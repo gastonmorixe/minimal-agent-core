@@ -194,7 +194,30 @@ const GREP_TOOL: ToolDefinition = {
   },
 };
 
-/** All available tool definitions */
+/**
+ * All tool definitions, in the order the agent sends them in API requests.
+ *
+ * Pass this directly to {@link SendOptions.tools} or to the `Agent.run()`
+ * method to enable tool use. The model will see these schemas and pick
+ * tools by name; {@link executeTool} dispatches by the same names.
+ *
+ * @example
+ * ```ts
+ * import { TOOL_DEFINITIONS, executeTool } from "./tools.ts";
+ *
+ * const response = await sendMessageFull({
+ *   auth, messages,
+ *   tools: TOOL_DEFINITIONS,
+ * });
+ *
+ * for (const block of response.blocks) {
+ *   if (block.type === "tool_use") {
+ *     const result = executeTool(block.name, block.input);
+ *     // send result back as tool_result block...
+ *   }
+ * }
+ * ```
+ */
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   BASH_TOOL,
   READ_TOOL,
@@ -427,6 +450,15 @@ function execEdit(input: Record<string, unknown>): ToolExecResult {
   }
 }
 
+/**
+ * Find files matching a glob pattern using bash globstar (`**`).
+ *
+ * Output is limited to 100 entries to avoid context bloat. Patterns like
+ * `**\/*.ts` (recursive) and `*.json` (single-level) both work.
+ *
+ * @param input.pattern - Glob pattern (e.g. `**\/*.ts`, `src/*.{js,ts}`)
+ * @param input.path - Directory to search in (default: current bash cwd)
+ */
 function execGlob(input: Record<string, unknown>): ToolExecResult {
   const pattern = input.pattern as string;
   const searchPath = (input.path as string) ?? bashCwd;
@@ -452,6 +484,28 @@ function execGlob(input: Record<string, unknown>): ToolExecResult {
   }
 }
 
+/**
+ * Search file contents using ripgrep (`rg`).
+ *
+ * Three output modes (matches the real CLI's Grep tool):
+ * - `files_with_matches` (default): list paths only
+ * - `count`: count matches per file
+ * - `content`: show matching lines with optional context (-A/-B/-C)
+ *
+ * Results are head-limited (default 250 lines) with a "... N more lines"
+ * marker to keep responses bounded. Pass `head_limit: 0` for unlimited.
+ *
+ * @param input.pattern - Regex pattern to search for
+ * @param input.path - File or directory to search (default: bash cwd)
+ * @param input.glob - Glob filter (e.g. `*.ts`)
+ * @param input.output_mode - `content` | `files_with_matches` | `count`
+ * @param input["-i"] - Case insensitive
+ * @param input["-A"] - Lines after match (content mode only)
+ * @param input["-B"] - Lines before match (content mode only)
+ * @param input["-C"] - Context lines (content mode only)
+ * @param input.head_limit - Cap output lines (default: 250, 0 = unlimited)
+ * @param input.multiline - Allow `.` to match newlines
+ */
 function execGrep(input: Record<string, unknown>): ToolExecResult {
   const pattern = input.pattern as string;
   const searchPath = (input.path as string) ?? bashCwd;

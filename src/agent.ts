@@ -1,11 +1,28 @@
 /**
- * Agent module: interactive REPL with tool execution loop.
+ * Agent module: conversational state + tool execution loop + REPL.
  *
- * Updated for v2.1.91:
- *   - Block-based message content (text, thinking, tool_use, tool_result)
- *   - Thinking blocks included in conversation history (with signatures)
- *   - Full tool execution loop: tool_use -> execute -> tool_result -> repeat
- *   - Tools: Bash, Read, Write, Edit, Glob, Grep
+ * The {@link Agent} class owns the append-only conversation history and
+ * provides two send methods:
+ *
+ * - {@link Agent.send} — single round-trip text reply (no tools)
+ * - {@link Agent.run} — full agentic loop: send → tool_use → execute → tool_result → repeat
+ *
+ * Both yield text chunks via async generator and return a {@link StreamedResponse}
+ * with the structured content blocks (thinking, tool_use, text). Thinking blocks
+ * are preserved verbatim in history (with their signatures) so subsequent
+ * requests can include them — required for the `redact-thinking-2026-02-12` beta.
+ *
+ * **Conversation history shape** (v2.1.91 block-based content):
+ * ```
+ * [
+ *   { role: "user",      content: [{type:"text", text:"..."}] },
+ *   { role: "assistant", content: [{type:"thinking",...}, {type:"tool_use",...}] },
+ *   { role: "user",      content: [{type:"tool_result", tool_use_id:"...", content:"..."}] },
+ *   { role: "assistant", content: [{type:"text", text:"..."}] },
+ * ]
+ * ```
+ *
+ * @module agent
  */
 
 import type { AuthResult } from "./auth.ts";
@@ -40,28 +57,93 @@ const c = {
 // Agent class
 // ---------------------------------------------------------------------------
 
+/**
+ * Conversational agent with append-only history and an agentic tool loop.
+ *
+ * The agent maintains its own message list and re-sends the full history
+ * on every API call (no truncation, no compression — that's a server-side
+ * concern enabled by the `context-management-2025-06-27` beta).
+ *
+ * Both {@link send} and {@link run} preserve all content block types in
+ * history (thinking blocks, tool calls, tool results) so the model has
+ * full context for follow-up turns.
+ *
+ * @example
+ * ```ts
+ * const agent = new Agent({ auth, model: "claude-sonnet-4-6" });
+ *
+ * // Simple text reply:
+ * for await (const chunk of agent.send("hello")) {
+ *   process.stdout.write(chunk);
+ * }
+ *
+ * // Full agentic with tools:
+ * for await (const chunk of agent.run("read package.json")) {
+ *   process.stdout.write(chunk);
+ * }
+ * ```
+ */
 export class Agent {
-  /** Append-only conversation history. Content is block-based. */
+  /**
+   * Append-only conversation history.
+   *
+   * Read-only by convention — never mutate from outside the class. Use
+   * {@link history} to get a defensive copy. Each message has block-based
+   * content matching the v2.1.91 wire format.
+   */
   readonly messages: Message[] = [];
+  /** Auth credentials used for every API call. Refresh closure stays attached. */
   private auth: AuthResult;
+  /** Model ID for all requests in this agent's lifetime. */
   private model: string;
-  /** Maximum tool execution rounds before stopping (safety limit) */
+  /**
+   * Hard limit on tool execution rounds within a single `run()` call.
+   * Prevents infinite loops if the model keeps calling tools forever.
+   * Set generously (50) since real agentic sessions can hit 30+ rounds.
+   */
   private maxToolRounds = 50;
 
+  /**
+   * @param opts.auth - Authenticated credentials from {@link getAuth}
+   * @param opts.model - Model ID (default: `claude-sonnet-4-6`)
+   */
   constructor(opts: { auth: AuthResult; model?: string }) {
     this.auth = opts.auth;
     this.model = opts.model ?? "claude-sonnet-4-6";
   }
 
   /**
-   * Send a user message with full agentic tool loop.
+   * Send a user message and run the full agentic tool loop.
    *
-   * Runs the send -> [tool_use -> execute -> tool_result] -> ... -> text loop
-   * until the model responds with end_turn (no more tool calls) or the
-   * safety limit is hit.
+   * Runs `send → execute_tools → send_results → ...` until the model returns
+   * a response with no `tool_use` blocks (i.e. it's done) or the
+   * {@link maxToolRounds} safety limit is hit.
    *
-   * Yields text chunks as they arrive for display. Tool execution output
-   * is reported to stderr.
+   * **What gets yielded**: only text chunks from the assistant's text blocks.
+   * Tool calls and their outputs are NOT yielded — they're logged to stderr
+   * with formatted previews so you can see what's happening without
+   * polluting stdout.
+   *
+   * **What goes into history**: every assistant response (including thinking
+   * and tool_use blocks) and every tool_result message is appended.
+   *
+   * @param userText - The user's message content
+   * @param opts - Optional overrides for the underlying send (max_tokens, etc.)
+   * @yields Text chunks from `text_delta` SSE events as they arrive
+   * @returns The final {@link StreamedResponse} from the last API call
+   *
+   * @example
+   * ```ts
+   * const gen = agent.run("count the .ts files in src/");
+   * while (true) {
+   *   const { done, value } = await gen.next();
+   *   if (done) {
+   *     console.log("\nstop reason:", value.stopReason);
+   *     break;
+   *   }
+   *   process.stdout.write(value);
+   * }
+   * ```
    */
   async *run(
     userText: string,
@@ -150,8 +232,16 @@ export class Agent {
   }
 
   /**
-   * Send a user message without tools (simple text-only).
-   * For backward compatibility and non-agentic use cases.
+   * Send a user message without enabling tools — single round-trip.
+   *
+   * Use this when you want a plain text reply without the agentic loop.
+   * The model will not be told about any tools, so it cannot call them.
+   * For agentic behavior, use {@link run} instead.
+   *
+   * @param userText - The user's message content
+   * @param opts - Optional overrides for the underlying send
+   * @yields Text chunks from `text_delta` SSE events as they arrive
+   * @returns The {@link StreamedResponse} containing all content blocks
    */
   async *send(
     userText: string,
@@ -188,7 +278,13 @@ export class Agent {
     return result;
   }
 
-  /** Return a copy of the conversation history. */
+  /**
+   * Return a defensive copy of the conversation history.
+   *
+   * The internal {@link messages} array is read-only by convention but
+   * not enforced; this method exists so external code can safely iterate
+   * without risking mutation.
+   */
   history(): Message[] {
     return [...this.messages];
   }
@@ -198,7 +294,13 @@ export class Agent {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Format tool input for display (compact) */
+/**
+ * Format a `tool_use` block's input for compact stderr display.
+ *
+ * Picks the most informative field per tool (command for Bash, file_path
+ * for file tools, pattern for search tools) and truncates to ~80 chars.
+ * Falls back to JSON-stringified input for unknown tools.
+ */
 function formatToolInput(tool: ToolUseBlock): string {
   const input = tool.input;
   if (tool.name === "Bash" && input.command) {
@@ -227,11 +329,27 @@ function formatToolInput(tool: ToolUseBlock): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Run an interactive read-eval-print loop with tool execution.
+ * Run an interactive read-eval-print loop with full tool execution.
  *
- * If `formatterCmd` is provided, each user turn pipes the streamed text
- * through that external process for realtime formatting (e.g. mdstream, bat).
- * The formatter is spawned fresh per turn so markdown context is reset.
+ * Reads lines from stdin, sends each non-empty line to the agent via
+ * {@link Agent.run}, and prints streamed text chunks to stdout. Tool
+ * calls and outputs are logged to stderr. Exit with Ctrl+D (EOF) or Ctrl+C.
+ *
+ * **Formatter integration**: if `opts.formatterCmd` is provided, each user
+ * turn pipes the streamed text through that external process (see
+ * {@link Formatter}). A fresh formatter is spawned per turn so the
+ * markdown rendering state resets between user messages — this avoids
+ * the formatter getting confused by stale state from previous turns.
+ *
+ * @param agent - Initialized agent instance
+ * @param opts.formatterCmd - Optional formatter argv (e.g. `["mdstream"]`)
+ *
+ * @example
+ * ```ts
+ * await runRepl(agent);
+ * await runRepl(agent, { formatterCmd: ["mdstream"] });
+ * await runRepl(agent, { formatterCmd: ["bat", "--language=md", "--paging=never"] });
+ * ```
  */
 export async function runRepl(
   agent: Agent,
