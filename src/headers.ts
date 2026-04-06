@@ -162,20 +162,39 @@ export const BETA_FLAGS = BETA_FLAGS_DETAILED.map((f) => f.id);
 export type RequestType = "quota" | "title" | "conversation";
 
 /**
- * Build the beta flags array for a specific request type.
+ * Build the `anthropic-beta` header value as an array of flag IDs.
  *
- * Observed flag sets in the v2.1.91 capture (April 4, 2026):
+ * The flag set varies by request type and model. The function picks the
+ * right combination based on what was observed in the v2.1.91 capture.
  *
- * Quota check (haiku, max_tokens=1):
- *   oauth, interleaved-thinking, redact-thinking, context-management, prompt-caching-scope
+ * **Flag sets observed (April 4, 2026):**
  *
- * Title gen (haiku, structured output):
- *   oauth, interleaved-thinking, redact-thinking, context-management, prompt-caching-scope,
- *   structured-outputs
+ * | Request type | Flags |
+ * |---|---|
+ * | `quota` (haiku, max_tokens=1) | oauth, interleaved-thinking, redact-thinking, context-management, prompt-caching-scope |
+ * | `title` (haiku, structured output) | quota set + structured-outputs |
+ * | `conversation` (non-opus) | claude-code, oauth, interleaved-thinking, redact-thinking, context-management, prompt-caching-scope, advanced-tool-use, effort |
+ * | `conversation` (opus or `[1m]` suffix) | conversation set + context-1m |
  *
- * Full conversation (opus):
- *   claude-code, oauth, context-1m, interleaved-thinking, redact-thinking,
- *   context-management, prompt-caching-scope, advanced-tool-use, effort
+ * **Model-specific behavior**:
+ * - `context-1m-2025-08-07` is opus-only because sonnet returns 429
+ *   "Extra usage is required for long context requests" without overage credits.
+ * - The `[1m]` suffix on a model ID is a client-side convention (the actual
+ *   API model ID has no suffix). We strip it for the request body but use
+ *   it here to detect 1M context intent.
+ *
+ * @param requestType - Which beta set to build (default: `"conversation"`)
+ * @param model - Model ID, used to gate model-specific flags like `context-1m`
+ * @returns Array of flag IDs ready to join with commas
+ *
+ * @example
+ * ```ts
+ * buildBetaFlags("conversation", "claude-opus-4-6")
+ * // → ["claude-code-20250219", "oauth-2025-04-20", "context-1m-2025-08-07", ...]
+ *
+ * buildBetaFlags("quota")
+ * // → ["oauth-2025-04-20", "interleaved-thinking-2025-05-14", ...]  (5 flags)
+ * ```
  */
 export function buildBetaFlags(
   requestType: RequestType = "conversation",
@@ -234,10 +253,20 @@ export function buildBetaFlags(
  */
 export const STAINLESS_SDK_VERSION = "0.80.0";
 
-/** Type for a system prompt block */
+/**
+ * One block in the system prompt array.
+ *
+ * The `cache_control` field enables prompt caching on this block. Only block 2
+ * (the instructions block) carries it in v2.1.91 traffic, with `scope:"global"`
+ * meaning the cache is shared across the whole organization rather than just
+ * the current session.
+ */
 export interface SystemBlock {
+  /** Always `"text"` for the standard CLI flow. */
   type: "text";
+  /** Block content. */
   text: string;
+  /** Prompt caching control. Present only on the large instructions block. */
   cache_control?: { type: "ephemeral"; scope?: "global" };
 }
 
@@ -266,6 +295,26 @@ export interface SystemBlock {
  * to system[2] with added scope:"global". system[0] and system[1] have NO
  * cache_control. This makes sense: cache the large instructions block, not the
  * tiny identity string.
+ *
+ * @param opts.instructions - Custom system[2] content. Defaults to a short
+ *   minimal instructions block. Pass the full real-CLI instructions here if
+ *   you want behavior identical to the real Claude Code.
+ * @param opts.sessionContext - Optional system[3] content. Omit to send only
+ *   3 blocks (the minimum). Real CLI always includes this with environment
+ *   details, CLAUDE.md, git status, etc.
+ * @returns Array of system blocks ready to send in the API request body.
+ *
+ * @example
+ * ```ts
+ * // Minimal 3-block prompt:
+ * const sys = buildSystemPrompt();
+ *
+ * // Full 4-block prompt with custom instructions:
+ * const sys = buildSystemPrompt({
+ *   instructions: "You are a code reviewer...",
+ *   sessionContext: "cwd: /tmp\nGit status: clean",
+ * });
+ * ```
  */
 export function buildSystemPrompt(opts?: {
   instructions?: string;

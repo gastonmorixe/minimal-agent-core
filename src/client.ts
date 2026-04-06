@@ -28,78 +28,225 @@ import { buildMetadata, getSessionId } from "./metadata.ts";
 // Content block types (matching v2.1.91 traffic)
 // ---------------------------------------------------------------------------
 
-/** Text content block */
+/**
+ * A plain text content block.
+ *
+ * Used in user messages (input prose) and assistant messages (response text).
+ * The smallest unit of conversation content.
+ *
+ * @example
+ * ```ts
+ * { type: "text", text: "Hello, world!" }
+ * ```
+ */
 export interface TextBlock {
   type: "text";
   text: string;
 }
 
-/** Thinking block (redacted in v2.1.91 — thinking is empty, signature is populated) */
+/**
+ * An assistant thinking block. Required by `redact-thinking-2026-02-12` beta.
+ *
+ * In v2.1.91 the `thinking` field is empty (the model's reasoning is
+ * server-side only) but the `signature` field contains a cryptographic
+ * proof that the model emitted thinking. Both fields must be preserved
+ * verbatim in conversation history for subsequent turns — the server
+ * verifies the signature on every request.
+ *
+ * @example
+ * ```ts
+ * { type: "thinking", thinking: "", signature: "EpUCClkIDBgC..." }
+ * ```
+ */
 export interface ThinkingBlock {
   type: "thinking";
+  /** Visible reasoning text. Empty when redact-thinking is active. */
   thinking: string;
+  /** Cryptographic signature verifying the thinking happened. */
   signature: string;
 }
 
-/** Tool use block emitted by the assistant */
+/**
+ * A tool invocation requested by the assistant.
+ *
+ * The model emits these when it wants to call a tool. The agent should
+ * execute the tool, then send back a {@link ToolResultBlock} with the same
+ * `tool_use_id` to keep the conversation paired up.
+ *
+ * **`caller` field** (new in v2.1.91): indicates whether the tool call
+ * originated from the model directly or from a sub-agent / nested context.
+ * Currently always `{type:"direct"}` in observed traffic.
+ *
+ * @example
+ * ```ts
+ * {
+ *   type: "tool_use",
+ *   id: "toolu_01ABC...",
+ *   name: "Bash",
+ *   input: { command: "ls -la" },
+ *   caller: { type: "direct" }
+ * }
+ * ```
+ */
 export interface ToolUseBlock {
   type: "tool_use";
+  /** Unique ID for this call. Used to pair with the matching tool_result. */
   id: string;
+  /** Tool name (must match a {@link ToolDefinition.name}). */
   name: string;
+  /** Parsed JSON input matching the tool's `input_schema`. */
   input: Record<string, unknown>;
+  /** Origin of the call (currently always `{type:"direct"}`). */
   caller?: { type: string };
 }
 
-/** Tool result block sent by the user after executing a tool */
+/**
+ * A tool execution result sent back from the user (agent) to the model.
+ *
+ * Must reference the original `tool_use` block via `tool_use_id`. The
+ * `content` field is the tool's stdout/output as a string. Set `is_error`
+ * to true if the tool failed — the model uses this to decide whether to
+ * retry, pick a different tool, or give up.
+ *
+ * @example
+ * ```ts
+ * {
+ *   type: "tool_result",
+ *   tool_use_id: "toolu_01ABC...",
+ *   content: "total 24\ndrwxr-xr-x 5 user  staff   160 Apr  6 02:18 src\n..."
+ * }
+ * ```
+ */
 export interface ToolResultBlock {
   type: "tool_result";
+  /** The `id` from the `tool_use` block this result corresponds to. */
   tool_use_id: string;
+  /** Tool output. Can be a plain string or nested content blocks. */
   content: string | ContentBlock[];
+  /** True if the tool failed. */
   is_error?: boolean;
 }
 
-/** Union of all content block types */
+/**
+ * Union of all content block types observed in v2.1.91 traffic.
+ *
+ * Used as the element type of {@link Message.content} when content is an
+ * array (block-based mode). Plain string content is also still supported
+ * for simple user messages but the API normalizes it to a single text block.
+ */
 export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
 
 // ---------------------------------------------------------------------------
 // Message and options types
 // ---------------------------------------------------------------------------
 
+/**
+ * A single conversation turn.
+ *
+ * Plain `string` content is supported for simple user messages but the API
+ * normalizes it to `[{type:"text", text:"..."}]` internally. New code should
+ * always use the array form for consistency with the v2.1.91 wire format.
+ *
+ * @example
+ * ```ts
+ * // Simple text message:
+ * { role: "user", content: [{ type: "text", text: "hi" }] }
+ *
+ * // Assistant with thinking and tool call:
+ * {
+ *   role: "assistant",
+ *   content: [
+ *     { type: "thinking", thinking: "", signature: "..." },
+ *     { type: "tool_use", id: "toolu_01...", name: "Bash", input: {command: "ls"} }
+ *   ]
+ * }
+ *
+ * // Tool result follow-up:
+ * {
+ *   role: "user",
+ *   content: [{ type: "tool_result", tool_use_id: "toolu_01...", content: "..." }]
+ * }
+ * ```
+ */
 export interface Message {
   role: "user" | "assistant";
   content: string | ContentBlock[];
 }
 
+/**
+ * Options for {@link sendMessage} and friends.
+ *
+ * Most fields have sensible defaults matching v2.1.91 conversation requests.
+ * Override `requestType` for quota checks or title generation, which use
+ * different beta flags and parameters.
+ */
 export interface SendOptions {
+  /** Authenticated credentials from {@link getAuth}. */
   auth: AuthResult;
+  /** Conversation history. Sent in full on every request. */
   messages: Message[];
+  /** System prompt blocks. Defaults to {@link SYSTEM_PROMPT} (3 blocks). */
   system?: SystemBlock[];
+  /** Model ID. Defaults to {@link DEFAULT_MODEL}. */
   model?: string;
+  /** Max output tokens. Default: 64000 (matches v2.1.91 opus conversation). */
   maxTokens?: number;
+  /** Stream the response via SSE. Default: true. */
   stream?: boolean;
+  /**
+   * Request type — controls beta flag set and feature gating.
+   * - `"conversation"` (default): full feature set, all 9 flags
+   * - `"quota"`: minimal flags, no thinking, no effort (for cheap quota checks)
+   * - `"title"`: structured-outputs flag, no thinking (for haiku title gen)
+   */
   requestType?: RequestType;
-  /** Enable adaptive thinking (default: true for conversation requests) */
+  /**
+   * Adaptive thinking config. Pass `false` to disable.
+   * Default: `{type:"adaptive"}` for non-haiku models, omitted for haiku.
+   */
   thinking?: { type: "adaptive" } | false;
-  /** Output configuration: effort level and/or structured output format */
+  /**
+   * Effort level and/or structured output format.
+   * - `effort`: model computation budget (default: `"high"` for non-haiku)
+   * - `format`: JSON schema for structured outputs (used by title gen)
+   */
   outputConfig?: {
     effort?: "high" | "medium" | "low";
     format?: { type: string; schema?: unknown };
   };
-  /** Tool definitions to include in the request */
+  /**
+   * Tool definitions sent in the request. Pass {@link TOOL_DEFINITIONS} to
+   * enable the standard tool set, or provide your own list.
+   */
   tools?: Array<{ name: string; description: string; input_schema: unknown }>;
-  /** Temperature (default: not sent, API uses its default) */
+  /** Temperature. Default: not sent (API uses its default). */
   temperature?: number;
 }
 
 /**
- * Parsed response from streaming — contains all content blocks, not just text.
+ * Structured response returned by {@link sendMessage} after streaming completes.
+ *
+ * Contains all parsed content blocks (thinking, tool_use, text) plus a
+ * convenience `text` field with the concatenated text. Use `blocks` when
+ * you need the structured form (e.g. to feed back into conversation history),
+ * use `text` when you just want the prose.
+ *
+ * @example
+ * ```ts
+ * const gen = sendMessage(opts);
+ * for await (const chunk of gen) process.stdout.write(chunk);
+ * const result = (await gen.next()).value as StreamedResponse;
+ * console.log("stop:", result.stopReason);
+ * console.log("blocks:", result.blocks.length);
+ * console.log("text:", result.text);
+ * ```
  */
 export interface StreamedResponse {
-  /** All content blocks in order */
+  /** All content blocks in the order they appeared in the SSE stream. */
   blocks: ContentBlock[];
-  /** Concatenated text from text blocks only (convenience) */
+  /** Concatenated text from text blocks only — convenience accessor. */
   text: string;
-  /** Stop reason from message_delta */
+  /** Stop reason from `message_delta` (e.g. `"end_turn"`, `"tool_use"`, `"max_tokens"`). */
   stopReason: string | null;
 }
 
@@ -156,20 +303,36 @@ export interface ModelInfo {
 }
 
 /**
- * Normalize a model string for API calls.
+ * Strip the client-side `[1m]` / `[2m]` suffix from a model ID.
  *
- * The CLI uses client-side suffixes like [1m] to denote context window
- * variants. These must be stripped before sending to the API — the actual
- * activation is via the context-1m-2025-08-07 beta flag.
+ * The real CLI uses `[1m]` as a UI convention to mean "use this model with
+ * the 1M context window variant". The actual API model ID has no suffix —
+ * 1M context is activated via the `context-1m-2025-08-07` beta flag instead.
+ * This helper strips the suffix so the request body has a valid model ID.
  *
- * See cc-03312026/src/utils/model/model.ts:normalizeModelStringForAPI()
+ * @param model - Model ID, possibly with `[1m]` or `[2m]` suffix
+ * @returns Model ID with suffix removed
+ *
+ * @example
+ * ```ts
+ * normalizeModelForAPI("claude-opus-4-6[1m]") // → "claude-opus-4-6"
+ * normalizeModelForAPI("claude-sonnet-4-6")   // → "claude-sonnet-4-6"
+ * ```
+ *
+ * @see cc-03312026/src/utils/model/model.ts:normalizeModelStringForAPI()
  */
 export function normalizeModelForAPI(model: string): string {
   return model.replace(/\[(1|2)m\]/gi, "");
 }
 
 /**
- * Check if a model string requests 1M context (has [1m] suffix).
+ * Check whether a model string requests the 1M context window (has `[1m]` suffix).
+ *
+ * Used by the beta-flag builder to decide whether to include
+ * `context-1m-2025-08-07`. Case-insensitive.
+ *
+ * @param model - Model ID to inspect
+ * @returns True if the model has a `[1m]` suffix
  */
 export function has1mContext(model: string): boolean {
   return /\[1m\]/i.test(model);
@@ -464,18 +627,44 @@ async function* parseSSE(
 // ---------------------------------------------------------------------------
 
 /**
- * Send a message to the Messages API and yield streamed content events.
+ * Send a message to the Messages API and yield streamed text chunks.
  *
- * Updated for v2.1.91:
- *   - Per-request-type beta flags via requestType option
- *   - Adaptive thinking via thinking option (default: {type:"adaptive"})
- *   - Effort parameter via outputConfig.effort (default: "high")
- *   - Parses all SSE delta types: text_delta, signature_delta, input_json_delta
- *   - Returns StreamedResponse with all content blocks
+ * The core HTTP layer. Builds the request body matching v2.1.91 wire format,
+ * POSTs to `/v1/messages?beta=true`, parses the SSE response, and yields
+ * text chunks via async generator. The full structured response (with
+ * thinking and tool_use blocks) is available as the generator's return value.
  *
- * The generator yields text chunks for backward compatibility. The full
- * structured response (including thinking and tool_use blocks) is available
- * via the return value.
+ * **Behaviors replicated from the real CLI:**
+ * - Per-request-type beta flags (via {@link SendOptions.requestType})
+ * - Adaptive thinking for non-haiku models
+ * - Effort parameter (`output_config.effort: "high"`) for non-haiku
+ * - Model-specific gating (no thinking/effort for haiku, no context-1m for sonnet)
+ * - 401 retry with token refresh (mirrors CLI's `onAuth401` pattern)
+ * - SSE parsing for `text_delta`, `signature_delta`, `input_json_delta`
+ *
+ * **Two ways to get the result:**
+ * 1. Iterate the generator for live text chunks (use this for streaming UI)
+ * 2. Await the return value for the full {@link StreamedResponse} with all blocks
+ *
+ * @param opts - Request options. See {@link SendOptions} for all fields.
+ * @yields Text chunks from `text_delta` SSE events as they arrive
+ * @returns Final {@link StreamedResponse} after stream completes
+ *
+ * @example
+ * ```ts
+ * // Streaming text only:
+ * for await (const chunk of sendMessage({ auth, messages })) {
+ *   process.stdout.write(chunk);
+ * }
+ *
+ * // Get full structured response:
+ * const result = await sendMessageFull({ auth, messages });
+ * for (const block of result.blocks) {
+ *   if (block.type === "tool_use") console.log("called:", block.name);
+ * }
+ * ```
+ *
+ * @throws Error if the API returns a non-2xx status (after 401 retry)
  */
 export async function* sendMessage(
   opts: SendOptions,
@@ -693,14 +882,25 @@ export async function* sendMessage(
 // listModels — fetch available models for this user
 // ---------------------------------------------------------------------------
 
-/**
- * List models available to the authenticated user.
- *
- * Uses GET /v1/models?beta=true, matching the SDK's `list()` method at L5066-5086.
- * Returns model objects with id, display_name, type, and created_at.
- */
+/** Endpoint for listing available models. */
 const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true";
 
+/**
+ * List models available to the authenticated user, plus synthesized
+ * `[1m]` context-window variants.
+ *
+ * Calls `GET /v1/models?beta=true` (matching the Anthropic SDK's `list()`
+ * method) to fetch the real model list, then appends `[1m]`-suffixed copies
+ * for any model that supports the 1M context window. The suffix is a
+ * client-side convention — the API itself doesn't know about it. The
+ * `--list-models` CLI flag uses this expanded list so users can pick
+ * `claude-opus-4-6[1m]` from the menu and get 1M context automatically.
+ *
+ * @param auth - Authenticated credentials
+ * @returns Array of {@link ModelInfo}, with `[1m]` variants appended
+ *
+ * @see cc-03312026/src/utils/context.ts:modelSupports1M()
+ */
 export async function listModels(auth: AuthResult): Promise<ModelInfo[]> {
   const sessionId = getSessionId();
   const headers = buildHeaders(auth, sessionId);
@@ -749,7 +949,23 @@ export async function listModels(auth: AuthResult): Promise<ModelInfo[]> {
 // sendMessageSync — convenience, collects full response
 // ---------------------------------------------------------------------------
 
-/** Convenience wrapper that collects the full streamed response text. */
+/**
+ * Send a message and return the concatenated text as a single string.
+ *
+ * Convenience wrapper around {@link sendMessage} that consumes the entire
+ * stream and returns just the text. Use this when you don't care about
+ * structured blocks or live streaming — e.g. in tests, or for simple
+ * one-shot prompts.
+ *
+ * @param opts - Same options as {@link sendMessage}
+ * @returns Concatenated text from all `text_delta` events
+ *
+ * @example
+ * ```ts
+ * const reply = await sendMessageSync({ auth, messages: [...] });
+ * console.log(reply);
+ * ```
+ */
 export async function sendMessageSync(
   opts: SendOptions,
 ): Promise<string> {
@@ -764,7 +980,23 @@ export async function sendMessageSync(
 }
 
 /**
- * Convenience wrapper that returns the full StreamedResponse with all content blocks.
+ * Send a message and return the full {@link StreamedResponse} with all blocks.
+ *
+ * Convenience wrapper around {@link sendMessage} that drains the stream and
+ * returns the structured response. Use this when you need access to thinking
+ * blocks, tool_use blocks, or the stop reason — not just the text.
+ *
+ * @param opts - Same options as {@link sendMessage}
+ * @returns Full structured response (blocks + text + stopReason)
+ *
+ * @example
+ * ```ts
+ * const result = await sendMessageFull({ auth, messages, tools: TOOL_DEFINITIONS });
+ * if (result.stopReason === "tool_use") {
+ *   const toolCalls = result.blocks.filter(b => b.type === "tool_use");
+ *   // ... execute tools and continue
+ * }
+ * ```
  */
 export async function sendMessageFull(
   opts: SendOptions,
@@ -786,16 +1018,23 @@ export async function sendMessageFull(
 // ---------------------------------------------------------------------------
 
 /**
- * Send a minimal quota check request matching v2.1.91 behavior.
+ * Send a minimal quota-check request to verify the account has quota.
  *
- * Observed in capture (fetch-002):
- *   model: claude-haiku-4-5-20251001
- *   max_tokens: 1
- *   messages: [{role:"user", content:"quota"}]
- *   No system prompt, no tools, no thinking, no output_config
- *   Beta flags: quota set (5 flags, no claude-code-20250219)
+ * Mirrors the real CLI's startup behavior (capture: fetch-002): a cheap
+ * haiku request with `max_tokens: 1` and the literal string `"quota"` as
+ * the user message. No system prompt, no tools, no thinking, no
+ * output_config — just the bare minimum to round-trip the API and surface
+ * a 429/auth error early before the user types anything.
  *
- * Returns true if the account has quota, false otherwise.
+ * Uses the `"quota"` request type which sends only 5 beta flags (no
+ * `claude-code-20250219`, no conversation-specific flags).
+ *
+ * **Catches all errors** and returns false on any failure (including
+ * network errors). Use {@link sendMessage} directly if you need the actual
+ * error message.
+ *
+ * @param auth - Authenticated credentials
+ * @returns True if the request succeeded (200 OK), false on any error
  */
 export async function checkQuota(auth: AuthResult): Promise<boolean> {
   const sessionId = getSessionId();

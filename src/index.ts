@@ -2,24 +2,42 @@
 /**
  * Minimal Claude agent — entry point.
  *
- * A research tool for understanding the minimal API surface needed to
- * make authenticated requests to the Anthropic Messages API using OAuth
- * tokens from the Claude Code CLI's macOS Keychain.
+ * A research tool for understanding the minimal API surface needed to make
+ * authenticated, agentic requests to the Anthropic Messages API using the
+ * Claude Code CLI's stored OAuth credentials.
  *
- * This script reuses the real CLI's credentials and replicates its exact
- * request format (headers, metadata, system prompt) so responses are
- * indistinguishable from those to the real CLI.
+ * This script reuses the real CLI's credentials (read from macOS Keychain)
+ * and replicates its exact request format (headers, metadata, system prompt,
+ * beta flags, tool schemas) so the server treats it identically to the real
+ * CLI. Verified against live captures via `.node-net-dbg/`.
  *
- * Usage:
- *   bun run src/index.ts                    # interactive REPL with default model
- *   bun run src/index.ts --model opus       # use a specific model (prefix match)
- *   bun run src/index.ts --debug            # log full request/response details
- *   bun run src/index.ts --list-models      # show models available to your account
- *   bun run src/index.ts --list-flags       # show beta feature flags with docs
- *   bun run src/index.ts "hello"            # non-interactive: send prompt, print response, exit
- *   bun run src/index.ts --prompt "hello"   # same, explicit flag
- *   echo "hello" | bun run src/index.ts -   # read prompt from stdin
- *   DEBUG=1 bun run src/index.ts            # alternative debug activation
+ * **Modules:**
+ * - {@link auth} — Keychain reading + OAuth refresh
+ * - {@link headers} — User-Agent, beta flags, system prompt
+ * - {@link metadata} — `metadata.user_id` JSON construction
+ * - {@link client} — HTTP layer + SSE streaming + request body
+ * - {@link tools} — Tool definitions + local execution
+ * - {@link agent} — Conversation state + agentic tool loop + REPL
+ * - {@link formatter} — Pipe streamed output through external processes
+ *
+ * **Usage:**
+ * ```
+ * bun run src/index.ts                          # interactive REPL
+ * bun run src/index.ts --model claude-opus-4-6  # specific model
+ * bun run src/index.ts --debug                  # log full request/response
+ * bun run src/index.ts --list-models            # show available models
+ * bun run src/index.ts --list-flags             # show beta flags
+ * bun run src/index.ts "hello"                  # one-shot prompt
+ * bun run src/index.ts --prompt "hello"         # same, explicit flag
+ * echo "hello" | bun run src/index.ts -         # read prompt from stdin
+ * bun run src/index.ts --formatter mdstream     # pipe through mdstream
+ * bun run src/index.ts --skip-quota             # skip startup quota check
+ * DEBUG=1 bun run src/index.ts                  # alternative debug activation
+ * ```
+ *
+ * Or use the shortcut: `./minimal-agent.sh [options]`
+ *
+ * @module index
  */
 
 import { getAuth } from "./auth.ts";
@@ -75,12 +93,17 @@ const formatterCmd =
     : undefined;
 
 /**
- * Extract a non-interactive prompt from args.
+ * Extract a non-interactive prompt from command-line args.
  *
- * Three forms:
- *   --prompt "text"     explicit flag
- *   "text"              bare positional arg (not starting with --)
- *   -                   read from stdin
+ * Three forms supported (checked in this order):
+ * 1. `--prompt <text>` — explicit flag
+ * 2. `-` — read from stdin (for piping: `echo hi | minimal-agent -`)
+ * 3. Bare positional arg — first non-flag, non-flag-value argument
+ *
+ * Returns `null` if none of the three forms is present, in which case
+ * the agent enters interactive REPL mode instead.
+ *
+ * @returns The prompt text, or `null` for interactive mode
  */
 async function extractPrompt(): Promise<string | null> {
   // --prompt "text"
@@ -123,6 +146,21 @@ async function extractPrompt(): Promise<string | null> {
 // Main
 // ---------------------------------------------------------------------------
 
+/**
+ * Entry point. Orchestrates the full startup flow:
+ *
+ * 1. Print session info to stderr
+ * 2. Read OAuth credentials from macOS Keychain
+ * 3. Handle one-shot subcommands (--list-flags, --list-models)
+ * 4. Run the quota check (unless --skip-quota)
+ * 5. Set up the agent with the selected model
+ * 6. Either:
+ *    - Non-interactive mode: send a single prompt and exit
+ *    - Interactive REPL mode: read lines from stdin until EOF
+ *
+ * If `--formatter` is provided, the streamed output is piped through
+ * the external process for realtime formatting.
+ */
 async function main() {
   console.error(`minimal-agent v${VERSION} (session: ${getSessionId().slice(0, 8)}...)`);
 
