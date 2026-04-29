@@ -999,6 +999,7 @@ export async function runRepl(
       }
       const onThinkingStop = async (): Promise<void> => {
         await endThinkingFormatter()
+        writeDirectSink("\n")
       }
 
       let turnError: unknown = null
@@ -1364,6 +1365,7 @@ async function runReplLiveArea(
       }
       const onThinkingStop = async (): Promise<void> => {
         await endThinkingFormatter()
+        writeDirectSink("\n")
       }
       try {
         const gen = agent.run(text, {
