@@ -1,7 +1,7 @@
 /**
  * Client module: Messages API with streaming, pretty debug logging, and 401 retry.
  *
- * Updated to match CLI v2.1.91 traffic (captured 2026-04-04):
+ * Updated to match CLI v2.1.118 traffic (captured 2026-04-25):
  *   - Block-based message content (text, thinking, tool_use, tool_result)
  *   - Adaptive thinking with redacted thinking + signatures
  *   - Effort parameter (output_config.effort)
@@ -10,22 +10,25 @@
  *   - SSE parsing for signature_delta and input_json_delta
  */
 
-import type { AuthResult } from "./auth.ts";
+import type { AuthResult } from "./auth.ts"
+import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import {
   API_URL,
-  SYSTEM_PROMPT,
-  DEFAULT_MODEL,
-  ANTHROPIC_VERSION,
-  BETA_FLAGS,
   buildHeaders,
-  buildSystemPrompt,
+  DEFAULT_MODEL,
   type RequestType,
+  SYSTEM_PROMPT,
   type SystemBlock,
-} from "./headers.ts";
-import { buildMetadata, getSessionId } from "./metadata.ts";
+} from "./headers.ts"
+import { buildMetadata, getSessionId } from "./metadata.ts"
+import { redactHeaders } from "./net-dbg.ts"
+import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
+import { GLOBAL_STATUS_BUS } from "./status.ts"
+
+type MaybePromise<T> = T | Promise<T>
 
 // ---------------------------------------------------------------------------
-// Content block types (matching v2.1.91 traffic)
+// Content block types (matching v2.1.118 traffic)
 // ---------------------------------------------------------------------------
 
 /**
@@ -39,9 +42,21 @@ import { buildMetadata, getSessionId } from "./metadata.ts";
  * { type: "text", text: "Hello, world!" }
  * ```
  */
+/**
+ * `cache_control` shape accepted on individual content blocks. Live 2.1.118
+ * traffic puts this on the LAST block of the LAST message every conversation
+ * turn (rolling-tail breakpoint) with `ttl:"1h"` and no `scope`.
+ */
+export type BlockCacheControl = {
+  type: "ephemeral"
+  ttl?: "5m" | "1h"
+  scope?: "global"
+}
+
 export interface TextBlock {
-  type: "text";
-  text: string;
+  type: "text"
+  text: string
+  cache_control?: BlockCacheControl
 }
 
 /**
@@ -59,11 +74,12 @@ export interface TextBlock {
  * ```
  */
 export interface ThinkingBlock {
-  type: "thinking";
+  type: "thinking"
   /** Visible reasoning text. Empty when redact-thinking is active. */
-  thinking: string;
+  thinking: string
   /** Cryptographic signature verifying the thinking happened. */
-  signature: string;
+  signature: string
+  cache_control?: BlockCacheControl
 }
 
 /**
@@ -89,15 +105,16 @@ export interface ThinkingBlock {
  * ```
  */
 export interface ToolUseBlock {
-  type: "tool_use";
+  type: "tool_use"
   /** Unique ID for this call. Used to pair with the matching tool_result. */
-  id: string;
+  id: string
   /** Tool name (must match a {@link ToolDefinition.name}). */
-  name: string;
+  name: string
   /** Parsed JSON input matching the tool's `input_schema`. */
-  input: Record<string, unknown>;
+  input: Record<string, unknown>
   /** Origin of the call (currently always `{type:"direct"}`). */
-  caller?: { type: string };
+  caller?: { type: string }
+  cache_control?: BlockCacheControl
 }
 
 /**
@@ -118,13 +135,14 @@ export interface ToolUseBlock {
  * ```
  */
 export interface ToolResultBlock {
-  type: "tool_result";
+  type: "tool_result"
   /** The `id` from the `tool_use` block this result corresponds to. */
-  tool_use_id: string;
+  tool_use_id: string
   /** Tool output. Can be a plain string or nested content blocks. */
-  content: string | ContentBlock[];
+  content: string | ContentBlock[]
   /** True if the tool failed. */
-  is_error?: boolean;
+  is_error?: boolean
+  cache_control?: BlockCacheControl
 }
 
 /**
@@ -134,7 +152,7 @@ export interface ToolResultBlock {
  * array (block-based mode). Plain string content is also still supported
  * for simple user messages but the API normalizes it to a single text block.
  */
-export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
+export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock
 
 // ---------------------------------------------------------------------------
 // Message and options types
@@ -169,8 +187,8 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResult
  * ```
  */
 export interface Message {
-  role: "user" | "assistant";
-  content: string | ContentBlock[];
+  role: "user" | "assistant"
+  content: string | ContentBlock[]
 }
 
 /**
@@ -182,45 +200,61 @@ export interface Message {
  */
 export interface SendOptions {
   /** Authenticated credentials from {@link getAuth}. */
-  auth: AuthResult;
+  auth: AuthResult
   /** Conversation history. Sent in full on every request. */
-  messages: Message[];
+  messages: Message[]
   /** System prompt blocks. Defaults to {@link SYSTEM_PROMPT} (3 blocks). */
-  system?: SystemBlock[];
+  system?: SystemBlock[]
   /** Model ID. Defaults to {@link DEFAULT_MODEL}. */
-  model?: string;
+  model?: string
   /** Max output tokens. Default: 64000 (matches v2.1.91 opus conversation). */
-  maxTokens?: number;
+  maxTokens?: number
   /** Stream the response via SSE. Default: true. */
-  stream?: boolean;
+  stream?: boolean
   /**
    * Request type — controls beta flag set and feature gating.
    * - `"conversation"` (default): full feature set, all 9 flags
    * - `"quota"`: minimal flags, no thinking, no effort (for cheap quota checks)
    * - `"title"`: structured-outputs flag, no thinking (for haiku title gen)
    */
-  requestType?: RequestType;
+  requestType?: RequestType
+  /** Network client used for API transport. */
+  networkClient?: NetworkClient
   /**
    * Adaptive thinking config. Pass `false` to disable.
    * Default: `{type:"adaptive"}` for non-haiku models, omitted for haiku.
    */
-  thinking?: { type: "adaptive" } | false;
+  thinking?: { type: "adaptive" } | false
   /**
    * Effort level and/or structured output format.
    * - `effort`: model computation budget (default: `"high"` for non-haiku)
    * - `format`: JSON schema for structured outputs (used by title gen)
    */
   outputConfig?: {
-    effort?: "high" | "medium" | "low";
-    format?: { type: string; schema?: unknown };
-  };
+    effort?: "high" | "medium" | "low" | "max"
+    format?: { type: string; schema?: unknown }
+  }
   /**
    * Tool definitions sent in the request. Pass {@link TOOL_DEFINITIONS} to
    * enable the standard tool set, or provide your own list.
    */
-  tools?: Array<{ name: string; description: string; input_schema: unknown }>;
+  tools?: Array<{ name: string; description: string; input_schema: unknown }>
   /** Temperature. Default: not sent (API uses its default). */
-  temperature?: number;
+  temperature?: number
+  /**
+   * Context-management edits. Live 2.1.118 conversation requests carry
+   * `{edits:[{type:"clear_thinking_20251015", keep:"all"}]}` at the top level.
+   * Gated by the `context-management-2025-06-27` beta. Server echoes results
+   * in `message_delta.context_management.applied_edits`. Pass `null` to opt
+   * out, or omit to use the default for `requestType:"conversation"`.
+   */
+  contextManagement?: { edits: Array<{ type: string; keep?: string }> } | null
+  /** Called when a native model thinking block starts. */
+  onThinkingStart?: () => MaybePromise<void>
+  /** Called for native model thinking chunks as they stream. */
+  onThinkingDelta?: (text: string) => MaybePromise<void>
+  /** Called when a native model thinking block stops. */
+  onThinkingStop?: () => MaybePromise<void>
 }
 
 /**
@@ -243,11 +277,11 @@ export interface SendOptions {
  */
 export interface StreamedResponse {
   /** All content blocks in the order they appeared in the SSE stream. */
-  blocks: ContentBlock[];
+  blocks: ContentBlock[]
   /** Concatenated text from text blocks only — convenience accessor. */
-  text: string;
+  text: string
   /** Stop reason from `message_delta` (e.g. `"end_turn"`, `"tool_use"`, `"max_tokens"`). */
-  stopReason: string | null;
+  stopReason: string | null
 }
 
 /**
@@ -258,6 +292,7 @@ export interface StreamedResponse {
  *   - content_block_start: new content block (text, thinking, tool_use)
  *   - content_block_delta: incremental data:
  *       text_delta: { type: "text_delta", text: "..." }
+ *       thinking_delta: { type: "thinking_delta", thinking: "..." }
  *       signature_delta: { type: "signature_delta", signature: "..." }
  *       input_json_delta: { type: "input_json_delta", partial_json: "..." }
  *   - content_block_stop: end of a content block
@@ -266,29 +301,30 @@ export interface StreamedResponse {
  *   - ping: keepalive
  */
 interface StreamEvent {
-  type: string;
-  index?: number;
+  type: string
+  index?: number
   delta?: {
-    type: string;
-    text?: string;
-    signature?: string;
-    partial_json?: string;
-    stop_reason?: string;
-    stop_sequence?: string | null;
-  };
-  message?: { id: string; model: string; usage: unknown };
+    type: string
+    text?: string
+    thinking?: string
+    signature?: string
+    partial_json?: string
+    stop_reason?: string
+    stop_sequence?: string | null
+  }
+  message?: { id: string; model: string; usage: unknown }
   content_block?: {
-    type: string;
-    text?: string;
-    thinking?: string;
-    signature?: string;
-    id?: string;
-    name?: string;
-    input?: Record<string, unknown>;
-    caller?: { type: string };
-  };
-  usage?: unknown;
-  context_management?: { applied_edits: unknown[] };
+    type: string
+    text?: string
+    thinking?: string
+    signature?: string
+    id?: string
+    name?: string
+    input?: Record<string, unknown>
+    caller?: { type: string }
+  }
+  usage?: unknown
+  context_management?: { applied_edits: unknown[] }
 }
 
 /**
@@ -296,10 +332,10 @@ interface StreamEvent {
  * The API returns a list of models the authenticated user can access.
  */
 export interface ModelInfo {
-  id: string;
-  display_name?: string;
-  type: string;
-  created_at?: string;
+  id: string
+  display_name?: string
+  type: string
+  created_at?: string
 }
 
 /**
@@ -315,14 +351,14 @@ export interface ModelInfo {
  *
  * @example
  * ```ts
- * normalizeModelForAPI("claude-opus-4-6[1m]") // → "claude-opus-4-6"
+ * normalizeModelForAPI("claude-opus-4-7[1m]") // → "claude-opus-4-7"
  * normalizeModelForAPI("claude-sonnet-4-6")   // → "claude-sonnet-4-6"
  * ```
  *
  * @see cc-03312026/src/utils/model/model.ts:normalizeModelStringForAPI()
  */
 export function normalizeModelForAPI(model: string): string {
-  return model.replace(/\[(1|2)m\]/gi, "");
+  return model.replace(/\[(1|2)m\]/gi, "")
 }
 
 /**
@@ -335,7 +371,7 @@ export function normalizeModelForAPI(model: string): string {
  * @returns True if the model has a `[1m]` suffix
  */
 export function has1mContext(model: string): boolean {
-  return /\[1m\]/i.test(model);
+  return /\[1m\]/i.test(model)
 }
 
 // ---------------------------------------------------------------------------
@@ -350,7 +386,8 @@ const c = {
   red: (s: string) => `\x1b[31m${s}\x1b[39m`,
   bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
   magenta: (s: string) => `\x1b[35m${s}\x1b[39m`,
-};
+  brightGreen: (s: string) => `\x1b[92m${s}\x1b[39m`,
+}
 
 // ---------------------------------------------------------------------------
 // Debug logging — pretty-printed to stderr
@@ -361,30 +398,41 @@ const c = {
  * in index.ts can set process.env.DEBUG before the first request.
  */
 export function isDebug(): boolean {
-  return !!process.env.DEBUG;
+  return !!process.env.DEBUG
+}
+
+/**
+ * When verbose is enabled (--verbose flag or VERBOSE=1), debug output is not
+ * truncated: full system blocks, full message previews, untrimmed tokens.
+ */
+export function isVerbose(): boolean {
+  return !!process.env.VERBOSE
+}
+
+/** Truncate `s` to `max` chars unless verbose mode is on. */
+function truncate(s: string, max: number): string {
+  if (isVerbose()) return s
+  return s.length > max ? s.slice(0, max) + "..." : s
 }
 
 function debugHeader(label: string): void {
-  if (!isDebug()) return;
-  console.error(`\n${c.bold(c.cyan(`--- ${label} ---`))}`);
+  if (!isDebug()) return
+  console.error(`\n${c.bold(c.cyan(`--- ${label} ---`))}`)
 }
 
 function debugKV(key: string, value: string): void {
-  if (!isDebug()) return;
-  console.error(`  ${c.dim(key + ":")} ${value}`);
+  if (!isDebug()) return
+  console.error(`  ${c.dim(key + ":")} ${value}`)
 }
 
 /** Print request headers sorted alphabetically, with auth tokens redacted. */
 function debugHeaders(headers: Record<string, string>): void {
-  if (!isDebug()) return;
-  console.error(`  ${c.bold("Headers:")}`);
-  const sorted = Object.entries(headers).sort(([a], [b]) => a.localeCompare(b));
+  if (!isDebug()) return
+  console.error(`  ${c.bold("Headers:")}`)
+  const safeHeaders = redactHeaders(headers)
+  const sorted = Object.entries(safeHeaders).sort(([a], [b]) => a.localeCompare(b))
   for (const [k, v] of sorted) {
-    const display =
-      k === "authorization" ? v.slice(0, 20) + "..." + c.dim("REDACTED") :
-      k === "x-api-key" ? v.slice(0, 10) + "..." + c.dim("REDACTED") :
-      v;
-    console.error(`    ${c.yellow(k)}: ${display}`);
+    console.error(`    ${c.yellow(k)}: ${v}`)
   }
 }
 
@@ -395,45 +443,60 @@ function debugHeaders(headers: Record<string, string>): void {
  *   - metadata.user_id: parse the JSON string and show fields individually
  */
 function debugBody(body: Record<string, unknown>): void {
-  if (!isDebug()) return;
-  console.error(`  ${c.bold("Body:")}`);
+  if (!isDebug()) return
+  console.error(`  ${c.bold("Body:")}`)
   for (const [k, v] of Object.entries(body)) {
     if (k === "messages") {
-      const msgs = v as Message[];
-      console.error(`    ${c.yellow("messages")}: ${c.dim(`[${msgs.length} message(s)]`)}`);
+      const msgs = v as Message[]
+      console.error(`    ${c.yellow("messages")}: ${c.dim(`[${msgs.length} message(s)]`)}`)
       for (const msg of msgs) {
-        const preview = typeof msg.content === "string"
-          ? msg.content.slice(0, 80) + (msg.content.length > 80 ? "..." : "")
-          : "[complex]";
-        console.error(`      ${c.green(msg.role)}: ${c.dim(preview)}`);
+        const isCached = (() => {
+          if (typeof msg.content === "string") return false
+          const last = msg.content[msg.content.length - 1] as
+            | { cache_control?: unknown }
+            | undefined
+          return Boolean(last?.cache_control)
+        })()
+        // Bright bold green annotation marks where the cache_control
+        // breakpoint sits in this request. Everything before it (system,
+        // tools, prior messages) is what the API actually serves from cache;
+        // see docs/caching.md for the prefix-checkpoint mental model.
+        const cc = isCached ? ` ${c.bold(c.brightGreen("[← cached prefix ends here]"))}` : ""
+        const preview = typeof msg.content === "string" ? truncate(msg.content, 80) : "[complex]"
+        console.error(`      ${c.green(msg.role)}${cc}: ${c.dim(preview)}`)
       }
     } else if (k === "system") {
-      const sys = v as Array<{ type: string; text: string; cache_control?: unknown }>;
-      console.error(`    ${c.yellow("system")}: ${c.dim(`[${sys.length} block(s)]`)}`);
+      const sys = v as Array<{
+        type: string
+        text: string
+        cache_control?: unknown
+      }>
+      console.error(`    ${c.yellow("system")}: ${c.dim(`[${sys.length} block(s)]`)}`)
       for (let i = 0; i < sys.length; i++) {
-        const block = sys[i];
+        const block = sys[i]
         // Label blocks by their role (see SYSTEM_PROMPT docs in headers.ts)
-        const label =
-          block.text.startsWith("x-anthropic-billing-header") ? "billing" :
-          block.text.startsWith("You are Claude") ? "identity" :
-          `block ${i}`;
-        const cc = block.cache_control ? ` ${c.dim("[cached]")}` : "";
-        const preview = block.text.slice(0, 80) + (block.text.length > 80 ? "..." : "");
-        console.error(`      ${c.magenta(label)}${cc}: ${c.dim(preview)}`);
+        const label = block.text.startsWith("x-anthropic-billing-header")
+          ? "billing"
+          : block.text.startsWith("You are Claude")
+            ? "identity"
+            : `block ${i}`
+        const cc = block.cache_control ? ` ${c.bold(c.brightGreen("[cached]"))}` : ""
+        const preview = truncate(block.text, 80)
+        console.error(`      ${c.magenta(label)}${cc}: ${c.dim(preview)}`)
       }
     } else if (k === "metadata") {
-      const meta = v as { user_id: string };
-      console.error(`    ${c.yellow("metadata.user_id")}:`);
+      const meta = v as { user_id: string }
+      console.error(`    ${c.yellow("metadata.user_id")}:`)
       try {
-        const parsed = JSON.parse(meta.user_id);
+        const parsed = JSON.parse(meta.user_id)
         for (const [mk, mv] of Object.entries(parsed)) {
-          console.error(`      ${c.magenta(mk)}: ${String(mv)}`);
+          console.error(`      ${c.magenta(mk)}: ${String(mv)}`)
         }
       } catch {
-        console.error(`      ${meta.user_id}`);
+        console.error(`      ${meta.user_id}`)
       }
     } else {
-      console.error(`    ${c.yellow(k)}: ${JSON.stringify(v)}`);
+      console.error(`    ${c.yellow(k)}: ${JSON.stringify(v)}`)
     }
   }
 }
@@ -455,25 +518,25 @@ function debugBody(body: Record<string, unknown>): void {
  */
 function humanizeRatelimitValue(key: string, value: string): string {
   if (key.endsWith("-reset")) {
-    const resetAt = Number(value) * 1000; // API sends seconds, we need ms
-    const now = Date.now();
-    const diffMs = resetAt - now;
-    if (diffMs <= 0) return "now";
-    const mins = Math.floor(diffMs / 60_000);
-    const hrs = Math.floor(mins / 60);
-    if (hrs > 0) return `in ${hrs}h ${mins % 60}m`;
-    return `in ${mins}m`;
+    const resetAt = Number(value) * 1000 // API sends seconds, we need ms
+    const now = Date.now()
+    const diffMs = resetAt - now
+    if (diffMs <= 0) return "now"
+    const mins = Math.floor(diffMs / 60_000)
+    const hrs = Math.floor(mins / 60)
+    if (hrs > 0) return `in ${hrs}h ${mins % 60}m`
+    return `in ${mins}m`
   }
   if (key.endsWith("-utilization")) {
-    return `${(Number(value) * 100).toFixed(1)}%`;
+    return `${(Number(value) * 100).toFixed(1)}%`
   }
   if (key.endsWith("-fallback-percentage")) {
-    return `${(Number(value) * 100).toFixed(0)}%`;
+    return `${(Number(value) * 100).toFixed(0)}%`
   }
   if (key.endsWith("-status")) {
-    if (value === "allowed") return c.green("allowed");
-    if (value === "rejected") return c.red("rejected");
-    return value;
+    if (value === "allowed") return c.green("allowed")
+    if (value === "rejected") return c.red("rejected")
+    return value
   }
   if (key.endsWith("-disabled-reason")) {
     // These reasons come from `P04()` (L468510-468524) which checks
@@ -482,10 +545,10 @@ function humanizeRatelimitValue(key: string, value: string): string {
       out_of_credits: "no credits remaining",
       overage_not_provisioned: "overage not set up",
       org_level_disabled: "disabled by org admin",
-    };
-    return map[value] ?? value;
+    }
+    return map[value] ?? value
   }
-  return "";
+  return ""
 }
 
 /**
@@ -493,53 +556,58 @@ function humanizeRatelimitValue(key: string, value: string): string {
  * Extracts the 5h and 7d windows and shows utilization, status, and reset time.
  */
 function formatRatelimitSummary(rl: Map<string, string>): void {
-  const windows = new Map<string, { util?: number; status?: string; reset?: number }>();
+  const windows = new Map<string, { util?: number; status?: string; reset?: number }>()
   for (const [k, v] of rl) {
-    const match = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/);
-    if (!match) continue;
-    const window = match[1];
-    const field = match[2];
-    if (!windows.has(window)) windows.set(window, {});
-    const w = windows.get(window)!;
-    if (field === "utilization") w.util = Number(v);
-    if (field === "status") w.status = v;
-    if (field === "reset") w.reset = Number(v) * 1000;
+    const match = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/)
+    if (!match) continue
+    const window = match[1]
+    const field = match[2]
+    if (!windows.has(window)) windows.set(window, {})
+    const w = windows.get(window)!
+    if (field === "utilization") w.util = Number(v)
+    if (field === "status") w.status = v
+    if (field === "reset") w.reset = Number(v) * 1000
   }
 
-  const ovStatus = rl.get("anthropic-ratelimit-unified-overage-status");
-  const ovReason = rl.get("anthropic-ratelimit-unified-overage-disabled-reason");
-  const rep = rl.get("anthropic-ratelimit-unified-representative-claim");
+  const ovStatus = rl.get("anthropic-ratelimit-unified-overage-status")
+  const ovReason = rl.get("anthropic-ratelimit-unified-overage-disabled-reason")
+  const rep = rl.get("anthropic-ratelimit-unified-representative-claim")
 
-  console.error(`\n  ${c.bold("Rate limit summary:")}`);
+  console.error(`\n  ${c.bold("Rate limit summary:")}`)
   for (const [window, info] of [...windows.entries()].sort()) {
     // Skip non-window entries (overage, fallback, representative-claim are handled separately)
-    if (window === "overage" || window === "fallback" || window === "representative") continue;
-    if (!info.util && !info.status && !info.reset) continue;
+    if (window === "overage" || window === "fallback" || window === "representative") continue
+    if (!info.util && !info.status && !info.reset) continue
     const label =
-      window === "5h" ? "5-hour" :
-      window === "7d" ? "7-day" :
-      window.startsWith("7d_") ? `7-day (${window.slice(3)})` :
-      window;
-    const pct = info.util != null ? `${(info.util * 100).toFixed(1)}% used` : "?";
-    const statusColor = info.status === "allowed" ? c.green(info.status!) : c.red(info.status!);
-    let resetStr = "";
+      window === "5h"
+        ? "5-hour"
+        : window === "7d"
+          ? "7-day"
+          : window.startsWith("7d_")
+            ? `7-day (${window.slice(3)})`
+            : window
+    const pct = info.util != null ? `${(info.util * 100).toFixed(1)}% used` : "?"
+    const statusColor = info.status === "allowed" ? c.green(info.status) : c.red(info.status!)
+    let resetStr = ""
     if (info.reset) {
-      const diffMs = info.reset - Date.now();
+      const diffMs = info.reset - Date.now()
       if (diffMs > 0) {
-        const hrs = Math.floor(diffMs / 3_600_000);
-        const mins = Math.floor((diffMs % 3_600_000) / 60_000);
-        resetStr = `, resets in ${hrs}h ${mins}m`;
+        const hrs = Math.floor(diffMs / 3_600_000)
+        const mins = Math.floor((diffMs % 3_600_000) / 60_000)
+        resetStr = `, resets in ${hrs}h ${mins}m`
       }
     }
-    console.error(`    ${c.cyan(label)}: ${pct} — ${statusColor}${resetStr}`);
+    console.error(`    ${c.cyan(label)}: ${pct} — ${statusColor}${resetStr}`)
   }
   if (ovStatus) {
-    const ovColor = ovStatus === "allowed" ? c.green("enabled") : c.red("disabled");
-    const reason = ovReason ? ` (${humanizeRatelimitValue("x-disabled-reason", ovReason) || ovReason})` : "";
-    console.error(`    ${c.cyan("overage")}: ${ovColor}${reason}`);
+    const ovColor = ovStatus === "allowed" ? c.green("enabled") : c.red("disabled")
+    const reason = ovReason
+      ? ` (${humanizeRatelimitValue("x-disabled-reason", ovReason) || ovReason})`
+      : ""
+    console.error(`    ${c.cyan("overage")}: ${ovColor}${reason}`)
   }
   if (rep) {
-    console.error(`    ${c.cyan("billing window")}: ${rep.replace("_", " ")}`);
+    console.error(`    ${c.cyan("billing window")}: ${rep.replace("_", " ")}`)
   }
 }
 
@@ -548,26 +616,24 @@ function formatRatelimitSummary(rl: Map<string, string>): void {
  * headers and a summary block at the end.
  */
 function debugResponse(status: number, headers: Headers): void {
-  if (!isDebug()) return;
-  debugHeader(`Response ${status >= 400 ? c.red(String(status)) : c.green(String(status))}`);
-  const entries: [string, string][] = [];
-  const ratelimitEntries = new Map<string, string>();
-  headers.forEach((v, k) => entries.push([k, v]));
-  entries.sort(([a], [b]) => a.localeCompare(b));
+  if (!isDebug()) return
+  debugHeader(`Response ${status >= 400 ? c.red(String(status)) : c.green(String(status))}`)
+  const entries: [string, string][] = []
+  const ratelimitEntries = new Map<string, string>()
+  headers.forEach((v, k) => entries.push([k, v]))
+  entries.sort(([a], [b]) => a.localeCompare(b))
 
   for (const [k, v] of entries) {
-    const human = k.startsWith("anthropic-ratelimit-")
-      ? humanizeRatelimitValue(k, v)
-      : "";
-    const annotation = human ? ` ${c.dim(`(${human})`)}` : "";
-    console.error(`    ${c.yellow(k)}: ${v}${annotation}`);
+    const human = k.startsWith("anthropic-ratelimit-") ? humanizeRatelimitValue(k, v) : ""
+    const annotation = human ? ` ${c.dim(`(${human})`)}` : ""
+    console.error(`    ${c.yellow(k)}: ${v}${annotation}`)
     if (k.startsWith("anthropic-ratelimit-")) {
-      ratelimitEntries.set(k, v);
+      ratelimitEntries.set(k, v)
     }
   }
 
   if (ratelimitEntries.size > 0) {
-    formatRatelimitSummary(ratelimitEntries);
+    formatRatelimitSummary(ratelimitEntries)
   }
 }
 
@@ -588,29 +654,29 @@ function debugResponse(status: number, headers: Headers): void {
  * Uses a line-buffered approach: we accumulate bytes until we see newlines,
  * then process complete lines. This handles partial chunks from the network
  * correctly (a single SSE event may arrive across multiple TCP segments).
+ *
+ * @yields Parsed stream events from complete SSE `data:` lines.
  */
-async function* parseSSE(
-  body: ReadableStream<Uint8Array>,
-): AsyncIterable<StreamEvent> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncIterable<StreamEvent> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const { done, value } = await reader.read()
+      if (done) break
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? ""; // keep incomplete last line in buffer
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? "" // keep incomplete last line in buffer
 
       for (const line of lines) {
         if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") return;
+          const data = line.slice(6).trim()
+          if (data === "[DONE]") return
           try {
-            yield JSON.parse(data) as StreamEvent;
+            yield JSON.parse(data) as StreamEvent
           } catch {
             // skip malformed events — shouldn't happen but defensive
           }
@@ -618,7 +684,7 @@ async function* parseSSE(
       }
     }
   } finally {
-    reader.releaseLock();
+    reader.releaseLock()
   }
 }
 
@@ -678,18 +744,23 @@ export async function* sendMessage(
     stream = true,
     requestType = "conversation",
     thinking = { type: "adaptive" as const },
-    outputConfig = { effort: "high" as const },
+    outputConfig = { effort: "medium" as const },
     tools,
     temperature,
-  } = opts;
+    contextManagement,
+    onThinkingStart,
+    onThinkingDelta,
+    onThinkingStop,
+    networkClient = defaultNetworkClient,
+  } = opts
 
   // Strip client-side [1m] suffix — API activation is via beta flag
-  const model = normalizeModelForAPI(rawModel);
+  const model = normalizeModelForAPI(rawModel)
 
-  const sessionId = getSessionId();
+  const sessionId = getSessionId()
   // Pass rawModel so buildBetaFlags sees [1m] and adds context-1m flag
-  const headers = buildHeaders(auth, sessionId, requestType, rawModel);
-  const metadata = buildMetadata(auth);
+  const headers = buildHeaders(auth, sessionId, requestType, rawModel)
+  const metadata = buildMetadata(auth)
 
   const body: Record<string, unknown> = {
     model,
@@ -698,184 +769,276 @@ export async function* sendMessage(
     system,
     messages,
     metadata,
-  };
+  }
 
   // Thinking: only for models that support it (not haiku)
   // v2.1.91 capture: opus sends thinking:{type:"adaptive"}, haiku does not
-  const isHaiku = model.includes("haiku");
+  const isHaiku = model.includes("haiku")
   if (thinking && !isHaiku) {
-    body.thinking = thinking;
+    body.thinking = thinking
   }
 
   // Output config: effort and/or structured format
   // v2.1.91: effort only sent for models that support it (not haiku)
   if (outputConfig && !isHaiku) {
-    body.output_config = outputConfig;
+    body.output_config = outputConfig
   } else if (outputConfig?.format) {
     // Structured output format can be sent even for haiku (used in title gen)
-    body.output_config = { format: outputConfig.format };
+    body.output_config = { format: outputConfig.format }
   }
 
   // Tools: include if provided
   if (tools && tools.length > 0) {
-    body.tools = tools;
+    body.tools = tools
   }
 
   // Temperature: only sent explicitly when set (title gen uses 1)
   if (temperature != null) {
-    body.temperature = temperature;
+    body.temperature = temperature
   }
 
-  debugHeader(`POST ${API_URL}`);
-  debugKV("model", model);
-  debugKV("stream", String(stream));
-  debugKV("max_tokens", String(maxTokens));
-  debugKV("request_type", requestType);
-  if (thinking) debugKV("thinking", JSON.stringify(thinking));
-  if (outputConfig) debugKV("output_config", JSON.stringify(outputConfig));
-  debugHeaders(headers);
-  debugBody(body as Record<string, unknown>);
-
-  const doFetch = async (token: string) => {
-    const h = { ...headers };
-    if (h.authorization) h.authorization = `Bearer ${token}`;
-    else if (h["x-api-key"]) h["x-api-key"] = token;
-
-    return fetch(API_URL, {
-      method: "POST",
-      headers: h,
-      body: JSON.stringify(body),
-    });
-  };
-
-  let response = await doFetch(auth.token);
-
-  debugResponse(response.status, response.headers);
-
-  // 401 retry with token refresh — mirrors onAuth401 pattern (L751090-751112)
-  if (response.status === 401 && auth.refresh) {
-    debugHeader(c.yellow("401 — refreshing token..."));
-    try {
-      const refreshed = await auth.refresh();
-      response = await doFetch(refreshed.token);
-      if (response.status === 401) {
-        throw new Error("401 after token refresh. Re-login required.");
+  // Context management: live 2.1.118 conversation requests carry
+  //   { edits: [{ type: "clear_thinking_20251015", keep: "all" }] }
+  // at the top level. Gated by the context-management-2025-06-27 beta.
+  // The clear_thinking strategy requires thinking to be enabled, which is the
+  // same predicate as `!isHaiku` (haiku has no thinking, so we never set
+  // body.thinking for it above). Using !isHaiku here keeps the gate aligned
+  // with the thinking gate above and easier to reason about.
+  // Pass contextManagement: null to opt out; omit to use the conversation
+  // default; pass a custom object to override.
+  if (contextManagement === undefined) {
+    if (requestType === "conversation" && !isHaiku) {
+      body.context_management = {
+        edits: [{ type: "clear_thinking_20251015", keep: "all" }],
       }
-      auth.token = refreshed.token;
-    } catch (e) {
-      throw new Error(
-        `Token refresh failed: ${e instanceof Error ? e.message : String(e)}`,
-      );
     }
+  } else if (contextManagement !== null) {
+    body.context_management = contextManagement
   }
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    if (isDebug()) {
-      debugHeader(c.red(`Error ${response.status}`));
-      console.error(`  ${errorBody.slice(0, 500)}`);
+  debugHeader(`POST ${API_URL}`)
+  debugKV("model", model)
+  debugKV("stream", String(stream))
+  debugKV("max_tokens", String(maxTokens))
+  debugKV("request_type", requestType)
+  if (thinking) debugKV("thinking", JSON.stringify(thinking))
+  if (outputConfig) debugKV("output_config", JSON.stringify(outputConfig))
+  debugHeaders(headers)
+  debugBody(body as Record<string, unknown>)
+
+  const requestStatus = GLOBAL_STATUS_BUS.create("Sending request", {
+    notificationId: "network.request",
+    category: "network",
+  })
+
+  const reqSnapshot = snapshotRequest(body, model)
+  const detector = getCacheDetector()
+
+  const serializedBody = JSON.stringify(body)
+
+  try {
+    const doRequest = async (token: string) => {
+      const h = { ...headers }
+      if (h.authorization) h.authorization = `Bearer ${token}`
+      else if (h["x-api-key"]) h["x-api-key"] = token
+
+      return networkClient.request({
+        label: "messages.send",
+        method: "POST",
+        url: API_URL,
+        headers: h,
+        body: serializedBody,
+      })
     }
-    throw new Error(`API ${response.status}: ${errorBody}`);
-  }
 
-  // Non-streaming path (used in tests)
-  if (!stream) {
-    const data = (await response.json()) as {
-      content: Array<{ type: string; text?: string }>;
-    };
-    const text = data.content.find((c) => c.type === "text")?.text ?? "";
-    yield text;
-    return { blocks: data.content as ContentBlock[], text, stopReason: "end_turn" };
-  }
+    let response = await doRequest(auth.token)
+    requestStatus.update(stream ? "Waiting for response" : "Reading response")
 
-  // Streaming path — parse SSE and collect all content blocks
-  if (!response.body) throw new Error("No response body for stream");
+    debugResponse(response.status, response.headers)
 
-  const blocks: ContentBlock[] = [];
-  let currentBlock: Partial<ContentBlock> | null = null;
-  let currentIndex = -1;
-  let fullText = "";
-  let stopReason: string | null = null;
-
-  // Accumulators for the current block being streamed
-  let thinkingSig = "";
-  let toolJsonParts = "";
-
-  for await (const event of parseSSE(response.body)) {
-    switch (event.type) {
-      case "content_block_start": {
-        currentIndex = event.index ?? -1;
-        const cb = event.content_block;
-        if (!cb) break;
-
-        if (cb.type === "thinking") {
-          currentBlock = { type: "thinking", thinking: cb.thinking ?? "", signature: cb.signature ?? "" };
-          thinkingSig = cb.signature ?? "";
-        } else if (cb.type === "tool_use") {
-          currentBlock = {
-            type: "tool_use",
-            id: cb.id ?? "",
-            name: cb.name ?? "",
-            input: cb.input ?? {},
-            caller: cb.caller,
-          };
-          toolJsonParts = "";
-        } else if (cb.type === "text") {
-          currentBlock = { type: "text", text: cb.text ?? "" };
+    // 401 retry with token refresh — mirrors onAuth401 pattern (L751090-751112).
+    // Goal: when the access token expires during a long-running session,
+    // refresh transparently and continue without forcing the user to
+    // restart anything. Surface the refresh in the status bar, then
+    // resume the same in-flight turn.
+    if (response.status === 401 && auth.refresh) {
+      debugHeader(c.yellow("401 — token expired, refreshing…"))
+      requestStatus.update("Auth token expired, refreshing…", {
+        notificationId: "auth.refresh",
+        category: "auth",
+      })
+      try {
+        const refreshed = await auth.refresh()
+        // Persist on the AuthResult so subsequent turns reuse the new token
+        // without paying another 401+refresh round-trip.
+        auth.token = refreshed.token
+        requestStatus.update("Auth refreshed, resuming…", {
+          notificationId: "auth.refresh",
+          category: "auth",
+        })
+        response = await doRequest(refreshed.token)
+        requestStatus.update(stream ? "Waiting for response" : "Reading response", {
+          notificationId: "network.request",
+          category: "network",
+        })
+        if (response.status === 401) {
+          throw new Error(
+            "401 after token refresh. The keychain credentials are stale — " +
+              "run `claude` to re-login.",
+          )
         }
-        break;
+      } catch (e) {
+        throw new Error(`Token refresh failed: ${e instanceof Error ? e.message : String(e)}`, {
+          cause: e,
+        })
       }
+    }
 
-      case "content_block_delta": {
-        const d = event.delta;
-        if (!d) break;
+    if (!response.ok) {
+      const errorBody = await response.text()
+      if (isDebug()) {
+        debugHeader(c.red(`Error ${response.status}`))
+        console.error(`  ${truncate(errorBody, 500)}`)
+      }
+      throw new Error(`API ${response.status}: ${errorBody}`)
+    }
 
-        if (d.type === "text_delta" && d.text) {
-          if (currentBlock?.type === "text") {
-            (currentBlock as TextBlock).text += d.text;
+    // Non-streaming path (used in tests)
+    if (!stream) {
+      const raw = await response.text()
+      const data = JSON.parse(raw) as {
+        content: Array<{ type: string; text?: string }>
+      }
+      const text = data.content.find((c) => c.type === "text")?.text ?? ""
+      yield text
+      return {
+        blocks: data.content as ContentBlock[],
+        text,
+        stopReason: "end_turn",
+      }
+    }
+
+    // Streaming path — parse SSE and collect all content blocks
+    if (!response.body) throw new Error("No response body for stream")
+
+    const blocks: ContentBlock[] = []
+    let currentBlock: Partial<ContentBlock> | null = null
+    let fullText = ""
+    let stopReason: string | null = null
+    let sawStreamEvent = false
+
+    // Accumulators for the current block being streamed
+    let thinkingSig = ""
+    let toolJsonParts = ""
+
+    for await (const event of parseSSE(response.body)) {
+      if (!sawStreamEvent) {
+        sawStreamEvent = true
+        requestStatus.update("Streaming response")
+      }
+      switch (event.type) {
+        case "message_start": {
+          // Anthropic returns the full `usage` payload right at message_start,
+          // since cache lookup happens during prefill — before any output
+          // tokens are generated. Use this to (a) print the per-turn cache
+          // line under --debug and (b) feed the always-on anomaly detector.
+          const usage = event.message?.usage as CacheUsage | undefined
+          if (usage) {
+            if (isDebug()) console.error(formatCacheLine(usage))
+            detector.observe(usage, reqSnapshot)
           }
-          fullText += d.text;
-          yield d.text;
-        } else if (d.type === "signature_delta" && d.signature) {
-          thinkingSig += d.signature;
-          if (currentBlock?.type === "thinking") {
-            (currentBlock as ThinkingBlock).signature = thinkingSig;
-          }
-        } else if (d.type === "input_json_delta" && d.partial_json != null) {
-          toolJsonParts += d.partial_json;
+          break
         }
-        break;
-      }
 
-      case "content_block_stop": {
-        if (currentBlock) {
-          // Finalize tool_use: parse accumulated JSON into input
-          if (currentBlock.type === "tool_use" && toolJsonParts) {
-            try {
-              (currentBlock as ToolUseBlock).input = JSON.parse(toolJsonParts);
-            } catch {
-              // partial JSON — keep what we have
-              (currentBlock as ToolUseBlock).input = { _raw: toolJsonParts };
+        case "content_block_start": {
+          const cb = event.content_block
+          if (!cb) break
+
+          if (cb.type === "thinking") {
+            const initialThinking = cb.thinking ?? ""
+            currentBlock = {
+              type: "thinking",
+              thinking: initialThinking,
+              signature: cb.signature ?? "",
             }
+            thinkingSig = cb.signature ?? ""
+            await onThinkingStart?.()
+            if (initialThinking) await onThinkingDelta?.(initialThinking)
+          } else if (cb.type === "tool_use") {
+            currentBlock = {
+              type: "tool_use",
+              id: cb.id ?? "",
+              name: cb.name ?? "",
+              input: cb.input ?? {},
+              caller: cb.caller,
+            }
+            toolJsonParts = ""
+          } else if (cb.type === "text") {
+            currentBlock = { type: "text", text: cb.text ?? "" }
           }
-          blocks.push(currentBlock as ContentBlock);
+          break
         }
-        currentBlock = null;
-        toolJsonParts = "";
-        thinkingSig = "";
-        break;
-      }
 
-      case "message_delta": {
-        if (event.delta?.stop_reason) {
-          stopReason = event.delta.stop_reason;
+        case "content_block_delta": {
+          const d = event.delta
+          if (!d) break
+
+          if (d.type === "text_delta" && d.text) {
+            if (currentBlock?.type === "text") {
+              ;(currentBlock as TextBlock).text += d.text
+            }
+            fullText += d.text
+            yield d.text
+          } else if (d.type === "thinking_delta" && d.thinking) {
+            if (currentBlock?.type === "thinking") {
+              ;(currentBlock as ThinkingBlock).thinking += d.thinking
+            }
+            await onThinkingDelta?.(d.thinking)
+          } else if (d.type === "signature_delta" && d.signature) {
+            thinkingSig += d.signature
+            if (currentBlock?.type === "thinking") {
+              ;(currentBlock as ThinkingBlock).signature = thinkingSig
+            }
+          } else if (d.type === "input_json_delta" && d.partial_json != null) {
+            toolJsonParts += d.partial_json
+          }
+          break
         }
-        break;
+
+        case "content_block_stop": {
+          if (currentBlock) {
+            const stoppedThinking = currentBlock.type === "thinking"
+            // Finalize tool_use: parse accumulated JSON into input
+            if (currentBlock.type === "tool_use" && toolJsonParts) {
+              try {
+                ;(currentBlock as ToolUseBlock).input = JSON.parse(toolJsonParts)
+              } catch {
+                // partial JSON — keep what we have
+                ;(currentBlock as ToolUseBlock).input = { _raw: toolJsonParts }
+              }
+            }
+            blocks.push(currentBlock as ContentBlock)
+            if (stoppedThinking) await onThinkingStop?.()
+          }
+          currentBlock = null
+          toolJsonParts = ""
+          thinkingSig = ""
+          break
+        }
+
+        case "message_delta": {
+          if (event.delta?.stop_reason) {
+            stopReason = event.delta.stop_reason
+          }
+          break
+        }
       }
     }
-  }
 
-  return { blocks, text: fullText, stopReason };
+    return { blocks, text: fullText, stopReason }
+  } finally {
+    requestStatus.clear()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -883,7 +1046,7 @@ export async function* sendMessage(
 // ---------------------------------------------------------------------------
 
 /** Endpoint for listing available models. */
-const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true";
+const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true"
 
 /**
  * List models available to the authenticated user, plus synthesized
@@ -894,55 +1057,61 @@ const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true";
  * for any model that supports the 1M context window. The suffix is a
  * client-side convention — the API itself doesn't know about it. The
  * `--list-models` CLI flag uses this expanded list so users can pick
- * `claude-opus-4-6[1m]` from the menu and get 1M context automatically.
+ * `claude-opus-4-7[1m]` from the menu and get 1M context automatically.
  *
- * @param auth - Authenticated credentials
+ * @param auth Authenticated credentials
+ * @param networkClient Network client used for the models request.
  * @returns Array of {@link ModelInfo}, with `[1m]` variants appended
  *
  * @see cc-03312026/src/utils/context.ts:modelSupports1M()
  */
-export async function listModels(auth: AuthResult): Promise<ModelInfo[]> {
-  const sessionId = getSessionId();
-  const headers = buildHeaders(auth, sessionId);
+export async function listModels(
+  auth: AuthResult,
+  networkClient: NetworkClient = defaultNetworkClient,
+): Promise<ModelInfo[]> {
+  const sessionId = getSessionId()
+  const headers = buildHeaders(auth, sessionId)
 
-  debugHeader(`GET ${MODELS_URL}`);
+  debugHeader(`GET ${MODELS_URL}`)
 
-  const response = await fetch(MODELS_URL, {
+  const response = await networkClient.request({
+    label: "models.list",
     method: "GET",
+    url: MODELS_URL,
     headers,
-  });
+  })
 
-  debugResponse(response.status, response.headers);
+  debugResponse(response.status, response.headers)
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Models API ${response.status}: ${errorBody}`);
+    const errorBody = await response.text()
+    throw new Error(`Models API ${response.status}: ${errorBody}`)
   }
 
-  const data = (await response.json()) as { data: ModelInfo[] };
-  const models = data.data;
+  const data = await response.json<{ data: ModelInfo[] }>()
+  const models = data.data
 
   // Synthesize 1M context variants for models that support it.
   // The CLI uses a client-side [1m] suffix convention — these aren't separate
   // API model IDs. The actual 1M activation happens via the context-1m-2025-08-07
   // beta flag. See cc-03312026/src/utils/context.ts:modelSupports1M().
+  // Opus-4-7 and sonnet-4 both advertise 1M context via the context-1m beta.
+  // (Older opus-4-6 also did, but it's gone from the live catalog as of 2.1.118.)
   const supports1M = (id: string) =>
-    id.includes("claude-sonnet-4") || id.includes("opus-4-6");
+    id.includes("claude-sonnet-4") || id.includes("opus-4-7") || id.includes("opus-4-6")
 
-  const variants: ModelInfo[] = [];
+  const variants: ModelInfo[] = []
   for (const m of models) {
     if (supports1M(m.id)) {
       variants.push({
         ...m,
         id: `${m.id}[1m]`,
-        display_name: m.display_name
-          ? `${m.display_name} (1M context)`
-          : `${m.id} (1M context)`,
-      });
+        display_name: m.display_name ? `${m.display_name} (1M context)` : `${m.id} (1M context)`,
+      })
     }
   }
 
-  return [...models, ...variants];
+  return [...models, ...variants]
 }
 
 // ---------------------------------------------------------------------------
@@ -966,17 +1135,15 @@ export async function listModels(auth: AuthResult): Promise<ModelInfo[]> {
  * console.log(reply);
  * ```
  */
-export async function sendMessageSync(
-  opts: SendOptions,
-): Promise<string> {
-  let result = "";
-  const gen = sendMessage(opts);
+export async function sendMessageSync(opts: SendOptions): Promise<string> {
+  let result = ""
+  const gen = sendMessage(opts)
   while (true) {
-    const { done, value } = await gen.next();
-    if (done) break;
-    result += value;
+    const { done, value } = await gen.next()
+    if (done) break
+    result += value
   }
-  return result;
+  return result
 }
 
 /**
@@ -998,19 +1165,17 @@ export async function sendMessageSync(
  * }
  * ```
  */
-export async function sendMessageFull(
-  opts: SendOptions,
-): Promise<StreamedResponse> {
-  const gen = sendMessage(opts);
-  let lastReturn: StreamedResponse | undefined;
+export async function sendMessageFull(opts: SendOptions): Promise<StreamedResponse> {
+  const gen = sendMessage(opts)
+  let lastReturn: StreamedResponse | undefined
   while (true) {
-    const { done, value } = await gen.next();
-    if (done) {
-      lastReturn = value as unknown as StreamedResponse;
-      break;
+    const next = await gen.next()
+    if (next.done) {
+      lastReturn = next.value
+      break
     }
   }
-  return lastReturn ?? { blocks: [], text: "", stopReason: null };
+  return lastReturn ?? { blocks: [], text: "", stopReason: null }
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,62 +1198,69 @@ export async function sendMessageFull(
  * network errors). Use {@link sendMessage} directly if you need the actual
  * error message.
  *
- * @param auth - Authenticated credentials
+ * @param auth Authenticated credentials
+ * @param networkClient Network client used for the quota request.
  * @returns True if the request succeeded (200 OK), false on any error
  */
-export async function checkQuota(auth: AuthResult): Promise<boolean> {
-  const sessionId = getSessionId();
-  const headers = buildHeaders(auth, sessionId, "quota");
-  const metadata = buildMetadata(auth);
+export async function checkQuota(
+  auth: AuthResult,
+  networkClient: NetworkClient = defaultNetworkClient,
+): Promise<boolean> {
+  const sessionId = getSessionId()
+  const headers = buildHeaders(auth, sessionId, "quota")
+  const metadata = buildMetadata(auth)
 
   const body = {
     model: "claude-haiku-4-5-20251001",
     max_tokens: 1,
     messages: [{ role: "user", content: "quota" }],
     metadata,
-  };
+  }
 
-  debugHeader("POST (quota check)");
-  debugKV("model", body.model);
+  debugHeader("POST (quota check)")
+  debugKV("model", body.model)
 
-  const doFetch = async (token: string) => {
-    const h = { ...headers };
-    if (h.authorization) h.authorization = `Bearer ${token}`;
-    else if (h["x-api-key"]) h["x-api-key"] = token;
+  const serializedBody = JSON.stringify(body)
+  const doRequest = async (token: string) => {
+    const h = { ...headers }
+    if (h.authorization) h.authorization = `Bearer ${token}`
+    else if (h["x-api-key"]) h["x-api-key"] = token
 
-    return fetch(API_URL, {
+    return networkClient.request({
+      label: "quota.check",
       method: "POST",
+      url: API_URL,
       headers: h,
-      body: JSON.stringify(body),
-    });
-  };
+      body: serializedBody,
+    })
+  }
 
   try {
-    let response = await doFetch(auth.token);
+    let response = await doRequest(auth.token)
 
     // 401 retry
     if (response.status === 401 && auth.refresh) {
-      const refreshed = await auth.refresh();
-      response = await doFetch(refreshed.token);
-      auth.token = refreshed.token;
+      const refreshed = await auth.refresh()
+      response = await doRequest(refreshed.token)
+      auth.token = refreshed.token
     }
 
-    debugResponse(response.status, response.headers);
+    debugResponse(response.status, response.headers)
 
     if (!response.ok) {
-      const errorBody = await response.text();
+      const errorBody = await response.text()
       if (isDebug()) {
-        debugHeader(c.red(`Quota check failed: ${response.status}`));
-        console.error(`  ${errorBody.slice(0, 200)}`);
+        debugHeader(c.red(`Quota check failed: ${response.status}`))
+        console.error(`  ${errorBody.slice(0, 200)}`)
       }
-      return false;
+      return false
     }
 
-    return true;
+    return true
   } catch (e) {
     if (isDebug()) {
-      console.error(`  quota check error: ${e instanceof Error ? e.message : String(e)}`);
+      console.error(`  quota check error: ${e instanceof Error ? e.message : String(e)}`)
     }
-    return false;
+    return false
   }
 }

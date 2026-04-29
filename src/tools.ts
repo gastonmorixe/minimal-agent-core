@@ -26,8 +26,10 @@
  * @module tools
  */
 
-import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process"
+import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
+import { truncateToolOutput, type TruncateCtx } from "./tools/truncation.ts"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,13 +55,48 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
  * };
  * ```
  */
+/**
+ * Color name for tool label rendering. Keys into the agent's ANSI color
+ * palette (`c` in `agent.ts`). Kept as a string union so tool authors get
+ * autocomplete without importing the palette.
+ */
+export type ToolColor =
+  | "orange"
+  | "pink"
+  | "purple"
+  | "lime"
+  | "sky"
+  | "violet"
+  | "gold"
+  | "cyan"
+  | "green"
+  | "red"
+  | "yellow"
+  | "magenta"
+  | "brightCyan"
+  | "brightGreen"
+  | "brightYellow"
+  | "brightRed"
+  | "brightMagenta"
+
 export interface ToolDefinition {
   /** Unique tool name. Must match the `name` in `tool_use` blocks. */
-  name: string;
+  name: string
   /** Plain-text description shown to the model — explains when/how to use it. */
-  description: string;
+  description: string
   /** JSON Schema describing the tool's input parameters. */
-  input_schema: Record<string, unknown>;
+  input_schema: Record<string, unknown>
+  /**
+   * Optional single-glyph icon shown next to the tool name in transcript
+   * headers. Purely cosmetic — never sent to the API. Pick something narrow
+   * (1 cell) so the header stays aligned.
+   */
+  icon?: string
+  /**
+   * Optional palette color for the tool's label in transcript headers.
+   * Purely cosmetic — never sent to the API.
+   */
+  color?: ToolColor
 }
 
 /**
@@ -77,9 +114,22 @@ export interface ToolDefinition {
  */
 export interface ToolExecResult {
   /** Tool output as a string (multi-line allowed). */
-  content: string;
+  content: string
   /** True if the tool failed; the model uses this to decide whether to retry. */
-  is_error?: boolean;
+  is_error?: boolean
+  /**
+   * Optional pre-rendered ANSI string to display in the transcript instead of
+   * `content`. Used by Edit/Write to show colored unified diffs while keeping
+   * the model's `tool_result` text compact.
+   */
+  display?: string
+  /**
+   * Internal: truncation context passed from each tool's executor up to
+   * {@link executeTool}'s universal clamp. Stripped before the result is
+   * returned so callers never see it. Not part of the public API.
+   * @internal
+   */
+  _truncCtx?: TruncateCtx
 }
 
 // ---------------------------------------------------------------------------
@@ -88,22 +138,30 @@ export interface ToolExecResult {
 
 const BASH_TOOL: ToolDefinition = {
   name: "Bash",
-  description: "Executes a given bash command and returns its output.\n\nThe working directory persists between commands, but shell state does not.",
+  icon: "»",
+  color: "orange",
+  description:
+    "Executes a given bash command and returns its output.\n\nThe working directory persists between commands, but shell state does not.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
       command: { description: "The command to execute", type: "string" },
       timeout: { description: "Optional timeout in milliseconds (max 600000)", type: "number" },
-      description: { description: "Clear, concise description of what this command does", type: "string" },
+      description: {
+        description: "Clear, concise description of what this command does",
+        type: "string",
+      },
     },
     required: ["command"],
     additionalProperties: false,
   },
-};
+}
 
 const READ_TOOL: ToolDefinition = {
   name: "Read",
+  icon: "•",
+  color: "sky",
   description: "Reads a file from the local filesystem. Returns content with line numbers.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -116,10 +174,12 @@ const READ_TOOL: ToolDefinition = {
     required: ["file_path"],
     additionalProperties: false,
   },
-};
+}
 
 const WRITE_TOOL: ToolDefinition = {
   name: "Write",
+  icon: "✚",
+  color: "lime",
   description: "Writes a file to the local filesystem. Overwrites existing files.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -131,10 +191,12 @@ const WRITE_TOOL: ToolDefinition = {
     required: ["file_path", "content"],
     additionalProperties: false,
   },
-};
+}
 
 const EDIT_TOOL: ToolDefinition = {
   name: "Edit",
+  icon: "✦",
+  color: "gold",
   description: "Performs exact string replacements in files.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -143,16 +205,23 @@ const EDIT_TOOL: ToolDefinition = {
       file_path: { description: "The absolute path to the file to modify", type: "string" },
       old_string: { description: "The text to replace", type: "string" },
       new_string: { description: "The text to replace it with", type: "string" },
-      replace_all: { description: "Replace all occurrences (default false)", default: false, type: "boolean" },
+      replace_all: {
+        description: "Replace all occurrences (default false)",
+        default: false,
+        type: "boolean",
+      },
     },
     required: ["file_path", "old_string", "new_string"],
     additionalProperties: false,
   },
-};
+}
 
 const GLOB_TOOL: ToolDefinition = {
   name: "Glob",
-  description: "Fast file pattern matching. Returns matching file paths sorted by modification time.",
+  icon: "✱",
+  color: "violet",
+  description:
+    "Fast file pattern matching. Returns matching file paths sorted by modification time.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -163,10 +232,12 @@ const GLOB_TOOL: ToolDefinition = {
     required: ["pattern"],
     additionalProperties: false,
   },
-};
+}
 
 const GREP_TOOL: ToolDefinition = {
   name: "Grep",
+  icon: "⌕",
+  color: "pink",
   description: "Search file contents with regex using ripgrep.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -174,7 +245,7 @@ const GREP_TOOL: ToolDefinition = {
     properties: {
       pattern: { description: "Regex pattern to search for", type: "string" },
       path: { description: "File or directory to search in. Defaults to cwd.", type: "string" },
-      glob: { description: "Glob pattern to filter files (e.g. \"*.js\")", type: "string" },
+      glob: { description: 'Glob pattern to filter files (e.g. "*.js")', type: "string" },
       output_mode: {
         description: "Output mode: content, files_with_matches, or count",
         type: "string",
@@ -192,7 +263,7 @@ const GREP_TOOL: ToolDefinition = {
     required: ["pattern"],
     additionalProperties: false,
   },
-};
+}
 
 /**
  * All tool definitions, in the order the agent sends them in API requests.
@@ -225,7 +296,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   EDIT_TOOL,
   GLOB_TOOL,
   GREP_TOOL,
-];
+]
 
 // ---------------------------------------------------------------------------
 // Tool execution
@@ -236,7 +307,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
  * process. Mirrors the real CLI's behavior where `cd` in one Bash call
  * affects subsequent calls (but shell state like env vars and aliases does not).
  */
-let bashCwd = process.cwd();
+let bashCwd = process.cwd()
 
 /**
  * Execute a tool by name with the given input.
@@ -255,25 +326,34 @@ let bashCwd = process.cwd();
  * console.log(result.content); // "hello"
  * ```
  */
-export function executeTool(
-  name: string,
-  input: Record<string, unknown>,
-): ToolExecResult {
+export function executeTool(name: string, input: Record<string, unknown>): ToolExecResult {
+  const r = dispatch(name, input)
+  // Universal post-hoc clamp. Skip when `display` is set — diffs are bounded
+  // by Edit/Write inputs and we want them rendered intact in the transcript.
+  if (!r.display) {
+    const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
+    r.content = truncateToolOutput(r.content, ctx)
+  }
+  delete r._truncCtx
+  return r
+}
+
+function dispatch(name: string, input: Record<string, unknown>): ToolExecResult {
   switch (name) {
     case "Bash":
-      return execBash(input);
+      return execBash(input)
     case "Read":
-      return execRead(input);
+      return execRead(input)
     case "Write":
-      return execWrite(input);
+      return execWrite(input)
     case "Edit":
-      return execEdit(input);
+      return execEdit(input)
     case "Glob":
-      return execGlob(input);
+      return execGlob(input)
     case "Grep":
-      return execGrep(input);
+      return execGrep(input)
     default:
-      return { content: `Unknown tool: ${name}`, is_error: true };
+      return { content: `Unknown tool: ${name}`, is_error: true }
   }
 }
 
@@ -291,20 +371,20 @@ export function executeTool(
  * @param input.timeout - Optional timeout in ms (default: 120000)
  */
 function execBash(input: Record<string, unknown>): ToolExecResult {
-  const command = input.command as string;
-  const timeout = (input.timeout as number) ?? 120_000;
+  const command = input.command as string
+  const timeout = (input.timeout as number) ?? 120_000
 
   try {
     // Handle cd commands by tracking cwd
-    const cdMatch = command.match(/^cd\s+(.+)$/);
+    const cdMatch = command.match(/^cd\s+(.+)$/)
     if (cdMatch) {
-      const { resolve } = require("node:path");
-      const newDir = resolve(bashCwd, cdMatch[1].replace(/^["']|["']$/g, ""));
+      const { resolve } = require("node:path")
+      const newDir = resolve(bashCwd, cdMatch[1].replace(/^["']|["']$/g, ""))
       if (existsSync(newDir)) {
-        bashCwd = newDir;
-        return { content: "" };
+        bashCwd = newDir
+        return { content: "" }
       }
-      return { content: `cd: no such directory: ${cdMatch[1]}`, is_error: true };
+      return { content: `cd: no such directory: ${cdMatch[1]}`, is_error: true }
     }
 
     const result = spawnSync("bash", ["-c", command], {
@@ -313,25 +393,25 @@ function execBash(input: Record<string, unknown>): ToolExecResult {
       maxBuffer: 1024 * 1024,
       encoding: "utf-8",
       env: { ...process.env, TERM: "dumb" },
-    });
+    })
 
-    const output = [result.stdout ?? "", result.stderr ?? ""]
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+    const output = [result.stdout ?? "", result.stderr ?? ""].filter(Boolean).join("\n").trim()
+    const totalBytes = Buffer.byteLength(output, "utf8")
+    const totalLines = output.length === 0 ? 0 : output.split("\n").length
 
     if (result.status !== 0) {
       return {
         content: output || `Exit code ${result.status}`,
         is_error: true,
-      };
+        _truncCtx: { totalBytes, totalLines },
+      }
     }
-    return { content: output };
+    return { content: output, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
       content: `Bash error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
-    };
+    }
   }
 }
 
@@ -347,27 +427,32 @@ function execBash(input: Record<string, unknown>): ToolExecResult {
  * @param input.limit - Max number of lines to read (default: all)
  */
 function execRead(input: Record<string, unknown>): ToolExecResult {
-  const filePath = input.file_path as string;
-  const offset = (input.offset as number) ?? 0;
-  const limit = input.limit as number | undefined;
+  const filePath = input.file_path as string
+  const offset = (input.offset as number) ?? 0
+  const limit = input.limit as number | undefined
 
   try {
-    const content = readFileSync(filePath, "utf-8");
-    const lines = content.split("\n");
-    const start = offset;
-    const end = limit ? start + limit : lines.length;
-    const slice = lines.slice(start, end);
+    const content = readFileSync(filePath, "utf-8")
+    const allLines = content.split("\n")
+    const start = offset
+    const end = limit ? start + limit : allLines.length
+    const slice = allLines.slice(start, end)
 
     // Return with line numbers (cat -n style)
-    const numbered = slice
-      .map((line, i) => `${start + i + 1}\t${line}`)
-      .join("\n");
-    return { content: numbered };
+    const numbered = slice.map((line, i) => `${start + i + 1}\t${line}`).join("\n")
+    return {
+      content: numbered,
+      _truncCtx: {
+        totalBytes: Buffer.byteLength(content, "utf8"),
+        totalLines: allLines.length,
+        startLine: start,
+      },
+    }
   } catch (e) {
     return {
       content: `Read error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
-    };
+    }
   }
 }
 
@@ -379,22 +464,30 @@ function execRead(input: Record<string, unknown>): ToolExecResult {
  * @param input.content - Full file content
  */
 function execWrite(input: Record<string, unknown>): ToolExecResult {
-  const filePath = input.file_path as string;
-  const content = input.content as string;
+  const filePath = input.file_path as string
+  const content = input.content as string
 
   try {
     // Ensure parent directory exists
-    const { dirname } = require("node:path");
-    const { mkdirSync } = require("node:fs");
-    mkdirSync(dirname(filePath), { recursive: true });
+    const { dirname } = require("node:path")
+    const { mkdirSync } = require("node:fs")
+    mkdirSync(dirname(filePath), { recursive: true })
 
-    writeFileSync(filePath, content);
-    return { content: `File written: ${filePath}` };
+    const before = existsSync(filePath) ? readFileSync(filePath, "utf-8") : ""
+    writeFileSync(filePath, content)
+    const isNew = before === ""
+    const patch = isNew
+      ? buildFileDiff(filePath, "", content)
+      : buildFileDiff(filePath, before, content)
+    const display = patch
+      ? renderUnifiedDiff(patch, isNew ? `New file: ${filePath}` : `Write: ${filePath}`)
+      : undefined
+    return { content: `File written: ${filePath}`, display }
   } catch (e) {
     return {
       content: `Write error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
-    };
+    }
   }
 }
 
@@ -411,42 +504,48 @@ function execWrite(input: Record<string, unknown>): ToolExecResult {
  * @param input.replace_all - If true, replace all matches (default: false)
  */
 function execEdit(input: Record<string, unknown>): ToolExecResult {
-  const filePath = input.file_path as string;
-  const oldString = input.old_string as string;
-  const newString = input.new_string as string;
-  const replaceAll = (input.replace_all as boolean) ?? false;
+  const filePath = input.file_path as string
+  const oldString = input.old_string as string
+  const newString = input.new_string as string
+  const replaceAll = (input.replace_all as boolean) ?? false
 
   try {
-    let content = readFileSync(filePath, "utf-8");
-    const count = content.split(oldString).length - 1;
+    let content = readFileSync(filePath, "utf-8")
+    const count = content.split(oldString).length - 1
 
     if (count === 0) {
       return {
         content: `Edit error: old_string not found in ${filePath}`,
         is_error: true,
-      };
+      }
     }
 
     if (!replaceAll && count > 1) {
       return {
         content: `Edit error: old_string matches ${count} locations in ${filePath}. Use replace_all or provide more context.`,
         is_error: true,
-      };
+      }
     }
 
+    const before = content
     if (replaceAll) {
-      content = content.split(oldString).join(newString);
+      content = content.split(oldString).join(newString)
     } else {
-      content = content.replace(oldString, newString);
+      content = content.replace(oldString, newString)
     }
 
-    writeFileSync(filePath, content);
-    return { content: `File edited: ${filePath} (${replaceAll ? count : 1} replacement(s))` };
+    writeFileSync(filePath, content)
+    const patch = buildEditDiff(filePath, before, oldString, newString, replaceAll)
+    const display = patch ? renderUnifiedDiff(patch) : undefined
+    return {
+      content: `File edited: ${filePath} (${replaceAll ? count : 1} replacement(s))`,
+      display,
+    }
   } catch (e) {
     return {
       content: `Edit error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
-    };
+    }
   }
 }
 
@@ -460,27 +559,36 @@ function execEdit(input: Record<string, unknown>): ToolExecResult {
  * @param input.path - Directory to search in (default: current bash cwd)
  */
 function execGlob(input: Record<string, unknown>): ToolExecResult {
-  const pattern = input.pattern as string;
-  const searchPath = (input.path as string) ?? bashCwd;
+  const pattern = input.pattern as string
+  const searchPath = (input.path as string) ?? bashCwd
 
   try {
     // Use find or fd if available, fallback to shell glob
-    const result = spawnSync("bash", ["-c", `shopt -s globstar nullglob; cd "${searchPath}" && ls -1d ${pattern} 2>/dev/null | head -100`], {
-      cwd: searchPath,
-      timeout: 10_000,
-      encoding: "utf-8",
-    });
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        `shopt -s globstar nullglob; cd "${searchPath}" && ls -1d ${pattern} 2>/dev/null | head -100`,
+      ],
+      {
+        cwd: searchPath,
+        timeout: 10_000,
+        encoding: "utf-8",
+      },
+    )
 
-    const output = (result.stdout ?? "").trim();
+    const output = (result.stdout ?? "").trim()
     if (!output) {
-      return { content: "No files matched the pattern." };
+      return { content: "No files matched the pattern." }
     }
-    return { content: output };
+    const totalBytes = Buffer.byteLength(output, "utf8")
+    const totalLines = output.split("\n").length
+    return { content: output, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
       content: `Glob error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
-    };
+    }
   }
 }
 
@@ -507,55 +615,58 @@ function execGlob(input: Record<string, unknown>): ToolExecResult {
  * @param input.multiline - Allow `.` to match newlines
  */
 function execGrep(input: Record<string, unknown>): ToolExecResult {
-  const pattern = input.pattern as string;
-  const searchPath = (input.path as string) ?? bashCwd;
-  const outputMode = (input.output_mode as string) ?? "files_with_matches";
-  const caseInsensitive = input["-i"] as boolean;
-  const headLimit = (input.head_limit as number) ?? 250;
-  const glob = input.glob as string | undefined;
-  const contextA = input["-A"] as number | undefined;
-  const contextB = input["-B"] as number | undefined;
-  const contextC = (input["-C"] ?? input.context) as number | undefined;
-  const multiline = input.multiline as boolean;
+  const pattern = input.pattern as string
+  const searchPath = (input.path as string) ?? bashCwd
+  const outputMode = (input.output_mode as string) ?? "files_with_matches"
+  const caseInsensitive = input["-i"] as boolean
+  const headLimit = (input.head_limit as number) ?? 250
+  const glob = input.glob as string | undefined
+  const contextA = input["-A"] as number | undefined
+  const contextB = input["-B"] as number | undefined
+  const contextC = (input["-C"] ?? input.context) as number | undefined
+  const multiline = input.multiline as boolean
 
-  const args = ["--no-heading", "--color=never"];
+  const args = ["--no-heading", "--color=never"]
 
-  if (outputMode === "files_with_matches") args.push("-l");
-  else if (outputMode === "count") args.push("-c");
-  else args.push("-n"); // content mode, show line numbers
+  if (outputMode === "files_with_matches") args.push("-l")
+  else if (outputMode === "count") args.push("-c")
+  else args.push("-n") // content mode, show line numbers
 
-  if (caseInsensitive) args.push("-i");
-  if (multiline) args.push("-U", "--multiline-dotall");
-  if (glob) args.push("--glob", glob);
-  if (contextA != null) args.push("-A", String(contextA));
-  if (contextB != null) args.push("-B", String(contextB));
-  if (contextC != null) args.push("-C", String(contextC));
+  if (caseInsensitive) args.push("-i")
+  if (multiline) args.push("-U", "--multiline-dotall")
+  if (glob) args.push("--glob", glob)
+  if (contextA != null) args.push("-A", String(contextA))
+  if (contextB != null) args.push("-B", String(contextB))
+  if (contextC != null) args.push("-C", String(contextC))
 
-  args.push(pattern, searchPath);
+  args.push(pattern, searchPath)
 
   try {
     const result = spawnSync("rg", args, {
       timeout: 30_000,
       encoding: "utf-8",
       maxBuffer: 2 * 1024 * 1024,
-    });
+    })
 
-    let output = (result.stdout ?? "").trim();
-    if (headLimit > 0) {
-      const lines = output.split("\n");
-      if (lines.length > headLimit) {
-        output = lines.slice(0, headLimit).join("\n") + `\n... (${lines.length - headLimit} more lines)`;
-      }
+    const raw = (result.stdout ?? "").trim()
+    if (!raw) {
+      return { content: "No matches found." }
     }
-
-    if (!output) {
-      return { content: "No matches found." };
+    const allLines = raw.split("\n")
+    const totalBytes = Buffer.byteLength(raw, "utf8")
+    const totalLines = allLines.length
+    const limited =
+      headLimit > 0 && allLines.length > headLimit
+        ? allLines.slice(0, headLimit).join("\n")
+        : raw
+    return {
+      content: limited,
+      _truncCtx: { totalBytes, totalLines },
     }
-    return { content: output };
   } catch (e) {
     return {
       content: `Grep error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
-    };
+    }
   }
 }

@@ -1,0 +1,189 @@
+import { describe, expect, it } from "bun:test"
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  type AssistantRecord,
+  indexFilePath,
+  type IndexRecord,
+  type MetaRecord,
+  parseLines,
+  SessionStore,
+  sessionFilePath,
+  shortHash,
+  type ToolResultRecord,
+  type UserRecord,
+} from "./session-store.ts"
+
+function tmp(): string {
+  return mkdtempSync(join(tmpdir(), "ma-session-store-"))
+}
+
+function readJsonl(path: string): unknown[] {
+  return readFileSync(path, "utf-8")
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l))
+}
+
+const baseOpenOpts = {
+  model: "claude-sonnet-4-6",
+  cwd: "/tmp/example",
+  systemHash: "deadbeef",
+  toolsHash: "cafebabe",
+  agentVersion: "test",
+}
+
+describe("SessionStore.open", () => {
+  it("writes a meta record and an index entry", () => {
+    const dir = tmp()
+    const sid = "ma-test-A"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+
+    const fileLines = readJsonl(store.path)
+    expect(fileLines).toHaveLength(1)
+    const meta = fileLines[0] as MetaRecord
+    expect(meta.kind).toBe("meta")
+    expect(meta.formatVersion).toBe(1)
+    expect(meta.sid).toBe(sid)
+    expect(meta.model).toBe(baseOpenOpts.model)
+    expect(meta.systemHash).toBe(baseOpenOpts.systemHash)
+    expect(meta.toolsHash).toBe(baseOpenOpts.toolsHash)
+
+    const indexLines = readJsonl(indexFilePath(dir))
+    expect(indexLines).toHaveLength(1)
+    const idx = indexLines[0] as IndexRecord
+    expect(idx.sid).toBe(sid)
+    expect(idx.cwd).toBe(baseOpenOpts.cwd)
+  })
+
+  it("throws when file exists and existsOk is false", () => {
+    const dir = tmp()
+    SessionStore.open({ ...baseOpenOpts, sid: "ma-dup", dir })
+    expect(() => SessionStore.open({ ...baseOpenOpts, sid: "ma-dup", dir })).toThrow(
+      /already exists/,
+    )
+  })
+
+  it("appends to an existing file when existsOk is true", () => {
+    const dir = tmp()
+    const a = SessionStore.open({ ...baseOpenOpts, sid: "ma-keep", dir })
+    a.appendNote("first run")
+    const b = SessionStore.open({ ...baseOpenOpts, sid: "ma-keep", dir, existsOk: true })
+    b.appendNote("second run")
+    const lines = readJsonl(b.path)
+    // meta + 2 notes
+    expect(lines).toHaveLength(3)
+    expect((lines[1] as { kind: string }).kind).toBe("note")
+    expect((lines[2] as { kind: string }).kind).toBe("note")
+  })
+})
+
+describe("SessionStore.append*", () => {
+  it("round-trips user / assistant / tool_result / note", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-rt", dir })
+
+    store.appendUser("hello")
+    store.appendAssistant(
+      [
+        { type: "text", text: "hi there" },
+        { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+      ],
+      "tool_use",
+      { input_tokens: 10, output_tokens: 20 },
+    )
+    store.appendToolResult({
+      type: "tool_result",
+      tool_use_id: "tu_1",
+      content: "a.txt\nb.txt",
+      is_error: false,
+    })
+    store.appendNote("turn complete")
+
+    const lines = readJsonl(store.path)
+    // meta + 4 events
+    expect(lines).toHaveLength(5)
+
+    const u = lines[1] as UserRecord
+    expect(u.kind).toBe("user")
+    expect(u.content).toBe("hello")
+
+    const a = lines[2] as AssistantRecord
+    expect(a.kind).toBe("assistant")
+    expect(a.content).toHaveLength(2)
+    expect(a.stopReason).toBe("tool_use")
+    expect(a.usage?.input_tokens).toBe(10)
+
+    const t = lines[3] as ToolResultRecord
+    expect(t.kind).toBe("tool_result")
+    expect(t.tool_use_id).toBe("tu_1")
+    expect(t.isError).toBe(false)
+    expect(t.content).toBe("a.txt\nb.txt")
+
+    expect((lines[4] as { kind: string }).kind).toBe("note")
+  })
+
+  it("preserves a large tool_result (~100KB) through round-trip", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-big", dir })
+    const big = "x".repeat(100_000)
+    store.appendToolResult({
+      type: "tool_result",
+      tool_use_id: "tu_big",
+      content: big,
+      is_error: false,
+    })
+    const lines = readJsonl(store.path)
+    const t = lines[1] as ToolResultRecord
+    expect(typeof t.content).toBe("string")
+    expect((t.content as string).length).toBe(100_000)
+  })
+})
+
+describe("parseLines", () => {
+  it("returns all valid records and reports torn last line", () => {
+    const dir = tmp()
+    const path = sessionFilePath("ma-torn", dir)
+    // valid meta + valid user + a partial line (no closing brace, no \n)
+    const meta = JSON.stringify({
+      kind: "meta",
+      formatVersion: 1,
+      sid: "ma-torn",
+      createdAt: "2026-04-28T00:00:00Z",
+      model: "m",
+      cwd: "/x",
+      systemHash: "h",
+      toolsHash: "h",
+      agentVersion: "v",
+    })
+    const user = JSON.stringify({ kind: "user", ts: "2026-04-28T00:00:01Z", content: "hi" })
+    const torn = `{"kind":"assistant","ts":"2026`
+    writeFileSync(path, `${meta}\n${user}\n${torn}`)
+    const text = readFileSync(path, "utf-8")
+    const { records, dropped } = parseLines(text)
+    expect(records).toHaveLength(2)
+    expect((records[0] as MetaRecord).kind).toBe("meta")
+    expect((records[1] as UserRecord).kind).toBe("user")
+    expect(dropped).toHaveLength(1)
+    expect(dropped[0].line).toBe(3)
+  })
+
+  it("does not drop earlier records when a middle line is corrupt", () => {
+    const meta = JSON.stringify({ kind: "meta", formatVersion: 1, sid: "x" })
+    const bad = "{not json"
+    const user = JSON.stringify({ kind: "user", ts: "t", content: "hi" })
+    const { records, dropped } = parseLines(`${meta}\n${bad}\n${user}\n`)
+    expect(records).toHaveLength(2)
+    expect(dropped).toHaveLength(1)
+    expect(dropped[0].line).toBe(2)
+  })
+})
+
+describe("shortHash", () => {
+  it("is deterministic and distinguishes inputs", () => {
+    expect(shortHash("hello")).toBe(shortHash("hello"))
+    expect(shortHash("hello")).not.toBe(shortHash("hello!"))
+    expect(shortHash("")).toMatch(/^[0-9a-f]{8}$/)
+  })
+})

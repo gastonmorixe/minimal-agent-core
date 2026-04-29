@@ -1,0 +1,43 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "tsconfig": "tsconfig.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/agent.ts",
+    "src/auth.ts",
+    "src/client.ts",
+    "src/formatter.ts",
+    "src/headers.ts",
+    "src/tools.ts",
+    "src/plugins/loader.ts",
+    "src/plugins/manifest.ts",
+    "src/plugins/scanner.ts",
+    "src/plugins/stream.ts",
+    "src/plugins/types.ts"
+  ],
+  "entryPointStrategy": "expand",
+  "exclude": ["src/**/*.test.ts", "src/test-utils.ts"],
+  "skipErrorChecking": true,
+  "disableSources": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "emit": "none",
+  "out": "docs/api",
+  "validation": {
+    "notDocumented": false,
+    "invalidLink": false,
+    "invalidPath": true,
+    "notExported": false,
+    "rewrittenLink": true
+  },
+  "requiredToBeDocumented": [
+    "Class",
+    "Interface",
+    "Function",
+    "Method",
+    "Accessor",
+    "TypeAlias",
+    "Enum"
+  ],
+  "treatValidationWarningsAsErrors": true
+}

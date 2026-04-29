@@ -1,0 +1,105 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc", "import", "jsdoc"],
+  "jsPlugins": [
+    {
+      "name": "jsdoc-js",
+      "specifier": "eslint-plugin-jsdoc"
+    }
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "warn"
+  },
+  "settings": {
+    "jsdoc": {
+      "ignorePrivate": true,
+      "ignoreInternal": true
+    }
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/await-thenable": "off",
+    "typescript/no-base-to-string": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/no-unnecessary-type-assertion": "off",
+    "typescript/no-unnecessary-boolean-literal-compare": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/require-array-sort-compare": "off",
+    "no-await-in-loop": "off",
+    "no-control-regex": "off",
+    "no-shadow": "off",
+    "no-unmodified-loop-condition": "off",
+    "jsdoc/check-tag-names": "error",
+    "jsdoc-js/require-jsdoc": "off",
+    "jsdoc-js/require-description": "off",
+    "jsdoc-js/require-param": "off",
+    "jsdoc-js/require-param-description": "off",
+    "jsdoc-js/require-returns": "off",
+    "jsdoc-js/require-returns-description": "off",
+    "jsdoc-js/check-param-names": "off",
+    "jsdoc-js/check-tag-names": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/agent.ts",
+        "src/auth.ts",
+        "src/client.ts",
+        "src/formatter.ts",
+        "src/headers.ts",
+        "src/tools.ts",
+        "src/plugins/loader.ts",
+        "src/plugins/manifest.ts",
+        "src/plugins/scanner.ts",
+        "src/plugins/stream.ts",
+        "src/plugins/types.ts"
+      ],
+      "rules": {
+        "jsdoc-js/require-jsdoc": [
+          "error",
+          {
+            "publicOnly": true,
+            "require": {
+              "ArrowFunctionExpression": false,
+              "ClassDeclaration": true,
+              "ClassExpression": true,
+              "FunctionDeclaration": true,
+              "FunctionExpression": false,
+              "MethodDefinition": true
+            }
+          }
+        ],
+        "jsdoc-js/require-description": "error"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts",
+        "src/test-utils.ts",
+        "tui-plugins/**",
+        "src/spinner/library/**",
+        "src/live-area-e2e.test.ts"
+      ],
+      "rules": {
+        "jsdoc-js/require-jsdoc": "off",
+        "jsdoc-js/require-description": "off",
+        "jsdoc-js/check-param-names": "off",
+        "jsdoc-js/check-tag-names": "off",
+        "jsdoc/check-tag-names": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.ts"],
+      "rules": {
+        "require-yield": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["node_modules/**", "docs/**", "research/**", ".swarm/**", "tmp/**"]
+}

@@ -36,6 +36,8 @@
  * the same endpoint the CLI uses: `BB6()` at L129419-129489.
  */
 
+import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -45,24 +47,17 @@
  * Constructed by `HE("-credentials")` at L238742 which calls `HE()` at L129869.
  * For non-custom CLAUDE_CONFIG_DIR installs, this is always "Claude Code-credentials".
  */
-const KEYCHAIN_SERVICE = "Claude Code-credentials";
+const KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 /**
- * OAuth client_id used by the Claude Code CLI.
- * @see cli.pretty.js L37972: `CLIENT_ID: "22422756-60c9-4084-8eb7-27705fd5cf9a"`
- * This is part of the `D07` config object (first-party / claude.ai environment).
+ * Current first-party OAuth client id from Claude Code v2.1.104 source.
  */
-const OAUTH_CLIENT_ID = "22422756-60c9-4084-8eb7-27705fd5cf9a";
+const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 /**
- * Token endpoint for refresh and exchange.
- * @see cli.pretty.js L37966: `TOKEN_URL: \`\${q}/v1/oauth/token\``
- * where `q` resolves to "https://api.anthropic.com" for first-party auth.
- * Confirmed in captured traffic: .node-net-dbg session shows POST to
- * https://platform.claude.com/v1/oauth/token (the platform URL variant).
- * Both URLs work; the CLI uses the one from its `b7().TOKEN_URL` config.
+ * Current first-party token endpoint from Claude Code v2.1.104 source.
  */
-const OAUTH_TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
+const DEFAULT_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 
 /**
  * OAuth scopes requested during token refresh.
@@ -80,7 +75,7 @@ const OAUTH_SCOPES = [
   "user:sessions:claude_code",
   "user:mcp_servers",
   "user:file_upload",
-];
+]
 
 /**
  * How early (in ms) before expiry we trigger a proactive refresh.
@@ -89,7 +84,7 @@ const OAUTH_SCOPES = [
  * when the token is actually expired. We add 60s of buffer to avoid
  * making API calls with tokens that expire mid-request.
  */
-const EXPIRY_BUFFER_MS = 60_000;
+const EXPIRY_BUFFER_MS = 60_000
 
 // ---------------------------------------------------------------------------
 // Types
@@ -104,47 +99,52 @@ const EXPIRY_BUFFER_MS = 60_000;
  * in ~/.claude.json and is NOT part of the keychain entry (verified empirically).
  */
 export interface CredentialsData {
-  apiKey?: string;
+  apiKey?: string
   claudeAiOauth?: {
-    accessToken: string;
-    refreshToken?: string;
+    accessToken: string
+    refreshToken?: string
     /** Milliseconds since epoch when the access token expires */
-    expiresAt?: number;
-    scopes?: string[];
+    expiresAt?: number
+    scopes?: string[]
     /** "pro" | "max" | "enterprise" | "team" — cached subscription type */
-    subscriptionType?: string;
+    subscriptionType?: string
     /** e.g. "default_claude_max_20x" — cached rate limit tier */
-    rateLimitTier?: string;
-  };
+    rateLimitTier?: string
+  }
   /**
    * May be present in some keychain entries (older CLI versions stored it here),
    * but in v2.1.87 this lives in ~/.claude.json instead.
    */
   oauthAccount?: {
-    accountUuid?: string;
-    organizationUuid?: string;
-    displayName?: string;
-  };
+    accountUuid?: string
+    organizationUuid?: string
+    displayName?: string
+  }
 }
 
 export interface AuthResult {
-  type: "api-key" | "oauth";
-  token: string;
-  accountUuid?: string;
-  organizationUuid?: string;
+  type: "api-key" | "oauth"
+  token: string
+  accountUuid?: string
+  organizationUuid?: string
   /**
    * Callable refresh function for 401 retry. When the API returns 401,
    * client.ts calls this to get a fresh token, then retries the request.
    * Mirrors the CLI's `onAuth401` handler pattern (L751090-751112).
    */
-  refresh?: () => Promise<AuthResult>;
+  refresh?: () => Promise<AuthResult>
 }
 
 export interface TokenRefreshResult {
-  accessToken: string;
-  refreshToken: string;
+  accessToken: string
+  refreshToken: string
   /** Milliseconds since epoch */
-  expiresAt: number;
+  expiresAt: number
+}
+
+export interface OAuthRefreshConfig {
+  clientId: string
+  tokenUrl: string
 }
 
 // ---------------------------------------------------------------------------
@@ -163,26 +163,18 @@ export interface TokenRefreshResult {
  * only one entry for the service. The CLI itself uses `-a $USER` for reads
  * (L238806), but omitting it is equivalent on single-user machines.
  */
-export function readKeychain(
-  service: string = KEYCHAIN_SERVICE,
-): CredentialsData | null {
-  const result = Bun.spawnSync([
-    "security",
-    "find-generic-password",
-    "-s",
-    service,
-    "-w",
-  ]);
+export function readKeychain(service: string = KEYCHAIN_SERVICE): CredentialsData | null {
+  const result = Bun.spawnSync(["security", "find-generic-password", "-s", service, "-w"])
 
-  if (result.exitCode !== 0) return null;
+  if (result.exitCode !== 0) return null
 
-  const raw = result.stdout.toString().trim();
-  if (!raw) return null;
+  const raw = result.stdout.toString().trim()
+  if (!raw) return null
 
   try {
-    return JSON.parse(raw) as CredentialsData;
+    return JSON.parse(raw) as CredentialsData
   } catch {
-    return null;
+    return null
   }
 }
 
@@ -193,24 +185,12 @@ export function readKeychain(
  * The CLI does this in its credential store backend — we replicate it
  * with delete-then-add because `security` doesn't support in-place updates.
  */
-export function writeKeychain(
-  data: CredentialsData,
-  service: string = KEYCHAIN_SERVICE,
-): void {
-  const user =
-    process.env.USER ??
-    Bun.spawnSync(["whoami"]).stdout.toString().trim();
-  const json = JSON.stringify(data);
+export function writeKeychain(data: CredentialsData, service: string = KEYCHAIN_SERVICE): void {
+  const user = process.env.USER ?? Bun.spawnSync(["whoami"]).stdout.toString().trim()
+  const json = JSON.stringify(data)
 
   // Delete existing entry (ignore errors if it doesn't exist)
-  Bun.spawnSync([
-    "security",
-    "delete-generic-password",
-    "-a",
-    user,
-    "-s",
-    service,
-  ]);
+  Bun.spawnSync(["security", "delete-generic-password", "-a", user, "-s", service])
 
   // Add new entry
   const result = Bun.spawnSync([
@@ -222,12 +202,22 @@ export function writeKeychain(
     service,
     "-w",
     json,
-  ]);
+  ])
 
   if (result.exitCode !== 0) {
-    throw new Error(
-      `Failed to write keychain: ${result.stderr.toString()}`,
-    );
+    throw new Error(`Failed to write keychain: ${result.stderr.toString()}`)
+  }
+}
+
+/**
+ * Build the OAuth refresh endpoint config, honoring the optional client ID override.
+ */
+export function getOauthRefreshConfig(): OAuthRefreshConfig {
+  const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID?.trim()
+
+  return {
+    clientId: clientId || DEFAULT_OAUTH_CLIENT_ID,
+    tokenUrl: DEFAULT_OAUTH_TOKEN_URL,
   }
 }
 
@@ -246,39 +236,50 @@ export function writeKeychain(
  * The response may include a new refresh_token (token rotation), or the
  * same one if the server doesn't rotate. We fall back to the original
  * refresh token if the response doesn't include one.
+ *
+ * @param refreshToken OAuth refresh token from the credential store.
+ * @param networkClient Network client used for the token endpoint request.
+ * @returns Updated credential data.
  */
 export async function refreshAccessToken(
   refreshToken: string,
+  networkClient: NetworkClient = defaultNetworkClient,
 ): Promise<TokenRefreshResult> {
-  const response = await fetch(OAUTH_TOKEN_URL, {
+  const oauth = getOauthRefreshConfig()
+  const requestBody = JSON.stringify({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: oauth.clientId,
+    scope: OAUTH_SCOPES.join(" "),
+  })
+  const response = await networkClient.request({
+    label: "oauth.refresh",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: OAUTH_CLIENT_ID,
-      scope: OAUTH_SCOPES.join(" "),
-    }),
-  });
+    url: oauth.tokenUrl,
+    headers: { "content-type": "application/json" },
+    body: requestBody,
+    capture: {
+      requestBody: "[REDACTED OAUTH REFRESH BODY]",
+      responseBody: false,
+    },
+  })
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Token refresh failed (${response.status}): ${body}`,
-    );
+    const body = await response.text()
+    throw new Error(`Token refresh failed (${response.status}): ${body}`)
   }
 
-  const data = (await response.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-  };
+  const data = await response.json<{
+    access_token: string
+    refresh_token?: string
+    expires_in: number
+  }>()
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? refreshToken,
     expiresAt: Date.now() + data.expires_in * 1000,
-  };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -300,18 +301,15 @@ export async function refreshAccessToken(
  */
 function readAccountUuidFromConfig(): string | undefined {
   try {
-    const { readFileSync } = require("node:fs");
-    const { join } = require("node:path");
-    const raw = readFileSync(
-      join(process.env.HOME ?? "", ".claude.json"),
-      "utf-8",
-    );
+    const { readFileSync } = require("node:fs")
+    const { join } = require("node:path")
+    const raw = readFileSync(join(process.env.HOME ?? "", ".claude.json"), "utf-8")
     const config = JSON.parse(raw) as {
-      oauthAccount?: { accountUuid?: string; organizationUuid?: string };
-    };
-    return config.oauthAccount?.accountUuid;
+      oauthAccount?: { accountUuid?: string; organizationUuid?: string }
+    }
+    return config.oauthAccount?.accountUuid
   } catch {
-    return undefined;
+    return undefined
   }
 }
 
@@ -327,66 +325,110 @@ function readAccountUuidFromConfig(): string | undefined {
  * The refresh closure updates the keychain with new tokens so subsequent
  * calls (and other processes reading the keychain) get the fresh token.
  */
+/**
+ * Injectable dependencies for {@link getAuth}. Production callers can omit
+ * this; tests pass mocks to drive keychain/refresh behavior deterministically.
+ */
+export interface GetAuthDeps {
+  read?: (service: string) => CredentialsData | null
+  write?: (data: CredentialsData, service: string) => void
+  refresh?: (refreshToken: string) => Promise<TokenRefreshResult>
+}
+
 export async function getAuth(
   service: string = KEYCHAIN_SERVICE,
+  deps: GetAuthDeps = {},
 ): Promise<AuthResult> {
-  const creds = readKeychain(service);
+  if (process.env.MINIMAL_AGENT_TEST_AUTH === "1") {
+    const testEnv = process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+    if (!testEnv) {
+      throw new Error("MINIMAL_AGENT_TEST_AUTH is only allowed in test")
+    }
+    return { type: "oauth", token: "test-token", accountUuid: "test-account" }
+  }
+
+  const read = deps.read ?? readKeychain
+  const write = deps.write ?? writeKeychain
+  const refreshFn = deps.refresh ?? refreshAccessToken
+
+  const creds = read(service)
   if (!creds) {
-    throw new Error(
-      "No credentials in keychain. Run `claude` and log in first.",
-    );
+    throw new Error("No credentials in keychain. Run `claude` and log in first.")
   }
 
   // API key path (no refresh needed)
   if (creds.apiKey) {
-    return { type: "api-key", token: creds.apiKey };
+    return { type: "api-key", token: creds.apiKey }
   }
 
-  const oauth = creds.claudeAiOauth;
+  const oauth = creds.claudeAiOauth
   if (!oauth?.accessToken) {
-    throw new Error("No OAuth access token found in keychain.");
+    throw new Error("No OAuth access token found in keychain.")
   }
 
   // accountUuid: try keychain first (older versions), fall back to ~/.claude.json
-  const accountUuid =
-    creds.oauthAccount?.accountUuid ?? readAccountUuidFromConfig();
-  const organizationUuid = creds.oauthAccount?.organizationUuid;
+  const accountUuid = creds.oauthAccount?.accountUuid ?? readAccountUuidFromConfig()
+  const organizationUuid = creds.oauthAccount?.organizationUuid
 
-  // Build a refresh closure that updates the keychain and returns fresh auth
+  // Build a refresh closure that re-reads the keychain on every call.
+  //
+  // Why re-read instead of using the closed-over `oauth` snapshot:
+  //   1. After a successful refresh the server rotates the refresh token;
+  //      our snapshot still holds the OLD one. A second refresh later in
+  //      the same long-running session would resend the old RT and get
+  //      `invalid_grant` from the server.
+  //   2. Another process (e.g. the official `claude` CLI) may rotate the
+  //      keychain entry while we are idle. Reading fresh picks that up.
+  // Both modes produce the same "Refresh token not found or invalid"
+  // 400 from /v1/oauth/token; both are fixed by reading current state.
   const doRefresh = async (): Promise<AuthResult> => {
-    if (!oauth.refreshToken) {
-      throw new Error("No refresh token available.");
+    const current = read(service) ?? creds
+    const currentOauth = current.claudeAiOauth
+    if (!currentOauth?.refreshToken) {
+      throw new Error("No refresh token available. Run `claude` to log in.")
     }
-    const refreshed = await refreshAccessToken(oauth.refreshToken);
+
+    let refreshed: TokenRefreshResult
+    try {
+      refreshed = await refreshFn(currentOauth.refreshToken)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg.includes("invalid_grant")) {
+        throw new Error(
+          "Refresh token rejected by server (invalid_grant). " +
+            "Run `claude` and re-login to refresh credentials.",
+          { cause: e },
+        )
+      }
+      throw e
+    }
 
     // Update keychain with new tokens so other processes see them too
     const updated: CredentialsData = {
-      ...creds,
+      ...current,
       claudeAiOauth: {
-        ...oauth,
+        ...currentOauth,
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken,
         expiresAt: refreshed.expiresAt,
       },
-    };
-    writeKeychain(updated, service);
+    }
+    write(updated, service)
 
     return {
       type: "oauth",
       token: refreshed.accessToken,
-      accountUuid,
-      organizationUuid,
+      accountUuid: current.oauthAccount?.accountUuid ?? accountUuid,
+      organizationUuid: current.oauthAccount?.organizationUuid ?? organizationUuid,
       refresh: doRefresh,
-    };
-  };
+    }
+  }
 
   // Proactively refresh if token is expired or about to expire
-  const needsRefresh =
-    oauth.expiresAt != null &&
-    oauth.expiresAt - Date.now() < EXPIRY_BUFFER_MS;
+  const needsRefresh = oauth.expiresAt != null && oauth.expiresAt - Date.now() < EXPIRY_BUFFER_MS
 
   if (needsRefresh && oauth.refreshToken) {
-    return doRefresh();
+    return doRefresh()
   }
 
   return {
@@ -395,5 +437,5 @@ export async function getAuth(
     accountUuid,
     organizationUuid,
     refresh: doRefresh,
-  };
+  }
 }

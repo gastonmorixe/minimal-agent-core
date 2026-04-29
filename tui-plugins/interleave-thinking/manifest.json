@@ -1,0 +1,22 @@
+{
+  "id": "interleave-thinking",
+  "name": "Interleave Thinking",
+  "version": "0.1.0",
+  "description": "Captures <tui::interleave-thinking> spans in assistant text and drops them from the user-visible output stream.",
+  "prompt": "./PROMPT.md",
+  "tuis": [
+    {
+      "id": "interleave_thinking",
+      "trigger": {
+        "type": "inline_tag",
+        "tag": "interleave-thinking"
+      },
+      "handler": {
+        "type": "module",
+        "path": "./handlers/interleave.ts",
+        "export": "default"
+      },
+      "interactive": false
+    }
+  ]
+}

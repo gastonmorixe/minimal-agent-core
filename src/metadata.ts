@@ -33,10 +33,10 @@
  *   "user_id":"{\"device_id\":\"<64-hex>\",\"account_uuid\":\"<uuid>\",\"session_id\":\"<uuid>\"}"
  */
 
-import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import type { AuthResult } from "./auth.ts";
+import { randomBytes, randomUUID } from "node:crypto"
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
+import { join } from "node:path"
+import type { AuthResult } from "./auth.ts"
 
 // ---------------------------------------------------------------------------
 // Session id (one per process)
@@ -55,18 +55,18 @@ import type { AuthResult } from "./auth.ts";
  *   - metadata.user_id → session_id field
  *   - HTTP header: x-claude-code-session-id (L238036)
  */
-let cachedSessionId: string | null = null;
+let cachedSessionId: string | null = null
 
 export function getSessionId(): string {
   if (!cachedSessionId) {
-    cachedSessionId = randomUUID();
+    cachedSessionId = randomUUID()
   }
-  return cachedSessionId;
+  return cachedSessionId
 }
 
 /** Reset for testing — allows tests to get a fresh session ID */
 export function _resetSessionId(): void {
-  cachedSessionId = null;
+  cachedSessionId = null
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +83,7 @@ export function _resetSessionId(): void {
  *
  * For standard installs this is simply `~/.claude.json`.
  */
-const DEFAULT_CONFIG_PATH = join(
-  process.env.HOME ?? "",
-  ".claude.json",
-);
+const DEFAULT_CONFIG_PATH = join(process.env.HOME ?? "", ".claude.json")
 
 /**
  * Get the device ID (a persistent 64-hex-char string).
@@ -112,15 +109,13 @@ const DEFAULT_CONFIG_PATH = join(
  *   { "userID": "<64 hex chars>" }
  * which matches the device_id in captured .node-net-dbg requests.
  */
-export function getDeviceId(
-  configPath: string = DEFAULT_CONFIG_PATH,
-): string {
+export function getDeviceId(configPath: string = DEFAULT_CONFIG_PATH): string {
   // Try reading from the real CLI config first
   try {
-    const raw = readFileSync(configPath, "utf-8");
-    const config = JSON.parse(raw) as { userID?: string };
+    const raw = readFileSync(configPath, "utf-8")
+    const config = JSON.parse(raw) as { userID?: string }
     if (config.userID && config.userID.length === 64) {
-      return config.userID;
+      return config.userID
     }
   } catch {
     // Config doesn't exist or is invalid — fall through to our own state
@@ -128,28 +123,28 @@ export function getDeviceId(
 
   // Fallback: generate and persist to our own state file.
   // This path is only hit if the Claude Code CLI has never been installed.
-  const stateDir = join(process.env.HOME ?? "", ".claude-demo");
-  const statePath = join(stateDir, "state.json");
+  const stateDir = join(process.env.HOME ?? "", ".claude-demo")
+  const statePath = join(stateDir, "state.json")
 
   try {
-    const raw = readFileSync(statePath, "utf-8");
-    const state = JSON.parse(raw) as { deviceId?: string };
+    const raw = readFileSync(statePath, "utf-8")
+    const state = JSON.parse(raw) as { deviceId?: string }
     if (state.deviceId && state.deviceId.length === 64) {
-      return state.deviceId;
+      return state.deviceId
     }
   } catch {
     // no state file — generate below
   }
 
   // Generate like the CLI does: randomBytes(32).toString("hex")
-  const id = randomBytes(32).toString("hex");
+  const id = randomBytes(32).toString("hex")
   try {
-    mkdirSync(stateDir, { recursive: true });
-    writeFileSync(statePath, JSON.stringify({ deviceId: id }, null, 2));
+    mkdirSync(stateDir, { recursive: true })
+    writeFileSync(statePath, JSON.stringify({ deviceId: id }, null, 2))
   } catch {
     // best effort persistence
   }
-  return id;
+  return id
 }
 
 // ---------------------------------------------------------------------------
@@ -167,17 +162,17 @@ export function getDeviceId(
  * override device_id, account_uuid, or session_id.
  */
 export function loadExtraMetadata(): Record<string, unknown> {
-  const raw = process.env.CLAUDE_CODE_EXTRA_METADATA;
-  if (!raw) return {};
+  const raw = process.env.CLAUDE_CODE_EXTRA_METADATA
+  if (!raw) return {}
   try {
-    const v = JSON.parse(raw) as unknown;
+    const v = JSON.parse(raw) as unknown
     if (v && typeof v === "object" && !Array.isArray(v)) {
-      return v as Record<string, unknown>;
+      return v as Record<string, unknown>
     }
   } catch {
     // invalid JSON — ignore silently (CLI logs an error, we skip it)
   }
-  return {};
+  return {}
 }
 
 // ---------------------------------------------------------------------------
@@ -202,18 +197,18 @@ export function loadExtraMetadata(): Record<string, unknown> {
  *   // → '{"device_id":"<64 hex>","account_uuid":"<uuid>","session_id":"<uuid>"}'
  */
 export function buildUserId(opts: {
-  deviceId: string;
-  accountUuid: string;
-  sessionId: string;
-  extra?: Record<string, unknown>;
+  deviceId: string
+  accountUuid: string
+  sessionId: string
+  extra?: Record<string, unknown>
 }): string {
   const payload: Record<string, unknown> = {
     ...opts.extra,
     device_id: opts.deviceId,
     account_uuid: opts.accountUuid,
     session_id: opts.sessionId,
-  };
-  return JSON.stringify(payload);
+  }
+  return JSON.stringify(payload)
 }
 
 // ---------------------------------------------------------------------------
@@ -226,19 +221,13 @@ export function buildUserId(opts: {
  * Orchestrates getDeviceId() + getSessionId() + loadExtraMetadata()
  * to produce the same `{ user_id: "..." }` that R76() returns.
  */
-export function buildMetadata(
-  auth: AuthResult,
-  configPath?: string,
-): { user_id: string } {
+export function buildMetadata(auth: AuthResult, configPath?: string): { user_id: string } {
   return {
     user_id: buildUserId({
       deviceId: getDeviceId(configPath),
-      accountUuid:
-        auth.type === "oauth" && auth.accountUuid
-          ? auth.accountUuid
-          : "",
+      accountUuid: auth.type === "oauth" && auth.accountUuid ? auth.accountUuid : "",
       sessionId: getSessionId(),
       extra: loadExtraMetadata(),
     }),
-  };
+  }
 }
