@@ -1,29 +1,35 @@
 /**
- * Headers module: request header construction matching CLI v2.1.91 traffic.
+ * Headers module: request header construction matching current captured CLI traffic.
  *
- * Every constant in this file was extracted from cli.pretty.js and verified
- * against real captured traffic in .node-net-dbg/. Updated from v2.1.87 to
- * v2.1.91 based on live capture from 2026-04-04.
+ * Most constants in this file were extracted from cli.pretty.js and then checked
+ * against real captured traffic in .node-net-dbg/. The CLI version is updated
+ * from live capture because that is the value the server actually sees.
  */
 
-import { randomUUID } from "node:crypto";
-import type { AuthResult } from "./auth.ts";
+import { randomUUID } from "node:crypto"
+import type { AuthResult } from "./auth.ts"
 
 // ---------------------------------------------------------------------------
 // Constants (from cli.pretty.js)
 // ---------------------------------------------------------------------------
 
 /**
- * CLI version string, embedded in the bundle at L240496.
+ * CLI version string observed in the latest captured traffic on 2026-04-25.
  * Used in User-Agent, billing header, and debug output.
  */
-export const VERSION = "2.1.91";
+export const VERSION = "2.1.118"
 
 /**
- * Build timestamp from the bundle at L240499.
- * Not sent in requests — informational only.
+ * Per-build hash suffix that appears in the billing header alongside VERSION
+ * (`cc_version=${VERSION}.${BUILD_HASH}`). Live 2.1.118 capture sends `3a7`.
+ * Rolls per-build, so bump together with VERSION.
  */
-export const BUILD_TIME = "2026-04-04T00:00:00Z"; // approximate, from v2.1.91
+export const BUILD_HASH = "3a7"
+
+/**
+ * Build timestamp. Not sent in requests, informational only.
+ */
+export const BUILD_TIME = "2026-04-25T00:00:00Z" // approximate, from v2.1.118
 
 /**
  * Anthropic API version header value.
@@ -31,7 +37,7 @@ export const BUILD_TIME = "2026-04-04T00:00:00Z"; // approximate, from v2.1.91
  * Also at L611391: `oYK = "2023-06-01"` and L792388: `var Dhz = "2023-06-01"`.
  * This has been "2023-06-01" across all versions we've tracked (2.1.12 through 2.1.87).
  */
-export const ANTHROPIC_VERSION = "2023-06-01";
+export const ANTHROPIC_VERSION = "2023-06-01"
 
 /**
  * Messages API URL with `?beta=true` query parameter.
@@ -41,7 +47,7 @@ export const ANTHROPIC_VERSION = "2023-06-01";
  * manually constructed by the CLI code. The SDK's `list()` method at L5069
  * and the request builder add it when beta flags are present.
  */
-export const API_URL = "https://api.anthropic.com/v1/messages?beta=true";
+export const API_URL = "https://api.anthropic.com/v1/messages?beta=true"
 
 /**
  * User-Agent string.
@@ -50,13 +56,23 @@ export const API_URL = "https://api.anthropic.com/v1/messages?beta=true";
  *   `claude-cli/${VERSION} (external, ${ENTRYPOINT}${sdkVersion}${clientApp}${workload})`
  *
  * For the standard CLI entrypoint without SDK embedding, this simplifies to:
- *   `claude-cli/2.1.87 (external, cli)`
+ *   `claude-cli/2.1.118 (external, cli)` (current capture)
  *
  * Note: there's also a `claude-code/` variant (L240516) used by the Agent SDK,
  * and a plain `claude-code/VERSION` variant (L240531). The `claude-cli/` form
  * is what the interactive CLI sends and what the server expects for OAuth.
  */
-export const USER_AGENT = `claude-cli/${VERSION} (external, cli)`;
+export const USER_AGENT = `claude-cli/${VERSION} (external, cli)`
+
+/**
+ * User-Agent variants for non-Stainless endpoints. Live 2.1.118 capture shows:
+ *   - `claude-code/${VERSION}`         → /api/oauth/account/settings
+ *   - `claude-code/${VERSION} (cli)`   → mcp-proxy.anthropic.com/v1/mcp/...
+ * The standard {@link USER_AGENT} (`claude-cli/...`) is for the Stainless SDK
+ * path that hits /v1/messages.
+ */
+export const USER_AGENT_OAUTH = `claude-code/${VERSION}`
+export const USER_AGENT_MCP = `claude-code/${VERSION} (cli)`
 
 /**
  * Beta feature flags sent in the `anthropic-beta` header.
@@ -78,78 +94,103 @@ export const USER_AGENT = `claude-cli/${VERSION} (external, cli)`;
  *   - source: exact line in cli.pretty.js where the variable is defined
  *   - condition: when the CLI includes it (from the i01() assembly logic)
  */
-export interface BetaFlag {
-  id: string;
-  description: string;
-  source: string;
-  condition: string;
+export enum BetaFlagId {
+  CLAUDE_CODE_20250219 = "claude-code-20250219",
+  OAUTH_20250420 = "oauth-2025-04-20",
+  CONTEXT_1M_20250807 = "context-1m-2025-08-07",
+  INTERLEAVED_THINKING_20250514 = "interleaved-thinking-2025-05-14",
+  REDACT_THINKING_20260212 = "redact-thinking-2026-02-12",
+  CONTEXT_MANAGEMENT_20250627 = "context-management-2025-06-27",
+  PROMPT_CACHING_SCOPE_20260105 = "prompt-caching-scope-2026-01-05",
+  ADVANCED_TOOL_USE_20251120 = "advanced-tool-use-2025-11-20",
+  EFFORT_20251124 = "effort-2025-11-24",
+  STRUCTURED_OUTPUTS_20251215 = "structured-outputs-2025-12-15",
 }
 
-export const BETA_FLAGS_DETAILED: BetaFlag[] = [
-  {
-    id: "claude-code-20250219",
-    description: "Claude Code features: tool schemas, system prompt allowlist validation, billing attribution",
-    source: "L138458: Uw8 = \"claude-code-20250219\"",
+export interface BetaFlag {
+  id: BetaFlagId
+  description: string
+  source: string
+  condition: string
+}
+
+/**
+ * Dictionary of beta flags with their details, indexed by BetaFlagId enum
+ */
+export const BETA_FLAGS_MAP: Record<BetaFlagId, BetaFlag> = {
+  [BetaFlagId.CLAUDE_CODE_20250219]: {
+    id: BetaFlagId.CLAUDE_CODE_20250219,
+    description:
+      "Claude Code features: tool schemas, system prompt allowlist validation, billing attribution",
+    source: 'L138458: Uw8 = "claude-code-20250219"',
     condition: "Included for non-haiku models (L238657: `if (!_) K.push(Uw8)` where _ is isHaiku)",
   },
-  {
-    id: "oauth-2025-04-20",
+  [BetaFlagId.OAUTH_20250420]: {
+    id: BetaFlagId.OAUTH_20250420,
     description: "OAuth authentication support for first-party (claude.ai) tokens",
-    source: "L38022: SX = \"oauth-2025-04-20\"",
+    source: 'L38022: SX = "oauth-2025-04-20"',
     condition: "Always included when using OAuth (p7() is true at L238658)",
   },
-  {
-    id: "context-1m-2025-08-07",
+  [BetaFlagId.CONTEXT_1M_20250807]: {
+    id: BetaFlagId.CONTEXT_1M_20250807,
     description: "Enables 1M token context window for supported models",
     source: "Observed in v2.1.91 capture for opus conversation requests",
     condition: "Included for full conversation requests with large-context models",
   },
-  {
-    id: "interleaved-thinking-2025-05-14",
+  [BetaFlagId.INTERLEAVED_THINKING_20250514]: {
+    id: BetaFlagId.INTERLEAVED_THINKING_20250514,
     description: "Extended thinking with interleaved text output (think -> text -> think -> text)",
-    source: "L138459: p54 = \"interleaved-thinking-2025-05-14\"",
-    condition: "Included unless DISABLE_INTERLEAVED_THINKING env is set, and model supports it (L238661-238664)",
+    source: 'L138459: p54 = "interleaved-thinking-2025-05-14"',
+    condition:
+      "Included unless DISABLE_INTERLEAVED_THINKING env is set, and model supports it (L238661-238664)",
   },
-  {
-    id: "redact-thinking-2026-02-12",
-    description: "Redacts thinking block content, returns empty thinking with cryptographic signature",
+  [BetaFlagId.REDACT_THINKING_20260212]: {
+    id: BetaFlagId.REDACT_THINKING_20260212,
+    description:
+      "Redacts thinking block content, returns empty thinking with cryptographic signature",
     source: "Observed in v2.1.91 capture — present in ALL request types",
     condition: "Always included for OAuth (replaces visible thinking content with signatures)",
   },
-  {
-    id: "context-management-2025-06-27",
+  [BetaFlagId.CONTEXT_MANAGEMENT_20250627]: {
+    id: BetaFlagId.CONTEXT_MANAGEMENT_20250627,
     description: "Server-side context window management (auto-compression, prioritization)",
-    source: "L138461: Qw8 = \"context-management-2025-06-27\"",
-    condition: "Included when first-party and USE_API_CONTEXT_MANAGEMENT env or model qualifies via ZB9() (L238677)",
+    source: 'L138461: Qw8 = "context-management-2025-06-27"',
+    condition:
+      "Included when first-party and USE_API_CONTEXT_MANAGEMENT env or model qualifies via ZB9() (L238677)",
   },
-  {
-    id: "prompt-caching-scope-2026-01-05",
+  [BetaFlagId.PROMPT_CACHING_SCOPE_20260105]: {
+    id: BetaFlagId.PROMPT_CACHING_SCOPE_20260105,
     description: "Scoped prompt caching: cache_control blocks persist across requests in a session",
-    source: "L138468: tB6 = \"prompt-caching-scope-2026-01-05\"",
+    source: 'L138468: tB6 = "prompt-caching-scope-2026-01-05"',
     condition: "Always included for first-party auth (L238682: unconditional when Wx() is true)",
   },
-  {
-    id: "advanced-tool-use-2025-11-20",
+  [BetaFlagId.ADVANCED_TOOL_USE_20251120]: {
+    id: BetaFlagId.ADVANCED_TOOL_USE_20251120,
     description: "Enhanced tool use capabilities (parallel tool calls, improved JSON streaming)",
     source: "Observed in v2.1.91 capture for full conversation requests",
     condition: "Included for full conversation requests with tool definitions",
   },
-  {
-    id: "effort-2025-11-24",
+  [BetaFlagId.EFFORT_20251124]: {
+    id: BetaFlagId.EFFORT_20251124,
     description: "Enables the effort parameter in output_config for controlling model computation",
     source: "Observed in v2.1.91 capture for full conversation requests",
     condition: "Included when output_config.effort is set",
   },
-  {
-    id: "structured-outputs-2025-12-15",
+  [BetaFlagId.STRUCTURED_OUTPUTS_20251215]: {
+    id: BetaFlagId.STRUCTURED_OUTPUTS_20251215,
     description: "JSON schema-based structured outputs via output_config.format",
     source: "Observed in v2.1.91 capture for title generation requests",
     condition: "Included when output_config.format is set (e.g. title generation)",
   },
-];
+}
+
+/**
+ * Array of beta flag details, for backward compatibility
+ */
+export const BETA_FLAGS_DETAILED = Object.values(BETA_FLAGS_MAP)
 
 /** All beta flag IDs */
-export const BETA_FLAGS = BETA_FLAGS_DETAILED.map((f) => f.id);
+export const BETA_FLAGS = Object.keys(BETA_FLAGS_MAP)
 
 /**
  * Request types that determine which beta flags to include.
@@ -159,7 +200,7 @@ export const BETA_FLAGS = BETA_FLAGS_DETAILED.map((f) => f.id);
  *   - "title": 6 flags (adds structured-outputs-2025-12-15)
  *   - "conversation": 9 flags (all flags for full agentic behavior)
  */
-export type RequestType = "quota" | "title" | "conversation";
+export type RequestType = "quota" | "title" | "conversation"
 
 /**
  * Build the `anthropic-beta` header value as an array of flag IDs.
@@ -182,66 +223,68 @@ export type RequestType = "quota" | "title" | "conversation";
  * - The `[1m]` suffix on a model ID is a client-side convention (the actual
  *   API model ID has no suffix). We strip it for the request body but use
  *   it here to detect 1M context intent.
- *
- * @param requestType - Which beta set to build (default: `"conversation"`)
- * @param model - Model ID, used to gate model-specific flags like `context-1m`
- * @returns Array of flag IDs ready to join with commas
- *
- * @example
- * ```ts
- * buildBetaFlags("conversation", "claude-opus-4-6")
- * // → ["claude-code-20250219", "oauth-2025-04-20", "context-1m-2025-08-07", ...]
- *
- * buildBetaFlags("quota")
- * // → ["oauth-2025-04-20", "interleaved-thinking-2025-05-14", ...]  (5 flags)
- * ```
- */
+ /**
+  * Builds the array of beta feature flags based on request type and model.
+  *
+  * @param requestType - Which beta set to build (default: \"conversation")
+  * @param model - Model ID, used to gate model-specific flags like `context-1m`
+  * @returns Array of BetaFlagId enum values ready to join with commas
+  *
+  * @example
+  * ```ts
+  * buildBetaFlags("conversation", "claude-opus-4-6")
+  * // → [BetaFlagId.CLAUDE_CODE_20250219, BetaFlagId.OAUTH_20250420, BetaFlagId.CONTEXT_1M_20250807, ...]
+  *
+  * buildBetaFlags("quota")
+  * // → [BetaFlagId.OAUTH_20250420, BetaFlagId.INTERLEAVED_THINKING_20250514, ...]  (5 flags)
+  * ```
+  */
 export function buildBetaFlags(
   requestType: RequestType = "conversation",
   model?: string,
-): string[] {
+): BetaFlagId[] {
   switch (requestType) {
     case "quota":
       return [
-        "oauth-2025-04-20",
-        "interleaved-thinking-2025-05-14",
-        "redact-thinking-2026-02-12",
-        "context-management-2025-06-27",
-        "prompt-caching-scope-2026-01-05",
-      ];
+        BetaFlagId.OAUTH_20250420,
+        BetaFlagId.INTERLEAVED_THINKING_20250514,
+        BetaFlagId.REDACT_THINKING_20260212,
+        BetaFlagId.CONTEXT_MANAGEMENT_20250627,
+        BetaFlagId.PROMPT_CACHING_SCOPE_20260105,
+      ]
     case "title":
       return [
-        "oauth-2025-04-20",
-        "interleaved-thinking-2025-05-14",
-        "redact-thinking-2026-02-12",
-        "context-management-2025-06-27",
-        "prompt-caching-scope-2026-01-05",
-        "structured-outputs-2025-12-15",
-      ];
+        BetaFlagId.OAUTH_20250420,
+        BetaFlagId.INTERLEAVED_THINKING_20250514,
+        BetaFlagId.REDACT_THINKING_20260212,
+        BetaFlagId.CONTEXT_MANAGEMENT_20250627,
+        BetaFlagId.PROMPT_CACHING_SCOPE_20260105,
+        BetaFlagId.STRUCTURED_OUTPUTS_20251215,
+      ]
     case "conversation": {
-      const flags = [
-        "claude-code-20250219",
-        "oauth-2025-04-20",
-      ];
+      const flags: BetaFlagId[] = [BetaFlagId.CLAUDE_CODE_20250219, BetaFlagId.OAUTH_20250420]
       // context-1m: enabled when model has [1m] suffix (client-side convention)
       // or for opus models by default (in v2.1.91 capture, opus always had this flag)
-      const wants1m = model
-        ? /\[1m\]/i.test(model) || model.includes("opus")
-        : false;
+      const wants1m = model ? /\[1m\]/i.test(model) || model.includes("opus") : false
       if (wants1m) {
-        flags.push("context-1m-2025-08-07");
+        flags.push(BetaFlagId.CONTEXT_1M_20250807)
       }
       flags.push(
-        "interleaved-thinking-2025-05-14",
-        "redact-thinking-2026-02-12",
-        "context-management-2025-06-27",
-        "prompt-caching-scope-2026-01-05",
-        "advanced-tool-use-2025-11-20",
-        "effort-2025-11-24",
-      );
-      return flags;
+        BetaFlagId.INTERLEAVED_THINKING_20250514,
+        // REDACT_THINKING_20260212: Explicitly excluded to ensure thinking steps are visible in normal chat conversations
+        // This flag causes thinking to be redacted with cryptographic signatures, but we want to see the thinking process
+        // BetaFlagId.REDACT_THINKING_20260212,
+        BetaFlagId.CONTEXT_MANAGEMENT_20250627,
+        BetaFlagId.PROMPT_CACHING_SCOPE_20260105,
+        BetaFlagId.ADVANCED_TOOL_USE_20251120,
+        BetaFlagId.EFFORT_20251124,
+      )
+
+      return flags
     }
   }
+
+  return buildBetaFlags("conversation", model)
 }
 
 /**
@@ -251,29 +294,37 @@ export function buildBetaFlags(
  * It was 0.70.0 in v2.1.29 and 0.74.0 in v2.1.87.
  * Sent as X-Stainless-Package-Version header (L3665).
  */
-export const STAINLESS_SDK_VERSION = "0.80.0";
+export const STAINLESS_SDK_VERSION = "0.81.0"
 
 /**
  * One block in the system prompt array.
  *
- * The `cache_control` field enables prompt caching on this block. Only block 2
- * (the instructions block) carries it in v2.1.91 traffic, with `scope:"global"`
- * meaning the cache is shared across the whole organization rather than just
- * the current session.
+ * `cache_control` enables prompt caching on this block. In live 2.1.118 traffic
+ * BOTH system[2] (instructions, with `scope:"global"`) and system[3] (session
+ * guidance, no scope) carry `cache_control` with explicit `ttl:"1h"`. The 1h
+ * TTL is what keeps the prefix warm across idle gaps; without it the cache
+ * defaults to 5 minutes.
  */
 export interface SystemBlock {
   /** Always `"text"` for the standard CLI flow. */
-  type: "text";
+  type: "text"
   /** Block content. */
-  text: string;
-  /** Prompt caching control. Present only on the large instructions block. */
-  cache_control?: { type: "ephemeral"; scope?: "global" };
+  text: string
+  /** Prompt caching control. */
+  cache_control?: {
+    type: "ephemeral"
+    /** Cache TTL. Defaults to 5m when omitted. Live 2.1.118 sends "1h". */
+    ttl?: "5m" | "1h"
+    /** "global" shares the cache org-wide; omit for per-session caching. */
+    scope?: "global"
+  }
 }
 
 /**
  * System prompt: 4 text blocks sent in the `system` array of Messages API calls.
  *
- * Verified against v2.1.91 capture (fetch-014, fetch-024):
+ * Verified against v2.1.118 capture (fetch-024 in
+ * .node-net-dbg/1777147064608-25-APR-2026-SATURDAY--15h57m44s-EDT/):
  *
  * system[0]: Billing attribution (no cache_control)
  *   Format: `x-anthropic-billing-header: cc_version=<ver>; cc_entrypoint=<ep>; cch=<hash>;`
@@ -285,16 +336,16 @@ export interface SystemBlock {
  *
  * system[2]: Full behavioral instructions (cache_control with scope:"global")
  *   Contains tool usage guidelines, security policies, output rules, etc.
- *   ~11,696 chars in v2.1.91. This is the block worth caching.
+ *   ~9,925 chars in v2.1.118. This is the block worth caching.
  *
  * system[3]: Session-specific guidance (no cache_control)
  *   Contains environment details, available skills, CLAUDE.md content, git status.
- *   Changes every request so not cached. ~15,751 chars in v2.1.91.
+ *   ~17,625 chars in v2.1.118. NOW carries cache_control with ttl:"1h".
  *
- * IMPORTANT: In v2.1.87, cache_control was on system[1]. In v2.1.91, it moved
- * to system[2] with added scope:"global". system[0] and system[1] have NO
- * cache_control. This makes sense: cache the large instructions block, not the
- * tiny identity string.
+ * IMPORTANT: In v2.1.87 cache_control was on system[1]. In v2.1.91 it moved
+ * to system[2] with scope:"global". In v2.1.118, ttl:"1h" was added AND a
+ * second cache_control was added on system[3] (without scope, per-session).
+ * system[0] and system[1] still have no cache_control.
  *
  * @param opts.instructions - Custom system[2] content. Defaults to a short
  *   minimal instructions block. Pass the full real-CLI instructions here if
@@ -317,37 +368,43 @@ export interface SystemBlock {
  * ```
  */
 export function buildSystemPrompt(opts?: {
-  instructions?: string;
-  sessionContext?: string;
+  instructions?: string
+  sessionContext?: string
 }): SystemBlock[] {
   const blocks: SystemBlock[] = [
     {
       type: "text",
-      text: `x-anthropic-billing-header: cc_version=${VERSION}.b42; cc_entrypoint=cli; cch=00000;`,
+      text: `x-anthropic-billing-header: cc_version=${VERSION}.${BUILD_HASH}; cc_entrypoint=cli; cch=00000;`,
     },
     {
       type: "text",
       text: "You are Claude Code, Anthropic's official CLI for Claude.",
     },
-  ];
+  ]
 
-  // system[2]: Instructions block with cache_control (the big one worth caching)
-  const instructions = opts?.instructions ?? DEFAULT_INSTRUCTIONS;
+  // system[2]: Instructions block with cache_control (the big one worth caching).
+  // ttl:"1h" matches live 2.1.118 traffic; scope:"global" shares the cache
+  // across sessions for the same org.
+  const instructions = opts?.instructions ?? DEFAULT_INSTRUCTIONS
   blocks.push({
     type: "text",
     text: instructions,
-    cache_control: { type: "ephemeral", scope: "global" },
-  });
+    cache_control: { type: "ephemeral", ttl: "1h", scope: "global" },
+  })
 
-  // system[3]: Session-specific context (changes per request, no caching)
+  // system[3]: Session-specific guidance + environment + git status, etc.
+  // Live 2.1.118 carries `cache_control: { type:"ephemeral", ttl:"1h" }` here
+  // (no scope, this content is per-session). This is the second of the three
+  // active breakpoints and is what lets cache_read grow turn-over-turn.
   if (opts?.sessionContext) {
     blocks.push({
       type: "text",
       text: opts.sessionContext,
-    });
+      cache_control: { type: "ephemeral", ttl: "1h" },
+    })
   }
 
-  return blocks;
+  return blocks
 }
 
 /**
@@ -362,22 +419,36 @@ You are an interactive agent that helps users with software engineering tasks. U
 - Be concise and direct in responses.
 - When given a task, do it without unnecessary explanation.
 - If you need to use tools, use them efficiently.
-`.trim();
+`.trim()
 
 /**
  * Legacy: flat system prompt for backward compatibility.
  * Prefer buildSystemPrompt() for new code.
  */
-export const SYSTEM_PROMPT = buildSystemPrompt();
+export const SYSTEM_PROMPT = buildSystemPrompt()
+
+/**
+ * Latest model IDs as of capture 2026-04-25 (claude-cli/2.1.118). Use these
+ * constants instead of string literals so a future model bump touches one
+ * place. Live 2.1.118 capture confirms `claude-opus-4-7` as the canonical
+ * opus ID (the previous `claude-opus-4-6` is gone).
+ */
+export const MODELS = {
+  OPUS: "claude-opus-4-7",
+  SONNET: "claude-sonnet-4-6",
+  HAIKU: "claude-haiku-4-5-20251001",
+} as const
 
 /**
  * Default model for conversation requests.
- * The CLI's default depends on subscription tier:
- *   - Max subscribers: opus-4-6 (with 1M context by default)
- *   - Pro subscribers: sonnet-4-6
- * We default to sonnet since it works for all tiers.
+ *
+ * The real CLI's default depends on subscription tier (Max → opus, Pro →
+ * sonnet). We default to sonnet because it works for all tiers and avoids
+ * unnecessary opus quota consumption when the user has not asked for it.
+ * Override via `--model claude-opus-4-7` (or `[1m]` suffix) on the CLI, or
+ * `model:` on programmatic calls.
  */
-export const DEFAULT_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_MODEL: string = MODELS.SONNET
 
 // ---------------------------------------------------------------------------
 // buildHeaders
@@ -435,30 +506,29 @@ export function buildHeaders(
 
     // Per-request UUID for log correlation (L238231, var kZ6 at L238245)
     "x-client-request-id": randomUUID(),
-  };
+  }
 
   if (auth.type === "api-key") {
-    headers["x-api-key"] = auth.token;
+    headers["x-api-key"] = auth.token
   } else {
-    headers["authorization"] = `Bearer ${auth.token}`;
-    headers["anthropic-beta"] = buildBetaFlags(requestType, model).join(",");
+    headers["authorization"] = `Bearer ${auth.token}`
+    headers["anthropic-beta"] = buildBetaFlags(requestType, model).join(",")
     // Required for OAuth — see L8383-8387 in the SDK client
-    headers["anthropic-dangerous-direct-browser-access"] = "true";
+    headers["anthropic-dangerous-direct-browser-access"] = "true"
   }
 
   // Stainless SDK platform metadata (cK5() at L3662-3675 for node runtime)
   // These are computed once and cached in $$7 via j$7() (L3716-3718).
   // The OS mapping is in O$7() at L3703-3713: "darwin" → "MacOS".
   // The arch mapping is in A$7() at L3695-3701: "arm64" stays "arm64".
-  headers["x-stainless-arch"] = process.arch;
-  headers["x-stainless-lang"] = "js";
-  headers["x-stainless-os"] =
-    process.platform === "darwin" ? "MacOS" : process.platform;
-  headers["x-stainless-package-version"] = STAINLESS_SDK_VERSION;
-  headers["x-stainless-retry-count"] = "0";
-  headers["x-stainless-runtime"] = "node";
-  headers["x-stainless-runtime-version"] = process.version;
-  headers["x-stainless-timeout"] = "600";
+  headers["x-stainless-arch"] = process.arch
+  headers["x-stainless-lang"] = "js"
+  headers["x-stainless-os"] = process.platform === "darwin" ? "MacOS" : process.platform
+  headers["x-stainless-package-version"] = STAINLESS_SDK_VERSION
+  headers["x-stainless-retry-count"] = "0"
+  headers["x-stainless-runtime"] = "node"
+  headers["x-stainless-runtime-version"] = process.version
+  headers["x-stainless-timeout"] = "600"
 
-  return headers;
+  return headers
 }

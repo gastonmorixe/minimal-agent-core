@@ -1,0 +1,448 @@
+import { describe, expect, it } from "bun:test"
+import { EventEmitter } from "node:events"
+import { EditorController } from "./editor-controller.ts"
+import { displayWidth } from "./term-width.ts"
+import { FakeTerminal } from "./test-utils/fake-terminal.ts"
+import { Compositor } from "./ui/compositor.ts"
+
+class FakeTTYInput extends EventEmitter {
+  isTTY = true
+  encoding: BufferEncoding | null = null
+  resumed = false
+  rawModes: boolean[] = []
+
+  setEncoding(encoding: BufferEncoding): this {
+    this.encoding = encoding
+    return this
+  }
+  resume(): this {
+    this.resumed = true
+    return this
+  }
+  pause(): this {
+    this.resumed = false
+    return this
+  }
+  setRawMode(value: boolean): this {
+    this.rawModes.push(value)
+    return this
+  }
+  send(chunk: string): void {
+    this.emit("data", chunk)
+  }
+}
+
+class FakeOutput {
+  readonly chunks: string[] = []
+  isTTY = true
+  columns = 80
+  rows = 24
+  write(chunk: string | Uint8Array): boolean {
+    this.chunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk))
+    return true
+  }
+  text(): string {
+    return this.chunks.join("")
+  }
+}
+
+class FakeCompositor {
+  liveAreaCalls: Array<{
+    lines: string[]
+    cursor: { row: number; col: number } | null
+  }> = []
+  liveHeightCalls: number[] = []
+  liveHeight = 1
+  setLiveArea(lines: string[], cursor: { row: number; col: number } | null): void {
+    this.liveAreaCalls.push({ lines: [...lines], cursor: cursor ? { ...cursor } : null })
+  }
+  setLiveHeight(n: number): void {
+    this.liveHeightCalls.push(n)
+    this.liveHeight = n
+  }
+  last() {
+    return this.liveAreaCalls[this.liveAreaCalls.length - 1]
+  }
+}
+
+function make(opts: { prompt?: string; continuation?: string; columns?: number } = {}) {
+  const stdin = new FakeTTYInput()
+  const output = new FakeOutput()
+  if (opts.columns) output.columns = opts.columns
+  const compositor = new FakeCompositor()
+  const ctrl = new EditorController({
+    prompt: opts.prompt ?? "> ",
+    continuationPrompt: opts.continuation ?? "  ",
+    compositor: compositor as any,
+    stdin: stdin as any,
+    output: output as any,
+  })
+  return { ctrl, stdin, output, compositor }
+}
+
+describe("EditorController — start/stop", () => {
+  it("start enables raw mode + terminal input modes and renders an empty prompt", () => {
+    const { ctrl, stdin, output, compositor } = make()
+    ctrl.start()
+    expect(stdin.rawModes).toEqual([true])
+    expect(stdin.resumed).toBe(true)
+    expect(output.text()).toContain("\x1b[?2004h") // bracketed paste
+    expect(output.text()).toContain("\x1b[>31u") // kitty
+    expect(compositor.last().lines).toEqual(["> "])
+    expect(compositor.last().cursor).toEqual({ row: 0, col: 2 })
+    ctrl.stop()
+  })
+
+  it("stop restores raw mode and disables terminal input modes", () => {
+    const { ctrl, stdin, output } = make()
+    ctrl.start()
+    ctrl.stop()
+    expect(stdin.rawModes).toEqual([true, false])
+    expect(stdin.resumed).toBe(false)
+    expect(output.text()).toContain("\x1b[<u") // kitty disable
+    expect(output.text()).toContain("\x1b[?2004l") // paste disable
+  })
+})
+
+describe("EditorController — typing & submit", () => {
+  it("typed characters update the buffer and trigger a live-area repaint", () => {
+    const { ctrl, stdin, compositor } = make()
+    ctrl.start()
+    stdin.send("hi")
+    expect(compositor.last().lines).toEqual(["> hi"])
+    expect(compositor.last().cursor).toEqual({ row: 0, col: 4 })
+    ctrl.stop()
+  })
+
+  it("Enter on non-blank emits 'submit' with text and clears the buffer (no unmount)", () => {
+    const { ctrl, stdin, compositor } = make()
+    const submits: string[] = []
+    ctrl.on("submit", (text) => submits.push(text))
+    ctrl.start()
+    stdin.send("hello")
+    stdin.send("\r")
+    expect(submits).toEqual(["hello"])
+    expect(compositor.last().lines).toEqual(["> "])
+    expect(compositor.last().cursor).toEqual({ row: 0, col: 2 })
+    ctrl.stop()
+  })
+
+  it("on submit, the rendered prompt is committed to scrollback via writeStream before the buffer clears", () => {
+    const { ctrl, stdin, compositor } = make()
+    const streamed: string[] = []
+    ;(compositor as unknown as { writeStream: (s: string) => void }).writeStream = (s) => {
+      streamed.push(s)
+    }
+    ctrl.start()
+    // Multiline submission via Shift+Enter (kitty CSI 13;2u) so we exercise
+    // the full-buffer rendering path, not just the visible viewport.
+    stdin.send("line1")
+    stdin.send("\x1b[13;2u")
+    stdin.send("line2")
+    stdin.send("\x1b[13;2u")
+    stdin.send("line3")
+    stdin.send("\r")
+    expect(streamed).toEqual(["> line1\n  line2\n  line3\n"])
+    // After the commit + clear, the live area shows a fresh empty prompt.
+    expect(compositor.last().lines).toEqual(["> "])
+    ctrl.stop()
+  })
+
+  it("submit without a writeStream-capable compositor still clears the buffer cleanly", () => {
+    const { ctrl, stdin, compositor } = make()
+    const submits: string[] = []
+    ctrl.on("submit", (text) => submits.push(text))
+    ctrl.start()
+    stdin.send("hi")
+    stdin.send("\r")
+    expect(submits).toEqual(["hi"])
+    expect(compositor.last().lines).toEqual(["> "])
+    ctrl.stop()
+  })
+
+  it("Enter on blank does not emit submit and just clears any whitespace", () => {
+    const { ctrl, stdin } = make()
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    ctrl.start()
+    stdin.send("\r")
+    expect(submits).toEqual([])
+    ctrl.stop()
+  })
+
+  it("Ctrl+C with empty buffer emits 'cancel'", () => {
+    const { ctrl, stdin } = make()
+    let cancelled = false
+    ctrl.on("cancel", () => {
+      cancelled = true
+    })
+    ctrl.start()
+    stdin.send("\x03")
+    expect(cancelled).toBe(true)
+    ctrl.stop()
+  })
+
+  it("Ctrl+C with content clears the buffer (does not emit cancel)", () => {
+    const { ctrl, stdin, compositor } = make()
+    let cancelled = false
+    ctrl.on("cancel", () => {
+      cancelled = true
+    })
+    ctrl.start()
+    stdin.send("oops")
+    stdin.send("\x03")
+    expect(cancelled).toBe(false)
+    expect(compositor.last().lines).toEqual(["> "])
+    ctrl.stop()
+  })
+
+  it("Backspace deletes the previous char", () => {
+    const { ctrl, stdin, compositor } = make()
+    ctrl.start()
+    stdin.send("ab")
+    stdin.send("\x7f")
+    expect(compositor.last().lines).toEqual(["> a"])
+    ctrl.stop()
+  })
+})
+
+describe("EditorController — status row", () => {
+  it("setStatus(text) prepends a status row above the prompt and grows liveHeight", () => {
+    const { ctrl, compositor } = make()
+    ctrl.start()
+    compositor.liveHeightCalls.length = 0
+    ctrl.setStatus("⠋ Thinking")
+    expect(compositor.last().lines).toEqual(["⠋ Thinking", "> "])
+    expect(compositor.last().cursor).toEqual({ row: 1, col: 2 })
+    expect(compositor.liveHeightCalls).toContain(2)
+    ctrl.stop()
+  })
+
+  it("setStatus(null) removes the status row and shrinks liveHeight back", () => {
+    const { ctrl, compositor } = make()
+    ctrl.start()
+    ctrl.setStatus("busy")
+    compositor.liveHeightCalls.length = 0
+    ctrl.setStatus(null)
+    expect(compositor.last().lines).toEqual(["> "])
+    expect(compositor.last().cursor).toEqual({ row: 0, col: 2 })
+    expect(compositor.liveHeightCalls).toContain(1)
+    ctrl.stop()
+  })
+
+  it("status row coexists with multiline editor", () => {
+    const { ctrl, stdin, compositor } = make()
+    ctrl.start()
+    stdin.send("a")
+    stdin.send("\x1b[13;2u") // shift+enter
+    stdin.send("b")
+    ctrl.setStatus("⠋")
+    expect(compositor.last().lines).toEqual(["⠋", "> a", "  b"])
+    // editor cursor is at row 2 (status occupies row 0, editor rows 1..2)
+    expect(compositor.last().cursor).toEqual({ row: 2, col: 3 })
+    ctrl.stop()
+  })
+
+  it("truncates long status rows so they cannot soft-wrap in the live area", () => {
+    const { ctrl, compositor } = make({ columns: 20 })
+    ctrl.start()
+    ctrl.setStatus("Thinking about a very long model response")
+
+    const status = compositor.last().lines[0]
+    expect(displayWidth(status)).toBeLessThanOrEqual(20)
+    expect(status).toBe("Thinking about a ...")
+    ctrl.stop()
+  })
+
+  it("keeps stream output aligned after a long status row in a narrow terminal", () => {
+    const term = new FakeTerminal({ cols: 20, rows: 8, scrollbackLimit: 50 })
+    const output = {
+      isTTY: true,
+      columns: 20,
+      rows: 8,
+      write: (s: string) => {
+        term.feed(s)
+        return true
+      },
+    }
+    const compositor = new Compositor({ output })
+    const stdin = new FakeTTYInput()
+    const ctrl = new EditorController({
+      prompt: "> ",
+      continuationPrompt: "  ",
+      compositor,
+      stdin: stdin as any,
+      output: output as any,
+    })
+
+    compositor.mount()
+    ctrl.start()
+    ctrl.setStatus("Thinking about a very long model response")
+    compositor.writeStream("OUT\n")
+
+    expect(term.fullText()).toContain("OUT")
+    expect(term.fullText()).not.toContain("model response")
+    ctrl.stop()
+    compositor.unmount()
+  })
+})
+
+describe("EditorController — resize", () => {
+  it("notifyResize immediately reflows the live area to the new width", () => {
+    const { ctrl, stdin, output, compositor } = make({ columns: 20 })
+    ctrl.start()
+    stdin.send("abcdefghijklmnop")
+    expect(compositor.last().lines.length).toBe(1)
+
+    output.columns = 10
+    ctrl.notifyResize()
+
+    expect(compositor.last().lines.length).toBeGreaterThan(1)
+    for (const line of compositor.last().lines) {
+      expect(displayWidth(line)).toBeLessThanOrEqual(10)
+    }
+    ctrl.stop()
+  })
+})
+
+describe("EditorController — bracketed paste", () => {
+  it("inserts pasted multiline text and adjusts viewport so the cursor is visible", () => {
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new FakeCompositor()
+    const ctrl = new EditorController({
+      prompt: "> ",
+      continuationPrompt: "  ",
+      compositor: compositor as any,
+      stdin: stdin as any,
+      output: output as any,
+      maxLiveHeight: 3,
+    })
+    ctrl.start()
+    // Simulate a bracketed paste of 5 lines.
+    stdin.send("\x1b[200~")
+    stdin.send("L1\nL2\nL3\nL4\nL5")
+    stdin.send("\x1b[201~")
+    expect(ctrl.buffer().toString()).toBe("L1\nL2\nL3\nL4\nL5")
+    // Cap at 3 → window shows last 3 lines.
+    expect(compositor.last().lines).toEqual(["  L3", "  L4", "  L5"])
+    expect(compositor.liveHeight).toBe(3)
+    ctrl.stop()
+  })
+})
+
+describe("EditorController — viewport cap & internal scroll", () => {
+  it("caps liveHeight at maxLiveHeight and scrolls a window onto the buffer", () => {
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new FakeCompositor()
+    const ctrl = new EditorController({
+      prompt: "> ",
+      continuationPrompt: "  ",
+      compositor: compositor as any,
+      stdin: stdin as any,
+      output: output as any,
+      maxLiveHeight: 3,
+    })
+    ctrl.start()
+
+    // Build 5 logical lines: a / b / c / d / e
+    stdin.send("a")
+    stdin.send("\x1b[13;2u")
+    stdin.send("b")
+    stdin.send("\x1b[13;2u")
+    stdin.send("c")
+    stdin.send("\x1b[13;2u")
+    stdin.send("d")
+    stdin.send("\x1b[13;2u")
+    stdin.send("e")
+
+    // liveHeight capped at 3.
+    expect(compositor.liveHeight).toBe(3)
+    // Last paint shows the bottom 3 rows (with continuation prompt).
+    expect(compositor.last().lines).toEqual(["  c", "  d", "  e"])
+    // Cursor on the last visible row at end of "e" → col 3.
+    expect(compositor.last().cursor).toEqual({ row: 2, col: 3 })
+    ctrl.stop()
+  })
+
+  it("scrolls back up when cursor moves above the window", () => {
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new FakeCompositor()
+    const ctrl = new EditorController({
+      prompt: "> ",
+      continuationPrompt: "  ",
+      compositor: compositor as any,
+      stdin: stdin as any,
+      output: output as any,
+      maxLiveHeight: 2,
+    })
+    ctrl.start()
+    // a / b / c
+    stdin.send("a")
+    stdin.send("\x1b[13;2u")
+    stdin.send("b")
+    stdin.send("\x1b[13;2u")
+    stdin.send("c")
+    // Last paint: "  b" + "  c"
+    expect(compositor.last().lines).toEqual(["  b", "  c"])
+    // Move cursor up twice → onto row 0 ("a"): window must scroll up.
+    stdin.send("\x1b[A")
+    stdin.send("\x1b[A")
+    expect(compositor.last().lines).toEqual(["> a", "  b"])
+    expect(compositor.last().cursor).toEqual({ row: 0, col: 3 })
+    ctrl.stop()
+  })
+
+  it("status row counts against the cap (cap=3, status=1 → editor window=2)", () => {
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new FakeCompositor()
+    const ctrl = new EditorController({
+      prompt: "> ",
+      continuationPrompt: "  ",
+      compositor: compositor as any,
+      stdin: stdin as any,
+      output: output as any,
+      maxLiveHeight: 3,
+    })
+    ctrl.start()
+    ctrl.setStatus("⠋")
+    stdin.send("a")
+    stdin.send("\x1b[13;2u")
+    stdin.send("b")
+    stdin.send("\x1b[13;2u")
+    stdin.send("c")
+    expect(compositor.liveHeight).toBe(3)
+    expect(compositor.last().lines).toEqual(["⠋", "  b", "  c"])
+    ctrl.stop()
+  })
+})
+
+describe("EditorController — multiline & growth", () => {
+  it("Shift+Enter (kitty CSI 13;2u) inserts a newline; live height grows to fit", () => {
+    const { ctrl, stdin, compositor } = make()
+    ctrl.start()
+    compositor.liveHeightCalls.length = 0
+    stdin.send("a")
+    stdin.send("\x1b[13;2u") // shift+enter (kitty)
+    stdin.send("b")
+    expect(compositor.last().lines).toEqual(["> a", "  b"])
+    expect(compositor.last().cursor).toEqual({ row: 1, col: 3 })
+    expect(compositor.liveHeightCalls).toContain(2)
+    ctrl.stop()
+  })
+
+  it("after submit, live height shrinks back to 1", () => {
+    const { ctrl, stdin, compositor } = make()
+    ctrl.start()
+    stdin.send("a")
+    stdin.send("\x1b[13;2u")
+    stdin.send("b")
+    compositor.liveHeightCalls.length = 0
+    stdin.send("\r")
+    expect(compositor.liveHeightCalls).toContain(1)
+    ctrl.stop()
+  })
+})

@@ -35,7 +35,13 @@
  * @module formatter
  */
 
-import type { Subprocess, FileSink } from "bun";
+import type { FileSink, Subprocess } from "bun"
+import { AnsiStreamBuffer } from "./ansi-stream.ts"
+
+type FormatterOutput = Pick<NodeJS.WriteStream, "write"> & {
+  columns?: number
+  rows?: number
+}
 
 /**
  * Wraps an external formatter subprocess and pipes byte-level streamed text
@@ -58,24 +64,41 @@ import type { Subprocess, FileSink } from "bun";
  */
 export class Formatter {
   /** Command argv to spawn (cmd[0] is the executable). */
-  private cmd: string[];
+  private cmd: string[]
+  /** Output sink for formatted stdout. Defaults to process.stdout. */
+  private output: FormatterOutput
   /** Active subprocess handle, or null when stopped. */
-  private proc: Subprocess<"pipe", "pipe", "inherit"> | null = null;
+  private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
   /** Bun FileSink for the subprocess's stdin (requires explicit flush). */
-  private stdin: FileSink | null = null;
+  private stdin: FileSink | null = null
   /** Background task that drains the subprocess's stdout to our stdout. */
-  private displayPromise: Promise<void> | null = null;
+  private displayPromise: Promise<void> | null = null
+  /** Tracks whether the formatter's first stdout chunk has been normalized yet. */
+  private normalizedFirstChunk = false
+  /**
+   * Holds any partial CSI / OSC at the end of a stdout chunk so the
+   * compositor never sees a write that ends mid-escape — otherwise the
+   * live-area erase/redraw sequences we splice in afterwards get
+   * absorbed into the broken escape and the terminal prints fragments
+   * like `[1m` as literal text. See {@link AnsiStreamBuffer}.
+   */
+  private readonly stdoutAnsiBuffer = new AnsiStreamBuffer()
+  /** Same protection for formatter stderr, which is also routed via output. */
+  private readonly stderrAnsiBuffer = new AnsiStreamBuffer()
 
   /**
+   * Create a formatter subprocess wrapper.
+   *
    * @param cmd - Command argv. Must contain at least the executable name.
    *   Use {@link parseFormatterCommand} to convert a shell-style string.
    * @throws Error if `cmd` is empty.
    */
-  constructor(cmd: string[]) {
+  constructor(cmd: string[], output: FormatterOutput = process.stdout) {
     if (cmd.length === 0) {
-      throw new Error("Formatter requires at least one command argument");
+      throw new Error("Formatter requires at least one command argument")
     }
-    this.cmd = cmd;
+    this.cmd = cmd
+    this.output = output
   }
 
   /**
@@ -86,23 +109,28 @@ export class Formatter {
    * directly (useful for debugging missing fonts, ANSI issues, etc.).
    */
   start(): void {
-    if (this.proc) return;
+    if (this.proc) return
 
     this.proc = Bun.spawn(this.cmd, {
       stdin: "pipe",
       stdout: "pipe",
-      stderr: "inherit",
-    }) as Subprocess<"pipe", "pipe", "inherit">;
+      stderr: "pipe",
+      env: formatterEnv(this.output),
+    })
 
-    this.stdin = this.proc.stdin;
+    this.stdin = this.proc.stdin
+    this.normalizedFirstChunk = false
+    this.stdoutAnsiBuffer.flush()
+    this.stderrAnsiBuffer.flush()
 
-    // Read stdout concurrently and pipe straight to our stdout.
+    // Read stdout and stderr concurrently and pipe them through the configured
+    // output sink. Stderr must not inherit the real fd in live-area mode
+    // because raw child writes would bypass the compositor and corrupt the UI.
     // The for-await loop runs in parallel with write() calls.
-    this.displayPromise = (async () => {
-      for await (const chunk of this.proc!.stdout) {
-        process.stdout.write(chunk);
-      }
-    })();
+    this.displayPromise = Promise.all([
+      this.drainOutput(this.proc.stdout, this.stdoutAnsiBuffer, true),
+      this.drainOutput(this.proc.stderr, this.stderrAnsiBuffer, false),
+    ]).then(() => undefined)
   }
 
   /**
@@ -119,10 +147,10 @@ export class Formatter {
    */
   write(chunk: string): void {
     if (!this.stdin) {
-      throw new Error("Formatter not started — call start() first");
+      throw new Error("Formatter not started — call start() first")
     }
-    this.stdin.write(chunk);
-    this.stdin.flush();
+    void this.stdin.write(chunk)
+    void this.stdin.flush()
   }
 
   /**
@@ -131,15 +159,48 @@ export class Formatter {
    * exit. Idempotent — safe to call from a `finally` block.
    */
   async end(): Promise<void> {
-    if (!this.proc || !this.stdin) return;
+    if (!this.proc || !this.stdin) return
 
-    this.stdin.end();
-    await this.displayPromise;
-    await this.proc.exited;
+    void this.stdin.end()
+    await this.displayPromise
+    await this.proc.exited
 
-    this.proc = null;
-    this.stdin = null;
-    this.displayPromise = null;
+    this.proc = null
+    this.stdin = null
+    this.displayPromise = null
+  }
+
+  private normalizeOutputChunk(chunk: Uint8Array): Uint8Array | null {
+    if (this.normalizedFirstChunk) {
+      return chunk
+    }
+
+    this.normalizedFirstChunk = true
+    if (chunk.length >= 2 && chunk[0] === 0x0d && chunk[1] === 0x0a) {
+      return chunk.length > 2 ? chunk.slice(2) : null
+    }
+    if (chunk[0] === 0x0a) {
+      return chunk.length > 1 ? chunk.slice(1) : null
+    }
+
+    return chunk
+  }
+
+  private async drainOutput(
+    stream: ReadableStream<Uint8Array>,
+    ansiBuffer: AnsiStreamBuffer,
+    normalizeFirstChunk: boolean,
+  ): Promise<void> {
+    const decoder = new TextDecoder()
+    for await (const chunk of stream) {
+      const normalized = normalizeFirstChunk ? this.normalizeOutputChunk(chunk) : chunk
+      if (!normalized) continue
+      const text = decoder.decode(normalized, { stream: true })
+      const safe = ansiBuffer.push(text)
+      if (safe.length > 0) this.output.write(safe)
+    }
+    const tail = decoder.decode() + ansiBuffer.flush()
+    if (tail.length > 0) this.output.write(tail)
   }
 
   /**
@@ -150,13 +211,15 @@ export class Formatter {
   kill(): void {
     if (this.proc) {
       try {
-        this.proc.kill();
+        this.proc.kill()
       } catch {
         // ignore — process may have already exited
       }
-      this.proc = null;
-      this.stdin = null;
-      this.displayPromise = null;
+      this.proc = null
+      this.stdin = null
+      this.displayPromise = null
+      this.stdoutAnsiBuffer.flush()
+      this.stderrAnsiBuffer.flush()
     }
   }
 }
@@ -185,11 +248,22 @@ export class Formatter {
  * ```
  */
 export function parseFormatterCommand(cmd: string): string[] {
-  const args: string[] = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let match;
+  const args: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let match
   while ((match = re.exec(cmd)) !== null) {
-    args.push(match[1] ?? match[2] ?? match[3]);
+    args.push(match[1] ?? match[2] ?? match[3])
   }
-  return args;
+  return args
+}
+
+function formatterEnv(output: FormatterOutput): Record<string, string> {
+  const env: Record<string, string> = { ...process.env } as Record<string, string>
+  if (Number.isFinite(output.columns) && output.columns && output.columns > 0) {
+    env.COLUMNS = String(Math.floor(output.columns))
+  }
+  if (Number.isFinite(output.rows) && output.rows && output.rows > 0) {
+    env.LINES = String(Math.floor(output.rows))
+  }
+  return env
 }

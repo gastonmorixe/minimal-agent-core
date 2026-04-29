@@ -1,0 +1,22 @@
+{
+  "id": "memory",
+  "name": "Memory",
+  "version": "0.1.0",
+  "description": "Persistent cross-session memory. The model emits <tui::memory> spans to save lessons; saved memories are appended to this plugin's PROMPT.md and reloaded into the system prompt on every future session.",
+  "prompt": "./PROMPT.md",
+  "tuis": [
+    {
+      "id": "memory_save",
+      "trigger": {
+        "type": "inline_tag",
+        "tag": "memory"
+      },
+      "handler": {
+        "type": "module",
+        "path": "./handlers/memory.ts",
+        "export": "default"
+      },
+      "interactive": false
+    }
+  ]
+}

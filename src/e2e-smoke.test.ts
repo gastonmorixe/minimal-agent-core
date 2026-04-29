@@ -1,0 +1,59 @@
+import { describe, it, expect } from "bun:test"
+
+async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (!stream) return ""
+  return new Response(stream).text()
+}
+
+describe("CLI smoke", () => {
+  it("prints help within budget without auth or network", async () => {
+    const t0 = performance.now()
+    const p = Bun.spawn(["bun", "run", "src/index.ts", "--help"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 5000,
+    })
+    await p.exited
+    expect(performance.now() - t0).toBeLessThan(2000)
+  })
+
+  it("starts, sends a one-shot prompt, and exits without external network", async () => {
+    const p = Bun.spawn(
+      [
+        "bun",
+        "run",
+        "src/index.ts",
+        "--model",
+        "claude-opus-4-7[1m]",
+        "--skip-quota",
+        "--prompt",
+        "Reply with exactly: PONG",
+      ],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 5000,
+        env: {
+          ...process.env,
+          NODE_ENV: "test",
+          MINIMAL_AGENT_TEST_AUTH: "1",
+          MINIMAL_AGENT_TRANSPORT: "test",
+          MINIMAL_AGENT_TEST_RESPONSE: "PONG",
+        },
+      },
+    )
+
+    const [exitCode, stdout, stderr] = await Promise.all([
+      p.exited,
+      readStream(p.stdout),
+      readStream(p.stderr),
+    ])
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("PONG")
+    expect(stderr).toContain("minimal-agent")
+    expect(stderr).toContain("oauth")
+    expect(stderr).toContain("claude-opus-4-7[1m]")
+    expect(stderr).not.toContain("cache anomaly")
+  })
+})
