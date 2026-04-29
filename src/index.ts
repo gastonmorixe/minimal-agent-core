@@ -41,7 +41,6 @@
  * @module index
  */
 
-import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
@@ -115,12 +114,11 @@ const effort =
     : undefined
 
 const formatterIdx = args.indexOf("--formatter")
-const DEFAULT_FORMATTER = `${process.env.HOME}/Projects/mdstream/target/release/mdstream`
 const formatterCmd: string[] | undefined =
   formatterIdx !== -1 && args[formatterIdx + 1]
     ? parseFormatterCommand(args[formatterIdx + 1])
-    : existsSync(DEFAULT_FORMATTER)
-      ? parseFormatterCommand(DEFAULT_FORMATTER)
+    : Bun.which("mdstream")
+      ? parseFormatterCommand("mdstream")
       : undefined
 
 // --resume <sid>  resume a saved session (or "last" for the most recent
