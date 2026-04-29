@@ -31,7 +31,7 @@
  * bun run src/index.ts "hello"                  # one-shot prompt
  * bun run src/index.ts --prompt "hello"         # same, explicit flag
  * echo "hello" | bun run src/index.ts -         # read prompt from stdin
- * bun run src/index.ts --formatter mdstream     # pipe through mdstream
+ * bun run src/index.ts --formatter mdstream     # pipe through mdstream (default)
  * bun run src/index.ts --skip-quota             # skip startup quota check
  * DEBUG=1 bun run src/index.ts                  # alternative debug activation
  * ```
@@ -41,6 +41,7 @@
  * @module index
  */
 
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
@@ -114,10 +115,13 @@ const effort =
     : undefined
 
 const formatterIdx = args.indexOf("--formatter")
-const formatterCmd =
+const DEFAULT_FORMATTER = `${process.env.HOME}/Projects/mdstream/target/release/mdstream`
+const formatterCmd: string[] | undefined =
   formatterIdx !== -1 && args[formatterIdx + 1]
     ? parseFormatterCommand(args[formatterIdx + 1])
-    : undefined
+    : existsSync(DEFAULT_FORMATTER)
+      ? parseFormatterCommand(DEFAULT_FORMATTER)
+      : undefined
 
 // --resume <sid>  resume a saved session (or "last" for the most recent
 // session in this cwd, falling back to the global most-recent).
@@ -139,7 +143,7 @@ function printHelp(): void {
     `  ${c.bold("Options")}`,
     `    ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
     `    ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max`,
-    `    ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter`,
+    `    ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
     `    ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
     `    ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
     `    ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
