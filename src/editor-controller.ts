@@ -704,6 +704,17 @@ export class EditorController extends EventEmitter {
       rowCount: editorWindow,
       columns: cols,
     })
+
+    // When the viewport has scrolled down, replace the first editor line with
+    // a faint "↑ more" indicator so the user knows content is hidden above.
+    if (this.viewportTop > 0 && lines.length > 0) {
+      const w = cols ?? 0
+      const indicator = w > 10
+        ? `\x1b[2m ${"─".repeat(w - 10)} ↑ more\x1b[22m`
+        : `\x1b[2m ↑ more\x1b[22m`
+      lines[0] = indicator
+    }
+
     const statusLine =
       this.statusLine == null || !cols || cols <= 0
         ? this.statusLine
