@@ -27,3 +27,9 @@ Two ways to use it:
 Prefer the tool call when the user will want to see the diff as the primary
 content of a reply. Prefer the inline tag when you need to reference a small
 hunk inside a longer explanation.
+
+Colors come from the agent's shared palette: additions render in the
+modern lime green (`addition` token), deletions in the hot pink/magenta
+used by the prompt arrow and `minimal-agent` banner (`removal` token).
+The plugin reads `MINIMAL_AGENT_PALETTE` from its environment so the
+look stays in sync with the rest of the agent's chrome.

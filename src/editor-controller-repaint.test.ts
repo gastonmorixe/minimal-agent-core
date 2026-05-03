@@ -87,9 +87,9 @@ describe("EditorController — paint amplification (B3)", () => {
 
     const initial = spy.calls.length
     // Same status twice in a row → second call should be a no-op.
-    ed.setStatus("Thinking…")
+    ed.setStatus("Thinking...")
     const afterFirst = spy.calls.length
-    ed.setStatus("Thinking…")
+    ed.setStatus("Thinking...")
     const afterSecond = spy.calls.length
 
     expect(afterFirst).toBeGreaterThan(initial)

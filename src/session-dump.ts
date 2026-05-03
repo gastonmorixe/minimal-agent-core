@@ -1,0 +1,161 @@
+import type { ContentBlock, Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import type { LoadedSession } from "./session-restore.ts"
+
+/**
+ * Format a session as a human-readable Markdown string.
+ */
+export function formatSessionAsMarkdown(session: LoadedSession): string {
+  let out = ""
+
+  if (session.meta) {
+    out += `# Session: ${session.meta.sid}\n`
+    out += `**Model**: ${session.meta.model}\n`
+    out += `**Date**: ${session.meta.createdAt}\n`
+    out += `**CWD**: \`${session.meta.cwd}\`\n\n`
+  }
+
+  for (const msg of session.messages) {
+    const role = msg.role === "user" ? "User" : "Assistant"
+    out += `## ${role}\n\n`
+
+    if (typeof msg.content === "string") {
+      out += msg.content + "\n\n"
+    } else {
+      for (const block of msg.content) {
+        out += formatBlockAsMarkdown(block) + "\n\n"
+      }
+    }
+  }
+
+  return out.trim() + "\n"
+}
+
+function formatBlockAsMarkdown(block: ContentBlock): string {
+  switch (block.type) {
+    case "text":
+      return block.text
+    case "thinking": {
+      let bq = `> 🤔 **Thinking**\n`
+      if (block.thinking) {
+        bq += block.thinking
+          .split("\n")
+          .map((line) => `> ${line}`)
+          .join("\n")
+      } else {
+        bq += `> *(Redacted thinking, signature: ${block.signature.slice(0, 16)}...)*`
+      }
+      return bq
+    }
+    case "tool_use": {
+      let bq = `> 🛠️ **Tool Use**: \`${block.name}\` (id: ${block.id})\n`
+      bq += `> \`\`\`json\n`
+      bq += JSON.stringify(block.input, null, 2)
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")
+      bq += `\n> \`\`\``
+      return bq
+    }
+    case "tool_result": {
+      let bq = `> 🔙 **Tool Result**: (id: ${block.tool_use_id})`
+      if (block.is_error) bq += ` **[ERROR]**`
+      bq += "\n"
+
+      let contentStr = ""
+      if (typeof block.content === "string") {
+        contentStr = block.content
+      } else {
+        contentStr = block.content
+          .filter(b => b.type === "text")
+          .map(b => (b as TextBlock).text)
+          .join("\n")
+      }
+
+      if (contentStr) {
+        bq += `> \`\`\`\n`
+        bq += contentStr
+          .split("\n")
+          .map((line) => `> ${line}`)
+          .join("\n")
+        bq += `\n> \`\`\``
+      } else {
+        bq += `> *(Empty result)*`
+      }
+      return bq
+    }
+  }
+}
+
+/**
+ * Format a session as a structured XML string.
+ */
+export function formatSessionAsXml(session: LoadedSession): string {
+  let out = ""
+
+  if (session.meta) {
+    out += `<session id="${escapeXml(session.meta.sid)}" model="${escapeXml(session.meta.model)}" date="${escapeXml(session.meta.createdAt)}">\n`
+  } else {
+    out += `<session>\n`
+  }
+
+  for (const msg of session.messages) {
+    out += `  <turn role="${escapeXml(msg.role)}">\n`
+
+    if (typeof msg.content === "string") {
+      out += `    <text>${escapeXml(msg.content)}</text>\n`
+    } else {
+      for (const block of msg.content) {
+        out += formatBlockAsXml(block, 4) + "\n"
+      }
+    }
+    out += `  </turn>\n`
+  }
+
+  out += `</session>\n`
+  return out
+}
+
+function formatBlockAsXml(block: ContentBlock, indent: number): string {
+  const pad = " ".repeat(indent)
+  switch (block.type) {
+    case "text":
+      return `${pad}<text>${escapeXml(block.text)}</text>`
+    case "thinking": {
+      if (block.thinking) {
+        return `${pad}<thinking>${escapeXml(block.thinking)}</thinking>`
+      }
+      return `${pad}<thinking signature="${escapeXml(block.signature)}"/>`
+    }
+    case "tool_use": {
+      const inputStr = typeof block.input === "object" ? JSON.stringify(block.input) : String(block.input)
+      return `${pad}<tool_use name="${escapeXml(block.name)}" id="${escapeXml(block.id)}">\n` +
+             `${pad}  <input>${escapeXml(inputStr)}</input>\n` +
+             `${pad}</tool_use>`
+    }
+    case "tool_result": {
+      const isErrorAttr = block.is_error ? ` is_error="true"` : ""
+      let contentStr = ""
+      if (typeof block.content === "string") {
+        contentStr = block.content
+      } else {
+        contentStr = block.content
+          .filter(b => b.type === "text")
+          .map(b => (b as TextBlock).text)
+          .join("\n")
+      }
+      
+      return `${pad}<tool_result tool_use_id="${escapeXml(block.tool_use_id)}"${isErrorAttr}>\n` +
+             `${pad}  <content>${escapeXml(contentStr)}</content>\n` +
+             `${pad}</tool_result>`
+    }
+  }
+}
+
+function escapeXml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
+}

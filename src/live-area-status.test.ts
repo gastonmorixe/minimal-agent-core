@@ -28,7 +28,7 @@ describe("LiveAreaStatusController", () => {
     })
     ctrl.start()
     const handle = bus.create("Thinking", { notificationId: "x", category: "agent" })
-    expect(editor.statuses[editor.statuses.length - 1]).toBe("* Thinking")
+    expect(editor.statuses[editor.statuses.length - 1]).toBe("*  Thinking")
     handle.clear()
     expect(editor.statuses[editor.statuses.length - 1]).toBe(null)
     ctrl.stop()
@@ -60,7 +60,7 @@ describe("LiveAreaStatusController", () => {
     editor.statuses.length = 0
     ctrl.suspend()
     ctrl.resume()
-    expect(editor.statuses[editor.statuses.length - 1]).toBe("* hi")
+    expect(editor.statuses[editor.statuses.length - 1]).toBe("*  hi")
     ctrl.stop()
   })
 })

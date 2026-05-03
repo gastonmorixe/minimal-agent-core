@@ -88,7 +88,7 @@ export interface TUIContext {
  *   truncated assistant turn.
  */
 export type TUIResult =
-  | { kind: "tool_result"; content: string; is_error?: boolean }
+  | { kind: "tool_result"; content: string; is_error?: boolean; display?: string }
   | { kind: "rendered"; ansi: string }
   | { kind: "interactive_result"; value: unknown }
 
@@ -372,7 +372,7 @@ export type EventHandler<TPayload = unknown> = (
  * - Re-skin the agent status spinner ("Asking..." instead of "Thinking...").
  *
  * Modes are mutually exclusive: at most one is active at a time. Cycling
- * (Shift+Tab in the REPL) walks the list `[no-mode, mode-1, mode-2, …]`.
+ * (Shift+Tab in the REPL) walks the list `[no-mode, mode-1, mode-2, ...]`.
  */
 export interface ManifestMode {
   /** Stable id, unique across all loaded plugins. Lowercase / kebab. */
@@ -411,22 +411,75 @@ export interface ManifestMode {
   statusLabel?: string
   /**
    * Markdown text to append to the system prompt's session-context block
-   * while this mode is active. Use this to instruct the model on the new
-   * behavior (e.g. "You are in ASK mode. Do not modify files.").
+   * while this mode is active.
+   *
+   * @deprecated As of v2.1.119 the recommended channel for mode behavior
+   *   text is the plugin's own `PROMPT.md` (which is part of the cached
+   *   `pluginBlock` of the system prompt). Reword the content from
+   *   "you have switched into X mode" to "when the active mode is `x`,
+   *   behave as follows…" so it remains valid whether the mode is active
+   *   or not. The activation signal is delivered as a small
+   *   `<mode-change>` attachment in the next user turn (see
+   *   {@link ModeManager.consumePendingAttachment}).
+   *
+   *   Concrete reason: any change to `systemPromptAppend` between turns
+   *   mutates the tail of `sys[3]` which carries `cache_control`; that
+   *   invalidates the entire ~12k-token system-prompt cache entry on
+   *   every mode toggle. PROMPT.md text is byte-stable across toggles.
+   *
+   *   Setting this field still works for one release (v2.1.x) but emits
+   *   a one-time stderr warning. It will be removed in v2.2.
    */
   systemPromptAppend?: string
   /**
-   * Tool names to remove from the tool list while this mode is active.
-   * The model literally cannot see these tools. Use exact tool names
-   * (e.g. `["Edit", "Write"]`).
+   * Tool names the harness will refuse to execute while this mode is
+   * active. The tools STAY REGISTERED in the request — the model still
+   * sees them in its tool list — but
+   * {@link ModeManager.isToolAllowed} returns `allowed: false` for
+   * them and the agent's tool-dispatch loop synthesizes a structured
+   * `is_error: true` tool_result instead of running the tool.
+   *
+   * Why "registered + refused" rather than "filtered out": removing a
+   * tool from the request changes the `tools` array bytes, which sits
+   * in the cached request prefix; that invalidates the prompt cache on
+   * every mode toggle. Keeping the array byte-stable preserves the
+   * cache. Mode mechanics live in code (the dispatch gate), not in
+   * the wire shape.
+   *
+   * Use exact tool names (e.g. `["Edit", "Write"]`).
    */
   disallowedTools?: string[]
+  /**
+   * Optional teaching string appended to the refusal `tool_result`'s
+   * content when the model calls a disallowed tool. The model sees the
+   * full message in its next turn and can adapt within the same agentic
+   * loop without a user round-trip.
+   *
+   * Example for ASK mode:
+   *   "Present the proposed change as a unified diff in a code block;
+   *    the user will apply it manually."
+   *
+   * The full refusal payload is rendered as
+   *   `Tool "<name>" is not permitted in <LABEL> mode. <refusalHint>`
+   *
+   * Keep it short (one sentence). The longer "policy" explanation
+   * belongs in the plugin's `PROMPT.md`, which is permanently in the
+   * cached system prompt.
+   */
+  refusalHint?: string
   /**
    * If `true`, this mode is the agent's startup mode. Only one mode across
    * all loaded plugins may declare itself default. If multiple do, the
    * loader keeps the first.
    */
   default?: boolean
+  /**
+   * When `true`, the live editor renders invisible characters as faint
+   * glyphs (spaces → `·`, tabs → `→`, line-ends → `↵`) while this mode
+   * is active. Useful for a dedicated "debug" mode in test harnesses or
+   * developer setups.
+   */
+  editorShowHidden?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -437,9 +490,9 @@ export interface ManifestMode {
  * A color value as a mode wishes to express it. Most-restrictive forms first.
  *
  * - `"transparent"` — sentinel, never paints. Default for backgrounds.
- * - Semantic token (`"accent"`, `"accent-soft"`, `"danger"`, `"muted"`, …) —
+ * - Semantic token (`"accent"`, `"accent-soft"`, `"danger"`, `"muted"`, ...) —
  *   theme-aware. **Preferred** for plugin authors.
- * - Legacy color name (`"blue"`, `"pink"`, …) — same set the manifest's
+ * - Legacy color name (`"blue"`, `"pink"`, ...) — same set the manifest's
  *   `color` field has always accepted. Kept for compat.
  * - Literal hex `"#rrggbb"` — escape hatch. May be downgraded by the
  *   resolver on terminals without truecolor.

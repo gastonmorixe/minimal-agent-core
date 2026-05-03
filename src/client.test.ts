@@ -266,7 +266,8 @@ describe("client", () => {
           null,
           "Sending request",
           "Waiting for response",
-          "Streaming response",
+          "Receiving stream",
+          "Writing response",
           null,
         ])
       } finally {
@@ -348,6 +349,109 @@ describe("client", () => {
         { type: "thinking", thinking: "plan step", signature: "sig-asig-b" },
         { type: "text", text: "answer" },
       ])
+    })
+
+    it("publishes detailed status updates for tool_use streaming with hint extraction", async () => {
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "edit" }] }]
+      const seen: Array<string | null> = []
+
+      GLOBAL_STATUS_BUS.reset()
+      const unsubscribe = GLOBAL_STATUS_BUS.subscribe((label) => {
+        seen.push(label)
+      })
+
+      // Build a Write input split across many input_json_delta events so the
+      // throttle has a chance to fire and the hint extractor sees partial JSON.
+      const inputJson = JSON.stringify({
+        file_path: "/tmp/example.txt",
+        content: "x".repeat(4096),
+      })
+      const chunks: string[] = []
+      for (let i = 0; i < inputJson.length; i += 256) {
+        chunks.push(inputJson.slice(i, i + 256))
+      }
+
+      const networkClient = fakeNetworkClient(() =>
+        sseResponse([
+          { type: "message_start", message: { usage: {} } },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "tu_1", name: "Write", input: {} },
+          },
+          ...chunks.map((partial) => ({
+            type: "content_block_delta" as const,
+            index: 0,
+            delta: { type: "input_json_delta" as const, partial_json: partial },
+          })),
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "tool_use", stop_sequence: null },
+          },
+        ]),
+      )
+
+      try {
+        const response = await sendMessageFull({
+          auth,
+          messages,
+          model: "claude-opus-4-7",
+          stream: true,
+          networkClient,
+        })
+
+        expect(response.blocks).toHaveLength(1)
+        const tu = response.blocks[0] as { type: string; name: string; input: Record<string, unknown> }
+        expect(tu.type).toBe("tool_use")
+        expect(tu.input.file_path).toBe("/tmp/example.txt")
+
+        // Status flow expectations:
+        expect(seen).toContain("Sending request")
+        expect(seen).toContain("Waiting for response")
+        expect(seen).toContain("Receiving stream")
+        // Initial tool_use status
+        expect(seen.some((l) => l === "Calling Write: streaming input")).toBe(true)
+        // At least one delta-driven update with the parsed file_path hint
+        expect(
+          seen.some(
+            (l) => typeof l === "string" && l.includes("Calling Write:") && l.includes("/tmp/example.txt"),
+          ),
+        ).toBe(true)
+        // Dispatch + finalize
+        expect(seen).toContain("Calling Write: dispatching")
+        // Cleared at the end
+        expect(seen[seen.length - 1]).toBeNull()
+      } finally {
+        unsubscribe()
+        GLOBAL_STATUS_BUS.reset()
+      }
+    })
+
+    it("forwards SendOptions.signal to networkClient.request", async () => {
+      let captured: NetworkRequest | null = null
+      const networkClient = fakeNetworkClient((req) => {
+        captured = req
+        return sseResponse([
+          { type: "message_start", message: { id: "x", model: "claude", usage: {} } },
+          { type: "message_stop" },
+        ])
+      })
+      const ac = new AbortController()
+      const auth: AuthResult = { token: "tok", refresh: undefined }
+      await sendMessageFull({
+        auth,
+        messages: [{ role: "user", content: "hi" }],
+        networkClient,
+        signal: ac.signal,
+      })
+      expect(captured).not.toBeNull()
+      // The captured network request must carry the SAME signal instance
+      // we passed in — cancellation has to walk all the way through to
+      // the fetch/http2 transport for Esc/Ctrl+C abort to actually tear
+      // down the in-flight HTTP/2 stream.
+      expect((captured as unknown as NetworkRequest).signal).toBe(ac.signal)
     })
   })
 

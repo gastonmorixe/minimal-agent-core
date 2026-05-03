@@ -35,6 +35,7 @@
  * @module mode-style
  */
 
+import { PALETTE, SEMANTIC } from "./palette.ts"
 import type { ColorRequest, ModeStyleRequest, ThemeKey } from "./plugins/types.ts"
 
 // ---------------------------------------------------------------------------
@@ -92,35 +93,34 @@ export const MAX_LABEL_WIDTH = 8
  * Keeping the open sequence (not a wrapper function) lets us compose with
  * background and bold/dim without nesting resets.
  */
+// SGR open sequences per palette name. Sourced from `src/palette.ts` so
+// `c.*` in agent.ts and this resolver can never drift.
 const LEGACY_FG_OPEN: Record<string, string> = {
-  cyan: "\x1b[36m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
-  yellow: "\x1b[33m",
-  green: "\x1b[32m",
-  red: "\x1b[31m",
-  // 256-color palette entries from agent.ts:78-85.
-  orange: "\x1b[38;5;208m",
-  pink: "\x1b[38;5;199m",
-  purple: "\x1b[38;5;98m",
-  lime: "\x1b[38;5;118m",
-  sky: "\x1b[38;5;45m",
-  gold: "\x1b[38;5;214m",
+  cyan: PALETTE.cyan,
+  blue: PALETTE.blue,
+  magenta: PALETTE.magenta,
+  yellow: PALETTE.yellow,
+  green: PALETTE.green,
+  red: PALETTE.red,
+  orange: PALETTE.orange,
+  pink: PALETTE.pink,
+  purple: PALETTE.purple,
+  lime: PALETTE.lime,
+  sky: PALETTE.sky,
+  gold: PALETTE.gold,
 }
 
 /**
- * Semantic token → legacy color name. The agent owns this mapping; plugins
- * just request a token.
- *
- * MVP defaults are conservative (mapped to existing ANSI helpers) so the
- * terminal theme stays authoritative. The mdstream rainbow palette is a
- * later upgrade.
+ * Semantic token → palette color name. Subset of `SEMANTIC` in
+ * `src/palette.ts` — the resolver only honors tokens that map to a
+ * color name we expose for mode style. Override locally if a mode-style
+ * surface should pick a different pigment than the broad semantic.
  */
 const SEMANTIC_TO_LEGACY: Record<string, string> = {
-  accent: "blue",
-  "accent-soft": "cyan",
-  danger: "red",
-  muted: "cyan", // dim flag carries the visual weight; cyan is least loud
+  accent: "blue", // mode-style prefers calm blue over the brand sky
+  "accent-soft": SEMANTIC["accent-soft"],
+  danger: SEMANTIC.danger,
+  muted: SEMANTIC.muted,
 }
 
 // ---------------------------------------------------------------------------
@@ -322,5 +322,5 @@ export function paint(text: string, style: ResolvedSurfaceStyle): string {
  */
 export function clampLabel(label: string): string {
   if (label.length <= MAX_LABEL_WIDTH) return label
-  return label.slice(0, MAX_LABEL_WIDTH - 1) + "…"
+  return label.slice(0, MAX_LABEL_WIDTH - 3) + "..."
 }

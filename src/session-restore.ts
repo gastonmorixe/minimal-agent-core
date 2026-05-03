@@ -36,17 +36,32 @@ import {
  *   block array, append a `tool_result` block to it; otherwise start a
  *   new `{role:"user", content:[<block>]}` message. This mirrors how the
  *   live agent loop assembles tool turns.
+ * - `rewind` → truncate `messages[]` so the user message corresponding to
+ *   `UserRecord.id === to` is the last message kept. Everything pushed
+ *   after that user record (assistant, tool_result, later user) is
+ *   dropped. Multiple rewinds compose because each is honored as it is
+ *   walked. If `to` does not match any prior user record, the rewind is
+ *   logged and skipped (defensive — append-only logs can in theory carry
+ *   stale ids after a manual edit).
  */
 export function foldRecords(records: SessionRecord[]): Message[] {
   const messages: Message[] = []
+  // Map from UserRecord.id → index in `messages[]` of the user message it
+  // produced. Maintained alongside `messages` so rewinds can find their
+  // truncation point in O(1). Entries pointing past the current end of
+  // `messages` are pruned on rewind.
+  const userIdToIndex = new Map<string, number>()
   for (const rec of records) {
     switch (rec.kind) {
       case "meta":
       case "note":
         continue
-      case "user":
+      case "user": {
+        const idx = messages.length
         messages.push({ role: "user", content: rec.content })
+        if (rec.id) userIdToIndex.set(rec.id, idx)
         break
+      }
       case "assistant":
         messages.push({ role: "assistant", content: rec.content })
         break
@@ -62,6 +77,22 @@ export function foldRecords(records: SessionRecord[]): Message[] {
           last.content.push(block)
         } else {
           messages.push({ role: "user", content: [block] })
+        }
+        break
+      }
+      case "rewind": {
+        const targetIdx = userIdToIndex.get(rec.to)
+        if (targetIdx === undefined) {
+          console.warn(
+            `session-restore: rewind to unknown msgId ${rec.to} — skipping`,
+          )
+          break
+        }
+        // Keep messages[0..targetIdx] inclusive; drop the rest.
+        messages.length = targetIdx + 1
+        // Prune id → index entries that now point past the end.
+        for (const [id, i] of userIdToIndex) {
+          if (i > targetIdx) userIdToIndex.delete(id)
         }
         break
       }
@@ -211,7 +242,7 @@ export function firstUserPromptSnippet(records: SessionRecord[], maxLen = 60): s
               .map((b) => b.text)
               .join(" ")
       const oneLine = text.replace(/\s+/g, " ").trim()
-      return oneLine.length > maxLen ? `${oneLine.slice(0, maxLen - 1)}…` : oneLine
+      return oneLine.length > maxLen ? `${oneLine.slice(0, maxLen - 3)}...` : oneLine
     }
   }
   return ""

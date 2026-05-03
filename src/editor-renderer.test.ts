@@ -124,3 +124,76 @@ describe("EditorRenderer", () => {
     expect(r.measureRows(buf, 10)).toBe(2)
   })
 })
+
+describe("EditorRenderer — showHidden", () => {
+  it("spaces become faint middle-dot glyphs", () => {
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  ", showHidden: true })
+    const buf = new EditorBuffer()
+    buf.insert("a b")
+    const out = r.render(buf)
+    // Space at position 1 should be replaced with the faint · indicator.
+    expect(out.lines[0]).toContain("\x1b[2m\u00b7\x1b[22m")
+    // Cursor is still placed at col 5 (2 prompt + "a b" = 3 chars × 1 cell each)
+    expect(out.cursor).toEqual({ row: 0, col: 5 })
+  })
+
+  it("tabs become faint arrow glyphs", () => {
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  ", showHidden: true })
+    const buf = new EditorBuffer()
+    buf.insert("a\tb")
+    const out = r.render(buf)
+    expect(out.lines[0]).toContain("\x1b[2m\u2192\x1b[22m")
+  })
+
+  it("non-last logical lines get a faint ↵ marker appended", () => {
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  ", showHidden: true })
+    const buf = new EditorBuffer()
+    buf.insert("line1")
+    buf.newline()
+    buf.insert("line2")
+    const out = r.render(buf)
+    // First rendered line should end with ↵
+    expect(out.lines[0]).toContain("\x1b[2m\u21b5\x1b[22m")
+    // Last line should NOT have ↵
+    expect(out.lines[1]).not.toContain("\u21b5")
+  })
+
+  it("last logical line has no ↵ marker", () => {
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  ", showHidden: true })
+    const buf = new EditorBuffer()
+    buf.insert("only line")
+    const out = r.render(buf)
+    expect(out.lines[0]).not.toContain("\u21b5")
+  })
+
+  it("setShowHidden toggles the feature at runtime", () => {
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  " })
+    const buf = new EditorBuffer()
+    buf.insert("a b")
+    // Off by default.
+    expect(r.render(buf).lines[0]).toBe("> a b")
+    // Enable.
+    r.setShowHidden(true)
+    expect(r.render(buf).lines[0]).toContain("\u00b7")
+    // Disable again.
+    r.setShowHidden(false)
+    expect(r.render(buf).lines[0]).toBe("> a b")
+  })
+
+  it("wrapping: ↵ appended only to last physical chunk of a logical line", () => {
+    // Line wider than columns → wraps into 2 physical rows.
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  ", showHidden: true })
+    const buf = new EditorBuffer()
+    buf.insert("aaa")
+    buf.newline()
+    buf.insert("bbb")
+    const out = r.render(buf, { columns: 6 }) // "❯ " + 4 chars → wraps at 4
+    // The ↵ should be on the last physical row of "aaa", not on intermediate rows.
+    const allLines = out.lines.join("\n")
+    // "aaa" fits in 4 cells (6 - 2 prompt) → 1 chunk, gets ↵
+    expect(out.lines[0]).toContain("\u21b5")
+    // "bbb" is the last logical line, no ↵
+    expect(out.lines[out.lines.length - 1]).not.toContain("\u21b5")
+    void allLines
+  })
+})

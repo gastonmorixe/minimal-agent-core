@@ -215,4 +215,70 @@ describe("live-area REPL (end to end)", () => {
     // Compositor restored on shutdown — cursor is shown again.
     expect(output.text()).toContain("\x1b[?25h")
   })
+
+  it("onQueueInject does NOT re-render the prompt to scrollback (Bug 7)", async () => {
+    // Regression for the "queue stuff renders twice" bug: when a queued
+    // message is drained at a tool boundary mid-turn and re-injected via
+    // opts.onQueueInject, the host hook used to commit a `❯ <text>` line
+    // to scrollback — but `EditorController.submit()` already committed
+    // that exact line at the moment the user pressed Enter. Result: same
+    // prompt visible twice in scrollback (once before the tool block,
+    // once after). The fix turns onQueueInject into a no-op for
+    // scrollback; this test asserts the snapshot is byte-stable across
+    // the call.
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new Compositor({ output: output as any })
+    const editor = new EditorController({
+      prompt: "❯ ",
+      continuationPrompt: "  ",
+      compositor,
+      stdin: stdin as any,
+      output: output as any,
+    })
+
+    // Capture the inject hook for direct invocation from inside agent.run.
+    let capturedInject: ((qtext: string) => void) | null = null
+    const fakeAgent: ReplAgentLike = {
+      pluginLoader: () => null,
+      async *run(_text: string, opts?: any) {
+        capturedInject = opts?.onQueueInject ?? null
+        yield "ok\n"
+        return { blocks: [], text: "ok\n", stopReason: "end_turn" } as any
+      },
+    }
+
+    const replPromise = runRepl(fakeAgent, {
+      output: output as any,
+      statusBus: new StatusBus(),
+      statusRenderer: null,
+      useLiveArea: true,
+      compositor,
+      editor,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    stdin.send("hi")
+    stdin.send("\r")
+    await new Promise((r) => setTimeout(r, 10))
+
+    // Snapshot output, fire the inject hook with a unique sentinel, and
+    // confirm no new bytes were written. A correct no-op leaves the output
+    // length unchanged AND never emits the sentinel as a `❯ <sentinel>`
+    // prompt line.
+    expect(capturedInject).not.toBeNull()
+    const sentinel = "QUEUE_INJECT_SENTINEL_XYZ"
+    const before = output.chunks.length
+    const beforeText = output.text()
+    capturedInject?.(sentinel)
+    expect(output.chunks.length).toBe(before)
+    expect(output.text()).toBe(beforeText)
+    expect(output.text()).not.toContain(`❯ ${sentinel}`)
+    expect(output.text()).not.toContain(sentinel)
+
+    stdin.send("\x03")
+    stdin.send("\x03")
+    await replPromise
+  })
 })

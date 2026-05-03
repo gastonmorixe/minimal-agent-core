@@ -53,8 +53,8 @@ describe("updateStreamCol", () => {
     expect(updateStreamCol("abc\nabcdef", 4, 5)).toBe(1)
   })
 
-  it("mixed prose with ❯ … — still matches displayWidth", () => {
-    const s = "❯ stream… —"
+  it("mixed prose with ❯ ... — still matches displayWidth", () => {
+    const s = "❯ stream... —"
     expect(updateStreamCol(s, 0)).toBe(displayWidth(s))
   })
 })

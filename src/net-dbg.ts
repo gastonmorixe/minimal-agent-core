@@ -3,7 +3,7 @@
  * file-quad scheme (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
  *
  * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1`. Logs go to
- * `${cwd}/.node-net-dbg/${epoch}-${human-date}/`. Each call produces four
+ * `${cwd}/.net-dbg/${epoch}-${human-date}/`. Each call produces four
  * files keyed by a per-process sequence number.
  *
  * Designed to be called from {@link sendMessage} in client.ts. The response
@@ -63,7 +63,7 @@ function ensureSessionDir(): string | null {
     `${pad(d.getDate())}-${months[d.getMonth()]}-${d.getFullYear()}-${days[d.getDay()]}--` +
     `${pad(d.getHours())}h${pad(d.getMinutes())}m${pad(d.getSeconds())}s${formatTzOffset(d)}`
 
-  const dir = join(process.cwd(), ".node-net-dbg", `${epoch}-${human}-minimal-agent`)
+  const dir = join(process.cwd(), ".net-dbg", `${epoch}-${human}-minimal-agent`)
   mkdirSync(dir, { recursive: true })
   SESSION_DIR = dir
   return dir

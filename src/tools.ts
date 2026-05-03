@@ -130,7 +130,44 @@ export interface ToolExecResult {
    * @internal
    */
   _truncCtx?: TruncateCtx
+  /**
+   * Internal: set when a tool was cancelled mid-flight via an
+   * {@link AbortSignal}. The agent's transcript renderer consumes this to
+   * draw a dim "canceled" footer; the field is stripped before the result
+   * is sent back to the API as a `tool_result`.
+   * @internal
+   */
+  _aborted?: boolean
 }
+
+/**
+ * Per-call options for {@link executeTool}.
+ *
+ * `signal` lets the host cancel a long-running tool (e.g. a `Bash` call
+ * doing `sleep 60`) without freezing the event loop. When the signal
+ * fires the tool resolves with `{ is_error: true, content: "tool aborted
+ * by user", _aborted: true }`.
+ */
+export interface ToolExecOpts {
+  signal?: AbortSignal
+}
+
+/**
+ * Strip internal-only fields (`_truncCtx`, `_aborted`) from a result before
+ * sending it back to the API. {@link executeTool} already strips
+ * `_truncCtx`; `_aborted` is preserved through `executeTool` so the
+ * renderer can see it, and stripped here right before serialization.
+ */
+export function stripInternalFields(r: ToolExecResult): void {
+  delete r._truncCtx
+  delete r._aborted
+}
+
+const ABORTED_RESULT = (): ToolExecResult => ({
+  content: "tool aborted by user",
+  is_error: true,
+  _aborted: true,
+})
 
 // ---------------------------------------------------------------------------
 // Tool definitions (matching v2.1.91 capture schemas)
@@ -326,32 +363,48 @@ let bashCwd = process.cwd()
  * console.log(result.content); // "hello"
  * ```
  */
-export function executeTool(name: string, input: Record<string, unknown>): ToolExecResult {
-  const r = dispatch(name, input)
+export async function executeTool(
+  name: string,
+  input: Record<string, unknown>,
+  opts: ToolExecOpts = {},
+): Promise<ToolExecResult> {
+  // Already-aborted shortcut: don't even dispatch. The Write-with-aborted
+  // test asserts no IO happens in this case.
+  if (opts.signal?.aborted) return ABORTED_RESULT()
+
+  const r = await dispatch(name, input, opts)
   // Universal post-hoc clamp. Skip when `display` is set — diffs are bounded
   // by Edit/Write inputs and we want them rendered intact in the transcript.
-  if (!r.display) {
+  // Also skip when aborted — the canned message is fine as-is.
+  if (!r.display && !r._aborted) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
     r.content = truncateToolOutput(r.content, ctx)
   }
   delete r._truncCtx
+  // Note: `_aborted` is intentionally PRESERVED here so the renderer can
+  // distinguish "tool errored" from "tool canceled". Caller must run
+  // `stripInternalFields` before serializing the result back to the API.
   return r
 }
 
-function dispatch(name: string, input: Record<string, unknown>): ToolExecResult {
+async function dispatch(
+  name: string,
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
   switch (name) {
     case "Bash":
-      return execBash(input)
+      return execBash(input, opts)
     case "Read":
-      return execRead(input)
+      return execRead(input, opts)
     case "Write":
-      return execWrite(input)
+      return execWrite(input, opts)
     case "Edit":
-      return execEdit(input)
+      return execEdit(input, opts)
     case "Glob":
-      return execGlob(input)
+      return execGlob(input, opts)
     case "Grep":
-      return execGrep(input)
+      return execGrep(input, opts)
     default:
       return { content: `Unknown tool: ${name}`, is_error: true }
   }
@@ -370,38 +423,130 @@ function dispatch(name: string, input: Record<string, unknown>): ToolExecResult 
  * @param input.command - Shell command to execute
  * @param input.timeout - Optional timeout in ms (default: 120000)
  */
-function execBash(input: Record<string, unknown>): ToolExecResult {
+async function execBash(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
   const command = input.command as string
   const timeout = (input.timeout as number) ?? 120_000
 
   try {
-    // Handle cd commands by tracking cwd
-    const cdMatch = command.match(/^cd\s+(.+)$/)
-    if (cdMatch) {
+    // Persistent-cwd shortcut for *bare* `cd <path>`.
+    //
+    // Each `bash -c` invocation runs in a fresh subshell, so a plain `cd`
+    // through bash would be lost the moment the subshell exits. To keep
+    // `bashCwd` sticky across tool calls we intercept the bare form here
+    // and update it directly.
+    //
+    // CRITICAL: only intercept when there are NO shell operators in the
+    // tail. The naive `^cd\s+(.+)$` capture is greedy and swallows
+    // pipelines like `cd /foo && bun test` or `cd /foo | tee log` as if
+    // the entire tail were a path — bash never runs, the operator is
+    // lost, and we synthesize a misleading "no such directory" error
+    // containing the full pipeline. Anything containing `&&`, `||`, `;`,
+    // `|`, `&`, redirections (`<`, `>`), backticks, or `$(...)` is
+    // delegated to `bash -c` so the operators take effect (the cd then
+    // happens inside the subshell and does NOT mutate `bashCwd`, matching
+    // POSIX semantics for chained commands).
+    //
+    // Regression test: src/tools-bash-cd.test.ts.
+    const cdMatch = command.match(/^cd\s+(.+?)\s*$/)
+    if (cdMatch && !/[;&|<>`$()]/.test(cdMatch[1])) {
       const { resolve } = require("node:path")
-      const newDir = resolve(bashCwd, cdMatch[1].replace(/^["']|["']$/g, ""))
+      const raw = cdMatch[1].trim()
+      // Strip a single matched pair of surrounding quotes.
+      const unquoted =
+        (raw.startsWith('"') && raw.endsWith('"')) ||
+        (raw.startsWith("'") && raw.endsWith("'"))
+          ? raw.slice(1, -1)
+          : raw
+      const newDir = resolve(bashCwd, unquoted)
       if (existsSync(newDir)) {
         bashCwd = newDir
         return { content: "" }
       }
-      return { content: `cd: no such directory: ${cdMatch[1]}`, is_error: true }
+      return { content: `cd: no such directory: ${unquoted}`, is_error: true }
     }
 
-    const result = spawnSync("bash", ["-c", command], {
+    // Async spawn: critical for UI responsiveness. The previous
+    // `spawnSync` blocked the entire event loop for the duration of the
+    // child process — the spinner stopped animating, keystrokes weren't
+    // echoed, and Ctrl+C couldn't be handled. With `Bun.spawn` the agent
+    // can keep painting the status bar and (eventually) honor a user-key
+    // abort routed through `opts.signal`.
+    const proc = Bun.spawn(["bash", "-c", command], {
       cwd: bashCwd,
-      timeout,
-      maxBuffer: 1024 * 1024,
-      encoding: "utf-8",
       env: { ...process.env, TERM: "dumb" },
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
     })
 
-    const output = [result.stdout ?? "", result.stderr ?? ""].filter(Boolean).join("\n").trim()
+    let aborted = false
+    let timedOut = false
+    const killTree = (sig: "SIGTERM" | "SIGKILL") => {
+      try {
+        proc.kill(sig)
+      } catch {
+        /* already exited */
+      }
+    }
+    const escalateKill = () => {
+      killTree("SIGTERM")
+      // Grace period before SIGKILL — matches the abort-quit-rewind plan.
+      setTimeout(() => {
+        if (proc.exitCode == null && proc.signalCode == null) killTree("SIGKILL")
+      }, 2000).unref?.()
+    }
+
+    const timer =
+      timeout > 0
+        ? setTimeout(() => {
+            timedOut = true
+            escalateKill()
+          }, timeout)
+        : null
+
+    const onAbort = () => {
+      aborted = true
+      escalateKill()
+    }
+    const signal = opts.signal
+    if (signal) {
+      if (signal.aborted) onAbort()
+      else signal.addEventListener("abort", onAbort, { once: true })
+    }
+
+    let stdout = ""
+    let stderr = ""
+    try {
+      ;[stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (signal) signal.removeEventListener("abort", onAbort)
+    }
+
+    if (aborted) return ABORTED_RESULT()
+
+    const output = [stdout, stderr].filter(Boolean).join("\n").trim()
     const totalBytes = Buffer.byteLength(output, "utf8")
     const totalLines = output.length === 0 ? 0 : output.split("\n").length
 
-    if (result.status !== 0) {
+    if (timedOut) {
       return {
-        content: output || `Exit code ${result.status}`,
+        content: output ? `${output}\n[timed out after ${timeout}ms]` : `[timed out after ${timeout}ms]`,
+        is_error: true,
+        _truncCtx: { totalBytes, totalLines },
+      }
+    }
+
+    if (proc.exitCode !== 0) {
+      return {
+        content: output || `Exit code ${proc.exitCode}`,
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }
@@ -426,7 +571,11 @@ function execBash(input: Record<string, unknown>): ToolExecResult {
  * @param input.offset - Zero-based line offset to start at (default: 0)
  * @param input.limit - Max number of lines to read (default: all)
  */
-function execRead(input: Record<string, unknown>): ToolExecResult {
+async function execRead(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
+  if (opts.signal?.aborted) return ABORTED_RESULT()
   const filePath = input.file_path as string
   const offset = (input.offset as number) ?? 0
   const limit = input.limit as number | undefined
@@ -463,7 +612,11 @@ function execRead(input: Record<string, unknown>): ToolExecResult {
  * @param input.file_path - Absolute path to write
  * @param input.content - Full file content
  */
-function execWrite(input: Record<string, unknown>): ToolExecResult {
+async function execWrite(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
+  if (opts.signal?.aborted) return ABORTED_RESULT()
   const filePath = input.file_path as string
   const content = input.content as string
 
@@ -503,7 +656,11 @@ function execWrite(input: Record<string, unknown>): ToolExecResult {
  * @param input.new_string - Replacement text
  * @param input.replace_all - If true, replace all matches (default: false)
  */
-function execEdit(input: Record<string, unknown>): ToolExecResult {
+async function execEdit(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
+  if (opts.signal?.aborted) return ABORTED_RESULT()
   const filePath = input.file_path as string
   const oldString = input.old_string as string
   const newString = input.new_string as string
@@ -558,7 +715,11 @@ function execEdit(input: Record<string, unknown>): ToolExecResult {
  * @param input.pattern - Glob pattern (e.g. `**\/*.ts`, `src/*.{js,ts}`)
  * @param input.path - Directory to search in (default: current bash cwd)
  */
-function execGlob(input: Record<string, unknown>): ToolExecResult {
+async function execGlob(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
+  if (opts.signal?.aborted) return ABORTED_RESULT()
   const pattern = input.pattern as string
   const searchPath = (input.path as string) ?? bashCwd
 
@@ -614,7 +775,11 @@ function execGlob(input: Record<string, unknown>): ToolExecResult {
  * @param input.head_limit - Cap output lines (default: 250, 0 = unlimited)
  * @param input.multiline - Allow `.` to match newlines
  */
-function execGrep(input: Record<string, unknown>): ToolExecResult {
+async function execGrep(
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+): Promise<ToolExecResult> {
+  if (opts.signal?.aborted) return ABORTED_RESULT()
   const pattern = input.pattern as string
   const searchPath = (input.path as string) ?? bashCwd
   const outputMode = (input.output_mode as string) ?? "files_with_matches"

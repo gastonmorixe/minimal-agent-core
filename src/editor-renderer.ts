@@ -26,6 +26,12 @@ import {
 export interface EditorRendererOptions {
   prompt: string
   continuationPrompt: string
+  /**
+   * When `true`, invisible characters are rendered as faint glyphs:
+   * spaces → `·`, tabs → `→`, line-ends → `↵`. Useful for
+   * debugging whitespace in multiline inputs.
+   */
+  showHidden?: boolean
 }
 
 export interface EditorRenderOptions {
@@ -46,12 +52,22 @@ export class EditorRenderer {
   private continuationPrompt: string
   private promptWidth: number
   private continuationPromptWidth: number
+  private showHidden: boolean
 
   constructor(opts: EditorRendererOptions) {
     this.prompt = opts.prompt
     this.continuationPrompt = opts.continuationPrompt
     this.promptWidth = displayWidth(opts.prompt)
     this.continuationPromptWidth = displayWidth(opts.continuationPrompt)
+    this.showHidden = opts.showHidden ?? false
+  }
+
+  /**
+   * Enable or disable visible rendering of invisible characters. Takes
+   * effect on the next call to {@link render}.
+   */
+  setShowHidden(v: boolean): void {
+    this.showHidden = v
   }
 
   /**
@@ -97,7 +113,11 @@ export class EditorRenderer {
       const lineText = buf.lines[logical]
 
       if (!wrap) {
-        lines.push(prompt + lineText)
+        const displayText = this.showHidden
+          ? markHidden(lineText) +
+            (logical < totalRows - 1 ? HIDDEN_NEWLINE : "")
+          : lineText
+        lines.push(prompt + displayText)
         if (logical === buf.row) {
           cursorRow = i
           cursorCol = promptW + buf.col
@@ -108,8 +128,20 @@ export class EditorRenderer {
 
       const startPhysical = lines.length
       const chunks = wrapContent(lineText, cols, promptW)
-      for (let k = 0; k < chunks.length; k++) {
-        lines.push((k === 0 ? prompt : "") + chunks[k])
+      if (this.showHidden) {
+        // Apply show-hidden transform AFTER wrapping so width calculations
+        // remain correct (wrapping uses the original text's display widths).
+        const isNonLastLine = logical < totalRows - 1
+        for (let k = 0; k < chunks.length; k++) {
+          const transformed =
+            markHidden(chunks[k]) +
+            (isNonLastLine && k === chunks.length - 1 ? HIDDEN_NEWLINE : "")
+          lines.push((k === 0 ? prompt : "") + transformed)
+        }
+      } else {
+        for (let k = 0; k < chunks.length; k++) {
+          lines.push((k === 0 ? prompt : "") + chunks[k])
+        }
       }
 
       if (logical === buf.row) {
@@ -200,4 +232,43 @@ function wrapContent(text: string, cols: number, firstPromptW: number): string[]
   }
   if (result.length === 0 || cur.length > 0) result.push(cur)
   return result
+}
+
+/**
+ * Faint newline glyph appended at the end of every non-last logical line
+ * when show-hidden mode is active.
+ */
+const HIDDEN_NEWLINE = "\x1b[2m\u21b5\x1b[22m"
+
+/**
+ * Replace invisible characters with faint visual indicator glyphs.
+ *
+ * | Character | Replacement | Meaning            |
+ * |-----------|-------------|-------------------- |
+ * | SPACE     | `·`         | U+00B7 MIDDLE DOT  |
+ * | TAB       | `→`         | U+2192 RIGHTWARDS ARROW |
+ *
+ * ANSI escape sequences already present in the text are passed through
+ * untouched (the renderer normally passes plain user input here, but
+ * callers should be aware).
+ *
+ * Width contract: each substituted glyph occupies exactly one terminal
+ * cell — the same as the original character — so cursor positions
+ * computed from the untransformed text remain valid.
+ */
+function markHidden(text: string): string {
+  let out = ""
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i)!
+    const ch = String.fromCodePoint(cp)
+    i += ch.length
+    if (ch === " ") {
+      out += "\x1b[2m\u00b7\x1b[22m" // · MIDDLE DOT
+    } else if (ch === "\t") {
+      out += "\x1b[2m\u2192\x1b[22m" // → RIGHTWARDS ARROW
+    } else {
+      out += ch
+    }
+  }
+  return out
 }

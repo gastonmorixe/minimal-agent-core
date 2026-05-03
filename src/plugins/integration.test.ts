@@ -65,8 +65,8 @@ describe("plugins: end-to-end integration with diff-view", () => {
     expect(full.endsWith(" after")).toBe(true)
     expect(full).not.toContain("<tui::diff>")
     expect(full).not.toContain("</tui::diff>")
-    expect(full).toContain("\x1b[31m-old\x1b[0m")
-    expect(full).toContain("\x1b[32m+new\x1b[0m")
+    expect(full).toContain("\x1b[38;5;199m-old\x1b[0m")
+    expect(full).toContain("\x1b[38;5;118m+new\x1b[0m")
     expect(full).toContain("\x1b[36m@@ -1,2 +1,2 @@\x1b[0m")
   })
 
@@ -81,8 +81,8 @@ describe("plugins: end-to-end integration with diff-view", () => {
     const full = out.join("")
     expect(full).toContain("prefix ")
     expect(full).toContain(" tail")
-    expect(full).toContain("\x1b[32m+b\x1b[0m")
-    expect(full).toContain("\x1b[31m-a\x1b[0m")
+    expect(full).toContain("\x1b[38;5;118m+b\x1b[0m")
+    expect(full).toContain("\x1b[38;5;199m-a\x1b[0m")
     expect(full).toContain("hunk")
   })
 
@@ -118,9 +118,15 @@ describe("plugins: end-to-end integration with diff-view", () => {
     expect(result.kind).toBe("tool_result")
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.is_error).toBeFalsy()
-    expect(result.content).toContain("x.ts")
-    expect(result.content).toContain("\x1b[31m-const x = 0;\x1b[0m")
-    expect(result.content).toContain("\x1b[32m+const x = 1;\x1b[0m")
+    // `content` is the raw patch (round-tripped to the model — no ANSI
+    // wasted on tokens). `display` is the ANSI-rendered diff shown in
+    // the transcript with no truncation. See formatToolPreview in
+    // src/agent.ts and the show_diff handler.
+    expect(result.content).toBe(patch)
+    expect(result.display).toBeDefined()
+    expect(result.display).toContain("x.ts")
+    expect(result.display).toContain("\x1b[38;5;199m-const x = 0;\x1b[0m")
+    expect(result.display).toContain("\x1b[38;5;118m+const x = 1;\x1b[0m")
   })
 
   it("reports is_error when show_diff is called without a patch", async () => {

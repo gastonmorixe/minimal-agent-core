@@ -1,8 +1,8 @@
 {
   "id": "ask-mode",
   "name": "Ask Mode",
-  "version": "0.1.0",
-  "description": "Read-only Q&A mode. Forbids file mutation tools so the agent answers questions without editing the workspace.",
+  "version": "0.2.0",
+  "description": "Read-only Q&A mode. The harness refuses Edit and Write at dispatch time and asks the model to present changes as diffs.",
   "prompt": "./PROMPT.md",
   "modes": [
     {
@@ -15,7 +15,7 @@
       },
       "statusLabel": "Asking",
       "disallowedTools": ["Edit", "Write"],
-      "systemPromptAppend": "<mode name=\"ask\">\nThe user has switched the agent into ASK mode. Treat this as a strong policy:\n\n- Your goal is to answer the user's questions and reason about the codebase, NOT to modify it.\n- The Edit and Write tools are unavailable in this mode and the request will literally not include them.\n- Bash and read-only tools (Read, Glob, Grep) remain available so you can inspect the workspace.\n- If the user asks for a change that would require Edit/Write, briefly explain you are in ASK mode and offer the proposed change as a code block or diff for them to apply, or suggest exiting ASK mode (Shift+Tab cycles modes).\n- Never run shell commands that mutate the workspace, the system, or the network beyond what's strictly necessary to answer the question. When in doubt, prefer Read/Glob/Grep over Bash.\n- Keep replies focused. Cite file paths and line numbers when you reference code.\n</mode>"
+      "refusalHint": "Present the proposed change as a unified diff in a fenced code block (or via the show_diff tool); the user will apply it manually."
     }
   ]
 }

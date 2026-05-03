@@ -28,6 +28,7 @@
 
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs"
 import { join, resolve, isAbsolute } from "node:path"
+import { paletteEnvJson } from "../palette.ts"
 import { EventBus, type EventContext } from "./event-bus.ts"
 import { parseManifest, ManifestError } from "./manifest.ts"
 import type {
@@ -509,7 +510,7 @@ export class PluginLoader {
    * The result is memoized for the rest of the loader's lifetime — the
    * system prompt sits on a prompt-cache breakpoint and must be
    * byte-stable across turns. Volatile content (current date, terminal
-   * size, …) is therefore captured once and reused, which is what the
+   * size, ...) is therefore captured once and reused, which is what the
    * `(at session start)` framing in the env-info plugin describes.
    *
    * Safe to call from multiple turns concurrently: the second call sees
@@ -654,7 +655,11 @@ export class PluginLoader {
       trigger,
       packageDir: findPackageDirFor(this.plugins, handler),
       cwd: agentCwd,
-      env: { ...process.env, TUI_PLUGIN_PROTOCOL: "1" } as Record<string, string>,
+      env: {
+        ...process.env,
+        TUI_PLUGIN_PROTOCOL: "1",
+        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
+      } as Record<string, string>,
       abort: ctrl.signal,
       stdout: process.stdout,
       stdin: process.stdin,
@@ -705,7 +710,7 @@ function resolvePath(pkgDir: string, rel: string): string {
  * host system prompt's outline.
  *
  * Only the first heading is removed, and only if it is the very first
- * non-empty line. Deeper headings (`##`, `###`, …) and headings that appear
+ * non-empty line. Deeper headings (`##`, `###`, ...) and headings that appear
  * later in the body are left untouched.
  */
 function stripLeadingHeading(body: string): string {
@@ -865,6 +870,7 @@ async function runFragment(
   const env = {
     ...process.env,
     TUI_PLUGIN_PROTOCOL: "1",
+    MINIMAL_AGENT_PALETTE: paletteEnvJson(),
     ...(sessionId ? { MINIMAL_AGENT_SESSION_ID: sessionId } : {}),
   } as Record<string, string>
 
@@ -994,7 +1000,11 @@ function registerEventSub(
       payload: ctx.payload,
       packageDir,
       cwd: process.cwd(),
-      env: { ...process.env, TUI_PLUGIN_PROTOCOL: "1" } as Record<string, string>,
+      env: {
+        ...process.env,
+        TUI_PLUGIN_PROTOCOL: "1",
+        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
+      } as Record<string, string>,
       emit: ctx.emit,
       abort: ctx.abort,
       stderr: process.stderr,
