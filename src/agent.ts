@@ -96,7 +96,7 @@ export const c = {
   gold: _fg(PALETTE.gold),
 }
 
-const faintThinkingChunk = (s: string): string => {
+export const faintThinkingChunk = (s: string): string => {
   const trailingNewline = s.endsWith("\n")
   const body = trailingNewline ? s.slice(0, -1) : s
   if (body.length === 0) return trailingNewline ? "\n" : ""
@@ -581,7 +581,9 @@ export class Agent {
           // Render a denial line in the transcript so the user sees what
           // got blocked. ⊘ glyph + dim red label + the refusal message.
           writeTranscript(`  ${c.dimCyan("│")} ${c.boldRed("⊘")} ${c.dim(content)}`)
-          writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(`(refused by ${this.modeManager?.activeId() ?? "mode"})`)}`)
+          writeTranscript(
+            `  ${c.dimCyan("╰")} ${c.dim(`(refused by ${this.modeManager?.activeId() ?? "mode"})`)}`,
+          )
         } else {
           const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
             notificationId: "tool.running",
@@ -771,7 +773,8 @@ export function formatToolInput(tool: ToolUseBlock): string {
     const firstNl = cmd.indexOf("\n")
     const firstLine = firstNl === -1 ? cmd : cmd.slice(0, firstNl)
     const charsCut = firstLine.length > 80 ? firstLine.length - 80 : 0
-    const truncated = charsCut > 0 ? `${firstLine.slice(0, 80)}${truncHint(charsCut, "ch")}` : firstLine
+    const truncated =
+      charsCut > 0 ? `${firstLine.slice(0, 80)}${truncHint(charsCut, "ch")}` : firstLine
     // Multi-line commands: when the first line itself wasn't cut, hint how
     // many additional lines were elided so the bordered block stays a single row.
     const extraLines = firstNl !== -1 && charsCut === 0 ? cmd.split("\n").length - 1 : 0
@@ -799,7 +802,7 @@ export function formatToolInput(tool: ToolUseBlock): string {
 }
 
 /**
- *
+ * Formats tool preview for display
  */
 export function formatToolPreview(content: string, isError?: boolean, display?: string): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
@@ -1350,10 +1353,21 @@ async function runReplLiveArea(
   // as needed via setLiveHeight().
   compositor.mount(1)
   editor.start()
-  // Replay any stdin bytes that arrived while term-caps detection held
-  // raw mode. The editor's data listener is now attached, so this lands
-  // in the buffer just like a normal keystroke.
-  if (opts.initialStdinBytes && opts.initialStdinBytes.length > 0) {
+  // Replay stdin bytes captured while term-caps held raw mode — but ONLY
+  // bytes that look like real keystrokes, never bytes that look like a
+  // terminal reply (ESC-prefixed CSI/OSC). The DECRPM probe sometimes
+  // races the timeout: the reply lands JUST after we resolve, gets
+  // captured as "unparsed", and re-emitting it injects `^[ [ ? 2026 ; 1 $ y`
+  // into the editor — which can read as a Ctrl+`[` (Esc) followed by
+  // garbage and, depending on key bindings, cancel the editor or
+  // submit/clear the buffer. Since real typeahead during the 80ms probe
+  // is extremely rare and ESC-leading garbage is the common failure
+  // mode, we discard ESC-leading buffers entirely.
+  if (
+    opts.initialStdinBytes &&
+    opts.initialStdinBytes.length > 0 &&
+    !opts.initialStdinBytes.startsWith("\x1b")
+  ) {
     process.stdin.emit("data", opts.initialStdinBytes)
   }
   statusRenderer?.start()
@@ -1407,11 +1421,10 @@ async function runReplLiveArea(
       return
     }
     const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
-    // Use a 1-cell glyph so the header text aligns column-for-column with
-    // the `┊`-prefixed item rows below. The previous `⏳` is wide-emoji
-    // (2 cells in iTerm/WezTerm/etc.) and the resulting 1-col drift made
-    // the queue widget look unaligned. (Bug 1.)
-    const arrow = c.faintWhite("…")
+    // ⏳ is wide-emoji (2 cells in iTerm/WezTerm/most modern terminals).
+    // The `┊` glyph below is 1 cell, so we pad each item line with one
+    // extra space to make text columns line up under the `2 queued` text.
+    const arrow = c.faintWhite("⏳")
     const count = queue.length
     const header = `  ${arrow} ${dim(`${count} queued`)}`
     const maxItems = 3
@@ -1433,13 +1446,14 @@ async function runReplLiveArea(
         // "I typed N more characters past the preview"). Counts via the
         // string iterator, which steps grapheme-naively but per-codepoint
         // — close enough for the queue preview's purpose.
+        // eslint-disable-next-line typescript-eslint/no-misused-spread
         const cpCut = [...oneLine].length - [...truncated].length
         preview = `${truncated}${truncHint(cpCut, "ch")}`
       }
-      lines.push(`  ${dim("┊")} ${dim(preview)}`)
+      lines.push(`  ${dim("┊")}  ${dim(preview)}`)
     }
     if (queue.length > maxItems) {
-      lines.push(`  ${dim(`┊ ... and ${queue.length - maxItems} more`)}`)
+      lines.push(`  ${dim(`┊  ... and ${queue.length - maxItems} more`)}`)
     }
     editor.setDecorationLines(lines)
   }

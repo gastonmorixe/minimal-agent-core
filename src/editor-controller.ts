@@ -102,6 +102,14 @@ export interface EditorControllerOptions {
    */
   bareEscapeMs?: number
   /**
+   * Debounce window (ms) for the `"input"` event. The event fires this
+   * long after the most recent buffer-text change. Default: 120ms — short
+   * enough to feel live, long enough to coalesce a fast typist's stream
+   * into a single notification per pause. Set to 0 in tests to fire
+   * synchronously.
+   */
+  inputDebounceMs?: number
+  /**
    * Inject the {@link AbortBus} singleton (or a fresh one for tests). When
    * a turn is in flight (`abortBus.isTurnInFlight()`) and the user presses
    * bare Esc or Ctrl+C, this controller calls
@@ -147,6 +155,21 @@ export class EditorController extends EventEmitter {
   private readonly bareEscapeMs: number
   private readonly abortBus: AbortBus
   private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
+  // ── input-event broadcasting ────────────────────────────────────────────
+  // Coalesced "buffer text changed" notification. Listeners (e.g. the
+  // auto-ASK heuristic) subscribe via `editor.on("input", ...)`. Fires
+  // only when the buffer's text differs from the last emitted snapshot
+  // (cursor-only moves do NOT fire), with a `inputDebounceMs` debounce
+  // so a fast typist gets one event per pause, not one per keystroke.
+  // Producer-side debouncing keeps the keystroke path free of listener
+  // work — the timer callback is the only thing that runs on the event
+  // loop after typing stops, and listeners run inside that callback (so
+  // a slow listener delays only the NEXT debounce window, not the next
+  // keystroke).
+  private inputDebounce: ReturnType<typeof setTimeout> | null = null
+  private lastEmittedInputText: string | null = null
+  private inputSeq = 0
+  private readonly inputDebounceMs: number
   private onDataBound = (chunk: string | Buffer): void => {
     this.onData(chunk)
   }
@@ -165,7 +188,48 @@ export class EditorController extends EventEmitter {
     const cap = opts.maxLiveHeight ?? Number.POSITIVE_INFINITY
     this.maxLiveHeight = typeof cap === "function" ? cap : () => cap
     this.bareEscapeMs = opts.bareEscapeMs ?? 20
+    this.inputDebounceMs = opts.inputDebounceMs ?? 120
     this.abortBus = opts.abortBus ?? abortBus
+  }
+
+  /**
+   * Schedule a coalesced `"input"` emission. Safe to call on every
+   * {@link repaint} — when the buffer text hasn't changed since the last
+   * emission the timer callback skips the emit.
+   *
+   * Listeners receive `{text, seq}`. `seq` is monotonic so listeners can
+   * discard stale snapshots cheaply.
+   *
+   * @internal
+   */
+  private scheduleInputEmit(): void {
+    if (this.inputDebounce) clearTimeout(this.inputDebounce)
+    if (this.inputDebounceMs <= 0) {
+      // Synchronous mode — used by tests that don't want to drive timers.
+      this.fireInputEvent()
+      return
+    }
+    this.inputDebounce = setTimeout(() => {
+      this.inputDebounce = null
+      this.fireInputEvent()
+    }, this.inputDebounceMs)
+  }
+
+  private fireInputEvent(): void {
+    const text = this.buf.toString()
+    if (text === this.lastEmittedInputText) return
+    this.lastEmittedInputText = text
+    this.inputSeq += 1
+    // Emitter is synchronous BUT we never call it on the keystroke path —
+    // the only callers are the debounce timer above and the synchronous
+    // shortcut for tests. A slow listener here delays the NEXT debounce
+    // window, never the next keystroke.
+    this.emit("input", { text, seq: this.inputSeq })
+  }
+
+  /** Current monotonic input sequence (mostly for tests). */
+  inputSequence(): number {
+    return this.inputSeq
   }
 
   start(): void {
@@ -189,6 +253,10 @@ export class EditorController extends EventEmitter {
   stop(): void {
     if (!this.started) return
     this.started = false
+    if (this.inputDebounce) {
+      clearTimeout(this.inputDebounce)
+      this.inputDebounce = null
+    }
     this.stdin.off("data", this.onDataBound)
     this.bracketedPaste = false
     this.output.write(
@@ -844,6 +912,11 @@ export class EditorController extends EventEmitter {
   }
 
   private repaint(): void {
+    // Coalesced "input" event broadcast. Cheap (the timer is reset each
+    // call; the actual emit only fires `inputDebounceMs` after the LAST
+    // repaint). The fire path skips when buffer text is unchanged, so
+    // cursor-only repaints don't generate spurious events.
+    if (this.started) this.scheduleInputEmit()
     const cols = (this.output as { columns?: number }).columns
     // Always reserve exactly 1 header row above the editor prompt.
     // When a status message is active it shows the spinner + label; when idle
@@ -940,9 +1013,7 @@ export class EditorController extends EventEmitter {
 
     const rawStatus = this.statusLine ?? ""
     const statusLine =
-      !rawStatus || !cols || cols <= 0
-        ? rawStatus
-        : truncateDisplayWidth(rawStatus, cols)
+      !rawStatus || !cols || cols <= 0 ? rawStatus : truncateDisplayWidth(rawStatus, cols)
 
     let finalLines: string[]
     let finalCursor: { row: number; col: number }

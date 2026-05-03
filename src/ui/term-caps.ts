@@ -80,7 +80,17 @@ export async function detectSynchronizedOutput(
   output: TermCapsOutput,
   timeoutMs = 80,
 ): Promise<DetectResult> {
+  // Skip detection on non-TTYs, inside tmux/screen (multiplexers route
+  // DECRPM replies through their own state machine — not suitable for a
+  // raw probe), or when TERM is "dumb" / "screen" / "tmux".
   if (!input.isTTY || !output.isTTY) {
+    return { syncOutput: false, unparsed: "" }
+  }
+  const insideMultiplexer =
+    !!process.env.TMUX ||
+    !!process.env.STY || // GNU screen
+    /^(screen|tmux)/.test(process.env.TERM ?? "")
+  if (insideMultiplexer) {
     return { syncOutput: false, unparsed: "" }
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import {
   firstUserPromptSnippet,
   foldRecords,
@@ -175,6 +175,50 @@ describe("repairTrailingTurn", () => {
     expect(repaired[0].role).toBe("user")
   })
 
+  it("reorders user message blocks so tool_result comes first (Bug: API requires tool_result immediately after tool_use)", () => {
+    // Repro: a queued user submit's appendUser landed BETWEEN the assistant's
+    // appendAssistant and the for-tools loop's appendToolResult. foldRecords
+    // then attached the tool_result onto the existing `[text]` user message,
+    // producing `[text, tool_result]`. Anthropic API rejects this with
+    // "tool_use ids were found without tool_result blocks immediately after".
+    const messages: Message[] = [
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_x",
+            name: "Bash",
+            input: { command: "echo" },
+          } as ToolUseBlock,
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "queued by user mid-turn" },
+          {
+            type: "tool_result",
+            tool_use_id: "tu_x",
+            content: "out",
+            is_error: false,
+          } as ToolResultBlock,
+        ],
+      },
+    ]
+    const repaired = repairTrailingTurn(messages)
+    expect(repaired).toHaveLength(3)
+    const userMsg = repaired[2]
+    expect(userMsg.role).toBe("user")
+    expect(Array.isArray(userMsg.content)).toBe(true)
+    const blocks = userMsg.content as ContentBlock[]
+    // tool_result MUST be first.
+    expect(blocks[0].type).toBe("tool_result")
+    expect((blocks[0] as ToolResultBlock).tool_use_id).toBe("tu_x")
+    expect(blocks[1].type).toBe("text")
+  })
+
   it("drops a trailing user message whose tool_results have no matching tool_use", () => {
     const messages: Message[] = [
       { role: "user", content: "hi" },
@@ -265,9 +309,19 @@ describe("foldRecords (rewind)", () => {
   it("single rewind drops post-target records", () => {
     const records: SessionRecord[] = [
       { kind: "user", ts: "t1", content: "first", id: "u1" },
-      { kind: "assistant", ts: "t1", content: [{ type: "text", text: "ans1" }], stopReason: "end_turn" },
+      {
+        kind: "assistant",
+        ts: "t1",
+        content: [{ type: "text", text: "ans1" }],
+        stopReason: "end_turn",
+      },
       { kind: "user", ts: "t2", content: "second", id: "u2" },
-      { kind: "assistant", ts: "t2", content: [{ type: "text", text: "ans2" }], stopReason: "end_turn" },
+      {
+        kind: "assistant",
+        ts: "t2",
+        content: [{ type: "text", text: "ans2" }],
+        stopReason: "end_turn",
+      },
       { kind: "rewind", ts: "t3", to: "u1", droppedCount: 3 },
     ]
     const messages = foldRecords(records)
@@ -293,7 +347,12 @@ describe("foldRecords (rewind)", () => {
     const records: SessionRecord[] = [
       { kind: "user", ts: "t1", content: "hi", id: "u1" },
       { kind: "rewind", ts: "t2", to: "does-not-exist", droppedCount: 0 },
-      { kind: "assistant", ts: "t3", content: [{ type: "text", text: "ok" }], stopReason: "end_turn" },
+      {
+        kind: "assistant",
+        ts: "t3",
+        content: [{ type: "text", text: "ok" }],
+        stopReason: "end_turn",
+      },
     ]
     const messages = foldRecords(records)
     expect(messages).toHaveLength(2)

@@ -1,24 +1,26 @@
 /**
  * Visual replay of a hydrated message list into a scrollback sink.
  *
+ * **Fidelity contract:** replay MUST be visually identical to what the
+ * agent rendered live, byte-for-byte where possible. Same colors, same
+ * tool transcript shape (`╭ … │ … ╰`), same thinking blocks, same
+ * formatToolPreview output. NO dim wrapping anywhere — historical content
+ * is rendered with the same vivid styling as new content. The only
+ * concession to "this is history" is the resume header line (a single
+ * dim `── resumed from <sid> (<n> messages, <model>) ──` separator),
+ * because that's a structural marker, not content.
+ *
+ * Why no dimming on the body? Users want to scroll up and re-read prior
+ * conversations as if the session never ended. Dimming hurts contrast,
+ * hides syntax-highlighted code, and turns thinking summaries into
+ * unreadable mush.
+ *
  * Used by `--resume <sid>`: after `loadSession` reconstructs `messages`,
- * we want the user to see the prior conversation (text + tool transcripts)
- * before the resumed REPL prompt. Without this, resume hydrates state
- * silently and the user stares at an empty pane wondering whether
- * anything was loaded.
- *
- * The output uses the SAME helpers (`formatToolInput`, `formatToolPreview`)
- * as live turns, so replayed content is visually identical to what the
- * agent would have rendered originally — just dimmed slightly via a
- * leading dim header so the user can tell "this is history, not new".
- *
- * Kept in its own module (rather than `session-restore.ts`) because it
- * imports from `agent.ts` for the formatters; `session-restore.ts` stays
- * a pure data-only module that's safe for tests/tools to import without
- * pulling in the whole agent stack.
+ * we want the user to see the prior conversation (text + thinking + tool
+ * transcripts) before the resumed REPL prompt.
  */
 
-import { c, formatToolInput, formatToolPreview } from "./agent.ts"
+import { c, formatToolInput, formatToolPreview, faintThinkingChunk } from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 
 /**
@@ -30,7 +32,8 @@ export interface ReplaySink {
 }
 
 /**
- * Render a one-line dim header announcing the resume.
+ * One-line dim header announcing the resume. This is the ONLY dim text
+ * in the replay output — see the fidelity contract in the module docs.
  */
 export function buildResumeHeader(opts: {
   sid: string
@@ -39,10 +42,7 @@ export function buildResumeHeader(opts: {
   repaired?: boolean
   dropped?: number
 }): string {
-  const parts = [
-    `${opts.turns} message${opts.turns === 1 ? "" : "s"}`,
-    opts.model,
-  ]
+  const parts = [`${opts.turns} message${opts.turns === 1 ? "" : "s"}`, opts.model]
   if (opts.repaired) parts.push("repaired")
   if (opts.dropped && opts.dropped > 0) parts.push(`dropped ${opts.dropped}`)
   const meta = parts.join(", ")
@@ -50,25 +50,24 @@ export function buildResumeHeader(opts: {
 }
 
 /**
- * Replay a message list to the sink. Each message is rendered to look
- * like the live turn that produced it:
+ * Replay a message list to the sink with full fidelity:
  *
- * - User messages: shown as a dim block with the user prompt prefix `❯`.
- *   String and `text` blocks are concatenated. `tool_result` blocks are
- *   rendered using the SAME `formatToolPreview` connector style as live —
- *   but they appear UNDER the assistant turn that produced the matching
- *   `tool_use`, not under the user message they're technically part of.
- *   To keep the replay readable, we render the tool_use header and its
- *   matching tool_result preview together as a single grouped block.
+ * - **User messages**: prompt prefix `❯ ` followed by the user's text in
+ *   normal weight. Tool_result blocks are not rendered here — they appear
+ *   under the assistant's tool_use header below.
  *
- * - Assistant messages: text blocks rendered plainly; `tool_use` blocks
- *   rendered as a header `╭ ToolName  $ args`. The matching `tool_result`
- *   from the next user message is found and its preview rendered under
- *   the header, mirroring `Agent.run`'s live transcript shape.
+ * - **Assistant text blocks**: rendered plain (no dim).
+ *
+ * - **Assistant thinking blocks**: rendered using `faintThinkingChunk`
+ *   (the same faint italic style live thinking uses), so historical
+ *   thinking is visually identical to live thinking.
+ *
+ * - **Assistant tool_use blocks**: rendered as the live transcript
+ *   `╭ ToolName  $ args ╰ output` shape, using the SAME `formatToolInput`
+ *   + `formatToolPreview` helpers the live agent uses.
  */
 export function replayToScrollback(messages: Message[], sink: ReplaySink): void {
-  // Build a map of tool_use_id → tool_result block for fast lookup. We
-  // walk all user messages once.
+  // Build a map of tool_use_id → tool_result block for fast lookup.
   const toolResultById = new Map<string, ToolResultBlock>()
   for (const msg of messages) {
     if (msg.role !== "user" || !Array.isArray(msg.content)) continue
@@ -81,16 +80,16 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
 
   for (const msg of messages) {
     if (msg.role === "user") {
-      // Skip user messages whose content is ONLY tool_results — those are
-      // rendered under the corresponding assistant turn.
+      // Skip user messages whose content is ONLY tool_results — those
+      // are rendered under the corresponding assistant turn.
       const content = msg.content
       if (Array.isArray(content) && content.every((b) => b.type === "tool_result")) {
         continue
       }
-      // Otherwise render the user prompt with the same arrow we use live.
       const text = stringifyUserText(content)
       if (text.length > 0) {
-        sink.write(`${c.bold(c.pink("❯"))} ${c.dim(text)}\n\n`)
+        // Live prompt arrow style: bold pink ❯ + plain text.
+        sink.write(`${c.bold(c.pink("❯"))} ${text}\n\n`)
       }
       continue
     }
@@ -100,14 +99,20 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
     let wroteAnyText = false
     for (const b of blocks) {
       if (b.type === "text") {
-        // Replayed text is dimmed so the eye can tell history from new.
-        sink.write(`${c.dim(b.text)}\n`)
+        sink.write(`${b.text}\n`)
         wroteAnyText = true
+      } else if (b.type === "thinking") {
+        // Live thinking renders via writeDirectSink + faintThinkingChunk
+        // (faint italic). Use the same helper for byte-identical replay.
+        const thinkingText = (b as { thinking?: string }).thinking ?? ""
+        if (thinkingText.length > 0) {
+          sink.write(`${faintThinkingChunk(thinkingText)}\n`)
+          wroteAnyText = true
+        }
       } else if (b.type === "tool_use") {
         const tu = b as ToolUseBlock
-        sink.write(
-          `\n  ${c.dimCyan("╭")} ${c.bold(c.dim(tu.name))}  ${c.dim(formatToolInput(tu))}\n`,
-        )
+        // Live header: `\n  ╭ ✦ Tool  args` — match it verbatim.
+        sink.write(`\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu))}\n`)
         const result = toolResultById.get(tu.id)
         if (result) {
           const content =
@@ -124,9 +129,6 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
           sink.write(`  ${c.dimCyan("╰")} ${c.dim("(no result on disk)")}\n`)
         }
       }
-      // thinking blocks intentionally skipped — too verbose for replay,
-      // and they're already-completed reasoning the user doesn't need to
-      // re-read.
     }
     if (wroteAnyText) sink.write("\n")
   }

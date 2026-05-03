@@ -28,7 +28,45 @@ class FakeStdout {
   }
 }
 
+/**
+ * Unset TMUX/STY for the duration of a probe test so the multiplexer
+ * guard doesn't short-circuit it (we run inside tmux in dev).
+ */
+function withNoMultiplexer(fn: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    const savedTmux = process.env.TMUX
+    const savedSty = process.env.STY
+    const savedTerm = process.env.TERM
+    delete process.env.TMUX
+    delete process.env.STY
+    process.env.TERM = "xterm-256color"
+    try {
+      await fn()
+    } finally {
+      if (savedTmux !== undefined) process.env.TMUX = savedTmux
+      if (savedSty !== undefined) process.env.STY = savedSty
+      if (savedTerm !== undefined) process.env.TERM = savedTerm
+    }
+  }
+}
+
 describe("detectSynchronizedOutput", () => {
+  it("returns supported=false immediately when inside tmux (TMUX env set)", async () => {
+    const orig = process.env.TMUX
+    process.env.TMUX = "/tmp/tmux-501/default,98738,26"
+    try {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const result = await detectSynchronizedOutput(stdin as any, stdout as any, 50)
+      expect(result.syncOutput).toBe(false)
+      expect(result.unparsed).toBe("")
+      expect(stdout.writes).toEqual([])
+    } finally {
+      if (orig === undefined) delete process.env.TMUX
+      else process.env.TMUX = orig
+    }
+  })
+
   it("returns supported=false immediately on a non-TTY", async () => {
     const stdin = new FakeStdin()
     stdin.isTTY = false
@@ -37,92 +75,102 @@ describe("detectSynchronizedOutput", () => {
     const result = await detectSynchronizedOutput(stdin as any, stdout as any, 50)
     expect(result.syncOutput).toBe(false)
     expect(result.unparsed).toBe("")
-    // Did not even send the probe (no TTY → moot).
     expect(stdout.writes).toEqual([])
   })
 
-  it("sends the DECRPM query and parses status=1 (currently set) as supported", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
-    // Yield so the probe sends its query and attaches the data listener.
-    await Promise.resolve()
-    expect(stdout.writes).toContain("\x1b[?2026$p")
-    stdin.emit("data", "\x1b[?2026;1$y")
-    const result = await p
-    expect(result.syncOutput).toBe(true)
-    expect(result.unparsed).toBe("")
-  })
+  it(
+    "sends the DECRPM query and parses status=1 (currently set) as supported",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
+      await Promise.resolve()
+      expect(stdout.writes).toContain("\x1b[?2026$p")
+      stdin.emit("data", "\x1b[?2026;1$y")
+      const result = await p
+      expect(result.syncOutput).toBe(true)
+      expect(result.unparsed).toBe("")
+    }),
+  )
 
-  it("parses status=2 (currently reset) as supported", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
-    await Promise.resolve()
-    stdin.emit("data", "\x1b[?2026;2$y")
-    expect((await p).syncOutput).toBe(true)
-  })
+  it(
+    "parses status=2 (currently reset) as supported",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
+      await Promise.resolve()
+      stdin.emit("data", "\x1b[?2026;2$y")
+      expect((await p).syncOutput).toBe(true)
+    }),
+  )
 
-  it("parses status=0 (mode not recognized) as unsupported", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
-    await Promise.resolve()
-    stdin.emit("data", "\x1b[?2026;0$y")
-    expect((await p).syncOutput).toBe(false)
-  })
+  it(
+    "parses status=0 (mode not recognized) as unsupported",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
+      await Promise.resolve()
+      stdin.emit("data", "\x1b[?2026;0$y")
+      expect((await p).syncOutput).toBe(false)
+    }),
+  )
 
-  it("times out and returns supported=false when the terminal never replies", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const start = Date.now()
-    const result = await detectSynchronizedOutput(stdin as any, stdout as any, 30)
-    const elapsed = Date.now() - start
-    expect(result.syncOutput).toBe(false)
-    // Should have waited approximately the timeout, give or take scheduler jitter.
-    expect(elapsed).toBeGreaterThanOrEqual(25)
-    expect(elapsed).toBeLessThan(500)
-  })
+  it(
+    "times out and returns supported=false when the terminal never replies",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const start = Date.now()
+      const result = await detectSynchronizedOutput(stdin as any, stdout as any, 30)
+      const elapsed = Date.now() - start
+      expect(result.syncOutput).toBe(false)
+      expect(elapsed).toBeGreaterThanOrEqual(25)
+      expect(elapsed).toBeLessThan(500)
+    }),
+  )
 
-  it("preserves typeahead bytes that arrived alongside the DECRPM reply", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
-    await Promise.resolve()
-    // The user managed to type 'h' 'i' before/after the reply landed.
-    stdin.emit("data", "h")
-    stdin.emit("data", "\x1b[?2026;1$y")
-    stdin.emit("data", "i")
-    // Note: the listener resolves on the FIRST chunk that completes the
-    // match. The trailing 'i' arrives after detect() resolved; that's
-    // fine — it lands on the next listener (the editor) since we already
-    // detached. We assert the typeahead seen up to the resolve point.
-    const result = await p
-    expect(result.syncOutput).toBe(true)
-    expect(result.unparsed).toBe("h")
-  })
+  it(
+    "preserves typeahead bytes that arrived alongside the DECRPM reply",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const p = detectSynchronizedOutput(stdin as any, stdout as any, 200)
+      await Promise.resolve()
+      stdin.emit("data", "h")
+      stdin.emit("data", "\x1b[?2026;1$y")
+      stdin.emit("data", "i")
+      const result = await p
+      expect(result.syncOutput).toBe(true)
+      expect(result.unparsed).toBe("h")
+    }),
+  )
 
-  it("removes its data listener after resolving (no leak)", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const p = detectSynchronizedOutput(stdin as any, stdout as any, 50)
-    await Promise.resolve()
-    stdin.emit("data", "\x1b[?2026;1$y")
-    await p
-    expect(stdin.listenerCount("data")).toBe(0)
-  })
+  it(
+    "removes its data listener after resolving (no leak)",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const p = detectSynchronizedOutput(stdin as any, stdout as any, 50)
+      await Promise.resolve()
+      stdin.emit("data", "\x1b[?2026;1$y")
+      await p
+      expect(stdin.listenerCount("data")).toBe(0)
+    }),
+  )
 
-  it("puts stdin into raw mode for the duration of the probe", async () => {
-    const stdin = new FakeStdin()
-    const stdout = new FakeStdout()
-    const p = detectSynchronizedOutput(stdin as any, stdout as any, 50)
-    await Promise.resolve()
-    expect(stdin.rawModes).toEqual([true])
-    stdin.emit("data", "\x1b[?2026;1$y")
-    await p
-    // We intentionally do NOT flip raw mode back to false here — the
-    // editor sets its own raw mode immediately after, and a flip-flop
-    // would cause a visible cursor blip on some terminals.
-    expect(stdin.rawModes).toEqual([true])
-  })
+  it(
+    "puts stdin into raw mode for the duration of the probe",
+    withNoMultiplexer(async () => {
+      const stdin = new FakeStdin()
+      const stdout = new FakeStdout()
+      const p = detectSynchronizedOutput(stdin as any, stdout as any, 50)
+      await Promise.resolve()
+      expect(stdin.rawModes).toEqual([true])
+      stdin.emit("data", "\x1b[?2026;1$y")
+      await p
+      expect(stdin.rawModes).toEqual([true])
+    }),
+  )
 })
