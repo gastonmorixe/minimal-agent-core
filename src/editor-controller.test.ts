@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
+import { AbortBus } from "./abort-bus.ts"
 import { EditorController } from "./editor-controller.ts"
 import { displayWidth } from "./term-width.ts"
 import { FakeTerminal } from "./test-utils/fake-terminal.ts"
@@ -65,7 +66,15 @@ class FakeCompositor {
   }
 }
 
-function make(opts: { prompt?: string; continuation?: string; columns?: number } = {}) {
+function make(
+  opts: {
+    prompt?: string
+    continuation?: string
+    columns?: number
+    bareEscapeMs?: number
+    abortBus?: AbortBus
+  } = {},
+) {
   const stdin = new FakeTTYInput()
   const output = new FakeOutput()
   if (opts.columns) output.columns = opts.columns
@@ -76,6 +85,8 @@ function make(opts: { prompt?: string; continuation?: string; columns?: number }
     compositor: compositor as any,
     stdin: stdin as any,
     output: output as any,
+    ...(opts.bareEscapeMs !== undefined ? { bareEscapeMs: opts.bareEscapeMs } : {}),
+    ...(opts.abortBus ? { abortBus: opts.abortBus } : {}),
   })
   return { ctrl, stdin, output, compositor }
 }

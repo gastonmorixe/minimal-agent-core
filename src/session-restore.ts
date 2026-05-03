@@ -83,9 +83,7 @@ export function foldRecords(records: SessionRecord[]): Message[] {
       case "rewind": {
         const targetIdx = userIdToIndex.get(rec.to)
         if (targetIdx === undefined) {
-          console.warn(
-            `session-restore: rewind to unknown msgId ${rec.to} — skipping`,
-          )
+          console.warn(`session-restore: rewind to unknown msgId ${rec.to} — skipping`)
           break
         }
         // Keep messages[0..targetIdx] inclusive; drop the rest.
@@ -172,7 +170,26 @@ export function repairMessages(input: Message[]): Message[] {
         (b) => b.type !== "tool_result" || liveIds.has((b as ToolResultBlock).tool_use_id),
       )
       if (filtered.length === 0) continue
-      out.push({ role: "user", content: filtered })
+      // Step 3b: REORDER so all tool_result blocks come first within the
+      // user message. The Anthropic API requires tool_result blocks to be
+      // the first blocks of the user message that immediately follows an
+      // assistant tool_use turn — anything in front of them returns:
+      //   "tool_use ids were found without tool_result blocks
+      //    immediately after"
+      // The agent's runtime already constructs userContent as
+      // `[...toolResults, queuedText?, modeAttach?]`, but the session log
+      // is append-only and on-disk record order can interleave a user
+      // text record between the assistant and its tool_result records
+      // (e.g. when a queued user submit's appendUser races with the
+      // for-tools loop's appendToolResult). foldRecords then attaches the
+      // tool_result onto the existing `[text]` user message, producing
+      // `[text, tool_result]`. Sort here — stable so original ordering
+      // among tool_results (and among non-tool_result blocks) is preserved.
+      const ordered = [
+        ...filtered.filter((b) => b.type === "tool_result"),
+        ...filtered.filter((b) => b.type !== "tool_result"),
+      ]
+      out.push({ role: "user", content: ordered })
     } else {
       // Defensive copy of arrays so callers can mutate freely.
       out.push({
