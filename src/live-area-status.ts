@@ -112,8 +112,19 @@ export class LiveAreaStatusController implements StatusController {
       this.editor.setStatus(null)
       return
     }
-    const text = this.spinnerGlyph ? `${this.spinnerGlyph} ${this.label}` : this.label
-    this.editor.setStatus(text)
+    // Layout invariant: `[icon-or-pad][gap][label]`. We always reserve
+    // the icon slot — even when the spinner manager is between frames
+    // (`spinnerGlyph === ""`) — so the label sits at a stable column.
+    //
+    // Two spaces (not one) for the gap: many nerd-font glyphs live in
+    // Supplementary PUA-A (e.g. nf-md-tools `󱁤` U+F1064) and render as
+    // 2 visual cells in terminals configured with a nerd font, while our
+    // `displayWidth` model counts them as 1. With a 1-space separator the
+    // label visually butts against the icon ("󱁤Running Bash"); a 2-space
+    // separator restores breathing room without depending on the model
+    // being right about glyph width.
+    const slot = this.spinnerGlyph || " "
+    this.editor.setStatus(`${slot}  ${this.label}`)
   }
 
   private toNotification(status: StatusSnapshot): SpinnerNotification {

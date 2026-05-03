@@ -15,13 +15,14 @@
 // The sid is the same UUID returned by `getSessionId()` from
 // `src/metadata.ts` — i.e. the value also sent in the
 // `x-claude-code-session-id` HTTP header. This keeps file id, API id, and
-// `.node-net-dbg/` capture id aligned.
+// `.net-dbg/` capture id aligned.
 //
 // FORMAT-CHANGE POLICY: bump the `// FORMAT vN` marker in this file AND
 // add a `formatVersion` field to the `meta` record. Old sessions remain
 // readable forever — `foldRecords` is responsible for understanding the
 // version mix.
 
+import { randomUUID } from "node:crypto"
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -50,6 +51,12 @@ export interface UserRecord {
   ts: string
   /** Same shape we push onto `Agent.messages` — string OR content blocks. */
   content: string | ContentBlock[]
+  /**
+   * Stable unique id for this user prompt. Generated at write time. Used as
+   * the target by `RewindRecord.to`. Optional for backward compat with
+   * sessions written before this field existed.
+   */
+  id?: string
 }
 
 export interface AssistantRecord {
@@ -79,12 +86,31 @@ export interface NoteRecord {
   text: string
 }
 
+/**
+ * Rewind marker. When folding records into the live `messages[]`, encountering
+ * a rewind drops every message after the target user prompt (the prompt with
+ * `id === to` is KEPT). Multiple rewinds compose: each operates on the
+ * already-folded message list at that point in the log.
+ *
+ * The rewind itself is metadata — it is NOT a message. `droppedCount` is
+ * informational (used by the replay renderer to show "M messages discarded").
+ */
+export interface RewindRecord {
+  kind: "rewind"
+  ts: string
+  /** `UserRecord.id` of the prompt to rewind to. That prompt is kept. */
+  to: string
+  /** Number of dropped records, for replay/UX. Not load-bearing. */
+  droppedCount: number
+}
+
 export type SessionRecord =
   | MetaRecord
   | UserRecord
   | AssistantRecord
   | ToolResultRecord
   | NoteRecord
+  | RewindRecord
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -247,9 +273,15 @@ export class SessionStore {
     return store
   }
 
-  /** Append a `user` record. Call this immediately after pushing onto `Agent.messages`. */
-  appendUser(content: string | ContentBlock[], now: Date = new Date()): void {
-    this.write({ kind: "user", ts: now.toISOString(), content })
+  /**
+   * Append a `user` record. Call this immediately after pushing onto
+   * `Agent.messages`. Returns the freshly-generated `id` so callers (e.g.
+   * the rewind picker) can reference this prompt later.
+   */
+  appendUser(content: string | ContentBlock[], now: Date = new Date()): string {
+    const id = randomUUID()
+    this.write({ kind: "user", ts: now.toISOString(), content, id })
+    return id
   }
 
   /** Append an `assistant` record. Call after a complete assistant turn. */
@@ -276,6 +308,21 @@ export class SessionStore {
   /** Free-form annotation (mode change, error, manual marker). */
   appendNote(text: string, now: Date = new Date()): void {
     this.write({ kind: "note", ts: now.toISOString(), text })
+  }
+
+  /**
+   * Append a `rewind` record marking the session as rewound to the user
+   * prompt with id `toMsgId`. Append-only: the dropped records remain on
+   * disk; `foldRecords` honors this marker on read to produce the effective
+   * conversation. `droppedCount` is informational (for replay UX).
+   */
+  appendRewind(toMsgId: string, droppedCount: number, now: Date = new Date()): void {
+    this.write({ kind: "rewind", ts: now.toISOString(), to: toMsgId, droppedCount })
+  }
+
+  /** Spec alias for {@link appendRewind}. */
+  recordRewind(toMsgId: string, droppedCount: number, now: Date = new Date()): void {
+    this.appendRewind(toMsgId, droppedCount, now)
   }
 
   private write(rec: SessionRecord): void {

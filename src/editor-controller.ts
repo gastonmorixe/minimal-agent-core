@@ -12,6 +12,7 @@
  */
 
 import { EventEmitter } from "node:events"
+import { abortBus, type AbortBus } from "./abort-bus.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
 import { EditorRenderer } from "./editor-renderer.ts"
 import { truncateDisplayWidth } from "./term-width.ts"
@@ -75,6 +76,42 @@ export interface EditorControllerOptions {
    * Defaults to `Infinity` (no cap) for backwards-compatible tests.
    */
   maxLiveHeight?: number | (() => number)
+  /**
+   * When `true`, invisible characters (spaces as `·`, tabs as `→`,
+   * line-ends as `↵`) are shown as faint glyphs in the editor.
+   * Toggle at runtime via {@link EditorController.setShowHidden}.
+   *
+   * Enabled automatically by `MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1` or
+   * `--show-hidden-chars` CLI flag, or by a manifest mode with
+   * `editorShowHidden: true`.
+   */
+  showHidden?: boolean
+  /**
+   * Bare-Esc disambiguation window in milliseconds. Esc is the lead byte
+   * of every CSI escape sequence (`\x1b[A`, `\x1b[200~`, etc.), so when
+   * we see a lone `\x1b` in `pending` we cannot tell yet whether it's
+   * "user pressed Esc and stopped" or "more bytes are en route across a
+   * second stdin chunk". We arm a short timer; if no follow-up bytes
+   * arrive before it fires, we treat the byte as a true bare Esc and
+   * route it to {@link AbortBus.requestAbort}.
+   *
+   * 20ms is short enough to feel instant and long enough to swallow the
+   * cross-chunk gap on typical terminals. Override via test harness.
+   *
+   * Default: 20.
+   */
+  bareEscapeMs?: number
+  /**
+   * Inject the {@link AbortBus} singleton (or a fresh one for tests). When
+   * a turn is in flight (`abortBus.isTurnInFlight()`) and the user presses
+   * bare Esc or Ctrl+C, this controller calls
+   * `abortBus.requestAbort({kind:"user-key", key:"Esc"|"Ctrl+C"})`. When no
+   * turn is in flight the keys retain their legacy meaning (Esc: ignore;
+   * Ctrl+C: clear buffer / quit on empty buffer).
+   *
+   * Defaults to the singleton from `./abort-bus.ts`.
+   */
+  abortBus?: AbortBus
 }
 
 type ParsedKey = {
@@ -106,6 +143,10 @@ export class EditorController extends EventEmitter {
   private started = false
   private cycleForward: (() => void) | null = null
   private cycleBackward: (() => void) | null = null
+  private showHiddenChars = false
+  private readonly bareEscapeMs: number
+  private readonly abortBus: AbortBus
+  private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
   private onDataBound = (chunk: string | Buffer): void => {
     this.onData(chunk)
   }
@@ -115,12 +156,16 @@ export class EditorController extends EventEmitter {
     this.renderer = new EditorRenderer({
       prompt: opts.prompt,
       continuationPrompt: opts.continuationPrompt,
+      showHidden: opts.showHidden ?? false,
     })
+    this.showHiddenChars = opts.showHidden ?? false
     this.compositor = opts.compositor
     this.stdin = opts.stdin ?? process.stdin
     this.output = opts.output ?? process.stdout
     const cap = opts.maxLiveHeight ?? Number.POSITIVE_INFINITY
     this.maxLiveHeight = typeof cap === "function" ? cap : () => cap
+    this.bareEscapeMs = opts.bareEscapeMs ?? 20
+    this.abortBus = opts.abortBus ?? abortBus
   }
 
   start(): void {
@@ -213,6 +258,24 @@ export class EditorController extends EventEmitter {
   }
 
   /**
+   * Enable or disable visible rendering of invisible characters
+   * (spaces as `·`, tabs as `→`, line-ends as `↵`). Repaints
+   * immediately.
+   *
+   * Called by the REPL on startup (env var / CLI flag), on mode change
+   * (when a mode declares `editorShowHidden: true`), and can be called
+   * directly by test harnesses.
+   *
+   * Runtime toggle keybinding: Ctrl+\ (sends `\x1c` in raw mode,
+   * or `\x1b[92;5u` via the kitty keyboard protocol).
+   */
+  setShowHidden(v: boolean): void {
+    this.showHiddenChars = v
+    this.renderer.setShowHidden(v)
+    if (this.started) this.repaint()
+  }
+
+  /**
    * Show or clear a single status line above the editor prompt. When set,
    * the live area grows by one row so the spinner/status doesn't fight the
    * prompt for screen real estate.
@@ -229,12 +292,96 @@ export class EditorController extends EventEmitter {
   }
 
   private statusLine: string | null = null
+  /**
+   * Decoration rows rendered between the status row and the editor prompt.
+   * Used by the REPL to surface the queued-message buffer above the input
+   * (so the user sees that messages they pressed Enter on are pending
+   * injection at the next safe boundary in the agent loop). Each entry is
+   * one already-styled line; the editor never interprets them as content,
+   * just slots them into the live area and bumps the cursor row offset.
+   */
+  private decorationLines: string[] = []
+
+  /**
+   * Set decoration rows to be drawn between the status row and the prompt.
+   * Pass `[]` to clear. Triggers a repaint when the array contents change
+   * (shallow string compare); a no-op otherwise so the live area doesn't
+   * flicker when the REPL polls the queue at unchanged steady state.
+   *
+   * Decoration rows count against the editor's live-height budget — they
+   * shrink the editor's available rows by `lines.length`. Callers should
+   * keep the queue display compact (one row per queued item, plus an
+   * optional header) on small terminals.
+   */
+  /**
+   * Replace the editor buffer with the given text and repaint. Used by the
+   * abort flow (`runReplLiveArea` → `handleAbort`) to restore the prompt
+   * the user just sent so they can edit and resubmit it. Cursor lands at
+   * the end of the inserted text — same place users expect to be after a
+   * paste, since the typical follow-up is "tweak and resubmit".
+   *
+   * Multi-line text is split on `\n` and inserted line-by-line with
+   * `EditorBuffer.newline()` between segments, mirroring how bracketed
+   * paste handling works elsewhere in this controller.
+   */
+  setBuffer(text: string): void {
+    this.buf.clear()
+    if (text.length > 0) {
+      const lines = text.split("\n")
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].length > 0) this.buf.insert(lines[i])
+        if (i < lines.length - 1) this.buf.newline()
+      }
+    }
+    if (this.started) this.repaint()
+  }
+
+  setDecorationLines(lines: string[]): void {
+    if (
+      lines.length === this.decorationLines.length &&
+      lines.every((l, i) => l === this.decorationLines[i])
+    ) {
+      return
+    }
+    this.decorationLines = [...lines]
+    if (this.started) this.repaint()
+  }
 
   // ----------------------------- internals -----------------------------
 
   private onData(chunk: string | Buffer): void {
+    // Any new input invalidates a pending bare-Esc — either it's the
+    // continuation bytes of a CSI we were holding, or it's a separate
+    // key entirely. In both cases the disambiguation timer must NOT
+    // fire, so cancel it before appending and re-running the consumer.
+    this.cancelBareEscapeTimer()
     this.pending += typeof chunk === "string" ? chunk : chunk.toString("utf8")
     this.consumePending()
+  }
+
+  private cancelBareEscapeTimer(): void {
+    if (this.bareEscapeTimer !== null) {
+      clearTimeout(this.bareEscapeTimer)
+      this.bareEscapeTimer = null
+    }
+  }
+
+  /**
+   * Called when the bare-Esc disambiguation timer fires without follow-up
+   * bytes arriving. At this point `pending` may still contain the lone
+   * `\x1b` (no other handler had a chance to consume it), so we drop it
+   * here and route to the abort bus when a turn is in flight. When no
+   * turn is in flight, bare Esc is a no-op (the user gets neither a
+   * spurious `cancel` nor anything inserted into the buffer).
+   */
+  private fireBareEscape(): void {
+    this.bareEscapeTimer = null
+    if (this.pending === "\x1b") {
+      this.pending = ""
+    }
+    if (this.abortBus.isTurnInFlight()) {
+      this.abortBus.requestAbort({ kind: "user-key", key: "Esc" })
+    }
   }
 
   private consumePending(): void {
@@ -248,6 +395,21 @@ export class EditorController extends EventEmitter {
       }
 
       if (this.pending.startsWith("\x1b")) {
+        // Lone Esc byte: arm the disambiguation timer and stop processing.
+        // If more bytes show up before the timer fires, `onData` cancels
+        // it and re-enters this loop with the full sequence available.
+        if (this.pending.length === 1) {
+          if (this.bareEscapeTimer === null) {
+            this.bareEscapeTimer = setTimeout(() => {
+              this.fireBareEscape()
+            }, this.bareEscapeMs)
+            // Keep the timer from holding the event loop alive after
+            // process exit on Bun/Node.
+            ;(this.bareEscapeTimer as { unref?: () => void }).unref?.()
+          }
+          if (dirty) this.repaint()
+          return
+        }
         const handled = this.consumeEscape()
         if (handled === "wait") return
         if (handled === "submit") {
@@ -291,6 +453,18 @@ export class EditorController extends EventEmitter {
         return
       }
       if (char === "\x03") {
+        // Ctrl+C composes two behaviors that share a key. When a turn
+        // is in flight, the dominant intent is "stop what you're doing"
+        // — route to the abort bus and DO NOT emit `cancel`/clear the
+        // buffer (the REPL's `handleAbort` will restore the in-flight
+        // prompt to the editor anyway). When no turn is in flight the
+        // legacy meaning kicks in: clear a non-empty buffer, or emit
+        // `cancel` (REPL exit) on an empty buffer. Phase 2 will replace
+        // the empty-buffer exit with a quit-confirm modal.
+        if (this.abortBus.isTurnInFlight()) {
+          this.abortBus.requestAbort({ kind: "user-key", key: "Ctrl+C" })
+          continue
+        }
         if (this.buf.isBlank()) {
           this.emit("cancel")
           return
@@ -325,6 +499,12 @@ export class EditorController extends EventEmitter {
       }
       if (char === "\x17") {
         if (this.buf.deleteWordBackward()) dirty = true
+        continue
+      }
+      if (char === "\x1c") {
+        // Ctrl+\ — toggle show-hidden debug rendering
+        this.setShowHidden(!this.showHiddenChars)
+        dirty = true
         continue
       }
       if (char === "\t") {
@@ -480,6 +660,9 @@ export class EditorController extends EventEmitter {
 
     if (ctrl) {
       switch (code) {
+        case 92: // \ — Ctrl+\ toggles show-hidden debug rendering
+          this.setShowHidden(!this.showHiddenChars)
+          return "changed"
         case 97:
           return this.buf.moveLineStart() ? "changed" : "ignore"
         case 99:
@@ -645,7 +828,13 @@ export class EditorController extends EventEmitter {
         rowCount: this.buf.lines.length,
       })
       if (fullLines.length > 0) {
-        this.compositor.writeStream(`${fullLines.join("\n")}\n`)
+        // Leading `\n` gives the committed prompt one blank row of breathing
+        // room above it (separating it from the previous turn's response or
+        // the startup banner). The compositor's blank-separator row is
+        // erased during the live-area teardown for this commit, so without
+        // this leading newline the prompt would butt directly against the
+        // previous content.
+        this.compositor.writeStream(`\n${fullLines.join("\n")}\n`)
       }
     }
     this.buf.clear()
@@ -656,71 +845,130 @@ export class EditorController extends EventEmitter {
 
   private repaint(): void {
     const cols = (this.output as { columns?: number }).columns
-    const statusRows = this.statusLine == null ? 0 : 1
+    // Always reserve exactly 1 header row above the editor prompt.
+    // When a status message is active it shows the spinner + label; when idle
+    // (statusLine == null) it is rendered as a blank line.  Keeping the row
+    // count constant means the prompt never jumps when status appears or
+    // disappears — in particular, `turnStatus.clear()` at end-of-turn no
+    // longer causes the prompt to hop up one row (the "blank line at the
+    // bottom" bug that occurred because the former STATUS row was vacated).
+    const decorationRows = this.decorationLines.length
+    // Status row is always 1; decoration rows (queued-message display, etc.)
+    // sit between the status and the editor and count against the cap so
+    // the prompt can't be pushed off-screen by an over-eager queue.
+    const statusRows = 1 + decorationRows
     const cap = Math.max(1, this.maxLiveHeight())
     const editorBudget = Math.max(1, cap - statusRows)
 
-    // Window size in **logical** lines. We pick the largest K such that
-    // the K logical lines starting at viewportTop wrap to ≤ editorBudget
-    // physical rows AND the cursor's logical row is included. Without
-    // `cols` (non-TTY tests), we treat each logical line as 1 physical row.
-    const totalLogical = this.buf.lines.length
-
-    // Slide viewport so cursor's logical row is in view (logical units).
-    if (this.buf.row < this.viewportTop) {
-      this.viewportTop = this.buf.row
-    }
-    // Tentatively grow the window to include the cursor row, then trim
-    // from the top until it fits in the physical budget.
-    let windowEnd = Math.max(this.buf.row + 1, this.viewportTop + 1)
-    if (windowEnd > totalLogical) windowEnd = totalLogical
-    let physicalRows = this.measureWindowPhysicalRows(this.viewportTop, windowEnd, cols)
-    while (physicalRows > editorBudget && this.viewportTop < this.buf.row) {
-      this.viewportTop += 1
-      physicalRows = this.measureWindowPhysicalRows(this.viewportTop, windowEnd, cols)
-    }
-    // Try to extend the window downward to fill remaining budget.
-    while (windowEnd < totalLogical) {
-      const next = this.measureWindowPhysicalRows(this.viewportTop, windowEnd + 1, cols)
-      if (next > editorBudget) break
-      windowEnd += 1
-      physicalRows = next
-    }
-    // Try to extend upward too if there's room.
-    while (this.viewportTop > 0) {
-      const next = this.measureWindowPhysicalRows(this.viewportTop - 1, windowEnd, cols)
-      if (next > editorBudget) break
-      this.viewportTop -= 1
-      physicalRows = next
+    // Run the viewport/window calculation for a given physical-row content
+    // budget. Does not mutate any state; returns the computed values.
+    const computeWindow = (budget: number, startVTop: number) => {
+      let vTop = startVTop
+      if (this.buf.row < vTop) vTop = this.buf.row
+      const totalLogical = this.buf.lines.length
+      // Tentatively grow the window to include the cursor row, then trim
+      // from the top until it fits in the physical budget.
+      let windowEnd = Math.max(this.buf.row + 1, vTop + 1)
+      if (windowEnd > totalLogical) windowEnd = totalLogical
+      let physicalRows = this.measureWindowPhysicalRows(vTop, windowEnd, cols)
+      while (physicalRows > budget && vTop < this.buf.row) {
+        vTop += 1
+        physicalRows = this.measureWindowPhysicalRows(vTop, windowEnd, cols)
+      }
+      // Try to extend the window downward to fill remaining budget.
+      while (windowEnd < totalLogical) {
+        const next = this.measureWindowPhysicalRows(vTop, windowEnd + 1, cols)
+        if (next > budget) break
+        windowEnd += 1
+        physicalRows = next
+      }
+      // Try to extend upward too if there's room.
+      while (vTop > 0) {
+        const next = this.measureWindowPhysicalRows(vTop - 1, windowEnd, cols)
+        if (next > budget) break
+        vTop -= 1
+        physicalRows = next
+      }
+      return { vTop, windowEnd, physicalRows }
     }
 
-    const editorWindow = Math.max(1, windowEnd - this.viewportTop)
-    const target = physicalRows + statusRows
+    // Pass 1: compute window with full editor budget (no indicator reservation).
+    let { vTop, windowEnd, physicalRows } = computeWindow(editorBudget, this.viewportTop)
+
+    // When the viewport is scrolled AND we have room (editorBudget ≥ 2), reserve
+    // a separate indicator row above the content rows.  This prevents the cursor
+    // from ever landing on the "↑ N more lines" line: redo the window calculation
+    // with a budget reduced by 1 so the cursor always maps to a content row.
+    // With editorBudget=1 there is no room for both indicator and content, so we
+    // fall back to the replacing behaviour (indicator overwrites the single row).
+    const needSeparateIndicator = vTop > 0 && editorBudget >= 2
+    if (needSeparateIndicator) {
+      const r = computeWindow(editorBudget - 1, this.viewportTop)
+      vTop = r.vTop
+      windowEnd = r.windowEnd
+      physicalRows = r.physicalRows
+    }
+
+    this.viewportTop = vTop
+
+    const editorWindow = Math.max(1, windowEnd - vTop)
+    // Re-check after pass 2 (in the unlikely case pass 2 brought vTop back to
+    // 0, no indicator is needed and we reclaim the reserved row).
+    const actualNeedSeparate = needSeparateIndicator && vTop > 0
+    const target = physicalRows + statusRows + (actualNeedSeparate ? 1 : 0)
     if (target !== this.compositor.liveHeight) {
       this.compositor.setLiveHeight(target)
     }
+
     const { lines, cursor } = this.renderer.render(this.buf, {
-      firstRow: this.viewportTop,
+      firstRow: vTop,
       rowCount: editorWindow,
       columns: cols,
     })
 
-    // When the viewport has scrolled down, replace the first editor line with
-    // a faint "↑ more" indicator so the user knows content is hidden above.
-    if (this.viewportTop > 0 && lines.length > 0) {
+    // Build the scroll indicator when content is hidden above the viewport.
+    let indicatorLine: string | null = null
+    if (vTop > 0) {
       const w = cols ?? 0
-      const indicator = w > 10
-        ? `\x1b[2m ${"─".repeat(w - 10)} ^ more\x1b[22m`
-        : `\x1b[2m ^ more\x1b[22m`
-      lines[0] = indicator
+      const n = vTop
+      const label = `^ ${n} more line${n === 1 ? "" : "s"}`
+      indicatorLine =
+        w > label.length + 3
+          ? `\x1b[2m ${"\u2500".repeat(w - label.length - 3)} ${label}\x1b[22m`
+          : `\x1b[2m ${label}\x1b[22m`
     }
 
+    const rawStatus = this.statusLine ?? ""
     const statusLine =
-      this.statusLine == null || !cols || cols <= 0
-        ? this.statusLine
-        : truncateDisplayWidth(this.statusLine, cols)
-    const finalLines = statusLine == null ? lines : [statusLine, ...lines]
-    const finalCursor = this.statusLine == null ? cursor : { row: cursor.row + 1, col: cursor.col }
+      !rawStatus || !cols || cols <= 0
+        ? rawStatus
+        : truncateDisplayWidth(rawStatus, cols)
+
+    let finalLines: string[]
+    let finalCursor: { row: number; col: number }
+
+    // Layout (top → bottom):
+    //   [statusLine]              ← always 1 row
+    //   [...decorationLines]      ← 0..N rows (queue display, etc.)
+    //   [indicatorLine?]          ← 0..1 row (scroll indicator, if needed)
+    //   [...lines]                ← editor content
+    // Cursor offset = 1 (status) + decorationRows + indicatorOffset.
+    const decoration = this.decorationLines
+    if (actualNeedSeparate && indicatorLine) {
+      // Separate indicator row above content.
+      finalLines = [statusLine, ...decoration, indicatorLine, ...lines]
+      finalCursor = { row: cursor.row + 2 + decorationRows, col: cursor.col }
+    } else if (indicatorLine && lines.length > 0) {
+      // Fallback for editorBudget=1: indicator replaces the single content row.
+      lines[0] = indicatorLine
+      finalLines = [statusLine, ...decoration, ...lines]
+      finalCursor = { row: cursor.row + 1 + decorationRows, col: cursor.col }
+    } else {
+      // No indicator (viewport at top).
+      finalLines = [statusLine, ...decoration, ...lines]
+      finalCursor = { row: cursor.row + 1 + decorationRows, col: cursor.col }
+    }
+
     this.compositor.setLiveArea(finalLines, finalCursor)
   }
 

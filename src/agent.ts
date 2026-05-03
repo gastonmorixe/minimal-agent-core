@@ -47,43 +47,53 @@ import type { ManifestMode } from "./plugins/types.ts"
 import type { SessionStore } from "./session-store.ts"
 import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
+import { PALETTE } from "./palette.ts"
 import { executeTool, TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
+import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
+import { truncHint } from "./truncate-hint.ts"
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
 // ---------------------------------------------------------------------------
 
+// Color helpers. The SGR open sequences live in `src/palette.ts` (the
+// agent-owned single source of truth, also exported to plugins via
+// `MINIMAL_AGENT_PALETTE` env). The wrappers here just close them.
+const _fg = (open: string) => (s: string) => `${open}${s}\x1b[39m`
+const _attr = (open: string, close: string) => (s: string) => `${open}${s}${close}`
+const _combo = (open: string, close: string) => (s: string) => `${open}${s}${close}`
+
 export const c = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[22m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[39m`,
-  blue: (s: string) => `\x1b[34m${s}\x1b[39m`,
-  magenta: (s: string) => `\x1b[35m${s}\x1b[39m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[39m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[39m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[39m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
-  italic: (s: string) => `\x1b[3m${s}\x1b[23m`,
-  underline: (s: string) => `\x1b[4m${s}\x1b[24m`,
-  brightCyan: (s: string) => `\x1b[96m${s}\x1b[39m`,
-  brightYellow: (s: string) => `\x1b[93m${s}\x1b[39m`,
-  brightGreen: (s: string) => `\x1b[92m${s}\x1b[39m`,
-  brightRed: (s: string) => `\x1b[91m${s}\x1b[39m`,
-  brightMagenta: (s: string) => `\x1b[95m${s}\x1b[39m`,
-  boldCyan: (s: string) => `\x1b[1;36m${s}\x1b[22;39m`,
-  boldGreen: (s: string) => `\x1b[1;32m${s}\x1b[22;39m`,
-  boldRed: (s: string) => `\x1b[1;31m${s}\x1b[22;39m`,
-  boldYellow: (s: string) => `\x1b[1;33m${s}\x1b[22;39m`,
-  dimCyan: (s: string) => `\x1b[2;36m${s}\x1b[22;39m`,
-  faintWhite: (s: string) => `\x1b[2;37m${s}\x1b[22;39m`,
+  dim: _attr("\x1b[2m", "\x1b[22m"),
+  cyan: _fg(PALETTE.cyan),
+  blue: _fg(PALETTE.blue),
+  magenta: _fg(PALETTE.magenta),
+  yellow: _fg(PALETTE.yellow),
+  green: _fg(PALETTE.green),
+  red: _fg(PALETTE.red),
+  bold: _attr("\x1b[1m", "\x1b[22m"),
+  italic: _attr("\x1b[3m", "\x1b[23m"),
+  underline: _attr("\x1b[4m", "\x1b[24m"),
+  brightCyan: _fg(PALETTE.brightCyan),
+  brightYellow: _fg(PALETTE.brightYellow),
+  brightGreen: _fg(PALETTE.brightGreen),
+  brightRed: _fg(PALETTE.brightRed),
+  brightMagenta: _fg(PALETTE.brightMagenta),
+  boldCyan: _combo("\x1b[1;36m", "\x1b[22;39m"),
+  boldGreen: _combo("\x1b[1;32m", "\x1b[22;39m"),
+  boldRed: _combo("\x1b[1;31m", "\x1b[22;39m"),
+  boldYellow: _combo("\x1b[1;33m", "\x1b[22;39m"),
+  dimCyan: _combo("\x1b[2;36m", "\x1b[22;39m"),
+  faintWhite: _combo("\x1b[2;37m", "\x1b[22;39m"),
 
   // Modern "Cool Summer" palette (Saturated & Powerful)
-  orange: (s: string) => `\x1b[38;5;208m${s}\x1b[39m`,
-  pink: (s: string) => `\x1b[38;5;199m${s}\x1b[39m`,
-  purple: (s: string) => `\x1b[38;5;98m${s}\x1b[39m`,
-  lime: (s: string) => `\x1b[38;5;118m${s}\x1b[39m`,
-  sky: (s: string) => `\x1b[38;5;45m${s}\x1b[39m`,
-  violet: (s: string) => `\x1b[38;5;93m${s}\x1b[39m`,
-  gold: (s: string) => `\x1b[38;5;214m${s}\x1b[39m`,
+  orange: _fg(PALETTE.orange),
+  pink: _fg(PALETTE.pink),
+  purple: _fg(PALETTE.purple),
+  lime: _fg(PALETTE.lime),
+  sky: _fg(PALETTE.sky),
+  violet: _fg(PALETTE.violet),
+  gold: _fg(PALETTE.gold),
 }
 
 const faintThinkingChunk = (s: string): string => {
@@ -184,6 +194,13 @@ export class Agent {
   private model: string
   /** Effort level for output_config.effort. */
   private effort: "high" | "medium" | "low" | "max" | undefined
+  /**
+   * Optional `thinking.display` override, threaded onto every API call.
+   * `"summarized"` opts opus-4.7 / mythos into plaintext thinking_delta
+   * streaming; `"omitted"` forces redaction on models that would otherwise
+   * stream summaries. Unset → server default per model.
+   */
+  private thinkingDisplay: "summarized" | "omitted" | undefined
   /** Optional TUI plugin loader. When set, plugin tools merge with core tools. */
   private loader: PluginLoader | null
   /** Optional mode manager (mode-aware system prompt + tool filter). */
@@ -223,6 +240,7 @@ export class Agent {
     auth: AuthResult
     model?: string
     effort?: "high" | "medium" | "low" | "max"
+    thinkingDisplay?: "summarized" | "omitted"
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
     sendFn?: typeof sendMessage
@@ -239,6 +257,7 @@ export class Agent {
     this.auth = opts.auth
     this.model = opts.model ?? "claude-sonnet-4-6"
     this.effort = opts.effort
+    this.thinkingDisplay = opts.thinkingDisplay
     this.loader = opts.loader ?? null
     this.modeManager = opts.modeManager ?? null
     this.sendFn = opts.sendFn ?? sendMessage
@@ -283,6 +302,14 @@ export class Agent {
    * not send back-to-back user messages (which the API rejects for
    * alternating-role reasons), and so the user can resubmit cleanly.
    *
+   * IMPORTANT: a user message that carries `tool_result` blocks is the
+   * required pairing for the previous assistant `tool_use` — popping it
+   * would leave a dangling tool_use, and every subsequent request would
+   * 400 with "tool_use ids were found without tool_result blocks
+   * immediately after". So we stop rolling back as soon as we hit such a
+   * message and leave it in place. The actual API failure for that turn
+   * is handled by re-sending, not by amputating history.
+   *
    * @returns true if at least one message was discarded.
    */
   rollbackPendingTurn(): boolean {
@@ -291,6 +318,10 @@ export class Agent {
       this.messages.length > 0 &&
       this.messages[this.messages.length - 1].role !== "assistant"
     ) {
+      const last = this.messages[this.messages.length - 1]
+      const hasToolResult =
+        Array.isArray(last.content) && last.content.some((b) => b.type === "tool_result")
+      if (hasToolResult) break
       this.messages.pop()
       removed = true
     }
@@ -337,12 +368,54 @@ export class Agent {
       onThinkingStart?: () => MaybePromise<void>
       onThinkingChunk?: (chunk: string) => MaybePromise<void>
       onThinkingStop?: () => MaybePromise<void>
+      /**
+       * Optional. Called at each tool-loop boundary (right after tool
+       * results are computed, before the next API request). Returns text
+       * the host wants to inject into the *current* turn as a follow-up
+       * user message (queued user input). When non-null/non-empty, the
+       * returned text is appended as a `text` content block to the same
+       * user message that carries the tool_results, so the model sees
+       * "tool outputs + new user instruction" in one user turn. Returning
+       * `null` or `""` skips injection. The host owns the queue; this
+       * callback is the drain.
+       */
+      drainQueuedUserText?: () => string | null
+      /**
+       * Optional. Notification hook fired immediately AFTER queued user
+       * text has been injected at a tool-loop boundary. Use this to
+       * commit the injected text to the host's scrollback (so the user
+       * sees their queued message materialize, mirroring what an
+       * editor.submit would have written). Distinct from
+       * `onTranscriptLine` because the visual treatment for queued user
+       * input usually mirrors a normal user prompt (e.g. `❯ <text>`),
+       * not a tool transcript block (`╭ │ └`).
+       */
+      onQueueInject?: (text: string) => void
+      /**
+       * Optional cancellation signal for the entire turn. When aborted:
+       *   - any in-flight `sendMessage` HTTP/2 stream is torn down,
+       *   - any in-flight `executeTool` (Bash child process, etc.) is killed,
+       *   - the generator throws `AbortError` so the caller can branch.
+       *
+       * The agent does NOT swallow the abort here — partial assistant
+       * blocks are NOT pushed onto `messages[]` (the rollback path is the
+       * caller's responsibility via {@link Agent.rollbackPendingTurn}).
+       */
+      signal?: AbortSignal
     },
   ): AsyncGenerator<string, StreamedResponse, undefined> {
     // Split transport opts from the transcript callback. sendFn must not see
-    // onTranscriptLine.
-    const { onTranscriptLine, onThinkingStart, onThinkingChunk, onThinkingStop, ...sendOpts } =
-      opts ?? {}
+    // onTranscriptLine or the queue-injection hooks.
+    const {
+      onTranscriptLine,
+      onThinkingStart,
+      onThinkingChunk,
+      onThinkingStop,
+      drainQueuedUserText,
+      onQueueInject,
+      signal,
+      ...sendOpts
+    } = opts ?? {}
     const thinkingStart = onThinkingStart
     const onThinkingDelta = onThinkingChunk ?? sendOpts.onThinkingDelta
     const thinkingStop = onThinkingStop
@@ -351,8 +424,16 @@ export class Agent {
       else console.error(line)
     }
 
-    // Initial user message
-    const initialUserContent: ContentBlock[] = [{ type: "text", text: userText }]
+    // Initial user message. If a mode toggle is pending advertisement,
+    // prepend a `<mode-change>` text block — see ModeManager.consumePendingAttachment.
+    // The attachment rides on the rolling-tail breakpoint (which is
+    // invalidated every turn anyway by the user message changing), so
+    // mode toggles cost zero additional cache invalidation. The system
+    // prompt and tool list are mode-independent under this design.
+    const initialUserContent: ContentBlock[] = []
+    const initialModeAttach = this.modeManager?.consumePendingAttachment() ?? null
+    if (initialModeAttach) initialUserContent.push(initialModeAttach)
+    initialUserContent.push({ type: "text", text: userText })
     this.messages.push({
       role: "user",
       content: initialUserContent,
@@ -367,9 +448,18 @@ export class Agent {
     }
 
     // Plugin system prompt + tools are computed once per run (plugins don't
-    // change mid-turn). The active mode (if any) layers on top: its
-    // systemPromptAppend joins the session-context block, and its
-    // disallowedTools filter removes tools from the request.
+    // change mid-turn). MODE STATE IS DELIBERATELY NOT COUPLED INTO THE
+    // CACHED PREFIX:
+    //   - Mode behavior text lives in each mode plugin's PROMPT.md, which
+    //     is part of `pluginBlock` and is byte-stable across toggles.
+    //   - Disallowed tools are gated at dispatch time below
+    //     (modeManager.isToolAllowed) — the request still advertises
+    //     every tool, so the `tools` array is byte-stable too.
+    //   - The activation signal ("from = X, to = Y") rides as a small
+    //     <mode-change> text block on the next user turn — see the
+    //     consumePendingAttachment() calls above and below. That block
+    //     sits behind the rolling-tail breakpoint that's invalidated
+    //     every turn anyway, so mode toggles cost zero extra cache.
     // Use the async variant so plugin-contributed prompt fragments
     // (env-info, etc.) get awaited+memoized. The first turn pays the
     // fragment-resolution cost (bounded by each fragment's `timeoutMs`,
@@ -377,16 +467,7 @@ export class Agent {
     // is reserved for the session hash in src/index.ts so volatile fragment
     // content (date, terminal size) doesn't bust resume drift detection.
     const pluginBlock = (await this.loader?.getPromptBlockAsync()) ?? null
-    const modeAddition = this.modeManager?.systemPromptAddition() ?? ""
-    const sessionContext: string | null =
-      pluginBlock && modeAddition
-        ? `${pluginBlock}\n\n${modeAddition}`
-        : pluginBlock != null
-          ? pluginBlock
-          : modeAddition !== ""
-            ? modeAddition
-            : null
-    const system = sessionContext ? buildSystemPrompt({ sessionContext }) : undefined
+    const system = pluginBlock ? buildSystemPrompt({ sessionContext: pluginBlock }) : undefined
     const allTools: ToolDefinition[] = this.loader
       ? [...TOOL_DEFINITIONS, ...(this.loader.getExtraTools() as ToolDefinition[])]
       : [...TOOL_DEFINITIONS]
@@ -396,7 +477,7 @@ export class Agent {
     for (const t of allTools) {
       if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
     }
-    let mergedTools: Array<{
+    const mergedTools: Array<{
       name: string
       description: string
       input_schema: Record<string, unknown>
@@ -405,11 +486,17 @@ export class Agent {
       description: t.description,
       input_schema: t.input_schema,
     }))
-    if (this.modeManager) {
-      mergedTools = this.modeManager.filterTools(mergedTools)
-    }
 
     while (rounds < this.maxToolRounds) {
+      // Short-circuit if the caller already aborted (e.g. user pressed Esc
+      // while we were between API rounds). Without this, an abort that
+      // landed during tool execution would still trigger a follow-up
+      // sendFn call that immediately throws — wastes a network round-trip
+      // and produces a confusing error path. Throw `AbortError` so the
+      // caller's catch can branch on `err.name === "AbortError"`.
+      if (signal?.aborted) {
+        throw Object.assign(new Error("aborted"), { name: "AbortError" })
+      }
       rounds++
 
       // Send messages to API. Mark the last block of the last message with a
@@ -422,10 +509,14 @@ export class Agent {
         tools: mergedTools,
         system,
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...(this.thinkingDisplay
+          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+          : {}),
         ...sendOpts,
         ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
         ...(onThinkingDelta ? { onThinkingDelta } : {}),
         ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
+        ...(signal ? { signal } : {}),
       })
 
       let response: StreamedResponse | undefined
@@ -476,44 +567,69 @@ export class Agent {
         let content: string
         let isError: boolean | undefined
         let display: string | undefined
-        const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
-          notificationId: "tool.running",
-          category: "tool",
-        })
 
-        try {
-          if (this.loader?.hasTool(tool.name)) {
-            // Plugin-provided tool: delegate to the loader dispatcher. Plugin
-            // handlers may draw their own interactive UI; we do not preview
-            // their stdout here.
-            const pluginResult = await this.loader.dispatch(
-              {
-                type: "tool",
-                name: tool.name,
-                input: tool.input,
-                tool_use_id: tool.id,
-              },
-              process.cwd(),
-            )
-            if (pluginResult.kind === "tool_result") {
-              content = pluginResult.content
-              isError = pluginResult.is_error
+        // Mode dispatch gate. Tools stay registered in the request body
+        // (so the cached prefix is mode-independent), but the harness
+        // refuses to actually invoke a tool the active mode disallows.
+        // The synthesized error tool_result teaches the model how to
+        // adapt — see ManifestMode.refusalHint. No spinner, no execution
+        // side effects.
+        const gate = this.modeManager?.isToolAllowed(tool.name) ?? { allowed: true as const }
+        if (!gate.allowed) {
+          content = gate.message
+          isError = true
+          // Render a denial line in the transcript so the user sees what
+          // got blocked. ⊘ glyph + dim red label + the refusal message.
+          writeTranscript(`  ${c.dimCyan("│")} ${c.boldRed("⊘")} ${c.dim(content)}`)
+          writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(`(refused by ${this.modeManager?.activeId() ?? "mode"})`)}`)
+        } else {
+          const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
+            notificationId: "tool.running",
+            category: "tool",
+          })
+
+          try {
+            if (this.loader?.hasTool(tool.name)) {
+              // Plugin-provided tool: delegate to the loader dispatcher. Plugin
+              // handlers may draw their own interactive UI; we do not preview
+              // their stdout here.
+              const pluginResult = await this.loader.dispatch(
+                {
+                  type: "tool",
+                  name: tool.name,
+                  input: tool.input,
+                  tool_use_id: tool.id,
+                },
+                process.cwd(),
+              )
+              if (pluginResult.kind === "tool_result") {
+                content = pluginResult.content
+                isError = pluginResult.is_error
+                display = pluginResult.display
+              } else {
+                content = `Plugin tool "${tool.name}" returned a non-tool_result value`
+                isError = true
+              }
             } else {
-              content = `Plugin tool "${tool.name}" returned a non-tool_result value`
-              isError = true
+              const result = await executeTool(tool.name, tool.input, { signal })
+              content = result.content
+              isError = result.is_error
+              display = result.display
+              // Propagate _aborted so the renderer below can draw a
+              // dim "canceled" close line instead of the generic error
+              // preview. The flag is stripped before the result is sent
+              // back to the API as a tool_result block.
+              if ((result as { _aborted?: boolean })._aborted) {
+                content = "canceled"
+              }
             }
-          } else {
-            const result = executeTool(tool.name, tool.input)
-            content = result.content
-            isError = result.is_error
-            display = result.display
+          } finally {
+            toolStatus.clear()
           }
-        } finally {
-          toolStatus.clear()
-        }
 
-        for (const line of formatToolPreview(content, isError, display)) {
-          writeTranscript(line)
+          for (const line of formatToolPreview(content, isError, display)) {
+            writeTranscript(line)
+          }
         }
 
         const resultBlock: ToolResultBlock = {
@@ -526,8 +642,41 @@ export class Agent {
         this.store?.appendToolResult(resultBlock)
       }
 
-      // Send tool results back
-      this.messages.push({ role: "user", content: toolResults })
+      // Send tool results back. Before the next API request, give the host
+      // a chance to drain queued user text and inject it into THIS user
+      // message, alongside the tool_results — this is the fastest natural
+      // injection point for "I want to add context mid-loop without
+      // canceling" because it rides the existing user→assistant turn
+      // boundary. If injected, mirror it into the store as a separate
+      // text-only user payload so session replay can distinguish queued
+      // injection from the tool_result message itself.
+      // ORDER MATTERS: the Anthropic API requires `tool_result` blocks to
+      // come *immediately* after the prior assistant `tool_use` — i.e.
+      // they must be the first blocks of this user message. A
+      // `<mode-change>` text block (or any other text) in front of them
+      // produces:
+      //   "tool_use ids were found without tool_result blocks
+      //    immediately after"
+      // and 400s the entire turn. So tool_results go FIRST; the
+      // mode-change attachment trails them. The model still sees the
+      // mode shift in the same user turn, just after the results, which
+      // is fine — the activation block is advisory, not load-bearing.
+      // consumePendingAttachment is idempotent: returns null if no
+      // toggle has happened since the last consume, so steady-state
+      // turns pay nothing. This ordering is also cache-safe: the
+      // rolling breakpoint just lands on whatever the last block is,
+      // and the historical prefix (prior turns) is untouched.
+      const userContent: ContentBlock[] = []
+      userContent.push(...toolResults)
+      const loopModeAttach = this.modeManager?.consumePendingAttachment() ?? null
+      if (loopModeAttach) userContent.push(loopModeAttach)
+      const queuedText = drainQueuedUserText?.() ?? null
+      if (queuedText && queuedText.trim().length > 0) {
+        userContent.push({ type: "text", text: queuedText })
+        this.store?.appendUser([{ type: "text", text: queuedText }])
+        onQueueInject?.(queuedText)
+      }
+      this.messages.push({ role: "user", content: userContent })
     }
 
     if (rounds >= this.maxToolRounds) {
@@ -565,6 +714,9 @@ export class Agent {
       messages: withRollingCacheBreakpoint(this.messages),
       model: this.model,
       ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+      ...(this.thinkingDisplay
+        ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+        : {}),
       ...opts,
     })
 
@@ -618,9 +770,13 @@ export function formatToolInput(tool: ToolUseBlock): string {
     const cmd = String(input.command)
     const firstNl = cmd.indexOf("\n")
     const firstLine = firstNl === -1 ? cmd : cmd.slice(0, firstNl)
-    const truncated = firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine
-    const ellipsis = firstNl !== -1 && firstLine.length <= 80 ? " …" : ""
-    return `$ ${truncated}${ellipsis}`
+    const charsCut = firstLine.length > 80 ? firstLine.length - 80 : 0
+    const truncated = charsCut > 0 ? `${firstLine.slice(0, 80)}${truncHint(charsCut, "ch")}` : firstLine
+    // Multi-line commands: when the first line itself wasn't cut, hint how
+    // many additional lines were elided so the bordered block stays a single row.
+    const extraLines = firstNl !== -1 && charsCut === 0 ? cmd.split("\n").length - 1 : 0
+    const more = extraLines > 0 ? ` ${truncHint(extraLines, "L")}` : ""
+    return `$ ${truncated}${more}`
   }
   if (tool.name === "Read" && input.file_path) {
     return String(input.file_path)
@@ -637,13 +793,18 @@ export function formatToolInput(tool: ToolUseBlock): string {
   if (tool.name === "Grep" && input.pattern) {
     return `/${input.pattern}/` + (input.path ? ` in ${input.path}` : "")
   }
-  return JSON.stringify(input).slice(0, 80)
+  const json = JSON.stringify(input)
+  const charsCut = json.length > 80 ? json.length - 80 : 0
+  return charsCut > 0 ? `${json.slice(0, 80)}${truncHint(charsCut, "ch")}` : json
 }
 
+/**
+ *
+ */
 export function formatToolPreview(content: string, isError?: boolean, display?: string): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
   // unified diff from Edit/Write), render it as-is, line by line, with the
-  // standard `│ … └` connector gutter. No truncation: diffs are the point.
+  // standard `│ ... └` connector gutter. No truncation: diffs are the point.
   if (display && !isError) {
     const dlines = display.split("\n")
     const out: string[] = []
@@ -657,7 +818,9 @@ export function formatToolPreview(content: string, isError?: boolean, display?: 
   const preview = content.slice(0, 200)
   const lines = (preview || "(no output)").split("\n")
   if (content.length > 200) {
-    lines[lines.length - 1] += "..."
+    // Append the elided-size hint to the last line so it inherits the
+    // line's `c.dim`/`c.red` color wrap below — no separate ANSI nesting.
+    lines[lines.length - 1] += truncHint(content.length - 200, "ch")
   }
 
   const color = isError ? c.red : c.dim
@@ -754,6 +917,13 @@ export interface ReplEditor {
    * changes). Repaint should happen synchronously inside the call.
    */
   setPrompt?(prompt: string, continuationPrompt?: string): void
+  /**
+   * Optional. Render decoration rows between the status row and the editor
+   * prompt — used by the REPL to display the queued-message buffer (lines
+   * the user submitted while the agent was streaming, awaiting injection
+   * at the next safe boundary). Pass `[]` to clear.
+   */
+  setDecorationLines?(lines: string[]): void
 }
 
 /**
@@ -813,6 +983,8 @@ export async function runRepl(
     useLiveArea?: boolean
     compositor?: ReplCompositor
     editor?: ReplEditor
+    /** Forwarded to {@link runReplLiveArea}; see its docs. */
+    initialStdinBytes?: string
   },
 ): Promise<void> {
   if (opts?.useLiveArea) {
@@ -981,7 +1153,7 @@ export async function runRepl(
         statusRenderer?.suspend()
         if (lastKind === "text" && !lastChunkEndedWithNewline) {
           // Close partial text line before transcript begins. The agent's
-          // tool header (`\n  ┌ …`) then yields a blank separator.
+          // tool header (`\n  ┌ ...`) then yields a blank separator.
           output.write("\n")
           lastChunkEndedWithNewline = true
         }
@@ -1112,6 +1284,13 @@ async function runReplLiveArea(
     listModels?: (auth: AuthResult) => Promise<ModelInfo[]>
     compositor?: ReplCompositor
     editor?: ReplEditor
+    /**
+     * Bytes captured from stdin BEFORE the editor's data listener was
+     * attached (typically during the term-caps DECRPM probe at startup).
+     * Re-emitted to `process.stdin` immediately after `editor.start()` so
+     * a fast-typing user doesn't lose the first keystroke of the session.
+     */
+    initialStdinBytes?: string
   },
 ): Promise<void> {
   if (!opts.compositor || !opts.editor) {
@@ -1171,6 +1350,12 @@ async function runReplLiveArea(
   // as needed via setLiveHeight().
   compositor.mount(1)
   editor.start()
+  // Replay any stdin bytes that arrived while term-caps detection held
+  // raw mode. The editor's data listener is now attached, so this lands
+  // in the buffer just like a normal keystroke.
+  if (opts.initialStdinBytes && opts.initialStdinBytes.length > 0) {
+    process.stdin.emit("data", opts.initialStdinBytes)
+  }
   statusRenderer?.start()
 
   // One-time ready banner above the prompt. Goes through writeStream so
@@ -1184,8 +1369,11 @@ async function runReplLiveArea(
     modeManager && modeManager.hasModes()
       ? `  ${dot}  ${c.faintWhite("shift+tab")} ${c.bold("cycle mode")}`
       : ""
+  // NOTE: single trailing `\n` here. The compositor no longer draws a
+  // blank separator row above the live area, so the prompt follows the
+  // hint text directly (no extra blank line needed or wanted).
   compositor.writeStream(
-    `\n  ${c.bold(c.purple("status"))} ${c.faintWhite("ready")}\n  ${baseHint}${modeHint}\n\n`,
+    `\n  ${c.bold(c.purple("status"))} ${c.faintWhite("ready")}\n  ${baseHint}${modeHint}\n`,
   )
 
   // Submit queue: keystrokes never block, but we serialize agent turns.
@@ -1198,9 +1386,68 @@ async function runReplLiveArea(
     if (r) r()
   }
 
+  // Track whether a turn is currently running. Submits that arrive while
+  // running become queued user input — eligible for mid-turn injection at
+  // the next agent tool-loop boundary (see drainQueuedUserText below) AND
+  // surfaced visually above the editor prompt via setDecorationLines.
+  let running = false
+
+  /**
+   * Build the queued-message decoration block shown between the live-area
+   * status row and the editor prompt. Only rendered while a turn is in
+   * flight (steady-state idle should not display the queue — items are
+   * drained immediately by the main loop and would visually flash).
+   * Truncates each item to a single ~70-col preview so a multi-line paste
+   * doesn't dominate the screen.
+   */
+  const renderDecoration = (): void => {
+    if (typeof editor.setDecorationLines !== "function") return
+    if (!running || queue.length === 0) {
+      editor.setDecorationLines([])
+      return
+    }
+    const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
+    // Use a 1-cell glyph so the header text aligns column-for-column with
+    // the `┊`-prefixed item rows below. The previous `⏳` is wide-emoji
+    // (2 cells in iTerm/WezTerm/etc.) and the resulting 1-col drift made
+    // the queue widget look unaligned. (Bug 1.)
+    const arrow = c.faintWhite("…")
+    const count = queue.length
+    const header = `  ${arrow} ${dim(`${count} queued`)}`
+    const maxItems = 3
+    const lines: string[] = [header]
+    for (let i = 0; i < Math.min(maxItems, queue.length); i++) {
+      const oneLine = queue[i].replace(/\s+/g, " ").trim()
+      // Display-width-aware truncation. The previous `oneLine.slice(0, 70)`
+      // was a UTF-16 code-unit slice that could split surrogate pairs (lone
+      // high surrogate → `�`) and miscount wide chars (CJK at 2 cells/cp,
+      // emoji at 2 cells, combining marks at 0). For ASCII it's identical;
+      // for everything else `truncateDisplayWidth` is correct. (Bug 3.)
+      const PREVIEW_W = 70
+      let preview: string
+      if (displayWidth(oneLine) <= PREVIEW_W) {
+        preview = oneLine
+      } else {
+        const truncated = truncateDisplayWidth(oneLine, PREVIEW_W, "")
+        // Report code-points cut, not cells (matches user mental model:
+        // "I typed N more characters past the preview"). Counts via the
+        // string iterator, which steps grapheme-naively but per-codepoint
+        // — close enough for the queue preview's purpose.
+        const cpCut = [...oneLine].length - [...truncated].length
+        preview = `${truncated}${truncHint(cpCut, "ch")}`
+      }
+      lines.push(`  ${dim("┊")} ${dim(preview)}`)
+    }
+    if (queue.length > maxItems) {
+      lines.push(`  ${dim(`┊ ... and ${queue.length - maxItems} more`)}`)
+    }
+    editor.setDecorationLines(lines)
+  }
+
   const onSubmit = (text: string): void => {
     if (!text.trim()) return
     queue.push(text)
+    renderDecoration()
     wakeWaiter()
   }
   const onCancel = (): void => {
@@ -1236,6 +1483,35 @@ async function runReplLiveArea(
       // resets between user messages. The formatter's stdout is fed into
       // compositor.writeStream so it lands above the pinned live area.
       let formatter: Formatter | null = null
+      // Some formatters (notably mdstream) emit a trailing `\n\n` at the end
+      // of a render to ensure block-level separation. In our REPL that lands
+      // as TWO blank rows between the response and the next prompt instead
+      // of one. We solve this by buffering trailing `\n` chunks: any run of
+      // `\n` characters at the tail of a chunk is held back, and flushed
+      // only when more body content arrives (preserving internal blank
+      // lines). At end-of-turn we flush at most a single `\n`.
+      let pendingTrailingNewlines = ""
+      const flushTrailingNewlines = () => {
+        if (pendingTrailingNewlines.length > 0) {
+          compositor.writeStream(pendingTrailingNewlines)
+          lastChunkEndedWithNewline = pendingTrailingNewlines.endsWith("\n")
+          pendingTrailingNewlines = ""
+        }
+      }
+      const writeFormatterChunk = (s: string) => {
+        if (s.length === 0) return
+        let i = s.length
+        while (i > 0 && s[i - 1] === "\n") i--
+        const body = s.slice(0, i)
+        const tail = s.slice(i)
+        if (body.length > 0) {
+          // Body resumes after a tail-only run; flush any held newlines
+          // verbatim so the internal layout is preserved.
+          flushTrailingNewlines()
+          compositor.writeStream(body)
+        }
+        pendingTrailingNewlines += tail
+      }
       if (opts.formatterCmd) {
         const decoder = new TextDecoder()
         const compositorSink: Pick<NodeJS.WriteStream, "write"> & {
@@ -1250,7 +1526,7 @@ async function runReplLiveArea(
           },
           write: ((chunk: string | Uint8Array) => {
             const s = typeof chunk === "string" ? chunk : decoder.decode(chunk)
-            if (s.length > 0) compositor.writeStream(s)
+            writeFormatterChunk(s)
             return true
           }) as NodeJS.WriteStream["write"],
         }
@@ -1266,15 +1542,9 @@ async function runReplLiveArea(
 
       const writeDirectSink = (s: string) => {
         if (s.length === 0) return
-        if (lastKind === "none") {
-          // First write of the turn. The user's just-submitted prompt sits
-          // immediately above in scrollback; without a separator the model's
-          // response butts directly against it (no color/space contrast),
-          // which reads as cramped. One blank line gives the eye an anchor.
-          compositor.writeStream("\n")
-        } else if (lastKind === "transcript") {
+        if (lastKind === "transcript") {
           // Transcript lines always end with `\n`; one more `\n` here yields
-          // exactly one blank line between the `└ …` and the next text.
+          // exactly one blank line between the `└ ...` and the next text.
           compositor.writeStream("\n")
         }
         wroteOutput = true
@@ -1285,15 +1555,9 @@ async function runReplLiveArea(
 
       const baseSink = (s: string) => {
         if (s.length === 0) return
-        if (lastKind === "none") {
-          // First write of the turn. The user's just-submitted prompt sits
-          // immediately above in scrollback; without a separator the model's
-          // response butts directly against it (no color/space contrast),
-          // which reads as cramped. One blank line gives the eye an anchor.
-          compositor.writeStream("\n")
-        } else if (lastKind === "transcript") {
+        if (lastKind === "transcript") {
           // Transcript lines always end with `\n`; one more `\n` here yields
-          // exactly one blank line between the `└ …` and the next text.
+          // exactly one blank line between the `└ ...` and the next text.
           compositor.writeStream("\n")
         }
         wroteOutput = true
@@ -1337,14 +1601,20 @@ async function runReplLiveArea(
       }
 
       const onTranscriptLine = (line: string): void => {
-        // If we're transitioning from a partial text line into transcript
-        // (`  ┌ …`), close the text line first. The agent's tool header
-        // already starts with `\n`, so adding `\n` here yields a blank
-        // separator line. When previous text already ended with `\n` the
-        // header's leading `\n` alone is the blank line — don't double it.
-        if (lastKind === "text" && !lastChunkEndedWithNewline) {
-          compositor.writeStream("\n")
-          lastChunkEndedWithNewline = true
+        // Transitioning from text to transcript: the formatter may have
+        // held back a trailing `\n`/`\n\n` in `pendingTrailingNewlines`
+        // (mdstream-style block-end run). Flush it FIRST so the text
+        // section ends with its proper line terminator before the tool
+        // header — otherwise the text line and the tool's `╭` would
+        // collide on adjacent rows with no blank between them. The
+        // capBlankLines cap in the compositor still ensures we never
+        // get more than one blank row from the combined `\n` run.
+        if (lastKind === "text") {
+          flushTrailingNewlines()
+          if (!lastChunkEndedWithNewline) {
+            compositor.writeStream("\n")
+            lastChunkEndedWithNewline = true
+          }
         }
         // When lastKind === "none" we do NOT add an extra `\n`: the agent's
         // tool header already starts with `\n`, and submit() flushed the
@@ -1367,12 +1637,45 @@ async function runReplLiveArea(
         await endThinkingFormatter()
         writeDirectSink("\n")
       }
+      // Mark the turn as running so submits arriving from this point on are
+      // captured as queued user input rather than racing into the next
+      // queue.shift() iteration. The decoration is rendered on every queue
+      // mutation; clearing happens in the finally below.
+      running = true
+      renderDecoration()
+      // drain: splice ALL pending items into one combined injection. We
+      // batch because the user's typical mental model when queuing
+      // multiple messages mid-turn is "give the model all this extra
+      // context at once" rather than "respond to each as a separate
+      // turn". If they wanted serialization they'd wait for a response
+      // between submits. Items not drained here (because no tool boundary
+      // ever fired) fall through to next-turn processing via the
+      // existing FIFO queue.shift() loop.
+      const drainQueuedUserText = (): string | null => {
+        if (queue.length === 0) return null
+        const drained = queue.splice(0).join("\n\n")
+        renderDecoration()
+        return drained
+      }
+      // onQueueInject: NO-OP for scrollback rendering. The user's submitted
+      // text was already committed to scrollback by EditorController.submit
+      // at the moment they pressed Enter — that's the immediate-feedback
+      // contract of the editor. Re-rendering it here at the tool-boundary
+      // injection point produced a visible duplicate (prompt appears twice:
+      // once before the tool block, once after). The hook is retained as a
+      // notification point in case future code wants to react to the
+      // injection, but it must not write to scrollback.
+      const onQueueInject = (_qtext: string): void => {
+        /* intentionally empty — see comment above */
+      }
       try {
         const gen = agent.run(text, {
           onTranscriptLine,
           onThinkingStart,
           onThinkingChunk,
           onThinkingStop,
+          drainQueuedUserText,
+          onQueueInject,
         })
         while (true) {
           const { done, value } = await gen.next()
@@ -1388,9 +1691,23 @@ async function runReplLiveArea(
       } catch (err) {
         turnError = err
       } finally {
+        running = false
+        renderDecoration()
         turnStatus.clear()
         await endThinkingFormatter()
         if (formatter) await formatter.end()
+        // Discard the formatter's trailing-newline buffer entirely. The
+        // compositor's drawLiveSeq handles the response→prompt boundary:
+        // when the body ends mid-line (streamCol > 0) it emits a `\r\n`
+        // line terminator so the live area starts at col 0. Writing our
+        // own `\n` here would add an extra blank row. We still mark
+        // `lastChunkEndedWithNewline` so the post-turn terminator below
+        // doesn't fire either: the held tail represents the formatter's
+        // intent to terminate, and the compositor handles the rest.
+        if (pendingTrailingNewlines.length > 0) {
+          pendingTrailingNewlines = ""
+          lastChunkEndedWithNewline = true
+        }
         compositor.flushStream?.()
       }
 

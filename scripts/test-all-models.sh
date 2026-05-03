@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TIMESTAMP="$(date -Iseconds)"
 RECORDING="/tmp/recording-all-models-${TIMESTAMP}.recording"
-NET_DBG_DIR="${PROJECT_DIR}/.node-net-dbg"
+NET_DBG_DIR="${PROJECT_DIR}/.net-dbg"
 # Optional: set INSPECTOR to the absolute path of a bun --preload module that
 # writes fetch captures to NETLOG_DIR (e.g. a node-network-inspector-style tool).
 # Leave unset to run without network capture.

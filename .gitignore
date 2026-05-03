@@ -1,5 +1,6 @@
 node_modules/**/*
 node_modules/
+.net-dbg
 .node-net-dbg
 .DS_Store
 tmp/

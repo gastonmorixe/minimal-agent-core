@@ -25,6 +25,7 @@ import {
   DEFAULT_NERD_ICON,
 } from "./presets.ts"
 import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
+import { displayWidth } from "../term-width.ts"
 
 const DEFAULT_BLINK_MS = 300
 
@@ -94,7 +95,14 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
         : this.blinkMs
     const step = Math.floor(context.elapsedMs / blinkMs)
     const requestedFps = 1000 / blinkMs
-    if (step % 2 !== 0) return { glyph: " ", requestedFps }
+    // Off-frame: pad with whitespace matching the on-glyph's display width
+    // so the label column never shifts when the icon blinks. A bare " "
+    // would jiggle the label by 1 cell whenever the icon glyph is wide
+    // (CJK, emoji, some patched Nerd Font ranges).
+    if (step % 2 !== 0) {
+      const width = Math.max(1, displayWidth(spec))
+      return { glyph: " ".repeat(width), requestedFps }
+    }
 
     const colorizer = palette.length > 0 ? palette[step % palette.length] : undefined
     const glyph = typeof colorizer === "function" ? colorizer(spec) : spec

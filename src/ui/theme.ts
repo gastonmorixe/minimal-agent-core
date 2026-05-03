@@ -1,3 +1,5 @@
+import { PALETTE } from "../palette.ts"
+
 export interface Theme {
   name: string
   mode: "light" | "dark"
@@ -10,11 +12,11 @@ export const DARK: Theme = {
   mode: "dark",
   colors: {
     primary: "\x1b[38;5;75m",
-    rust: "\x1b[38;5;208m",
+    rust: PALETTE.orange,
     text: "\x1b[37m",
     dim: "\x1b[90m",
-    success: "\x1b[32m",
-    error: "\x1b[31m",
+    success: PALETTE.lime,
+    error: PALETTE.pink,
   },
 }
 export const LIGHT: Theme = {

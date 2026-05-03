@@ -204,6 +204,77 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     expect(out).not.toContain("\x1b[31\x1b")
   })
 
+  it("caps consecutive blank lines: at most one blank row between writes", () => {
+    // Repro for the "3+ blank lines in scrollback" bug. When the model
+    // emits a whitespace-only text block (e.g. "\n\n") between two tool
+    // calls, the per-turn sink writes a transcript→text separator `\n`
+    // followed by the chunk's `\n\n`, which on top of the prior tool's
+    // trailing `\n` and the next tool header's leading `\n` would pile
+    // up to 4+ consecutive `\n` (3+ blank rows). The compositor caps any
+    // run of `\n` in scrollback to 2, so at most one blank row appears.
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    cap.writes.length = 0
+    // Simulate the buggy sequence: tool A close, separator, whitespace
+    // text block, next tool header.
+    c.writeStream("  ╰ done\n")
+    c.writeStream("\n") // baseSink separator (transcript→text)
+    c.writeStream("\n\n") // model's "\n\n" text content
+    c.writeStream("\n  ╭ Read /tmp/foo\n") // next transcript header
+    const out = joined(cap)
+    // Strip ANSI to inspect content.
+    const stripAnsi = (s: string) =>
+      s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
+    const plain = stripAnsi(out)
+    // Find content between "╰ done" and "╭ Read".
+    const between = plain.slice(plain.indexOf("╰ done") + "╰ done".length, plain.indexOf("╭ Read"))
+    // Count `\n` runs: the longest run must be 2 (= one blank row), never 3+.
+    const longestRun = between.split("").reduce(
+      (acc: { max: number; cur: number }, ch: string) => {
+        if (ch === "\n") {
+          acc.cur++
+          if (acc.cur > acc.max) acc.max = acc.cur
+        } else acc.cur = 0
+        return acc
+      },
+      { max: 0, cur: 0 },
+    ).max
+    expect(longestRun).toBeLessThanOrEqual(2)
+  })
+
+  it("does not strip newlines inside ANSI escape sequences when capping", () => {
+    // Sanity: ANSI codes must pass through untouched and they should be
+    // treated as zero-width — they neither extend nor reset the
+    // consecutive-newline run.
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ "], null)
+    cap.writes.length = 0
+    c.writeStream("\n\n\x1b[31m\n\x1b[0m") // 3 newlines with ANSI between #2 and #3
+    const stripAnsi = (s: string) =>
+      s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
+    const plain = stripAnsi(joined(cap))
+    // ANSI redraw bytes around the chunk are stripped; the scrollback
+    // payload should contain at most 2 consecutive `\n` from this write.
+    const longestRun = plain.split("").reduce(
+      (acc: { max: number; cur: number }, ch: string) => {
+        if (ch === "\n") {
+          acc.cur++
+          if (acc.cur > acc.max) acc.max = acc.cur
+        } else acc.cur = 0
+        return acc
+      },
+      { max: 0, cur: 0 },
+    ).max
+    expect(longestRun).toBe(2)
+    // ANSI codes still made it through.
+    expect(joined(cap)).toContain("\x1b[31m")
+    expect(joined(cap)).toContain("\x1b[0m")
+  })
+
   it("flushStream drains a dangling ANSI tail before shutdown", () => {
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output })
@@ -252,6 +323,51 @@ describe("Compositor (withSuspendedLiveArea)", () => {
       }),
     ).rejects.toThrow("boom")
     expect(joined(cap)).toContain("❯ ")
+  })
+})
+
+describe("Compositor (DECSET 2026 synchronized output)", () => {
+  const BSU = "\x1b[?2026h"
+  const ESU = "\x1b[?2026l"
+
+  it("does NOT emit BSU/ESU when syncOutput is disabled (default)", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    c.writeStream("hello\n")
+    c.unmount()
+    const out = joined(cap)
+    expect(out).not.toContain(BSU)
+    expect(out).not.toContain(ESU)
+  })
+
+  it("brackets each writeStream batch in BSU/ESU when syncOutput is enabled", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output, syncOutput: true })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    cap.writes.length = 0 // ignore mount + initial setLiveArea writes
+    c.writeStream("chunk\n")
+    const last = cap.writes[cap.writes.length - 1]
+    expect(last.startsWith(BSU)).toBe(true)
+    expect(last.endsWith(ESU)).toBe(true)
+    // The payload between BSU and ESU contains the actual chunk bytes.
+    expect(last).toContain("chunk")
+    c.unmount()
+  })
+
+  it("brackets each setLiveArea redraw in BSU/ESU when syncOutput is enabled", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output, syncOutput: true })
+    c.mount()
+    cap.writes.length = 0
+    c.setLiveArea(["❯ hi"], { row: 0, col: 4 })
+    const last = cap.writes[cap.writes.length - 1]
+    expect(last.startsWith(BSU)).toBe(true)
+    expect(last.endsWith(ESU)).toBe(true)
+    expect(last).toContain("❯ hi")
+    c.unmount()
   })
 })
 

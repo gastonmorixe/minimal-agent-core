@@ -66,6 +66,21 @@ export const BOUNCING_BALL: readonly string[] = [
   "[ ●   ]",
 ]
 
+/** Arc corner sweep — four corners of a circle traced in sequence. */
+export const ARC_SWEEP: readonly string[] = ["◜", "◝", "◞", "◟"]
+
+/** Eight-point arrow compass orbit — directional, suits network/download ops. */
+export const ARROW_ORBIT: readonly string[] = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
+
+/** Circled-dot focus ring — calm pulse between filled and hollow. */
+export const CIRCLE_PULSE: readonly string[] = ["◉", "◎", "○", "◌", "○", "◎"]
+
+/** Heavy braille rotor — fills the cell, more visual weight than BRAILLE_DOTS. */
+export const BRAILLE_ROTOR_HEAVY: readonly string[] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
+
+/** Grow-shrink block bar — semantically evokes download/transfer progress. */
+export const BAR_GROW: readonly string[] = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎"]
+
 // ─── Recommended AnimatedIcon bundles (frames + intervalMs) ─────────────────
 
 export const THINKING_ROTOR_ASCII: AnimatedIcon = {
@@ -108,4 +123,31 @@ export const THINKING_PHASE_QUADRANT: AnimatedIcon = {
 export const THINKING_BLOCK: AnimatedIcon = {
   frames: BLOCK_ROTOR,
   intervalMs: 120,
+}
+
+export const THINKING_ARC_SWEEP: AnimatedIcon = {
+  frames: ARC_SWEEP,
+  intervalMs: 120,
+}
+
+export const THINKING_ARROW_ORBIT: AnimatedIcon = {
+  frames: ARROW_ORBIT,
+  intervalMs: 110,
+}
+
+export const THINKING_CIRCLE_PULSE: AnimatedIcon = {
+  frames: CIRCLE_PULSE,
+  intervalMs: 150,
+  steadyColor: true,
+}
+
+export const THINKING_BRAILLE_HEAVY: AnimatedIcon = {
+  frames: BRAILLE_ROTOR_HEAVY,
+  intervalMs: 100,
+}
+
+export const THINKING_BAR_GROW: AnimatedIcon = {
+  frames: BAR_GROW,
+  intervalMs: 70,
+  steadyColor: true,
 }

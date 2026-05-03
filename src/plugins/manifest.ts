@@ -401,6 +401,12 @@ function parseMode(
   if (obj.default != null && typeof obj.default !== "boolean") {
     err("default must be a boolean if present")
   }
+  if (obj.editorShowHidden != null && typeof obj.editorShowHidden !== "boolean") {
+    err("editorShowHidden must be a boolean if present")
+  }
+  if (obj.refusalHint != null && typeof obj.refusalHint !== "string") {
+    err("refusalHint must be a string if present")
+  }
 
   let style: ModeStyleRequest | undefined
   if (obj.style != null) {
@@ -421,7 +427,9 @@ function parseMode(
     statusLabel: obj.statusLabel as string | undefined,
     systemPromptAppend: obj.systemPromptAppend as string | undefined,
     disallowedTools: obj.disallowedTools as string[] | undefined,
+    refusalHint: obj.refusalHint as string | undefined,
     default: obj.default as boolean | undefined,
+    editorShowHidden: obj.editorShowHidden as boolean | undefined,
     style,
   }
 }

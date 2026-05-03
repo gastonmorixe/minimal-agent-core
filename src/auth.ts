@@ -335,6 +335,9 @@ export interface GetAuthDeps {
   refresh?: (refreshToken: string) => Promise<TokenRefreshResult>
 }
 
+/**
+ *
+ */
 export async function getAuth(
   service: string = KEYCHAIN_SERVICE,
   deps: GetAuthDeps = {},

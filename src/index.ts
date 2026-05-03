@@ -43,16 +43,21 @@
 
 import { join } from "node:path"
 import { Agent, c, runRepl } from "./agent.ts"
+import { normalizeArgs } from "./cli-args.ts"
 import { getAuth } from "./auth.ts"
+import { configPath, loadUserConfig } from "./config.ts"
 import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { displayWidth } from "./term-width.ts"
 import { checkQuota, listModels } from "./client.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
+import { resolveFormatter } from "./auto-formatter.ts"
 import { BETA_FLAGS_DETAILED, DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { getSessionId } from "./metadata.ts"
 import { ModeManager } from "./modes.ts"
+import { AutoAskController } from "./auto-ask.ts"
 import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
 import { loadSession, firstUserPromptSnippet } from "./session-restore.ts"
+import { formatSessionAsMarkdown, formatSessionAsXml } from "./session-dump.ts"
 import {
   defaultSessionsDir,
   indexFilePath,
@@ -72,6 +77,8 @@ import {
   SPINNER_PRESETS,
 } from "./spinner/named-presets.ts"
 import type { Spinner } from "./spinner.ts"
+import { BREATHING_DOT } from "./spinner/library/frames.ts"
+import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 
@@ -79,7 +86,7 @@ import { TOOL_DEFINITIONS } from "./tools.ts"
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-const args = process.argv.slice(2)
+const args = normalizeArgs(process.argv.slice(2))
 
 if (args.includes("--help") || args.includes("-h")) {
   printHelp()
@@ -94,32 +101,67 @@ if (args.includes("--verbose")) {
   process.env.VERBOSE = "1"
 }
 
+// Propagate --show-hidden-chars to subsystems (e.g. the debug printer in
+// client.ts) via env var, mirroring how --debug/--verbose work. The editor
+// also reads this flag directly from `args` further down.
+if (args.includes("--show-hidden-chars")) {
+  process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS = "1"
+}
+
 const modelIdx = args.indexOf("--model")
-const model = modelIdx !== -1 && args[modelIdx + 1] ? args[modelIdx + 1] : undefined
+const model =
+  modelIdx !== -1 && args[modelIdx + 1]
+    ? args[modelIdx + 1]
+    : undefined // config.model applied later (after loadUserConfig is called)
 
 const wantListModels = args.includes("--list-models")
 const wantListFlags = args.includes("--list-flags")
 const wantListSpinners = args.includes("--list-spinners")
 
 const spinnerIdx = args.indexOf("--spinner")
+// Global user config (~/.minimal-agent/config.json). Lowest precedence:
+// CLI flag > env var > config file > built-in default.
+const userConfig = loadUserConfig()
+
 const spinnerName =
   spinnerIdx !== -1 && args[spinnerIdx + 1]
     ? args[spinnerIdx + 1]
-    : process.env.MINIMAL_AGENT_SPINNER
+    : (process.env.MINIMAL_AGENT_SPINNER ?? userConfig.spinner)
 
 const effortIdx = args.indexOf("--effort")
-const effort =
+const effort: "high" | "medium" | "low" | "max" | undefined =
   effortIdx !== -1 && args[effortIdx + 1]
     ? (args[effortIdx + 1] as "high" | "medium" | "low" | "max")
+    : userConfig.effort
+
+// formatterCmd is resolved asynchronously inside main() via resolveFormatter()
+// so that it can auto-download mdstream when it is not already on PATH.
+// --thinking-display <summarized|omitted>  (env: MINIMAL_AGENT_THINKING_DISPLAY)
+// Opt-in override for `thinking.display`. Unset → server default per model
+// (omitted on opus-4.7 / mythos, summarized on sonnet-4.6 / opus-4.6).
+// Set to "summarized" to force plaintext thinking_delta streaming on opus-4.7.
+// Accept both `--thinking-display summarized` and `--thinking-display=summarized`.
+function readFlagValue(name: string): string | undefined {
+  const eq = args.find((a) => a.startsWith(`${name}=`))
+  if (eq) return eq.slice(name.length + 1)
+  const idx = args.indexOf(name)
+  if (idx !== -1 && args[idx + 1]) return args[idx + 1]
+  return undefined
+}
+const thinkingDisplayRaw =
+  readFlagValue("--thinking-display") ??
+  process.env.MINIMAL_AGENT_THINKING_DISPLAY ??
+  userConfig.thinkingDisplay
+const thinkingDisplay: "summarized" | "omitted" | undefined =
+  thinkingDisplayRaw === "summarized" || thinkingDisplayRaw === "omitted"
+    ? thinkingDisplayRaw
     : undefined
 
-const formatterIdx = args.indexOf("--formatter")
-const formatterCmd: string[] | undefined =
-  formatterIdx !== -1 && args[formatterIdx + 1]
-    ? parseFormatterCommand(args[formatterIdx + 1])
-    : Bun.which("mdstream")
-      ? parseFormatterCommand("mdstream")
-      : undefined
+const formatterExplicitIdx = args.indexOf("--formatter")
+const formatterExplicitArg: string[] | undefined =
+  formatterExplicitIdx !== -1 && args[formatterExplicitIdx + 1]
+    ? parseFormatterCommand(args[formatterExplicitIdx + 1])
+    : undefined
 
 // --resume <sid>  resume a saved session (or "last" for the most recent
 // session in this cwd, falling back to the global most-recent).
@@ -127,6 +169,11 @@ const formatterCmd: string[] | undefined =
 const resumeIdx = args.indexOf("--resume")
 const resumeArg = resumeIdx !== -1 && args[resumeIdx + 1] ? args[resumeIdx + 1] : undefined
 const wantListSessions = args.includes("--sessions")
+
+const dumpIdx = args.indexOf("--dump")
+const dumpArg = dumpIdx !== -1 && args[dumpIdx + 1] ? args[dumpIdx + 1] : undefined
+const dumpFormatIdx = args.indexOf("--dump-format")
+const dumpFormatArg = dumpFormatIdx !== -1 && args[dumpFormatIdx + 1] ? args[dumpFormatIdx + 1] : "md"
 
 function printHelp(): void {
   const lines = [
@@ -139,33 +186,40 @@ function printHelp(): void {
     `    ${c.dim("$")} echo "prompt" | minimal-agent ${c.dim("-")}`,
     "",
     `  ${c.bold("Options")}`,
-    `    ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
-    `    ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max`,
-    `    ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
-    `    ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
-    `    ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
-    `    ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
-    `    ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
-    `    ${c.cyan("--skip-quota")}        Skip startup quota check`,
+    `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
+    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max`,
+    `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
+    `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
+    `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
+    `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
+    `    ${c.cyan("-d")}, ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
+    `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
+    `    ${c.cyan("--skip-quota")}            Skip startup quota check`,
+    `    ${c.cyan("--show-hidden-chars")}      Reveal spaces/tabs/newlines as faint glyphs (input editor + --debug output)`,
     "",
-    `  ${c.bold("Info")}`,
-    `    ${c.cyan("--list-models")}       Fetch and display available models`,
-    `    ${c.cyan("--list-flags")}        Show beta feature flags`,
-    `    ${c.cyan("--list-spinners")}     Show available spinner presets`,
-    `    ${c.cyan("--sessions")}          List saved sessions ${c.dim("(~/.minimal-agent/sessions/)")}`,
-    `    ${c.cyan("--resume")} ${c.dim("<sid|last>")} Resume a saved session`,
-    `    ${c.cyan("--help")}, ${c.cyan("-h")}          Show this help`,
+    `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
+    `    ${c.cyan("--list-models")} ${c.dim("/")} ${c.cyan("--models")}       Fetch and display available models`,
+    `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
+    `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
+    `    ${c.cyan("--sessions")}                  List saved sessions ${c.dim("(~/.minimal-agent/sessions/)")}`,
+    `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session`,
+    `    ${c.cyan("--dump")} ${c.dim("<sid|last>")}         Dump a full session history to stdout`,
+    `    ${c.cyan("--dump-format")} ${c.dim("<md|xml>")}    Output format for --dump ${c.dim("(default: md)")}`,
+    `    ${c.cyan("-h")}, ${c.cyan("--help")}                 Show this help`,
     "",
     `  ${c.bold("Env")}`,
     `    ${c.cyan("DEBUG=1")}                  Verbose request/response logging to stderr`,
     `    ${c.cyan("MINIMAL_AGENT_TRANSPORT")}  Transport: http2 ${c.dim("(default)")} or fetch`,
     `    ${c.cyan("MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1")}  Allow fetch fallback after HTTP/2 failure`,
-    `    ${c.cyan("MINIMAL_AGENT_NET_DBG=1")}  Mirror raw HTTP req/res to ${c.dim("./.node-net-dbg/")}`,
+    `    ${c.cyan("MINIMAL_AGENT_NET_DBG=1")}  Mirror raw HTTP req/res to ${c.dim("./.net-dbg/")}`,
     `    ${c.cyan("CLAUDE_CODE_EXTRA_METADATA")}  JSON object merged into metadata.user_id`,
     `    ${c.cyan("MINIMAL_AGENT_SPINNER")}    Spinner preset id ${c.dim("(same values as --spinner)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
     `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,
     `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
+    `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
     `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
     "",
     `  ${c.bold("Docs")}`,
@@ -211,6 +265,10 @@ function printStartupHeader(): void {
   const catWidth = Math.max(displayWidth(ears), displayWidth(face))
   const fits = anchorCol + catWidth <= cols
 
+  // Breathing room between the user's shell prompt and our banner when
+  // running interactively. Skipped on non-TTY (piped/redirected stderr)
+  // so log files don't gain a stray leading blank line.
+  if (process.stderr.isTTY) console.error("")
   console.error(fits ? padTo(line1, anchorCol) + c.faintWhite(ears) : line1)
   console.error(fits ? padTo(line2, anchorCol) + c.faintWhite(face) : line2)
   console.error(`  ${c.faintWhite("│")}`)
@@ -230,7 +288,7 @@ function padTo(line: string, targetCol: number): string {
 let lastStartupRow: { label: string; value: string } | null = null
 
 function printStartupRow(label: string, value: string): void {
-  console.error(`  ${c.faintWhite("│")} ${c.sky(label.padEnd(7))} ${value}`)
+  console.error(`  ${c.faintWhite("│")} ${c.sky(label.padEnd(9))}  ${value}`)
   lastStartupRow = { label, value }
 }
 
@@ -250,10 +308,165 @@ function closeStartupTree(): void {
   if (process.stderr.isTTY) {
     // Move cursor up 1 line, clear it, carriage return, reprint with ╰.
     process.stderr.write("\x1b[1A\x1b[2K\r")
-    console.error(`  ${c.faintWhite("╰")} ${c.sky(label.padEnd(7))} ${value}`)
+    console.error(`  ${c.faintWhite("╰")} ${c.sky(label.padEnd(9))}  ${value}`)
   } else {
     console.error(`  ${c.faintWhite("╰")}`)
   }
+}
+
+/**
+ * Print a startup row that animates a breathing-dot spinner while an async
+ * task runs, then resolves to a final value in-place.
+ *
+ * Returns `{ ok(value), fail(value) }` — call one of them when the task
+ * settles to overwrite the spinner with the final state and advance the
+ * cursor. `lastStartupRow` is updated so `closeStartupTree` works correctly.
+ *
+ * On non-TTY output the spinner is skipped and only the final value prints.
+ */
+function startStartupRowSpinner(label: string, checking: string): {
+  ok(value: string): void
+  fail(value: string): void
+} {
+  const PIPE = `  ${c.faintWhite("│")} `
+  const prefix = `${PIPE}${c.sky(label.padEnd(9))}  `
+
+  // Non-TTY: no cursor tricks — just print the row when settled.
+  if (!process.stderr.isTTY) {
+    return {
+      ok(value) {
+        console.error(`${prefix}${value}`)
+        lastStartupRow = { label, value }
+      },
+      fail(value) {
+        console.error(`${prefix}${value}`)
+        lastStartupRow = { label, value }
+      },
+    }
+  }
+
+  let frameIdx = 0
+  let colorIdx = 0
+
+  function coloredDot(): string {
+    const char = BREATHING_DOT[frameIdx] ?? "·"
+    return (ANSI_PALETTE_RAINBOW[colorIdx % ANSI_PALETTE_RAINBOW.length]!)(char)
+  }
+
+  // Print the first frame immediately (no trailing newline — will be overwritten).
+  process.stderr.write(`${prefix}${coloredDot()} ${checking}`)
+
+  const timer = setInterval(() => {
+    frameIdx = (frameIdx + 1) % BREATHING_DOT.length
+    colorIdx++
+    process.stderr.write(`\r${prefix}${coloredDot()} ${checking}`)
+  }, 160)
+
+  function settle(value: string): void {
+    clearInterval(timer)
+    process.stderr.write(`\r\x1b[2K${prefix}${value}\n`)
+    lastStartupRow = { label, value }
+  }
+
+  return {
+    ok: settle,
+    fail: settle,
+  }
+}
+
+/**
+ * Format the parsed rate-limit headers from a successful quota check into a
+ * compact, single-line summary appended after `ok ✔`.
+ *
+ * Style: minimalist, mid-dot separated. Window names are normal weight,
+ * percentages are color-graded (green/yellow/red) by utilization, the soonest
+ * reset is shown faint. Returns "" when there's nothing useful to show
+ * (e.g. test fakes without rate-limit headers).
+ */
+function formatQuotaSummary(rl: Map<string, string>): string {
+  if (rl.size === 0) return ""
+
+  type Win = { util?: number; status?: string; reset?: number }
+  const windows = new Map<string, Win>()
+  // Two header shapes:
+  //   anthropic-ratelimit-unified-<window>-<field>   (e.g. 5h, 7d, overage)
+  //   anthropic-ratelimit-unified-<field>            (aggregate, no window)
+  // We map the aggregate form to the synthetic key "overall" so it sorts and
+  // renders alongside the windowed entries.
+  const FIELDS = new Set(["utilization", "status", "reset"])
+  for (const [k, v] of rl) {
+    let win: string | null = null
+    let field: string | null = null
+    const mw = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/)
+    if (mw) {
+      win = mw[1]!
+      field = mw[2]!
+    } else {
+      const ma = k.match(/^anthropic-ratelimit-unified-(\w+)$/)
+      if (ma && FIELDS.has(ma[1]!)) {
+        win = "overall"
+        field = ma[1]!
+      }
+    }
+    if (!win || !field) continue
+    if (!windows.has(win)) windows.set(win, {})
+    const w = windows.get(win)!
+    if (field === "utilization") w.util = Number(v)
+    else if (field === "status") w.status = v
+    else if (field === "reset") w.reset = Number(v) * 1000
+  }
+
+  const colorPct = (util: number): string => {
+    const pct = util * 100
+    // Round so 0.099 doesn't render as "9.9%". We show integers for
+    // compactness — sub-percent precision isn't useful at a glance.
+    const txt = `${Math.round(pct)}%`
+    if (pct >= 85) return c.red(txt)
+    if (pct >= 60) return c.yellow(txt)
+    return c.green(txt)
+  }
+
+  const humanReset = (resetAt: number): string | null => {
+    const diffMs = resetAt - Date.now()
+    if (diffMs <= 0) return null
+    const totalMins = Math.floor(diffMs / 60_000)
+    const days = Math.floor(totalMins / (60 * 24))
+    const hrs = Math.floor((totalMins % (60 * 24)) / 60)
+    const mins = totalMins % 60
+    if (days > 0) return hrs > 0 ? `${days}d${hrs}h` : `${days}d`
+    if (hrs > 0) return `${hrs}h${mins}m`
+    return `${mins}m`
+  }
+
+  const parts: string[] = []
+  // Stable, narrow→wide order: 5h, 7d, overall (aggregate). Anything else
+  // sorts after, alphabetical.
+  const order = (w: string): number =>
+    w === "5h" ? 0 : w === "7d" ? 1 : w === "overall" ? 2 : 3
+  const winEntries = [...windows.entries()]
+    .filter(([w]) => w !== "overage" && w !== "fallback" && w !== "representative")
+    .sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
+
+  for (const [name, info] of winEntries) {
+    if (info.util == null) continue
+    let segment = `${c.faintWhite(name)} ${colorPct(info.util)}`
+    if (info.reset) {
+      const human = humanReset(info.reset)
+      if (human) segment += ` ${c.dim("↻")} ${c.dim(human)}`
+    }
+    parts.push(segment)
+  }
+
+  // Overage status — only surface when explicitly disabled (the common case
+  // is "allowed" and noise-free is better here).
+  const ov = rl.get("anthropic-ratelimit-unified-overage-status")
+  if (ov && ov !== "allowed") {
+    parts.push(`${c.faintWhite("overage")} ${c.red("off")}`)
+  }
+
+  if (parts.length === 0) return ""
+  const sep = c.dim(" · ")
+  return `  ${parts.join(sep)}`
 }
 
 function printFlagsView(): void {
@@ -416,7 +629,14 @@ async function extractPrompt(): Promise<string | null> {
   }
 
   // Bare positional: any arg that isn't a flag or flag value
-  const flagsWithValues = new Set(["--model", "--prompt", "--formatter", "--effort", "--spinner"])
+  const flagsWithValues = new Set([
+    "--model",
+    "--prompt",
+    "--formatter",
+    "--effort",
+    "--spinner",
+    "--thinking-display",
+  ])
   const flagsNoValue = new Set([
     "--debug",
     "--verbose",
@@ -427,6 +647,7 @@ async function extractPrompt(): Promise<string | null> {
     "-h",
     "-",
     "--skip-quota",
+    "--show-hidden-chars",
   ])
   const skipNext = new Set<number>()
   for (let i = 0; i < args.length; i++) {
@@ -508,7 +729,18 @@ async function main() {
     return
   }
 
-  const selectedModel = model ?? DEFAULT_MODEL
+  // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
+  const formatterResolution = await resolveFormatter(formatterExplicitArg)
+  let formatterCmd: string[] | undefined
+  if (formatterResolution.cmd) {
+    formatterCmd = formatterResolution.cmd
+    printStartupRow("formatter", c.dim(formatterResolution.label))
+  } else {
+    formatterCmd = undefined
+    console.error(`  ${c.boldYellow("warn")} ${formatterResolution.warn}`)
+  }
+
+  const selectedModel = model ?? userConfig.model ?? DEFAULT_MODEL
   printStartupRow("model", c.boldCyan(selectedModel))
 
   // Thinking + effort: surface what we'll actually send on the wire.
@@ -517,26 +749,56 @@ async function main() {
   //   output_config.effort: "medium"   — non-haiku only
   // Haiku models get neither field, so show "off" for both.
   const isHaiku = selectedModel.includes("haiku")
-  const thinkingLabel = isHaiku ? c.dim("off") : "adaptive"
+  const thinkingLabel = isHaiku
+    ? c.dim("off")
+    : thinkingDisplay
+      ? `adaptive ${c.dim(`(display=${thinkingDisplay})`)}`
+      : "adaptive"
   const effortLabel = isHaiku
     ? c.dim("off")
     : effort
-      ? `${effort} ${c.dim("(--effort)")}`
+      ? `${effort} ${c.dim(userConfig.effort === effort && effortIdx === -1 ? "(config)" : "(--effort)")}`
       : `medium ${c.dim("(default)")}`
-  printStartupRow("think", thinkingLabel)
+  printStartupRow("thinking", thinkingLabel)
   printStartupRow("effort", effortLabel)
 
   // Quota check — verify account has quota before starting conversation
   // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1
   if (!args.includes("--skip-quota")) {
-    const hasQuota = await checkQuota(auth)
-    if (!hasQuota) {
+    const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
+    const result = await checkQuota(auth)
+    if (!result.ok) {
+      quotaSpinner.fail(`${c.boldRed("failed")} \x1b[1;31m✗\x1b[22;39m`)
       console.error(
         `  ${c.boldRed("error")} quota check failed. Account may not have quota or token is invalid.`,
       )
       process.exit(1)
     }
-    printStartupRow("quota", c.boldGreen("ok"))
+    quotaSpinner.ok(`${c.boldGreen("ok")} ${c.boldGreen("✔")}${formatQuotaSummary(result.rateLimits)}`)
+  }
+
+  // --dump <sid|last>: output full session to stdout and exit
+  if (dumpArg) {
+    closeStartupTree()
+    try {
+      const dumpSid = dumpArg === "last" ? resolveLastSessionId(process.cwd()) : dumpArg
+      if (!dumpSid) {
+        console.error(`  ${c.boldRed("error")} no saved sessions found to dump`)
+        process.exit(1)
+      }
+      const loaded = loadSession(dumpSid)
+      if (dumpFormatArg === "xml") {
+        process.stdout.write(formatSessionAsXml(loaded))
+      } else {
+        process.stdout.write(formatSessionAsMarkdown(loaded))
+      }
+    } catch (err) {
+      console.error(
+        `  ${c.boldRed("error")} could not dump session ${dumpArg}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      process.exit(1)
+    }
+    return
   }
 
   // Load TUI plugins from ~/.agents/tui-plugins and <cwd>/tui-plugins.
@@ -566,7 +828,7 @@ async function main() {
     if (tools > 0) bits.push(`${tools} tool(s)`)
     if (modes > 0) bits.push(`${modes} mode(s)`)
     if (bits.length === 0) bits.push("prompt block")
-    printStartupRow("plugins", bits.join(", "))
+    printStartupRow("plugins", bits.join(" · "))
   }
   const modeManager =
     loadedModes.length > 0 ? new ModeManager(loadedModes, loader.getDefaultModeId()) : null
@@ -673,6 +935,7 @@ async function main() {
     auth,
     model: selectedModel,
     effort,
+    thinkingDisplay,
     loader: hasPlugins ? loader : null,
     modeManager,
     store,
@@ -764,6 +1027,19 @@ async function main() {
     const { Compositor } = await import("./ui/compositor.ts")
     const { EditorController } = await import("./editor-controller.ts")
     const { StdioInterceptor } = await import("./ui/stdio-interceptor.ts")
+    const { detectSynchronizedOutput } = await import("./ui/term-caps.ts")
+
+    // Probe the terminal for DEC mode 2026 (synchronized output) BEFORE
+    // creating the editor. Detection puts stdin into raw mode briefly,
+    // sends a DECRPM query, and parses the reply. If the terminal supports
+    // it, the Compositor wraps each redraw batch in BSU/ESU so the user
+    // sees a single atomic frame instead of erase→write→redraw flicker.
+    // Any typeahead bytes that arrived during the probe are saved and
+    // re-emitted to the editor below so a fast-typing user doesn't lose
+    // a keystroke. Disabled (and detection is skipped) when MINIMAL_AGENT_NO_SYNC=1.
+    const syncProbe = process.env.MINIMAL_AGENT_NO_SYNC === "1"
+      ? { syncOutput: false, unparsed: "" }
+      : await detectSynchronizedOutput(process.stdin as any, process.stdout as any)
 
     // Two-phase wiring: the StdioInterceptor needs a compositor to forward
     // intercepted writes to, and the Compositor needs an output that
@@ -787,22 +1063,56 @@ async function main() {
           return process.stdout.write(s)
         },
       } as any,
+      syncOutput: syncProbe.syncOutput,
     })
     const interceptor = new StdioInterceptor(compositor)
     interceptorRef = interceptor
 
     const continuationPrompt = process.env.MINIMAL_AGENT_CONTINUATION_PROMPT ?? "  "
+    const showHiddenCharsInit =
+      process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1" ||
+      args.includes("--show-hidden-chars") ||
+      (modeManager?.editorShowHidden() ?? false)
     const editor = new EditorController({
       prompt: `${c.bold(c.pink("❯"))} `,
       continuationPrompt,
       compositor,
       maxLiveHeight: () => Math.max(2, Math.floor((process.stdout.rows ?? 24) / 2)),
+      showHidden: showHiddenCharsInit,
     })
+    // Keep show-hidden in sync with mode changes: a mode with
+    // `editorShowHidden: true` overrides the env-var/flag baseline.
+    if (modeManager) {
+      const showHiddenBase =
+        process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1" ||
+        args.includes("--show-hidden-chars")
+      modeManager.subscribe((_active) => {
+        editor.setShowHidden(showHiddenBase || (modeManager.editorShowHidden() ?? false))
+      })
+    }
     const onResize = () => {
       compositor.notifyResize()
       editor.notifyResize()
     }
     process.stdout.on("resize", onResize)
+
+    // Auto-ASK: silently flip into ASK mode when the editor buffer reads
+    // like a question, revert on action verbs, never override a manual
+    // Shift+Tab. Opt-out via `MINIMAL_AGENT_AUTO_ASK=0` or `autoAsk:false`
+    // in the user config. Only wires up when an "ask" mode actually
+    // exists in the active manifest set (otherwise: dead code).
+    let autoAsk: AutoAskController | null = null
+    if (modeManager && modeManager.list().some((m) => m.id === "ask")) {
+      const envOff = process.env.MINIMAL_AGENT_AUTO_ASK === "0"
+      const cfgOff = userConfig.autoAsk === false
+      if (!envOff && !cfgOff) {
+        autoAsk = new AutoAskController(editor, modeManager, {
+          logger: process.env.DEBUG === "1"
+            ? (m) => process.stderr.write(`[auto-ask] ${m}\n`)
+            : undefined,
+        })
+      }
+    }
 
     // Install AFTER the editor is built but BEFORE handing control to
     // runRepl: from this point on, every console.log / console.error /
@@ -818,6 +1128,7 @@ async function main() {
         useLiveArea: true,
         compositor,
         editor,
+        initialStdinBytes: syncProbe.unparsed,
       })
     } finally {
       interceptor.uninstall()

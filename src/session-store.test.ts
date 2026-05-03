@@ -8,6 +8,7 @@ import {
   type IndexRecord,
   type MetaRecord,
   parseLines,
+  type RewindRecord,
   SessionStore,
   sessionFilePath,
   shortHash,
@@ -177,6 +178,48 @@ describe("parseLines", () => {
     expect(records).toHaveLength(2)
     expect(dropped).toHaveLength(1)
     expect(dropped[0].line).toBe(2)
+  })
+})
+
+describe("rewind records", () => {
+  it("appendUser returns a stable id and writes it on the record", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-rw-id", dir })
+    const id = store.appendUser("hi")
+    expect(typeof id).toBe("string")
+    expect(id.length).toBeGreaterThan(0)
+    const lines = readJsonl(store.path)
+    const u = lines[1] as UserRecord
+    expect(u.kind).toBe("user")
+    expect(u.id).toBe(id)
+  })
+
+  it("appendRewind writes a JSONL line that round-trips through parseLines", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-rw-rt", dir })
+    const id = store.appendUser("hello")
+    store.appendRewind(id, 4)
+    const text = readFileSync(store.path, "utf-8")
+    const { records, dropped } = parseLines(text)
+    expect(dropped).toHaveLength(0)
+    const last = records[records.length - 1] as RewindRecord
+    expect(last.kind).toBe("rewind")
+    expect(last.to).toBe(id)
+    expect(last.droppedCount).toBe(4)
+    expect(typeof last.ts).toBe("string")
+  })
+
+  it("recordRewind is an alias for appendRewind", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-rw-alias", dir })
+    const id = store.appendUser("x")
+    store.recordRewind(id, 2)
+    const text = readFileSync(store.path, "utf-8")
+    const { records } = parseLines(text)
+    const last = records[records.length - 1] as RewindRecord
+    expect(last.kind).toBe("rewind")
+    expect(last.to).toBe(id)
+    expect(last.droppedCount).toBe(2)
   })
 })
 

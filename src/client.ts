@@ -24,6 +24,7 @@ import { buildMetadata, getSessionId } from "./metadata.ts"
 import { redactHeaders } from "./net-dbg.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
+import { clampWithHint } from "./truncate-hint.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -223,8 +224,16 @@ export interface SendOptions {
   /**
    * Adaptive thinking config. Pass `false` to disable.
    * Default: `{type:"adaptive"}` for non-haiku models, omitted for haiku.
+   *
+   * `display` controls visibility of streamed thinking deltas:
+   * - `"summarized"`: server streams plaintext `thinking_delta` events.
+   *   Default on sonnet-4.6 / opus-4.6 / earlier Claude 4 models.
+   * - `"omitted"`: only the encrypted `signature` is returned (no plaintext
+   *   deltas). Faster time-to-first-text-token. **Default on opus-4.7 and
+   *   Claude Mythos Preview.** To see thinking on those models, the caller
+   *   must explicitly request `display: "summarized"`.
    */
-  thinking?: { type: "adaptive" } | false
+  thinking?: { type: "adaptive"; display?: "summarized" | "omitted" } | false
   /**
    * Effort level and/or structured output format.
    * - `effort`: model computation budget (default: `"high"` for non-haiku)
@@ -255,6 +264,13 @@ export interface SendOptions {
   onThinkingDelta?: (text: string) => MaybePromise<void>
   /** Called when a native model thinking block stops. */
   onThinkingStop?: () => MaybePromise<void>
+  /**
+   * Optional cancellation signal forwarded to the underlying network
+   * transport. When the signal aborts mid-request the transport tears
+   * down the HTTP/2 stream and the iterator throws an `AbortError`.
+   * Used by the REPL's Esc/Ctrl+C handling to cancel an in-flight turn.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -409,10 +425,110 @@ export function isVerbose(): boolean {
   return !!process.env.VERBOSE
 }
 
-/** Truncate `s` to `max` chars unless verbose mode is on. */
+/**
+ * When --show-hidden-chars (or MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1) is on,
+ * debug output reveals invisible characters as faint glyphs — same idea
+ * as the input editor's show-hidden mode (see editor-renderer.ts).
+ *
+ * Without this, multi-line tool descriptions (e.g. "Bash: ...\n\nThe working
+ * directory...") wrap onto real lines in the debug log and visually break
+ * the structured key/value layout.
+ */
+export function isShowHiddenChars(): boolean {
+  return process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1"
+}
+
+/**
+ * Replace invisible characters with faint visual indicator glyphs:
+ *   space → ·, tab → →, LF → ↵, CR → ␍.
+ * No-op unless `--show-hidden-chars` is active.
+ *
+ * Kept independent of editor-renderer.ts's `markHidden` because here we
+ * also want to fold newlines (which the editor handles structurally) so
+ * the debug log keeps each value on a single line.
+ */
+function revealHidden(s: string): string {
+  if (!isShowHiddenChars()) return s
+  let out = ""
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === " ") out += "\x1b[2m\u00b7\x1b[22m" // ·
+    else if (ch === "\t") out += "\x1b[2m\u2192\x1b[22m" // →
+    else if (ch === "\n") out += "\x1b[2m\u21b5\x1b[22m" // ↵
+    else if (ch === "\r") out += "\x1b[2m\u240d\x1b[22m" // ␍
+    else out += ch
+  }
+  return out
+}
+
+/**
+ * Truncate `s` to `max` chars unless verbose mode is on, then optionally
+ * reveal hidden characters. Truncation operates on the raw string so the
+ * `(+Nch)` count reflects source characters, not glyph-substituted output.
+ */
 function truncate(s: string, max: number): string {
-  if (isVerbose()) return s
-  return s.length > max ? s.slice(0, max) + "..." : s
+  // Verbose mode disables the cap; otherwise delegate to the shared
+  // `clampWithHint` so debug dumps speak the same `...(+Nch)` dialect as
+  // tool transcript previews (see src/truncate-hint.ts).
+  const body = isVerbose() ? s : clampWithHint(s, max, "ch")
+  return revealHidden(body)
+}
+
+/**
+ * Render a single ContentBlock as a short structural token for debug output.
+ *
+ * One token per block; no color, no truncation — the caller composes them
+ * and applies {@link truncate} to the joined result. The discriminator
+ * (`b.type`) is the wire-protocol literal from {@link ContentBlock}, so the
+ * exhaustiveness `never` check below will fail at compile time the moment
+ * Anthropic adds a new block variant — pointing right at this switch.
+ *
+ * Newline-bearing payloads (text, tool_result strings) are JSON-stringified
+ * so embedded `\n` becomes the escape `\n`, keeping each block on one line
+ * in the debug log.
+ */
+function previewBlock(b: ContentBlock): string {
+  switch (b.type) {
+    case "text":
+      return JSON.stringify(b.text)
+    case "thinking":
+      return `thinking(${b.thinking.length}ch)`
+    case "tool_use": {
+      const keys = Object.keys(b.input ?? {}).join(",")
+      return `tool_use(${b.name}#${shortId(b.id)})${keys ? `{${keys}}` : ""}`
+    }
+    case "tool_result": {
+      const inner =
+        typeof b.content === "string"
+          ? JSON.stringify(b.content)
+          : b.content.map(previewBlock).join(" + ")
+      const err = b.is_error ? "!" : ""
+      return `tool_result${err}(${shortId(b.tool_use_id)}) ${inner}`
+    }
+    default: {
+      // Compile-time exhaustiveness. If ContentBlock gains a member, tsc
+      // errors here ("Type 'XBlock' is not assignable to type 'never'").
+      // Runtime fallback below keeps the agent alive on unknown shapes.
+      const _exhaustive: never = b
+      void _exhaustive
+      return `unknown(${(b as { type?: string } | null)?.type ?? "?"})`
+    }
+  }
+}
+
+/** Last 6 chars of a `toolu_...` id — enough to pair use↔result within a dump. */
+function shortId(id: string): string {
+  return id.slice(-6)
+}
+
+/**
+ * Summarize a `Message.content` (string or block array) for non-verbose
+ * debug. Caps at `max` chars with the same `...(+Nch)` convention as
+ * {@link truncate}.
+ */
+function previewContent(content: string | ContentBlock[], max = 80): string {
+  if (typeof content === "string") return truncate(content, max)
+  return truncate(content.map(previewBlock).join("  ⟶  "), max)
 }
 
 function debugHeader(label: string): void {
@@ -432,7 +548,7 @@ function debugHeaders(headers: Record<string, string>): void {
   const safeHeaders = redactHeaders(headers)
   const sorted = Object.entries(safeHeaders).sort(([a], [b]) => a.localeCompare(b))
   for (const [k, v] of sorted) {
-    console.error(`    ${c.yellow(k)}: ${v}`)
+    console.error(`    ${c.yellow(k)}: ${revealHidden(v)}`)
   }
 }
 
@@ -462,7 +578,7 @@ function debugBody(body: Record<string, unknown>): void {
         // tools, prior messages) is what the API actually serves from cache;
         // see docs/caching.md for the prefix-checkpoint mental model.
         const cc = isCached ? ` ${c.bold(c.brightGreen("[← cached prefix ends here]"))}` : ""
-        const preview = typeof msg.content === "string" ? truncate(msg.content, 80) : "[complex]"
+        const preview = previewContent(msg.content, 80)
         console.error(`      ${c.green(msg.role)}${cc}: ${c.dim(preview)}`)
       }
     } else if (k === "system") {
@@ -484,19 +600,26 @@ function debugBody(body: Record<string, unknown>): void {
         const preview = truncate(block.text, 80)
         console.error(`      ${c.magenta(label)}${cc}: ${c.dim(preview)}`)
       }
+    } else if (k === "tools") {
+      const tools = v as Array<{ name: string; description?: string }>
+      console.error(`    ${c.yellow("tools")}: ${c.dim(`[${tools.length} tool(s)]`)}`)
+      for (const tool of tools) {
+        const desc = truncate(tool.description ?? "", 80)
+        console.error(`      ${c.magenta(tool.name)}: ${c.dim(desc)}`)
+      }
     } else if (k === "metadata") {
       const meta = v as { user_id: string }
       console.error(`    ${c.yellow("metadata.user_id")}:`)
       try {
         const parsed = JSON.parse(meta.user_id)
         for (const [mk, mv] of Object.entries(parsed)) {
-          console.error(`      ${c.magenta(mk)}: ${String(mv)}`)
+          console.error(`      ${c.magenta(mk)}: ${revealHidden(String(mv))}`)
         }
       } catch {
-        console.error(`      ${meta.user_id}`)
+        console.error(`      ${revealHidden(meta.user_id)}`)
       }
     } else {
-      console.error(`    ${c.yellow(k)}: ${JSON.stringify(v)}`)
+      console.error(`    ${c.yellow(k)}: ${revealHidden(JSON.stringify(v))}`)
     }
   }
 }
@@ -689,6 +812,99 @@ async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncIterable<Stream
 }
 
 // ---------------------------------------------------------------------------
+// Streaming status helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a byte count as a short human-readable string for status labels.
+ * Examples: 0 → "0 B", 512 → "512 B", 2048 → "2.0 KB", 1572864 → "1.5 MB".
+ */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+/**
+ * Best-effort extraction of a one-line hint from a (possibly partial) tool_use
+ * input JSON string while it is still streaming. Tries fast regex extraction
+ * first (works on partial JSON), then falls back to JSON.parse.
+ *
+ * Per-tool prioritization mirrors the most useful "what is it actually doing"
+ * field: file_path for Read/Write/Edit, command for Bash, pattern for Grep,
+ * url for WebFetch, query for the search tools, etc. Falls back to the first
+ * string-valued top-level key when no known field is found.
+ *
+ * @returns A short hint string (≤80 chars, no newlines) or "" if nothing
+ *   could be extracted yet.
+ */
+function extractToolHint(toolName: string, partialJson: string): string {
+  if (partialJson.length === 0) return ""
+
+  const fieldsByTool: Record<string, string[]> = {
+    Bash: ["command"],
+    Read: ["file_path", "path"],
+    Write: ["file_path", "path"],
+    Edit: ["file_path", "path"],
+    MultiEdit: ["file_path", "path"],
+    Grep: ["pattern", "path"],
+    Glob: ["pattern", "path"],
+    WebFetch: ["url"],
+    WebSearch: ["query"],
+    show_diff: ["title"],
+  }
+  const candidates = fieldsByTool[toolName] ?? [
+    "file_path",
+    "path",
+    "command",
+    "pattern",
+    "url",
+    "query",
+    "title",
+    "name",
+  ]
+
+  // Regex pass: tolerates unterminated strings and incomplete JSON.
+  // Captures the contents of the first matching `"<key>"\s*:\s*"..."` pair.
+  for (const key of candidates) {
+    const re = new RegExp(String.raw`"${key}"\s*:\s*"((?:\\.|[^"\\])*)`, "")
+    const m = re.exec(partialJson)
+    if (m && m[1]) return shortenHint(unescapeJsonish(m[1]))
+  }
+
+  // Fallback: try a full JSON parse and surface the first string field.
+  try {
+    const obj = JSON.parse(partialJson) as Record<string, unknown>
+    for (const key of candidates) {
+      const v = obj[key]
+      if (typeof v === "string" && v.length > 0) return shortenHint(v)
+    }
+    for (const v of Object.values(obj)) {
+      if (typeof v === "string" && v.length > 0) return shortenHint(v)
+    }
+  } catch {
+    // partial — nothing more to do
+  }
+  return ""
+}
+
+function unescapeJsonish(s: string): string {
+  // Cheap unescape sufficient for hint display (not a full JSON string parser).
+  return s
+    .replace(/\n/g, " ")
+    .replace(/\t/g, " ")
+    .replace(/\r/g, "")
+    .replace(/\"/g, '"')
+    .replace(/\\\\/g, "\\")
+}
+
+function shortenHint(s: string): string {
+  const oneLine = s.replace(/\s+/g, " ").trim()
+  if (oneLine.length <= 80) return oneLine
+  return `${oneLine.slice(0, 77)}…`
+}
+
+// ---------------------------------------------------------------------------
 // sendMessage — streaming, returns async iterable of text chunks
 // ---------------------------------------------------------------------------
 
@@ -752,6 +968,7 @@ export async function* sendMessage(
     onThinkingDelta,
     onThinkingStop,
     networkClient = defaultNetworkClient,
+    signal,
   } = opts
 
   // Strip client-side [1m] suffix — API activation is via beta flag
@@ -848,6 +1065,7 @@ export async function* sendMessage(
         url: API_URL,
         headers: h,
         body: serializedBody,
+        signal,
       })
     }
 
@@ -862,8 +1080,8 @@ export async function* sendMessage(
     // restart anything. Surface the refresh in the status bar, then
     // resume the same in-flight turn.
     if (response.status === 401 && auth.refresh) {
-      debugHeader(c.yellow("401 — token expired, refreshing…"))
-      requestStatus.update("Auth token expired, refreshing…", {
+      debugHeader(c.yellow("401 — token expired, refreshing..."))
+      requestStatus.update("Auth token expired, refreshing...", {
         notificationId: "auth.refresh",
         category: "auth",
       })
@@ -872,7 +1090,7 @@ export async function* sendMessage(
         // Persist on the AuthResult so subsequent turns reuse the new token
         // without paying another 401+refresh round-trip.
         auth.token = refreshed.token
-        requestStatus.update("Auth refreshed, resuming…", {
+        requestStatus.update("Auth refreshed, resuming...", {
           notificationId: "auth.refresh",
           category: "auth",
         })
@@ -931,10 +1149,22 @@ export async function* sendMessage(
     let thinkingSig = ""
     let toolJsonParts = ""
 
+    // Per-block status tracking. We keep these around so input_json_delta
+    // events (which don't repeat the tool name) can rebuild a useful label.
+    let activeToolName = ""
+    let lastStatusUpdateAt = 0
+    let lastStatusBytes = 0
+    const STATUS_THROTTLE_MS = 100
+    const STATUS_THROTTLE_BYTES = 2048
+
     for await (const event of parseSSE(response.body)) {
       if (!sawStreamEvent) {
         sawStreamEvent = true
-        requestStatus.update("Streaming response")
+        // Generic fallback — overridden by the per-block-type labels below
+        // as soon as we see a content_block_start. Without this fallback, a
+        // stream that begins with something unexpected would still show the
+        // pre-stream label ("Waiting for response") indefinitely.
+        requestStatus.update("Receiving stream")
       }
       switch (event.type) {
         case "message_start": {
@@ -947,6 +1177,7 @@ export async function* sendMessage(
             if (isDebug()) console.error(formatCacheLine(usage))
             detector.observe(usage, reqSnapshot)
           }
+          requestStatus.update("Receiving stream")
           break
         }
 
@@ -962,6 +1193,7 @@ export async function* sendMessage(
               signature: cb.signature ?? "",
             }
             thinkingSig = cb.signature ?? ""
+            requestStatus.update("Thinking")
             await onThinkingStart?.()
             if (initialThinking) await onThinkingDelta?.(initialThinking)
           } else if (cb.type === "tool_use") {
@@ -973,8 +1205,13 @@ export async function* sendMessage(
               caller: cb.caller,
             }
             toolJsonParts = ""
+            activeToolName = cb.name ?? "tool"
+            lastStatusBytes = 0
+            lastStatusUpdateAt = Date.now()
+            requestStatus.update(`Calling ${activeToolName}: streaming input`)
           } else if (cb.type === "text") {
             currentBlock = { type: "text", text: cb.text ?? "" }
+            requestStatus.update("Writing response")
           }
           break
         }
@@ -1001,6 +1238,23 @@ export async function* sendMessage(
             }
           } else if (d.type === "input_json_delta" && d.partial_json != null) {
             toolJsonParts += d.partial_json
+            // Throttled status update — every ~2KB of accumulated JSON or
+            // every ~100ms, whichever fires first. Without throttling we'd
+            // re-render the spinner line on every delta (potentially hundreds
+            // per second for a fast tool block).
+            const now = Date.now()
+            const grewEnough = toolJsonParts.length - lastStatusBytes >= STATUS_THROTTLE_BYTES
+            const elapsedEnough = now - lastStatusUpdateAt >= STATUS_THROTTLE_MS
+            if (grewEnough || elapsedEnough) {
+              lastStatusBytes = toolJsonParts.length
+              lastStatusUpdateAt = now
+              const hint = extractToolHint(activeToolName, toolJsonParts)
+              const size = formatBytes(toolJsonParts.length)
+              const label = hint
+                ? `Calling ${activeToolName}: ${hint} (${size})`
+                : `Calling ${activeToolName}: streaming input (${size})`
+              requestStatus.update(label)
+            }
           }
           break
         }
@@ -1008,6 +1262,7 @@ export async function* sendMessage(
         case "content_block_stop": {
           if (currentBlock) {
             const stoppedThinking = currentBlock.type === "thinking"
+            const stoppedToolUse = currentBlock.type === "tool_use"
             // Finalize tool_use: parse accumulated JSON into input
             if (currentBlock.type === "tool_use" && toolJsonParts) {
               try {
@@ -1019,10 +1274,14 @@ export async function* sendMessage(
             }
             blocks.push(currentBlock as ContentBlock)
             if (stoppedThinking) await onThinkingStop?.()
+            if (stoppedToolUse && activeToolName) {
+              requestStatus.update(`Calling ${activeToolName}: dispatching`)
+            }
           }
           currentBlock = null
           toolJsonParts = ""
           thinkingSig = ""
+          activeToolName = ""
           break
         }
 
@@ -1202,10 +1461,17 @@ export async function sendMessageFull(opts: SendOptions): Promise<StreamedRespon
  * @param networkClient Network client used for the quota request.
  * @returns True if the request succeeded (200 OK), false on any error
  */
+export type QuotaResult =
+  | { ok: false }
+  | { ok: true; rateLimits: Map<string, string> }
+
+/**
+ *
+ */
 export async function checkQuota(
   auth: AuthResult,
   networkClient: NetworkClient = defaultNetworkClient,
-): Promise<boolean> {
+): Promise<QuotaResult> {
   const sessionId = getSessionId()
   const headers = buildHeaders(auth, sessionId, "quota")
   const metadata = buildMetadata(auth)
@@ -1253,14 +1519,18 @@ export async function checkQuota(
         debugHeader(c.red(`Quota check failed: ${response.status}`))
         console.error(`  ${errorBody.slice(0, 200)}`)
       }
-      return false
+      return { ok: false }
     }
 
-    return true
+    const rateLimits = new Map<string, string>()
+    response.headers.forEach((v, k) => {
+      if (k.startsWith("anthropic-ratelimit-")) rateLimits.set(k, v)
+    })
+    return { ok: true, rateLimits }
   } catch (e) {
     if (isDebug()) {
       console.error(`  quota check error: ${e instanceof Error ? e.message : String(e)}`)
     }
-    return false
+    return { ok: false }
   }
 }

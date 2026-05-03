@@ -106,7 +106,7 @@ describe("repairTrailingTurn", () => {
       {
         role: "assistant",
         content: [
-          { type: "text", text: "running…" },
+          { type: "text", text: "running..." },
           { type: "tool_use", id: "tu_orphan", name: "Bash", input: {} } as ToolUseBlock,
         ],
       },
@@ -261,6 +261,67 @@ describe("loadSession (full pipeline)", () => {
   })
 })
 
+describe("foldRecords (rewind)", () => {
+  it("single rewind drops post-target records", () => {
+    const records: SessionRecord[] = [
+      { kind: "user", ts: "t1", content: "first", id: "u1" },
+      { kind: "assistant", ts: "t1", content: [{ type: "text", text: "ans1" }], stopReason: "end_turn" },
+      { kind: "user", ts: "t2", content: "second", id: "u2" },
+      { kind: "assistant", ts: "t2", content: [{ type: "text", text: "ans2" }], stopReason: "end_turn" },
+      { kind: "rewind", ts: "t3", to: "u1", droppedCount: 3 },
+    ]
+    const messages = foldRecords(records)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("user")
+    expect(messages[0].content).toBe("first")
+  })
+
+  it("multiple rewinds compose", () => {
+    const records: SessionRecord[] = [
+      { kind: "user", ts: "t1", content: "first", id: "u1" },
+      { kind: "user", ts: "t2", content: "second", id: "u2" },
+      { kind: "rewind", ts: "t3", to: "u1", droppedCount: 1 },
+      { kind: "user", ts: "t4", content: "third", id: "u3" },
+      { kind: "rewind", ts: "t5", to: "u1", droppedCount: 1 },
+    ]
+    const messages = foldRecords(records)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].content).toBe("first")
+  })
+
+  it("rewind with unknown `to` id is skipped (no crash)", () => {
+    const records: SessionRecord[] = [
+      { kind: "user", ts: "t1", content: "hi", id: "u1" },
+      { kind: "rewind", ts: "t2", to: "does-not-exist", droppedCount: 0 },
+      { kind: "assistant", ts: "t3", content: [{ type: "text", text: "ok" }], stopReason: "end_turn" },
+    ]
+    const messages = foldRecords(records)
+    expect(messages).toHaveLength(2)
+    expect(messages[0].content).toBe("hi")
+    expect(messages[1].role).toBe("assistant")
+  })
+
+  it("rewind preserves merged tool_result blocks on the kept user message", () => {
+    const records: SessionRecord[] = [
+      { kind: "user", ts: "t0", content: "go", id: "u0" },
+      {
+        kind: "assistant",
+        ts: "t0",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: {} }],
+        stopReason: "tool_use",
+      },
+      { kind: "tool_result", ts: "t0", tool_use_id: "tu_1", content: "ok", isError: false },
+      { kind: "user", ts: "t1", content: "next", id: "u1" },
+      { kind: "rewind", ts: "t2", to: "u0", droppedCount: 3 },
+    ]
+    const messages = foldRecords(records)
+    // u0 user, asst(tool_use), user(tool_result merged) — kept up through targetIdx=0
+    // Wait: target is u0 at index 0; everything after is dropped.
+    expect(messages).toHaveLength(1)
+    expect(messages[0].content).toBe("go")
+  })
+})
+
 describe("firstUserPromptSnippet", () => {
   it("returns the first user message text trimmed and one-line", () => {
     const records: SessionRecord[] = [
@@ -274,7 +335,7 @@ describe("firstUserPromptSnippet", () => {
     const records: SessionRecord[] = [{ kind: "user", ts: "t", content: long }]
     const out = firstUserPromptSnippet(records, 20)
     expect(out.length).toBe(20)
-    expect(out.endsWith("…")).toBe(true)
+    expect(out.endsWith("...")).toBe(true)
   })
   it("handles content blocks (text)", () => {
     const records: SessionRecord[] = [

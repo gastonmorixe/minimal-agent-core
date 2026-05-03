@@ -17,7 +17,7 @@ else
 fi
 
 output=$(echo "Reply with exactly one word: PONG" | \
-  NETLOG_DISK=1 NETLOG_FETCH=1 NETLOG_CONSOLE=0 NETLOG_DIR=".node-net-dbg" \
+  NETLOG_DISK=1 NETLOG_FETCH=1 NETLOG_CONSOLE=0 NETLOG_DIR=".net-dbg" \
   bun "${preload_args[@]}" \
   src/index.ts --model "$model" 2>/dev/null \
   | grep -v "^>" | grep -v "^minimal" | grep -v "^$" | grep -v "^Bye" | grep -v "^╭\|^│\|^├\|^╰\|^  " | head -3)

@@ -7,7 +7,7 @@
  * receives with its own `\x1b[?25l` / cursor moves / `\x1b[K`
  * sequences. If the caller forwards an incoming chunk that ends with
  * a partial CSI like `\x1b[38;2;180;` and the compositor immediately
- * appends `❯ \x1b[K…`, the terminal's parser glues them together as
+ * appends `❯ \x1b[K...`, the terminal's parser glues them together as
  * one malformed escape and prints fragments as literal text.
  *
  * Producers that read from a pipe (`Bun.spawn(..., { stdout: "pipe"

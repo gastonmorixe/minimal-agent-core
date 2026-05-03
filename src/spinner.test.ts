@@ -170,7 +170,9 @@ describe("BlinkingNerdSpinner", () => {
     const onFrame2 = spinner.render({ ...base, elapsedMs: 600 })
 
     expect(onFrame.glyph).toBe("C:NET")
-    expect(offFrame.glyph).toBe(" ")
+    // Off-frame pads to the on-glyph's display width so the label column
+    // is stable across the blink cycle. "NET" is 3 cells wide.
+    expect(offFrame.glyph).toBe("   ")
     expect(onFrame2.glyph).toBe("C:NET")
   })
 })
