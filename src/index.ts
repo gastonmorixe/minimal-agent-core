@@ -764,7 +764,8 @@ async function main() {
 
   // Quota check — verify account has quota before starting conversation
   // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1
-  if (!args.includes("--skip-quota")) {
+  // Explicitly skipped if we're just dumping a session
+  if (!args.includes("--skip-quota") && !dumpArg) {
     const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
     const result = await checkQuota(auth)
     if (!result.ok) {
