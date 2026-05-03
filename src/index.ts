@@ -194,7 +194,7 @@ function printHelp(): void {
     `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
     `    ${c.cyan("-d")}, ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
     `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
-    `    ${c.cyan("--skip-quota")}            Skip startup quota check`,
+    `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
     `    ${c.cyan("--show-hidden-chars")}      Reveal spaces/tabs/newlines as faint glyphs (input editor + --debug output)`,
     "",
     `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
@@ -220,6 +220,7 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,
     `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
     `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
+    `    ${c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1")}       Skip startup quota check`,
     `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
     "",
     `  ${c.bold("Docs")}`,
@@ -764,8 +765,14 @@ async function main() {
 
   // Quota check — verify account has quota before starting conversation
   // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1
-  // Explicitly skipped if we're just dumping a session
-  if (!args.includes("--skip-quota") && !dumpArg) {
+  // Explicitly skipped if we're just dumping a session, or if configured.
+  const shouldSkipQuota =
+    args.includes("--skip-quota") ||
+    process.env.MINIMAL_AGENT_SKIP_QUOTA === "1" ||
+    userConfig.skipQuota === true ||
+    dumpArg !== undefined
+
+  if (!shouldSkipQuota) {
     const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
     const result = await checkQuota(auth)
     if (!result.ok) {
