@@ -37,6 +37,18 @@ export interface UserConfig {
   thinkingDisplay?: "summarized" | "omitted"
   spinner?: string
   formatter?: string
+  /**
+   * Auto-ASK heuristic. When `true` (or unset = default), the editor's
+   * input stream is scored for question-vs-action intent and the agent
+   * silently flips into ASK mode on confident questions, reverting on
+   * confident actions. Set `false` to disable. Override at runtime via
+   * `MINIMAL_AGENT_AUTO_ASK=0`.
+   */
+  autoAsk?: boolean
+  /**
+   * Skip the startup quota check.
+   */
+  skipQuota?: boolean
 }
 
 const VALID_EFFORT = new Set(["low", "medium", "high", "max"])
@@ -98,6 +110,8 @@ export function loadUserConfig(): UserConfig {
   }
   if (typeof obj.spinner === "string" && obj.spinner.length > 0) out.spinner = obj.spinner
   if (typeof obj.formatter === "string" && obj.formatter.length > 0) out.formatter = obj.formatter
+  if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
+  if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
 
   return out
 }
