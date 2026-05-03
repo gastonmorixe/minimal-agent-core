@@ -75,7 +75,7 @@ describe("ModeManager.isToolAllowed", () => {
     if (!r.allowed) {
       expect(r.message).toContain('Tool "Edit"')
       expect(r.message).toContain("ASK mode")
-      expect(r.message).toContain(ASK_MODE.refusalHint)
+      expect(r.message).toContain(ASK_MODE.refusalHint ?? "")
     }
   })
 
