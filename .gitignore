@@ -12,3 +12,7 @@ tmp/
 .DS_Store
 research/
 docs/internal/
+
+# vim swap files
+*.swp
+*.swo
