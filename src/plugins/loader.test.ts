@@ -7,14 +7,16 @@ import type { ManifestFile } from "./types.ts"
 const ROOT = resolve(__dirname, "../../tmp/loader-tests")
 const HOME = join(ROOT, "home")
 const PROJECT = join(ROOT, "project")
+const EMBEDDED = join(ROOT, "embedded")
 
 function writePackage(
   root: string,
   id: string,
   manifest: unknown,
   files: Record<string, string> = {},
+  sub: string = "tui-plugins",
 ) {
-  const dir = join(root, "tui-plugins", id)
+  const dir = join(root, sub, id)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
   for (const [rel, content] of Object.entries(files)) {
@@ -100,6 +102,7 @@ describe("PluginLoader", () => {
     rmSync(ROOT, { recursive: true, force: true })
     mkdirSync(HOME, { recursive: true })
     mkdirSync(PROJECT, { recursive: true })
+    mkdirSync(EMBEDDED, { recursive: true })
   })
 
   afterAll(() => {
@@ -146,9 +149,15 @@ describe("PluginLoader", () => {
     writePackage(HOME, "beta", toolManifest("beta", "tool_home", "./h.ts"), {
       "h.ts": "export default async () => ({ kind: 'tool_result', content: 'HOME' });",
     })
-    writePackage(PROJECT, "beta", toolManifest("beta", "tool_project", "./h.ts"), {
-      "h.ts": "export default async () => ({ kind: 'tool_result', content: 'PROJECT' });",
-    })
+    writePackage(
+      PROJECT,
+      "beta",
+      toolManifest("beta", "tool_project", "./h.ts"),
+      {
+        "h.ts": "export default async () => ({ kind: 'tool_result', content: 'PROJECT' });",
+      },
+      ".agents/tui-plugins",
+    )
     const loader = await PluginLoader.load({
       homeDir: HOME,
       projectDir: PROJECT,
@@ -157,7 +166,7 @@ describe("PluginLoader", () => {
     const tools = loader.getExtraTools()
     expect(tools.map((t) => t.name)).toEqual(["tool_project"])
     rmSync(join(HOME, "tui-plugins", "beta"), { recursive: true })
-    rmSync(join(PROJECT, "tui-plugins", "beta"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "tui-plugins", "beta"), { recursive: true })
   })
 
   it("skips a package whose manifest is malformed", async () => {
@@ -408,5 +417,124 @@ describe("PluginLoader", () => {
     })
     expect(loader.hasInlineTag("spk")).toBe(true)
     rmSync(dir, { recursive: true })
+  })
+
+  it("loads embedded plugins from <embeddedDir>/tui-plugins/", async () => {
+    writePackage(EMBEDDED, "emb1", toolManifest("emb1", "tool_emb", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+      "PROMPT.md": "embedded plugin prompt",
+    })
+    const loader = await PluginLoader.load({
+      embeddedDir: EMBEDDED,
+      homeDir: join(ROOT, "nope-home"),
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    expect(loader.hasTool("tool_emb")).toBe(true)
+    const block = loader.getPromptBlock()
+    expect(block).toContain('<plugin id="emb1">')
+    expect(block).toContain("embedded plugin prompt")
+    rmSync(join(EMBEDDED, "tui-plugins", "emb1"), { recursive: true })
+  })
+
+  it("project plugins live at <projectDir>/.agents/tui-plugins/, not <projectDir>/tui-plugins/", async () => {
+    // Old (incorrect) path: should NOT be picked up.
+    writePackage(PROJECT, "old_path", toolManifest("old_path", "tool_old", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    // New (correct) path.
+    writePackage(
+      PROJECT,
+      "new_path",
+      toolManifest("new_path", "tool_new", "./h.ts"),
+      { "h.ts": TOOL_HANDLER_BODY },
+      ".agents/tui-plugins",
+    )
+    const loader = await PluginLoader.load({
+      homeDir: join(ROOT, "nope-home"),
+      projectDir: PROJECT,
+      coreToolNames: CORE_TOOLS,
+    })
+    expect(loader.hasTool("tool_new")).toBe(true)
+    expect(loader.hasTool("tool_old")).toBe(false)
+    rmSync(join(PROJECT, "tui-plugins", "old_path"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "tui-plugins", "new_path"), { recursive: true })
+  })
+
+  it("loads non-colliding plugins from all three roots together", async () => {
+    writePackage(EMBEDDED, "e_only", toolManifest("e_only", "tool_e", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(HOME, "h_only", toolManifest("h_only", "tool_h", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(
+      PROJECT,
+      "p_only",
+      toolManifest("p_only", "tool_p", "./h.ts"),
+      { "h.ts": TOOL_HANDLER_BODY },
+      ".agents/tui-plugins",
+    )
+    const loader = await PluginLoader.load({
+      embeddedDir: EMBEDDED,
+      homeDir: HOME,
+      projectDir: PROJECT,
+      coreToolNames: CORE_TOOLS,
+    })
+    const names = loader.getExtraTools().map((t) => t.name).sort()
+    expect(names).toEqual(["tool_e", "tool_h", "tool_p"])
+    rmSync(join(EMBEDDED, "tui-plugins", "e_only"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "h_only"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "tui-plugins", "p_only"), { recursive: true })
+  })
+
+  it("on package-id collision, project shadows home shadows embedded", async () => {
+    writePackage(EMBEDDED, "shared", toolManifest("shared", "tool_emb", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(HOME, "shared", toolManifest("shared", "tool_home", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(
+      PROJECT,
+      "shared",
+      toolManifest("shared", "tool_project", "./h.ts"),
+      { "h.ts": TOOL_HANDLER_BODY },
+      ".agents/tui-plugins",
+    )
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      embeddedDir: EMBEDDED,
+      homeDir: HOME,
+      projectDir: PROJECT,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    const names = loader.getExtraTools().map((t) => t.name)
+    expect(names).toEqual(["tool_project"])
+    // Both home and embedded variants were skipped with a precedence note.
+    expect(logs.filter((l) => l.includes('"shared"')).length).toBeGreaterThanOrEqual(2)
+    expect(logs.some((l) => l.includes("project > home > embedded"))).toBe(true)
+    rmSync(join(EMBEDDED, "tui-plugins", "shared"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "shared"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "tui-plugins", "shared"), { recursive: true })
+  })
+
+  it("home shadows embedded when project has no entry for the id", async () => {
+    writePackage(EMBEDDED, "two_way", toolManifest("two_way", "tool_emb", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(HOME, "two_way", toolManifest("two_way", "tool_home", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      embeddedDir: EMBEDDED,
+      homeDir: HOME,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_home"])
+    rmSync(join(EMBEDDED, "tui-plugins", "two_way"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "two_way"), { recursive: true })
   })
 })

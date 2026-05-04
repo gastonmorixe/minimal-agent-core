@@ -76,14 +76,28 @@ export interface PluginToolDefinition {
 /** Options for {@link PluginLoader.load}. */
 export interface PluginLoaderOptions {
   /**
+   * Absolute path to the agent's install directory (the dir containing
+   * `src/` and the bundled `tui-plugins/`). The loader looks for a
+   * `tui-plugins/` subdirectory under this path. These are the
+   * "embedded" / built-in plugins that ship with minimal-agent itself
+   * (e.g. ask-mode, diff-view, env-info, memory). Lowest precedence on
+   * package-id collision — project and home both shadow embedded.
+   *
+   * Wired from `import.meta.dirname` in `src/index.ts` so the embedded
+   * plugins load regardless of the user's cwd.
+   */
+  embeddedDir?: string
+  /**
    * Absolute path to the user's home-dir plugins root. The loader looks for
    * a `tui-plugins/` subdirectory under this path. Defaults to
    * `~/.agents`.
    */
   homeDir?: string
   /**
-   * Absolute path to the project root. The loader looks for a
-   * `tui-plugins/` subdirectory under this path. Defaults to the CWD.
+   * Absolute path to the project root (typically the agent's cwd). The
+   * loader looks for a `.agents/tui-plugins/` subdirectory under this
+   * path. Highest precedence — project plugins shadow home and embedded
+   * on package-id collision.
    */
   projectDir?: string
   /**
@@ -216,16 +230,21 @@ export class PluginLoader {
     const eventBus = opts.bus ?? new EventBus(logger)
     const sessionId = opts.sessionId
 
-    // Discover packages in both roots. Home first, then project. Project
-    // shadows home when the same package id appears in both.
-    const packages: { dir: string; root: "home" | "project" }[] = []
+    // Discover packages in all three roots. Precedence on package-id
+    // collision: project > home > embedded (closer-to-user wins).
+    const packages: { dir: string; root: "embedded" | "home" | "project" }[] = []
+    if (opts.embeddedDir) {
+      for (const d of discoverPackageDirs(opts.embeddedDir, "tui-plugins")) {
+        packages.push({ dir: d, root: "embedded" })
+      }
+    }
     if (opts.homeDir) {
-      for (const d of discoverPackageDirs(opts.homeDir)) {
+      for (const d of discoverPackageDirs(opts.homeDir, "tui-plugins")) {
         packages.push({ dir: d, root: "home" })
       }
     }
     if (opts.projectDir) {
-      for (const d of discoverPackageDirs(opts.projectDir)) {
+      for (const d of discoverPackageDirs(opts.projectDir, ".agents/tui-plugins")) {
         packages.push({ dir: d, root: "project" })
       }
     }
@@ -233,10 +252,11 @@ export class PluginLoader {
     // Parse manifests.
     const parsed: LoadedPlugin[] = []
     const seenIds = new Set<string>()
-    // Walk project entries FIRST so they win on id collision.
+    // Walk in precedence order: project > home > embedded.
     const ordered = [
       ...packages.filter((p) => p.root === "project"),
       ...packages.filter((p) => p.root === "home"),
+      ...packages.filter((p) => p.root === "embedded"),
     ]
     for (const { dir, root } of ordered) {
       const manifestPath = join(dir, "manifest.json")
@@ -256,7 +276,10 @@ export class PluginLoader {
       }
 
       if (seenIds.has(manifest.id)) {
-        logger(`skipping ${dir}: package id "${manifest.id}" already loaded (project shadows home)`)
+        logger(
+          `skipping ${dir}: package id "${manifest.id}" already loaded ` +
+            `(precedence: project > home > embedded)`,
+        )
         continue
       }
 
@@ -684,8 +707,8 @@ export class PluginLoader {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function discoverPackageDirs(rootDir: string): string[] {
-  const base = join(rootDir, "tui-plugins")
+function discoverPackageDirs(rootDir: string, sub: string): string[] {
+  const base = join(rootDir, sub)
   if (!existsSync(base) || !statSync(base).isDirectory()) return []
   const out: string[] = []
   for (const entry of readdirSync(base)) {

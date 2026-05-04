@@ -41,7 +41,8 @@
  * @module index
  */
 
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { Agent, c, runRepl } from "./agent.ts"
 import { normalizeArgs } from "./cli-args.ts"
 import { getAuth } from "./auth.ts"
@@ -813,11 +814,18 @@ async function main() {
   // Core tool names must always win over plugin names.
   const coreToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name))
   const homeDir = process.env.HOME ? join(process.env.HOME, ".agents") : undefined
+  // Embedded plugins ship inside the agent's own checkout: `<repo>/tui-plugins/`.
+  // `import.meta.dirname` (Bun + Node 20+) of this file is `<repo>/src`, so
+  // climb one level. This makes ask-mode/diff-view/env-info/memory work
+  // regardless of the user's cwd, not just when cwd === <repo>.
+  const thisFileDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
+  const embeddedDir = dirname(thisFileDir)
   // Expose the resolved model id to plugin prompt fragments (e.g. env-info)
   // so they can embed it in the system prompt. Subprocess probes inherit
   // process.env, so a plain assignment is enough.
   process.env.MINIMAL_AGENT_MODEL = selectedModel
   const loader = await PluginLoader.load({
+    embeddedDir,
     homeDir,
     projectDir: process.cwd(),
     coreToolNames,
