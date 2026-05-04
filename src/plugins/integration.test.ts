@@ -33,7 +33,7 @@ describe("plugins: end-to-end integration with diff-view", () => {
 
   beforeAll(async () => {
     loader = await PluginLoader.load({
-      projectDir: PROJECT_ROOT,
+      embeddedDir: PROJECT_ROOT,
       coreToolNames: CORE_TOOLS,
     })
   })
