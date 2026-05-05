@@ -1,8 +1,8 @@
 {
   "id": "memory",
   "name": "Memory",
-  "version": "0.1.0",
-  "description": "Persistent cross-session memory. The model emits <tui::memory> spans to save lessons; saved memories are appended to this plugin's PROMPT.md and reloaded into the system prompt on every future session.",
+  "version": "0.2.0",
+  "description": "Persistent cross-session memory. The model emits <tui::memory> spans to save lessons; saved memories live in per-user files (`~/.minimal-agent/memory.md` for global, `~/.minimal-agent/projects/<cwd>/memory.md` for project-scoped) and are reloaded into the system prompt on every future session.",
   "prompt": "./PROMPT.md",
   "tuis": [
     {
@@ -17,6 +17,18 @@
         "export": "default"
       },
       "interactive": false
+    }
+  ],
+  "promptFragments": [
+    {
+      "id": "memory_load",
+      "handler": {
+        "type": "module",
+        "path": "./handlers/load.ts",
+        "export": "default"
+      },
+      "timeoutMs": 1000,
+      "order": 200
     }
   ]
 }
