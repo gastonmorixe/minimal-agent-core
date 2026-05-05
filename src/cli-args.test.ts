@@ -11,12 +11,7 @@ describe("normalizeArgs", () => {
   })
 
   test("expands short flags", () => {
-    expect(normalizeArgs(["-m", "opus", "-p", "hi"])).toEqual([
-      "--model",
-      "opus",
-      "--prompt",
-      "hi",
-    ])
+    expect(normalizeArgs(["-m", "opus", "-p", "hi"])).toEqual(["--model", "opus", "--prompt", "hi"])
     expect(normalizeArgs(["-d", "-v"])).toEqual(["--debug", "--verbose"])
     expect(normalizeArgs(["-h"])).toEqual(["--help"])
     expect(normalizeArgs(["-r", "last"])).toEqual(["--resume", "last"])
@@ -48,10 +43,7 @@ describe("normalizeArgs", () => {
     // `--models=foo` would be nonsense (it's a list flag), but the key
     // alias should still resolve so users get a useful error rather than
     // a silent typo.
-    expect(normalizeArgs(["--list-sessions=ignored"])).toEqual([
-      "--sessions",
-      "ignored",
-    ])
+    expect(normalizeArgs(["--list-sessions=ignored"])).toEqual(["--sessions", "ignored"])
   })
 
   test("long aliases for list-* subcommands", () => {
@@ -83,15 +75,8 @@ describe("normalizeArgs", () => {
   })
 
   test("subcommand verb followed by extra flags keeps them", () => {
-    expect(normalizeArgs(["models", "list", "--debug"])).toEqual([
-      "--list-models",
-      "--debug",
-    ])
-    expect(normalizeArgs(["resume", "abc", "-d"])).toEqual([
-      "--resume",
-      "abc",
-      "--debug",
-    ])
+    expect(normalizeArgs(["models", "list", "--debug"])).toEqual(["--list-models", "--debug"])
+    expect(normalizeArgs(["resume", "abc", "-d"])).toEqual(["--resume", "abc", "--debug"])
   })
 
   test("subcommand recognition only fires at position 0", () => {
