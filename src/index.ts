@@ -45,43 +45,37 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Agent, c, runRepl } from "./agent.ts"
 import { normalizeArgs } from "./cli-args.ts"
+import { planCommand } from "./cli/command-plan.ts"
 import { getAuth } from "./auth.ts"
-import { configPath, loadUserConfig } from "./config.ts"
+import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
+import { resolveEffort } from "./effort-resolution.ts"
 import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { displayWidth } from "./term-width.ts"
-import { checkQuota, listModels } from "./client.ts"
+import { checkQuota } from "./client.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
-import { BETA_FLAGS_DETAILED, DEFAULT_MODEL, VERSION } from "./headers.ts"
+import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { getSessionId } from "./metadata.ts"
 import { ModeManager } from "./modes.ts"
 import { AutoAskController } from "./auto-ask.ts"
 import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
-import { loadSession, firstUserPromptSnippet } from "./session-restore.ts"
-import { formatSessionAsMarkdown, formatSessionAsXml } from "./session-dump.ts"
-import {
-  defaultSessionsDir,
-  indexFilePath,
-  type IndexRecord,
-  parseLines as parseSessionLines,
-  SessionStore,
-  sessionFilePath,
-  shortHash,
-} from "./session-store.ts"
-import { readFileSync } from "node:fs"
+import { loadSession } from "./session-restore.ts"
+import { SessionStore, shortHash } from "./session-store.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
-import {
-  getSpinnerPreset,
-  type NamedSpinnerPreset,
-  SPINNER_PRESETS,
-} from "./spinner/named-presets.ts"
+import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
 import type { Spinner } from "./spinner.ts"
 import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
+import { runDumpCommand, DumpCommandError } from "./commands/dump.ts"
+import { runListFlagsCommand } from "./commands/list-flags.ts"
+import { runListModelsCommand } from "./commands/list-models.ts"
+import { runListSpinnersCommand } from "./commands/list-spinners.ts"
+import { resolveSessionTarget } from "./commands/session-index.ts"
+import { runSessionsCommand } from "./commands/sessions.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -110,10 +104,7 @@ if (args.includes("--show-hidden-chars")) {
 }
 
 const modelIdx = args.indexOf("--model")
-const model =
-  modelIdx !== -1 && args[modelIdx + 1]
-    ? args[modelIdx + 1]
-    : undefined // config.model applied later (after loadUserConfig is called)
+const model = modelIdx !== -1 && args[modelIdx + 1] ? args[modelIdx + 1] : undefined // config.model applied later (after loadUserConfig is called)
 
 const wantListModels = args.includes("--list-models")
 const wantListFlags = args.includes("--list-flags")
@@ -129,11 +120,15 @@ const spinnerName =
     ? args[spinnerIdx + 1]
     : (process.env.MINIMAL_AGENT_SPINNER ?? userConfig.spinner)
 
+// Effort: --effort / -e  >  MINIMAL_AGENT_EFFORT  >  config file.
+// Pass-through: the value is forwarded to output_config.effort verbatim;
+// the server is the source of truth on accepted levels.
 const effortIdx = args.indexOf("--effort")
-const effort: "high" | "medium" | "low" | "max" | undefined =
-  effortIdx !== -1 && args[effortIdx + 1]
-    ? (args[effortIdx + 1] as "high" | "medium" | "low" | "max")
-    : userConfig.effort
+const { effort, source: effortSource } = resolveEffort({
+  cli: effortIdx !== -1 ? args[effortIdx + 1] : undefined,
+  env: process.env.MINIMAL_AGENT_EFFORT,
+  config: userConfig.effort,
+})
 
 // formatterCmd is resolved asynchronously inside main() via resolveFormatter()
 // so that it can auto-download mdstream when it is not already on PATH.
@@ -174,7 +169,15 @@ const wantListSessions = args.includes("--sessions")
 const dumpIdx = args.indexOf("--dump")
 const dumpArg = dumpIdx !== -1 && args[dumpIdx + 1] ? args[dumpIdx + 1] : undefined
 const dumpFormatIdx = args.indexOf("--dump-format")
-const dumpFormatArg = dumpFormatIdx !== -1 && args[dumpFormatIdx + 1] ? args[dumpFormatIdx + 1] : "md"
+const dumpFormatArg =
+  dumpFormatIdx !== -1 && args[dumpFormatIdx + 1] ? args[dumpFormatIdx + 1] : "md"
+const commandPlan = planCommand({
+  dumpArg,
+  wantListSessions,
+  wantListFlags,
+  wantListSpinners,
+  wantListModels,
+})
 
 function printHelp(): void {
   const lines = [
@@ -188,7 +191,7 @@ function printHelp(): void {
     "",
     `  ${c.bold("Options")}`,
     `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
-    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max`,
+    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
     `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
     `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
     `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
@@ -215,6 +218,7 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_NET_DBG=1")}  Mirror raw HTTP req/res to ${c.dim("./.net-dbg/")}`,
     `    ${c.cyan("CLAUDE_CODE_EXTRA_METADATA")}  JSON object merged into metadata.user_id`,
     `    ${c.cyan("MINIMAL_AGENT_SPINNER")}    Spinner preset id ${c.dim("(same values as --spinner)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_EFFORT")}     Reasoning effort ${c.dim("(low | medium | high | max)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
     `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
@@ -326,7 +330,10 @@ function closeStartupTree(): void {
  *
  * On non-TTY output the spinner is skipped and only the final value prints.
  */
-function startStartupRowSpinner(label: string, checking: string): {
+function startStartupRowSpinner(
+  label: string,
+  checking: string,
+): {
   ok(value: string): void
   fail(value: string): void
 } {
@@ -352,7 +359,7 @@ function startStartupRowSpinner(label: string, checking: string): {
 
   function coloredDot(): string {
     const char = BREATHING_DOT[frameIdx] ?? "·"
-    return (ANSI_PALETTE_RAINBOW[colorIdx % ANSI_PALETTE_RAINBOW.length]!)(char)
+    return ANSI_PALETTE_RAINBOW[colorIdx % ANSI_PALETTE_RAINBOW.length]!(char)
   }
 
   // Print the first frame immediately (no trailing newline — will be overwritten).
@@ -443,8 +450,7 @@ function formatQuotaSummary(rl: Map<string, string>): string {
   const parts: string[] = []
   // Stable, narrow→wide order: 5h, 7d, overall (aggregate). Anything else
   // sorts after, alphabetical.
-  const order = (w: string): number =>
-    w === "5h" ? 0 : w === "7d" ? 1 : w === "overall" ? 2 : 3
+  const order = (w: string): number => (w === "5h" ? 0 : w === "7d" ? 1 : w === "overall" ? 2 : 3)
   const winEntries = [...windows.entries()]
     .filter(([w]) => w !== "overage" && w !== "fallback" && w !== "representative")
     .sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
@@ -469,136 +475,6 @@ function formatQuotaSummary(rl: Map<string, string>): string {
   if (parts.length === 0) return ""
   const sep = c.dim(" · ")
   return `  ${parts.join(sep)}`
-}
-
-function printFlagsView(): void {
-  console.log(`\n  ${c.bold("Beta feature flags")}`)
-  console.log(`  ${c.dim("Sent with every Messages API request")}\n`)
-  for (const flag of BETA_FLAGS_DETAILED) {
-    console.log(`  ${c.dimCyan("╭")} ${c.cyan(flag.id)}`)
-    console.log(`  ${c.dimCyan("│")} ${flag.description}`)
-    console.log(`  ${c.dimCyan("│")} ${c.dim(`source: ${flag.source}`)}`)
-    console.log(`  ${c.dimCyan("╰")} ${c.dim(`when:   ${flag.condition}`)}`)
-    console.log()
-  }
-  console.log(`  ${c.dim(`${BETA_FLAGS_DETAILED.length} flags total`)}`)
-}
-
-function printSpinnersView(): void {
-  console.log(`\n  ${c.bold("Spinner presets")}`)
-  console.log(`  ${c.dim("Pick one with --spinner <id> or env MINIMAL_AGENT_SPINNER=<id>")}\n`)
-  for (const p of SPINNER_PRESETS) {
-    console.log(`  ${c.dimCyan("╭")} ${c.cyan(p.id)}`)
-    console.log(`  ${c.dimCyan("╰")} ${c.dim(p.description)}`)
-    console.log()
-  }
-  console.log(`  ${c.dim(`${SPINNER_PRESETS.length} presets total`)}`)
-}
-
-function printModelsView(models: Awaited<ReturnType<typeof listModels>>): void {
-  const families = new Map<string, typeof models>()
-  for (const modelInfo of models) {
-    const family = modelInfo.id.replace(/-\d.*$/, "")
-    if (!families.has(family)) {
-      families.set(family, [])
-    }
-    families.get(family)!.push(modelInfo)
-  }
-
-  console.log("")
-  for (const [family, members] of [...families.entries()].sort()) {
-    console.log(`  ${c.bold(family)}`)
-    for (const modelInfo of members.sort((a, b) => a.id.localeCompare(b.id))) {
-      const id = c.cyan(modelInfo.id.padEnd(24))
-      const name = modelInfo.display_name ? c.dim(modelInfo.display_name.padEnd(28)) : "".padEnd(28)
-      const date = modelInfo.created_at ? c.dim(modelInfo.created_at.slice(0, 10)) : ""
-      console.log(`    ${id} ${name} ${date}`)
-    }
-    console.log("")
-  }
-  console.log(`  ${c.dim(`${models.length} models available`)}`)
-}
-
-// ---------------------------------------------------------------------------
-// Session listing / "resume last" resolution
-// ---------------------------------------------------------------------------
-
-/**
- * Read the global sessions index. Returns one record per saved session,
- * in append order (oldest first). Missing index file → empty array.
- */
-function readSessionIndex(): IndexRecord[] {
-  const path = indexFilePath()
-  let text: string
-  try {
-    text = readFileSync(path, "utf-8")
-  } catch {
-    return []
-  }
-  const out: IndexRecord[] = []
-  for (const line of text.split("\n")) {
-    if (line.length === 0) continue
-    try {
-      out.push(JSON.parse(line) as IndexRecord)
-    } catch {
-      // Skip malformed lines silently — index is best-effort metadata.
-    }
-  }
-  return out
-}
-
-/**
- * Resolve `--resume last` to a sid. Prefer the most recent session whose
- * `cwd` matches the current process cwd; fall back to the global most
- * recent. Returns null when no sessions exist.
- */
-function resolveLastSessionId(cwd: string): string | null {
-  const all = readSessionIndex()
-  if (all.length === 0) return null
-  for (let i = all.length - 1; i >= 0; i--) {
-    if (all[i].cwd === cwd) return all[i].sid
-  }
-  return all[all.length - 1].sid
-}
-
-/**
- * `--sessions`: print a table of saved sessions and exit. We read from
- * `index.jsonl` (cheap) and grab a one-line snippet of the first user
- * prompt from each session file (slightly more expensive but only one
- * fs.readFileSync per session, and only enough bytes to find the first
- * `"kind":"user"` record).
- */
-function printSessionsView(): void {
-  const all = readSessionIndex()
-  if (all.length === 0) {
-    console.log(`\n  ${c.dim("no saved sessions yet")}`)
-    console.log(`  ${c.dim(`(sessions are stored at ${defaultSessionsDir()})`)}`)
-    return
-  }
-  console.log("")
-  console.log(
-    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("preview")}`,
-  )
-  for (const rec of all) {
-    let snippet = ""
-    try {
-      // Read the whole file — they're append-only JSONL, typically small.
-      // For huge sessions this is still fine because we only do it on
-      // explicit `--sessions` listing (one-shot), not in any hot path.
-      const text = readFileSync(sessionFilePath(rec.sid), "utf-8")
-      const { records: parsed } = parseSessionLines(text)
-      snippet = firstUserPromptSnippet(parsed, 40)
-    } catch {
-      // ignore — session file may have been deleted
-    }
-    const when = c.dim(rec.createdAt.replace("T", " ").slice(0, 19))
-    const sid = c.cyan(rec.sid.padEnd(38))
-    const model = c.dim(rec.model.padEnd(22))
-    console.log(`  ${when}  ${sid} ${model} ${c.faintWhite(snippet)}`)
-  }
-  console.log("")
-  console.log(`  ${c.dim(`${all.length} session(s) at ${defaultSessionsDir()}`)}`)
-  console.log(`  ${c.dim(`resume with: --resume <sid>  (or --resume last)`)}`)
 }
 
 /**
@@ -689,17 +565,49 @@ async function extractPrompt(): Promise<string | null> {
  * the external process for realtime formatting.
  */
 async function main() {
-  printStartupHeader()
-
-  // --sessions: metadata-only; doesn't need auth. Handle before any
-  // network/keychain calls so the user can list sessions even when offline
-  // or when the keychain isn't available.
-  if (wantListSessions) {
-    closeStartupTree()
-    printSessionsView()
-    return
+  switch (commandPlan.command) {
+    case "dump": {
+      if (!dumpArg) {
+        console.error(`  ${c.boldRed("error")} --dump requires <sid|last>`)
+        process.exit(1)
+      }
+      try {
+        await runDumpCommand({
+          target: dumpArg,
+          format: dumpFormatArg,
+          cwd: process.cwd(),
+        })
+      } catch (err) {
+        if (err instanceof DumpCommandError) {
+          console.error(`  ${c.boldRed("error")} ${err.message}`)
+          process.exit(1)
+        }
+        console.error(
+          `  ${c.boldRed("error")} could not dump session ${dumpArg}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+        process.exit(1)
+      }
+      return
+    }
+    case "sessions":
+      runSessionsCommand()
+      return
+    case "list-flags":
+      runListFlagsCommand()
+      return
+    case "list-spinners":
+      runListSpinnersCommand()
+      return
+    case "list-models": {
+      const auth = await getAuth()
+      await runListModelsCommand(auth)
+      return
+    }
+    case "run":
+      break
   }
 
+  printStartupHeader()
   printStartupRow("session", c.dim(getSessionId()))
 
   const auth = await getAuth()
@@ -708,38 +616,19 @@ async function main() {
     `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`,
   )
 
-  // --list-flags: show beta feature flags with documentation and exit
-  if (wantListFlags) {
-    closeStartupTree()
-    printFlagsView()
-    return
-  }
-
-  // --list-spinners: enumerate registered spinner presets and exit
-  if (wantListSpinners) {
-    closeStartupTree()
-    printSpinnersView()
-    return
-  }
-
-  // --list-models: fetch available models from the API and exit
-  if (wantListModels) {
-    closeStartupTree()
-    console.error(`\n  ${c.dim("fetching models...")}`)
-    const models = await listModels(auth)
-    printModelsView(models)
-    return
-  }
-
   // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
-  const formatterResolution = await resolveFormatter(formatterExplicitArg)
   let formatterCmd: string[] | undefined
-  if (formatterResolution.cmd) {
-    formatterCmd = formatterResolution.cmd
-    printStartupRow("formatter", c.dim(formatterResolution.label))
+  if (commandPlan.needsFormatter) {
+    const formatterResolution = await resolveFormatter(formatterExplicitArg)
+    if (formatterResolution.cmd) {
+      formatterCmd = formatterResolution.cmd
+      printStartupRow("formatter", c.dim(formatterResolution.label))
+    } else {
+      formatterCmd = undefined
+      console.error(`  ${c.boldYellow("warn")} ${formatterResolution.warn}`)
+    }
   } else {
     formatterCmd = undefined
-    console.error(`  ${c.boldYellow("warn")} ${formatterResolution.warn}`)
   }
 
   const selectedModel = model ?? userConfig.model ?? DEFAULT_MODEL
@@ -756,22 +645,29 @@ async function main() {
     : thinkingDisplay
       ? `adaptive ${c.dim(`(display=${thinkingDisplay})`)}`
       : "adaptive"
+  const effortProvenance =
+    effortSource === "cli"
+      ? "(--effort)"
+      : effortSource === "env"
+        ? "(env)"
+        : effortSource === "config"
+          ? "(config)"
+          : ""
   const effortLabel = isHaiku
     ? c.dim("off")
     : effort
-      ? `${effort} ${c.dim(userConfig.effort === effort && effortIdx === -1 ? "(config)" : "(--effort)")}`
+      ? `${effort} ${c.dim(effortProvenance)}`
       : `medium ${c.dim("(default)")}`
   printStartupRow("thinking", thinkingLabel)
   printStartupRow("effort", effortLabel)
 
   // Quota check — verify account has quota before starting conversation
-  // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1
-  // Explicitly skipped if we're just dumping a session, or if configured.
+  // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1.
   const shouldSkipQuota =
+    !commandPlan.needsQuota ||
     args.includes("--skip-quota") ||
     process.env.MINIMAL_AGENT_SKIP_QUOTA === "1" ||
-    userConfig.skipQuota === true ||
-    dumpArg !== undefined
+    userConfig.skipQuota === true
 
   if (!shouldSkipQuota) {
     const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
@@ -783,31 +679,9 @@ async function main() {
       )
       process.exit(1)
     }
-    quotaSpinner.ok(`${c.boldGreen("ok")} ${c.boldGreen("✔")}${formatQuotaSummary(result.rateLimits)}`)
-  }
-
-  // --dump <sid|last>: output full session to stdout and exit
-  if (dumpArg) {
-    closeStartupTree()
-    try {
-      const dumpSid = dumpArg === "last" ? resolveLastSessionId(process.cwd()) : dumpArg
-      if (!dumpSid) {
-        console.error(`  ${c.boldRed("error")} no saved sessions found to dump`)
-        process.exit(1)
-      }
-      const loaded = loadSession(dumpSid)
-      if (dumpFormatArg === "xml") {
-        process.stdout.write(formatSessionAsXml(loaded))
-      } else {
-        process.stdout.write(formatSessionAsMarkdown(loaded))
-      }
-    } catch (err) {
-      console.error(
-        `  ${c.boldRed("error")} could not dump session ${dumpArg}: ${err instanceof Error ? err.message : String(err)}`,
-      )
-      process.exit(1)
-    }
-    return
+    quotaSpinner.ok(
+      `${c.boldGreen("ok")} ${c.boldGreen("✔")}${formatQuotaSummary(result.rateLimits)}`,
+    )
   }
 
   // Load TUI plugins from ~/.agents/tui-plugins and <cwd>/tui-plugins.
@@ -833,6 +707,9 @@ async function main() {
     // so it's safely cached; passing it lets prompt fragments embed the
     // id (e.g. env-info ships it in the <env> block).
     sessionId: getSessionId(),
+    // Universal opt-out: any plugin with `plugins.<id>.enabled === false`
+    // in ~/.minimal-agent/config.jsonc is dropped before validation.
+    disabledPluginIds: loadDisabledPluginIds(),
   })
   const loadedModes = loader.getModes()
   const hasPlugins =
@@ -859,7 +736,7 @@ async function main() {
   let resumeBanner: string | null = null
   if (resumeArg) {
     try {
-      resumeSid = resumeArg === "last" ? resolveLastSessionId(process.cwd()) : resumeArg
+      resumeSid = resolveSessionTarget(resumeArg, process.cwd())
       if (!resumeSid) {
         console.error(`  ${c.boldRed("error")} no saved sessions found to --resume last`)
         process.exit(1)
@@ -867,7 +744,10 @@ async function main() {
       const loaded = loadSession(resumeSid)
       initialMessages = loaded.messages
       const turns = initialMessages.length
-      const droppedNote = loaded.dropped.length > 0 ? ` ${c.dim(`(dropped ${loaded.dropped.length} corrupt line(s))`)}` : ""
+      const droppedNote =
+        loaded.dropped.length > 0
+          ? ` ${c.dim(`(dropped ${loaded.dropped.length} corrupt line(s))`)}`
+          : ""
       const repairNote = loaded.repaired ? ` ${c.dim("(repaired trailing turn)")}` : ""
       resumeBanner = `resume ${c.cyan(resumeSid)} ${c.dim(`(${turns} message(s))`)}${repairNote}${droppedNote}`
       printStartupRow("resume", resumeBanner)
@@ -903,7 +783,11 @@ async function main() {
     ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as typeof TOOL_DEFINITIONS)]
     : [...TOOL_DEFINITIONS]
   const toolsForHash = JSON.stringify(
-    allToolsForHash.map((t) => ({ name: t.name, description: t.description, schema: t.input_schema })),
+    allToolsForHash.map((t) => ({
+      name: t.name,
+      description: t.description,
+      schema: t.input_schema,
+    })),
   )
   const systemHash = shortHash(systemForHash)
   const toolsHash = shortHash(toolsForHash)
@@ -931,7 +815,27 @@ async function main() {
       `  ${c.boldYellow("warn")} session store unavailable: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
+
+  // Soft warn-on-resume: if another agent process appears to be live on
+  // this same session, the user is about to fork the conversation.
+  // Liveness is OS-probed (kill(0) + ps -o lstart=) so this catches the
+  // common cases (running, dead, pid-reused) without relying on clean
+  // detach markers. See `src/session-liveness.ts`.
   if (resumeSid) {
+    try {
+      const { getSessionLiveness } = await import("./session-liveness.ts")
+      const live = getSessionLiveness(resumeSid)
+      if (live.status === "live" && live.pid !== process.pid) {
+        console.error(
+          `  ${c.boldYellow("warn")} session ${resumeSid} appears live ` +
+            `(pid ${live.pid}, since ${live.since}); resuming anyway will ` +
+            `fork the conversation`,
+        )
+      }
+    } catch {
+      // best-effort; never block resume on liveness probing
+    }
+
     try {
       const loaded = loadSession(resumeSid)
       const drifted =
@@ -945,6 +849,42 @@ async function main() {
     } catch {
       // already reported above
     }
+  }
+
+  // Mark this process as the current owner of the session (new OR resume).
+  // Liveness is OS-probed by readers; the AttachRecord is just the pointer
+  // they walk. The matching DetachRecord is best-effort and missing it is
+  // explicitly fine — readers verify against the live OS, not the log.
+  if (store) {
+    try {
+      store.appendAttach()
+    } catch {
+      // best-effort
+    }
+    let detachWritten = false
+    const writeDetach = (reason: "exit" | "signal" | "error", code?: number) => {
+      if (detachWritten || !store) return
+      detachWritten = true
+      try {
+        store.appendDetach(reason, code)
+      } catch {
+        // swallow — we may already be inside process.exit
+      }
+    }
+    // The editor-controller's signal handlers call process.exit(), which
+    // fires the 'exit' event and runs this handler. So a single 'exit'
+    // hook covers SIGINT/SIGTERM/SIGHUP plus clean exits. Fatal handlers
+    // only record the detach marker, then rethrow so the runtime still
+    // terminates instead of continuing in a corrupted state.
+    process.on("exit", (code) => writeDetach("exit", typeof code === "number" ? code : 0))
+    process.on("uncaughtException", (err) => {
+      writeDetach("error")
+      throw err
+    })
+    process.on("unhandledRejection", (reason) => {
+      writeDetach("error")
+      throw reason
+    })
   }
 
   const agent = new Agent({
@@ -1053,9 +993,10 @@ async function main() {
     // Any typeahead bytes that arrived during the probe are saved and
     // re-emitted to the editor below so a fast-typing user doesn't lose
     // a keystroke. Disabled (and detection is skipped) when MINIMAL_AGENT_NO_SYNC=1.
-    const syncProbe = process.env.MINIMAL_AGENT_NO_SYNC === "1"
-      ? { syncOutput: false, unparsed: "" }
-      : await detectSynchronizedOutput(process.stdin as any, process.stdout as any)
+    const syncProbe =
+      process.env.MINIMAL_AGENT_NO_SYNC === "1"
+        ? { syncOutput: false, unparsed: "" }
+        : await detectSynchronizedOutput(process.stdin as any, process.stdout as any)
 
     // Two-phase wiring: the StdioInterceptor needs a compositor to forward
     // intercepted writes to, and the Compositor needs an output that
@@ -1100,8 +1041,7 @@ async function main() {
     // `editorShowHidden: true` overrides the env-var/flag baseline.
     if (modeManager) {
       const showHiddenBase =
-        process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1" ||
-        args.includes("--show-hidden-chars")
+        process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1" || args.includes("--show-hidden-chars")
       modeManager.subscribe((_active) => {
         editor.setShowHidden(showHiddenBase || (modeManager.editorShowHidden() ?? false))
       })
@@ -1117,15 +1057,17 @@ async function main() {
     // Shift+Tab. Opt-out via `MINIMAL_AGENT_AUTO_ASK=0` or `autoAsk:false`
     // in the user config. Only wires up when an "ask" mode actually
     // exists in the active manifest set (otherwise: dead code).
-    let autoAsk: AutoAskController | null = null
     if (modeManager && modeManager.list().some((m) => m.id === "ask")) {
       const envOff = process.env.MINIMAL_AGENT_AUTO_ASK === "0"
       const cfgOff = userConfig.autoAsk === false
       if (!envOff && !cfgOff) {
-        autoAsk = new AutoAskController(editor, modeManager, {
-          logger: process.env.DEBUG === "1"
-            ? (m) => process.stderr.write(`[auto-ask] ${m}\n`)
-            : undefined,
+        // Controller installs itself on the editor; the reference is intentionally
+        // not retained — it lives until the editor is destroyed.
+        void new AutoAskController(editor, modeManager, {
+          logger:
+            process.env.DEBUG === "1"
+              ? (m) => process.stderr.write(`[auto-ask] ${m}\n`)
+              : undefined,
         })
       }
     }
