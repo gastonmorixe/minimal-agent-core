@@ -17,10 +17,7 @@ describe("executeTool — universal clamp wiring", () => {
   it("Read on a huge file emits a structured truncation notice with real totals", async () => {
     const path = join(dir, "huge.txt")
     const totalLines = MAX_TOOL_OUTPUT_LINES * 3
-    writeFileSync(
-      path,
-      Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"),
-    )
+    writeFileSync(path, Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"))
     const r = await executeTool("Read", { file_path: path })
     expect(r.is_error).toBeFalsy()
     expect(r.content).toContain("[truncated:")
@@ -33,10 +30,7 @@ describe("executeTool — universal clamp wiring", () => {
   it("Read with offset reports cut line relative to offset", async () => {
     const path = join(dir, "huge2.txt")
     const totalLines = MAX_TOOL_OUTPUT_LINES * 3
-    writeFileSync(
-      path,
-      Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"),
-    )
+    writeFileSync(path, Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"))
     const r = await executeTool("Read", { file_path: path, offset: 200 })
     const m = r.content.match(/cut at byte \d+, line (\d+)/)
     expect(m).not.toBeNull()

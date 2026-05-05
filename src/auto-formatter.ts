@@ -66,18 +66,16 @@ function assetName(): string | null {
 // ---------------------------------------------------------------------------
 
 const A = {
-  dim:       (s: string) => `\x1b[2m${s}\x1b[22m`,
-  bold:      (s: string) => `\x1b[1m${s}\x1b[22m`,
-  faint:     (s: string) => `\x1b[2;37m${s}\x1b[22;39m`,   // faintWhite
+  dim: (s: string) => `\x1b[2m${s}\x1b[22m`,
+  bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
+  faint: (s: string) => `\x1b[2;37m${s}\x1b[22;39m`, // faintWhite
   boldGreen: (s: string) => `\x1b[1;32m${s}\x1b[22;39m`,
-  sky:       (s: string) => `\x1b[38;5;45m${s}\x1b[39m`,
-  clearLine: "\x1b[2K",  // erase entire current line
+  sky: (s: string) => `\x1b[38;5;45m${s}\x1b[39m`,
+  clearLine: "\x1b[2K", // erase entire current line
 }
 
 /** Shared tree-prefix used by the startup rows in index.ts */
 const PIPE = `  ${A.faint("│")} `
-
-
 
 // ---------------------------------------------------------------------------
 // Inline spinner — runs on stderr while the download is in progress.
@@ -133,9 +131,15 @@ function startSpinner(initialLabel: string): DownloadSpinner {
   }
 
   return {
-    setPhase(label: string) { phase = label },
-    done(finalLine: string) { stop(A.boldGreen("✔"), finalLine) },
-    fail(errorLine: string) { stop(`\x1b[1;31m✗\x1b[22;39m`, errorLine) },
+    setPhase(label: string) {
+      phase = label
+    },
+    done(finalLine: string) {
+      stop(A.boldGreen("✔"), finalLine)
+    },
+    fail(errorLine: string) {
+      stop(`\x1b[1;31m✗\x1b[22;39m`, errorLine)
+    },
   }
 }
 
@@ -225,7 +229,7 @@ export async function resolveFormatter(explicitCmd?: string[]): Promise<Formatte
     if (!asset) {
       spinner.fail(
         `no release asset for ${process.platform}/${process.arch} ` +
-        `(looked for ${A.dim(`"${target}"`)} in ${A.dim(version)})`,
+          `(looked for ${A.dim(`"${target}"`)} in ${A.dim(version)})`,
       )
       return {
         cmd: undefined,
@@ -260,9 +264,7 @@ export async function resolveFormatter(explicitCmd?: string[]): Promise<Formatte
     if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
     tarball = await res.arrayBuffer()
   } catch (err) {
-    spinner.fail(
-      `download failed: ${A.dim(err instanceof Error ? err.message : String(err))}`,
-    )
+    spinner.fail(`download failed: ${A.dim(err instanceof Error ? err.message : String(err))}`)
     return {
       cmd: undefined,
       warn:
@@ -319,9 +321,7 @@ export async function resolveFormatter(explicitCmd?: string[]): Promise<Formatte
       // ignore
     }
   } catch (err) {
-    spinner.fail(
-      `install failed: ${A.dim(err instanceof Error ? err.message : String(err))}`,
-    )
+    spinner.fail(`install failed: ${A.dim(err instanceof Error ? err.message : String(err))}`)
     return {
       cmd: undefined,
       warn:

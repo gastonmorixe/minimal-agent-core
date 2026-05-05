@@ -41,6 +41,27 @@ describe("term-width", () => {
     expect(displayWidth("🙂")).toBe(2)
   })
 
+  it("treats Private Use Area codepoints as width 1 (font-config dependent)", () => {
+    // PUA cell width is NOT hard-coded to 2: a patched Nerd Font
+    // renders these as 2 cells, but iTerm + an unpatched fallback
+    // font renders them as 1. Hard-coding "PUA = 2" jiggles the
+    // other case. We treat them as 1 (the safer default) and rely
+    // on byte-width-stable spinner pulses for layout stability.
+    expect(codePointWidth(0xe000)).toBe(1)
+    expect(codePointWidth(0xf07b)).toBe(1) // nf-fa-folder
+    expect(codePointWidth(0xf8ff)).toBe(1)
+    expect(codePointWidth(0xf0000)).toBe(1)
+    expect(codePointWidth(0xf1064)).toBe(1) // nf-md-tools 󱁤
+    expect(codePointWidth(0x100000)).toBe(1)
+    expect(displayWidth("\u{F1064}")).toBe(1)
+    expect(displayWidth("\u{F1064} label")).toBe(7) // 1 + 1 + 5
+  })
+
+  it("non-PUA spinner frames also count as width 1", () => {
+    expect(codePointWidth(0x25cf)).toBe(1)
+    expect(displayWidth("●")).toBe(1)
+  })
+
   it("wrapRows handles the exact-fill case", () => {
     expect(wrapRows(0, 80)).toBe(1)
     expect(wrapRows(1, 80)).toBe(1)

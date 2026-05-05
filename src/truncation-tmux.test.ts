@@ -32,14 +32,7 @@ desc("tmux smoke: truncation notice renders inside the transcript block", () => 
     const t0 = Date.now()
     let pane = ""
     while (Date.now() - t0 < 8000) {
-      const cap = spawnSync("tmux", [
-        "capture-pane",
-        "-t",
-        session,
-        "-p",
-        "-S",
-        "-200",
-      ])
+      const cap = spawnSync("tmux", ["capture-pane", "-t", session, "-p", "-S", "-200"])
       pane = cap.stdout?.toString() ?? ""
       if (pane.includes("[truncated:")) break
       Bun.sleepSync(150)

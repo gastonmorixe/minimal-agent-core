@@ -53,59 +53,59 @@
  *   --help                 Show this help
  */
 
-import { readFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync } from "fs"
+import { resolve } from "path"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 interface Config {
   /** Path to the markdown file to stream. Required — no default. */
-  file: string;
+  file: string
 
   /** Minimum number of characters emitted per chunk. */
-  minChunk: number;
+  minChunk: number
 
   /** Maximum number of characters emitted per chunk (soft — gaussian can exceed it). */
-  maxChunk: number;
+  maxChunk: number
 
   /**
    * Controls how wide the gaussian size jitter is, as a fraction of the
    * [minChunk, maxChunk] range.  0 = uniform distribution, 1 = very noisy.
    */
-  chunkVariation: number;
+  chunkVariation: number
 
   /** Base inter-chunk delay in milliseconds. */
-  speed: number;
+  speed: number
 
   /**
    * Controls the width of normal-distribution timing noise as a fraction
    * of `speed`.  0 = metronomic, 1 = highly variable.
    */
-  speedVariation: number;
+  speedVariation: number
 
   /**
    * Probability (0–1) that any given chunk triggers a "network stall".
    * Stall duration = speed * slowdownFactor * uniform(0.6, 1.4).
    */
-  slowdownChance: number;
+  slowdownChance: number
 
   /**
    * Multiplier applied to `speed` during a stall event.
    * E.g. 12 means the gap is ~12× longer than normal.
    */
-  slowdownFactor: number;
+  slowdownFactor: number
 
   /**
    * Probability (0–1) that any given chunk triggers a "burst" (fast path).
    * Burst delay = speed * speedupFactor * uniform(0.5, 1.5).
    */
-  speedupChance: number;
+  speedupChance: number
 
   /**
    * Fraction of `speed` used during a burst event.
    * E.g. 0.08 means chunks arrive ~12.5× faster than normal.
    */
-  speedupFactor: number;
+  speedupFactor: number
 }
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
@@ -123,13 +123,13 @@ function parseArgs(argv: string[]): Config {
     slowdownFactor: 12,
     speedupChance: 0.04,
     speedupFactor: 0.08,
-  };
+  }
 
-  const args = argv.slice(2); // drop "bun" and script path
+  const args = argv.slice(2) // drop "bun" and script path
 
   for (let i = 0; i < args.length; i++) {
-    const key = args[i];
-    const val = args[i + 1];
+    const key = args[i]
+    const val = args[i + 1]
 
     if (key === "--help" || key === "-h") {
       process.stdout.write(
@@ -153,52 +153,73 @@ function parseArgs(argv: string[]): Config {
           "",
           "  Positional:  any non-flag arg is treated as --file",
           "",
-        ].join("\n") + "\n"
-      );
-      process.exit(0);
+        ].join("\n") + "\n",
+      )
+      process.exit(0)
     }
 
     // Helper: consume next token as a number and advance the loop index.
     const num = () => {
-      const n = Number(val);
-      if (isNaN(n)) throw new Error(`Expected number after ${key}, got "${val}"`);
-      i++; // consume the value token
-      return n;
-    };
+      const n = Number(val)
+      if (isNaN(n)) throw new Error(`Expected number after ${key}, got "${val}"`)
+      i++ // consume the value token
+      return n
+    }
 
     // Bare positional argument → treat as the file path.
     if (!key.startsWith("--")) {
-      cfg.file = resolve(key);
-      continue;
+      cfg.file = resolve(key)
+      continue
     }
 
     switch (key) {
-      case "--file":            cfg.file = resolve(val); i++; break;
-      case "--min-chunk":       cfg.minChunk = num(); break;
-      case "--max-chunk":       cfg.maxChunk = num(); break;
-      case "--chunk-variation": cfg.chunkVariation = num(); break;
-      case "--speed":           cfg.speed = num(); break;
-      case "--speed-variation": cfg.speedVariation = num(); break;
-      case "--slowdown-chance": cfg.slowdownChance = num(); break;
-      case "--slowdown-factor": cfg.slowdownFactor = num(); break;
-      case "--speedup-chance":  cfg.speedupChance = num(); break;
-      case "--speedup-factor":  cfg.speedupFactor = num(); break;
+      case "--file":
+        cfg.file = resolve(val)
+        i++
+        break
+      case "--min-chunk":
+        cfg.minChunk = num()
+        break
+      case "--max-chunk":
+        cfg.maxChunk = num()
+        break
+      case "--chunk-variation":
+        cfg.chunkVariation = num()
+        break
+      case "--speed":
+        cfg.speed = num()
+        break
+      case "--speed-variation":
+        cfg.speedVariation = num()
+        break
+      case "--slowdown-chance":
+        cfg.slowdownChance = num()
+        break
+      case "--slowdown-factor":
+        cfg.slowdownFactor = num()
+        break
+      case "--speedup-chance":
+        cfg.speedupChance = num()
+        break
+      case "--speedup-factor":
+        cfg.speedupFactor = num()
+        break
       default:
-        process.stderr.write(`Unknown option: ${key}\n`);
-        process.exit(1);
+        process.stderr.write(`Unknown option: ${key}\n`)
+        process.exit(1)
     }
   }
 
-  return cfg;
+  return cfg
 }
 
 // ─── RNG helpers ─────────────────────────────────────────────────────────────
 
 /** Uniform random in [0, 1). */
-const rand = () => Math.random();
+const rand = () => Math.random()
 
 /** Uniform random in [lo, hi). */
-const randRange = (lo: number, hi: number) => lo + rand() * (hi - lo);
+const randRange = (lo: number, hi: number) => lo + rand() * (hi - lo)
 
 /**
  * Standard-normal sample via Box-Muller transform.
@@ -211,13 +232,13 @@ const randRange = (lo: number, hi: number) => lo + rand() * (hi - lo);
  * The `1 - rand()` for u avoids passing exactly 0 to log().
  */
 function randn(): number {
-  const u = 1 - rand();
-  const v = rand();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  const u = 1 - rand()
+  const v = rand()
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
 }
 
 /** Clamp x into [lo, hi]. */
-const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
 // ─── Chunk-size model ─────────────────────────────────────────────────────────
 
@@ -235,10 +256,10 @@ const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x
  * preventing truly absurd sizes.
  */
 function nextChunkSize(cfg: Config): number {
-  const base   = randRange(cfg.minChunk, cfg.maxChunk + 1);
-  const spread = (cfg.maxChunk - cfg.minChunk) * cfg.chunkVariation;
-  const noisy  = base + randn() * spread * 0.4;
-  return Math.max(1, Math.round(clamp(noisy, cfg.minChunk, cfg.maxChunk * 2)));
+  const base = randRange(cfg.minChunk, cfg.maxChunk + 1)
+  const spread = (cfg.maxChunk - cfg.minChunk) * cfg.chunkVariation
+  const noisy = base + randn() * spread * 0.4
+  return Math.max(1, Math.round(clamp(noisy, cfg.minChunk, cfg.maxChunk * 2)))
 }
 
 // ─── Delay model ─────────────────────────────────────────────────────────────
@@ -267,87 +288,87 @@ function nextChunkSize(cfg: Config): number {
  * chunks (each chunk gets its own roll).
  */
 function nextDelay(cfg: Config): number {
-  const r = rand();
+  const r = rand()
 
   // ── Stall event ─────────────────────────────────────────────────────────
   if (r < cfg.slowdownChance) {
-    const stall = cfg.speed * cfg.slowdownFactor * randRange(0.6, 1.4);
-    return Math.round(stall);
+    const stall = cfg.speed * cfg.slowdownFactor * randRange(0.6, 1.4)
+    return Math.round(stall)
   }
 
   // ── Burst event ─────────────────────────────────────────────────────────
   // Threshold is the *sum* of the two chances, because r already cleared the
   // slowdown check above.
   if (r < cfg.slowdownChance + cfg.speedupChance) {
-    return Math.round(cfg.speed * cfg.speedupFactor * randRange(0.5, 1.5));
+    return Math.round(cfg.speed * cfg.speedupFactor * randRange(0.5, 1.5))
   }
 
   // ── Normal jittered delay ───────────────────────────────────────────────
-  const jitter = randn() * cfg.speed * cfg.speedVariation * 0.5;
-  return Math.max(0, Math.round(cfg.speed + jitter));
+  const jitter = randn() * cfg.speed * cfg.speedVariation * 0.5
+  return Math.max(0, Math.round(cfg.speed + jitter))
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 /** Promise-based setTimeout wrapper. */
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const cfg = parseArgs(process.argv);
+  const cfg = parseArgs(process.argv)
 
   // ── Load file ────────────────────────────────────────────────────────────
   if (!cfg.file) {
-    process.stderr.write(`Usage: bun scripts/stream-markdown.ts <file> [options]\n`);
-    process.exit(1);
+    process.stderr.write(`Usage: bun scripts/stream-markdown.ts <file> [options]\n`)
+    process.exit(1)
   }
 
-  let text: string;
+  let text: string
   try {
-    text = readFileSync(cfg.file, "utf8");
+    text = readFileSync(cfg.file, "utf8")
   } catch (e: any) {
-    process.stderr.write(`Cannot read file: ${cfg.file}\n${e.message}\n`);
-    process.exit(1);
+    process.stderr.write(`Cannot read file: ${cfg.file}\n${e.message}\n`)
+    process.exit(1)
   }
 
   // Work in raw bytes so we can slice at arbitrary positions while keeping
   // UTF-8 safety.  We encode once and decode each slice individually.
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const bytes   = encoder.encode(text);
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+  const bytes = encoder.encode(text)
 
-  const out = process.stdout;
+  const out = process.stdout
 
   // ── Streaming loop ───────────────────────────────────────────────────────
-  let pos = 0;
+  let pos = 0
   while (pos < bytes.length) {
-    const size = nextChunkSize(cfg);
-    const end  = Math.min(pos + size, bytes.length);
+    const size = nextChunkSize(cfg)
+    const end = Math.min(pos + size, bytes.length)
 
     // Walk back from `end` until we're not sitting on a UTF-8 continuation
     // byte (0x80–0xBF).  Continuation bytes are the 2nd/3rd/4th bytes of a
     // multi-byte sequence; splitting there would produce mojibake.
-    let safeEnd = end;
-    while (safeEnd > pos && (bytes[safeEnd] & 0xc0) === 0x80) safeEnd--;
+    let safeEnd = end
+    while (safeEnd > pos && (bytes[safeEnd] & 0xc0) === 0x80) safeEnd--
 
     // Decode and write the chunk.
-    const chunk = decoder.decode(bytes.slice(pos, safeEnd));
-    out.write(chunk);
-    pos = safeEnd;
+    const chunk = decoder.decode(bytes.slice(pos, safeEnd))
+    out.write(chunk)
+    pos = safeEnd
 
     // Sleep between chunks but not after the very last one.
     if (pos < bytes.length) {
-      await sleep(nextDelay(cfg));
+      await sleep(nextDelay(cfg))
     }
   }
 
   // Guarantee the output ends with a newline so the shell prompt lands on a
   // fresh line even if the markdown file doesn't end with one.
-  if (!text.endsWith("\n")) out.write("\n");
+  if (!text.endsWith("\n")) out.write("\n")
 }
 
 main().catch((e) => {
-  process.stderr.write(String(e) + "\n");
-  process.exit(1);
-});
+  process.stderr.write(String(e) + "\n")
+  process.exit(1)
+})

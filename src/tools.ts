@@ -456,8 +456,7 @@ async function execBash(
       const raw = cdMatch[1].trim()
       // Strip a single matched pair of surrounding quotes.
       const unquoted =
-        (raw.startsWith('"') && raw.endsWith('"')) ||
-        (raw.startsWith("'") && raw.endsWith("'"))
+        (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
           ? raw.slice(1, -1)
           : raw
       const newDir = resolve(bashCwd, unquoted)
@@ -538,7 +537,9 @@ async function execBash(
 
     if (timedOut) {
       return {
-        content: output ? `${output}\n[timed out after ${timeout}ms]` : `[timed out after ${timeout}ms]`,
+        content: output
+          ? `${output}\n[timed out after ${timeout}ms]`
+          : `[timed out after ${timeout}ms]`,
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }
@@ -821,9 +822,7 @@ async function execGrep(
     const totalBytes = Buffer.byteLength(raw, "utf8")
     const totalLines = allLines.length
     const limited =
-      headLimit > 0 && allLines.length > headLimit
-        ? allLines.slice(0, headLimit).join("\n")
-        : raw
+      headLimit > 0 && allLines.length > headLimit ? allLines.slice(0, headLimit).join("\n") : raw
     return {
       content: limited,
       _truncCtx: { totalBytes, totalLines },

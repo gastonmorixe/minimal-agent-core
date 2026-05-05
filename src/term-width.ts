@@ -47,6 +47,16 @@ export function codePointWidth(cp: number): number {
     return 0
   }
 
+  // Private Use Areas (Nerd Font glyphs land here) intentionally NOT
+  // mapped to width 2. PUA cell width depends on the active font: a
+  // patched Nerd Font renders them as 2 cells, an unpatched fallback
+  // renders them as 1. Hard-coding "PUA = 2" jiggles the other case.
+  // We rely on the spinner emitting byte-width-stable frames (see
+  // BlinkingNerdSpinner.render's pulse-instead-of-blink comment) and
+  // a plain 1-space gap in the status row, so width assumptions about
+  // PUA never matter for layout stability. Falls through to the
+  // generic "1 cell" return below.
+
   // Wide / Fullwidth ranges (subset of UAX #11 W/F).
   if (
     (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo

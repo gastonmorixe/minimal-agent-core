@@ -3,7 +3,7 @@
  * runners). See `work/plans/abort-quit-rewind.md` §1.2.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { executeTool, stripInternalFields, type ToolExecResult } from "./tools.ts"
@@ -73,11 +73,7 @@ describe("executeTool — abort plumbing", () => {
     const marker = `marker-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const ac = new AbortController()
     setTimeout(() => ac.abort(), 100)
-    await executeTool(
-      "Bash",
-      { command: `sleep 3 # ${marker}` },
-      { signal: ac.signal },
-    )
+    await executeTool("Bash", { command: `sleep 3 # ${marker}` }, { signal: ac.signal })
     // Give the kernel a moment to reap.
     await new Promise((r) => setTimeout(r, 200))
     const probe = Bun.spawn(["pgrep", "-f", marker], { stdout: "pipe", stderr: "pipe" })

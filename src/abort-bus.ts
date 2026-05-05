@@ -15,40 +15,40 @@
  *      (success, error, or aborted). It is idempotent.
  */
 
-import { EventEmitter } from "node:events";
+import { EventEmitter } from "node:events"
 
 export type AbortReason =
-	| { kind: "user-key"; key: "Esc" | "Ctrl+C" }
-	| { kind: "signal"; signal: NodeJS.Signals }
-	| { kind: "programmatic"; tag: string }
-	| { kind: "timeout"; ms: number };
+  | { kind: "user-key"; key: "Esc" | "Ctrl+C" }
+  | { kind: "signal"; signal: NodeJS.Signals }
+  | { kind: "programmatic"; tag: string }
+  | { kind: "timeout"; ms: number }
 
 export class AbortBus extends EventEmitter {
-	private controller: AbortController | null = null;
-	private aborted = false;
+  private controller: AbortController | null = null
+  private aborted = false
 
-	beginTurn(): AbortController {
-		this.controller = new AbortController();
-		this.aborted = false;
-		return this.controller;
-	}
+  beginTurn(): AbortController {
+    this.controller = new AbortController()
+    this.aborted = false
+    return this.controller
+  }
 
-	endTurn(): void {
-		this.controller = null;
-		this.aborted = false;
-	}
+  endTurn(): void {
+    this.controller = null
+    this.aborted = false
+  }
 
-	requestAbort(reason: AbortReason): boolean {
-		if (!this.controller || this.aborted) return false;
-		this.aborted = true;
-		this.controller.abort();
-		this.emit("abort", reason);
-		return true;
-	}
+  requestAbort(reason: AbortReason): boolean {
+    if (!this.controller || this.aborted) return false
+    this.aborted = true
+    this.controller.abort()
+    this.emit("abort", reason)
+    return true
+  }
 
-	isTurnInFlight(): boolean {
-		return this.controller !== null && !this.aborted;
-	}
+  isTurnInFlight(): boolean {
+    return this.controller !== null && !this.aborted
+  }
 }
 
-export const abortBus: AbortBus = new AbortBus();
+export const abortBus: AbortBus = new AbortBus()

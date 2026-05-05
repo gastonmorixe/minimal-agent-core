@@ -25,7 +25,11 @@ import {
   DEFAULT_NERD_ICON,
 } from "./presets.ts"
 import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
-import { displayWidth } from "../term-width.ts"
+
+/** Wrap text in a dim SGR (brightness↓), matching `ansiDim` from palettes.ts. */
+function dimWrap(text: string): string {
+  return `\x1b[2m${text}\x1b[22m`
+}
 
 const DEFAULT_BLINK_MS = 300
 
@@ -95,13 +99,21 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
         : this.blinkMs
     const step = Math.floor(context.elapsedMs / blinkMs)
     const requestedFps = 1000 / blinkMs
-    // Off-frame: pad with whitespace matching the on-glyph's display width
-    // so the label column never shifts when the icon blinks. A bare " "
-    // would jiggle the label by 1 cell whenever the icon glyph is wide
-    // (CJK, emoji, some patched Nerd Font ranges).
+    // "Pulse" instead of true blink: every frame emits the SAME glyph,
+    // every frame has IDENTICAL byte-width. Off-step is the glyph
+    // wrapped in a dim SGR; on-step is the glyph wrapped in the rotating
+    // palette colorizer. Same character → same rendered cell width
+    // regardless of whether the terminal/font treats the codepoint as 1
+    // or 2 cells. This is the only robust way to keep the label column
+    // stable across the cycle, because PUA / Nerd Font widths are not
+    // reliably 2 cells across all terminals + font configs (iTerm with
+    // a non-patched fallback font commonly renders them as 1 cell).
+    //
+    // The visual cue is the brightness pulse, not the appear/disappear
+    // animation. Animated specs (`AnimatedIcon`) take the rotor branch
+    // above and don't reach here — they animate via frame cycling.
     if (step % 2 !== 0) {
-      const width = Math.max(1, displayWidth(spec))
-      return { glyph: " ".repeat(width), requestedFps }
+      return { glyph: dimWrap(spec), requestedFps }
     }
 
     const colorizer = palette.length > 0 ? palette[step % palette.length] : undefined

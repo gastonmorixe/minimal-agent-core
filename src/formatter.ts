@@ -257,6 +257,26 @@ export function parseFormatterCommand(cmd: string): string[] {
   return args
 }
 
+/**
+ * Build the env passed to the formatter subprocess. We export `COLUMNS`
+ * and `LINES` from the host's view of the controlling terminal so the
+ * child renders to the same surface the compositor is tracking.
+ *
+ * **`COLUMNS` is load-bearing for `mdstream` ≥ 0.2.2.** Earlier
+ * versions ignored `COLUMNS` and queried `/dev/tty` directly, which can
+ * disagree with `process.stdout.columns` (multiplexer indirection,
+ * mid-stream resize observed at different times). The mismatch surfaced
+ * as duplicate paragraphs in scrollback: mdstream computed the wrong
+ * partial-redraw row count and only cleared the bottom wrap row,
+ * stranding the top row of raw markdown above the rendered version.
+ *
+ * We do NOT refresh `COLUMNS` mid-stream on `SIGWINCH`. The formatter is
+ * spawned once per session, so a resize between spawn and a flush is
+ * still possible. mdstream 0.2.2 mitigates that on its side by tracking
+ * the wrap row count incrementally as bytes are emitted (using whatever
+ * width was live at each emit) — see mdstream's CHANGELOG entry under
+ * the unreleased section.
+ */
 function formatterEnv(output: FormatterOutput): Record<string, string> {
   const env: Record<string, string> = { ...process.env } as Record<string, string>
   if (Number.isFinite(output.columns) && output.columns && output.columns > 0) {

@@ -51,9 +51,7 @@ describe("replayToScrollback", () => {
       { role: "user", content: [{ type: "text", text: "list files" }] },
       {
         role: "assistant",
-        content: [
-          { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
-        ],
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
       },
       {
         role: "user",

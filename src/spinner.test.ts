@@ -148,7 +148,7 @@ describe("SpinnerManager", () => {
 })
 
 describe("BlinkingNerdSpinner", () => {
-  it("blinks at 300ms and maps icon by notification id", () => {
+  it("pulses (same glyph, different SGR) at 300ms and maps icon by notification id", () => {
     const spinner = new BlinkingNerdSpinner({
       iconByNotificationId: {
         "network.request": "NET",
@@ -169,10 +169,52 @@ describe("BlinkingNerdSpinner", () => {
     const offFrame = spinner.render({ ...base, elapsedMs: 300 })
     const onFrame2 = spinner.render({ ...base, elapsedMs: 600 })
 
+    // On-step: the active palette colorizer wraps the spec.
     expect(onFrame.glyph).toBe("C:NET")
-    // Off-frame pads to the on-glyph's display width so the label column
-    // is stable across the blink cycle. "NET" is 3 cells wide.
-    expect(offFrame.glyph).toBe("   ")
+    // Off-step: SAME glyph, wrapped in dim SGR (\x1b[2m...\x1b[22m).
+    // The spec text is unchanged — only the SGR escape differs — so the
+    // rendered cell width is byte-identical to the on-step regardless
+    // of how the terminal interprets PUA / wide-char widths.
+    expect(offFrame.glyph).toBe("\x1b[2mNET\x1b[22m")
     expect(onFrame2.glyph).toBe("C:NET")
+  })
+
+  it("on-step and off-step have IDENTICAL display width (no jiggle)", () => {
+    // Cover the three icon-width regimes. "NET" is 3 ASCII cells,
+    // "●" is 1 cell, "\u{F1064}" is the 󱁤 nf-md-tools PUA glyph (cell
+    // width depends on the active font, BUT the on/off frames must
+    // come out the same width regardless because they emit the same
+    // codepoints).
+    const cases: Array<{ name: string; spec: string }> = [
+      { name: "ASCII multi-char", spec: "NET" },
+      { name: "narrow Unicode", spec: "\u{25CF}" }, // ●
+      { name: "Nerd Font PUA", spec: "\u{F1064}" }, // 󱁤
+    ]
+    for (const { name, spec } of cases) {
+      const spinner = new BlinkingNerdSpinner({
+        iconByNotificationId: { "x.test": spec },
+      })
+      const base = {
+        now: 0,
+        startedAt: 0,
+        maxFps: 30,
+        currentFps: 30,
+        theme: {},
+        notification: { notificationId: "x.test" },
+      }
+      const onFrame = spinner.render({ ...base, elapsedMs: 0 })
+      const offFrame = spinner.render({ ...base, elapsedMs: 300 })
+      // Strip ALL SGR escapes from both frames; what remains must be
+      // the same number of code points (≡ same rendered cell count
+      // since the codepoints themselves are identical).
+      const stripSgr = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")
+      const onCps = Array.from(stripSgr(onFrame.glyph))
+      const offCps = Array.from(stripSgr(offFrame.glyph))
+      expect({ name, on: onCps, off: offCps }).toEqual({
+        name,
+        on: Array.from(spec),
+        off: Array.from(spec),
+      })
+    }
   })
 })

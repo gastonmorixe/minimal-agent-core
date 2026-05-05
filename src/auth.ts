@@ -336,7 +336,9 @@ export interface GetAuthDeps {
 }
 
 /**
- *
+ * Resolve OAuth credentials and return an `AuthResult` with a token plus a
+ * lazy `refresh` closure. Re-reads the keychain on every refresh so that
+ * cross-process rotation (e.g. by the official `claude` CLI) is honored.
  */
 export async function getAuth(
   service: string = KEYCHAIN_SERVICE,
