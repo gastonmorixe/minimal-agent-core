@@ -20,7 +20,13 @@
  * transcripts) before the resumed REPL prompt.
  */
 
-import { c, formatToolInput, formatToolPreview, faintThinkingChunk } from "./agent.ts"
+import {
+  c,
+  formatToolInput,
+  formatToolInputContinuation,
+  formatToolPreview,
+  faintThinkingChunk,
+} from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 
 /**
@@ -113,6 +119,10 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
         const tu = b as ToolUseBlock
         // Live header: `\n  ╭ ✦ Tool  args` — match it verbatim.
         sink.write(`\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu))}\n`)
+        // Multi-line Bash continuation rows (mirrors live agent rendering).
+        for (const cont of formatToolInputContinuation(tu)) {
+          sink.write(`  ${c.dimCyan("│")} ${c.dim(cont)}\n`)
+        }
         const result = toolResultById.get(tu.id)
         if (result) {
           const content =
@@ -122,7 +132,16 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
                   .filter((rb): rb is Extract<ContentBlock, { type: "text" }> => rb.type === "text")
                   .map((rb) => rb.text)
                   .join("")
-          for (const line of formatToolPreview(content, !!result.is_error)) {
+          // Replay does not have access to the live `_truncInfo` (it was
+          // never persisted in the JSONL — it's a per-render artifact).
+          // We pass `tool: tu.name` so the per-tool body line budget still
+          // applies; truncation footers are not reconstructed at replay.
+          // The trailing `[truncated: ...]` notice in `content` is still
+          // stripped from the displayed body by `formatToolPreview` since
+          // it scans for the magic prefix.
+          for (const line of formatToolPreview(content, !!result.is_error, undefined, {
+            tool: tu.name,
+          })) {
             sink.write(`${line}\n`)
           }
         } else {
