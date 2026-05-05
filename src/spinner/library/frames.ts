@@ -79,7 +79,22 @@ export const CIRCLE_PULSE: readonly string[] = ["◉", "◎", "○", "◌", "○
 export const BRAILLE_ROTOR_HEAVY: readonly string[] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
 
 /** Grow-shrink block bar — semantically evokes download/transfer progress. */
-export const BAR_GROW: readonly string[] = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎"]
+export const BAR_GROW: readonly string[] = [
+  "▏",
+  "▎",
+  "▍",
+  "▌",
+  "▋",
+  "▊",
+  "▉",
+  "█",
+  "▉",
+  "▊",
+  "▋",
+  "▌",
+  "▍",
+  "▎",
+]
 
 // ─── Recommended AnimatedIcon bundles (frames + intervalMs) ─────────────────
 

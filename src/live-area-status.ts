@@ -112,19 +112,20 @@ export class LiveAreaStatusController implements StatusController {
       this.editor.setStatus(null)
       return
     }
-    // Layout invariant: `[icon-or-pad][gap][label]`. We always reserve
-    // the icon slot — even when the spinner manager is between frames
-    // (`spinnerGlyph === ""`) — so the label sits at a stable column.
+    // Plain 1-space gap. The label column stays stable because every
+    // frame the spinner emits is the SAME glyph (only the SGR escape
+    // differs — bright color for on-step, dim for off-step). See the
+    // pulse-instead-of-blink comment in BlinkingNerdSpinner.render.
     //
-    // Two spaces (not one) for the gap: many nerd-font glyphs live in
-    // Supplementary PUA-A (e.g. nf-md-tools `󱁤` U+F1064) and render as
-    // 2 visual cells in terminals configured with a nerd font, while our
-    // `displayWidth` model counts them as 1. With a 1-space separator the
-    // label visually butts against the icon ("󱁤Running Bash"); a 2-space
-    // separator restores breathing room without depending on the model
-    // being right about glyph width.
+    // No `displayWidth`-based padding here: it tries to compensate for
+    // wide PUA glyphs but in practice PUA cell width is unreliable
+    // across terminal/font configs (iTerm + non-patched fallback font
+    // renders Nerd Font PUA as 1 cell, while patched fonts render
+    // them as 2). Padding for one config jiggles in the other. The
+    // pulse-instead-of-blink design makes that compensation
+    // unnecessary because the byte-width is identical every frame.
     const slot = this.spinnerGlyph || " "
-    this.editor.setStatus(`${slot}  ${this.label}`)
+    this.editor.setStatus(`${slot} ${this.label}`)
   }
 
   private toNotification(status: StatusSnapshot): SpinnerNotification {

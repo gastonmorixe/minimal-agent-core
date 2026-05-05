@@ -114,8 +114,7 @@ export class EditorRenderer {
 
       if (!wrap) {
         const displayText = this.showHidden
-          ? markHidden(lineText) +
-            (logical < totalRows - 1 ? HIDDEN_NEWLINE : "")
+          ? markHidden(lineText) + (logical < totalRows - 1 ? HIDDEN_NEWLINE : "")
           : lineText
         lines.push(prompt + displayText)
         if (logical === buf.row) {
@@ -134,8 +133,7 @@ export class EditorRenderer {
         const isNonLastLine = logical < totalRows - 1
         for (let k = 0; k < chunks.length; k++) {
           const transformed =
-            markHidden(chunks[k]) +
-            (isNonLastLine && k === chunks.length - 1 ? HIDDEN_NEWLINE : "")
+            markHidden(chunks[k]) + (isNonLastLine && k === chunks.length - 1 ? HIDDEN_NEWLINE : "")
           lines.push((k === 0 ? prompt : "") + transformed)
         }
       } else {
@@ -199,12 +197,7 @@ export class EditorRenderer {
       let rows = wrapRows(w, columns)
       // Phantom row when the cursor sits at end of an exact-fill line —
       // must match the renderer's `lines.push("")` branch above.
-      if (
-        i === buf.row &&
-        buf.col === codePointCount(buf.lines[i]) &&
-        w > 0 &&
-        w % columns === 0
-      ) {
+      if (i === buf.row && buf.col === codePointCount(buf.lines[i]) && w > 0 && w % columns === 0) {
         rows += 1
       }
       total += rows

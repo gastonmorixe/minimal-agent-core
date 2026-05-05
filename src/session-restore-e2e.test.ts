@@ -50,9 +50,7 @@ describe("session restore E2E", () => {
         round++
         if (round === 1) {
           return {
-            blocks: [
-              { type: "tool_use" as const, id: "tu_1", name: "NonExistentTool", input: {} },
-            ],
+            blocks: [{ type: "tool_use" as const, id: "tu_1", name: "NonExistentTool", input: {} }],
             text: "",
             stopReason: "tool_use",
           } as StreamedResponse

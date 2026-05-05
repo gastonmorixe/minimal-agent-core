@@ -338,7 +338,6 @@ export class ModeManager {
     const m = this.active()
     if (m?.systemPromptAppend && !this.warnedSystemPromptAppend) {
       this.warnedSystemPromptAppend = true
-      // eslint-disable-next-line no-console
       console.error(
         `  \x1b[33m⚠\x1b[0m mode "${m.id}" declares deprecated ` +
           `\`systemPromptAppend\` — move the text to the plugin's ` +

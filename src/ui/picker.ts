@@ -49,7 +49,7 @@ export class Picker<V> {
     this.items = opts.items
     this.pageSize = Math.max(1, opts.pageSize ?? 10)
     const initial = opts.initial ?? 0
-    this.idx = this.clampToEnabled(initial, +1)
+    this.idx = this.clampToEnabled(initial, 1)
     if (this.idx < 0) this.idx = this.clampToEnabled(initial, -1)
   }
 
@@ -95,16 +95,16 @@ export class Picker<V> {
         this.moveBy(-1)
         return "stay"
       case "down":
-        this.moveBy(+1)
+        this.moveBy(1)
         return "stay"
       case "pageup":
         this.moveBy(-this.pageSize)
         return "stay"
       case "pagedown":
-        this.moveBy(+this.pageSize)
+        this.moveBy(this.pageSize)
         return "stay"
       case "home": {
-        const i = this.clampToEnabled(0, +1)
+        const i = this.clampToEnabled(0, 1)
         if (i >= 0) this.idx = i
         return "stay"
       }
@@ -119,6 +119,8 @@ export class Picker<V> {
       }
       case "escape":
         return { close: true, result: null }
+      default:
+        return "stay"
     }
   }
 

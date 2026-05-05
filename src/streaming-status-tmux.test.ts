@@ -42,7 +42,9 @@ desc("tmux smoke: streaming status updates with detailed labels", () => {
       // Status line shape from StatusRenderer: "<spinner-glyph> <dim-label>".
       // Capture any "Calling Write:" or specific lifecycle labels we see.
       for (const line of pane.split("\n")) {
-        const m = line.match(/(?:Calling \w+:.*|Receiving stream|Writing response|Thinking|Finalizing)/)
+        const m = line.match(
+          /(?:Calling \w+:.*|Receiving stream|Writing response|Thinking|Finalizing)/,
+        )
         if (m) seenLabels.add(m[0].trim())
       }
       if (pane.includes("DONE")) {
@@ -58,7 +60,10 @@ desc("tmux smoke: streaming status updates with detailed labels", () => {
     // Must have seen at least one delta-driven label that includes the
     // extracted file_path hint AND a byte/KB size suffix.
     const hintedSized = [...seenLabels].filter(
-      (l) => l.includes("Calling Write:") && l.includes("big-config.yaml") && /\((\d+(\.\d+)?\s?(B|KB|MB))\)/.test(l),
+      (l) =>
+        l.includes("Calling Write:") &&
+        l.includes("big-config.yaml") &&
+        /\((\d+(\.\d+)?\s?(B|KB|MB))\)/.test(l),
     )
     expect(hintedSized.length).toBeGreaterThan(0)
 

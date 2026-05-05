@@ -7,11 +7,7 @@ export class QuitModal implements LiveOverlay {
   render(_width: number): string[] {
     const yes = this.selectedIndex === 0 ? "❮ Yes ❯" : "[ Yes ]"
     const no = this.selectedIndex === 1 ? "❮ No ❯" : "[ No ]"
-    return [
-      "  Quit minimal-agent?",
-      "",
-      `  ${yes}   ${no}`,
-    ]
+    return ["  Quit minimal-agent?", "", `  ${yes}   ${no}`]
   }
 
   onKey(key: OverlayKey): "stay" | { close: true; result: boolean } {
