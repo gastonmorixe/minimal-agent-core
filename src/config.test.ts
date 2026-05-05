@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadUserConfig } from "./config.ts"
+import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
 
 describe("loadUserConfig", () => {
   let dir: string
@@ -43,16 +43,24 @@ describe("loadUserConfig", () => {
     })
   })
 
-  it("drops invalid enum values silently", () => {
+  it("drops invalid enum values silently (effort is pass-through)", () => {
     writeFileSync(
       path,
       JSON.stringify({
-        effort: "ludicrous", // invalid
-        thinkingDisplay: "encrypted", // invalid
+        effort: "ludicrous", // pass-through: server validates, not us
+        thinkingDisplay: "encrypted", // invalid enum, dropped
         model: "claude-opus-4-7", // valid
       }),
     )
-    expect(loadUserConfig()).toEqual({ model: "claude-opus-4-7" })
+    expect(loadUserConfig()).toEqual({
+      model: "claude-opus-4-7",
+      effort: "ludicrous",
+    })
+  })
+
+  it("drops empty-string effort", () => {
+    writeFileSync(path, JSON.stringify({ effort: "" }))
+    expect(loadUserConfig()).toEqual({})
   })
 
   it("ignores unknown keys", () => {
@@ -106,5 +114,78 @@ describe("loadUserConfig", () => {
       thinkingDisplay: "summarized",
       effort: "high",
     })
+  })
+})
+
+describe("loadDisabledPluginIds", () => {
+  let dir: string
+  let path: string
+  const prevEnv = process.env.MINIMAL_AGENT_CONFIG
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "minimal-agent-disabled-"))
+    path = join(dir, "config.jsonc")
+    process.env.MINIMAL_AGENT_CONFIG = path
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (prevEnv === undefined) delete process.env.MINIMAL_AGENT_CONFIG
+    else process.env.MINIMAL_AGENT_CONFIG = prevEnv
+  })
+
+  it("returns empty set when file is missing", () => {
+    process.env.MINIMAL_AGENT_CONFIG = join(dir, "nope.jsonc")
+    expect(loadDisabledPluginIds()).toEqual(new Set())
+  })
+
+  it("returns empty set when no plugins section", () => {
+    writeFileSync(path, JSON.stringify({ model: "x" }))
+    expect(loadDisabledPluginIds()).toEqual(new Set())
+  })
+
+  it("collects ids with enabled === false", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        plugins: {
+          "web-search": { enabled: false },
+          "diff-view": { enabled: true },
+          "env-info": {}, // no enabled key → enabled
+          "ask-mode": { enabled: false },
+        },
+      }),
+    )
+    expect(loadDisabledPluginIds()).toEqual(new Set(["web-search", "ask-mode"]))
+  })
+
+  it("ignores non-object plugin blocks", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        plugins: { "web-search": "yes", "diff-view": null, memory: { enabled: false } },
+      }),
+    )
+    expect(loadDisabledPluginIds()).toEqual(new Set(["memory"]))
+  })
+
+  it("treats truthy non-false values as enabled", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        plugins: {
+          a: { enabled: true },
+          b: { enabled: 0 }, // not literal false
+          c: { enabled: null },
+          d: { enabled: false },
+        },
+      }),
+    )
+    expect(loadDisabledPluginIds()).toEqual(new Set(["d"]))
+  })
+
+  it("malformed JSON → empty set, no throw", () => {
+    writeFileSync(path, "{ not valid")
+    expect(loadDisabledPluginIds()).toEqual(new Set())
   })
 })
