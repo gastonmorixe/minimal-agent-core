@@ -371,6 +371,77 @@ describe("Compositor (DECSET 2026 synchronized output)", () => {
   })
 })
 
+describe("Compositor (notifyResize)", () => {
+  it("on TTY emits \\x1b[H\\x1b[J (full viewport wipe) and zeroes counters", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["status", "❯ "], { row: 1, col: 2 })
+    expect(c.liveHeight).toBe(2)
+    cap.writes.length = 0
+    c.notifyResize()
+    const out = joined(cap)
+    // Full viewport wipe: home then erase-to-end-of-screen. Anything
+    // less leaves reflowed upper portions of the old live area visible
+    // above the cursor, and drawLiveSeq paints fresh status+prompt
+    // below them — the duplication the user originally reported.
+    expect(out).toContain("\x1b[H\x1b[J")
+    // Counters reset so the next setLiveArea won't issue a stale
+    // relative-up sequence (which would land mid-reflow and leave debris).
+    expect(c.liveHeight).toBe(0)
+  })
+
+  it("the next setLiveArea after a resize emits no \\x1b[nA up-moves (clean repaint)", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["status", "❯ "], { row: 1, col: 2 })
+    c.notifyResize()
+    cap.writes.length = 0
+    c.setLiveArea(["status", "❯ "], { row: 1, col: 2 })
+    const out = joined(cap)
+    // No relative up-moves should appear in this paint — the resize wiped
+    // the canvas, so the live area redraws starting at the current row
+    // without trying to step over a stale OLD live area.
+    expect(out).not.toMatch(/\x1b\[\d*A/)
+    // It DID draw the new content.
+    expect(out).toContain("status")
+    expect(out).toContain("❯ ")
+  })
+
+  it("is a no-op on non-TTY", () => {
+    const cap = makeOutput({ isTTY: false })
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.notifyResize()
+    expect(cap.writes).toEqual([])
+  })
+
+  it("is a no-op when not mounted", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    // No mount() — should be silent.
+    c.notifyResize()
+    expect(cap.writes).toEqual([])
+  })
+
+  it("wraps the erase in BSU/ESU when synchronized output is enabled", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output, syncOutput: true })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    cap.writes.length = 0
+    c.notifyResize()
+    const out = joined(cap)
+    // BSU then ESU around the erase, atomic on supporting terminals.
+    const bsu = "\x1b[?2026h"
+    const esu = "\x1b[?2026l"
+    expect(out.indexOf(bsu)).toBeGreaterThanOrEqual(0)
+    expect(out.indexOf(esu)).toBeGreaterThan(out.indexOf(bsu))
+    expect(out).toContain("\x1b[H\x1b[J")
+  })
+})
+
 describe("updateStreamCol", () => {
   it("advances col by visible width when chunk has no newline", () => {
     expect(updateStreamCol("hello", 0)).toBe(5)
