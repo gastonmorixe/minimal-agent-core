@@ -25,6 +25,7 @@
  * @module agent
  */
 
+import { abortBus } from "./abort-bus.ts"
 import type { AuthResult } from "./auth.ts"
 import {
   type ContentBlock,
@@ -865,6 +866,13 @@ export interface ReplAgentLike {
       onThinkingStop?: () => MaybePromise<void>
       drainQueuedUserText?: () => string | null
       onQueueInject?: (text: string) => void
+      /**
+       * Optional cancellation signal. The live-area REPL forwards
+       * {@link AbortBus.beginTurn}'s controller signal here so a user-press
+       * Esc / Ctrl+C tears down the SDK stream and any in-flight tool
+       * (Bash child gets SIGTERM → SIGKILL escalation).
+       */
+      signal?: AbortSignal
     },
   ): AsyncGenerator<string, StreamedResponse, undefined>
   /** Optional: current model id (for diagnostics/recovery prompts). */
@@ -940,6 +948,14 @@ export interface ReplEditor {
    * at the next safe boundary). Pass `[]` to clear.
    */
   setDecorationLines?(lines: string[]): void
+  /**
+   * Optional. Restore the editor buffer to a given text. Used by the abort
+   * flow (`runReplLiveArea` → `handleAbort`) so that when the user cancels
+   * an in-flight turn, the prompt they just sent is put back into the editor
+   * for tweaking and resubmission. Cursor lands at the end of the inserted
+   * text.
+   */
+  setBuffer?(text: string): void
 }
 
 /**
@@ -1695,8 +1711,22 @@ async function runReplLiveArea(
       const onQueueInject = (_qtext: string): void => {
         /* intentionally empty — see comment above */
       }
+      // Begin a turn on the global abort bus. From this point on, the
+      // editor's bare-Esc / Ctrl+C handlers (see `EditorController`) will
+      // route to `abortBus.requestAbort(...)` instead of clearing the
+      // buffer or emitting `cancel`. We pass `ctrl.signal` into `agent.run`
+      // so an abort tears down the SDK stream AND any in-flight tool
+      // (Bash child gets SIGTERM → SIGKILL escalation, Read/Write/etc.
+      // throw before further IO).
+      const ctrl = abortBus.beginTurn()
+      let aborted = false
+      const onBusAbort = (): void => {
+        aborted = true
+      }
+      abortBus.once("abort", onBusAbort)
       try {
         const gen = agent.run(text, {
+          signal: ctrl.signal,
           onTranscriptLine,
           onThinkingStart,
           onThinkingChunk,
@@ -1718,6 +1748,11 @@ async function runReplLiveArea(
       } catch (err) {
         turnError = err
       } finally {
+        // Always end the turn FIRST so the bus is in a clean state for the
+        // next iteration even if endThinkingFormatter / formatter.end()
+        // throw. `off` keeps the listener count stable across turns.
+        abortBus.off("abort", onBusAbort)
+        abortBus.endTurn()
         running = false
         renderDecoration()
         turnStatus.clear()
@@ -1738,7 +1773,20 @@ async function runReplLiveArea(
         compositor.flushStream?.()
       }
 
-      if (turnError) {
+      // Abort path: distinguish user-initiated cancellation from a real
+      // error. `agent.run` throws `Error("aborted")` with `name === "AbortError"`
+      // when the signal trips. We swallow it, emit a single dim footer,
+      // restore the in-flight prompt to the editor (so the user can edit
+      // and resubmit), and rollback the orphan user turn.
+      const isAbortError =
+        aborted || (turnError instanceof Error && (turnError as Error).name === "AbortError")
+      if (isAbortError) {
+        // Make sure the dim footer starts on a fresh line.
+        if (wroteOutput && !lastChunkEndedWithNewline) compositor.writeStream("\n")
+        compositor.writeStream(`  \x1b[2m⊘ aborted by user — prompt restored to editor\x1b[22m\n`)
+        if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
+        if (typeof editor.setBuffer === "function") editor.setBuffer(text)
+      } else if (turnError) {
         const msg = turnError instanceof Error ? turnError.message : String(turnError)
         compositor.writeStream(`\n  ${c.boldRed("error")} ${msg}\n`)
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
