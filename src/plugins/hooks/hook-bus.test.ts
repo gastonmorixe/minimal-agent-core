@@ -15,14 +15,22 @@ describe("HookBus / chain", () => {
     const bus = new HookBus(noLog)
     bus.declare("c", "chain")
     const trace: string[] = []
-    bus.on("c", (n: number) => {
-      trace.push(`hi:${n}`)
-      return { payload: n + 1 }
-    }, { priority: 90, source: "hi" })
-    bus.on("c", (n: number) => {
-      trace.push(`lo:${n}`)
-      return { payload: n * 10 }
-    }, { priority: 10, source: "lo" })
+    bus.on(
+      "c",
+      (n: number) => {
+        trace.push(`hi:${n}`)
+        return { payload: n + 1 }
+      },
+      { priority: 90, source: "hi" },
+    )
+    bus.on(
+      "c",
+      (n: number) => {
+        trace.push(`lo:${n}`)
+        return { payload: n * 10 }
+      },
+      { priority: 10, source: "lo" },
+    )
 
     const r = await bus.emitChain<number>("c", 1)
     expect(trace).toEqual(["hi:1", "lo:2"])
@@ -34,12 +42,20 @@ describe("HookBus / chain", () => {
     const bus = new HookBus(noLog)
     bus.declare("c", "chain")
     const trace: string[] = []
-    bus.on("c", () => {
-      trace.push("a")
-    }, { priority: 50, source: "a" })
-    bus.on("c", () => {
-      trace.push("b")
-    }, { priority: 50, source: "b" })
+    bus.on(
+      "c",
+      () => {
+        trace.push("a")
+      },
+      { priority: 50, source: "a" },
+    )
+    bus.on(
+      "c",
+      () => {
+        trace.push("b")
+      },
+      { priority: 50, source: "b" },
+    )
     await bus.emitChain("c", null)
     expect(trace).toEqual(["a", "b"])
   })
@@ -62,9 +78,13 @@ describe("HookBus / chain", () => {
       priority: 90,
       source: "blocker",
     })
-    bus.on("c", () => {
-      downstreamCalled = true
-    }, { priority: 10 })
+    bus.on(
+      "c",
+      () => {
+        downstreamCalled = true
+      },
+      { priority: 10 },
+    )
     const r = await bus.emitChain("c", "x")
     expect(r.halted).toBe(true)
     expect(r.haltedBy).toBe("blocker")
@@ -76,9 +96,13 @@ describe("HookBus / chain", () => {
     const logs: string[] = []
     const bus = new HookBus((m) => logs.push(m))
     bus.declare("c", "chain")
-    bus.on("c", () => {
-      throw new Error("boom")
-    }, { priority: 90 })
+    bus.on(
+      "c",
+      () => {
+        throw new Error("boom")
+      },
+      { priority: 90 },
+    )
     bus.on("c", (n: number) => ({ payload: n + 1 }), { priority: 10 })
     const r = await bus.emitChain<number>("c", 1)
     expect(r.payload).toBe(2)
@@ -89,11 +113,7 @@ describe("HookBus / chain", () => {
     const logs: string[] = []
     const bus = new HookBus((m) => logs.push(m))
     bus.declare("c", "chain")
-    bus.on(
-      "c",
-      (n: number) => ({ payload: n + 999 }),
-      { observeOnly: true, priority: 90 },
-    )
+    bus.on("c", (n: number) => ({ payload: n + 999 }), { observeOnly: true, priority: 90 })
     bus.on("c", (n: number) => ({ payload: n + 1 }), { priority: 10 })
     const r = await bus.emitChain<number>("c", 0)
     expect(r.payload).toBe(1)
@@ -161,13 +181,21 @@ describe("HookBus / broadcast-sync", () => {
     const logs: string[] = []
     const bus = new HookBus((m) => logs.push(m))
     bus.declare("k", "broadcast-sync")
-    bus.on("k", () => {
-      throw new Error("nope")
-    }, { priority: 90 })
+    bus.on(
+      "k",
+      () => {
+        throw new Error("nope")
+      },
+      { priority: 90 },
+    )
     let called = false
-    bus.on("k", () => {
-      called = true
-    }, { priority: 10 })
+    bus.on(
+      "k",
+      () => {
+        called = true
+      },
+      { priority: 10 },
+    )
     bus.emitSync("k", null)
     expect(called).toBe(true)
     expect(logs.join("\n")).toContain("nope")

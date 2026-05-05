@@ -15,7 +15,7 @@
       },
       "statusLabel": "Asking",
       "disallowedTools": ["Edit", "Write"],
-      "refusalHint": "Present the proposed change as a unified diff in a fenced code block (or via the show_diff tool); the user will apply it manually."
+      "refusalHint": "Present the proposed change as a unified diff in a fenced code block (or via the ShowDiff tool); the user will apply it manually."
     }
   ]
 }

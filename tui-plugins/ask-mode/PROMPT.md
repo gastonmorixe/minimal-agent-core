@@ -22,7 +22,7 @@ While in this mode, you should:
 - Treat the user's intent as a question or read-only investigation.
 - Use `Read`, `Glob`, `Grep`, and read-only `Bash` freely.
 - When proposing a change to a file, format it as a unified diff inside a
-  fenced code block (or use the `show_diff` tool if available) instead of
+  fenced code block (or use the `ShowDiff` tool if available) instead of
   calling `Edit`. The user will apply the change manually.
 - Cite file paths and line numbers when referencing code.
 - Avoid `Bash` commands that mutate the workspace, system, or network.

@@ -38,7 +38,6 @@ import type {
   ManifestEventSubscription,
   ManifestFile,
   ManifestHandler,
-  ManifestHandlerEntry,
   ManifestMode,
   ManifestPromptFragment,
   PromptFragmentContext,
@@ -134,6 +133,18 @@ export interface PluginLoaderOptions {
    * explicitly here so the loader stays decoupled from `metadata.ts`.
    */
   sessionId?: string
+  /**
+   * Set of plugin ids to skip entirely. The loader silently ignores any
+   * package whose `manifest.id` is in this set — discovery still walks
+   * the dirs, but the manifest is dropped before validation, before
+   * collision checks, and before handler resolution.
+   *
+   * Wired in `src/index.ts` from `~/.minimal-agent/config.jsonc`:
+   * any plugin whose `plugins.<id>.enabled` is `false` lands here. This
+   * gives every plugin (current and future) a uniform opt-out without
+   * each plugin having to implement disabling itself.
+   */
+  disabledPluginIds?: Set<string>
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -165,6 +176,14 @@ interface PendingFragment {
 export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
   private readonly toolIndex: Map<string, ResolvedHandler>
+  /**
+   * Alias → canonical-tool-name map. Built once at load time. The
+   * dispatcher consults this on a {@link toolIndex} miss; aliases are
+   * never advertised to the model (see `getExtraTools`) and never
+   * mutate the result on hit. See manifest's `tool.aliases` field for
+   * the public contract.
+   */
+  private readonly aliasIndex: Map<string, string>
   private readonly tagIndex: Map<string, ResolvedHandler>
   private readonly modes: LoadedMode[]
   private readonly defaultModeId: string | null
@@ -183,6 +202,7 @@ export class PluginLoader {
   private constructor(
     plugins: LoadedPlugin[],
     toolIndex: Map<string, ResolvedHandler>,
+    aliasIndex: Map<string, string>,
     tagIndex: Map<string, ResolvedHandler>,
     modes: LoadedMode[],
     defaultModeId: string | null,
@@ -193,6 +213,7 @@ export class PluginLoader {
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
+    this.aliasIndex = aliasIndex
     this.tagIndex = tagIndex
     this.modes = modes
     this.defaultModeId = defaultModeId
@@ -229,6 +250,7 @@ export class PluginLoader {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const eventBus = opts.bus ?? new EventBus(logger)
     const sessionId = opts.sessionId
+    const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
 
     // Discover packages in all three roots. Precedence on package-id
     // collision: project > home > embedded (closer-to-user wins).
@@ -283,6 +305,16 @@ export class PluginLoader {
         continue
       }
 
+      if (disabledPluginIds.has(manifest.id)) {
+        logger(
+          `skipping ${dir}: plugin "${manifest.id}" is disabled in user config ` +
+            `(plugins.${manifest.id}.enabled = false)`,
+        )
+        // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
+        seenIds.add(manifest.id)
+        continue
+      }
+
       // Resolve prompt content.
       const promptRel = manifest.prompt ?? "./PROMPT.md"
       const promptAbs = resolvePath(dir, promptRel)
@@ -305,6 +337,7 @@ export class PluginLoader {
 
     // Resolve handlers, apply collision rules.
     const toolIndex = new Map<string, ResolvedHandler>()
+    const aliasIndex = new Map<string, string>() // alias → canonical
     const tagIndex = new Map<string, ResolvedHandler>()
     const finalPlugins: LoadedPlugin[] = []
 
@@ -314,8 +347,18 @@ export class PluginLoader {
       let rejectReason = ""
 
       // First pass: collision check. A plugin is accepted only if ALL of its
-      // tool names / tag names are conflict-free. Partial acceptance would
-      // mean the plugin's PROMPT.md lies about what's available.
+      // tool names / tag names / aliases are conflict-free. Partial
+      // acceptance would mean the plugin's PROMPT.md lies about what's
+      // available.
+      //
+      // Aliases are checked against:
+      //   - core tool names (no alias may shadow a core tool)
+      //   - other plugins' canonical tool names (alias must not point at
+      //     a different tool's canonical surface)
+      //   - already-registered aliases (alias must not collide with
+      //     another plugin's alias)
+      // (Self-collision — alias === own canonical name, dups within the
+      // alias array — is caught earlier in the manifest parser.)
       for (const h of pkg.manifest.tuis ?? []) {
         if (h.trigger.type === "tool") {
           const name = h.trigger.tool.name
@@ -324,11 +367,29 @@ export class PluginLoader {
             rejectReason = `tool name "${name}" collides with a core tool`
             break
           }
-          if (toolIndex.has(name)) {
+          if (toolIndex.has(name) || aliasIndex.has(name)) {
             packageRejected = true
             rejectReason = `tool name "${name}" collides with another loaded plugin`
             break
           }
+          for (const alias of h.trigger.tool.aliases ?? []) {
+            if (coreToolNames.has(alias)) {
+              packageRejected = true
+              rejectReason = `tool alias "${alias}" collides with a core tool`
+              break
+            }
+            if (toolIndex.has(alias)) {
+              packageRejected = true
+              rejectReason = `tool alias "${alias}" collides with another plugin's canonical tool`
+              break
+            }
+            if (aliasIndex.has(alias)) {
+              packageRejected = true
+              rejectReason = `tool alias "${alias}" collides with another plugin's alias`
+              break
+            }
+          }
+          if (packageRejected) break
         } else if (h.trigger.type === "inline_tag") {
           const tag = h.trigger.tag
           if (tagIndex.has(tag)) {
@@ -363,7 +424,11 @@ export class PluginLoader {
       // Commit to global indexes.
       for (const r of accepted) {
         if (r.definition.trigger.type === "tool") {
-          toolIndex.set(r.definition.trigger.tool.name, r)
+          const canonical = r.definition.trigger.tool.name
+          toolIndex.set(canonical, r)
+          for (const alias of r.definition.trigger.tool.aliases ?? []) {
+            aliasIndex.set(alias, canonical)
+          }
         } else {
           tagIndex.set(r.definition.trigger.tag, r)
         }
@@ -444,6 +509,7 @@ export class PluginLoader {
     return new PluginLoader(
       finalPlugins,
       toolIndex,
+      aliasIndex,
       tagIndex,
       modes,
       defaultModeId,
@@ -487,6 +553,8 @@ export class PluginLoader {
             name: h.definition.trigger.tool.name,
             description: h.definition.trigger.tool.description,
             input_schema: h.definition.trigger.tool.input_schema,
+            ...(h.definition.icon ? { icon: h.definition.icon } : {}),
+            ...(h.definition.color ? { color: h.definition.color } : {}),
           })
         }
       }
@@ -635,9 +703,26 @@ export class PluginLoader {
     return parts.join("\n\n")
   }
 
-  /** True if a loaded plugin claims this tool name. */
+  /**
+   * True if a loaded plugin claims this tool name — either as a canonical
+   * name or as a registered alias. Used by the agent loop to decide
+   * whether to dispatch a `tool_use` block to a plugin handler.
+   */
   hasTool(name: string): boolean {
-    return this.toolIndex.has(name)
+    return this.toolIndex.has(name) || this.aliasIndex.has(name)
+  }
+
+  /**
+   * Read-only snapshot of the alias-to-canonical map. Consumers (e.g.
+   * the agent's `toolPresentation` builder) use this to mirror the
+   * canonical tool's icon/color into the alias slots so transcript
+   * rendering stays consistent when the model emits an old name.
+   *
+   * Returns a fresh Map each call; callers can mutate without affecting
+   * the loader.
+   */
+  getToolAliases(): Map<string, string> {
+    return new Map(this.aliasIndex)
   }
 
   /** True if a loaded plugin claims this inline tag name. */
@@ -657,8 +742,21 @@ export class PluginLoader {
    * @param agentCwd - The agent's current working directory.
    */
   async dispatch(trigger: TUITrigger, agentCwd: string): Promise<TUIResult> {
-    const handler =
-      trigger.type === "tool" ? this.toolIndex.get(trigger.name) : this.tagIndex.get(trigger.name)
+    let handler: ResolvedHandler | undefined
+    if (trigger.type === "tool") {
+      // Canonical lookup first. On miss, fall through to the alias map —
+      // the canonical handler runs unmodified; the alias name lives only
+      // in the trigger and the JSONL log. Result content/display are
+      // returned byte-identical to a canonical-name call. See `aliases`
+      // on `ManifestTrigger.tool` for the public contract.
+      handler = this.toolIndex.get(trigger.name)
+      if (!handler) {
+        const canonical = this.aliasIndex.get(trigger.name)
+        if (canonical) handler = this.toolIndex.get(canonical)
+      }
+    } else {
+      handler = this.tagIndex.get(trigger.name)
+    }
 
     if (!handler) {
       return trigger.type === "tool"

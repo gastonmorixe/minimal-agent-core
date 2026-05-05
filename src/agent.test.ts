@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { Agent, type ReplAgentLike, runRepl, withRollingCacheBreakpoint } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
-import type { Message, StreamedResponse } from "./client.ts"
+import type { Message, SendOptions, StreamedResponse } from "./client.ts"
 import { StatusBus } from "./status.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
@@ -410,9 +410,9 @@ describe("Agent.run transcript", () => {
   })
 
   it("forwards opts.signal to sendFn so the transport can be torn down", async () => {
-    let captured: { signal?: AbortSignal } | null = null
-    const sendFn = async function* (opts: Record<string, unknown>) {
-      captured = opts as { signal?: AbortSignal }
+    let captured: SendOptions | null = null
+    const sendFn = async function* (opts: SendOptions) {
+      captured = opts
       yield "hi"
       return {
         blocks: [{ type: "text" as const, text: "hi" }],
@@ -428,8 +428,9 @@ describe("Agent.run transcript", () => {
       const { done } = await gen.next()
       if (done) break
     }
-    expect(captured).not.toBeNull()
-    expect((captured as { signal?: AbortSignal }).signal).toBe(ac.signal)
+    const seen = captured as SendOptions | null
+    if (!seen) throw new Error("sendFn was not called")
+    expect(seen.signal).toBe(ac.signal)
   })
 
   it("throws AbortError between rounds when signal fires after a tool result", async () => {
@@ -651,11 +652,9 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
    */
   function makeRecordingSendFn(records: Array<Record<string, unknown>>) {
     let round = 0
-    return async function* (opts: Record<string, unknown>): AsyncGenerator<
-      string,
-      StreamedResponse,
-      undefined
-    > {
+    return async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
       // Snapshot only the cache-relevant top-level fields. Deep-clone so
       // later mutations by other turns can't poison the snapshot.
       records.push(
@@ -718,7 +717,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(history.length).toBe(4)
     const toolResultMsg = history[2]
     expect(toolResultMsg.role).toBe("user")
-    const tr = (toolResultMsg.content as Array<Record<string, unknown>>).find(
+    const tr = (toolResultMsg.content as unknown as Array<Record<string, unknown>>).find(
       (b) => b.type === "tool_result",
     ) as Record<string, unknown>
     expect(tr).toBeDefined()
@@ -783,11 +782,9 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     // 3-turn sendFn: each turn just emits text and ends.
     let round = 0
     const records: Array<Record<string, unknown>> = []
-    const sendFn = async function* (opts: Record<string, unknown>): AsyncGenerator<
-      string,
-      StreamedResponse,
-      undefined
-    > {
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
       records.push(JSON.parse(JSON.stringify({ messages: opts.messages })))
       round++
       yield `r${round}`
@@ -873,15 +870,11 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     const { ModeManager } = await import("./modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST])
 
-    let round = 0
     const records: Array<Record<string, unknown>> = []
-    const sendFn = async function* (opts: Record<string, unknown>): AsyncGenerator<
-      string,
-      StreamedResponse,
-      undefined
-    > {
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
       records.push(JSON.parse(JSON.stringify({ system: opts.system })))
-      round++
       yield "ok"
       return {
         blocks: [{ type: "text" as const, text: "ok" }],
@@ -934,11 +927,9 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
 
     let round = 0
     const records: Array<Record<string, unknown>> = []
-    const sendFn = async function* (opts: Record<string, unknown>): AsyncGenerator<
-      string,
-      StreamedResponse,
-      undefined
-    > {
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
       records.push(JSON.parse(JSON.stringify({ messages: opts.messages })))
       round++
       if (round === 1) {
@@ -986,9 +977,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(blocks[0].type).toBe("tool_result")
     expect((blocks[0] as { tool_use_id: string }).tool_use_id).toBe("call-1")
     expect(blocks[1].type).toBe("text")
-    expect((blocks[1] as { text: string }).text).toBe(
-      '<mode-change from="default" to="ask" />',
-    )
+    expect((blocks[1] as { text: string }).text).toBe('<mode-change from="default" to="ask" />')
   })
 
   it("rollbackPendingTurn() refuses to discard a user message containing tool_result blocks", async () => {
@@ -1008,15 +997,11 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
         { role: "user", content: [{ type: "text", text: "go" }] },
         {
           role: "assistant",
-          content: [
-            { type: "tool_use", id: "call-1", name: "Bash", input: { command: "ls" } },
-          ],
+          content: [{ type: "tool_use", id: "call-1", name: "Bash", input: { command: "ls" } }],
         },
         {
           role: "user",
-          content: [
-            { type: "tool_result", tool_use_id: "call-1", content: "ok", is_error: false },
-          ],
+          content: [{ type: "tool_result", tool_use_id: "call-1", content: "ok", is_error: false }],
         },
       ],
     })
@@ -1030,7 +1015,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(removed).toBe(false)
     expect(after).toBe(before)
     expect(agent.history()[2].role).toBe("user")
-    const lastBlocks = agent.history()[2].content as Array<Record<string, unknown>>
+    const lastBlocks = agent.history()[2].content as unknown as Array<Record<string, unknown>>
     expect(lastBlocks[0].type).toBe("tool_result")
   })
 

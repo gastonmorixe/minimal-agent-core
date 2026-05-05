@@ -25,12 +25,7 @@
 import { EventBus, type Listener as EventListener } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "./channels.ts"
 import { HookBus, type StreamHandle } from "./hook-bus.ts"
-import type {
-  ChainEmitResult,
-  ChannelShape,
-  Disposer,
-  ListenOpts,
-} from "./types.ts"
+import type { ChainEmitResult, ChannelShape, Disposer, HookCtx, ListenOpts } from "./types.ts"
 
 /**
  * Privilege of the caller registering a hook. Determines the priority
@@ -101,9 +96,15 @@ export class Hooks {
    * Subscribe a listener. The bus and clamping behaviour are decided
    * by the channel's shape and the caller's privilege.
    */
+  // oxlint-disable-next-line typescript-eslint/no-unnecessary-type-parameters
+  on<T>(
+    channel: string,
+    fn: (payload: T, ctx: HookCtx) => unknown,
+    opts?: ListenOpts & { caller?: CallerKind },
+  ): Disposer
   on(
     channel: string,
-    fn: (...args: unknown[]) => unknown,
+    fn: (payload: unknown, ctx: HookCtx) => unknown,
     opts: ListenOpts & { caller?: CallerKind } = {},
   ): Disposer {
     const shape = this.shapeOf(channel)
@@ -113,7 +114,7 @@ export class Hooks {
     if (shape === "broadcast-async") {
       // Adapt EventBus's (ctx) listener to our (payload, hookCtx) signature.
       const wrapped: EventListener = (ec) =>
-        (fn as (p: unknown, c: unknown) => unknown)(ec.payload, {
+        (fn as (payload: unknown, ctx: HookCtx) => unknown)(ec.payload, {
           channel: ec.event,
           abort: ec.abort,
           logger: this.logger,
@@ -136,7 +137,7 @@ export class Hooks {
   }
 
   /** Emit a `broadcast-sync` channel (inline). */
-  emitSync<T>(channel: string, payload: T): void {
+  emitSync(channel: string, payload: unknown): void {
     this.assertShape(channel, "broadcast-sync")
     this.hookBus.emitSync(channel, payload)
   }
@@ -174,9 +175,7 @@ export class Hooks {
   private assertShape(channel: string, expected: ChannelShape): void {
     const actual = this.shapeOf(channel)
     if (actual !== expected) {
-      throw new Error(
-        `Hooks: channel "${channel}" has shape "${actual}", not "${expected}"`,
-      )
+      throw new Error(`Hooks: channel "${channel}" has shape "${actual}", not "${expected}"`)
     }
   }
 

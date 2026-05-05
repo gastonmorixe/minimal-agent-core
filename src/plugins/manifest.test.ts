@@ -93,6 +93,70 @@ describe("parseManifest", () => {
     expect(() => parseManifest(bad, "/x")).toThrow(/tool\.name/i)
   })
 
+  describe("tool aliases", () => {
+    function withAliases(aliases: unknown) {
+      return {
+        ...valid,
+        tuis: [
+          {
+            ...valid.tuis[0],
+            trigger: {
+              type: "tool",
+              tool: { ...valid.tuis[0].trigger.tool, aliases },
+            },
+          },
+        ],
+      }
+    }
+
+    it("parses a manifest with valid aliases", () => {
+      const m = parseManifest(withAliases(["legacy_diff", "old_diff"]), "/x")
+      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
+      expect(tool.aliases).toEqual(["legacy_diff", "old_diff"])
+    })
+
+    it("treats omitted aliases field as undefined (not empty array)", () => {
+      const m = parseManifest(valid, "/x")
+      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
+      expect(tool.aliases).toBeUndefined()
+    })
+
+    it("treats empty aliases array as undefined", () => {
+      const m = parseManifest(withAliases([]), "/x")
+      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { aliases?: string[] } }).tool
+      expect(tool.aliases).toBeUndefined()
+    })
+
+    it("rejects non-array aliases", () => {
+      expect(() => parseManifest(withAliases("legacy_diff"), "/x")).toThrow(
+        /aliases must be an array/,
+      )
+    })
+
+    it("rejects non-string alias entry", () => {
+      expect(() => parseManifest(withAliases(["ok", 42]), "/x")).toThrow(
+        /aliases\[1\].*non-empty string/,
+      )
+    })
+
+    it("rejects empty-string alias entry", () => {
+      expect(() => parseManifest(withAliases(["ok", ""]), "/x")).toThrow(
+        /aliases\[1\].*non-empty string/,
+      )
+    })
+
+    it("rejects alias equal to canonical tool name", () => {
+      // canonical is "show_diff"
+      expect(() => parseManifest(withAliases(["show_diff"]), "/x")).toThrow(/duplicates tool\.name/)
+    })
+
+    it("rejects duplicate aliases within the array", () => {
+      expect(() => parseManifest(withAliases(["a", "b", "a"]), "/x")).toThrow(
+        /aliases\[2\].*duplicated/,
+      )
+    })
+  })
+
   it("parses inline_tag trigger", () => {
     const m = parseManifest(
       {
@@ -233,21 +297,19 @@ describe("parseManifest / hooks", () => {
   })
 
   it("rejects unknown hook keys", () => {
-    expect(() =>
-      parseManifest({ ...base, hooks: [{ ...goodHook, weird: 1 }] }, "/x"),
-    ).toThrow(/unknown hook subscription key/)
+    expect(() => parseManifest({ ...base, hooks: [{ ...goodHook, weird: 1 }] }, "/x")).toThrow(
+      /unknown hook subscription key/,
+    )
   })
 
   it("rejects duplicate hook ids", () => {
-    expect(() =>
-      parseManifest({ ...base, hooks: [goodHook, goodHook] }, "/x"),
-    ).toThrow(/duplicate/)
+    expect(() => parseManifest({ ...base, hooks: [goodHook, goodHook] }, "/x")).toThrow(/duplicate/)
   })
 
   it("rejects negative timeoutMs", () => {
-    expect(() =>
-      parseManifest({ ...base, hooks: [{ ...goodHook, timeoutMs: -1 }] }, "/x"),
-    ).toThrow(/non-negative/)
+    expect(() => parseManifest({ ...base, hooks: [{ ...goodHook, timeoutMs: -1 }] }, "/x")).toThrow(
+      /non-negative/,
+    )
   })
 
   it("accepts permissions and requiresUnsafeHooks", () => {
@@ -265,8 +327,8 @@ describe("parseManifest / hooks", () => {
   })
 
   it("rejects non-string permission entries", () => {
-    expect(() =>
-      parseManifest({ ...base, hooks: [goodHook], permissions: [42] }, "/x"),
-    ).toThrow(/permissions/)
+    expect(() => parseManifest({ ...base, hooks: [goodHook], permissions: [42] }, "/x")).toThrow(
+      /permissions/,
+    )
   })
 })

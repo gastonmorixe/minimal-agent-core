@@ -41,7 +41,7 @@ import type {
 } from "./types.ts"
 
 interface Entry {
-  fn: (...args: unknown[]) => unknown
+  fn: (payload: unknown, ctx: HookCtx) => unknown
   opts: Required<Pick<ListenOpts, "priority" | "source" | "label">> &
     Pick<ListenOpts, "observeOnly" | "timeoutMs">
   /** Insertion order tiebreaker so equal-priority listeners run FIFO. */
@@ -93,13 +93,19 @@ export class HookBus {
   }
 
   /** Subscribe a listener to `channel`. Returns a disposer. */
-  on<T>(channel: string, fn: (...args: unknown[]) => unknown, opts: ListenOpts = {}): Disposer {
+  // oxlint-disable-next-line typescript-eslint/no-unnecessary-type-parameters
+  on<T>(channel: string, fn: (payload: T, ctx: HookCtx) => unknown, opts?: ListenOpts): Disposer
+  on(
+    channel: string,
+    fn: (payload: unknown, ctx: HookCtx) => unknown,
+    opts: ListenOpts = {},
+  ): Disposer {
     if (this.disposed) return () => {}
     const source = opts.source ?? "anonymous"
     const priority = opts.priority ?? 50
     const label = opts.label ?? `${source}:${channel}`
     const entry: Entry = {
-      fn,
+      fn: fn as (payload: unknown, ctx: HookCtx) => unknown,
       opts: {
         priority,
         source,
@@ -126,8 +132,6 @@ export class HookBus {
       if (i >= 0) cur.splice(i, 1)
       if (cur.length === 0) this.entries.delete(channel)
     }
-    // suppress unused TS warning for generic T
-    void (undefined as unknown as T)
   }
 
   /**
@@ -184,14 +188,14 @@ export class HookBus {
    * Dispatch a `broadcast-sync` channel. Listeners run inline in
    * priority order. Returns after the last one. Errors logged.
    */
-  emitSync<T>(channel: string, payload: T): void {
+  emitSync(channel: string, payload: unknown): void {
     this.assertShape(channel, "broadcast-sync")
     if (this.disposed) return
     const list = this.snapshot(channel)
     for (const entry of list) {
       const ctx = this.makeCtx(channel, entry)
       try {
-        ;(entry.fn as SyncListener<T>)(payload, ctx)
+        ;(entry.fn as SyncListener<unknown>)(payload, ctx)
       } catch (e) {
         this.reportError(entry, channel, e)
       }
@@ -325,11 +329,7 @@ export class HookBus {
     }
   }
 
-  private async withTimeout<T>(
-    channel: string,
-    entry: Entry,
-    result: T | Promise<T>,
-  ): Promise<T> {
+  private async withTimeout<T>(channel: string, entry: Entry, result: T | Promise<T>): Promise<T> {
     if (!isThenable(result) || !entry.opts.timeoutMs || entry.opts.timeoutMs <= 0) {
       return await (result as Promise<T>)
     }
@@ -338,11 +338,7 @@ export class HookBus {
     const timeoutP = new Promise<never>((_, rej) => {
       timer = setTimeout(
         () =>
-          rej(
-            new Error(
-              `listener "${entry.opts.label}" on "${channel}" exceeded ${ms}ms timeout`,
-            ),
-          ),
+          rej(new Error(`listener "${entry.opts.label}" on "${channel}" exceeded ${ms}ms timeout`)),
         ms,
       )
     })
@@ -360,9 +356,5 @@ export class HookBus {
 }
 
 function isThenable(x: unknown): x is Promise<unknown> {
-  return (
-    typeof x === "object" &&
-    x !== null &&
-    typeof (x as { then?: unknown }).then === "function"
-  )
+  return typeof x === "object" && x !== null && typeof (x as { then?: unknown }).then === "function"
 }

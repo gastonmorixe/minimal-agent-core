@@ -271,7 +271,9 @@ describe("live-area REPL (end to end)", () => {
     const sentinel = "QUEUE_INJECT_SENTINEL_XYZ"
     const before = output.chunks.length
     const beforeText = output.text()
-    capturedInject?.(sentinel)
+    const inject = capturedInject as ((text: string) => void) | null
+    if (!inject) throw new Error("queue inject hook was not captured")
+    inject(sentinel)
     expect(output.chunks.length).toBe(before)
     expect(output.text()).toBe(beforeText)
     expect(output.text()).not.toContain(`❯ ${sentinel}`)
