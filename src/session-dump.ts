@@ -1,4 +1,4 @@
-import type { ContentBlock, Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import type { ContentBlock, TextBlock } from "./client.ts"
 import type { LoadedSession } from "./session-restore.ts"
 
 /**
@@ -66,8 +66,8 @@ function formatBlockAsMarkdown(block: ContentBlock): string {
         contentStr = block.content
       } else {
         contentStr = block.content
-          .filter(b => b.type === "text")
-          .map(b => (b as TextBlock).text)
+          .filter((b) => b.type === "text")
+          .map((b) => (b as TextBlock).text)
           .join("\n")
       }
 
@@ -82,6 +82,10 @@ function formatBlockAsMarkdown(block: ContentBlock): string {
         bq += `> *(Empty result)*`
       }
       return bq
+    }
+    default: {
+      const _exhaustive: never = block
+      return `> *(Unknown block: ${JSON.stringify(_exhaustive)})*`
     }
   }
 }
@@ -127,10 +131,13 @@ function formatBlockAsXml(block: ContentBlock, indent: number): string {
       return `${pad}<thinking signature="${escapeXml(block.signature)}"/>`
     }
     case "tool_use": {
-      const inputStr = typeof block.input === "object" ? JSON.stringify(block.input) : String(block.input)
-      return `${pad}<tool_use name="${escapeXml(block.name)}" id="${escapeXml(block.id)}">\n` +
-             `${pad}  <input>${escapeXml(inputStr)}</input>\n` +
-             `${pad}</tool_use>`
+      const inputStr =
+        typeof block.input === "object" ? JSON.stringify(block.input) : String(block.input)
+      return (
+        `${pad}<tool_use name="${escapeXml(block.name)}" id="${escapeXml(block.id)}">\n` +
+        `${pad}  <input>${escapeXml(inputStr)}</input>\n` +
+        `${pad}</tool_use>`
+      )
     }
     case "tool_result": {
       const isErrorAttr = block.is_error ? ` is_error="true"` : ""
@@ -139,14 +146,20 @@ function formatBlockAsXml(block: ContentBlock, indent: number): string {
         contentStr = block.content
       } else {
         contentStr = block.content
-          .filter(b => b.type === "text")
-          .map(b => (b as TextBlock).text)
+          .filter((b) => b.type === "text")
+          .map((b) => (b as TextBlock).text)
           .join("\n")
       }
-      
-      return `${pad}<tool_result tool_use_id="${escapeXml(block.tool_use_id)}"${isErrorAttr}>\n` +
-             `${pad}  <content>${escapeXml(contentStr)}</content>\n` +
-             `${pad}</tool_result>`
+
+      return (
+        `${pad}<tool_result tool_use_id="${escapeXml(block.tool_use_id)}"${isErrorAttr}>\n` +
+        `${pad}  <content>${escapeXml(contentStr)}</content>\n` +
+        `${pad}</tool_result>`
+      )
+    }
+    default: {
+      const _exhaustive: never = block
+      return `${pad}<unknown>${escapeXml(JSON.stringify(_exhaustive))}</unknown>`
     }
   }
 }

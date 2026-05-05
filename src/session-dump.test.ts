@@ -33,8 +33,8 @@ const mockSession: LoadedSession = {
           id: "toolu_1",
           name: "Bash",
           input: { command: "echo hi" },
-        }
-      ]
+        },
+      ],
     },
     {
       role: "user",
@@ -44,9 +44,9 @@ const mockSession: LoadedSession = {
           tool_use_id: "toolu_1",
           content: "hi",
           is_error: false,
-        }
-      ]
-    }
+        },
+      ],
+    },
   ],
   dropped: [],
   repaired: false,
@@ -68,13 +68,13 @@ test("formatSessionAsXml", () => {
   const xml = formatSessionAsXml(mockSession)
   expect(xml).toContain('<session id="test-sid-123"')
   expect(xml).toContain('<turn role="user">')
-  expect(xml).toContain('<text>Hello</text>')
+  expect(xml).toContain("<text>Hello</text>")
   expect(xml).toContain('<turn role="assistant">')
-  expect(xml).toContain('<thinking>I need to say hi</thinking>')
+  expect(xml).toContain("<thinking>I need to say hi</thinking>")
   expect(xml).toContain('<tool_use name="Bash" id="toolu_1">')
-  expect(xml).toContain('<input>{&quot;command&quot;:&quot;echo hi&quot;}</input>')
+  expect(xml).toContain("<input>{&quot;command&quot;:&quot;echo hi&quot;}</input>")
   expect(xml).toContain('<tool_result tool_use_id="toolu_1">')
-  expect(xml).toContain('<content>hi</content>')
+  expect(xml).toContain("<content>hi</content>")
 })
 
 const mockSessionRedacted: LoadedSession = {
@@ -88,9 +88,9 @@ const mockSessionRedacted: LoadedSession = {
           type: "thinking",
           thinking: "",
           signature: "very-long-signature-xyz",
-        }
-      ]
-    }
+        },
+      ],
+    },
   ],
   dropped: [],
   repaired: false,
