@@ -22,9 +22,10 @@
 // readable forever — `foldRecords` is responsible for understanding the
 // version mix.
 
+import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, hostname as osHostname } from "node:os"
 import { join } from "node:path"
 import type { ContentBlock, ToolResultBlock } from "./client.ts"
 
@@ -104,6 +105,42 @@ export interface RewindRecord {
   droppedCount: number
 }
 
+/**
+ * Process-attach marker. Written once on session open (new OR resume) so any
+ * other process can answer "is an agent currently attached to this session?"
+ *
+ * Liveness is determined by probing the live OS (kill(pid,0) + start-time
+ * match), NOT by trusting this record alone. PIDs get reused; `startTime`
+ * pins identity beyond the pid. `hostname` guards against home dirs on
+ * network shares / sync'd folders where the pid is meaningless to us.
+ *
+ * See `src/session-liveness.ts` for the query side.
+ */
+export interface AttachRecord {
+  kind: "attach"
+  ts: string
+  pid: number
+  ppid: number
+  /** ISO 8601, captured from `ps -o lstart=` for our own pid at startup. */
+  startTime: string
+  hostname: string
+  agentVersion: string
+}
+
+/**
+ * Best-effort clean-shutdown marker. Pairs with the latest AttachRecord by
+ * pid. MAY be missing (SIGKILL, crash, power loss) — readers MUST NOT treat
+ * its absence as "still alive". It is purely an optimization that lets the
+ * reader skip the OS probe.
+ */
+export interface DetachRecord {
+  kind: "detach"
+  ts: string
+  pid: number
+  reason: "exit" | "signal" | "error"
+  exitCode?: number
+}
+
 export type SessionRecord =
   | MetaRecord
   | UserRecord
@@ -111,6 +148,8 @@ export type SessionRecord =
   | ToolResultRecord
   | NoteRecord
   | RewindRecord
+  | AttachRecord
+  | DetachRecord
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -180,6 +219,54 @@ export function parseLines(text: string): {
 }
 
 // ---------------------------------------------------------------------------
+// Process identity helpers (used by AttachRecord + session-liveness)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a process's wall-clock start time from `ps -o lstart=`. Returns null
+ * if the process does not exist, ps is unavailable, or the output cannot be
+ * parsed. The returned string is normalized to ISO 8601 so on-disk values
+ * compare with strict equality.
+ *
+ * Works on macOS and Linux. The kernel records lstart at process creation
+ * and never updates it, so this is stable against later wall-clock skew.
+ */
+export function readProcessStartTime(pid: number): string | null {
+  try {
+    const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      timeout: 1000,
+    })
+    if (r.status !== 0) return null
+    const raw = (r.stdout ?? "").trim()
+    if (!raw) return null
+    const t = new Date(raw).getTime()
+    if (!Number.isFinite(t)) return null
+    return new Date(t).toISOString()
+  } catch {
+    return null
+  }
+}
+
+let _ownStartTime: string | null = null
+
+/**
+ * Capture our own process start time once and cache it. Falls back to
+ * "now" if `ps` is unavailable; in that case PID-reuse detection becomes
+ * a no-op for this session, but `kill(0)` liveness still works.
+ */
+export function getOwnStartTime(): string {
+  if (_ownStartTime != null) return _ownStartTime
+  _ownStartTime = readProcessStartTime(process.pid) ?? new Date().toISOString()
+  return _ownStartTime
+}
+
+/** Test-only: reset the cached start time. */
+export function _resetOwnStartTimeForTest(): void {
+  _ownStartTime = null
+}
+
+// ---------------------------------------------------------------------------
 // SessionStore — append-only writer
 // ---------------------------------------------------------------------------
 
@@ -197,11 +284,13 @@ export function parseLines(text: string): {
 export class SessionStore {
   readonly sid: string
   readonly path: string
+  readonly agentVersion: string
   private readonly dir: string
 
-  private constructor(sid: string, dir: string) {
+  private constructor(sid: string, dir: string, agentVersion: string) {
     this.sid = sid
     this.dir = dir
+    this.agentVersion = agentVersion
     this.path = sessionFilePath(sid, dir)
   }
 
@@ -227,7 +316,7 @@ export class SessionStore {
   }): SessionStore {
     const dir = opts.dir ?? defaultSessionsDir()
     mkdirSync(dir, { recursive: true })
-    const store = new SessionStore(opts.sid, dir)
+    const store = new SessionStore(opts.sid, dir, opts.agentVersion)
     const now = (opts.now ?? (() => new Date()))()
     const createdAt = now.toISOString()
 
@@ -271,6 +360,47 @@ export class SessionStore {
     }
 
     return store
+  }
+
+  /**
+   * Append an `attach` record marking that THIS process is now attached
+   * to this session. Call once, immediately after `open()` — and again
+   * (cheap, idempotent in effect) on every resume.
+   *
+   * The recorded `startTime` is captured at first call to
+   * {@link getOwnStartTime} and cached for the life of the process.
+   */
+  appendAttach(now: Date = new Date()): void {
+    const rec: AttachRecord = {
+      kind: "attach",
+      ts: now.toISOString(),
+      pid: process.pid,
+      ppid: typeof process.ppid === "number" ? process.ppid : 0,
+      startTime: getOwnStartTime(),
+      hostname: osHostname(),
+      agentVersion: this.agentVersion,
+    }
+    this.write(rec)
+  }
+
+  /**
+   * Append a best-effort clean-shutdown marker. Failure to write (e.g.
+   * because we're already in `process.exit`) is swallowed — readers do
+   * NOT depend on this record for correctness.
+   */
+  appendDetach(reason: DetachRecord["reason"], exitCode?: number, now: Date = new Date()): void {
+    const rec: DetachRecord = {
+      kind: "detach",
+      ts: now.toISOString(),
+      pid: process.pid,
+      reason,
+      ...(exitCode != null ? { exitCode } : {}),
+    }
+    try {
+      this.write(rec)
+    } catch {
+      // Best-effort. Don't crash mid-shutdown.
+    }
   }
 
   /**
