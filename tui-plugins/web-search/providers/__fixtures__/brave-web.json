@@ -1,0 +1,32 @@
+{
+  "type": "search",
+  "query": { "original": "rust async runtime", "altered": "rust async runtime" },
+  "web": {
+    "type": "search",
+    "results": [
+      {
+        "title": "Tokio - An asynchronous Rust runtime",
+        "url": "https://tokio.rs/",
+        "is_source_local": false,
+        "description": "Tokio is an <strong>asynchronous</strong> runtime for the Rust programming language.",
+        "age": "3 days ago",
+        "page_age": "2025-04-30T12:00:00",
+        "meta_url": { "hostname": "tokio.rs" },
+        "thumbnail": { "src": "https://example.com/tokio.png" },
+        "subtype": "generic"
+      },
+      {
+        "title": "async-std",
+        "url": "https://github.com/async-rs/async-std",
+        "description": "Async version of the Rust standard library.",
+        "page_age": "2024-11-01T00:00:00",
+        "meta_url": { "hostname": "github.com" },
+        "subtype": "generic"
+      },
+      {
+        "title": "Missing URL — should be dropped",
+        "subtype": "generic"
+      }
+    ]
+  }
+}

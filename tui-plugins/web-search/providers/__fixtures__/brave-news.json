@@ -1,0 +1,22 @@
+{
+  "type": "news",
+  "query": { "original": "ai regulation", "altered": "ai regulation" },
+  "results": [
+    {
+      "title": "EU passes new AI rules",
+      "url": "https://example-news.com/eu-ai",
+      "description": "Lawmakers approved a sweeping AI regulation package.",
+      "age": "5 hours ago",
+      "page_age": "2025-05-04T10:00:00",
+      "meta_url": { "hostname": "example-news.com" },
+      "thumbnail": { "src": "https://example-news.com/img.jpg" }
+    },
+    {
+      "title": "White House releases AI guidance",
+      "url": "https://other-news.org/wh-ai",
+      "description": "New executive order targets frontier models.",
+      "age": "1 day ago",
+      "meta_url": { "hostname": "other-news.org" }
+    }
+  ]
+}

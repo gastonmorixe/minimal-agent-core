@@ -403,7 +403,11 @@ describe("client", () => {
         })
 
         expect(response.blocks).toHaveLength(1)
-        const tu = response.blocks[0] as { type: string; name: string; input: Record<string, unknown> }
+        const tu = response.blocks[0] as {
+          type: string
+          name: string
+          input: Record<string, unknown>
+        }
         expect(tu.type).toBe("tool_use")
         expect(tu.input.file_path).toBe("/tmp/example.txt")
 
@@ -416,7 +420,10 @@ describe("client", () => {
         // At least one delta-driven update with the parsed file_path hint
         expect(
           seen.some(
-            (l) => typeof l === "string" && l.includes("Calling Write:") && l.includes("/tmp/example.txt"),
+            (l) =>
+              typeof l === "string" &&
+              l.includes("Calling Write:") &&
+              l.includes("/tmp/example.txt"),
           ),
         ).toBe(true)
         // Dispatch + finalize
@@ -439,7 +446,7 @@ describe("client", () => {
         ])
       })
       const ac = new AbortController()
-      const auth: AuthResult = { token: "tok", refresh: undefined }
+      const auth: AuthResult = { type: "api-key", token: "tok", refresh: undefined }
       await sendMessageFull({
         auth,
         messages: [{ role: "user", content: "hi" }],

@@ -240,7 +240,7 @@ export interface SendOptions {
    * - `format`: JSON schema for structured outputs (used by title gen)
    */
   outputConfig?: {
-    effort?: "high" | "medium" | "low" | "max"
+    effort?: string
     format?: { type: string; schema?: unknown }
   }
   /**
@@ -452,10 +452,14 @@ function revealHidden(s: string): string {
   let out = ""
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]
-    if (ch === " ") out += "\x1b[2m\u00b7\x1b[22m" // ·
-    else if (ch === "\t") out += "\x1b[2m\u2192\x1b[22m" // →
-    else if (ch === "\n") out += "\x1b[2m\u21b5\x1b[22m" // ↵
-    else if (ch === "\r") out += "\x1b[2m\u240d\x1b[22m" // ␍
+    if (ch === " ")
+      out += "\x1b[2m\u00b7\x1b[22m" // ·
+    else if (ch === "\t")
+      out += "\x1b[2m\u2192\x1b[22m" // →
+    else if (ch === "\n")
+      out += "\x1b[2m\u21b5\x1b[22m" // ↵
+    else if (ch === "\r")
+      out += "\x1b[2m\u240d\x1b[22m" // ␍
     else out += ch
   }
   return out
@@ -894,7 +898,7 @@ function unescapeJsonish(s: string): string {
     .replace(/\n/g, " ")
     .replace(/\t/g, " ")
     .replace(/\r/g, "")
-    .replace(/\"/g, '"')
+    .replace(/"/g, '"')
     .replace(/\\\\/g, "\\")
 }
 
@@ -960,7 +964,7 @@ export async function* sendMessage(
     stream = true,
     requestType = "conversation",
     thinking = { type: "adaptive" as const },
-    outputConfig = { effort: "medium" as const },
+    outputConfig = { effort: "medium" },
     tools,
     temperature,
     contextManagement,
@@ -1461,12 +1465,12 @@ export async function sendMessageFull(opts: SendOptions): Promise<StreamedRespon
  * @param networkClient Network client used for the quota request.
  * @returns True if the request succeeded (200 OK), false on any error
  */
-export type QuotaResult =
-  | { ok: false }
-  | { ok: true; rateLimits: Map<string, string> }
+export type QuotaResult = { ok: false } | { ok: true; rateLimits: Map<string, string> }
 
 /**
- *
+ * Probe the Anthropic API for the current quota / rate-limit state. Returns
+ * `{ok: true, rateLimits}` on a 200 (with the parsed `anthropic-ratelimit-*`
+ * headers), or `{ok: false}` on any error.
  */
 export async function checkQuota(
   auth: AuthResult,

@@ -33,7 +33,9 @@ import { parseJsonc } from "./jsonc.ts"
 
 export interface UserConfig {
   model?: string
-  effort?: "low" | "medium" | "high" | "max"
+  /** Reasoning effort. Pass-through to `output_config.effort` on the wire;
+   *  the server validates. Common values: `"low" | "medium" | "high" | "max"`. */
+  effort?: string
   thinkingDisplay?: "summarized" | "omitted"
   spinner?: string
   formatter?: string
@@ -51,7 +53,6 @@ export interface UserConfig {
   skipQuota?: boolean
 }
 
-const VALID_EFFORT = new Set(["low", "medium", "high", "max"])
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
 
 /**
@@ -102,8 +103,10 @@ export function loadUserConfig(): UserConfig {
   const out: UserConfig = {}
 
   if (typeof obj.model === "string" && obj.model.length > 0) out.model = obj.model
-  if (typeof obj.effort === "string" && VALID_EFFORT.has(obj.effort)) {
-    out.effort = obj.effort as UserConfig["effort"]
+  // Effort is pass-through: any non-empty string forwards to the server,
+  // which is the source of truth on accepted levels.
+  if (typeof obj.effort === "string" && obj.effort.length > 0) {
+    out.effort = obj.effort
   }
   if (typeof obj.thinkingDisplay === "string" && VALID_DISPLAY.has(obj.thinkingDisplay)) {
     out.thinkingDisplay = obj.thinkingDisplay as UserConfig["thinkingDisplay"]
@@ -113,5 +116,47 @@ export function loadUserConfig(): UserConfig {
   if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
   if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
 
+  return out
+}
+
+/**
+ * Walk `plugins.<id>.enabled` in the user config and collect the ids of
+ * any plugin that has been explicitly disabled (`enabled: false`).
+ *
+ * The caller (typically `src/index.ts`) passes the resulting set as
+ * `disabledPluginIds` to `PluginLoader.load`, where the loader skips
+ * matching packages before validation. This gives every plugin a uniform
+ * opt-out without each one having to implement disabling itself.
+ *
+ * Lenient: missing file, missing `plugins` section, malformed JSON, or
+ * non-object plugin blocks → empty set. Never throws.
+ *
+ * Note: a plugin block that is *missing* `enabled`, or has any value
+ * other than literal `false`, is treated as ENABLED. Only the explicit
+ * `false` opts the plugin out — config presence alone never disables.
+ */
+export function loadDisabledPluginIds(): Set<string> {
+  const path = configPath()
+  const out = new Set<string>()
+  if (!existsSync(path)) return out
+  let raw: string
+  try {
+    raw = readFileSync(path, "utf-8")
+  } catch {
+    return out
+  }
+  let parsed: unknown
+  try {
+    parsed = parseJsonc(raw)
+  } catch {
+    return out
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out
+  const plugins = (parsed as Record<string, unknown>).plugins
+  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) return out
+  for (const [id, block] of Object.entries(plugins as Record<string, unknown>)) {
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue
+    if ((block as Record<string, unknown>).enabled === false) out.add(id)
+  }
   return out
 }
