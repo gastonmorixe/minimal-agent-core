@@ -82,16 +82,24 @@ describe("executeTool — abort plumbing", () => {
     expect(out.trim()).toBe("")
   })
 
-  it("stripInternalFields removes _truncCtx and _aborted", () => {
+  it("stripInternalFields removes _truncCtx, _truncInfo, and _aborted", () => {
     const r: ToolExecResult = {
       content: "x",
       _aborted: true,
       _truncCtx: { tool: "Bash" },
+      _truncInfo: {
+        tool: "Bash",
+        truncated: false,
+        shownBytes: 1,
+        shownLines: 1,
+        cutLine: 1,
+      },
     }
     stripInternalFields(r)
     const raw = r as unknown as Record<string, unknown>
     expect(raw._aborted).toBeUndefined()
     expect(raw._truncCtx).toBeUndefined()
+    expect(raw._truncInfo).toBeUndefined()
     expect(r.content).toBe("x")
   })
 
@@ -106,5 +114,17 @@ describe("executeTool — abort plumbing", () => {
     const raw = r as unknown as Record<string, unknown>
     expect(raw._truncCtx).toBeUndefined()
     expect(raw._aborted).toBe(true)
+  })
+
+  it("executeTool preserves _truncInfo on a successful (non-aborted) call", async () => {
+    const r = (await executeTool("Bash", { command: "echo hi" })) as ToolExecResult
+    // Bash exec populates _truncCtx with totals; executeTool replaces it
+    // with a structured _truncInfo for the renderer.
+    expect(r._truncInfo).toBeDefined()
+    expect(r._truncInfo?.truncated).toBe(false)
+    expect(r._truncInfo?.shownLines).toBeGreaterThanOrEqual(1)
+    // Stripping then leaves the result API-clean.
+    stripInternalFields(r)
+    expect((r as unknown as Record<string, unknown>)._truncInfo).toBeUndefined()
   })
 })

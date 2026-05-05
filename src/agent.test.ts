@@ -409,6 +409,74 @@ describe("Agent.run transcript", () => {
     expect(joined).toContain("Unknown tool")
   })
 
+  it("appends a streak `[note: ...]` to tool_result.content after 3 consecutive truncations", async () => {
+    // Layer 3 (feedback tracker) integration test. Wires into executeTool's
+    // real path: each round emits a Bash tool_use whose command produces
+    // > 64KB of output, hits the universal clamp, and increments the
+    // tracker. The 3rd hit fires the streak note. We inspect the 4th
+    // request's last user message to find the tool_result content
+    // carrying that note.
+    const records: Array<Record<string, unknown>> = []
+    let round = 0
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      records.push(JSON.parse(JSON.stringify({ messages: opts.messages })))
+      round++
+      if (round <= 3) {
+        return {
+          blocks: [
+            {
+              type: "tool_use" as const,
+              id: `call-${round}`,
+              name: "Bash",
+              // 200KB of output → universal clamp at 64KB fires.
+              input: { command: "yes hi | head -c 200000" },
+            },
+          ],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+
+    const auth: AuthResult = { type: "api-key", token: "test-token" }
+    const agent = new Agent({ auth, model: "test-model", sendFn })
+
+    const gen = agent.run("go")
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    // Round 4 (last) carries the cumulative history including all 3
+    // tool_results. The 3rd tool_result is the one that triggered the
+    // streak note.
+    expect(records.length).toBe(4)
+    const round4Msgs = records[3].messages as Array<Record<string, unknown>>
+    // Find every tool_result content from the user messages.
+    const allToolResultContent: string[] = []
+    for (const msg of round4Msgs) {
+      if (msg.role !== "user") continue
+      const blocks = msg.content as Array<Record<string, unknown>>
+      for (const b of blocks) {
+        if (b.type === "tool_result") allToolResultContent.push(String(b.content))
+      }
+    }
+    // Three Bash truncations → exactly one streak note appended to the third.
+    const withNote = allToolResultContent.filter((s) => s.includes("[note:"))
+    expect(withNote.length).toBe(1)
+    expect(withNote[0]).toContain("[truncated:") // both notices present
+    expect(withNote[0]).toContain("[note:")
+    expect(withNote[0]).toMatch(/3 Bash calls in a row/)
+  }, 30_000)
+
   it("forwards opts.signal to sendFn so the transport can be torn down", async () => {
     let captured: SendOptions | null = null
     const sendFn = async function* (opts: SendOptions) {

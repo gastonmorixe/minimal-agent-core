@@ -35,15 +35,68 @@ export interface TruncateCtx {
 }
 
 /**
- * Clamp `output` to the byte/line budgets and append a structured truncation
- * notice when anything was cut. Returns `output` unchanged when within budget.
+ * Structured render-time view of "what happened to this tool result", emitted
+ * by {@link truncateToolOutput} alongside the model-facing string. The TUI
+ * reads this to draw a bare-facts footer (`shown N/M L · X/Y B · cut at L`)
+ * without parsing the trailing `[truncated: ...]` notice that lives inside
+ * `content` for the model. Audiences are split: model gets the verbose
+ * notice with action verbs in `content`; user gets the structured summary
+ * via this object. See `formatToolPreview` in `src/agent.ts`.
  */
-export function truncateToolOutput(output: string, ctx: TruncateCtx = {}): string {
+export interface TruncationInfo {
+  /** Tool name (mirrors `ctx.tool`). */
+  tool?: string
+  /** True iff the body was clamped. When false, all `shown*` == `total*`. */
+  truncated: boolean
+  /** Bytes shown to the model after clamping (and to the TUI body preview). */
+  shownBytes: number
+  /** Lines shown to the model after clamping. */
+  shownLines: number
+  /** Total bytes the underlying source produced, if known. */
+  totalBytes?: number
+  /** Total lines the underlying source produced, if known. */
+  totalLines?: number
+  /** Absolute last-line index visible (= `startLine + shownLines`). */
+  cutLine: number
+  /** Zero-based line offset already applied (Read with `offset`). */
+  startLine?: number
+}
+
+/**
+ * Clamp `output` to the byte/line budgets and emit a structured
+ * {@link TruncationInfo} alongside the model-facing string. When nothing
+ * was cut, `info.truncated === false` and `content` equals `output`
+ * unchanged. When clamping happens, `content` includes the trailing
+ * `[truncated: ...]` notice (model-facing, with action-verb hint), and
+ * `info` carries the same numbers in machine-readable form (TUI-facing,
+ * no hints).
+ */
+export function truncateToolOutput(
+  output: string,
+  ctx: TruncateCtx = {},
+): { content: string; info: TruncationInfo } {
   const bytes = Buffer.byteLength(output, "utf8")
   const lines = output.length === 0 ? 0 : output.split("\n").length
   const overBytes = bytes > MAX_TOOL_OUTPUT_BYTES
   const overLines = lines > MAX_TOOL_OUTPUT_LINES
-  if (!overBytes && !overLines) return output
+  if (!overBytes && !overLines) {
+    // Pass-through: still report the totals so the TUI can show
+    // "1L · 87ch" style stats even when nothing was clamped. The body
+    // and the totals coincide.
+    return {
+      content: output,
+      info: {
+        tool: ctx.tool,
+        truncated: false,
+        shownBytes: bytes,
+        shownLines: lines,
+        totalBytes: ctx.totalBytes ?? bytes,
+        totalLines: ctx.totalLines ?? lines,
+        cutLine: (ctx.startLine ?? 0) + lines,
+        startLine: ctx.startLine,
+      },
+    }
+  }
 
   // Snap to a line boundary first when the line budget hit.
   let kept = output
@@ -63,11 +116,21 @@ export function truncateToolOutput(output: string, ctx: TruncateCtx = {}): strin
   const totalL = ctx.totalLines != null ? String(ctx.totalLines) : "unknown"
   const hint = ctx.hint ?? defaultHint(ctx.tool, cutLine, shownBytes)
 
-  return (
+  const content =
     kept +
     `\n\n[truncated: shown ${shownBytes} of ${totalB} bytes, ` +
     `${shownLines}/${totalL} lines; cut at byte ${shownBytes}, line ${cutLine}. ${hint}]`
-  )
+  const info: TruncationInfo = {
+    tool: ctx.tool,
+    truncated: true,
+    shownBytes,
+    shownLines,
+    totalBytes: ctx.totalBytes,
+    totalLines: ctx.totalLines,
+    cutLine,
+    startLine: ctx.startLine,
+  }
+  return { content, info }
 }
 
 function defaultHint(tool: string | undefined, cutLine: number, shownBytes: number): string {

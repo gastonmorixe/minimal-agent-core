@@ -50,6 +50,8 @@ import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
 import { PALETTE } from "./palette.ts"
 import { executeTool, TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
+import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
+import type { TruncationInfo } from "./tools/truncation.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 import { truncHint } from "./truncate-hint.ts"
 
@@ -225,6 +227,16 @@ export class Agent {
    * Set generously (50) since real agentic sessions can hit 30+ rounds.
    */
   private maxToolRounds = 50
+  /**
+   * Streak / pattern soft-warning tracker — Layer 3 of the size-feedback
+   * design. Observes per-tool consecutive truncations and emits a
+   * `[note: ...]` line on the model-facing `tool_result.content` after a
+   * threshold-th repeat (default 3). State is per-Agent and survives the
+   * full conversation; reset across sessions / on resume.
+   *
+   * See `src/tools/feedback-tracker.ts` for the full behavior contract.
+   */
+  private feedbackTracker = new ToolFeedbackTracker()
 
   /**
    * Create an agent with auth, model, plugin, mode, and transport settings.
@@ -575,10 +587,18 @@ export class Agent {
         writeTranscript(
           `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool))}`,
         )
+        // Continuation rows for multi-line Bash commands. Each row sits in
+        // the same bordered block (`│` connector) with a `> ` prefix that
+        // mirrors bash's secondary prompt — visually distinguishable from
+        // output rows below. Empty for non-Bash and single-line Bash.
+        for (const cont of formatToolInputContinuation(tool)) {
+          writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
+        }
 
         let content: string
         let isError: boolean | undefined
         let display: string | undefined
+        let truncInfo: TruncationInfo | undefined
 
         // Mode dispatch gate. Tools stay registered in the request body
         // (so the cached prefix is mode-independent), but the harness
@@ -629,19 +649,36 @@ export class Agent {
               content = result.content
               isError = result.is_error
               display = result.display
+              truncInfo = result._truncInfo
               // Propagate _aborted so the renderer below can draw a
               // dim "canceled" close line instead of the generic error
               // preview. The flag is stripped before the result is sent
               // back to the API as a tool_result block.
               if ((result as { _aborted?: boolean })._aborted) {
                 content = "canceled"
+              } else {
+                // Layer 3 of the size-feedback design: streak tracker.
+                // After N consecutive truncations on the same tool, append
+                // a soft `[note: ...]` to the model-facing content so the
+                // model sees the *pattern*, not just per-call hints.
+                // Skipped on aborted calls (no tool work happened) and on
+                // plugin-tool branches (those don't go through executeTool
+                // so we have no _truncInfo to consult anyway).
+                const streakNote = this.feedbackTracker.observe(
+                  tool.name,
+                  truncInfo?.truncated ?? false,
+                )
+                if (streakNote) content = `${content}\n\n${streakNote}`
               }
             }
           } finally {
             toolStatus.clear()
           }
 
-          for (const line of formatToolPreview(content, isError, display)) {
+          for (const line of formatToolPreview(content, isError, display, {
+            tool: tool.name,
+            info: truncInfo,
+          })) {
             writeTranscript(line)
           }
         }
@@ -770,28 +807,73 @@ export class Agent {
 // ---------------------------------------------------------------------------
 
 /**
- * Format a `tool_use` block's input for compact stderr display.
+ * Per-tool char cap for the bordered tool **header** line ("╭ Bash $ ..."),
+ * applied only when the input field truly overflows. The cap is generous
+ * (500 chars for Bash, 200 for the JSON fallback) — much wider than the
+ * old 80-ch hard slice that often cut Bash commands mid-token. We never
+ * pad to terminal width; if the line overflows the terminal cells, the
+ * terminal wraps and that's fine.
+ */
+const HEADER_BASH_MAX = 500
+const HEADER_JSON_MAX = 200
+
+/**
+ * Trim `s` to at most `max` characters, preferring a word boundary so we
+ * don't cut mid-token. The primary failure mode of the old hard slice
+ * was things like `… | head...(+4ch)` — four characters short of
+ * `head -50`, useless. Here we walk back to the last whitespace within
+ * the trailing 15% of the budget and prefer it over a hard cut. If no
+ * whitespace exists in that window (single-token blob), we fall through
+ * to the hard cut so we never balloon past `max` itself.
+ */
+function trimAtWordBoundary(s: string, max: number): string {
+  if (s.length <= max) return s
+  const slack = Math.floor(max * 0.15)
+  const window = s.slice(0, max)
+  // Find the last whitespace within the last `slack` chars of the window.
+  const wsIdx = window.search(/\s\S*$/)
+  if (wsIdx >= max - slack) return s.slice(0, wsIdx)
+  return window
+}
+
+/**
+ * Max continuation lines we render for a multi-line Bash command in the
+ * bordered block before collapsing the rest into a `> ... +NL more` row.
+ * Generous enough to show typical heredocs / for-loops / function bodies
+ * without dominating the screen.
+ */
+const BASH_CONT_MAX_LINES = 8
+
+/**
+ * Format a `tool_use` block's input for the bordered tool header. Picks
+ * the most informative field per tool (command for Bash, file_path for
+ * file tools, pattern for search tools). Falls back to JSON-stringified
+ * input for unknown tools.
  *
- * Picks the most informative field per tool (command for Bash, file_path
- * for file tools, pattern for search tools) and truncates to ~80 chars.
- * Falls back to JSON-stringified input for unknown tools.
+ * Returns ONLY the header line (single-line, no embedded newlines).
+ * Multi-line Bash commands render their continuation via the sibling
+ * {@link formatToolInputContinuation} — the caller writes those after the
+ * header as `│ ...` rows inside the same bordered block.
+ *
+ * Truncation strategy:
+ *  - **Bash**: first line only (multi-line continuation rendered separately
+ *    by {@link formatToolInputContinuation}); word-boundary trim at 500 chars.
+ *  - **Read/Write/Edit/Glob/Grep**: file_path / pattern only — typically
+ *    well under 200 chars; no truncation in the common case.
+ *  - **Unknown**: JSON.stringify, hard slice at 200 chars (unknown tools
+ *    have unknown shape, so word boundaries aren't meaningful).
  */
 export function formatToolInput(tool: ToolUseBlock): string {
   const input = tool.input
   if (tool.name === "Bash" && input.command) {
-    // First line only — multi-line commands (heredocs etc.) would otherwise
-    // shred the bordered tool block by injecting raw newlines into the header.
     const cmd = String(input.command)
     const firstNl = cmd.indexOf("\n")
     const firstLine = firstNl === -1 ? cmd : cmd.slice(0, firstNl)
-    const charsCut = firstLine.length > 80 ? firstLine.length - 80 : 0
-    const truncated =
-      charsCut > 0 ? `${firstLine.slice(0, 80)}${truncHint(charsCut, "ch")}` : firstLine
-    // Multi-line commands: when the first line itself wasn't cut, hint how
-    // many additional lines were elided so the bordered block stays a single row.
-    const extraLines = firstNl !== -1 && charsCut === 0 ? cmd.split("\n").length - 1 : 0
-    const more = extraLines > 0 ? ` ${truncHint(extraLines, "L")}` : ""
-    return `$ ${truncated}${more}`
+    const trimmed = trimAtWordBoundary(firstLine, HEADER_BASH_MAX)
+    const charsCut = firstLine.length - trimmed.length
+    const truncated = charsCut > 0 ? `${trimmed}${truncHint(charsCut, "ch")}` : trimmed
+    // Header line only — continuation rendered by formatToolInputContinuation.
+    return `$ ${truncated}`
   }
   if (tool.name === "Read" && input.file_path) {
     return String(input.file_path)
@@ -809,14 +891,126 @@ export function formatToolInput(tool: ToolUseBlock): string {
     return `/${input.pattern}/` + (input.path ? ` in ${input.path}` : "")
   }
   const json = JSON.stringify(input)
-  const charsCut = json.length > 80 ? json.length - 80 : 0
-  return charsCut > 0 ? `${json.slice(0, 80)}${truncHint(charsCut, "ch")}` : json
+  const charsCut = json.length > HEADER_JSON_MAX ? json.length - HEADER_JSON_MAX : 0
+  return charsCut > 0 ? `${json.slice(0, HEADER_JSON_MAX)}${truncHint(charsCut, "ch")}` : json
 }
 
 /**
- * Formats tool preview for display
+ * Continuation rows for a multi-line tool input — rendered as `│ ...` rows
+ * between the header and the output. Currently emits rows only for
+ * multi-line **Bash** commands; other tools have single-line headers.
+ *
+ * Each returned line carries a leading `> ` (mirroring bash's secondary
+ * prompt) so it's visually distinguishable from output rows (which have
+ * no prefix). Heredoc-shaped commands like:
+ *
+ * ```
+ *   $ cat > /tmp/x.txt << "EOF"
+ *   foo
+ *   bar
+ *   EOF
+ * ```
+ *
+ * render as:
+ *
+ * ```
+ *   ╭ » Bash  $ cat > /tmp/x.txt << "EOF"
+ *   │ > foo
+ *   │ > bar
+ *   │ > EOF
+ *   ╰ (no output)
+ * ```
+ *
+ * Capped at {@link BASH_CONT_MAX_LINES} (default 8). Beyond the cap, a
+ * synthetic last row reads `> ... +NL more` so the user knows the rest
+ * was elided. Per-line word-boundary trim mirrors `formatToolInput`'s
+ * 500-char Bash budget.
  */
-export function formatToolPreview(content: string, isError?: boolean, display?: string): string[] {
+export function formatToolInputContinuation(tool: ToolUseBlock): string[] {
+  const input = tool.input
+  if (tool.name !== "Bash" || !input.command) return []
+  const cmd = String(input.command)
+  const all = cmd.split("\n")
+  if (all.length <= 1) return []
+  const cont = all.slice(1)
+  const visible = cont.slice(0, BASH_CONT_MAX_LINES)
+  const elided = cont.length - visible.length
+  const out = visible.map((line) => {
+    const trimmed = trimAtWordBoundary(line, HEADER_BASH_MAX)
+    const charsCut = line.length - trimmed.length
+    const body = charsCut > 0 ? `${trimmed}${truncHint(charsCut, "ch")}` : trimmed
+    return `> ${body}`
+  })
+  if (elided > 0) {
+    // `truncHint(N, "L")` already starts with `...(+`, so the synthetic
+    // row reads `> ...(+6L) more` (single ellipsis, terse, distinct from
+    // bash output below).
+    out.push(`> ${truncHint(elided, "L")} more`)
+  }
+  return out
+}
+
+/**
+ * Per-tool body line budget for the bordered transcript preview. Tuned by
+ * shape of typical output:
+ *  - **Bash**: 10 lines — output is variable; 10 covers "exit code + last
+ *    few lines" without dominating the screen.
+ *  - **Read**: 15 lines — content is dense (line-numbered) and structural;
+ *    a few extra lines is high-value.
+ *  - **Grep**: 12 lines — content mode; for files-only / count modes
+ *    we'd want more, but those are explicit user choices and rarely hit
+ *    the cap.
+ *  - **Glob**: 25 lines — paths are short, dense, easy to scan.
+ *  - **Default**: 10 lines — sensible mid-range for unknown tools.
+ *
+ * These are TUI display caps, not API caps. The model still sees up to
+ * the universal {@link MAX_TOOL_OUTPUT_LINES} (1000 lines) per
+ * `tool_result.content`. See `src/tools/truncation.ts` for the API cap.
+ */
+const TOOL_PREVIEW_LINES: Record<string, number> = {
+  Bash: 10,
+  Read: 15,
+  Grep: 12,
+  Glob: 25,
+  Edit: 1000, // diff display channel; effectively unbounded
+  Write: 1000,
+}
+const TOOL_PREVIEW_LINES_DEFAULT = 10
+
+/**
+ * Per-line display-width cap for body lines. A single 10_000-char minified
+ * JSON line in a Read result shouldn't dominate the preview; clamp to a
+ * fixed value (NOT terminal width — we don't reflow on resize). 300 chars
+ * is generous enough to read most code and structured output without one
+ * pathological line eating the screen.
+ */
+const TOOL_PREVIEW_LINE_WIDTH = 300
+
+/**
+ * Format the body of a `tool_result` for the bordered transcript preview.
+ *
+ * Audience split (this matters): the **model** receives the full clamped
+ * `content` including the trailing `[truncated: shown N of M bytes ...]`
+ * notice with its action-verb resume hint. The **TUI** (you, looking at
+ * the transcript) receives this function's output: the body preview only,
+ * plus a bare-facts footer (`shown N/M L · X/Y B · cut at L`) when
+ * truncation happened. No verbs, no advice — those go to the model where
+ * they're actionable.
+ *
+ * The `info` parameter, when supplied (see `executeTool`'s `_truncInfo`),
+ * is the source of truth for the footer. Without it we fall back to the
+ * pre-info legacy behavior (slice at 200 chars + `...(+Nch)` hint) so
+ * older callers keep working.
+ *
+ * Per-tool body line budgets live in {@link TOOL_PREVIEW_LINES}; per-line
+ * display width is capped at {@link TOOL_PREVIEW_LINE_WIDTH}.
+ */
+export function formatToolPreview(
+  content: string,
+  isError?: boolean,
+  display?: string,
+  opts?: { tool?: string; info?: TruncationInfo },
+): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
   // unified diff from Edit/Write), render it as-is, line by line, with the
   // standard `│ ... └` connector gutter. No truncation: diffs are the point.
@@ -830,21 +1024,96 @@ export function formatToolPreview(content: string, isError?: boolean, display?: 
     return out
   }
 
-  const preview = content.slice(0, 200)
-  const lines = (preview || "(no output)").split("\n")
-  if (content.length > 200) {
-    // Append the elided-size hint to the last line so it inherits the
-    // line's `c.dim`/`c.red` color wrap below — no separate ANSI nesting.
-    lines[lines.length - 1] += truncHint(content.length - 200, "ch")
+  const tool = opts?.tool
+  const info = opts?.info
+  const color = isError ? c.red : c.dim
+
+  // 1. Strip the model-facing trailing notice from what we display to the
+  //    human. The notice is everything from `\n\n[truncated: ` to the end
+  //    when present. The structured `info` (when supplied) carries the
+  //    same numbers in machine form — we'll render those as the bare-facts
+  //    footer instead.
+  const noticeIdx = content.lastIndexOf("\n\n[truncated:")
+  let body = noticeIdx >= 0 ? content.slice(0, noticeIdx) : content
+
+  // 2. Per-line width clamp (display-width-aware so wide chars / emoji /
+  //    CJK don't blow past the budget).
+  const maxLines = TOOL_PREVIEW_LINES[tool ?? ""] ?? TOOL_PREVIEW_LINES_DEFAULT
+  const allLines = (body || "(no output)").split("\n")
+  const visible = allLines.slice(0, maxLines)
+  const linesElided = allLines.length - visible.length
+  const renderedLines: string[] = visible.map((line) => {
+    if (displayWidth(line) <= TOOL_PREVIEW_LINE_WIDTH) return line
+    const trimmed = truncateDisplayWidth(line, TOOL_PREVIEW_LINE_WIDTH, "")
+    // eslint-disable-next-line typescript-eslint/no-misused-spread
+    const cpCut = [...line].length - [...trimmed].length
+    return `${trimmed}${truncHint(cpCut, "ch")}`
+  })
+
+  // 3. Build the footer.
+  //    The footer always reads "shown <visible-in-TUI> / <real-source-total>"
+  //    — one ratio, two domains. The user immediately sees how much of the
+  //    underlying tool result they're actually looking at.
+  //    - API truncation present (info.truncated): include byte ratio
+  //      (model-shown / source-total) and the cut line.
+  //    - TUI-only elision (long body but the API did not clamp): just the
+  //      line ratio. Bytes are uniformative when nothing was cut at the API.
+  //    - Body fits within budget AND no API truncation: no footer at all.
+  let footerStat: string | null = null
+  if (info?.truncated) {
+    footerStat = formatTruncFooter(info, visible.length)
+  } else if (linesElided > 0) {
+    const totalLines = info?.totalLines ?? allLines.length
+    footerStat = `shown ${visible.length}/${totalLines} L`
   }
 
-  const color = isError ? c.red : c.dim
+  // 4. Stitch lines + footer with the bordered gutter.
   const out: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const connector = i === lines.length - 1 ? "╰" : "│"
-    out.push(`  ${c.dimCyan(connector)} ${color(lines[i])}`)
+  const totalRender = renderedLines.length
+  for (let i = 0; i < totalRender; i++) {
+    // Last rendered line is `╰` only when there's no footer below it.
+    const isLast = i === totalRender - 1 && footerStat === null
+    const connector = isLast ? "╰" : "│"
+    out.push(`  ${c.dimCyan(connector)} ${color(renderedLines[i])}`)
+  }
+  if (footerStat !== null) {
+    out.push(`  ${c.dimCyan("╰")} ${c.dim(footerStat)}`)
   }
   return out
+}
+
+/**
+ * Format a {@link TruncationInfo} as the bare-facts footer string.
+ * No verbs, no advice — totals and cut location only.
+ *
+ * Format: `shown <V>/<T> L · <X>/<Y> B · cut at L<L>`
+ *
+ *   - **V** = lines visible in the TUI right now (`tuiVisible` argument).
+ *     This is what the user is looking at — the most user-relevant count.
+ *   - **T** = total lines the underlying source produced (`info.totalLines`).
+ *     The denominator the user cares about ("how big was this really?").
+ *   - **X** = bytes shown to the model (`info.shownBytes`). Note: this is
+ *     model-domain, not user-domain — the user sees fewer body bytes than
+ *     the model when the TUI body budget is below the API cap. Showing
+ *     model-bytes here gives the user the size of the actual `tool_result`
+ *     ride-back, which is what tokens are spent on.
+ *   - **Y** = total bytes from the source (`info.totalBytes`).
+ *   - **L** = cut line index (`info.cutLine`).
+ */
+function formatTruncFooter(info: TruncationInfo, tuiVisible: number): string {
+  const totalL = info.totalLines ?? info.shownLines
+  const totalB = info.totalBytes ?? info.shownBytes
+  const lineFrag = `shown ${tuiVisible}/${totalL} L`
+  const byteFrag = `${formatBytes(info.shownBytes)}/${formatBytes(totalB)}`
+  const cutFrag = `cut at L${info.cutLine}`
+  return `${lineFrag} · ${byteFrag} · ${cutFrag}`
+}
+
+/** Format byte counts with K/M suffix for compactness. */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
 // ---------------------------------------------------------------------------

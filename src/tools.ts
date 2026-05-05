@@ -29,7 +29,7 @@
 import { spawnSync } from "node:child_process"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
-import { truncateToolOutput, type TruncateCtx } from "./tools/truncation.ts"
+import { truncateToolOutput, type TruncateCtx, type TruncationInfo } from "./tools/truncation.ts"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -131,6 +131,16 @@ export interface ToolExecResult {
    */
   _truncCtx?: TruncateCtx
   /**
+   * Internal: structured "what got cut" data, populated by `executeTool`
+   * after the universal clamp runs. Read by the agent's transcript renderer
+   * (`formatToolPreview`) to draw a bare-facts footer (`shown N/M L · X/Y B`)
+   * without parsing the trailing `[truncated: ...]` notice that lives inside
+   * `content` for the model. Stripped before the result is sent back to the
+   * API as a `tool_result` block. Not part of the public API.
+   * @internal
+   */
+  _truncInfo?: TruncationInfo
+  /**
    * Internal: set when a tool was cancelled mid-flight via an
    * {@link AbortSignal}. The agent's transcript renderer consumes this to
    * draw a dim "canceled" footer; the field is stripped before the result
@@ -153,13 +163,16 @@ export interface ToolExecOpts {
 }
 
 /**
- * Strip internal-only fields (`_truncCtx`, `_aborted`) from a result before
- * sending it back to the API. {@link executeTool} already strips
- * `_truncCtx`; `_aborted` is preserved through `executeTool` so the
- * renderer can see it, and stripped here right before serialization.
+ * Strip internal-only fields (`_truncCtx`, `_truncInfo`, `_aborted`) from
+ * a result before sending it back to the API.
+ *
+ * {@link executeTool} already strips `_truncCtx` (input-only). `_truncInfo`
+ * and `_aborted` are preserved through `executeTool` so the renderer can
+ * see them, and stripped here right before serialization.
  */
 export function stripInternalFields(r: ToolExecResult): void {
   delete r._truncCtx
+  delete r._truncInfo
   delete r._aborted
 }
 
@@ -178,7 +191,12 @@ const BASH_TOOL: ToolDefinition = {
   icon: "»",
   color: "orange",
   description:
-    "Executes a given bash command and returns its output.\n\nThe working directory persists between commands, but shell state does not.",
+    "Executes a given bash command and returns its output.\n\n" +
+    "Output is capped at ~64KB / 1000 lines (whichever first). For commands that may " +
+    "produce more, bound the output yourself with `head -c`, `head -n`, `tail`, " +
+    "`sed -n '1,200p'`, or `grep` — pre-bounding gives usable signal; the post-hoc " +
+    "cap is lossy and includes a structured truncation notice for resume.\n\n" +
+    "The working directory persists between commands, but shell state does not.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -199,7 +217,11 @@ const READ_TOOL: ToolDefinition = {
   name: "Read",
   icon: "•",
   color: "sky",
-  description: "Reads a file from the local filesystem. Returns content with line numbers.",
+  description:
+    "Reads a file from the local filesystem. Returns content with line numbers.\n\n" +
+    "Output is capped at ~64KB / 1000 lines per call. For larger files, page with " +
+    "`offset` (zero-based start line) and `limit` (max lines). The truncation notice " +
+    "reports both the cut line and total file size so you can pick the next offset.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -275,7 +297,12 @@ const GREP_TOOL: ToolDefinition = {
   name: "Grep",
   icon: "⌕",
   color: "pink",
-  description: "Search file contents with regex using ripgrep.",
+  description:
+    "Search file contents with regex using ripgrep.\n\n" +
+    "Output is capped at ~64KB / 1000 lines. For broad searches, prefer " +
+    '`output_mode: "files_with_matches"` (paths only — densest) or `"count"`. ' +
+    'Narrow with `glob` (e.g. "*.ts"), `path` (subdirectory), `-A/-B/-C` for ' +
+    "context lines, or `head_limit` rather than relying on the cap to fire.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -378,12 +405,19 @@ export async function executeTool(
   // Also skip when aborted — the canned message is fine as-is.
   if (!r.display && !r._aborted) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
-    r.content = truncateToolOutput(r.content, ctx)
+    const { content, info } = truncateToolOutput(r.content, ctx)
+    r.content = content
+    // Hand the renderer structured "what got cut" data, separate from the
+    // model-facing `[truncated: ...]` notice that lives inside `content`.
+    // The TUI footer (`shown N/M L · X/Y B`) reads from this; the model
+    // reads the verbose notice. Audiences split. See `formatToolPreview`
+    // in `src/agent.ts`.
+    r._truncInfo = info
   }
+  // `_truncCtx` was an executor→clamp ferry; once consumed, drop it. We
+  // intentionally KEEP `_truncInfo` and `_aborted` so the renderer can see
+  // them; both are stripped by `stripInternalFields` before serialization.
   delete r._truncCtx
-  // Note: `_aborted` is intentionally PRESERVED here so the renderer can
-  // distinguish "tool errored" from "tool canceled". Caller must run
-  // `stripInternalFields` before serializing the result back to the API.
   return r
 }
 
