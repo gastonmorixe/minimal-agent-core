@@ -481,7 +481,10 @@ describe("PluginLoader", () => {
       projectDir: PROJECT,
       coreToolNames: CORE_TOOLS,
     })
-    const names = loader.getExtraTools().map((t) => t.name).sort()
+    const names = loader
+      .getExtraTools()
+      .map((t) => t.name)
+      .sort()
     expect(names).toEqual(["tool_e", "tool_h", "tool_p"])
     rmSync(join(EMBEDDED, "tui-plugins", "e_only"), { recursive: true })
     rmSync(join(HOME, "tui-plugins", "h_only"), { recursive: true })
@@ -536,5 +539,195 @@ describe("PluginLoader", () => {
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_home"])
     rmSync(join(EMBEDDED, "tui-plugins", "two_way"), { recursive: true })
     rmSync(join(HOME, "tui-plugins", "two_way"), { recursive: true })
+  })
+
+  it("disabledPluginIds skips matching packages with a diagnostic", async () => {
+    writePackage(HOME, "kept", toolManifest("kept", "tool_kept", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(HOME, "dropped", toolManifest("dropped", "tool_dropped", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+      disabledPluginIds: new Set(["dropped"]),
+    })
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_kept"])
+    expect(logs.some((l) => l.includes('"dropped" is disabled'))).toBe(true)
+    rmSync(join(HOME, "tui-plugins", "kept"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "dropped"), { recursive: true })
+  })
+
+  it("alias map: tool dispatch resolves alias on canonical-miss", async () => {
+    // Plugin declares canonical "Aliased" with one alias "old_aliased".
+    const manifest = toolManifest("aliased_pkg", "Aliased", "./h.ts")
+    manifest.tuis![0].trigger = {
+      type: "tool",
+      tool: {
+        name: "Aliased",
+        description: "Aliased tool",
+        input_schema: { type: "object", properties: {} },
+        aliases: ["old_aliased"],
+      },
+    }
+    writePackage(HOME, "aliased_pkg", manifest, { "h.ts": TOOL_HANDLER_BODY })
+    const loader = await PluginLoader.load({ homeDir: HOME, coreToolNames: CORE_TOOLS })
+
+    // Canonical is advertised; alias is NOT advertised but IS dispatchable.
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["Aliased"])
+    expect(loader.hasTool("Aliased")).toBe(true)
+    expect(loader.hasTool("old_aliased")).toBe(true)
+    expect(loader.hasTool("nope")).toBe(false)
+    expect(loader.getToolAliases().get("old_aliased")).toBe("Aliased")
+
+    // Both names dispatch to the same handler with byte-identical results.
+    const a = await loader.dispatch(
+      { type: "tool", name: "Aliased", input: { x: 1 }, tool_use_id: "u1" },
+      "/cwd",
+    )
+    const b = await loader.dispatch(
+      { type: "tool", name: "old_aliased", input: { x: 1 }, tool_use_id: "u2" },
+      "/cwd",
+    )
+    expect(a.kind).toBe("tool_result")
+    expect(b.kind).toBe("tool_result")
+    if (a.kind === "tool_result" && b.kind === "tool_result") {
+      // Same content (the test handler echoes input as JSON).
+      expect(a.content).toBe(b.content)
+      expect(a.is_error).toBe(b.is_error)
+    }
+    rmSync(join(HOME, "tui-plugins", "aliased_pkg"), { recursive: true })
+  })
+
+  it("alias collision: alias collides with another plugin's canonical → reject", async () => {
+    // Plugin A claims canonical "Tool_A". Plugin B aliases "Tool_A" — collision.
+    writePackage(HOME, "pkg_a", toolManifest("pkg_a", "Tool_A", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const m = toolManifest("pkg_b", "Tool_B", "./h.ts")
+    m.tuis![0].trigger = {
+      type: "tool",
+      tool: {
+        name: "Tool_B",
+        description: "x",
+        input_schema: { type: "object", properties: {} },
+        aliases: ["Tool_A"],
+      },
+    }
+    writePackage(HOME, "pkg_b", m, { "h.ts": TOOL_HANDLER_BODY })
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (msg) => logs.push(msg),
+    })
+    expect(
+      loader
+        .getExtraTools()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["Tool_A"])
+    expect(logs.some((l) => l.includes('alias "Tool_A"') && l.includes("canonical"))).toBe(true)
+    rmSync(join(HOME, "tui-plugins", "pkg_a"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "pkg_b"), { recursive: true })
+  })
+
+  it("alias collision: alias collides with another plugin's alias → reject", async () => {
+    const m1 = toolManifest("pkg_x", "Tool_X", "./h.ts")
+    m1.tuis![0].trigger = {
+      type: "tool",
+      tool: {
+        name: "Tool_X",
+        description: "x",
+        input_schema: { type: "object", properties: {} },
+        aliases: ["legacy"],
+      },
+    }
+    const m2 = toolManifest("pkg_y", "Tool_Y", "./h.ts")
+    m2.tuis![0].trigger = {
+      type: "tool",
+      tool: {
+        name: "Tool_Y",
+        description: "y",
+        input_schema: { type: "object", properties: {} },
+        aliases: ["legacy"],
+      },
+    }
+    writePackage(HOME, "pkg_x", m1, { "h.ts": TOOL_HANDLER_BODY })
+    writePackage(HOME, "pkg_y", m2, { "h.ts": TOOL_HANDLER_BODY })
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (msg) => logs.push(msg),
+    })
+    // First-loaded plugin keeps its alias; second is rejected entirely.
+    expect(
+      loader
+        .getExtraTools()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["Tool_X"])
+    expect(loader.getToolAliases().has("legacy")).toBe(true)
+    expect(logs.some((l) => l.includes('alias "legacy"'))).toBe(true)
+    rmSync(join(HOME, "tui-plugins", "pkg_x"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "pkg_y"), { recursive: true })
+  })
+
+  it("alias collision: alias collides with a core tool name → reject plugin", async () => {
+    const m = toolManifest("alias_core", "Tool_Z", "./h.ts")
+    m.tuis![0].trigger = {
+      type: "tool",
+      tool: {
+        name: "Tool_Z",
+        description: "z",
+        input_schema: { type: "object", properties: {} },
+        aliases: ["Bash"], // collides with core
+      },
+    }
+    writePackage(HOME, "alias_core", m, { "h.ts": TOOL_HANDLER_BODY })
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (msg) => logs.push(msg),
+    })
+    expect(loader.getExtraTools()).toEqual([])
+    expect(logs.some((l) => l.includes('alias "Bash"') && l.includes("core tool"))).toBe(true)
+    rmSync(join(HOME, "tui-plugins", "alias_core"), { recursive: true })
+  })
+
+  it("disabling a high-precedence copy does NOT promote the lower-precedence one", async () => {
+    // Project disabled, home present, embedded present. Without the id
+    // reservation in the loader, home would silently take over — a
+    // surprising behavior that defeats the user's intent. Verify that
+    // disabling the id at the highest precedence kills it everywhere.
+    writePackage(EMBEDDED, "shared2", toolManifest("shared2", "tool_emb", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(HOME, "shared2", toolManifest("shared2", "tool_home", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(
+      PROJECT,
+      "shared2",
+      toolManifest("shared2", "tool_project", "./h.ts"),
+      { "h.ts": TOOL_HANDLER_BODY },
+      ".agents/tui-plugins",
+    )
+    const loader = await PluginLoader.load({
+      embeddedDir: EMBEDDED,
+      homeDir: HOME,
+      projectDir: PROJECT,
+      coreToolNames: CORE_TOOLS,
+      disabledPluginIds: new Set(["shared2"]),
+    })
+    expect(loader.getExtraTools()).toEqual([])
+    rmSync(join(EMBEDDED, "tui-plugins", "shared2"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "shared2"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "tui-plugins", "shared2"), { recursive: true })
   })
 })

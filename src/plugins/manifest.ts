@@ -194,11 +194,7 @@ function parsePromptFragment(
 
   let timeoutMs: number | undefined
   if (obj.timeoutMs != null) {
-    if (
-      typeof obj.timeoutMs !== "number" ||
-      !Number.isFinite(obj.timeoutMs) ||
-      obj.timeoutMs < 0
-    ) {
+    if (typeof obj.timeoutMs !== "number" || !Number.isFinite(obj.timeoutMs) || obj.timeoutMs < 0) {
       err(`timeoutMs must be a non-negative number (got: ${JSON.stringify(obj.timeoutMs)})`)
     }
     timeoutMs = obj.timeoutMs as number
@@ -265,11 +261,7 @@ function parseHookSub(
 
   let timeoutMs: number | undefined
   if (obj.timeoutMs != null) {
-    if (
-      typeof obj.timeoutMs !== "number" ||
-      !Number.isFinite(obj.timeoutMs) ||
-      obj.timeoutMs < 0
-    ) {
+    if (typeof obj.timeoutMs !== "number" || !Number.isFinite(obj.timeoutMs) || obj.timeoutMs < 0) {
       err(`timeoutMs must be a non-negative number (got: ${JSON.stringify(obj.timeoutMs)})`)
     }
     timeoutMs = obj.timeoutMs as number
@@ -609,11 +601,31 @@ function parseHandler(
   const trigger = parseTrigger(obj.trigger, at, manifestPath)
   const handler = parseHandlerEntry(obj.handler, at, manifestPath)
 
+  // Optional cosmetic fields. Only meaningful for tool triggers; tolerated
+  // (but ignored at render time) for inline_tag triggers — the loader
+  // forwards them anyway, and the agent only wires them for tool tools.
+  let icon: string | undefined
+  let color: string | undefined
+  if (obj.icon != null) {
+    if (typeof obj.icon !== "string" || obj.icon.length === 0) {
+      err("icon must be a non-empty string")
+    }
+    icon = obj.icon as string
+  }
+  if (obj.color != null) {
+    if (typeof obj.color !== "string" || obj.color.length === 0) {
+      err("color must be a non-empty string")
+    }
+    color = obj.color as string
+  }
+
   return {
     id,
     trigger,
     handler,
     interactive: obj.interactive as boolean,
+    ...(icon ? { icon } : {}),
+    ...(color ? { color } : {}),
   }
 }
 
@@ -631,12 +643,42 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
     if (typeof tool.name !== "string" || !tool.name) err("tool.name is required")
     if (typeof tool.description !== "string") err("tool.description is required")
     if (!isObject(tool.input_schema)) err("tool.input_schema must be an object")
+
+    // Optional aliases: array of alternate names this tool also responds
+    // to. Validated locally here (shape, dup, self-collision); cross-
+    // plugin collisions (alias vs another tool's canonical or alias, or
+    // alias vs core tool name) are enforced in the loader at load time.
+    let aliases: string[] | undefined
+    if (tool.aliases != null) {
+      if (!Array.isArray(tool.aliases)) err("tool.aliases must be an array of strings")
+      const arr = tool.aliases as unknown[]
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i]
+        if (typeof a !== "string" || a.length === 0) {
+          err(`tool.aliases[${i}] must be a non-empty string`)
+        }
+        const aStr = a as string
+        if (aStr === tool.name) {
+          err(`tool.aliases[${i}] (${JSON.stringify(aStr)}) duplicates tool.name`)
+        }
+        if (seen.has(aStr)) {
+          err(`tool.aliases[${i}] (${JSON.stringify(aStr)}) is duplicated`)
+        }
+        seen.add(aStr)
+        out.push(aStr)
+      }
+      if (out.length > 0) aliases = out
+    }
+
     return {
       type: "tool",
       tool: {
         name: tool.name as string,
         description: tool.description as string,
         input_schema: tool.input_schema as Record<string, unknown>,
+        ...(aliases ? { aliases } : {}),
       },
     }
   }

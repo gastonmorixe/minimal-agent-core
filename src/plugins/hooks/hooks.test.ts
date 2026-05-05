@@ -7,9 +7,13 @@ describe("Hooks facade", () => {
   test("routes broadcast-async to EventBus", async () => {
     const h = new Hooks({ logger: noLog })
     let payload: unknown = null
-    h.on("turn.didEnd", (p) => {
-      payload = p
-    }, { caller: "agent" })
+    h.on(
+      "turn.didEnd",
+      (p) => {
+        payload = p
+      },
+      { caller: "agent" },
+    )
     h.emitAsync("turn.didEnd", { ok: 1 })
     // EventBus is microtask-deferred
     await Promise.resolve()
@@ -43,7 +47,7 @@ describe("Hooks facade", () => {
     const logs: string[] = []
     const h = new Hooks({ logger: (m) => logs.push(m), unsafeHooks: false })
     let runs = 0
-    let lastPrio: number | null = null
+    let lastPrio = -1
     h.on(
       "turn.willStart",
       (_n, ctx) => {
@@ -60,7 +64,7 @@ describe("Hooks facade", () => {
 
   test("UNSAFE_HOOKS lets plugin priority into the agent band", async () => {
     const h = new Hooks({ logger: noLog, unsafeHooks: true })
-    let prio: number | null = null
+    let prio = -1
     h.on(
       "turn.willStart",
       (_n, ctx) => {
@@ -96,10 +100,14 @@ describe("Hooks facade", () => {
   test("declare() adds runtime channels", async () => {
     const h = new Hooks({ logger: noLog })
     h.declare("custom.thing", "chain")
-    let saw: number | null = null
-    h.on("custom.thing", (n: number) => {
-      saw = n
-    }, { caller: "agent", priority: 5000 })
+    let saw = -1
+    h.on(
+      "custom.thing",
+      (n: number) => {
+        saw = n
+      },
+      { caller: "agent", priority: 5000 },
+    )
     await h.emitChain("custom.thing", 42)
     expect(saw).toBe(42)
   })

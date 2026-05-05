@@ -1,5 +1,13 @@
 /**
- * Tool-call handler for `show_diff`.
+ * Tool-call handler for the `ShowDiff` tool.
+ *
+ * Note: the handler `id` and file path stay as `show_diff` (loader-internal,
+ * never user-visible). The model-facing tool name was renamed to `ShowDiff`
+ * to match the convention used by built-ins (`Bash`, `Read`, `WebSearch`,
+ * etc.). The legacy `show_diff` name is preserved as an alias on the
+ * manifest so resumed sessions and muscle-memory calls keep working
+ * silently — see manifest.json's `tool.aliases` field and the dispatcher
+ * in src/plugins/loader.ts.
  *
  * Reads `patch` and optional `title` from the tool input and returns the
  * rendered diff as a tool_result. Non-interactive: the agent loop receives
@@ -11,13 +19,13 @@ import { renderUnifiedDiff } from "./render.ts";
 
 export default async function showDiffHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
-    return { kind: "tool_result", content: "show_diff: wrong trigger", is_error: true };
+    return { kind: "tool_result", content: "ShowDiff: wrong trigger", is_error: true };
   }
   const input = ctx.trigger.input as { patch?: unknown; title?: unknown };
   if (typeof input.patch !== "string") {
     return {
       kind: "tool_result",
-      content: "show_diff: `patch` must be a string",
+      content: "ShowDiff: `patch` must be a string",
       is_error: true,
     };
   }

@@ -562,6 +562,20 @@ export interface ManifestHandler {
    * the agent loop; interactive inline handlers abort the stream and restart.
    */
   interactive: boolean
+  /**
+   * Optional cosmetic glyph rendered next to the tool name in transcript
+   * headers. Only meaningful when `trigger.type === "tool"`. Purely visual —
+   * never sent to the model. Pick a single-cell character (nerd-font glyphs
+   * work) so the header stays aligned.
+   */
+  icon?: string
+  /**
+   * Optional palette color for the tool's label in transcript headers.
+   * Only meaningful when `trigger.type === "tool"`. Allowed values match
+   * `ToolColor` in `src/tools.ts` (e.g. `"cyan"`, `"orange"`). Purely
+   * visual — never sent to the model.
+   */
+  color?: string
 }
 
 /** Trigger variant tag. */
@@ -572,6 +586,29 @@ export type ManifestTrigger =
         name: string
         description: string
         input_schema: Record<string, unknown>
+        /**
+         * Optional alternate names this tool also responds to. Aliases are
+         * NOT advertised to the model — `getExtraTools()` only emits the
+         * canonical `name`. Their sole job is to silently catch tool calls
+         * the model emits with an old/legacy name (resumed history,
+         * user-typed names, training muscle memory) and route them to the
+         * canonical handler. The model-facing tool list, the JSONL log,
+         * and the transcript all see whatever name was emitted; aliases
+         * never mutate content or display. See `dispatch()` in
+         * `src/plugins/loader.ts`.
+         *
+         * Validation:
+         *   - each alias is a non-empty string
+         *   - no alias equals the canonical name (would be a no-op)
+         *   - no two aliases in the same array are equal
+         *   - alias names follow the same regex as core tool names
+         *     (alphanumerics + `_-`)
+         *
+         * Cross-plugin collision (alias vs another canonical, alias vs
+         * another alias, alias vs core tool name) is checked at load time
+         * in the loader and rejects the offending plugin entirely.
+         */
+        aliases?: string[]
       }
     }
   | {
@@ -649,7 +686,7 @@ export interface ResolvedHookSub {
    * the hook payload (or stream) plus a hook context. Return is the
    * raw user return — the loader interprets it for chain channels.
    */
-  invoke: (payload: unknown, ctx: HookHandlerContext) => unknown | Promise<unknown>
+  invoke: (payload: unknown, ctx: HookHandlerContext) => unknown
 }
 
 /**

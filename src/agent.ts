@@ -192,8 +192,8 @@ export class Agent {
   private auth: AuthResult
   /** Model ID for all requests in this agent's lifetime. */
   private model: string
-  /** Effort level for output_config.effort. */
-  private effort: "high" | "medium" | "low" | "max" | undefined
+  /** Effort level for output_config.effort. Pass-through string; server validates. */
+  private effort: string | undefined
   /**
    * Optional `thinking.display` override, threaded onto every API call.
    * `"summarized"` opts opus-4.7 / mythos into plaintext thinking_delta
@@ -239,7 +239,7 @@ export class Agent {
   constructor(opts: {
     auth: AuthResult
     model?: string
-    effort?: "high" | "medium" | "low" | "max"
+    effort?: string
     thinkingDisplay?: "summarized" | "omitted"
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
@@ -476,6 +476,17 @@ export class Agent {
     const toolPresentation = new Map<string, { icon?: string; color?: string }>()
     for (const t of allTools) {
       if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
+    }
+    // Mirror canonical presentation into alias slots so a tool_use the model
+    // emits with an old/legacy name still renders with the canonical icon
+    // and color in the transcript header. Aliases themselves are NOT in
+    // `allTools` (the loader's `getExtraTools` advertises only canonical
+    // names to the model); we read them straight from the loader.
+    if (this.loader) {
+      for (const [alias, canonical] of this.loader.getToolAliases()) {
+        const pres = toolPresentation.get(canonical)
+        if (pres && !toolPresentation.has(alias)) toolPresentation.set(alias, pres)
+      }
     }
     const mergedTools: Array<{
       name: string
@@ -852,6 +863,8 @@ export interface ReplAgentLike {
       onThinkingStart?: () => MaybePromise<void>
       onThinkingChunk?: (chunk: string) => MaybePromise<void>
       onThinkingStop?: () => MaybePromise<void>
+      drainQueuedUserText?: () => string | null
+      onQueueInject?: (text: string) => void
     },
   ): AsyncGenerator<string, StreamedResponse, undefined>
   /** Optional: current model id (for diagnostics/recovery prompts). */

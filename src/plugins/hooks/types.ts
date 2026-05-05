@@ -18,11 +18,7 @@
  */
 
 /** Delivery semantics of a channel. */
-export type ChannelShape =
-  | "broadcast-sync"
-  | "broadcast-async"
-  | "chain"
-  | "stream"
+export type ChannelShape = "broadcast-sync" | "broadcast-async" | "chain" | "stream"
 
 /**
  * Result a `chain` listener returns. `void` (or `undefined`) means
@@ -49,10 +45,7 @@ export type ChainListener<T> = (
   payload: T,
   ctx: HookCtx,
 ) => ChainResult<T> | Promise<ChainResult<T>>
-export type StreamListener<T> = (
-  stream: AsyncIterable<T>,
-  ctx: HookCtx,
-) => void | Promise<void>
+export type StreamListener<T> = (stream: AsyncIterable<T>, ctx: HookCtx) => void | Promise<void>
 
 /** Context passed as the second arg to every listener. */
 export interface HookCtx {

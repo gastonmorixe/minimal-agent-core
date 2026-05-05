@@ -52,8 +52,7 @@ export const CHANNELS = [
     name: "turn.willStart",
     shape: "chain",
     permission: "hooks:turn.willStart",
-    description:
-      "Chain hook — listeners may rewrite the user input or veto the turn.",
+    description: "Chain hook — listeners may rewrite the user input or veto the turn.",
   },
   {
     name: "turn.didStart",
@@ -99,8 +98,7 @@ export const CHANNELS = [
     name: "tool.willInvoke",
     shape: "chain",
     permission: "hooks:tool.willInvoke",
-    description:
-      "Chain hook — listeners may rewrite tool input, swap the tool, or veto.",
+    description: "Chain hook — listeners may rewrite tool input, swap the tool, or veto.",
   },
   {
     name: "tool.didInvoke",

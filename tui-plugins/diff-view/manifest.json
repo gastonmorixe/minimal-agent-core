@@ -2,7 +2,7 @@
   "id": "diff-view",
   "name": "Diff Viewer",
   "version": "0.1.0",
-  "description": "Renders unified diffs with ANSI colors and exposes a show_diff tool.",
+  "description": "Renders unified diffs with ANSI colors and exposes a ShowDiff tool.",
   "prompt": "./PROMPT.md",
   "tuis": [
     {
@@ -10,7 +10,8 @@
       "trigger": {
         "type": "tool",
         "tool": {
-          "name": "show_diff",
+          "name": "ShowDiff",
+          "aliases": ["show_diff"],
           "description": "Render a unified diff with ANSI colors and return the rendered output. Use this when you want to display a concrete diff inline in the conversation (instead of pasting raw patch text). The `patch` argument must be a unified diff string (the output of `git diff`, `diff -u`, etc.).",
           "input_schema": {
             "type": "object",
@@ -34,7 +35,9 @@
         "path": "./handlers/show_diff.ts",
         "export": "default"
       },
-      "interactive": false
+      "interactive": false,
+      "icon": "±",
+      "color": "lime"
     },
     {
       "id": "inline_diff",

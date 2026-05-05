@@ -136,7 +136,7 @@ describe("EventBus", () => {
     const seen: number[] = []
     let now = 1000
     // Inject a fake clock by monkey-patching performance.now.
-    const realNow = performance.now
+    const realNow = performance.now.bind(performance)
     ;(performance as unknown as { now: () => number }).now = () => now
 
     try {

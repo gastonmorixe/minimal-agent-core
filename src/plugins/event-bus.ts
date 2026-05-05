@@ -78,9 +78,7 @@ export interface EventContext<TPayload = unknown> {
  * Returning a Promise is supported. The bus tracks in-flight listener
  * promises for coalescing; it does NOT await them in {@link emit}.
  */
-export type Listener<TPayload = unknown> = (
-  ctx: EventContext<TPayload>,
-) => void | Promise<void>
+export type Listener<TPayload = unknown> = (ctx: EventContext<TPayload>) => void | Promise<void>
 
 /** Options for {@link EventBus.on}. */
 export interface ListenerOptions {
@@ -290,7 +288,7 @@ export class EventBus {
 
   private reportError(event: string, entry: ListenerEntry, err: unknown): void {
     const label = entry.opts.label ?? "<anonymous listener>"
-    const msg = err instanceof Error ? err.stack ?? err.message : String(err)
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err)
     this.logger(`listener "${label}" for "${event}" threw: ${msg}`)
   }
 }
@@ -303,9 +301,5 @@ function nowMs(): number {
 }
 
 function isPromise(x: unknown): x is Promise<unknown> {
-  return (
-    typeof x === "object" &&
-    x !== null &&
-    typeof (x as { then?: unknown }).then === "function"
-  )
+  return typeof x === "object" && x !== null && typeof (x as { then?: unknown }).then === "function"
 }

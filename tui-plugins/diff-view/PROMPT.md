@@ -3,7 +3,7 @@ The `diff-view` plugin renders unified diffs with ANSI colors.
 Two ways to use it:
 
 1. **Tool call**: when you want to present a diff to the user and you have
-   the full unified diff text ready, call the `show_diff` tool with
+   the full unified diff text ready, call the `ShowDiff` tool with
    `{patch: "..."}`. The tool result will be the rendered diff (you do not
    need to render it again yourself).
 
