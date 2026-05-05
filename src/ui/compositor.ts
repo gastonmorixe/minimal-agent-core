@@ -282,12 +282,42 @@ export class Compositor {
   }
 
   /**
-   * Hook for SIGWINCH. With the inline-redraw model there's no scroll
-   * region to recompute — the live area will reflow on the next repaint.
-   * Provided for API symmetry with the previous DECSTBM-based design.
+   * Hook for SIGWINCH.
+   *
+   * On resize the terminal reflows any wrapped content in the live area
+   * to the new width, and our `cursorRowInLive` / `liveHeightValue` /
+   * `streamCol` counters — which were measured under the *old* width —
+   * become fiction. The next repaint's `eraseLiveSeq()` would then step
+   * up by a stale row count, leaving reflowed old content above the
+   * erase point. `drawLiveSeq()` paints the new live area below it,
+   * producing duplicate prompt lines on screen.
+   *
+   * Fix: full viewport wipe (`\x1b[H` home + `\x1b[J` erase to end of
+   * screen) and invalidate the counters. The very next `setLiveArea()`
+   * call (from `editor.notifyResize()` in `src/index.ts:991-992`, which
+   * runs synchronously right after this) sees `liveHeightValue === 0`,
+   * short-circuits the erase, and paints fresh at the home position.
+   *
+   * Why not the cheaper `\r\x1b[J`? Because the cursor usually sits on
+   * the LAST row of the live area (the prompt). `\r\x1b[J` only clears
+   * from that row down, leaving reflowed *upper* portions of the old
+   * live area — including any status row and the wrapped early portion
+   * of the prompt — visible above the cursor. Then `drawLiveSeq` paints
+   * a fresh complete live area starting at that cursor row, putting the
+   * new status+prompt directly below the ghost old status+prompt:
+   * exactly the duplication the user reported.
+   *
+   * Trade-off: on-screen transcript flashes off on resize (it survives
+   * in scrollback above the viewport). Acceptable because resize is
+   * rare and a duplicate prompt is much worse than a transcript that
+   * scrolled up by one viewport.
    */
   notifyResize(): void {
-    /* no-op */
+    if (!this.tty || !this.mounted) return
+    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
+    this.liveHeightValue = 0
+    this.cursorRowInLive = 0
+    this.streamCol = 0
   }
 
   // ------------------------- internal sequences -------------------------
