@@ -146,8 +146,26 @@ export class EditorRenderer {
 
       if (logical === buf.row) {
         const colW = displayWidthOfChars(lineText, buf.col)
-        cursorRow = startPhysical + cursorRowOffset(promptW, colW, cols)
-        cursorCol = cursorVisualCol(promptW, colW, cols)
+        const total = promptW + colW
+        const atExactFill = total > 0 && total % cols === 0
+        if (atExactFill) {
+          // Editor uses "post-insert" cursor placement: at a wrap boundary,
+          // park the cursor at col 0 of the next physical row (where the
+          // next typed character will land), not at col `cols` of the
+          // current row (which terminals clamp onto the last printed cell,
+          // making it look like the next keystroke will replace it).
+          //
+          // The next row already exists when there is more content after
+          // buf.col; if the cursor is at end-of-line we materialize a
+          // phantom empty row so it has a home.
+          const atEndOfLine = buf.col === codePointCount(lineText)
+          if (atEndOfLine) lines.push("")
+          cursorRow = startPhysical + total / cols
+          cursorCol = 0
+        } else {
+          cursorRow = startPhysical + cursorRowOffset(promptW, colW, cols)
+          cursorCol = cursorVisualCol(promptW, colW, cols)
+        }
         cursorPlaced = true
       }
     }
@@ -177,7 +195,19 @@ export class EditorRenderer {
     let total = 0
     for (let i = 0; i < buf.lines.length; i++) {
       const promptW = i === 0 ? this.promptWidth : this.continuationPromptWidth
-      total += wrapRows(promptW + displayWidth(buf.lines[i]), columns)
+      const w = promptW + displayWidth(buf.lines[i])
+      let rows = wrapRows(w, columns)
+      // Phantom row when the cursor sits at end of an exact-fill line —
+      // must match the renderer's `lines.push("")` branch above.
+      if (
+        i === buf.row &&
+        buf.col === codePointCount(buf.lines[i]) &&
+        w > 0 &&
+        w % columns === 0
+      ) {
+        rows += 1
+      }
+      total += rows
     }
     return Math.max(1, total)
   }
@@ -187,6 +217,18 @@ export class EditorRenderer {
  * Display width of the first `charCount` code points of `text`. `charCount`
  * is in code-point units (matching {@link EditorBuffer}'s column model).
  */
+/** Number of code points in `text` (matches EditorBuffer's column model). */
+function codePointCount(text: string): number {
+  let n = 0
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i)
+    if (cp === undefined) break
+    i += cp > 0xffff ? 2 : 1
+    n += 1
+  }
+  return n
+}
+
 function displayWidthOfChars(text: string, charCount: number): number {
   let width = 0
   let consumed = 0

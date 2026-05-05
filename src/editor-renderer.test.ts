@@ -87,13 +87,16 @@ describe("EditorRenderer", () => {
     // (8 content + 2 prompt = 10), continuation rows "9012345678" then "" if any.
     buf.insert("123456789012345678")
     const out = r.render(buf, { columns: 10 })
-    expect(out.lines.length).toBe(2)
+    // 18 chars + 2-cell prompt = 20 cells, exactly fills 2 physical rows.
+    // Cursor sits at end-of-line on a wrap boundary → renderer appends a
+    // phantom empty row so the cursor parks at row 2, col 0 (where the
+    // next typed character will land), instead of getting clamped onto
+    // the last visible cell at row 1, col 10.
+    expect(out.lines.length).toBe(3)
     expect(out.lines[0]).toBe("❯ 12345678")
     expect(out.lines[1]).toBe("9012345678")
-    // cursor at end of buffer: col=18, promptW=2 → total=20, on cols=10
-    // → row offset 1 (using cursorRowOffset semantics: exact-fill stays on
-    // current row, so 19 cells past start = row 1, visualCol = 10).
-    expect(out.cursor).toEqual({ row: 1, col: 10 })
+    expect(out.lines[2]).toBe("")
+    expect(out.cursor).toEqual({ row: 2, col: 0 })
   })
 
   it("places cursor in physical coordinates after a wrap", () => {
@@ -114,6 +117,103 @@ describe("EditorRenderer", () => {
     const out = r.render(buf)
     expect(out.lines).toEqual(["❯ 123456789012345678"])
     expect(out.cursor).toEqual({ row: 0, col: 20 })
+  })
+
+  describe("exact-fill cursor placement (post-insert model)", () => {
+    it("end-of-line at exact wrap boundary parks on phantom next row", () => {
+      // The original bug: prompt(2) + 8 chars = 10 cells in a 10-col TTY.
+      // Without the fix, cursor would render at row 0, col 10 — clamped
+      // onto the last printed cell, making it look like the next keystroke
+      // replaces 'h' instead of inserting after it.
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("12345678")
+      const out = r.render(buf, { columns: 10 })
+      expect(out.lines).toEqual(["❯ 12345678", ""])
+      expect(out.cursor).toEqual({ row: 1, col: 0 })
+    })
+
+    it("mid-line at exact wrap boundary jumps to existing next row col 0", () => {
+      // 200 chars: prompt(2) + 78 first row + 80 + 42. Cursor at col 78
+      // (logical) sits on the boundary between row 0 and row 1; should
+      // render at row 1 col 0, not row 0 col 80.
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("x".repeat(200))
+      buf.col = 78
+      const out = r.render(buf, { columns: 80 })
+      // Three physical rows: 78 + 80 + 42 chars.
+      expect(out.lines.length).toBe(3)
+      // No phantom appended — cursor is mid-line, the next row already exists.
+      expect(out.lines[2].length).toBe(42)
+      expect(out.cursor).toEqual({ row: 1, col: 0 })
+    })
+
+    it("end-of-line after multiple wraps appends one phantom row", () => {
+      // 158 chars: prompt(2) + 78 + 80, exact fill across 2 rows.
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("y".repeat(158))
+      const out = r.render(buf, { columns: 80 })
+      expect(out.lines.length).toBe(3)
+      expect(out.lines[2]).toBe("")
+      expect(out.cursor).toEqual({ row: 2, col: 0 })
+    })
+
+    it("non-exact-fill end-of-line keeps legacy placement", () => {
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("12345") // 5 chars, total 7 cells in 10-col → no boundary
+      const out = r.render(buf, { columns: 10 })
+      expect(out.lines).toEqual(["❯ 12345"])
+      expect(out.cursor).toEqual({ row: 0, col: 7 })
+    })
+
+    it("empty buffer is not treated as exact-fill", () => {
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      const out = r.render(buf, { columns: 10 })
+      expect(out.lines).toEqual(["❯ "])
+      expect(out.cursor).toEqual({ row: 0, col: 2 })
+    })
+
+    it("exact-fill on a continuation line uses continuation prompt width", () => {
+      // Line 1 with continuation prompt "· " (width 2) + 8 chars = 10 cells.
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "· " })
+      const buf = new EditorBuffer()
+      buf.insert("a")
+      buf.newline()
+      buf.insert("12345678")
+      const out = r.render(buf, { columns: 10 })
+      // line 0: "❯ a" (1 row); line 1: "· 12345678" (1 row) + phantom.
+      expect(out.lines).toEqual(["❯ a", "· 12345678", ""])
+      expect(out.cursor).toEqual({ row: 2, col: 0 })
+    })
+
+    it("measureRows reserves the phantom row for exact-fill end-of-line", () => {
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("12345678") // exact-fill at col 8 in cols=10
+      expect(r.measureRows(buf, 10)).toBe(2)
+    })
+
+    it("measureRows does not add a phantom row when cursor is mid-line", () => {
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("x".repeat(200))
+      buf.col = 78 // boundary, but not at end-of-line
+      expect(r.measureRows(buf, 80)).toBe(3)
+    })
+
+    it("measureRows does not add a phantom row when cursor is on a different line", () => {
+      // Line 0 is exact-fill (8 chars + 2 prompt = 10), but cursor lives on line 1.
+      const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+      const buf = new EditorBuffer()
+      buf.insert("12345678")
+      buf.newline()
+      buf.insert("x")
+      expect(r.measureRows(buf, 10)).toBe(2)
+    })
   })
 
   it("measureRows uses display width for wide / emoji content", () => {
