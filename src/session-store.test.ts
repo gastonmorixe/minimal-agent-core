@@ -223,6 +223,53 @@ describe("rewind records", () => {
   })
 })
 
+describe("attach/detach records", () => {
+  it("appendAttach writes a JSONL line that round-trips", () => {
+    const dir = tmp()
+    const sid = "ma-test-attach"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+    store.appendAttach(new Date("2026-02-02T03:04:05.000Z"))
+
+    const recs = readJsonl(store.path) as Array<Record<string, unknown>>
+    const att = recs.find((r) => r.kind === "attach") as Record<string, unknown> | undefined
+    expect(att).toBeDefined()
+    expect(att?.pid).toBe(process.pid)
+    expect(typeof att?.hostname).toBe("string")
+    expect(typeof att?.startTime).toBe("string")
+    expect(att?.agentVersion).toBe("test")
+    expect(att?.ts).toBe("2026-02-02T03:04:05.000Z")
+  })
+
+  it("appendDetach pairs with appendAttach by pid", () => {
+    const dir = tmp()
+    const sid = "ma-test-detach"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+    store.appendAttach(new Date("2026-02-02T03:04:05.000Z"))
+    store.appendDetach("signal", undefined, new Date("2026-02-02T03:05:00.000Z"))
+
+    const recs = readJsonl(store.path) as Array<Record<string, unknown>>
+    const det = recs.find((r) => r.kind === "detach") as
+      | (Record<string, unknown> & { pid: number; reason: string })
+      | undefined
+    expect(det).toBeDefined()
+    expect(det?.pid).toBe(process.pid)
+    expect(det?.reason).toBe("signal")
+  })
+
+  it("appendDetach is best-effort: throws are swallowed", () => {
+    // Construct a store whose underlying path is a directory, so
+    // appendFileSync will throw EISDIR. We verify appendDetach swallows.
+    const dir = tmp()
+    const sid = "ma-test-detach-fail"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+    // Replace the file with a directory to force write failure.
+    const { unlinkSync, mkdirSync } = require("node:fs") as typeof import("node:fs")
+    unlinkSync(store.path)
+    mkdirSync(store.path)
+    expect(() => store.appendDetach("error")).not.toThrow()
+  })
+})
+
 describe("shortHash", () => {
   it("is deterministic and distinguishes inputs", () => {
     expect(shortHash("hello")).toBe(shortHash("hello"))
