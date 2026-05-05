@@ -1,76 +1,92 @@
 /**
- * Inline-tag handler for `<tui::memory>...</tui::memory>`.
+ * Inline-tag handler for `<tui::memory [scope="global"|"project"]>...</tui::memory>`.
  *
  * Behavior:
- *   1. Append the body as a new bullet to the `## Saved memories` section
- *      of this plugin's PROMPT.md, between the `<!-- memories-begin -->`
- *      and `<!-- memories-end -->` sentinels. Because the loader re-reads
- *      PROMPT.md on every session start, the memory becomes part of the
- *      system prompt in all future sessions.
+ *   1. Append the body as a new bullet to the user's memory file. The target
+ *      depends on the `scope` attribute:
+ *        - scope="global"   → ~/.minimal-agent/memory.md
+ *        - scope="project"  → ~/.minimal-agent/projects/<absolute-cwd>/memory.md  (default)
+ *      The directory is created if missing.
  *   2. Render a short confirmation line in place of the tag span so the
  *      user can see the save happened. The body itself is not echoed.
  *
- * Write failures are surfaced to the user as a one-line error so saves
- * aren't silently lost.
+ * Memory files are reloaded into the system prompt at every session start
+ * by this plugin's `memory_load` prompt fragment (handlers/load.ts).
+ *
+ * Safety:
+ *   - The handler refuses to write under `ctx.packageDir` (defensive: this
+ *     was the previous bug — the plugin used to mutate its own embedded
+ *     `PROMPT.md`, dirtying the shipped repo and leaking the assistant's
+ *     personal memories to every user of the agent).
+ *   - Empty bodies are no-ops.
+ *   - Multi-line bodies are collapsed to a single line so each bullet stays
+ *     compact and the model is gently nudged toward short, actionable notes.
+ *
+ * Write failures surface as a one-line ANSI error so saves aren't silently lost.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs"
+import { dirname } from "node:path"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts";
+import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
-const BEGIN = "<!-- memories-begin -->";
-const END = "<!-- memories-end -->";
+import { globalMemoryPath, projectMemoryPath } from "./load.ts"
+
+type Scope = "global" | "project"
+
+function parseScope(attrs: Record<string, string>): Scope {
+  const raw = (attrs.scope ?? "").trim().toLowerCase()
+  if (raw === "global") return "global"
+  // Default = project. Most lessons learned during a session apply to the
+  // codebase the session is running against, not the user's whole life.
+  return "project"
+}
+
+function targetPath(scope: Scope, cwd: string): string {
+  return scope === "global" ? globalMemoryPath() : projectMemoryPath(cwd)
+}
 
 export default async function memoryHandler(
   ctx: TUIContext,
 ): Promise<TUIResult> {
   if (ctx.trigger.type !== "inline_tag") {
-    return { kind: "rendered", ansi: "" };
+    return { kind: "rendered", ansi: "" }
   }
 
-  const body = ctx.trigger.body.trim();
+  const body = ctx.trigger.body.trim()
   if (body.length === 0) {
-    return { kind: "rendered", ansi: "" };
+    return { kind: "rendered", ansi: "" }
+  }
+
+  const scope = parseScope(ctx.trigger.attrs)
+  const path = targetPath(scope, ctx.cwd)
+
+  // Defensive: never let a memory write mutate the shipped plugin tree.
+  // This shouldn't be reachable through normal config, but if `cwd` ever
+  // resolves under `packageDir` (e.g. a test fixture), bail loudly.
+  if (path.startsWith(`${ctx.packageDir}/`) || path === ctx.packageDir) {
+    const ansi = `\x1b[31m· memory save refused: target inside plugin dir (${path})\x1b[0m\n`
+    ctx.stderr.write(`[memory] refused write under packageDir: ${path}\n`)
+    return { kind: "rendered", ansi }
   }
 
   // Collapse to a single line so the bullet stays clean. Multi-line memories
   // are joined with spaces; the model is instructed to keep them short.
-  const oneLine = body.replace(/\s+/g, " ");
-  const bullet = `- ${oneLine}`;
-
-  const promptPath = join(ctx.packageDir, "PROMPT.md");
+  const oneLine = body.replace(/\s+/g, " ")
+  const bullet = `- ${oneLine}\n`
 
   try {
-    const original = readFileSync(promptPath, "utf-8");
-    const beginIdx = original.indexOf(BEGIN);
-    const endIdx = original.indexOf(END);
-    if (beginIdx === -1 || endIdx === -1 || endIdx < beginIdx) {
-      throw new Error(
-        `memory sentinels not found in ${promptPath}; expected ${BEGIN} ... ${END}`,
-      );
-    }
+    mkdirSync(dirname(path), { recursive: true })
+    appendFileSync(path, bullet, "utf-8")
 
-    const before = original.slice(0, beginIdx + BEGIN.length);
-    const after = original.slice(endIdx);
-    const middle = original.slice(beginIdx + BEGIN.length, endIdx);
-
-    // Existing bullets, trimmed of surrounding blank lines.
-    const existing = middle.replace(/^\s+|\s+$/g, "");
-    const newMiddle =
-      existing.length === 0 ? `\n${bullet}\n` : `\n${existing}\n${bullet}\n`;
-
-    const next = `${before}${newMiddle}${after}`;
-    writeFileSync(promptPath, next);
-
-    // Dim grey confirmation line.
-    const preview = oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine;
-    const ansi = `\x1b[2m· memory saved: ${preview}\x1b[0m\n`;
-    return { kind: "rendered", ansi };
+    const preview = oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine
+    const tag = scope === "global" ? "global" : "project"
+    const ansi = `\x1b[2m· memory saved [${tag}]: ${preview}\x1b[0m\n`
+    return { kind: "rendered", ansi }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    ctx.stderr.write(`[memory] save failed: ${msg}\n`);
-    const ansi = `\x1b[31m· memory save failed: ${msg}\x1b[0m\n`;
-    return { kind: "rendered", ansi };
+    const msg = e instanceof Error ? e.message : String(e)
+    ctx.stderr.write(`[memory] save failed: ${msg}\n`)
+    const ansi = `\x1b[31m· memory save failed: ${msg}\x1b[0m\n`
+    return { kind: "rendered", ansi }
   }
 }

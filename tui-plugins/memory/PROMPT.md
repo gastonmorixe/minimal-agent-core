@@ -1,93 +1,96 @@
-The `memory` plugin gives you persistent memory across sessions.
+The `memory` plugin gives you persistent, per-user memory across sessions.
 
-## How it works
+## Mental model
 
-You have a single self-modifying memory file (this `PROMPT.md`). When you
-emit a `<tui::memory>` tag, its body is appended verbatim as a new bullet
-under the `## Saved memories` section below. Next session, this file is
-re-read into the system prompt, so the memory comes back automatically.
+Think of memory as **two notebooks you carry between sessions**:
 
-The body of the tag is **not** shown to the user — the tag is stripped
-from the visible stream, just like `interleave-thinking`. A short
-confirmation line is rendered in its place so the user can see that a
-memory was saved.
+| Scope     | File                                                       | Contains                                                                          |
+| --------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `global`  | `~/.minimal-agent/memory.md`                               | Cross-project working style, user preferences, hard-won general lessons.          |
+| `project` | `~/.minimal-agent/projects/<absolute-cwd>/memory.md`       | Facts, invariants, and gotchas specific to *this* codebase / workspace (default). |
 
-## When to save a memory
+Both are **per-user**, never inside the project tree, never committed,
+never shared with collaborators. Memories are the assistant's personal
+scratchpad — not team documentation. Things meant for the team belong in
+`README.md`, `CLAUDE.md`, `AGENTS.md`, etc.
 
-Save memories that should outlive the current session:
+At session start, this plugin reads both files (if present) and the
+loader injects them into the system prompt as a `## Saved memories`
+section. So whatever you save **comes back automatically** next session
+— you don't have to "look it up", it's already in your context.
 
-- Lessons learned from user feedback ("I should open an interleaved
-  thinking span when the user pushes back, even if I feel certain").
-- User preferences ("Gaston prefers concise replies", "always show
-  diffs with `show_diff`").
-- Project-specific facts that aren't already in CLAUDE.md ("the test
-  suite uses `bun test`, not `npm test`").
-- Mistakes you don't want to repeat.
+## When to save
+
+Save things that should outlive this session:
+
+- **Lessons from user feedback.** "When the user pushes back I should
+  open an interleaved-thinking span and re-check, not restate."
+- **User preferences.** "User prefers concise replies." "Always show
+  diffs with `ShowDiff` rather than pasting code blocks."
+- **Project invariants and gotchas.** "The `Compositor`'s blank-line cap
+  lives in `capBlankLines()`; don't reintroduce sink-level deduping."
+  "Test runner is `bun test`, not `npm test`."
+- **Mistakes you don't want to repeat.** "I confabulated a session id
+  once instead of reading the env block — always quote it verbatim."
 
 Do **not** save:
 
-- Transient task state (use a TODO file or scratchpad).
-- Secrets or credentials.
-- Long verbatim content — keep memories short and actionable, ideally
-  one sentence each.
+- Transient task state. Use a TODO list or scratchpad in your reply.
+- Secrets, tokens, credentials.
+- Long verbatim content. Memories should be one or two sentences,
+  actionable, with concrete file/symbol names where useful.
+- Things already in `CLAUDE.md` / `AGENTS.md` / the README.
 
-## When to consult memory
+## Choosing a scope
 
-The `## Saved memories` section below is part of your system prompt every
-session. Treat its bullets as standing instructions / known facts. You
-don't need to "look them up" — they're already in context.
+Default to `project`. Most session lessons are about whatever codebase
+you're in. Use `global` only when the lesson generalizes across every
+project you'll ever work on with this user.
+
+Quick test: *"Would this still be true if I were working in a totally
+different repo tomorrow?"* — yes → `global`, no → `project`.
 
 ## Syntax
 
-One tag, no attributes. Body is the memory text:
+One tag, one optional attribute (`scope`):
 
     <tui::memory>
-    On user pushback, open an interleaved thinking span and re-examine
-    even if I feel certain. Pushback is evidence.
+    Project-scoped memory (default). About this codebase only.
     </tui::memory>
 
-The body is appended as `- {body}` under `## Saved memories`. Empty
-bodies are ignored.
+    <tui::memory scope="project">
+    Same as above, just explicit.
+    </tui::memory>
 
-## Saved memories
+    <tui::memory scope="global">
+    Cross-project memory. About working with this user, my own
+    failure modes, general tooling, etc.
+    </tui::memory>
 
-<!-- memories-begin -->
-- On user pushback, open an interleaved thinking span and re-examine even if I feel certain. Pushback is evidence — either I am missing something or I am being tested for sycophancy, and I cannot distinguish without actually re-checking. Do not just restate and defend.
-- ...
-- The agent has two REPL paths: legacy `runRepl` (uses `RawInput`) and `runReplLiveArea` (uses `EditorController` + `Compositor`, the default). When fixing input/mode/prompt behavior, check BOTH paths — features added to `RawInput` are easy to forget to mirror in `EditorController`, and vice versa. Examples: Shift+Tab mode cycling, prompt-prefix repaint on mode change, status label from `modeManager.statusLabel(...)`.
-- In `src/agent.ts`, the REPL has two sinks per turn — `baseSink` for streamed model text and `onTranscriptLine` for tool blocks (` ┌ … │ … └ …`) — and they need an explicit `lastKind` ("text" | "transcript") tracker to insert blank-line separators at boundaries. The agent itself prepends `\n` to tool headers but nothing more, so the REPL must add one `\n` going transcript→text and (when prior text was a partial line) one `\n` going text→transcript. Apply the fix to BOTH `runRepl` and `runReplLiveArea`.
-- `formatToolInput` in `src/agent.ts` must strip newlines from the Bash `command` before slicing — multi-line heredocs otherwise destroy the `┌ │ └` bordered block. First-line-only with `…` when truncated/multiline.
-- For UI/rendering changes in this repo, unit tests on `compositor.streams` are not enough — actually drive the change through a real `Compositor` + `StdioInterceptor` inside a tmux pane (`tmux new-session -d -s … -x 100 -y 40 'bun run …'; tmux capture-pane -t … -p`) and inspect the rendered scrollback. A small fake-agent driver that exercises text↔transcript boundaries (and is auto-cancelled after one turn) is the right shape for this. When the user asks "have you tested in tmux", they mean it: check the actual visual output, not just the stream array.
-- The live-area REPL commits the user's submitted prompt to scrollback via `EditorController.submit` (writeStream), then immediately streams the response. To avoid the response butting against the prompt, `runReplLiveArea`'s `baseSink` AND `onTranscriptLine` must emit a leading `"\n"` when `lastKind === "none"` (first write of the turn) — mirroring what the legacy `runRepl` does on its first chunk. Easy to forget because the legacy and live-area sinks are similar but not identical.
-- For Edit/Write diff rendering: `ToolExecResult.display` (optional ANSI string) is the channel for "show this in the transcript instead of `content`". `formatToolPreview` in `src/agent.ts` honors it (skipping truncation) only when `!isError`. `src/diff.ts` builds unified diffs (`buildEditDiff` for known old/new strings, `buildFileDiff` for arbitrary before/after via LCS) and renders via `renderUnifiedDiff` from `tui-plugins/diff-view/handlers/render.ts`.
-- In `src/tools.ts`, `ToolDefinition` carries optional cosmetic `icon?: string` and `color?: ToolColor` (palette key) used only for transcript header rendering. These fields MUST be stripped before sending tools to the Anthropic API — `src/agent.ts` does this by mapping `allTools` down to `{name, description, input_schema}` into `mergedTools` and keeping a parallel `toolPresentation` Map for rendering. `PluginToolDefinition` mirrors the same optional fields.
-- The "extra `\n` for breathing room when lastKind === 'none'" is needed in `baseSink` (streamed text has no leading `\n`) but NOT in `onTranscriptLine` (the agent prepends `\n` to tool header lines at agent.ts:412). EditorController.submit() flushes the prompt with a trailing `\n`, so prompt-trailing-`\n` + line-leading-`\n` = exactly one blank row. Adding another in onTranscriptLine produces two blank rows. The two sinks look symmetric but aren't — don't blindly mirror.
-- minimal-agent's `getAuth()` in `src/auth.ts` is called once at process start (`src/index.ts:367`) and returns an `AuthResult` whose `refresh` closure captures the `oauth` snapshot from that initial `readKeychain`. If another process (e.g. the official `claude` CLI) rotates the OAuth refresh token in the macOS Keychain (`Claude Code-credentials`) during the agent's lifetime, our `doRefresh` keeps sending the stale RT and the server returns `invalid_grant` ("Refresh token not found or invalid"). Fix: re-read the keychain inside `doRefresh` before calling `refreshAccessToken`, and surface a "run `claude` to re-login" hint when the server returns `invalid_grant`. Diagnose via `.node-net-dbg/<run>/*oauth*` 400 responses paired with preceding 401s on `/v1/messages`.
-- The fix for the OAuth refresh bug landed in src/auth.ts: `getAuth` now takes an optional `deps: GetAuthDeps` second arg ({read, write, refresh}) for DI, and `doRefresh` re-reads the keychain on every invocation instead of using the closed-over snapshot. Two failure modes were collapsed: (A) cross-process rotation by the official `claude` CLI, and (B) in-process double-refresh where the server rotated RT1→RT2 on the first refresh but the closure still held RT1 for the second. Both produced "invalid_grant" / "Refresh token not found or invalid". Tests in src/auth.test.ts cover both. Status-bar UX in src/client.ts: "Auth token expired, refreshing… → Auth refreshed, resuming…" so transparent refresh during a long session is visible.
-- src/tools/truncation.ts is the universal tool-output guardrail wired into src/tools.ts:executeTool. Budgets: MAX_TOOL_OUTPUT_BYTES=64_000, MAX_TOOL_OUTPUT_LINES=1_000. Notice shape: `[truncated: shown N of M bytes, sL/tL lines; cut at byte B, line L. <hint>]` with M/tL = "unknown" when source size unknown. Per-tool executors populate `_truncCtx: { totalBytes, totalLines, startLine? }` on ToolExecResult; executeTool strips `_truncCtx` before returning and skips the clamp when `display` is set (Edit/Write diffs render intact). Per-tool resume hints live in `defaultHint()` keyed on ctx.tool. UTF-8 safety via `sliceUtf8` (backs off continuation bytes).
-- For tmux smoke tests asserting rendered scrollback, tmux hard-wraps long lines at the pane width and can split mid-word (e.g. `offset=1000` becomes `o\nffset=1000`). When asserting against captured pane content, normalize by stripping ALL whitespace (`pane.replace(/\s+/g, "")`) and match against the concatenated form, not the wrapped form. Also keep the driver's process alive briefly after self-exit (`bun run driver.ts; sleep 5`) so capture-pane has time to read the buffer.
-- For session restore in minimal-agent: the conversation `messages[]` is the source of truth and is persisted as append-only JSONL at `~/.minimal-agent/sessions/<sid>.jsonl` keyed by the existing `getSessionId()` UUID (same as `x-claude-code-session-id` header). FORMAT v1 records: `meta`/`user`/`assistant`/`tool_result`/`note`. Three-module split: `session-store.ts` (writer + parseLines, data-only), `session-restore.ts` (foldRecords + repairMessages, also data-only — safe for tools/tests to import), `session-replay.ts` (visual replay; imports from agent.ts for formatters, kept separate to avoid pulling agent stack into restore). Repair must scan the WHOLE list (not just the tail) because resume + new turn leaves old orphan tool_use records physically in the append-only log; `repairMessages` filters them on every load. Replay writes to stdout BEFORE the live-area compositor mounts, so history lands in normal scrollback above the pinned prompt.
-- When asked "what's your session id / value X from the env block / etc.", READ the env-info block in the system prompt and quote it verbatim. Do NOT generate a UUID-shaped string from imagination — these are exactly the kind of plausible-looking details where confabulation hides. If unsure whether a value is in context, open an interleaved thinking span and verify before stating it.
-- User command `/narrate`: rewrite the most recent relevant content (usually my previous reply, unless the user specifies a different target) as narration for a live voice reader. Style: flowing prose, no bullet lists, no markdown, no headers, no code fences; spell out symbols (e.g. "forty-two" not "42"); short sentences are fine; punctuation should cue natural breath/pause; speak in first person to the listener as if continuing the conversation aloud.
-- Web search is available via `fish -c 'search_online --output text "{{ query }}"'` (Brave by default). Useful flags: `-v web|news|images|videos`, `-L N` (limit, max 20), `-O N` (offset), `-C CC`, `-l LL`, `-M LL-CC`, `-n` (no color), `-o json|ndjson|text|raw|schema|tooldef`. Use `-o text -n` for clean piping. Run `fish -c 'search_online --help'` to re-check.
-- The agent (src/index.ts) sets `process.env.MINIMAL_AGENT_MODEL = selectedModel` before `PluginLoader.load`, and the env-info `gather.sh` probes it as `model=…`. So the resolved model id is visible in the session-start `<env>` snapshot in the system prompt — I can read it from there instead of guessing.
-- The compositor (src/ui/compositor.ts, drawLiveSeq) already draws a blank separator row above the pinned live area for breathing room. Therefore content passed to `compositor.writeStream` should end with a single `\n` (just terminating the last line), NOT `\n\n` — a trailing `\n\n` produces TWO blank rows between scrollback content and the prompt. Bug fixed in src/agent.ts runReplLiveArea ready-banner.
-- The live-area REPL has THREE places that affect blank-line spacing around the prompt — they interact and must be considered together: (1) Compositor.drawLiveSeq draws its own blank separator row above the live area, so banner/transcript content passed to writeStream should end with a single `\n`, never `\n\n`. (2) EditorController.submit() commits the prompt with a leading `\n` (added Apr 2026) so the user's submitted input always has one blank above it — the compositor's blank-sep is erased during commit, so without this leading `\n` the prompt would butt against prior content. (3) Some formatters (mdstream) emit trailing `\n\n` after rendering; runReplLiveArea wraps the formatter's compositorSink with `writeFormatterChunk` + `pendingTrailingNewlines` to buffer tail newlines and cap them to one `\n` at end-of-turn. Test that affirms (2): src/editor-controller.test.ts asserts `["\n> line1\n line2\n line3\n"]`.
-- src/ui/compositor.ts now caps consecutive `\n` runs in scrollback at 2 (= one blank row max) via `capBlankLines()` in writeStream/flushStream. ANSI escape sequences (CSI ESC[…<0x40-0x7E>, OSC ESC]…BEL/ESC\) and bare CR are zero-width passthrough — they neither extend nor reset the run. State (`consecutiveNewlines`) persists across writeStream calls and resets on unmount. This fixes the "3+ blank lines between tool blocks" bug that occurred when the model emitted whitespace-only text (e.g. `"\n\n"`) between two tool_use blocks: baseSink's transcript→text separator `\n` + chunk's `\n\n` + next transcript header's leading `\n` would pile 4 `\n` after the prior tool's `└…\n`. Putting the cap in Compositor (not in the sinks) makes it a global UX invariant covering banner writes, editor submit, formatter tails, and all sink paths.
-- Compositor's `drawLiveSeq` writes an unconditional `\r\n` blank-separator row above the live area for breathing room — but if scrollback already ends with `\n\n` (one blank row, e.g. from the capBlankLines cap or the agent's sink emitting trailing newlines), this adds a SECOND blank row and the prompt drifts up from the bottom on every turn. Fix: skip the separator when `streamCol === 0 && consecutiveNewlines >= 2`, and track the choice in `liveSepDrawn` so `eraseLiveSeq` only steps up `\x1b[1A` over the sep when it was actually drawn. Pairs with capBlankLines to enforce "exactly one blank row between scrollback and live area" as a global invariant. Tests in src/ui/compositor.test.ts cover both directions.
-- The "1 blank row everywhere in the live-area REPL" invariant has THREE collaborating mechanisms — each fixes a distinct seam: (1) `Compositor.capBlankLines` caps consecutive `\n` in scrollback to 2 (= at most one blank row inline) — handles model emitting whitespace-only text and runaway `\n` runs. (2) `runReplLiveArea`'s end-of-turn `pendingTrailingNewlines` flush ONLY writes `\n` when `!lastChunkEndedWithNewline` — without this guard, formatter tail flush + already-terminated content produces `\n\n` at the tail and `drawLiveSeq`'s blank-sep `\r\n` on top renders as TWO blank rows above the prompt. (3) `onTranscriptLine` flushes `pendingTrailingNewlines` BEFORE writing the tool header when transitioning from `text` — without this, mdstream's held `\n\n` tail never makes it to scrollback before the tool's `╭` line, so text and the next tool block collide on adjacent rows with no blank between (visible as "Foo:Bar:Baz:" smash). `drawLiveSeq` should stay simple (always-draw blank-sep, no skipSep tricks) — fancy "skip sep when scrollback already ends with a blank" logic interacts badly with live-area shrink (status row clearing) and is fragile.
-- In `runReplLiveArea` (src/agent.ts), at end-of-turn DO NOT write a `\n` to the compositor to flush `pendingTrailingNewlines` — discard it and set `lastChunkEndedWithNewline = true`. The compositor's `drawLiveSeq` already provides the single blank row between scrollback and the live-area prompt: it emits a `\r\n` line terminator when `streamCol > 0`, and a `\r\n` blank-separator unless scrollback already ends with `\n\n` (skipSep). Writing `\n` here adds a third newline to that ladder and produces two blank rows above the prompt instead of one — causing the prompt to drift one row off the bottom on every turn after the first. The same logic applies to the `wroteOutput && !lastChunkEndedWithNewline` fallback in the live-area path: it is similarly redundant with drawLiveSeq's streamCol-fix `\r\n`. Symptom: after first response, prompt no longer sticky to bottom; recording shows `[1A[1A[NC[J\n\n❯` (two `\n` between response text and prompt).
-- The compositor's `drawLiveSeq` no longer draws a blank separator row above the live area (removed Apr 2026 to avoid the "❯ jumped one line" UX complaint). The separator row was incidentally serving as a buffer for mdstream's incremental-rerender cursor-up sequences (`ESC[nA`). Without it, those sequences would step into actual scrollback content. Fix: `writeBufferedStream` now strips `ESC[nA` (cursor-up) from chunks and, when cursor-up was present AND streamCol>0, pre-clears the current partial stream line with `\r\x1b[J` before writing. This lets mdstream's rerender work correctly (partial content replaced) without a sacrificial separator row.
-- Always use the Grep tool (ripgrep) for searching file contents — never shell out to `bash grep`. Grep is faster, recursive by default, respects .gitignore, and produces cleaner output.
-- src/tools.ts execBash has a `cd` interceptor that updates the persistent `bashCwd` for bare `cd <path>` calls (each `bash -c` is a fresh subshell, so this is the only way persistence works). It MUST refuse to intercept when the command tail contains shell operators (`;&|<>` backtick `$()`), otherwise `cd /foo && cmd` is mis-parsed as `cd "/foo && cmd"`, bash never runs, and a synthetic "no such directory" containing the full pipeline is returned. Tests in src/tools-bash-cd.test.ts.
-- Use the Edit/Write tools normally for code edits — including large multi-line replacements. The old "Edit tool duplicates files" workaround (use a Python script with src.replace) is retired; if a real corruption recurs, investigate and fix the Edit tool itself rather than reaching for python. When Edit/Write are unavailable (e.g. ASK mode at session start, even if mode is later toggled — tool list is baked at session start, not dynamic), use `sed`/`awk`/`tee`/heredocs from Bash, not python3.
-- minimal-agent has an opt-in `--thinking-display <summarized|omitted>` flag (also `MINIMAL_AGENT_THINKING_DISPLAY` env, also `Agent({thinkingDisplay})` programmatic) that threads `thinking: {type:"adaptive", display}` onto every API call. Needed because Claude Opus 4.7 and Mythos Preview default `thinking.display` to `"omitted"` server-side (only encrypted signature, no `thinking_delta` events stream), unlike Sonnet 4.6 / Opus 4.6 which default to `"summarized"`. Symptom: spinner spins for a minute on opus-4.7 with zero visible thinking. Fix is opt-in / model-agnostic, not hard-coded per-model. Docs: platform.claude.com/docs/en/build-with-claude/adaptive-thinking.md "Controlling thinking display". Tests in src/agent.thinking-display.test.ts.
-- Plugin tools (TUIResult kind:"tool_result") can set an optional `display?: string` field to get the same no-truncation, ANSI-passthrough transcript rendering that built-in Edit/Write get via ToolExecResult.display. The agent's plugin branch in src/agent.ts (~line 558) reads pluginResult.display into the local `display` var passed to formatToolPreview. Without it, plugin output falls into the generic content.slice(0,200) + c.dim() truncation path — which is what broke show_diff rendering until May 2026 (rendered ANSI diff was returned in `content` only, getting cut at 200 chars and color-stripped). Convention: put a short/raw round-trip payload in `content` (saves model tokens) and the rich ANSI render in `display`.
-- Convention in this repo: `tmp/*-tmux-driver.ts` smoke harnesses are kept around as repeatable regression guards (sep-tmux-driver, queue-tmux-driver, truncation-tmux-driver, streaming-status-tmux-driver, diff-render-tmux, etc.). Don't delete them after a one-off verification — leave the driver next to the others with a header comment explaining what bug it guards and the tmux invocation to reproduce.
-- minimal-agent has a global user config at `~/.minimal-agent/config.jsonc` (preferred) or `~/.minimal-agent/config.json` (legacy fallback), overridable via `MINIMAL_AGENT_CONFIG` env var. Loaded by `src/config.ts:loadUserConfig()` which delegates parsing to `src/jsonc.ts:parseJsonc` (a 50-line zero-dep JSONC stripper supporting `// line`, `/* block */` comments and trailing commas, with string-aware escape handling). Supported keys: `model`, `effort` (low|medium|high|max), `thinkingDisplay` (summarized|omitted), `spinner`, `formatter`. Precedence (highest first): CLI flag > env var > config file > built-in default. Bad/missing config = silent `{}` fallback (won't crash startup; logs to stderr only when DEBUG=1). Tests in src/config.test.ts and src/jsonc.test.ts.
-- NEVER use `git commit --no-gpg-sign` (or any flag/config that bypasses GPG signing) in this user's repos. Commits must always be signed. If signing fails (e.g. "No passphrase given"), stop and ask the user to unlock their GPG key — do not offer or suggest skipping the signature as a workaround.
-- src/tools.ts `execBash` was originally `spawnSync` which blocked the entire Node/Bun event loop for the duration of every shell command — spinner stopped, keystrokes weren't echoed, redraws stalled. Visible to user as "the TUI is frozen while Bash runs". Fixed May 2026 by switching to async `Bun.spawn` with stdout/stderr piped via `new Response(proc.stdout).text()`, plus full signal/abort plumbing (signal listener → SIGTERM → 2s → SIGKILL escalation). All 6 tool execs (`Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep`) now async; `executeTool(name, input, {signal?})` returns `Promise<ToolExecResult>`. `_aborted` flag preserved through `executeTool` for the renderer, stripped by new `stripInternalFields` export before API serialization. Glob and Grep still use `spawnSync` internally — same blocking bug applies; convert when next touched.
-- Live-area status row format in `src/live-area-status.ts` is `${slot} ${label}` (TWO spaces, not one). Reason: nerd-font icons like `󱁤` (U+F1064 nf-md-tools) live in Supplementary PUA-A and render as 2 visual cells in nerd-font terminals, but our `displayWidth` in `src/term-width.ts` counts PUA codepoints as 1. With a 1-space separator the icon visually butts against the label ("󱁤Running Bash"). Don't "simplify" back to 1 space without also fixing the width model — and fixing the width model breaks column tracking elsewhere because nerd glyph widths depend on font config. Tests in `src/live-area-status.test.ts` assert the 2-space form ("* Thinking", "* hi").
-- The agent has TWO API-contract invariants for the post-tool user message that are easy to break independently: 1. In src/agent.ts run() loop (~line 620), `tool_result` blocks MUST be the first blocks of the user message that follows a tool_use turn — anything (text, `<mode-change>` attachment, queued user injection) before them produces "tool_use ids were found without tool_result blocks immediately after" 400. So order is: tool_results → mode-change attachment → queued text. 2. `Agent.rollbackPendingTurn()` (src/agent.ts ~306) MUST refuse to pop a user message that contains tool_result blocks. Otherwise a single failed turn cascades — the rollback strips the tool_result, leaving a dangling assistant tool_use, and every subsequent send 400s forever with the same toolu_id. Tested in src/agent.test.ts under "Agent.run with ModeManager". Both bugs surfaced together when the user toggled modes mid-tool: ModeManager's pending `<mode-change>` attachment landed in front of tool_result, the request 400'd, rollback wiped the tool_result, and `?`/`??`/`???` retries all 400'd until process restart.
-- minimal-agent's local HTTP capture dir was renamed `.node-net-dbg/` → `.net-dbg/` (May 2026). The writer in src/net-dbg.ts emits to `${cwd}/.net-dbg/<epoch>-<human-date>-minimal-agent/` and is gated by `MINIMAL_AGENT_NET_DBG=1`. References to `.node-net-dbg` that remain in the codebase (src/cache.ts, src/headers.ts, src/metadata.ts, src/tools.ts, src/headers.test.ts, src/metadata.test.ts, src/index.ts:13, src/net-dbg.ts:2 doc) are intentional — they cite the **upstream Claude Code CLI's** capture dir (which is `.node-net-dbg/` because the upstream is a Node.js process), used as reverse-engineering ground truth and as a test fixture path under `~/Projects/claude-cli-versions/.node-net-dbg`. Don't blanket-rename those.
-<!-- memories-end -->
+The body is **not** shown to the user — the tag is stripped from the
+visible stream, the same way `<tui::interleave-thinking>` is stripped.
+A short dim confirmation line is rendered in its place so the user can
+see that a save happened (e.g. `· memory saved [project]: ...`).
+
+Whitespace inside the body is collapsed to a single line — keep
+memories short and self-contained. Empty bodies are silently ignored.
+
+## Updating or correcting a memory
+
+There's no in-band edit/delete mechanism. To revise a memory, edit the
+underlying file directly with the `Edit` or `Write` tool:
+
+- Global: `~/.minimal-agent/memory.md`
+- Project: `~/.minimal-agent/projects/<absolute-cwd>/memory.md`
+
+If you've learned that an old memory is wrong, **say so in the new
+memory** ("Supersedes the May-2026 note about X: actually Y") and edit
+the file to remove the outdated bullet. Stale memories are worse than
+no memories.
+
+## When to consult memory
+
+You don't — it's already in your system prompt as the `## Saved memories`
+section, loaded fresh every session by this plugin's `memory_load`
+prompt fragment. Treat each bullet as a standing instruction or a known
+fact about the project / user.
