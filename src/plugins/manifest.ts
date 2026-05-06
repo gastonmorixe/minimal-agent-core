@@ -19,6 +19,7 @@ import type {
   ManifestHandler,
   ManifestHandlerEntry,
   ManifestHookSubscription,
+  ManifestLiveAreaSlot,
   ManifestMode,
   ManifestPromptFragment,
   ManifestTrigger,
@@ -93,6 +94,9 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   if (obj.promptFragments != null && !Array.isArray(obj.promptFragments)) {
     err("promptFragments must be an array if present")
   }
+  if (obj.liveAreaSlots != null && !Array.isArray(obj.liveAreaSlots)) {
+    err("liveAreaSlots must be an array if present")
+  }
   if (obj.permissions != null) {
     if (!Array.isArray(obj.permissions)) err("permissions must be an array if present")
     for (const p of obj.permissions as unknown[]) {
@@ -140,16 +144,24 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     promptFragments.push(parsePromptFragment(fragsRaw[i], i, manifestPath, seenFragIds))
   }
 
+  const seenSlotIds = new Set<string>()
+  const liveAreaSlots: ManifestLiveAreaSlot[] = []
+  const slotsRaw = (obj.liveAreaSlots ?? []) as unknown[]
+  for (let i = 0; i < slotsRaw.length; i++) {
+    liveAreaSlots.push(parseLiveAreaSlot(slotsRaw[i], i, manifestPath, seenSlotIds))
+  }
+
   if (
     tuis.length === 0 &&
     modes.length === 0 &&
     events.length === 0 &&
     hooks.length === 0 &&
-    promptFragments.length === 0
+    promptFragments.length === 0 &&
+    liveAreaSlots.length === 0
   ) {
     err(
-      "manifest must declare at least one tuis, modes, events, hooks, or " +
-        "promptFragments entry",
+      "manifest must declare at least one tuis, modes, events, hooks, " +
+        "promptFragments, or liveAreaSlots entry",
     )
   }
 
@@ -164,9 +176,66 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     modes,
     events,
     hooks,
+    liveAreaSlots,
     permissions: (obj.permissions as string[] | undefined) ?? [],
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
   }
+}
+
+/**
+ * Validate a single `liveAreaSlots[i]` entry.
+ */
+function parseLiveAreaSlot(
+  raw: unknown,
+  index: number,
+  manifestPath: string,
+  seenIds: Set<string>,
+): ManifestLiveAreaSlot {
+  const at = `liveAreaSlots[${index}]`
+  const err = (msg: string) => {
+    throw new ManifestError(`${at}: ${msg}`, manifestPath)
+  }
+  if (!isObject(raw)) err("live-area slot must be an object")
+  const obj = raw as Record<string, unknown>
+
+  const id = requireString(obj, "id", err)
+  if (!ID_RE.test(id)) err(`live-area slot id must match ${ID_RE}`)
+  if (seenIds.has(id)) err(`duplicate live-area slot id: ${id}`)
+  seenIds.add(id)
+
+  const handler = parseHandlerEntry(obj.handler, at, manifestPath)
+
+  let position: "header" | "footer" | undefined
+  if (obj.position != null) {
+    if (obj.position !== "header" && obj.position !== "footer") {
+      err(`position must be "header" or "footer" (got: ${JSON.stringify(obj.position)})`)
+    }
+    position = obj.position as "header" | "footer"
+  }
+
+  let refreshMs: number | undefined
+  if (obj.refreshMs != null) {
+    if (typeof obj.refreshMs !== "number" || !Number.isFinite(obj.refreshMs) || obj.refreshMs < 0) {
+      err(`refreshMs must be a non-negative number (got: ${JSON.stringify(obj.refreshMs)})`)
+    }
+    refreshMs = obj.refreshMs as number
+  }
+
+  let timeoutMs: number | undefined
+  if (obj.timeoutMs != null) {
+    if (typeof obj.timeoutMs !== "number" || !Number.isFinite(obj.timeoutMs) || obj.timeoutMs < 0) {
+      err(`timeoutMs must be a non-negative number (got: ${JSON.stringify(obj.timeoutMs)})`)
+    }
+    timeoutMs = obj.timeoutMs as number
+  }
+
+  for (const k of Object.keys(obj)) {
+    if (!["id", "handler", "position", "refreshMs", "timeoutMs"].includes(k)) {
+      err(`unknown live-area slot key: ${JSON.stringify(k)}`)
+    }
+  }
+
+  return { id, handler, position, refreshMs, timeoutMs }
 }
 
 /**

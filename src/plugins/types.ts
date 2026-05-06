@@ -170,6 +170,21 @@ export interface ManifestFile {
    */
   hooks?: ManifestHookSubscription[]
   /**
+   * Live-area slots contributed by this plugin. Each slot is a periodic
+   * producer of a single line of ANSI text rendered into the REPL's
+   * sticky bottom live area — either above the input (`position: "header"`)
+   * or below it (`position: "footer"`).
+   *
+   * Use this for ambient, non-interactive status that should persist
+   * without competing with scrollback (e.g. quota %, git branch state,
+   * background-job progress). Slots run on a fixed interval; first
+   * invocation fires immediately at REPL start. See
+   * {@link ManifestLiveAreaSlot}.
+   *
+   * Optional; may be empty.
+   */
+  liveAreaSlots?: ManifestLiveAreaSlot[]
+  /**
    * Permission grants this plugin requires. Each entry follows the form
    * `hooks:CHANNEL` or `hooks:CHANNEL.*` (wildcard). The loader denies
    * any hook subscription whose channel isn't covered by an entry here.
@@ -359,6 +374,78 @@ export interface ManifestHookSubscription {
 export type EventHandler<TPayload = unknown> = (
   ctx: EventHandlerContext<TPayload>,
 ) => void | Promise<void>
+
+/**
+ * One live-area slot contributed by a plugin.
+ *
+ * A slot is a periodic, non-interactive producer of a single line of
+ * ANSI text that the REPL paints into its sticky bottom live area. Two
+ * positions are supported:
+ *
+ * - `"header"` — rendered above the input, alongside other decoration
+ *   rows (queued user messages, etc.). Useful for "what's coming next"
+ *   info.
+ * - `"footer"` — rendered BELOW the input, pinned to the very bottom of
+ *   the terminal. Useful for ambient status that should never compete
+ *   with what the user is typing (quota %, git state, etc.).
+ *
+ * The handler is invoked at REPL start (t=0) and then every
+ * `refreshMs`. It returns a string (the new value), `null` (clear the
+ * slot), or throws (error → slot cleared, diagnostic logged). The
+ * scheduler skips ticks while a previous invocation is still in flight,
+ * so a slow handler can't pile up.
+ */
+export interface ManifestLiveAreaSlot {
+  /** Stable id, unique within the package. */
+  id: string
+  /** How to run the producer. Module or subprocess. */
+  handler: ManifestHandlerEntry
+  /** Where in the live area to render the result. Defaults to `"footer"`. */
+  position?: "header" | "footer"
+  /**
+   * Refresh interval in milliseconds. Defaults to 60_000 (1 min).
+   * Minimum enforced by the scheduler is 1000 ms.
+   */
+  refreshMs?: number
+  /**
+   * Per-invocation deadline. If the producer hasn't resolved by this
+   * many ms, the in-flight call is abandoned and the previous value is
+   * preserved. Defaults to 5000.
+   */
+  timeoutMs?: number
+}
+
+/**
+ * Module-handler default export signature for live-area slots.
+ *
+ * Returns the new line to render, `null` to clear the slot, or throws
+ * to clear and log a diagnostic.
+ */
+export type LiveAreaHandler = (
+  ctx: LiveAreaHandlerContext,
+) => Promise<string | null> | string | null
+
+/**
+ * Runtime context passed to a live-area slot handler.
+ */
+export interface LiveAreaHandlerContext {
+  /** Plugin package directory (absolute). */
+  packageDir: string
+  /** The agent's current working directory. */
+  cwd: string
+  /** Plugin-scoped environment. */
+  env: Record<string, string>
+  /** Aborts when the per-invocation timeout fires or the REPL is closing. */
+  abort: AbortSignal
+  /** Diagnostic stream. Writers should be lightweight; the live area is hot. */
+  stderr: NodeJS.WriteStream
+  /**
+   * Monotonically increasing tick counter for this slot. `0` for the
+   * first call, `1` for the second, etc. Useful for slots that want to
+   * stagger heavy work (e.g. only refresh "real" data every N ticks).
+   */
+  tick: number
+}
 
 /**
  * One named operating mode.
@@ -666,8 +753,34 @@ export interface LoadedPlugin {
    * manifest's `hooks` order. Empty when the manifest declares none.
    */
   hookSubs: ResolvedHookSub[]
+  /**
+   * Live-area slots resolved to invocable form. Order matches the
+   * manifest's `liveAreaSlots` order. Empty when none declared.
+   */
+  liveAreaSlots: ResolvedLiveAreaSlot[]
   /** Contents of the plugin's PROMPT.md, or null if absent. */
   prompt: string | null
+}
+
+/**
+ * A manifest live-area slot paired with its resolved handler entry.
+ *
+ * The loader produces these at load time. The REPL's live-area
+ * scheduler drives them on a fixed interval; producers receive a
+ * {@link LiveAreaHandlerContext} and return either the line to render,
+ * `null` to clear, or throw to clear-and-log.
+ */
+export interface ResolvedLiveAreaSlot {
+  /** The original manifest entry (with normalized defaults applied). */
+  definition: ManifestLiveAreaSlot
+  /** Plugin id this slot belongs to (for labeling / diagnostics). */
+  pluginId: string
+  /** Absolute path to the package directory (the slot's `cwd` for subprocess). */
+  packageDir: string
+  /** Absolute path to the handler entry (module path or executable). */
+  entryAbsolute: string
+  /** Invokes the producer once. */
+  invoke: (ctx: LiveAreaHandlerContext) => Promise<string | null>
 }
 
 /**

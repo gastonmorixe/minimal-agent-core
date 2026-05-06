@@ -332,3 +332,110 @@ describe("parseManifest / hooks", () => {
     )
   })
 })
+
+describe("parseManifest / liveAreaSlots", () => {
+  // Minimal manifest shell: no tools/modes/events — `liveAreaSlots`
+  // alone is a valid contribution shape (the manifest parser's
+  // "must declare at least one of …" gate accepts it).
+  const base = {
+    id: "quota-status",
+    name: "Quota Status",
+    version: "0.1.0",
+    description: "tests",
+  }
+
+  const goodSlot = {
+    id: "quota",
+    handler: { type: "module", path: "./handler.ts", export: "default" },
+    position: "footer",
+    refreshMs: 60_000,
+    timeoutMs: 4_000,
+  }
+
+  it("parses a minimal liveAreaSlots-only manifest", () => {
+    const m = parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x")
+    expect(m.liveAreaSlots).toHaveLength(1)
+    expect(m.liveAreaSlots![0]!.id).toBe("quota")
+    expect(m.liveAreaSlots![0]!.position).toBe("footer")
+    expect(m.liveAreaSlots![0]!.refreshMs).toBe(60_000)
+    expect(m.liveAreaSlots![0]!.timeoutMs).toBe(4_000)
+  })
+
+  it("accepts a manifest with NO tuis/modes/events/hooks/promptFragments when liveAreaSlots is non-empty", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x"),
+    ).not.toThrow()
+  })
+
+  it("still rejects a manifest with EVERYTHING empty", () => {
+    expect(() => parseManifest({ ...base }, "/x")).toThrow(/at least one/i)
+    expect(() => parseManifest({ ...base, liveAreaSlots: [] }, "/x")).toThrow(/at least one/i)
+  })
+
+  it("error message lists liveAreaSlots in the at-least-one set", () => {
+    expect(() => parseManifest({ ...base }, "/x")).toThrow(/liveAreaSlots/)
+  })
+
+  it("rejects liveAreaSlots that isn't an array", () => {
+    expect(() => parseManifest({ ...base, liveAreaSlots: { wrong: "shape" } }, "/x")).toThrow(
+      /liveAreaSlots must be an array/,
+    )
+  })
+
+  it("rejects duplicate slot ids within one package", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [goodSlot, { ...goodSlot }] }, "/x"),
+    ).toThrow(/duplicate live-area slot id: quota/)
+  })
+
+  it("rejects slot id with invalid characters", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, id: "Bad ID!" }] }, "/x"),
+    ).toThrow(/live-area slot id must match/)
+  })
+
+  it("rejects unknown position values", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, position: "sidebar" }] }, "/x"),
+    ).toThrow(/position must be "header" or "footer"/)
+  })
+
+  it("accepts position omitted (will default at resolve time)", () => {
+    const slot = { ...goodSlot } as Record<string, unknown>
+    delete slot.position
+    const m = parseManifest({ ...base, liveAreaSlots: [slot] }, "/x")
+    expect(m.liveAreaSlots![0]!.position).toBeUndefined()
+  })
+
+  it("rejects negative or non-finite refreshMs", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, refreshMs: -1 }] }, "/x"),
+    ).toThrow(/refreshMs must be a non-negative number/)
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, refreshMs: "soon" }] }, "/x"),
+    ).toThrow(/refreshMs/)
+  })
+
+  it("rejects negative or non-finite timeoutMs", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, timeoutMs: -1 }] }, "/x"),
+    ).toThrow(/timeoutMs must be a non-negative number/)
+  })
+
+  it("rejects unknown keys on a slot entry", () => {
+    expect(() =>
+      parseManifest(
+        { ...base, liveAreaSlots: [{ ...goodSlot, color: "red" }] },
+        "/x",
+      ),
+    ).toThrow(/unknown live-area slot key/)
+  })
+
+  it("rejects missing handler", () => {
+    const noHandler: Record<string, unknown> = { ...goodSlot }
+    delete noHandler.handler
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [noHandler] }, "/x"),
+    ).toThrow()
+  })
+})

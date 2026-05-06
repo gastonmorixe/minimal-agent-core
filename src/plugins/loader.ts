@@ -34,16 +34,20 @@ import { parseManifest, ManifestError } from "./manifest.ts"
 import type {
   EventHandler,
   EventHandlerContext,
+  LiveAreaHandler,
+  LiveAreaHandlerContext,
   LoadedPlugin,
   ManifestEventSubscription,
   ManifestFile,
   ManifestHandler,
+  ManifestLiveAreaSlot,
   ManifestMode,
   ManifestPromptFragment,
   PromptFragmentContext,
   PromptFragmentHandler,
   ResolvedEventSub,
   ResolvedHandler,
+  ResolvedLiveAreaSlot,
   TUIContext,
   TUIHandler,
   TUIResult,
@@ -330,6 +334,7 @@ export class PluginLoader {
         handlers: [], // filled after collision resolution
         eventSubs: [], // filled after handler resolution
         hookSubs: [], // filled after hook permission/shape checks
+        liveAreaSlots: [], // filled after handler resolution
         prompt,
       })
       seenIds.add(manifest.id)
@@ -452,6 +457,15 @@ export class PluginLoader {
         registerEventSub(eventBus, pkg.packageDir, r, logger)
       }
 
+      // Resolve live-area slots. Same lenient policy as event subs: a
+      // missing/broken slot handler doesn't disqualify the plugin's tools.
+      const resolvedSlots: ResolvedLiveAreaSlot[] = []
+      for (const slot of pkg.manifest.liveAreaSlots ?? []) {
+        const r = await resolveLiveAreaSlot(slot, pkg.manifest.id, pkg.packageDir, logger)
+        if (r) resolvedSlots.push(r)
+      }
+      pkg.liveAreaSlots = resolvedSlots
+
       finalPlugins.push(pkg)
     }
 
@@ -539,6 +553,20 @@ export class PluginLoader {
     const out: { pluginId: string; sub: ResolvedEventSub }[] = []
     for (const pkg of this.plugins) {
       for (const s of pkg.eventSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
+    }
+    return out
+  }
+
+  /**
+   * Live-area slots contributed by loaded plugins, flattened across all
+   * packages. The REPL's live-area scheduler iterates this once at start
+   * to wire periodic producers into the sticky bottom UI. Order is
+   * stable (plugin-load order, then manifest declaration order).
+   */
+  getLiveAreaSlots(): ReadonlyArray<ResolvedLiveAreaSlot> {
+    const out: ResolvedLiveAreaSlot[] = []
+    for (const pkg of this.plugins) {
+      for (const s of pkg.liveAreaSlots) out.push(s)
     }
     return out
   }
@@ -1200,5 +1228,102 @@ async function invokeEventSubprocess(
       const p = parsed as { emit: string; payload?: unknown }
       ctx.emit(p.emit, p.payload)
     }
+  }
+}
+
+/**
+ * Resolve a single {@link ManifestLiveAreaSlot} to invocable form.
+ *
+ * Module handlers must `export default` a {@link LiveAreaHandler}. The
+ * loader applies normalized defaults (position=`"footer"`,
+ * refreshMs=60_000, timeoutMs=5000) before invocation so the scheduler
+ * never has to second-guess them.
+ *
+ * Returns `null` (with a logged diagnostic) on missing module / bad
+ * default export / missing executable. The plugin's tools and other
+ * subscriptions are NOT affected — broken slot ≠ broken plugin.
+ */
+async function resolveLiveAreaSlot(
+  slot: ManifestLiveAreaSlot,
+  pluginId: string,
+  packageDir: string,
+  logger: (msg: string) => void,
+): Promise<ResolvedLiveAreaSlot | null> {
+  const definition: ManifestLiveAreaSlot = {
+    ...slot,
+    position: slot.position ?? "footer",
+    refreshMs: slot.refreshMs ?? 60_000,
+    timeoutMs: slot.timeoutMs ?? 5000,
+  }
+
+  if (slot.handler.type === "module") {
+    const abs = resolvePath(packageDir, slot.handler.path)
+    if (!existsSync(abs)) {
+      logger(`${packageDir}: live-area slot handler module not found: ${abs}`)
+      return null
+    }
+    let mod: { default?: LiveAreaHandler }
+    try {
+      mod = await import(abs)
+    } catch (e) {
+      logger(
+        `${packageDir}: failed to import live-area slot handler ${abs}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      )
+      return null
+    }
+    const fn = mod.default
+    if (typeof fn !== "function") {
+      logger(`${packageDir}: live-area slot handler ${abs} has no default export function`)
+      return null
+    }
+    return {
+      definition,
+      pluginId,
+      packageDir,
+      entryAbsolute: abs,
+      invoke: async (ctx: LiveAreaHandlerContext) => {
+        const out = await fn(ctx)
+        if (out == null) return null
+        if (typeof out !== "string") {
+          throw new Error(
+            `live-area slot "${slot.id}" returned non-string (${typeof out}); expected string | null`,
+          )
+        }
+        return out
+      },
+    }
+  }
+
+  // subprocess
+  const cmd = slot.handler.command
+  const exe = cmd[0]
+  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
+  if (!existsSync(exeAbs)) {
+    logger(`${packageDir}: live-area slot executable not found: ${exeAbs}`)
+    return null
+  }
+  return {
+    definition,
+    pluginId,
+    packageDir,
+    entryAbsolute: exeAbs,
+    invoke: async (ctx: LiveAreaHandlerContext) => {
+      const proc = Bun.spawn([exeAbs, ...cmd.slice(1)], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "inherit",
+        cwd: ctx.packageDir,
+        env: ctx.env,
+      })
+      const envelope = JSON.stringify({ tick: ctx.tick, cwd: ctx.cwd, env: ctx.env })
+      void proc.stdin.write(envelope + "\n")
+      void proc.stdin.end()
+      const out = await new Response(proc.stdout).text()
+      await proc.exited
+      const trimmed = out.replace(/\n+$/, "")
+      return trimmed.length === 0 ? null : trimmed
+    },
   }
 }

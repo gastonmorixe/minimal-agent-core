@@ -517,3 +517,74 @@ describe("EditorController — multiline & growth", () => {
     ctrl.stop()
   })
 })
+
+describe("EditorController — footer rows (live-area slots)", () => {
+  it("setFooterLines appends rows BELOW the editor content; cursor stays on the editor row", () => {
+    const { ctrl, compositor } = make({ columns: 40 })
+    ctrl.start()
+    ctrl.setFooterLines(["quota 5h 12% · 7d 3%"])
+    const last = compositor.last()!
+    // Layout: [status, ...decoration, ...content, ...footer]
+    // No status text so status row is empty (""), no decoration, 1 content row,
+    // 1 footer row.
+    expect(last.lines).toHaveLength(3)
+    expect(last.lines[0]).toBe("") // empty status row
+    expect(last.lines[1]).toContain("> ") // editor prompt
+    expect(last.lines[2]).toBe("quota 5h 12% · 7d 3%") // footer
+    // Cursor sits on the editor row — footer rows are below it.
+    expect(last.cursor).not.toBeNull()
+    expect(last.cursor!.row).toBe(1)
+    ctrl.stop()
+  })
+
+  it("setFooterLines bumps liveHeight by the number of footer rows", () => {
+    const { ctrl, compositor } = make({ columns: 40 })
+    ctrl.start()
+    const heightBefore = compositor.liveHeight
+    ctrl.setFooterLines(["row1", "row2"])
+    expect(compositor.liveHeight).toBe(heightBefore + 2)
+    ctrl.setFooterLines(["row1"])
+    expect(compositor.liveHeight).toBe(heightBefore + 1)
+    ctrl.setFooterLines([])
+    expect(compositor.liveHeight).toBe(heightBefore)
+    ctrl.stop()
+  })
+
+  it("repaint is shallow-deduped (no setLiveArea call when content unchanged)", () => {
+    const { ctrl, compositor } = make({ columns: 40 })
+    ctrl.start()
+    ctrl.setFooterLines(["same"])
+    const before = compositor.liveAreaCalls.length
+    ctrl.setFooterLines(["same"]) // identical → must not repaint
+    expect(compositor.liveAreaCalls.length).toBe(before)
+    ctrl.setFooterLines(["different"]) // change → must repaint
+    expect(compositor.liveAreaCalls.length).toBeGreaterThan(before)
+    ctrl.stop()
+  })
+
+  it("footer coexists with status, decoration, and indicator without disturbing them", () => {
+    const { ctrl, compositor } = make({ columns: 40 })
+    ctrl.start()
+    ctrl.setStatus("· thinking")
+    ctrl.setDecorationLines(["queued: hi"])
+    ctrl.setFooterLines(["quota 0%"])
+    const last = compositor.last()!
+    // Layout: [status, decoration, ...content, footer]
+    expect(last.lines[0]).toContain("thinking")
+    expect(last.lines[1]).toContain("queued: hi")
+    expect(last.lines.at(-1)).toBe("quota 0%")
+    // Editor cursor row is below status (1) + decoration (1) = 2.
+    expect(last.cursor!.row).toBe(2)
+    ctrl.stop()
+  })
+
+  it("setFooterLines([]) clears the footer", () => {
+    const { ctrl, compositor } = make({ columns: 40 })
+    ctrl.start()
+    ctrl.setFooterLines(["a", "b"])
+    expect(compositor.last()!.lines.length).toBe(4) // status + 1 content + 2 footer
+    ctrl.setFooterLines([])
+    expect(compositor.last()!.lines.length).toBe(2) // status + 1 content
+    ctrl.stop()
+  })
+})
