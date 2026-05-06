@@ -45,6 +45,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Agent, c, runRepl } from "./agent.ts"
 import { normalizeArgs } from "./cli-args.ts"
+import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { planCommand } from "./cli/command-plan.ts"
 import { getAuth } from "./auth.ts"
 import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
@@ -480,68 +481,22 @@ function formatQuotaSummary(rl: Map<string, string>): string {
 /**
  * Extract a non-interactive prompt from command-line args.
  *
- * Three forms supported (checked in this order):
- * 1. `--prompt <text>` — explicit flag
- * 2. `-` — read from stdin (for piping: `echo hi | minimal-agent -`)
- * 3. Bare positional arg — first non-flag, non-flag-value argument
+ * Wraps the pure {@link extractPromptFromArgs} (in `./extract-prompt.ts`)
+ * by handling the stdin-slurp case here. Lifting the classification out
+ * keeps it unit-testable — see `src/extract-prompt.test.ts`.
  *
- * Returns `null` if none of the three forms is present, in which case
- * the agent enters interactive REPL mode instead.
- *
- * @returns The prompt text, or `null` for interactive mode
+ * @returns The prompt text, or `null` for interactive REPL mode.
  */
 async function extractPrompt(): Promise<string | null> {
-  // --prompt "text"
-  const promptIdx = args.indexOf("--prompt")
-  if (promptIdx !== -1 && args[promptIdx + 1]) {
-    return args[promptIdx + 1]
-  }
-
-  // "-" means read from stdin
-  if (args.includes("-")) {
+  const src = extractPromptFromArgs(args)
+  if (src.kind === "literal") return src.text
+  if (src.kind === "stdin") {
     const chunks: Buffer[] = []
     for await (const chunk of process.stdin) {
       chunks.push(chunk as Buffer)
     }
     return Buffer.concat(chunks).toString("utf-8").trim()
   }
-
-  // Bare positional: any arg that isn't a flag or flag value
-  const flagsWithValues = new Set([
-    "--model",
-    "--prompt",
-    "--formatter",
-    "--effort",
-    "--spinner",
-    "--thinking-display",
-  ])
-  const flagsNoValue = new Set([
-    "--debug",
-    "--verbose",
-    "--list-models",
-    "--list-flags",
-    "--list-spinners",
-    "--help",
-    "-h",
-    "-",
-    "--skip-quota",
-    "--show-hidden-chars",
-  ])
-  const skipNext = new Set<number>()
-  for (let i = 0; i < args.length; i++) {
-    if (flagsWithValues.has(args[i])) {
-      skipNext.add(i)
-      skipNext.add(i + 1)
-    } else if (flagsNoValue.has(args[i])) {
-      skipNext.add(i)
-    }
-  }
-  for (let i = 0; i < args.length; i++) {
-    if (!skipNext.has(i) && !args[i].startsWith("--")) {
-      return args[i]
-    }
-  }
-
   return null
 }
 
