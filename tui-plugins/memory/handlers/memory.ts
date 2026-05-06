@@ -110,7 +110,16 @@ export default async function memoryHandler(
   // (handlers/load.ts) treats the file as opaque text and never parses
   // bullets, so old and new formats coexist freely in the same file.
   const ts = localIsoSeconds()
-  const bullet = `- [${ts}] ${oneLine}\n`
+  // Optional `[session:<sid>]` field (UUID v4) lets the user trace a
+  // memory back to the originating session — `~/.minimal-agent/sessions/<sid>.jsonl`
+  // holds the full transcript. Omitted when no session id is plumbed
+  // through (older agent versions, ad-hoc tests). See PROMPT.md.
+  //
+  // Backward compatibility: load.ts treats memory files as opaque text,
+  // so legacy bullets without timestamp/session prefix coexist freely.
+  const sid = ctx.env.MINIMAL_AGENT_SESSION_ID?.trim()
+  const sidField = sid ? ` [session:${sid}]` : ""
+  const bullet = `- [${ts}]${sidField} ${oneLine}\n`
 
   try {
     mkdirSync(dirname(path), { recursive: true })
