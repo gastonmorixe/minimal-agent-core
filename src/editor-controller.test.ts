@@ -153,7 +153,7 @@ describe("EditorController — typing & submit", () => {
     stdin.send("\x1b[13;2u")
     stdin.send("line3")
     stdin.send("\r")
-    expect(streamed).toEqual(["\n> line1\n  line2\n  line3\n"])
+    expect(streamed).toEqual(["\n\n> line1\n  line2\n  line3\n"])
     // After the commit + clear, the live area shows a fresh empty prompt.
     expect(compositor.last().lines).toEqual(["", "> "])
     ctrl.stop()
