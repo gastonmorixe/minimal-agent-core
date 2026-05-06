@@ -51,6 +51,21 @@ export interface UserConfig {
    * Skip the startup quota check.
    */
   skipQuota?: boolean
+  /**
+   * Show the startup tree (banner + rows + closer). When unset, the
+   * default is `true` for interactive sessions and `false` for
+   * non-interactive ones (`--prompt`, `-`, bare-positional prompt).
+   * Override at runtime via `--header` / `--no-header` or
+   * `MINIMAL_AGENT_HEADER=0|1`.
+   */
+  header?: boolean
+  /**
+   * Initial mode id (e.g. `"ask"`). Use `"none"` to force no mode even
+   * when the default would pick one. Override via `--mode <id>` or
+   * `MINIMAL_AGENT_MODE`. Default: `"ask"` for non-interactive,
+   * plugin-declared default for interactive.
+   */
+  mode?: string
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -115,6 +130,8 @@ export function loadUserConfig(): UserConfig {
   if (typeof obj.formatter === "string" && obj.formatter.length > 0) out.formatter = obj.formatter
   if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
   if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
+  if (typeof obj.header === "boolean") out.header = obj.header
+  if (typeof obj.mode === "string" && obj.mode.length > 0) out.mode = obj.mode
 
   return out
 }

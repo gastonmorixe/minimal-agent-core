@@ -46,6 +46,7 @@ import { fileURLToPath } from "node:url"
 import { Agent, c, runRepl } from "./agent.ts"
 import { normalizeArgs } from "./cli-args.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
+import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
 import { planCommand } from "./cli/command-plan.ts"
 import { getAuth } from "./auth.ts"
 import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
@@ -117,6 +118,17 @@ const spinnerIdx = args.indexOf("--spinner")
 // Global user config (~/.minimal-agent/config.json). Lowest precedence:
 // CLI flag > env var > config file > built-in default.
 const userConfig = loadUserConfig()
+
+// Whether to print the startup tree (banner + rows + closer). The
+// default is hidden in non-interactive mode (`--prompt`, `-`, or a
+// bare-positional prompt). See `resolveShowHeader` for the precedence
+// ladder. Hoisted to module scope so the row/spinner/closer helpers
+// can short-circuit cleanly without threading the flag everywhere.
+const SHOW_HEADER = resolveShowHeader({
+  args,
+  env: { HEADER: process.env.MINIMAL_AGENT_HEADER },
+  config: { header: userConfig.header },
+})
 
 const spinnerName =
   spinnerIdx !== -1 && args[spinnerIdx + 1]
@@ -199,6 +211,8 @@ function printHelp(): void {
     `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
     `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
     `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
+    `    ${c.cyan("--mode")} ${c.dim("<id|none>")}         Initial mode ${c.dim("(default: ask in non-interactive, plugin default otherwise)")}`,
+    `    ${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}      Force startup tree on/off ${c.dim("(default: hidden in non-interactive)")}`,
     `    ${c.cyan("-d")}, ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
     `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
     `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
@@ -226,6 +240,8 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
     `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,
+    `    ${c.cyan("MINIMAL_AGENT_HEADER")}     Force startup tree: ${c.dim("0|1 (default: hidden in non-interactive)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_MODE")}       Initial mode id (or ${c.dim('"none"')} to disable)`,
     `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
     `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
     `    ${c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1")}       Skip startup quota check`,
@@ -243,6 +259,7 @@ function printHelp(): void {
 }
 
 function printStartupHeader(): void {
+  if (!SHOW_HEADER) return
   const by = c.faintWhite(c.italic("by"))
   const author = c.faintWhite(c.italic("Gaston Morixe"))
   const sep = c.faintWhite("·")
@@ -297,6 +314,7 @@ function padTo(line: string, targetCol: number): string {
 let lastStartupRow: { label: string; value: string } | null = null
 
 function printStartupRow(label: string, value: string): void {
+  if (!SHOW_HEADER) return
   console.error(`  ${c.faintWhite("│")} ${c.sky(label.padEnd(9))}  ${value}`)
   lastStartupRow = { label, value }
 }
@@ -311,6 +329,7 @@ function printStartupRow(label: string, value: string): void {
  * render.
  */
 function closeStartupTree(): void {
+  if (!SHOW_HEADER) return
   if (!lastStartupRow) return
   const { label, value } = lastStartupRow
   lastStartupRow = null
@@ -340,6 +359,11 @@ function startStartupRowSpinner(
   ok(value: string): void
   fail(value: string): void
 } {
+  // Header suppressed (typical for non-interactive `--prompt` runs):
+  // no rows, no spinner, no settle output. Callers don't need to know.
+  if (!SHOW_HEADER) {
+    return { ok() {}, fail() {} }
+  }
   const PIPE = `  ${c.faintWhite("│")} `
   const prefix = `${PIPE}${c.sky(label.padEnd(9))}  `
 
@@ -572,8 +596,22 @@ async function main() {
     if (bits.length === 0) bits.push("prompt block")
     printStartupRow("plugins", bits.join(" · "))
   }
-  const modeManager =
-    loadedModes.length > 0 ? new ModeManager(loadedModes, loader.getDefaultModeId()) : null
+  // Resolve the initial mode. In non-interactive (--prompt/`-`/positional)
+  // we default to ASK so one-shot runs are read-only by default; the user
+  // opts out via `--mode none`, `MINIMAL_AGENT_MODE=none`, or
+  // `config.mode = "none"`. See `resolveInitialModeId` for full precedence.
+  const initialModeId =
+    loadedModes.length > 0
+      ? resolveInitialModeId(
+          {
+            args,
+            env: { MODE: process.env.MINIMAL_AGENT_MODE },
+            config: { mode: userConfig.mode },
+          },
+          loader.getDefaultModeId(),
+        )
+      : null
+  const modeManager = loadedModes.length > 0 ? new ModeManager(loadedModes, initialModeId) : null
   if (modeManager?.active()) {
     printStartupRow("mode", c.bold(c.cyan(modeManager.active()!.id)))
   }
@@ -587,9 +625,7 @@ async function main() {
   // duplicate the work and re-introduce the latency we're trying to
   // eliminate. The user-facing benefit: the live area shows up
   // instantly; the quota row populates a moment later.
-  const hasQuotaSlot = loader
-    .getLiveAreaSlots()
-    .some((s) => s.definition.id === "quota")
+  const hasQuotaSlot = loader.getLiveAreaSlots().some((s) => s.definition.id === "quota")
   const shouldSkipQuota =
     !commandPlan.needsQuota ||
     args.includes("--skip-quota") ||
@@ -804,8 +840,10 @@ async function main() {
   if (prompt) {
     // Breathing room between the closed startup tree (stderr) and the
     // streamed response (stdout). The interactive REPL gets this for
-    // free via the Compositor; the non-interactive path doesn't.
-    process.stdout.write("\n")
+    // free via the Compositor; the non-interactive path doesn't. When
+    // the header is suppressed (typical for `--prompt`) there's nothing
+    // to breathe from, so skip the leading blank line — script-friendly.
+    if (SHOW_HEADER) process.stdout.write("\n")
     const formatter = formatterCmd ? new Formatter(formatterCmd, process.stdout) : null
     if (formatter) formatter.start()
 

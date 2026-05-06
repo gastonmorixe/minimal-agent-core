@@ -40,6 +40,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--effort",
   "--spinner",
   "--thinking-display",
+  "--mode",
 ])
 
 /**
@@ -62,6 +63,8 @@ export const FLAGS_NO_VALUE: ReadonlySet<string> = new Set([
   "-",
   "--skip-quota",
   "--show-hidden-chars",
+  "--header",
+  "--no-header",
 ])
 
 export type PromptSource = { kind: "literal"; text: string } | { kind: "stdin" } | { kind: "none" }
