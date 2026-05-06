@@ -76,14 +76,17 @@ Whitespace inside the body is collapsed to a single line — keep
 memories short and self-contained. Empty bodies are silently ignored.
 
 Each saved bullet is automatically prefixed with a local-time ISO 8601
-timestamp (with seconds), e.g.
-`- [2026-05-05T21:06:20-04:00] <body>`.
-This is added by the handler — don't write it yourself.
+timestamp (with seconds) and the originating session id (UUID v4), e.g.
+`- [2026-05-05T21:06:20-04:00] [session:a4da0710-fc5a-4959-bc71-c965a46d1231] <body>`.
+Both fields are added by the handler — don't write them yourself. The
+session id lets the user trace a memory back to its conversation
+(`~/.minimal-agent/sessions/<sid>.jsonl`) when they reference it.
 
-Legacy bullets saved before this prefix existed (and any hand-edited
-bullets without a `[<ts>] ` prefix) remain valid and load unchanged
-alongside timestamped ones; the loader treats memory files as opaque
-text.
+Legacy bullets saved before these prefixes existed (and any hand-edited
+bullets without a `[<ts>] ` / `[session:<sid>] ` prefix) remain valid
+and load unchanged alongside new ones; the loader treats memory files
+as opaque text. The session field is also omitted on bullets saved
+when no session id is plumbed through (e.g. ad-hoc tests).
 
 ## Updating or correcting a memory
 

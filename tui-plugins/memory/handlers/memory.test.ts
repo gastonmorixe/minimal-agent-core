@@ -220,6 +220,38 @@ describe("memory: save handler", () => {
     process.env.HOME = tmpHome
   })
 
+  it("includes [session:<sid>] field when MINIMAL_AGENT_SESSION_ID is in ctx.env", async () => {
+    const sid = "a4da0710-fc5a-4959-bc71-c965a46d1231"
+    const cwd = "/p"
+    const ctx = makeSaveCtx({ body: "with sid", cwd })
+    ctx.env = { MINIMAL_AGENT_SESSION_ID: sid }
+    await memoryHandler(ctx)
+
+    const out = readFileSync(projectMemoryPath(cwd, tmpHome), "utf-8")
+    expect(out).toMatch(
+      new RegExp("^- \\[" + TS_RE + "\\] \\[session:" + sid + "\\] with sid\\n$"),
+    )
+  })
+
+  it("omits the [session:...] field when no session id is plumbed through (back-compat)", async () => {
+    const cwd = "/p"
+    // ctx.env defaults to {} in makeSaveCtx — no MINIMAL_AGENT_SESSION_ID.
+    await memoryHandler(makeSaveCtx({ body: "no sid", cwd }))
+    const out = readFileSync(projectMemoryPath(cwd, tmpHome), "utf-8")
+    // Bullet is byte-identical to the pre-session-id format.
+    expect(out).toMatch(new RegExp("^- \\[" + TS_RE + "\\] no sid\\n$"))
+    expect(out).not.toContain("[session:")
+  })
+
+  it("treats blank/whitespace MINIMAL_AGENT_SESSION_ID as absent", async () => {
+    const cwd = "/p"
+    const ctx = makeSaveCtx({ body: "blank sid", cwd })
+    ctx.env = { MINIMAL_AGENT_SESSION_ID: "   " }
+    await memoryHandler(ctx)
+    const out = readFileSync(projectMemoryPath(cwd, tmpHome), "utf-8")
+    expect(out).not.toContain("[session:")
+  })
+
   it("non-inline-tag triggers return empty (defensive)", async () => {
     const ctx: TUIContext = {
       ...makeSaveCtx({ body: "x" }),
@@ -371,6 +403,35 @@ describe("memory: integration with PluginLoader", () => {
     expect(block).toContain("## Saved memories")
     expect(block).toContain("- E2E global memory line")
     expect(block).toContain("- E2E project memory line")
+  })
+
+  it("loader threads its sessionId into the saved bullet", async () => {
+    const sid = "11111111-2222-3333-4444-555555555555"
+    const loader = await PluginLoader.load({
+      embeddedDir: PROJECT_ROOT,
+      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+      sessionId: sid,
+    })
+
+    const cwd = process.cwd()
+    await loader.dispatch(
+      {
+        type: "inline_tag",
+        name: "memory",
+        attrs: { scope: "project" },
+        body: "stamped from loader",
+        self_closing: false,
+      },
+      cwd,
+    )
+
+    const path = projectMemoryPath(cwd, tmpHome)
+    expect(readFileSync(path, "utf-8")).toMatch(
+      new RegExp(
+        "^- \\[" + TS_RE + "\\] \\[session:" + sid +
+          "\\] stamped from loader\\n$",
+      ),
+    )
   })
 
   it("save handler dispatched through scanner writes to the right file", async () => {

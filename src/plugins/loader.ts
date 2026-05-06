@@ -196,6 +196,13 @@ export class PluginLoader {
   private readonly pendingFrags: PendingFragment[]
   private readonly logger: (msg: string) => void
   /**
+   * Agent session id (UUID v4) if one was provided to {@link load}.
+   * Forwarded to module handlers via `ctx.env.MINIMAL_AGENT_SESSION_ID`
+   * (matching the subprocess-handler contract) so handlers like the
+   * `memory` plugin can stamp their output with the originating session.
+   */
+  private readonly sessionId: string | undefined
+  /**
    * Cached result of {@link getPromptBlockAsync}. Populated on first call
    * (after fragments resolve or time out). Subsequent calls return this
    * without re-awaiting — the system prompt sits on a cache breakpoint
@@ -214,6 +221,7 @@ export class PluginLoader {
     eventBus: EventBus,
     pendingFrags: PendingFragment[],
     logger: (msg: string) => void,
+    sessionId: string | undefined,
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
@@ -225,6 +233,7 @@ export class PluginLoader {
     this.eventBus = eventBus
     this.pendingFrags = pendingFrags
     this.logger = logger
+    this.sessionId = sessionId
   }
 
   /**
@@ -531,6 +540,7 @@ export class PluginLoader {
       eventBus,
       pendingFrags,
       logger,
+      sessionId,
     )
   }
 
@@ -808,6 +818,7 @@ export class PluginLoader {
         ...process.env,
         TUI_PLUGIN_PROTOCOL: "1",
         MINIMAL_AGENT_PALETTE: paletteEnvJson(),
+        ...(this.sessionId ? { MINIMAL_AGENT_SESSION_ID: this.sessionId } : {}),
       } as Record<string, string>,
       abort: ctrl.signal,
       stdout: process.stdout,
