@@ -62,6 +62,22 @@ describe("extractPromptFromArgs", () => {
     })
   })
 
+  // ---- regression: --mode must consume its value ----------------------
+
+  test("--mode ask + bare positional → positional is the prompt", () => {
+    expect(extractPromptFromArgs(["--mode", "ask", "do the thing"])).toEqual({
+      kind: "literal",
+      text: "do the thing",
+    })
+  })
+
+  test("--header + bare positional → positional is the prompt", () => {
+    expect(extractPromptFromArgs(["--header", "do the thing"])).toEqual({
+      kind: "literal",
+      text: "do the thing",
+    })
+  })
+
   // ---- precedence ------------------------------------------------------
 
   test("--prompt wins over --resume's value", () => {

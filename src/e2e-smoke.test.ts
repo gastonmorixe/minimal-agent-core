@@ -26,6 +26,9 @@ describe("CLI smoke", () => {
         "--model",
         "claude-opus-4-7[1m]",
         "--skip-quota",
+        // Force the startup tree on so the assertions below can verify
+        // its contents — non-interactive mode hides it by default.
+        "--header",
         "--prompt",
         "Reply with exactly: PONG",
       ],
@@ -55,5 +58,50 @@ describe("CLI smoke", () => {
     expect(stderr).toContain("oauth")
     expect(stderr).toContain("claude-opus-4-7[1m]")
     expect(stderr).not.toContain("cache anomaly")
+    // Non-interactive defaults: ASK mode is auto-applied. The mode row
+    // is only printed when the header is shown — which it is here via
+    // `--header` — so verifying it pins both behaviors at once. ANSI
+    // color codes sit between the "mode" label and the "ask" value, so
+    // strip them before matching.
+    const stderrPlain = stderr.replace(/\u001b\[[0-9;]*m/g, "")
+    expect(stderrPlain).toMatch(/mode\s+ask/)
+  })
+
+  it("hides the startup tree by default in non-interactive mode", async () => {
+    const p = Bun.spawn(
+      [
+        "bun",
+        "run",
+        "src/index.ts",
+        "--model",
+        "claude-opus-4-7[1m]",
+        "--skip-quota",
+        "--prompt",
+        "Reply with exactly: PONG",
+      ],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 5000,
+        env: {
+          ...process.env,
+          NODE_ENV: "test",
+          MINIMAL_AGENT_TEST_AUTH: "1",
+          MINIMAL_AGENT_TRANSPORT: "test",
+          MINIMAL_AGENT_TEST_RESPONSE: "PONG",
+        },
+      },
+    )
+    const [exitCode, stdout, stderr] = await Promise.all([
+      p.exited,
+      readStream(p.stdout),
+      readStream(p.stderr),
+    ])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("PONG")
+    // Banner / tree rows are suppressed by default in non-interactive.
+    expect(stderr).not.toContain("minimal-agent")
+    expect(stderr).not.toMatch(/^\s*│/m)
+    expect(stderr).not.toMatch(/^\s*╭/m)
   })
 })
