@@ -926,13 +926,21 @@ export class EditorController extends EventEmitter {
         rowCount: this.buf.lines.length,
       })
       if (fullLines.length > 0) {
-        // Leading `\n` gives the committed prompt one blank row of breathing
-        // room above it (separating it from the previous turn's response or
-        // the startup banner). The compositor's blank-separator row is
-        // erased during the live-area teardown for this commit, so without
-        // this leading newline the prompt would butt directly against the
-        // previous content.
-        this.compositor.writeStream(`\n${fullLines.join("\n")}\n`)
+        // Leading `\n\n` gives the committed prompt one blank row of
+        // breathing room above it. We need TWO leading newlines (not one)
+        // because the live-area REPL's end-of-turn path deliberately leaves
+        // scrollback ending without a trailing `\n` — `drawLiveSeq` emits
+        // its own `\r\n` to seat the live area on a fresh row, but that's
+        // a cursor move, not a scrollback char. So when submit fires after
+        // a turn, scrollback ends mid-line and a single `\n` would only be
+        // a line break, not a blank row above the prompt.
+        //
+        // This is safe in the other cases too: `Compositor.capBlankLines`
+        // caps consecutive `\n` runs in scrollback at 2, so if previous
+        // content already ended with one or two `\n` (e.g. the ready
+        // banner), the extra `\n` is dropped and we still get exactly one
+        // blank row above the prompt. Idempotent across all three states.
+        this.compositor.writeStream(`\n\n${fullLines.join("\n")}\n`)
       }
     }
     this.buf.clear()
