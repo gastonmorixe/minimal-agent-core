@@ -599,6 +599,7 @@ export class Agent {
         let isError: boolean | undefined
         let display: string | undefined
         let truncInfo: TruncationInfo | undefined
+        let streamedRendered = false
 
         // Mode dispatch gate. Tools stay registered in the request body
         // (so the cached prefix is mode-independent), but the harness
@@ -645,17 +646,88 @@ export class Agent {
                 isError = true
               }
             } else {
-              const result = await executeTool(tool.name, tool.input, { signal })
+              // Live-stream Bash stdout/stderr to the transcript as the
+              // child writes it, instead of waiting for the process to
+              // exit. Without this, a `for i in {1..20}; do echo $i;
+              // sleep 1; done` produced nothing visible for 20 seconds —
+              // the user couldn't tell the difference between "working"
+              // and "frozen". The streamer emits one `│ <line>` per
+              // newline up to the per-tool body budget; lines past the
+              // budget are still counted (so the footer can say "shown
+              // V/T L") but not emitted.
+              //
+              // The last emitted line is BUFFERED instead of written
+              // immediately — so when the stream ends we can decide
+              // between (a) writing it as `│` followed by a `╰ <footer>`
+              // line (when there's something to say), or (b) rewriting
+              // it as `╰` and dropping the footer entirely (clean run,
+              // body fits in budget). Scrollback is permanent so this
+              // last-line trick is the only way to keep the close glyph
+              // attached to the body in the no-footer case.
+              const isBash = tool.name === "Bash"
+              const STREAM_BUDGET =
+                TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
+              let streamedLineCount = 0
+              let bufferedLastLine: string | null = null
+              let pendingChunk = ""
+              let didStream = false
+
+              const flushLineToBuffer = (raw: string) => {
+                didStream = true
+                if (streamedLineCount >= STREAM_BUDGET) {
+                  streamedLineCount++
+                  return
+                }
+                if (bufferedLastLine !== null) {
+                  writeTranscript(`  ${c.dimCyan("│")} ${c.dim(bufferedLastLine)}`)
+                }
+                let line = raw
+                if (displayWidth(line) > TOOL_PREVIEW_LINE_WIDTH) {
+                  const trimmed = truncateDisplayWidth(line, TOOL_PREVIEW_LINE_WIDTH, "")
+                  // eslint-disable-next-line typescript-eslint/no-misused-spread
+                  const cpCut = [...line].length - [...trimmed].length
+                  line = `${trimmed}${truncHint(cpCut, "ch")}`
+                }
+                bufferedLastLine = line
+                streamedLineCount++
+              }
+
+              const onChunk = (s: string) => {
+                pendingChunk += s
+                let nl: number
+                while ((nl = pendingChunk.indexOf("\n")) !== -1) {
+                  flushLineToBuffer(pendingChunk.slice(0, nl))
+                  pendingChunk = pendingChunk.slice(nl + 1)
+                }
+              }
+
+              const result = await executeTool(tool.name, tool.input, {
+                signal,
+                onStdout: isBash ? onChunk : undefined,
+                onStderr: isBash ? onChunk : undefined,
+              })
               content = result.content
               isError = result.is_error
               display = result.display
               truncInfo = result._truncInfo
+
+              // Flush any trailing partial line (no terminating newline).
+              if (pendingChunk.length > 0) {
+                flushLineToBuffer(pendingChunk)
+                pendingChunk = ""
+              }
+
               // Propagate _aborted so the renderer below can draw a
               // dim "canceled" close line instead of the generic error
               // preview. The flag is stripped before the result is sent
               // back to the API as a tool_result block.
               if ((result as { _aborted?: boolean })._aborted) {
-                content = "canceled"
+                // If the executor surfaced partial output (e.g. Bash captured
+                // some stdout before SIGTERM landed), keep it — both for the
+                // user (transcript body) and for the model (so it sees what
+                // ran before the abort). Only fall back to the canned
+                // "canceled" string when there's literally nothing to show.
+                if (!content) content = "canceled"
               } else {
                 // Layer 3 of the size-feedback design: streak tracker.
                 // After N consecutive truncations on the same tool, append
@@ -670,16 +742,35 @@ export class Agent {
                 )
                 if (streakNote) content = `${content}\n\n${streakNote}`
               }
+
+              if (didStream) {
+                // Emit the buffered last line + computed footer. We then
+                // mark `streamedRendered` so the post-block render path
+                // (which would call formatToolPreview and re-emit the
+                // body) is skipped — but the tool_result push to the API
+                // below still happens.
+                renderStreamedTail({
+                  bufferedLastLine,
+                  streamedLineCount,
+                  budget: STREAM_BUDGET,
+                  truncInfo,
+                  isError,
+                  writeTranscript,
+                })
+                streamedRendered = true
+              }
             }
           } finally {
             toolStatus.clear()
           }
 
-          for (const line of formatToolPreview(content, isError, display, {
-            tool: tool.name,
-            info: truncInfo,
-          })) {
-            writeTranscript(line)
+          if (!streamedRendered) {
+            for (const line of formatToolPreview(content, isError, display, {
+              tool: tool.name,
+              info: truncInfo,
+            })) {
+              writeTranscript(line)
+            }
           }
         }
 
@@ -1080,6 +1171,60 @@ export function formatToolPreview(
     out.push(`  ${c.dimCyan("╰")} ${c.dim(footerStat)}`)
   }
   return out
+}
+
+/**
+ * Emit the closing rows for a tool whose body was already streamed `│`-line
+ * by `│`-line into scrollback (live, while the child process ran). We held
+ * back the LAST emitted line so we can either:
+ *
+ *   - rewrite it as `╰ <line>` when there's nothing to summarize (clean
+ *     run, body fits in budget, no truncation), OR
+ *   - emit it as `│ <line>` and append a separate `╰ <footer>` row when
+ *     there IS something to say (truncation, elision, or zero-output abort).
+ *
+ * Scrollback is permanent — once a `│` row is written we can't rewrite it
+ * — so the buffered-last-line trick is the only way to keep the close
+ * glyph attached to the body in the no-footer case.
+ *
+ * Mirrors the audience-split invariant in {@link formatToolPreview}: footer
+ * carries bare facts (lines / bytes / cut location); no verbs / advice.
+ */
+function renderStreamedTail(opts: {
+  bufferedLastLine: string | null
+  streamedLineCount: number
+  budget: number
+  truncInfo?: TruncationInfo
+  isError?: boolean
+  writeTranscript: (line: string) => void
+}): void {
+  const { bufferedLastLine, streamedLineCount, budget, truncInfo, isError, writeTranscript } = opts
+  const visibleCount = Math.min(streamedLineCount, budget)
+  const color = isError ? c.red : c.dim
+
+  let footer: string | null = null
+  if (truncInfo?.truncated) {
+    footer = formatTruncFooter(truncInfo, visibleCount)
+  } else if (streamedLineCount > budget) {
+    const totalLines = truncInfo?.totalLines ?? streamedLineCount
+    footer = `shown ${visibleCount}/${totalLines} L`
+  }
+
+  if (bufferedLastLine === null) {
+    // Stream produced nothing (shouldn't happen — caller only invokes us
+    // when didStream=true, which implies at least one flushLineToBuffer
+    // call). Defensive close glyph anyway.
+    writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(footer ?? "(no output)")}`)
+    return
+  }
+
+  if (footer === null) {
+    writeTranscript(`  ${c.dimCyan("╰")} ${color(bufferedLastLine)}`)
+    return
+  }
+
+  writeTranscript(`  ${c.dimCyan("│")} ${color(bufferedLastLine)}`)
+  writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(footer)}`)
 }
 
 /**

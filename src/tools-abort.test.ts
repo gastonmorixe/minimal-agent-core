@@ -17,6 +17,64 @@ afterAll(() => {
 })
 
 describe("executeTool — abort plumbing", () => {
+  it("Bash forwards stdout chunks via onStdout AS THEY ARRIVE (no buffering)", async () => {
+    // Critical for live transcript rendering. Without streaming the user
+    // sees nothing until the child exits — long-running commands look
+    // frozen. We verify by recording the timestamp of each chunk and
+    // asserting that the FIRST chunk arrives well before the process
+    // would have completed.
+    const chunks: { t: number; s: string }[] = []
+    const t0 = Date.now()
+    const r = await executeTool(
+      "Bash",
+      {
+        command:
+          "echo first; sleep 0.4; echo second; sleep 0.4; echo third",
+      },
+      {
+        onStdout: (s) => {
+          chunks.push({ t: Date.now() - t0, s })
+        },
+      },
+    )
+    expect(r.is_error).toBeFalsy()
+    expect(r.content).toContain("first")
+    expect(r.content).toContain("second")
+    expect(r.content).toContain("third")
+    // At least one chunk must have arrived before the full ~800ms
+    // command finished. Specifically the FIRST `echo first` should be
+    // visible long before the second sleep.
+    const all = chunks.map((c) => c.s).join("")
+    expect(all).toContain("first")
+    const firstChunkContaining = chunks.find((c) => c.s.includes("first"))
+    expect(firstChunkContaining).toBeDefined()
+    // First chunk should land within ~300ms of process start — well
+    // before total runtime. Generous bound to avoid CI flake.
+    expect(firstChunkContaining!.t).toBeLessThan(300)
+    // And the LAST chunk should land later than the first (proves
+    // chunks really were streamed across time, not delivered in one
+    // bundle at the end).
+    if (chunks.length >= 2) {
+      expect(chunks[chunks.length - 1].t).toBeGreaterThan(firstChunkContaining!.t)
+    }
+  })
+
+  it("Bash aborted with partial stream pushes [aborted by user] through onStdout", async () => {
+    const chunks: string[] = []
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 200)
+    await executeTool(
+      "Bash",
+      {
+        command: "for i in 1 2 3 4 5 6 7 8 9 10; do echo word-$i; sleep 0.05; done",
+      },
+      { signal: ac.signal, onStdout: (s) => chunks.push(s) },
+    )
+    const all = chunks.join("")
+    expect(all).toContain("word-1")
+    expect(all).toContain("[aborted by user]")
+  })
+
   it("Bash works without a signal (regression)", async () => {
     const r = await executeTool("Bash", { command: "sleep 0.05 && echo hi" })
     expect(r.is_error).toBeFalsy()
@@ -38,6 +96,29 @@ describe("executeTool — abort plumbing", () => {
     expect(r.is_error).toBe(true)
     expect(r.content).toBe("tool aborted by user")
     expect(dt).toBeLessThan(3000)
+  })
+
+  it("Bash aborted with partial stdout surfaces it instead of dropping", async () => {
+    // Loop emitting a line every 50ms; abort after ~250ms — we should see
+    // a few lines in `content`, not the canned "tool aborted by user".
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 250)
+    const r = (await executeTool(
+      "Bash",
+      {
+        command:
+          "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do echo word-$i; sleep 0.05; done",
+      },
+      { signal: ac.signal },
+    )) as ToolExecResult
+    expect(r._aborted).toBe(true)
+    expect(r.is_error).toBe(true)
+    // Should contain at least the first emitted line.
+    expect(r.content).toContain("word-1")
+    // Should carry the [aborted by user] marker.
+    expect(r.content).toContain("[aborted by user]")
+    // And NOT be the canned empty-aborted string.
+    expect(r.content).not.toBe("tool aborted by user")
   })
 
   it("Read with already-aborted signal returns _aborted without IO", async () => {
