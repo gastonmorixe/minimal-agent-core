@@ -19,7 +19,11 @@ import type {
 } from "../../../src/plugins/types.ts"
 
 import loadMemories, { globalMemoryPath, projectMemoryPath } from "./load.ts"
-import memoryHandler from "./memory.ts"
+import memoryHandler, { localIsoSeconds } from "./memory.ts"
+
+// Matches a single bullet line of the form `- [<iso>] <body>\n`, where
+// <iso> is `YYYY-MM-DDTHH:MM:SS±HH:MM` (local-time ISO 8601 with seconds).
+const TS_RE = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}[+-]\\d{2}:\\d{2}"
 
 const PROJECT_ROOT = resolve(__dirname, "../../..")
 const PLUGIN_DIR = resolve(__dirname, "..")
@@ -42,6 +46,24 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
+
+describe("memory: localIsoSeconds", () => {
+  it("formats a fixed date as local ISO 8601 with seconds and offset", () => {
+    // Use a wall-clock date and assert shape only — the offset depends on
+    // the test runner's timezone, which we don't control.
+    const out = localIsoSeconds(new Date(2026, 4, 5, 21, 6, 20))
+    expect(out).toMatch(
+      new RegExp("^2026-05-05T21:06:20[+-]\\d{2}:\\d{2}$"),
+    )
+  })
+
+  it("zero-pads single-digit fields", () => {
+    const out = localIsoSeconds(new Date(2026, 0, 2, 3, 4, 5))
+    expect(out).toMatch(
+      new RegExp("^2026-01-02T03:04:05[+-]\\d{2}:\\d{2}$"),
+    )
+  })
+})
 
 describe("memory: path helpers", () => {
   it("globalMemoryPath = <home>/.minimal-agent/memory.md", () => {
@@ -97,7 +119,9 @@ describe("memory: save handler", () => {
     expect(res.ansi).toContain("[project]")
 
     const path = projectMemoryPath(cwd, tmpHome)
-    expect(readFileSync(path, "utf-8")).toBe("- hello\n")
+    expect(readFileSync(path, "utf-8")).toMatch(
+      new RegExp("^- \\[" + TS_RE + "\\] hello\\n$"),
+    )
   })
 
   it("scope='global' writes to ~/.minimal-agent/memory.md", async () => {
@@ -108,8 +132,33 @@ describe("memory: save handler", () => {
     if (res.kind !== "rendered") throw new Error("unreachable")
     expect(res.ansi).toContain("[global]")
 
-    expect(readFileSync(globalMemoryPath(tmpHome), "utf-8")).toBe(
-      "- global thing\n",
+    expect(readFileSync(globalMemoryPath(tmpHome), "utf-8")).toMatch(
+      new RegExp("^- \\[" + TS_RE + "\\] global thing\\n$"),
+    )
+  })
+
+  it("appends to a file with pre-existing untimestamped (legacy) bullets without rewriting them", async () => {
+    // Simulate a memory file written by an older version of the plugin or
+    // hand-edited by the user — bullets have no `[<ts>] ` prefix.
+    const cwd = "/legacy"
+    const path = projectMemoryPath(cwd, tmpHome)
+    require("node:fs").mkdirSync(require("node:path").dirname(path), {
+      recursive: true,
+    })
+    writeFileSync(path, "- legacy one\n- legacy two\n")
+
+    await memoryHandler(makeSaveCtx({ body: "fresh", cwd }))
+
+    const out = readFileSync(path, "utf-8")
+    // Legacy bullets are preserved verbatim (no timestamp injected).
+    expect(out.startsWith("- legacy one\n- legacy two\n")).toBe(true)
+    // New bullet is appended with a timestamp.
+    expect(out).toMatch(
+      new RegExp(
+        "^- legacy one\\n" +
+          "- legacy two\\n" +
+          "- \\[" + TS_RE + "\\] fresh\\n$",
+      ),
     )
   })
 
@@ -118,16 +167,20 @@ describe("memory: save handler", () => {
     await memoryHandler(makeSaveCtx({ body: "one", cwd }))
     await memoryHandler(makeSaveCtx({ body: "two", cwd }))
     await memoryHandler(makeSaveCtx({ body: "three", cwd }))
-    expect(readFileSync(projectMemoryPath(cwd, tmpHome), "utf-8")).toBe(
-      "- one\n- two\n- three\n",
+    expect(readFileSync(projectMemoryPath(cwd, tmpHome), "utf-8")).toMatch(
+      new RegExp(
+        "^- \\[" + TS_RE + "\\] one\\n" +
+          "- \\[" + TS_RE + "\\] two\\n" +
+          "- \\[" + TS_RE + "\\] three\\n$",
+      ),
     )
   })
 
   it("collapses multi-line bodies to a single line", async () => {
     const body = "first line\n  second line\n\nthird"
     await memoryHandler(makeSaveCtx({ body, cwd: "/p" }))
-    expect(readFileSync(projectMemoryPath("/p", tmpHome), "utf-8")).toBe(
-      "- first line second line third\n",
+    expect(readFileSync(projectMemoryPath("/p", tmpHome), "utf-8")).toMatch(
+      new RegExp("^- \\[" + TS_RE + "\\] first line second line third\\n$"),
     )
   })
 
@@ -255,6 +308,27 @@ describe("memory: load fragment", () => {
     expect(out).toContain("- project-one")
   })
 
+  it("loads legacy (untimestamped) and new (timestamped) bullets together verbatim", async () => {
+    // Memory files can contain a mix of formats — older bullets without a
+    // `[<ts>] ` prefix and newer ones with it. The loader should pass them
+    // through unchanged, never rewriting or filtering.
+    const gp = globalMemoryPath(tmpHome)
+    require("node:fs").mkdirSync(require("node:path").dirname(gp), {
+      recursive: true,
+    })
+    writeFileSync(
+      gp,
+      "- legacy bullet, no timestamp\n" +
+        "- [2026-05-05T21:06:20-04:00] new bullet, with timestamp\n",
+    )
+
+    const out = await loadMemories(makeLoadCtx("/p"))
+    expect(out).toContain("- legacy bullet, no timestamp")
+    expect(out).toContain(
+      "- [2026-05-05T21:06:20-04:00] new bullet, with timestamp",
+    )
+  })
+
   it("trims surrounding whitespace from file contents", async () => {
     const gp = globalMemoryPath(tmpHome)
     require("node:fs").mkdirSync(require("node:path").dirname(gp), {
@@ -324,6 +398,8 @@ describe("memory: integration with PluginLoader", () => {
     expect(result.kind).toBe("rendered")
 
     const path = projectMemoryPath(cwd, tmpHome)
-    expect(readFileSync(path, "utf-8")).toContain("- integration save test")
+    expect(readFileSync(path, "utf-8")).toMatch(
+      new RegExp("^- \\[" + TS_RE + "\\] integration save test\\n$"),
+    )
   })
 })

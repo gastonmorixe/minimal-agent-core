@@ -75,6 +75,16 @@ see that a save happened (e.g. `· memory saved [project]: ...`).
 Whitespace inside the body is collapsed to a single line — keep
 memories short and self-contained. Empty bodies are silently ignored.
 
+Each saved bullet is automatically prefixed with a local-time ISO 8601
+timestamp (with seconds), e.g.
+`- [2026-05-05T21:06:20-04:00] <body>`.
+This is added by the handler — don't write it yourself.
+
+Legacy bullets saved before this prefix existed (and any hand-edited
+bullets without a `[<ts>] ` prefix) remain valid and load unchanged
+alongside timestamped ones; the loader treats memory files as opaque
+text.
+
 ## Updating or correcting a memory
 
 There's no in-band edit/delete mechanism. To revise a memory, edit the
