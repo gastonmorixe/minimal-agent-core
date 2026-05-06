@@ -160,6 +160,16 @@ export interface ToolExecResult {
  */
 export interface ToolExecOpts {
   signal?: AbortSignal
+  /**
+   * Optional stdout-chunk callback. Currently only honored by `Bash` — chunks
+   * are decoded UTF-8 strings forwarded as the child writes them, so the
+   * caller can render output live instead of waiting for the process to
+   * exit. The chunks ARE NOT pre-buffered into lines; the caller is
+   * responsible for line-buffering if it wants line-grained rendering.
+   */
+  onStdout?: (chunk: string) => void
+  /** Stderr counterpart to {@link onStdout}. Bash-only for now. */
+  onStderr?: (chunk: string) => void
 }
 
 /**
@@ -402,8 +412,10 @@ export async function executeTool(
   const r = await dispatch(name, input, opts)
   // Universal post-hoc clamp. Skip when `display` is set — diffs are bounded
   // by Edit/Write inputs and we want them rendered intact in the transcript.
-  // Also skip when aborted — the canned message is fine as-is.
-  if (!r.display && !r._aborted) {
+  // Aborted results are clamped too: the canned "tool aborted by user"
+  // string is trivially under cap, and aborted Bash with partial stdout
+  // (e.g. a runaway `yes` for 5s before ESC) genuinely needs the clamp.
+  if (!r.display) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
     const { content, info } = truncateToolOutput(r.content, ctx)
     r.content = content
@@ -550,12 +562,48 @@ async function execBash(
       else signal.addEventListener("abort", onAbort, { once: true })
     }
 
+    // Manual streaming drain. Replaces `new Response(stream).text()` (which
+    // only resolves on pipe-close) with a reader loop that decodes UTF-8
+    // incrementally and forwards each chunk to the caller's optional
+    // `onStdout`/`onStderr` callback as bash writes it. The full text is
+    // also accumulated for the returned `content` so the model sees the
+    // same payload it would have without streaming. Critical for UI
+    // responsiveness on long-running commands — without this the agent
+    // can't render anything until the entire 20s loop (or whatever) exits.
+    const drain = async (
+      stream: ReadableStream<Uint8Array>,
+      cb?: (s: string) => void,
+    ): Promise<string> => {
+      const decoder = new TextDecoder()
+      let acc = ""
+      const reader = stream.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const s = decoder.decode(value, { stream: true })
+          if (s) {
+            acc += s
+            cb?.(s)
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      const tail = decoder.decode()
+      if (tail) {
+        acc += tail
+        cb?.(tail)
+      }
+      return acc
+    }
+
     let stdout = ""
     let stderr = ""
     try {
       ;[stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
+        drain(proc.stdout, opts.onStdout),
+        drain(proc.stderr, opts.onStderr),
       ])
       await proc.exited
     } finally {
@@ -563,9 +611,30 @@ async function execBash(
       if (signal) signal.removeEventListener("abort", onAbort)
     }
 
-    if (aborted) return ABORTED_RESULT()
-
     const output = [stdout, stderr].filter(Boolean).join("\n").trim()
+
+    if (aborted) {
+      // Surface partial output captured before SIGTERM landed instead of
+      // discarding it. The drain readers resolve on pipe-close, which
+      // happens when bash exits — so by the time we get here `stdout`/
+      // `stderr` already hold whatever the child managed to flush.
+      // Returning empty would tell the user "nothing happened", when in
+      // reality 4-5s of work may have produced useful logs.
+      if (!output) return ABORTED_RESULT()
+      // Push the marker through the stdout stream too so any live
+      // line-streamer in the host sees it as the trailing line. The
+      // marker is also baked into `content` for the model.
+      opts.onStdout?.("\n[aborted by user]\n")
+      const trailed = `${output}\n[aborted by user]`
+      const totalBytes = Buffer.byteLength(trailed, "utf8")
+      const totalLines = trailed.split("\n").length
+      return {
+        content: trailed,
+        is_error: true,
+        _aborted: true,
+        _truncCtx: { totalBytes, totalLines },
+      }
+    }
     const totalBytes = Buffer.byteLength(output, "utf8")
     const totalLines = output.length === 0 ? 0 : output.split("\n").length
 
