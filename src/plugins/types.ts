@@ -413,6 +413,28 @@ export interface ManifestLiveAreaSlot {
    * preserved. Defaults to 5000.
    */
   timeoutMs?: number
+  /**
+   * Initial line painted into the slot at REPL start, BEFORE the first
+   * invoke resolves. Reserves the live-area row so the prompt doesn't
+   * visually shift up by one row when the first real value arrives.
+   * Use a faint loader/skeleton (e.g. `quota  ·`); empty string is
+   * treated as "no row" and re-introduces the jump.
+   *
+   * When omitted, the slot's row appears only after the first non-null
+   * invoke result. ANSI escapes are allowed; the editor counts visual
+   * rows, not characters.
+   */
+  placeholder?: string
+  /**
+   * Plugin-bus event names that should trigger an off-cycle re-fire of
+   * this slot. Use for event-driven refresh — e.g. `quota` re-renders
+   * on every API response (`quota.headersReceived`), not just on the
+   * timer. The scheduler subscribes via the loader's event bus; the
+   * existing in-flight/timeout machinery prevents pile-up under bursts.
+   *
+   * Optional. Empty array = timer-only refresh (same as omitting).
+   */
+  refreshOn?: string[]
 }
 
 /**

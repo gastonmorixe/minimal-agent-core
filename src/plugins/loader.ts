@@ -1254,6 +1254,12 @@ async function resolveLiveAreaSlot(
     position: slot.position ?? "footer",
     refreshMs: slot.refreshMs ?? 60_000,
     timeoutMs: slot.timeoutMs ?? 5000,
+    // Pass through verbatim — empty string is a deliberate opt-out;
+    // undefined means "no row reserved before first invoke".
+    placeholder: slot.placeholder,
+    // Normalize undefined/null → empty array so the scheduler can iterate
+    // without a null check.
+    refreshOn: slot.refreshOn ?? [],
   }
 
   if (slot.handler.type === "module") {

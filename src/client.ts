@@ -23,6 +23,7 @@ import {
 import { buildMetadata, getSessionId } from "./metadata.ts"
 import { redactHeaders } from "./net-dbg.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
+import { broadcastResponseRateLimits } from "./quota-broadcast.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 import { clampWithHint } from "./truncate-hint.ts"
 
@@ -1125,6 +1126,13 @@ export async function* sendMessage(
       throw new Error(`API ${response.status}: ${errorBody}`)
     }
 
+    // Cache + broadcast the rate-limit snapshot from THIS response.
+    // The `quota-status` plugin's live-area slot subscribes to
+    // `quota.headersReceived` (via its manifest's `refreshOn`) so the
+    // footer updates within milliseconds of every successful API call —
+    // no waiting for the 5-min heartbeat.
+    broadcastResponseRateLimits(response.headers)
+
     // Non-streaming path (used in tests)
     if (!stream) {
       const raw = await response.text()
@@ -1526,10 +1534,12 @@ export async function checkQuota(
       return { ok: false }
     }
 
-    const rateLimits = new Map<string, string>()
-    response.headers.forEach((v, k) => {
-      if (k.startsWith("anthropic-ratelimit-")) rateLimits.set(k, v)
-    })
+    // Same broadcast as the main completion path — cache + bus emit.
+    // `checkQuota` is called both at startup (when the plugin is
+    // disabled) and as the live-area slot's cold-cache fallback, so
+    // populating the cache here closes the loop if a later request
+    // arrives before any chat completion happens.
+    const rateLimits = broadcastResponseRateLimits(response.headers)
     return { ok: true, rateLimits }
   } catch (e) {
     if (isDebug()) {

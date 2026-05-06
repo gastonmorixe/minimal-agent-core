@@ -18,6 +18,7 @@
  * @module live-area-providers
  */
 
+import type { EventBus } from "./plugins/event-bus.ts"
 import type { ResolvedLiveAreaSlot } from "./plugins/types.ts"
 
 /** Sink the scheduler writes into. Mirrors the `ReplEditor` shape. */
@@ -41,6 +42,17 @@ export interface LiveAreaSchedulerDeps {
   clearTimeout?: (handle: unknown) => void
   /** Logger for transient errors. Defaults to writing to stderr. */
   logger?: (msg: string) => void
+  /**
+   * Plugin event bus. When provided, every slot whose definition
+   * declares `refreshOn: [...]` gets a listener installed for each
+   * named event; on emit, the scheduler off-cycle re-fires that slot
+   * (subject to the in-flight skip — bursts don't pile up).
+   *
+   * Pass `undefined` (default) to disable event-driven refresh
+   * entirely; slots fall back to timer-only behavior. Tests usually
+   * inject a fresh `EventBus` so they can `.emit()` directly.
+   */
+  bus?: EventBus
 }
 
 interface SlotState {
@@ -67,19 +79,27 @@ export class LiveAreaScheduler {
   private readonly setT: (cb: () => void, ms: number) => unknown
   private readonly clearT: (h: unknown) => void
   private readonly logger: (msg: string) => void
+  private readonly bus: EventBus | null
+  /** Listener disposers (one per `(slot, event)` pair). Walked at `stop()`. */
+  private readonly busDisposers: Array<() => void> = []
   private stopped = false
 
   constructor(slots: ResolvedLiveAreaSlot[], sink: LiveAreaSink, deps: LiveAreaSchedulerDeps = {}) {
     this.slots = slots.map((slot) => ({
       slot,
       tick: 0,
-      current: null,
+      // Reserve the row from t=0 with the manifest-declared placeholder
+      // (if any) so the editor's live-area height never grows when the
+      // first invoke resolves. See ManifestLiveAreaSlot.placeholder
+      // and the bug-1 analysis in the WT-quota-live-area worktree.
+      current: slot.definition.placeholder ?? null,
       inFlight: false,
       timer: null,
       abort: null,
       warnedHeader: false,
     }))
     this.sink = sink
+    this.bus = deps.bus ?? null
     this.setT = deps.setTimeout ?? ((cb, ms) => setTimeout(cb, ms))
     // The default branch narrows `h` back to a real Timeout via the
     // host-typed clearTimeout. Tests inject their own pair so the
@@ -99,10 +119,43 @@ export class LiveAreaScheduler {
       })
   }
 
-  /** Kick off the first invocation of every slot. */
+  /**
+   * Kick off the first invocation of every slot.
+   *
+   * Order matters: we paint the placeholder rows BEFORE any
+   * `fire()` runs, so the editor's first repaint already has the
+   * footer at its final height — no growth-and-jump when the first
+   * tick resolves a moment later. Then we wire the optional
+   * `refreshOn` event listeners and finally trigger the first
+   * invocation per slot.
+   */
   start(): void {
+    this.repaint()
+    this.subscribeRefreshOn()
     for (const s of this.slots) {
       this.fire(s)
+    }
+  }
+
+  /**
+   * Install a bus listener for every `(slot, event)` pair. Each
+   * listener calls `fire(slot)` with the standard in-flight skip
+   * semantics, so a burst of events while a previous tick is in
+   * flight collapses to one (subsequent) refresh. Stored disposers
+   * are walked at `stop()` to avoid leaking listeners across REPL
+   * teardown.
+   */
+  private subscribeRefreshOn(): void {
+    if (!this.bus) return
+    for (const s of this.slots) {
+      const events = s.slot.definition.refreshOn ?? []
+      for (const evt of events) {
+        const dispose = this.bus.on(evt, () => {
+          if (this.stopped) return
+          this.fire(s)
+        })
+        this.busDisposers.push(dispose)
+      }
     }
   }
 
@@ -110,6 +163,14 @@ export class LiveAreaScheduler {
   stop(): void {
     if (this.stopped) return
     this.stopped = true
+    for (const dispose of this.busDisposers) {
+      try {
+        dispose()
+      } catch {
+        // best-effort
+      }
+    }
+    this.busDisposers.length = 0
     for (const s of this.slots) {
       if (s.timer) {
         this.clearT(s.timer)
@@ -165,8 +226,15 @@ export class LiveAreaScheduler {
       s.inFlight = false
       s.abort = null
       if (this.stopped) return
-      if (next !== s.current) {
-        s.current = next
+      // null from the handler means "no fresh data this tick". We
+      // hold on the placeholder rather than clearing the row — a
+      // clear would shrink the live-area height by one row and
+      // re-introduce the prompt-jump that the placeholder exists to
+      // prevent. When no placeholder is configured this collapses to
+      // the previous behavior (s.current = null → row disappears).
+      const resolved = next ?? s.slot.definition.placeholder ?? null
+      if (resolved !== s.current) {
+        s.current = resolved
         this.repaint()
       }
       this.scheduleNext(s)
@@ -195,6 +263,9 @@ export class LiveAreaScheduler {
     }, refreshMs)
   }
 
+  /** Last value pushed to {@link sink.setFooterLines}; used for dedup. */
+  private lastFooter: string[] = []
+
   private repaint(): void {
     // Footer-only routing in this cut. `position: "header"` is accepted
     // by the manifest parser but the REPL reserves `setDecorationLines`
@@ -214,6 +285,19 @@ export class LiveAreaScheduler {
       }
       footer.push(line)
     }
+    // Dedup at the scheduler layer: skip the sink push when nothing
+    // changed since the last paint. This keeps the initial
+    // "no-placeholder, no-data" `start()` repaint quiet (otherwise
+    // it would emit a no-op `setFooterLines([])` that complicates
+    // tests and adds a sink-level repaint EditorController already
+    // shallow-compares away).
+    if (
+      footer.length === this.lastFooter.length &&
+      footer.every((l, i) => l === this.lastFooter[i])
+    ) {
+      return
+    }
+    this.lastFooter = footer.slice()
     if (this.sink.setFooterLines) this.sink.setFooterLines(footer)
   }
 }

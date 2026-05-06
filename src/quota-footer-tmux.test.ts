@@ -1,23 +1,16 @@
 /**
- * tmux smoke test: verifies the live-area FOOTER renders below the
- * editor prompt in a real terminal (not just in unit-test fixtures).
+ * tmux smoke test for the live-area quota footer.
  *
- * This is the regression guard for the user-visible promise of the
- * `quota-status` plugin: "the live area shows up instantly; the
- * quota row populates a moment later, BELOW the prompt."
+ * Two regression guards:
  *
- * Driver: `tmp/quota-footer-tmux-driver.ts` (gitignored — built-out
- * locally; the test skips when the driver is missing so a fresh
- * checkout doesn't fail).
+ * 1. The footer renders BELOW the editor prompt in a real terminal.
+ * 2. The placeholder mechanism prevents the prompt from jumping up
+ *    one row when the first invoke resolves — we capture the pane
+ *    twice (placeholder phase, then data phase) and assert the
+ *    prompt row index is identical between them.
  *
- * Pane layout we assert (after the scheduler's first tick lands):
- *
- *     status ready          ← scrollback banner
- *                           ← blank
- *     ❯                     ← interactive editor prompt
- *     quota 5h 12% · …      ← live-area footer (the new bit)
- *
- * The `quota` line MUST be BELOW the `❯` line — that's the whole point.
+ * Skips when `tmux` or the gitignored driver `tmp/quota-footer-tmux-
+ * driver.ts` is missing.
  */
 
 import { describe, expect, it } from "bun:test"
@@ -29,15 +22,21 @@ function haveTmux(): boolean {
   return spawnSync("tmux", ["-V"]).status === 0
 }
 
+function indexOfLine(pane: string, needle: string): number {
+  return pane.split("\n").findIndex((l) => l.includes(needle))
+}
+
 const DRIVER = resolve(__dirname, "..", "tmp", "quota-footer-tmux-driver.ts")
 
 const desc = haveTmux() && existsSync(DRIVER) ? describe : describe.skip
 
 desc("tmux smoke: quota-status live-area footer", () => {
-  it("renders the footer line BELOW the editor prompt in a real terminal", () => {
+  it("renders BELOW the editor prompt and the prompt does NOT jump when data lands", () => {
     const session = `quota-footer-${Date.now()}`
-    // Keep the pane alive a moment after the driver self-exits so
-    // capture-pane has time to read the buffer.
+    // Driver hangs ~2.2s; total ~5.2s with the trailing sleep. We
+    // capture twice: once early (placeholder phase) and once late
+    // (real data phase) and compare prompt row positions to assert
+    // the no-jump invariant.
     const cmd = `bun run ${DRIVER}; sleep 3`
 
     spawnSync("tmux", ["kill-session", "-t", session], { stdio: "ignore" })
@@ -54,34 +53,53 @@ desc("tmux smoke: quota-status live-area footer", () => {
     ])
     expect(start.status).toBe(0)
 
-    // Poll for the footer (driver self-exits ~1.5s; budget ~6s).
-    const t0 = Date.now()
-    let pane = ""
-    while (Date.now() - t0 < 8_000) {
+    // ----- Phase 1: capture during placeholder (before invoke resolves) -----
+    // Driver sleeps 800ms before resolving the first invoke; we poll for
+    // the first frame that has BOTH the prompt AND `quota` BUT NOT
+    // `5h` — that's the placeholder phase (real data renders `5h`).
+    const placeholderDeadline = Date.now() + 1_500
+    let early = ""
+    while (Date.now() < placeholderDeadline) {
       const cap = spawnSync("tmux", ["capture-pane", "-t", session, "-p", "-S", "-100"])
-      pane = cap.stdout?.toString() ?? ""
-      if (pane.includes("quota") && pane.includes("%")) break
+      early = cap.stdout?.toString() ?? ""
+      if (early.includes("❯") && early.includes("quota") && !early.includes("5h")) break
+      Bun.sleepSync(100)
+    }
+    const earlyPromptIdx = indexOfLine(early, "❯")
+    const earlyFooterIdx = indexOfLine(early, "quota")
+    expect(earlyPromptIdx).toBeGreaterThanOrEqual(0)
+    expect(earlyFooterIdx).toBeGreaterThan(earlyPromptIdx)
+
+    // ----- Phase 2: capture after data lands -----
+    const dataDeadline = Date.now() + 5_000
+    let late = ""
+    while (Date.now() < dataDeadline) {
+      const cap = spawnSync("tmux", ["capture-pane", "-t", session, "-p", "-S", "-100"])
+      late = cap.stdout?.toString() ?? ""
+      if (late.includes("5h 12%")) break
       Bun.sleepSync(150)
     }
     spawnSync("tmux", ["kill-session", "-t", session], { stdio: "ignore" })
 
-    // Footer content is present at all.
-    expect(pane).toContain("quota")
-    expect(pane).toMatch(/5h 12%/)
-    expect(pane).toMatch(/overall 4%/)
+    const latePromptIdx = indexOfLine(late, "❯")
+    const lateFooterIdx = indexOfLine(late, "quota")
 
-    // Crucial structural assertion: the quota line is BELOW the prompt
-    // line in the rendered pane (i.e. higher line index = visually
-    // lower since tmux paints top-to-bottom).
-    const lines = pane.split("\n")
-    const promptIdx = lines.findIndex((l) => l.includes("❯"))
-    const quotaIdx = lines.findIndex((l) => l.includes("quota") && l.includes("%"))
-    expect(promptIdx).toBeGreaterThanOrEqual(0)
-    expect(quotaIdx).toBeGreaterThan(promptIdx)
+    // Real data is present.
+    expect(late).toContain("5h 12%")
+    expect(late).toContain("overall 4%")
+    // Footer is below prompt in the late frame too.
+    expect(lateFooterIdx).toBeGreaterThan(latePromptIdx)
+
+    // === The headline regression guard: NO JUMP. ===
+    // The prompt row in the early (placeholder) frame must equal the
+    // prompt row in the late (real-data) frame. If the live-area
+    // height grew between the two frames, the prompt would have
+    // shifted up — that's the bug the placeholder mechanism prevents.
+    expect(latePromptIdx).toBe(earlyPromptIdx)
 
     // Sanity: the synchronous "checking..." spinner that the OLD
-    // startup tree used to print MUST NOT appear in this pane — the
-    // whole point of the plugin is to skip it.
-    expect(pane).not.toMatch(/checking\.\.\./)
+    // startup tree used to print MUST NOT appear — the whole point
+    // of the plugin is to eliminate it.
+    expect(late).not.toContain("checking...")
   })
 })

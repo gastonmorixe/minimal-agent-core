@@ -1689,9 +1689,20 @@ async function runReplLiveArea(
   let liveAreaScheduler: import("./live-area-providers.ts").LiveAreaScheduler | null = null
   if (slotRows.length > 0 && typeof editor.setFooterLines === "function") {
     const { LiveAreaScheduler } = await import("./live-area-providers.ts")
-    liveAreaScheduler = new LiveAreaScheduler(slotRows as ResolvedLiveAreaSlot[], {
-      setFooterLines: (lines) => editor.setFooterLines?.(lines),
-    })
+    liveAreaScheduler = new LiveAreaScheduler(
+      slotRows as ResolvedLiveAreaSlot[],
+      {
+        setFooterLines: (lines) => editor.setFooterLines?.(lines),
+      },
+      {
+        // Wire the loader's event bus so slots with a `refreshOn` list
+        // re-fire on the named events (e.g. `quota.headersReceived`
+        // emitted from `client.ts` after every successful response).
+        // When `loader` is absent (degenerate test paths) we still
+        // create the scheduler but skip event-driven refresh.
+        bus: loader?.bus(),
+      },
+    )
     liveAreaScheduler.start()
   }
 

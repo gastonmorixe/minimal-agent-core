@@ -935,3 +935,56 @@ describe("PluginLoader / liveAreaSlots", () => {
     rmSync(join(HOME, "tui-plugins", "la-disabled"), { recursive: true })
   })
 })
+
+describe("PluginLoader / liveAreaSlots: placeholder + refreshOn", () => {
+  it("threads placeholder through resolution; refreshOn defaults to []", async () => {
+    writePackage(
+      HOME,
+      "la-pl",
+      {
+        id: "la-pl",
+        name: "la-pl",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "x",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+            placeholder: "loading…",
+          },
+        ],
+      },
+      { "prov.ts": "export default async () => 'data'" },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const slot = loader.getLiveAreaSlots()[0]!
+    expect(slot.definition.placeholder).toBe("loading…")
+    expect(slot.definition.refreshOn).toEqual([])
+    rmSync(join(HOME, "tui-plugins", "la-pl"), { recursive: true })
+  })
+
+  it("normalizes refreshOn", async () => {
+    writePackage(
+      HOME,
+      "la-ro",
+      {
+        id: "la-ro",
+        name: "la-ro",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "x",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+            refreshOn: ["a.b", "c.d"],
+          },
+        ],
+      },
+      { "prov.ts": "export default async () => 'data'" },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const slot = loader.getLiveAreaSlots()[0]!
+    expect(slot.definition.refreshOn).toEqual(["a.b", "c.d"])
+    rmSync(join(HOME, "tui-plugins", "la-ro"), { recursive: true })
+  })
+})
