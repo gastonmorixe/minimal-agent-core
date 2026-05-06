@@ -731,3 +731,207 @@ describe("PluginLoader", () => {
     rmSync(join(PROJECT, ".agents", "tui-plugins", "shared2"), { recursive: true })
   })
 })
+
+describe("PluginLoader / liveAreaSlots", () => {
+  it("resolves a module-handler slot, applies defaults, and exposes via getLiveAreaSlots()", async () => {
+    writePackage(
+      HOME,
+      "la-mod",
+      {
+        id: "la-mod",
+        name: "la-mod",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "ambient",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+            // No position / refreshMs / timeoutMs — exercise the defaults.
+          },
+        ],
+      },
+      {
+        "prov.ts": `
+          export default async function (ctx) {
+            return "ambient@" + (ctx?.tick ?? -1)
+          }
+        `,
+      },
+    )
+
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const slots = loader.getLiveAreaSlots()
+    expect(slots).toHaveLength(1)
+    expect(slots[0]!.pluginId).toBe("la-mod")
+    expect(slots[0]!.definition.id).toBe("ambient")
+    expect(slots[0]!.definition.position).toBe("footer")
+    expect(slots[0]!.definition.refreshMs).toBe(60_000)
+    expect(slots[0]!.definition.timeoutMs).toBe(5_000)
+    // packageDir points at the actual package dir on disk.
+    expect(slots[0]!.packageDir).toBe(join(HOME, "tui-plugins", "la-mod"))
+    // Invoke is callable and threads the tick through.
+    const out = await slots[0]!.invoke({
+      packageDir: slots[0]!.packageDir,
+      cwd: process.cwd(),
+      env: {},
+      abort: new AbortController().signal,
+      stderr: process.stderr,
+      tick: 0,
+    })
+    expect(out).toBe("ambient@0")
+
+    rmSync(join(HOME, "tui-plugins", "la-mod"), { recursive: true })
+  })
+
+  it("logs and skips a slot whose module handler is missing", async () => {
+    const logs: string[] = []
+    writePackage(HOME, "la-missing", {
+      id: "la-missing",
+      name: "la-missing",
+      version: "0.1.0",
+      description: "test",
+      liveAreaSlots: [
+        {
+          id: "x",
+          handler: { type: "module", path: "./nope.ts", export: "default" },
+        },
+      ],
+    })
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: (m) => logs.push(m) })
+    expect(loader.getLiveAreaSlots()).toEqual([])
+    expect(logs.some((m) => /live-area slot handler module not found/.test(m))).toBe(true)
+    rmSync(join(HOME, "tui-plugins", "la-missing"), { recursive: true })
+  })
+
+  it("logs and skips a slot whose module handler has no default export", async () => {
+    const logs: string[] = []
+    writePackage(
+      HOME,
+      "la-noexport",
+      {
+        id: "la-noexport",
+        name: "la-noexport",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "x",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "prov.ts": "export const named = () => 'nope'",
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: (m) => logs.push(m) })
+    expect(loader.getLiveAreaSlots()).toEqual([])
+    expect(logs.some((m) => /no default export function/.test(m))).toBe(true)
+    rmSync(join(HOME, "tui-plugins", "la-noexport"), { recursive: true })
+  })
+
+  it("rejects a non-string return from a module handler", async () => {
+    writePackage(
+      HOME,
+      "la-badreturn",
+      {
+        id: "la-badreturn",
+        name: "la-badreturn",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "x",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "prov.ts": "export default async function () { return 42 }",
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const slots = loader.getLiveAreaSlots()
+    expect(slots).toHaveLength(1)
+    await expect(
+      slots[0]!.invoke({
+        packageDir: slots[0]!.packageDir,
+        cwd: process.cwd(),
+        env: {},
+        abort: new AbortController().signal,
+        stderr: process.stderr,
+        tick: 0,
+      }),
+    ).rejects.toThrow(/returned non-string/)
+    rmSync(join(HOME, "tui-plugins", "la-badreturn"), { recursive: true })
+  })
+
+  it("a slot does NOT count as a tool (separate accessors)", async () => {
+    writePackage(
+      HOME,
+      "la-tool-and-slot",
+      {
+        id: "la-tool-and-slot",
+        name: "la-tool-and-slot",
+        version: "0.1.0",
+        description: "test",
+        tuis: [
+          {
+            id: "only",
+            trigger: {
+              type: "tool",
+              tool: {
+                name: "tool_x",
+                description: "x",
+                input_schema: { type: "object", properties: {} },
+              },
+            },
+            handler: { type: "module", path: "./h.ts", export: "default" },
+            interactive: false,
+          },
+        ],
+        liveAreaSlots: [
+          {
+            id: "ambient",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "h.ts": TOOL_HANDLER_BODY,
+        "prov.ts": "export default async () => 'hi'",
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_x"])
+    expect(loader.getLiveAreaSlots().map((s) => s.definition.id)).toEqual(["ambient"])
+    rmSync(join(HOME, "tui-plugins", "la-tool-and-slot"), { recursive: true })
+  })
+
+  it("disabledPluginIds removes the slot too", async () => {
+    writePackage(
+      HOME,
+      "la-disabled",
+      {
+        id: "la-disabled",
+        name: "la-disabled",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "x",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      { "prov.ts": "export default async () => 'hi'" },
+    )
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      logger: () => {},
+      disabledPluginIds: new Set(["la-disabled"]),
+    })
+    expect(loader.getLiveAreaSlots()).toEqual([])
+    rmSync(join(HOME, "tui-plugins", "la-disabled"), { recursive: true })
+  })
+})

@@ -53,6 +53,7 @@ import { resolveEffort } from "./effort-resolution.ts"
 import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { displayWidth } from "./term-width.ts"
 import { checkQuota } from "./client.ts"
+import { formatQuotaSummary } from "./quota-format.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
@@ -384,99 +385,10 @@ function startStartupRowSpinner(
   }
 }
 
-/**
- * Format the parsed rate-limit headers from a successful quota check into a
- * compact, single-line summary appended after `ok ✔`.
- *
- * Style: minimalist, mid-dot separated. Window names are normal weight,
- * percentages are color-graded (green/yellow/red) by utilization, the soonest
- * reset is shown faint. Returns "" when there's nothing useful to show
- * (e.g. test fakes without rate-limit headers).
- */
-function formatQuotaSummary(rl: Map<string, string>): string {
-  if (rl.size === 0) return ""
-
-  type Win = { util?: number; status?: string; reset?: number }
-  const windows = new Map<string, Win>()
-  // Two header shapes:
-  //   anthropic-ratelimit-unified-<window>-<field>   (e.g. 5h, 7d, overage)
-  //   anthropic-ratelimit-unified-<field>            (aggregate, no window)
-  // We map the aggregate form to the synthetic key "overall" so it sorts and
-  // renders alongside the windowed entries.
-  const FIELDS = new Set(["utilization", "status", "reset"])
-  for (const [k, v] of rl) {
-    let win: string | null = null
-    let field: string | null = null
-    const mw = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/)
-    if (mw) {
-      win = mw[1]!
-      field = mw[2]!
-    } else {
-      const ma = k.match(/^anthropic-ratelimit-unified-(\w+)$/)
-      if (ma && FIELDS.has(ma[1]!)) {
-        win = "overall"
-        field = ma[1]!
-      }
-    }
-    if (!win || !field) continue
-    if (!windows.has(win)) windows.set(win, {})
-    const w = windows.get(win)!
-    if (field === "utilization") w.util = Number(v)
-    else if (field === "status") w.status = v
-    else if (field === "reset") w.reset = Number(v) * 1000
-  }
-
-  const colorPct = (util: number): string => {
-    const pct = util * 100
-    // Round so 0.099 doesn't render as "9.9%". We show integers for
-    // compactness — sub-percent precision isn't useful at a glance.
-    const txt = `${Math.round(pct)}%`
-    if (pct >= 85) return c.red(txt)
-    if (pct >= 60) return c.yellow(txt)
-    return c.green(txt)
-  }
-
-  const humanReset = (resetAt: number): string | null => {
-    const diffMs = resetAt - Date.now()
-    if (diffMs <= 0) return null
-    const totalMins = Math.floor(diffMs / 60_000)
-    const days = Math.floor(totalMins / (60 * 24))
-    const hrs = Math.floor((totalMins % (60 * 24)) / 60)
-    const mins = totalMins % 60
-    if (days > 0) return hrs > 0 ? `${days}d${hrs}h` : `${days}d`
-    if (hrs > 0) return `${hrs}h${mins}m`
-    return `${mins}m`
-  }
-
-  const parts: string[] = []
-  // Stable, narrow→wide order: 5h, 7d, overall (aggregate). Anything else
-  // sorts after, alphabetical.
-  const order = (w: string): number => (w === "5h" ? 0 : w === "7d" ? 1 : w === "overall" ? 2 : 3)
-  const winEntries = [...windows.entries()]
-    .filter(([w]) => w !== "overage" && w !== "fallback" && w !== "representative")
-    .sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
-
-  for (const [name, info] of winEntries) {
-    if (info.util == null) continue
-    let segment = `${c.faintWhite(name)} ${colorPct(info.util)}`
-    if (info.reset) {
-      const human = humanReset(info.reset)
-      if (human) segment += ` ${c.dim("↻")} ${c.dim(human)}`
-    }
-    parts.push(segment)
-  }
-
-  // Overage status — only surface when explicitly disabled (the common case
-  // is "allowed" and noise-free is better here).
-  const ov = rl.get("anthropic-ratelimit-unified-overage-status")
-  if (ov && ov !== "allowed") {
-    parts.push(`${c.faintWhite("overage")} ${c.red("off")}`)
-  }
-
-  if (parts.length === 0) return ""
-  const sep = c.dim(" · ")
-  return `  ${parts.join(sep)}`
-}
+// `formatQuotaSummary` lives in `./quota-format.ts` so the startup tree
+// AND the live-area `quota-status` plugin can share one source of
+// truth. The startup row passes `leadSpaces: 2` to align with the
+// tree's `╰ ok ✔` indent; the live-area slot passes `0`.
 
 /**
  * Extract a non-interactive prompt from command-line args.
@@ -616,29 +528,6 @@ async function main() {
   printStartupRow("thinking", thinkingLabel)
   printStartupRow("effort", effortLabel)
 
-  // Quota check — verify account has quota before starting conversation
-  // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1.
-  const shouldSkipQuota =
-    !commandPlan.needsQuota ||
-    args.includes("--skip-quota") ||
-    process.env.MINIMAL_AGENT_SKIP_QUOTA === "1" ||
-    userConfig.skipQuota === true
-
-  if (!shouldSkipQuota) {
-    const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
-    const result = await checkQuota(auth)
-    if (!result.ok) {
-      quotaSpinner.fail(`${c.boldRed("failed")} \x1b[1;31m✗\x1b[22;39m`)
-      console.error(
-        `  ${c.boldRed("error")} quota check failed. Account may not have quota or token is invalid.`,
-      )
-      process.exit(1)
-    }
-    quotaSpinner.ok(
-      `${c.boldGreen("ok")} ${c.boldGreen("✔")}${formatQuotaSummary(result.rateLimits)}`,
-    )
-  }
-
   // Load TUI plugins from ~/.agents/tui-plugins and <cwd>/tui-plugins.
   // Core tool names must always win over plugin names.
   const coreToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name))
@@ -682,6 +571,40 @@ async function main() {
     loadedModes.length > 0 ? new ModeManager(loadedModes, loader.getDefaultModeId()) : null
   if (modeManager?.active()) {
     printStartupRow("mode", c.bold(c.cyan(modeManager.active()!.id)))
+  }
+
+  // Quota check — verify account has quota before starting conversation.
+  // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1.
+  //
+  // Skipped automatically when ANY loaded plugin contributes a live-area
+  // slot with id `"quota"` — the slot will fetch the same data
+  // asynchronously after REPL boot, so blocking the boot here would just
+  // duplicate the work and re-introduce the latency we're trying to
+  // eliminate. The user-facing benefit: the live area shows up
+  // instantly; the quota row populates a moment later.
+  const hasQuotaSlot = loader
+    .getLiveAreaSlots()
+    .some((s) => s.definition.id === "quota")
+  const shouldSkipQuota =
+    !commandPlan.needsQuota ||
+    args.includes("--skip-quota") ||
+    process.env.MINIMAL_AGENT_SKIP_QUOTA === "1" ||
+    userConfig.skipQuota === true ||
+    hasQuotaSlot
+
+  if (!shouldSkipQuota) {
+    const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
+    const result = await checkQuota(auth)
+    if (!result.ok) {
+      quotaSpinner.fail(`${c.boldRed("failed")} \x1b[1;31m✗\x1b[22;39m`)
+      console.error(
+        `  ${c.boldRed("error")} quota check failed. Account may not have quota or token is invalid.`,
+      )
+      process.exit(1)
+    }
+    quotaSpinner.ok(
+      `${c.boldGreen("ok")} ${c.boldGreen("✔")}${formatQuotaSummary(result.rateLimits, { leadSpaces: 2 })}`,
+    )
   }
   // Resolve --resume: load prior conversation if asked.
   // We resolve the sid, load the session, hash-check against current

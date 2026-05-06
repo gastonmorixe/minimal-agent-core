@@ -44,7 +44,7 @@ import { RawInput } from "./input.ts"
 import { ModeManager } from "./modes.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
-import type { ManifestMode } from "./plugins/types.ts"
+import type { ManifestMode, ResolvedLiveAreaSlot } from "./plugins/types.ts"
 import type { SessionStore } from "./session-store.ts"
 import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
@@ -1218,6 +1218,17 @@ export interface ReplEditor {
    */
   setDecorationLines?(lines: string[]): void
   /**
+   * Optional. Render footer rows BELOW the editor input in the live area.
+   * Used by plugin-contributed live-area slots (see `liveAreaSlots` in
+   * the manifest schema) to surface ambient status — quota %, git
+   * branch state, background-job progress — without competing with
+   * what the user is typing. Pass `[]` to clear.
+   *
+   * Editors without footer support can omit this; the live-area
+   * scheduler in `runReplLiveArea` no-ops when it's missing.
+   */
+  setFooterLines?(lines: string[]): void
+  /**
    * Optional. Restore the editor buffer to a given text. Used by the abort
    * flow (`runReplLiveArea` → `handleAbort`) so that when the user cancels
    * an in-flight turn, the prompt they just sent is put back into the editor
@@ -1670,6 +1681,20 @@ async function runReplLiveArea(
   }
   statusRenderer?.start()
 
+  // Plugin-contributed live-area slots: schedule periodic producers that
+  // populate the editor's footer (and, in future cuts, decoration). The
+  // scheduler is started AFTER editor.start() so the first repaint
+  // lands in an already-mounted live area; stopped at REPL teardown.
+  const slotRows = loader?.getLiveAreaSlots() ?? []
+  let liveAreaScheduler: import("./live-area-providers.ts").LiveAreaScheduler | null = null
+  if (slotRows.length > 0 && typeof editor.setFooterLines === "function") {
+    const { LiveAreaScheduler } = await import("./live-area-providers.ts")
+    liveAreaScheduler = new LiveAreaScheduler(slotRows as ResolvedLiveAreaSlot[], {
+      setFooterLines: (lines) => editor.setFooterLines?.(lines),
+    })
+    liveAreaScheduler.start()
+  }
+
   // One-time ready banner above the prompt. Goes through writeStream so
   // it lands in normal scrollback (above the pinned live area).
   const dot = c.faintWhite("·")
@@ -2070,6 +2095,7 @@ async function runReplLiveArea(
       }
     }
   } finally {
+    liveAreaScheduler?.stop()
     statusRenderer?.stop()
     editor.stop()
     compositor.unmount()

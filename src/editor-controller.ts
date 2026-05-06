@@ -415,6 +415,36 @@ export class EditorController extends EventEmitter {
     if (this.started) this.repaint()
   }
 
+  /**
+   * Footer rows rendered BELOW the editor input in the live area. Used
+   * by plugin-contributed live-area slots that want to surface ambient
+   * status (quota %, git state, background-job progress) without
+   * competing with what the user is typing.
+   *
+   * Each entry is one already-styled line. Empty array clears. Footer
+   * rows count against the editor's live-height budget — they shrink
+   * the editor's available rows by `lines.length`. Callers should keep
+   * the footer compact (one row is the common case).
+   */
+  private footerLines: string[] = []
+
+  /**
+   * Set footer rows (drawn below the editor prompt in the live area).
+   * Pass `[]` to clear. Triggers a repaint when contents change
+   * (shallow compare); a no-op otherwise so plugins polling at steady
+   * state don't flicker the live area.
+   */
+  setFooterLines(lines: string[]): void {
+    if (
+      lines.length === this.footerLines.length &&
+      lines.every((l, i) => l === this.footerLines[i])
+    ) {
+      return
+    }
+    this.footerLines = [...lines]
+    if (this.started) this.repaint()
+  }
+
   // ----------------------------- internals -----------------------------
 
   private onData(chunk: string | Buffer): void {
@@ -926,12 +956,14 @@ export class EditorController extends EventEmitter {
     // longer causes the prompt to hop up one row (the "blank line at the
     // bottom" bug that occurred because the former STATUS row was vacated).
     const decorationRows = this.decorationLines.length
+    const footerRows = this.footerLines.length
     // Status row is always 1; decoration rows (queued-message display, etc.)
-    // sit between the status and the editor and count against the cap so
-    // the prompt can't be pushed off-screen by an over-eager queue.
+    // sit between the status and the editor; footer rows sit BELOW the
+    // editor. All three count against the cap so the prompt can't be
+    // pushed off-screen by an over-eager queue or a chatty footer.
     const statusRows = 1 + decorationRows
     const cap = Math.max(1, this.maxLiveHeight())
-    const editorBudget = Math.max(1, cap - statusRows)
+    const editorBudget = Math.max(1, cap - statusRows - footerRows)
 
     // Run the viewport/window calculation for a given physical-row content
     // budget. Does not mutate any state; returns the computed values.
@@ -988,7 +1020,7 @@ export class EditorController extends EventEmitter {
     // Re-check after pass 2 (in the unlikely case pass 2 brought vTop back to
     // 0, no indicator is needed and we reclaim the reserved row).
     const actualNeedSeparate = needSeparateIndicator && vTop > 0
-    const target = physicalRows + statusRows + (actualNeedSeparate ? 1 : 0)
+    const target = physicalRows + statusRows + footerRows + (actualNeedSeparate ? 1 : 0)
     if (target !== this.compositor.liveHeight) {
       this.compositor.setLiveHeight(target)
     }
@@ -1023,20 +1055,23 @@ export class EditorController extends EventEmitter {
     //   [...decorationLines]      ← 0..N rows (queue display, etc.)
     //   [indicatorLine?]          ← 0..1 row (scroll indicator, if needed)
     //   [...lines]                ← editor content
+    //   [...footerLines]          ← 0..N rows (quota, ambient status, etc.)
     // Cursor offset = 1 (status) + decorationRows + indicatorOffset.
+    // Footer rows live below the cursor row, so they don't shift it.
     const decoration = this.decorationLines
+    const footer = this.footerLines
     if (actualNeedSeparate && indicatorLine) {
       // Separate indicator row above content.
-      finalLines = [statusLine, ...decoration, indicatorLine, ...lines]
+      finalLines = [statusLine, ...decoration, indicatorLine, ...lines, ...footer]
       finalCursor = { row: cursor.row + 2 + decorationRows, col: cursor.col }
     } else if (indicatorLine && lines.length > 0) {
       // Fallback for editorBudget=1: indicator replaces the single content row.
       lines[0] = indicatorLine
-      finalLines = [statusLine, ...decoration, ...lines]
+      finalLines = [statusLine, ...decoration, ...lines, ...footer]
       finalCursor = { row: cursor.row + 1 + decorationRows, col: cursor.col }
     } else {
       // No indicator (viewport at top).
-      finalLines = [statusLine, ...decoration, ...lines]
+      finalLines = [statusLine, ...decoration, ...lines, ...footer]
       finalCursor = { row: cursor.row + 1 + decorationRows, col: cursor.col }
     }
 
