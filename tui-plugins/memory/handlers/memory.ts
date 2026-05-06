@@ -34,6 +34,34 @@ import { globalMemoryPath, projectMemoryPath } from "./load.ts"
 
 type Scope = "global" | "project"
 
+/**
+ * Local-time ISO 8601 string with seconds and timezone offset, e.g.
+ * `2026-05-05T21:06:20-04:00`. Mirrors the format used by the env-info
+ * plugin's `date_iso` field, so timestamps in saved memories are
+ * grep-able against session-start snapshots.
+ *
+ * `Date.prototype.toISOString()` always emits UTC (`Z`) — we want local
+ * time so a memory bullet reads naturally to the user without timezone
+ * conversion. Exposed for tests; production callers pass `new Date()`.
+ */
+export function localIsoSeconds(d: Date = new Date()): string {
+  const pad = (n: number): string => String(n).padStart(2, "0")
+  const yyyy = d.getFullYear()
+  const mm = pad(d.getMonth() + 1)
+  const dd = pad(d.getDate())
+  const hh = pad(d.getHours())
+  const mi = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  // `getTimezoneOffset` returns minutes WEST of UTC (so EDT = +240).
+  // ISO offset is signed the other way (EDT = `-04:00`), hence the negation.
+  const offMin = -d.getTimezoneOffset()
+  const sign = offMin >= 0 ? "+" : "-"
+  const absMin = Math.abs(offMin)
+  const oh = pad(Math.floor(absMin / 60))
+  const om = pad(absMin % 60)
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${sign}${oh}:${om}`
+}
+
 function parseScope(attrs: Record<string, string>): Scope {
   const raw = (attrs.scope ?? "").trim().toLowerCase()
   if (raw === "global") return "global"
@@ -73,7 +101,16 @@ export default async function memoryHandler(
   // Collapse to a single line so the bullet stays clean. Multi-line memories
   // are joined with spaces; the model is instructed to keep them short.
   const oneLine = body.replace(/\s+/g, " ")
-  const bullet = `- ${oneLine}\n`
+  // Prefix every newly-saved bullet with a local-time ISO timestamp (with
+  // seconds) so memories carry temporal context when reloaded next session
+  // — useful for spotting stale notes and ordering related observations.
+  //
+  // Backward compatibility: legacy bullets (saved before this change, or
+  // hand-edited by the user) have no `[<ts>] ` prefix. The load fragment
+  // (handlers/load.ts) treats the file as opaque text and never parses
+  // bullets, so old and new formats coexist freely in the same file.
+  const ts = localIsoSeconds()
+  const bullet = `- [${ts}] ${oneLine}\n`
 
   try {
     mkdirSync(dirname(path), { recursive: true })
