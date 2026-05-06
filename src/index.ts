@@ -54,6 +54,7 @@ import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { displayWidth } from "./term-width.ts"
 import { checkQuota } from "./client.ts"
 import { formatQuotaSummary } from "./quota-format.ts"
+import { setGlobalEventBus } from "./global-bus.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
@@ -555,6 +556,10 @@ async function main() {
     // in ~/.minimal-agent/config.jsonc is dropped before validation.
     disabledPluginIds: loadDisabledPluginIds(),
   })
+  // Expose the loader's event bus to deep emit-points (notably
+  // `client.ts`, which broadcasts `quota.headersReceived` after every
+  // successful API response — see src/global-bus.ts for the rationale).
+  setGlobalEventBus(loader.bus())
   const loadedModes = loader.getModes()
   const hasPlugins =
     loader.getExtraTools().length > 0 || loader.getPromptBlock() !== null || loadedModes.length > 0

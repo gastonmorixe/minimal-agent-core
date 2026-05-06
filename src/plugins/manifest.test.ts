@@ -439,3 +439,72 @@ describe("parseManifest / liveAreaSlots", () => {
     ).toThrow()
   })
 })
+
+describe("parseManifest / liveAreaSlots: placeholder + refreshOn", () => {
+  const base = {
+    id: "p",
+    name: "p",
+    version: "0.1.0",
+    description: "t",
+  }
+  const slot = {
+    id: "x",
+    handler: { type: "module", path: "./h.ts", export: "default" },
+  }
+
+  it("parses placeholder when present", () => {
+    const m = parseManifest(
+      { ...base, liveAreaSlots: [{ ...slot, placeholder: "loading…" }] },
+      "/x",
+    )
+    expect(m.liveAreaSlots![0]!.placeholder).toBe("loading…")
+  })
+
+  it("rejects non-string placeholder", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...slot, placeholder: 42 }] }, "/x"),
+    ).toThrow(/placeholder must be a string/)
+  })
+
+  it("accepts empty-string placeholder (caller-supplied opt-out)", () => {
+    const m = parseManifest({ ...base, liveAreaSlots: [{ ...slot, placeholder: "" }] }, "/x")
+    expect(m.liveAreaSlots![0]!.placeholder).toBe("")
+  })
+
+  it("parses refreshOn array of event names", () => {
+    const m = parseManifest(
+      { ...base, liveAreaSlots: [{ ...slot, refreshOn: ["a.b", "c.d"] }] },
+      "/x",
+    )
+    expect(m.liveAreaSlots![0]!.refreshOn).toEqual(["a.b", "c.d"])
+  })
+
+  it("rejects refreshOn that isn't an array", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: "single" }] }, "/x"),
+    ).toThrow(/refreshOn must be an array/)
+  })
+
+  it("rejects empty-string event names", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: [""] }] }, "/x"),
+    ).toThrow(/non-empty string event name/)
+  })
+
+  it("rejects event names with whitespace", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: ["evt with space"] }] }, "/x"),
+    ).toThrow(/must not contain whitespace/)
+  })
+
+  it("rejects duplicate event names within refreshOn", () => {
+    expect(() =>
+      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: ["a", "a"] }] }, "/x"),
+    ).toThrow(/duplicate event name/)
+  })
+
+  it("accepts empty refreshOn array (== timer-only)", () => {
+    const m = parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: [] }] }, "/x")
+    expect(m.liveAreaSlots![0]!.refreshOn).toEqual([])
+  })
+})

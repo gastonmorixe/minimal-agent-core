@@ -384,3 +384,226 @@ describe("LiveAreaScheduler — lifecycle", () => {
     sched.stop()
   })
 })
+
+describe("LiveAreaScheduler — placeholder + refreshOn", () => {
+  it("paints the placeholder synchronously at start(), BEFORE any fire resolves", async () => {
+    let resolveInvoke!: (v: string) => void
+    const slot = makeSlot({
+      id: "p",
+      invoke: () => new Promise<string | null>((r) => (resolveInvoke = r)),
+    })
+    // Inject a placeholder via the slot definition (we override the test
+    // factory's default footer position; placeholder lives next to it).
+    slot.definition.placeholder = "loading…"
+
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    // BEFORE we resolve the invoke: the footer must already have the
+    // placeholder line — that's the whole point of this feature.
+    expect(sink.footerCalls.at(-1)).toEqual(["loading…"])
+
+    // Drain microtasks so the .then chain reaches `slot.invoke(ctx)` and
+    // captures `resolveInvoke`. The invoke promise is hung until we call
+    // it explicitly — placeholder must STILL be the latest paint at this
+    // point (no value has resolved yet).
+    for (let i = 0; i < 16; i++) await Promise.resolve()
+    expect(sink.footerCalls.at(-1)).toEqual(["loading…"])
+
+    // Resolve invoke with real data; placeholder is replaced.
+    resolveInvoke("real value")
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual(["real value"])
+    sched.stop()
+  })
+
+  it("falls back to the placeholder when a tick returns null", async () => {
+    let returnNull = false
+    const slot = makeSlot({
+      id: "p",
+      refreshMs: 1_000,
+      invoke: async () => (returnNull ? null : "data"),
+    })
+    slot.definition.placeholder = "·"
+
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual(["data"])
+    returnNull = true
+    await clock.tick(1_000)
+    // Row reservation is preserved — falls back to placeholder, not [].
+    expect(sink.footerCalls.at(-1)).toEqual(["·"])
+    sched.stop()
+  })
+
+  it("without a placeholder, null still clears the row (legacy behavior)", async () => {
+    let returnNull = false
+    const slot = makeSlot({
+      id: "p",
+      refreshMs: 1_000,
+      invoke: async () => (returnNull ? null : "data"),
+    })
+    // No placeholder set.
+
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual(["data"])
+    returnNull = true
+    await clock.tick(1_000)
+    expect(sink.footerCalls.at(-1)).toEqual([])
+    sched.stop()
+  })
+
+  it("refreshOn events trigger an off-cycle re-fire", async () => {
+    const { EventBus } = await import("./plugins/event-bus.ts")
+    const bus = new EventBus(() => {})
+    let invokeCount = 0
+    const slot = makeSlot({
+      id: "q",
+      refreshMs: 60_000, // very long timer; we drive via events
+      invoke: async () => `tick=${invokeCount++}`,
+    })
+    slot.definition.refreshOn = ["evt.refresh"]
+
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      bus,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(invokeCount).toBe(1) // first fire from start()
+    expect(sink.footerCalls.at(-1)).toEqual(["tick=0"])
+
+    // Emit the event the slot subscribed to. EventBus uses queueMicrotask;
+    // drain microtasks via tick(0).
+    bus.emit("evt.refresh")
+    await clock.tick(0)
+    expect(invokeCount).toBe(2)
+    expect(sink.footerCalls.at(-1)).toEqual(["tick=1"])
+
+    // Repeated emits each fire (subject to in-flight skip, which doesn't
+    // apply here since invoke resolves synchronously).
+    bus.emit("evt.refresh")
+    await clock.tick(0)
+    expect(invokeCount).toBe(3)
+    sched.stop()
+  })
+
+  it("refreshOn drops events that arrive while a previous tick is in-flight", async () => {
+    const { EventBus } = await import("./plugins/event-bus.ts")
+    const bus = new EventBus(() => {})
+    let invokeCount = 0
+    let resolveFirst!: (v: string | null) => void
+    const slot = makeSlot({
+      id: "q",
+      refreshMs: 60_000,
+      invoke: () =>
+        new Promise<string | null>((r) => {
+          invokeCount++
+          if (invokeCount === 1) resolveFirst = r
+          else r(`tick=${invokeCount}`)
+        }),
+    })
+    slot.definition.refreshOn = ["evt.refresh"]
+
+    const clock = new FakeClock()
+    const sched = new LiveAreaScheduler([slot], makeSink(), {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      bus,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(invokeCount).toBe(1) // first fire hangs
+
+    // Burst of events while in-flight — none cause a new invoke.
+    for (let i = 0; i < 5; i++) bus.emit("evt.refresh")
+    await clock.tick(0)
+    expect(invokeCount).toBe(1)
+
+    // Resolve the first; subsequent emit fires normally.
+    resolveFirst("first")
+    await clock.tick(0)
+    bus.emit("evt.refresh")
+    await clock.tick(0)
+    expect(invokeCount).toBe(2)
+    sched.stop()
+  })
+
+  it("stop() removes refreshOn listeners (no leak across REPL teardown)", async () => {
+    const { EventBus } = await import("./plugins/event-bus.ts")
+    const bus = new EventBus(() => {})
+    let invokeCount = 0
+    const slot = makeSlot({
+      id: "q",
+      refreshMs: 60_000,
+      invoke: async () => `tick=${invokeCount++}`,
+    })
+    slot.definition.refreshOn = ["evt.refresh"]
+
+    const clock = new FakeClock()
+    const sched = new LiveAreaScheduler([slot], makeSink(), {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      bus,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    sched.stop()
+
+    bus.emit("evt.refresh")
+    await clock.tick(0)
+    // Still only the start()-time invoke; emit after stop is dropped.
+    expect(invokeCount).toBe(1)
+    expect(bus.listenerCount("evt.refresh")).toBe(0)
+  })
+
+  it("repaint dedup: identical footer arrays don't double-push to the sink", async () => {
+    const slot = makeSlot({ id: "a", invoke: async () => "v" })
+    slot.definition.placeholder = "·"
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    // start() repaint paints placeholder ["·"]. fire's first invoke
+    // returns "v" → another paint ["v"]. But NO empty paint between.
+    await clock.tick(0)
+    const footerSnaps = sink.footerCalls.map((f) => f.slice())
+    // We accept either:
+    //  - [["·"], ["v"]]  (placeholder paint then value paint)
+    //  - [["v"]]         (placeholder ≡ no paint when there's no row to draw)
+    // What we MUST NOT see is an interleaved []-paint or duplicates.
+    expect(footerSnaps.every((f) => f.length === 1)).toBe(true)
+    expect(footerSnaps.at(-1)).toEqual(["v"])
+    sched.stop()
+  })
+})

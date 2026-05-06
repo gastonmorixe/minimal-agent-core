@@ -13,7 +13,9 @@
       },
       "position": "footer",
       "refreshMs": 300000,
-      "timeoutMs": 8000
+      "timeoutMs": 8000,
+      "placeholder": "\u001b[2mquota  \u00b7\u001b[22m",
+      "refreshOn": ["quota.headersReceived"]
     }
   ]
 }

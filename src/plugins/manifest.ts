@@ -229,13 +229,47 @@ function parseLiveAreaSlot(
     timeoutMs = obj.timeoutMs as number
   }
 
+  let placeholder: string | undefined
+  if (obj.placeholder != null) {
+    if (typeof obj.placeholder !== "string") {
+      err(`placeholder must be a string (got: ${JSON.stringify(obj.placeholder)})`)
+    }
+    placeholder = obj.placeholder as string
+  }
+
+  let refreshOn: string[] | undefined
+  if (obj.refreshOn != null) {
+    if (!Array.isArray(obj.refreshOn)) err("refreshOn must be an array of event names if present")
+    const seen = new Set<string>()
+    refreshOn = []
+    for (let i = 0; i < (obj.refreshOn as unknown[]).length; i++) {
+      const e = (obj.refreshOn as unknown[])[i]
+      if (typeof e !== "string" || e.length === 0) {
+        err(`refreshOn[${i}] must be a non-empty string event name`)
+      }
+      const name = e as string
+      if (/\s/.test(name)) {
+        err(`refreshOn[${i}] must not contain whitespace (got: ${JSON.stringify(name)})`)
+      }
+      if (seen.has(name)) {
+        err(`refreshOn[${i}] duplicate event name: ${JSON.stringify(name)}`)
+      }
+      seen.add(name)
+      refreshOn.push(name)
+    }
+  }
+
   for (const k of Object.keys(obj)) {
-    if (!["id", "handler", "position", "refreshMs", "timeoutMs"].includes(k)) {
+    if (
+      !["id", "handler", "position", "refreshMs", "timeoutMs", "placeholder", "refreshOn"].includes(
+        k,
+      )
+    ) {
       err(`unknown live-area slot key: ${JSON.stringify(k)}`)
     }
   }
 
-  return { id, handler, position, refreshMs, timeoutMs }
+  return { id, handler, position, refreshMs, timeoutMs, placeholder, refreshOn }
 }
 
 /**
