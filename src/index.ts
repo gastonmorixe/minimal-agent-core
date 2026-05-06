@@ -802,6 +802,10 @@ async function main() {
   // Non-interactive mode: send prompt, print response, exit
   const prompt = await extractPrompt()
   if (prompt) {
+    // Breathing room between the closed startup tree (stderr) and the
+    // streamed response (stdout). The interactive REPL gets this for
+    // free via the Compositor; the non-interactive path doesn't.
+    process.stdout.write("\n")
     const formatter = formatterCmd ? new Formatter(formatterCmd, process.stdout) : null
     if (formatter) formatter.start()
 
