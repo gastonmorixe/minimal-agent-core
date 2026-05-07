@@ -87,4 +87,98 @@ describe("replayToScrollback", () => {
     replayToScrollback(messages, sink)
     expect(stripAnsi(sink.out)).toContain("(no result on disk)")
   })
+
+  it("strips <mode-change> activation blocks and uses the per-mode prompt prefix", async () => {
+    const { ModeManager } = await import("./modes.ts")
+    const ASK_MANIFEST = { id: "ask", label: "ASK" }
+    const modeManager = new ModeManager([ASK_MANIFEST])
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: "ask question" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "answer" }] },
+      {
+        role: "user",
+        content: [{ type: "text", text: "follow-up still in ask" }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="ask" to="default" />' },
+          { type: "text", text: "back to default" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    replayToScrollback(messages, sink, { modeManager })
+    const plain = stripAnsi(sink.out)
+    // The activation tag itself never reaches the rendered output.
+    expect(plain).not.toContain("<mode-change")
+    // First turn renders under the ASK prompt prefix.
+    expect(plain).toContain("ASK ❯ ask question")
+    // Follow-up turn (no <mode-change>) inherits the prior mode.
+    expect(plain).toContain("ASK ❯ follow-up still in ask")
+    // After mode-change to default, the prefix returns to the bare arrow…
+    expect(plain).toContain("❯ back to default")
+    // …and specifically NOT under an ASK label.
+    expect(plain).not.toContain("ASK ❯ back to default")
+  })
+
+  it("ignores a tool_result-only user message that also carries a <mode-change> block", async () => {
+    const { ModeManager } = await import("./modes.ts")
+    const ASK_MANIFEST = { id: "ask", label: "ASK" }
+    const modeManager = new ModeManager([ASK_MANIFEST])
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "kick off" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_1", content: "ok", is_error: false },
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "now in ask" }],
+      },
+    ]
+    const sink = new CaptureSink()
+    replayToScrollback(messages, sink, { modeManager })
+    const plain = stripAnsi(sink.out)
+    // The mid-loop user message (tool_result + mode-change) renders no
+    // own header line, but its mode-change side effect carries forward.
+    expect(plain).not.toContain("<mode-change")
+    expect(plain).toContain("ASK ❯ now in ask")
+    // Only two `❯ ` arrows total: the kickoff and the post-toggle prompt.
+    const arrows = plain.match(/❯ /g)?.length ?? 0
+    expect(arrows).toBe(2)
+  })
+
+  it("falls back to the bare arrow when no modeManager is supplied (back-compat)", () => {
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: "no manager" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    // Activation tag is still stripped (it's a transport detail)…
+    expect(plain).not.toContain("<mode-change")
+    // …and the prompt falls back to the bare arrow rather than crashing.
+    expect(plain).toContain("❯ no manager")
+    expect(plain).not.toContain("ASK ❯")
+  })
 })

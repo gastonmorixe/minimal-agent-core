@@ -831,7 +831,7 @@ async function main() {
         model: selectedModel,
       }),
     )
-    replayToScrollback(initialMessages, stdoutSink)
+    replayToScrollback(initialMessages, stdoutSink, { modeManager })
     stdoutSink.write("\n")
   }
 
