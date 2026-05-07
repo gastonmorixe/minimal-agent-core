@@ -28,8 +28,7 @@ describe("executeTool — abort plumbing", () => {
     const r = await executeTool(
       "Bash",
       {
-        command:
-          "echo first; sleep 0.4; echo second; sleep 0.4; echo third",
+        command: "echo first; sleep 0.4; echo second; sleep 0.4; echo third",
       },
       {
         onStdout: (s) => {

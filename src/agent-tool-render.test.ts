@@ -198,9 +198,12 @@ describe("formatToolInput — non-Bash tools", () => {
     expect(formatToolInput(tu("Glob", { pattern: "**/*.ts" }))).toBe("**/*.ts")
   })
 
-  it("Grep shows /pattern/ with optional ` in PATH`", () => {
+  it("Grep shows /pattern/ with optional ` · in PATH`", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo" }))).toBe("/foo/")
-    expect(formatToolInput(tu("Grep", { pattern: "foo", path: "/src" }))).toBe("/foo/ in /src")
+    // The "in PATH" form uses the project-wide ` · ` separator — same one
+    // used in the truncation footer (`shown 15/1831 L · 8.0 KB/1.5 MB ·
+    // cut at L1000`), keeping a single visual language inside the block.
+    expect(formatToolInput(tu("Grep", { pattern: "foo", path: "/src" }))).toBe("/foo/ · in /src")
   })
 
   it("unknown tool falls back to JSON.stringify with 200-char hard cap", () => {
@@ -208,6 +211,151 @@ describe("formatToolInput — non-Bash tools", () => {
     const out = formatToolInput(tu("Mystery", big))
     expect(out).toContain("...(+")
     expect(out).toMatch(/^\{"stuff":"x{1,250}\.\.\.\(\+\d+ch\)$/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// formatToolInput — Style A subordinate-input vocabulary
+//
+// "Style A" is the programmer-native shorthand approved May 2026: regex
+// flags inline (`/foo/i`), context as arrows (`↑↓↕N`), head limit as `≤N`,
+// `replace_all` as sed `· g`, line-range as `· L<a>-<b>` (1-indexed). All
+// chunks separated by ` · ` — same separator the truncation footer uses,
+// keeping the tool block in one visual language.
+// ---------------------------------------------------------------------------
+
+describe("formatToolInput — Read with offset/limit (Style A `· L<a>-<b>`)", () => {
+  it("bare Read renders byte-identical to no-extras form", () => {
+    expect(formatToolInput(tu("Read", { file_path: "/x" }))).toBe("/x")
+  })
+  it("`limit` only → 1-indexed closed range starting at L1", () => {
+    // Common case the user reported: model asks for "first 4 lines",
+    // header should reflect it. `execRead` body prints 1-indexed line
+    // numbers, so the header range matches what the user sees in the body.
+    expect(formatToolInput(tu("Read", { file_path: "/x", limit: 4 }))).toBe("/x · L1-4")
+  })
+  it("`offset` only → open-ended `· from L<n>` (n is 1-indexed)", () => {
+    // `offset` is zero-based in the schema; we lift it to 1-indexed for
+    // the header (offset=100 → "from L101") so the user's mental model
+    // stays consistent with the body's line gutter.
+    expect(formatToolInput(tu("Read", { file_path: "/x", offset: 100 }))).toBe("/x · from L101")
+  })
+  it("offset + limit → closed range, both 1-indexed", () => {
+    expect(formatToolInput(tu("Read", { file_path: "/x", offset: 100, limit: 5 }))).toBe(
+      "/x · L101-105",
+    )
+  })
+  it("offset=0 + limit → identical to limit-only form", () => {
+    // Edge case: explicit offset=0 should not differ from omitted offset.
+    expect(formatToolInput(tu("Read", { file_path: "/x", offset: 0, limit: 4 }))).toBe("/x · L1-4")
+  })
+})
+
+describe("formatToolInput — Edit replace_all (Style A `· g`)", () => {
+  it("default Edit (no replace_all) renders byte-identical to no-extras form", () => {
+    expect(formatToolInput(tu("Edit", { file_path: "/x", old_string: "a", new_string: "b" }))).toBe(
+      "/x",
+    )
+  })
+  it("replace_all=true appends sed-style `· g`", () => {
+    expect(
+      formatToolInput(
+        tu("Edit", { file_path: "/x", old_string: "a", new_string: "b", replace_all: true }),
+      ),
+    ).toBe("/x · g")
+  })
+  it("replace_all=false renders byte-identical to no-extras form (the schema default)", () => {
+    expect(
+      formatToolInput(
+        tu("Edit", { file_path: "/x", old_string: "a", new_string: "b", replace_all: false }),
+      ),
+    ).toBe("/x")
+  })
+})
+
+describe("formatToolInput — Glob with path", () => {
+  it("`path` appends as `· in <path>`", () => {
+    expect(formatToolInput(tu("Glob", { pattern: "*.ts", path: "/src" }))).toBe("*.ts · in /src")
+  })
+})
+
+describe("formatToolInput — Grep flags (Style A)", () => {
+  it("`-i` lifts to a JS-regex `i` flag on the pattern (NOT a separate chunk)", () => {
+    // Critical: case-insensitivity is a property of the regex, so it
+    // attaches inline to the pattern atom rather than floating as a
+    // separate chunk. `/foo/i · in /src` — not `/foo/ · -i · in /src`.
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-i": true }))).toBe("/foo/i")
+  })
+  it("`multiline` lifts to `m` flag (combinable with i → `im`)", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-i": true, multiline: true }))).toBe(
+      "/foo/im",
+    )
+  })
+  it("multiline alone → `/foo/m`", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", multiline: true }))).toBe("/foo/m")
+  })
+  it("`-A N` → `· ↓N` (after)", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-A": 5 }))).toBe("/foo/ · ↓5")
+  })
+  it("`-B N` → `· ↑N` (before)", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-B": 2 }))).toBe("/foo/ · ↑2")
+  })
+  it("`-C N` → `· ↕N` (around)", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-C": 3 }))).toBe("/foo/ · ↕3")
+  })
+  it("`context` (alias for -C) → `· ↕N`", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", context: 3 }))).toBe("/foo/ · ↕3")
+  })
+  it("`-C` takes precedence when both -C and -A/-B set (symmetric beats asymmetric)", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-A": 5, "-B": 2, "-C": 3 }))).toBe(
+      "/foo/ · ↕3",
+    )
+  })
+  it("renders both ↓ and ↑ when -A and -B are set without -C", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-A": 5, "-B": 2 }))).toBe(
+      "/foo/ · ↓5 · ↑2",
+    )
+  })
+  it("`head_limit` → `· ≤N`", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", head_limit: 100 }))).toBe("/foo/ · ≤100")
+  })
+  it("output_mode: count → `· count`", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", output_mode: "count" }))).toBe(
+      "/foo/ · count",
+    )
+  })
+  it("output_mode: files_with_matches → `· paths`", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", output_mode: "files_with_matches" }))).toBe(
+      "/foo/ · paths",
+    )
+  })
+  it("output_mode: content (default) → omitted from header", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", output_mode: "content" }))).toBe("/foo/")
+  })
+  it("`glob` filter renders as a bare chunk after path", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", path: "/src", glob: "*.ts" }))).toBe(
+      "/foo/ · in /src · *.ts",
+    )
+  })
+  it("composed: pattern with flags, path, glob, context, head, mode (full chain)", () => {
+    expect(
+      formatToolInput(
+        tu("Grep", {
+          pattern: "foo",
+          "-i": true,
+          path: "/src",
+          glob: "*.ts",
+          "-C": 3,
+          head_limit: 100,
+          output_mode: "count",
+        }),
+      ),
+    ).toBe("/foo/i · in /src · *.ts · ↕3 · ≤100 · count")
+  })
+  it("`-n` (line numbers) is intentionally NOT surfaced — it's the default", () => {
+    // Surfacing -n would clutter the header for zero information gain
+    // (it's on by default; the body already shows numbers via the gutter).
+    expect(formatToolInput(tu("Grep", { pattern: "foo", "-n": true }))).toBe("/foo/")
   })
 })
 
@@ -230,28 +378,31 @@ describe("formatToolPreview — body preview budget", () => {
   it("uses Bash budget (10 lines) for tool=Bash", () => {
     const content = Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n")
     const lines = formatToolPreview(content, false, undefined, { tool: "Bash" })
-    // Body lines + at most one footer line. With 50 source lines and a
-    // budget of 10, the TUI elides 40 — that triggers the footer.
-    // Visible body = 10; footer = 1; total = 11.
-    expect(lines.length).toBe(11)
-    // First 10 lines render line content; 11th is the footer.
+    // Body lines + truncation separator + footer line. With 50 source lines
+    // and a budget of 10, the TUI elides 40 — that triggers the footer,
+    // which is now preceded by a `┊` "something cut here" divider.
+    // Visible body = 10; ┊ separator = 1; footer = 1; total = 12.
+    expect(lines.length).toBe(12)
+    // First 10 lines render line content; 11th is the `┊`; 12th is `╰ shown…`.
     expect(stripAnsi(lines[0])).toMatch(/^\s*│\sline 0$/)
     expect(stripAnsi(lines[9])).toMatch(/^\s*│\sline 9$/)
-    expect(stripAnsi(lines[10])).toMatch(/^\s*╰\sshown\s/)
+    expect(stripAnsi(lines[10])).toMatch(/^\s*┊\s*$/)
+    expect(stripAnsi(lines[11])).toMatch(/^\s*╰\sshown\s/)
   })
 
   it("uses Read budget (15 lines) for tool=Read", () => {
     const content = Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n")
     const lines = formatToolPreview(content, false, undefined, { tool: "Read" })
-    expect(lines.length).toBe(16) // 15 body + 1 footer
+    expect(lines.length).toBe(17) // 15 body + 1 ┊ + 1 footer
     expect(stripAnsi(lines[14])).toMatch(/^\s*│\sline 14$/)
-    expect(stripAnsi(lines[15])).toMatch(/^\s*╰\sshown\s/)
+    expect(stripAnsi(lines[15])).toMatch(/^\s*┊\s*$/)
+    expect(stripAnsi(lines[16])).toMatch(/^\s*╰\sshown\s/)
   })
 
   it("uses default budget (10 lines) for unknown tool", () => {
     const content = Array.from({ length: 30 }, (_, i) => `r${i}`).join("\n")
     const lines = formatToolPreview(content, false, undefined, { tool: "Mystery" })
-    expect(lines.length).toBe(11)
+    expect(lines.length).toBe(12) // 10 body + 1 ┊ + 1 footer
   })
 
   it("does NOT add a footer when body fits within budget", () => {
@@ -413,10 +564,69 @@ describe("formatToolPreview — bare-facts footer", () => {
         cutLine: 30,
       },
     })
-    expect(lines.length).toBe(11) // 10 body + 1 footer
-    const footer = stripAnsi(lines[10])
+    expect(lines.length).toBe(12) // 10 body + 1 ┊ + 1 footer
+    expect(stripAnsi(lines[10])).toMatch(/^\s*┊\s*$/)
+    const footer = stripAnsi(lines[11])
     expect(footer).toMatch(/shown \d+\/30 L/)
     expect(footer).not.toMatch(/cut at L/) // TUI-only — no API cut.
+  })
+})
+
+describe("formatToolPreview — `┊` truncation separator", () => {
+  // Standalone coverage of the dotted divider: it appears IFF the footer
+  // appears, sits exactly above `╰`, and is absent on clean runs (so it
+  // doesn't get confused with a literal blank output line).
+  it("emits a `┊` row immediately before `╰ <footer>` when API truncated", () => {
+    const body = "row 0\nrow 1\nrow 2"
+    const lines = formatToolPreview(body, false, undefined, {
+      tool: "Read",
+      info: {
+        tool: "Read",
+        truncated: true,
+        shownBytes: 100,
+        shownLines: 3,
+        totalBytes: 5_000,
+        totalLines: 200,
+        cutLine: 3,
+      },
+    })
+    // Last two rows are `┊` and `╰ <footer>`, in that order.
+    const sepIdx = lines.length - 2
+    const footIdx = lines.length - 1
+    expect(stripAnsi(lines[sepIdx])).toMatch(/^\s*┊\s*$/)
+    expect(stripAnsi(lines[footIdx])).toMatch(/^\s*╰\s/)
+    expect(stripAnsi(lines[footIdx])).toContain("cut at L3")
+  })
+
+  it("emits `┊` for a TUI-only elision footer too (body bigger than budget, API clean)", () => {
+    const content = Array.from({ length: 30 }, (_, i) => `n${i}`).join("\n")
+    const lines = formatToolPreview(content, false, undefined, { tool: "Bash" })
+    expect(stripAnsi(lines[lines.length - 2])).toMatch(/^\s*┊\s*$/)
+    expect(stripAnsi(lines[lines.length - 1])).toMatch(/^\s*╰\sshown/)
+  })
+
+  it("does NOT emit `┊` on a clean run (body fits, no API clamp)", () => {
+    const lines = formatToolPreview("one\ntwo\nthree", false, undefined, { tool: "Bash" })
+    // No ┊ anywhere — the body just closes with `╰`.
+    expect(lines.some((l) => stripAnsi(l).match(/^\s*┊\s*$/))).toBe(false)
+    expect(stripAnsi(lines[lines.length - 1])).toMatch(/^\s*╰\sthree$/)
+  })
+
+  it("does NOT emit `┊` for the `(no output)` close line", () => {
+    // Empty content renders a single `╰ (no output)` row — that's not a
+    // truncation indicator, so no dotted divider above it.
+    const lines = formatToolPreview("", false, undefined, { tool: "Bash" })
+    expect(lines.length).toBe(1)
+    expect(lines.some((l) => stripAnsi(l).match(/^\s*┊\s*$/))).toBe(false)
+  })
+
+  it("does NOT emit `┊` for the display channel (Edit/Write diffs)", () => {
+    // Diffs render verbatim with no truncation, so the `┊` divider is
+    // never appropriate here even when the diff is long.
+    const display = "+a\n+b\n+c\n+d\n+e\n+f"
+    const lines = formatToolPreview("compact", false, display, { tool: "Edit" })
+    expect(lines.some((l) => stripAnsi(l).match(/^\s*┊\s*$/))).toBe(false)
+    expect(stripAnsi(lines[lines.length - 1])).toMatch(/^\s*╰\s/)
   })
 })
 

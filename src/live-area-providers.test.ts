@@ -236,7 +236,7 @@ describe("LiveAreaScheduler — repaint dedup & routing", () => {
     sched.stop()
   })
 
-  it("treats `position: \"header\"` as footer (with a one-time warning)", async () => {
+  it('treats `position: "header"` as footer (with a one-time warning)', async () => {
     const warnings: string[] = []
     const slot = makeSlot({
       id: "h",
@@ -257,7 +257,7 @@ describe("LiveAreaScheduler — repaint dedup & routing", () => {
     await clock.tick(1_000)
     expect(sink.footerCalls.at(-1)).toEqual(["hi"])
     // Warning fires exactly once even across multiple ticks.
-    expect(warnings.filter((w) => w.includes("position=\"header\""))).toHaveLength(1)
+    expect(warnings.filter((w) => w.includes('position="header"'))).toHaveLength(1)
     sched.stop()
   })
 })

@@ -37,10 +37,7 @@ export interface FormatQuotaOptions {
  * reset is shown faint. Returns `""` when there's nothing useful to show
  * (e.g. test fakes without rate-limit headers).
  */
-export function formatQuotaSummary(
-  rl: Map<string, string>,
-  opts: FormatQuotaOptions = {},
-): string {
+export function formatQuotaSummary(rl: Map<string, string>, opts: FormatQuotaOptions = {}): string {
   if (rl.size === 0) return ""
   const now = opts.now ?? Date.now
 

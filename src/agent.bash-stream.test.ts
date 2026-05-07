@@ -26,8 +26,7 @@ describe("Agent.run live-streams Bash stdout to transcript", () => {
               name: "Bash",
               // Print three lines, ~250ms apart. Total ~500ms.
               input: {
-                command:
-                  "echo line-A; sleep 0.25; echo line-B; sleep 0.25; echo line-C",
+                command: "echo line-A; sleep 0.25; echo line-B; sleep 0.25; echo line-C",
               },
             },
           ],
@@ -61,9 +60,7 @@ describe("Agent.run live-streams Bash stdout to transcript", () => {
 
     // We should see header (╭) + 3 body rows (last row is ╰) for line-A,
     // line-B, line-C. Filter to just the bordered tool block.
-    const bodyRows = stamps.filter(
-      (s) => s.line.includes("│") || s.line.includes("╰"),
-    )
+    const bodyRows = stamps.filter((s) => s.line.includes("│") || s.line.includes("╰"))
 
     // line-A appears in the FIRST body row.
     const aIdx = bodyRows.findIndex((s) => s.line.includes("line-A"))

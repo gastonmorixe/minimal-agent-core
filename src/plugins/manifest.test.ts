@@ -362,9 +362,7 @@ describe("parseManifest / liveAreaSlots", () => {
   })
 
   it("accepts a manifest with NO tuis/modes/events/hooks/promptFragments when liveAreaSlots is non-empty", () => {
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x"),
-    ).not.toThrow()
+    expect(() => parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x")).not.toThrow()
   })
 
   it("still rejects a manifest with EVERYTHING empty", () => {
@@ -424,19 +422,14 @@ describe("parseManifest / liveAreaSlots", () => {
 
   it("rejects unknown keys on a slot entry", () => {
     expect(() =>
-      parseManifest(
-        { ...base, liveAreaSlots: [{ ...goodSlot, color: "red" }] },
-        "/x",
-      ),
+      parseManifest({ ...base, liveAreaSlots: [{ ...goodSlot, color: "red" }] }, "/x"),
     ).toThrow(/unknown live-area slot key/)
   })
 
   it("rejects missing handler", () => {
     const noHandler: Record<string, unknown> = { ...goodSlot }
     delete noHandler.handler
-    expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [noHandler] }, "/x"),
-    ).toThrow()
+    expect(() => parseManifest({ ...base, liveAreaSlots: [noHandler] }, "/x")).toThrow()
   })
 })
 

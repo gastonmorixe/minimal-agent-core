@@ -105,8 +105,7 @@ export class LiveAreaScheduler {
     // host-typed clearTimeout. Tests inject their own pair so the
     // shape is internally consistent (cast safely confined here).
     this.clearT =
-      deps.clearTimeout ??
-      ((h) => clearTimeout(h as Parameters<typeof clearTimeout>[0]))
+      deps.clearTimeout ?? ((h) => clearTimeout(h as Parameters<typeof clearTimeout>[0]))
     const stderr = deps.stderr ?? process.stderr
     this.logger =
       deps.logger ??

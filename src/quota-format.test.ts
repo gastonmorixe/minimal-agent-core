@@ -82,10 +82,7 @@ describe("formatQuotaSummary", () => {
     const at = (offsetMs: number): string => {
       const rl = new Map([
         ["anthropic-ratelimit-unified-7d-utilization", "0.5"],
-        [
-          "anthropic-ratelimit-unified-7d-reset",
-          String(Math.floor((now + offsetMs) / 1000)),
-        ],
+        ["anthropic-ratelimit-unified-7d-reset", String(Math.floor((now + offsetMs) / 1000))],
       ])
       return stripAnsi(formatQuotaSummary(rl, { now: () => now }))
     }
