@@ -128,7 +128,10 @@ describe("auth", () => {
         claudeAiOauth: {
           accessToken: "AT",
           refreshToken: "RT_revoked",
-          expiresAt: Date.now() + 60_000,
+          // Well beyond EXPIRY_BUFFER_MS (60_000) so getAuth does NOT
+          // proactively refresh — the test wants to exercise the explicit
+          // auth.refresh!() call below, not the eager refresh path.
+          expiresAt: Date.now() + 60_000_000,
         },
       })
       const fakeRefresh = async (): Promise<TokenRefreshResult> => {
