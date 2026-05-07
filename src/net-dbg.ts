@@ -12,6 +12,7 @@
 
 import { mkdirSync, existsSync, writeFileSync, appendFileSync } from "node:fs"
 import { join } from "node:path"
+import { getSessionId } from "./metadata.ts"
 
 /**
  * Captured at module load. Toggling MINIMAL_AGENT_NET_DBG at runtime does NOT
@@ -37,12 +38,21 @@ export function formatTzOffset(d: Date): string {
   return `${sign}${hh}${mm}`
 }
 
-function ensureSessionDir(): string | null {
-  if (!ENABLED) return null
-  if (SESSION_DIR && existsSync(SESSION_DIR)) return SESSION_DIR
-
-  const epoch = Date.now()
-  const d = new Date()
+/**
+ * Build the leaf folder name for a recording session.
+ *
+ * Shape: `<epoch-ms>-<DD>-<MON>-<YYYY>-<WEEKDAY>--<HH>h<MM>m<SS>s<±HHMM>-minimal-agent-<sid>`
+ *
+ * The leading epoch keeps directories sortable lexicographically by start
+ * time; the human chunk is for skim-readability; the trailing `<sid>` lets
+ * a recording be cross-referenced with the agent's session id (same UUID
+ * `metadata.getSessionId()` returns and `~/.minimal-agent/sessions/<sid>.jsonl`
+ * uses).
+ *
+ * Pure function — exported for testing and for any future caller that wants
+ * the naming logic without the mkdir side-effect.
+ */
+export function formatSessionDirName(epoch: number, d: Date, sessionId: string): string {
   const pad = (n: number) => String(n).padStart(2, "0")
   const months = [
     "JAN",
@@ -62,8 +72,18 @@ function ensureSessionDir(): string | null {
   const human =
     `${pad(d.getDate())}-${months[d.getMonth()]}-${d.getFullYear()}-${days[d.getDay()]}--` +
     `${pad(d.getHours())}h${pad(d.getMinutes())}m${pad(d.getSeconds())}s${formatTzOffset(d)}`
+  return `${epoch}-${human}-minimal-agent-${sessionId}`
+}
 
-  const dir = join(process.cwd(), ".net-dbg", `${epoch}-${human}-minimal-agent`)
+function ensureSessionDir(): string | null {
+  if (!ENABLED) return null
+  if (SESSION_DIR && existsSync(SESSION_DIR)) return SESSION_DIR
+
+  const dir = join(
+    process.cwd(),
+    ".net-dbg",
+    formatSessionDirName(Date.now(), new Date(), getSessionId()),
+  )
   mkdirSync(dir, { recursive: true })
   SESSION_DIR = dir
   return dir
