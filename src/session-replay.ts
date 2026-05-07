@@ -169,9 +169,16 @@ export function replayToScrollback(
       } else if (b.type === "tool_use") {
         const tu = b as ToolUseBlock
         // Live header: `\n  ╭ ✦ Tool  args` — match it verbatim.
-        sink.write(`\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu))}\n`)
-        // Multi-line Bash continuation rows (mirrors live agent rendering).
-        for (const cont of formatToolInputContinuation(tu)) {
+        // Pass live terminal width so soft-split (overflowing single-line
+        // Bash → `↳ <op> <body>` rows) activates the same way it does in
+        // the live agent. See `src/bash-split.ts`.
+        const replayCols = process.stdout.columns
+        sink.write(
+          `\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, replayCols))}\n`,
+        )
+        // Continuation rows: `> <line>` for `\n`-separated multi-line,
+        // `↳ <op> <body>` for soft-split single-line overflow.
+        for (const cont of formatToolInputContinuation(tu, replayCols)) {
           sink.write(`  ${c.dimCyan("│")} ${c.dim(cont)}\n`)
         }
         // Header→body separator (mirrors live agent rendering: the empty

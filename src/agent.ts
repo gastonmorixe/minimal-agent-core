@@ -54,6 +54,7 @@ import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import type { TruncationInfo } from "./tools/truncation.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 import { truncHint } from "./truncate-hint.ts"
+import { splitBashSegments, shouldSoftSplit } from "./bash-split.ts"
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -584,14 +585,22 @@ export class Agent {
             ? (c as Record<string, (s: string) => string>)[pres.color]
             : c.orange
         const icon = pres?.icon ? `${labelColor(pres.icon)} ` : ""
+        // Pass live terminal width so single-line Bash commands that
+        // would overflow get soft-split at top-level operators (`&&`,
+        // `||`, `|`, `;`) into `↳`-prefixed continuation rows. See
+        // `src/bash-split.ts` for the splitter and activation predicate.
+        const renderCols = process.stdout.columns
         writeTranscript(
-          `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool))}`,
+          `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool, renderCols))}`,
         )
-        // Continuation rows for multi-line Bash commands. Each row sits in
-        // the same bordered block (`│` connector) with a `> ` prefix that
-        // mirrors bash's secondary prompt — visually distinguishable from
-        // output rows below. Empty for non-Bash and single-line Bash.
-        for (const cont of formatToolInputContinuation(tool)) {
+        // Continuation rows. Two shapes:
+        //   - `> <line>` — PS2-style for `\n`-separated multi-line input
+        //     (heredocs, for-loops). Existing behavior.
+        //   - `↳ <op> <body>` — soft-split for overflowing single-line
+        //     pipelines. Operator leads each row (shfmt convention).
+        // Both use the same `│` connector. Empty for non-Bash and for
+        // single-line Bash that fits the width.
+        for (const cont of formatToolInputContinuation(tool, renderCols)) {
           writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
         }
         // Header→body separator: a single empty gutter row (`│` glyph, no
@@ -992,14 +1001,35 @@ const BASH_CONT_MAX_LINES = 8
  *  - **Unknown**: JSON.stringify, hard slice at 200 chars (unknown tools
  *    have unknown shape, so word boundaries aren't meaningful).
  */
-export function formatToolInput(tool: ToolUseBlock): string {
+export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
   const input = tool.input
   if (tool.name === "Bash" && input.command) {
     const cmd = String(input.command)
     const firstNl = cmd.indexOf("\n")
     const firstLine = firstNl === -1 ? cmd : cmd.slice(0, firstNl)
-    const trimmed = trimAtWordBoundary(firstLine, HEADER_BASH_MAX)
-    const charsCut = firstLine.length - trimmed.length
+    // Width-aware soft-split: when the first \n-line would overflow the
+    // available terminal cells, route through `splitBashSegments` and
+    // use only the lead segment in the header. The remaining segments
+    // are emitted as `↳`-prefixed continuation rows by
+    // `formatToolInputContinuation`, followed by the existing PS2 `> `
+    // rows for any subsequent \n-lines (heredoc bodies, inline scripts).
+    //
+    // Soft-split applies to the FIRST \n-line independent of whether
+    // there are more \n-lines after it — early versions gated this on
+    // `firstNl === -1`, which made multi-line commands (python3 -c with
+    // embedded \n, heredocs, for-loops) bypass soft-split entirely and
+    // let the long first line truncate+wrap. Reported by user, May 2026.
+    //
+    // Default `cols` rule: when neither arg nor TTY width is available
+    // (e.g. unit tests, piped output), treat as Infinity so we never
+    // trigger soft-split — the lead-only header would otherwise be a
+    // regression for non-TTY callers.
+    const effectiveCols = cols ?? process.stdout.columns ?? Number.POSITIVE_INFINITY
+    const headerBody = shouldSoftSplit(firstLine, effectiveCols)
+      ? splitBashSegments(firstLine).lead || firstLine
+      : firstLine
+    const trimmed = trimAtWordBoundary(headerBody, HEADER_BASH_MAX)
+    const charsCut = headerBody.length - trimmed.length
     const truncated = charsCut > 0 ? `${trimmed}${truncHint(charsCut, "ch")}` : trimmed
     // Header line only — continuation rendered by formatToolInputContinuation.
     return `$ ${truncated}`
@@ -1092,28 +1122,60 @@ export function formatToolInput(tool: ToolUseBlock): string {
  * was elided. Per-line word-boundary trim mirrors `formatToolInput`'s
  * 500-char Bash budget.
  */
-export function formatToolInputContinuation(tool: ToolUseBlock): string[] {
+export function formatToolInputContinuation(tool: ToolUseBlock, cols?: number): string[] {
   const input = tool.input
   if (tool.name !== "Bash" || !input.command) return []
   const cmd = String(input.command)
   const all = cmd.split("\n")
-  if (all.length <= 1) return []
-  const cont = all.slice(1)
-  const visible = cont.slice(0, BASH_CONT_MAX_LINES)
-  const elided = cont.length - visible.length
-  const out = visible.map((line) => {
+  const firstLine = all[0] ?? ""
+  const tail = all.slice(1)
+  const effectiveCols = cols ?? process.stdout.columns ?? Number.POSITIVE_INFINITY
+
+  // Zone A — soft-split rows for the FIRST \n-line. Activates whenever
+  // the first line would overflow AND has top-level operators
+  // (`&&`, `||`, `|`, `;`) — independent of whether there are more
+  // \n-lines after it. Each row is prefixed `↳ ` and leads with the
+  // operator (shellcheck/shfmt convention). Visually distinct from
+  // Zone B's `> ` PS2 rows.
+  const softSplitRows: string[] = (() => {
+    if (!shouldSoftSplit(firstLine, effectiveCols)) return []
+    const { rest } = splitBashSegments(firstLine)
+    if (rest.length === 0) return []
+    return rest.map(({ op, body }) => {
+      const segLine = `${op} ${body}`
+      const trimmed = trimAtWordBoundary(segLine, HEADER_BASH_MAX)
+      const charsCut = segLine.length - trimmed.length
+      const finalBody = charsCut > 0 ? `${trimmed}${truncHint(charsCut, "ch")}` : trimmed
+      return `↳ ${finalBody}`
+    })
+  })()
+
+  // Zone B — PS2 (`> `) rows for subsequent \n-lines (heredoc bodies,
+  // inline scripts, for-loop bodies). Existing behavior, preserved.
+  const ps2Rows: string[] = tail.map((line) => {
     const trimmed = trimAtWordBoundary(line, HEADER_BASH_MAX)
     const charsCut = line.length - trimmed.length
     const body = charsCut > 0 ? `${trimmed}${truncHint(charsCut, "ch")}` : trimmed
     return `> ${body}`
   })
-  if (elided > 0) {
-    // `truncHint(N, "L")` already starts with `...(+`, so the synthetic
-    // row reads `> ...(+6L) more` (single ellipsis, terse, distinct from
-    // bash output below).
-    out.push(`> ${truncHint(elided, "L")} more`)
-  }
-  return out
+
+  // Combined cap. Concatenate Zone A then Zone B, then clip to
+  // `BASH_CONT_MAX_LINES` with a single trailing elision row that
+  // counts both elided categories together. Putting the cap on the
+  // combined list (rather than per-zone) keeps the visual block from
+  // ballooning when a model emits a long pipeline AND a multi-line
+  // heredoc body in the same call.
+  const combined = [...softSplitRows, ...ps2Rows]
+  if (combined.length === 0) return []
+  if (combined.length <= BASH_CONT_MAX_LINES) return combined
+  const visible = combined.slice(0, BASH_CONT_MAX_LINES)
+  const elided = combined.length - visible.length
+  // Elision-row prefix mirrors whichever zone the LAST visible row
+  // came from, so the eye stays oriented (`↳` if we cut inside the
+  // operator-split zone, `>` if we cut inside the heredoc zone).
+  const lastPrefix = visible[visible.length - 1].startsWith("↳ ") ? "↳" : ">"
+  visible.push(`${lastPrefix} ${truncHint(elided, "L")} more`)
+  return visible
 }
 
 /**
