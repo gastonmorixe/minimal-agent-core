@@ -388,9 +388,36 @@ export class ModeManager {
    *   restyles it. Defaults to `"❯"`.
    */
   promptPrefix(baseArrow: string, arrowGlyph = "❯"): string {
-    const m = this.active()
-    if (!m) return baseArrow
-    const resolved = this.resolvedCache[this.idx]
+    return this.promptPrefixForId(this.activeId(), baseArrow, arrowGlyph)
+  }
+
+  /**
+   * Like {@link promptPrefix}, but resolves against an explicit mode id
+   * instead of the currently active one. Pass `null` (or any unknown id,
+   * including the literal `"default"` placeholder used as the "no mode"
+   * token in `<mode-change>` activation blocks) to get the bare
+   * `baseArrow`.
+   *
+   * Used by session replay (see `session-replay.ts`) to render past
+   * user turns under the prompt prefix that was active at the time,
+   * reconstructed from the `<mode-change from=… to=… />` attachments
+   * stored alongside the user content. Pure: never mutates `this.idx` or
+   * `lastAdvertisedModeId` — safe to call repeatedly while walking
+   * historical messages.
+   *
+   * @param modeId - Id of the mode whose prefix to render, or `null`.
+   * @param baseArrow - Default pre-styled arrow (with trailing space)
+   *   used when `modeId` is `null` or unknown, or when the resolved
+   *   mode does not request its own arrow color.
+   * @param arrowGlyph - Raw glyph used to rebuild the arrow when the
+   *   resolved mode restyles it. Defaults to `"❯"`.
+   */
+  promptPrefixForId(modeId: string | null, baseArrow: string, arrowGlyph = "❯"): string {
+    if (modeId == null) return baseArrow
+    const idx = this.modes.findIndex((mm) => mm.id === modeId)
+    if (idx === -1) return baseArrow
+    const m = this.modes[idx]
+    const resolved = this.resolvedCache[idx]
     const label = clampLabel((m.label ?? m.id).toUpperCase())
     const labelStyle = resolved?.label ?? null
     const arrowStyle = resolved?.arrow ?? null

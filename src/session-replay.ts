@@ -28,6 +28,7 @@ import {
   faintThinkingChunk,
 } from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import type { ModeManager } from "./modes.ts"
 
 /**
  * Sink shape: anything with a `write(string)`. The live-area REPL passes
@@ -35,6 +36,24 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./cli
  */
 export interface ReplaySink {
   write(s: string): unknown
+}
+
+/**
+ * Optional per-call options for {@link replayToScrollback}.
+ */
+export interface ReplayOptions {
+  /**
+   * If provided, used to render the prompt prefix for each replayed user
+   * turn (so a turn submitted under `ASK` mode displays `ASK ❯` in
+   * scrollback, matching what the live REPL drew). When omitted, all
+   * replayed turns use the bare `❯ ` arrow regardless of any
+   * `<mode-change>` activation blocks recorded in the log.
+   *
+   * The activation blocks themselves are ALWAYS stripped from the
+   * rendered text — they are a transport detail for the model, not
+   * user-visible content — even when no `modeManager` is supplied.
+   */
+  modeManager?: ModeManager | null
 }
 
 /**
@@ -58,9 +77,13 @@ export function buildResumeHeader(opts: {
 /**
  * Replay a message list to the sink with full fidelity:
  *
- * - **User messages**: prompt prefix `❯ ` followed by the user's text in
- *   normal weight. Tool_result blocks are not rendered here — they appear
- *   under the assistant's tool_use header below.
+ * - **User messages**: prompt prefix `❯ ` (or the per-mode prefix such
+ *   as `ASK ❯` when `opts.modeManager` is supplied and the turn carried
+ *   a `<mode-change from=… to=… />` activation block) followed by the
+ *   user's text in normal weight. The activation block itself is always
+ *   stripped from the rendered text — it is a transport detail, not
+ *   user-visible content. Tool_result blocks are not rendered here —
+ *   they appear under the assistant's tool_use header below.
  *
  * - **Assistant text blocks**: rendered plain (no dim).
  *
@@ -71,8 +94,23 @@ export function buildResumeHeader(opts: {
  * - **Assistant tool_use blocks**: rendered as the live transcript
  *   `╭ ToolName  $ args ╰ output` shape, using the SAME `formatToolInput`
  *   + `formatToolPreview` helpers the live agent uses.
+ *
+ * @param messages - Hydrated message list (typically `loadSession(...).messages`).
+ * @param sink - Anywhere with `write(string)`. See {@link ReplaySink}.
+ * @param opts - Optional rendering knobs. See {@link ReplayOptions}.
  */
-export function replayToScrollback(messages: Message[], sink: ReplaySink): void {
+export function replayToScrollback(
+  messages: Message[],
+  sink: ReplaySink,
+  opts: ReplayOptions = {},
+): void {
+  const baseArrow = `${c.bold(c.pink("❯"))} `
+  const modeManager = opts.modeManager ?? null
+  // Tracks the mode the user was in when each message was submitted, by
+  // walking <mode-change> activation blocks in order. Defaults to "no
+  // mode" until a block flips it.
+  let activeModeId: string | null = null
+
   // Build a map of tool_use_id → tool_result block for fast lookup.
   const toolResultById = new Map<string, ToolResultBlock>()
   for (const msg of messages) {
@@ -86,16 +124,29 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
 
   for (const msg of messages) {
     if (msg.role === "user") {
-      // Skip user messages whose content is ONLY tool_results — those
-      // are rendered under the corresponding assistant turn.
       const content = msg.content
-      if (Array.isArray(content) && content.every((b) => b.type === "tool_result")) {
+      // Skip user messages whose content is ONLY tool_results (and/or a
+      // `<mode-change>` activation block) — those have no user-visible
+      // payload of their own. Tool results are rendered under the
+      // corresponding assistant turn; the mode-change is consumed for
+      // its side effect on the prompt prefix of LATER turns.
+      if (
+        Array.isArray(content) &&
+        content.every((b) => b.type === "tool_result" || isModeChangeBlock(b))
+      ) {
+        for (const b of content) {
+          const to = readModeChangeTo(b)
+          if (to !== undefined) activeModeId = to === "default" ? null : to
+        }
         continue
       }
-      const text = stringifyUserText(content)
+      const { text, modeAfter } = stringifyUserText(content, activeModeId)
+      activeModeId = modeAfter
       if (text.length > 0) {
-        // Live prompt arrow style: bold pink ❯ + plain text.
-        sink.write(`${c.bold(c.pink("❯"))} ${text}\n\n`)
+        const arrow = modeManager
+          ? modeManager.promptPrefixForId(activeModeId, baseArrow)
+          : baseArrow
+        sink.write(`${arrow}${text}\n\n`)
       }
       continue
     }
@@ -123,6 +174,10 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
         for (const cont of formatToolInputContinuation(tu)) {
           sink.write(`  ${c.dimCyan("│")} ${c.dim(cont)}\n`)
         }
+        // Header→body separator (mirrors live agent rendering: the empty
+        // `│` gutter row that sits between the tool header and the first
+        // body line, giving every tool block a consistent visual shape).
+        sink.write(`  ${c.dimCyan("│")}\n`)
         const result = toolResultById.get(tu.id)
         if (result) {
           const content =
@@ -153,11 +208,57 @@ export function replayToScrollback(messages: Message[], sink: ReplaySink): void 
   }
 }
 
-function stringifyUserText(content: string | ContentBlock[]): string {
-  if (typeof content === "string") return content
-  return content
-    .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
-    .map((b) => b.text)
-    .join(" ")
-    .trim()
+/**
+ * Match a `<mode-change from=… to=… />` activation block exactly as
+ * written by `ModeManager.consumePendingAttachment`. The block is always
+ * emitted as a self-contained text block (one per user turn), so an
+ * exact whole-string match is sufficient — no inline parsing needed.
+ */
+const MODE_CHANGE_RE = /^\s*<mode-change\s+from="([^"]*)"\s+to="([^"]*)"\s*\/>\s*$/
+
+/**
+ * True iff `b` is a text content block holding ONLY a mode-change
+ * activation tag (and possibly surrounding whitespace).
+ */
+function isModeChangeBlock(b: ContentBlock): boolean {
+  return b.type === "text" && MODE_CHANGE_RE.test(b.text)
+}
+
+/**
+ * If `b` is a mode-change activation block, return its `to=` value
+ * (`"ask"`, `"default"`, …). Otherwise return `undefined`.
+ */
+function readModeChangeTo(b: ContentBlock): string | undefined {
+  if (b.type !== "text") return undefined
+  const m = b.text.match(MODE_CHANGE_RE)
+  return m ? m[2] : undefined
+}
+
+/**
+ * Extract user-visible text from a user message's content array, while
+ * threading the active mode forward across `<mode-change>` activation
+ * blocks. Returns the visible text plus the resulting mode id (or
+ * `null` for "no mode active").
+ *
+ * @param content - The message's content (string or block array).
+ * @param initialModeId - Mode id active at the START of this message,
+ *   carried over from earlier turns.
+ */
+function stringifyUserText(
+  content: string | ContentBlock[],
+  initialModeId: string | null,
+): { text: string; modeAfter: string | null } {
+  if (typeof content === "string") return { text: content, modeAfter: initialModeId }
+  let modeAfter = initialModeId
+  const parts: string[] = []
+  for (const b of content) {
+    if (b.type !== "text") continue
+    const to = readModeChangeTo(b)
+    if (to !== undefined) {
+      modeAfter = to === "default" ? null : to
+      continue
+    }
+    parts.push(b.text)
+  }
+  return { text: parts.join(" ").trim(), modeAfter }
 }
