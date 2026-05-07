@@ -54,9 +54,7 @@ export interface QuotaHeadersReceivedPayload {
  * lowercased and `formatQuotaSummary` matches both forms via regex.
  * We preserve the wire form for parity with prior behavior.
  */
-export function broadcastResponseRateLimits(
-  responseHeaders: Headers,
-): Map<string, string> {
+export function broadcastResponseRateLimits(responseHeaders: Headers): Map<string, string> {
   const rl = new Map<string, string>()
   responseHeaders.forEach((v, k) => {
     if (k.startsWith("anthropic-ratelimit-")) rl.set(k, v)

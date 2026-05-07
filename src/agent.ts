@@ -594,6 +594,16 @@ export class Agent {
         for (const cont of formatToolInputContinuation(tool)) {
           writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
         }
+        // Header→body separator: a single empty gutter row (`│` glyph, no
+        // payload). Always emitted, regardless of body length, so the visual
+        // shape of every tool block is consistent — short outputs get the
+        // same breather as long ones. Inherited by both the streamed-Bash
+        // path (which writes `│ <line>` rows directly into scrollback) and
+        // the post-block render path (`formatToolPreview`). The refusal
+        // branch below also inherits it; if we ever decide that a denied
+        // tool should sit closer to its header, gate this single line on
+        // `gate.allowed` and the change is local.
+        writeTranscript(`  ${c.dimCyan("│")}`)
 
         let content: string
         let isError: boolean | undefined
@@ -665,8 +675,7 @@ export class Agent {
               // last-line trick is the only way to keep the close glyph
               // attached to the body in the no-footer case.
               const isBash = tool.name === "Bash"
-              const STREAM_BUDGET =
-                TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
+              const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
               let streamedLineCount = 0
               let bufferedLastLine: string | null = null
               let pendingChunk = ""
@@ -946,11 +955,40 @@ const BASH_CONT_MAX_LINES = 8
  * {@link formatToolInputContinuation} — the caller writes those after the
  * header as `│ ...` rows inside the same bordered block.
  *
+ * # Style: programmer-native + dot-separated chunks
+ *
+ * Beyond the primary field (path/pattern/command), each tool can carry
+ * "subordinate" inputs — `offset`/`limit` for Read, `replace_all` for
+ * Edit, `path`/`glob`/`-i`/`-A`/etc. for Grep. Surfacing them in the
+ * header is what lets the user see *what was actually run* (e.g.
+ * "Read first 4 lines" vs. "Read whole file" — same tool name, very
+ * different operation).
+ *
+ * The vocabulary is "Style A" — programmer-native shorthand:
+ *
+ *  - **Read**: `<path> · L<start>-<end>` (closed range, 1-indexed to match
+ *    the body's line-number gutter), or `· from L<start>` (open-ended,
+ *    `offset` only). Bare reads (neither set) render byte-identical to
+ *    the pre-extras form.
+ *  - **Edit**: `<path> · g` for `replace_all` (sed `s/.../.../g` flavor).
+ *  - **Glob**: `<pattern> · in <path>` when `path` is set.
+ *  - **Grep**: regex flags appended to the pattern (`/foo/i` for `-i`,
+ *    `/foo/m` for `multiline`, `/foo/im` for both). Modifiers chain after
+ *    ` · `: `in <path>` (where), `<glob>` (filter), `↓N`/`↑N`/`↕N` (after/
+ *    before/around context — `-C` takes precedence over `-A`/`-B` since
+ *    it's symmetric), `≤N` (`head_limit`), `count`/`paths` (output mode).
+ *
+ * The ` · ` mid-dot is the same separator used in the truncation footer
+ * (`shown 15/1831 L · 8.0 KB/1.5 MB · cut at L1000`), keeping a single
+ * visual language across the tool block.
+ *
  * Truncation strategy:
  *  - **Bash**: first line only (multi-line continuation rendered separately
  *    by {@link formatToolInputContinuation}); word-boundary trim at 500 chars.
  *  - **Read/Write/Edit/Glob/Grep**: file_path / pattern only — typically
- *    well under 200 chars; no truncation in the common case.
+ *    well under 200 chars; no truncation in the common case. Composed
+ *    Grep headers (all flags set) come in under ~80 cells in practice;
+ *    if real usage ever overflows, prioritize pattern → path → context.
  *  - **Unknown**: JSON.stringify, hard slice at 200 chars (unknown tools
  *    have unknown shape, so word boundaries aren't meaningful).
  */
@@ -967,19 +1005,56 @@ export function formatToolInput(tool: ToolUseBlock): string {
     return `$ ${truncated}`
   }
   if (tool.name === "Read" && input.file_path) {
-    return String(input.file_path)
+    const path = String(input.file_path)
+    // `offset` is zero-based in the schema; `execRead` prints body lines
+    // 1-indexed (`${start + i + 1}\t…`), so we surface the same 1-indexed
+    // range here and the header promise matches what the body shows.
+    // Bare reads (no offset/limit) render byte-identical to the
+    // pre-extras form — the common case is undisturbed.
+    const off = typeof input.offset === "number" ? input.offset : undefined
+    const lim = typeof input.limit === "number" ? input.limit : undefined
+    if (off === undefined && lim === undefined) return path
+    const startL = (off ?? 0) + 1
+    if (lim !== undefined) return `${path} · L${startL}-${startL + lim - 1}`
+    return `${path} · from L${startL}`
   }
   if (tool.name === "Write" && input.file_path) {
     return String(input.file_path)
   }
   if (tool.name === "Edit" && input.file_path) {
-    return String(input.file_path)
+    const path = String(input.file_path)
+    // `g` flag — borrowed from sed's `s/old/new/g`. Cheap, recognizable,
+    // attaches the modifier visually to the path it modifies.
+    return input.replace_all ? `${path} · g` : path
   }
   if (tool.name === "Glob" && input.pattern) {
-    return String(input.pattern)
+    const pat = String(input.pattern)
+    return input.path ? `${pat} · in ${input.path}` : pat
   }
   if (tool.name === "Grep" && input.pattern) {
-    return `/${input.pattern}/` + (input.path ? ` in ${input.path}` : "")
+    // Pattern carries its own JS-regex flags: `i` for -i, `m` for
+    // multiline. Then ` · ` between major chunks: where (path, then
+    // optional glob filter), context (↑↓↕N), head limit (≤N), output
+    // mode. `-n` (line numbers) is intentionally not surfaced — it's the
+    // default and would just clutter.
+    const flags = `${input["-i"] ? "i" : ""}${input.multiline ? "m" : ""}`
+    const parts: string[] = [`/${input.pattern}/${flags}`]
+    if (input.path) parts.push(`in ${input.path}`)
+    if (input.glob) parts.push(String(input.glob))
+    // Context arrows. `-C N` (or its `context` alias) takes precedence —
+    // it's symmetric so `↕` reads more naturally than two arrows. When
+    // only `-A`/`-B` are set, render whichever (or both) are present.
+    const ctxC = (input["-C"] as number | undefined) ?? (input.context as number | undefined)
+    if (typeof ctxC === "number") {
+      parts.push(`↕${ctxC}`)
+    } else {
+      if (typeof input["-A"] === "number") parts.push(`↓${input["-A"]}`)
+      if (typeof input["-B"] === "number") parts.push(`↑${input["-B"]}`)
+    }
+    if (typeof input.head_limit === "number") parts.push(`≤${input.head_limit}`)
+    if (input.output_mode === "count") parts.push("count")
+    else if (input.output_mode === "files_with_matches") parts.push("paths")
+    return parts.join(" · ")
   }
   const json = JSON.stringify(input)
   const charsCut = json.length > HEADER_JSON_MAX ? json.length - HEADER_JSON_MAX : 0
@@ -1159,6 +1234,12 @@ export function formatToolPreview(
   }
 
   // 4. Stitch lines + footer with the bordered gutter.
+  //    When a truncation footer is present we slot a `┊` (light-dotted
+  //    vertical) row between the last body line and the `╰ <footer>` row.
+  //    The dotted glyph reads as "something has been cut here" — visually
+  //    foreshadowing the bare-facts footer below it (e.g. `shown 10/520 L`).
+  //    No `┊` is emitted on a clean run (body fits, no API clamp): in that
+  //    case there's nothing missing, so the body just closes with `╰`.
   const out: string[] = []
   const totalRender = renderedLines.length
   for (let i = 0; i < totalRender; i++) {
@@ -1168,6 +1249,7 @@ export function formatToolPreview(
     out.push(`  ${c.dimCyan(connector)} ${color(renderedLines[i])}`)
   }
   if (footerStat !== null) {
+    out.push(`  ${c.dimCyan("┊")}`)
     out.push(`  ${c.dimCyan("╰")} ${c.dim(footerStat)}`)
   }
   return out
@@ -1180,8 +1262,10 @@ export function formatToolPreview(
  *
  *   - rewrite it as `╰ <line>` when there's nothing to summarize (clean
  *     run, body fits in budget, no truncation), OR
- *   - emit it as `│ <line>` and append a separate `╰ <footer>` row when
- *     there IS something to say (truncation, elision, or zero-output abort).
+ *   - emit it as `│ <line>`, then a `┊` truncation separator, then a
+ *     `╰ <footer>` row when there IS something to say (truncation, elision,
+ *     or zero-output abort). The `┊` reads as "something cut here" and
+ *     visually foreshadows the bare-facts footer (e.g. `shown 10/520 L`).
  *
  * Scrollback is permanent — once a `│` row is written we can't rewrite it
  * — so the buffered-last-line trick is the only way to keep the close
@@ -1189,6 +1273,8 @@ export function formatToolPreview(
  *
  * Mirrors the audience-split invariant in {@link formatToolPreview}: footer
  * carries bare facts (lines / bytes / cut location); no verbs / advice.
+ * Mirrors its `┊`-before-`╰` convention too, so streamed and non-streamed
+ * tool blocks have identical shape from the user's eye.
  */
 function renderStreamedTail(opts: {
   bufferedLastLine: string | null
@@ -1213,7 +1299,9 @@ function renderStreamedTail(opts: {
   if (bufferedLastLine === null) {
     // Stream produced nothing (shouldn't happen — caller only invokes us
     // when didStream=true, which implies at least one flushLineToBuffer
-    // call). Defensive close glyph anyway.
+    // call). Defensive close glyph anyway. Skip the `┊` separator: with
+    // zero body rows above it, a dotted divider has nothing to "cut from"
+    // and would just look like floating noise.
     writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(footer ?? "(no output)")}`)
     return
   }
@@ -1224,6 +1312,7 @@ function renderStreamedTail(opts: {
   }
 
   writeTranscript(`  ${c.dimCyan("│")} ${color(bufferedLastLine)}`)
+  writeTranscript(`  ${c.dimCyan("┊")}`)
   writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(footer)}`)
 }
 
