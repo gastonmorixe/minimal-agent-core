@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test"
 import {
   formatTzOffset,
+  formatSessionDirName,
   redactHeaders,
   netDbgEnabled,
   warnLoggerErrorOnce,
@@ -37,6 +38,125 @@ describe("net-dbg", () => {
     it("returns +0900 for JST (UTC+9)", () => {
       const fakeDate = { getTimezoneOffset: () => -540 } as Date
       expect(formatTzOffset(fakeDate)).toBe("+0900")
+    })
+  })
+
+  describe("formatSessionDirName", () => {
+    // A fixed UUID-shaped sid so tests don't depend on randomUUID() output.
+    const SID = "34b34421-3b9d-48a0-8807-9e48f0046e03"
+
+    // Build a Date stand-in that returns deterministic local-time fields,
+    // independent of the host TZ. We intentionally don't use `new Date(iso)`
+    // because that would make the assertions TZ-dependent.
+    function fakeDate(parts: {
+      year: number
+      month: number // 0-indexed (Date convention)
+      day: number
+      weekday: number // 0=Sunday
+      hours: number
+      minutes: number
+      seconds: number
+      tzOffsetMin: number // minutes WEST of UTC, matches getTimezoneOffset()
+    }): Date {
+      return {
+        getFullYear: () => parts.year,
+        getMonth: () => parts.month,
+        getDate: () => parts.day,
+        getDay: () => parts.weekday,
+        getHours: () => parts.hours,
+        getMinutes: () => parts.minutes,
+        getSeconds: () => parts.seconds,
+        getTimezoneOffset: () => parts.tzOffsetMin,
+      } as unknown as Date
+    }
+
+    it("matches the documented shape: <epoch>-<DD>-<MON>-<YYYY>-<WEEKDAY>--<HH>h<MM>m<SS>s<±HHMM>-minimal-agent-<sid>", () => {
+      // 2026-05-06 19:25:12 EDT (UTC-4), a Wednesday.
+      const d = fakeDate({
+        year: 2026,
+        month: 4, // May
+        day: 6,
+        weekday: 3, // Wednesday
+        hours: 19,
+        minutes: 25,
+        seconds: 12,
+        tzOffsetMin: 240,
+      })
+      const name = formatSessionDirName(1778109912827, d, SID)
+      expect(name).toBe(`1778109912827-06-MAY-2026-WEDNESDAY--19h25m12s-0400-minimal-agent-${SID}`)
+    })
+
+    it("zero-pads single-digit day/hour/minute/second fields", () => {
+      // 2026-01-02 03:04:05, Friday, UTC. Every clock field is single-digit.
+      const d = fakeDate({
+        year: 2026,
+        month: 0, // January
+        day: 2,
+        weekday: 5, // Friday
+        hours: 3,
+        minutes: 4,
+        seconds: 5,
+        tzOffsetMin: 0,
+      })
+      const name = formatSessionDirName(1, d, SID)
+      expect(name).toBe(`1-02-JAN-2026-FRIDAY--03h04m05s+0000-minimal-agent-${SID}`)
+    })
+
+    it("includes the session id verbatim at the end", () => {
+      // Regression: the sid suffix is what lets a recording be cross-
+      // referenced with the agent's session id (and the corresponding
+      // ~/.minimal-agent/sessions/<sid>.jsonl). Pin that it ends with the
+      // exact UUID, not a truncated/short version.
+      const d = fakeDate({
+        year: 2026,
+        month: 4,
+        day: 6,
+        weekday: 3,
+        hours: 19,
+        minutes: 25,
+        seconds: 12,
+        tzOffsetMin: 240,
+      })
+      const name = formatSessionDirName(1778109912827, d, SID)
+      expect(name.endsWith(`-${SID}`)).toBe(true)
+      expect(name).toContain(SID)
+    })
+
+    it("starts with the epoch (lexicographic-by-time sort is preserved)", () => {
+      // Regression: the leading epoch is what makes `ls .net-dbg/` come out
+      // chronologically. If a future refactor moves the epoch later in the
+      // name, sorting silently breaks. Pin the leading position.
+      const d = fakeDate({
+        year: 2026,
+        month: 4,
+        day: 6,
+        weekday: 3,
+        hours: 19,
+        minutes: 25,
+        seconds: 12,
+        tzOffsetMin: 240,
+      })
+      expect(formatSessionDirName(1, d, SID).startsWith("1-")).toBe(true)
+      expect(formatSessionDirName(999999999999, d, SID).startsWith("999999999999-")).toBe(true)
+    })
+
+    it("contains the literal '-minimal-agent-' tag immediately before the sid", () => {
+      // Regression: external tooling (or a curious user grepping `ls`) keys
+      // off the `-minimal-agent-<sid>` suffix to find this agent's recordings
+      // among unrelated `.net-dbg/` siblings. Pin that the tag is present
+      // and adjacent to the sid.
+      const d = fakeDate({
+        year: 2026,
+        month: 4,
+        day: 6,
+        weekday: 3,
+        hours: 19,
+        minutes: 25,
+        seconds: 12,
+        tzOffsetMin: 240,
+      })
+      const name = formatSessionDirName(1778109912827, d, SID)
+      expect(name).toContain(`-minimal-agent-${SID}`)
     })
   })
 
