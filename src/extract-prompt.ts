@@ -37,6 +37,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--prompt",
   "--resume",
   "--formatter",
+  "--formatter-args",
   "--effort",
   "--spinner",
   "--thinking-display",
