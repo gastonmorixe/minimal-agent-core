@@ -97,6 +97,30 @@ describe("loadUserConfig", () => {
     }
   })
 
+  it("parses formatterArgs as a string array", () => {
+    writeFileSync(path, JSON.stringify({ formatterArgs: ["--table-fit", "--foo"] }))
+    expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--foo"] })
+  })
+
+  it("parses formatterArgs as a shell-style string", () => {
+    writeFileSync(path, JSON.stringify({ formatterArgs: "--table-fit --title 'My Doc'" }))
+    expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--title", "My Doc"] })
+  })
+
+  it("filters non-string / empty entries from formatterArgs array", () => {
+    writeFileSync(path, JSON.stringify({ formatterArgs: ["--table-fit", "", 42, null, "--ok"] }))
+    expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--ok"] })
+  })
+
+  it("drops empty/invalid formatterArgs", () => {
+    writeFileSync(path, JSON.stringify({ formatterArgs: [] }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ formatterArgs: "" }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ formatterArgs: 42 }))
+    expect(loadUserConfig()).toEqual({})
+  })
+
   it("accepts JSONC syntax: line comments, block comments, trailing commas", () => {
     writeFileSync(
       path,

@@ -29,6 +29,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { parseFormatterCommand } from "./formatter.ts"
 import { parseJsonc } from "./jsonc.ts"
 
 export interface UserConfig {
@@ -39,6 +40,23 @@ export interface UserConfig {
   thinkingDisplay?: "summarized" | "omitted"
   spinner?: string
   formatter?: string
+  /**
+   * Extra args appended to the formatter command after resolution.
+   *
+   * Useful for opt-in mdstream features (e.g. `["--table-fit"]`) without
+   * having to override the executable via `formatter` / `--formatter`.
+   * Applied to whichever formatter wins (auto-resolved mdstream, cached
+   * binary, or `--formatter <cmd>` override) — the args are appended,
+   * not replacing.
+   *
+   * Accepted shapes in the JSONC file:
+   *   "formatterArgs": ["--table-fit"]            // array (preferred)
+   *   "formatterArgs": "--table-fit --foo bar"    // shell-style string
+   *
+   * Override at runtime via `--formatter-args "<args>"` or
+   * `MINIMAL_AGENT_FORMATTER_ARGS="<args>"` (both shell-parsed).
+   */
+  formatterArgs?: string[]
   /**
    * Auto-ASK heuristic. When `true` (or unset = default), the editor's
    * input stream is scored for question-vs-action intent and the agent
@@ -128,6 +146,16 @@ export function loadUserConfig(): UserConfig {
   }
   if (typeof obj.spinner === "string" && obj.spinner.length > 0) out.spinner = obj.spinner
   if (typeof obj.formatter === "string" && obj.formatter.length > 0) out.formatter = obj.formatter
+  // formatterArgs accepts either a string[] (preferred) or a shell-style
+  // string (parsed via parseFormatterCommand). Empty / non-string entries
+  // in an array are dropped silently. Any other shape → ignored.
+  if (Array.isArray(obj.formatterArgs)) {
+    const arr = obj.formatterArgs.filter((a): a is string => typeof a === "string" && a.length > 0)
+    if (arr.length > 0) out.formatterArgs = arr
+  } else if (typeof obj.formatterArgs === "string" && obj.formatterArgs.length > 0) {
+    const parsed = parseFormatterCommand(obj.formatterArgs)
+    if (parsed.length > 0) out.formatterArgs = parsed
+  }
   if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
   if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
   if (typeof obj.header === "boolean") out.header = obj.header

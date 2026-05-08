@@ -174,6 +174,18 @@ const formatterExplicitArg: string[] | undefined =
     ? parseFormatterCommand(args[formatterExplicitIdx + 1])
     : undefined
 
+// Extra args appended to the resolved formatter command. Precedence:
+//   --formatter-args  >  MINIMAL_AGENT_FORMATTER_ARGS  >  config.formatterArgs
+// CLI / env are shell-parsed (so `--formatter-args "--table-fit --foo"`
+// works); config can be a string[] or a shell-style string.
+const formatterArgsCli = readFlagValue("--formatter-args")
+const formatterExtraArgs: string[] = (() => {
+  if (formatterArgsCli !== undefined) return parseFormatterCommand(formatterArgsCli)
+  const envVal = process.env.MINIMAL_AGENT_FORMATTER_ARGS
+  if (envVal && envVal.length > 0) return parseFormatterCommand(envVal)
+  return userConfig.formatterArgs ?? []
+})()
+
 // --resume <sid>  resume a saved session (or "last" for the most recent
 // session in this cwd, falling back to the global most-recent).
 // --sessions       list saved sessions and exit.
@@ -209,6 +221,7 @@ function printHelp(): void {
     `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
     `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
     `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
+    `    ${c.cyan("--formatter-args")} ${c.dim("<args>")}   Extra args appended to the formatter ${c.dim('(e.g. "--table-fit"; or MINIMAL_AGENT_FORMATTER_ARGS)')}`,
     `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
     `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
     `    ${c.cyan("--mode")} ${c.dim("<id|none>")}         Initial mode ${c.dim("(default: ask in non-interactive, plugin default otherwise)")}`,
@@ -237,6 +250,7 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_SPINNER")}    Spinner preset id ${c.dim("(same values as --spinner)")}`,
     `    ${c.cyan("MINIMAL_AGENT_EFFORT")}     Reasoning effort ${c.dim("(low | medium | high | max)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_FORMATTER_ARGS")}  Extra args for the formatter ${c.dim('(shell-style, e.g. "--table-fit")')}`,
     `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
     `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,
@@ -514,7 +528,16 @@ async function main() {
     const formatterResolution = await resolveFormatter(formatterExplicitArg)
     if (formatterResolution.cmd) {
       formatterCmd = formatterResolution.cmd
-      printStartupRow("formatter", c.dim(formatterResolution.label))
+      // Append user-supplied extra args (--formatter-args / env / config).
+      // Applied here (after resolution) so they ride along regardless of
+      // whether the formatter came from PATH, the cache, an auto-download,
+      // or an explicit --formatter override.
+      if (formatterExtraArgs.length > 0) {
+        formatterCmd = [...formatterCmd, ...formatterExtraArgs]
+      }
+      const extraLabel =
+        formatterExtraArgs.length > 0 ? ` ${c.dim(formatterExtraArgs.join(" "))}` : ""
+      printStartupRow("formatter", `${c.dim(formatterResolution.label)}${extraLabel}`)
     } else {
       formatterCmd = undefined
       console.error(`  ${c.boldYellow("warn")} ${formatterResolution.warn}`)
