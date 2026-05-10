@@ -72,6 +72,7 @@ import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-prese
 import type { Spinner } from "./spinner.ts"
 import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
+import { formatStartupToolsRow } from "./startup-tools-row.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 import { runDumpCommand, DumpCommandError } from "./commands/dump.ts"
@@ -607,17 +608,27 @@ async function main() {
   // `client.ts`, which broadcasts `quota.headersReceived` after every
   // successful API response — see src/global-bus.ts for the rationale).
   setGlobalEventBus(loader.bus())
+  const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
-  const hasPlugins =
-    loader.getExtraTools().length > 0 || loader.getPromptBlock() !== null || loadedModes.length > 0
-  if (hasPlugins) {
-    const tools = loader.getExtraTools().length
-    const modes = loadedModes.length
-    const bits: string[] = []
-    if (tools > 0) bits.push(`${tools} tool(s)`)
-    if (modes > 0) bits.push(`${modes} mode(s)`)
-    if (bits.length === 0) bits.push("prompt block")
-    printStartupRow("plugins", bits.join(" · "))
+  const hasPromptBlock = loader.getPromptBlock() !== null
+  // Aggregate flag preserved for downstream system-prompt / tool-hash
+  // construction (search this file for `hasPlugins`). Independently of
+  // how we choose to render the startup tree, those callers want one
+  // bool: "did anything plugin-shaped get loaded".
+  const hasPlugins = loadedTools.length > 0 || hasPromptBlock || loadedModes.length > 0
+  // Show what the plugin layer actually contributes — names of callable
+  // tools rather than an aggregate `3 tool(s)`. The active mode (if any)
+  // gets its own row below at the `printStartupRow("mode", …)` site, so
+  // we don't duplicate it here. Modes that exist but aren't active are
+  // intentionally not surfaced — discoverable via Shift+Tab.
+  const toolsValue = formatStartupToolsRow(loadedTools)
+  if (toolsValue !== null) {
+    printStartupRow("tools", toolsValue)
+  } else if (hasPromptBlock || loadedModes.length > 0) {
+    // Plugins ran but contribute only prompt fragments / live-area
+    // slots / modes — keep a quiet row so it's visible the layer is
+    // wired without bragging about it.
+    printStartupRow("plugins", c.dim("loaded"))
   }
   // Resolve the initial mode. In non-interactive (--prompt/`-`/positional)
   // we default to ASK so one-shot runs are read-only by default; the user
@@ -636,7 +647,13 @@ async function main() {
       : null
   const modeManager = loadedModes.length > 0 ? new ModeManager(loadedModes, initialModeId) : null
   if (modeManager?.active()) {
-    printStartupRow("mode", c.bold(c.cyan(modeManager.active()!.id)))
+    // Use the manifest's `label` (e.g. "ASK") rather than the lowercase
+    // `id` so the startup row matches the prompt prefix the user sees a
+    // moment later (`ASK ❯ `). Falls back to upper-cased id when label
+    // isn't declared, mirroring `ModeManager.computePromptPrefix`.
+    const m = modeManager.active()!
+    const label = m.label ?? m.id.toUpperCase()
+    printStartupRow("mode", c.bold(c.cyan(label)))
   }
 
   // Quota check — verify account has quota before starting conversation.

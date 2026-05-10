@@ -61,10 +61,14 @@ describe("CLI smoke", () => {
     // Non-interactive defaults: ASK mode is auto-applied. The mode row
     // is only printed when the header is shown — which it is here via
     // `--header` — so verifying it pins both behaviors at once. ANSI
-    // color codes sit between the "mode" label and the "ask" value, so
+    // color codes sit between the "mode" label and the "ASK" value, so
     // strip them before matching.
+    //
+    // Asserts on `ASK` (the manifest's `label`), not `ask` (the lowercase
+    // id) — the startup row aligns with the prompt prefix the user sees
+    // a moment later (`ASK ❯ `). See `src/index.ts` mode-row site.
     const stderrPlain = stderr.replace(/\u001b\[[0-9;]*m/g, "")
-    expect(stderrPlain).toMatch(/mode\s+ask/)
+    expect(stderrPlain).toMatch(/mode\s+ASK/)
   })
 
   it("hides the startup tree by default in non-interactive mode", async () => {
