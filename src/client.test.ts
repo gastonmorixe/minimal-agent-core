@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { type AuthResult, getAuth } from "./auth.ts"
-import { type Message, sendMessageFull, sendMessageSync } from "./client.ts"
+import { checkQuota, type Message, sendMessageFull, sendMessageSync } from "./client.ts"
+import { clearLastRateLimits } from "./quota-cache.ts"
 import { buildSystemPrompt, SYSTEM_PROMPT } from "./headers.ts"
 import {
   NetworkClient,
@@ -459,6 +460,104 @@ describe("client", () => {
       // the fetch/http2 transport for Esc/Ctrl+C abort to actually tear
       // down the in-flight HTTP/2 stream.
       expect((captured as unknown as NetworkRequest).signal).toBe(ac.signal)
+    })
+
+    // -----------------------------------------------------------------
+    // Regression: the live-area `quota-status` slot's deadlock fix.
+    //
+    // Before this plumbing landed, `checkQuota` ignored its caller's
+    // abort signal entirely — which meant the scheduler's
+    // `AbortController` could fire its `abort` event, but the in-flight
+    // network request would keep waiting on a TCP socket that died
+    // during macOS sleep/wake (or any other transport stall). The
+    // slot's `inFlight` flag stayed `true` forever, deadlocking BOTH
+    // the heartbeat AND the `quota.headersReceived` bus path.
+    //
+    // The two assertions below pin the contract:
+    //  - `checkQuota(auth, networkClient, signal)` must walk the
+    //    `signal` argument all the way down to `networkClient.request`
+    //    (so the transport can tear down the dead socket).
+    //  - When that signal is already aborted before the request lands,
+    //    the transport throws `AbortError`, `checkQuota` catches it and
+    //    returns `{ok: false}` rather than hanging.
+    // -----------------------------------------------------------------
+    describe("checkQuota — signal propagation (deadlock regression)", () => {
+      it("forwards the caller's AbortSignal to networkClient.request", async () => {
+        // Without rate-limit headers in the response, the broadcast
+        // helper is a no-op — keeps the cache module untouched.
+        clearLastRateLimits()
+        let captured: NetworkRequest | null = null
+        const networkClient = fakeNetworkClient((req) => {
+          captured = req
+          return new NetworkResponse({
+            status: 200,
+            headers: { "content-type": "application/json" },
+            transport: { id: "fake" },
+            body: new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(`{"id":"x"}`))
+                controller.close()
+              },
+            }),
+          })
+        })
+        const ac = new AbortController()
+        const auth: AuthResult = { type: "api-key", token: "tok", refresh: undefined }
+        const result = await checkQuota(auth, networkClient, ac.signal)
+        expect(result.ok).toBe(true)
+        expect(captured).not.toBeNull()
+        // SAME instance — abort propagation only works if the transport
+        // listens on the exact AbortSignal the scheduler owns.
+        expect((captured as unknown as NetworkRequest).signal).toBe(ac.signal)
+      })
+
+      it("returns {ok: false} (not a hang) when the signal is already aborted", async () => {
+        clearLastRateLimits()
+        // Real fetch-transport-style behavior: throw AbortError when the
+        // signal is aborted before the response body arrives. The user's
+        // bug was that this throw never propagated because the signal
+        // wasn't plumbed in — the request stayed pending indefinitely.
+        const networkClient = fakeNetworkClient((req) => {
+          if (req.signal?.aborted) {
+            const err = new Error("AbortError") as Error & { name: string }
+            err.name = "AbortError"
+            throw err
+          }
+          // Defensive default — this branch shouldn't run if the signal
+          // is wired correctly.
+          return sseResponse([])
+        })
+        const ac = new AbortController()
+        ac.abort()
+        const auth: AuthResult = { type: "api-key", token: "tok", refresh: undefined }
+        const result = await checkQuota(auth, networkClient, ac.signal)
+        expect(result).toEqual({ ok: false })
+      })
+
+      it("works without a signal (back-compat: existing callers don't break)", async () => {
+        clearLastRateLimits()
+        let captured: NetworkRequest | null = null
+        const networkClient = fakeNetworkClient((req) => {
+          captured = req
+          return new NetworkResponse({
+            status: 200,
+            headers: { "content-type": "application/json" },
+            transport: { id: "fake" },
+            body: new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(`{"id":"x"}`))
+                controller.close()
+              },
+            }),
+          })
+        })
+        const auth: AuthResult = { type: "api-key", token: "tok", refresh: undefined }
+        const result = await checkQuota(auth, networkClient)
+        expect(result.ok).toBe(true)
+        // No signal passed → undefined forwarded to the transport, which
+        // is a no-op (every transport accepts `signal?: AbortSignal`).
+        expect((captured as unknown as NetworkRequest).signal).toBeUndefined()
+      })
     })
   })
 

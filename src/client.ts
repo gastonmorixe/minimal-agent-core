@@ -1483,6 +1483,7 @@ export type QuotaResult = { ok: false } | { ok: true; rateLimits: Map<string, st
 export async function checkQuota(
   auth: AuthResult,
   networkClient: NetworkClient = defaultNetworkClient,
+  signal?: AbortSignal,
 ): Promise<QuotaResult> {
   const sessionId = getSessionId()
   const headers = buildHeaders(auth, sessionId, "quota")
@@ -1510,6 +1511,15 @@ export async function checkQuota(
       url: API_URL,
       headers: h,
       body: serializedBody,
+      // Signal forwarded to the underlying transport (fetch / http2). The
+      // live-area `quota-status` slot passes `ctx.abort`; if the
+      // `LiveAreaScheduler.timeoutMs` elapses the request is canceled at
+      // the network layer and `doRequest` rejects with `AbortError` —
+      // freeing the slot's `inFlight` gate so the next heartbeat tick
+      // (and any bus-driven `quota.headersReceived` re-fire) can run.
+      // Without this, a probe stuck on a dead TCP socket (e.g. after
+      // macOS sleep/wake) would deadlock both refresh paths permanently.
+      signal,
     })
   }
 
