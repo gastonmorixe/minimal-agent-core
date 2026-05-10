@@ -12,6 +12,7 @@ import {
   shouldSoftSplit,
   BASH_OPERATORS,
   BASH_HEADER_PREFIX_CELLS_DEFAULT,
+  MULTI_OP_SOFT_SPLIT_MIN,
 } from "./bash-split.ts"
 
 // ---------------------------------------------------------------------------
@@ -334,5 +335,66 @@ describe("shouldSoftSplit — width predicate", () => {
     const wide = "漢".repeat(30)
     expect(shouldSoftSplit(wide, 80)).toBe(false)
     expect(shouldSoftSplit(wide, 70)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// shouldSoftSplit — multi-operator structured-pipeline rule
+// ---------------------------------------------------------------------------
+
+describe("shouldSoftSplit — multi-operator pipeline rule", () => {
+  it(`splits a 2+ operator pipeline regardless of width (>= ${MULTI_OP_SOFT_SPLIT_MIN} ops)`, () => {
+    // Reproduces user-reported bug (May 2026): at typical iTerm widths
+    // (130–160 cells) a 105-char `cd … && cat … | head -80` pipeline
+    // fits inline and the old width-only predicate left it unsplit.
+    // The new rule splits any structured 2+ operator command.
+    const cmd =
+      "cd /Users/gaston/Projects/inditex/work/inditex-supplier-management && cat Makefile 2>/dev/null | head -80"
+    expect(shouldSoftSplit(cmd, 130)).toBe(true)
+    expect(shouldSoftSplit(cmd, 200)).toBe(true)
+    expect(shouldSoftSplit(cmd, 400)).toBe(true)
+  })
+
+  it("does NOT split a single-operator pipeline that fits (1 op stays inline)", () => {
+    // Single-operator commands are short and trivially scannable;
+    // splitting `ls | wc -l` into 2 rows is overkill. Only overflow
+    // triggers the split for these.
+    expect(shouldSoftSplit("ls | wc -l", 80)).toBe(false)
+    expect(shouldSoftSplit("cd /tmp && ls", 80)).toBe(false)
+    expect(shouldSoftSplit("cmd1 ; cmd2", 80)).toBe(false)
+  })
+
+  it("splits 2+ operators even when the body is short enough to fit", () => {
+    // 19-char body, 2 operators. Old rule: no split (fits at 80).
+    // New rule: split (2 operators is the structured-pipeline signal).
+    expect(shouldSoftSplit("cd /tmp && ls | wc", 80)).toBe(true)
+  })
+
+  it("does NOT split when only quoted operators are present (no top-level ops)", () => {
+    // Quote-protected `&&` is part of an echo arg, not a top-level operator.
+    // Width-fit + 0 operators ⇒ no split.
+    expect(shouldSoftSplit('echo "a && b && c"', 80)).toBe(false)
+  })
+
+  it("does NOT split when only subshell-internal pipes are present", () => {
+    // `|` is inside `$(…)`, so depth > 0 — not a top-level operator.
+    // Zero top-level operators here, fits the width → no split.
+    expect(shouldSoftSplit("echo $(date | tr A-Z a-z)", 80)).toBe(false)
+  })
+
+  it("returns false when cols is non-finite (width unknown sentinel)", () => {
+    // Renderer passes Infinity when neither `cols` arg nor
+    // `process.stdout.columns` is available (non-TTY). Multi-op rule
+    // must not fire here, otherwise `bun test`-driven tests that don't
+    // pass cols would start splitting unexpectedly.
+    expect(shouldSoftSplit("a && b | c", Number.POSITIVE_INFINITY)).toBe(false)
+    expect(shouldSoftSplit("a && b | c", Number.NaN)).toBe(false)
+  })
+
+  it("multi-op rule does not regress overflow detection (both rules co-exist)", () => {
+    // Long single-op pipeline at narrow width — old overflow rule alone
+    // must still fire even though the multi-op rule wouldn't.
+    const longSingleOp = `${"x".repeat(200)} | head`
+    expect(shouldSoftSplit(longSingleOp, 80)).toBe(true)
   })
 })

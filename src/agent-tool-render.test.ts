@@ -858,3 +858,62 @@ describe("formatToolInputContinuation — Bash combined soft-split + PS2 tail", 
     expect(cont[cont.length - 1]).toMatch(/^> \.\.\.\(\+\d+L\) more$/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Regression coverage: 2+ operator pipelines split at WIDE terminals
+//
+// User report (May 2026): two real-world commands rendered without any
+// `↳` rows because they fit horizontally in a typical 130–160 cell
+// iTerm window, even though both have 2+ top-level operators that the
+// user wants to read row-by-row. Width-only predicate left them unsplit.
+// New rule: 2+ operators ⇒ soft-split regardless of overflow.
+// ---------------------------------------------------------------------------
+
+describe("formatToolInput / formatToolInputContinuation — 2+ operator split at wide cols", () => {
+  const userCmd1 =
+    "cd /Users/gaston/Projects/inditex/work/inditex-supplier-management && cat Makefile 2>/dev/null | head -80"
+  const userCmd2 =
+    "cd /Users/gaston/Projects/inditex/work/inditex-supplier-management/api && npm run lint 2>&1 | tail -120"
+
+  // Span a few realistic terminal widths. All three must split because
+  // both commands have 2 top-level operators (&&, |) — the multi-op
+  // rule fires regardless of width.
+  for (const cols of [120, 140, 160, 200]) {
+    it(`user-reported cmd #1 splits at cols=${cols} (2+ operators)`, () => {
+      expect(formatToolInput(tu("Bash", { command: userCmd1 }), cols)).toBe(
+        "$ cd /Users/gaston/Projects/inditex/work/inditex-supplier-management",
+      )
+      expect(formatToolInputContinuation(tu("Bash", { command: userCmd1 }), cols)).toEqual([
+        "↳ && cat Makefile 2>/dev/null",
+        "↳ | head -80",
+      ])
+    })
+
+    it(`user-reported cmd #2 splits at cols=${cols} (2+ operators)`, () => {
+      expect(formatToolInput(tu("Bash", { command: userCmd2 }), cols)).toBe(
+        "$ cd /Users/gaston/Projects/inditex/work/inditex-supplier-management/api",
+      )
+      expect(formatToolInputContinuation(tu("Bash", { command: userCmd2 }), cols)).toEqual([
+        "↳ && npm run lint 2>&1",
+        "↳ | tail -120",
+      ])
+    })
+  }
+
+  it("single-operator pipelines still stay inline at wide cols (no over-splitting)", () => {
+    // `ls | wc -l` is short and trivially scannable; splitting would be
+    // visual noise. Multi-op rule requires 2+ operators, so 1-op stays inline.
+    expect(formatToolInput(tu("Bash", { command: "ls | wc -l" }), 200)).toBe("$ ls | wc -l")
+    expect(formatToolInputContinuation(tu("Bash", { command: "ls | wc -l" }), 200)).toEqual([])
+  })
+
+  it("non-TTY callers (no cols, no TTY) still get single-line headers — multi-op rule gated on finite cols", () => {
+    // Mirrors `bun test`-style invocations where stdout isn't a TTY and
+    // process.stdout.columns is undefined → effectiveCols becomes Infinity.
+    // Multi-op rule must NOT fire here; otherwise piped/test output of
+    // 2+ op commands changes shape. Existing tests at line ~674/720
+    // depend on this.
+    expect(formatToolInput(tu("Bash", { command: "a && b | c" }))).toBe("$ a && b | c")
+    expect(formatToolInputContinuation(tu("Bash", { command: "a && b | c" }))).toEqual([])
+  })
+})

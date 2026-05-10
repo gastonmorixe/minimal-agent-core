@@ -296,12 +296,43 @@ function matchOperator(cmd: string, i: number): BashOperator | null {
 }
 
 /**
+ * Minimum top-level operator count above which a command soft-splits
+ * even when it visually fits the terminal. The reasoning: 2+ operators
+ * (3+ segments) is a strong signal that the model emitted a structured
+ * pipeline — `cd <path> && <cmd> | <pager>`, `setup && build && test`,
+ * etc. — that the user wants to read row-by-row regardless of whether
+ * the terminal is wide enough to fit it inline.
+ *
+ * 1-operator pipelines (`a | b`, `cd /tmp && ls`) remain inline unless
+ * they overflow — they're short and trivially scannable.
+ *
+ * Bumped to 2 (rather than 1) after a user report (May 2026) where
+ * `cd /Users/.../inditex-supplier-management && cat Makefile … | head -80`
+ * stayed unsplit at a typical 130-col iTerm window. Splitting on every
+ * single operator regardless of width felt too noisy in early prototypes
+ * (`ls | wc -l` → 2 rows is overkill); the 2-operator threshold strikes
+ * the balance.
+ */
+export const MULTI_OP_SOFT_SPLIT_MIN = 2
+
+/**
  * Predicate: should the renderer soft-split this command?
  *
- * Returns `true` when the command's display width plus the header
- * prefix would exceed the available terminal columns. The predicate is
- * the activation gate for the renderer — short commands stay on one
- * line, only overflow triggers the multi-row layout.
+ * Returns `true` in either of two cases:
+ *
+ *  - **Overflow.** The command's display width plus the header prefix
+ *    would exceed the available terminal columns. Splitting prevents
+ *    mid-token hard-wrap by the terminal.
+ *
+ *  - **Multi-operator pipeline.** The command has at least
+ *    {@link MULTI_OP_SOFT_SPLIT_MIN} top-level operators (`&&`, `||`,
+ *    `|`, `;`) — i.e., 3+ segments. A structured pipeline reads better
+ *    row-by-row regardless of available width, so we split it
+ *    proactively. Single-operator commands (`ls | wc -l`) stay inline.
+ *
+ * Returns `false` when `cols` is non-finite (typically used by the
+ * renderer to mean "width unknown — don't split"). Non-TTY callers
+ * (tests, piped output) hit this path and keep single-line headers.
  *
  * @param cmd the (single-line) command body, without `$ ` or any prefix
  * @param cols the terminal width in cells (typically `process.stdout.columns`)
@@ -309,9 +340,11 @@ function matchOperator(cmd: string, i: number): BashOperator | null {
  *   the command body. Defaults to {@link BASH_HEADER_PREFIX_CELLS_DEFAULT}.
  *
  * @example
- *   shouldSoftSplit("ls | wc -l", 80)            // false — fits
- *   shouldSoftSplit("x".repeat(200), 80)         // true — overflows
- *   shouldSoftSplit("ls", 20, 5)                 // false — 2 + 5 < 20
+ *   shouldSoftSplit("ls | wc -l", 80)               // false — 1 op, fits
+ *   shouldSoftSplit("x".repeat(200), 80)            // true — overflows
+ *   shouldSoftSplit("a && b | c", 200)              // true — 2 ops, multi-op rule
+ *   shouldSoftSplit("a && b | c", Infinity)         // false — cols unknown
+ *   shouldSoftSplit("ls", 20, 5)                    // false — 2 + 5 < 20
  */
 export function shouldSoftSplit(
   cmd: string,
@@ -319,5 +352,14 @@ export function shouldSoftSplit(
   headerPrefixCells: number = BASH_HEADER_PREFIX_CELLS_DEFAULT,
 ): boolean {
   if (cmd.length === 0) return false
-  return displayWidth(cmd) + headerPrefixCells > cols
+  // `cols` non-finite ⇒ width unknown (non-TTY caller). Refuse to split
+  // so tests and piped-output callers see a stable single-line header.
+  if (!Number.isFinite(cols)) return false
+  // Tier 1 — width overflow. Splits prevent mid-token hard-wrap.
+  if (displayWidth(cmd) + headerPrefixCells > cols) return true
+  // Tier 2 — multi-operator pipeline. Visual structure trumps compactness
+  // for `cd … && build … | pager` shapes that fit but read poorly inline.
+  // Single-op commands skip this branch and stay on one row.
+  const { rest } = splitBashSegments(cmd)
+  return rest.length >= MULTI_OP_SOFT_SPLIT_MIN
 }
