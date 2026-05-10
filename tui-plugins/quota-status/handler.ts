@@ -63,7 +63,7 @@ function freshnessWindowMs(): number {
   return 60_000
 }
 
-export default async function handle(_ctx: LiveAreaHandlerContext): Promise<string | null> {
+export default async function handle(ctx: LiveAreaHandlerContext): Promise<string | null> {
   // 1) Cache-first: if the agent's last successful response left a
   //    snapshot, prefer it. Cheaper than `checkQuota` (no API call,
   //    no auth, no parse), and inside the freshness window we trust
@@ -77,13 +77,21 @@ export default async function handle(_ctx: LiveAreaHandlerContext): Promise<stri
   // 2) Cache cold or stale: fall back to a dedicated probe. This
   //    runs only at the heartbeat (no recent traffic) or the very
   //    first invoke before any chat completion.
+  //
+  //    `ctx.abort` is forwarded all the way down to the network
+  //    transport so a stuck probe (dead TCP socket after macOS
+  //    sleep/wake, hung DNS, etc.) is canceled when the scheduler's
+  //    `timeoutMs` elapses — releasing the slot's `inFlight` gate so
+  //    subsequent heartbeats AND `quota.headersReceived` bus events
+  //    can refresh the footer. Forgetting this single argument is
+  //    what previously deadlocked both refresh paths until restart.
   let auth: Awaited<ReturnType<typeof getAuth>>
   try {
     auth = await getAuth()
   } catch {
     return `${LABEL} ${c.dim("auth missing")}`
   }
-  const result = await checkQuota(auth)
+  const result = await checkQuota(auth, undefined, ctx.abort)
   if (!result.ok) return `${LABEL} ${c.dim("—")}`
   return render(result.rateLimits)
 }

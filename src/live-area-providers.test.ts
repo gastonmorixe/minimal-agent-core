@@ -350,6 +350,135 @@ describe("LiveAreaScheduler — failure modes", () => {
     expect(sink.footerCalls.at(-1)).toEqual(["aborted"])
     sched.stop()
   })
+
+  // ----------------------------------------------------------------------
+  // Regression: the live-area `quota-status` slot's deadlock recovery.
+  //
+  // A slot handler that *ignores* `ctx.abort` (older API consumers, or any
+  // network call without signal plumbing — exactly what `checkQuota`
+  // looked like before May 2026) must NOT permanently deadlock the
+  // scheduler when its in-flight invocation gets stuck. The defensive
+  // belt at the bottom of `fire()` is what makes that true: when the
+  // timeout fires, we deliberately wait one microtask for a "natural"
+  // resolution (so well-behaved handlers still win the latch), then
+  // force-release `s.inFlight` ourselves and log a diagnostic.
+  //
+  // Both refresh paths (heartbeat AND `refreshOn` events) share the same
+  // gate, so we test BOTH here — that's the smoking gun for the user's
+  // bug report ("two systems failed: the interval AND the new request").
+  // ----------------------------------------------------------------------
+  it(
+    "force-releases inFlight when timeoutMs fires AND invoke ignores ctx.abort " +
+      "(heartbeat + refreshOn both recover)",
+    async () => {
+      const { EventBus } = await import("./plugins/event-bus.ts")
+      const bus = new EventBus(() => {})
+      let invokeCount = 0
+      const slot = makeSlot({
+        id: "deadlock-prone",
+        refreshMs: 1_000,
+        timeoutMs: 200,
+        // The pathological case: invoke returns a promise that NEVER
+        // resolves, NEVER rejects, and NEVER honors ctx.abort. This is
+        // the fingerprint of a TCP socket whose peer died during macOS
+        // sleep — `fetch` over h2 sits there forever.
+        invoke: () => {
+          invokeCount++
+          return new Promise<string | null>(() => {
+            /* never settles */
+          })
+        },
+      })
+      slot.definition.refreshOn = ["quota.headersReceived"]
+
+      const logs: string[] = []
+      const clock = new FakeClock()
+      const sched = new LiveAreaScheduler([slot], makeSink(), {
+        setTimeout: clock.setTimeout,
+        clearTimeout: clock.clearTimeout,
+        bus,
+        logger: (m) => logs.push(m),
+      })
+
+      sched.start()
+      await clock.tick(0)
+      expect(invokeCount).toBe(1) // first fire kicked off
+
+      // -- HEARTBEAT recovery --
+      // Without the defensive belt, `s.inFlight` would still be true at
+      // this point (the original promise never resolves) and the next
+      // refreshMs tick would skip on the `if (s.inFlight) return` guard
+      // — every subsequent heartbeat for the rest of the session.
+      await clock.tick(200) // timeoutMs fires → force-release path runs
+      expect(logs.some((m) => m.includes("timed out") && m.includes("deadlock-prone"))).toBe(true)
+
+      // The heartbeat scheduled by the force-release path runs at
+      // refreshMs after the release. Advance to that boundary and
+      // confirm a second invoke actually fires (proving inFlight is now
+      // false). 1000ms refresh + the 200ms we already advanced = 1200ms
+      // since start, but scheduleNext re-schedules from "now", so we
+      // need 1000ms more.
+      await clock.tick(1_000)
+      expect(invokeCount).toBe(2) // heartbeat recovered
+
+      // -- refreshOn (bus event) recovery --
+      // Even more important than the heartbeat: while the second fire
+      // is also stuck (same pathological invoke), the user's recent API
+      // response broadcast a `quota.headersReceived` event. Before the
+      // fix, this emit would also hit the `inFlight` gate and silently
+      // drop. After the fix, the timeout's force-release lets the next
+      // bus emit kick off another invoke.
+      await clock.tick(200) // second fire's timeoutMs fires
+      bus.emit("quota.headersReceived", { rateLimits: new Map() })
+      await clock.tick(0) // drain microtasks for the bus listener
+      expect(invokeCount).toBe(3) // bus path recovered
+
+      sched.stop()
+    },
+  )
+
+  it("a well-behaved handler still wins the latch (force-release does NOT clobber on-time results)", async () => {
+    // The defensive belt MUST be a tiebreaker for stuck handlers, not a
+    // pre-emption of well-behaved ones. If invoke honors ctx.abort and
+    // resolves to "aborted" the moment the signal fires, the latch must
+    // record "aborted" — NOT null from the force-release microtask. This
+    // is the existing "aborts a slow invocation" test's invariant. We
+    // re-assert it here to pin the no-regression-on-the-happy-path bound
+    // alongside the deadlock recovery test.
+    // Explicit annotation prevents TS from narrowing to `undefined` at the
+    // initializer. We mutate it from the abort listener below.
+    let resolvedWith = undefined as string | null | undefined
+    const slot = makeSlot({
+      id: "well-behaved",
+      refreshMs: 60_000,
+      timeoutMs: 200,
+      invoke: (ctx) =>
+        new Promise<string | null>((resolve) => {
+          ctx.abort.addEventListener(
+            "abort",
+            () => {
+              resolvedWith = "aborted-ok"
+              resolve(resolvedWith)
+            },
+            { once: true },
+          )
+        }),
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    await clock.tick(200) // timeoutMs fires
+    // Sink received the well-behaved value, NOT a null force-release.
+    expect(resolvedWith).toBe("aborted-ok")
+    expect(sink.footerCalls.at(-1)).toEqual(["aborted-ok"])
+    sched.stop()
+  })
 })
 
 describe("LiveAreaScheduler — lifecycle", () => {

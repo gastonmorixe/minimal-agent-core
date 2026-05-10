@@ -204,13 +204,6 @@ export class LiveAreaScheduler {
     const ac = new AbortController()
     s.abort = ac
     const timeoutMs = s.slot.definition.timeoutMs ?? 5000
-    const timeoutHandle = this.setT(() => {
-      try {
-        ac.abort()
-      } catch {
-        // best-effort
-      }
-    }, timeoutMs)
     const tick = s.tick++
     const ctx = {
       packageDir: s.slot.packageDir,
@@ -220,7 +213,35 @@ export class LiveAreaScheduler {
       stderr: process.stderr,
       tick,
     }
+
+    // Single-fire latch shared between the timeout path and the
+    // invoke-resolved path. Whichever path runs first wins. The
+    // other becomes a silent no-op.
+    //
+    // Why this matters: a well-behaved invoke honors `ctx.abort`,
+    // so the timeout's `ac.abort()` causes invoke to reject quickly
+    // and `handle()` runs via the rejection branch — `inFlight` is
+    // released through the normal path.
+    //
+    // But not every handler is well-behaved (or every transport
+    // wired through to the signal). If invoke ignores the signal
+    // entirely, the original code left `s.inFlight = true` forever:
+    // both heartbeat ticks and `refreshOn` bus events would skip
+    // on the `if (s.inFlight) return` guard. A single stuck
+    // request — e.g. a probe to a TCP socket that died during
+    // macOS sleep — would deadlock every refresh path until
+    // restart.
+    //
+    // Defensive belt: after the timeout fires we wait one
+    // microtask hop for a "natural" resolution to land (the abort
+    // listener may have just resolved/rejected the invoke
+    // promise), then if we still have not settled we force-clean
+    // ourselves so the next tick / event can run.
+    const slotLabel = s.slot.pluginId + "/" + s.slot.definition.id
+    let settled = false
     const handle = (next: string | null): void => {
+      if (settled) return
+      settled = true
       this.clearT(timeoutHandle)
       s.inFlight = false
       s.abort = null
@@ -238,16 +259,67 @@ export class LiveAreaScheduler {
       }
       this.scheduleNext(s)
     }
+
+    const timeoutHandle = this.setT(() => {
+      try {
+        ac.abort()
+      } catch {
+        // best-effort
+      }
+      // Defer for a few microtask hops so an invoke that DOES honor
+      // the signal gets to win the latch (its `(out) => handle(out)`
+      // continuation runs ahead of this checker). If we still have
+      // not settled by then, conclude invoke is hung and free the
+      // gate ourselves.
+      //
+      // Why TWO hops, not one: when the .then chain is built as
+      //   `Promise.resolve().then(() => invoke(ctx)).then(handle)`
+      // the invoke callback returns a thenable, so the runtime
+      // schedules an extra "adopt" microtask to link the inner
+      // promise into the chain. Counting from `resolve(...)` inside
+      // the abort listener: hop 1 propagates fulfillment from the
+      // inner promise to the chained one. Hop 2 is when `handle()`
+      // actually runs. A single-hop checker fires BETWEEN those two
+      // and would force-clean with `null`, clobbering the
+      // well-behaved handler's real value. Two hops is enough across
+      // V8/JSC/SpiderMonkey microtask draining. The existing
+      // "aborts a slow invocation" + "well-behaved handler still
+      // wins the latch" tests pin the contract.
+      // `void` marks the chain as intentionally fire-and-forget. The
+      // body cannot throw (it only calls `this.logger` and `handle`,
+      // both of which are designed to swallow errors).
+      void Promise.resolve()
+        .then(() => Promise.resolve())
+        .then(() => {
+          if (settled) return
+          this.logger(
+            "slot " +
+              JSON.stringify(slotLabel) +
+              " timed out after " +
+              timeoutMs +
+              "ms (handler did not honor ctx.abort); releasing inFlight gate so subsequent ticks can run",
+          )
+          handle(null)
+        })
+    }, timeoutMs)
+
     Promise.resolve()
       .then(() => s.slot.invoke(ctx))
       .then(
         (out) => handle(out),
         (err) => {
-          this.logger(
-            `slot "${s.slot.pluginId}/${s.slot.definition.id}" failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          )
+          // Don't double-log when the latch already fired via
+          // timeout (the timeout path already wrote a "timed out"
+          // diagnostic and an extra "AbortError" line is just
+          // noise).
+          if (!settled) {
+            this.logger(
+              "slot " +
+                JSON.stringify(slotLabel) +
+                " failed: " +
+                (err instanceof Error ? err.message : String(err)),
+            )
+          }
           handle(null)
         },
       )
