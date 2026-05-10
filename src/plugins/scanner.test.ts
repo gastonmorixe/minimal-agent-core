@@ -106,6 +106,19 @@ describe("TagScanner", () => {
     expect(e.text.join("")).toBe("<tui::diff>unterminated body")
   })
 
+  it("falls back to raw text when the closer name doesn't match the opener", () => {
+    // Regression: only `</tui::NAME>` exactly matching the opener closes a
+    // capture. A differently-named closer is just more body content, so the
+    // capture runs to end-of-stream and falls back to raw flush — same code
+    // path as the no-closer-at-all case above, but a distinct authoring
+    // mistake worth documenting. Real instance: a memory tag closed with
+    // `</thinking>` (the older Anthropic scratchpad pattern) instead of
+    // `</tui::memory>` flushed the body to the terminal but skipped the save.
+    const e = drive(["<tui::memory>save me</thinking> trailing"])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("<tui::memory>save me</thinking> trailing")
+  })
+
   it("handles nested different-name tags by capturing the outer raw body", () => {
     const e = drive(["<tui::outer><tui::inner /></tui::outer>"])
     expect(e.tags).toHaveLength(1)

@@ -105,6 +105,15 @@ export class TagScanner {
   /**
    * Finish the stream. Flushes any pending text and falls back to raw output
    * for any in-progress capture. Idempotent after the first call.
+   *
+   * **Common cause of unterminated captures:** a mismatched closer. Only
+   * `</tui::NAME>` exactly matching the opener name closes a capture. A
+   * differently-named closer (e.g. `</thinking>` or `</tui::other>`) is just
+   * buffered as more body content, the matching close never arrives, and the
+   * span is flushed verbatim here at end-of-stream. This failure is silent
+   * from the producer's perspective: the body appears in the user's terminal
+   * exactly once (here, in the fallback flush) but no tag event fires, so any
+   * plugin side-effect — memory save, diff render, etc. — is skipped.
    */
   end(): void {
     if (this.state === "capturing") {
