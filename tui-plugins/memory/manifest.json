@@ -1,8 +1,8 @@
 {
   "id": "memory",
   "name": "Memory",
-  "version": "0.2.0",
-  "description": "Persistent cross-session memory. The model emits <tui::memory> spans to save lessons; saved memories live in per-user files (`~/.minimal-agent/memory.md` for global, `~/.minimal-agent/projects/<cwd>/memory.md` for project-scoped) and are reloaded into the system prompt on every future session.",
+  "version": "0.3.0",
+  "description": "Persistent cross-session memory plus per-session short-term scratchpad. Saves via the inline <tui::memory> tag (zero-friction, mid-response); reads/edits/removes via the MemoryTool (structured CRUD by id). Three scopes: global (~/.minimal-agent/memory.md), project (~/.minimal-agent/projects/<cwd>/memory.md), short-term (~/.minimal-agent/sessions/<sid>.scratch.md). The first two are reloaded into the system prompt on every session start; short-term rides as a per-turn user-message attachment.",
   "prompt": "./PROMPT.md",
   "tuis": [
     {
@@ -17,6 +17,64 @@
         "export": "default"
       },
       "interactive": false
+    },
+    {
+      "id": "memory_tool",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "MemoryTool",
+          "description": "List, read, add, edit, or remove saved memories. Three scopes: global (cross-project), project (this codebase), short-term (this session only). For in-flight saves mid-response, prefer the inline <tui::memory> tag — it's lower friction and the save-echo gives you the id back on the next turn. Use this tool for retrieval and curation. `id` is required for read/edit/remove; `body` for add/edit; `query` and `limit` are list-only. `clear` is only allowed for scope=short-term.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["list", "read", "add", "edit", "remove", "clear"],
+                "description": "What to do."
+              },
+              "scope": {
+                "type": "string",
+                "enum": ["global", "project", "short-term"],
+                "description": "Which memory file to act on."
+              },
+              "id": {
+                "type": "string",
+                "description": "Bullet id from a prior <memory-saved> echo, list result, or save-echo. Required for read/edit/remove. Persistent ids look like `lwq8tg-a8f3`; short-term ids are integers like `3`."
+              },
+              "body": {
+                "type": "string",
+                "description": "New body for add or edit. Single-line preferred; multi-line is collapsed to one line."
+              },
+              "query": {
+                "type": "string",
+                "description": "Optional case-insensitive substring filter for action=list."
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "For action=list, return only the N most recent matches. Default: all."
+              },
+              "format": {
+                "type": "string",
+                "enum": ["text", "json"],
+                "default": "text",
+                "description": "Result format. `text` (default) returns a compact human-readable list. `json` returns a structured shape suitable when you need to extract specific values."
+              }
+            },
+            "required": ["action", "scope"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": {
+        "type": "module",
+        "path": "./handlers/memory_tool.ts",
+        "export": "default"
+      },
+      "interactive": false,
+      "icon": "󰍩",
+      "color": "purple"
     }
   ],
   "promptFragments": [
