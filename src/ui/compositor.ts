@@ -242,10 +242,37 @@ export class Compositor {
     parts.push("\x1b[?25l")
     parts.push(this.eraseLiveSeq())
     parts.push(chunk)
-    this.streamCol = updateStreamColAfterRedraw(chunk, this.streamCol, this.output.columns)
+    this.streamCol = updateStreamColAfterRedraw(chunk, this.streamCol, this.effectiveColumns())
     parts.push(this.drawLiveSeq())
     parts.push(this.esu)
     this.output.write(parts.join(""))
+  }
+
+  /**
+   * Effective terminal width for the partial-redraw modulo math.
+   *
+   * `process.stdout.columns` is `0` when the host's TTY reports
+   * `WINSZ=0` — most commonly when the agent runs under macOS BSD
+   * `script(1)`, which allocates a slave PTY but never propagates
+   * the parent terminal's window size. With `columns ≤ 0`,
+   * `updateStreamCol` skips the wrap-modulo and returns the raw
+   * cell count of the partial line; `eraseLiveSeq` then emits
+   * `\x1b[1A\x1b[<raw>C\x1b[J`, which on a real terminal that *is*
+   * narrower clamps to the right edge and lands the cursor on the
+   * wrong physical row, leaving the first wrap row of the partial
+   * stuck in scrollback above the eventual rendered version
+   * (visible as a duplicated paragraph in script-recorded sessions).
+   *
+   * Fall back to `$COLUMNS` so users recording sessions can opt in
+   * with `COLUMNS=N script -r out.log -- bun run minimal-agent`.
+   * mdstream already does the same (renderer.rs `term_width`),
+   * so this brings the two layers into agreement.
+   */
+  private effectiveColumns(): number {
+    const c = this.output.columns ?? 0
+    if (c > 0) return c
+    const env = Number.parseInt(process.env.COLUMNS ?? "", 10)
+    return Number.isFinite(env) && env > 0 ? env : 0
   }
 
   setLiveArea(lines: string[], cursor: { row: number; col: number } | null): void {
