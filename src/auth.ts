@@ -210,6 +210,21 @@ export function writeKeychain(data: CredentialsData, service: string = KEYCHAIN_
 }
 
 /**
+ * Delete the keychain entry, if any. Returns `true` when a row was deleted,
+ * `false` when no matching entry existed (also non-fatal).
+ *
+ * Used by the `--logout` command. Mirrors the CLI's `performLogout()` flow,
+ * which is essentially `security delete-generic-password` plus a config strip.
+ */
+export function deleteKeychain(service: string = KEYCHAIN_SERVICE): boolean {
+  const user = process.env.USER ?? Bun.spawnSync(["whoami"]).stdout.toString().trim()
+  const result = Bun.spawnSync(["security", "delete-generic-password", "-a", user, "-s", service])
+  // `security` returns non-zero when there's no entry to delete; treat that
+  // as "already logged out" rather than an error so logout is idempotent.
+  return result.exitCode === 0
+}
+
+/**
  * Build the OAuth refresh endpoint config, honoring the optional client ID override.
  */
 export function getOauthRefreshConfig(): OAuthRefreshConfig {
@@ -358,7 +373,9 @@ export async function getAuth(
 
   const creds = read(service)
   if (!creds) {
-    throw new Error("No credentials in keychain. Run `claude` and log in first.")
+    throw new Error(
+      "No credentials in keychain. Run `minimal-agent --login` (or `claude`) to sign in.",
+    )
   }
 
   // API key path (no refresh needed)
@@ -368,7 +385,9 @@ export async function getAuth(
 
   const oauth = creds.claudeAiOauth
   if (!oauth?.accessToken) {
-    throw new Error("No OAuth access token found in keychain.")
+    throw new Error(
+      "No OAuth access token found in keychain. Run `minimal-agent --login` to sign in.",
+    )
   }
 
   // accountUuid: try keychain first (older versions), fall back to ~/.claude.json
@@ -390,7 +409,9 @@ export async function getAuth(
     const current = read(service) ?? creds
     const currentOauth = current.claudeAiOauth
     if (!currentOauth?.refreshToken) {
-      throw new Error("No refresh token available. Run `claude` to log in.")
+      throw new Error(
+        "No refresh token available. Run `minimal-agent --login` (or `claude`) to sign in.",
+      )
     }
 
     let refreshed: TokenRefreshResult
@@ -401,7 +422,7 @@ export async function getAuth(
       if (msg.includes("invalid_grant")) {
         throw new Error(
           "Refresh token rejected by server (invalid_grant). " +
-            "Run `claude` and re-login to refresh credentials.",
+            "Run `minimal-agent --login` (or `claude`) to re-login.",
           { cause: e },
         )
       }

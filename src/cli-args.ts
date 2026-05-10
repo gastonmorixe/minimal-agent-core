@@ -63,6 +63,13 @@ const SUBCOMMANDS: Record<string, SubcommandSpec> = {
   spinners: { flag: "--list-spinners" },
   sessions: { flag: "--sessions" },
   resume: { flag: "--resume", takesValue: true },
+  login: { flag: "--login" },
+  logout: { flag: "--logout" },
+  // Dash-form is recognized as a single token; the more discoverable
+  // two-word form `auth status` would need a wider tokenizer extension —
+  // skipped for now since `--auth-status` and `auth-status` cover the
+  // 90% case.
+  "auth-status": { flag: "--auth-status" },
   help: { flag: "--help" },
 }
 
