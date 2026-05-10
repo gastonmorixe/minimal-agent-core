@@ -210,6 +210,28 @@ export class Agent {
   /** Optional mode manager (mode-aware system prompt + tool filter). */
   private modeManager: ModeManager | null
   /**
+   * Optional save-echo collector. When set, every `<memory-saved …>`
+   * event the inline-tag handler (or the `MemoryTool` add action)
+   * emits on the global bus is buffered here, and drained as
+   * ContentBlock(s) prepended to the next user message. The model
+   * thereby learns the id of every memory it just saved on its very
+   * next turn, with no extra tool round-trip.
+   *
+   * Off by default; the agent is fully functional without it.
+   * See `tui-plugins/memory/lib/save-echo.ts`.
+   */
+  private saveEcho: { consumeAll(): ContentBlock[] } | null
+  /**
+   * Optional short-term snapshot producer. When set, the per-session
+   * `<short-term-memory>…</short-term-memory>` attachment is prepended
+   * to the FIRST user message of each `run()` call.
+   *
+   * Only emitted at the initial seam (not at the loop seam after
+   * tool_use rounds), to avoid re-emitting stale snapshots within the
+   * same turn — see `tui-plugins/memory/lib/short-term-snapshot.ts`.
+   */
+  private shortTermSnapshot: { toAttachment(): ContentBlock | null } | null
+  /**
    * Injectable transport. Defaults to the real {@link sendMessage} function.
    * Primary purpose is a testing seam so suites can drive tool_use flows
    * without making live API calls.
@@ -257,6 +279,17 @@ export class Agent {
     thinkingDisplay?: "summarized" | "omitted"
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
+    /**
+     * Optional save-echo collector (see {@link Agent.saveEcho}). The
+     * structural type avoids a hard dependency on the memory plugin's
+     * implementation — `src/index.ts` constructs and injects it.
+     */
+    saveEcho?: { consumeAll(): ContentBlock[] } | null
+    /**
+     * Optional short-term snapshot producer (see
+     * {@link Agent.shortTermSnapshot}). Same structural-type pattern.
+     */
+    shortTermSnapshot?: { toAttachment(): ContentBlock | null } | null
     sendFn?: typeof sendMessage
     store?: SessionStore | null
     /**
@@ -274,6 +307,8 @@ export class Agent {
     this.thinkingDisplay = opts.thinkingDisplay
     this.loader = opts.loader ?? null
     this.modeManager = opts.modeManager ?? null
+    this.saveEcho = opts.saveEcho ?? null
+    this.shortTermSnapshot = opts.shortTermSnapshot ?? null
     this.sendFn = opts.sendFn ?? sendMessage
     this.store = opts.store ?? null
     if (opts.initialMessages && opts.initialMessages.length > 0) {
@@ -444,9 +479,25 @@ export class Agent {
     // invalidated every turn anyway by the user message changing), so
     // mode toggles cost zero additional cache invalidation. The system
     // prompt and tool list are mode-independent under this design.
+    // Initial user message. Prepended attachments (in this order):
+    //
+    //   1. <mode-change from="…" to="…" />            — pending mode toggle.
+    //   2. <short-term-memory>…</short-term-memory>    — session scratchpad.
+    //   3. <memory-saved scope="…" id="…">…</…>+      — id echo for any
+    //      memory(ies) the model saved on the previous turn.
+    //   4. user text                                   — the actual user input.
+    //
+    // ORDER NOTE: short-term snapshot comes before save-echoes because
+    // it's the persistent context the model needs every turn ("what we're
+    // currently tracking"); save-echoes are deltas from the last turn and
+    // read more naturally as a coda before the user text.
     const initialUserContent: ContentBlock[] = []
     const initialModeAttach = this.modeManager?.consumePendingAttachment() ?? null
     if (initialModeAttach) initialUserContent.push(initialModeAttach)
+    const stmAttach = this.shortTermSnapshot?.toAttachment() ?? null
+    if (stmAttach) initialUserContent.push(stmAttach)
+    const initialSaveEchoes = this.saveEcho?.consumeAll() ?? []
+    for (const e of initialSaveEchoes) initialUserContent.push(e)
     initialUserContent.push({ type: "text", text: userText })
     this.messages.push({
       role: "user",
@@ -827,9 +878,17 @@ export class Agent {
       // rolling breakpoint just lands on whatever the last block is,
       // and the historical prefix (prior turns) is untouched.
       const userContent: ContentBlock[] = []
+      // Same ordering rule as initial seam, with two changes for the
+      // loop: tool_result blocks MUST come first (Anthropic API
+      // requirement), and we do NOT re-emit the short-term snapshot
+      // (already sent at the initial seam this turn — re-emitting on
+      // every tool round just balloons the conversation with stale
+      // repeats; the model can call MemoryTool to re-fetch if it cares).
       userContent.push(...toolResults)
       const loopModeAttach = this.modeManager?.consumePendingAttachment() ?? null
       if (loopModeAttach) userContent.push(loopModeAttach)
+      const loopSaveEchoes = this.saveEcho?.consumeAll() ?? []
+      for (const e of loopSaveEchoes) userContent.push(e)
       const queuedText = drainQueuedUserText?.() ?? null
       if (queuedText && queuedText.trim().length > 0) {
         userContent.push({ type: "text", text: queuedText })

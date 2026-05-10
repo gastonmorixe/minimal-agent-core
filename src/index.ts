@@ -56,6 +56,8 @@ import { displayWidth } from "./term-width.ts"
 import { checkQuota } from "./client.ts"
 import { formatQuotaSummary } from "./quota-format.ts"
 import { setGlobalEventBus } from "./global-bus.ts"
+import { SaveEchoCollector } from "../tui-plugins/memory/lib/save-echo.ts"
+import { ShortTermSnapshot } from "../tui-plugins/memory/lib/short-term-snapshot.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
@@ -608,6 +610,13 @@ async function main() {
   // `client.ts`, which broadcasts `quota.headersReceived` after every
   // successful API response — see src/global-bus.ts for the rationale).
   setGlobalEventBus(loader.bus())
+  // Memory plugin v0.3 collectors. Both subscribe to the loader's bus
+  // (or read from disk on demand). The Agent receives them via its
+  // optional `saveEcho` / `shortTermSnapshot` constructor params and
+  // drains them at every user-message seam — see `Agent.run` and
+  // `tui-plugins/memory/lib/{save-echo,short-term-snapshot}.ts`.
+  const saveEcho = SaveEchoCollector.attach(loader.bus())
+  const shortTermSnapshot = new ShortTermSnapshot(getSessionId())
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
   const hasPromptBlock = loader.getPromptBlock() !== null
@@ -853,6 +862,8 @@ async function main() {
     thinkingDisplay,
     loader: hasPlugins ? loader : null,
     modeManager,
+    saveEcho,
+    shortTermSnapshot,
     store,
     initialMessages,
   })
