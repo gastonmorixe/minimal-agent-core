@@ -1107,7 +1107,7 @@ export async function* sendMessage(
         if (response.status === 401) {
           throw new Error(
             "401 after token refresh. The keychain credentials are stale — " +
-              "run `claude` to re-login.",
+              "run `minimal-agent --login` (or `claude`) to re-login.",
           )
         }
       } catch (e) {

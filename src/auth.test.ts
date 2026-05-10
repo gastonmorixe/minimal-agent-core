@@ -147,7 +147,10 @@ describe("auth", () => {
       })
 
       await expect(auth.refresh!()).rejects.toThrow(/invalid_grant/)
-      await expect(auth.refresh!()).rejects.toThrow(/Run `claude`/)
+      // Hint mentions both `--login` (preferred) and `claude` (fallback) so
+      // grepping for either substring continues to work.
+      await expect(auth.refresh!()).rejects.toThrow(/--login/)
+      await expect(auth.refresh!()).rejects.toThrow(/claude/)
     })
 
     it("lets CLAUDE_CODE_OAUTH_CLIENT_ID override the default", () => {

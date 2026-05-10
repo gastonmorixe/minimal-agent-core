@@ -42,6 +42,10 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--spinner",
   "--thinking-display",
   "--mode",
+  // Optional companion to `--login`: `--email <addr>` (or `--email-hint`)
+  // pre-fills the login form. Both forms accept the same value semantics.
+  "--email",
+  "--email-hint",
 ])
 
 /**
@@ -66,6 +70,13 @@ export const FLAGS_NO_VALUE: ReadonlySet<string> = new Set([
   "--show-hidden-chars",
   "--header",
   "--no-header",
+  // Auth subcommands — see src/cli/command-plan.ts. None of these consume
+  // the following positional, so they belong here rather than in
+  // FLAGS_WITH_VALUES. (`--login --email foo@bar` is a future option but
+  // even then `--email` would be the value-taker, not `--login`.)
+  "--login",
+  "--logout",
+  "--auth-status",
 ])
 
 export type PromptSource = { kind: "literal"; text: string } | { kind: "stdin" } | { kind: "none" }

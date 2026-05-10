@@ -4,6 +4,9 @@ export type CommandName =
   | "list-flags"
   | "list-spinners"
   | "list-models"
+  | "login"
+  | "logout"
+  | "auth-status"
   | "run"
 
 export interface CommandCapabilities {
@@ -25,6 +28,14 @@ export interface PlanCommandInput {
   wantListFlags: boolean
   wantListSpinners: boolean
   wantListModels: boolean
+  /**
+   * Auth-related top-level commands. Routed BEFORE `run` so they bypass
+   * credential acquisition — login can't depend on already being logged
+   * in, and logout / auth-status never need network.
+   */
+  wantLogin?: boolean
+  wantLogout?: boolean
+  wantAuthStatus?: boolean
 }
 
 function capabilities(command: CommandName): CommandCapabilities {
@@ -33,10 +44,25 @@ function capabilities(command: CommandName): CommandCapabilities {
     case "sessions":
     case "list-flags":
     case "list-spinners":
+    case "logout":
+    case "auth-status":
       return {
         needsStartupUi: false,
         needsAuth: false,
         needsNetwork: false,
+        needsFormatter: false,
+        needsQuota: false,
+        supportsPromptInput: false,
+      }
+    case "login":
+      // Login is a one-shot command that hits the OAuth endpoints itself
+      // (network=true) but it is **not** allowed to depend on already-
+      // valid credentials (auth=false). The startup UI / formatter /
+      // quota check are all skipped.
+      return {
+        needsStartupUi: false,
+        needsAuth: false,
+        needsNetwork: true,
         needsFormatter: false,
         needsQuota: false,
         supportsPromptInput: false,
@@ -69,6 +95,12 @@ function capabilities(command: CommandName): CommandCapabilities {
 /**
  * Decide which top-level command should run, then expose an explicit
  * capability profile so startup dependencies are only initialized when needed.
+ *
+ * Precedence: dump > sessions > list-flags > list-spinners > list-models >
+ * login > logout > auth-status > run. Auth subcommands sit ahead of `run`
+ * but after the read-only inspection commands so a `--sessions --logout`
+ * combo still falls through to sessions (whoever wrote that flag combo
+ * almost certainly meant the read).
  */
 export function planCommand(input: PlanCommandInput): CommandPlan {
   const command: CommandName = input.dumpArg
@@ -81,7 +113,13 @@ export function planCommand(input: PlanCommandInput): CommandPlan {
           ? "list-spinners"
           : input.wantListModels
             ? "list-models"
-            : "run"
+            : input.wantLogin
+              ? "login"
+              : input.wantLogout
+                ? "logout"
+                : input.wantAuthStatus
+                  ? "auth-status"
+                  : "run"
 
   return {
     command,

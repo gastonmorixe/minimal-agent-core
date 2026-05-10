@@ -52,4 +52,46 @@ describe("planCommand", () => {
     expect(models.needsQuota).toBe(false)
     expect(models.supportsPromptInput).toBe(false)
   })
+
+  test("login: needs network but NOT auth (must work for fresh keychains)", () => {
+    const p = planCommand({ ...base, wantLogin: true })
+    expect(p.command).toBe("login")
+    expect(p.needsAuth).toBe(false)
+    expect(p.needsNetwork).toBe(true)
+    expect(p.needsStartupUi).toBe(false)
+    expect(p.needsFormatter).toBe(false)
+    expect(p.needsQuota).toBe(false)
+    expect(p.supportsPromptInput).toBe(false)
+  })
+
+  test("logout: pure local op — no auth, no network, no UI", () => {
+    const p = planCommand({ ...base, wantLogout: true })
+    expect(p.command).toBe("logout")
+    expect(p.needsAuth).toBe(false)
+    expect(p.needsNetwork).toBe(false)
+    expect(p.needsStartupUi).toBe(false)
+  })
+
+  test("auth-status: read-only local — no auth, no network", () => {
+    const p = planCommand({ ...base, wantAuthStatus: true })
+    expect(p.command).toBe("auth-status")
+    expect(p.needsAuth).toBe(false)
+    expect(p.needsNetwork).toBe(false)
+  })
+
+  test("read-only inspection commands take precedence over auth subcommands", () => {
+    expect(planCommand({ ...base, wantListSessions: true, wantLogout: true }).command).toBe(
+      "sessions",
+    )
+    expect(planCommand({ ...base, wantListFlags: true, wantLogin: true }).command).toBe(
+      "list-flags",
+    )
+  })
+
+  test("among auth subcommands: login > logout > auth-status", () => {
+    expect(
+      planCommand({ ...base, wantLogin: true, wantLogout: true, wantAuthStatus: true }).command,
+    ).toBe("login")
+    expect(planCommand({ ...base, wantLogout: true, wantAuthStatus: true }).command).toBe("logout")
+  })
 })

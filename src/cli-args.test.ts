@@ -95,4 +95,22 @@ describe("normalizeArgs", () => {
   test("empty argv stays empty", () => {
     expect(normalizeArgs([])).toEqual([])
   })
+
+  test("auth subcommand sugar maps to long flags", () => {
+    expect(normalizeArgs(["login"])).toEqual(["--login"])
+    expect(normalizeArgs(["logout"])).toEqual(["--logout"])
+    expect(normalizeArgs(["auth-status"])).toEqual(["--auth-status"])
+  })
+
+  test("auth subcommands keep trailing flags after the verb", () => {
+    // `minimal-agent login --email foo@bar` → `--login --email foo@bar`.
+    // The subcommand recognizer only consumes the first positional;
+    // anything that follows is preserved verbatim for the value-flag
+    // walker to pick up later.
+    expect(normalizeArgs(["login", "--email", "foo@bar"])).toEqual([
+      "--login",
+      "--email",
+      "foo@bar",
+    ])
+  })
 })
