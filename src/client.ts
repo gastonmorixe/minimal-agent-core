@@ -10,7 +10,7 @@
  *   - SSE parsing for signature_delta and input_json_delta
  */
 
-import type { AuthResult } from "./auth.ts"
+import { readKeychain, type AuthResult } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import {
   API_URL,
@@ -1084,36 +1084,85 @@ export async function* sendMessage(
     // refresh transparently and continue without forcing the user to
     // restart anything. Surface the refresh in the status bar, then
     // resume the same in-flight turn.
+    //
+    // Multi-process race mitigation (May 2026): when many agent processes
+    // share one keychain entry, server-side refresh-token rotation makes
+    // each refresh invalidate the access tokens cached by every OTHER
+    // process. They each 401 on their next request, refresh, invalidate
+    // the previous one, and the cycle never settles. Net-dbg trace from
+    // session c0ab6ba6: 24/105 requests in a single 5-minute window
+    // returned 401, with 22 refreshes (one outright `invalid_grant` —
+    // refresh token already burned by another agent).
+    //
+    // Fix: on 401, re-read the keychain BEFORE calling auth.refresh().
+    // If another process has already written a fresher access token, use
+    // that directly — no oauth round-trip, no rotation, no race. Only
+    // refresh if the keychain still has the same token we just got 401
+    // on (i.e. WE are the freshest cache holder, the token genuinely
+    // expired). Collapses N concurrent refreshes per "true expiry" event
+    // into 1.
     if (response.status === 401 && auth.refresh) {
-      debugHeader(c.yellow("401 — token expired, refreshing..."))
-      requestStatus.update("Auth token expired, refreshing...", {
-        notificationId: "auth.refresh",
-        category: "auth",
-      })
+      debugHeader(c.yellow("401 — token expired"))
+
+      // Step 1: keychain-first. Cheap (`security find-generic-password`),
+      // synchronous, no network. Fail-quiet on any read error — fall
+      // through to the refresh path.
+      let recovered = false
       try {
-        const refreshed = await auth.refresh()
-        // Persist on the AuthResult so subsequent turns reuse the new token
-        // without paying another 401+refresh round-trip.
-        auth.token = refreshed.token
-        requestStatus.update("Auth refreshed, resuming...", {
+        const fresh = readKeychain()
+        const freshToken = fresh?.claudeAiOauth?.accessToken
+        if (freshToken && freshToken !== auth.token) {
+          requestStatus.update("Auth refreshed elsewhere, retrying...", {
+            notificationId: "auth.refresh",
+            category: "auth",
+          })
+          auth.token = freshToken
+          response = await doRequest(freshToken)
+          if (response.ok) {
+            recovered = true
+            requestStatus.update(stream ? "Waiting for response" : "Reading response", {
+              notificationId: "network.request",
+              category: "network",
+            })
+          }
+        }
+      } catch {
+        // Keychain read failures are non-fatal; the refresh path below
+        // is the authoritative recovery anyway.
+      }
+
+      // Step 2: still 401 (or keychain had no fresher token) → do our
+      // own refresh.
+      if (!recovered && response.status === 401) {
+        requestStatus.update("Auth token expired, refreshing...", {
           notificationId: "auth.refresh",
           category: "auth",
         })
-        response = await doRequest(refreshed.token)
-        requestStatus.update(stream ? "Waiting for response" : "Reading response", {
-          notificationId: "network.request",
-          category: "network",
-        })
-        if (response.status === 401) {
-          throw new Error(
-            "401 after token refresh. The keychain credentials are stale — " +
-              "run `minimal-agent --login` (or `claude`) to re-login.",
-          )
+        try {
+          const refreshed = await auth.refresh()
+          // Persist on the AuthResult so subsequent turns reuse the new
+          // token without paying another 401+refresh round-trip.
+          auth.token = refreshed.token
+          requestStatus.update("Auth refreshed, resuming...", {
+            notificationId: "auth.refresh",
+            category: "auth",
+          })
+          response = await doRequest(refreshed.token)
+          requestStatus.update(stream ? "Waiting for response" : "Reading response", {
+            notificationId: "network.request",
+            category: "network",
+          })
+          if (response.status === 401) {
+            throw new Error(
+              "401 after token refresh. The keychain credentials are stale — " +
+                "run `minimal-agent --login` (or `claude`) to re-login.",
+            )
+          }
+        } catch (e) {
+          throw new Error(`Token refresh failed: ${e instanceof Error ? e.message : String(e)}`, {
+            cause: e,
+          })
         }
-      } catch (e) {
-        throw new Error(`Token refresh failed: ${e instanceof Error ? e.message : String(e)}`, {
-          cause: e,
-        })
       }
     }
 
@@ -1526,11 +1575,30 @@ export async function checkQuota(
   try {
     let response = await doRequest(auth.token)
 
-    // 401 retry
+    // 401 retry — same multi-process keychain-first mitigation as in
+    // `sendMessage` above (see the long comment at the main 401 site).
+    // checkQuota fires from the live-area `quota-status` plugin's
+    // heartbeat AND on every `quota.headersReceived` event; with 100s of
+    // agents, this path is one of the biggest contributors to refresh
+    // contention if we don't deduplicate.
     if (response.status === 401 && auth.refresh) {
-      const refreshed = await auth.refresh()
-      response = await doRequest(refreshed.token)
-      auth.token = refreshed.token
+      let recovered = false
+      try {
+        const fresh = readKeychain()
+        const freshToken = fresh?.claudeAiOauth?.accessToken
+        if (freshToken && freshToken !== auth.token) {
+          auth.token = freshToken
+          response = await doRequest(freshToken)
+          if (response.ok) recovered = true
+        }
+      } catch {
+        // best-effort; fall through to refresh
+      }
+      if (!recovered && response.status === 401) {
+        const refreshed = await auth.refresh()
+        response = await doRequest(refreshed.token)
+        auth.token = refreshed.token
+      }
     }
 
     debugResponse(response.status, response.headers)
