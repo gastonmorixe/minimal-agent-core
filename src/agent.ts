@@ -55,6 +55,7 @@ import type { TruncationInfo } from "./tools/truncation.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 import { truncHint } from "./truncate-hint.ts"
 import { splitBashSegments, shouldSoftSplit } from "./bash-split.ts"
+import { buildQueueDecorationLines } from "./queue-decoration.ts"
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -2202,55 +2203,23 @@ async function runReplLiveArea(
   let running = false
 
   /**
-   * Build the queued-message decoration block shown between the live-area
+   * Paint the queued-message decoration block between the live-area
    * status row and the editor prompt. Only rendered while a turn is in
-   * flight (steady-state idle should not display the queue : items are
-   * drained immediately by the main loop and would visually flash).
-   * Truncates each item to a single ~70-col preview so a multi-line paste
-   * doesn't dominate the screen.
+   * flight (steady-state idle would visually flash since the main loop
+   * drains items immediately).
+   *
+   * The byte-exact layout (numbering, `┊` / `╰` glyph choice, preview
+   * truncation) lives in the pure builder `buildQueueDecorationLines`
+   * — see src/queue-decoration.ts and its unit tests for the regression
+   * guards.
    */
   const renderDecoration = (): void => {
     if (typeof editor.setDecorationLines !== "function") return
-    if (!running || queue.length === 0) {
+    if (!running) {
       editor.setDecorationLines([])
       return
     }
-    const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
-    // ⏳ is wide-emoji (2 cells in iTerm/WezTerm/most modern terminals).
-    // The `┊` glyph below is 1 cell, so we pad each item line with one
-    // extra space to make text columns line up under the `2 queued` text.
-    const arrow = c.faintWhite("⏳")
-    const count = queue.length
-    const header = `  ${arrow} ${dim(`${count} queued`)}`
-    const maxItems = 3
-    const lines: string[] = [header]
-    for (let i = 0; i < Math.min(maxItems, queue.length); i++) {
-      const oneLine = queue[i].replace(/\s+/g, " ").trim()
-      // Display-width-aware truncation. The previous `oneLine.slice(0, 70)`
-      // was a UTF-16 code-unit slice that could split surrogate pairs (lone
-      // high surrogate → `�`) and miscount wide chars (CJK at 2 cells/cp,
-      // emoji at 2 cells, combining marks at 0). For ASCII it's identical;
-      // for everything else `truncateDisplayWidth` is correct. (Bug 3.)
-      const PREVIEW_W = 70
-      let preview: string
-      if (displayWidth(oneLine) <= PREVIEW_W) {
-        preview = oneLine
-      } else {
-        const truncated = truncateDisplayWidth(oneLine, PREVIEW_W, "")
-        // Report code-points cut, not cells (matches user mental model:
-        // "I typed N more characters past the preview"). Counts via the
-        // string iterator, which steps grapheme-naively but per-codepoint
-        // : close enough for the queue preview's purpose.
-        // eslint-disable-next-line typescript-eslint/no-misused-spread
-        const cpCut = [...oneLine].length - [...truncated].length
-        preview = `${truncated}${truncHint(cpCut, "ch")}`
-      }
-      lines.push(`  ${dim("┊")}  ${dim(preview)}`)
-    }
-    if (queue.length > maxItems) {
-      lines.push(`  ${dim(`┊  ... and ${queue.length - maxItems} more`)}`)
-    }
-    editor.setDecorationLines(lines)
+    editor.setDecorationLines(buildQueueDecorationLines(queue))
   }
 
   const onSubmit = (text: string): void => {
