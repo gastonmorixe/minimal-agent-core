@@ -28,7 +28,11 @@
 
 import { spawnSync } from "node:child_process"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { configPath as userConfigPath } from "./config.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
+import { acquireLock, LockAbortedError, LockTimeoutError, type LockHandle } from "./file-lock.ts"
+import { parseJsonc } from "./jsonc.ts"
+import { getSessionId } from "./metadata.ts"
 import { truncateToolOutput, type TruncateCtx, type TruncationInfo } from "./tools/truncation.ts"
 
 // ---------------------------------------------------------------------------
@@ -444,15 +448,158 @@ async function dispatch(
     case "Read":
       return execRead(input, opts)
     case "Write":
-      return execWrite(input, opts)
+      return withFileLock("Write", input, opts, () => execWrite(input, opts))
     case "Edit":
-      return execEdit(input, opts)
+      return withFileLock("Edit", input, opts, () => execEdit(input, opts))
     case "Glob":
       return execGlob(input, opts)
     case "Grep":
       return execGrep(input, opts)
     default:
       return { content: `Unknown tool: ${name}`, is_error: true }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// File locking (cooperative, for concurrent agents in a shared worktree)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolved file-lock configuration. Sourced from
+ * `~/.minimal-agent/config.jsonc` under `plugins["file-lock"]` (single
+ * source of truth — the same key the loader reads to decide whether to
+ * activate the companion plugin), with sane defaults when missing.
+ *
+ * Read once and cached: tools.ts is hot-path on every Edit/Write, and the
+ * config doesn't change mid-session.
+ */
+interface FileLockConfig {
+  enabled: boolean
+  tools: ReadonlySet<string>
+  timeoutMs: number
+  staleAfterMs: number
+}
+
+let _fileLockConfig: FileLockConfig | null = null
+
+function fileLockConfig(): FileLockConfig {
+  if (_fileLockConfig !== null) return _fileLockConfig
+  // Hard env opt-out for tests / debugging. Doesn't pollute the config file.
+  if (process.env.MINIMAL_AGENT_FILE_LOCK_DISABLED === "1") {
+    _fileLockConfig = {
+      enabled: false,
+      tools: new Set(["Edit", "Write"]),
+      timeoutMs: 30_000,
+      staleAfterMs: 300_000,
+    }
+    return _fileLockConfig
+  }
+  const defaults: FileLockConfig = {
+    enabled: true,
+    tools: new Set(["Edit", "Write"]),
+    timeoutMs: 30_000,
+    staleAfterMs: 300_000,
+  }
+  // Read raw JSONC directly. `loadUserConfig()` validates and returns
+  // only its whitelisted keys (model, effort, etc.) — `plugins.<id>` is
+  // not in that whitelist, so we must read the raw file ourselves. This
+  // matches the pattern in `loadDisabledPluginIds` (src/config.ts).
+  try {
+    const path = userConfigPath()
+    if (!existsSync(path)) {
+      _fileLockConfig = defaults
+      return _fileLockConfig
+    }
+    const raw = readFileSync(path, "utf-8")
+    const parsed = parseJsonc(raw) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      _fileLockConfig = defaults
+      return _fileLockConfig
+    }
+    const plugins = (parsed as Record<string, unknown>).plugins as
+      | Record<string, unknown>
+      | undefined
+    const block = plugins?.["file-lock"] as Record<string, unknown> | undefined
+    if (!block) {
+      _fileLockConfig = defaults
+      return _fileLockConfig
+    }
+    const enabled = block.enabled === false ? false : defaults.enabled
+    const tools =
+      Array.isArray(block.tools) && block.tools.every((t) => typeof t === "string")
+        ? new Set(block.tools as string[])
+        : defaults.tools
+    const timeoutMs =
+      typeof block.timeoutMs === "number" && block.timeoutMs > 0
+        ? block.timeoutMs
+        : defaults.timeoutMs
+    const staleAfterMs =
+      typeof block.staleAfterMs === "number" && block.staleAfterMs > 0
+        ? block.staleAfterMs
+        : defaults.staleAfterMs
+    _fileLockConfig = { enabled, tools, timeoutMs, staleAfterMs }
+    return _fileLockConfig
+  } catch {
+    _fileLockConfig = defaults
+    return _fileLockConfig
+  }
+}
+
+/** Test seam: drop the cached config so the next call re-reads the file/env. */
+export function _resetFileLockConfigForTests(): void {
+  _fileLockConfig = null
+}
+
+/**
+ * Wrap a mutation tool's execution in a cooperative file lock.
+ *
+ * The lock spans only the body of `run()` — held for as long as the
+ * read-modify-write takes, typically <100ms. On lock failure, returns a
+ * `tool_result` with `is_error: true` and a holder-rich diagnostic so the
+ * model can decide to wait, inspect via `LockStatus`, or proceed elsewhere.
+ *
+ * Disabled gracefully when `plugins["file-lock"].enabled === false` or
+ * `MINIMAL_AGENT_FILE_LOCK_DISABLED=1` is set in the environment — `run()`
+ * is invoked directly with no lock.
+ */
+async function withFileLock(
+  tool: string,
+  input: Record<string, unknown>,
+  opts: ToolExecOpts,
+  run: () => Promise<ToolExecResult>,
+): Promise<ToolExecResult> {
+  const cfg = fileLockConfig()
+  if (!cfg.enabled || !cfg.tools.has(tool)) return run()
+  const filePath = input.file_path
+  if (typeof filePath !== "string" || filePath.length === 0) {
+    // Let the executor return its own validation error — we've nothing to lock.
+    return run()
+  }
+  let handle: LockHandle | null = null
+  try {
+    handle = await acquireLock(
+      filePath,
+      { sessionId: getSessionId(), tool },
+      {
+        timeoutMs: cfg.timeoutMs,
+        staleAfterMs: cfg.staleAfterMs,
+        signal: opts.signal,
+      },
+    )
+    return await run()
+  } catch (e) {
+    if (e instanceof LockTimeoutError) {
+      return { content: `${tool} error: ${e.message}`, is_error: true }
+    }
+    if (e instanceof LockAbortedError) {
+      return ABORTED_RESULT()
+    }
+    // Any other thrown error from acquire (filesystem-level) — surface as
+    // a tool error rather than letting it crash the dispatch loop.
+    const msg = e instanceof Error ? e.message : String(e)
+    return { content: `${tool} error: lock acquire failed: ${msg}`, is_error: true }
+  } finally {
+    handle?.release()
   }
 }
 

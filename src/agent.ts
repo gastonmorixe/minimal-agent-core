@@ -88,7 +88,11 @@ export const c = {
   boldRed: _combo("\x1b[1;31m", "\x1b[22;39m"),
   boldYellow: _combo("\x1b[1;33m", "\x1b[22;39m"),
   dimCyan: _combo("\x1b[2;36m", "\x1b[22;39m"),
+  dimRed: _combo("\x1b[2;31m", "\x1b[22;39m"),
   faintWhite: _combo("\x1b[2;37m", "\x1b[22;39m"),
+  // Strikethrough (SGR 9 / 29). Independent of bold/dim/fg, so it composes
+  // with `c.dim` etc. without sharing close codes.
+  strike: _attr("\x1b[9m", "\x1b[29m"),
 
   // Modern "Cool Summer" palette (Saturated & Powerful)
   orange: _fg(PALETTE.orange),
@@ -108,6 +112,71 @@ export const faintThinkingChunk = (s: string): string => {
     .replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")
     .replaceAll("\x1b[22m", "\x1b[22m\x1b[2m")
   return `\x1b[2m${redimmed}\x1b[22m${trailingNewline ? "\n" : ""}`
+}
+
+/**
+ * Render an "aborted prompt echo" block: a faint, struck-through
+ * reproduction of the user's just-rolled-back submission, prefixed with a
+ * dim-red `⊘` badge and an `ABORTED` label. Replaces the old single-line
+ * `⊘ aborted by user — prompt restored to editor` footer.
+ *
+ * The motivation: when a user aborts and re-submits, both the original
+ * prompt (committed to scrollback at submit time) and the re-submitted
+ * prompt look identical — bold pink `❯` followed by the same text. This
+ * echo block sits between them in faint+strikethrough form so the
+ * sequence reads unambiguously: "this got rolled back; the next bold
+ * prompt is the one that was actually answered."
+ *
+ * Format:
+ * ```
+ *   ⊘ ABORTED · ❯ <line 1, dim+strikethrough>
+ *     <line 2, dim+strikethrough, indented>
+ *     <line 3, dim+strikethrough, indented>
+ * ```
+ *
+ * Mode-aware: when `activeModeLabel` is supplied (e.g. `"ASK"`) it sits
+ * between the separator and the arrow, matching the live prompt's
+ * `ASK ❯` shape (also dimmed):
+ * ```
+ *   ⊘ ABORTED · ASK ❯ <text…>
+ * ```
+ *
+ * Pure / no IO; the caller writes the returned string (followed by `\n`)
+ * to the compositor's scrollback stream.
+ *
+ * @param text - The original user prompt text. Multi-line input is split
+ *   on `\n`; each line is dimmed + strikethrough separately so terminal
+ *   attribute state never leaks across line boundaries.
+ * @param opts.activeModeLabel - Active mode label (e.g. `"ASK"`), or
+ *   null/undefined for default mode. Uppercased on display.
+ */
+export function formatAbortedEcho(
+  text: string,
+  opts: { activeModeLabel?: string | null } = {},
+): string {
+  const badge = c.dimRed("⊘")
+  const label = c.dim("ABORTED")
+  const sep = c.dim("·")
+  const modeLabel = opts.activeModeLabel ? ` ${c.dim(opts.activeModeLabel.toUpperCase())}` : ""
+  const arrow = c.dim("❯")
+  const head = `  ${badge} ${label} ${sep}${modeLabel} ${arrow}`
+
+  // wrap: dim + strikethrough, with both attributes opened/closed per
+  // line so multi-line output never relies on terminals carrying SGR
+  // state across `\n` (some don't).
+  const wrap = (line: string) => c.dim(c.strike(line))
+
+  // Strip exactly one trailing newline so a buffer like "foo\n" doesn't
+  // emit a phantom empty struck row. Interior blank lines are preserved.
+  const normalized = text.endsWith("\n") ? text.slice(0, -1) : text
+  const lines = normalized.split("\n")
+  const first = `${head} ${wrap(lines[0] ?? "")}`
+  // Continuation lines: 4-space indent (2 outer + 2 inner) so they
+  // visually nest under the badge rather than aligning under the content
+  // of line 1 — keeps the block compact for long submissions and makes
+  // the `⊘ ABORTED` anchor unambiguous as the "left margin" of the echo.
+  const rest = lines.slice(1).map((l) => `    ${wrap(l)}`)
+  return [first, ...rest].join("\n")
 }
 
 type MaybePromise<T> = T | Promise<T>
@@ -418,6 +487,20 @@ export class Agent {
       onThinkingChunk?: (chunk: string) => MaybePromise<void>
       onThinkingStop?: () => MaybePromise<void>
       /**
+       * Optional. Fires when a `text` content_block stops streaming.
+       * Useful for hosts that maintain per-text-block state — most
+       * notably, the response formatter (e.g. `mdstream`): the same
+       * formatter subprocess is shared across all sub-turns of a
+       * `run()`, and without a per-block boundary its paragraph buffer
+       * concatenates two unrelated sentences ("…before writing.I have
+       * a complete picture…") at end-of-run. Use this hook to commit
+       * the formatter's per-block partial (e.g. end+respawn) at the
+       * right seam: AFTER the just-streamed text, BEFORE any tool_use
+       * block lands in scrollback. See {@link SendMessageOptions.onTextStop}
+       * for the canonical doc.
+       */
+      onTextStop?: () => MaybePromise<void>
+      /**
        * Optional. Called at each tool-loop boundary (right after tool
        * results are computed, before the next API request). Returns text
        * the host wants to inject into the *current* turn as a follow-up
@@ -460,6 +543,7 @@ export class Agent {
       onThinkingStart,
       onThinkingChunk,
       onThinkingStop,
+      onTextStop,
       drainQueuedUserText,
       onQueueInject,
       signal,
@@ -468,6 +552,7 @@ export class Agent {
     const thinkingStart = onThinkingStart
     const onThinkingDelta = onThinkingChunk ?? sendOpts.onThinkingDelta
     const thinkingStop = onThinkingStop
+    const textStop = onTextStop ?? sendOpts.onTextStop
     const writeTranscript = (line: string): void => {
       if (onTranscriptLine) onTranscriptLine(line)
       else console.error(line)
@@ -592,6 +677,7 @@ export class Agent {
         ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
         ...(onThinkingDelta ? { onThinkingDelta } : {}),
         ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
+        ...(textStop ? { onTextStop: textStop } : {}),
         ...(signal ? { signal } : {}),
       })
 
@@ -2441,9 +2527,18 @@ async function runReplLiveArea(
       const isAbortError =
         aborted || (turnError instanceof Error && (turnError as Error).name === "AbortError")
       if (isAbortError) {
-        // Make sure the dim footer starts on a fresh line.
+        // Make sure the abort echo starts on a fresh line.
         if (wroteOutput && !lastChunkEndedWithNewline) compositor.writeStream("\n")
-        compositor.writeStream(`  \x1b[2m⊘ aborted by user — prompt restored to editor\x1b[22m\n`)
+        // Render the faint+strikethrough echo of the rolled-back submission.
+        // The visual semantics are unambiguous: the struck-through block
+        // shows what got aborted; the next bold `❯ ` prompt (which appears
+        // right below once the editor restores the buffer via setBuffer)
+        // is the live editor showing the same text, available for edit and
+        // re-submission. No separate "prompt restored to editor" line is
+        // needed — the editor's own redraw is the proof.
+        const activeMode = modeManager?.active()
+        const modeLabel = activeMode?.label ?? activeMode?.id ?? null
+        compositor.writeStream(`${formatAbortedEcho(text, { activeModeLabel: modeLabel })}\n`)
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
         if (typeof editor.setBuffer === "function") editor.setBuffer(text)
       } else if (turnError) {
