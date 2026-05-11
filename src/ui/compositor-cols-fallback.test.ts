@@ -72,11 +72,12 @@ const joined = (cap: Capture) => cap.writes.join("")
  * `\x1b[<col>C\x1b[J` portion when streamCol > 0).
  */
 function extractRedrawCol(stream: string): number | null {
-  // The `\x1b[<col>C` we care about is the SECOND such code on a line —
-  // the first is the live-area "step over to streamCol" emit. Match the
-  // canonical eraseLiveSeq tail: optional `\x1b[<r>A` + `\r` + `\x1b[1A`
-  // + `\x1b[<col>C` + `\x1b[J`.
-  const m = stream.match(/\x1b\[1A\x1b\[(\d+)C\x1b\[J/)
+  // Match the eraseLiveSeq's "step back to streamCol" tail. As of May 2026
+  // the rows-up count is variable: drawLiveSeq emits up to 2 \r\n rows
+  // above the live area (1 forced for mid-line, 1 smart-skip separator),
+  // so eraseLiveSeq's `\x1b[<rows>A` may be `\x1b[1A` or `\x1b[2A`.
+  // The canonical tail is then `\x1b[<col>C\x1b[J`.
+  const m = stream.match(/\x1b\[\d+A\x1b\[(\d+)C\x1b\[J/)
   return m ? Number.parseInt(m[1] ?? "0", 10) : null
 }
 

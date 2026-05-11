@@ -156,9 +156,7 @@ describe("EditorController — typing & submit", () => {
       streamed.push(s)
     }
     const submits: { text: string; commitLines: string[] }[] = []
-    ctrl.on("submit", (text, commitLines) =>
-      submits.push({ text, commitLines: commitLines ?? [] }),
-    )
+    ctrl.on("submit", (text, commitLines) => submits.push({ text, commitLines: commitLines ?? [] }))
     ctrl.start()
     // Multiline submission via Shift+Enter (kitty CSI 13;2u) so we
     // exercise the full-buffer rendering path, not just the visible
@@ -499,8 +497,8 @@ describe("EditorController — viewport cap & internal scroll", () => {
       compositor: compositor as any,
       stdin: stdin as any,
       output: output as any,
-      // 1 status + 2 gap + 2 editor + 1 indicator = 6.
-      maxLiveHeight: 6,
+      // 1 status + 1 gap + 2 editor (1 indicator + 1 content row) = 4.
+      maxLiveHeight: 4,
     })
     ctrl.start()
     ctrl.setStatus("⠋")
@@ -677,27 +675,28 @@ describe("EditorController — footer rows (live-area slots)", () => {
     ctrl.start()
     ctrl.setFooterLines(["quota 5h 12% · 7d 3%"])
     const last = compositor.last()!
-    // Layout: [status, ...decoration, ...content, ...footer]
-    // No status text so status row is empty (""), no decoration, 1 content row,
-    // 1 footer row.
+    // Layout (idle, no status): [editor, footerSpacer, footer].
+    // 1 editor row + 1 blank spacer + 1 footer row = 3 rows.
     expect(last.lines).toHaveLength(3)
-    expect(last.lines[0]).toBe("") // empty status row
-    expect(last.lines[1]).toContain("> ") // editor prompt
+    expect(last.lines[0]).toContain("> ") // editor prompt
+    expect(last.lines[1]).toBe("") // footer spacer (blank)
     expect(last.lines[2]).toBe("quota 5h 12% · 7d 3%") // footer
-    // Cursor sits on the editor row — footer rows are below it.
+    // Cursor sits on the editor row — spacer + footer rows are below.
     expect(last.cursor).not.toBeNull()
-    expect(last.cursor!.row).toBe(1)
+    expect(last.cursor!.row).toBe(0)
     ctrl.stop()
   })
 
-  it("setFooterLines bumps liveHeight by the number of footer rows", () => {
+  it("setFooterLines bumps liveHeight by N footer rows + 1 blank spacer", () => {
     const { ctrl, compositor } = make({ columns: 40 })
     ctrl.start()
     const heightBefore = compositor.liveHeight
     ctrl.setFooterLines(["row1", "row2"])
-    expect(compositor.liveHeight).toBe(heightBefore + 2)
+    // +2 footer rows +1 spacer = +3
+    expect(compositor.liveHeight).toBe(heightBefore + 3)
     ctrl.setFooterLines(["row1"])
-    expect(compositor.liveHeight).toBe(heightBefore + 1)
+    // +1 footer row +1 spacer = +2
+    expect(compositor.liveHeight).toBe(heightBefore + 2)
     ctrl.setFooterLines([])
     expect(compositor.liveHeight).toBe(heightBefore)
     ctrl.stop()
