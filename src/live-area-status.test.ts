@@ -106,6 +106,9 @@ describe("LiveAreaStatusController", () => {
       const bus = new StatusBus()
       const editor = new FakeEditor()
       const spinner = new BlinkingNerdSpinner({
+        // Pin blinkMs so the on/off-step assertion stays decoupled
+        // from whatever default the spinner ships with.
+        blinkMs: 300,
         iconByNotificationId: { [`x.${name}`]: spec },
       })
       // Stub time so we can control on/off step deterministically.
