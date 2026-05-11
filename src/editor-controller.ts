@@ -541,6 +541,18 @@ export class EditorController extends EventEmitter {
         if (coalesced) {
           this.pending = this.pending.slice(other.length)
         }
+        // Bare LF without a CR partner → Shift+Enter / Ctrl+J → newline.
+        // Check this BEFORE the isBlank() no-op so that Shift+Enter on
+        // an empty buffer inserts a newline (matching Alt/Option+Enter,
+        // which goes through the escape parser and bypasses isBlank()).
+        // Without this ordering the two newline-insert keys disagree on
+        // empty buffers: Alt+Enter expands to two blank lines, but bare
+        // LF would be eaten by the no-op below.
+        if (char === "\n" && !coalesced) {
+          this.buf.newline()
+          dirty = true
+          continue
+        }
         if (this.buf.isBlank()) {
           this.buf.clear()
           dirty = true
@@ -551,12 +563,6 @@ export class EditorController extends EventEmitter {
         // newline insertion. A trailing escape sequence (e.g. arrow key
         // coalesced into the same chunk) means the Enter is real.
         if (this.pending.length > 0 && !this.pending.startsWith("\x1b")) {
-          this.buf.newline()
-          dirty = true
-          continue
-        }
-        // Bare LF without a CR partner → Shift+Enter / Ctrl+J → newline.
-        if (char === "\n" && !coalesced) {
           this.buf.newline()
           dirty = true
           continue

@@ -862,4 +862,52 @@ describe("EditorController — Shift+Enter via bare LF", () => {
     a.ctrl.stop()
     b.ctrl.stop()
   })
+
+  it("bare LF on an EMPTY buffer inserts a blank-line newline (matches Alt+Enter)", () => {
+    // Regression: an earlier ordering let the `isBlank()` no-op swallow
+    // bare LF, so Shift+Enter (via terminal keymap) on an empty prompt
+    // did nothing — but Alt+Enter (`\x1b\r`) bypassed `isBlank()` via
+    // the escape parser and inserted a blank-line newline. The two
+    // newline-insert keys must agree on empty buffers.
+    const a = makeEditor()
+    a.ctrl.start()
+    a.stdin.send("\n") // Shift+Enter via keymap on EMPTY buffer
+
+    const b = makeEditor()
+    b.ctrl.start()
+    b.stdin.send("\x1b\r") // Alt/Option+Enter on EMPTY buffer
+
+    expect(a.ctrl.buffer().toString()).toBe(b.ctrl.buffer().toString())
+    expect(a.ctrl.buffer().toString()).toBe("\n")
+    expect(a.submits).toEqual([])
+    expect(b.submits).toEqual([])
+
+    a.ctrl.stop()
+    b.ctrl.stop()
+  })
+
+  it("bare LF on a whitespace-only buffer still inserts a newline (no isBlank swallow)", () => {
+    // Whitespace-only is also "blank" to the existing isBlank() no-op,
+    // but Shift+Enter / Ctrl+J should still expand the buffer.
+    const { ctrl, stdin, submits } = makeEditor()
+    ctrl.start()
+    stdin.send("   ") // only spaces
+    stdin.send("\n") // Shift+Enter
+    expect(submits).toEqual([])
+    expect(ctrl.buffer().toString()).toBe("   \n")
+    ctrl.stop()
+  })
+
+  it("real Enter (\\r) on an empty buffer remains the no-op (existing shell convention)", () => {
+    // Counter-test: my fix must NOT change the long-standing "press
+    // Enter on empty line = no-op, don't submit, don't insert" behavior.
+    const { ctrl, stdin, submits } = makeEditor()
+    ctrl.start()
+    stdin.send("\r")
+    stdin.send("\r")
+    stdin.send("\r")
+    expect(submits).toEqual([])
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
 })
