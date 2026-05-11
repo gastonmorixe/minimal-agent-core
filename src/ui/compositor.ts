@@ -80,6 +80,46 @@ export class Compositor {
   private liveHeightValue = 0
   /** Cursor row inside the live area, 0..liveHeightValue-1. */
   private cursorRowInLive = 0
+  /**
+   * Whether `drawLiveSeq` already emitted its blank-row separator above
+   * the current live area. Reset on every `writeBufferedStream` (new
+   * scrollback content invalidates the prior separator's position) and
+   * on `unmount`/`notifyResize` (live area state cleared).
+   *
+   * Without this flag, repeated draw cycles (typing, status changes)
+   * would each add a fresh separator row → the live area would drift
+   * down by one row per repaint.
+   */
+  private liveSepDrawn = false
+  /**
+   * Rows of `\r\n` that `drawLiveSeq` emitted between the previous
+   * scrollback content and the start of the live area: 0 (no forced
+   * \r\n, no separator), 1 (one of: forced-CRLF for mid-line OR the
+   * smart-skip separator), or 2 (both). `eraseLiveSeq` walks the
+   * cursor back UP over this many rows so the next chunk write lands
+   * at the original scrollback cursor position, not on a separator
+   * row that would then be overwritten.
+   */
+  private sepRowsAboveLive = 0
+  /**
+   * Effective columns at which the current live area / streamCol counters
+   * were measured. When the next paint observes a different value, the
+   * stale counters (and any in-terminal wrapping under the old width) will
+   * desynchronize from physical reality: `eraseLiveSeq`'s `\x1b[<n>A`
+   * walks back by logical-row count, but content that wrapped at the OLD
+   * cols occupies more physical rows than the counter knows, so the erase
+   * undershoots and the stale top of the live area scrolls into scrollback.
+   *
+   * This is the same failure mode SIGWINCH triggers, but cols can change
+   * silently — `script(1)` PTY-size-propagation jitter, a SIGWINCH that
+   * landed between repaints but before `editor.notifyResize()`, or a
+   * tty whose TIOCGWINSZ reports a different value than what was current
+   * when we last drew. Detecting it at paint time and replaying the
+   * resize-recovery wipe gives the next draw a clean slate.
+   *
+   * 0 means "no live area drawn yet, no baseline to compare against".
+   */
+  private lastDrawColumns = 0
   private lastLines: string[] = []
   private lastCursor: { row: number; col: number } | null = null
 
@@ -133,6 +173,9 @@ export class Compositor {
     this.cursorRowInLive = 0
     this.streamCol = 0
     this.consecutiveNewlines = 0
+    this.liveSepDrawn = false
+    this.sepRowsAboveLive = 0
+    this.lastDrawColumns = 0
     this.lastLines = []
     this.lastCursor = null
   }
@@ -218,7 +261,13 @@ export class Compositor {
         out += chunk.slice(i, j)
         i = j
       } else if (ch === "\n") {
-        if (this.consecutiveNewlines < 2) out += "\n"
+        // Cap consecutive `\n` runs at 3 (= 2 blank rows max in scrollback).
+        // Bumped from `< 2` (1 blank max) to `< 3` (2 blanks max) so
+        // turn-end transitions can land 2 blank rows above a freshly
+        // committed prompt — `EditorController.submit` emits 3 leading
+        // `\n`s and relies on this cap to absorb whatever the previous
+        // content left in the run.
+        if (this.consecutiveNewlines < 3) out += "\n"
         this.consecutiveNewlines++
         i++
       } else if (ch === "\r") {
@@ -235,6 +284,10 @@ export class Compositor {
   }
 
   private writeBufferedStream(chunk: string): void {
+    // Same cols-drift recovery setLiveArea does — without it, a scrollback
+    // chunk written under a stale-cols live area would push the live area's
+    // wrapped-but-uncounted top rows into permanent scrollback.
+    this.maybeRecoverFromColsDrift()
     const parts: string[] = []
     // BSU before any cursor moves so the terminal buffers the whole
     // erase→write→redraw sequence and presents it as a single frame.
@@ -243,9 +296,14 @@ export class Compositor {
     parts.push(this.eraseLiveSeq())
     parts.push(chunk)
     this.streamCol = updateStreamColAfterRedraw(chunk, this.streamCol, this.effectiveColumns())
+    // New scrollback content was just appended — the prior live-area
+    // separator (if any) is now buried mid-scrollback. Reset so the next
+    // `drawLiveSeq` decides afresh whether to draw a separator.
+    this.liveSepDrawn = false
     parts.push(this.drawLiveSeq())
     parts.push(this.esu)
     this.output.write(parts.join(""))
+    this.lastDrawColumns = this.effectiveColumns()
   }
 
   /**
@@ -279,6 +337,12 @@ export class Compositor {
     this.lastLines = [...lines]
     this.lastCursor = cursor ? { ...cursor } : null
     if (!this.tty || !this.mounted) return
+    // Detect silent cols changes (PTY-size jitter, SIGWINCH that hasn't
+    // hit `editor.notifyResize()` yet, terminals whose TIOCGWINSZ races
+    // with their actual width). The recovery wipes the viewport and
+    // zeroes our counters so `drawLiveSeq` starts at home with no stale
+    // wrapped content lurking above the new draw.
+    this.maybeRecoverFromColsDrift()
     const parts: string[] = []
     parts.push(this.bsu)
     parts.push("\x1b[?25l")
@@ -286,6 +350,7 @@ export class Compositor {
     parts.push(this.drawLiveSeq())
     parts.push(this.esu)
     this.output.write(parts.join(""))
+    this.lastDrawColumns = this.effectiveColumns()
   }
 
   /**
@@ -342,9 +407,47 @@ export class Compositor {
   notifyResize(): void {
     if (!this.tty || !this.mounted) return
     this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
+    this.resetLiveCounters()
+  }
+
+  /**
+   * Zero every counter that tracks where the live area is on screen.
+   * Used by `notifyResize` and by the paint-time cols-drift recovery
+   * in `setLiveArea` / `writeBufferedStream`.
+   */
+  private resetLiveCounters(): void {
     this.liveHeightValue = 0
     this.cursorRowInLive = 0
     this.streamCol = 0
+    this.liveSepDrawn = false
+    this.sepRowsAboveLive = 0
+    this.lastDrawColumns = 0
+  }
+
+  /**
+   * If `effectiveColumns()` has changed since the last successful draw,
+   * the in-screen state is fiction (see `lastDrawColumns` doc). Emit the
+   * same `\x1b[H\x1b[J` wipe `notifyResize` uses and zero the counters
+   * so the immediately-following `drawLiveSeq` paints from a clean home.
+   *
+   * Returns `true` when recovery fired (caller may want to write the
+   * sequence as part of its own BSU/ESU envelope, but we own the write
+   * here for simplicity — the wipe is idempotent w.r.t. a fresh draw).
+   *
+   * No-op when there is no live area yet (`lastDrawColumns === 0`) or
+   * when cols hasn't moved. Also no-op when the terminal is detached.
+   */
+  private maybeRecoverFromColsDrift(): boolean {
+    if (!this.tty || !this.mounted) return false
+    if (this.lastDrawColumns === 0) return false
+    const now = this.effectiveColumns()
+    // `effectiveColumns()` returns 0 only when both `output.columns` and
+    // `$COLUMNS` are unavailable; in that case we have no signal to act
+    // on, so leave the counters alone.
+    if (now === 0 || now === this.lastDrawColumns) return false
+    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
+    this.resetLiveCounters()
+    return true
   }
 
   // ------------------------- internal sequences -------------------------
@@ -361,19 +464,25 @@ export class Compositor {
       parts.push(`\x1b[${this.cursorRowInLive}A`)
     }
     parts.push("\r")
-    // If the previous stream chunk ended mid-line, we wrote `\r\n` before
-    // drawing the live area; undo that by stepping up one row and forward
-    // to the saved column.
+    // Walk back over any `\r\n` rows that `drawLiveSeq` emitted between
+    // the previous scrollback cursor and the live area's first row
+    // (forced mid-line CRLF + smart-skip separator). We need to land
+    // back at the original scrollback cursor so the next chunk write
+    // appends naturally; failing to step over these would write the
+    // chunk on top of a separator row, producing visual corruption.
+    if (this.sepRowsAboveLive > 0) {
+      parts.push(`\x1b[${this.sepRowsAboveLive}A`)
+    }
     if (this.streamCol > 0) {
-      parts.push("\x1b[1A")
       parts.push(`\x1b[${this.streamCol}C`)
     }
-    // Erase from cursor to end of screen — wipes the live area (and any
-    // trailing characters past streamCol on the current row, which is
-    // fine because nothing should be there).
+    // Erase from cursor to end of screen — wipes the live area, the
+    // separator rows above, and any trailing characters past streamCol
+    // on the current row (which should be empty).
     parts.push("\x1b[J")
     this.liveHeightValue = 0
     this.cursorRowInLive = 0
+    this.sepRowsAboveLive = 0
     return parts.join("")
   }
 
@@ -388,9 +497,25 @@ export class Compositor {
     // Live area must start at column 0 of a fresh line. If the stream
     // cursor is mid-line, write CRLF first so the live area doesn't
     // collide with stream content.
+    let sepConsumed = 0 // count of \r\n we emit for separator/forced
     if (this.streamCol > 0) {
       parts.push("\r\n")
+      sepConsumed++
     }
+    // Smart-skip blank separator above the live area. Goal: exactly one
+    // visible blank row between scrollback content and the live area's
+    // first row. Skip when scrollback already ends with a blank row
+    // (consecutiveNewlines >= 2 → one or more blanks already emitted).
+    // The mid-line `\r\n` above counts as the row terminator only — it
+    // doesn't itself create a blank — so when streamCol > 0 we still
+    // need the separator.
+    const alreadyBlank = this.streamCol === 0 && this.consecutiveNewlines >= 2
+    if (!this.liveSepDrawn && !alreadyBlank) {
+      parts.push("\r\n")
+      sepConsumed++
+    }
+    this.liveSepDrawn = true
+    this.sepRowsAboveLive = sepConsumed
     for (let i = 0; i < lines.length; i++) {
       parts.push(lines[i])
       // Clear to end of line in case the previous content here was wider.

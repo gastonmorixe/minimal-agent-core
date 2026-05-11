@@ -12,7 +12,7 @@
  */
 
 import { EventEmitter } from "node:events"
-import { abortBus, type AbortBus } from "./abort-bus.ts"
+import { type AbortBus, abortBus } from "./abort-bus.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
 import { EditorRenderer } from "./editor-renderer.ts"
 import { truncateDisplayWidth } from "./term-width.ts"
@@ -994,10 +994,7 @@ export class EditorController extends EventEmitter {
     const footerSpacerRows = this.footerLines.length > 0 ? 1 : 0
     const footerRows = this.footerLines.length + footerSpacerRows
     const cap = Math.max(1, this.maxLiveHeight())
-    const editorBudget = Math.max(
-      1,
-      cap - statusRows - statusGapRows - footerRows,
-    )
+    const editorBudget = Math.max(1, cap - statusRows - statusGapRows - footerRows)
 
     // Run the viewport/window calculation for a given physical-row content
     // budget. Does not mutate any state; returns the computed values.

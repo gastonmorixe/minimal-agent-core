@@ -2373,6 +2373,14 @@ async function runReplLiveArea(
 
       const writeDirectSink = (s: string) => {
         if (s.length === 0) return
+        // First write of the turn: insert a blank row of breathing room
+        // above the response text. Mirrors the legacy `runRepl` baseSink
+        // (`!wroteOutput` clause). Without this the response butts directly
+        // under the just-committed `❯ <prompt>` row in scrollback. The
+        // separator is unnecessary when the first content is a transcript
+        // line (the agent prepends `\n` to tool headers); only text needs
+        // the explicit kick.
+        if (!wroteOutput) compositor.writeStream("\n")
         if (lastKind === "transcript") {
           // Transcript lines always end with `\n`; one more `\n` here yields
           // exactly one blank line between the `└ ...` and the next text.
@@ -2386,6 +2394,8 @@ async function runReplLiveArea(
 
       const baseSink = (s: string) => {
         if (s.length === 0) return
+        // See `writeDirectSink` for the rationale on the !wroteOutput kick.
+        if (!wroteOutput) compositor.writeStream("\n")
         if (lastKind === "transcript") {
           // Transcript lines always end with `\n`; one more `\n` here yields
           // exactly one blank line between the `└ ...` and the next text.
@@ -2537,13 +2547,17 @@ async function runReplLiveArea(
         const old = formatter
         formatter = null
         if (old) await old.end()
-        // After `end()` returns, drainOutput has consumed every byte
-        // mdstream emitted (incl. the `erase_partial` + final markdown
-        // render produced by `finish()`). Any trailing `\n`/`\n\n` is
-        // now held in `pendingTrailingNewlines`; we deliberately leave
-        // it there. The existing flush sites : next baseSink body
-        // chunk, onTranscriptLine's text→transcript flush, or
-        // end-of-turn discard : still work unchanged.
+        // Discard the OLD formatter's trailing tail. The next text block
+        // (if any) starts with a freshly-spawned formatter; any pending
+        // `\n\n` from the OLD render belongs to the boundary between this
+        // text block and whatever follows (tool, end-of-turn). We handle
+        // those boundaries explicitly: `onTranscriptLine` adds its own
+        // `\n` when crossing text→transcript, the `!wroteOutput` kick
+        // in `baseSink` adds the leading `\n` for transcript→text, and
+        // `EditorController.submit` provides the `\n\n\n` lead for
+        // turn-end → next-prompt. Holding the OLD pending here just
+        // double-counts the boundary and overshoots blanks.
+        pendingTrailingNewlines = ""
         formatter = spawnMainFormatter()
       }
       try {

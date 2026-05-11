@@ -170,9 +170,11 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     c.writeStream(" world")
     const out = joined(cap)
     // To redraw, we erased the live area. The previous chunk ended mid-line
-    // ("hello", streamCol=5), so the erase sequence steps up an extra row
-    // and forward to col 5 to land back at end-of-"hello".
-    expect(out).toContain("\x1b[1A")
+    // ("hello", streamCol=5). drawLiveSeq emitted TWO `\r\n`s above the live
+    // area: one forced (mid-line → fresh row), one smart-skip separator
+    // (1 blank row of breathing room above the live area). So eraseLiveSeq
+    // steps back 2 rows and forward to col 5 to land back at end-of-"hello".
+    expect(out).toContain("\x1b[2A")
     expect(out).toContain("\x1b[5C")
     // Then the new chunk writes " world" continuing the same line.
     expect(out).toContain(" world")
@@ -204,14 +206,16 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     expect(out).not.toContain("\x1b[31\x1b")
   })
 
-  it("caps consecutive blank lines: at most one blank row between writes", () => {
-    // Repro for the "3+ blank lines in scrollback" bug. When the model
+  it("caps consecutive blank lines: at most TWO blank rows between writes", () => {
+    // Repro for the "4+ blank lines in scrollback" bug. When the model
     // emits a whitespace-only text block (e.g. "\n\n") between two tool
     // calls, the per-turn sink writes a transcript→text separator `\n`
     // followed by the chunk's `\n\n`, which on top of the prior tool's
     // trailing `\n` and the next tool header's leading `\n` would pile
     // up to 4+ consecutive `\n` (3+ blank rows). The compositor caps any
-    // run of `\n` in scrollback to 2, so at most one blank row appears.
+    // run of `\n` in scrollback to 3, so at most TWO blank rows appear.
+    // Cap was bumped from 2 to 3 in May 2026 to support the "2 blanks
+    // at turn end" rule (`EditorController.submit` writes `\n\n\n` lead).
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output })
     c.mount()
@@ -241,7 +245,7 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
       },
       { max: 0, cur: 0 },
     ).max
-    expect(longestRun).toBeLessThanOrEqual(2)
+    expect(longestRun).toBeLessThanOrEqual(3)
   })
 
   it("does not strip newlines inside ANSI escape sequences when capping", () => {
@@ -258,7 +262,8 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
       s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
     const plain = stripAnsi(joined(cap))
     // ANSI redraw bytes around the chunk are stripped; the scrollback
-    // payload should contain at most 2 consecutive `\n` from this write.
+    // payload should contain all 3 consecutive `\n` from this write
+    // (cap=3 since May 2026, was cap=2). ANSI codes don't extend the run.
     const longestRun = plain.split("").reduce(
       (acc: { max: number; cur: number }, ch: string) => {
         if (ch === "\n") {
@@ -269,7 +274,7 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
       },
       { max: 0, cur: 0 },
     ).max
-    expect(longestRun).toBe(2)
+    expect(longestRun).toBe(3)
     // ANSI codes still made it through.
     expect(joined(cap)).toContain("\x1b[31m")
     expect(joined(cap)).toContain("\x1b[0m")
@@ -439,6 +444,84 @@ describe("Compositor (notifyResize)", () => {
     expect(out.indexOf(bsu)).toBeGreaterThanOrEqual(0)
     expect(out.indexOf(esu)).toBeGreaterThan(out.indexOf(bsu))
     expect(out).toContain("\x1b[H\x1b[J")
+  })
+})
+
+describe("Compositor (cols-drift recovery)", () => {
+  it("setLiveArea after a silent cols change emits the resize wipe before redraw", () => {
+    // Reproduces the bug observed in user session 9d832ab0-…:
+    //   process.stdout.columns oscillated between 131 and 127 mid-session
+    //   without a SIGWINCH-driven notifyResize(). The compositor's
+    //   `cursorRowInLive` was measured under the old width, so the next
+    //   eraseLiveSeq's `\x1b[<n>A` undershot (content emitted under the
+    //   old width may have wrapped under the new width). The stale top
+    //   of the live area then scrolled into scrollback on every repaint,
+    //   producing dozens of duplicate "ASK ❯ ─── ^ N more lines" rows.
+    const cap = makeOutput()
+    cap.output.columns = 131
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ hello"], { row: 0, col: 7 })
+    expect(c.liveHeight).toBe(1)
+    cap.writes.length = 0
+    // Terminal got narrower without our SIGWINCH path firing.
+    cap.output.columns = 127
+    c.setLiveArea(["❯ hello"], { row: 0, col: 7 })
+    const out = joined(cap)
+    // The full-viewport wipe MUST appear before the redraw, otherwise
+    // any stale wrapped content above the live area survives and gets
+    // pushed into scrollback by the next write.
+    const wipeIdx = out.indexOf("\x1b[H\x1b[J")
+    expect(wipeIdx).toBeGreaterThanOrEqual(0)
+    // And after recovery the immediate redraw must NOT issue a relative
+    // up-move (counters were zeroed, so nothing to step over).
+    const afterWipe = out.slice(wipeIdx + "\x1b[H\x1b[J".length)
+    expect(afterWipe).not.toMatch(/\x1b\[\d*A/)
+    expect(afterWipe).toContain("❯ hello")
+  })
+
+  it("setLiveArea is a no-op (no extra wipe) when cols hasn't changed", () => {
+    const cap = makeOutput()
+    cap.output.columns = 127
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ a"], { row: 0, col: 3 })
+    cap.writes.length = 0
+    c.setLiveArea(["❯ b"], { row: 0, col: 3 })
+    const out = joined(cap)
+    // No full wipe — this is the steady-state repaint path.
+    expect(out).not.toContain("\x1b[H\x1b[J")
+    expect(out).toContain("❯ b")
+  })
+
+  it("writeStream after a silent cols change also wipes before appending", () => {
+    // Same failure mode at the scrollback seam: a chunk written while
+    // the stale live area is still on screen would push the wrapped-but-
+    // uncounted top rows into permanent scrollback.
+    const cap = makeOutput()
+    cap.output.columns = 131
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ hello"], { row: 0, col: 7 })
+    cap.writes.length = 0
+    cap.output.columns = 80
+    c.writeStream("response chunk\n")
+    const out = joined(cap)
+    expect(out).toContain("\x1b[H\x1b[J")
+    expect(out).toContain("response chunk")
+  })
+
+  it("first-ever paint does NOT trip the recovery (no baseline to compare)", () => {
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    cap.writes.length = 0
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    const out = joined(cap)
+    // No prior draw → nothing to recover from.
+    expect(out).not.toContain("\x1b[H\x1b[J")
+    expect(out).toContain("❯ ")
   })
 })
 
