@@ -7,8 +7,8 @@ When you call `Edit` or `Write`, the agent atomically creates a sibling
 lock file `<file>.locked` containing your session id, pid, host, and
 timestamp. The lock is held only for the duration of the read-modify-write
 (typically <100ms). Concurrent `Edit`/`Write` to the same file from a
-peer agent will wait with backoff up to 30s. Stale locks — holder PID
-dead OR holder older than 5 minutes — are auto-broken on the next
+peer agent will wait with backoff up to 30s. Stale locks : holder PID
+dead OR holder older than 5 minutes : are auto-broken on the next
 acquire attempt.
 
 ## Errors you might see
@@ -31,10 +31,10 @@ What to do, in order of preference:
 3. **`LockStatus action="inspect" path="/abs/path/foo.ts"`** to read one
    specific holder's metadata.
 4. **`LockStatus action="clear-stale"`** to prune locks the auto-breaker
-   missed (cross-host NFS, alive-but-wedged peers). Safe — it only
+   missed (cross-host NFS, alive-but-wedged peers). Safe : it only
    removes locks whose holder PID is dead OR whose age exceeds the
    stale threshold.
-5. **`LockStatus action="clear" path="..."`** — only as a last resort,
+5. **`LockStatus action="clear" path="..."`** : only as a last resort,
    when you have strong reason to believe the holder is gone but the
    auto-stale-breaker can't tell. Be aware that breaking an active
    peer's lock causes them to fail the next time they try to release
@@ -44,7 +44,7 @@ What to do, in order of preference:
 
 - **Don't loop-retry blindly** on lock errors. The acquire path already
   retries with exponential backoff for 30s. If you got an error, that
-  retry budget is already spent — wait or inspect, don't immediately
+  retry budget is already spent : wait or inspect, don't immediately
   call `Edit` again.
 - **Don't break active peers' locks.** `LockStatus action="clear"` on a
   lock with a live PID is a footgun. Use `clear-stale` instead.
@@ -75,4 +75,4 @@ The user can disable locking via `~/.minimal-agent/config.jsonc`:
 
 Or via `MINIMAL_AGENT_FILE_LOCK_DISABLED=1` for one-off invocations.
 When disabled, both the lock acquisition AND the `LockStatus` tool are
-inactive — you simply won't see lock-related behavior.
+inactive : you simply won't see lock-related behavior.

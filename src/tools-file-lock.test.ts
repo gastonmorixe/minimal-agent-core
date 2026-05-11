@@ -35,7 +35,7 @@ beforeEach(() => {
   configPath = join(dir, "config.jsonc")
   savedConfigEnv = process.env.MINIMAL_AGENT_CONFIG
   savedDisabledEnv = process.env.MINIMAL_AGENT_FILE_LOCK_DISABLED
-  // Use MINIMAL_AGENT_CONFIG (not HOME) — `os.homedir()` reads from getpwuid
+  // Use MINIMAL_AGENT_CONFIG (not HOME) : `os.homedir()` reads from getpwuid
   // on macOS, not $HOME, so HOME-override would leak to the real
   // ~/.minimal-agent/config.jsonc.
   process.env.MINIMAL_AGENT_CONFIG = configPath
@@ -100,7 +100,7 @@ describe("Edit + file-lock wiring", () => {
     expect(r.content).toContain("peer-session")
     // File untouched (the other peer's lock prevented us).
     expect(readFileSync(file, "utf-8")).toBe("alpha\n")
-    // Other peer's lock still there — we must NOT have smashed it.
+    // Other peer's lock still there : we must NOT have smashed it.
     expect(existsSync(lockPathFor(file))).toBe(true)
   })
 
@@ -163,7 +163,7 @@ describe("opt-out paths", () => {
     })
     expect(r.is_error).toBeFalsy()
     expect(readFileSync(file, "utf-8")).toBe("X\n")
-    // The peer's lock is left untouched — we didn't acquire/release it.
+    // The peer's lock is left untouched : we didn't acquire/release it.
     expect(existsSync(lockPathFor(file))).toBe(true)
   })
 
@@ -198,7 +198,7 @@ describe("error path: missing file_path", () => {
       new_string: "y",
     } as unknown as Record<string, unknown>)
     expect(r.is_error).toBe(true)
-    // Whatever the executor's own error text is — important: NOT a lock error.
+    // Whatever the executor's own error text is : important: NOT a lock error.
     expect(r.content).not.toContain("locked")
     expect(r.content).not.toContain("lock acquire")
   })

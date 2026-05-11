@@ -69,7 +69,7 @@ export default async function loadMemories(
   const out: string[] = ["## Saved memories", ""]
   out.push(
     "Standing instructions and lessons-learned, persisted across sessions.",
-    "Snapshot taken at session start — for the live state mid-session,",
+    "Snapshot taken at session start : for the live state mid-session,",
     "call `MemoryTool({action: \"list\", scope: ...})` (other agents in",
     "shared worktrees, CLI edits, and your own later saves all bypass",
     "this snapshot).",

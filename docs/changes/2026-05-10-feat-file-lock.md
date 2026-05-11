@@ -40,7 +40,7 @@ notices when the resulting file looks wrong.
 
 ## Options considered
 
-### Option A — Core feature in `src/tools.ts` (CHOSEN)
+### Option A : Core feature in `src/tools.ts` (CHOSEN)
 
 A small `src/file-lock.ts` library; `src/tools.ts` wires it around
 `execEdit` / `execWrite`. A companion plugin under
@@ -48,34 +48,34 @@ A small `src/file-lock.ts` library; `src/tools.ts` wires it around
 CLI, PROMPT.md docs).
 
 - **+** Self-contained core; one file to wire.
-- **+** Doesn't touch `src/agent.ts` (other agent has it dirty —
+- **+** Doesn't touch `src/agent.ts` (other agent has it dirty :
   memory v0.3 in flight). Reduces collision risk.
 - **+** The companion plugin still lets the user disable via existing
   `plugins["file-lock"].enabled = false` infrastructure (single source
-  of truth — the same config flag drives both the locker and the
+  of truth : the same config flag drives both the locker and the
   `LockStatus` tool).
-- **−** Not "purely" a plugin — the locking call site is in core
+- **-** Not "purely" a plugin : the locking call site is in core
   `tools.ts`. Acceptable: locking is a safety property, not a feature.
 
-### Option B — Complete the hooks subsystem; pure plugin
+### Option B : Complete the hooks subsystem; pure plugin
 
 `src/plugins/hooks/channels.ts` already declares `tool.willInvoke`
 (chain, can veto/rewrite) and `tool.didInvoke` (broadcast-async). A
 plugin could subscribe to those and acquire/release. But:
 
-- **−** The channels are declared but NOT emitted anywhere yet, and
+- **-** The channels are declared but NOT emitted anywhere yet, and
   the loader doesn't dispatch manifest `hooks: [...]` entries to the
   bus. Wiring this means touching `src/agent.ts`, `src/tools.ts`, and
-  `src/plugins/loader.ts` — three files, two of which are currently
+  `src/plugins/loader.ts` : three files, two of which are currently
   modified by other agents.
-- **−** Larger change, more places to regress.
+- **-** Larger change, more places to regress.
 - **+** Cleaner long-term architecture; would unblock other policy
   plugins (audit-log, sandbox-enforce).
 - **REJECTED for v1.** The lock protocol is the interesting part;
   the plumbing route doesn't change correctness. We can hoist later
   with a 5-line refactor once the hook subsystem is wired up.
 
-### Option C — Wrapper tools `LockedEdit` / `LockedWrite`
+### Option C : Wrapper tools `LockedEdit` / `LockedWrite`
 
 Plugin advertises new tools, prompts the model to use them instead of
 `Edit` / `Write`. **REJECTED**: the model would routinely fall back
@@ -88,7 +88,7 @@ sets of tools doing the same thing.
 ### Lock file
 
 - **Path**: sibling `<file>.locked` (e.g. `foo.ts` → `foo.ts.locked`).
-- **Atomicity**: `fs.openSync(lockPath, "wx")` — POSIX `O_CREAT |
+- **Atomicity**: `fs.openSync(lockPath, "wx")` : POSIX `O_CREAT |
   O_EXCL`. Exactly one of N concurrent creators wins.
 - **Contents** (single-line JSON, atomic-ish read; a partial-write
   parses to `null` and is treated as stale):
@@ -156,7 +156,7 @@ falls through to the time check.
    the content is missing/unparseable → unlink.
 3. Otherwise → someone broke our lock and now owns it; don't smash.
 
-### Crash safety — three layers
+### Crash safety : three layers
 
 | Layer | Mechanism                              | Catches                                  |
 | ----- | -------------------------------------- | ---------------------------------------- |
@@ -172,8 +172,8 @@ correctness backstop.
 - **Locks**: `Edit` and `Write` (default; configurable via
   `plugins["file-lock"].tools`).
 - **Not locked**:
-  - `Read`, `Grep`, `Glob` — pure observation, no mutation.
-  - `Bash` — opaque commands. Detecting "this `bash -c 'sed -i'` is a
+  - `Read`, `Grep`, `Glob` : pure observation, no mutation.
+  - `Bash` : opaque commands. Detecting "this `bash -c 'sed -i'` is a
     write to X" is a regex tarpit; v1 documents this as out of scope.
 
 ### Config
@@ -197,46 +197,46 @@ Env opt-out: `MINIMAL_AGENT_FILE_LOCK_DISABLED=1` (one-off / test scope).
 
 ### Companion plugin (`tui-plugins/file-lock/`)
 
-- **`manifest.json`** — declares `LockStatus` tool. Picked up by the
+- **`manifest.json`** : declares `LockStatus` tool. Picked up by the
   same `PluginLoader` that loads memory / ask-mode / etc.
-- **`PROMPT.md`** — model-facing instructions for handling lock
+- **`PROMPT.md`** : model-facing instructions for handling lock
   errors and using `LockStatus` to investigate.
-- **`handlers/lock_status.ts`** — handler with four actions:
-  - `list` — every `*.locked` under `path` (default cwd), with
+- **`handlers/lock_status.ts`** : handler with four actions:
+  - `list` : every `*.locked` under `path` (default cwd), with
     status verdicts (`held` / `stale-pid` / `stale-time` / `corrupt`
     / `cross-host`).
-  - `inspect` — one lock's holder details.
-  - `clear-stale` — auto-prune what the live acquirer would also
+  - `inspect` : one lock's holder details.
+  - `clear-stale` : auto-prune what the live acquirer would also
     break (safe).
-  - `clear` — force-remove one lock (loud about whether the holder
+  - `clear` : force-remove one lock (loud about whether the holder
     appears alive).
-- **`cli.ts`** — same actions for shell use. Run as
+- **`cli.ts`** : same actions for shell use. Run as
   `bun run tui-plugins/file-lock/cli.ts list|inspect|clear-stale|clear|path`.
 
 ## Files
 
 ### New
 
-- `src/file-lock.ts` — lock library (atomic acquire/release, stale
+- `src/file-lock.ts` : lock library (atomic acquire/release, stale
   detection, wait+backoff, exit cleanup, list-under-dir).
-- `src/file-lock.test.ts` — 40 unit tests covering parse, stale
+- `src/file-lock.test.ts` : 40 unit tests covering parse, stale
   detection, atomic acquire, contention with mocked time/sleep, abort
   paths, listing.
-- `src/tools-file-lock.test.ts` — 8 integration tests verifying the
+- `src/tools-file-lock.test.ts` : 8 integration tests verifying the
   `tools.ts` wiring (lock acquired & released on `Edit` / `Write`,
   holder details surface in error message on contention, env +
   config opt-outs honored, ENOENT validation falls through cleanly).
-- `tui-plugins/file-lock/manifest.json` — plugin manifest.
-- `tui-plugins/file-lock/PROMPT.md` — model docs.
-- `tui-plugins/file-lock/handlers/lock_status.ts` — `LockStatus`
+- `tui-plugins/file-lock/manifest.json` : plugin manifest.
+- `tui-plugins/file-lock/PROMPT.md` : model docs.
+- `tui-plugins/file-lock/handlers/lock_status.ts` : `LockStatus`
   handler (4 actions, ANSI + JSON rendering).
-- `tui-plugins/file-lock/handlers/lock_status.test.ts` — 27 unit
+- `tui-plugins/file-lock/handlers/lock_status.test.ts` : 27 unit
   tests for `annotate`, the four `runX` functions, and the default
   export adapter.
-- `tui-plugins/file-lock/cli.ts` — human-facing CLI.
-- `tui-plugins/file-lock/cli.test.ts` — 20 tests for `parseArgs` and
+- `tui-plugins/file-lock/cli.ts` : human-facing CLI.
+- `tui-plugins/file-lock/cli.test.ts` : 20 tests for `parseArgs` and
   `runCli`.
-- `tui-plugins/file-lock/integration.test.ts` — 3 PluginLoader
+- `tui-plugins/file-lock/integration.test.ts` : 3 PluginLoader
   integration tests verifying that `LockStatus` is advertised and
   dispatched correctly.
 
@@ -276,7 +276,7 @@ Env opt-out: `MINIMAL_AGENT_FILE_LOCK_DISABLED=1` (one-off / test scope).
   loads, `LockStatus` is advertised, dispatch round-trips).
 
 Full suite: `bun test` → **1609 pass, 0 fail, 5 skip** (unchanged
-skip set — all network/terminal tests that always skip).
+skip set : all network/terminal tests that always skip).
 
 ## Risks & mitigations
 
@@ -303,5 +303,5 @@ skip set — all network/terminal tests that always skip).
   behavior wouldn't change, only the call site).
 - Optional Bash protection via per-directory or per-glob locking
   (coarser, opt-in).
-- Read locks (shared) — currently unnecessary; mutation-vs-mutation
+- Read locks (shared) : currently unnecessary; mutation-vs-mutation
   is the failure we see.

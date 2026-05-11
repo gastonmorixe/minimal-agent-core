@@ -10,12 +10,12 @@
  *     REPL:
  *       - swallows the resulting `AbortError` (no `error` footer);
  *       - prints a faint+strikethrough "⊘ ABORTED · ❯ <echoed body>" block
- *         (see `formatAbortedEcho` — replaces the older single-line
- *         "⊘ aborted by user — prompt restored to editor" footer);
+ *         (see `formatAbortedEcho` : replaces the older single-line
+ *         "⊘ aborted by user : prompt restored to editor" footer);
  *       - calls `editor.setBuffer(text)` to restore the in-flight prompt;
  *       - calls `agent.rollbackPendingTurn()` to drop the orphan user turn;
  *       - leaves `abortBus.isTurnInFlight()` false.
- *  4. Real (non-Abort) errors STILL go through the existing "error" path —
+ *  4. Real (non-Abort) errors STILL go through the existing "error" path :
  *     the abort branch must not shadow them.
  *  5. After an aborted turn, the very next turn dispatches with a FRESH
  *     non-aborted signal.
@@ -158,7 +158,7 @@ const stripAnsi = (s: string) => s.replace(ANSI_RE, "")
 
 // ----------------------------- tests ---------------------------------------
 
-describe("runReplLiveArea — abort bus integration", () => {
+describe("runReplLiveArea : abort bus integration", () => {
   it("brackets every turn with abortBus.beginTurn / endTurn (success path)", async () => {
     const compositor = new FakeCompositor()
     const editor = new FakeEditor()
@@ -190,7 +190,7 @@ describe("runReplLiveArea — abort bus integration", () => {
     editor.cancel()
     await replPromise
 
-    // Agent saw exactly one signal — the bus's signal.
+    // Agent saw exactly one signal : the bus's signal.
     expect(f.calls.length).toBe(1)
     expect(f.calls[0].signal).toBeDefined()
     expect(f.calls[0].signal!.aborted).toBe(false)
@@ -248,12 +248,12 @@ describe("runReplLiveArea — abort bus integration", () => {
 
     const all = stripAnsi(compositor.streams.join(""))
     // The new abort-echo block uses the `⊘ ABORTED` anchor (vs the older
-    // single-line `⊘ aborted by user — prompt restored to editor` footer).
+    // single-line `⊘ aborted by user : prompt restored to editor` footer).
     // Echoes the rolled-back submission in dim+strikethrough so the user
     // can disambiguate from the re-submitted prompt visually.
     expect(all).toContain("⊘ ABORTED")
     expect(all).toContain("the user prompt") // the echoed body
-    // Generic error path uses the literal "error" prefix — must NOT fire here.
+    // Generic error path uses the literal "error" prefix : must NOT fire here.
     const errorLines = compositor.streams.filter((s) => s.includes("\x1b[1;31merror"))
     expect(errorLines.length).toBe(0)
 
@@ -481,7 +481,7 @@ describe("runReplLiveArea — abort bus integration", () => {
 // End-to-end: real Agent + real tools + real Bash sleep, abort kills child.
 // ---------------------------------------------------------------------------
 
-describe("runReplLiveArea — abort kills in-flight tool", () => {
+describe("runReplLiveArea : abort kills in-flight tool", () => {
   it("aborting a turn that's running `Bash sleep 5` returns within the SIGTERM grace + propagates AbortError to the REPL footer", async () => {
     const compositor = new FakeCompositor()
     const editor = new FakeEditor()

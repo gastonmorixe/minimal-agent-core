@@ -67,7 +67,7 @@ export interface TextBlock {
  * In v2.1.91 the `thinking` field is empty (the model's reasoning is
  * server-side only) but the `signature` field contains a cryptographic
  * proof that the model emitted thinking. Both fields must be preserved
- * verbatim in conversation history for subsequent turns — the server
+ * verbatim in conversation history for subsequent turns : the server
  * verifies the signature on every request.
  *
  * @example
@@ -124,7 +124,7 @@ export interface ToolUseBlock {
  *
  * Must reference the original `tool_use` block via `tool_use_id`. The
  * `content` field is the tool's stdout/output as a string. Set `is_error`
- * to true if the tool failed — the model uses this to decide whether to
+ * to true if the tool failed : the model uses this to decide whether to
  * retry, pick a different tool, or give up.
  *
  * @example
@@ -214,7 +214,7 @@ export interface SendOptions {
   /** Stream the response via SSE. Default: true. */
   stream?: boolean
   /**
-   * Request type — controls beta flag set and feature gating.
+   * Request type : controls beta flag set and feature gating.
    * - `"conversation"` (default): full feature set, all 9 flags
    * - `"quota"`: minimal flags, no thinking, no effort (for cheap quota checks)
    * - `"title"`: structured-outputs flag, no thinking (for haiku title gen)
@@ -269,7 +269,7 @@ export interface SendOptions {
    * Called when a `text` content_block stops streaming (server-fired
    * `content_block_stop` for a block whose type was `"text"`).
    *
-   * **Why this exists** — the host's response formatter (e.g. `mdstream`)
+   * **Why this exists** : the host's response formatter (e.g. `mdstream`)
    * is typically spawned ONCE per `Agent.run` and persists across all
    * tool rounds, but a single `run()` can produce multiple text blocks
    * (one per sub-turn: text → tool → text → tool → …). Without a
@@ -278,8 +278,8 @@ export interface SendOptions {
    * at end-of-run it then re-renders the *combined* buffer, smashing
    * two unrelated sentences together with no separator
    * (`…before writing.I have a complete picture…`). Hosts use
-   * `onTextStop` to commit the per-block partial — typically by ending
-   * and respawning the formatter — at exactly the right moment: AFTER
+   * `onTextStop` to commit the per-block partial : typically by ending
+   * and respawning the formatter : at exactly the right moment: AFTER
    * the just-streamed text, BEFORE any tool_use block lands in
    * scrollback. Fires AFTER the completed text block has been pushed
    * onto `blocks[]`, so observers can read the just-finished block.
@@ -317,7 +317,7 @@ export interface SendOptions {
 export interface StreamedResponse {
   /** All content blocks in the order they appeared in the SSE stream. */
   blocks: ContentBlock[]
-  /** Concatenated text from text blocks only — convenience accessor. */
+  /** Concatenated text from text blocks only : convenience accessor. */
   text: string
   /** Stop reason from `message_delta` (e.g. `"end_turn"`, `"tool_use"`, `"max_tokens"`). */
   stopReason: string | null
@@ -381,7 +381,7 @@ export interface ModelInfo {
  * Strip the client-side `[1m]` / `[2m]` suffix from a model ID.
  *
  * The real CLI uses `[1m]` as a UI convention to mean "use this model with
- * the 1M context window variant". The actual API model ID has no suffix —
+ * the 1M context window variant". The actual API model ID has no suffix :
  * 1M context is activated via the `context-1m-2025-08-07` beta flag instead.
  * This helper strips the suffix so the request body has a valid model ID.
  *
@@ -429,7 +429,7 @@ const c = {
 }
 
 // ---------------------------------------------------------------------------
-// Debug logging — pretty-printed to stderr
+// Debug logging : pretty-printed to stderr
 // ---------------------------------------------------------------------------
 
 /**
@@ -450,7 +450,7 @@ export function isVerbose(): boolean {
 
 /**
  * When --show-hidden-chars (or MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1) is on,
- * debug output reveals invisible characters as faint glyphs — same idea
+ * debug output reveals invisible characters as faint glyphs : same idea
  * as the input editor's show-hidden mode (see editor-renderer.ts).
  *
  * Without this, multi-line tool descriptions (e.g. "Bash: ...\n\nThe working
@@ -504,11 +504,11 @@ function truncate(s: string, max: number): string {
 /**
  * Render a single ContentBlock as a short structural token for debug output.
  *
- * One token per block; no color, no truncation — the caller composes them
+ * One token per block; no color, no truncation : the caller composes them
  * and applies {@link truncate} to the joined result. The discriminator
  * (`b.type`) is the wire-protocol literal from {@link ContentBlock}, so the
  * exhaustiveness `never` check below will fail at compile time the moment
- * Anthropic adds a new block variant — pointing right at this switch.
+ * Anthropic adds a new block variant : pointing right at this switch.
  *
  * Newline-bearing payloads (text, tool_result strings) are JSON-stringified
  * so embedded `\n` becomes the escape `\n`, keeping each block on one line
@@ -543,7 +543,7 @@ function previewBlock(b: ContentBlock): string {
   }
 }
 
-/** Last 6 chars of a `toolu_...` id — enough to pair use↔result within a dump. */
+/** Last 6 chars of a `toolu_...` id : enough to pair use↔result within a dump. */
 function shortId(id: string): string {
   return id.slice(-6)
 }
@@ -747,7 +747,7 @@ function formatRatelimitSummary(rl: Map<string, string>): void {
         resetStr = `, resets in ${hrs}h ${mins}m`
       }
     }
-    console.error(`    ${c.cyan(label)}: ${pct} — ${statusColor}${resetStr}`)
+    console.error(`    ${c.cyan(label)}: ${pct} : ${statusColor}${resetStr}`)
   }
   if (ovStatus) {
     const ovColor = ovStatus === "allowed" ? c.green("enabled") : c.red("disabled")
@@ -828,7 +828,7 @@ async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncIterable<Stream
           try {
             yield JSON.parse(data) as StreamEvent
           } catch {
-            // skip malformed events — shouldn't happen but defensive
+            // skip malformed events : shouldn't happen but defensive
           }
         }
       }
@@ -910,7 +910,7 @@ function extractToolHint(toolName: string, partialJson: string): string {
       if (typeof v === "string" && v.length > 0) return shortenHint(v)
     }
   } catch {
-    // partial — nothing more to do
+    // partial : nothing more to do
   }
   return ""
 }
@@ -932,7 +932,7 @@ function shortenHint(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// sendMessage — streaming, returns async iterable of text chunks
+// sendMessage : streaming, returns async iterable of text chunks
 // ---------------------------------------------------------------------------
 
 /**
@@ -999,7 +999,7 @@ export async function* sendMessage(
     signal,
   } = opts
 
-  // Strip client-side [1m] suffix — API activation is via beta flag
+  // Strip client-side [1m] suffix : API activation is via beta flag
   const model = normalizeModelForAPI(rawModel)
 
   const sessionId = getSessionId()
@@ -1102,7 +1102,7 @@ export async function* sendMessage(
 
     debugResponse(response.status, response.headers)
 
-    // 401 retry with token refresh — mirrors onAuth401 pattern (L751090-751112).
+    // 401 retry with token refresh : mirrors onAuth401 pattern (L751090-751112).
     // Goal: when the access token expires during a long-running session,
     // refresh transparently and continue without forcing the user to
     // restart anything. Surface the refresh in the status bar, then
@@ -1114,21 +1114,21 @@ export async function* sendMessage(
     // process. They each 401 on their next request, refresh, invalidate
     // the previous one, and the cycle never settles. Net-dbg trace from
     // session c0ab6ba6: 24/105 requests in a single 5-minute window
-    // returned 401, with 22 refreshes (one outright `invalid_grant` —
+    // returned 401, with 22 refreshes (one outright `invalid_grant` :
     // refresh token already burned by another agent).
     //
     // Fix: on 401, re-read the keychain BEFORE calling auth.refresh().
     // If another process has already written a fresher access token, use
-    // that directly — no oauth round-trip, no rotation, no race. Only
+    // that directly : no oauth round-trip, no rotation, no race. Only
     // refresh if the keychain still has the same token we just got 401
     // on (i.e. WE are the freshest cache holder, the token genuinely
     // expired). Collapses N concurrent refreshes per "true expiry" event
     // into 1.
     if (response.status === 401 && auth.refresh) {
-      debugHeader(c.yellow("401 — token expired"))
+      debugHeader(c.yellow("401 : token expired"))
 
       // Step 1: keychain-first. Cheap (`security find-generic-password`),
-      // synchronous, no network. Fail-quiet on any read error — fall
+      // synchronous, no network. Fail-quiet on any read error : fall
       // through to the refresh path.
       let recovered = false
       try {
@@ -1177,7 +1177,7 @@ export async function* sendMessage(
           })
           if (response.status === 401) {
             throw new Error(
-              "401 after token refresh. The keychain credentials are stale — " +
+              "401 after token refresh. The keychain credentials are stale : " +
                 "run `minimal-agent --login` (or `claude`) to re-login.",
             )
           }
@@ -1201,7 +1201,7 @@ export async function* sendMessage(
     // Cache + broadcast the rate-limit snapshot from THIS response.
     // The `quota-status` plugin's live-area slot subscribes to
     // `quota.headersReceived` (via its manifest's `refreshOn`) so the
-    // footer updates within milliseconds of every successful API call —
+    // footer updates within milliseconds of every successful API call :
     // no waiting for the 5-min heartbeat.
     broadcastResponseRateLimits(response.headers)
 
@@ -1220,7 +1220,7 @@ export async function* sendMessage(
       }
     }
 
-    // Streaming path — parse SSE and collect all content blocks
+    // Streaming path : parse SSE and collect all content blocks
     if (!response.body) throw new Error("No response body for stream")
 
     const blocks: ContentBlock[] = []
@@ -1244,7 +1244,7 @@ export async function* sendMessage(
     for await (const event of parseSSE(response.body)) {
       if (!sawStreamEvent) {
         sawStreamEvent = true
-        // Generic fallback — overridden by the per-block-type labels below
+        // Generic fallback : overridden by the per-block-type labels below
         // as soon as we see a content_block_start. Without this fallback, a
         // stream that begins with something unexpected would still show the
         // pre-stream label ("Waiting for response") indefinitely.
@@ -1253,7 +1253,7 @@ export async function* sendMessage(
       switch (event.type) {
         case "message_start": {
           // Anthropic returns the full `usage` payload right at message_start,
-          // since cache lookup happens during prefill — before any output
+          // since cache lookup happens during prefill : before any output
           // tokens are generated. Use this to (a) print the per-turn cache
           // line under --debug and (b) feed the always-on anomaly detector.
           const usage = event.message?.usage as CacheUsage | undefined
@@ -1322,7 +1322,7 @@ export async function* sendMessage(
             }
           } else if (d.type === "input_json_delta" && d.partial_json != null) {
             toolJsonParts += d.partial_json
-            // Throttled status update — every ~2KB of accumulated JSON or
+            // Throttled status update : every ~2KB of accumulated JSON or
             // every ~100ms, whichever fires first. Without throttling we'd
             // re-render the spinner line on every delta (potentially hundreds
             // per second for a fast tool block).
@@ -1353,7 +1353,7 @@ export async function* sendMessage(
               try {
                 ;(currentBlock as ToolUseBlock).input = JSON.parse(toolJsonParts)
               } catch {
-                // partial JSON — keep what we have
+                // partial JSON : keep what we have
                 ;(currentBlock as ToolUseBlock).input = { _raw: toolJsonParts }
               }
             }
@@ -1391,7 +1391,7 @@ export async function* sendMessage(
 }
 
 // ---------------------------------------------------------------------------
-// listModels — fetch available models for this user
+// listModels : fetch available models for this user
 // ---------------------------------------------------------------------------
 
 /** Endpoint for listing available models. */
@@ -1404,7 +1404,7 @@ const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true"
  * Calls `GET /v1/models?beta=true` (matching the Anthropic SDK's `list()`
  * method) to fetch the real model list, then appends `[1m]`-suffixed copies
  * for any model that supports the 1M context window. The suffix is a
- * client-side convention — the API itself doesn't know about it. The
+ * client-side convention : the API itself doesn't know about it. The
  * `--list-models` CLI flag uses this expanded list so users can pick
  * `claude-opus-4-7[1m]` from the menu and get 1M context automatically.
  *
@@ -1441,7 +1441,7 @@ export async function listModels(
   const models = data.data
 
   // Synthesize 1M context variants for models that support it.
-  // The CLI uses a client-side [1m] suffix convention — these aren't separate
+  // The CLI uses a client-side [1m] suffix convention : these aren't separate
   // API model IDs. The actual 1M activation happens via the context-1m-2025-08-07
   // beta flag. See cc-03312026/src/utils/context.ts:modelSupports1M().
   // Opus-4-7 and sonnet-4 both advertise 1M context via the context-1m beta.
@@ -1464,7 +1464,7 @@ export async function listModels(
 }
 
 // ---------------------------------------------------------------------------
-// sendMessageSync — convenience, collects full response
+// sendMessageSync : convenience, collects full response
 // ---------------------------------------------------------------------------
 
 /**
@@ -1472,7 +1472,7 @@ export async function listModels(
  *
  * Convenience wrapper around {@link sendMessage} that consumes the entire
  * stream and returns just the text. Use this when you don't care about
- * structured blocks or live streaming — e.g. in tests, or for simple
+ * structured blocks or live streaming : e.g. in tests, or for simple
  * one-shot prompts.
  *
  * @param opts - Same options as {@link sendMessage}
@@ -1500,7 +1500,7 @@ export async function sendMessageSync(opts: SendOptions): Promise<string> {
  *
  * Convenience wrapper around {@link sendMessage} that drains the stream and
  * returns the structured response. Use this when you need access to thinking
- * blocks, tool_use blocks, or the stop reason — not just the text.
+ * blocks, tool_use blocks, or the stop reason : not just the text.
  *
  * @param opts - Same options as {@link sendMessage}
  * @returns Full structured response (blocks + text + stopReason)
@@ -1528,7 +1528,7 @@ export async function sendMessageFull(opts: SendOptions): Promise<StreamedRespon
 }
 
 // ---------------------------------------------------------------------------
-// Quota check — cheap haiku request to verify account has quota
+// Quota check : cheap haiku request to verify account has quota
 // ---------------------------------------------------------------------------
 
 /**
@@ -1537,7 +1537,7 @@ export async function sendMessageFull(opts: SendOptions): Promise<StreamedRespon
  * Mirrors the real CLI's startup behavior (capture: fetch-002): a cheap
  * haiku request with `max_tokens: 1` and the literal string `"quota"` as
  * the user message. No system prompt, no tools, no thinking, no
- * output_config — just the bare minimum to round-trip the API and surface
+ * output_config : just the bare minimum to round-trip the API and surface
  * a 429/auth error early before the user types anything.
  *
  * Uses the `"quota"` request type which sends only 5 beta flags (no
@@ -1592,7 +1592,7 @@ export async function checkQuota(
       // Signal forwarded to the underlying transport (fetch / http2). The
       // live-area `quota-status` slot passes `ctx.abort`; if the
       // `LiveAreaScheduler.timeoutMs` elapses the request is canceled at
-      // the network layer and `doRequest` rejects with `AbortError` —
+      // the network layer and `doRequest` rejects with `AbortError` :
       // freeing the slot's `inFlight` gate so the next heartbeat tick
       // (and any bus-driven `quota.headersReceived` re-fire) can run.
       // Without this, a probe stuck on a dead TCP socket (e.g. after
@@ -1604,7 +1604,7 @@ export async function checkQuota(
   try {
     let response = await doRequest(auth.token)
 
-    // 401 retry — same multi-process keychain-first mitigation as in
+    // 401 retry : same multi-process keychain-first mitigation as in
     // `sendMessage` above (see the long comment at the main 401 site).
     // checkQuota fires from the live-area `quota-status` plugin's
     // heartbeat AND on every `quota.headersReceived` event; with 100s of
@@ -1641,7 +1641,7 @@ export async function checkQuota(
       return { ok: false }
     }
 
-    // Same broadcast as the main completion path — cache + bus emit.
+    // Same broadcast as the main completion path : cache + bus emit.
     // `checkQuota` is called both at startup (when the plugin is
     // disabled) and as the live-area slot's cold-cache fallback, so
     // populating the cache here closes the loop if a later request

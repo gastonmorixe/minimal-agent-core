@@ -1,10 +1,10 @@
 /**
- * file-lock.ts — Cooperative file locking for concurrent agents.
+ * file-lock.ts : Cooperative file locking for concurrent agents.
  *
  * When multiple cooperating agents share a worktree (the same directory tree
  * mounted into multiple sessions / processes / hosts), concurrent Edit/Write
  * to the same file produces lost-write races: agent A reads C0, agent B reads
- * C0, both compute new content, both write — last writer wins, the first
+ * C0, both compute new content, both write : last writer wins, the first
  * edit is silently lost.
  *
  * This module provides a sibling-lock-file mechanism that gives every cooperating
@@ -17,7 +17,7 @@
  * - **Atomic creation** via `O_CREAT | O_EXCL` (`openSync(path, "wx")`). POSIX
  *   primitive that succeeds on exactly one of N concurrent creators.
  * - **Held briefly.** The lock spans the body of `execEdit` / `execWrite` only
- *   — typically <100ms. There is no notion of "lock for the whole turn".
+ *   : typically <100ms. There is no notion of "lock for the whole turn".
  * - **Self-healing.** Stale locks (holder PID dead OR holder lock older than
  *   `staleAfterMs`) are auto-broken on the next acquire attempt. Three crash
  *   safety layers: (a) `try/finally` always releases on tool exit, (b) a
@@ -188,7 +188,7 @@ export function serializeHolder(h: LockHolder): string {
 }
 
 /**
- * Parse a holder file's text. Returns `null` for any malformed input —
+ * Parse a holder file's text. Returns `null` for any malformed input :
  * empty, non-JSON, missing required fields, wrong types. The caller treats
  * `null` as "lock is corrupt → stale → break it".
  */
@@ -312,7 +312,7 @@ export type TryResult =
  *
  * - Returns `{ok: true, handle}` if we won the create.
  * - Returns `{ok: false, reason: "exists", existing}` on EEXIST. `existing`
- *   is the parsed holder (or `null` when the file is corrupt — caller treats
+ *   is the parsed holder (or `null` when the file is corrupt : caller treats
  *   that as stale).
  * - Returns `{ok: false, reason: "io", err}` for any other filesystem error.
  *
@@ -363,7 +363,7 @@ export function tryAcquireOnce(
         if (code === "ENOENT") {
           // Already gone. That's the desired post-state.
         }
-        // Other errors are swallowed — release is best-effort, the next
+        // Other errors are swallowed : release is best-effort, the next
         // acquirer's stale-detection will heal anything we leave behind.
       }
       opts.onRelease?.(lockPath)
@@ -407,7 +407,7 @@ export function readLockFile(lockPath: string): LockHolder | null {
  * shutdown doesn't leave PID-stale locks for the next acquirer to break.
  *
  * NOTE: `process.on("exit", ...)` only runs on graceful exit. SIGKILL,
- * OOM, and kernel panics bypass it — those are handled by the next
+ * OOM, and kernel panics bypass it : those are handled by the next
  * acquirer's PID-based stale detection (layer 3).
  */
 const heldLocks = new Set<string>()
@@ -421,14 +421,14 @@ function installExitHook(): void {
       try {
         unlinkSync(lockPath)
       } catch {
-        // ignore — best-effort
+        // ignore : best-effort
       }
     }
     heldLocks.clear()
   }
   process.on("exit", cleanup)
   // SIGINT/SIGTERM: cleanup, then re-raise (exit hook also fires).
-  // We don't override behavior — just add cleanup. If anyone else has
+  // We don't override behavior : just add cleanup. If anyone else has
   // a handler, theirs runs too. We use exit codes 130/143 (POSIX
   // convention for SIGINT/SIGTERM) when no other handler exits first.
   process.on("SIGINT", () => {
@@ -551,7 +551,7 @@ export async function acquireLock(
       try {
         unlinkSync(lockPathFor(filePath))
       } catch {
-        // ignore — next attempt will still see it; we'll retry
+        // ignore : next attempt will still see it; we'll retry
       }
       continue
     }
@@ -649,7 +649,7 @@ export interface ListedLock {
  *
  * Skips common heavy directories (`node_modules`, `.git`, `dist`, `build`,
  * `.cache`) so a worktree-wide list stays fast. The skip list is
- * conservative — locks under those dirs would still be honored by acquire,
+ * conservative : locks under those dirs would still be honored by acquire,
  * we just don't surface them in inventory walks.
  */
 export function listLocksUnder(rootDir: string): ListedLock[] {

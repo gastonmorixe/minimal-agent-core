@@ -86,19 +86,19 @@ export type ToolColor =
 export interface ToolDefinition {
   /** Unique tool name. Must match the `name` in `tool_use` blocks. */
   name: string
-  /** Plain-text description shown to the model — explains when/how to use it. */
+  /** Plain-text description shown to the model : explains when/how to use it. */
   description: string
   /** JSON Schema describing the tool's input parameters. */
   input_schema: Record<string, unknown>
   /**
    * Optional single-glyph icon shown next to the tool name in transcript
-   * headers. Purely cosmetic — never sent to the API. Pick something narrow
+   * headers. Purely cosmetic : never sent to the API. Pick something narrow
    * (1 cell) so the header stays aligned.
    */
   icon?: string
   /**
    * Optional palette color for the tool's label in transcript headers.
-   * Purely cosmetic — never sent to the API.
+   * Purely cosmetic : never sent to the API.
    */
   color?: ToolColor
 }
@@ -165,7 +165,7 @@ export interface ToolExecResult {
 export interface ToolExecOpts {
   signal?: AbortSignal
   /**
-   * Optional stdout-chunk callback. Currently only honored by `Bash` — chunks
+   * Optional stdout-chunk callback. Currently only honored by `Bash` : chunks
    * are decoded UTF-8 strings forwarded as the child writes them, so the
    * caller can render output live instead of waiting for the process to
    * exit. The chunks ARE NOT pre-buffered into lines; the caller is
@@ -208,7 +208,7 @@ const BASH_TOOL: ToolDefinition = {
     "Executes a given bash command and returns its output.\n\n" +
     "Output is capped at ~64KB / 1000 lines (whichever first). For commands that may " +
     "produce more, bound the output yourself with `head -c`, `head -n`, `tail`, " +
-    "`sed -n '1,200p'`, or `grep` — pre-bounding gives usable signal; the post-hoc " +
+    "`sed -n '1,200p'`, or `grep` : pre-bounding gives usable signal; the post-hoc " +
     "cap is lossy and includes a structured truncation notice for resume.\n\n" +
     "The working directory persists between commands, but shell state does not.",
   input_schema: {
@@ -314,7 +314,7 @@ const GREP_TOOL: ToolDefinition = {
   description:
     "Search file contents with regex using ripgrep.\n\n" +
     "Output is capped at ~64KB / 1000 lines. For broad searches, prefer " +
-    '`output_mode: "files_with_matches"` (paths only — densest) or `"count"`. ' +
+    '`output_mode: "files_with_matches"` (paths only : densest) or `"count"`. ' +
     'Narrow with `glob` (e.g. "*.ts"), `path` (subdirectory), `-A/-B/-C` for ' +
     "context lines, or `head_limit` rather than relying on the cap to fire.",
   input_schema: {
@@ -391,7 +391,7 @@ let bashCwd = process.cwd()
  * Execute a tool by name with the given input.
  *
  * Dispatches to the appropriate exec function. Unknown tool names return an
- * error result rather than throwing — the model can recover by picking a
+ * error result rather than throwing : the model can recover by picking a
  * different tool.
  *
  * @param name - Tool name as it appears in {@link ToolDefinition.name}
@@ -414,7 +414,7 @@ export async function executeTool(
   if (opts.signal?.aborted) return ABORTED_RESULT()
 
   const r = await dispatch(name, input, opts)
-  // Universal post-hoc clamp. Skip when `display` is set — diffs are bounded
+  // Universal post-hoc clamp. Skip when `display` is set : diffs are bounded
   // by Edit/Write inputs and we want them rendered intact in the transcript.
   // Aborted results are clamped too: the canned "tool aborted by user"
   // string is trivially under cap, and aborted Bash with partial stdout
@@ -467,7 +467,7 @@ async function dispatch(
 /**
  * Resolved file-lock configuration. Sourced from
  * `~/.minimal-agent/config.jsonc` under `plugins["file-lock"]` (single
- * source of truth — the same key the loader reads to decide whether to
+ * source of truth : the same key the loader reads to decide whether to
  * activate the companion plugin), with sane defaults when missing.
  *
  * Read once and cached: tools.ts is hot-path on every Edit/Write, and the
@@ -501,7 +501,7 @@ function fileLockConfig(): FileLockConfig {
     staleAfterMs: 300_000,
   }
   // Read raw JSONC directly. `loadUserConfig()` validates and returns
-  // only its whitelisted keys (model, effort, etc.) — `plugins.<id>` is
+  // only its whitelisted keys (model, effort, etc.) : `plugins.<id>` is
   // not in that whitelist, so we must read the raw file ourselves. This
   // matches the pattern in `loadDisabledPluginIds` (src/config.ts).
   try {
@@ -553,13 +553,13 @@ export function _resetFileLockConfigForTests(): void {
 /**
  * Wrap a mutation tool's execution in a cooperative file lock.
  *
- * The lock spans only the body of `run()` — held for as long as the
+ * The lock spans only the body of `run()` : held for as long as the
  * read-modify-write takes, typically <100ms. On lock failure, returns a
  * `tool_result` with `is_error: true` and a holder-rich diagnostic so the
  * model can decide to wait, inspect via `LockStatus`, or proceed elsewhere.
  *
  * Disabled gracefully when `plugins["file-lock"].enabled === false` or
- * `MINIMAL_AGENT_FILE_LOCK_DISABLED=1` is set in the environment — `run()`
+ * `MINIMAL_AGENT_FILE_LOCK_DISABLED=1` is set in the environment : `run()`
  * is invoked directly with no lock.
  */
 async function withFileLock(
@@ -572,7 +572,7 @@ async function withFileLock(
   if (!cfg.enabled || !cfg.tools.has(tool)) return run()
   const filePath = input.file_path
   if (typeof filePath !== "string" || filePath.length === 0) {
-    // Let the executor return its own validation error — we've nothing to lock.
+    // Let the executor return its own validation error : we've nothing to lock.
     return run()
   }
   let handle: LockHandle | null = null
@@ -594,7 +594,7 @@ async function withFileLock(
     if (e instanceof LockAbortedError) {
       return ABORTED_RESULT()
     }
-    // Any other thrown error from acquire (filesystem-level) — surface as
+    // Any other thrown error from acquire (filesystem-level) : surface as
     // a tool error rather than letting it crash the dispatch loop.
     const msg = e instanceof Error ? e.message : String(e)
     return { content: `${tool} error: lock acquire failed: ${msg}`, is_error: true }
@@ -634,7 +634,7 @@ async function execBash(
     // CRITICAL: only intercept when there are NO shell operators in the
     // tail. The naive `^cd\s+(.+)$` capture is greedy and swallows
     // pipelines like `cd /foo && bun test` or `cd /foo | tee log` as if
-    // the entire tail were a path — bash never runs, the operator is
+    // the entire tail were a path : bash never runs, the operator is
     // lost, and we synthesize a misleading "no such directory" error
     // containing the full pipeline. Anything containing `&&`, `||`, `;`,
     // `|`, `&`, redirections (`<`, `>`), backticks, or `$(...)` is
@@ -662,7 +662,7 @@ async function execBash(
 
     // Async spawn: critical for UI responsiveness. The previous
     // `spawnSync` blocked the entire event loop for the duration of the
-    // child process — the spinner stopped animating, keystrokes weren't
+    // child process : the spinner stopped animating, keystrokes weren't
     // echoed, and Ctrl+C couldn't be handled. With `Bun.spawn` the agent
     // can keep painting the status bar and (eventually) honor a user-key
     // abort routed through `opts.signal`.
@@ -685,7 +685,7 @@ async function execBash(
     }
     const escalateKill = () => {
       killTree("SIGTERM")
-      // Grace period before SIGKILL — matches the abort-quit-rewind plan.
+      // Grace period before SIGKILL : matches the abort-quit-rewind plan.
       setTimeout(() => {
         if (proc.exitCode == null && proc.signalCode == null) killTree("SIGKILL")
       }, 2000).unref?.()
@@ -715,7 +715,7 @@ async function execBash(
     // `onStdout`/`onStderr` callback as bash writes it. The full text is
     // also accumulated for the returned `content` so the model sees the
     // same payload it would have without streaming. Critical for UI
-    // responsiveness on long-running commands — without this the agent
+    // responsiveness on long-running commands : without this the agent
     // can't render anything until the entire 20s loop (or whatever) exits.
     const drain = async (
       stream: ReadableStream<Uint8Array>,
@@ -763,7 +763,7 @@ async function execBash(
     if (aborted) {
       // Surface partial output captured before SIGTERM landed instead of
       // discarding it. The drain readers resolve on pipe-close, which
-      // happens when bash exits — so by the time we get here `stdout`/
+      // happens when bash exits : so by the time we get here `stdout`/
       // `stderr` already hold whatever the child managed to flush.
       // Returning empty would tell the user "nothing happened", when in
       // reality 4-5s of work may have produced useful logs.

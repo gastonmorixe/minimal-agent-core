@@ -4,13 +4,13 @@
  * The {@link Agent} class owns the append-only conversation history and
  * provides two send methods:
  *
- * - {@link Agent.send} — single round-trip text reply (no tools)
- * - {@link Agent.run} — full agentic loop: send → tool_use → execute → tool_result → repeat
+ * - {@link Agent.send} : single round-trip text reply (no tools)
+ * - {@link Agent.run} : full agentic loop: send → tool_use → execute → tool_result → repeat
  *
  * Both yield text chunks via async generator and return a {@link StreamedResponse}
  * with the structured content blocks (thinking, tool_use, text). Thinking blocks
  * are preserved verbatim in history (with their signatures) so subsequent
- * requests can include them — required for the `redact-thinking-2026-02-12` beta.
+ * requests can include them : required for the `redact-thinking-2026-02-12` beta.
  *
  * **Conversation history shape** (v2.1.118 block-based content):
  * ```
@@ -118,11 +118,11 @@ export const faintThinkingChunk = (s: string): string => {
  * Render an "aborted prompt echo" block: a faint, struck-through
  * reproduction of the user's just-rolled-back submission, prefixed with a
  * dim-red `⊘` badge and an `ABORTED` label. Replaces the old single-line
- * `⊘ aborted by user — prompt restored to editor` footer.
+ * `⊘ aborted by user : prompt restored to editor` footer.
  *
  * The motivation: when a user aborts and re-submits, both the original
  * prompt (committed to scrollback at submit time) and the re-submitted
- * prompt look identical — bold pink `❯` followed by the same text. This
+ * prompt look identical : bold pink `❯` followed by the same text. This
  * echo block sits between them in faint+strikethrough form so the
  * sequence reads unambiguously: "this got rolled back; the next bold
  * prompt is the one that was actually answered."
@@ -173,7 +173,7 @@ export function formatAbortedEcho(
   const first = `${head} ${wrap(lines[0] ?? "")}`
   // Continuation lines: 4-space indent (2 outer + 2 inner) so they
   // visually nest under the badge rather than aligning under the content
-  // of line 1 — keeps the block compact for long submissions and makes
+  // of line 1 : keeps the block compact for long submissions and makes
   // the `⊘ ABORTED` anchor unambiguous as the "left margin" of the echo.
   const rest = lines.slice(1).map((l) => `    ${wrap(l)}`)
   return [first, ...rest].join("\n")
@@ -230,7 +230,7 @@ export function withRollingCacheBreakpoint(messages: Message[]): Message[] {
  * Conversational agent with append-only history and an agentic tool loop.
  *
  * The agent maintains its own message list and re-sends the full history
- * on every API call (no truncation, no compression — that's a server-side
+ * on every API call (no truncation, no compression : that's a server-side
  * concern enabled by the `context-management-2025-06-27` beta).
  *
  * Both {@link send} and {@link run} preserve all content block types in
@@ -256,7 +256,7 @@ export class Agent {
   /**
    * Append-only conversation history.
    *
-   * Read-only by convention — never mutate from outside the class. Use
+   * Read-only by convention : never mutate from outside the class. Use
    * {@link history} to get a defensive copy. Each message has block-based
    * content matching the v2.1.91 wire format.
    */
@@ -297,7 +297,7 @@ export class Agent {
    *
    * Only emitted at the initial seam (not at the loop seam after
    * tool_use rounds), to avoid re-emitting stale snapshots within the
-   * same turn — see `tui-plugins/memory/lib/short-term-snapshot.ts`.
+   * same turn : see `tui-plugins/memory/lib/short-term-snapshot.ts`.
    */
   private shortTermSnapshot: { toAttachment(): ContentBlock | null } | null
   /**
@@ -320,7 +320,7 @@ export class Agent {
    */
   private maxToolRounds = 50
   /**
-   * Streak / pattern soft-warning tracker — Layer 3 of the size-feedback
+   * Streak / pattern soft-warning tracker : Layer 3 of the size-feedback
    * design. Observes per-tool consecutive truncations and emits a
    * `[note: ...]` line on the model-facing `tool_result.content` after a
    * threshold-th repeat (default 3). State is per-Agent and survives the
@@ -351,7 +351,7 @@ export class Agent {
     /**
      * Optional save-echo collector (see {@link Agent.saveEcho}). The
      * structural type avoids a hard dependency on the memory plugin's
-     * implementation — `src/index.ts` constructs and injects it.
+     * implementation : `src/index.ts` constructs and injects it.
      */
     saveEcho?: { consumeAll(): ContentBlock[] } | null
     /**
@@ -364,7 +364,7 @@ export class Agent {
     /**
      * Pre-existing conversation to seed the agent with (used by
      * `--resume <sid>` to rehydrate from a saved log). Pushed onto
-     * `this.messages` verbatim. The store, if any, is NOT re-written —
+     * `this.messages` verbatim. The store, if any, is NOT re-written :
      * resume opens its store with `existsOk: true` so subsequent turns
      * append to the same file.
      */
@@ -421,7 +421,7 @@ export class Agent {
    * alternating-role reasons), and so the user can resubmit cleanly.
    *
    * IMPORTANT: a user message that carries `tool_result` blocks is the
-   * required pairing for the previous assistant `tool_use` — popping it
+   * required pairing for the previous assistant `tool_use` : popping it
    * would leave a dangling tool_use, and every subsequent request would
    * 400 with "tool_use ids were found without tool_result blocks
    * immediately after". So we stop rolling back as soon as we hit such a
@@ -454,7 +454,7 @@ export class Agent {
    * {@link maxToolRounds} safety limit is hit.
    *
    * **What gets yielded**: only text chunks from the assistant's text blocks.
-   * Tool calls and their outputs are NOT yielded — they're logged to stderr
+   * Tool calls and their outputs are NOT yielded : they're logged to stderr
    * with formatted previews so you can see what's happening without
    * polluting stdout.
    *
@@ -488,7 +488,7 @@ export class Agent {
       onThinkingStop?: () => MaybePromise<void>
       /**
        * Optional. Fires when a `text` content_block stops streaming.
-       * Useful for hosts that maintain per-text-block state — most
+       * Useful for hosts that maintain per-text-block state : most
        * notably, the response formatter (e.g. `mdstream`): the same
        * formatter subprocess is shared across all sub-turns of a
        * `run()`, and without a per-block boundary its paragraph buffer
@@ -529,7 +529,7 @@ export class Agent {
        *   - any in-flight `executeTool` (Bash child process, etc.) is killed,
        *   - the generator throws `AbortError` so the caller can branch.
        *
-       * The agent does NOT swallow the abort here — partial assistant
+       * The agent does NOT swallow the abort here : partial assistant
        * blocks are NOT pushed onto `messages[]` (the rollback path is the
        * caller's responsibility via {@link Agent.rollbackPendingTurn}).
        */
@@ -552,25 +552,25 @@ export class Agent {
     const thinkingStart = onThinkingStart
     const onThinkingDelta = onThinkingChunk ?? sendOpts.onThinkingDelta
     const thinkingStop = onThinkingStop
-    const textStop = onTextStop ?? sendOpts.onTextStop
+    const textStop = onTextStop
     const writeTranscript = (line: string): void => {
       if (onTranscriptLine) onTranscriptLine(line)
       else console.error(line)
     }
 
     // Initial user message. If a mode toggle is pending advertisement,
-    // prepend a `<mode-change>` text block — see ModeManager.consumePendingAttachment.
+    // prepend a `<mode-change>` text block : see ModeManager.consumePendingAttachment.
     // The attachment rides on the rolling-tail breakpoint (which is
     // invalidated every turn anyway by the user message changing), so
     // mode toggles cost zero additional cache invalidation. The system
     // prompt and tool list are mode-independent under this design.
     // Initial user message. Prepended attachments (in this order):
     //
-    //   1. <mode-change from="…" to="…" />            — pending mode toggle.
-    //   2. <short-term-memory>…</short-term-memory>    — session scratchpad.
-    //   3. <memory-saved scope="…" id="…">…</…>+      — id echo for any
+    //   1. <mode-change from="…" to="…" />            : pending mode toggle.
+    //   2. <short-term-memory>…</short-term-memory>    : session scratchpad.
+    //   3. <memory-saved scope="…" id="…">…</…>+      : id echo for any
     //      memory(ies) the model saved on the previous turn.
-    //   4. user text                                   — the actual user input.
+    //   4. user text                                   : the actual user input.
     //
     // ORDER NOTE: short-term snapshot comes before save-echoes because
     // it's the persistent context the model needs every turn ("what we're
@@ -603,10 +603,10 @@ export class Agent {
     //   - Mode behavior text lives in each mode plugin's PROMPT.md, which
     //     is part of `pluginBlock` and is byte-stable across toggles.
     //   - Disallowed tools are gated at dispatch time below
-    //     (modeManager.isToolAllowed) — the request still advertises
+    //     (modeManager.isToolAllowed) : the request still advertises
     //     every tool, so the `tools` array is byte-stable too.
     //   - The activation signal ("from = X, to = Y") rides as a small
-    //     <mode-change> text block on the next user turn — see the
+    //     <mode-change> text block on the next user turn : see the
     //     consumePendingAttachment() calls above and below. That block
     //     sits behind the rolling-tail breakpoint that's invalidated
     //     every turn anyway, so mode toggles cost zero extra cache.
@@ -652,7 +652,7 @@ export class Agent {
       // Short-circuit if the caller already aborted (e.g. user pressed Esc
       // while we were between API rounds). Without this, an abort that
       // landed during tool execution would still trigger a follow-up
-      // sendFn call that immediately throws — wastes a network round-trip
+      // sendFn call that immediately throws : wastes a network round-trip
       // and produces a confusing error path. Throw `AbortError` so the
       // caller's catch can branch on `err.name === "AbortError"`.
       if (signal?.aborted) {
@@ -699,7 +699,7 @@ export class Agent {
         this.store?.appendAssistant(
           lastResponse.blocks,
           lastResponse.stopReason,
-          // usage isn't surfaced on StreamedResponse yet — leave undefined
+          // usage isn't surfaced on StreamedResponse yet : leave undefined
           // and add it later when the client exposes it.
           undefined,
         )
@@ -709,7 +709,7 @@ export class Agent {
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
 
       if (toolBlocks.length === 0) {
-        // No tool calls — model is done
+        // No tool calls : model is done
         break
       }
 
@@ -731,9 +731,9 @@ export class Agent {
           `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool, renderCols))}`,
         )
         // Continuation rows. Two shapes:
-        //   - `> <line>` — PS2-style for `\n`-separated multi-line input
+        //   - `> <line>` : PS2-style for `\n`-separated multi-line input
         //     (heredocs, for-loops). Existing behavior.
-        //   - `↳ <op> <body>` — soft-split for overflowing single-line
+        //   - `↳ <op> <body>` : soft-split for overflowing single-line
         //     pipelines. Operator leads each row (shfmt convention).
         // Both use the same `│` connector. Empty for non-Bash and for
         // single-line Bash that fits the width.
@@ -742,7 +742,7 @@ export class Agent {
         }
         // Header→body separator: a single empty gutter row (`│` glyph, no
         // payload). Always emitted, regardless of body length, so the visual
-        // shape of every tool block is consistent — short outputs get the
+        // shape of every tool block is consistent : short outputs get the
         // same breather as long ones. Inherited by both the streamed-Bash
         // path (which writes `│ <line>` rows directly into scrollback) and
         // the post-block render path (`formatToolPreview`). The refusal
@@ -761,7 +761,7 @@ export class Agent {
         // (so the cached prefix is mode-independent), but the harness
         // refuses to actually invoke a tool the active mode disallows.
         // The synthesized error tool_result teaches the model how to
-        // adapt — see ManifestMode.refusalHint. No spinner, no execution
+        // adapt : see ManifestMode.refusalHint. No spinner, no execution
         // side effects.
         const gate = this.modeManager?.isToolAllowed(tool.name) ?? { allowed: true as const }
         if (!gate.allowed) {
@@ -805,7 +805,7 @@ export class Agent {
               // Live-stream Bash stdout/stderr to the transcript as the
               // child writes it, instead of waiting for the process to
               // exit. Without this, a `for i in {1..20}; do echo $i;
-              // sleep 1; done` produced nothing visible for 20 seconds —
+              // sleep 1; done` produced nothing visible for 20 seconds :
               // the user couldn't tell the difference between "working"
               // and "frozen". The streamer emits one `│ <line>` per
               // newline up to the per-tool body budget; lines past the
@@ -813,7 +813,7 @@ export class Agent {
               // V/T L") but not emitted.
               //
               // The last emitted line is BUFFERED instead of written
-              // immediately — so when the stream ends we can decide
+              // immediately : so when the stream ends we can decide
               // between (a) writing it as `│` followed by a `╰ <footer>`
               // line (when there's something to say), or (b) rewriting
               // it as `╰` and dropping the footer entirely (clean run,
@@ -878,7 +878,7 @@ export class Agent {
               // back to the API as a tool_result block.
               if ((result as { _aborted?: boolean })._aborted) {
                 // If the executor surfaced partial output (e.g. Bash captured
-                // some stdout before SIGTERM landed), keep it — both for the
+                // some stdout before SIGTERM landed), keep it : both for the
                 // user (transcript body) and for the model (so it sees what
                 // ran before the abort). Only fall back to the canned
                 // "canceled" string when there's literally nothing to show.
@@ -902,7 +902,7 @@ export class Agent {
                 // Emit the buffered last line + computed footer. We then
                 // mark `streamedRendered` so the post-block render path
                 // (which would call formatToolPreview and re-emit the
-                // body) is skipped — but the tool_result push to the API
+                // body) is skipped : but the tool_result push to the API
                 // below still happens.
                 renderStreamedTail({
                   bufferedLastLine,
@@ -941,14 +941,14 @@ export class Agent {
 
       // Send tool results back. Before the next API request, give the host
       // a chance to drain queued user text and inject it into THIS user
-      // message, alongside the tool_results — this is the fastest natural
+      // message, alongside the tool_results : this is the fastest natural
       // injection point for "I want to add context mid-loop without
       // canceling" because it rides the existing user→assistant turn
       // boundary. If injected, mirror it into the store as a separate
       // text-only user payload so session replay can distinguish queued
       // injection from the tool_result message itself.
       // ORDER MATTERS: the Anthropic API requires `tool_result` blocks to
-      // come *immediately* after the prior assistant `tool_use` — i.e.
+      // come *immediately* after the prior assistant `tool_use` : i.e.
       // they must be the first blocks of this user message. A
       // `<mode-change>` text block (or any other text) in front of them
       // produces:
@@ -957,7 +957,7 @@ export class Agent {
       // and 400s the entire turn. So tool_results go FIRST; the
       // mode-change attachment trails them. The model still sees the
       // mode shift in the same user turn, just after the results, which
-      // is fine — the activation block is advisory, not load-bearing.
+      // is fine : the activation block is advisory, not load-bearing.
       // consumePendingAttachment is idempotent: returns null if no
       // toggle has happened since the last consume, so steady-state
       // turns pay nothing. This ordering is also cache-safe: the
@@ -967,7 +967,7 @@ export class Agent {
       // Same ordering rule as initial seam, with two changes for the
       // loop: tool_result blocks MUST come first (Anthropic API
       // requirement), and we do NOT re-emit the short-term snapshot
-      // (already sent at the initial seam this turn — re-emitting on
+      // (already sent at the initial seam this turn : re-emitting on
       // every tool round just balloons the conversation with stale
       // repeats; the model can call MemoryTool to re-fetch if it cares).
       userContent.push(...toolResults)
@@ -994,7 +994,7 @@ export class Agent {
   }
 
   /**
-   * Send a user message without enabling tools — single round-trip.
+   * Send a user message without enabling tools : single round-trip.
    *
    * Use this when you want a plain text reply without the agentic loop.
    * The model will not be told about any tools, so it cannot call them.
@@ -1063,7 +1063,7 @@ export class Agent {
 /**
  * Per-tool char cap for the bordered tool **header** line ("╭ Bash $ ..."),
  * applied only when the input field truly overflows. The cap is generous
- * (500 chars for Bash, 200 for the JSON fallback) — much wider than the
+ * (500 chars for Bash, 200 for the JSON fallback) : much wider than the
  * old 80-ch hard slice that often cut Bash commands mid-token. We never
  * pad to terminal width; if the line overflows the terminal cells, the
  * terminal wraps and that's fine.
@@ -1074,7 +1074,7 @@ const HEADER_JSON_MAX = 200
 /**
  * Trim `s` to at most `max` characters, preferring a word boundary so we
  * don't cut mid-token. The primary failure mode of the old hard slice
- * was things like `… | head...(+4ch)` — four characters short of
+ * was things like `… | head...(+4ch)` : four characters short of
  * `head -50`, useless. Here we walk back to the last whitespace within
  * the trailing 15% of the budget and prefer it over a hard cut. If no
  * whitespace exists in that window (single-token blob), we fall through
@@ -1106,19 +1106,19 @@ const BASH_CONT_MAX_LINES = 8
  *
  * Returns ONLY the header line (single-line, no embedded newlines).
  * Multi-line Bash commands render their continuation via the sibling
- * {@link formatToolInputContinuation} — the caller writes those after the
+ * {@link formatToolInputContinuation} : the caller writes those after the
  * header as `│ ...` rows inside the same bordered block.
  *
  * # Style: programmer-native + dot-separated chunks
  *
  * Beyond the primary field (path/pattern/command), each tool can carry
- * "subordinate" inputs — `offset`/`limit` for Read, `replace_all` for
+ * "subordinate" inputs : `offset`/`limit` for Read, `replace_all` for
  * Edit, `path`/`glob`/`-i`/`-A`/etc. for Grep. Surfacing them in the
  * header is what lets the user see *what was actually run* (e.g.
- * "Read first 4 lines" vs. "Read whole file" — same tool name, very
+ * "Read first 4 lines" vs. "Read whole file" : same tool name, very
  * different operation).
  *
- * The vocabulary is "Style A" — programmer-native shorthand:
+ * The vocabulary is "Style A" : programmer-native shorthand:
  *
  *  - **Read**: `<path> · L<start>-<end>` (closed range, 1-indexed to match
  *    the body's line-number gutter), or `· from L<start>` (open-ended,
@@ -1129,7 +1129,7 @@ const BASH_CONT_MAX_LINES = 8
  *  - **Grep**: regex flags appended to the pattern (`/foo/i` for `-i`,
  *    `/foo/m` for `multiline`, `/foo/im` for both). Modifiers chain after
  *    ` · `: `in <path>` (where), `<glob>` (filter), `↓N`/`↑N`/`↕N` (after/
- *    before/around context — `-C` takes precedence over `-A`/`-B` since
+ *    before/around context : `-C` takes precedence over `-A`/`-B` since
  *    it's symmetric), `≤N` (`head_limit`), `count`/`paths` (output mode).
  *
  * The ` · ` mid-dot is the same separator used in the truncation footer
@@ -1139,7 +1139,7 @@ const BASH_CONT_MAX_LINES = 8
  * Truncation strategy:
  *  - **Bash**: first line only (multi-line continuation rendered separately
  *    by {@link formatToolInputContinuation}); word-boundary trim at 500 chars.
- *  - **Read/Write/Edit/Glob/Grep**: file_path / pattern only — typically
+ *  - **Read/Write/Edit/Glob/Grep**: file_path / pattern only : typically
  *    well under 200 chars; no truncation in the common case. Composed
  *    Grep headers (all flags set) come in under ~80 cells in practice;
  *    if real usage ever overflows, prioritize pattern → path → context.
@@ -1160,14 +1160,14 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
     // rows for any subsequent \n-lines (heredoc bodies, inline scripts).
     //
     // Soft-split applies to the FIRST \n-line independent of whether
-    // there are more \n-lines after it — early versions gated this on
+    // there are more \n-lines after it : early versions gated this on
     // `firstNl === -1`, which made multi-line commands (python3 -c with
     // embedded \n, heredocs, for-loops) bypass soft-split entirely and
     // let the long first line truncate+wrap. Reported by user, May 2026.
     //
     // Default `cols` rule: when neither arg nor TTY width is available
     // (e.g. unit tests, piped output), treat as Infinity so we never
-    // trigger soft-split — the lead-only header would otherwise be a
+    // trigger soft-split : the lead-only header would otherwise be a
     // regression for non-TTY callers.
     const effectiveCols = cols ?? process.stdout.columns ?? Number.POSITIVE_INFINITY
     const headerBody = shouldSoftSplit(firstLine, effectiveCols)
@@ -1176,7 +1176,7 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
     const trimmed = trimAtWordBoundary(headerBody, HEADER_BASH_MAX)
     const charsCut = headerBody.length - trimmed.length
     const truncated = charsCut > 0 ? `${trimmed}${truncHint(charsCut, "ch")}` : trimmed
-    // Header line only — continuation rendered by formatToolInputContinuation.
+    // Header line only : continuation rendered by formatToolInputContinuation.
     return `$ ${truncated}`
   }
   if (tool.name === "Read" && input.file_path) {
@@ -1185,7 +1185,7 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
     // 1-indexed (`${start + i + 1}\t…`), so we surface the same 1-indexed
     // range here and the header promise matches what the body shows.
     // Bare reads (no offset/limit) render byte-identical to the
-    // pre-extras form — the common case is undisturbed.
+    // pre-extras form : the common case is undisturbed.
     const off = typeof input.offset === "number" ? input.offset : undefined
     const lim = typeof input.limit === "number" ? input.limit : undefined
     if (off === undefined && lim === undefined) return path
@@ -1198,7 +1198,7 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
   }
   if (tool.name === "Edit" && input.file_path) {
     const path = String(input.file_path)
-    // `g` flag — borrowed from sed's `s/old/new/g`. Cheap, recognizable,
+    // `g` flag : borrowed from sed's `s/old/new/g`. Cheap, recognizable,
     // attaches the modifier visually to the path it modifies.
     return input.replace_all ? `${path} · g` : path
   }
@@ -1210,13 +1210,13 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
     // Pattern carries its own JS-regex flags: `i` for -i, `m` for
     // multiline. Then ` · ` between major chunks: where (path, then
     // optional glob filter), context (↑↓↕N), head limit (≤N), output
-    // mode. `-n` (line numbers) is intentionally not surfaced — it's the
+    // mode. `-n` (line numbers) is intentionally not surfaced : it's the
     // default and would just clutter.
     const flags = `${input["-i"] ? "i" : ""}${input.multiline ? "m" : ""}`
     const parts: string[] = [`/${input.pattern}/${flags}`]
     if (input.path) parts.push(`in ${input.path}`)
     if (input.glob) parts.push(String(input.glob))
-    // Context arrows. `-C N` (or its `context` alias) takes precedence —
+    // Context arrows. `-C N` (or its `context` alias) takes precedence :
     // it's symmetric so `↕` reads more naturally than two arrows. When
     // only `-A`/`-B` are set, render whichever (or both) are present.
     const ctxC = (input["-C"] as number | undefined) ?? (input.context as number | undefined)
@@ -1237,7 +1237,7 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
 }
 
 /**
- * Continuation rows for a multi-line tool input — rendered as `│ ...` rows
+ * Continuation rows for a multi-line tool input : rendered as `│ ...` rows
  * between the header and the output. Currently emits rows only for
  * multi-line **Bash** commands; other tools have single-line headers.
  *
@@ -1276,9 +1276,9 @@ export function formatToolInputContinuation(tool: ToolUseBlock, cols?: number): 
   const tail = all.slice(1)
   const effectiveCols = cols ?? process.stdout.columns ?? Number.POSITIVE_INFINITY
 
-  // Zone A — soft-split rows for the FIRST \n-line. Activates whenever
+  // Zone A : soft-split rows for the FIRST \n-line. Activates whenever
   // the first line would overflow AND has top-level operators
-  // (`&&`, `||`, `|`, `;`) — independent of whether there are more
+  // (`&&`, `||`, `|`, `;`) : independent of whether there are more
   // \n-lines after it. Each row is prefixed `↳ ` and leads with the
   // operator (shellcheck/shfmt convention). Visually distinct from
   // Zone B's `> ` PS2 rows.
@@ -1295,7 +1295,7 @@ export function formatToolInputContinuation(tool: ToolUseBlock, cols?: number): 
     })
   })()
 
-  // Zone B — PS2 (`> `) rows for subsequent \n-lines (heredoc bodies,
+  // Zone B : PS2 (`> `) rows for subsequent \n-lines (heredoc bodies,
   // inline scripts, for-loop bodies). Existing behavior, preserved.
   const ps2Rows: string[] = tail.map((line) => {
     const trimmed = trimAtWordBoundary(line, HEADER_BASH_MAX)
@@ -1326,15 +1326,15 @@ export function formatToolInputContinuation(tool: ToolUseBlock, cols?: number): 
 /**
  * Per-tool body line budget for the bordered transcript preview. Tuned by
  * shape of typical output:
- *  - **Bash**: 10 lines — output is variable; 10 covers "exit code + last
+ *  - **Bash**: 10 lines : output is variable; 10 covers "exit code + last
  *    few lines" without dominating the screen.
- *  - **Read**: 15 lines — content is dense (line-numbered) and structural;
+ *  - **Read**: 15 lines : content is dense (line-numbered) and structural;
  *    a few extra lines is high-value.
- *  - **Grep**: 12 lines — content mode; for files-only / count modes
+ *  - **Grep**: 12 lines : content mode; for files-only / count modes
  *    we'd want more, but those are explicit user choices and rarely hit
  *    the cap.
- *  - **Glob**: 25 lines — paths are short, dense, easy to scan.
- *  - **Default**: 10 lines — sensible mid-range for unknown tools.
+ *  - **Glob**: 25 lines : paths are short, dense, easy to scan.
+ *  - **Default**: 10 lines : sensible mid-range for unknown tools.
  *
  * These are TUI display caps, not API caps. The model still sees up to
  * the universal {@link MAX_TOOL_OUTPUT_LINES} (1000 lines) per
@@ -1353,7 +1353,7 @@ const TOOL_PREVIEW_LINES_DEFAULT = 10
 /**
  * Per-line display-width cap for body lines. A single 10_000-char minified
  * JSON line in a Read result shouldn't dominate the preview; clamp to a
- * fixed value (NOT terminal width — we don't reflow on resize). 300 chars
+ * fixed value (NOT terminal width : we don't reflow on resize). 300 chars
  * is generous enough to read most code and structured output without one
  * pathological line eating the screen.
  */
@@ -1367,7 +1367,7 @@ const TOOL_PREVIEW_LINE_WIDTH = 300
  * notice with its action-verb resume hint. The **TUI** (you, looking at
  * the transcript) receives this function's output: the body preview only,
  * plus a bare-facts footer (`shown N/M L · X/Y B · cut at L`) when
- * truncation happened. No verbs, no advice — those go to the model where
+ * truncation happened. No verbs, no advice : those go to the model where
  * they're actionable.
  *
  * The `info` parameter, when supplied (see `executeTool`'s `_truncInfo`),
@@ -1404,7 +1404,7 @@ export function formatToolPreview(
   // 1. Strip the model-facing trailing notice from what we display to the
   //    human. The notice is everything from `\n\n[truncated: ` to the end
   //    when present. The structured `info` (when supplied) carries the
-  //    same numbers in machine form — we'll render those as the bare-facts
+  //    same numbers in machine form : we'll render those as the bare-facts
   //    footer instead.
   const noticeIdx = content.lastIndexOf("\n\n[truncated:")
   let body = noticeIdx >= 0 ? content.slice(0, noticeIdx) : content
@@ -1425,7 +1425,7 @@ export function formatToolPreview(
 
   // 3. Build the footer.
   //    The footer always reads "shown <visible-in-TUI> / <real-source-total>"
-  //    — one ratio, two domains. The user immediately sees how much of the
+  //    : one ratio, two domains. The user immediately sees how much of the
   //    underlying tool result they're actually looking at.
   //    - API truncation present (info.truncated): include byte ratio
   //      (model-shown / source-total) and the cut line.
@@ -1443,7 +1443,7 @@ export function formatToolPreview(
   // 4. Stitch lines + footer with the bordered gutter.
   //    When a truncation footer is present we slot a `┊` (light-dotted
   //    vertical) row between the last body line and the `╰ <footer>` row.
-  //    The dotted glyph reads as "something has been cut here" — visually
+  //    The dotted glyph reads as "something has been cut here" : visually
   //    foreshadowing the bare-facts footer below it (e.g. `shown 10/520 L`).
   //    No `┊` is emitted on a clean run (body fits, no API clamp): in that
   //    case there's nothing missing, so the body just closes with `╰`.
@@ -1474,8 +1474,8 @@ export function formatToolPreview(
  *     or zero-output abort). The `┊` reads as "something cut here" and
  *     visually foreshadows the bare-facts footer (e.g. `shown 10/520 L`).
  *
- * Scrollback is permanent — once a `│` row is written we can't rewrite it
- * — so the buffered-last-line trick is the only way to keep the close
+ * Scrollback is permanent : once a `│` row is written we can't rewrite it
+ * : so the buffered-last-line trick is the only way to keep the close
  * glyph attached to the body in the no-footer case.
  *
  * Mirrors the audience-split invariant in {@link formatToolPreview}: footer
@@ -1504,7 +1504,7 @@ function renderStreamedTail(opts: {
   }
 
   if (bufferedLastLine === null) {
-    // Stream produced nothing (shouldn't happen — caller only invokes us
+    // Stream produced nothing (shouldn't happen : caller only invokes us
     // when didStream=true, which implies at least one flushLineToBuffer
     // call). Defensive close glyph anyway. Skip the `┊` separator: with
     // zero body rows above it, a dotted divider has nothing to "cut from"
@@ -1525,16 +1525,16 @@ function renderStreamedTail(opts: {
 
 /**
  * Format a {@link TruncationInfo} as the bare-facts footer string.
- * No verbs, no advice — totals and cut location only.
+ * No verbs, no advice : totals and cut location only.
  *
  * Format: `shown <V>/<T> L · <X>/<Y> B · cut at L<L>`
  *
  *   - **V** = lines visible in the TUI right now (`tuiVisible` argument).
- *     This is what the user is looking at — the most user-relevant count.
+ *     This is what the user is looking at : the most user-relevant count.
  *   - **T** = total lines the underlying source produced (`info.totalLines`).
  *     The denominator the user cares about ("how big was this really?").
  *   - **X** = bytes shown to the model (`info.shownBytes`). Note: this is
- *     model-domain, not user-domain — the user sees fewer body bytes than
+ *     model-domain, not user-domain : the user sees fewer body bytes than
  *     the model when the TUI body budget is below the API cap. Showing
  *     model-bytes here gives the user the size of the actual `tool_result`
  *     ride-back, which is what tokens are spent on.
@@ -1574,6 +1574,7 @@ export interface ReplAgentLike {
       onThinkingStart?: () => MaybePromise<void>
       onThinkingChunk?: (chunk: string) => MaybePromise<void>
       onThinkingStop?: () => MaybePromise<void>
+      onTextStop?: () => MaybePromise<void>
       drainQueuedUserText?: () => string | null
       onQueueInject?: (text: string) => void
       /**
@@ -1653,7 +1654,7 @@ export interface ReplEditor {
   setPrompt?(prompt: string, continuationPrompt?: string): void
   /**
    * Optional. Render decoration rows between the status row and the editor
-   * prompt — used by the REPL to display the queued-message buffer (lines
+   * prompt : used by the REPL to display the queued-message buffer (lines
    * the user submitted while the agent was streaming, awaiting injection
    * at the next safe boundary). Pass `[]` to clear.
    */
@@ -1661,8 +1662,8 @@ export interface ReplEditor {
   /**
    * Optional. Render footer rows BELOW the editor input in the live area.
    * Used by plugin-contributed live-area slots (see `liveAreaSlots` in
-   * the manifest schema) to surface ambient status — quota %, git
-   * branch state, background-job progress — without competing with
+   * the manifest schema) to surface ambient status : quota %, git
+   * branch state, background-job progress : without competing with
    * what the user is typing. Pass `[]` to clear.
    *
    * Editors without footer support can omit this; the live-area
@@ -1689,7 +1690,7 @@ export interface ReplEditor {
  * **Formatter integration**: if `opts.formatterCmd` is provided, each user
  * turn pipes the streamed text through that external process (see
  * {@link Formatter}). A fresh formatter is spawned per turn so the
- * markdown rendering state resets between user messages — this avoids
+ * markdown rendering state resets between user messages : this avoids
  * the formatter getting confused by stale state from previous turns.
  *
  * @param agent - Initialized agent instance
@@ -1723,7 +1724,7 @@ export async function runRepl(
      * the error and continue.
      */
     auth?: AuthResult
-    /** Override for testing — defaults to the real listModels client call. */
+    /** Override for testing : defaults to the real listModels client call. */
     listModels?: (auth: AuthResult) => Promise<ModelInfo[]>
     /**
      * Enable the persistent live-area UI: the multiline input is pinned to
@@ -1731,7 +1732,7 @@ export async function runRepl(
      * Requires `compositor` and `editor` (or sensible defaults wired by the
      * caller). When false (the legacy default), `runRepl` reads turns one
      * at a time via {@link RawInput} and writes streamed output straight to
-     * stdout — same as before.
+     * stdout : same as before.
      */
     useLiveArea?: boolean
     compositor?: ReplCompositor
@@ -1810,11 +1811,20 @@ export async function runRepl(
 
       if (!text.trim()) continue
 
+      // Main response formatter : see `runReplLiveArea` for the full
+      // rationale on per-text-block lifecycle (mdstream's `partial`
+      // paragraph buffer would otherwise concatenate two unrelated
+      // text blocks within one `run()` and smash them together at
+      // end-of-turn). Lifted into a factory so `onTextStop` (below)
+      // can end+respawn at every text-block seam.
       let formatter: Formatter | null = null
-      if (opts?.formatterCmd) {
-        formatter = new Formatter(opts.formatterCmd, output)
-        formatter.start()
+      const spawnMainFormatter = (): Formatter | null => {
+        if (!opts?.formatterCmd) return null
+        const f = new Formatter(opts.formatterCmd, output)
+        f.start()
+        return f
       }
+      formatter = spawnMainFormatter()
 
       let wroteOutput = false
       let lastChunkEndedWithNewline = false
@@ -1926,6 +1936,15 @@ export async function runRepl(
         await endThinkingFormatter()
         writeDirectSink("\n")
       }
+      // Per-text-block formatter boundary. See `runReplLiveArea` for the
+      // full rationale; this is the legacy `runRepl` (non-live-area) twin.
+      const onTextStop = async (): Promise<void> => {
+        if (!formatter && !opts?.formatterCmd) return
+        const old = formatter
+        formatter = null
+        if (old) await old.end()
+        formatter = spawnMainFormatter()
+      }
 
       let turnError: unknown = null
       try {
@@ -1934,6 +1953,7 @@ export async function runRepl(
           onThinkingStart,
           onThinkingChunk,
           onThinkingStop,
+          onTextStop,
         })
         while (true) {
           const { done, value } = await gen.next()
@@ -1997,7 +2017,7 @@ export async function runRepl(
       }
 
       // Terminate the partial response line so the next prompt starts at
-      // column 0. No extra blank separator — the prompt sits directly
+      // column 0. No extra blank separator : the prompt sits directly
       // below the response. Skip when the response already ended with `\n`
       // (or we wrote nothing at all).
       if (wroteOutput && !lastChunkEndedWithNewline) output.write("\n")
@@ -2015,7 +2035,7 @@ export async function runRepl(
  * terminal and stays visible across agent work. Streamed output is written
  * through the {@link ReplCompositor} (which scrolls inside a region above
  * the live area), and the {@link ReplEditor} stays mounted for the entire
- * session — submits emit events; the buffer clears in place.
+ * session : submits emit events; the buffer clears in place.
  *
  * Submits arriving while a turn is in flight are queued and processed in
  * order. A `cancel` event ends the loop cleanly.
@@ -2103,12 +2123,12 @@ async function runReplLiveArea(
   // as needed via setLiveHeight().
   compositor.mount(1)
   editor.start()
-  // Replay stdin bytes captured while term-caps held raw mode — but ONLY
+  // Replay stdin bytes captured while term-caps held raw mode : but ONLY
   // bytes that look like real keystrokes, never bytes that look like a
   // terminal reply (ESC-prefixed CSI/OSC). The DECRPM probe sometimes
   // races the timeout: the reply lands JUST after we resolve, gets
   // captured as "unparsed", and re-emitting it injects `^[ [ ? 2026 ; 1 $ y`
-  // into the editor — which can read as a Ctrl+`[` (Esc) followed by
+  // into the editor : which can read as a Ctrl+`[` (Esc) followed by
   // garbage and, depending on key bindings, cancel the editor or
   // submit/clear the buffer. Since real typeahead during the 80ms probe
   // is extremely rare and ESC-leading garbage is the common failure
@@ -2176,7 +2196,7 @@ async function runReplLiveArea(
   }
 
   // Track whether a turn is currently running. Submits that arrive while
-  // running become queued user input — eligible for mid-turn injection at
+  // running become queued user input : eligible for mid-turn injection at
   // the next agent tool-loop boundary (see drainQueuedUserText below) AND
   // surfaced visually above the editor prompt via setDecorationLines.
   let running = false
@@ -2184,7 +2204,7 @@ async function runReplLiveArea(
   /**
    * Build the queued-message decoration block shown between the live-area
    * status row and the editor prompt. Only rendered while a turn is in
-   * flight (steady-state idle should not display the queue — items are
+   * flight (steady-state idle should not display the queue : items are
    * drained immediately by the main loop and would visually flash).
    * Truncates each item to a single ~70-col preview so a multi-line paste
    * doesn't dominate the screen.
@@ -2220,7 +2240,7 @@ async function runReplLiveArea(
         // Report code-points cut, not cells (matches user mental model:
         // "I typed N more characters past the preview"). Counts via the
         // string iterator, which steps grapheme-naively but per-codepoint
-        // — close enough for the queue preview's purpose.
+        // : close enough for the queue preview's purpose.
         // eslint-disable-next-line typescript-eslint/no-misused-spread
         const cpCut = [...oneLine].length - [...truncated].length
         preview = `${truncated}${truncHint(cpCut, "ch")}`
@@ -2271,6 +2291,16 @@ async function runReplLiveArea(
       // If --formatter was passed, spawn one per turn so markdown state
       // resets between user messages. The formatter's stdout is fed into
       // compositor.writeStream so it lands above the pinned live area.
+      //
+      // **Per text-block lifecycle, not per turn.** Inside one `run()` a
+      // turn can produce multiple text blocks (text → tool → text → …).
+      // Mdstream's `partial` paragraph buffer is keyed to ONE process and
+      // would otherwise accumulate every text-block into one paragraph;
+      // at `finish()` it then re-renders the *combined* buffer, smashing
+      // unrelated sentences together with no separator. We respawn the
+      // formatter on every `onTextStop` boundary (defined below) : each
+      // text block gets its own subprocess, each gets its own `finish()`,
+      // each paragraph commits independently and on its own row.
       let formatter: Formatter | null = null
       // Some formatters (notably mdstream) emit a trailing `\n\n` at the end
       // of a render to ensure block-level separation. In our REPL that lands
@@ -2301,27 +2331,33 @@ async function runReplLiveArea(
         }
         pendingTrailingNewlines += tail
       }
-      if (opts.formatterCmd) {
-        const decoder = new TextDecoder()
-        const compositorSink: Pick<NodeJS.WriteStream, "write"> & {
-          columns?: number
-          rows?: number
-        } = {
-          get columns() {
-            return opts.output?.columns ?? process.stdout.columns
-          },
-          get rows() {
-            return opts.output?.rows ?? process.stdout.rows
-          },
-          write: ((chunk: string | Uint8Array) => {
-            const s = typeof chunk === "string" ? chunk : decoder.decode(chunk)
-            writeFormatterChunk(s)
-            return true
-          }) as NodeJS.WriteStream["write"],
-        }
-        formatter = new Formatter(opts.formatterCmd, compositorSink)
-        formatter.start()
+      // Shared sink + decoder: lifted out of the original
+      // `if (opts.formatterCmd)` block so `spawnMainFormatter()` (below) can
+      // reuse them when respawning at text-block boundaries.
+      const formatterDecoder = new TextDecoder()
+      const compositorSink: Pick<NodeJS.WriteStream, "write"> & {
+        columns?: number
+        rows?: number
+      } = {
+        get columns() {
+          return opts.output?.columns ?? process.stdout.columns
+        },
+        get rows() {
+          return opts.output?.rows ?? process.stdout.rows
+        },
+        write: ((chunk: string | Uint8Array) => {
+          const s = typeof chunk === "string" ? chunk : formatterDecoder.decode(chunk)
+          writeFormatterChunk(s)
+          return true
+        }) as NodeJS.WriteStream["write"],
       }
+      const spawnMainFormatter = (): Formatter | null => {
+        if (!opts.formatterCmd) return null
+        const f = new Formatter(opts.formatterCmd, compositorSink)
+        f.start()
+        return f
+      }
+      formatter = spawnMainFormatter()
 
       // Track the last kind of write so we can insert a blank-line separator
       // at text↔transcript boundaries. Without this, streamed markdown butts
@@ -2394,7 +2430,7 @@ async function runReplLiveArea(
         // held back a trailing `\n`/`\n\n` in `pendingTrailingNewlines`
         // (mdstream-style block-end run). Flush it FIRST so the text
         // section ends with its proper line terminator before the tool
-        // header — otherwise the text line and the tool's `╭` would
+        // header : otherwise the text line and the tool's `╭` would
         // collide on adjacent rows with no blank between them. The
         // capBlankLines cap in the compositor still ensures we never
         // get more than one blank row from the combined `\n` run.
@@ -2448,14 +2484,14 @@ async function runReplLiveArea(
       }
       // onQueueInject: NO-OP for scrollback rendering. The user's submitted
       // text was already committed to scrollback by EditorController.submit
-      // at the moment they pressed Enter — that's the immediate-feedback
+      // at the moment they pressed Enter : that's the immediate-feedback
       // contract of the editor. Re-rendering it here at the tool-boundary
       // injection point produced a visible duplicate (prompt appears twice:
       // once before the tool block, once after). The hook is retained as a
       // notification point in case future code wants to react to the
       // injection, but it must not write to scrollback.
       const onQueueInject = (_qtext: string): void => {
-        /* intentionally empty — see comment above */
+        /* intentionally empty : see comment above */
       }
       // Begin a turn on the global abort bus. From this point on, the
       // editor's bare-Esc / Ctrl+C handlers (see `EditorController`) will
@@ -2470,6 +2506,28 @@ async function runReplLiveArea(
         aborted = true
       }
       abortBus.once("abort", onBusAbort)
+      // Per-text-block formatter boundary. See the `spawnMainFormatter`
+      // doc-cluster and the `onTextStop` field on `SendMessageOptions`:
+      // ends the current main formatter (awaited : drains mdstream's
+      // `finish()` output through `drainOutput` → `compositorSink`
+      // synchronously w.r.t. our control flow) and respawns a fresh one
+      // so the *next* text block starts with an empty `partial` paragraph
+      // buffer. Without this, two text blocks in one `run()` get smashed
+      // together at end-of-run by mdstream's final re-render.
+      const onTextStop = async (): Promise<void> => {
+        if (!formatter && !opts.formatterCmd) return
+        const old = formatter
+        formatter = null
+        if (old) await old.end()
+        // After `end()` returns, drainOutput has consumed every byte
+        // mdstream emitted (incl. the `erase_partial` + final markdown
+        // render produced by `finish()`). Any trailing `\n`/`\n\n` is
+        // now held in `pendingTrailingNewlines`; we deliberately leave
+        // it there. The existing flush sites : next baseSink body
+        // chunk, onTranscriptLine's text→transcript flush, or
+        // end-of-turn discard : still work unchanged.
+        formatter = spawnMainFormatter()
+      }
       try {
         const gen = agent.run(text, {
           signal: ctrl.signal,
@@ -2477,6 +2535,7 @@ async function runReplLiveArea(
           onThinkingStart,
           onThinkingChunk,
           onThinkingStop,
+          onTextStop,
           drainQueuedUserText,
           onQueueInject,
         })
@@ -2535,7 +2594,7 @@ async function runReplLiveArea(
         // right below once the editor restores the buffer via setBuffer)
         // is the live editor showing the same text, available for edit and
         // re-submission. No separate "prompt restored to editor" line is
-        // needed — the editor's own redraw is the proof.
+        // needed : the editor's own redraw is the proof.
         const activeMode = modeManager?.active()
         const modeLabel = activeMode?.label ?? activeMode?.id ?? null
         compositor.writeStream(`${formatAbortedEcho(text, { activeModeLabel: modeLabel })}\n`)
@@ -2550,7 +2609,7 @@ async function runReplLiveArea(
         // the editor's submit flush) starts at column 0. No extra blank
         // line: the live-area prompt sits directly below the response.
         // When the response already ended with `\n` we skip this entirely
-        // — avoids both the extra blank row AND the erase/redraw flicker
+        // : avoids both the extra blank row AND the erase/redraw flicker
         // of an unnecessary writeStream call.
         compositor.writeStream("\n")
       }
@@ -2578,7 +2637,7 @@ export function parseModelNotFoundError(message: string): string | null {
 
 /**
  * Detect API errors that don't say "model not found" but still mean the
- * current model selection won't work for this account — e.g. picking a
+ * current model selection won't work for this account : e.g. picking a
  * `[1m]` variant on a subscription without long-context access:
  *
  *   `API 400: {"type":"error","error":{"type":"invalid_request_error",
