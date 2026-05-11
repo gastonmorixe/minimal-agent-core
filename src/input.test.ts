@@ -429,9 +429,29 @@ describe("RawInput", () => {
     expect(output.text()).toContain("| world")
   })
 
-  it("submits on a lone LF line ending", async () => {
-    const { result } = await readFromTTY(["hello", "\n"])
+  it("inserts a newline on a lone LF (Shift+Enter via terminal keymap, or Ctrl+J)", async () => {
+    // Bare `\n` without a `\r` partner means the terminal distinguished
+    // Shift+Enter from Enter (or the user pressed Ctrl+J). Insert a
+    // newline so multi-line editing works with Shift+Enter just like
+    // with Alt/Option+Enter (`\x1b\r`). To recover real submit, follow
+    // with `\r`.
+    const { result } = await readFromTTY(["hello", "\n", "world", "\r"])
+    expect(result).toBe("hello\nworld")
+  })
+
+  it("still submits on CRLF (\\r\\n) coalesced as a single Enter press", async () => {
+    const { result } = await readFromTTY(["hello", "\r\n"])
     expect(result).toBe("hello")
+  })
+
+  it("still submits on LFCR (\\n\\r) coalesced as a single Enter press", async () => {
+    const { result } = await readFromTTY(["hello", "\n\r"])
+    expect(result).toBe("hello")
+  })
+
+  it("inserts a newline on lone LF split across chunks (still bare LF)", async () => {
+    const { result } = await readFromTTY(["hello", "\n", "world", "\r"])
+    expect(result).toBe("hello\nworld")
   })
 
   it("treats embedded line endings in one chunk as pasted multiline text", async () => {
