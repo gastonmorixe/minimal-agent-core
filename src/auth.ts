@@ -36,6 +36,9 @@
  * the same endpoint the CLI uses: `BB6()` at L129419-129489.
  */
 
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { withLock } from "./lockfile.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
 // ---------------------------------------------------------------------------
@@ -85,6 +88,11 @@ const OAUTH_SCOPES = [
  * making API calls with tokens that expire mid-request.
  */
 const EXPIRY_BUFFER_MS = 60_000
+
+function sanitizeServiceName(service: string): string {
+  const sanitized = service.replace(/[^A-Za-z0-9._-]+/g, "_")
+  return sanitized.length > 0 ? sanitized : "service"
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -394,7 +402,8 @@ export async function getAuth(
   const accountUuid = creds.oauthAccount?.accountUuid ?? readAccountUuidFromConfig()
   const organizationUuid = creds.oauthAccount?.organizationUuid
 
-  // Build a refresh closure that re-reads the keychain on every call.
+  // Build a refresh closure that re-reads the keychain on every call AND
+  // coordinates with other processes via a cross-process advisory lock.
   //
   // Why re-read instead of using the closed-over `oauth` snapshot:
   //   1. After a successful refresh the server rotates the refresh token;
@@ -405,9 +414,73 @@ export async function getAuth(
   //      keychain entry while we are idle. Reading fresh picks that up.
   // Both modes produce the same "Refresh token not found or invalid"
   // 400 from /v1/oauth/token; both are fixed by reading current state.
-  const doRefresh = async (): Promise<AuthResult> => {
+  //
+  // Why the lockfile (May 2026): with N concurrent agent processes
+  // sharing one keychain entry, server-side refresh-token rotation makes
+  // every successful refresh by ANY process invalidate the access tokens
+  // cached by the OTHER N-1. They each 401 next, refresh in parallel,
+  // and the storm never settles. With 100s of agents the symptom is a
+  // constant `󰌾 Auth refreshed, resuming...` flash in every live area.
+  // Net-dbg trace from session c0ab6ba6: 24/105 requests (23%) returned
+  // 401 with 1:1 refresh ratio. The fix is to serialize refreshes
+  // through a lockfile in `~/.minimal-agent/.refresh-<service>.lock`:
+  //
+  //   1. Acquire the lock (or time out at 5s → fall through to refresh
+  //      anyway; better to thrash than block forever).
+  //   2. RE-READ keychain UNDER the lock. If the access token there
+  //      differs from what we last issued, another process just
+  //      finished refreshing — use their fresh token, no server call,
+  //      no rotation.
+  //   3. Otherwise actually refresh, write keychain.
+  //
+  // For 100 agents at typical traffic this collapses N concurrent
+  // refreshes per "true expiry" event into 1 — steady-state refresh
+  // rate drops from O(agents × traffic) to O(traffic / token_TTL).
+  //
+  // `lastIssuedToken` is the closure-captured "what this auth pipe
+  // most recently observed/issued". Initialized to the first read in
+  // getAuth, advanced on every successful refresh AND on every
+  // skip-via-keychain. The compare in step 2 uses it as the "is the
+  // keychain newer than what I have?" signal. Without `lastIssuedToken`
+  // we'd compare against `oauth.accessToken` (frozen at session start)
+  // and incorrectly classify our own already-issued refresh as "newer
+  // than us".
+  let lastIssuedToken = oauth.accessToken
+  let lastIssuedRefreshToken = oauth.refreshToken
+  let lastIssuedExpiresAt = oauth.expiresAt ?? 0
+  const lockPath = join(
+    homedir(),
+    ".minimal-agent",
+    `.refresh-${sanitizeServiceName(service)}.lock`,
+  )
+
+  const doRefreshUnlocked = async (): Promise<AuthResult> => {
     const current = read(service) ?? creds
     const currentOauth = current.claudeAiOauth
+
+    // Keychain may already hold a fresher token (another process refreshed
+    // while we were waiting on the lock). Use it directly — no server
+    // round-trip, no rotation, no race propagation.
+    const keychainHasNewerToken =
+      currentOauth?.accessToken &&
+      currentOauth.accessToken !== lastIssuedToken &&
+      (currentOauth.refreshToken != null
+        ? currentOauth.refreshToken !== lastIssuedRefreshToken
+        : currentOauth.expiresAt != null && currentOauth.expiresAt > lastIssuedExpiresAt)
+
+    if (keychainHasNewerToken) {
+      lastIssuedToken = currentOauth.accessToken
+      lastIssuedRefreshToken = currentOauth.refreshToken
+      lastIssuedExpiresAt = currentOauth.expiresAt ?? 0
+      return {
+        type: "oauth",
+        token: currentOauth.accessToken,
+        accountUuid: current.oauthAccount?.accountUuid ?? accountUuid,
+        organizationUuid: current.oauthAccount?.organizationUuid ?? organizationUuid,
+        refresh: doRefresh,
+      }
+    }
+
     if (!currentOauth?.refreshToken) {
       throw new Error(
         "No refresh token available. Run `minimal-agent --login` (or `claude`) to sign in.",
@@ -440,6 +513,9 @@ export async function getAuth(
       },
     }
     write(updated, service)
+    lastIssuedToken = refreshed.accessToken
+    lastIssuedRefreshToken = refreshed.refreshToken
+    lastIssuedExpiresAt = refreshed.expiresAt
 
     return {
       type: "oauth",
@@ -448,6 +524,23 @@ export async function getAuth(
       organizationUuid: current.oauthAccount?.organizationUuid ?? organizationUuid,
       refresh: doRefresh,
     }
+  }
+
+  const doRefresh = async (): Promise<AuthResult> => {
+    // Skip the lock entirely under the test-only env flag (some tests
+    // inject fake `read`/`write`/`refresh` deps and don't want to
+    // touch the real filesystem at all).
+    if (deps.read || deps.write || deps.refresh) {
+      return await doRefreshUnlocked()
+    }
+    const result = await withLock(lockPath, { timeoutMs: 5000 }, doRefreshUnlocked)
+    if (result.ok) return result.value
+    // Lock acquisition timed out (5s without progress). Fall through to
+    // an unlocked refresh — uncoordinated, but better than blocking
+    // forever. The keychain re-read in `doRefreshUnlocked` still gives
+    // us the keychain-first benefit if another process happened to
+    // finish writing while we were waiting.
+    return await doRefreshUnlocked()
   }
 
   // Proactively refresh if token is expired or about to expire
