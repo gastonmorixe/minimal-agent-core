@@ -31,7 +31,7 @@ function dimWrap(text: string): string {
   return `\x1b[2m${text}\x1b[22m`
 }
 
-const DEFAULT_BLINK_MS = 300
+const DEFAULT_BLINK_MS = 500
 
 export interface BlinkingNerdSpinnerTheme {
   blinkMs?: number
@@ -116,7 +116,15 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
       return { glyph: dimWrap(spec), requestedFps }
     }
 
-    const colorizer = palette.length > 0 ? palette[step % palette.length] : undefined
+    // Color advances ONCE per on/off cycle so the visible sequence is
+    // [color0, dim, color1, dim, color2, dim, …] — every palette entry
+    // gets its turn. Using `step % len` directly would skip odd-indexed
+    // entries (only even `step`s reach here), producing
+    // [color0, dim, color2, dim, color4, dim, color1, …] — entries are
+    // visited but not in declared order, which reads as "random colors"
+    // instead of a clean rainbow walk.
+    const colorIndex = Math.floor(step / 2)
+    const colorizer = palette.length > 0 ? palette[colorIndex % palette.length] : undefined
     const glyph = typeof colorizer === "function" ? colorizer(spec) : spec
     return { glyph, requestedFps }
   }

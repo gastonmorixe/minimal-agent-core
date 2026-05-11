@@ -148,8 +148,9 @@ describe("SpinnerManager", () => {
 })
 
 describe("BlinkingNerdSpinner", () => {
-  it("pulses (same glyph, different SGR) at 300ms and maps icon by notification id", () => {
+  it("pulses (same glyph, different SGR) and maps icon by notification id", () => {
     const spinner = new BlinkingNerdSpinner({
+      blinkMs: 300,
       iconByNotificationId: {
         "network.request": "NET",
       },
@@ -179,6 +180,47 @@ describe("BlinkingNerdSpinner", () => {
     expect(onFrame2.glyph).toBe("C:NET")
   })
 
+  it("cycles palette in declared order across on-frames (color1 → blink → color2 → blink → …)", () => {
+    // Regression for the bug where `palette[step % len]` advanced the
+    // color on EVERY frame (on-step and off-step alike), so on-frames
+    // only ever saw even-indexed entries — a 5-color palette became
+    // [c0, dim, c2, dim, c4, dim, c1, dim, c3, dim, …]. The fix uses
+    // Math.floor(step / 2) for the color index so successive on-frames
+    // walk c0, c1, c2, … in order.
+    const spinner = new BlinkingNerdSpinner({
+      blinkMs: 100,
+      iconByNotificationId: { "x.test": "X" },
+      // Easy-to-distinguish palette tags so the cycle order is obvious.
+      colorizers: [(t) => `c0:${t}`, (t) => `c1:${t}`, (t) => `c2:${t}`, (t) => `c3:${t}`],
+    })
+    const base = {
+      now: 0,
+      startedAt: 0,
+      maxFps: 30,
+      currentFps: 30,
+      theme: {},
+      notification: { notificationId: "x.test" },
+    }
+    const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
+    // 8 on/off pairs = full 4-color cycle + first color of next cycle.
+    const sequence = Array.from(
+      { length: 10 },
+      (_, i) => spinner.render({ ...base, elapsedMs: i * 100 }).glyph,
+    )
+    expect(sequence).toEqual([
+      "c0:X", // step 0: on, color 0
+      dim("X"), // step 1: dim
+      "c1:X", // step 2: on, color 1 (was "c2:X" before fix — the bug)
+      dim("X"), // step 3: dim
+      "c2:X", // step 4: on, color 2
+      dim("X"), // step 5: dim
+      "c3:X", // step 6: on, color 3 (last in palette)
+      dim("X"), // step 7: dim
+      "c0:X", // step 8: wrap to color 0
+      dim("X"), // step 9: dim
+    ])
+  })
+
   it("on-step and off-step have IDENTICAL display width (no jiggle)", () => {
     // Cover the three icon-width regimes. "NET" is 3 ASCII cells,
     // "●" is 1 cell, "\u{F1064}" is the 󱁤 nf-md-tools PUA glyph (cell
@@ -192,6 +234,7 @@ describe("BlinkingNerdSpinner", () => {
     ]
     for (const { name, spec } of cases) {
       const spinner = new BlinkingNerdSpinner({
+        blinkMs: 300,
         iconByNotificationId: { "x.test": spec },
       })
       const base = {
