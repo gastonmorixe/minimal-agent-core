@@ -122,6 +122,7 @@ export class Compositor {
   private lastDrawColumns = 0
   private lastLines: string[] = []
   private lastCursor: { row: number; col: number } | null = null
+  private drawnLiveKey: string | null = null
 
   constructor(opts: CompositorOptions = {}) {
     this.output = opts.output ?? (process.stdout as CompositorOutput)
@@ -178,6 +179,7 @@ export class Compositor {
     this.lastDrawColumns = 0
     this.lastLines = []
     this.lastCursor = null
+    this.drawnLiveKey = null
   }
 
   writeStream(chunk: string): void {
@@ -304,6 +306,7 @@ export class Compositor {
     parts.push(this.esu)
     this.output.write(parts.join(""))
     this.lastDrawColumns = this.effectiveColumns()
+    this.drawnLiveKey = liveAreaKey(this.lastLines, this.lastCursor)
   }
 
   /**
@@ -334,23 +337,29 @@ export class Compositor {
   }
 
   setLiveArea(lines: string[], cursor: { row: number; col: number } | null): void {
-    this.lastLines = [...lines]
-    this.lastCursor = cursor ? { ...cursor } : null
+    const nextLines = [...lines]
+    const nextCursor = cursor ? { ...cursor } : null
+    const nextKey = liveAreaKey(nextLines, nextCursor)
+    this.lastLines = nextLines
+    this.lastCursor = nextCursor
     if (!this.tty || !this.mounted) return
+    if (this.liveHeightValue > 0 && this.drawnLiveKey === nextKey && !this.hasColsDrift()) return
     // Detect silent cols changes (PTY-size jitter, SIGWINCH that hasn't
     // hit `editor.notifyResize()` yet, terminals whose TIOCGWINSZ races
     // with their actual width). The recovery wipes the viewport and
     // zeroes our counters so `drawLiveSeq` starts at home with no stale
     // wrapped content lurking above the new draw.
     this.maybeRecoverFromColsDrift()
+    const repaintExistingLiveArea = this.liveHeightValue > 0
     const parts: string[] = []
     parts.push(this.bsu)
     parts.push("\x1b[?25l")
-    parts.push(this.eraseLiveSeq())
-    parts.push(this.drawLiveSeq())
+    parts.push(this.eraseLiveSeq({ includeSepRows: !repaintExistingLiveArea }))
+    parts.push(this.drawLiveSeq({ reuseExistingGap: repaintExistingLiveArea }))
     parts.push(this.esu)
     this.output.write(parts.join(""))
     this.lastDrawColumns = this.effectiveColumns()
+    this.drawnLiveKey = nextKey
   }
 
   /**
@@ -370,6 +379,7 @@ export class Compositor {
     } finally {
       this.streamCol = 0 // assume callback left a clean line
       this.output.write(this.bsu + "\x1b[?25l" + this.drawLiveSeq() + this.esu)
+      this.drawnLiveKey = liveAreaKey(this.lastLines, this.lastCursor)
     }
   }
 
@@ -422,6 +432,7 @@ export class Compositor {
     this.liveSepDrawn = false
     this.sepRowsAboveLive = 0
     this.lastDrawColumns = 0
+    this.drawnLiveKey = null
   }
 
   /**
@@ -438,55 +449,57 @@ export class Compositor {
    * when cols hasn't moved. Also no-op when the terminal is detached.
    */
   private maybeRecoverFromColsDrift(): boolean {
+    if (!this.hasColsDrift()) return false
+    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
+    this.resetLiveCounters()
+    return true
+  }
+
+  private hasColsDrift(): boolean {
     if (!this.tty || !this.mounted) return false
     if (this.lastDrawColumns === 0) return false
     const now = this.effectiveColumns()
     // `effectiveColumns()` returns 0 only when both `output.columns` and
     // `$COLUMNS` are unavailable; in that case we have no signal to act
     // on, so leave the counters alone.
-    if (now === 0 || now === this.lastDrawColumns) return false
-    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
-    this.resetLiveCounters()
-    return true
+    return now !== 0 && now !== this.lastDrawColumns
   }
 
   // ------------------------- internal sequences -------------------------
 
-  private eraseLiveSeq(): string {
+  private eraseLiveSeq(opts: { includeSepRows?: boolean } = {}): string {
     if (this.liveHeightValue === 0) {
       // No live area drawn yet; nothing to erase. Cursor is at the natural
       // stream position already.
       return ""
     }
+    const includeSepRows = opts.includeSepRows !== false
     const parts: string[] = []
     // Move from editor cursor row up to top of live area, col 0.
     if (this.cursorRowInLive > 0) {
       parts.push(`\x1b[${this.cursorRowInLive}A`)
     }
     parts.push("\r")
-    // Walk back over any `\r\n` rows that `drawLiveSeq` emitted between
-    // the previous scrollback cursor and the live area's first row
-    // (forced mid-line CRLF + smart-skip separator). We need to land
-    // back at the original scrollback cursor so the next chunk write
-    // appends naturally; failing to step over these would write the
-    // chunk on top of a separator row, producing visual corruption.
-    if (this.sepRowsAboveLive > 0) {
+    // Stream writes must walk back over any rows that `drawLiveSeq`
+    // emitted above the live area. Pure live-area repaints stay on the
+    // live area's first row so the prompt does not move into the gap.
+    if (includeSepRows && this.sepRowsAboveLive > 0) {
       parts.push(`\x1b[${this.sepRowsAboveLive}A`)
     }
     if (this.streamCol > 0) {
       parts.push(`\x1b[${this.streamCol}C`)
     }
-    // Erase from cursor to end of screen — wipes the live area, the
-    // separator rows above, and any trailing characters past streamCol
-    // on the current row (which should be empty).
+    // Erase from cursor to end of screen. For stream writes, this also
+    // erases separator rows above the live area.
     parts.push("\x1b[J")
     this.liveHeightValue = 0
     this.cursorRowInLive = 0
-    this.sepRowsAboveLive = 0
+    this.drawnLiveKey = null
+    if (includeSepRows) this.sepRowsAboveLive = 0
     return parts.join("")
   }
 
-  private drawLiveSeq(): string {
+  private drawLiveSeq(opts: { reuseExistingGap?: boolean } = {}): string {
     const lines = this.lastLines
     const cursor = this.lastCursor
     if (lines.length === 0) {
@@ -494,27 +507,31 @@ export class Compositor {
       return cursor ? "\x1b[?25h" : "\x1b[?25l"
     }
     const parts: string[] = []
-    // Live area must start at column 0 of a fresh line. If the stream
-    // cursor is mid-line, write CRLF first so the live area doesn't
-    // collide with stream content.
-    let sepConsumed = 0 // count of \r\n we emit for separator/forced
-    if (this.streamCol > 0) {
-      parts.push("\r\n")
-      sepConsumed++
+    const reuseExistingGap = opts.reuseExistingGap === true && this.liveSepDrawn
+    let sepConsumed = reuseExistingGap ? this.sepRowsAboveLive : 0
+    if (!reuseExistingGap) {
+      // Live area must start at column 0 of a fresh line. If the stream
+      // cursor is mid-line, write CRLF first so the live area doesn't
+      // collide with stream content.
+      sepConsumed = 0 // count of \r\n we emit for separator/forced
+      if (this.streamCol > 0) {
+        parts.push("\r\n")
+        sepConsumed++
+      }
+      // Smart-skip blank separator above the live area. Goal: exactly one
+      // visible blank row between scrollback content and the live area's
+      // first row. Skip when scrollback already ends with a blank row
+      // (consecutiveNewlines >= 2 → one or more blanks already emitted).
+      // The mid-line `\r\n` above counts as the row terminator only — it
+      // doesn't itself create a blank — so when streamCol > 0 we still
+      // need the separator.
+      const alreadyBlank = this.streamCol === 0 && this.consecutiveNewlines >= 2
+      if (!this.liveSepDrawn && !alreadyBlank) {
+        parts.push("\r\n")
+        sepConsumed++
+      }
+      this.liveSepDrawn = true
     }
-    // Smart-skip blank separator above the live area. Goal: exactly one
-    // visible blank row between scrollback content and the live area's
-    // first row. Skip when scrollback already ends with a blank row
-    // (consecutiveNewlines >= 2 → one or more blanks already emitted).
-    // The mid-line `\r\n` above counts as the row terminator only — it
-    // doesn't itself create a blank — so when streamCol > 0 we still
-    // need the separator.
-    const alreadyBlank = this.streamCol === 0 && this.consecutiveNewlines >= 2
-    if (!this.liveSepDrawn && !alreadyBlank) {
-      parts.push("\r\n")
-      sepConsumed++
-    }
-    this.liveSepDrawn = true
     this.sepRowsAboveLive = sepConsumed
     for (let i = 0; i < lines.length; i++) {
       parts.push(lines[i])
@@ -582,4 +599,8 @@ function suffixAfterLastRedrawClear(chunk: string): string | null {
     end = (match.index ?? 0) + match[0].length
   }
   return end === -1 ? null : chunk.slice(end)
+}
+
+function liveAreaKey(lines: string[], cursor: { row: number; col: number } | null): string {
+  return JSON.stringify([lines, cursor])
 }

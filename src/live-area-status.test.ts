@@ -92,6 +92,22 @@ describe("LiveAreaStatusController", () => {
     ctrl.stop()
   })
 
+  it("does not animate status rows by default", async () => {
+    const bus = new StatusBus()
+    const editor = new FakeEditor()
+    const ctrl = new LiveAreaStatusController(bus, editor, {
+      spinner: fakeSpinner,
+    })
+    ctrl.start()
+    bus.create("steady", { notificationId: "n4", category: "agent" })
+    const afterCreate = editor.statuses.length
+
+    await new Promise((resolve) => setTimeout(resolve, 120))
+
+    expect(editor.statuses.length).toBe(afterCreate)
+    ctrl.stop()
+  })
+
   it("pulse-stable: on-frame and off-frame status strings have identical visible width", () => {
     // Drive the real BlinkingNerdSpinner so we exercise the actual
     // pulse-instead-of-blink behavior: both frames emit the same

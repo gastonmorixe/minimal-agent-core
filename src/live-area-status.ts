@@ -47,7 +47,7 @@ export class LiveAreaStatusController implements StatusController {
   constructor(bus: StatusBus, editor: EditorStatusSink, opts: LiveAreaStatusOptions = {}) {
     this.bus = bus
     this.editor = editor
-    this.maxFps = opts.maxFps ?? 12.5
+    this.maxFps = opts.maxFps ?? 0
     this.baseTheme = opts.spinnerTheme ?? {}
     this.spinnerManager = new SpinnerManager<StatusSpinnerTheme>({
       spinner: opts.spinner ?? new BlinkingNerdSpinner(),

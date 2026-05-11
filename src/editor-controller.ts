@@ -350,6 +350,7 @@ export class EditorController extends EventEmitter {
    */
   setStatus(text: string | null): void {
     const next = text == null ? null : text
+    if (next != null && next.length > 0) this.statusRowReserved = true
     if (this.statusLine === next) return
     this.statusLine = next
     this.repaint()
@@ -360,6 +361,7 @@ export class EditorController extends EventEmitter {
   }
 
   private statusLine: string | null = null
+  private statusRowReserved = false
   /**
    * Decoration rows rendered between the status row and the editor prompt.
    * Used by the REPL to surface the queued-message buffer above the input
@@ -963,31 +965,16 @@ export class EditorController extends EventEmitter {
     // cursor-only repaints don't generate spurious events.
     if (this.started) this.scheduleInputEmit()
     const cols = (this.output as { columns?: number }).columns
-    // Always reserve exactly 1 header row above the editor prompt.
-    // When a status message is active it shows the spinner + label; when idle
-    // (statusLine == null) it is rendered as a blank line.  Keeping the row
-    // count constant means the prompt never jumps when status appears or
-    // disappears — in particular, `turnStatus.clear()` at end-of-turn no
-    // longer causes the prompt to hop up one row (the "blank line at the
-    // bottom" bug that occurred because the former STATUS row was vacated).
     const decorationRows = this.decorationLines.length
-    // Status row is rendered ONLY when filled. When idle (no status) we
-    // omit the row entirely so the live area is just `[editor, footer]`
-    // — no leading blank above the editor at idle. The "1 blank above
-    // live area" rule comes from `Compositor.drawLiveSeq`'s smart-skip
-    // separator (handles the scrollback↔live-area boundary). The editor
-    // shifts down by `1 + 2` rows when status appears (status row + 2
-    // gap rows), which is the visually intended cue for "agent active".
+    // Do not reserve the status band at cold idle. Once a status has
+    // appeared, keep the band as blank rows when idle so status clear does
+    // not move the prompt.
     const statusFilled = this.statusLine != null && this.statusLine.length > 0
-    // Blank rows BETWEEN status and editor (only when status is filled).
-    // The user explicitly requested visual breathing room between the
-    // mid-turn status indicator and the editor input — see annotations
-    // on the May 2026 layout-fix request.
-    // Refined from 2 → 1 (May 2026 user feedback: 2 rows of gap visually
-    // overshoots — 1 row is enough breathing room between the `● Thinking`
-    // status indicator and the prompt below).
-    const statusGapRows = statusFilled ? 1 : 0
-    const statusRows = (statusFilled ? 1 : 0) + decorationRows
+    const statusReserved = statusFilled || this.statusRowReserved
+    // One blank row between the status band and the editor keeps busy
+    // state readable without moving the prompt again at end of turn.
+    const statusGapRows = statusReserved ? 1 : 0
+    const statusRows = (statusReserved ? 1 : 0) + decorationRows
     // A blank row between editor content and the footer when both are
     // present, so footer lines (quota, ambient status, etc.) don't visually
     // butt against the prompt's `❯ ` row.
@@ -1120,7 +1107,7 @@ export class EditorController extends EventEmitter {
     // Cursor offset = (statusRows = statusFilled?1:0 + decorationRows)
     //               + statusGapRows + indicatorOffset.
     const decoration = this.decorationLines
-    const head: string[] = statusFilled ? [statusLine] : []
+    const head: string[] = statusReserved ? [statusLine] : []
     const gap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
     const footer = this.footerLines
     const footerWithSpacer = footer.length > 0 ? ["", ...footer] : []

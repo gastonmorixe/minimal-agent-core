@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { FakeTerminal } from "../test-utils/fake-terminal.ts"
 import { Compositor, updateStreamCol } from "./compositor.ts"
 
 type Capture = {
@@ -127,6 +128,42 @@ describe("Compositor (setLiveArea)", () => {
     expect(out).toContain("a\x1b[K\r\nb\x1b[K\r\nc\x1b[K")
     // No upward movement needed: cursor target is the last row.
     expect(c.liveHeight).toBe(3)
+  })
+
+  it("keystroke redraw keeps the prompt on the same row after a trailing newline stream", () => {
+    const term = new FakeTerminal({ cols: 80, rows: 12, scrollbackLimit: 20 })
+    const c = new Compositor({
+      output: {
+        isTTY: true,
+        columns: term.cols,
+        rows: term.rows,
+        write: (s: string) => {
+          term.feed(s)
+          return true
+        },
+      },
+    })
+    c.mount()
+    c.writeStream("  error API 429\n")
+    c.setLiveArea(["❯ ", "", "-"], { row: 0, col: 2 })
+    const promptRowBefore = term.screen().findIndex((line) => line.includes("❯"))
+    expect(promptRowBefore).toBeGreaterThanOrEqual(0)
+
+    c.setLiveArea(["❯ h", "", "-"], { row: 0, col: 3 })
+    const promptRowAfter = term.screen().findIndex((line) => line.includes("❯ h"))
+    expect(promptRowAfter).toBe(promptRowBefore)
+  })
+
+  it("skips byte-identical live-area redraws", () => {
+    const cap = makeOutput()
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    cap.writes.length = 0
+
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+
+    expect(cap.writes).toEqual([])
   })
 })
 

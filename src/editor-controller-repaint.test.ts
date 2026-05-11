@@ -123,4 +123,30 @@ describe("EditorController — paint amplification (B3)", () => {
 
     ed.stop()
   })
+
+  it("keeps the prompt row reserved after status clears", () => {
+    const stdin = new FakeStdin()
+    const output = new FakeOutput()
+    const spy = makeCompositorSpy()
+
+    const ed = new EditorController({
+      prompt: "❯ ",
+      continuationPrompt: "  ",
+      compositor: spy.compositor,
+      stdin: stdin as any,
+      output: output as any,
+    })
+    ed.start()
+
+    ed.setStatus("Thinking")
+    const withStatus = spy.calls[spy.calls.length - 1]
+    ed.setStatus(null)
+    const afterClear = spy.calls[spy.calls.length - 1]
+
+    expect(withStatus.cursor).toEqual({ row: 2, col: 2 })
+    expect(afterClear.cursor).toEqual({ row: 2, col: 2 })
+    expect(afterClear.lines).toEqual(["", "", "❯ "])
+
+    ed.stop()
+  })
 })
