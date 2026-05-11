@@ -77,10 +77,13 @@ import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import { formatStartupToolsRow } from "./startup-tools-row.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
+import { runAuthStatusCommand } from "./commands/auth-status.ts"
 import { runDumpCommand, DumpCommandError } from "./commands/dump.ts"
 import { runListFlagsCommand } from "./commands/list-flags.ts"
 import { runListModelsCommand } from "./commands/list-models.ts"
 import { runListSpinnersCommand } from "./commands/list-spinners.ts"
+import { runLoginCommand } from "./commands/login.ts"
+import { runLogoutCommand } from "./commands/logout.ts"
 import { resolveSessionTarget } from "./commands/session-index.ts"
 import { runSessionsCommand } from "./commands/sessions.ts"
 
@@ -201,12 +204,24 @@ const dumpArg = dumpIdx !== -1 && args[dumpIdx + 1] ? args[dumpIdx + 1] : undefi
 const dumpFormatIdx = args.indexOf("--dump-format")
 const dumpFormatArg =
   dumpFormatIdx !== -1 && args[dumpFormatIdx + 1] ? args[dumpFormatIdx + 1] : "md"
+
+// Auth top-level commands. None of these consume credentials at startup —
+// `--login` would be impossible if it did (cold-start case) — so they
+// branch ahead of `getAuth()` in the `main()` switch. See
+// src/cli/command-plan.ts for the full capability matrix.
+const wantLogin = args.includes("--login")
+const wantLogout = args.includes("--logout")
+const wantAuthStatus = args.includes("--auth-status")
+
 const commandPlan = planCommand({
   dumpArg,
   wantListSessions,
   wantListFlags,
   wantListSpinners,
   wantListModels,
+  wantLogin,
+  wantLogout,
+  wantAuthStatus,
 })
 
 function printHelp(): void {
@@ -233,6 +248,11 @@ function printHelp(): void {
     `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
     `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
     `    ${c.cyan("--show-hidden-chars")}      Reveal spaces/tabs/newlines as faint glyphs (input editor + --debug output)`,
+    "",
+    `  ${c.bold("Auth")} ${c.dim("(also as subcommands: `login`, `logout`, `auth-status`)")}`,
+    `    ${c.cyan("--login")} ${c.dim("[--email <addr>]")}   Sign in via OAuth (PKCE manual-paste flow)`,
+    `    ${c.cyan("--logout")}                   Clear keychain credentials and ${c.dim("~/.claude.json")} oauthAccount`,
+    `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
     "",
     `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
     `    ${c.cyan("--list-models")} ${c.dim("/")} ${c.cyan("--models")}       Fetch and display available models`,
@@ -454,6 +474,99 @@ async function extractPrompt(): Promise<string | null> {
   return null
 }
 
+/**
+ * Wrap `getAuth()` with a first-time / stale-credentials login prompt.
+ *
+ * On a fresh install the keychain has no `Claude Code-credentials` entry;
+ * `getAuth()` throws `"No credentials in keychain. …"`. Rather than dump
+ * the user back at the shell with an error, we detect that case in
+ * interactive mode (TTY on stdout AND stdin) and offer to run `--login`
+ * inline. If they accept, we run the OAuth flow and retry `getAuth()`.
+ *
+ * Non-interactive runs (non-TTY, `--prompt`, piped stdin) keep the current
+ * "fail fast with a hint" behavior — script-friendly and predictable.
+ *
+ * Stale credentials (refresh token rejected) take a similar path: we surface
+ * the error and ask if they want to re-login. `getAuth()` itself doesn't
+ * eagerly refresh unless the token is within `EXPIRY_BUFFER_MS` of expiry,
+ * so this branch only fires when we're about to make a real API call AND
+ * the cached token won't survive it. The 401-after-refresh case in
+ * `client.ts` is handled separately (it bubbles a clean error that already
+ * mentions `--login`).
+ */
+async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<typeof getAuth>>> {
+  try {
+    return await getAuth()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const looksLikeMissing =
+      /No credentials in keychain|No OAuth access token|No refresh token/i.test(msg)
+    const looksLikeStale = /invalid_grant|stale/i.test(msg)
+    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true
+
+    if (!interactive || (!looksLikeMissing && !looksLikeStale)) {
+      throw err
+    }
+
+    // Interactive — offer a one-shot login. Print the diagnosis first so
+    // the user sees WHY the prompt appeared, then ask y/N. Default is
+    // "no" for stale credentials (user might prefer to re-run with
+    // different flags) and "yes" for fresh installs (the only sane next
+    // step).
+    const headline = looksLikeMissing
+      ? `${c.bold("Welcome to minimal-agent")} — you're not signed in yet.`
+      : `${c.bold("Credentials expired")} — refresh token rejected.`
+    console.error("")
+    console.error(`  ${c.bold(c.pink("⮕"))} ${headline}`)
+    console.error(`  ${c.faintWhite("│")} ${c.dim(msg)}`)
+    const defaultYes = looksLikeMissing
+    const promptText = `  ${c.faintWhite("│")} Sign in now? ${c.dim(defaultYes ? "[Y/n]" : "[y/N]")} `
+    const answer = await readSingleLineFromStdin(promptText)
+    const yes = answer === "" ? defaultYes : /^y(es)?$/i.test(answer.trim())
+    if (!yes) {
+      console.error(
+        `  ${c.faintWhite("╰")} ${c.dim("aborted — run `minimal-agent --login` later to sign in.")}`,
+      )
+      throw err
+    }
+    console.error(`  ${c.faintWhite("╰")} ${c.dim("starting login…")}`)
+    console.error("")
+
+    const code = await runLoginCommand()
+    if (code !== 0) {
+      // Preserve the original error as `cause` so callers (or a future
+      // structured-logging hook) can surface BOTH the post-login retry
+      // failure AND the original "no creds / invalid_grant" diagnosis.
+      throw new Error(
+        "Login failed; see messages above. Re-run `minimal-agent --login` to retry.",
+        { cause: err },
+      )
+    }
+    // Login wrote the keychain; retry. If THIS still fails, surface
+    // the error — we're not going to loop.
+    return await getAuth()
+  }
+}
+
+/**
+ * Read one line from stdin without entering raw mode. Used for the
+ * first-time-login y/N prompt. Implementation is the same shape as
+ * `commands/login.ts`'s `readLine` but inlined so we don't pull in the
+ * full login command module before we know it's needed.
+ */
+async function readSingleLineFromStdin(promptText: string): Promise<string> {
+  const { createInterface } = await import("node:readline")
+  return new Promise<string>((resolve) => {
+    process.stderr.write(promptText)
+    const rl = createInterface({ input: process.stdin, terminal: false })
+    rl.once("line", (line) => {
+      rl.close()
+      resolve(line)
+    })
+    rl.once("close", () => resolve(""))
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -512,6 +625,28 @@ async function main() {
       await runListModelsCommand(auth)
       return
     }
+    case "login": {
+      // OAuth login flow. Never reads existing credentials — the whole
+      // point of the command is to acquire (or replace) them. Email
+      // pre-fill: `--login --email foo@bar.com` (or `--email-hint` if you
+      // squint at the upstream CLI). We accept either form.
+      const emailIdx =
+        args.indexOf("--email") !== -1 ? args.indexOf("--email") : args.indexOf("--email-hint")
+      const loginHint =
+        emailIdx !== -1 && args[emailIdx + 1] && !args[emailIdx + 1].startsWith("-")
+          ? args[emailIdx + 1]
+          : undefined
+      const code = await runLoginCommand({ loginHint })
+      process.exit(code)
+    }
+    case "logout": {
+      const code = await runLogoutCommand()
+      process.exit(code)
+    }
+    case "auth-status": {
+      const code = await runAuthStatusCommand()
+      process.exit(code)
+    }
     case "run":
       break
   }
@@ -519,7 +654,7 @@ async function main() {
   printStartupHeader()
   printStartupRow("session", c.dim(getSessionId()))
 
-  const auth = await getAuth()
+  const auth = await getAuthWithFirstTimePrompt()
   printStartupRow(
     "auth",
     `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`,
