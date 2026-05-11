@@ -34,19 +34,19 @@ describe("buildResumeHeader", () => {
 })
 
 describe("replayToScrollback", () => {
-  it("renders a simple text-only conversation in dim", () => {
+  it("renders a simple text-only conversation in dim", async () => {
     const messages: Message[] = [
       { role: "user", content: [{ type: "text", text: "hi" }] },
       { role: "assistant", content: [{ type: "text", text: "hello there" }] },
     ]
     const sink = new CaptureSink()
-    replayToScrollback(messages, sink)
+    await replayToScrollback(messages, sink)
     const plain = stripAnsi(sink.out)
     expect(plain).toContain("❯ hi")
     expect(plain).toContain("hello there")
   })
 
-  it("renders a tool_use under the assistant turn with its result preview", () => {
+  it("renders a tool_use under the assistant turn with its result preview", async () => {
     const messages: Message[] = [
       { role: "user", content: [{ type: "text", text: "list files" }] },
       {
@@ -62,7 +62,7 @@ describe("replayToScrollback", () => {
       { role: "assistant", content: [{ type: "text", text: "done" }] },
     ]
     const sink = new CaptureSink()
-    replayToScrollback(messages, sink)
+    await replayToScrollback(messages, sink)
     const plain = stripAnsi(sink.out)
     expect(plain).toContain("Bash")
     expect(plain).toContain("$ ls")
@@ -75,7 +75,7 @@ describe("replayToScrollback", () => {
     expect(userArrows).toBe(1) // only the original "list files" prompt
   })
 
-  it("annotates a tool_use with no on-disk result", () => {
+  it("annotates a tool_use with no on-disk result", async () => {
     const messages: Message[] = [
       { role: "user", content: [{ type: "text", text: "go" }] },
       {
@@ -84,7 +84,7 @@ describe("replayToScrollback", () => {
       },
     ]
     const sink = new CaptureSink()
-    replayToScrollback(messages, sink)
+    await replayToScrollback(messages, sink)
     expect(stripAnsi(sink.out)).toContain("(no result on disk)")
   })
 
@@ -114,7 +114,7 @@ describe("replayToScrollback", () => {
       },
     ]
     const sink = new CaptureSink()
-    replayToScrollback(messages, sink, { modeManager })
+    await replayToScrollback(messages, sink, { modeManager })
     const plain = stripAnsi(sink.out)
     // The activation tag itself never reaches the rendered output.
     expect(plain).not.toContain("<mode-change")
@@ -151,7 +151,7 @@ describe("replayToScrollback", () => {
       },
     ]
     const sink = new CaptureSink()
-    replayToScrollback(messages, sink, { modeManager })
+    await replayToScrollback(messages, sink, { modeManager })
     const plain = stripAnsi(sink.out)
     // The mid-loop user message (tool_result + mode-change) renders no
     // own header line, but its mode-change side effect carries forward.
@@ -162,7 +162,7 @@ describe("replayToScrollback", () => {
     expect(arrows).toBe(2)
   })
 
-  it("falls back to the bare arrow when no modeManager is supplied (back-compat)", () => {
+  it("falls back to the bare arrow when no modeManager is supplied (back-compat)", async () => {
     const messages: Message[] = [
       {
         role: "user",
@@ -173,7 +173,7 @@ describe("replayToScrollback", () => {
       },
     ]
     const sink = new CaptureSink()
-    replayToScrollback(messages, sink)
+    await replayToScrollback(messages, sink)
     const plain = stripAnsi(sink.out)
     // Activation tag is still stripped (it's a transport detail)…
     expect(plain).not.toContain("<mode-change")

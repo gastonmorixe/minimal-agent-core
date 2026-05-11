@@ -275,7 +275,7 @@ describe("EditorController — typing & submit", () => {
 })
 
 describe("EditorController — status row", () => {
-  it("setStatus(text) inserts status row + 2-blank gap above the editor", () => {
+  it("setStatus(text) inserts status row + 1-blank gap above the editor", () => {
     const { ctrl, compositor } = make()
     ctrl.start()
     // Idle: just the editor row (no status row when empty).
@@ -292,17 +292,15 @@ describe("EditorController — status row", () => {
     ctrl.stop()
   })
 
-  it("setStatus(null) drops the status row and gap, editor goes back to row 0", () => {
+  it("setStatus(null) keeps the reserved status band after first use", () => {
     const { ctrl, compositor } = make()
     ctrl.start()
     ctrl.setStatus("busy")
     compositor.liveHeightCalls.length = 0
     ctrl.setStatus(null)
-    // Idle layout restored: just the editor.
-    expect(compositor.last().lines).toEqual(["> "])
-    expect(compositor.last().cursor).toEqual({ row: 0, col: 2 })
-    // Height shrank back to 1.
-    expect(compositor.liveHeightCalls).toContain(1)
+    expect(compositor.last().lines).toEqual(["", "", "> "])
+    expect(compositor.last().cursor).toEqual({ row: 2, col: 2 })
+    expect(compositor.liveHeightCalls).toEqual([])
     ctrl.stop()
   })
 

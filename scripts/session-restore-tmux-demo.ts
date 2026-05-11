@@ -90,7 +90,7 @@ if (mode === "resume") {
       dropped: loaded.dropped.length,
     }),
   )
-  replayToScrollback(loaded.messages, { write: (s) => process.stdout.write(s) })
+  await replayToScrollback(loaded.messages, { write: (s) => process.stdout.write(s) })
   process.stdout.write("\n")
 
   const store = SessionStore.open({
