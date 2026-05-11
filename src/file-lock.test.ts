@@ -60,7 +60,7 @@ describe("lockPathFor", () => {
   it("appends .locked to the file path", () => {
     expect(lockPathFor("/tmp/foo.ts")).toBe("/tmp/foo.ts.locked")
   })
-  it("idempotent under repeated suffix only by accident — caller is responsible", () => {
+  it("idempotent under repeated suffix only by accident : caller is responsible", () => {
     // Documents that we don't dedupe; lockPathFor("x.locked") -> "x.locked.locked"
     expect(lockPathFor("/tmp/foo.locked")).toBe("/tmp/foo.locked.locked")
   })
@@ -304,14 +304,14 @@ describe("tryAcquireOnce", () => {
 })
 
 // ---------------------------------------------------------------------------
-// acquireLock — the public path
+// acquireLock : the public path
 // ---------------------------------------------------------------------------
 
 /**
  * Build a controllable LockOpts:
  *   - `now()` reads from a mutable cell so tests can step time forward.
  *   - `sleep()` advances time by the requested ms (so the next backoff
- *     attempt sees a later `now`) and returns immediately — no real wall
+ *     attempt sees a later `now`) and returns immediately : no real wall
  *     clock waits.
  *   - `pidAlive` defaults to "alive" but is replaceable.
  */
@@ -334,7 +334,7 @@ function fakeClock(start = 1_000_000): {
   }
 }
 
-describe("acquireLock — happy path", () => {
+describe("acquireLock : happy path", () => {
   it("acquires immediately when no contention", async () => {
     const file = join(dir, "h.txt")
     const handle = await acquireLock(file, { sessionId: "s1", tool: "Edit" })
@@ -355,7 +355,7 @@ describe("acquireLock — happy path", () => {
   })
 })
 
-describe("acquireLock — same-session reentrancy", () => {
+describe("acquireLock : same-session reentrancy", () => {
   it("returns a no-op handle when our own session+pid already holds the lock", async () => {
     const file = join(dir, "j.txt")
     const first = await acquireLock(file, { sessionId: "s1", tool: "Edit" })
@@ -372,7 +372,7 @@ describe("acquireLock — same-session reentrancy", () => {
   })
 })
 
-describe("acquireLock — stale detection breaks and continues", () => {
+describe("acquireLock : stale detection breaks and continues", () => {
   it("breaks a lock whose holder PID is dead (same-host)", async () => {
     const file = join(dir, "k.txt")
     const dead = buildHolder({
@@ -431,7 +431,7 @@ describe("acquireLock — stale detection breaks and continues", () => {
   })
 })
 
-describe("acquireLock — contention with backoff", () => {
+describe("acquireLock : contention with backoff", () => {
   it("waits, retries, succeeds when the holder releases", async () => {
     const file = join(dir, "n.txt")
     const fc = fakeClock()
@@ -510,7 +510,7 @@ describe("acquireLock — contention with backoff", () => {
     expect(e.holder?.sessionId).toBe("stuckpeer")
     expect(e.message).toContain("locked")
     expect(e.message).toContain("stuckpeer")
-    // Other peer's lock must still be there — we didn't smash it.
+    // Other peer's lock must still be there : we didn't smash it.
     expect(existsSync(e.lockPath)).toBe(true)
   })
 

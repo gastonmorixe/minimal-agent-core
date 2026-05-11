@@ -1,7 +1,7 @@
 /**
  * Tests for the file-lock CLI.
  *
- * `runCli(argv)` is exercised directly — it returns `{exitCode, stdout, stderr}`
+ * `runCli(argv)` is exercised directly : it returns `{exitCode, stdout, stderr}`
  * without touching the real process, so we can assert each subcommand's
  * shape without spawning subprocesses. Argument-parsing is also unit-tested
  * via `parseArgs(argv)`.
@@ -89,7 +89,7 @@ describe("parseArgs", () => {
 // runCli
 // ---------------------------------------------------------------------------
 
-describe("runCli — usage / help", () => {
+describe("runCli : usage / help", () => {
   it("no args returns exit 2 + usage", () => {
     const r = runCli([])
     expect(r.exitCode).toBe(2)
@@ -109,7 +109,7 @@ describe("runCli — usage / help", () => {
   })
 })
 
-describe("runCli — list", () => {
+describe("runCli : list", () => {
   it("empty cwd: no locks", () => {
     const r = runCli(["list"])
     expect(r.exitCode).toBe(0)
@@ -144,7 +144,7 @@ describe("runCli — list", () => {
   })
 })
 
-describe("runCli — inspect", () => {
+describe("runCli : inspect", () => {
   it("requires a positional FILE", () => {
     const r = runCli(["inspect"])
     expect(r.exitCode).toBe(2)
@@ -182,7 +182,7 @@ describe("runCli — inspect", () => {
   })
 })
 
-describe("runCli — clear-stale", () => {
+describe("runCli : clear-stale", () => {
   it("removes stale lock; keeps a held one", () => {
     const f1 = join(dir, "stale.txt") // dead pid
     const f2 = join(dir, "held.txt") // ours, very fresh
@@ -194,7 +194,7 @@ describe("runCli — clear-stale", () => {
     const h1raw = fs.readFileSync(lockPathFor(f1), "utf-8")
     const h1 = JSON.parse(h1raw.trim()) as Record<string, unknown>
     h1.pid = stalePid
-    h1.acquiredAtMs = 1 // also ancient — both stale signals
+    h1.acquiredAtMs = 1 // also ancient : both stale signals
     h1.acquiredAt = new Date(1).toISOString()
     fs.writeFileSync(lockPathFor(f1), JSON.stringify(h1) + "\n")
 
@@ -206,7 +206,7 @@ describe("runCli — clear-stale", () => {
   })
 })
 
-describe("runCli — clear", () => {
+describe("runCli : clear", () => {
   it("requires absolute FILE", () => {
     expect(runCli(["clear"]).exitCode).toBe(2)
     expect(runCli(["clear", "rel.txt"]).exitCode).toBe(2)
@@ -222,7 +222,7 @@ describe("runCli — clear", () => {
   })
 })
 
-describe("runCli — path", () => {
+describe("runCli : path", () => {
   it("prints the config path (matches MINIMAL_AGENT_CONFIG when set)", () => {
     const r = runCli(["path"])
     expect(r.exitCode).toBe(0)

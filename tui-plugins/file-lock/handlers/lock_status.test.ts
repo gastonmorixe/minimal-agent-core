@@ -1,8 +1,8 @@
 /**
  * Tests for `LockStatus` handler.
  *
- * The status-inference logic (`annotate`) is exercised in isolation —
- * status verdict = what the live acquirer would also conclude — and the
+ * The status-inference logic (`annotate`) is exercised in isolation :
+ * status verdict = what the live acquirer would also conclude : and the
  * action functions (`runList`, `runInspect`, `runClearStale`, `runClear`)
  * are exercised end-to-end with controlled disk state under a tmp dir.
  *
@@ -43,7 +43,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-// Shared deps factory — `pidAlive` returns true unless we override.
+// Shared deps factory : `pidAlive` returns true unless we override.
 function deps(over: Partial<RunDeps> = {}): RunDeps {
   return {
     cwd: dir,
@@ -133,7 +133,7 @@ describe("annotate", () => {
     expect(a.reason).toMatch(/old/)
   })
 
-  it("cross-host: different host, recent — held but unprobed", () => {
+  it("cross-host: different host, recent : held but unprobed", () => {
     const h = buildHolder({
       sessionId: "x",
       tool: "Edit",
@@ -209,7 +209,7 @@ describe("runList", () => {
     const parsed = JSON.parse(r.content) as { count: number; locks: unknown[] }
     expect(parsed.count).toBe(1)
     expect(parsed.locks).toHaveLength(1)
-    // display is still ANSI text — distinct from content.
+    // display is still ANSI text : distinct from content.
     expect(r.display).not.toBe(r.content)
   })
 
@@ -433,7 +433,7 @@ describe("default export adapter", () => {
   })
 })
 
-// Make sure the readdirSync-based listing has at least one matched file —
+// Make sure the readdirSync-based listing has at least one matched file :
 // a sanity check the test scaffolding writes lock files where we expect.
 describe("test scaffolding sanity", () => {
   it("writeLock + listLocksUnder roundtrip", () => {

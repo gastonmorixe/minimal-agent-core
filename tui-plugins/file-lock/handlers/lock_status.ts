@@ -1,5 +1,5 @@
 /**
- * `LockStatus` — model-facing CRUD-ish tool for cooperative file locks.
+ * `LockStatus` : model-facing CRUD-ish tool for cooperative file locks.
  *
  * Companion to the auto-locking wired into `Edit` / `Write` in `src/tools.ts`.
  * The locks themselves are written + parsed by `src/file-lock.ts`; this
@@ -7,15 +7,15 @@
  * operations to the model and (via the CLI) the human.
  *
  * Actions:
- *   - `list`        — every `*.locked` under `path` (default cwd), with holder
+ *   - `list`        : every `*.locked` under `path` (default cwd), with holder
  *                     details and an inferred status (`held` / `stale-pid` /
  *                     `stale-time` / `corrupt` / `cross-host`).
- *   - `inspect`     — one lock by file path.
- *   - `clear-stale` — auto-prune locks the live acquirer would also break:
+ *   - `inspect`     : one lock by file path.
+ *   - `clear-stale` : auto-prune locks the live acquirer would also break:
  *                     dead PID on this host OR older than `staleAfterMs`.
  *                     Corrupt lock files are also pruned (parse fails →
  *                     stale by definition).
- *   - `clear`       — force-remove a specific lock. Loud about whether the
+ *   - `clear`       : force-remove a specific lock. Loud about whether the
  *                     holder appears alive, so the model can second-guess
  *                     before smashing a peer.
  *
@@ -25,7 +25,7 @@
  *
  * Result shape: `tool_result` with both `content` (compact text/JSON for
  * the model) and `display` (pretty ANSI for the transcript). The two are
- * always semantically equivalent — the audience differs only in
+ * always semantically equivalent : the audience differs only in
  * formatting.
  *
  * @module file-lock/handlers/lock_status
@@ -84,7 +84,7 @@ function validate(raw: Record<string, unknown>): Validation {
     path = raw.path
   }
 
-  // `inspect` and `clear` require an explicit absolute path — without one
+  // `inspect` and `clear` require an explicit absolute path : without one
   // we can't unambiguously pick "the lock". `list` and `clear-stale` allow
   // omitting it (defaults to cwd).
   if ((action === "inspect" || action === "clear") && (!path || !isAbsolute(path))) {
@@ -243,7 +243,7 @@ export function runClearStale(input: ParsedInput, deps: RunDeps): RunResult {
         unlinkSync(a.lockPath)
         removed.push(a)
       } catch {
-        kept.push(a) // unlink failed — surface as still-there
+        kept.push(a) // unlink failed : surface as still-there
       }
     } else {
       kept.push(a)
@@ -284,7 +284,7 @@ export function runClear(input: ParsedInput, deps: RunDeps): RunResult {
   } catch (e) {
     return errorResult(`unlink failed: ${e instanceof Error ? e.message : String(e)}`)
   }
-  // Loud diagnostic when we just smashed a "held" lock — model should see
+  // Loud diagnostic when we just smashed a "held" lock : model should see
   // this in the result so it can flag the action to the user.
   const verdict = ann.status === "held" ? "WARNING: holder appears alive" : "OK"
   if (input.format === "json") {
@@ -301,7 +301,7 @@ export function runClear(input: ParsedInput, deps: RunDeps): RunResult {
 // Rendering
 // ---------------------------------------------------------------------------
 
-// Minimal ANSI helpers — we don't pull in the full palette here, just a
+// Minimal ANSI helpers : we don't pull in the full palette here, just a
 // few tokens for the transcript. The handler runs without colors when
 // piped (TTY detection is the agent's job).
 const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
@@ -409,7 +409,7 @@ function errorResult(msg: string): RunResult {
 }
 
 // ---------------------------------------------------------------------------
-// Default export — adapter from TUIContext to runX functions
+// Default export : adapter from TUIContext to runX functions
 // ---------------------------------------------------------------------------
 
 export default async function lockStatusHandler(ctx: TUIContext): Promise<TUIResult> {
@@ -450,7 +450,7 @@ export default async function lockStatusHandler(ctx: TUIContext): Promise<TUIRes
       r = runClear(input, deps)
       break
     default: {
-      // Exhaustiveness — should be unreachable given validate().
+      // Exhaustiveness : should be unreachable given validate().
       const _never: never = input.action
       void _never
       return {
@@ -468,8 +468,8 @@ export default async function lockStatusHandler(ctx: TUIContext): Promise<TUIRes
  * Read once per call (cheap; the config block is small) so the user can
  * tweak `staleAfterMs` between turns and `LockStatus` reflects it.
  *
- * The mismatch path — handler reads cwd/cwd/.minimal-agent/config.jsonc
- * but `tools.ts` reads $HOME/.minimal-agent/config.jsonc — is impossible
+ * The mismatch path : handler reads cwd/cwd/.minimal-agent/config.jsonc
+ * but `tools.ts` reads $HOME/.minimal-agent/config.jsonc : is impossible
  * because both go through `configPath()` from `src/config.ts` which
  * reads `MINIMAL_AGENT_CONFIG` env first, then `os.homedir()`.
  */

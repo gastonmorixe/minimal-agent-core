@@ -4,7 +4,7 @@
  * Asserts that a real `PluginLoader.load(...)` picks up the embedded
  * `tui-plugins/file-lock/` manifest, advertises the `LockStatus` tool to
  * the model, and dispatches tool calls to the handler. This is the
- * loader-↔-plugin seam — the handler's logic itself is covered in
+ * loader-↔-plugin seam : the handler's logic itself is covered in
  * `handlers/lock_status.test.ts`.
  */
 
@@ -45,7 +45,7 @@ describe("PluginLoader picks up tui-plugins/file-lock/", () => {
     const lockStatus = tools.find((t) => t.name === "LockStatus")
     expect(lockStatus).toBeDefined()
     expect(lockStatus?.description).toMatch(/locked/)
-    // Schema is sent to the model — make sure required fields are right.
+    // Schema is sent to the model : make sure required fields are right.
     const schema = lockStatus?.input_schema as Record<string, unknown> | undefined
     expect(schema?.required).toEqual(["action"])
   })

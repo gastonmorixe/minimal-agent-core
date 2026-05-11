@@ -1,21 +1,21 @@
 #!/usr/bin/env bun
 /**
- * `file-lock` CLI — inspect/clear cooperative file locks from the shell.
+ * `file-lock` CLI : inspect/clear cooperative file locks from the shell.
  *
  * Subcommands mirror the `LockStatus` tool the agent exposes to the model:
  *
- *   list [PATH]                — walk PATH (default cwd) for *.locked files
- *   inspect <FILE>             — show one lock's holder (FILE is the path of
+ *   list [PATH]                : walk PATH (default cwd) for *.locked files
+ *   inspect <FILE>             : show one lock's holder (FILE is the path of
  *                                the protected file, NOT the .locked sibling)
- *   clear-stale [PATH]         — auto-remove locks the live acquirer would
+ *   clear-stale [PATH]         : auto-remove locks the live acquirer would
  *                                also break (dead PID, time-stale, corrupt)
- *   clear <FILE>               — force-remove one lock (with a verdict)
- *   path                       — print the config path the auto-locker reads
+ *   clear <FILE>               : force-remove one lock (with a verdict)
+ *   path                       : print the config path the auto-locker reads
  *
  * Global flags:
  *
- *   --json                     — JSON output (default: ANSI text)
- *   -h, --help                 — usage
+ *   --json                     : JSON output (default: ANSI text)
+ *   -h, --help                 : usage
  *
  * The CLI shares `lib`-equivalent code with the LockStatus handler: both
  * call into `runList` / `runInspect` / `runClearStale` / `runClear` from
