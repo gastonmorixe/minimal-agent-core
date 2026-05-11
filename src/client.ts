@@ -266,6 +266,28 @@ export interface SendOptions {
   /** Called when a native model thinking block stops. */
   onThinkingStop?: () => MaybePromise<void>
   /**
+   * Called when a `text` content_block stops streaming (server-fired
+   * `content_block_stop` for a block whose type was `"text"`).
+   *
+   * **Why this exists** — the host's response formatter (e.g. `mdstream`)
+   * is typically spawned ONCE per `Agent.run` and persists across all
+   * tool rounds, but a single `run()` can produce multiple text blocks
+   * (one per sub-turn: text → tool → text → tool → …). Without a
+   * per-text-block boundary, mdstream's `partial` paragraph buffer
+   * accumulates every text-block's chunks into one logical paragraph;
+   * at end-of-run it then re-renders the *combined* buffer, smashing
+   * two unrelated sentences together with no separator
+   * (`…before writing.I have a complete picture…`). Hosts use
+   * `onTextStop` to commit the per-block partial — typically by ending
+   * and respawning the formatter — at exactly the right moment: AFTER
+   * the just-streamed text, BEFORE any tool_use block lands in
+   * scrollback. Fires AFTER the completed text block has been pushed
+   * onto `blocks[]`, so observers can read the just-finished block.
+   *
+   * Symmetric with {@link onThinkingStop}.
+   */
+  onTextStop?: () => MaybePromise<void>
+  /**
    * Optional cancellation signal forwarded to the underlying network
    * transport. When the signal aborts mid-request the transport tears
    * down the HTTP/2 stream and the iterator throws an `AbortError`.
@@ -972,6 +994,7 @@ export async function* sendMessage(
     onThinkingStart,
     onThinkingDelta,
     onThinkingStop,
+    onTextStop,
     networkClient = defaultNetworkClient,
     signal,
   } = opts
@@ -1323,6 +1346,7 @@ export async function* sendMessage(
         case "content_block_stop": {
           if (currentBlock) {
             const stoppedThinking = currentBlock.type === "thinking"
+            const stoppedText = currentBlock.type === "text"
             const stoppedToolUse = currentBlock.type === "tool_use"
             // Finalize tool_use: parse accumulated JSON into input
             if (currentBlock.type === "tool_use" && toolJsonParts) {
@@ -1335,6 +1359,11 @@ export async function* sendMessage(
             }
             blocks.push(currentBlock as ContentBlock)
             if (stoppedThinking) await onThinkingStop?.()
+            // Fire onTextStop AFTER the block is pushed onto `blocks`, so
+            // a handler that walks `blocks[]` sees the just-finished text
+            // block. Symmetric with `onThinkingStop`. See the option's
+            // doc-comment for why hosts care about this seam.
+            if (stoppedText) await onTextStop?.()
             if (stoppedToolUse && activeToolName) {
               requestStatus.update(`Calling ${activeToolName}: dispatching`)
             }
