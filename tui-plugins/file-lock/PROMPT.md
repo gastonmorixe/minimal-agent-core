@@ -16,7 +16,7 @@ acquire attempt.
 ```
 Edit error: File /abs/path/foo.ts is locked (waited 30.0s).
 Holder: minimal-agent session=<other-sid> pid=12345 host=MacBook-Pro.local
-Tool: Edit; held since 2026-05-10T05:45:30Z (35s ago).
+Tool: Edit. Held since 2026-05-10T05:45:30Z (35s ago).
 Inspect with the LockStatus tool, or wait and retry.
 ```
 
