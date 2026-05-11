@@ -284,16 +284,17 @@ describe("EditorController — status row", () => {
     expect(compositor.last().lines).toEqual(["> "])
     compositor.liveHeightCalls.length = 0
     ctrl.setStatus("⠋ Thinking")
-    // Status filled: [status, "", "", editor]. The 2 blank rows between
-    // status and editor are the user-requested visual gap (May 2026).
-    expect(compositor.last().lines).toEqual(["⠋ Thinking", "", "", "> "])
-    expect(compositor.last().cursor).toEqual({ row: 3, col: 2 })
-    // Height grew from 1 (idle editor only) to 4 (status + 2 gap + editor).
-    expect(compositor.liveHeightCalls).toContain(4)
+    // Status filled: [status, "", editor]. The 1 blank row between
+    // status and editor is the user-requested visual gap (refined from
+    // 2 → 1 in May 2026: 2 overshot, 1 is enough breathing room).
+    expect(compositor.last().lines).toEqual(["⠋ Thinking", "", "> "])
+    expect(compositor.last().cursor).toEqual({ row: 2, col: 2 })
+    // Height grew from 1 (idle editor only) to 3 (status + 1 gap + editor).
+    expect(compositor.liveHeightCalls).toContain(3)
     ctrl.stop()
   })
 
-  it("setStatus(null) drops the status row and 2-gap, editor goes back to row 0", () => {
+  it("setStatus(null) drops the status row and gap, editor goes back to row 0", () => {
     const { ctrl, compositor } = make()
     ctrl.start()
     ctrl.setStatus("busy")
@@ -314,10 +315,10 @@ describe("EditorController — status row", () => {
     stdin.send("\x1b[13;2u") // shift+enter
     stdin.send("b")
     ctrl.setStatus("⠋")
-    // Layout: [status, "", "", editorLine1, editorLine2]
-    expect(compositor.last().lines).toEqual(["⠋", "", "", "> a", "  b"])
-    // editor cursor on row 4 (status row 0, gap rows 1+2, editor rows 3..4)
-    expect(compositor.last().cursor).toEqual({ row: 4, col: 3 })
+    // Layout: [status, "", editorLine1, editorLine2]
+    expect(compositor.last().lines).toEqual(["⠋", "", "> a", "  b"])
+    // editor cursor on row 3 (status row 0, gap row 1, editor rows 2..3)
+    expect(compositor.last().cursor).toEqual({ row: 3, col: 3 })
     ctrl.stop()
   })
 
@@ -488,7 +489,7 @@ describe("EditorController — viewport cap & internal scroll", () => {
     ctrl.stop()
   })
 
-  it("status row + 2-gap count against the cap (cap=6 → editor window=2)", () => {
+  it("status row + 1-gap count against the cap (cap=4 → editor window=2 → triggers indicator)", () => {
     const stdin = new FakeTTYInput()
     const output = new FakeOutput()
     const compositor = new FakeCompositor()
@@ -508,15 +509,14 @@ describe("EditorController — viewport cap & internal scroll", () => {
     stdin.send("b")
     stdin.send("\x1b[13;2u")
     stdin.send("c")
-    expect(compositor.liveHeight).toBe(6)
-    // Layout: [status, "", "", indicator, editor-row, editor-row].
+    expect(compositor.liveHeight).toBe(4)
+    // Layout: [status, "", indicator, editor-row].
+    // 3 logical rows (a/b/c), editorBudget=2 → indicator + 1 content row.
     // Cursor at "c", viewportTop=2 > 0 → indicator "^ 2 more lines".
     expect(compositor.last().lines[0]).toBe("⠋")
     expect(compositor.last().lines[1]).toBe("")
-    expect(compositor.last().lines[2]).toBe("")
-    expect(compositor.last().lines[3]).toContain("more line")
-    expect(compositor.last().lines[4]).toBe("  b")
-    expect(compositor.last().lines[5]).toBe("  c")
+    expect(compositor.last().lines[2]).toContain("more line")
+    expect(compositor.last().lines[3]).toBe("  c")
     ctrl.stop()
   })
 })
@@ -715,29 +715,34 @@ describe("EditorController — footer rows (live-area slots)", () => {
     ctrl.stop()
   })
 
-  it("footer coexists with status, decoration, and indicator without disturbing them", () => {
+  it("footer coexists with status, decoration, and gap, indicator without disturbing them", () => {
     const { ctrl, compositor } = make({ columns: 40 })
     ctrl.start()
     ctrl.setStatus("· thinking")
     ctrl.setDecorationLines(["queued: hi"])
     ctrl.setFooterLines(["quota 0%"])
     const last = compositor.last()!
-    // Layout: [status, decoration, ...content, footer]
+    // Layout: [status, decoration, "", "", editor, "", footer]
+    //   = 1 status + 1 decoration + 2 gap + 1 editor + 1 footer-spacer + 1 footer = 7 rows.
     expect(last.lines[0]).toContain("thinking")
     expect(last.lines[1]).toContain("queued: hi")
+    expect(last.lines[2]).toBe("")
     expect(last.lines.at(-1)).toBe("quota 0%")
-    // Editor cursor row is below status (1) + decoration (1) = 2.
-    expect(last.cursor!.row).toBe(2)
+    expect(last.lines.at(-2)).toBe("") // footer spacer
+    // Editor cursor row: status(1) + decoration(1) + gap(1) = 3.
+    expect(last.cursor!.row).toBe(3)
     ctrl.stop()
   })
 
-  it("setFooterLines([]) clears the footer", () => {
+  it("setFooterLines([]) clears the footer (and its spacer)", () => {
     const { ctrl, compositor } = make({ columns: 40 })
     ctrl.start()
     ctrl.setFooterLines(["a", "b"])
-    expect(compositor.last()!.lines.length).toBe(4) // status + 1 content + 2 footer
+    // Layout: [editor, "", "a", "b"] = 4 rows (idle, no status; 1 editor + 1 spacer + 2 footer).
+    expect(compositor.last()!.lines.length).toBe(4)
     ctrl.setFooterLines([])
-    expect(compositor.last()!.lines.length).toBe(2) // status + 1 content
+    // Layout: [editor] = 1 row.
+    expect(compositor.last()!.lines.length).toBe(1)
     ctrl.stop()
   })
 })

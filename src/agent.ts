@@ -2453,7 +2453,16 @@ async function runReplLiveArea(
         // one blank row between the prompt and `╭`. Adding another `\n`
         // here (as we do in baseSink for streamed text, which has no
         // leading newline) would produce two blank rows.
-        compositor.writeStream(`${line}\n`)
+        //
+        // Block-close glyph `╰` is followed by an extra `\n` so the live
+        // area below (status row, next tool block, or text) gets one
+        // blank row of breathing room above it. capBlankLines in the
+        // compositor caps the run at 2 ` \n`s = 1 visible blank, so
+        // adjacent `╰`-then-`╭` doesn't pile up to two blank rows. This
+        // closes the "missing blank between `╰ shown 10/20 L` and
+        // `● Thinking`" visual bug (May 2026).
+        const isBlockClose = line.includes("╰")
+        compositor.writeStream(isBlockClose ? `${line}\n\n` : `${line}\n`)
         lastKind = "transcript"
       }
       const onThinkingStart = (): void => {
