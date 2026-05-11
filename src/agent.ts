@@ -1635,7 +1635,15 @@ export interface ReplCompositor {
 export interface ReplEditor {
   start(): void
   stop(): void
-  on(event: "submit", listener: (text: string) => void): unknown
+  /**
+   * Submit event. The optional `commitLines` argument carries the
+   * pre-rendered scrollback lines for the just-submitted prompt :
+   * the host writes them to scrollback at TURN START (or tool-boundary
+   * drain time for queued items), NOT at submit time, so a prompt that
+   * sits queued does not appear in both scrollback and the queue widget
+   * (Bug 393). Listeners that only care about `text` can ignore it.
+   */
+  on(event: "submit", listener: (text: string, commitLines?: string[]) => void): unknown
   on(event: "cancel", listener: () => void): unknown
   off?(event: "submit" | "cancel", listener: (...args: unknown[]) => void): unknown
   /** Called by the live-area status controller to push the spinner row. */
@@ -2179,15 +2187,35 @@ async function runReplLiveArea(
     modeManager && modeManager.hasModes()
       ? `  ${dot}  ${c.faintWhite("shift+tab")} ${c.bold("cycle mode")}`
       : ""
-  // NOTE: single trailing `\n` here. The compositor no longer draws a
-  // blank separator row above the live area, so the prompt follows the
-  // hint text directly (no extra blank line needed or wanted).
+  // Trailing `\n\n` (NOT `\n`) gives one blank row between the hint
+  // row and the prompt below. The compositor's `capBlankLines` caps
+  // consecutive `\n` runs at 2, so a single blank row is the most we
+  // can get : the user explicitly requested breathing room above the
+  // prompt at startup ("MISSING NEW BLANK LINE AFTER THIS LINE" bug,
+  // May 2026). The compositor no longer auto-draws a blank above the
+  // live area : the banner has to provide it.
   compositor.writeStream(
-    `\n  ${c.bold(c.purple("status"))} ${c.faintWhite("ready")}\n  ${baseHint}${modeHint}\n`,
+    `\n  ${c.bold(c.purple("status"))} ${c.faintWhite("ready")}\n  ${baseHint}${modeHint}\n\n`,
   )
 
   // Submit queue: keystrokes never block, but we serialize agent turns.
-  const queue: string[] = []
+  // Each queue item carries BOTH the user's text (for the agent) AND the
+  // pre-rendered scrollback lines (for the TUI). The scrollback write is
+  // deferred from EditorController.submit() to TURN START / drain time
+  // here, so a queued prompt never appears in BOTH the scrollback and
+  // the queue widget at the same time (Bug 393).
+  type QueueItem = { text: string; commitLines: string[] }
+  const queue: QueueItem[] = []
+  /** Flush a queue item's pre-rendered scrollback lines, if any. */
+  const flushQueueItemToScrollback = (item: QueueItem): void => {
+    if (item.commitLines.length === 0) return
+    if (typeof compositor.writeStream !== "function") return
+    // Matches the lead `EditorController.submit` used to emit before
+    // the scrollback-write was deferred here : `\n\n\n` for two blank
+    // rows of breathing room (capBlankLines collapses to ≤2 in actual
+    // scrollback), trailing `\n` to terminate the prompt line.
+    compositor.writeStream(`\n\n\n${item.commitLines.join("\n")}\n`)
+  }
   let cancelled = false
   let resolveWaiter: (() => void) | null = null
   const wakeWaiter = () => {
@@ -2219,12 +2247,12 @@ async function runReplLiveArea(
       editor.setDecorationLines([])
       return
     }
-    editor.setDecorationLines(buildQueueDecorationLines(queue))
+    editor.setDecorationLines(buildQueueDecorationLines(queue.map((q) => q.text)))
   }
 
-  const onSubmit = (text: string): void => {
+  const onSubmit = (text: string, commitLines: string[] = []): void => {
     if (!text.trim()) return
-    queue.push(text)
+    queue.push({ text, commitLines })
     renderDecoration()
     wakeWaiter()
   }
@@ -2244,8 +2272,17 @@ async function runReplLiveArea(
         })
         continue
       }
-      const text = queue.shift()
-      if (text === undefined) continue
+      const item = queue.shift()
+      if (item === undefined) continue
+      const text = item.text
+      // Flush the deferred scrollback commit NOW (the editor stopped
+      // writing at submit time : Bug 393). For queued items this is
+      // when they first appear in scrollback; for direct submits it's
+      // microseconds after Enter, indistinguishable from the old behavior.
+      // Decoration must be re-rendered AFTER the shift so the queue widget
+      // shrinks by one row in lockstep with the scrollback commit.
+      flushQueueItemToScrollback(item)
+      renderDecoration()
 
       const statusText = modeManager ? modeManager.statusLabel("Thinking") : "Thinking"
       const turnStatus = statusBus.create(statusText, {
@@ -2447,18 +2484,21 @@ async function runReplLiveArea(
       // existing FIFO queue.shift() loop.
       const drainQueuedUserText = (): string | null => {
         if (queue.length === 0) return null
-        const drained = queue.splice(0).join("\n\n")
+        const drained = queue.splice(0)
+        // Flush each drained item's pre-rendered scrollback lines IN ORDER
+        // before injecting their combined text into the agent. The user
+        // sees their queued prompts materialize in scrollback at the moment
+        // they're handed to the agent (mid-turn drain at a tool boundary) :
+        // mirrors what a sequence of solo turns would look like.
+        for (const item of drained) flushQueueItemToScrollback(item)
         renderDecoration()
-        return drained
+        return drained.map((i) => i.text).join("\n\n")
       }
-      // onQueueInject: NO-OP for scrollback rendering. The user's submitted
-      // text was already committed to scrollback by EditorController.submit
-      // at the moment they pressed Enter : that's the immediate-feedback
-      // contract of the editor. Re-rendering it here at the tool-boundary
-      // injection point produced a visible duplicate (prompt appears twice:
-      // once before the tool block, once after). The hook is retained as a
+      // onQueueInject: NO-OP. Scrollback writes for drained items happen
+      // inside drainQueuedUserText (above). The hook is retained as a
       // notification point in case future code wants to react to the
-      // injection, but it must not write to scrollback.
+      // injection, but it must not write to scrollback : that would
+      // double-commit the prompts (Bug 393, second-order regression).
       const onQueueInject = (_qtext: string): void => {
         /* intentionally empty : see comment above */
       }
