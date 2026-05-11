@@ -40,14 +40,14 @@ notices when the resulting file looks wrong.
 
 ## Options considered
 
-### Option A : Core feature in `src/tools.ts` (CHOSEN)
+### Option A (CHOSEN): Core feature in `src/tools.ts`
 
 A small `src/file-lock.ts` library; `src/tools.ts` wires it around
 `execEdit` / `execWrite`. A companion plugin under
 `tui-plugins/file-lock/` provides the user surface (`LockStatus` tool,
 CLI, PROMPT.md docs).
 
-- **+** Self-contained core; one file to wire.
+- **+** Self-contained core. One file to wire.
 - **+** Doesn't touch `src/agent.ts` (other agent has it dirty :
   memory v0.3 in flight). Reduces collision risk.
 - **+** The companion plugin still lets the user disable via existing
@@ -57,7 +57,7 @@ CLI, PROMPT.md docs).
 - **-** Not "purely" a plugin : the locking call site is in core
   `tools.ts`. Acceptable: locking is a safety property, not a feature.
 
-### Option B : Complete the hooks subsystem; pure plugin
+### Option B (rejected): Complete the hooks subsystem, ship a pure plugin
 
 `src/plugins/hooks/channels.ts` already declares `tool.willInvoke`
 (chain, can veto/rewrite) and `tool.didInvoke` (broadcast-async). A
@@ -69,13 +69,13 @@ plugin could subscribe to those and acquire/release. But:
   `src/plugins/loader.ts` : three files, two of which are currently
   modified by other agents.
 - **-** Larger change, more places to regress.
-- **+** Cleaner long-term architecture; would unblock other policy
+- **+** Cleaner long-term architecture. Would unblock other policy
   plugins (audit-log, sandbox-enforce).
 - **REJECTED for v1.** The lock protocol is the interesting part;
   the plumbing route doesn't change correctness. We can hoist later
   with a 5-line refactor once the hook subsystem is wired up.
 
-### Option C : Wrapper tools `LockedEdit` / `LockedWrite`
+### Option C (rejected): Wrapper tools `LockedEdit` / `LockedWrite`
 
 Plugin advertises new tools, prompts the model to use them instead of
 `Edit` / `Write`. **REJECTED**: the model would routinely fall back
@@ -90,7 +90,7 @@ sets of tools doing the same thing.
 - **Path**: sibling `<file>.locked` (e.g. `foo.ts` → `foo.ts.locked`).
 - **Atomicity**: `fs.openSync(lockPath, "wx")` : POSIX `O_CREAT |
   O_EXCL`. Exactly one of N concurrent creators wins.
-- **Contents** (single-line JSON, atomic-ish read; a partial-write
+- **Contents** (single-line JSON, atomic-ish read. A partial-write
   parses to `null` and is treated as stale):
 
   ```json
@@ -154,7 +154,7 @@ falls through to the time check.
 1. Read the current lock file content.
 2. If it parses as ours (`sessionId + pid + acquiredAtMs` match) OR
    the content is missing/unparseable → unlink.
-3. Otherwise → someone broke our lock and now owns it; don't smash.
+3. Otherwise → someone broke our lock and now owns it. Don't smash.
 
 ### Crash safety : three layers
 
@@ -164,17 +164,17 @@ falls through to the time check.
 | 2     | `process.on("exit"/"SIGINT"/"SIGTERM")` | Graceful shutdown (Ctrl-C, container stop) |
 | 3     | PID-based stale detection at acquire   | SIGKILL, OOM, kernel panic               |
 
-Layers 1+2 keep things tidy in normal operation; layer 3 is the
+Layers 1+2 keep things tidy in normal operation. Layer 3 is the
 correctness backstop.
 
 ### Scope
 
-- **Locks**: `Edit` and `Write` (default; configurable via
-  `plugins["file-lock"].tools`).
+- **Locks**: `Edit` and `Write` (default). Configurable via
+  `plugins["file-lock"].tools`.
 - **Not locked**:
-  - `Read`, `Grep`, `Glob` : pure observation, no mutation.
-  - `Bash` : opaque commands. Detecting "this `bash -c 'sed -i'` is a
-    write to X" is a regex tarpit; v1 documents this as out of scope.
+  - `Read`, `Grep`, `Glob` are pure observation, no mutation.
+  - `Bash` is opaque. Detecting "this `bash -c 'sed -i'` is a
+    write to X" is a regex tarpit. v1 documents this as out of scope.
 
 ### Config
 
@@ -291,7 +291,7 @@ skip set : all network/terminal tests that always skip).
   next acquire.
 - **Race with peer breaking our lock**: `release` re-reads and
   refuses to unlink a foreign holder, so we don't smash their lock.
-- **Cross-host NFS**: PID probe is skipped; time threshold (5 min
+- **Cross-host NFS**: PID probe is skipped. Time threshold (5 min
   default) is the only stale signal. Configurable via
   `staleAfterMs`.
 
@@ -299,9 +299,9 @@ skip set : all network/terminal tests that always skip).
 
 - Wire `tool.willInvoke` / `tool.didInvoke` hooks in `agent.ts` and
   hoist the locking into a pure plugin once the hook subsystem is
-  complete. Adds <50 lines net; backward-compatible (the locking
+  complete. Adds <50 lines net and is backward-compatible (the locking
   behavior wouldn't change, only the call site).
 - Optional Bash protection via per-directory or per-glob locking
   (coarser, opt-in).
-- Read locks (shared) : currently unnecessary; mutation-vs-mutation
-  is the failure we see.
+- Read locks (shared). Currently unnecessary because
+  mutation-vs-mutation is the failure we see.

@@ -625,7 +625,7 @@ function formatTimeoutMessage(
   return [
     `File ${filePath} is locked (waited ${waited}s).`,
     `Holder: ${holder.harness} session=${holder.sessionId} pid=${holder.pid} host=${holder.host}`,
-    `Tool: ${holder.tool}; held since ${holder.acquiredAt} (${ageS}s ago).`,
+    `Tool: ${holder.tool}. Held since ${holder.acquiredAt} (${ageS}s ago).`,
     `Inspect with the LockStatus tool, or wait and retry.`,
   ].join("\n")
 }
