@@ -528,9 +528,17 @@ export class EditorController extends EventEmitter {
       this.pending = this.pending.slice(char.length)
 
       if (char === "\r" || char === "\n") {
-        // Coalesce CRLF / LFCR.
+        // Coalesce CRLF / LFCR. Track whether we ate the partner byte —
+        // a coalesced CRLF is unambiguously "plain Enter" regardless of
+        // which half arrived first; a *bare* LF (no CR partner) is what
+        // terminals send for Ctrl+J and for Shift+Enter when the user
+        // has configured the terminal to send LF for Shift+Return
+        // (e.g. iTerm2 → Profiles → Keys → Key Mappings: Shift+Return →
+        // Send Hex Codes 0x0a). Treat bare LF as "newline insertion"
+        // so Shift+Enter works alongside Alt/Option+Enter.
         const other = char === "\r" ? "\n" : "\r"
-        if (this.pending.startsWith(other)) {
+        const coalesced = this.pending.startsWith(other)
+        if (coalesced) {
           this.pending = this.pending.slice(other.length)
         }
         if (this.buf.isBlank()) {
@@ -543,6 +551,12 @@ export class EditorController extends EventEmitter {
         // newline insertion. A trailing escape sequence (e.g. arrow key
         // coalesced into the same chunk) means the Enter is real.
         if (this.pending.length > 0 && !this.pending.startsWith("\x1b")) {
+          this.buf.newline()
+          dirty = true
+          continue
+        }
+        // Bare LF without a CR partner → Shift+Enter / Ctrl+J → newline.
+        if (char === "\n" && !coalesced) {
           this.buf.newline()
           dirty = true
           continue
@@ -912,41 +926,28 @@ export class EditorController extends EventEmitter {
 
   private submit(): void {
     const text = this.buf.toString()
-    // Commit the prompt to scrollback BEFORE clearing the buffer, so the
-    // user can scroll up later and re-read what they typed (mirrors what
-    // a normal shell does after Enter). We render the FULL buffer here —
-    // not the viewport window — so multiline submissions that scrolled
-    // internally are preserved in their entirety. writeStream() erases
-    // the live area, prints these lines into the natural scroll region,
-    // then redraws the live area; clearing the buffer immediately after
-    // replaces that redraw with a fresh, empty prompt.
-    if (typeof this.compositor.writeStream === "function") {
-      const { lines: fullLines } = this.renderer.render(this.buf, {
+    // Render the FULL buffer (not the viewport window) so multiline
+    // submissions are preserved verbatim in scrollback. The HOST decides
+    // WHEN to flush these lines : deferred to turn-start (or tool-boundary
+    // drain time for queued items) so a queued prompt does NOT appear in
+    // BOTH the scrollback AND the queue widget at the same time (Bug 393).
+    // The submit event carries the lines so the host doesn't re-render.
+    //
+    // When the buffer is empty (`buf.lines.length === 0`), commitLines is
+    // an empty array : the host's flusher no-ops, preserving the prior
+    // "empty submits are silently ignored" semantics.
+    let commitLines: string[] = []
+    if (this.buf.lines.length > 0) {
+      const rendered = this.renderer.render(this.buf, {
         firstRow: 0,
         rowCount: this.buf.lines.length,
       })
-      if (fullLines.length > 0) {
-        // Leading `\n\n` gives the committed prompt one blank row of
-        // breathing room above it. We need TWO leading newlines (not one)
-        // because the live-area REPL's end-of-turn path deliberately leaves
-        // scrollback ending without a trailing `\n` — `drawLiveSeq` emits
-        // its own `\r\n` to seat the live area on a fresh row, but that's
-        // a cursor move, not a scrollback char. So when submit fires after
-        // a turn, scrollback ends mid-line and a single `\n` would only be
-        // a line break, not a blank row above the prompt.
-        //
-        // This is safe in the other cases too: `Compositor.capBlankLines`
-        // caps consecutive `\n` runs in scrollback at 2, so if previous
-        // content already ended with one or two `\n` (e.g. the ready
-        // banner), the extra `\n` is dropped and we still get exactly one
-        // blank row above the prompt. Idempotent across all three states.
-        this.compositor.writeStream(`\n\n${fullLines.join("\n")}\n`)
-      }
+      commitLines = rendered.lines
     }
     this.buf.clear()
     this.viewportTop = 0
     this.repaint()
-    this.emit("submit", text)
+    this.emit("submit", text, commitLines)
   }
 
   private repaint(): void {
@@ -964,14 +965,30 @@ export class EditorController extends EventEmitter {
     // longer causes the prompt to hop up one row (the "blank line at the
     // bottom" bug that occurred because the former STATUS row was vacated).
     const decorationRows = this.decorationLines.length
-    const footerRows = this.footerLines.length
-    // Status row is always 1; decoration rows (queued-message display, etc.)
-    // sit between the status and the editor; footer rows sit BELOW the
-    // editor. All three count against the cap so the prompt can't be
-    // pushed off-screen by an over-eager queue or a chatty footer.
-    const statusRows = 1 + decorationRows
+    // Status row is rendered ONLY when filled. When idle (no status) we
+    // omit the row entirely so the live area is just `[editor, footer]`
+    // — no leading blank above the editor at idle. The "1 blank above
+    // live area" rule comes from `Compositor.drawLiveSeq`'s smart-skip
+    // separator (handles the scrollback↔live-area boundary). The editor
+    // shifts down by `1 + 2` rows when status appears (status row + 2
+    // gap rows), which is the visually intended cue for "agent active".
+    const statusFilled = this.statusLine != null && this.statusLine.length > 0
+    // Blank rows BETWEEN status and editor (only when status is filled).
+    // The user explicitly requested visual breathing room between the
+    // mid-turn status indicator and the editor input — see annotations
+    // on the May 2026 layout-fix request.
+    const statusGapRows = statusFilled ? 2 : 0
+    const statusRows = (statusFilled ? 1 : 0) + decorationRows
+    // A blank row between editor content and the footer when both are
+    // present, so footer lines (quota, ambient status, etc.) don't visually
+    // butt against the prompt's `❯ ` row.
+    const footerSpacerRows = this.footerLines.length > 0 ? 1 : 0
+    const footerRows = this.footerLines.length + footerSpacerRows
     const cap = Math.max(1, this.maxLiveHeight())
-    const editorBudget = Math.max(1, cap - statusRows - footerRows)
+    const editorBudget = Math.max(
+      1,
+      cap - statusRows - statusGapRows - footerRows,
+    )
 
     // Run the viewport/window calculation for a given physical-row content
     // budget. Does not mutate any state; returns the computed values.
@@ -1028,7 +1045,8 @@ export class EditorController extends EventEmitter {
     // Re-check after pass 2 (in the unlikely case pass 2 brought vTop back to
     // 0, no indicator is needed and we reclaim the reserved row).
     const actualNeedSeparate = needSeparateIndicator && vTop > 0
-    const target = physicalRows + statusRows + footerRows + (actualNeedSeparate ? 1 : 0)
+    const target =
+      physicalRows + statusRows + statusGapRows + footerRows + (actualNeedSeparate ? 1 : 0)
     if (target !== this.compositor.liveHeight) {
       this.compositor.setLiveHeight(target)
     }
@@ -1040,15 +1058,42 @@ export class EditorController extends EventEmitter {
     })
 
     // Build the scroll indicator when content is hidden above the viewport.
+    //
+    // The indicator carries the active mode's prompt prefix (e.g. `❯ ` in
+    // default mode, `ASK ❯ ` in ASK) BEFORE the dashes+label. This is the
+    // only place the user can read off the mode while the buffer is
+    // scrolled: visible content rows below the indicator render with the
+    // continuation prompt (two spaces) and carry no mode info.
+    //
+    // The prompt comes pre-styled (its own SGR open/close). We then open a
+    // dim attribute (`\x1b[2m`) for the dashes+label and close with
+    // `\x1b[22m`. `cols` is read fresh from `this.output.columns` on every
+    // repaint, so SIGWINCH → `notifyResize()` → `repaint()` recomputes the
+    // dash run to fit the new width.
     let indicatorLine: string | null = null
     if (vTop > 0) {
       const w = cols ?? 0
       const n = vTop
       const label = `^ ${n} more line${n === 1 ? "" : "s"}`
-      indicatorLine =
-        w > label.length + 3
-          ? `\x1b[2m ${"\u2500".repeat(w - label.length - 3)} ${label}\x1b[22m`
-          : `\x1b[2m ${label}\x1b[22m`
+      const prompt = this.renderer.getPrompt()
+      const promptW = this.renderer.getPromptDisplayWidth()
+      const labelW = label.length // pure ASCII; bytes == display cells
+      // Three forms, picked by available width (preferring mode visibility):
+      //   1. `<prompt><dashes> <label>` when room for ≥1 dash + spacing.
+      //      Fixed cells = promptW + 1 (dash) + 1 (space) + labelW = promptW + labelW + 2.
+      //      Pad 1 trailing cell so the row never wraps at exact width.
+      //   2. `<prompt><label>` when prompt + label fit but no dash room.
+      //      The prompt's trailing space already separates it from the `^`.
+      //   3. ` <label>` bare fallback when even the prompt doesn't fit.
+      //      Same shape as the pre-mode-aware indicator — graceful degrade.
+      if (w >= promptW + labelW + 3) {
+        const dashes = w - promptW - labelW - 2
+        indicatorLine = `${prompt}\x1b[2m${"\u2500".repeat(dashes)} ${label}\x1b[22m`
+      } else if (w >= promptW + labelW) {
+        indicatorLine = `${prompt}\x1b[2m${label}\x1b[22m`
+      } else {
+        indicatorLine = `\x1b[2m ${label}\x1b[22m`
+      }
     }
 
     const rawStatus = this.statusLine ?? ""
@@ -1059,28 +1104,34 @@ export class EditorController extends EventEmitter {
     let finalCursor: { row: number; col: number }
 
     // Layout (top → bottom):
-    //   [statusLine]              ← always 1 row
+    //   [statusLine]              ← 0 or 1 row (only when status is FILLED)
     //   [...decorationLines]      ← 0..N rows (queue display, etc.)
+    //   ["", ""]                  ← 0 or 2 rows (blank gap, only when status filled)
     //   [indicatorLine?]          ← 0..1 row (scroll indicator, if needed)
     //   [...lines]                ← editor content
+    //   [footerSpacer = ""]       ← 0 or 1 row (only when footer is present)
     //   [...footerLines]          ← 0..N rows (quota, ambient status, etc.)
-    // Cursor offset = 1 (status) + decorationRows + indicatorOffset.
-    // Footer rows live below the cursor row, so they don't shift it.
+    // Cursor offset = (statusRows = statusFilled?1:0 + decorationRows)
+    //               + statusGapRows + indicatorOffset.
     const decoration = this.decorationLines
+    const head: string[] = statusFilled ? [statusLine] : []
+    const gap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
     const footer = this.footerLines
+    const footerWithSpacer = footer.length > 0 ? ["", ...footer] : []
+    const baseOffset = statusRows + statusGapRows
     if (actualNeedSeparate && indicatorLine) {
       // Separate indicator row above content.
-      finalLines = [statusLine, ...decoration, indicatorLine, ...lines, ...footer]
-      finalCursor = { row: cursor.row + 2 + decorationRows, col: cursor.col }
+      finalLines = [...head, ...decoration, ...gap, indicatorLine, ...lines, ...footerWithSpacer]
+      finalCursor = { row: cursor.row + baseOffset + 1, col: cursor.col }
     } else if (indicatorLine && lines.length > 0) {
       // Fallback for editorBudget=1: indicator replaces the single content row.
       lines[0] = indicatorLine
-      finalLines = [statusLine, ...decoration, ...lines, ...footer]
-      finalCursor = { row: cursor.row + 1 + decorationRows, col: cursor.col }
+      finalLines = [...head, ...decoration, ...gap, ...lines, ...footerWithSpacer]
+      finalCursor = { row: cursor.row + baseOffset, col: cursor.col }
     } else {
       // No indicator (viewport at top).
-      finalLines = [statusLine, ...decoration, ...lines, ...footer]
-      finalCursor = { row: cursor.row + 1 + decorationRows, col: cursor.col }
+      finalLines = [...head, ...decoration, ...gap, ...lines, ...footerWithSpacer]
+      finalCursor = { row: cursor.row + baseOffset, col: cursor.col }
     }
 
     this.compositor.setLiveArea(finalLines, finalCursor)

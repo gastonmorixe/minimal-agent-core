@@ -428,7 +428,18 @@ export class RawInput {
           this.render()
           continue
         }
-        if (!this.consumeLineBreak(char)) {
+        const outcome = this.consumeLineBreak(char)
+        if (outcome === "newline") {
+          this.render()
+          continue
+        }
+        // Bare LF without a CR partner → Shift+Enter / Ctrl+J → newline.
+        // Terminals that distinguish Shift+Enter from Enter typically
+        // emit LF for the former (e.g. iTerm2 with a Shift+Return →
+        // Send Hex Codes 0x0a key binding). A coalesced CRLF or a bare
+        // CR stays a real Enter submit.
+        if (char === "\n" && outcome === "submit") {
+          this.insertNewline()
           this.render()
           continue
         }
@@ -646,17 +657,19 @@ export class RawInput {
    * The previous heuristic ("any trailing byte ⇒ newline") could silently
    * eat a real Enter when Node coalesced an arrow key into the same chunk.
    */
-  private consumeLineBreak(char: string): boolean {
+  private consumeLineBreak(char: string): "submit" | "submit_coalesced" | "newline" {
     const other = char === "\r" ? "\n" : "\r"
+    let coalesced = false
     if (this.pending.startsWith(other)) {
       this.pending = this.pending.slice(other.length)
+      coalesced = true
     }
 
-    if (this.pending.length === 0) return true
-    if (this.pending.startsWith("\x1b")) return true
+    if (this.pending.length === 0) return coalesced ? "submit_coalesced" : "submit"
+    if (this.pending.startsWith("\x1b")) return coalesced ? "submit_coalesced" : "submit"
 
     this.insertNewline()
-    return false
+    return "newline"
   }
 
   private startBracketedPaste(): boolean {
