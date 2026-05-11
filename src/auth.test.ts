@@ -153,6 +153,104 @@ describe("auth", () => {
       await expect(auth.refresh!()).rejects.toThrow(/claude/)
     })
 
+    it("doRefresh skips the server call when keychain already has a fresher token", async () => {
+      // Models the multi-process race: between our 401 and our refresh,
+      // another process refreshed → keychain now holds a NEW access
+      // token (different from what we issued last time). doRefresh
+      // should detect this via the in-closure `lastIssuedToken` tracker
+      // and return the keychain's token directly, skipping the server
+      // round-trip and the destructive refresh-token rotation.
+      let storedAccess = "AT_v1"
+      let storedRT = "RT_v1"
+      let refreshCalls = 0
+
+      const fakeRead = (_service: string): CredentialsData => ({
+        claudeAiOauth: {
+          accessToken: storedAccess,
+          refreshToken: storedRT,
+          expiresAt: Date.now() + 60_000_000,
+        },
+        oauthAccount: { accountUuid: "uuid-1" },
+      })
+      const fakeWrite = (data: CredentialsData) => {
+        storedAccess = data.claudeAiOauth!.accessToken
+        storedRT = data.claudeAiOauth!.refreshToken!
+      }
+      const fakeRefresh = async (rt: string): Promise<TokenRefreshResult> => {
+        refreshCalls++
+        return {
+          accessToken: `AT_after_refresh_${refreshCalls}`,
+          refreshToken: rt + "_rotated",
+          expiresAt: Date.now() + 8 * 3600_000,
+        }
+      }
+
+      const auth = await getAuth("test-service", {
+        read: fakeRead,
+        write: fakeWrite,
+        refresh: fakeRefresh,
+      })
+      // Initial: lastIssuedToken == "AT_v1" (the value getAuth observed).
+
+      // Simulate: ANOTHER process refreshed and wrote a new token to the
+      // keychain WITHOUT us calling refresh ourselves. Now when WE call
+      // auth.refresh(), the closure should compare keychain's accessToken
+      // to lastIssuedToken, see a difference, return the fresh token, and
+      // NOT call refreshFn.
+      storedAccess = "AT_from_other_process"
+      storedRT = "RT_from_other_process"
+
+      const result = await auth.refresh!()
+
+      expect(refreshCalls).toBe(0) // server was NOT called
+      expect(result.token).toBe("AT_from_other_process")
+    })
+
+    it("doRefresh DOES call refresh when keychain still has the same token we last used", async () => {
+      // Counterpart of the previous test: if no other process has
+      // refreshed, the keychain still matches lastIssuedToken, so we
+      // must do a real refresh (not silently skip).
+      let storedAccess = "AT_v1"
+      let storedRT = "RT_v1"
+      let refreshCalls = 0
+
+      const fakeRead = (_service: string): CredentialsData => ({
+        claudeAiOauth: {
+          accessToken: storedAccess,
+          refreshToken: storedRT,
+          expiresAt: Date.now() + 60_000_000,
+        },
+        oauthAccount: { accountUuid: "uuid-1" },
+      })
+      const fakeWrite = (data: CredentialsData) => {
+        storedAccess = data.claudeAiOauth!.accessToken
+        storedRT = data.claudeAiOauth!.refreshToken!
+      }
+      const fakeRefresh = async (rt: string): Promise<TokenRefreshResult> => {
+        refreshCalls++
+        return {
+          accessToken: `AT_fresh_${refreshCalls}`,
+          refreshToken: rt + "_rot",
+          expiresAt: Date.now() + 8 * 3600_000,
+        }
+      }
+
+      const auth = await getAuth("test-service", {
+        read: fakeRead,
+        write: fakeWrite,
+        refresh: fakeRefresh,
+      })
+
+      // No other process has touched the keychain. auth.refresh() must
+      // call the server.
+      const result = await auth.refresh!()
+
+      expect(refreshCalls).toBe(1)
+      expect(result.token).toBe("AT_fresh_1")
+      // And the keychain reflects the new tokens.
+      expect(storedAccess).toBe("AT_fresh_1")
+    })
+
     it("lets CLAUDE_CODE_OAUTH_CLIENT_ID override the default", () => {
       const prev = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID
       process.env.CLAUDE_CODE_OAUTH_CLIENT_ID = "test-client-id"
