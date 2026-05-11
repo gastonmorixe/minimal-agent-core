@@ -977,7 +977,10 @@ export class EditorController extends EventEmitter {
     // The user explicitly requested visual breathing room between the
     // mid-turn status indicator and the editor input — see annotations
     // on the May 2026 layout-fix request.
-    const statusGapRows = statusFilled ? 2 : 0
+    // Refined from 2 → 1 (May 2026 user feedback: 2 rows of gap visually
+    // overshoots — 1 row is enough breathing room between the `● Thinking`
+    // status indicator and the prompt below).
+    const statusGapRows = statusFilled ? 1 : 0
     const statusRows = (statusFilled ? 1 : 0) + decorationRows
     // A blank row between editor content and the footer when both are
     // present, so footer lines (quota, ambient status, etc.) don't visually
