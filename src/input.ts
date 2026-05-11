@@ -423,13 +423,10 @@ export class RawInput {
       this.pending = this.pending.slice(char.length)
 
       if (char === "\r" || char === "\n") {
-        if (this.isBlankBuffer()) {
-          this.clearBuffer()
-          this.render()
-          continue
-        }
         const outcome = this.consumeLineBreak(char)
         if (outcome === "newline") {
+          // Paste-style continuation; consumeLineBreak already inserted
+          // the newline into the buffer.
           this.render()
           continue
         }
@@ -437,9 +434,20 @@ export class RawInput {
         // Terminals that distinguish Shift+Enter from Enter typically
         // emit LF for the former (e.g. iTerm2 with a Shift+Return →
         // Send Hex Codes 0x0a key binding). A coalesced CRLF or a bare
-        // CR stays a real Enter submit.
+        // CR stays a real Enter submit. We honor this BEFORE the empty-
+        // buffer no-op so that Shift+Enter on an empty prompt expands to
+        // a blank-line newline-insert (matching Alt/Option+Enter, which
+        // bypasses isBlank() entirely via the escape parser).
         if (char === "\n" && outcome === "submit") {
           this.insertNewline()
+          this.render()
+          continue
+        }
+        // Real Enter (coalesced CRLF or bare CR). On an empty / blank-
+        // whitespace buffer this is the standard "press Enter on empty
+        // line" no-op: clear any whitespace, don't submit.
+        if (this.isBlankBuffer()) {
+          this.clearBuffer()
           this.render()
           continue
         }

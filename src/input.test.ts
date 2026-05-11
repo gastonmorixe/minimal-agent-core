@@ -454,6 +454,27 @@ describe("RawInput", () => {
     expect(result).toBe("hello\nworld")
   })
 
+  it("bare LF on an EMPTY buffer inserts a blank-line newline (matches Alt+Enter)", async () => {
+    // Regression: an earlier ordering let the isBlankBuffer() no-op
+    // swallow bare LF, so Shift+Enter via terminal keymap did nothing
+    // on an empty prompt — but Alt+Enter (`\x1b\r`) bypassed it and
+    // inserted a blank-line newline. Both newline-insert keys must
+    // agree on empty buffers.
+    const a = await readFromTTY(["\n", "hello", "\r"])
+    const b = await readFromTTY(["\x1b\r", "hello", "\r"])
+    expect(a.result).toBe(b.result)
+    expect(a.result).toBe("\nhello")
+  })
+
+  it("real Enter (\\r) on an empty buffer stays a no-op (existing shell convention)", async () => {
+    // Counter-test: my reordering must NOT change the long-standing
+    // "press Enter on empty line = no-op, don't submit" behavior. The
+    // three leading `\r`s should be eaten as no-ops, only the final
+    // submit after `hello` should land.
+    const { result } = await readFromTTY(["\r", "\r", "\r", "hello", "\r"])
+    expect(result).toBe("hello")
+  })
+
   it("treats embedded line endings in one chunk as pasted multiline text", async () => {
     const { result } = await readFromTTY(["line1\rline2\r"])
     expect(result).toBe("line1\nline2")
