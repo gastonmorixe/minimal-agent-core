@@ -84,6 +84,26 @@ export class EditorRenderer {
     }
   }
 
+  /**
+   * Current prompt prefix string, with any ANSI styling intact. Read-only
+   * accessor for callers that need to compose adjacent UI affordances
+   * (e.g. the "↑ N more lines" scroll indicator in
+   * {@link EditorController}, which prepends this prefix so the user can
+   * always tell what mode is active even when the buffer is scrolled and
+   * the natural prompt-bearing row is hidden above the viewport).
+   */
+  getPrompt(): string {
+    return this.prompt
+  }
+
+  /**
+   * Display width (in terminal cells) of {@link getPrompt}. Pre-computed
+   * — `displayWidth` is not called per access.
+   */
+  getPromptDisplayWidth(): number {
+    return this.promptWidth
+  }
+
   render(
     buf: EditorBuffer,
     opts?: EditorRenderOptions,
