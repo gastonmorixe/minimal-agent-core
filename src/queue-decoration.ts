@@ -5,17 +5,16 @@
  * Layout (n = queue.length):
  *
  *   `  ⏳ n queued`              <- header
- *   `  ┊  1 first preview`       <- item rows, numbered 1..maxVisible
- *   `  ┊  2 second preview`
- *   `  ╰  3 third preview`       <- last visible row uses `╰`
+ *   `  ┊  1 ▸ first preview`     <- item rows: position + ▸ + preview
+ *   `  ┊  2 ▸ second preview`
+ *   `  ╰  3 ▸ third preview`     <- last visible row uses `╰`
  *
  * Overflow (n > QUEUE_MAX_VISIBLE_ITEMS):
  *
  *   `  ⏳ n queued`
- *   `  ┊  1 first`
- *   `  ┊  2 second`
- *   `  ┊  3 third`
- *   `  ╰  ... and (n-3) more`    <- elision tail closes the block
+ *   `  ┊  1 ▸ first`
+ *   `  …  (rows 2..10) …`
+ *   `  ╰  ... and (n-10) more`   <- elision tail closes the block
  *
  * Numbering is 1-based so the digits line up under the header count
  * ("3 queued" → entries `1`, `2`, `3`). Item-row layout pads the
@@ -36,11 +35,25 @@
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 import { truncHint } from "./truncate-hint.ts"
 
-/** Cap on item rows before eliding into a "... and N more" tail. */
-export const QUEUE_MAX_VISIBLE_ITEMS = 3
+/**
+ * Cap on item rows before eliding into a "... and N more" tail. Bumped
+ * from 3 → 10 (Bug 19283): deep queues stay readable inline without
+ * forcing the user to wait for a tool-boundary drain to see what they
+ * typed three submits ago. With cap=10 the worst-case decoration block
+ * is 12 rows tall (header + 10 items + elision tail) — fits comfortably
+ * in any terminal taller than ~20 rows alongside the prompt.
+ */
+export const QUEUE_MAX_VISIBLE_ITEMS = 10
 
 /** Display-width cap on a single preview row. */
 export const QUEUE_PREVIEW_W = 70
+
+/**
+ * Glyph between the queue position and the preview text. U+25B8 BLACK
+ * RIGHT-POINTING SMALL TRIANGLE — 1 cell wide in the codebase's
+ * `displayWidth` model, dim-rendered (no accent color).
+ */
+export const QUEUE_ITEM_SEPARATOR = "▸"
 
 /** SGR dim wrapper. Inlined to keep this module dependency-light. */
 const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
@@ -78,7 +91,7 @@ export function buildQueueDecorationLines(queue: readonly string[]): string[] {
     const isClosingRow = i === visibleCount - 1 && !hasOverflow
     const glyph = isClosingRow ? "╰" : "┊"
     const num = i + 1
-    lines.push(`  ${dim(glyph)}  ${dim(`${num} ${preview}`)}`)
+    lines.push(`  ${dim(glyph)}  ${dim(`${num} ${QUEUE_ITEM_SEPARATOR} ${preview}`)}`)
   }
   if (hasOverflow) {
     const remaining = count - QUEUE_MAX_VISIBLE_ITEMS

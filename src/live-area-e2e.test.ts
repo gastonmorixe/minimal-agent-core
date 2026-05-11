@@ -217,15 +217,16 @@ describe("live-area REPL (end to end)", () => {
   })
 
   it("onQueueInject does NOT re-render the prompt to scrollback (Bug 7)", async () => {
-    // Regression for the "queue stuff renders twice" bug: when a queued
-    // message is drained at a tool boundary mid-turn and re-injected via
-    // opts.onQueueInject, the host hook used to commit a `❯ <text>` line
-    // to scrollback — but `EditorController.submit()` already committed
-    // that exact line at the moment the user pressed Enter. Result: same
-    // prompt visible twice in scrollback (once before the tool block,
-    // once after). The fix turns onQueueInject into a no-op for
-    // scrollback; this test asserts the snapshot is byte-stable across
-    // the call.
+    // Regression for the "queue stuff renders twice" bug. ORIGINAL form:
+    // the inject hook wrote a `❯ <text>` line to scrollback but the
+    // editor's submit had ALREADY committed the same line → duplicate.
+    // The fix made `onQueueInject` a no-op. NEW form (post-Bug 393):
+    // `EditorController.submit()` no longer writes to scrollback at all;
+    // the scrollback commit happens at TURN START (or `drainQueuedUserText`
+    // call site) inside `runReplLiveArea`. `onQueueInject` REMAINS a
+    // no-op, so this test still passes : it now guards against a future
+    // regression where someone reactivates the hook for scrollback writes
+    // (which would double-commit alongside drainQueuedUserText).
     const stdin = new FakeTTYInput()
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as any })
@@ -278,6 +279,101 @@ describe("live-area REPL (end to end)", () => {
     expect(output.text()).toBe(beforeText)
     expect(output.text()).not.toContain(`❯ ${sentinel}`)
     expect(output.text()).not.toContain(sentinel)
+
+    stdin.send("\x03")
+    stdin.send("\x03")
+    await replPromise
+  })
+
+  it("queued mid-turn submit does NOT appear in scrollback until dequeue (Bug 393)", async () => {
+    // BUG 393: while a turn is in flight, a fresh submit should land in
+    // the queue widget ONLY, NEVER in scrollback. The pre-fix design
+    // had EditorController.submit() commit eagerly to scrollback at the
+    // moment Enter was pressed, so a queued prompt sat in BOTH places
+    // simultaneously. Fix: defer the scrollback commit to runReplLiveArea
+    // (turn-start dequeue, or drainQueuedUserText for in-flight drain).
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new Compositor({ output: output as any })
+    // Capture scrollback writes (writeStream) separately from live-area
+    // repaints (which paint to `output` directly via setLiveArea). The
+    // editor's per-keystroke repaint of the prompt row IS part of the
+    // raw stdout stream, but is NOT a scrollback write. Only writeStream
+    // bytes land permanently in scrollback above the live area.
+    const scrollbackWrites: string[] = []
+    const origWriteStream = compositor.writeStream.bind(compositor)
+    compositor.writeStream = (chunk: string) => {
+      scrollbackWrites.push(chunk)
+      return origWriteStream(chunk)
+    }
+
+    const editor = new EditorController({
+      prompt: "❯ ",
+      continuationPrompt: "  ",
+      compositor,
+      stdin: stdin as any,
+      output: output as any,
+    })
+
+    // Slow-stream fake agent: yields one body chunk, sleeps long enough
+    // for a 2nd submit to land in the queue, then returns. We don't
+    // drain via tool boundary here : we just want the 2nd prompt to
+    // sit QUEUED while running=true, then get flushed at next-turn
+    // dequeue when the current turn ends.
+    let runCount = 0
+    const seenFirstArgs: string[] = []
+    const fakeAgent: ReplAgentLike = {
+      pluginLoader: () => null,
+      async *run(text: string, _opts?: any) {
+        runCount += 1
+        seenFirstArgs.push(text)
+        yield `response-${runCount}-body\n`
+        // Hold the turn long enough for the 2nd submit to enter the queue.
+        await new Promise((r) => setTimeout(r, 80))
+        return { blocks: [], text: "ok\n", stopReason: "end_turn" } as any
+      },
+    }
+
+    const replPromise = runRepl(fakeAgent, {
+      output: output as any,
+      statusBus: new StatusBus(),
+      statusRenderer: null,
+      useLiveArea: true,
+      compositor,
+      editor,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // First submit : starts turn 1.
+    stdin.send("first message")
+    stdin.send("\r")
+    // Yield once so the turn starts and `running` flips to true.
+    await new Promise((r) => setTimeout(r, 5))
+
+    // Second submit WHILE running=true : should be queued, NOT committed.
+    const QUEUED = "SECOND_MESSAGE_QUEUED_SENTINEL"
+    stdin.send(QUEUED)
+    stdin.send("\r")
+    // Yield once for the submit to land in the queue + decoration to repaint.
+    await new Promise((r) => setTimeout(r, 5))
+
+    // CORE Bug 393 assertion: the queued sentinel must NOT be in the
+    // scrollback writes yet. While running, only the 1st turn's prompt
+    // commit + the streaming response should be in scrollback.
+    const midTurnScrollback = scrollbackWrites.join("")
+    expect(midTurnScrollback).toContain("❯ first message")
+    expect(midTurnScrollback).toContain("response-1-body")
+    expect(midTurnScrollback).not.toContain(QUEUED)
+
+    // Wait for turn 1 to finish + turn 2 (the dequeued one) to start.
+    // At that moment the deferred scrollback commit must fire AND the
+    // 2nd run() call must receive the queued text as its first arg.
+    await new Promise((r) => setTimeout(r, 200))
+    const finalScrollback = scrollbackWrites.join("")
+    expect(finalScrollback).toContain(`❯ ${QUEUED}`)
+    expect(runCount).toBe(2)
+    expect(seenFirstArgs).toEqual(["first message", QUEUED])
 
     stdin.send("\x03")
     stdin.send("\x03")
