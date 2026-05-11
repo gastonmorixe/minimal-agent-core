@@ -1008,6 +1008,11 @@ async function main() {
   // history lands in normal terminal scrollback and the pinned editor
   // appears underneath it. For non-interactive (`--prompt`) mode we skip
   // the replay — the user just wants the next reply, not the history.
+  //
+  // `formatterCmd` is passed through so assistant text/thinking blocks
+  // render through mdstream (or whatever formatter the user configured),
+  // matching the live REPL's markdown rendering. Without this, replayed
+  // markdown shows up as raw `**bold**` / `# heading` source text.
   if (resumeSid && initialMessages.length > 0 && !args.includes("--prompt")) {
     const stdoutSink = { write: (s: string) => process.stdout.write(s) }
     stdoutSink.write(
@@ -1017,7 +1022,7 @@ async function main() {
         model: selectedModel,
       }),
     )
-    replayToScrollback(initialMessages, stdoutSink, { modeManager })
+    await replayToScrollback(initialMessages, stdoutSink, { modeManager, formatterCmd })
     stdoutSink.write("\n")
   }
 

@@ -181,4 +181,118 @@ describe("replayToScrollback", () => {
     expect(plain).toContain("❯ no manager")
     expect(plain).not.toContain("ASK ❯")
   })
+
+  // ──────────────────────────────────────────────────────────────────
+  // Formatter pass-through (the resume-doesn't-render-markdown bugfix).
+  //
+  // These tests use a fake formatter subprocess (`bun -e "…"`) that
+  // wraps stdin in `FMT[…]` markers. If `formatterCmd` is plumbed
+  // through correctly, every assistant text/thinking block ends up
+  // wrapped — proving the bytes actually went through the subprocess
+  // pipeline rather than being written raw to the sink. Same pattern
+  // used by `src/agent.test.ts`'s "renders native thinking chunks
+  // through the formatter" test.
+  // ──────────────────────────────────────────────────────────────────
+
+  const FAKE_FORMATTER_CMD = [
+    "bun",
+    "-e",
+    "let s = ''; const d = new TextDecoder(); for await (const chunk of Bun.stdin.stream()) s += d.decode(chunk); process.stdout.write('FMT[' + s + ']\\n')",
+  ]
+
+  it("pipes assistant text blocks through the formatter when formatterCmd is set", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "**hello** there" }] },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { formatterCmd: FAKE_FORMATTER_CMD })
+    expect(sink.out).toContain("FMT[**hello** there]")
+    // User prompt line is NOT piped through the formatter — only
+    // assistant text/thinking. The raw user text must be present.
+    expect(stripAnsi(sink.out)).toContain("❯ hi")
+    expect(sink.out).not.toContain("FMT[hi]")
+  })
+
+  it("spawns a fresh formatter per text block to mirror the live onTextStop boundary", async () => {
+    // Two text blocks in ONE assistant turn must each get wrapped
+    // independently (`FMT[…]` per block), proving start+end ran twice
+    // — not once with both blocks concatenated.
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "first" },
+          { type: "text", text: "second" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { formatterCmd: FAKE_FORMATTER_CMD })
+    expect(sink.out).toContain("FMT[first]")
+    expect(sink.out).toContain("FMT[second]")
+    expect(sink.out).not.toContain("FMT[firstsecond]")
+  })
+
+  it("pipes assistant thinking blocks through the formatter when formatterCmd is set", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "think" }] },
+      {
+        role: "assistant",
+        content: [
+          // Use the `thinking` block shape `replayToScrollback` reads:
+          // `(b as { thinking?: string }).thinking`.
+          { type: "thinking", thinking: "let me see" } as unknown as never,
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { formatterCmd: FAKE_FORMATTER_CMD })
+    expect(sink.out).toContain("FMT[let me see]")
+    // Thinking output is wrapped in faint+italic ANSI (faintThinkingChunk).
+    // `\x1b[2m` = faint, `\x1b[3m` = italic. Sanity-check the wrap is
+    // applied to the formatter's emitted chunk.
+    expect(sink.out).toMatch(/\x1b\[2m.*FMT\[let me see\]/)
+  })
+
+  it("does not spawn a formatter for empty text/thinking blocks", async () => {
+    // Spawning a subprocess for a zero-byte block would be wasteful
+    // and could pollute the sink with an empty `FMT[]`. Skip them.
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "x" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "" },
+          { type: "thinking", thinking: "" } as unknown as never,
+          { type: "text", text: "after" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { formatterCmd: FAKE_FORMATTER_CMD })
+    expect(sink.out).toContain("FMT[after]")
+    expect(sink.out).not.toContain("FMT[]")
+  })
+
+  it("falls back to raw writes (back-compat) when formatterCmd is not set", async () => {
+    // The legacy no-formatter path: each text block writes `${text}\n`
+    // and each thinking block writes `${faintThinkingChunk(text)}\n`
+    // directly, with NO `FMT[…]` wrapping (no subprocess).
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "**raw** markdown" },
+          { type: "thinking", thinking: "think raw" } as unknown as never,
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    expect(sink.out).toContain("**raw** markdown")
+    expect(sink.out).not.toContain("FMT[")
+  })
 })

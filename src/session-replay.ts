@@ -22,12 +22,13 @@
 
 import {
   c,
+  faintThinkingChunk,
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
-  faintThinkingChunk,
 } from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import { Formatter } from "./formatter.ts"
 import type { ModeManager } from "./modes.ts"
 
 /**
@@ -54,6 +55,20 @@ export interface ReplayOptions {
    * user-visible content — even when no `modeManager` is supplied.
    */
   modeManager?: ModeManager | null
+
+  /**
+   * If provided, assistant `text` and `thinking` blocks are piped through
+   * a freshly-spawned {@link Formatter} subprocess (typically `mdstream`)
+   * so markdown renders the same way the live REPL renders it. When
+   * omitted, text blocks are written raw (the historical behavior).
+   *
+   * One formatter is spawned per text block (and per thinking block),
+   * mirroring the live agent's per-text-block `onTextStop` boundary so
+   * each block starts with mdstream's `partial` paragraph buffer empty.
+   * Without this boundary, two text blocks in one assistant turn would
+   * be smashed together at end-of-render — see memory `#mp0pnjih-16b0`.
+   */
+  formatterCmd?: string[]
 }
 
 /**
@@ -99,13 +114,26 @@ export function buildResumeHeader(opts: {
  * @param sink - Anywhere with `write(string)`. See {@link ReplaySink}.
  * @param opts - Optional rendering knobs. See {@link ReplayOptions}.
  */
-export function replayToScrollback(
+export async function replayToScrollback(
   messages: Message[],
   sink: ReplaySink,
   opts: ReplayOptions = {},
-): void {
+): Promise<void> {
   const baseArrow = `${c.bold(c.pink("❯"))} `
   const modeManager = opts.modeManager ?? null
+  const formatterCmd = opts.formatterCmd
+  // Wrap the sink as a `FormatterOutput` so a spawned Formatter can pipe
+  // its rendered stdout back into the same scrollback target. `columns`
+  // / `rows` come from the host stdout — `COLUMNS` is load-bearing for
+  // mdstream ≥ 0.2.2 (see `formatterEnv` in src/formatter.ts), and
+  // mdstream uses it to wrap paragraphs.
+  const textFormatterOutput = formatterCmd ? makeFormatterOutput(sink, null) : null
+  // Thinking output wraps each emitted chunk with `faintThinkingChunk`
+  // (faint italic ANSI), mirroring the live agent's `thinkingOutput`
+  // setup in src/agent.ts.
+  const thinkingFormatterOutput = formatterCmd
+    ? makeFormatterOutput(sink, faintThinkingChunk)
+    : null
   // Tracks the mode the user was in when each message was submitted, by
   // walking <mode-change> activation blocks in order. Defaults to "no
   // mode" until a block flips it.
@@ -156,16 +184,46 @@ export function replayToScrollback(
     let wroteAnyText = false
     for (const b of blocks) {
       if (b.type === "text") {
-        sink.write(`${b.text}\n`)
+        if (b.text.length === 0) continue
+        if (formatterCmd && textFormatterOutput) {
+          // Per-text-block formatter cycle: spawn → write → end (await
+          // drain). End-and-respawn at every text-block boundary mirrors
+          // the live agent's `onTextStop` callback (see `agent.ts`
+          // `spawnMainFormatter`) — without it, two adjacent text blocks
+          // would share one mdstream `partial` buffer and get smashed
+          // together by `finish()`'s erase_partial + render_line on EOF.
+          // mdstream's natural trailing `\n` provides the line-end. The
+          // outer `if (wroteAnyText) sink.write("\n")` below provides
+          // the blank-line separator between turns.
+          const f = new Formatter(formatterCmd, textFormatterOutput)
+          f.start()
+          f.write(b.text)
+          await f.end()
+        } else {
+          sink.write(`${b.text}\n`)
+        }
         wroteAnyText = true
       } else if (b.type === "thinking") {
         // Live thinking renders via writeDirectSink + faintThinkingChunk
-        // (faint italic). Use the same helper for byte-identical replay.
+        // (faint italic). When a formatter is configured the live agent
+        // pipes thinking through it too (see `ensureThinkingFormatter`
+        // in src/agent.ts), with each emitted chunk wrapped by
+        // `faintThinkingChunk`. Mirror both paths for byte-identical
+        // replay.
         const thinkingText = (b as { thinking?: string }).thinking ?? ""
-        if (thinkingText.length > 0) {
+        if (thinkingText.length === 0) continue
+        if (formatterCmd && thinkingFormatterOutput) {
+          const f = new Formatter(formatterCmd, thinkingFormatterOutput)
+          f.start()
+          f.write(thinkingText)
+          await f.end()
+          // Live `onThinkingStop` writes a trailing `\n` for breathing
+          // room between the thinking block and whatever follows.
+          sink.write("\n")
+        } else {
           sink.write(`${faintThinkingChunk(thinkingText)}\n`)
-          wroteAnyText = true
         }
+        wroteAnyText = true
       } else if (b.type === "tool_use") {
         const tu = b as ToolUseBlock
         // Live header: `\n  ╭ ✦ Tool  args` — match it verbatim.
@@ -212,6 +270,38 @@ export function replayToScrollback(
       }
     }
     if (wroteAnyText) sink.write("\n")
+  }
+}
+
+/**
+ * Build a `FormatterOutput`-shaped wrapper around a {@link ReplaySink}
+ * so a spawned {@link Formatter} can route its rendered stdout back
+ * into the replay sink. The optional `wrap` callback is applied to
+ * every emitted chunk before writing — used by the thinking path to
+ * apply `faintThinkingChunk`'s faint+italic ANSI codes.
+ *
+ * Column/row hints come live from `process.stdout` so that, on
+ * mid-replay terminal resize, a later spawn sees the new dimensions.
+ * mdstream consumes these via the `COLUMNS`/`LINES` env (see
+ * `formatterEnv` in src/formatter.ts).
+ */
+function makeFormatterOutput(
+  sink: ReplaySink,
+  wrap: ((s: string) => string) | null,
+): Pick<NodeJS.WriteStream, "write"> & { columns?: number; rows?: number } {
+  const decoder = new TextDecoder()
+  return {
+    get columns() {
+      return process.stdout.columns
+    },
+    get rows() {
+      return process.stdout.rows
+    },
+    write: ((chunk: string | Uint8Array): boolean => {
+      const s = typeof chunk === "string" ? chunk : decoder.decode(chunk)
+      sink.write(wrap ? wrap(s) : s)
+      return true
+    }) as NodeJS.WriteStream["write"],
   }
 }
 
