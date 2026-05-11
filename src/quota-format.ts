@@ -22,10 +22,15 @@ import { c } from "./agent.ts"
  *   path passes `2` to align with its tree-indented row; the live-area
  *   path passes `0` because the slot is column-anchored already.
  * - `now`: clock injection for tests. Defaults to `Date.now()`.
+ * - `showOverage`: surface the `overage off` segment when overage is
+ *   disabled. Defaults to `false` — the common case is "allowed" and
+ *   the uncommon case is noise. Power users opt in via
+ *   `MINIMAL_AGENT_QUOTA_OVERAGE=1` and the caller forwards that here.
  */
 export interface FormatQuotaOptions {
   leadSpaces?: number
   now?: () => number
+  showOverage?: boolean
 }
 
 /**
@@ -111,11 +116,14 @@ export function formatQuotaSummary(rl: Map<string, string>, opts: FormatQuotaOpt
     parts.push(segment)
   }
 
-  // Overage status — only surface when explicitly disabled (the common case
-  // is "allowed" and noise-free is better here).
-  const ov = rl.get("anthropic-ratelimit-unified-overage-status")
-  if (ov && ov !== "allowed") {
-    parts.push(`${c.faintWhite("overage")} ${c.red("off")}`)
+  // Overage status — opt-in. The common case is "allowed" (silent), the
+  // uncommon case is noise the user explicitly does not want. Set
+  // `showOverage: true` to surface "overage off" when status != allowed.
+  if (opts.showOverage) {
+    const ov = rl.get("anthropic-ratelimit-unified-overage-status")
+    if (ov && ov !== "allowed") {
+      parts.push(`${c.faintWhite("overage")} ${c.red("off")}`)
+    }
   }
 
   if (parts.length === 0) return ""

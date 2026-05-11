@@ -95,7 +95,7 @@ describe("formatQuotaSummary", () => {
     expect(at((3 * 24 + 5) * 60 * 60_000)).toContain("3d5h")
   })
 
-  it("surfaces overage status only when explicitly disabled", () => {
+  it("hides overage by default — surfaces it only when opts.showOverage is true", () => {
     const allowed = new Map([
       ["anthropic-ratelimit-unified-5h-utilization", "0.5"],
       ["anthropic-ratelimit-unified-overage-status", "allowed"],
@@ -104,8 +104,12 @@ describe("formatQuotaSummary", () => {
       ["anthropic-ratelimit-unified-5h-utilization", "0.5"],
       ["anthropic-ratelimit-unified-overage-status", "off"],
     ])
+    // Default (opt-out): the overage segment never appears.
     expect(stripAnsi(formatQuotaSummary(allowed))).not.toContain("overage")
-    expect(stripAnsi(formatQuotaSummary(denied))).toContain("overage off")
+    expect(stripAnsi(formatQuotaSummary(denied))).not.toContain("overage")
+    // Opt-in: surfaced only when status is something other than "allowed".
+    expect(stripAnsi(formatQuotaSummary(allowed, { showOverage: true }))).not.toContain("overage")
+    expect(stripAnsi(formatQuotaSummary(denied, { showOverage: true }))).toContain("overage off")
   })
 
   it("ignores `overage`/`fallback`/`representative` window names entirely", () => {

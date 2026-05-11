@@ -10,7 +10,7 @@
  *   - SSE parsing for signature_delta and input_json_delta
  */
 
-import { readKeychain, type AuthResult } from "./auth.ts"
+import { type AuthResult, readKeychain } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import {
   API_URL,
@@ -24,6 +24,7 @@ import { buildMetadata, getSessionId } from "./metadata.ts"
 import { redactHeaders } from "./net-dbg.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 import { broadcastResponseRateLimits } from "./quota-broadcast.ts"
+import { addSessionUsage } from "./session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 import { clampWithHint } from "./truncate-hint.ts"
 
@@ -1260,6 +1261,7 @@ export async function* sendMessage(
           if (usage) {
             if (isDebug()) console.error(formatCacheLine(usage))
             detector.observe(usage, reqSnapshot)
+            addSessionUsage(usage)
           }
           requestStatus.update("Receiving stream")
           break
