@@ -16,8 +16,8 @@ It is built for people who want to see the wire shape, tool loop, terminal rende
 ## Requirements
 
 - Bun.
-- macOS if you want first-party Claude Code OAuth reuse through Keychain.
-- A working Claude Code login. Run the official `claude` CLI and sign in first.
+- macOS or Linux. First-party Claude Code OAuth credentials are reused from the platform credential store: the macOS Keychain (`Claude Code-credentials` generic password) on Darwin, or `~/.claude/.credentials.json` (mode 0600) on Linux and other Unix-likes. Set `MINIMAL_AGENT_CREDENTIAL_STORE=file` to force the file backend on macOS if you have a non-standard Keychain setup.
+- A working Claude Code login. Run the official `claude` CLI and sign in first, or use `./minimal-agent --login` (PKCE manual-paste flow).
 - Optional: `mdstream` for Markdown rendering. The agent can resolve it automatically when configured as the formatter.
 - Optional: `BRAVE_API_KEY` for the WebSearch plugin.
 
@@ -239,7 +239,8 @@ Start here:
 - **`src/index.ts`:** CLI, startup, config, plugin loading, session wiring, and REPL launch.
 - **`src/agent.ts`:** Agent loop, message history, tool execution, cache markers, and streamed assistant turns.
 - **`src/client.ts`:** Messages API request body, SSE parsing, thinking blocks, usage, and retry behavior.
-- **`src/auth.ts`:** Keychain credential read, OAuth refresh, and account metadata.
+- **`src/auth.ts`:** OAuth refresh, account metadata, and the `getAuth()` flow.
+- **`src/credential-store.ts`:** Platform-aware credential persistence — macOS Keychain or `~/.claude/.credentials.json` on Linux.
 - **`src/headers.ts`:** User-Agent, beta flags, system prompt, and Anthropic headers.
 - **`src/tools.ts`:** Core tool schemas and local executors.
 - **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and test transport.

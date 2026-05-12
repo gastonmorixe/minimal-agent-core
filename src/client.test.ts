@@ -561,9 +561,9 @@ describe("client", () => {
     })
 
     // -----------------------------------------------------------------
-    // Regression: multi-process keychain-first 401 recovery (May 2026).
+    // Regression: multi-process store-first 401 recovery (May 2026).
     //
-    // Cause: with N agents sharing one keychain entry, server-side
+    // Cause: with N agents sharing one credential entry, server-side
     // refresh-token rotation makes each successful refresh invalidate
     // the access tokens cached by the OTHER N-1 processes. They each
     // 401 next, refresh, invalidate the previous one, and the cycle
@@ -571,21 +571,21 @@ describe("client", () => {
     // requests in a 5-min window returning 401, with 22 refreshes
     // (one of which outright failed `invalid_grant`).
     //
-    // Fix: on 401, re-read the keychain BEFORE calling auth.refresh().
-    // If another process already wrote a fresher access token, use
-    // that directly — no oauth round-trip, no rotation. The refresh()
-    // closure remains the fallback when WE are the freshest cache
-    // holder.
+    // Fix: on 401, re-read the credential store BEFORE calling
+    // auth.refresh(). If another process already wrote a fresher access
+    // token, use that directly — no oauth round-trip, no rotation. The
+    // refresh() closure remains the fallback when WE are the freshest
+    // cache holder.
     //
     // We exercise the path indirectly: an auth.refresh that throws
     // (server-side rejection) PROVES we hit the refresh fallback.
     // A successful retry without auth.refresh being called PROVES the
-    // keychain-first path won.
+    // store-first path won.
     // -----------------------------------------------------------------
-    describe("401 retry — keychain-first multi-process race mitigation", () => {
-      it("calls auth.refresh as the fallback when 401 persists (no keychain rotation)", async () => {
-        // No real keychain entry on the test path → readKeychain returns
-        // null → keychain-first branch is a no-op → refresh fallback runs.
+    describe("401 retry — store-first multi-process race mitigation", () => {
+      it("calls auth.refresh as the fallback when 401 persists (no store rotation)", async () => {
+        // No real store entry on the test path → readCredentials returns
+        // null → store-first branch is a no-op → refresh fallback runs.
         let refreshCalls = 0
         let messageReqs = 0
         const networkClient = fakeNetworkClient((req) => {
@@ -638,7 +638,7 @@ describe("client", () => {
         expect(auth.token).toBe("fresh-from-refresh")
       })
 
-      it("checkQuota's 401 path also uses keychain-first then refresh fallback", async () => {
+      it("checkQuota's 401 path also uses store-first then refresh fallback", async () => {
         let refreshCalls = 0
         let reqs = 0
         const networkClient = fakeNetworkClient((req) => {
