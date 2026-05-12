@@ -24,7 +24,7 @@ function captureOut(): { out: { write: (s: string) => void }; lines: string[]; t
 }
 
 describe("renderAuthStatus", () => {
-  it("reports not-logged-in (and exit code 1) when no credentials are stored", async () => {
+  it("reports not-logged-in (and exit code 1) when keychain is empty", async () => {
     const cap = captureOut()
     const code = await runAuthStatusCommand({ read: () => null, output: cap.out })
     expect(code).toBe(1)
@@ -115,13 +115,13 @@ describe("renderAuthStatus", () => {
     expect(cap.text()).toContain("refresh  missing")
   })
 
-  it("treats credentials-without-access-token as not logged in", () => {
+  it("treats keychain-with-no-access-token as not logged in", () => {
     const cap = captureOut()
     const ok = renderAuthStatus({
       read: () => ({ claudeAiOauth: { accessToken: "" } }),
       output: cap.out,
     })
     expect(ok).toBe(false)
-    expect(cap.text()).toContain("no access token")
+    expect(cap.text()).toContain("has no access token")
   })
 })
