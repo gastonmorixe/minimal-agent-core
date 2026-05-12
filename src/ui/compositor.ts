@@ -486,7 +486,16 @@ export class Compositor {
     if (includeSepRows && this.sepRowsAboveLive > 0) {
       parts.push(`\x1b[${this.sepRowsAboveLive}A`)
     }
-    if (this.streamCol > 0) {
+    // The walk-right-by-streamCol step is part of "land back at the
+    // original scrollback cursor" and only makes sense in tandem with
+    // the walk-up over sep rows. Pure live-area repaints (spinner blink,
+    // editor keystrokes) stay on the live area's top row and must NOT
+    // shift right — otherwise the new content lands at col streamCol of
+    // the status row instead of col 0, leaving the previous label
+    // visible at cols 0..streamCol-1 (visible as horizontally
+    // accumulating "● Thinking … Thinking … ● Thinking …" on every
+    // blink while streamCol grows with the response).
+    if (includeSepRows && this.streamCol > 0) {
       parts.push(`\x1b[${this.streamCol}C`)
     }
     // Erase from cursor to end of screen. For stream writes, this also
