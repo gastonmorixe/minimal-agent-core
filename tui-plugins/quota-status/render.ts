@@ -3,14 +3,21 @@
  *
  * Visual (term width permitting):
  *
- *   █▌░░░░░░ 21% 5h 4h32m    ░░░░░░░░  8% 7d 6d11h    ✦ 47.5k tok · 38k cached
+ *   █▌░░░░░░ 21% 5h 4h32m    ░░░░░░░░  8% 7d 6d11h    ✦ ▎░░░░░░░ 24% 47.5k ctx
  *
  * Design rules:
  *   - No leading "quota" word — the bar is the visual cue.
  *   - 8-cell bar with fractional fill (1/8th eighth-block ramp) for sub-cell precision.
  *   - Bar fill colour-graded by severity (green <60%, yellow 60-84%, red ≥85%).
  *   - Reset time appears as a dim trailing word, no `↻` icon.
- *   - Session token block on the right, sky-blue ✦ accent, bold total + dim cached.
+ *   - Session block on the right: sky-blue ✦ accent, then the SAME bar style
+ *     showing `contextSize / contextWindow` (latest turn's input footprint
+ *     vs. the model's context limit), then bold token count + dim `ctx`.
+ *     The cumulative-sum approach (previous behavior) over-counted cached
+ *     prefixes by ~N× since the same prefix is re-read every turn.
+ *   - Session block ALWAYS renders when `showSession` is on, even at 0 tokens.
+ *     Pre-traffic users see `✦ ░░░░░░░░ 0% 0 ctx` — the bar acts as a
+ *     "this is your context budget" signpost from the very first paint.
  *   - 4-space group separator between distinct windows.
  *   - "overage" hidden by default (set MINIMAL_AGENT_QUOTA_OVERAGE=1 to surface).
  *   - Responsive degradation: drop tail segments when the result would overflow `cols`.
@@ -29,6 +36,12 @@ export interface RenderOpts {
   showOverage?: boolean
   /** Render the session-tokens block on the right. Default: true. */
   showSession?: boolean
+  /**
+   * Model context window in tokens, for computing the session bar's
+   * fill percentage (`contextSize / contextWindow`). Default 200_000 —
+   * Anthropic's standard context limit. Pass 1_000_000 for `[1m]` models.
+   */
+  contextWindow?: number
   /** Clock injection for tests. Default: `Date.now`. */
   now?: () => number
 }
@@ -37,6 +50,7 @@ const BAR_CELLS = 8
 /** 1/8th-block ramp: index = number of eighths filled within one cell. */
 const SLICES = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] as const
 const EMPTY_CELL = "░"
+const DEFAULT_CONTEXT_WINDOW = 200_000
 
 function bar(pct: number): { full: string; empty: string } {
   const eighths = Math.max(
@@ -116,13 +130,38 @@ function renderWindowSegment(w: ParsedWindow, now: number, withReset: boolean): 
   return s
 }
 
-function renderSessionSegment(s: SessionTokens, withCached: boolean): string {
-  const cached = s.cacheRead + s.cacheCreate
-  let out = `${c.sky("✦")} ${c.bold(fmtTokens(s.total))} ${c.dim("tok")}`
-  if (withCached && cached > 0) {
-    out += ` ${c.dim("·")} ${c.dim(`${fmtTokens(cached)} cached`)}`
-  }
-  return out
+/**
+ * Build the session block.
+ *
+ * `withBar=true` →   `✦ ▎░░░░░░░ 24% 47.5k ctx`
+ * `withBar=false` →  `✦ 47.5k ctx`
+ *
+ * Percentage is `contextSize / contextWindow`, capped at 100 (overflows are
+ * clamped — the renderer can't predict a model's hard error threshold).
+ * Always renders, even at 0 tokens — the zero-state shows an empty bar at 0%,
+ * which is informative on its own (≈ "you have a clean context budget").
+ */
+function renderSessionSegment(
+  s: SessionTokens,
+  contextWindow: number,
+  withBar: boolean,
+): string {
+  const tokenStr = `${c.bold(fmtTokens(s.contextSize))} ${c.dim("ctx")}`
+  if (!withBar) return `${c.sky("✦")} ${tokenStr}`
+
+  const pct = Math.max(
+    0,
+    Math.min(100, Math.round((s.contextSize / contextWindow) * 100)),
+  )
+  const { full, empty } = bar(pct)
+  // Same shape as renderWindowSegment, just with ✦ instead of a "5h"/"7d" name
+  // and tokens instead of a reset countdown.
+  return (
+    `${c.sky("✦")} ` +
+    `${colorBar(pct)(full)}${c.dim(empty)} ` +
+    `${colorPctBold(pct)(`${pct}%`)} ` +
+    tokenStr
+  )
 }
 
 function overageTail(rl: ReadonlyMap<string, string>): string | null {
@@ -133,11 +172,15 @@ function overageTail(rl: ReadonlyMap<string, string>): string | null {
 
 /**
  * Build the footer line. Returns `null` when there's nothing useful to show
- * (no quota windows AND no session traffic).
+ * (no quota windows AND session block disabled).
  *
- * When `cols` is provided, the renderer tries (in order) full → drop cached →
- * drop session entirely → drop reset clauses → drop the 7d window → keep just
- * the 5h bar. The first form that fits within `cols` wins.
+ * When `cols` is provided, the renderer tries (in order) full → drop overage →
+ * drop session bar → drop reset clauses → drop session entirely → drop 7d →
+ * keep just the 5h bar. The first form that fits within `cols` wins.
+ *
+ * The session block is kept around even at 0 contextSize so users see their
+ * context-window budget bar from the start. It drops only when terminal
+ * width physically can't accommodate it.
  */
 export function renderQuotaFooter(
   rl: ReadonlyMap<string, string>,
@@ -146,8 +189,9 @@ export function renderQuotaFooter(
 ): string | null {
   const now = (opts.now ?? Date.now)()
   const showOverage = opts.showOverage ?? false
+  const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const windows = parseWindows(rl, showOverage)
-  const showSession = (opts.showSession ?? true) && session.total > 0
+  const showSession = opts.showSession ?? true
   const tail = showOverage ? overageTail(rl) : null
 
   if (windows.length === 0 && !showSession && !tail) return null
@@ -157,7 +201,7 @@ export function renderQuotaFooter(
   interface BuildCfg {
     withReset: boolean
     withSession: boolean
-    withCached: boolean
+    withSessionBar: boolean
     withOverage: boolean
     maxWindows?: number
   }
@@ -165,7 +209,9 @@ export function renderQuotaFooter(
     const segs: string[] = []
     const wins = cfg.maxWindows != null ? windows.slice(0, cfg.maxWindows) : windows
     for (const w of wins) segs.push(renderWindowSegment(w, now, cfg.withReset))
-    if (cfg.withSession && showSession) segs.push(renderSessionSegment(session, cfg.withCached))
+    if (cfg.withSession && showSession) {
+      segs.push(renderSessionSegment(session, contextWindow, cfg.withSessionBar))
+    }
     if (cfg.withOverage && tail) segs.push(tail)
     return segs.join(SEP)
   }
@@ -174,17 +220,19 @@ export function renderQuotaFooter(
     opts.cols == null || displayWidth(stripAnsi(s)) <= opts.cols
 
   // Degradation ladder, richest → leanest. First fit wins.
+  // Session block is kept as long as possible (per user UX request: always
+  // show the context-budget signpost). The bar drops first, then reset
+  // clauses, then the block itself, then the 7d window.
   const candidates: BuildCfg[] = [
-    { withReset: true, withSession: true, withCached: true, withOverage: true },
-    { withReset: true, withSession: true, withCached: false, withOverage: true },
-    { withReset: true, withSession: true, withCached: false, withOverage: false },
-    { withReset: true, withSession: false, withCached: false, withOverage: false },
-    { withReset: false, withSession: true, withCached: false, withOverage: false },
-    { withReset: false, withSession: false, withCached: false, withOverage: false },
+    { withReset: true, withSession: true, withSessionBar: true, withOverage: true },
+    { withReset: true, withSession: true, withSessionBar: true, withOverage: false },
+    { withReset: true, withSession: true, withSessionBar: false, withOverage: false },
+    { withReset: false, withSession: true, withSessionBar: false, withOverage: false },
+    { withReset: false, withSession: false, withSessionBar: false, withOverage: false },
     {
       withReset: false,
       withSession: false,
-      withCached: false,
+      withSessionBar: false,
       withOverage: false,
       maxWindows: 1,
     },
@@ -199,7 +247,7 @@ export function renderQuotaFooter(
   return build({
     withReset: false,
     withSession: false,
-    withCached: false,
+    withSessionBar: false,
     withOverage: false,
     maxWindows: 1,
   })

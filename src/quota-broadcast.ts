@@ -22,7 +22,7 @@
  */
 
 import { getGlobalEventBus } from "./global-bus.ts"
-import { setLastRateLimits } from "./quota-cache.ts"
+import { getLastRateLimits, setLastRateLimits } from "./quota-cache.ts"
 
 /**
  * Channel name. Stable wire format — once published, plugins may
@@ -71,4 +71,28 @@ export function broadcastResponseRateLimits(responseHeaders: Headers): Map<strin
   const payload: QuotaHeadersReceivedPayload = { rateLimits: rl }
   getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
   return rl
+}
+
+/**
+ * Re-emit {@link QUOTA_HEADERS_RECEIVED} using the already-cached
+ * rate-limits, without touching the cache.
+ *
+ * Why this exists: in the streaming chat path, response headers arrive
+ * (and {@link broadcastResponseRateLimits} fires) BEFORE the SSE
+ * `message_start` event delivers the `usage` payload that feeds the
+ * session-tokens accumulator. The first broadcast therefore lets the
+ * `quota-status` footer re-render with the new rate-limits but with
+ * stale (prior-turn) session totals — visible to the user as the
+ * `✦ <N> tok` segment always lagging one turn behind.
+ *
+ * `client.ts` calls this helper from inside the `message_start` SSE
+ * case, right after `addSessionUsage(usage)`, so the scheduler re-fires
+ * the slot a second time with fresh totals. The bus emit is a no-op
+ * when the cache is empty (test harnesses, pre-first-response).
+ */
+export function rebroadcastQuotaForSessionUpdate(): void {
+  const snap = getLastRateLimits()
+  if (!snap || snap.rateLimits.size === 0) return
+  const payload: QuotaHeadersReceivedPayload = { rateLimits: snap.rateLimits }
+  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
 }

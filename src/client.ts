@@ -23,7 +23,7 @@ import {
 import { buildMetadata, getSessionId } from "./metadata.ts"
 import { redactHeaders } from "./net-dbg.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
-import { broadcastResponseRateLimits } from "./quota-broadcast.ts"
+import { broadcastResponseRateLimits, rebroadcastQuotaForSessionUpdate } from "./quota-broadcast.ts"
 import { addSessionUsage } from "./session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 import { clampWithHint } from "./truncate-hint.ts"
@@ -1262,6 +1262,14 @@ export async function* sendMessage(
             if (isDebug()) console.error(formatCacheLine(usage))
             detector.observe(usage, reqSnapshot)
             addSessionUsage(usage)
+            // The earlier broadcast (right after response headers
+            // arrived) updated the rate-limit cache and re-fired the
+            // `quota-status` slot — but `addSessionUsage` had not run
+            // yet, so that render had stale session totals. Re-emit
+            // here, using the still-fresh cache, so the footer's
+            // `✦ <N> tok` segment reflects THIS turn instead of
+            // lagging by one.
+            rebroadcastQuotaForSessionUpdate()
           }
           requestStatus.update("Receiving stream")
           break
