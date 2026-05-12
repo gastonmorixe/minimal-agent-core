@@ -6,7 +6,7 @@
  *   - URL building: required params, scope ordering, optional login_hint
  *   - Paste parsing: `code#state`, full URL, query-only, malformed, empty
  *   - Token exchange: happy path, 401, generic error
- *   - installCredentials: credential shape, ~/.claude.json merge / new file
+ *   - installCredentials: keychain shape, ~/.claude.json merge / new file
  *   - runOAuthLogin orchestrator: success, retries, state mismatch, exhaustion
  */
 
@@ -330,7 +330,7 @@ describe("exchangeCodeForTokens", () => {
 // ---------------------------------------------------------------------------
 
 describe("installCredentials", () => {
-  it("writes a CredentialsData with claudeAiOauth + oauthAccount to the credential store", () => {
+  it("writes a CredentialsData with claudeAiOauth + oauthAccount to the keychain", () => {
     let written: CredentialsData | null = null
     const resp: TokenExchangeResponse = {
       access_token: "AT",
@@ -342,7 +342,7 @@ describe("installCredentials", () => {
     }
 
     const result = installCredentials(resp, {
-      writeCredentials: (data) => {
+      writeKeychain: (data) => {
         written = data
       },
       writeClaudeJson: () => {}, // skip the disk write in this test
@@ -367,7 +367,7 @@ describe("installCredentials", () => {
         refresh_token: "RT",
         expires_in: 60,
       } as TokenExchangeResponse,
-      { writeCredentials: () => {}, writeClaudeJson: () => {} },
+      { writeKeychain: () => {}, writeClaudeJson: () => {} },
     )
     const after = Date.now()
     expect(result.expiresAt).toBeGreaterThanOrEqual(before + 60_000)
@@ -386,7 +386,7 @@ describe("installCredentials", () => {
         organization: { uuid: "org-uuid" },
       },
       {
-        writeCredentials: () => {},
+        writeKeychain: () => {},
         readFile: (path) => {
           if (path.endsWith(".claude.json")) {
             return JSON.stringify({
@@ -425,7 +425,7 @@ describe("installCredentials", () => {
         account: { uuid: "acc-uuid", email_address: "u@example.com" },
       },
       {
-        writeCredentials: () => {},
+        writeKeychain: () => {},
         readFile: () => null,
         writeFile: (_p, c) => {
           writtenContents = c
@@ -448,7 +448,7 @@ describe("installCredentials", () => {
         account: { uuid: "acc-uuid", email_address: "u@example.com" },
       },
       {
-        writeCredentials: () => {},
+        writeKeychain: () => {},
         readFile: () => "{not json}",
         writeFile: (_p, c) => {
           writtenContents = c
@@ -470,7 +470,7 @@ describe("installCredentials", () => {
         // no `account`
       },
       {
-        writeCredentials: () => {},
+        writeKeychain: () => {},
         writeClaudeJson: () => {
           touched = true
         },
@@ -557,7 +557,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => `AUTHCODE#${orchState}`,
       randomBytes: orchestratorRand,
       install: {
-        writeCredentials: () => {},
+        writeKeychain: () => {},
         writeClaudeJson: ({ accountUuid }) => {
           installedAccount = accountUuid
         },
@@ -612,7 +612,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
       display: (m) => messages.push(m),
-      install: { writeCredentials: () => {}, writeClaudeJson: () => {} },
+      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
     })
     expect(outcome.ok).toBe(true)
     expect(messages.some((m) => /Invalid code/.test(m))).toBe(true)
@@ -644,7 +644,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
       display: (m) => messages.push(m),
-      install: { writeCredentials: () => {}, writeClaudeJson: () => {} },
+      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
     })
     expect(outcome.ok).toBe(true)
     expect(messages.some((m) => /State mismatch/i.test(m))).toBe(true)
@@ -665,7 +665,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => "nope",
       maxAttempts: 2,
       randomBytes: orchestratorRand,
-      install: { writeCredentials: () => {}, writeClaudeJson: () => {} },
+      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) {
@@ -695,7 +695,7 @@ describe("runOAuthLogin", () => {
         networkClient: new NetworkClient({ primary: tokenSrv }),
         readPaste: async () => `BAD#${orchState}`,
         randomBytes: orchestratorRand,
-        install: { writeCredentials: () => {}, writeClaudeJson: () => {} },
+        install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
       }),
     ).rejects.toThrow(/invalid authorization code/i)
   })
@@ -724,7 +724,7 @@ describe("runOAuthLogin", () => {
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => `OK#${orchState}`,
       randomBytes: orchestratorRand,
-      install: { writeCredentials: () => {}, writeClaudeJson: () => {} },
+      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
     })
     expect(outcome.ok).toBe(true)
   })

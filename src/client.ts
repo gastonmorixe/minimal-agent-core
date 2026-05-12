@@ -10,7 +10,7 @@
  *   - SSE parsing for signature_delta and input_json_delta
  */
 
-import { type AuthResult, readCredentials } from "./auth.ts"
+import { type AuthResult, readKeychain } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import {
   API_URL,
@@ -1110,7 +1110,7 @@ export async function* sendMessage(
     // resume the same in-flight turn.
     //
     // Multi-process race mitigation (May 2026): when many agent processes
-    // share one credential entry, server-side refresh-token rotation makes
+    // share one keychain entry, server-side refresh-token rotation makes
     // each refresh invalidate the access tokens cached by every OTHER
     // process. They each 401 on their next request, refresh, invalidate
     // the previous one, and the cycle never settles. Net-dbg trace from
@@ -1118,22 +1118,22 @@ export async function* sendMessage(
     // returned 401, with 22 refreshes (one outright `invalid_grant` :
     // refresh token already burned by another agent).
     //
-    // Fix: on 401, re-read the credential store BEFORE calling
-    // auth.refresh(). If another process has already written a fresher
-    // access token, use that directly : no oauth round-trip, no rotation,
-    // no race. Only refresh if the store still has the same token we
-    // just got 401 on (i.e. WE are the freshest cache holder, the token
-    // genuinely expired). Collapses N concurrent refreshes per "true
-    // expiry" event into 1.
+    // Fix: on 401, re-read the keychain BEFORE calling auth.refresh().
+    // If another process has already written a fresher access token, use
+    // that directly : no oauth round-trip, no rotation, no race. Only
+    // refresh if the keychain still has the same token we just got 401
+    // on (i.e. WE are the freshest cache holder, the token genuinely
+    // expired). Collapses N concurrent refreshes per "true expiry" event
+    // into 1.
     if (response.status === 401 && auth.refresh) {
       debugHeader(c.yellow("401 : token expired"))
 
-      // Step 1: store-first. Cheap (single read of keychain or local
-      // JSON file), synchronous, no network. Fail-quiet on any read
-      // error : fall through to the refresh path.
+      // Step 1: keychain-first. Cheap (`security find-generic-password`),
+      // synchronous, no network. Fail-quiet on any read error : fall
+      // through to the refresh path.
       let recovered = false
       try {
-        const fresh = readCredentials()
+        const fresh = readKeychain()
         const freshToken = fresh?.claudeAiOauth?.accessToken
         if (freshToken && freshToken !== auth.token) {
           requestStatus.update("Auth refreshed elsewhere, retrying...", {
@@ -1151,11 +1151,11 @@ export async function* sendMessage(
           }
         }
       } catch {
-        // Credential read failures are non-fatal; the refresh path below
+        // Keychain read failures are non-fatal; the refresh path below
         // is the authoritative recovery anyway.
       }
 
-      // Step 2: still 401 (or store had no fresher token) → do our
+      // Step 2: still 401 (or keychain had no fresher token) → do our
       // own refresh.
       if (!recovered && response.status === 401) {
         requestStatus.update("Auth token expired, refreshing...", {
@@ -1178,7 +1178,7 @@ export async function* sendMessage(
           })
           if (response.status === 401) {
             throw new Error(
-              "401 after token refresh. The stored credentials are stale : " +
+              "401 after token refresh. The keychain credentials are stale : " +
                 "run `minimal-agent --login` (or `claude`) to re-login.",
             )
           }
@@ -1614,7 +1614,7 @@ export async function checkQuota(
   try {
     let response = await doRequest(auth.token)
 
-    // 401 retry : same multi-process store-first mitigation as in
+    // 401 retry : same multi-process keychain-first mitigation as in
     // `sendMessage` above (see the long comment at the main 401 site).
     // checkQuota fires from the live-area `quota-status` plugin's
     // heartbeat AND on every `quota.headersReceived` event; with 100s of
@@ -1623,7 +1623,7 @@ export async function checkQuota(
     if (response.status === 401 && auth.refresh) {
       let recovered = false
       try {
-        const fresh = readCredentials()
+        const fresh = readKeychain()
         const freshToken = fresh?.claudeAiOauth?.accessToken
         if (freshToken && freshToken !== auth.token) {
           auth.token = freshToken

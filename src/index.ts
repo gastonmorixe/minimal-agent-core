@@ -7,15 +7,13 @@
  * authenticated, agentic requests to the Anthropic Messages API using the
  * Claude Code CLI's stored OAuth credentials.
  *
- * This script reuses the real CLI's credentials (read from the macOS
- * Keychain on Darwin, or `~/.claude/.credentials.json` on Linux and
- * other platforms) and replicates its exact request format (headers,
- * metadata, system prompt, beta flags, tool schemas) so the server
- * treats it identically to the real CLI. Verified against live
- * captures via `.node-net-dbg/`.
+ * This script reuses the real CLI's credentials (read from macOS Keychain)
+ * and replicates its exact request format (headers, metadata, system prompt,
+ * beta flags, tool schemas) so the server treats it identically to the real
+ * CLI. Verified against live captures via `.node-net-dbg/`.
  *
  * **Modules:**
- * - {@link auth} — credential store access + OAuth refresh
+ * - {@link auth} — Keychain reading + OAuth refresh
  * - {@link headers} — User-Agent, beta flags, system prompt
  * - {@link metadata} — `metadata.user_id` JSON construction
  * - {@link client} — HTTP layer + SSE streaming + request body
@@ -254,7 +252,7 @@ function printHelp(): void {
     "",
     `  ${c.bold("Auth")} ${c.dim("(also as subcommands: `login`, `logout`, `auth-status`)")}`,
     `    ${c.cyan("--login")} ${c.dim("[--email <addr>]")}   Sign in via OAuth (PKCE manual-paste flow)`,
-    `    ${c.cyan("--logout")}                   Clear stored credentials and ${c.dim("~/.claude.json")} oauthAccount`,
+    `    ${c.cyan("--logout")}                   Clear keychain credentials and ${c.dim("~/.claude.json")} oauthAccount`,
     `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
     "",
     `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
@@ -486,11 +484,11 @@ async function extractPrompt(): Promise<string | null> {
 /**
  * Wrap `getAuth()` with a first-time / stale-credentials login prompt.
  *
- * On a fresh install the credential store has no entry; `getAuth()`
- * throws `"No credentials found. …"`. Rather than dump the user back at
- * the shell with an error, we detect that case in interactive mode
- * (TTY on stdout AND stdin) and offer to run `--login` inline. If they
- * accept, we run the OAuth flow and retry `getAuth()`.
+ * On a fresh install the keychain has no `Claude Code-credentials` entry;
+ * `getAuth()` throws `"No credentials in keychain. …"`. Rather than dump
+ * the user back at the shell with an error, we detect that case in
+ * interactive mode (TTY on stdout AND stdin) and offer to run `--login`
+ * inline. If they accept, we run the OAuth flow and retry `getAuth()`.
  *
  * Non-interactive runs (non-TTY, `--prompt`, piped stdin) keep the current
  * "fail fast with a hint" behavior — script-friendly and predictable.
@@ -508,9 +506,8 @@ async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<typeof g
     return await getAuth()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    const looksLikeMissing = /No credentials found|No OAuth access token|No refresh token/i.test(
-      msg,
-    )
+    const looksLikeMissing =
+      /No credentials in keychain|No OAuth access token|No refresh token/i.test(msg)
     const looksLikeStale = /invalid_grant|stale/i.test(msg)
     const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true
 
@@ -552,8 +549,8 @@ async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<typeof g
         { cause: err },
       )
     }
-    // Login wrote the credential store; retry. If THIS still fails,
-    // surface the error — we're not going to loop.
+    // Login wrote the keychain; retry. If THIS still fails, surface
+    // the error — we're not going to loop.
     return await getAuth()
   }
 }
@@ -585,7 +582,7 @@ async function readSingleLineFromStdin(promptText: string): Promise<string> {
  * Entry point. Orchestrates the full startup flow:
  *
  * 1. Print session info to stderr
- * 2. Read OAuth credentials from the platform credential store
+ * 2. Read OAuth credentials from macOS Keychain
  * 3. Handle one-shot subcommands (--list-flags, --list-models)
  * 4. Run the quota check (unless --skip-quota)
  * 5. Set up the agent with the selected model

@@ -17,10 +17,10 @@
  *      format from the success page, and pastes it back at our prompt.
  *   7. POST to the token endpoint with `grant_type=authorization_code`,
  *      `code`, `redirect_uri`, `client_id`, `code_verifier`, `state`.
- *   8. Persist the resulting tokens to the platform credential store
- *      (macOS Keychain or `~/.claude/.credentials.json` on Linux) and
- *      merge `oauthAccount` into `~/.claude.json` so both minimal-agent
- *      and the official CLI find the same account uuid.
+ *   8. Persist the resulting tokens to the macOS Keychain
+ *      (`Claude Code-credentials`) and merge `oauthAccount` into
+ *      `~/.claude.json` so both minimal-agent and the official CLI find the
+ *      same account uuid.
  *
  * Why manual-paste only:
  *   - No localhost HTTP listener → works inside SSH, headless containers,
@@ -41,7 +41,7 @@ import { createHash, randomBytes } from "node:crypto"
 import {
   type CredentialsData,
   getOauthRefreshConfig,
-  writeCredentials as defaultWriteCredentials,
+  writeKeychain as defaultWriteKeychain,
 } from "./auth.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
@@ -337,8 +337,8 @@ export async function exchangeCodeForTokens(
 // ---------------------------------------------------------------------------
 
 export interface InstallCredentialsDeps {
-  /** Override the credential writer (tests). */
-  writeCredentials?: (data: CredentialsData) => void
+  /** Override the keychain writer (tests). */
+  writeKeychain?: (data: CredentialsData, service?: string) => void
   /** Override the ~/.claude.json updater (tests). Passed accountUuid + organizationUuid. */
   writeClaudeJson?: (info: {
     accountUuid: string
@@ -354,12 +354,10 @@ export interface InstallCredentialsDeps {
 }
 
 /**
- * Persist a successful token-exchange result into the platform credential
- * store and (best-effort) merge the `oauthAccount` block into
- * `~/.claude.json`.
+ * Persist a successful token-exchange result into the macOS Keychain and
+ * (best-effort) merge the `oauthAccount` block into `~/.claude.json`.
  *
- * The credential entry uses the same shape the official CLI writes
- * (regardless of which backend stores it):
+ * The Keychain entry uses the same shape the official CLI writes:
  *
  * ```json
  * {
@@ -403,8 +401,8 @@ export function installCredentials(
       ...(organization ? { organizationUuid: organization.uuid } : {}),
     }
   }
-  const writeStore = deps.writeCredentials ?? defaultWriteCredentials
-  writeStore(credentials)
+  const writeKc = deps.writeKeychain ?? defaultWriteKeychain
+  writeKc(credentials)
 
   // 2. Mirror `oauthAccount` into ~/.claude.json (merge, don't clobber).
   if (account) {

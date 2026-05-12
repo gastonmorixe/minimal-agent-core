@@ -5,9 +5,7 @@
  * (see `cc-03312026-2.1.88/src/commands/logout/logout.js`) trimmed to two
  * effects:
  *
- *   1. Delete the credential store entry. On macOS this removes the
- *      Keychain item `Claude Code-credentials`; on Linux/others it
- *      removes `~/.claude/.credentials.json`.
+ *   1. Delete the macOS Keychain entry for `Claude Code-credentials`.
  *   2. Strip the `oauthAccount` block from `~/.claude.json` (preserve other
  *      fields — onboarding, settings, project state belongs to the official
  *      CLI and we don't touch it).
@@ -21,11 +19,11 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { c } from "../agent.ts"
-import { deleteCredentials } from "../auth.ts"
+import { deleteKeychain } from "../auth.ts"
 
 export interface LogoutDeps {
-  /** Override credential delete (tests). Returns `true` if an entry was deleted. */
-  deleteCredentials?: () => boolean
+  /** Override keychain delete (tests). Returns `true` if a row was deleted. */
+  deleteKeychain?: () => boolean
   /** Override fs read (tests). */
   readFile?: (path: string) => string | null
   /** Override fs write (tests). */
@@ -94,7 +92,7 @@ export function stripClaudeJsonOauthAccount(
  */
 export async function runLogoutCommand(deps: LogoutDeps = {}): Promise<number> {
   const out = deps.output ?? { write: (s: string) => process.stderr.write(s) }
-  const del = deps.deleteCredentials ?? deleteCredentials
+  const del = deps.deleteKeychain ?? deleteKeychain
 
   out.write(`  ${c.bold(c.pink("⊖"))} ${c.bold("Sign out")}\n`)
 
@@ -103,13 +101,13 @@ export async function runLogoutCommand(deps: LogoutDeps = {}): Promise<number> {
     removed = del()
   } catch (err) {
     out.write(
-      `  ${c.boldYellow("warn")} credential delete failed: ${
+      `  ${c.boldYellow("warn")} keychain delete failed: ${
         err instanceof Error ? err.message : String(err)
       }\n`,
     )
   }
   out.write(
-    `  ${c.faintWhite("│")} credentials  ${removed ? c.boldGreen("removed") : c.dim("(no entry)")}\n`,
+    `  ${c.faintWhite("│")} keychain  ${removed ? c.boldGreen("removed") : c.dim("(no entry)")}\n`,
   )
 
   let strippedJson = false

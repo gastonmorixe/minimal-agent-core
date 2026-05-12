@@ -4,17 +4,17 @@ import {
   type TokenRefreshResult,
   getAuth,
   getOauthRefreshConfig,
-  readCredentials,
+  readKeychain,
   refreshAccessToken,
 } from "./auth.ts"
 
 describe("auth", () => {
-  describe("readCredentials", () => {
+  describe("readKeychain", () => {
     it("reads Claude Code credentials and returns expected shape", () => {
-      const creds = readCredentials()
+      const creds = readKeychain("Claude Code-credentials")
       // On a machine with Claude Code installed, this should succeed
       if (!creds) {
-        console.warn("SKIP: no credential entry found (not logged in)")
+        console.warn("SKIP: no keychain entry found (not logged in)")
         return
       }
 
@@ -29,11 +29,16 @@ describe("auth", () => {
       expect(typeof creds.claudeAiOauth!.expiresAt).toBe("number")
     })
 
-    it("has oauthAccount with accountUuid (from credential store or ~/.claude.json)", () => {
-      const creds = readCredentials()
+    it("returns null for nonexistent service", () => {
+      const creds = readKeychain("nonexistent-service-12345")
+      expect(creds).toBeNull()
+    })
+
+    it("has oauthAccount with accountUuid (from keychain or ~/.claude.json)", () => {
+      const creds = readKeychain("Claude Code-credentials")
       if (!creds) return
 
-      // oauthAccount may be in the store or in ~/.claude.json depending on version
+      // oauthAccount may be in keychain or in ~/.claude.json depending on version
       if (creds.oauthAccount?.accountUuid) {
         expect(creds.oauthAccount.accountUuid).toMatch(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
@@ -48,7 +53,7 @@ describe("auth", () => {
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
           )
         } catch {
-          console.warn("SKIP: no accountUuid in store or ~/.claude.json")
+          console.warn("SKIP: no accountUuid in keychain or ~/.claude.json")
         }
       }
     })
@@ -69,7 +74,7 @@ describe("auth", () => {
       )
     })
 
-    it("doRefresh re-reads the store on every call (mode B: in-process rotation)", async () => {
+    it("doRefresh re-reads the keychain on every call (mode B: in-process rotation)", async () => {
       // Regression: long-lived sessions previously failed on the *second*
       // refresh because the closure captured the original snapshot's
       // refreshToken. After the server rotated RT1→RT2 on the first
@@ -77,7 +82,7 @@ describe("auth", () => {
       let storedRT = "RT1"
       const sentRefreshTokens: string[] = []
 
-      const fakeRead = (): CredentialsData => ({
+      const fakeRead = (_service: string): CredentialsData => ({
         claudeAiOauth: {
           accessToken: "AT_old",
           refreshToken: storedRT,
@@ -101,7 +106,7 @@ describe("auth", () => {
         }
       }
 
-      const auth = await getAuth({
+      const auth = await getAuth("test-service", {
         read: fakeRead,
         write: fakeWrite,
         refresh: fakeRefresh,
@@ -112,7 +117,7 @@ describe("auth", () => {
       const after2 = await after1.refresh!()
       const after3 = await after2.refresh!()
 
-      // Each refresh sent the *current* store RT, not the captured one
+      // Each refresh sent the *current* keychain RT, not the captured one
       expect(sentRefreshTokens).toEqual(["RT1", "RT2", "RT3"])
       expect(after3.token).toBe("AT_RT4")
       expect(storedRT).toBe("RT4")
@@ -135,7 +140,7 @@ describe("auth", () => {
         )
       }
 
-      const auth = await getAuth({
+      const auth = await getAuth("test-service", {
         read: fakeRead,
         write: () => {},
         refresh: fakeRefresh,
@@ -148,18 +153,18 @@ describe("auth", () => {
       await expect(auth.refresh!()).rejects.toThrow(/claude/)
     })
 
-    it("doRefresh skips the server call when the store already has a fresher token", async () => {
+    it("doRefresh skips the server call when keychain already has a fresher token", async () => {
       // Models the multi-process race: between our 401 and our refresh,
-      // another process refreshed → the store now holds a NEW access
+      // another process refreshed → keychain now holds a NEW access
       // token (different from what we issued last time). doRefresh
       // should detect this via the in-closure `lastIssuedToken` tracker
-      // and return the store's token directly, skipping the server
+      // and return the keychain's token directly, skipping the server
       // round-trip and the destructive refresh-token rotation.
       let storedAccess = "AT_v1"
       let storedRT = "RT_v1"
       let refreshCalls = 0
 
-      const fakeRead = (): CredentialsData => ({
+      const fakeRead = (_service: string): CredentialsData => ({
         claudeAiOauth: {
           accessToken: storedAccess,
           refreshToken: storedRT,
@@ -180,7 +185,7 @@ describe("auth", () => {
         }
       }
 
-      const auth = await getAuth({
+      const auth = await getAuth("test-service", {
         read: fakeRead,
         write: fakeWrite,
         refresh: fakeRefresh,
@@ -188,8 +193,8 @@ describe("auth", () => {
       // Initial: lastIssuedToken == "AT_v1" (the value getAuth observed).
 
       // Simulate: ANOTHER process refreshed and wrote a new token to the
-      // store WITHOUT us calling refresh ourselves. Now when WE call
-      // auth.refresh(), the closure should compare the store's accessToken
+      // keychain WITHOUT us calling refresh ourselves. Now when WE call
+      // auth.refresh(), the closure should compare keychain's accessToken
       // to lastIssuedToken, see a difference, return the fresh token, and
       // NOT call refreshFn.
       storedAccess = "AT_from_other_process"
@@ -201,15 +206,15 @@ describe("auth", () => {
       expect(result.token).toBe("AT_from_other_process")
     })
 
-    it("doRefresh DOES call refresh when the store still has the same token we last used", async () => {
+    it("doRefresh DOES call refresh when keychain still has the same token we last used", async () => {
       // Counterpart of the previous test: if no other process has
-      // refreshed, the store still matches lastIssuedToken, so we
+      // refreshed, the keychain still matches lastIssuedToken, so we
       // must do a real refresh (not silently skip).
       let storedAccess = "AT_v1"
       let storedRT = "RT_v1"
       let refreshCalls = 0
 
-      const fakeRead = (): CredentialsData => ({
+      const fakeRead = (_service: string): CredentialsData => ({
         claudeAiOauth: {
           accessToken: storedAccess,
           refreshToken: storedRT,
@@ -230,19 +235,19 @@ describe("auth", () => {
         }
       }
 
-      const auth = await getAuth({
+      const auth = await getAuth("test-service", {
         read: fakeRead,
         write: fakeWrite,
         refresh: fakeRefresh,
       })
 
-      // No other process has touched the store. auth.refresh() must
+      // No other process has touched the keychain. auth.refresh() must
       // call the server.
       const result = await auth.refresh!()
 
       expect(refreshCalls).toBe(1)
       expect(result.token).toBe("AT_fresh_1")
-      // And the store reflects the new tokens.
+      // And the keychain reflects the new tokens.
       expect(storedAccess).toBe("AT_fresh_1")
     })
 
