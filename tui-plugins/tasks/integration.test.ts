@@ -74,7 +74,7 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
     expect(addResult).not.toBeNull()
     if (addResult?.kind !== "tool_result") return
     expect(addResult.is_error).toBeFalsy()
-    expect(addResult.display).toContain("added 3 tasks")
+    expect(addResult.displayHeader).toContain("added 3 tasks")
     expect(addResult.content).toContain("plan step 1")
     expect(addResult.content).toContain("plan step 3")
 
@@ -124,7 +124,7 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
     expect(doneResult).not.toBeNull()
     if (doneResult?.kind !== "tool_result") return
     expect(doneResult.is_error).toBeFalsy()
-    expect(doneResult.display).toContain("marked done")
+    expect(doneResult.displayHeader).toContain("marked done")
 
     // Attachment sees done=1, todo=1.
     const text = new TasksAttachment(sid, { home: tmpHome }).toText()!
@@ -160,7 +160,7 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
       process.cwd(),
     )
     if (r?.kind !== "tool_result") return
-    expect(r.display).toContain("all done")
+    expect(r.displayHeader).toContain("all done")
   })
 
   it("subtasks: add child via #parent and the attachment shows the tree", async () => {

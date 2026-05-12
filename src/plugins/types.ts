@@ -88,7 +88,14 @@ export interface TUIContext {
  *   truncated assistant turn.
  */
 export type TUIResult =
-  | { kind: "tool_result"; content: string; is_error?: boolean; display?: string }
+  | {
+      kind: "tool_result"
+      content: string
+      is_error?: boolean
+      display?: string
+      displayHeader?: string
+      displayFooter?: string
+    }
   | { kind: "rendered"; ansi: string }
   | { kind: "interactive_result"; value: unknown }
 

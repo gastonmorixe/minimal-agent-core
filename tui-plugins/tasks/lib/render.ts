@@ -1,9 +1,8 @@
 /**
  * Renderer for the Tasks plugin.
  *
- * Produces both ANSI ({@link RenderOptions.ansi} = true, used for the
- * tool-result `display` channel and the CLI) and plain text (ansi = false,
- * for the model-facing `tool_result.content` channel).
+ * Produces both full framed blocks for the CLI and split host-frame
+ * parts for the in-agent `Task` tool transcript.
  *
  * Output shape (framed):
  *
@@ -67,7 +66,7 @@ const ANSI = {
    * lime-green `✔` for "done" (gold-and-lime were too close on the
    * yellow-green axis).
    */
-  SKY: "\x1b[38;5;45m",
+  GOLD: "\x1b[38;5;214m",
   RED: "\x1b[31m",
   DGRAY: "\x1b[38;5;240m",
   LGRAY: "\x1b[38;5;246m",
@@ -121,7 +120,7 @@ function statusGlyph(status: TaskStatus, ansi: boolean): string {
     case "done":
       return color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)
     case "doing":
-      return color(ansi, ANSI.SKY, GLYPHS.doing)
+      return color(ansi, ANSI.GOLD, GLYPHS.doing)
     case "todo":
       return color(ansi, ANSI.DIM, GLYPHS.pending)
     case "canceled":
@@ -145,7 +144,7 @@ function statusGlyph(status: TaskStatus, ansi: boolean): string {
  *  - canceled → red `✘ ` prefix + dim + strikethrough + ` (reason)` suffix
  */
 function styleTitle(t: Task, ansi: boolean, maxLen?: number): string {
-  const title = truncate(t.title, maxLen)
+  const title = truncate(singleLineText(t.title), maxLen)
   switch (t.status) {
     case "done":
       return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, title)
@@ -156,7 +155,8 @@ function styleTitle(t: Task, ansi: boolean, maxLen?: number): string {
     case "canceled": {
       const x = color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)
       const body = color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, title)
-      const reason = t.reason ? `  ${color(ansi, ANSI.DGRAY, `(${t.reason})`)}` : ""
+      const reasonText = t.reason ? singleLineText(t.reason) : ""
+      const reason = reasonText ? `  ${color(ansi, ANSI.DGRAY, `(${reasonText})`)}` : ""
       return `${x} ${body}${reason}`
     }
     default: {
@@ -165,6 +165,10 @@ function styleTitle(t: Task, ansi: boolean, maxLen?: number): string {
       throw new Error(`unhandled status: ${String(_exhaustive)}`)
     }
   }
+}
+
+function singleLineText(s: string): string {
+  return s.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim()
 }
 
 function truncate(s: string, max?: number): string {
@@ -177,9 +181,8 @@ function truncate(s: string, max?: number): string {
 // Header rendering
 // ---------------------------------------------------------------------------
 
-function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string {
+function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
-  const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameTL)
   const brand = `${color(ansi, ANSI.DIM, GLYPHS.pending)} ${color(ansi, ANSI.BOLD, "Tasks")}`
 
   // Common N/M trailer.
@@ -196,13 +199,13 @@ function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string
       middle = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, `added ${action.count} tasks`)}`
       break
     case "started":
-      middle = ` ${dot} ${color(ansi, ANSI.SKY, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = ` ${dot} ${color(ansi, ANSI.GOLD, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_done":
       middle = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} marked done ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_doing":
-      middle = ` ${dot} ${color(ansi, ANSI.SKY, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = ` ${dot} ${color(ansi, ANSI.GOLD, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_todo":
       middle = ` ${dot} ${color(ansi, ANSI.DIM, GLYPHS.pending)} reset to todo ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
@@ -244,16 +247,20 @@ function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string
     suffix = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, String(stats.done))}${color(ansi, ANSI.DIM, `/${stats.total}`)}`
   }
 
-  return `${frame} ${brand}${middle}${suffix}`
+  return `${brand}${middle}${suffix}`
+}
+
+function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string {
+  const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameTL)
+  return `${frame} ${renderHeaderText(action, stats, ansi)}`
 }
 
 // ---------------------------------------------------------------------------
 // Row rendering
 // ---------------------------------------------------------------------------
 
-function renderTopLevelRow(v: View, ansi: boolean, maxTitleLen?: number): string {
+function renderTopLevelRowBody(v: View, ansi: boolean, maxTitleLen?: number): string {
   const t = v.task
-  const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
   // Number column (right-aligned width 2).
   const numStr = String(v.n).padStart(2, " ")
   let numCol: string
@@ -272,18 +279,27 @@ function renderTopLevelRow(v: View, ansi: boolean, maxTitleLen?: number): string
   const stCol = statusGlyph(t.status, ansi)
   const idCol = color(ansi, ANSI.DGRAY, `#${t.id}`)
   const titleCol = styleTitle(t, ansi, maxTitleLen)
-  return `${frame}   ${numCol}  ${stCol}  ${idCol}  ${titleCol}`
+  return `  ${numCol}  ${stCol}  ${idCol}  ${titleCol}`
 }
 
-function renderSubtaskRow(v: View, ansi: boolean, maxTitleLen?: number): string {
-  const t = v.task
+function renderTopLevelRow(v: View, ansi: boolean, maxTitleLen?: number): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
+  return `${frame} ${renderTopLevelRowBody(v, ansi, maxTitleLen)}`
+}
+
+function renderSubtaskRowBody(v: View, ansi: boolean, maxTitleLen?: number): string {
+  const t = v.task
   const isLast = v.siblingCount !== null && v.childIndex === v.siblingCount - 1
   const treeGlyph = color(ansi, ANSI.DGRAY, isLast ? GLYPHS.treeLast : GLYPHS.treeMid)
   const stCol = statusGlyph(t.status, ansi)
   const idCol = color(ansi, ANSI.DGRAY, `#${t.id}`)
   const titleCol = styleTitle(t, ansi, maxTitleLen)
-  return `${frame}        ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}`
+  return `       ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}`
+}
+
+function renderSubtaskRow(v: View, ansi: boolean, maxTitleLen?: number): string {
+  const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
+  return `${frame} ${renderSubtaskRowBody(v, ansi, maxTitleLen)}`
 }
 
 function renderGap(ansi: boolean): string {
@@ -294,17 +310,56 @@ function renderGap(ansi: boolean): string {
 // Closer rendering
 // ---------------------------------------------------------------------------
 
-function renderCloser(stats: Stats, ansi: boolean): string {
-  const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameBL)
+function renderCloserText(stats: Stats, ansi: boolean): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   const parts: string[] = []
   parts.push(color(ansi, ANSI.LIME, `${stats.done} done`))
-  parts.push(color(ansi, ANSI.SKY, `${stats.doing} doing`))
+  parts.push(color(ansi, ANSI.GOLD, `${stats.doing} doing`))
   parts.push(color(ansi, ANSI.DIM, `${stats.todo} todo`))
   if (stats.canceled > 0) {
     parts.push(color(ansi, `${ANSI.DIM}${ANSI.RED}`, `${stats.canceled} canceled`))
   }
-  return `${frame}  ${parts.join(` ${dot} `)}`
+  return parts.join(` ${dot} `)
+}
+
+function renderCloser(stats: Stats, ansi: boolean): string {
+  const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameBL)
+  return `${frame}  ${renderCloserText(stats, ansi)}`
+}
+
+export interface ToolDisplayParts {
+  header: string
+  body: string
+  footer: string
+}
+
+export function renderToolDisplay(
+  views: readonly View[],
+  stats: Stats,
+  opts: RenderOptions,
+): ToolDisplayParts {
+  const bodyLines: string[] = []
+  if (views.length === 0) {
+    if (opts.action.kind === "list" || opts.action.kind === "cleared") {
+      const dim = opts.ansi ? `${ANSI.DIM}\x1b[3m` : ""
+      const reset = opts.ansi ? ANSI.RESET : ""
+      bodyLines.push(`  ${dim}Task({action: "add_many", titles: [...]}) to plan a multi-step change${reset}`)
+    }
+  } else {
+    for (const v of views) {
+      bodyLines.push(
+        v.task.parent === null
+          ? renderTopLevelRowBody(v, opts.ansi, opts.maxTitleLen)
+          : renderSubtaskRowBody(v, opts.ansi, opts.maxTitleLen),
+      )
+    }
+  }
+  bodyLines.push("")
+  return {
+    header: renderHeaderText(opts.action, stats, opts.ansi),
+    body: bodyLines.join("\n"),
+    footer: views.length === 0 ? "" : ` ${renderCloserText(stats, opts.ansi)}`,
+  }
 }
 
 // ---------------------------------------------------------------------------

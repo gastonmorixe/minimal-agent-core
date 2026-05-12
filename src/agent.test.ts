@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
+
 import { describe, expect, it } from "bun:test"
 import { Agent, type ReplAgentLike, runRepl, withRollingCacheBreakpoint } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "./client.ts"
+import { PluginLoader } from "./plugins/loader.ts"
 import { StatusBus } from "./status.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
@@ -407,6 +412,67 @@ describe("Agent.run transcript", () => {
     const joined = transcript.join("\n")
     expect(joined).toContain("NonExistentTool")
     expect(joined).toContain("Unknown tool")
+  })
+
+  it("renders Task plugin header and footer through the host tool frame", async () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "task-transcript-test-"))
+    const oldHome = process.env.HOME
+    try {
+      process.env.HOME = tmpHome
+      const loader = await PluginLoader.load({
+        embeddedDir: resolve(__dirname, ".."),
+        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+        sessionId: "99999999-aaaa-bbbb-cccc-dddddddddddd",
+      })
+      let round = 0
+      const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+        round++
+        if (round === 1) {
+          return {
+            blocks: [
+              {
+                type: "tool_use" as const,
+                id: "tu-task",
+                name: "Task",
+                input: { action: "add_many", titles: ["Verify lint clean", "Run tests"] },
+              },
+            ],
+            text: "",
+            stopReason: "tool_use",
+          } as StreamedResponse
+        }
+        yield "done"
+        return {
+          blocks: [{ type: "text" as const, text: "done" }],
+          text: "done",
+          stopReason: "end_turn",
+        } as StreamedResponse
+      }
+
+      const agent = new Agent({
+        auth: { type: "api-key", token: "test-token" },
+        model: "test-model",
+        loader,
+        sendFn,
+      })
+      const transcript: string[] = []
+      for await (const _ of agent.run("go", {
+        onTranscriptLine: (line) => transcript.push(line),
+      })) {
+        // drain
+      }
+      const plain = stripAnsi(transcript.join("\n"))
+      expect(plain).toContain("  ╭ ○ Tasks · + added 2 tasks · 0/2")
+      expect(plain).toContain("  │    1  ○")
+      expect(plain).toContain("Verify lint clean")
+      expect(plain).toContain("  ╰  0 done · 0 doing · 2 todo")
+      expect(plain).not.toContain("  │ ╭")
+      expect(plain).not.toContain("  │ │")
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME
+      else process.env.HOME = oldHome
+      rmSync(tmpHome, { recursive: true, force: true })
+    }
   })
 
   it("appends a streak `[note: ...]` to tool_result.content after 3 consecutive truncations", async () => {

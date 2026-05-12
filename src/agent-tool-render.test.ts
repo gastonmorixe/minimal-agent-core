@@ -372,6 +372,18 @@ describe("formatToolPreview — display channel (Edit/Write diffs)", () => {
     expect(stripAnsi(lines[lines.length - 1])).toMatch(/^\s*╰\s/)
     expect(stripAnsi(lines[0])).toMatch(/^\s*│\s\+added/)
   })
+
+  it("uses a supplied display footer as the close row", () => {
+    const display = "  1  ○  #a7b3c4  first\n"
+    const lines = formatToolPreview("compact for model", false, display, {
+      tool: "Task",
+      footer: "0 done · 0 doing · 1 todo",
+    })
+    const plain = lines.map(stripAnsi)
+    expect(plain[0]).toMatch(/^\s*│\s+1\s+○/)
+    expect(plain[1]).toMatch(/^\s*│\s*$/)
+    expect(plain[2]).toMatch(/^\s*╰\s0 done/)
+  })
 })
 
 describe("formatToolPreview — body preview budget", () => {
