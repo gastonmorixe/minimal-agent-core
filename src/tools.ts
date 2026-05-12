@@ -206,19 +206,10 @@ const BASH_TOOL: ToolDefinition = {
   color: "orange",
   description:
     "Executes a given bash command and returns its output.\n\n" +
-    "Output you (the model) receive is capped at ~64KB / 1000 lines (whichever " +
-    "first). For commands that may produce more, bound the output yourself with " +
-    "`head -c`, `head -n`, `tail`, `sed -n '1,200p'`, or `grep` : pre-bounding " +
-    "gives usable signal: the post-hoc cap is lossy and includes a structured " +
-    "truncation notice for resume.\n\n" +
-    "Separately, the user's transcript previews ONLY THE FIRST ~10 LINES of body " +
-    "and summarizes the rest as `shown N/M L`. Do NOT use Bash to render visual " +
-    "content for the user (ASCII art, banners, ANSI TUI previews, formatted " +
-    "tables, generated reports) : they will only see a fraction. To show visual " +
-    "content, put it in your text reply instead, which the user reads in full. " +
-    "When the TUI preview clamped more lines than the API cap did, you will " +
-    "receive a `<ma::tui-preview shown=N total=M>` annotation on the tool_result " +
-    "so the divergence is visible to you on the next turn.\n\n" +
+    "Output is capped at ~64KB / 1000 lines (whichever first). For commands that may " +
+    "produce more, bound the output yourself with `head -c`, `head -n`, `tail`, " +
+    "`sed -n '1,200p'`, or `grep` : pre-bounding gives usable signal; the post-hoc " +
+    "cap is lossy and includes a structured truncation notice for resume.\n\n" +
     "The working directory persists between commands, but shell state does not.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -242,11 +233,9 @@ const READ_TOOL: ToolDefinition = {
   color: "sky",
   description:
     "Reads a file from the local filesystem. Returns content with line numbers.\n\n" +
-    "Output you (the model) receive is capped at ~64KB / 1000 lines per call. The " +
-    "user's transcript previews only the first ~15 lines and summarizes the rest. " +
-    "For larger files, page with `offset` (zero-based start line) and `limit` " +
-    "(max lines). The truncation notice reports both the cut line and total file " +
-    "size so you can pick the next offset.",
+    "Output is capped at ~64KB / 1000 lines per call. For larger files, page with " +
+    "`offset` (zero-based start line) and `limit` (max lines). The truncation notice " +
+    "reports both the cut line and total file size so you can pick the next offset.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -324,12 +313,10 @@ const GREP_TOOL: ToolDefinition = {
   color: "pink",
   description:
     "Search file contents with regex using ripgrep.\n\n" +
-    "Output you (the model) receive is capped at ~64KB / 1000 lines. The user's " +
-    "transcript previews only the first ~12 lines and summarizes the rest. For " +
-    'broad searches, prefer `output_mode: "files_with_matches"` (paths only : ' +
-    'densest) or `"count"`. Narrow with `glob` (e.g. "*.ts"), `path` ' +
-    "(subdirectory), `-A/-B/-C` for context lines, or `head_limit` rather than " +
-    "relying on the cap to fire.",
+    "Output is capped at ~64KB / 1000 lines. For broad searches, prefer " +
+    '`output_mode: "files_with_matches"` (paths only : densest) or `"count"`. ' +
+    'Narrow with `glob` (e.g. "*.ts"), `path` (subdirectory), `-A/-B/-C` for ' +
+    "context lines, or `head_limit` rather than relying on the cap to fire.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",

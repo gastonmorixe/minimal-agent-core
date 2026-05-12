@@ -40,37 +40,6 @@ describe("tool descriptions — output cap is documented", () => {
     expect(d).toMatch(/head|tail|sed|grep/i)
   })
 
-  it("Bash discloses the TUI-side preview cap distinct from the API cap", () => {
-    const d = descOf("Bash")
-    // The user-facing transcript preview is ~10 lines; tooling must
-    // tell the model so it doesn't assume "model-visible == user-visible".
-    expect(d).toMatch(/10\s*LINES|10\s*lines/)
-    expect(d).toMatch(/transcript|user/i)
-  })
-
-  it("Bash steers the model away from using it as a user-visible render channel", () => {
-    const d = descOf("Bash")
-    expect(d).toMatch(/visual|ASCII|ANSI|preview/i)
-    expect(d).toMatch(/text reply|response|reply/i)
-  })
-
-  it("Bash mentions the runtime <ma::tui-preview> annotation", () => {
-    const d = descOf("Bash")
-    expect(d).toMatch(/<ma::tui-preview/)
-  })
-
-  it("Read discloses the TUI-side preview cap distinct from the API cap", () => {
-    const d = descOf("Read")
-    expect(d).toMatch(/15\s*lines/i)
-    expect(d).toMatch(/transcript|user/i)
-  })
-
-  it("Grep discloses the TUI-side preview cap distinct from the API cap", () => {
-    const d = descOf("Grep")
-    expect(d).toMatch(/12\s*lines/i)
-    expect(d).toMatch(/transcript|user/i)
-  })
-
   it("Read mentions the cap and the paging params", () => {
     const d = descOf("Read")
     expect(d).toMatch(/64\s*KB/i)

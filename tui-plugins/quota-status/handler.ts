@@ -27,7 +27,7 @@
 
 import { c } from "../../src/agent.ts"
 import { getAuth } from "../../src/auth.ts"
-import { checkQuota } from "../../src/client.ts"
+import { checkQuota, has1mContext } from "../../src/client.ts"
 import { getLastRateLimits } from "../../src/quota-cache.ts"
 import { getSessionTokens } from "../../src/session-tokens.ts"
 import type { LiveAreaHandlerContext } from "../../src/plugins/types.ts"
@@ -37,6 +37,32 @@ import { renderQuotaFooter } from "./render.ts"
 // env var mid-session won't take effect until restart, which is fine: this
 // is a power-user knob, not a runtime toggle.
 const SHOW_OVERAGE = process.env.MINIMAL_AGENT_QUOTA_OVERAGE === "1"
+
+/**
+ * Resolve the model's context-window size from `MINIMAL_AGENT_MODEL`.
+ *
+ * The agent (src/index.ts) sets this env var before plugin load, so it's
+ * reliably available here. Snapshot-once: model can be switched per call
+ * via `--model`, but the live-area footer is per-process and we'd rather
+ * not re-resolve on every paint.
+ *
+ * Defaults to 200_000 (Anthropic's standard context window) when:
+ *   - the env var is missing,
+ *   - or the model has no `[1m]` suffix.
+ *
+ * Returns 1_000_000 for `[1m]` variants (Sonnet 4.6, Opus 4.6 with the
+ * explicit 1M opt-in). We do NOT try to auto-detect 1M support beyond
+ * the suffix — that's the user's signal that they're using the 1M
+ * endpoint, and erring on the side of "smaller window assumed" means
+ * the bar shows a higher fill ratio (closer to the danger zone) when
+ * we're unsure, which is the safer default for a "watch your context"
+ * indicator.
+ */
+function resolveContextWindow(): number {
+  const model = process.env.MINIMAL_AGENT_MODEL ?? ""
+  return has1mContext(model) ? 1_000_000 : 200_000
+}
+const CONTEXT_WINDOW = resolveContextWindow()
 
 /**
  * "Fresh enough to skip a `checkQuota` probe" window. Half the declared
@@ -72,6 +98,7 @@ export default async function handle(
     return renderQuotaFooter(cached.rateLimits, getSessionTokens(), {
       cols: cols(),
       showOverage: SHOW_OVERAGE,
+      contextWindow: CONTEXT_WINDOW,
     })
   }
 
@@ -95,5 +122,6 @@ export default async function handle(
   return renderQuotaFooter(result.rateLimits, getSessionTokens(), {
     cols: cols(),
     showOverage: SHOW_OVERAGE,
+    contextWindow: CONTEXT_WINDOW,
   })
 }

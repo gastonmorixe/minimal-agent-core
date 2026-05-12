@@ -19,10 +19,11 @@ describe("session-tokens", () => {
       cacheCreate: 0,
       total: 0,
       turns: 0,
+      contextSize: 0,
     })
   })
 
-  it("accumulates each field across turns", () => {
+  it("accumulates each cumulative field across turns", () => {
     addSessionUsage({
       input_tokens: 10,
       output_tokens: 20,
@@ -44,6 +45,42 @@ describe("session-tokens", () => {
     expect(t.turns).toBe(2)
   })
 
+  it("contextSize REPLACES on each turn (no accumulation)", () => {
+    // This is the key fix: cumulative-sum of cache_read across turns
+    // produces an ~N×-inflated "session footprint" because the same
+    // cached prefix is re-read every turn. contextSize snapshots the
+    // LATEST turn instead, so it tracks "what's actually in the
+    // model's context window right now."
+    addSessionUsage({
+      input_tokens: 10,
+      cache_read_input_tokens: 30,
+      cache_creation_input_tokens: 5,
+    })
+    expect(getSessionTokens().contextSize).toBe(45)
+
+    // A subsequent turn re-reads the same prefix + a few new input
+    // tokens. contextSize should equal the LATEST turn (50), not
+    // 45 + 50 = 95.
+    addSessionUsage({
+      input_tokens: 2,
+      cache_read_input_tokens: 48,
+      cache_creation_input_tokens: 0,
+    })
+    expect(getSessionTokens().contextSize).toBe(50)
+    // The cumulative `cacheRead` is still inflated (documented).
+    expect(getSessionTokens().cacheRead).toBe(78)
+  })
+
+  it("contextSize excludes output (not yet known at message_start)", () => {
+    addSessionUsage({
+      input_tokens: 10,
+      output_tokens: 9999, // arbitrarily large to make the test obvious
+      cache_read_input_tokens: 30,
+      cache_creation_input_tokens: 5,
+    })
+    expect(getSessionTokens().contextSize).toBe(45)
+  })
+
   it("ignores undefined and missing fields", () => {
     addSessionUsage(undefined)
     addSessionUsage({})
@@ -53,19 +90,30 @@ describe("session-tokens", () => {
     // An empty `{}` still counts as a turn (the API returned a response);
     // undefined does not.
     expect(t.turns).toBe(2)
+    // No turn carried any input/cache, so contextSize stayed at 0.
+    expect(t.contextSize).toBe(0)
   })
 
   it("returns a copy so callers cannot mutate internal state", () => {
     addSessionUsage({ input_tokens: 1 })
     const t = getSessionTokens()
     t.input = 999
+    t.contextSize = 999
     expect(getSessionTokens().input).toBe(1)
+    expect(getSessionTokens().contextSize).toBe(1)
   })
 
   it("clearSessionTokens resets everything", () => {
-    addSessionUsage({ input_tokens: 5, output_tokens: 6 })
+    addSessionUsage({
+      input_tokens: 5,
+      output_tokens: 6,
+      cache_read_input_tokens: 100,
+    })
+    expect(getSessionTokens().contextSize).toBe(105)
     clearSessionTokens()
-    expect(getSessionTokens().total).toBe(0)
-    expect(getSessionTokens().turns).toBe(0)
+    const t = getSessionTokens()
+    expect(t.total).toBe(0)
+    expect(t.turns).toBe(0)
+    expect(t.contextSize).toBe(0)
   })
 })
