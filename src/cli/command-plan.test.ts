@@ -53,7 +53,7 @@ describe("planCommand", () => {
     expect(models.supportsPromptInput).toBe(false)
   })
 
-  test("login: needs network but NOT auth (must work for fresh keychains)", () => {
+  test("login: needs network but NOT auth (must work for fresh installs)", () => {
     const p = planCommand({ ...base, wantLogin: true })
     expect(p.command).toBe("login")
     expect(p.needsAuth).toBe(false)

@@ -1,11 +1,12 @@
 /**
  * Cross-process advisory lock via atomic file create.
  *
- * The macOS Keychain provides no cross-process coordination of its own:
- * `security find-generic-password` and `security add-generic-password`
- * are each atomic on the OS level, but a "read → think → write" sequence
- * straddles the boundary and races against concurrent readers/writers in
- * other processes.
+ * Neither credential backend coordinates "read → think → write" on its
+ * own: the macOS Keychain's `security find-generic-password` /
+ * `add-generic-password` are atomic at the OS level, and the Linux file
+ * backend's `writeFileSync` is atomic too — but the read-modify-write
+ * sequence built on top of either straddles the boundary and races
+ * against concurrent readers/writers in other processes.
  *
  * For minimal-agent's OAuth refresh path this matters: with N agents
  * sharing one credential, refresh-token rotation makes every successful

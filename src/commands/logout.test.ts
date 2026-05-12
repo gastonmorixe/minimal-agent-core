@@ -84,7 +84,7 @@ describe("runLogoutCommand", () => {
     const cap = captureOut()
     let writtenContents = ""
     const code = await runLogoutCommand({
-      deleteKeychain: () => true,
+      deleteCredentials: () => true,
       home: "/tmp/fakehome",
       readFile: () =>
         JSON.stringify({
@@ -98,7 +98,7 @@ describe("runLogoutCommand", () => {
     })
     expect(code).toBe(0)
     const t = cap.text()
-    expect(t).toContain("keychain  removed")
+    expect(t).toContain("credentials  removed")
     expect(t).toContain("config    stripped oauthAccount")
     expect(t).toContain("Logged out")
     expect(JSON.parse(writtenContents).oauthAccount).toBeUndefined()
@@ -107,7 +107,7 @@ describe("runLogoutCommand", () => {
   it("idempotent: no entries to delete still exits 0", async () => {
     const cap = captureOut()
     const code = await runLogoutCommand({
-      deleteKeychain: () => false,
+      deleteCredentials: () => false,
       home: "/tmp/fakehome",
       readFile: () => null,
       writeFile: () => {
@@ -121,10 +121,10 @@ describe("runLogoutCommand", () => {
     expect(t).toContain("(nothing to strip)")
   })
 
-  it("doesn't throw when keychain delete throws — degrades gracefully", async () => {
+  it("doesn't throw when credential delete throws — degrades gracefully", async () => {
     const cap = captureOut()
     const code = await runLogoutCommand({
-      deleteKeychain: () => {
+      deleteCredentials: () => {
         throw new Error("security tool unavailable")
       },
       home: "/tmp/fakehome",
