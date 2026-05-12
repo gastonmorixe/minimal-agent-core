@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import type { Spinner } from "./spinner.ts"
 import { BlinkingNerdSpinner, SpinnerManager } from "./spinner.ts"
+import { displayWidth } from "./term-width.ts"
 
 describe("SpinnerManager", () => {
   it("switches spinners after the negotiated grace window", () => {
@@ -148,7 +149,7 @@ describe("SpinnerManager", () => {
 })
 
 describe("BlinkingNerdSpinner", () => {
-  it("pulses (same glyph, different SGR) and maps icon by notification id", () => {
+  it("blinks (color on-frame, whitespace off-frame) and maps icon by notification id", () => {
     const spinner = new BlinkingNerdSpinner({
       blinkMs: 300,
       iconByNotificationId: {
@@ -172,21 +173,19 @@ describe("BlinkingNerdSpinner", () => {
 
     // On-step: the active palette colorizer wraps the spec.
     expect(onFrame.glyph).toBe("C:NET")
-    // Off-step: SAME glyph, wrapped in dim SGR (\x1b[2m...\x1b[22m).
-    // The spec text is unchanged — only the SGR escape differs — so the
-    // rendered cell width is byte-identical to the on-step regardless
-    // of how the terminal interprets PUA / wide-char widths.
-    expect(offFrame.glyph).toBe("\x1b[2mNET\x1b[22m")
+    // Off-step: whitespace of equivalent display width. "NET" is 3
+    // ASCII cells → 3 spaces.
+    expect(offFrame.glyph).toBe("   ")
     expect(onFrame2.glyph).toBe("C:NET")
   })
 
-  it("cycles palette in declared order across on-frames (color1 → blink → color2 → blink → …)", () => {
+  it("cycles palette in declared order across on-frames (color1 → blank → color2 → blank → …)", () => {
     // Regression for the bug where `palette[step % len]` advanced the
     // color on EVERY frame (on-step and off-step alike), so on-frames
     // only ever saw even-indexed entries — a 5-color palette became
-    // [c0, dim, c2, dim, c4, dim, c1, dim, c3, dim, …]. The fix uses
-    // Math.floor(step / 2) for the color index so successive on-frames
-    // walk c0, c1, c2, … in order.
+    // [c0, blank, c2, blank, c4, blank, c1, blank, c3, blank, …]. The
+    // fix uses Math.floor(step / 2) for the color index so successive
+    // on-frames walk c0, c1, c2, … in order.
     const spinner = new BlinkingNerdSpinner({
       blinkMs: 100,
       iconByNotificationId: { "x.test": "X" },
@@ -201,7 +200,9 @@ describe("BlinkingNerdSpinner", () => {
       theme: {},
       notification: { notificationId: "x.test" },
     }
-    const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
+    // True blink: off-step is whitespace of equivalent display width.
+    // "X" is 1 ASCII cell → 1 space.
+    const blank = " "
     // 8 on/off pairs = full 4-color cycle + first color of next cycle.
     const sequence = Array.from(
       { length: 10 },
@@ -209,24 +210,23 @@ describe("BlinkingNerdSpinner", () => {
     )
     expect(sequence).toEqual([
       "c0:X", // step 0: on, color 0
-      dim("X"), // step 1: dim
+      blank, // step 1: blank
       "c1:X", // step 2: on, color 1 (was "c2:X" before fix — the bug)
-      dim("X"), // step 3: dim
+      blank, // step 3: blank
       "c2:X", // step 4: on, color 2
-      dim("X"), // step 5: dim
+      blank, // step 5: blank
       "c3:X", // step 6: on, color 3 (last in palette)
-      dim("X"), // step 7: dim
+      blank, // step 7: blank
       "c0:X", // step 8: wrap to color 0
-      dim("X"), // step 9: dim
+      blank, // step 9: blank
     ])
   })
 
   it("on-step and off-step have IDENTICAL display width (no jiggle)", () => {
     // Cover the three icon-width regimes. "NET" is 3 ASCII cells,
-    // "●" is 1 cell, "\u{F1064}" is the 󱁤 nf-md-tools PUA glyph (cell
-    // width depends on the active font, BUT the on/off frames must
-    // come out the same width regardless because they emit the same
-    // codepoints).
+    // "●" is 1 cell, "\u{F1064}" is the 󱁤 nf-md-tools PUA glyph.
+    // On-step renders the colorized glyph; off-step renders whitespace
+    // of equivalent display width. The cell count must match.
     const cases: Array<{ name: string; spec: string }> = [
       { name: "ASCII multi-char", spec: "NET" },
       { name: "narrow Unicode", spec: "\u{25CF}" }, // ●
@@ -247,16 +247,14 @@ describe("BlinkingNerdSpinner", () => {
       }
       const onFrame = spinner.render({ ...base, elapsedMs: 0 })
       const offFrame = spinner.render({ ...base, elapsedMs: 300 })
-      // Strip ALL SGR escapes from both frames; what remains must be
-      // the same number of code points (≡ same rendered cell count
-      // since the codepoints themselves are identical).
-      const stripSgr = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")
-      const onCps = Array.from(stripSgr(onFrame.glyph))
-      const offCps = Array.from(stripSgr(offFrame.glyph))
-      expect({ name, on: onCps, off: offCps }).toEqual({
+      // Compare display widths — `displayWidth` strips SGRs and sums
+      // codepoint widths via the same table the rest of the agent uses
+      // for column tracking. On-frame and off-frame must occupy the
+      // same number of cells so the label column does not jiggle.
+      expect({ name, on: displayWidth(onFrame.glyph), off: displayWidth(offFrame.glyph) }).toEqual({
         name,
-        on: Array.from(spec),
-        off: Array.from(spec),
+        on: displayWidth(spec),
+        off: displayWidth(spec),
       })
     }
   })

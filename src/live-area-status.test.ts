@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { StatusBus } from "./status.ts"
 import { BlinkingNerdSpinner, type Spinner } from "./spinner.ts"
 import { LiveAreaStatusController } from "./live-area-status.ts"
+import { displayWidth } from "./term-width.ts"
 
 class FakeEditor {
   readonly statuses: Array<string | null> = []
@@ -92,28 +93,40 @@ describe("LiveAreaStatusController", () => {
     ctrl.stop()
   })
 
-  it("does not animate status rows by default", async () => {
+  it("animates status rows by default (timer ticks while a status is active)", async () => {
+    // Spinner that emits a DIFFERENT glyph on every render call so the
+    // controller's `editor.setStatus` short-circuit (skip when text
+    // unchanged) does not mask the animation timer. If the timer fires
+    // at all, additional paints land in `editor.statuses` beyond the
+    // single paint triggered by `bus.create`.
+    let renders = 0
+    const tickingSpinner: Spinner = {
+      ...fakeSpinner,
+      render: () => ({ glyph: String(renders++) }),
+    }
     const bus = new StatusBus()
     const editor = new FakeEditor()
     const ctrl = new LiveAreaStatusController(bus, editor, {
-      spinner: fakeSpinner,
+      spinner: tickingSpinner,
+      // 20 fps → 50 ms tick. With a 200 ms wait we expect 3-4 ticks.
+      maxFps: 20,
     })
     ctrl.start()
     bus.create("steady", { notificationId: "n4", category: "agent" })
     const afterCreate = editor.statuses.length
 
-    await new Promise((resolve) => setTimeout(resolve, 120))
+    await new Promise((resolve) => setTimeout(resolve, 200))
 
-    expect(editor.statuses.length).toBe(afterCreate)
+    expect(editor.statuses.length).toBeGreaterThan(afterCreate)
     ctrl.stop()
   })
 
-  it("pulse-stable: on-frame and off-frame status strings have identical visible width", () => {
+  it("blink-stable: on-frame and off-frame status strings have identical display width", () => {
     // Drive the real BlinkingNerdSpinner so we exercise the actual
-    // pulse-instead-of-blink behavior: both frames emit the same
-    // glyph codepoints, only the SGR escape differs.
-    //
-    // Stripping SGRs from both frames must yield identical strings.
+    // true-blink behavior: on-frame is the colorized glyph, off-frame
+    // is whitespace of equivalent cell width. The two frames differ
+    // in stripped content but MUST agree on display width so the
+    // label column does not jiggle across the cycle.
     const cases: Array<{ name: string; spec: string }> = [
       { name: "narrow", spec: "●" },
       { name: "wide PUA", spec: "\u{F1064}" }, // 󱁤
@@ -127,7 +140,9 @@ describe("LiveAreaStatusController", () => {
         blinkMs: 300,
         iconByNotificationId: { [`x.${name}`]: spec },
       })
-      // Stub time so we can control on/off step deterministically.
+      // Stub time so we can control on/off step deterministically. The
+      // controller is constructed with maxFps:0 so only bus events
+      // produce paints — guarantees exactly two captures below.
       let now = 1_000_000
       const ctrl = new LiveAreaStatusController(bus, editor, {
         spinner,
@@ -147,13 +162,13 @@ describe("LiveAreaStatusController", () => {
         category: `cat.${name}`,
       })
       const offCapture = editor.statuses[editor.statuses.length - 1]!
-      const stripSgr = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")
-      const onStripped = stripSgr(onCapture)
-      const offStripped = stripSgr(offCapture)
-      expect({ name, onStripped, offStripped }).toEqual({
+      // Both captures must occupy the same number of terminal cells.
+      // On-frame: "<colorized spec> Doing things". Off-frame:
+      // "<displayWidth(spec) spaces> Doing things". Same width.
+      expect({ name, on: displayWidth(onCapture), off: displayWidth(offCapture) }).toEqual({
         name,
-        onStripped: `${spec} Doing things`,
-        offStripped: `${spec} Doing things`,
+        on: displayWidth(`${spec} Doing things`),
+        off: displayWidth(`${spec} Doing things`),
       })
       ctrl.stop()
     }

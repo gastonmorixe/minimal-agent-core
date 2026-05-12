@@ -51,6 +51,44 @@ import {
 export type StoreKind = "global" | "project" | "short-term"
 
 /**
+ * Env var that namespaces ALL memory paths. When set to a non-empty,
+ * valid namespace name, every store (`global`, `project`, `short-term`)
+ * routes under `~/.minimal-agent/namespaces/<ns>/...` instead of the
+ * top-level `~/.minimal-agent/`. Useful for:
+ *
+ *   - **Starting fresh** — `MINIMAL_AGENT_MEMORY_NAMESPACE=scratch <cmd>`
+ *     gives the agent an empty memory store for one session without
+ *     touching the user's main memory.
+ *   - **Testing** — exercise save/load paths against a throwaway
+ *     namespace, then `rm -rf ~/.minimal-agent/namespaces/<ns>`.
+ *   - **Multi-persona** — keep "work" and "personal" memory separate
+ *     by running the agent under different namespace env vars.
+ *
+ * When unset (the default), paths are unchanged — full backwards
+ * compatibility with pre-namespace memory files.
+ *
+ * Validation: name must match {@link NAMESPACE_RE}. Invalid names throw
+ * at path-resolution time so a typo (`/` in the namespace, `..` for
+ * traversal, whitespace, empty string) fails loud instead of silently
+ * writing to the default location or escaping the namespaces dir.
+ *
+ * Read at every path resolution (not cached) so test injection via
+ * `StoreDeps.namespace` and runtime changes (e.g. setting the env
+ * before each spawned subprocess) both work.
+ */
+export const MEMORY_NAMESPACE_ENV = "MINIMAL_AGENT_MEMORY_NAMESPACE"
+
+/**
+ * Namespace identifier shape: letters, digits, `_`, `.`, `-`. No
+ * slashes (would let a malicious / typo'd value escape the namespaces
+ * dir), no empty string after trim (would collapse to the default
+ * path silently). The literal token `..` is also rejected even though
+ * the regex allows it as a substring — defensive against `cd ..`-style
+ * traversal across symlinks.
+ */
+const NAMESPACE_RE = /^[A-Za-z0-9_.-]+$/
+
+/**
  * Cap on short-term entries. When `add` would push the count above this,
  * the oldest entry (by file order, which is also insertion order modulo
  * edits — see {@link MemoryStore.edit} for the bump-to-bottom rule) is
@@ -86,6 +124,13 @@ export interface StoreDeps {
   rand?: () => Buffer
   /** Override the resolved `$HOME`. Default: `process.env.HOME ?? os.homedir()`. */
   home?: string
+  /**
+   * Override the resolved namespace. Default: `process.env[MEMORY_NAMESPACE_ENV]`.
+   * Pass `null` to force "no namespace" (default top-level paths) even
+   * if the env var is set — useful for the CLI's `--namespace ""`
+   * reset and for tests.
+   */
+  namespace?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -97,20 +142,76 @@ function resolveHome(deps?: StoreDeps): string {
   return deps?.home ?? process.env.HOME ?? homedir()
 }
 
+/**
+ * Resolve the active namespace, if any. Precedence:
+ *
+ *   1. Explicit `deps.namespace` (including `null` to force-disable).
+ *   2. `process.env[MEMORY_NAMESPACE_ENV]`.
+ *   3. None (returns `null`).
+ *
+ * Throws if the resolved value is a non-empty string that fails
+ * {@link NAMESPACE_RE} validation or equals `..`. Empty / whitespace
+ * is treated as "no namespace" (returns `null`) so an exported-but-
+ * empty env var doesn't crash the plugin.
+ *
+ * Exported for tests. Production code goes through the path helpers,
+ * which call this internally.
+ */
+export function resolveNamespace(deps?: StoreDeps): string | null {
+  let raw: string | null | undefined
+  // Defensive: callers historically passed a bare string in the `deps`
+  // slot (relying on optional-chaining to silently no-op). The `in`
+  // operator throws on non-objects, so guard before reaching for the
+  // `namespace` key.
+  if (deps && typeof deps === "object" && "namespace" in deps) {
+    raw = deps.namespace
+  } else {
+    raw = process.env[MEMORY_NAMESPACE_ENV]
+  }
+  if (raw === null || raw === undefined) return null
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return null
+  if (trimmed === "..") {
+    throw new Error(
+      `${MEMORY_NAMESPACE_ENV}: invalid namespace "${trimmed}" (refused traversal token)`,
+    )
+  }
+  if (!NAMESPACE_RE.test(trimmed)) {
+    throw new Error(
+      `${MEMORY_NAMESPACE_ENV}: invalid namespace "${trimmed}" ` +
+        `(must match ${NAMESPACE_RE.source} — letters, digits, _, ., -)`,
+    )
+  }
+  return trimmed
+}
+
+/**
+ * Root of the `.minimal-agent` data dir, possibly namespaced. When a
+ * namespace is active, this is `<home>/.minimal-agent/namespaces/<ns>`;
+ * otherwise `<home>/.minimal-agent`. Every other path helper composes
+ * from this root.
+ */
+function rootDir(deps?: StoreDeps): string {
+  const home = resolveHome(deps)
+  const ns = resolveNamespace(deps)
+  if (ns === null) return join(home, ".minimal-agent")
+  return join(home, ".minimal-agent", "namespaces", ns)
+}
+
 export function globalMemoryPath(deps?: StoreDeps): string {
-  return join(resolveHome(deps), ".minimal-agent", "memory.md")
+  return join(rootDir(deps), "memory.md")
 }
 
 export function projectMemoryPath(cwd: string, deps?: StoreDeps): string {
   // Strip leading slashes so the cwd becomes a relative tree under
-  // `~/.minimal-agent/projects/`. Mirrors the existing layout in
+  // `<root>/projects/`. Mirrors the existing layout in
   // `tui-plugins/memory/handlers/load.ts`.
   const rel = cwd.replace(/^\/+/, "")
-  return join(resolveHome(deps), ".minimal-agent", "projects", rel, "memory.md")
+  return join(rootDir(deps), "projects", rel, "memory.md")
 }
 
 export function shortTermMemoryPath(sid: string, deps?: StoreDeps): string {
-  return join(resolveHome(deps), ".minimal-agent", "sessions", `${sid}.scratch.md`)
+  return join(rootDir(deps), "sessions", `${sid}.scratch.md`)
 }
 
 // ---------------------------------------------------------------------------

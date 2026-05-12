@@ -33,8 +33,10 @@ import { dirname, join } from "node:path"
 
 import {
   globalMemoryPath,
+  MEMORY_NAMESPACE_ENV,
   MemoryStore,
   projectMemoryPath,
+  resolveNamespace,
   SHORT_TERM_CAP,
   shortTermMemoryPath,
 } from "./store.ts"
@@ -68,6 +70,136 @@ describe("path helpers", () => {
     expect(shortTermMemoryPath("abc-123", { home: "/h" })).toBe(
       "/h/.minimal-agent/sessions/abc-123.scratch.md",
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Namespace support
+//
+// The env var MINIMAL_AGENT_MEMORY_NAMESPACE routes every memory file
+// under `<home>/.minimal-agent/namespaces/<ns>/...` instead of the
+// top-level layout. Useful for "start fresh" testing without touching
+// the user's real memory. Validated to reject `..` and slashes so a
+// typo can't escape the namespaces dir.
+// ---------------------------------------------------------------------------
+
+describe("namespace (env-driven)", () => {
+  let savedEnv: string | undefined
+  beforeEach(() => {
+    savedEnv = process.env[MEMORY_NAMESPACE_ENV]
+    delete process.env[MEMORY_NAMESPACE_ENV]
+  })
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env[MEMORY_NAMESPACE_ENV]
+    else process.env[MEMORY_NAMESPACE_ENV] = savedEnv
+  })
+
+  it("unset env → resolveNamespace returns null", () => {
+    expect(resolveNamespace()).toBeNull()
+    expect(resolveNamespace({ home: "/h" })).toBeNull()
+  })
+
+  it("empty / whitespace env → treated as unset (returns null, no throw)", () => {
+    process.env[MEMORY_NAMESPACE_ENV] = ""
+    expect(resolveNamespace()).toBeNull()
+    process.env[MEMORY_NAMESPACE_ENV] = "   "
+    expect(resolveNamespace()).toBeNull()
+  })
+
+  it("valid env value → returned trimmed", () => {
+    process.env[MEMORY_NAMESPACE_ENV] = " scratch "
+    expect(resolveNamespace()).toBe("scratch")
+  })
+
+  it("path helpers route under namespaces/<ns>/ when env is set", () => {
+    process.env[MEMORY_NAMESPACE_ENV] = "scratch"
+    expect(globalMemoryPath({ home: "/h" })).toBe(
+      "/h/.minimal-agent/namespaces/scratch/memory.md",
+    )
+    expect(projectMemoryPath("/Users/a/proj", { home: "/h" })).toBe(
+      "/h/.minimal-agent/namespaces/scratch/projects/Users/a/proj/memory.md",
+    )
+    expect(shortTermMemoryPath("abc-123", { home: "/h" })).toBe(
+      "/h/.minimal-agent/namespaces/scratch/sessions/abc-123.scratch.md",
+    )
+  })
+
+  it("deps.namespace overrides the env var", () => {
+    process.env[MEMORY_NAMESPACE_ENV] = "envns"
+    expect(globalMemoryPath({ home: "/h", namespace: "depsns" })).toBe(
+      "/h/.minimal-agent/namespaces/depsns/memory.md",
+    )
+  })
+
+  it("deps.namespace=null forces default paths even when env is set", () => {
+    process.env[MEMORY_NAMESPACE_ENV] = "envns"
+    expect(globalMemoryPath({ home: "/h", namespace: null })).toBe(
+      "/h/.minimal-agent/memory.md",
+    )
+    expect(projectMemoryPath("/p", { home: "/h", namespace: null })).toBe(
+      "/h/.minimal-agent/projects/p/memory.md",
+    )
+  })
+
+  it("rejects namespace containing a slash", () => {
+    process.env[MEMORY_NAMESPACE_ENV] = "evil/escape"
+    expect(() => globalMemoryPath({ home: "/h" })).toThrow(/invalid namespace/)
+  })
+
+  it("rejects the bare traversal token `..`", () => {
+    expect(() => resolveNamespace({ home: "/h", namespace: ".." })).toThrow(
+      /traversal/,
+    )
+  })
+
+  it("rejects whitespace inside namespace", () => {
+    expect(() =>
+      resolveNamespace({ home: "/h", namespace: "has space" }),
+    ).toThrow(/invalid namespace/)
+  })
+
+  it("accepts dots and dashes (semver-style namespaces)", () => {
+    expect(resolveNamespace({ home: "/h", namespace: "v1.2.3-rc1" })).toBe(
+      "v1.2.3-rc1",
+    )
+  })
+
+  it("MemoryStore.add writes under the namespaced path when env is set", () => {
+    const home = mkdtempSync(join(tmpdir(), "memory-ns-add-"))
+    try {
+      process.env[MEMORY_NAMESPACE_ENV] = "scratch"
+      const store = MemoryStore.global({ home })
+      const { bullet } = store.add("only visible in scratch")
+      const nsPath = join(home, ".minimal-agent", "namespaces", "scratch", "memory.md")
+      const defaultPath = join(home, ".minimal-agent", "memory.md")
+      expect(existsSync(nsPath)).toBe(true)
+      expect(existsSync(defaultPath)).toBe(false)
+      expect(readFileSync(nsPath, "utf-8")).toContain(bullet.id)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("MemoryStore.list in one namespace cannot see entries from another", () => {
+    const home = mkdtempSync(join(tmpdir(), "memory-ns-iso-"))
+    try {
+      process.env[MEMORY_NAMESPACE_ENV] = "alpha"
+      MemoryStore.global({ home }).add("alpha-only")
+      process.env[MEMORY_NAMESPACE_ENV] = "beta"
+      const inBeta = MemoryStore.global({ home }).list()
+      expect(inBeta.length).toBe(0)
+      // And the default (env unset) namespace also stays clean.
+      delete process.env[MEMORY_NAMESPACE_ENV]
+      const inDefault = MemoryStore.global({ home }).list()
+      expect(inDefault.length).toBe(0)
+      // Re-entering alpha sees the original entry.
+      process.env[MEMORY_NAMESPACE_ENV] = "alpha"
+      const reAlpha = MemoryStore.global({ home }).list()
+      expect(reAlpha.length).toBe(1)
+      expect(reAlpha[0]?.body).toBe("alpha-only")
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })
 

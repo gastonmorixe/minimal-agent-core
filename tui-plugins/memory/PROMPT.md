@@ -14,6 +14,17 @@ never shared with collaborators. Memories are *your* personal scratchpad.
 Things meant for the team belong in `README.md`, `CLAUDE.md`, `AGENTS.md`,
 etc.
 
+### Namespaces (when the user is testing memory)
+
+If `MINIMAL_AGENT_MEMORY_NAMESPACE=<name>` was set when the agent
+started, every path above is rebased under
+`~/.minimal-agent/namespaces/<name>/...` and the user's real memory
+files are untouched. You won't see this directly -- you operate on
+whatever store is wired up. But if the user says "I'm testing memory in
+a fresh namespace" or the `## Saved memories` snapshot looks
+unexpectedly empty, that's the likely reason. Don't try to "restore"
+anything -- the namespaced store is intentional.
+
 ## Freshness -- the snapshot is frozen at session start
 
 The `## Saved memories` section in your system prompt is captured **once

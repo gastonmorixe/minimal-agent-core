@@ -4,22 +4,25 @@
  *
  * Layout (n = queue.length):
  *
- *   `  ⏳ n queued`              <- header
+ *   `  ⏳ queued · n`            <- header: count as trailing badge
  *   `  ┊  1 ▸ first preview`     <- item rows: position + ▸ + preview
  *   `  ┊  2 ▸ second preview`
  *   `  ╰  3 ▸ third preview`     <- last visible row uses `╰`
  *
  * Overflow (n > QUEUE_MAX_VISIBLE_ITEMS):
  *
- *   `  ⏳ n queued`
+ *   `  ⏳ queued · n`
  *   `  ┊  1 ▸ first`
  *   `  …  (rows 2..10) …`
  *   `  ╰  ... and (n-10) more`   <- elision tail closes the block
  *
- * Numbering is 1-based so the digits line up under the header count
- * ("3 queued" → entries `1`, `2`, `3`). Item-row layout pads the
- * 1-cell `┊` / `╰` glyph with one extra space so its content column
- * aligns under the wide-emoji `⏳` (2 cells) in the header.
+ * Item numbering is 1-based; per-row layout pads the 1-cell `┊` / `╰`
+ * glyph with one extra space so its number column aligns under the
+ * wide-emoji `⏳` (2 cells) in the header. The header count is placed
+ * as a trailing `· n` badge so its digit does NOT share a column with
+ * the item ordinals below — the previous "n queued" form put the count
+ * digit and the item digits in the same column, reading as a confusing
+ * vertical strip (e.g. "2 / 1 / 2" for a two-item queue).
  *
  * Each preview is whitespace-collapsed and display-width-truncated to
  * QUEUE_PREVIEW_W cells, with a `(+Nch)` hint when cut.
@@ -79,7 +82,7 @@ function buildPreview(entry: string): string {
 export function buildQueueDecorationLines(queue: readonly string[]): string[] {
   if (queue.length === 0) return []
   const count = queue.length
-  const header = `  ${faintWhite("⏳")} ${dim(`${count} queued`)}`
+  const header = `  ${faintWhite("⏳")} ${dim(`queued · ${count}`)}`
   const lines: string[] = [header]
   const visibleCount = Math.min(QUEUE_MAX_VISIBLE_ITEMS, count)
   const hasOverflow = count > QUEUE_MAX_VISIBLE_ITEMS
