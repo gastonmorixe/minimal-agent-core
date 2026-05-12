@@ -2,9 +2,9 @@
  * `Task` tool — the model-facing CRUD interface for per-session tasks.
  *
  * Dispatch shape mirrors `MemoryTool` exactly: one tool, action switch,
- * per-action validation. Every action returns the post-mutation
- * rendered list (in `display`) so the user sees the new state after
- * every change without an extra `list` round-trip.
+ * per-action validation. Every action returns the post-mutation task
+ * body in `display`, with `displayHeader` and `displayFooter` letting
+ * the host tool frame own the box glyphs.
  *
  * ## Actions
  *
@@ -31,7 +31,7 @@
 
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
-import { renderBlock, type RenderAction } from "../lib/render.ts"
+import { renderToolDisplay, type RenderAction } from "../lib/render.ts"
 import { TaskStore, TaskStoreError } from "../lib/store.ts"
 import { isTaskStatus, type TaskStatus } from "../lib/parse.ts"
 
@@ -248,10 +248,14 @@ function renderResult(
   store: TaskStore,
   action: RenderAction,
   format: "text" | "json" = "text",
-): { content: string; display: string } {
+): { content: string; display: string; displayHeader: string; displayFooter: string } {
   const views = store.views()
   const stats = store.stats()
-  const display = renderBlock(views, stats, { ansi: true, action })
+  const displayParts = renderToolDisplay(views, stats, { ansi: true, action })
+  const contentParts = renderToolDisplay(views, stats, { ansi: false, action })
+  const content = [contentParts.header, contentParts.body.trimEnd(), contentParts.footer]
+    .filter((part) => part.length > 0)
+    .join("\n")
   if (format === "json") {
     const tasks = store.list().map((t) => ({
       id: t.id,
@@ -264,13 +268,17 @@ function renderResult(
     }))
     return {
       content: JSON.stringify({ stats, tasks }, null, 2),
-      display,
+      display: displayParts.body,
+      displayHeader: displayParts.header,
+      displayFooter: displayParts.footer,
     }
   }
-  // The plain-text content is the same renderer with ansi:false. The model
-  // gets a structured view it can parse line-by-line.
-  const content = renderBlock(views, stats, { ansi: false, action })
-  return { content, display }
+  return {
+    content,
+    display: displayParts.body,
+    displayHeader: displayParts.header,
+    displayFooter: displayParts.footer,
+  }
 }
 
 function ok(
@@ -278,8 +286,14 @@ function ok(
   action: RenderAction,
   format?: "text" | "json",
 ): TUIResult {
-  const { content, display } = renderResult(store, action, format ?? "text")
-  return { kind: "tool_result", content, display }
+  const rendered = renderResult(store, action, format ?? "text")
+  return {
+    kind: "tool_result",
+    content: rendered.content,
+    display: rendered.display,
+    displayHeader: rendered.displayHeader,
+    displayFooter: rendered.displayFooter,
+  }
 }
 
 function err(message: string): TUIResult {

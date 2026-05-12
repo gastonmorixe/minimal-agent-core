@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { GLYPHS, renderBlock, type RenderOptions } from "./render.ts"
+import { GLYPHS, renderBlock, renderToolDisplay, type RenderOptions } from "./render.ts"
 import type { Task } from "./parse.ts"
 import type { View, Stats } from "./store.ts"
 
@@ -77,6 +77,51 @@ describe("renderBlock — frame structure", () => {
     expect(lines).toHaveLength(5)
     expect(lines[1]).toBe(GLYPHS.frameML)
     expect(lines[3]).toBe(GLYPHS.frameML)
+  })
+})
+
+describe("renderToolDisplay — host-owned frame parts", () => {
+  test("returns header, unframed body, and footer separately", () => {
+    const v = topView(task({ status: "doing", title: "x" }), 1)
+    const out = renderToolDisplay([v], stats({ total: 1, doing: 1 }), {
+      ansi: false,
+      action: { kind: "started", hash: "a7b3c4" },
+    })
+    expect(out.header).toContain(`${GLYPHS.doing} started #a7b3c4`)
+    expect(out.body).toContain(`  1  ${GLYPHS.doing}  #a7b3c4  x`)
+    expect(out.body).not.toContain(GLYPHS.frameTL)
+    expect(out.body).not.toContain(GLYPHS.frameML)
+    expect(out.footer).toContain("1 doing")
+  })
+  test("keeps multiline titles from breaking the host frame", () => {
+    const parent = task({ id: "3b6c0e", title: "Refactor session\n\ntoken accounting" })
+    const child = task({
+      id: "3b6c0ea",
+      parent: "3b6c0e",
+      status: "done",
+      title: "Replace cumulative\n\n total",
+      done_at: "2026-05-12T15:31:00-04:00",
+    })
+    const next = task({ id: "b6bd6e", title: "Polish live-area footer rendering" })
+    const out = renderToolDisplay(
+      [topView(parent, 1), subView(child, 0, 1), topView(next, 2)],
+      stats({ total: 3, done: 1, todo: 2 }),
+      { ansi: false, action: { kind: "marked_done", hash: "3b6c0ea" } },
+    )
+
+    expect(out.body).toContain("Refactor session token accounting")
+    expect(out.body).toContain("Replace cumulative total")
+    expect(out.body).not.toContain("\n\n")
+  })
+  test("keeps multiline cancel reasons on one rendered row", () => {
+    const v = topView(task({ status: "canceled", title: "drop branch", reason: "user\n\nchanged direction" }), 1)
+    const out = renderToolDisplay([v], stats({ total: 1, canceled: 1 }), {
+      ansi: false,
+      action: { kind: "marked_canceled", hash: "a7b3c4" },
+    })
+
+    expect(out.body).toContain("(user changed direction)")
+    expect(out.body).not.toContain("\n\n")
   })
 })
 

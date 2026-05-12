@@ -104,8 +104,8 @@ describe("add", () => {
     expect(r.is_error).toBeUndefined()
     expect(r.content).toContain("hello")
     expect(r.display).toContain("hello")
-    // List was rendered with "added" verb.
-    expect(r.display).toContain("added")
+    expect(r.displayHeader).toContain("added")
+    expect(r.display).not.toContain("╭")
   })
   test("supports parent for subtasks", async () => {
     const r1 = await call({ action: "add", title: "parent" })
@@ -143,7 +143,7 @@ describe("add_many", () => {
     expect(r.is_error).toBeUndefined()
     const store = new TaskStore(sid, { home: tmpHome })
     expect(store.list().map((t) => t.title)).toEqual(["one", "two", "three"])
-    expect(r.display).toContain("added 3 tasks")
+    expect(r.displayHeader).toContain("added 3 tasks")
   })
   test("supports a shared parent", async () => {
     const r1 = await call({ action: "add", title: "parent" })
@@ -165,7 +165,7 @@ describe("status / start / done", () => {
     await call({ action: "add", title: "x" })
     const r = await call({ action: "status", id: 1, status: "doing" })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("marked doing")
+    expect(r.displayHeader).toContain("marked doing")
   })
   test("status=canceled records the reason", async () => {
     await call({ action: "add", title: "x" })
@@ -176,7 +176,7 @@ describe("status / start / done", () => {
       reason: "user redirected",
     })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("canceled")
+    expect(r.displayHeader).toContain("canceled")
     expect(r.display).toContain("user redirected")
   })
   test("start enforces single-doing discipline by default", async () => {
@@ -205,7 +205,7 @@ describe("status / start / done", () => {
     await call({ action: "add", title: "y" })
     const r = await call({ action: "done", id: 1 })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("marked done")
+    expect(r.displayHeader).toContain("marked done")
   })
   test("done on the LAST remaining task triggers 'all done' verb", async () => {
     await call({ action: "add", title: "one" })
@@ -213,7 +213,7 @@ describe("status / start / done", () => {
     await call({ action: "done", id: 1 })
     const r = await call({ action: "done", id: 2 })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("all done")
+    expect(r.displayHeader).toContain("all done")
   })
 })
 
@@ -255,7 +255,7 @@ describe("reorder", () => {
     const id3 = extractFirstHash(r3.content!)
     const r = await call({ action: "reorder", order: [`#${id3}`, `#${id1}`] })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("reordered")
+    expect(r.displayHeader).toContain("reordered")
   })
 })
 
@@ -264,7 +264,7 @@ describe("clear", () => {
     await call({ action: "add", title: "x" })
     const r = await call({ action: "clear" })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("cleared")
+    expect(r.displayHeader).toContain("cleared")
   })
   test("refuses when a task is doing (no force)", async () => {
     await call({ action: "add", title: "x", status: "doing" })
@@ -285,14 +285,14 @@ describe("list", () => {
     const before = new TaskStore(sid, { home: tmpHome }).list()
     const r = await call({ action: "list" })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("Tasks")
+    expect(r.displayHeader).toContain("Tasks")
     const after = new TaskStore(sid, { home: tmpHome }).list()
     expect(after).toEqual(before)
   })
   test("empty state shows 'no tasks'", async () => {
     const r = await call({ action: "list" })
     expect(r.is_error).toBeUndefined()
-    expect(r.display).toContain("no tasks")
+    expect(r.displayHeader).toContain("no tasks")
   })
 })
 

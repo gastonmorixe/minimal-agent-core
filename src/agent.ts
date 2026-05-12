@@ -742,43 +742,35 @@ export class Agent {
       const toolResults: ToolResultBlock[] = []
       for (const tool of toolBlocks) {
         const pres = toolPresentation.get(tool.name)
-        const labelColor =
-          pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
-            ? (c as Record<string, (s: string) => string>)[pres.color]
-            : c.orange
-        const icon = pres?.icon ? `${labelColor(pres.icon)} ` : ""
-        // Pass live terminal width so single-line Bash commands that
-        // would overflow get soft-split at top-level operators (`&&`,
-        // `||`, `|`, `;`) into `↳`-prefixed continuation rows. See
-        // `src/bash-split.ts` for the splitter and activation predicate.
         const renderCols = process.stdout.columns
-        writeTranscript(
-          `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool, renderCols))}`,
-        )
-        // Continuation rows. Two shapes:
-        //   - `> <line>` : PS2-style for `\n`-separated multi-line input
-        //     (heredocs, for-loops). Existing behavior.
-        //   - `↳ <op> <body>` : soft-split for overflowing single-line
-        //     pipelines. Operator leads each row (shfmt convention).
-        // Both use the same `│` connector. Empty for non-Bash and for
-        // single-line Bash that fits the width.
-        for (const cont of formatToolInputContinuation(tool, renderCols)) {
-          writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
+        const pluginTool = this.loader?.hasTool(tool.name) ?? false
+        let headerWritten = false
+        const writeToolHeader = (override?: string): void => {
+          if (headerWritten) return
+          headerWritten = true
+          if (override !== undefined) {
+            writeTranscript(`\n  ${c.dimCyan("╭")} ${override}`)
+          } else {
+            const labelColor =
+              pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
+                ? (c as Record<string, (s: string) => string>)[pres.color]
+                : c.orange
+            const icon = pres?.icon ? `${labelColor(pres.icon)} ` : ""
+            writeTranscript(
+              `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool, renderCols))}`,
+            )
+            for (const cont of formatToolInputContinuation(tool, renderCols)) {
+              writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
+            }
+          }
+          writeTranscript(`  ${c.dimCyan("│")}`)
         }
-        // Header→body separator: a single empty gutter row (`│` glyph, no
-        // payload). Always emitted, regardless of body length, so the visual
-        // shape of every tool block is consistent : short outputs get the
-        // same breather as long ones. Inherited by both the streamed-Bash
-        // path (which writes `│ <line>` rows directly into scrollback) and
-        // the post-block render path (`formatToolPreview`). The refusal
-        // branch below also inherits it; if we ever decide that a denied
-        // tool should sit closer to its header, gate this single line on
-        // `gate.allowed` and the change is local.
-        writeTranscript(`  ${c.dimCyan("│")}`)
 
         let content: string
         let isError: boolean | undefined
         let display: string | undefined
+        let displayHeader: string | undefined
+        let displayFooter: string | undefined
         let truncInfo: TruncationInfo | undefined
         let streamedRendered = false
         let aborted = false
@@ -791,6 +783,7 @@ export class Agent {
         // side effects.
         const gate = this.modeManager?.isToolAllowed(tool.name) ?? { allowed: true as const }
         if (!gate.allowed) {
+          writeToolHeader()
           content = gate.message
           isError = true
           // Render a denial line in the transcript so the user sees what
@@ -800,6 +793,7 @@ export class Agent {
             `  ${c.dimCyan("╰")} ${c.dim(`(refused by ${this.modeManager?.activeId() ?? "mode"})`)}`,
           )
         } else {
+          if (!pluginTool) writeToolHeader()
           const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
             notificationId: "tool.running",
             category: "tool",
@@ -823,10 +817,13 @@ export class Agent {
                 content = pluginResult.content
                 isError = pluginResult.is_error
                 display = pluginResult.display
+                displayHeader = pluginResult.displayHeader
+                displayFooter = pluginResult.displayFooter
               } else {
                 content = `Plugin tool "${tool.name}" returned a non-tool_result value`
                 isError = true
               }
+              writeToolHeader(displayHeader)
             } else {
               // Live-stream Bash stdout/stderr to the transcript as the
               // child writes it, instead of waiting for the process to
@@ -947,9 +944,11 @@ export class Agent {
           }
 
           if (!streamedRendered) {
+            if (!headerWritten) writeToolHeader(displayHeader)
             for (const line of formatToolPreview(content, isError, display, {
               tool: tool.name,
               info: truncInfo,
+              footer: displayFooter,
             })) {
               writeTranscript(line)
             }
@@ -1525,17 +1524,30 @@ export function formatToolPreview(
   content: string,
   isError?: boolean,
   display?: string,
-  opts?: { tool?: string; info?: TruncationInfo },
+  opts?: { tool?: string; info?: TruncationInfo; footer?: string },
 ): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
   // unified diff from Edit/Write), render it as-is, line by line, with the
   // standard `│ ... └` connector gutter. No truncation: diffs are the point.
-  if (display && !isError) {
-    const dlines = display.split("\n")
+  if (display !== undefined && !isError) {
     const out: string[] = []
+    const footer = opts?.footer
+    const body = footer === undefined ? display.replace(/\n$/, "") : display
+    const dlines = body.length === 0 ? [] : body.split("\n")
+    if (dlines.length === 0 && footer === undefined) {
+      out.push(`  ${c.dimCyan("╰")}`)
+      return out
+    }
     for (let i = 0; i < dlines.length; i++) {
-      const connector = i === dlines.length - 1 ? "╰" : "│"
-      out.push(`  ${c.dimCyan(connector)} ${dlines[i]}`)
+      const connector = footer === undefined && i === dlines.length - 1 ? "╰" : "│"
+      out.push(
+        dlines[i].length === 0
+          ? `  ${c.dimCyan(connector)}`
+          : `  ${c.dimCyan(connector)} ${dlines[i]}`,
+      )
+    }
+    if (footer !== undefined) {
+      out.push(footer.length === 0 ? `  ${c.dimCyan("╰")}` : `  ${c.dimCyan("╰")} ${footer}`)
     }
     return out
   }
