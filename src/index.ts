@@ -58,6 +58,7 @@ import { formatQuotaSummary } from "./quota-format.ts"
 import { setGlobalEventBus } from "./global-bus.ts"
 import { SaveEchoCollector } from "../tui-plugins/memory/lib/save-echo.ts"
 import { ShortTermSnapshot } from "../tui-plugins/memory/lib/short-term-snapshot.ts"
+import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
@@ -752,6 +753,14 @@ async function main() {
   // `tui-plugins/memory/lib/{save-echo,short-term-snapshot}.ts`.
   const saveEcho = SaveEchoCollector.attach(loader.bus())
   const shortTermSnapshot = new ShortTermSnapshot(getSessionId())
+  // Tasks plugin attachment producer. Reads the per-session JSONL on
+  // every initial-seam call and renders `<ma::tui::tasks …>…</ma::tui::tasks>`
+  // for the model. Unconditional construction (mirrors ShortTermSnapshot):
+  // if the user disables the `tasks` plugin in config, the Task tool is
+  // skipped at loader time and the file stays empty, so this attachment
+  // returns null and costs nothing. See
+  // `tui-plugins/tasks/lib/attachment.ts`.
+  const tasksAttachment = new TasksAttachment(getSessionId())
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
   const hasPromptBlock = loader.getPromptBlock() !== null
@@ -999,6 +1008,7 @@ async function main() {
     modeManager,
     saveEcho,
     shortTermSnapshot,
+    tasksAttachment,
     store,
     initialMessages,
   })

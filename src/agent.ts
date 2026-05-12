@@ -302,6 +302,17 @@ export class Agent {
    */
   private shortTermSnapshot: { toAttachment(): ContentBlock | null } | null
   /**
+   * Optional tasks-list attachment producer. When set, the per-session
+   * `<ma::tui::tasks …>…</ma::tui::tasks>` attachment is prepended to
+   * the FIRST user message of each `run()` call. Mirrors
+   * {@link Agent.shortTermSnapshot} exactly : same structural-type
+   * pattern, same initial-seam-only emission rule, same null-on-empty
+   * behavior (zero token cost when the session has no tasks).
+   *
+   * See `tui-plugins/tasks/lib/attachment.ts`.
+   */
+  private tasksAttachment: { toAttachment(): ContentBlock | null } | null
+  /**
    * Injectable transport. Defaults to the real {@link sendMessage} function.
    * Primary purpose is a testing seam so suites can drive tool_use flows
    * without making live API calls.
@@ -360,6 +371,11 @@ export class Agent {
      * {@link Agent.shortTermSnapshot}). Same structural-type pattern.
      */
     shortTermSnapshot?: { toAttachment(): ContentBlock | null } | null
+    /**
+     * Optional tasks-list attachment producer (see
+     * {@link Agent.tasksAttachment}). Same structural-type pattern.
+     */
+    tasksAttachment?: { toAttachment(): ContentBlock | null } | null
     sendFn?: typeof sendMessage
     store?: SessionStore | null
     /**
@@ -379,6 +395,7 @@ export class Agent {
     this.modeManager = opts.modeManager ?? null
     this.saveEcho = opts.saveEcho ?? null
     this.shortTermSnapshot = opts.shortTermSnapshot ?? null
+    this.tasksAttachment = opts.tasksAttachment ?? null
     this.sendFn = opts.sendFn ?? sendMessage
     this.store = opts.store ?? null
     if (opts.initialMessages && opts.initialMessages.length > 0) {
@@ -569,19 +586,26 @@ export class Agent {
     //
     //   1. <mode-change from="…" to="…" />            : pending mode toggle.
     //   2. <short-term-memory>…</short-term-memory>    : session scratchpad.
-    //   3. <memory-saved scope="…" id="…">…</…>+      : id echo for any
+    //   3. <ma::tui::tasks …>…</ma::tui::tasks>        : active task list.
+    //   4. <memory-saved scope="…" id="…">…</…>+      : id echo for any
     //      memory(ies) the model saved on the previous turn.
-    //   4. user text                                   : the actual user input.
+    //   5. user text                                   : the actual user input.
     //
-    // ORDER NOTE: short-term snapshot comes before save-echoes because
-    // it's the persistent context the model needs every turn ("what we're
-    // currently tracking"); save-echoes are deltas from the last turn and
-    // read more naturally as a coda before the user text.
+    // ORDER NOTE: short-term snapshot and tasks both come before
+    // save-echoes because they're persistent context the model needs
+    // every turn ("what we're tracking" and "what's the plan");
+    // save-echoes are deltas from the last turn and read more naturally
+    // as a coda before the user text. Tasks sits AFTER short-term-memory
+    // because short-term is more ambient (current symptoms / hypotheses);
+    // tasks is the structured plan and reads better closer to the user
+    // text it's anchored to.
     const initialUserContent: ContentBlock[] = []
     const initialModeAttach = this.modeManager?.consumePendingAttachment() ?? null
     if (initialModeAttach) initialUserContent.push(initialModeAttach)
     const stmAttach = this.shortTermSnapshot?.toAttachment() ?? null
     if (stmAttach) initialUserContent.push(stmAttach)
+    const tasksAttach = this.tasksAttachment?.toAttachment() ?? null
+    if (tasksAttach) initialUserContent.push(tasksAttach)
     const initialSaveEchoes = this.saveEcho?.consumeAll() ?? []
     for (const e of initialSaveEchoes) initialUserContent.push(e)
     initialUserContent.push({ type: "text", text: userText })
@@ -1411,11 +1435,7 @@ const TOOL_PREVIEW_LINES_DEFAULT = 10
  * (cross-version replay-breaking change), this collapses to a single
  * `<ma::…>` test.
  */
-const ANNOTATION_PREFIXES = [
-  "\n\n[truncated:",
-  "\n\n[note:",
-  "\n\n<ma::tui-preview",
-] as const
+const ANNOTATION_PREFIXES = ["\n\n[truncated:", "\n\n[note:", "\n\n<ma::tui-preview"] as const
 
 function findAnnotationStart(content: string): number {
   let earliest = -1
