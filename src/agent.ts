@@ -757,6 +757,7 @@ export class Agent {
         let display: string | undefined
         let truncInfo: TruncationInfo | undefined
         let streamedRendered = false
+        let aborted = false
 
         // Mode dispatch gate. Tools stay registered in the request body
         // (so the cached prefix is mode-independent), but the harness
@@ -878,6 +879,7 @@ export class Agent {
               // preview. The flag is stripped before the result is sent
               // back to the API as a tool_result block.
               if ((result as { _aborted?: boolean })._aborted) {
+                aborted = true
                 // If the executor surfaced partial output (e.g. Bash captured
                 // some stdout before SIGTERM landed), keep it : both for the
                 // user (transcript body) and for the model (so it sees what
@@ -926,6 +928,38 @@ export class Agent {
               info: truncInfo,
             })) {
               writeTranscript(line)
+            }
+          }
+
+          // Layer 1b of size-feedback (companion to truncation.ts notice and
+          // feedback-tracker.ts streak note): when the user's transcript
+          // clamped MORE lines than the API cap did (every tool with a tight
+          // preview budget : Bash=10, Read=15, Grep=12, Glob=25), append a
+          // model-only `<ma::tui-preview …>` annotation to `content` BEFORE
+          // we push it to `toolResults`, so the model knows the audiences
+          // diverged. Without this, the model sees the full body and
+          // assumes the user did too, leading to "as you can see above"
+          // claims that desync from what the user actually saw.
+          //
+          // Model-only by construction: this runs AFTER the transcript
+          // render path, so `formatToolPreview` / `renderStreamedTail`
+          // never sees it. The strip in `formatToolPreview` also catches
+          // it (for session-replay where this annotation is persisted in
+          // tool_result history). Skipped when:
+          //   - tool was refused by the mode gate (no execution happened),
+          //   - tool returned a `display` override (Edit/Write diff render
+          //     full by design),
+          //   - tool was aborted (partial output, no point nagging),
+          //   - body fits the TUI budget.
+          if (!display && !aborted) {
+            const e = computeTuiElision(content, tool.name)
+            if (e) {
+              const hint = tuiPreviewHint(tool.name)
+              content =
+                `${content}\n\n<ma::tui-preview ` +
+                `shown="${e.shown}" total="${e.total}" tool="${tool.name}">` +
+                hint +
+                `</ma::tui-preview>`
             }
           }
         }
@@ -1352,6 +1386,94 @@ const TOOL_PREVIEW_LINES: Record<string, number> = {
 const TOOL_PREVIEW_LINES_DEFAULT = 10
 
 /**
+ * Three flavors of model-only annotation can ride at the end of
+ * `tool_result.content`:
+ *
+ *  - `\n\n[truncated: ...]`           : universal API-cap notice
+ *    (see `tools/truncation.ts`).
+ *  - `\n\n[note: ...]`                : streak tracker note
+ *    (see `tools/feedback-tracker.ts`).
+ *  - `\n\n<ma::tui-preview …>…</ma::tui-preview>` : Layer 1b annotation
+ *    (this file).
+ *
+ * Order at end of content is fixed: `[truncated:]` → `[note:]` →
+ * `<ma::tui-preview>`. `findAnnotationStart` returns the index of the
+ * EARLIEST true annotation (= start of the annotation region) so callers
+ * can slice the body cleanly. Using per-pattern `lastIndexOf` (not a
+ * single regex with `.match()`) hardens against the case where the body
+ * itself legitimately contains the prefix (e.g. a `Read` of a log that
+ * happens to include the string `[truncated:`) : the last occurrence
+ * is the real annotation, body-internal occurrences are earlier.
+ *
+ * Convention note: `[truncated:]` and `[note:]` are legacy bracket-string
+ * shapes. New annotations use the `<ma::…>` XML-like namespace (per
+ * project convention). When the legacy ones are eventually retrofitted
+ * (cross-version replay-breaking change), this collapses to a single
+ * `<ma::…>` test.
+ */
+const ANNOTATION_PREFIXES = [
+  "\n\n[truncated:",
+  "\n\n[note:",
+  "\n\n<ma::tui-preview",
+] as const
+
+function findAnnotationStart(content: string): number {
+  let earliest = -1
+  for (const p of ANNOTATION_PREFIXES) {
+    const i = content.lastIndexOf(p)
+    if (i >= 0 && (earliest < 0 || i < earliest)) earliest = i
+  }
+  return earliest
+}
+
+/**
+ * Compute the TUI vs body line gap for the `<ma::tui-preview>` annotation.
+ * Returns `null` when the body fits in the per-tool budget or there's no
+ * body at all.
+ *
+ * Strips any trailing annotation from `content` before counting lines, so
+ * re-application of the note is idempotent (a peer agent's prior note in
+ * historical content doesn't double up). The line count is taken AFTER
+ * stripping, so the note reads "user saw N of M lines of *what you saw*"
+ * : accurate even when the API ALSO truncated (in which case `[truncated:]`
+ * carries the separate source→model ratio).
+ */
+function computeTuiElision(content: string, tool: string): { shown: number; total: number } | null {
+  const idx = findAnnotationStart(content)
+  const body = idx >= 0 ? content.slice(0, idx) : content
+  if (!body) return null
+  const total = body.split("\n").length
+  const budget = TOOL_PREVIEW_LINES[tool] ?? TOOL_PREVIEW_LINES_DEFAULT
+  if (total <= budget) return null
+  return { shown: budget, total }
+}
+
+/**
+ * Per-tool hint body for `<ma::tui-preview>`. Bash is the worst offender
+ * (model often picks it as a "render visual content to the user" channel
+ * even though the transcript clamps at 10 lines), so we point it at the
+ * right channel explicitly. Other tools get a gentler "summarize for the
+ * user" nudge.
+ */
+function tuiPreviewHint(tool: string): string {
+  switch (tool) {
+    case "Bash":
+      return (
+        "the user only saw a fraction of this output. If you used Bash to " +
+        "render visual content (ASCII art, ANSI TUI preview, formatted " +
+        "tables) for the user, put it in your text reply instead : the " +
+        "user reads that in full."
+      )
+    default:
+      return (
+        "the user only saw a fraction of this output. If you intended this " +
+        "for the user, summarize the key parts in your text reply (the " +
+        "user reads it in full)."
+      )
+  }
+}
+
+/**
  * Per-line display-width cap for body lines. A single 10_000-char minified
  * JSON line in a Read result shouldn't dominate the preview; clamp to a
  * fixed value (NOT terminal width : we don't reflow on resize). 300 chars
@@ -1402,12 +1524,16 @@ export function formatToolPreview(
   const info = opts?.info
   const color = isError ? c.red : c.dim
 
-  // 1. Strip the model-facing trailing notice from what we display to the
-  //    human. The notice is everything from `\n\n[truncated: ` to the end
-  //    when present. The structured `info` (when supplied) carries the
-  //    same numbers in machine form : we'll render those as the bare-facts
-  //    footer instead.
-  const noticeIdx = content.lastIndexOf("\n\n[truncated:")
+  // 1. Strip ALL model-only trailing annotations from what we display to
+  //    the human. Three flavors today : `[truncated: ...]`, `[note: ...]`,
+  //    `<ma::tui-preview ...>...</ma::tui-preview>` (see
+  //    `findAnnotationStart`). They live at end-of-content separated by
+  //    `\n\n` and stack in a fixed order, so the earliest of their
+  //    last-occurrences is the start of the annotation region and we slice
+  //    from there. The structured `info` (when supplied) carries the same
+  //    truncation numbers in machine form : we render those as the
+  //    bare-facts footer instead.
+  const noticeIdx = findAnnotationStart(content)
   let body = noticeIdx >= 0 ? content.slice(0, noticeIdx) : content
 
   // 2. Per-line width clamp (display-width-aware so wide chars / emoji /
