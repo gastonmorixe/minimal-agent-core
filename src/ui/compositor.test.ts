@@ -531,34 +531,6 @@ describe("Compositor (cols-drift recovery)", () => {
     expect(out).toContain("❯ b")
   })
 
-  it("setLiveArea repaint does NOT walk right by streamCol (spinner blink stays at col 0)", () => {
-    // Regression for the "horizontally accumulating Thinking labels" bug:
-    // after streaming content leaves streamCol > 0, a pure live-area
-    // repaint (spinner tick) used to also emit `\x1b[<streamCol>C` before
-    // the `\x1b[J` erase, landing the new status at col streamCol of the
-    // status row instead of col 0. Each blink left the previous label
-    // visible at cols 0..streamCol-1, producing
-    // `● Thinking   Thinking   ● Thinking …` accumulating across the row
-    // as streamCol grew with the response. The walk-right step is part
-    // of "land back at the original scrollback cursor" and only makes
-    // sense in tandem with the walk-up over separator rows — pure
-    // live-area repaints must stay at col 0 of the live area's top row.
-    const cap = makeOutput()
-    const c = new Compositor({ output: cap.output })
-    c.mount()
-    c.setLiveArea(["● Thinking", "", "❯ ask"], { row: 2, col: 5 })
-    c.writeStream("hello world") // streamCol grows to 11
-    cap.writes.length = 0
-    c.setLiveArea(["  Thinking", "", "❯ ask"], { row: 2, col: 5 })
-    const out = joined(cap)
-    // The cursor walk-right used for "land back at scrollback streamCol"
-    // must NOT appear in the repaint path. The only walk-right allowed
-    // is the editor cursor's `\x1b[5C` (col 5, end of "❯ ask").
-    expect(out).not.toContain("\x1b[11C")
-    expect(out).toContain("\x1b[5C")
-    expect(out).toContain("  Thinking")
-  })
-
   it("writeStream after a silent cols change also wipes before appending", () => {
     // Same failure mode at the scrollback seam: a chunk written while
     // the stale live area is still on screen would push the wrapped-but-

@@ -47,7 +47,13 @@ export class LiveAreaStatusController implements StatusController {
   constructor(bus: StatusBus, editor: EditorStatusSink, opts: LiveAreaStatusOptions = {}) {
     this.bus = bus
     this.editor = editor
-    this.maxFps = opts.maxFps ?? 0
+    // Default animation cadence: 8 fps (125 ms tick) is plenty to drive
+    // the 500 ms blink cycle without missing step transitions. The
+    // compositor's `drawnLiveKey` content-dedup absorbs identical-glyph
+    // repaints, so the cost when the spinner state hasn't changed is one
+    // cheap string compare per tick — no terminal write. Setting maxFps
+    // to 0 here disables the timer entirely (useful for tests).
+    this.maxFps = opts.maxFps ?? 8
     this.baseTheme = opts.spinnerTheme ?? {}
     this.spinnerManager = new SpinnerManager<StatusSpinnerTheme>({
       spinner: opts.spinner ?? new BlinkingNerdSpinner(),

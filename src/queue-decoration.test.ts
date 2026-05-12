@@ -31,14 +31,14 @@ describe("buildQueueDecorationLines", () => {
   it("single entry: header + closing ╰ on the one item row", () => {
     const lines = buildQueueDecorationLines(["only one"])
     expect(lines.length).toBe(2)
-    expect(noAnsi(lines[0])).toBe("  ⏳ 1 queued")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 1")
     expect(noAnsi(lines[1])).toBe("  ╰  1 ▸ only one")
   })
 
   it("two entries: first row ┊, second row ╰ (last item closes)", () => {
     const lines = buildQueueDecorationLines(["first", "second"])
     expect(lines.length).toBe(3)
-    expect(noAnsi(lines[0])).toBe("  ⏳ 2 queued")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 2")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ first")
     expect(noAnsi(lines[2])).toBe("  ╰  2 ▸ second")
   })
@@ -46,7 +46,7 @@ describe("buildQueueDecorationLines", () => {
   it("three entries: three numbered rows, last is ╰ (well within cap)", () => {
     const lines = buildQueueDecorationLines(["a", "b", "c"])
     expect(lines.length).toBe(4)
-    expect(noAnsi(lines[0])).toBe("  ⏳ 3 queued")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 3")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ a")
     expect(noAnsi(lines[2])).toBe("  ┊  2 ▸ b")
     expect(noAnsi(lines[3])).toBe("  ╰  3 ▸ c")
@@ -56,7 +56,7 @@ describe("buildQueueDecorationLines", () => {
     const queue = Array.from({ length: 10 }, (_, i) => `item-${i + 1}`)
     const lines = buildQueueDecorationLines(queue)
     expect(lines.length).toBe(11) // header + 10 items, no overflow tail
-    expect(noAnsi(lines[0])).toBe("  ⏳ 10 queued")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 10")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ item-1")
     expect(noAnsi(lines[9])).toBe("  ┊  9 ▸ item-9")
     expect(noAnsi(lines[10])).toBe("  ╰  10 ▸ item-10")
@@ -66,7 +66,7 @@ describe("buildQueueDecorationLines", () => {
     const queue = Array.from({ length: 12 }, (_, i) => `item-${i + 1}`)
     const lines = buildQueueDecorationLines(queue)
     expect(lines.length).toBe(12) // header + 10 items + elision tail
-    expect(noAnsi(lines[0])).toBe("  ⏳ 12 queued")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 12")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ item-1")
     expect(noAnsi(lines[10])).toBe("  ┊  10 ▸ item-10")
     expect(noAnsi(lines[11])).toBe("  ╰  ... and 2 more")
@@ -125,7 +125,7 @@ describe("buildQueueDecorationLines", () => {
     const lines = buildQueueDecorationLines(["a"])
     expect(lines[0]).toContain("\x1b[2;37m") // faintWhite ⏳ open
     expect(lines[0]).toContain("\x1b[22;39m") // faintWhite close
-    expect(lines[0]).toContain("\x1b[2m") // dim "1 queued" open
+    expect(lines[0]).toContain("\x1b[2m") // dim "queued · N" open
     expect(lines[1]).toContain("\x1b[2m") // dim glyph + content
     expect(lines[1]).toContain("\x1b[22m") // dim close
   })

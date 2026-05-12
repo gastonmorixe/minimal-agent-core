@@ -25,11 +25,7 @@ import {
   DEFAULT_NERD_ICON,
 } from "./presets.ts"
 import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
-
-/** Wrap text in a dim SGR (brightness↓), matching `ansiDim` from palettes.ts. */
-function dimWrap(text: string): string {
-  return `\x1b[2m${text}\x1b[22m`
-}
+import { displayWidth } from "../term-width.ts"
 
 const DEFAULT_BLINK_MS = 500
 
@@ -99,21 +95,24 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
         : this.blinkMs
     const step = Math.floor(context.elapsedMs / blinkMs)
     const requestedFps = 1000 / blinkMs
-    // "Pulse" instead of true blink: every frame emits the SAME glyph,
-    // every frame has IDENTICAL byte-width. Off-step is the glyph
-    // wrapped in a dim SGR; on-step is the glyph wrapped in the rotating
-    // palette colorizer. Same character → same rendered cell width
-    // regardless of whether the terminal/font treats the codepoint as 1
-    // or 2 cells. This is the only robust way to keep the label column
-    // stable across the cycle, because PUA / Nerd Font widths are not
-    // reliably 2 cells across all terminals + font configs (iTerm with
-    // a non-patched fallback font commonly renders them as 1 cell).
+    // True blink: on-step renders the glyph in the rotating palette
+    // color; off-step replaces it with whitespace of equivalent cell
+    // width. The visible cycle reads as
+    //   [color0, blank, color1, blank, color2, blank, …]
+    // which is the appearance most users expect from a "blinking"
+    // status indicator.
     //
-    // The visual cue is the brightness pulse, not the appear/disappear
-    // animation. Animated specs (`AnimatedIcon`) take the rotor branch
-    // above and don't reach here — they animate via frame cycling.
+    // Cell-width caveat: `displayWidth` returns 1 for both BMP narrow
+    // glyphs (●, U+25CF) and Nerd-Font PUA glyphs (`src/term-width.ts`
+    // explicitly drops PUA out of the wide range). For narrow icons
+    // this is exact. For PUA icons in a patched-Nerd-Font terminal
+    // that renders them as 2 cells visually, the label will jiggle 1
+    // cell during the off-frame. If that becomes a problem we can
+    // branch here on `cp >= 0xE000` to keep a pulse (dim SGR) variant
+    // for PUA icons only.
     if (step % 2 !== 0) {
-      return { glyph: dimWrap(spec), requestedFps }
+      const cells = Math.max(1, displayWidth(spec))
+      return { glyph: " ".repeat(cells), requestedFps }
     }
 
     // Color advances ONCE per on/off cycle so the visible sequence is

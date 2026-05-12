@@ -92,6 +92,25 @@ describe("parseArgs", () => {
     expect(f.cwd).toBe("/x")
   })
 
+  it("parses -n / --namespace", () => {
+    expect(parseArgs(["list", "-n", "scratch"]).namespace).toBe("scratch")
+    expect(parseArgs(["list", "--namespace", "scratch"]).namespace).toBe("scratch")
+  })
+
+  it("--namespace \"\" maps to null (force-reset to default paths)", () => {
+    const f = parseArgs(["list", "--namespace", ""])
+    expect(f.namespace).toBeNull()
+  })
+
+  it("namespace flag is absent (not undefined-keyed) when not passed", () => {
+    const f = parseArgs(["list"])
+    expect("namespace" in f).toBe(false)
+  })
+
+  it("rejects --namespace with missing value", () => {
+    expect(() => parseArgs(["list", "--namespace"])).toThrow()
+  })
+
   it("parses -f / --format", () => {
     expect(parseArgs(["list", "-f", "json"]).format).toBe("json")
     expect(parseArgs(["list", "--format", "text"]).format).toBe("text")
@@ -407,6 +426,41 @@ describe("main — path", () => {
     const sid = "abc"
     await main(["path", "-s", "short-term", "--sid", sid], io)
     expect(io.out.join("").trimEnd()).toBe(shortTermMemoryPath(sid, { home: tmpHome }))
+  })
+
+  it("--namespace routes path under namespaces/<ns>/", async () => {
+    const io = makeIO()
+    const code = await main(["path", "-s", "global", "-n", "scratch"], io)
+    expect(code).toBe(0)
+    expect(io.out.join("").trimEnd()).toBe(
+      join(tmpHome, ".minimal-agent", "namespaces", "scratch", "memory.md"),
+    )
+  })
+
+  it("--namespace also isolates add/list end-to-end", async () => {
+    // Default namespace: add one entry.
+    await main(["add", "default-only", "-s", "global"], makeIO())
+    // Namespaced: should see ZERO entries.
+    const nsIO = makeIO()
+    const code = await main(["list", "-s", "global", "-n", "scratch", "-f", "json"], nsIO)
+    expect(code).toBe(0)
+    const parsed = JSON.parse(nsIO.out.join("")) as { total: number; bullets: unknown[] }
+    expect(parsed.total).toBe(0)
+    expect(parsed.bullets).toEqual([])
+    // Add into the namespace and confirm it lands in the namespaced file
+    // and is invisible to the default scope.
+    await main(["add", "ns-only", "-s", "global", "-n", "scratch"], makeIO())
+    const defIO = makeIO()
+    await main(["list", "-s", "global", "-f", "json"], defIO)
+    const defParsed = JSON.parse(defIO.out.join("")) as { total: number }
+    expect(defParsed.total).toBe(1) // still only `default-only`
+  })
+
+  it("--namespace with invalid value (slash) fails loudly", async () => {
+    const io = makeIO()
+    const code = await main(["path", "-s", "global", "-n", "bad/ns"], io)
+    expect(code).toBe(2)
+    expect(io.err.join("")).toMatch(/invalid namespace/)
   })
 })
 

@@ -14,37 +14,41 @@
  * isolated, keeps everything per-user (so collaborators never see them),
  * and never touches the project tree itself (no gitignore needed).
  *
+ * Path resolution is delegated to `lib/store.ts` so the namespace env
+ * var (`MINIMAL_AGENT_MEMORY_NAMESPACE`) and any future layout changes
+ * stay in one place. When the namespace env var is set, the paths
+ * above become `~/.minimal-agent/namespaces/<ns>/memory.md` and
+ * `~/.minimal-agent/namespaces/<ns>/projects/<cwd>/memory.md`.
+ *
  * If both files are absent or empty, the fragment returns an empty string
  * (the loader will simply not include this fragment in the prompt).
  */
 
 import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
 
 import type { PromptFragmentContext } from "../../../src/plugins/types.ts"
+import {
+  globalMemoryPath as storeGlobalMemoryPath,
+  projectMemoryPath as storeProjectMemoryPath,
+} from "../lib/store.ts"
 
 /**
- * Resolve the user's home directory. Reads `$HOME` first so tests (and
- * any other runtime override) take effect; falls back to `os.homedir()`
- * which on Bun reads from the passwd database and ignores live env edits.
+ * Resolve the global memory file. Optional `h` is a `$HOME` override
+ * (legacy string form, kept for back-compat with existing tests and
+ * any external caller); when omitted, the store reads `$HOME` from the
+ * process env. Namespace handling is fully delegated to `lib/store.ts`
+ * (driven by `MINIMAL_AGENT_MEMORY_NAMESPACE`).
  */
-function home(): string {
-  return process.env.HOME ?? homedir()
+export function globalMemoryPath(h?: string): string {
+  return storeGlobalMemoryPath(h !== undefined ? { home: h } : undefined)
 }
 
-export function globalMemoryPath(h: string = home()): string {
-  return join(h, ".minimal-agent", "memory.md")
-}
-
-export function projectMemoryPath(
-  cwd: string,
-  h: string = home(),
-): string {
-  // Strip the leading slash so `join` doesn't reset to root, then the cwd
-  // path becomes a relative tree under `~/.minimal-agent/projects/`.
-  const rel = cwd.replace(/^\/+/, "")
-  return join(h, ".minimal-agent", "projects", rel, "memory.md")
+/**
+ * Resolve the project memory file for a given cwd. See
+ * {@link globalMemoryPath} for the `h` parameter semantics.
+ */
+export function projectMemoryPath(cwd: string, h?: string): string {
+  return storeProjectMemoryPath(cwd, h !== undefined ? { home: h } : undefined)
 }
 
 function readIfPresent(path: string): string {

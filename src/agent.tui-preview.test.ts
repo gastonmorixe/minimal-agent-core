@@ -82,10 +82,7 @@ describe("<ma::tui-preview> runtime annotation", () => {
     // 20 lines of bash output : above the Bash TUI budget (10) but well
     // under the universal API cap (1000 lines / 64KB).
     const records: Array<{ messages: CapturedMsg[] }> = []
-    const sendFn = makeSendFn(
-      [{ id: "c1", name: "Bash", input: { command: "seq 1 20" } }],
-      records,
-    )
+    const sendFn = makeSendFn([{ id: "c1", name: "Bash", input: { command: "seq 1 20" } }], records)
     const agent = new Agent({ auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {
@@ -168,15 +165,9 @@ describe("<ma::tui-preview> runtime annotation", () => {
     )
     void tmpdir
     const path = `/tmp/agent-tui-preview-read-${Date.now()}.txt`
-    await Bun.write(
-      path,
-      Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n"),
-    )
+    await Bun.write(path, Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n"))
     const records: Array<{ messages: CapturedMsg[] }> = []
-    const sendFn = makeSendFn(
-      [{ id: "c1", name: "Read", input: { file_path: path } }],
-      records,
-    )
+    const sendFn = makeSendFn([{ id: "c1", name: "Read", input: { file_path: path } }], records)
     const agent = new Agent({ auth: AUTH, model: "test", sendFn })
     const gen = agent.run("go")
     while (true) {

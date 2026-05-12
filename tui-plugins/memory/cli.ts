@@ -86,6 +86,14 @@ interface Flags {
   scope: StoreKind
   cwd: string
   sid?: string
+  /**
+   * Namespace override. `undefined` = use env var (default behavior),
+   * `null` = force "no namespace" (ignore env), a string = use that
+   * namespace. The empty-string CLI value `--namespace ""` maps to
+   * `null` so users can reset to default paths even when the env is
+   * exported in their shell.
+   */
+  namespace?: string | null
   format: "text" | "json"
   color: boolean
   help: boolean
@@ -124,6 +132,11 @@ Flags (global):
   -s, --scope <s>                   global | project | short-term (default: project)
   --cwd <path>                      Working dir for project scope (default: $PWD)
   --sid <sid>                       Session id for short-term (default: $MINIMAL_AGENT_SESSION_ID)
+  -n, --namespace <name>            Isolate paths under
+                                    ~/.minimal-agent/namespaces/<name>/
+                                    (default: $MINIMAL_AGENT_MEMORY_NAMESPACE).
+                                    Pass "" to force default paths even
+                                    when the env is set.
   -f, --format text|json            Output format (default: text)
   --no-color                        Disable ANSI colors in text output
   -h, --help                        Show this help
@@ -142,6 +155,13 @@ Examples:
   bun run tui-plugins/memory/cli.ts clear -s short-term --sid <sid>
   bun run tui-plugins/memory/cli.ts rewrite-ids -s project
   bun run tui-plugins/memory/cli.ts path -s project --cwd ~/Projects/app
+  bun run tui-plugins/memory/cli.ts list -s global -n scratch
+  MINIMAL_AGENT_MEMORY_NAMESPACE=scratch bun run minimal-agent
+
+To disable the memory plugin entirely (no save echoes, no system-prompt
+fragment, no MemoryTool), set this in ~/.minimal-agent/config.jsonc:
+
+  { "plugins": { "memory": { "enabled": false } } }
 `
 
 class UsageError extends Error {}
@@ -201,6 +221,17 @@ export function parseArgs(argv: string[]): Flags {
       i++
       continue
     }
+    if (a === "-n" || a === "--namespace") {
+      // We DO accept the empty string here (unlike --sid / --cwd) so
+      // `--namespace ""` can override an exported env var back to the
+      // default top-level paths. The empty string maps to `null` in
+      // Flags so the store knows it's an explicit reset, not "unset".
+      const v = argv[++i]
+      if (v === undefined) throw new UsageError(`${a} requires a value (use "" to disable)`)
+      flags.namespace = v === "" ? null : v
+      i++
+      continue
+    }
     if (a === "-f" || a === "--format") {
       const v = argv[++i]
       if (v !== "text" && v !== "json") {
@@ -252,30 +283,46 @@ export function parseArgs(argv: string[]): Flags {
 // Store factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a {@link StoreDeps}-shaped namespace override from flags. Only
+ * includes the `namespace` key when the flag was explicitly provided,
+ * so the store falls back to the env var in the default case (instead
+ * of force-clearing it).
+ */
+function namespaceDeps(flags: Flags): { namespace?: string | null } {
+  return "namespace" in flags && flags.namespace !== undefined
+    ? { namespace: flags.namespace }
+    : {}
+}
+
 function makeStore(flags: Flags): MemoryStore {
-  if (flags.scope === "global") return MemoryStore.global({ sid: flags.sid ?? null })
+  const ns = namespaceDeps(flags)
+  if (flags.scope === "global") {
+    return MemoryStore.global({ ...ns, sid: flags.sid ?? null })
+  }
   if (flags.scope === "short-term") {
     if (!flags.sid) {
       throw new UsageError(
         "scope=short-term requires --sid (or $MINIMAL_AGENT_SESSION_ID)",
       )
     }
-    return MemoryStore.shortTerm(flags.sid)
+    return MemoryStore.shortTerm(flags.sid, ns)
   }
-  return MemoryStore.project(flags.cwd, { sid: flags.sid ?? null })
+  return MemoryStore.project(flags.cwd, { ...ns, sid: flags.sid ?? null })
 }
 
 function pathForScope(flags: Flags): string {
-  if (flags.scope === "global") return globalMemoryPath()
+  const ns = namespaceDeps(flags)
+  if (flags.scope === "global") return globalMemoryPath(ns)
   if (flags.scope === "short-term") {
     if (!flags.sid) {
       throw new UsageError(
         "scope=short-term requires --sid (or $MINIMAL_AGENT_SESSION_ID)",
       )
     }
-    return shortTermMemoryPath(flags.sid)
+    return shortTermMemoryPath(flags.sid, ns)
   }
-  return projectMemoryPath(flags.cwd)
+  return projectMemoryPath(flags.cwd, ns)
 }
 
 // ---------------------------------------------------------------------------
