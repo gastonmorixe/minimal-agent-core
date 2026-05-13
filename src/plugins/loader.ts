@@ -329,11 +329,22 @@ export class PluginLoader {
       }
 
       // Resolve prompt content.
-      const promptRel = manifest.prompt ?? "./PROMPT.md"
-      const promptAbs = resolvePath(dir, promptRel)
+      //
+      // `manifest.prompt` is fully optional. Three states:
+      //   - undefined            → look for default `./PROMPT.md`; absent is fine
+      //   - ""                   → explicit opt-out: no PROMPT.md lookup at all
+      //   - "<relative path>"    → look at that path; absent is fine (silent null)
+      //
+      // A missing / empty / comment-only PROMPT.md produces NO `<plugin>` wrapper
+      // in the assembled prompt block (see `buildBlock`). `manifest.description`
+      // is human-facing metadata only and is never injected into the model prompt.
       let prompt: string | null = null
-      if (existsSync(promptAbs)) {
-        prompt = readFileSync(promptAbs, "utf-8")
+      if (manifest.prompt !== "") {
+        const promptRel = manifest.prompt ?? "./PROMPT.md"
+        const promptAbs = resolvePath(dir, promptRel)
+        if (existsSync(promptAbs)) {
+          prompt = readFileSync(promptAbs, "utf-8")
+        }
       }
 
       parsed.push({
@@ -602,7 +613,7 @@ export class PluginLoader {
 
   /**
    * Prompt fragment to append to the system prompt, or `null` if no plugins
-   * are loaded.
+   * are loaded OR no loaded plugin contributes a prompt body.
    *
    * The block is structured with XML-style tags rather than Markdown headings
    * so it composes cleanly into a larger system prompt without colliding with
@@ -616,11 +627,21 @@ export class PluginLoader {
    * </tui-plugins>
    * ```
    *
-   * Each plugin's `PROMPT.md` is embedded verbatim except that a single
-   * leading top-level heading (e.g. `# ask-mode`) is stripped if present —
-   * the surrounding `<plugin id="...">` tag already names the plugin, and
-   * keeping the `#` would both duplicate the id and inject a stray H1 into
-   * the host prompt.
+   * Per-plugin rules:
+   *
+   * - A plugin contributes a body when its `PROMPT.md` exists and has
+   *   non-comment, non-whitespace content (or it contributes a resolved
+   *   prompt fragment). A plugin with no model-facing surface — e.g.
+   *   `quota-status`, which only renders a live-area footer — declares
+   *   `"prompt": ""` in its manifest (or omits `PROMPT.md` entirely) and
+   *   gets NO `<plugin>` wrapper in the assembled block.
+   * - `manifest.description` is human-facing metadata only and is never
+   *   embedded in the prompt. It does not function as a fallback prompt.
+   * - A single leading top-level heading (e.g. `# ask-mode`) is stripped
+   *   from `PROMPT.md` if present — the surrounding `<plugin id="...">`
+   *   tag already names the plugin.
+   * - HTML comments (`<!-- ... -->`) in `PROMPT.md` are stripped so plugin
+   *   authors can leave source-only notes without leaking them to the model.
    */
   getPromptBlock(): string | null {
     return this.buildBlock(null)
@@ -731,11 +752,22 @@ export class PluginLoader {
         "</overview>",
     )
     for (const pkg of this.plugins) {
-      const body = stripLeadingHeading(pkg.prompt ?? pkg.manifest.description)
+      // `manifest.description` is human-facing metadata and MUST NOT leak into
+      // the model prompt. Plugins that have nothing to say to the model (e.g.
+      // pure live-area-slot plugins like `quota-status`) opt out by omitting
+      // `PROMPT.md` or by setting `"prompt": ""` in their manifest; in either
+      // case `pkg.prompt` is null and they get no `<plugin>` wrapper here.
+      const body = stripLeadingHeading(stripHtmlComments(pkg.prompt ?? ""))
       const frags = fragmentTexts?.get(pkg.manifest.id) ?? []
       const fragSection =
         frags.length > 0 ? `\n\n${frags.map((t) => t.trimEnd()).join("\n\n")}` : ""
+      if (body.length === 0 && fragSection.length === 0) continue
       parts.push(`<plugin id="${pkg.manifest.id}">\n${body}${fragSection}\n</plugin>`)
+    }
+    if (parts.length === 2) {
+      // Only `<tui-plugins>` + `<overview>` made it through; no plugin
+      // contributed a body. Emit nothing rather than an empty shell.
+      return null
     }
     parts.push("</tui-plugins>")
     return parts.join("\n\n")
@@ -878,6 +910,21 @@ function stripLeadingHeading(body: string): string {
   const match = body.match(/^\uFEFF?\s*#[ \t]+[^\n]*\n+/)
   if (!match) return body.trim()
   return body.slice(match[0].length).trim()
+}
+
+/**
+ * Strip HTML comments (`<!-- ... -->`, including multi-line) from a prompt
+ * body. Plugin authors sometimes leave explanatory notes in `PROMPT.md`
+ * about why the file exists or what the plugin contributes; those notes
+ * are for humans reading the source, not for the model. Combined with the
+ * "skip empty `<plugin>` wrapper" rule in `buildBlock`, a `PROMPT.md` that
+ * contains nothing but comments produces no model-visible bytes.
+ *
+ * Defensive — `prompt: ""` in the manifest already opts out at load time;
+ * this is for the case where the file exists with body-shaped content.
+ */
+function stripHtmlComments(body: string): string {
+  return body.replace(/<!--[\s\S]*?-->/g, "").trim()
 }
 
 async function resolveHandler(
