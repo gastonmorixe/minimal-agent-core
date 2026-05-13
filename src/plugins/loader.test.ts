@@ -356,6 +356,128 @@ describe("PluginLoader", () => {
     rmSync(join(HOME, "tui-plugins", "pb"), { recursive: true })
   })
 
+  it("omits the <plugin> wrapper for a plugin that contributes no PROMPT.md", async () => {
+    // A live-area-slot-only plugin (e.g. quota-status) has no model-facing
+    // surface — no tools, no inline tags, no fragments — and should not
+    // appear in the assembled prompt block at all.
+    writePackage(
+      HOME,
+      "silent",
+      {
+        id: "silent",
+        name: "silent",
+        version: "0.1.0",
+        description: "DESCRIPTION_MUST_NOT_LEAK into the model prompt",
+        liveAreaSlots: [
+          {
+            id: "quiet",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "prov.ts": `export default async () => "tick"`,
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const block = loader.getPromptBlock()
+    // Only plugin loaded, no prompt body → entire block collapses to null.
+    expect(block).toBeNull()
+    rmSync(join(HOME, "tui-plugins", "silent"), { recursive: true })
+  })
+
+  it('treats `prompt: ""` as an explicit opt-out even when PROMPT.md exists on disk', async () => {
+    writePackage(
+      HOME,
+      "optout",
+      {
+        id: "optout",
+        name: "optout",
+        version: "0.1.0",
+        description: "test",
+        prompt: "",
+        liveAreaSlots: [
+          {
+            id: "quiet",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "prov.ts": `export default async () => "tick"`,
+        "PROMPT.md": "SHOULD_NOT_APPEAR — opt-out wins over file presence",
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    expect(loader.getPromptBlock()).toBeNull()
+    rmSync(join(HOME, "tui-plugins", "optout"), { recursive: true })
+  })
+
+  it("strips HTML comments from PROMPT.md and omits the wrapper if nothing else remains", async () => {
+    writePackage(
+      HOME,
+      "commented",
+      {
+        id: "commented",
+        name: "commented",
+        version: "0.1.0",
+        description: "test",
+        liveAreaSlots: [
+          {
+            id: "quiet",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "prov.ts": `export default async () => "tick"`,
+        "PROMPT.md":
+          "<!--\nThis comment explains to source readers why the file is empty.\nIt MUST NOT_LEAK into the model prompt.\n-->\n",
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    expect(loader.getPromptBlock()).toBeNull()
+    rmSync(join(HOME, "tui-plugins", "commented"), { recursive: true })
+  })
+
+  it("never uses manifest.description as a prompt fallback", async () => {
+    // Mixed setup: plugin "talker" contributes a real body so the block is
+    // non-null; plugin "silent" has no PROMPT.md but a chatty description.
+    // The description must not appear anywhere in the assembled block.
+    writePackage(HOME, "talker", toolManifest("talker", "tool_t", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+      "PROMPT.md": "talker-body",
+    })
+    writePackage(
+      HOME,
+      "silent2",
+      {
+        id: "silent2",
+        name: "silent2",
+        version: "0.1.0",
+        description: "DESCRIPTION_MUST_NOT_LEAK_2",
+        liveAreaSlots: [
+          {
+            id: "quiet",
+            handler: { type: "module", path: "./prov.ts", export: "default" },
+          },
+        ],
+      },
+      {
+        "prov.ts": `export default async () => "tick"`,
+      },
+    )
+    const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
+    const block = loader.getPromptBlock()
+    expect(block).not.toBeNull()
+    expect(block!).toContain('<plugin id="talker">')
+    expect(block!).toContain("talker-body")
+    expect(block!).not.toContain('<plugin id="silent2">')
+    expect(block!).not.toContain("DESCRIPTION_MUST_NOT_LEAK_2")
+    rmSync(join(HOME, "tui-plugins", "talker"), { recursive: true })
+    rmSync(join(HOME, "tui-plugins", "silent2"), { recursive: true })
+  })
+
   it("rejects a subprocess handler whose executable is missing", async () => {
     writePackage(HOME, "sp", {
       id: "sp",

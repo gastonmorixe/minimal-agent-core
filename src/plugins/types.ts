@@ -122,7 +122,24 @@ export interface ManifestFile {
   name: string
   version: string
   description: string
-  /** Optional relative path to a PROMPT.md file (default: `./PROMPT.md`). */
+  /**
+   * Optional relative path to a `PROMPT.md` file (default: `./PROMPT.md`).
+   *
+   * Three states:
+   * - `undefined` (field omitted): the loader looks for `./PROMPT.md`. If
+   *   absent or empty, the plugin contributes no prompt body and gets no
+   *   `<plugin>` wrapper in the assembled system-prompt block.
+   * - `""` (explicit empty string): the loader skips the lookup entirely.
+   *   Use this for plugins that have no model-facing surface (no tools,
+   *   no inline tags, no modes, no prompt fragments) — e.g. a live-area
+   *   slot that only renders a footer line. Identical effect to omitting
+   *   the field plus deleting `PROMPT.md`, but signals intent in the
+   *   manifest so source readers don't wonder where the prompt went.
+   * - `"<relative path>"`: the loader reads that file. Absent file is
+   *   silently treated as "no prompt body".
+   *
+   * `description` is NOT a prompt fallback. It's human-facing metadata.
+   */
   prompt?: string
   /**
    * Async prompt fragments. Each fragment is a producer (subprocess or
