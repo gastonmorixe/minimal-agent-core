@@ -240,8 +240,15 @@ export async function replayToScrollback(
           sink.write(`  ${c.dimCyan("│")} ${c.dim(cont)}\n`)
         }
         // Header→body separator (mirrors live agent rendering: the empty
-        // `│` gutter row that sits between the tool header and the first
+        // gutter row that sits between the tool header and the first
         // body line, giving every tool block a consistent visual shape).
+        // Always solid `│` in replay : the live agent reserves the dashed
+        // `┊` for bodies that start mid-source (Read with `offset > 0`),
+        // derived from runtime `truncInfo.startLine`. That field isn't
+        // persisted in the JSONL store, so replay can't reconstruct it
+        // and falls back to the default glyph. End-of-body truncation
+        // footers are similarly absent from replay (see formatToolPreview
+        // call below : we pass `info: undefined`).
         sink.write(`  ${c.dimCyan("│")}\n`)
         const result = toolResultById.get(tu.id)
         if (result) {

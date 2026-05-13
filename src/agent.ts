@@ -763,7 +763,31 @@ export class Agent {
               writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
             }
           }
-          writeTranscript(`  ${c.dimCyan("│")}`)
+          // NOTE: the empty header→body separator row is NOT emitted here.
+          // The caller emits it lazily via `writeHeaderBodySep` once the
+          // tool has run and `truncInfo` is known, because the choice of
+          // glyph depends on whether the body starts mid-source:
+          //   - `│` (solid) when no discontinuity above the first body row
+          //     (body starts at line 1 of source, OR no source notion at all
+          //      : Bash stdout, plugin tools, refusal lines, etc.).
+          //   - `┊` (light-dotted) when the body starts mid-source : the
+          //     same "something was cut here" semantics as the truncation
+          //     separator above `╰ <footer>` at the bottom of the block.
+          //     Today this fires for `Read` with `offset > 0`, signalled
+          //     via `TruncationInfo.startLine > 0`.
+          // session-replay.ts can't reconstruct startLine (not persisted in
+          // the JSONL), so it always uses `│`.
+        }
+        // Lazy emit of the header→body separator. Captured by closure over
+        // `headerWritten` / `sepEmitted` so callers can fire it from any
+        // branch (streamed Bash, plugin tool, formatToolPreview path,
+        // refusal) without worrying about double-emission.
+        let sepEmitted = false
+        const writeHeaderBodySep = (startTruncated: boolean): void => {
+          if (sepEmitted) return
+          if (!headerWritten) return
+          sepEmitted = true
+          writeTranscript(`  ${c.dimCyan(startTruncated ? "┊" : "│")}`)
         }
 
         let content: string
@@ -784,6 +808,10 @@ export class Agent {
         const gate = this.modeManager?.isToolAllowed(tool.name) ?? { allowed: true as const }
         if (!gate.allowed) {
           writeToolHeader()
+          // Refusal lines never start-truncate : the body is the
+          // synthesized refusal message, not output from a source with a
+          // "above this" notion. Always solid `│`.
+          writeHeaderBodySep(false)
           content = gate.message
           isError = true
           // Render a denial line in the transcript so the user sees what
@@ -824,6 +852,10 @@ export class Agent {
                 isError = true
               }
               writeToolHeader(displayHeader)
+              // Plugin tools don't surface `TruncationInfo` through the
+              // dispatcher protocol, so we have no startLine signal here.
+              // Always solid `│`.
+              writeHeaderBodySep(false)
             } else {
               // Live-stream Bash stdout/stderr to the transcript as the
               // child writes it, instead of waiting for the process to
@@ -852,6 +884,13 @@ export class Agent {
 
               const flushLineToBuffer = (raw: string) => {
                 didStream = true
+                // Bash stdout has no "above this" notion : output starts
+                // at the first byte the child writes, so always `│`. We
+                // emit on the FIRST line (rather than eagerly after the
+                // header) so zero-output Bash runs : where didStream
+                // stays false : don't get an orphan separator row above
+                // the eventual `╰ (no output)` close.
+                writeHeaderBodySep(false)
                 if (streamedLineCount >= STREAM_BUDGET) {
                   streamedLineCount++
                   return
@@ -945,6 +984,15 @@ export class Agent {
 
           if (!streamedRendered) {
             if (!headerWritten) writeToolHeader(displayHeader)
+            // `Read` with `offset > 0` populates `truncInfo.startLine`
+            // (see src/tools.ts:861 → src/tools/truncation.ts) : that's
+            // the only signal we have today for "body starts mid-source".
+            // Any future tool that returns the same will get the `┊`
+            // top-of-body separator for free. The post-block render path
+            // is the only place where `truncInfo` is reliably populated
+            // before any body row hits the transcript, so this is where
+            // start-truncation gets visualized.
+            writeHeaderBodySep((truncInfo?.startLine ?? 0) > 0)
             for (const line of formatToolPreview(content, isError, display, {
               tool: tool.name,
               info: truncInfo,
