@@ -20,6 +20,17 @@
  * that position. The backslash is consumed on emit (the text channel sees
  * `<tui::...`). This is the only escape.
  *
+ * **Markdown code context:** the scanner tracks inline code spans
+ * (`` `...` ``, or any backtick run `` ``...`` `` closed by the same run
+ * length) and fenced code blocks (lines beginning with 3+ backticks or 3+
+ * tildes, closed by a same-char fence of equal-or-greater length at line
+ * start). Inside either context, `<tui::` openers are passed through as
+ * plain text and no tag event fires. This prevents the model's prose --
+ * which often references plugin tag names inside backticks or fenced
+ * examples -- from accidentally triggering plugin handlers. Leading-space
+ * indent on fence openers is NOT supported (zero-indent only); this covers
+ * the realistic agent-emitted markdown but skips obscure CommonMark cases.
+ *
  * **Nesting:** the scanner captures until the first `</tui::NAME>` matching
  * the opener name. Nested tags with different names are safe because they do
  * not match the outer close. Nested tags with the same name are ambiguous;
@@ -85,6 +96,13 @@ export class TagScanner {
   // current capture began.
   private captureStart = 0
 
+  // Markdown code-context state. Persists across writes; suppresses inline
+  // tag detection while inside inline-code (backtick runs) or fenced-code
+  // blocks. See module docstring "Markdown code context".
+  private mdInline = 0
+  private mdFence: { char: "`" | "~"; len: number } | null = null
+  private mdAtLineStart = true
+
   private readonly onText: (text: string) => void
   private readonly onTag: (span: TagSpan) => void
   private readonly maxSpanBytes: number
@@ -147,47 +165,158 @@ export class TagScanner {
   }
 
   /**
-   * Default state: look for the next unescaped `<tui::`, flush text before
-   * it, and try to parse an opener.
+   * Default state: walk `buf` byte-by-byte, tracking markdown code context,
+   * and look for an unescaped `<tui::` opener at a position that is not
+   * inside an inline or fenced code span.
    *
    * Returns `true` if progress was made (caller should loop), `false` if the
    * scanner is waiting for more data.
    */
   private driveDefault(): boolean {
-    const idx = findUnescapedOpener(this.buf)
+    const buf = this.buf
+    const n = buf.length
+    let i = 0
 
-    if (idx < 0) {
-      // No opener in sight. Flush everything except a short tail that might
-      // be the start of an opener (e.g. `... <tu` at end of chunk).
-      const safe = safeTextEnd(this.buf)
-      if (safe > 0) {
-        this.onText(decodeEscapes(this.buf.slice(0, safe)))
-        this.buf = this.buf.slice(safe)
+    while (i < n) {
+      const ch = buf[i]
+
+      // Newlines reset the line-start flag regardless of code state.
+      if (ch === "\n") {
+        this.mdAtLineStart = true
+        i++
+        continue
       }
-      return false
+
+      // Inside a fenced code block: look only for a closing fence at line
+      // start. Everything else is opaque content.
+      if (this.mdFence) {
+        if (this.mdAtLineStart && ch === this.mdFence.char) {
+          const runLen = countRun(buf, i, ch)
+          if (i + runLen >= n) {
+            // Partial run at end-of-buf; hold and wait for more.
+            return this.flushAndHoldAt(i)
+          }
+          if (runLen >= this.mdFence.len) this.mdFence = null
+          i += runLen
+          this.mdAtLineStart = false
+          continue
+        }
+        this.mdAtLineStart = false
+        i++
+        continue
+      }
+
+      // Not in fenced code. Detect a fence opener at line start (3+
+      // backticks or 3+ tildes, zero-indent only), else fall through to
+      // inline-code / opener detection.
+      if (this.mdAtLineStart && (ch === "`" || ch === "~")) {
+        const runLen = countRun(buf, i, ch)
+        if (i + runLen >= n) return this.flushAndHoldAt(i)
+        if (runLen >= 3) {
+          this.mdFence = { char: ch as "`" | "~", len: runLen }
+          this.mdAtLineStart = false
+          i += runLen
+          continue
+        }
+        // Backtick run < 3 at line start: inline code toggle.
+        if (ch === "`") {
+          this.toggleInline(runLen)
+          this.mdAtLineStart = false
+          i += runLen
+          continue
+        }
+        // Tilde run < 3 at line start: just text.
+        this.mdAtLineStart = false
+        i += runLen
+        continue
+      }
+
+      // Backtick (not at line start): inline code toggle.
+      if (ch === "`") {
+        const runLen = countRun(buf, i, "`")
+        if (i + runLen >= n) return this.flushAndHoldAt(i)
+        this.toggleInline(runLen)
+        this.mdAtLineStart = false
+        i += runLen
+        continue
+      }
+
+      // Inside an inline code span: everything else is opaque content.
+      if (this.mdInline > 0) {
+        this.mdAtLineStart = false
+        i++
+        continue
+      }
+
+      // Escape form: `\<tui::` suppresses detection. The backslash is
+      // collapsed by decodeEscapes on flush.
+      if (ch === "\\" && i + 1 + OPENER_PROBE.length <= n && buf.startsWith(OPENER_PROBE, i + 1)) {
+        this.mdAtLineStart = false
+        i += 1 + OPENER_PROBE.length
+        continue
+      }
+
+      // Opener candidate at a non-code position.
+      if (ch === "<" && buf.startsWith(OPENER_PROBE, i)) {
+        // Flush text before the opener, then hand off to opener handling.
+        if (i > 0) {
+          this.onText(decodeEscapes(buf.slice(0, i)))
+          this.buf = buf.slice(i)
+        }
+        return this.handleOpener()
+      }
+
+      this.mdAtLineStart = false
+      i++
     }
 
-    // Flush any plain text before the opener.
-    if (idx > 0) {
-      this.onText(decodeEscapes(this.buf.slice(0, idx)))
-      this.buf = this.buf.slice(idx)
-    }
+    // Reached end-of-buf with no opener and no incomplete-run hold. Flush
+    // what we can, retaining a short tail for partial-opener-prefix matching
+    // (only meaningful when not inside code).
+    return this.flushAndHoldAt(n)
+  }
 
-    // Try to parse an opener at buf[0].
+  /**
+   * Flush `buf[0..upto)` as text, retaining any trailing partial opener
+   * prefix (e.g. `... <tu`) so it can be completed by the next chunk. When
+   * inside a code context, no opener can fire, so the full prefix is safe
+   * to flush.
+   */
+  private flushAndHoldAt(upto: number): boolean {
+    if (upto <= 0) return false
+    const head = this.buf.slice(0, upto)
+    const tailHold = this.mdInline > 0 || this.mdFence ? 0 : head.length - safeTextEnd(head)
+    const flushLen = head.length - tailHold
+    if (flushLen > 0) {
+      this.onText(decodeEscapes(head.slice(0, flushLen)))
+      this.buf = this.buf.slice(flushLen)
+    }
+    return false
+  }
+
+  /** Toggle the inline-code state on a backtick run of length `runLen`. */
+  private toggleInline(runLen: number): void {
+    if (this.mdInline === 0) this.mdInline = runLen
+    else if (runLen === this.mdInline) this.mdInline = 0
+    // Else: mismatched run inside an open inline-code span -- just content.
+  }
+
+  /**
+   * Parse an opener at `buf[0]` and either fire a self-closing event,
+   * transition to capturing state, or report incomplete/malformed.
+   */
+  private handleOpener(): boolean {
     const parsed = parseOpener(this.buf)
-    if (parsed === "incomplete") {
-      // Need more bytes.
-      return false
-    }
+    if (parsed === "incomplete") return false
     if (parsed === "malformed") {
       // Not a valid opener. Emit the leading `<` as text, advance, retry.
       this.onText("<")
       this.buf = this.buf.slice(1)
+      this.mdAtLineStart = false
       return true
     }
 
     if (parsed.self_closing) {
-      // Atomic self-closing tag.
       this.onTag({
         name: parsed.name,
         attrs: parsed.attrs,
@@ -196,6 +325,7 @@ export class TagScanner {
         raw: this.buf.slice(0, parsed.openerLen),
       })
       this.buf = this.buf.slice(parsed.openerLen)
+      this.mdAtLineStart = false
       return true
     }
 
@@ -203,8 +333,6 @@ export class TagScanner {
     this.state = "capturing"
     this.captureName = parsed.name
     this.captureStart = 0
-    // Stash parsed opener metadata in a side field so the closing step
-    // doesn't re-parse.
     this.pendingOpener = parsed
     return true
   }
@@ -264,21 +392,13 @@ export class TagScanner {
 // ---------------------------------------------------------------------------
 
 /**
- * Find the first unescaped `<tui::` in `s`, or -1 if none. A preceding
- * backslash suppresses detection; the escape is consumed by {@link decodeEscapes}
- * when the surrounding text is flushed.
+ * Count consecutive occurrences of `ch` in `s` starting at `from`. Used by
+ * the markdown walker to size backtick / tilde runs in a single step.
  */
-function findUnescapedOpener(s: string): number {
-  let from = 0
-  for (;;) {
-    const i = s.indexOf(OPENER_PROBE, from)
-    if (i < 0) return -1
-    if (i > 0 && s[i - 1] === "\\") {
-      from = i + OPENER_PROBE.length
-      continue
-    }
-    return i
-  }
+function countRun(s: string, from: number, ch: string): number {
+  let i = from
+  while (i < s.length && s[i] === ch) i++
+  return i - from
 }
 
 /**
