@@ -290,6 +290,150 @@ describe("renderBlock — ANSI", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Ghost-removed overlay (post-remove tombstone)
+// ---------------------------------------------------------------------------
+
+describe("renderBlock — ghost-removed overlay", () => {
+  function ghostView(t: Task, n: number): View {
+    return { task: t, n, childIndex: null, siblingCount: null, ghost: "removed" }
+  }
+
+  test("plain-text: ghost row keeps its original position number and shows ✘ + title", () => {
+    // Pre-state had 3 tasks. User removed #2. The renderer is fed the
+    // PRE-state views with `ghost: "removed"` stamped on the deleted row,
+    // and post-state stats. Result: all three rows appear (the user sees
+    // WHAT was removed) but the closer reflects 2 todo.
+    const a = task({ id: "aaaaaa", title: "alpha" })
+    const b = task({ id: "bbbbbb", title: "beta" })
+    const g = task({ id: "cccccc", title: "gamma" })
+    const out = plain(
+      [topView(a, 1), ghostView(b, 2), topView(g, 3)],
+      stats({ total: 2, todo: 2 }), // post-state: only 2 tasks alive
+      { action: { kind: "removed", hash: "bbbbbb" } },
+    )
+    expect(out).toContain(`alpha`)
+    expect(out).toContain(`beta`)
+    expect(out).toContain(`gamma`)
+    // Ghost row carries the canceled glyph in the status column.
+    expect(out).toContain(` 2  ${GLYPHS.canceled}  #bbbbbb  beta`)
+    // Header verb says "removed".
+    expect(out.split("\n")[0]).toContain(`${GLYPHS.canceled} removed #bbbbbb`)
+    // Closer reflects post-state.
+    expect(out.trimEnd().split("\n").at(-1)).toContain("2 todo")
+  })
+
+  test("ansi: ghost row paints title in RED+STRIKE (distinct from canceled's DIM+STRIKE)", () => {
+    const b = task({ id: "bbbbbb", title: "beta" })
+    const out = renderBlock(
+      [ghostView(b, 1)],
+      stats({ total: 0 }),
+      { ansi: true, action: { kind: "removed", hash: "bbbbbb" } },
+    )
+    const RED = "\\x1b\\[31m"
+    const STRIKE = "\\x1b\\[9m"
+    const RESET = "\\x1b\\[0m"
+    const nonEsc = "[^\\x1b]*?"
+    // Title wears red+strike.
+    expect(out).toMatch(new RegExp(RED + STRIKE + nonEsc + "beta" + nonEsc + RESET))
+    // Icon is red+bold (matches the canceled icon style).
+    expect(out).toContain(`\x1b[31m\x1b[1m${GLYPHS.canceled}\x1b[0m`)
+    // Id col is dgray+strike (re-uses the canceled treatment).
+    expect(out).toMatch(/\x1b\[38;5;240m\x1b\[9m[^\x1b]*?#bbbbbb[^\x1b]*?\x1b\[0m/)
+  })
+
+  test("ghost subtask still renders with its tree connector (└ for last child)", () => {
+    const parent = task({ id: "p00000", title: "parent" })
+    const child = task({ id: "p00000a", parent: "p00000", title: "child" })
+    const out = plain(
+      [
+        topView(parent, 1),
+        { task: child, n: null, childIndex: 0, siblingCount: 1, ghost: "removed" } as View,
+      ],
+      stats({ total: 1, todo: 1 }),
+      { action: { kind: "removed", hash: "p00000a" } },
+    )
+    // Tree-last connector + ✘ + #id + title — the child is shown as a ghost
+    // BUT still visually attached to its parent via the tree glyph.
+    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.canceled}  #p00000a  child`)
+  })
+
+  test("ghost row's number column is dim+strike (matches canceled-row dimming)", () => {
+    const b = task({ id: "bbbbbb", title: "beta" })
+    const out = renderBlock(
+      [ghostView(b, 7)],
+      stats({ total: 0 }),
+      { ansi: true, action: { kind: "removed", hash: "bbbbbb" } },
+    )
+    const DIM = "\\x1b\\[2m"
+    const STRIKE = "\\x1b\\[9m"
+    const RESET = "\\x1b\\[0m"
+    expect(out).toMatch(new RegExp(DIM + STRIKE + "[^\\x1b]*?7[^\\x1b]*?" + RESET))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Update diff overlay (old → new inline)
+// ---------------------------------------------------------------------------
+
+describe("renderBlock — update diff overlay", () => {
+  function diffView(t: Task, n: number, oldTitle: string): View {
+    return { task: t, n, childIndex: null, siblingCount: null, diff: { oldTitle } }
+  }
+
+  test("plain-text: shows '<old>  →  <new>' inline in the title column", () => {
+    const t = task({ id: "abcdef", title: "new title text" })
+    const out = plain(
+      [diffView(t, 1, "old title text")],
+      stats({ total: 1, todo: 1 }),
+      { action: { kind: "updated", hash: "abcdef" } },
+    )
+    expect(out).toContain("old title text")
+    expect(out).toContain("→")
+    expect(out).toContain("new title text")
+    // Order matters: old comes before arrow comes before new. Filter to
+    // the BODY row specifically — the header also contains `#abcdef`
+    // (via the `updated #abcdef` verb), so a naive `find` returns the
+    // wrong line.
+    const titleRow = out.split("\n").find((l) => l.startsWith(GLYPHS.frameML) && l.includes("#abcdef"))!
+    expect(titleRow).toBeDefined()
+    const oldIdx = titleRow.indexOf("old title")
+    const arrowIdx = titleRow.indexOf("→")
+    const newIdx = titleRow.indexOf("new title")
+    expect(oldIdx).toBeGreaterThanOrEqual(0)
+    expect(arrowIdx).toBeGreaterThan(oldIdx)
+    expect(newIdx).toBeGreaterThan(arrowIdx)
+  })
+
+  test("ansi: old half is RED+STRIKE, new half inherits status styling", () => {
+    const t = task({ id: "abcdef", status: "doing", title: "new" })
+    const out = renderBlock(
+      [diffView(t, 1, "old")],
+      stats({ total: 1, doing: 1 }),
+      { ansi: true, action: { kind: "updated", hash: "abcdef" } },
+    )
+    const RED = "\\x1b\\[31m"
+    const STRIKE = "\\x1b\\[9m"
+    const BOLD = "\\x1b\\[1m"
+    const RESET = "\\x1b\\[0m"
+    const nonEsc = "[^\\x1b]*?"
+    // Old → red+strike around the OLD text.
+    expect(out).toMatch(new RegExp(RED + STRIKE + nonEsc + "old" + nonEsc + RESET))
+    // New → status styling (doing = bold).
+    expect(out).toMatch(new RegExp(BOLD + nonEsc + "new" + nonEsc + RESET))
+  })
+
+  test("diff overlay preserves the closer/status counts (purely visual)", () => {
+    const t = task({ id: "abcdef", title: "renamed" })
+    const out = plain(
+      [diffView(t, 1, "first")],
+      stats({ total: 1, todo: 1 }),
+      { action: { kind: "updated", hash: "abcdef" } },
+    )
+    expect(out.trimEnd().split("\n").at(-1)).toContain("1 todo")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Title truncation
 // ---------------------------------------------------------------------------
 

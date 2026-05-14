@@ -64,9 +64,12 @@ const ANSI = {
    * for the "doing" status — "in focus / actively being worked on"
    * reads naturally as accent, and pairs better than gold against the
    * lime-green `✔` for "done" (gold-and-lime were too close on the
-   * yellow-green axis).
+   * yellow-green axis). The constant was previously named `GOLD` and
+   * carried code 214 (orange) — the docstring matched the design intent
+   * but the value was stale. Renamed to `SKY` so future readers don't
+   * trip over the same divergence.
    */
-  GOLD: "\x1b[38;5;214m",
+  SKY: "\x1b[38;5;45m",
   RED: "\x1b[31m",
   DGRAY: "\x1b[38;5;240m",
   LGRAY: "\x1b[38;5;246m",
@@ -115,12 +118,18 @@ export interface RenderOptions {
 // Per-status glyph + ANSI styling
 // ---------------------------------------------------------------------------
 
-function statusGlyph(status: TaskStatus, ansi: boolean): string {
+function statusGlyph(status: TaskStatus, ansi: boolean, ghost?: "removed"): string {
+  // Ghost overrides status — a just-removed task gets the red ✘ regardless
+  // of what its status was at the moment of deletion. The visual cue is
+  // "this is gone", not "this is canceled".
+  if (ghost === "removed") {
+    return color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.canceled)
+  }
   switch (status) {
     case "done":
       return color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)
     case "doing":
-      return color(ansi, ANSI.GOLD, GLYPHS.doing)
+      return color(ansi, ANSI.SKY, GLYPHS.doing)
     case "todo":
       return color(ansi, ANSI.DIM, GLYPHS.pending)
     case "canceled":
@@ -137,14 +146,44 @@ function statusGlyph(status: TaskStatus, ansi: boolean): string {
 }
 
 /**
- * Style the title per status:
- *  - done     → dim + strikethrough
- *  - doing    → bold
- *  - todo     → plain
- *  - canceled → red `✘ ` prefix + dim + strikethrough + ` (reason)` suffix
+ * Style the title per status, with optional `ghost` / `diff` overlays:
+ *  - ghost="removed"  → red + strikethrough (status/diff ignored)
+ *  - diff={oldTitle}  → `<old red+strike>  →  <new>` inline diff,
+ *                       where `<new>` inherits per-status styling
+ *  - status=done      → dim + strikethrough
+ *  - status=doing     → bold
+ *  - status=todo      → plain
+ *  - status=canceled  → red+dim `✘ ` prefix + dim+strike body + ` (reason)`
  */
-function styleTitle(t: Task, ansi: boolean, maxLen?: number): string {
+function styleTitle(
+  t: Task,
+  ansi: boolean,
+  maxLen?: number,
+  ghost?: "removed",
+  diff?: { oldTitle: string },
+): string {
   const title = truncate(singleLineText(t.title), maxLen)
+  // 1. Ghost wins — a just-removed row is a tombstone. Status, diff, and
+  //    reason are all irrelevant for the visual.
+  if (ghost === "removed") {
+    return color(ansi, `${ANSI.RED}${ANSI.STRIKE}`, title)
+  }
+  // 2. Diff overlay — render `<old red+strike>  →  <new>`. The "new"
+  //    half inherits per-status styling (so e.g. updating a `doing` task
+  //    renders the new title bold).
+  if (diff !== undefined) {
+    const oldT = truncate(singleLineText(diff.oldTitle), maxLen)
+    const oldCol = color(ansi, `${ANSI.RED}${ANSI.STRIKE}`, oldT)
+    const arrow = color(ansi, ANSI.DIM, "  →  ")
+    const newCol = styleTitleByStatus(t, title, ansi)
+    return `${oldCol}${arrow}${newCol}`
+  }
+  // 3. Plain status styling (HEAD behavior, unchanged).
+  return styleTitleByStatus(t, title, ansi)
+}
+
+/** Apply per-status text styling to an already-truncated title string. */
+function styleTitleByStatus(t: Task, title: string, ansi: boolean): string {
   switch (t.status) {
     case "done":
       return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, title)
@@ -204,13 +243,13 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
       middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, `added ${action.count} tasks`)}`
       break
     case "started":
-      middle = `${color(ansi, ANSI.GOLD, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, ANSI.SKY, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_done":
       middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} marked done ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_doing":
-      middle = `${color(ansi, ANSI.GOLD, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, ANSI.SKY, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_todo":
       middle = `${color(ansi, ANSI.DIM, GLYPHS.pending)} reset to todo ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
@@ -278,21 +317,27 @@ function renderTopLevelRowBody(v: View, ansi: boolean, maxTitleLen?: number): st
   // Number column (right-aligned width 2).
   const numStr = String(v.n).padStart(2, " ")
   let numCol: string
-  switch (t.status) {
-    case "done":
-      numCol = color(ansi, ANSI.DIM, numStr)
-      break
-    case "doing":
-      numCol = color(ansi, ANSI.BOLD, numStr)
-      break
-    case "todo":
-    case "canceled":
-      numCol = color(ansi, ANSI.LGRAY, numStr)
-      break
+  if (v.ghost === "removed") {
+    numCol = color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
+  } else {
+    switch (t.status) {
+      case "done":
+        numCol = color(ansi, ANSI.DIM, numStr)
+        break
+      case "doing":
+        numCol = color(ansi, ANSI.BOLD, numStr)
+        break
+      case "todo":
+      case "canceled":
+        numCol = color(ansi, ANSI.LGRAY, numStr)
+        break
+    }
   }
-  const stCol = statusGlyph(t.status, ansi)
-  const idCol = color(ansi, ANSI.DGRAY, `#${t.id}`)
-  const titleCol = styleTitle(t, ansi, maxTitleLen)
+  const stCol = statusGlyph(t.status, ansi, v.ghost)
+  const idCol = v.ghost === "removed"
+    ? color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, `#${t.id}`)
+    : color(ansi, ANSI.DGRAY, `#${t.id}`)
+  const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff)
   return `  ${numCol}  ${stCol}  ${idCol}  ${titleCol}`
 }
 
@@ -305,9 +350,11 @@ function renderSubtaskRowBody(v: View, ansi: boolean, maxTitleLen?: number): str
   const t = v.task
   const isLast = v.siblingCount !== null && v.childIndex === v.siblingCount - 1
   const treeGlyph = color(ansi, ANSI.DGRAY, isLast ? GLYPHS.treeLast : GLYPHS.treeMid)
-  const stCol = statusGlyph(t.status, ansi)
-  const idCol = color(ansi, ANSI.DGRAY, `#${t.id}`)
-  const titleCol = styleTitle(t, ansi, maxTitleLen)
+  const stCol = statusGlyph(t.status, ansi, v.ghost)
+  const idCol = v.ghost === "removed"
+    ? color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, `#${t.id}`)
+    : color(ansi, ANSI.DGRAY, `#${t.id}`)
+  const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff)
   return `       ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}`
 }
 
@@ -328,7 +375,7 @@ function renderCloserText(stats: Stats, ansi: boolean): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   const parts: string[] = []
   parts.push(color(ansi, ANSI.LIME, `${stats.done} done`))
-  parts.push(color(ansi, ANSI.GOLD, `${stats.doing} doing`))
+  parts.push(color(ansi, ANSI.SKY, `${stats.doing} doing`))
   parts.push(color(ansi, ANSI.DIM, `${stats.todo} todo`))
   if (stats.canceled > 0) {
     parts.push(color(ansi, `${ANSI.DIM}${ANSI.RED}`, `${stats.canceled} canceled`))

@@ -222,12 +222,25 @@ describe("status / start / done", () => {
 // ---------------------------------------------------------------------------
 
 describe("update", () => {
-  test("changes title", async () => {
+  test("changes title and renders the diff (old → new) in the display", async () => {
     await call({ action: "add", title: "before" })
     const r = await call({ action: "update", id: 1, title: "after" })
     expect(r.is_error).toBeUndefined()
+    // Both the old and new titles appear, with an arrow between them.
+    // The display lets the user SEE what changed instead of silently swapping.
+    expect(r.display).toContain("before")
     expect(r.display).toContain("after")
-    expect(r.display).not.toContain("before")
+    expect(r.display).toContain("→")
+    // The store itself reflects only the post-state (no stale title on disk).
+    const store = new TaskStore(sid, { home: tmpHome })
+    expect(store.list()[0].title).toBe("after")
+  })
+  test("no diff overlay when the title is unchanged (avoid 'x → x' noise)", async () => {
+    await call({ action: "add", title: "same" })
+    const r = await call({ action: "update", id: 1, title: "same" })
+    expect(r.is_error).toBeUndefined()
+    expect(r.display).toContain("same")
+    expect(r.display).not.toContain("→")
   })
   test("error for unknown id", async () => {
     const r = await call({ action: "update", id: "#deadbe", title: "x" })
@@ -236,10 +249,39 @@ describe("update", () => {
 })
 
 describe("remove", () => {
-  test("removes the task", async () => {
+  test("removes the task from disk", async () => {
     await call({ action: "add", title: "x" })
     const r = await call({ action: "remove", id: 1 })
     expect(r.is_error).toBeUndefined()
+    const store = new TaskStore(sid, { home: tmpHome })
+    expect(store.list()).toEqual([])
+  })
+  test("keeps a ghost-removed tombstone in the rendered display so the user sees WHAT was removed", async () => {
+    await call({ action: "add", title: "alpha" })
+    await call({ action: "add", title: "beta" })
+    await call({ action: "add", title: "gamma" })
+    const r = await call({ action: "remove", id: 2 })
+    expect(r.is_error).toBeUndefined()
+    // The removed task's title still appears in the display body (tombstone).
+    expect(r.display).toContain("beta")
+    // The other tasks are still there too.
+    expect(r.display).toContain("alpha")
+    expect(r.display).toContain("gamma")
+    // Closer reflects post-state (2 todo, not 3).
+    expect(r.displayFooter).toContain("2 todo")
+  })
+  test("removing a parent ghosts the whole subtree (cascade)", async () => {
+    const parent = await call({ action: "add", title: "parent" })
+    const pid = /#([0-9a-f]{6})/.exec(parent.content!)![1]
+    await call({ action: "add", title: "child A", parent: `#${pid}` })
+    await call({ action: "add", title: "child B", parent: `#${pid}` })
+    const r = await call({ action: "remove", id: `#${pid}` })
+    expect(r.is_error).toBeUndefined()
+    // Parent + both children appear as ghost rows in the display.
+    expect(r.display).toContain("parent")
+    expect(r.display).toContain("child A")
+    expect(r.display).toContain("child B")
+    // But the store is empty.
     const store = new TaskStore(sid, { home: tmpHome })
     expect(store.list()).toEqual([])
   })

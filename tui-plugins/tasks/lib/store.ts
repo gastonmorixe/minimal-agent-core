@@ -54,6 +54,10 @@ import {
 /**
  * A task plus the derived display position. Subtasks have `n: null`.
  * The renderer and attachment consume {@link View}, not raw {@link Task}.
+ *
+ * `ghost` and `diff` are one-shot overlays the handler may attach when
+ * it wants the renderer to surface "what just changed" (rather than only
+ * the post-state). The store itself never populates them.
  */
 export interface View {
   task: Task
@@ -63,6 +67,23 @@ export interface View {
   childIndex: number | null
   /** Total child count of this task's parent (used by the renderer to detect "last child"). `null` for top-level. */
   siblingCount: number | null
+  /**
+   * When set, this row is a one-shot "tombstone" for a task that no
+   * longer exists in the store (just removed). Rendered with a red `✘`
+   * icon and red strikethrough title so the user sees WHAT was removed,
+   * not just that something was. The closer's stats still reflect the
+   * post-mutation state — the ghost is purely visual.
+   */
+  ghost?: "removed"
+  /**
+   * When set, the title column renders as a diff:
+   *
+   *     <oldTitle struck through red>  →  <newTitle bold>
+   *
+   * Used by `update` so the user sees WHAT changed, not just the new
+   * title. The handler is responsible for skipping this when old===new.
+   */
+  diff?: { oldTitle: string }
 }
 
 /** Counts for the closer line and the attachment header. */
@@ -91,6 +112,36 @@ export interface StoreDeps {
 function resolveTasksPath(sid: string, deps: StoreDeps): string {
   const home = deps.home ?? homedir()
   return join(home, ".minimal-agent", "sessions", `${sid}.tasks.jsonl`)
+}
+
+/**
+ * Pure helper: derive views (with display positions + child-tree
+ * metadata) from a flat task list in file order. The handler reuses
+ * this to build augmented views from PRE-mutation tasks when a
+ * just-removed task needs to be re-injected as a ghost row.
+ */
+export function buildViews(tasks: readonly Task[]): View[] {
+  const out: View[] = []
+  let n = 0
+  const childrenByParent = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (t.parent !== null) {
+      const arr = childrenByParent.get(t.parent) ?? []
+      arr.push(t)
+      childrenByParent.set(t.parent, arr)
+    }
+  }
+  for (const t of tasks) {
+    if (t.parent === null) {
+      n += 1
+      out.push({ task: t, n, childIndex: null, siblingCount: null })
+    } else {
+      const siblings = childrenByParent.get(t.parent) ?? []
+      const childIndex = siblings.indexOf(t)
+      out.push({ task: t, n: null, childIndex, siblingCount: siblings.length })
+    }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -140,29 +191,7 @@ export class TaskStore {
    * (1-indexed across top-level only) on every call.
    */
   views(): View[] {
-    const tasks = this.list()
-    const out: View[] = []
-    let n = 0
-    // Group children under their parent for `siblingCount` / `childIndex`.
-    const childrenByParent = new Map<string, Task[]>()
-    for (const t of tasks) {
-      if (t.parent !== null) {
-        const arr = childrenByParent.get(t.parent) ?? []
-        arr.push(t)
-        childrenByParent.set(t.parent, arr)
-      }
-    }
-    for (const t of tasks) {
-      if (t.parent === null) {
-        n += 1
-        out.push({ task: t, n, childIndex: null, siblingCount: null })
-      } else {
-        const siblings = childrenByParent.get(t.parent) ?? []
-        const childIndex = siblings.indexOf(t)
-        out.push({ task: t, n: null, childIndex, siblingCount: siblings.length })
-      }
-    }
-    return out
+    return buildViews(this.list())
   }
 
   /** Aggregate counts for headers. */
