@@ -15,15 +15,31 @@
  *     │         ├  ◐  #d04c91b  Replace-not-accumulate semantics
  *     │         ╰  ○  #d04c91c  Multi-turn growth pinned
  *     │    4  ○  #b18f73   ...
+ *     │    5  ✘  #4dcff2   Wire contextSize into footer  (user pivoted)
  *     │
  *     ╰  3 done · 1 doing · 5 todo
  *
  * Header is action-specific:
- *  - `marked done` (verb=done) → `✔ marked done #<id>`
- *  - `started` (verb=start)    → `◐ started #<id>`
- *  - `added N tasks` (verb=add) → `+ added N tasks`
- *  - `all done`                 → `✔ all done`
- *  - empty list / list verb     → ` 5 tasks` or `no tasks`
+ *  - `marked done`  (verb=done)   → `✔ marked done #<id>`           (LIME ✔)
+ *  - `started`      (verb=start)  → `◐ started #<id>`                (SKY)
+ *  - `marked doing` (verb=status) → `◐ marked doing #<id>`           (SKY)
+ *  - `canceled`     (verb=status) → `✘ canceled #<id>`               (RED)
+ *  - `added`        (verb=add)    → `+ added` / `+ added N tasks`    (LIME)
+ *  - `updated`      (verb=update) → `updated #<id>` + diff in row    (SKY)
+ *  - `all_done`     (auto)        → `✔ ALL DONE`                    (LIME)
+ *  - empty list / list verb       → ` 5 tasks` or `no tasks`
+ *
+ * "ALL DONE" celebration:
+ *
+ * When `stats.doing === 0 && stats.todo === 0 && stats.done > 0`, ANY
+ * action's header is suffixed with ` · ✦ ALL DONE` (LIME+BOLD), and the
+ * closer leads with the same tag while dropping the `0 doing` / `0 todo`
+ * zero-counts. So a `marked done` that completes the last task with
+ * canceled tasks in the mix renders as:
+ *
+ *     ╭ ○ Tasks · ✔ marked done #af9d93 · ✦ ALL DONE · 10/12
+ *     │   ...
+ *     ╰  ✦ ALL DONE · 10 done · 2 canceled
  *
  * @module tasks/lib/render
  */
@@ -47,6 +63,13 @@ export const GLYPHS = {
   treeLast: "╰",
   bullet: "·",
   plus: "+",
+  // Celebration glyph for the "ALL DONE" tag. Chosen over `★` because
+  // it's visually distinct from the `✔` done check while still reading
+  // as a small celebratory spark. NO EMOJI in this codebase — `✦` is
+  // in the Dingbats block (U+2726) and renders as monochrome text,
+  // unlike e.g. U+2728 (SPARKLES) which terminals upgrade to a color
+  // emoji glyph.
+  sparkle: "✦", // U+2726
 } as const
 
 // ---------------------------------------------------------------------------
@@ -133,7 +156,7 @@ function statusGlyph(status: TaskStatus, ansi: boolean, ghost?: "removed"): stri
     case "todo":
       return color(ansi, ANSI.DIM, GLYPHS.pending)
     case "canceled":
-      return color(ansi, ANSI.DIM, GLYPHS.pending)
+      return color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.canceled)
     default: {
       // TaskStatus is a closed union; this default exists only to satisfy
       // `consistent-return` and acts as an exhaustiveness check at the
@@ -146,14 +169,25 @@ function statusGlyph(status: TaskStatus, ansi: boolean, ghost?: "removed"): stri
 }
 
 /**
- * Style the title per status, with optional `ghost` / `diff` overlays:
- *  - ghost="removed"  → red + strikethrough (status/diff ignored)
- *  - diff={oldTitle}  → `<old red+strike>  →  <new>` inline diff,
- *                       where `<new>` inherits per-status styling
- *  - status=done      → dim + strikethrough
- *  - status=doing     → bold
- *  - status=todo      → plain
- *  - status=canceled  → red+dim `✘ ` prefix + dim+strike body + ` (reason)`
+ * Style the title per status, with optional `ghost` / `diff` overlays.
+ *
+ * Color identity is consistent with the status icon: the row reads as
+ * one coherent gesture across icon + title + (where applicable) reason,
+ * instead of "colored icon + neutral title".
+ *
+ *  - ghost="removed"           → red + strikethrough (diff/status ignored)
+ *  - diff={oldTitle}           → `<old red+strike>  →  <new sky+bold>`
+ *                                The "new" half is always SKY+BOLD (the
+ *                                update action's identity color), never
+ *                                inheriting per-status styling — so a
+ *                                rename of a done task still reads as
+ *                                "this is the new value".
+ *  - status=done               → dim + strikethrough
+ *  - status=doing              → SKY + bold  (matches the `◐` icon)
+ *  - status=todo               → plain
+ *  - status=canceled           → red + strikethrough; appended faint-red
+ *                                strikethrough ` (reason)` if present
+ *                                (matches the `✘` icon's red identity)
  */
 function styleTitle(
   t: Task,
@@ -161,43 +195,99 @@ function styleTitle(
   maxLen?: number,
   ghost?: "removed",
   diff?: { oldTitle: string },
+  targeted = false,
 ): string {
   const title = truncate(singleLineText(t.title), maxLen)
   // 1. Ghost wins — a just-removed row is a tombstone. Status, diff, and
-  //    reason are all irrelevant for the visual.
+  //    reason are all irrelevant for the visual. When the removal
+  //    targeted THIS row, add BOLD so the tombstone reads as "this is
+  //    the one I just removed".
   if (ghost === "removed") {
-    return color(ansi, `${ANSI.RED}${ANSI.STRIKE}`, title)
+    return color(
+      ansi,
+      targeted ? `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}` : `${ANSI.RED}${ANSI.STRIKE}`,
+      title,
+    )
   }
-  // 2. Diff overlay — render `<old red+strike>  →  <new>`. The "new"
-  //    half inherits per-status styling (so e.g. updating a `doing` task
-  //    renders the new title bold).
+  // 2. Diff overlay — render `<old red+strike>  →  <new sky+bold>`.
+  //    The "update" action's identity color is SKY (the same blue used
+  //    for the `◐` doing glyph in `started` / `marked_doing` headers),
+  //    so the NEW half always paints SKY+BOLD regardless of the task's
+  //    current status. The OLD half is always RED+STRIKE — symmetric
+  //    "deletion red / addition blue" diff semantics. Earlier behavior
+  //    inherited per-status styling for the new half, which made the
+  //    new title render white-bold for `doing` tasks and made the diff
+  //    look like it had no action color.
   if (diff !== undefined) {
     const oldT = truncate(singleLineText(diff.oldTitle), maxLen)
     const oldCol = color(ansi, `${ANSI.RED}${ANSI.STRIKE}`, oldT)
     const arrow = color(ansi, ANSI.DIM, "  →  ")
-    const newCol = styleTitleByStatus(t, title, ansi)
+    const newCol = color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, title)
     return `${oldCol}${arrow}${newCol}`
   }
-  // 3. Plain status styling (HEAD behavior, unchanged).
-  return styleTitleByStatus(t, title, ansi)
+  // 3. Plain status styling.
+  if (t.status === "canceled") {
+    const body = styleTitleByStatus(t, title, ansi, targeted)
+    const reasonText = t.reason ? singleLineText(t.reason) : ""
+    // Faint-red parenthetical (`RED + DIM + STRIKE`) — visually softer
+    // than the title's plain RED+STRIKE so the eye reads the title
+    // first and the reason second, while still keeping the whole row
+    // inside the "canceled = red" color family. NOTE: the reason
+    // intentionally does NOT pick up BOLD when targeted — the title
+    // and number column carry the emphasis, the reason stays quiet
+    // so the targeted-row signal doesn't drown out its own metadata.
+    const reason = reasonText
+      ? `  ${color(ansi, `${ANSI.RED}${ANSI.DIM}${ANSI.STRIKE}`, `(${reasonText})`)}`
+      : ""
+    return `${body}${reason}`
+  }
+  return styleTitleByStatus(t, title, ansi, targeted)
 }
 
-/** Apply per-status text styling to an already-truncated title string. */
-function styleTitleByStatus(t: Task, title: string, ansi: boolean): string {
+/**
+ * Apply per-status text styling to an already-truncated title string.
+ *
+ * When `targeted` is true (the row matches the action's hash), the
+ * status's normal styling is escalated: DIM is replaced with the
+ * status's identity color, and BOLD is added. So a `marked done` on
+ * a row turns its title from DIM+STRIKE (the usual "this is finished
+ * and faded out" look) into LIME+BOLD+STRIKE (still struck, but now
+ * popping in lime to say "this is the one that just got marked").
+ */
+function styleTitleByStatus(t: Task, title: string, ansi: boolean, targeted = false): string {
   switch (t.status) {
     case "done":
-      return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, title)
+      return color(
+        ansi,
+        targeted
+          ? `${ANSI.LIME}${ANSI.BOLD}${ANSI.STRIKE}`
+          : `${ANSI.DIM}${ANSI.STRIKE}`,
+        title,
+      )
     case "doing":
-      return color(ansi, ANSI.BOLD, title)
+      // SKY+BOLD so the title pulls the same blue identity as the `◐`
+      // glyph in the status column — "in flight" reads as one coherent
+      // blue gesture across icon and label, instead of "blue icon +
+      // white-bold title" which fragmented the visual into two cues.
+      // Targeted doing rows are visually identical to non-targeted
+      // doing rows here (already maxed-out: SKY+BOLD); the distinction
+      // comes from the brighter `idCol` in the row renderer instead.
+      return color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, title)
     case "todo":
-      return title
-    case "canceled": {
-      const x = color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)
-      const body = color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, title)
-      const reasonText = t.reason ? singleLineText(t.reason) : ""
-      const reason = reasonText ? `  ${color(ansi, ANSI.DGRAY, `(${reasonText})`)}` : ""
-      return `${x} ${body}${reason}`
-    }
+      // Plain → BOLD when targeted. Pops the just-added task out of
+      // the rest of the todo list.
+      return targeted ? color(ansi, ANSI.BOLD, title) : title
+    case "canceled":
+      // Match the row's red `✘` icon — title is also red+strike so the
+      // whole row reads as one "canceled" gesture instead of "red icon
+      // + dim white title" (which made the title look done, not gone).
+      return color(
+        ansi,
+        targeted
+          ? `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}`
+          : `${ANSI.RED}${ANSI.STRIKE}`,
+        title,
+      )
     default: {
       // Exhaustiveness check; see the matching default in `statusGlyph`.
       const _exhaustive: never = t.status
@@ -243,19 +333,30 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
       middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, `added ${action.count} tasks`)}`
       break
     case "started":
-      middle = `${color(ansi, ANSI.SKY, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      // Word + icon both SKY so the header reads as one blue "started"
+      // gesture, matching the `marked_canceled` precedent (RED icon +
+      // RED word + dgray hash) and the row's SKY+BOLD title for the
+      // same task.
+      middle = `${color(ansi, ANSI.SKY, GLYPHS.doing)} ${color(ansi, ANSI.SKY, "started")} ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_done":
       middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} marked done ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_doing":
-      middle = `${color(ansi, ANSI.SKY, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      // Symmetric to `started` — both transition a task into the doing
+      // state, both deserve SKY identity on the verb.
+      middle = `${color(ansi, ANSI.SKY, GLYPHS.doing)} ${color(ansi, ANSI.SKY, "marked doing")} ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_todo":
       middle = `${color(ansi, ANSI.DIM, GLYPHS.pending)} reset to todo ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_canceled":
-      middle = `${color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)} canceled ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      // Word "canceled" is RED (no dim) so the action's identity color
+      // reads at-a-glance from the header just like `added` is LIME
+      // and `marked done` carries the lime `✔`. Icon stays RED+DIM
+      // (softer than a row's RED+BOLD `✘`) so the header's verb glyph
+      // doesn't compete with the row icons below.
+      middle = `${color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)} ${color(ansi, ANSI.RED, "canceled")} ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "updated":
       middle = `updated ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
@@ -270,7 +371,10 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
       middle = `cleared ${color(ansi, ANSI.LGRAY, String(action.count))} tasks`
       break
     case "all_done":
-      middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, "all done")}`
+      // Uppercase "ALL DONE" — the celebration is supposed to read as
+      // a small shout. Stays in LIME (no bold on the word — the icon
+      // carries the bold so the row doesn't feel SHOUTY-SHOUTY).
+      middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, "ALL DONE")}`
       break
     case "list":
       if (stats.total === 0) {
@@ -279,6 +383,18 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
         middle = `${color(ansi, ANSI.LGRAY, `${stats.total} task${stats.total === 1 ? "" : "s"}`)}`
       }
       break
+  }
+
+  // "ALL DONE" celebration suffix — appended to ANY action's verb
+  // section when the resulting state has nothing left to work on AND
+  // at least one task got finished. Skipped for `all_done` itself
+  // (that action's header is already `✔ ALL DONE`, double-celebration
+  // would read as a stutter) and for the empty `list` (already says
+  // "no tasks" or "N tasks", but with 0 done — won't satisfy isAllDone
+  // anyway). Reads as `… · ✦ ALL DONE` and uses the same LIME+BOLD
+  // identity as the closer's celebration prefix.
+  if (action.kind !== "all_done" && isAllDone(stats)) {
+    middle += ` ${dot} ${allDoneTag(ansi)}`
   }
 
   // For action kinds that don't reference a specific task, drop the
@@ -312,59 +428,188 @@ function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string
 // Row rendering
 // ---------------------------------------------------------------------------
 
-function renderTopLevelRowBody(v: View, ansi: boolean, maxTitleLen?: number): string {
-  const t = v.task
-  // Number column (right-aligned width 2).
+/**
+ * Number-column styling for one row. Extracted to keep both row body
+ * functions (top-level + subtask) in lockstep on the targeted-emphasis
+ * rules. `targeted` rows wear status-color + BOLD; non-targeted rows
+ * fall back to the quieter per-status palette.
+ */
+function styleNumCol(v: View, ansi: boolean, targeted: boolean): string {
   const numStr = String(v.n).padStart(2, " ")
-  let numCol: string
   if (v.ghost === "removed") {
-    numCol = color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
-  } else {
-    switch (t.status) {
+    // Tombstone — preserve DIM+STRIKE even when targeted; BOLD on a
+    // removed row's number col would look like "still alive".
+    return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
+  }
+  if (targeted) {
+    switch (v.task.status) {
       case "done":
-        numCol = color(ansi, ANSI.DIM, numStr)
-        break
+        return color(ansi, `${ANSI.LIME}${ANSI.BOLD}${ANSI.STRIKE}`, numStr)
       case "doing":
-        numCol = color(ansi, ANSI.BOLD, numStr)
-        break
+        return color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, numStr)
       case "todo":
+        return color(ansi, ANSI.BOLD, numStr)
       case "canceled":
-        numCol = color(ansi, ANSI.LGRAY, numStr)
-        break
+        return color(ansi, `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}`, numStr)
     }
   }
+  switch (v.task.status) {
+    case "done":
+      return color(ansi, ANSI.DIM, numStr)
+    case "doing":
+      return color(ansi, ANSI.BOLD, numStr)
+    case "todo":
+      return color(ansi, ANSI.LGRAY, numStr)
+    case "canceled":
+      return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
+  }
+}
+
+/**
+ * ID-column styling for one row. Targeted rows boost DGRAY → LGRAY+BOLD
+ * (or DGRAY+BOLD+STRIKE for canceled/ghost) so the hash is the most
+ * visible secondary signal that "this is the row referenced in the
+ * header". Especially important for status=doing where the title is
+ * already SKY+BOLD whether targeted or not — the id column becomes the
+ * primary "this one" cue.
+ */
+function styleIdCol(v: View, ansi: boolean, targeted: boolean): string {
+  const t = v.task
+  const idStruck = v.ghost === "removed" || t.status === "canceled"
+  if (idStruck) {
+    return color(
+      ansi,
+      targeted ? `${ANSI.DGRAY}${ANSI.BOLD}${ANSI.STRIKE}` : `${ANSI.DGRAY}${ANSI.STRIKE}`,
+      `#${t.id}`,
+    )
+  }
+  return color(
+    ansi,
+    targeted ? `${ANSI.LGRAY}${ANSI.BOLD}` : ANSI.DGRAY,
+    `#${t.id}`,
+  )
+}
+
+function renderTopLevelRowBody(
+  v: View,
+  ansi: boolean,
+  maxTitleLen?: number,
+  targeted = false,
+): string {
+  const t = v.task
+  const numCol = styleNumCol(v, ansi, targeted)
   const stCol = statusGlyph(t.status, ansi, v.ghost)
-  const idCol = v.ghost === "removed"
-    ? color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, `#${t.id}`)
-    : color(ansi, ANSI.DGRAY, `#${t.id}`)
-  const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff)
+  const idCol = styleIdCol(v, ansi, targeted)
+  const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff, targeted)
   return `  ${numCol}  ${stCol}  ${idCol}  ${titleCol}`
 }
 
-function renderTopLevelRow(v: View, ansi: boolean, maxTitleLen?: number): string {
+function renderTopLevelRow(v: View, ansi: boolean, maxTitleLen?: number, targeted = false): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
-  return `${frame} ${renderTopLevelRowBody(v, ansi, maxTitleLen)}`
+  return `${frame} ${renderTopLevelRowBody(v, ansi, maxTitleLen, targeted)}`
 }
 
-function renderSubtaskRowBody(v: View, ansi: boolean, maxTitleLen?: number): string {
+function renderSubtaskRowBody(
+  v: View,
+  ansi: boolean,
+  maxTitleLen?: number,
+  targeted = false,
+): string {
   const t = v.task
   const isLast = v.siblingCount !== null && v.childIndex === v.siblingCount - 1
   const treeGlyph = color(ansi, ANSI.DGRAY, isLast ? GLYPHS.treeLast : GLYPHS.treeMid)
   const stCol = statusGlyph(t.status, ansi, v.ghost)
-  const idCol = v.ghost === "removed"
-    ? color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, `#${t.id}`)
-    : color(ansi, ANSI.DGRAY, `#${t.id}`)
-  const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff)
+  const idCol = styleIdCol(v, ansi, targeted)
+  const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff, targeted)
   return `       ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}`
 }
 
-function renderSubtaskRow(v: View, ansi: boolean, maxTitleLen?: number): string {
+function renderSubtaskRow(v: View, ansi: boolean, maxTitleLen?: number, targeted = false): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
-  return `${frame} ${renderSubtaskRowBody(v, ansi, maxTitleLen)}`
+  return `${frame} ${renderSubtaskRowBody(v, ansi, maxTitleLen, targeted)}`
 }
 
 function renderGap(ansi: boolean): string {
   return color(ansi, ANSI.DGRAY, GLYPHS.frameML)
+}
+
+// ---------------------------------------------------------------------------
+// "All done" detection + tag
+// ---------------------------------------------------------------------------
+
+/**
+ * True when there is nothing left to work on AND at least one task has
+ * actually been completed. Canceled tasks DON'T disqualify the state —
+ * they're intentionally not-done, so a list of "10 done + 2 canceled +
+ * 0 todo + 0 doing" still counts as "ALL DONE from the user's POV".
+ *
+ * Edge cases:
+ *   - empty list (total=0)               → false (nothing to celebrate)
+ *   - only canceled tasks (done=0)       → false (nothing was finished)
+ *   - first add_many (everything todo)   → false (done=0)
+ *   - last todo gets canceled            → true  (doing=0, todo=0, done>0)
+ */
+function isAllDone(stats: Stats): boolean {
+  return stats.doing === 0 && stats.todo === 0 && stats.done > 0
+}
+
+/**
+ * The celebration tag — `✦ ALL DONE` in LIME+BOLD. Used as a header
+ * suffix (so the in-stream action also reads "and now everything's
+ * done") and as a closer prefix (so the final summary leads with the
+ * good news).
+ */
+function allDoneTag(ansi: boolean): string {
+  // Uppercase "ALL DONE" so the celebration reads as a small shout —
+  // distinct from any per-row "done" word (which stays lowercase as
+  // a status label).
+  return color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, `${GLYPHS.sparkle} ALL DONE`)
+}
+
+// ---------------------------------------------------------------------------
+// "Targeted row" emphasis — find the row that matches the action's hash
+// ---------------------------------------------------------------------------
+
+/**
+ * For actions that mutate ONE specific task (added, started,
+ * marked_done, marked_doing, marked_todo, marked_canceled, updated,
+ * removed), return that task's hash. Bulk or non-targeting actions
+ * (added_many, reordered, cleared, list, all_done) return null and no
+ * row gets emphasized.
+ *
+ * The row whose `task.id` matches this hash is rendered with BOLD on
+ * every column (number / icon-where-applicable / id / title), so the
+ * reader can see at-a-glance "this is the one that just changed". For
+ * a `marked done` row this turns the usual DIM+STRIKE title into
+ * LIME+BOLD+STRIKE — popping the just-completed row out of the dim
+ * sea of older completions. For `doing` rows the title is already
+ * SKY+BOLD; the targeted-row signal then comes from the brighter
+ * (LGRAY+BOLD) id column.
+ */
+function targetHashFromAction(action: RenderAction): string | null {
+  switch (action.kind) {
+    case "added":
+    case "started":
+    case "marked_done":
+    case "marked_doing":
+    case "marked_todo":
+    case "marked_canceled":
+    case "updated":
+    case "removed":
+      return action.hash
+    case "added_many":
+    case "reordered":
+    case "cleared":
+    case "list":
+    case "all_done":
+      return null
+    default: {
+      // Exhaustiveness check — fail closed (no emphasis) on a new kind.
+      const _exhaustive: never = action
+      void _exhaustive
+      return null
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -374,9 +619,24 @@ function renderGap(ansi: boolean): string {
 function renderCloserText(stats: Stats, ansi: boolean): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   const parts: string[] = []
+  const allDone = isAllDone(stats)
+
+  // Lead with the celebration when there's nothing left to do, so the
+  // final summary row reads "you're done" before the per-status counts.
+  if (allDone) parts.push(allDoneTag(ansi))
+
   parts.push(color(ansi, ANSI.LIME, `${stats.done} done`))
-  parts.push(color(ansi, ANSI.SKY, `${stats.doing} doing`))
-  parts.push(color(ansi, ANSI.DIM, `${stats.todo} todo`))
+  // Hide the `0 doing` / `0 todo` zero-counts only in the all-done
+  // state — those zeros ARE the celebration, but in any other state
+  // a `0 doing` is informational (e.g. "you have 5 todo and 0 doing"
+  // tells the user nothing's started yet). Keep canceled visible
+  // whenever non-zero regardless of state.
+  if (!allDone || stats.doing > 0) {
+    parts.push(color(ansi, ANSI.SKY, `${stats.doing} doing`))
+  }
+  if (!allDone || stats.todo > 0) {
+    parts.push(color(ansi, ANSI.DIM, `${stats.todo} todo`))
+  }
   if (stats.canceled > 0) {
     parts.push(color(ansi, `${ANSI.DIM}${ANSI.RED}`, `${stats.canceled} canceled`))
   }
@@ -407,11 +667,13 @@ export function renderToolDisplay(
       bodyLines.push(`  ${dim}Task({action: "add_many", titles: [...]}) to plan a multi-step change${reset}`)
     }
   } else {
+    const targetHash = targetHashFromAction(opts.action)
     for (const v of views) {
+      const targeted = targetHash !== null && v.task.id === targetHash
       bodyLines.push(
         v.task.parent === null
-          ? renderTopLevelRowBody(v, opts.ansi, opts.maxTitleLen)
-          : renderSubtaskRowBody(v, opts.ansi, opts.maxTitleLen),
+          ? renderTopLevelRowBody(v, opts.ansi, opts.maxTitleLen, targeted)
+          : renderSubtaskRowBody(v, opts.ansi, opts.maxTitleLen, targeted),
       )
     }
   }
@@ -459,11 +721,13 @@ export function renderBlock(
     return `${lines.join("\n")}\n`
   }
   lines.push(renderGap(opts.ansi))
+  const targetHash = targetHashFromAction(opts.action)
   for (const v of views) {
+    const targeted = targetHash !== null && v.task.id === targetHash
     if (v.task.parent === null) {
-      lines.push(renderTopLevelRow(v, opts.ansi, opts.maxTitleLen))
+      lines.push(renderTopLevelRow(v, opts.ansi, opts.maxTitleLen, targeted))
     } else {
-      lines.push(renderSubtaskRow(v, opts.ansi, opts.maxTitleLen))
+      lines.push(renderSubtaskRow(v, opts.ansi, opts.maxTitleLen, targeted))
     }
   }
   lines.push(renderGap(opts.ansi))

@@ -442,7 +442,7 @@ function doStatus(store: TaskStore, input: ParsedInput): TUIResult {
   if (target === null) return err(`id "${input.id}" not found`)
   const updated = store.setStatus(target.id, input.status!, input.reason)
   if (updated === null) return err(`id "${input.id}" not found`)
-  // Special "all done" surface when the user transitions the last todo/doing
+  // Special "ALL DONE" surface when the user transitions the last todo/doing
   // top-level task to done. Subtask completion doesn't trigger it.
   if (input.status === "done" && target.parent === null) {
     const s = store.stats()

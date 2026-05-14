@@ -200,20 +200,20 @@ describe("status / start / done", () => {
   })
   test("done is sugar for status=done", async () => {
     await call({ action: "add", title: "x" })
-    // Add a second task so completing #1 doesn't trigger the 'all done' verb,
+    // Add a second task so completing #1 doesn't trigger the 'ALL DONE' verb,
     // which has its own dedicated test below.
     await call({ action: "add", title: "y" })
     const r = await call({ action: "done", id: 1 })
     expect(r.is_error).toBeUndefined()
     expect(r.displayHeader).toContain("marked done")
   })
-  test("done on the LAST remaining task triggers 'all done' verb", async () => {
+  test("done on the LAST remaining task triggers 'ALL DONE' verb", async () => {
     await call({ action: "add", title: "one" })
     await call({ action: "add", title: "two" })
     await call({ action: "done", id: 1 })
     const r = await call({ action: "done", id: 2 })
     expect(r.is_error).toBeUndefined()
-    expect(r.displayHeader).toContain("all done")
+    expect(r.displayHeader).toContain("ALL DONE")
   })
 })
 

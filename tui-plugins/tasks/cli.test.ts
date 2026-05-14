@@ -136,17 +136,17 @@ describe("start / done / status", () => {
   })
   test("done flips to done", () => {
     exec(["add", "x"])
-    exec(["add", "y"]) // second task so 'all done' doesn't trigger
+    exec(["add", "y"]) // second task so 'ALL DONE' doesn't trigger
     const r = exec(["done", "1"])
     expect(r.code).toBe(0)
     const store = new TaskStore(sid, { home: tmpHome })
     expect(store.list()[0].status).toBe("done")
   })
-  test("done on last task triggers 'all done' verb", () => {
+  test("done on last task triggers 'ALL DONE' verb", () => {
     exec(["add", "x"])
     const r = exec(["done", "1"])
     expect(r.code).toBe(0)
-    expect(r.output).toContain("all done")
+    expect(r.output).toContain("ALL DONE")
   })
   test("status accepts a reason", () => {
     exec(["add", "x"])
