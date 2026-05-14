@@ -160,7 +160,7 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
       process.cwd(),
     )
     if (r?.kind !== "tool_result") return
-    expect(r.displayHeader).toContain("all done")
+    expect(r.displayHeader).toContain("ALL DONE")
   })
 
   it("subtasks: add child via #parent and the attachment shows the tree", async () => {
