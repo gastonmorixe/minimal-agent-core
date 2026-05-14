@@ -121,13 +121,40 @@ describe("buildQueueDecorationLines", () => {
     expect(QUEUE_ITEM_SEPARATOR.codePointAt(0)).toBe(0x25b8)
   })
 
-  it("dims the glyph and content wrappers (ESC[2m … ESC[22m)", () => {
+  it("colors the header in violet (non-dim) and dims the badge count", () => {
     const lines = buildQueueDecorationLines(["a"])
-    expect(lines[0]).toContain("\x1b[2;37m") // faintWhite ⏳ open
+    // Header: violet ⏳ + violet "queued" + faintWhite "· 1"
+    // Violet is truecolor rgb(180, 140, 255) — matches mdstream inline-code.
+    expect(lines[0]).toContain("\x1b[38;2;180;140;255m") // violet open (⏳ and "queued")
+    expect(lines[0]).toContain("\x1b[39m") // violet close
+    expect(lines[0]).toContain("\x1b[2;37m") // faintWhite "· N" open
     expect(lines[0]).toContain("\x1b[22;39m") // faintWhite close
-    expect(lines[0]).toContain("\x1b[2m") // dim "queued · N" open
-    expect(lines[1]).toContain("\x1b[2m") // dim glyph + content
+    // Header MUST NOT be in the yellow/gold family — guards against
+    // future accidental refactor to gold/yellow/orange.
+    expect(lines[0]).not.toContain("\x1b[33m") // yellow
+    expect(lines[0]).not.toContain("\x1b[93m") // bright yellow
+    expect(lines[0]).not.toContain("\x1b[38;5;214m") // gold
+    expect(lines[0]).not.toContain("\x1b[38;5;208m") // orange
+  })
+
+  it("item rows: dim glyph, dim-violet number, dim ▸, faintWhite preview", () => {
+    const lines = buildQueueDecorationLines(["a"])
+    // glyph + separator wrapped in plain dim
+    expect(lines[1]).toContain("\x1b[2m") // dim open (glyph + ▸)
     expect(lines[1]).toContain("\x1b[22m") // dim close
+    // row number is dim-violet (combined SGR open)
+    expect(lines[1]).toContain("\x1b[2;38;2;180;140;255m") // dim-violet open (truecolor)
+    expect(lines[1]).toContain("\x1b[22;39m") // dim-violet close (also matches faintWhite close)
+    // preview is faintWhite
+    expect(lines[1]).toContain("\x1b[2;37m") // faintWhite preview open
+  })
+
+  it("overflow tail uses faintWhite (matches preview row tone)", () => {
+    const queue = Array.from({ length: 15 }, (_, i) => `item-${i + 1}`)
+    const lines = buildQueueDecorationLines(queue)
+    const tail = lines[lines.length - 1]
+    expect(tail).toContain("\x1b[2m") // dim glyph
+    expect(tail).toContain("\x1b[2;37m") // faintWhite tail text
   })
 
   it("cap constant matches the visible-rows behavior (bumped to 10 in BUG 19283)", () => {
