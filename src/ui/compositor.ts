@@ -394,29 +394,52 @@ export class Compositor {
    * erase point. `drawLiveSeq()` paints the new live area below it,
    * producing duplicate prompt lines on screen.
    *
-   * Fix: full viewport wipe (`\x1b[H` home + `\x1b[J` erase to end of
-   * screen) and invalidate the counters. The very next `setLiveArea()`
-   * call (from `editor.notifyResize()` in `src/index.ts:991-992`, which
-   * runs synchronously right after this) sees `liveHeightValue === 0`,
-   * short-circuits the erase, and paints fresh at the home position.
+   * Fix: scroll the entire visible viewport into scrollback FIRST, then
+   * invalidate the counters. The next `setLiveArea()` call (from
+   * `editor.notifyResize()` in `src/index.ts`, which runs synchronously
+   * right after this) sees `liveHeightValue === 0` and paints the new
+   * live area at the cursor position we leave behind.
    *
-   * Why not the cheaper `\r\x1b[J`? Because the cursor usually sits on
-   * the LAST row of the live area (the prompt). `\r\x1b[J` only clears
-   * from that row down, leaving reflowed *upper* portions of the old
-   * live area — including any status row and the wrapped early portion
-   * of the prompt — visible above the cursor. Then `drawLiveSeq` paints
-   * a fresh complete live area starting at that cursor row, putting the
-   * new status+prompt directly below the ghost old status+prompt:
-   * exactly the duplication the user reported.
+   * Why scroll-into-scrollback instead of `\x1b[H\x1b[J`? Because iTerm
+   * (and several other mainstream terminals) DROP `\x1b[J`-erased cells
+   * from the scrollback history buffer. A bare wipe silently loses the
+   * most recent ~viewport-rows of stream content — visible to the user
+   * as a chopped-off Bash tool block, a missing response header, a
+   * truncated rendered diff, etc. The LF-from-bottom preamble pushes
+   * each visible row off the top of the viewport, which all mainstream
+   * terminals (xterm, iTerm2, Terminal.app, tmux, kitty, …) commit to
+   * scrollback. The viewport ends up naturally blank, so no separate
+   * `\x1b[J` wipe is needed.
    *
-   * Trade-off: on-screen transcript flashes off on resize (it survives
-   * in scrollback above the viewport). Acceptable because resize is
-   * rare and a duplicate prompt is much worse than a transcript that
-   * scrolled up by one viewport.
+   * Why also reposition the cursor up by the old live-area height?
+   * Because the prompt is supposed to be sticky to the bottom of the
+   * viewport. Without the up-move, the cursor lands at the bottom-left
+   * after the LF preamble; the subsequent `drawLiveSeq` paint then
+   * scrolls N more times (one per emitted row) to fit the live area —
+   * pushing N blank rows into scrollback AND landing the live area at
+   * the bottom in a less obvious way. Pre-positioning the cursor at
+   * `rows - oldHeight` makes the paint exactly fill the bottom N rows
+   * with zero extra scroll, keeping the prompt sticky-to-bottom and
+   * leaving scrollback clean.
+   *
+   * Trade-off: the OLD live area was already reflowed by the terminal
+   * to the new width before this handler ran, so its contents (status
+   * row + wrapped editor + footer) get pushed into scrollback as a
+   * duplicate. Far better than silently losing in-flight stream content.
+   *
+   * Regression history:
+   * - Originally a bare `\x1b[H\x1b[J` (which lost scrollback on iTerm).
+   * - 5b36689 added the LF-scroll preamble to preserve scrollback.
+   * - 86d2d3b accidentally reverted 5b36689 while refactoring blank-line
+   *   invariants, regressing the iTerm scrollback loss AND introducing
+   *   the "prompt jumps to top of viewport" UX bug.
+   * - This change re-applies 5b36689's preserve-scroll AND adds the
+   *   cursor-up-by-oldHeight repositioning to keep the prompt sticky.
    */
   notifyResize(): void {
     if (!this.tty || !this.mounted) return
-    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
+    const oldHeight = this.liveHeightValue
+    this.output.write(this.bsu + this.resizePreserveSeq(oldHeight) + this.esu)
     this.resetLiveCounters()
   }
 
@@ -436,21 +459,52 @@ export class Compositor {
   }
 
   /**
-   * If `effectiveColumns()` has changed since the last successful draw,
-   * the in-screen state is fiction (see `lastDrawColumns` doc). Emit the
-   * same `\x1b[H\x1b[J` wipe `notifyResize` uses and zero the counters
-   * so the immediately-following `drawLiveSeq` paints from a clean home.
+   * Build the resize-recovery byte sequence: preserve the entire visible
+   * viewport into scrollback via `\x1b[<rows>B` + `\n` × rows, then
+   * optionally reposition the cursor near the bottom of the (now blank)
+   * viewport so the next `drawLiveSeq` paint lands the live area at the
+   * viewport bottom (sticky-to-bottom prompt).
    *
-   * Returns `true` when recovery fired (caller may want to write the
-   * sequence as part of its own BSU/ESU envelope, but we own the write
-   * here for simplicity — the wipe is idempotent w.r.t. a fresh draw).
+   * `\x1b[<rows>B` is CUD clamped at the bottom row in all mainstream
+   * terminals; it lands the cursor at the bottom-left regardless of
+   * where it currently is. Each subsequent `\n` (at the bottom row)
+   * scrolls the top row of the viewport off the top, into scrollback.
+   * After `rows` line-feeds, the entire visible content has been
+   * preserved in scrollback and the viewport is naturally blank.
+   *
+   * The cursor-up-by-N move at the end: `drawLiveSeq` emits a leading
+   * `\r\n` separator + (N-1) `\r\n`s between N lines = N total cursor
+   * advances. To land the last live-area row at the viewport bottom,
+   * cursor must start at row `rows - N`. From bottom-row (where the
+   * preamble left us), that's an up-move of N. We use `estLiveHeight`
+   * as the estimate for N — usually the OLD live height, which is a
+   * close-enough approximation of what the editor will repaint with.
+   * A 1-row drift (from rewrap under new width) is far better than the
+   * previous "prompt jumps to row 0" behavior.
+   */
+  private resizePreserveSeq(estLiveHeight: number): string {
+    const rows = Math.max(1, this.output.rows ?? 24)
+    let seq = `\x1b[${rows}B` + "\n".repeat(rows)
+    const upN = Math.min(Math.max(0, estLiveHeight), rows - 1)
+    if (upN > 0) seq += `\x1b[${upN}A`
+    return seq
+  }
+
+  /**
+   * If `effectiveColumns()` has changed since the last successful draw,
+   * the in-screen state is fiction (see `lastDrawColumns` doc). Same
+   * recovery as `notifyResize` — preserve viewport into scrollback,
+   * reposition near the bottom, zero counters.
+   *
+   * Returns `true` when recovery fired.
    *
    * No-op when there is no live area yet (`lastDrawColumns === 0`) or
    * when cols hasn't moved. Also no-op when the terminal is detached.
    */
   private maybeRecoverFromColsDrift(): boolean {
     if (!this.hasColsDrift()) return false
-    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
+    const oldHeight = this.liveHeightValue
+    this.output.write(this.bsu + this.resizePreserveSeq(oldHeight) + this.esu)
     this.resetLiveCounters()
     return true
   }
