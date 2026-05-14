@@ -759,8 +759,12 @@ export class Agent {
             writeTranscript(
               `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool, renderCols))}`,
             )
+            // Indent so `↳`/`>` aligns directly under the start of the
+            // command body in the header (under `c` of `cd …`). See
+            // {@link toolContinuationIndentCells} for the layout walk.
+            const indent = " ".repeat(toolContinuationIndentCells(tool.name, pres?.icon))
             for (const cont of formatToolInputContinuation(tool, renderCols)) {
-              writeTranscript(`  ${c.dimCyan("│")} ${c.dim(cont)}`)
+              writeTranscript(`  ${c.dimCyan("│")} ${indent}${c.dim(cont)}`)
             }
           }
           // NOTE: the empty header→body separator row is NOT emitted here.
@@ -1427,6 +1431,49 @@ export function formatToolInputContinuation(tool: ToolUseBlock, cols?: number): 
   const lastPrefix = visible[visible.length - 1].startsWith("↳ ") ? "↳" : ">"
   visible.push(`${lastPrefix} ${truncHint(elided, "L")} more`)
   return visible
+}
+
+/**
+ * Cell count of the indent that continuation rows need *after* their
+ * `  │ ` frame so the `↳`/`>` sigil aligns directly under the start of
+ * the command body in the header row.
+ *
+ * Header layout (live agent):
+ *
+ * ```
+ *   ╭ » Bash  $ cd /Users/...
+ *               ^ command body starts here (col 14)
+ * ```
+ *
+ * Continuation layout (what this indent achieves):
+ *
+ * ```
+ *   │           ↳ && git push ...
+ *               ^ ↳ aligned with `c` of `cd` (col 14)
+ * ```
+ *
+ * The math walks the visible cells in the header BEFORE the command
+ * body: icon (if any) + trailing space + label + 2-space gap + `$ `
+ * sigil. Stripped ANSI is implicit because callers pass the bare text
+ * (`tool.name`, manifest `icon`) not the colored render.
+ *
+ * Returns `0` for non-Bash tools (no continuation rows exist there
+ * today). For Bash:
+ *  - with `»` icon → 10 cells of padding
+ *  - without icon (session-replay header) → 8 cells of padding
+ *
+ * Two emit sites consume this: `agent.ts` (live agent transcript) and
+ * `session-replay.ts` (--resume scrollback rehydration). Keeping the
+ * arithmetic in one helper makes both stay in sync if header shape
+ * changes later.
+ */
+export function toolContinuationIndentCells(toolName: string, iconText?: string): number {
+  if (toolName !== "Bash") return 0
+  const iconCells = iconText ? displayWidth(iconText) + 1 : 0
+  const labelCells = displayWidth(toolName)
+  const gapCells = 2
+  const cmdSigilCells = 2 // "$ " from formatToolInput
+  return iconCells + labelCells + gapCells + cmdSigilCells
 }
 
 /**
