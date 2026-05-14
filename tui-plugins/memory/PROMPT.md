@@ -138,6 +138,29 @@ global/project is a footgun, so remove individual ids instead.
 - **Curation pass** when you spot overlapping bullets on one subsystem:
   list, read the worst, edit one to be comprehensive, remove the rest.
 
+## Summary mode (opt-in)
+
+When the user has enabled `plugins.memory.summary.enabled` in their
+config, the `## Saved memories` section above may carry a **condensed
+summary** instead of (or in addition to) verbatim bullets. The summary
+groups bullets by topic and cites the underlying bullet ids in
+`Sources: #id1, #id2` form. New bullets since the last regen appear
+verbatim under "Recent saves (not yet in summary)" at the tail.
+
+The agent should treat the summary as a **router**, not as content:
+
+- **Need a specific fact?** Use the id list and
+  `MemoryTool({action: "read", scope, id})` to fetch the full body --
+  the summary intentionally drops detail.
+- **Extending an existing topic with a new save?** First `read` the
+  most relevant bullet by id to recover the full text. Saving a new
+  bullet built on the summary's lossy view risks introducing
+  near-duplicates of content that's actually richer in source.
+- **Curating?** Same as before -- `list` then `read` then `edit`/`remove`.
+
+Disabled by default; behaves identically to the legacy verbatim
+injection until a user opts in.
+
 ## Id formats
 
 - **Persistent** (`global`, `project`): `<base36-millis>-<rand4hex>`,
