@@ -162,6 +162,64 @@ describe("executeTool — abort plumbing", () => {
     expect(out.trim()).toBe("")
   })
 
+  // Regression for the "Running Bash can't be aborted" bug. Previously,
+  // `proc.kill(SIGTERM)` only killed the bash process, not its children;
+  // an orphaned `sleep` would inherit stdout/stderr and keep the pipes
+  // open, blocking the drain readers indefinitely. `executeTool` then
+  // never returned and the agent's tool loop hung even though Ctrl+C had
+  // fired correctly. Fixed by spawning bash detached (its own pgrp) and
+  // sending the signal to the whole process group, plus cancelling the
+  // stream readers on abort as a safety net.
+  it("Bash abort with a long-running child returns quickly (no pipe hang)", async () => {
+    // `sleep 30 && echo never` is the canonical bug repro: bash forks
+    // /bin/sleep, which inherits stdout/stderr. When the old code killed
+    // bash with SIGTERM, sleep orphaned and held the pipes open, so the
+    // drain readers blocked forever and executeTool never returned.
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 200)
+    const t0 = Date.now()
+    const r = (await executeTool(
+      "Bash",
+      { command: "sleep 30 && echo never" },
+      { signal: ac.signal },
+    )) as ToolExecResult
+    const dt = Date.now() - t0
+    // The fix: group-kill drops the child too (closing pipes naturally)
+    // and the abort-driven reader cancel is the safety net. Either way,
+    // executeTool returns soon after abort fires, not 30 s later.
+    expect(dt).toBeLessThan(2000)
+    expect(r._aborted).toBe(true)
+    expect(r.is_error).toBe(true)
+  })
+
+  it("Bash abort kills backgrounded children too (no surviving orphan)", async () => {
+    // Stronger no-orphan test than the earlier one (which used `sleep 3 #
+    // marker`, where `# marker` is a bash comment that never reaches
+    // sleep's argv — so `pgrep -f marker` only matched bash and passed
+    // vacuously). Here we use a uniquely-decimal sleep duration so the
+    // child has an identifying argv our probe can match.
+    const uniqueSec = `33.${Math.random().toString().slice(2, 8)}`
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 150)
+    await executeTool(
+      "Bash",
+      // Background the sleep + `wait` so bash isn't the direct parent
+      // doing the read — exercises the case where bash exits via SIGTERM
+      // and the background child must still be reaped via group-kill.
+      { command: `sleep ${uniqueSec} & wait` },
+      { signal: ac.signal },
+    )
+    // Give the kernel a moment to reap the descendants.
+    await new Promise((res) => setTimeout(res, 300))
+    const probe = Bun.spawn(["pgrep", "-f", `sleep ${uniqueSec}`], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const out = await new Response(probe.stdout).text()
+    await probe.exited
+    expect(out.trim()).toBe("")
+  })
+
   it("stripInternalFields removes _truncCtx, _truncInfo, and _aborted", () => {
     const r: ToolExecResult = {
       content: "x",
