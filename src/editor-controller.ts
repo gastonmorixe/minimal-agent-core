@@ -14,11 +14,7 @@
 import { EventEmitter } from "node:events"
 import { type AbortBus, abortBus } from "./abort-bus.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
-import {
-  computeCursorVisualPos,
-  EditorRenderer,
-  findColAtVisualPos,
-} from "./editor-renderer.ts"
+import { computeCursorVisualPos, EditorRenderer, findColAtVisualPos } from "./editor-renderer.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 
 interface CompositorLike {
@@ -601,10 +597,7 @@ export class EditorController extends EventEmitter {
    * touch it.
    */
   private isVerticalStickyAlive(): boolean {
-    return (
-      this.lastVerticalEndRow === this.buf.row &&
-      this.lastVerticalEndCol === this.buf.col
-    )
+    return this.lastVerticalEndRow === this.buf.row && this.lastVerticalEndCol === this.buf.col
   }
 
   /**

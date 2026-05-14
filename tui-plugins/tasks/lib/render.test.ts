@@ -456,7 +456,9 @@ describe("renderBlock — header verb ANSI colors", () => {
 describe("renderBlock — targeted row gets BOLD across columns", () => {
   const RED = "\\x1b\\[31m"
   const LIME = "\\x1b\\[38;5;118m"
-  const SKY = "\\x1b\\[38;5;45m"
+  // SKY is intentionally omitted: the `started` test below asserts on the
+  // idCol's LGRAY+BOLD treatment, not the title's SKY+BOLD (titles are
+  // already exercised by the per-status describe block above).
   const LGRAY = "\\x1b\\[38;5;246m"
   const BOLD = "\\x1b\\[1m"
   const STRIKE = "\\x1b\\[9m"
