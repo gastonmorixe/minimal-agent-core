@@ -170,4 +170,110 @@ describe("TagScanner", () => {
     const e = drive(['<tui::x k="v" />'])
     expect(e.tags[0].raw).toBe('<tui::x k="v" />')
   })
+
+  // ---------------------------------------------------------------------
+  // Markdown code-context regression tests
+  //
+  // The scanner used to greedily match `<tui::NAME>` anywhere in the
+  // stream, even inside backticked inline code or fenced blocks. That
+  // broke mdstream's table renderer when a row cell contained something
+  // like `` `<tui::diff>` `` — the scanner started buffering, mdstream's
+  // table state was wrecked, and the rest of the table fell through to
+  // raw markdown. Symptom captured in the user's table-rendering report.
+  // ---------------------------------------------------------------------
+
+  it("ignores <tui:: openers inside single-backtick inline code", () => {
+    const e = drive(["see `<tui::diff>` for details"])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("see `<tui::diff>` for details")
+  })
+
+  it("ignores <tui:: closers inside inline code too", () => {
+    const e = drive(["wraps `</tui::diff>` literally"])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("wraps `</tui::diff>` literally")
+  })
+
+  it("regression: table cell with backticked tag plus following rows", () => {
+    // Mirrors the exact user-reported failure: a table cell containing
+    // `<tui::diff>` followed by more table rows. The scanner must not
+    // start a capture, so mdstream's table parser sees clean input.
+    const md =
+      "| Plugin | Notes |\n| --- | --- |\n| diff-view | `<tui::diff>` |\n| memory | tag |\n"
+    const e = drive([md])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe(md)
+  })
+
+  it("ignores <tui:: openers inside double-backtick inline code", () => {
+    const e = drive(["``a `<tui::x />` b``"])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("``a `<tui::x />` b``")
+  })
+
+  it("re-enables tag detection after an inline code span closes", () => {
+    const e = drive(["`<tui::a />` then <tui::b />"])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].name).toBe("b")
+    expect(e.text.join("")).toBe("`<tui::a />` then ")
+  })
+
+  it("ignores <tui:: openers inside a fenced code block (backticks)", () => {
+    const md = "```\n<tui::diff>body</tui::diff>\n```\nafter"
+    const e = drive([md])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe(md)
+  })
+
+  it("ignores <tui:: openers inside a fenced code block (tildes)", () => {
+    const md = "~~~\n<tui::diff>body</tui::diff>\n~~~\nafter"
+    const e = drive([md])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe(md)
+  })
+
+  it("re-enables tag detection after a fenced code block closes", () => {
+    const md = "```\n<tui::a />\n```\n<tui::b />"
+    const e = drive([md])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].name).toBe("b")
+  })
+
+  it("handles inline code split across chunk boundaries", () => {
+    // Backtick run at end of chunk is held until classification is known.
+    const e = drive(["pre `", "<tui::x />` post"])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("pre `<tui::x />` post")
+  })
+
+  it("handles fence opener split across chunk boundaries", () => {
+    // Three backticks at line start could be a fence; the partial run
+    // must be held until the third backtick arrives.
+    const e = drive(["``", "`\n<tui::x />\n```\n"])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("```\n<tui::x />\n```\n")
+  })
+
+  it("a backtick mid-line does NOT open a fence", () => {
+    // Fence detection only triggers at line start.
+    const e = drive(["text ``` more <tui::x />"])
+    // Three backticks mid-line open a 3-tick inline code span; the tag
+    // inside is suppressed; the span is unterminated so it stays open
+    // until end-of-stream (still text).
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe("text ``` more <tui::x />")
+  })
+
+  it("a fenced block whose close fence is longer than the open still closes", () => {
+    const md = "```\nbody <tui::x />\n````\nafter <tui::y />"
+    const e = drive([md])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].name).toBe("y")
+  })
+
+  it("does NOT close a 3-backtick fence with a 2-backtick run", () => {
+    const md = "```\n``\n<tui::x />\n```\n"
+    const e = drive([md])
+    expect(e.tags).toHaveLength(0)
+  })
 })
