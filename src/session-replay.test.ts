@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import type { Message } from "./client.ts"
 import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
+import { ToolTimeTracker } from "./tool-time.ts"
 
 class CaptureSink {
   out = ""
@@ -294,5 +295,120 @@ describe("replayToScrollback", () => {
     await replayToScrollback(messages, sink)
     expect(sink.out).toContain("**raw** markdown")
     expect(sink.out).not.toContain("FMT[")
+  })
+
+  it("appends ` · <time>` to tool_use header when tracker + startTimes are wired", async () => {
+    // Two tool_uses on the same calendar day. The first should carry the
+    // cold-start "Mon DD HH:MM:SS" form; the second drops the date prefix.
+    // The tracker IS shared with the (hypothetical) live agent that comes
+    // after replay — that's the whole point of accepting it as an option.
+    const tu1Ms = new Date(2026, 4, 14, 15, 42, 3).getTime() // May 14 15:42:03
+    const tu2Ms = new Date(2026, 4, 14, 15, 42, 7).getTime() // May 14 15:42:07
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "tu_replay_a", name: "Bash", input: { command: "true" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_replay_a", content: "", is_error: false },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "tu_replay_b", name: "Bash", input: { command: "true" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_replay_b", content: "", is_error: false },
+        ],
+      },
+    ]
+    const tracker = new ToolTimeTracker()
+    const startTimes = new Map([
+      ["tu_replay_a", tu1Ms],
+      ["tu_replay_b", tu2Ms],
+    ])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, {
+      toolTimeTracker: tracker,
+      toolStartTimes: startTimes,
+    })
+    const plain = stripAnsi(sink.out)
+    // First tool: cold-start, includes "May 14".
+    expect(plain).toContain("· May 14 15:42:03")
+    // Second tool: same calendar day, bare HH:MM:SS only.
+    expect(plain).toContain("· 15:42:07")
+    // The "May 14" prefix must NOT recur on the second tool.
+    expect(plain.match(/May 14/g)?.length ?? 0).toBe(1)
+  })
+
+  it("emits NO time hint when toolTimeTracker is omitted (back-compat)", async () => {
+    // Same input shape, but no tracker/startTimes → headers stay clean.
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_no_hint", name: "Bash", input: { command: "true" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_no_hint", content: "", is_error: false }],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, {
+      // tracker provided but no startTimes → still no hint, no crash
+      toolTimeTracker: new ToolTimeTracker(),
+    })
+    const plain = stripAnsi(sink.out)
+    expect(plain).not.toMatch(/ · \d{2}:\d{2}:\d{2}/)
+    expect(plain).not.toMatch(
+      /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2}/,
+    )
+  })
+
+  it("skips the time hint silently when a tool_use_id is missing from startTimes", async () => {
+    // The lookup is best-effort: a tool_use whose AssistantRecord lost
+    // its `ts` (or whose record was filtered) just renders without the
+    // suffix instead of crashing or printing "undefined".
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "tu_known", name: "Bash", input: { command: "true" } },
+          { type: "tool_use", id: "tu_unknown", name: "Bash", input: { command: "true" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_known", content: "", is_error: false },
+          { type: "tool_result", tool_use_id: "tu_unknown", content: "", is_error: false },
+        ],
+      },
+    ]
+    const knownMs = new Date(2026, 5, 1, 10, 0, 0).getTime() // Jun 1 10:00:00
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, {
+      toolTimeTracker: new ToolTimeTracker(),
+      toolStartTimes: new Map([["tu_known", knownMs]]),
+    })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("· Jun 1 10:00:00")
+    // The unknown tool's header still renders, just without a hint.
+    // Sanity: there's only ONE timestamp suffix across the whole output —
+    // the regex matches both "· Jun 1 10:00:00" (cold-start form) and
+    // "· HH:MM:SS" (steady-state form).
+    const suffixRe = / · (?:[A-Z][a-z]{2} \d{1,2} )?\d{2}:\d{2}:\d{2}/g
+    expect(plain.match(suffixRe)?.length ?? 0).toBe(1)
   })
 })

@@ -462,7 +462,11 @@ describe("Agent.run transcript", () => {
         // drain
       }
       const plain = stripAnsi(transcript.join("\n"))
-      expect(plain).toContain("  ╭ ○ Tasks · + added 2 tasks · 0/2")
+      // Manifest-owned chrome (`✔ Task` from icon+name) followed by the
+      // plugin's header content slot (action verb + stats). The plugin no
+      // longer prepends its own `○ Tasks` brand — that lived inside the
+      // host frame and would shadow the manifest identity.
+      expect(plain).toContain("  ╭ ✔ Task  + added 2 tasks · 0/2")
       expect(plain).toContain("  │    1  ○")
       expect(plain).toContain("Verify lint clean")
       expect(plain).toContain("  ╰  0 done · 0 doing · 2 todo")

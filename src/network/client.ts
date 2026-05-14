@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { networkActivityObserver } from "./activity-observer.ts"
 import { FetchTransport } from "./fetch-transport.ts"
 import { Http2Transport } from "./http2-transport.ts"
 import { createNetDebugObserver } from "./net-dbg-observer.ts"
@@ -158,7 +159,10 @@ export function createDefaultNetworkClient(): NetworkClient {
     primary,
     fallback,
     allowFetchFallback: process.env.MINIMAL_AGENT_ALLOW_FETCH_FALLBACK === "1",
-    observers: [createNetDebugObserver()],
+    // Order matters slightly: net-dbg snapshots full traffic to disk for
+    // post-hoc debugging; the activity observer only mutates an attached
+    // StatusHandle (cheap, in-memory). Neither depends on the other.
+    observers: [createNetDebugObserver(), networkActivityObserver],
   })
 }
 

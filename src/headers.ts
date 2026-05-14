@@ -321,6 +321,86 @@ export interface SystemBlock {
 }
 
 /**
+ * Default interval (in tool-execution rounds) between reflection checkpoints
+ * within a single `run()` call. Mirrored by `Agent.reflectionInterval` and
+ * referenced from {@link buildSystemPrompt} when generating the loop-safety
+ * paragraph appended to `system[2]`. Set to 50 because empirically a real
+ * agentic session can hit 30+ rounds for a single complex task : 50 is the
+ * point past which "still on track?" is a reasonable question for the model.
+ * Configurable per-Agent; pass 0 to disable checkpoints entirely.
+ */
+export const DEFAULT_REFLECTION_INTERVAL = 50
+
+/**
+ * Default wall-clock cooldown (in milliseconds) applied at each reflection
+ * checkpoint before the next API request is sent. Mirrored by
+ * `Agent.reflectionCooldownMs`. Serves two purposes: (1) gives a human
+ * watching the agent a window to press Esc and interrupt, (2) surfaces the
+ * elapsed wall time to the model via the `cooldown-applied-seconds`
+ * attribute on the injected `<ma::reflection-checkpoint>` tag, so the model
+ * has a concrete signal that wall-clock time has passed. Configurable
+ * per-Agent; pass 0 to keep the checkpoint attachment but skip the pause.
+ */
+export const DEFAULT_REFLECTION_COOLDOWN_MS = 60_000
+
+/**
+ * Build the harness-safety paragraph appended to `system[2]` so the model
+ * knows about the reflection checkpoint, the cooldown, the ack/silence
+ * opt-out, and (when configured) the emergency hard cap.
+ *
+ * Text is stable as a function of inputs, so the prompt cache key only
+ * changes when the configuration changes : default-config sessions all
+ * share the same cached prefix.
+ *
+ * The emergency-cap paragraph is OMITTED when `maxToolRounds` is
+ * non-finite (the default, `Infinity`), so a default-configured session
+ * sees no mention of a hard cap : there isn't one.
+ */
+export function buildLoopSafetyParagraph(opts: {
+  reflectionInterval: number
+  reflectionCooldownMs: number
+  maxToolRounds: number
+}): string {
+  const { reflectionInterval, reflectionCooldownMs, maxToolRounds } = opts
+  const hasReflection = reflectionInterval > 0
+  const hasCooldown = hasReflection && reflectionCooldownMs > 0
+  const hasEmergencyCap = Number.isFinite(maxToolRounds)
+  if (!hasReflection && !hasEmergencyCap) return ""
+
+  const cooldownSec = Math.round(reflectionCooldownMs / 1000)
+  const parts: string[] = ["# Tool-use loop safety", ""]
+
+  if (hasReflection) {
+    parts.push(
+      "The agentic tool-use loop has no fixed turn cap by default. Long autonomous tasks (multi-file refactors, audits, sustained research) can run for many rounds without interruption.",
+      "",
+    )
+    if (hasCooldown) {
+      parts.push(
+        `A reflection checkpoint fires every ${reflectionInterval} tool rounds: the harness applies a ${cooldownSec}-second wall-clock cooldown (a human watching can press Esc to interrupt during the countdown), then injects a \`<ma::reflection-checkpoint round="N" cooldown-applied-seconds="${cooldownSec}" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
+      )
+    } else {
+      parts.push(
+        `A reflection checkpoint fires every ${reflectionInterval} tool rounds. The harness injects a \`<ma::reflection-checkpoint round="N" cooldown-applied-seconds="0" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
+      )
+    }
+    parts.push(
+      "",
+      'To suppress the next K checkpoints during sustained autonomous work (skipping both the cooldown and the attachment), emit `<ma::reflection-ack silence-for="K" reason="..." />` anywhere in your assistant response. The `reason` appears in the user-visible transcript so the human running you can see why you opted out.',
+    )
+  }
+
+  if (hasEmergencyCap) {
+    parts.push(
+      "",
+      `An emergency hard cap is configured at ${maxToolRounds} rounds for this session. Reaching it disables tools for one final response and surfaces a \`<ma::emergency-cap-triggered round="${maxToolRounds}" />\` attachment : use that turn to summarize what you accomplished and surface anything the user should know.`,
+    )
+  }
+
+  return parts.join("\n")
+}
+
+/**
  * System prompt: 4 text blocks sent in the `system` array of Messages API calls.
  *
  * Verified against v2.1.118 capture (fetch-024 in
@@ -353,6 +433,18 @@ export interface SystemBlock {
  * @param opts.sessionContext - Optional system[3] content. Omit to send only
  *   3 blocks (the minimum). Real CLI always includes this with environment
  *   details, CLAUDE.md, git status, etc.
+ * @param opts.reflectionInterval - Reflection checkpoint cadence (rounds)
+ *   used to generate the loop-safety paragraph appended to system[2].
+ *   Defaults to {@link DEFAULT_REFLECTION_INTERVAL}. Pass 0 to omit the
+ *   reflection section of the safety paragraph.
+ * @param opts.reflectionCooldownMs - Wall-clock cooldown (ms) used to
+ *   generate the loop-safety paragraph. Defaults to
+ *   {@link DEFAULT_REFLECTION_COOLDOWN_MS}. Pass 0 to describe a
+ *   checkpoint without a wall-clock pause.
+ * @param opts.maxToolRounds - Emergency hard cap (rounds) used to generate
+ *   the loop-safety paragraph. Defaults to `Number.POSITIVE_INFINITY` (no
+ *   emergency cap, no mention in the prompt). Pass a finite value to add
+ *   the emergency-cap paragraph.
  * @returns Array of system blocks ready to send in the API request body.
  *
  * @example
@@ -370,6 +462,9 @@ export interface SystemBlock {
 export function buildSystemPrompt(opts?: {
   instructions?: string
   sessionContext?: string
+  reflectionInterval?: number
+  reflectionCooldownMs?: number
+  maxToolRounds?: number
 }): SystemBlock[] {
   const blocks: SystemBlock[] = [
     {
@@ -385,7 +480,25 @@ export function buildSystemPrompt(opts?: {
   // system[2]: Instructions block with cache_control (the big one worth caching).
   // ttl:"1h" matches live 2.1.118 traffic; scope:"global" shares the cache
   // across sessions for the same org.
-  const instructions = opts?.instructions ?? DEFAULT_INSTRUCTIONS
+  //
+  // We append a "Tool-use loop safety" paragraph so the model knows about
+  // the reflection checkpoint cadence, the cooldown wall-clock penalty,
+  // the ack/silence opt-out, and the emergency cap (when one is set). The
+  // paragraph is a pure function of the three opts below : default values
+  // produce stable text, so the cache key is stable across default-config
+  // sessions and only diverges when a host overrides the defaults.
+  const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
+  const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
+  const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
+  const instructionsBase = opts?.instructions ?? DEFAULT_INSTRUCTIONS
+  const safetyParagraph = buildLoopSafetyParagraph({
+    reflectionInterval,
+    reflectionCooldownMs,
+    maxToolRounds,
+  })
+  const instructions = safetyParagraph
+    ? `${instructionsBase}\n\n${safetyParagraph}`
+    : instructionsBase
   blocks.push({
     type: "text",
     text: instructions,

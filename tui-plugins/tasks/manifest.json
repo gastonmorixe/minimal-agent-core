@@ -86,7 +86,7 @@
         "export": "default"
       },
       "interactive": false,
-      "icon": "◉",
+      "icon": "✔",
       "color": "lime"
     }
   ]

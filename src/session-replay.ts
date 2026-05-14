@@ -31,6 +31,8 @@ import {
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import { Formatter } from "./formatter.ts"
 import type { ModeManager } from "./modes.ts"
+import { displayWidth } from "./term-width.ts"
+import type { ToolTimeTracker } from "./tool-time.ts"
 
 /**
  * Sink shape: anything with a `write(string)`. The live-area REPL passes
@@ -70,6 +72,26 @@ export interface ReplayOptions {
    * be smashed together at end-of-render — see memory `#mp0pnjih-16b0`.
    */
   formatterCmd?: string[]
+
+  /**
+   * Optional time-hint tracker shared with the live Agent. When provided
+   * AND `toolStartTimes` is also provided, every tool_use header gets
+   * the same dim ` · <time>` suffix the live agent draws. The tracker
+   * is mutated in-place as replay walks the message list, so the LIVE
+   * agent's first header inherits the day-state and only re-emits the
+   * date prefix on actual rollover. See `src/tool-time.ts`.
+   */
+  toolTimeTracker?: ToolTimeTracker | null
+
+  /**
+   * Optional `tool_use_id → epoch ms` lookup for the time-hint suffix.
+   * The agent doesn't persist a dedicated `startedAt` field, so callers
+   * derive this from the parsed JSONL records (each AssistantRecord's
+   * `ts` is the time the assistant message containing the tool_use
+   * arrived; that approximates the moment the live REPL drew the header).
+   * When omitted, no time hint is appended even if `toolTimeTracker` is set.
+   */
+  toolStartTimes?: Map<string, number> | null
 }
 
 /**
@@ -123,6 +145,8 @@ export async function replayToScrollback(
   const baseArrow = `${c.bold(c.pink("❯"))} `
   const modeManager = opts.modeManager ?? null
   const formatterCmd = opts.formatterCmd
+  const toolTimeTracker = opts.toolTimeTracker ?? null
+  const toolStartTimes = opts.toolStartTimes ?? null
   // Wrap the sink as a `FormatterOutput` so a spawned Formatter can pipe
   // its rendered stdout back into the same scrollback target. `columns`
   // / `rows` come from the host stdout — `COLUMNS` is load-bearing for
@@ -227,13 +251,31 @@ export async function replayToScrollback(
         wroteAnyText = true
       } else if (b.type === "tool_use") {
         const tu = b as ToolUseBlock
-        // Live header: `\n  ╭ ✦ Tool  args` — match it verbatim.
+        // Live header: `\n  ╭ ✦ Tool  args [· <time>]` — match it verbatim.
         // Pass live terminal width so soft-split (overflowing single-line
         // Bash → `↳ <op> <body>` rows) activates the same way it does in
         // the live agent. See `src/bash-split.ts`.
         const replayCols = process.stdout.columns
+        // Time-hint suffix mirrors writeToolHeader in src/agent.ts. The
+        // startedAt comes from the AssistantRecord that originally wrote
+        // this tool_use block (caller-supplied via `toolStartTimes`); we
+        // can only render the suffix when both the lookup AND the shared
+        // tracker are present, so a non-resume call (no records loaded)
+        // and an old-format call (no tracker injected) both no-op cleanly.
+        const startedAt = toolStartTimes?.get(tu.id)
+        const timeText =
+          toolTimeTracker !== null && startedAt !== undefined
+            ? toolTimeTracker.format(startedAt)
+            : undefined
+        const timeSuffix = timeText !== undefined ? ` · ${timeText}` : ""
+        const TIME_HINT_GUTTER = 2
+        const adjustedCols =
+          replayCols !== undefined && timeSuffix.length > 0
+            ? Math.max(20, replayCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
+            : replayCols
+        const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
         sink.write(
-          `\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, replayCols))}\n`,
+          `\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, adjustedCols))}${dimTimeSuffix}\n`,
         )
         // Continuation rows: `> <line>` for `\n`-separated multi-line,
         // `↳ <op> <body>` for soft-split single-line overflow. Indented
@@ -242,19 +284,12 @@ export async function replayToScrollback(
         // is narrower than the live agent : `toolContinuationIndentCells`
         // accounts for that via the optional `iconText` arg).
         const contIndent = " ".repeat(toolContinuationIndentCells(tu.name))
-        for (const cont of formatToolInputContinuation(tu, replayCols)) {
+        for (const cont of formatToolInputContinuation(tu, adjustedCols)) {
           sink.write(`  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}\n`)
         }
         // Header→body separator (mirrors live agent rendering: the empty
-        // gutter row that sits between the tool header and the first
+        // `│` gutter row that sits between the tool header and the first
         // body line, giving every tool block a consistent visual shape).
-        // Always solid `│` in replay : the live agent reserves the dashed
-        // `┊` for bodies that start mid-source (Read with `offset > 0`),
-        // derived from runtime `truncInfo.startLine`. That field isn't
-        // persisted in the JSONL store, so replay can't reconstruct it
-        // and falls back to the default glyph. End-of-body truncation
-        // footers are similarly absent from replay (see formatToolPreview
-        // call below : we pass `info: undefined`).
         sink.write(`  ${c.dimCyan("│")}\n`)
         const result = toolResultById.get(tu.id)
         if (result) {

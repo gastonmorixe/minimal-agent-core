@@ -285,7 +285,11 @@ describe("list", () => {
     const before = new TaskStore(sid, { home: tmpHome }).list()
     const r = await call({ action: "list" })
     expect(r.is_error).toBeUndefined()
-    expect(r.displayHeader).toContain("Tasks")
+    // Header content is action-specific; for `list` with N tasks it
+    // includes the count summary. The "Tasks" brand lives on the CLI
+    // path only (`renderBlock`); the agent path delegates identity to
+    // the manifest's icon/label via host chrome.
+    expect(r.displayHeader).toContain("1 task")
     const after = new TaskStore(sid, { home: tmpHome }).list()
     expect(after).toEqual(before)
   })

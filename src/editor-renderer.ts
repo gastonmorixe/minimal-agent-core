@@ -104,6 +104,24 @@ export class EditorRenderer {
     return this.promptWidth
   }
 
+  /**
+   * Display width (in terminal cells) of the continuation prompt used on
+   * logical rows > 0. Used by the controller's wrap-aware up/down
+   * navigation to compute which physical row a cursor sits on.
+   */
+  getContinuationPromptDisplayWidth(): number {
+    return this.continuationPromptWidth
+  }
+
+  /**
+   * Width of the prompt prefix used for a given logical row index: the
+   * main prompt on row 0, the continuation prompt on later rows. Pure
+   * accessor; pre-computed widths, no allocation.
+   */
+  promptDisplayWidthForRow(row: number): number {
+    return row === 0 ? this.promptWidth : this.continuationPromptWidth
+  }
+
   render(
     buf: EditorBuffer,
     opts?: EditorRenderOptions,
@@ -253,6 +271,101 @@ function displayWidthOfChars(text: string, charCount: number): number {
     consumed += 1
   }
   return width
+}
+
+/**
+ * Visual position of a cursor sitting `col` code points into a logical line
+ * `text` whose prompt prefix occupies `promptW` cells, in a terminal of
+ * `cols` cells wide.
+ *
+ * - `visualRow` (0-based) is the physical row within the logical line.
+ * - `visualCol` (0-based, 0..cols-1) is the cell column within `visualRow`.
+ * - `rowsInLine` is how many physical rows the whole logical line occupies.
+ *
+ * Returns `{ visualRow: 0, visualCol: promptW, rowsInLine: 1 }` when
+ * `cols <= 0` (no-wrap layout). Callers should treat that as "no visual
+ * navigation possible" and fall back to logical row movement.
+ *
+ * Used by the controller's wrap-aware up/down arrow navigation so a long
+ * wrapped logical line walks visual row at a time instead of jumping the
+ * whole line per keystroke.
+ */
+export function computeCursorVisualPos(
+  text: string,
+  col: number,
+  promptW: number,
+  cols: number,
+): { visualRow: number; visualCol: number; rowsInLine: number } {
+  if (cols <= 0) {
+    return { visualRow: 0, visualCol: promptW, rowsInLine: 1 }
+  }
+  const colCells = displayWidthOfChars(text, col)
+  const totalCells = promptW + colCells
+  const lineWidth = promptW + displayWidth(text)
+  // Use the same wrap math as the renderer. Both `cursorRowOffset` and
+  // `cursorVisualCol` (from term-width.ts) park the exact-fill cursor at
+  // the end of the current row; we follow the same convention so the
+  // visual position we return matches what the user sees.
+  const visualRow =
+    totalCells <= 0
+      ? 0
+      : Math.floor(Math.max(0, totalCells - 1) / cols)
+  const mod = totalCells === 0 ? 0 : totalCells % cols
+  const visualCol = mod === 0 && totalCells > 0 ? cols : mod
+  const rowsInLine =
+    lineWidth <= 0 ? 1 : Math.max(1, Math.ceil(lineWidth / cols))
+  return { visualRow, visualCol, rowsInLine }
+}
+
+/**
+ * Inverse of {@link computeCursorVisualPos}: given a logical line, a
+ * target physical row within that line, and a desired visual column
+ * (cell offset from the left edge), return the buffer's code-point
+ * column the cursor should sit at.
+ *
+ * - `targetVisualRow` is 0-based within the logical line; values
+ *   beyond the line's actual `rowsInLine` are clamped to the last row.
+ * - `targetVisualCol` is 0-based and may be greater than the content
+ *   of the target row, in which case the cursor lands at end-of-row
+ *   (or end-of-line on the last row, matching the "stop at the visible
+ *   tail" UX users expect from arrow nav).
+ *
+ * The prompt prefix of `promptW` cells occupies the head of `visualRow=0`,
+ * so a `targetVisualRow=0`, `targetVisualCol=0` request returns col 0
+ * regardless of `promptW` (the cursor parks just after the prompt; the
+ * caller doesn't see negative columns).
+ */
+export function findColAtVisualPos(
+  text: string,
+  targetVisualRow: number,
+  targetVisualCol: number,
+  promptW: number,
+  cols: number,
+): number {
+  if (cols <= 0 || targetVisualRow < 0) return 0
+  // Total cells from line start to target visual position.
+  const rowStartCells = targetVisualRow * cols
+  // First row starts after the prompt; later rows start at col 0.
+  const targetTotalCells = rowStartCells + targetVisualCol
+  // Walk the line counting cells until we exceed targetTotalCells - promptW.
+  const targetContentCells = Math.max(0, targetTotalCells - promptW)
+  let cells = 0
+  let col = 0
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i)
+    if (cp === undefined) break
+    const ch = String.fromCodePoint(cp)
+    const w = codePointWidth(cp)
+    // If consuming this char would put us past the target, stop here.
+    // Tie-break: when `cells + w === targetContentCells` we consume (the
+    // cursor sits AFTER the char, which is how all other editors render
+    // a cursor at the right edge of a glyph).
+    if (cells + w > targetContentCells) return col
+    cells += w
+    col += 1
+    i += ch.length
+  }
+  return col
 }
 
 /**

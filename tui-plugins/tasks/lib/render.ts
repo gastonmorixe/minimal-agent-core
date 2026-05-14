@@ -183,56 +183,61 @@ function truncate(s: string, max?: number): string {
 
 function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
-  const brand = `${color(ansi, ANSI.DIM, GLYPHS.pending)} ${color(ansi, ANSI.BOLD, "Tasks")}`
 
-  // Common N/M trailer.
+  // Common N/M trailer. The leading ` ${dot} ` separates the action verb
+  // from the stats (e.g. `+ added 7 tasks · 0/7`); when stats are empty
+  // (zero-total) the separator goes with it.
   const trail = stats.total === 0
     ? ""
     : ` ${dot} ${color(ansi, ANSI.BOLD, String(stats.done))}${color(ansi, ANSI.DIM, `/${stats.total}`)}`
 
+  // The plugin owns the "header content" slot only — agent chrome
+  // (`╭ [icon] [label]  …`) is drawn around this string. Don't lead with
+  // a separator; the agent has already put a two-space gap after the
+  // label.
   let middle = ""
   switch (action.kind) {
     case "added":
-      middle = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, "added")} ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, "added")} ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "added_many":
-      middle = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, `added ${action.count} tasks`)}`
+      middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.plus)} ${color(ansi, ANSI.LIME, `added ${action.count} tasks`)}`
       break
     case "started":
-      middle = ` ${dot} ${color(ansi, ANSI.GOLD, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, ANSI.GOLD, GLYPHS.doing)} started ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_done":
-      middle = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} marked done ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} marked done ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_doing":
-      middle = ` ${dot} ${color(ansi, ANSI.GOLD, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, ANSI.GOLD, GLYPHS.doing)} marked doing ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_todo":
-      middle = ` ${dot} ${color(ansi, ANSI.DIM, GLYPHS.pending)} reset to todo ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, ANSI.DIM, GLYPHS.pending)} reset to todo ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "marked_canceled":
-      middle = ` ${dot} ${color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)} canceled ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)} canceled ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "updated":
-      middle = ` ${dot} updated ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `updated ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "removed":
-      middle = ` ${dot} ${color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)} removed ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
+      middle = `${color(ansi, `${ANSI.RED}${ANSI.DIM}`, GLYPHS.canceled)} removed ${color(ansi, ANSI.DGRAY, `#${action.hash}`)}`
       break
     case "reordered":
-      middle = ` ${dot} reordered`
+      middle = `reordered`
       break
     case "cleared":
-      middle = ` ${dot} cleared ${color(ansi, ANSI.LGRAY, String(action.count))} tasks`
+      middle = `cleared ${color(ansi, ANSI.LGRAY, String(action.count))} tasks`
       break
     case "all_done":
-      middle = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, "all done")}`
+      middle = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, "all done")}`
       break
     case "list":
       if (stats.total === 0) {
-        middle = ` ${dot} ${color(ansi, `${ANSI.DIM}\x1b[3m`, "no tasks")}`
+        middle = `${color(ansi, `${ANSI.DIM}\x1b[3m`, "no tasks")}`
       } else {
-        middle = ` ${dot} ${color(ansi, ANSI.LGRAY, `${stats.total} task${stats.total === 1 ? "" : "s"}`)}`
+        middle = `${color(ansi, ANSI.LGRAY, `${stats.total} task${stats.total === 1 ? "" : "s"}`)}`
       }
       break
   }
@@ -247,12 +252,21 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
     suffix = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, String(stats.done))}${color(ansi, ANSI.DIM, `/${stats.total}`)}`
   }
 
-  return `${brand}${middle}${suffix}`
+  return `${middle}${suffix}`
 }
 
 function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameTL)
-  return `${frame} ${renderHeaderText(action, stats, ansi)}`
+  // CLI-only brand prefix. The agent path uses `renderToolDisplay` (which
+  // skips this wrapper) and gets its identity from the manifest's icon
+  // and label in the host tool-frame chrome instead. Keeping the brand
+  // local to this CLI wrapper avoids leaking a duplicate "Tasks" word
+  // into the agent's transcript where it would sit next to "Task" from
+  // the manifest.
+  const brand = `${color(ansi, ANSI.DIM, GLYPHS.pending)} ${color(ansi, ANSI.BOLD, "Tasks")}`
+  const content = renderHeaderText(action, stats, ansi)
+  const sep = content.length === 0 ? "" : ` ${color(ansi, ANSI.DIM, GLYPHS.bullet)} `
+  return `${frame} ${brand}${sep}${content}`
 }
 
 // ---------------------------------------------------------------------------
