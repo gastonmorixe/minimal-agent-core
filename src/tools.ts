@@ -685,15 +685,32 @@ async function execBash(
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
+      // Make bash the leader of its own process group so we can group-kill
+      // children when the user aborts. Without this, `proc.kill(SIGTERM)`
+      // only kills bash; an orphan child (e.g. `sleep 30` inside `sleep 30
+      // && echo never`) inherits stdout/stderr pipes and keeps them open,
+      // blocking the `drain()` readers below indefinitely : the agent's
+      // tool loop then hangs even though the abort signal fired and the
+      // SIGTERM was delivered to bash. See tmp/abort-bash-children-repro.ts.
+      detached: true,
     })
 
     let aborted = false
     let timedOut = false
     const killTree = (sig: "SIGTERM" | "SIGKILL") => {
+      // Group-kill so any descendants bash spawned die too. Negative pid
+      // = process group; only works because we passed `detached: true`
+      // above to make bash its own pgrp leader. Falls back to a single-pid
+      // kill if the group lookup fails (rare; e.g. bash already exited
+      // and the pgrp was reaped).
       try {
-        proc.kill(sig)
+        process.kill(-proc.pid, sig)
       } catch {
-        /* already exited */
+        try {
+          proc.kill(sig)
+        } catch {
+          /* already exited */
+        }
       }
     }
     const escalateKill = () => {
@@ -712,15 +729,7 @@ async function execBash(
           }, timeout)
         : null
 
-    const onAbort = () => {
-      aborted = true
-      escalateKill()
-    }
     const signal = opts.signal
-    if (signal) {
-      if (signal.aborted) onAbort()
-      else signal.addEventListener("abort", onAbort, { once: true })
-    }
 
     // Manual streaming drain. Replaces `new Response(stream).text()` (which
     // only resolves on pipe-close) with a reader loop that decodes UTF-8
@@ -730,6 +739,13 @@ async function execBash(
     // same payload it would have without streaming. Critical for UI
     // responsiveness on long-running commands : without this the agent
     // can't render anything until the entire 20s loop (or whatever) exits.
+    //
+    // The reader is also cancelled when `signal` aborts. The group-kill
+    // above is the primary mechanism for terminating descendants and
+    // closing pipes; this reader-cancel is the belt-and-suspenders for
+    // the corner case where a double-forked daemon detaches from the
+    // group and keeps the write-end open. Without it, drain would block
+    // forever and the agent's tool loop would never resume.
     const drain = async (
       stream: ReadableStream<Uint8Array>,
       cb?: (s: string) => void,
@@ -737,6 +753,15 @@ async function execBash(
       const decoder = new TextDecoder()
       let acc = ""
       const reader = stream.getReader()
+      const cancelReader = () => {
+        reader.cancel().catch(() => {
+          /* already cancelled or stream closed */
+        })
+      }
+      if (signal) {
+        if (signal.aborted) cancelReader()
+        else signal.addEventListener("abort", cancelReader, { once: true })
+      }
       try {
         while (true) {
           const { done, value } = await reader.read()
@@ -748,6 +773,7 @@ async function execBash(
           }
         }
       } finally {
+        if (signal) signal.removeEventListener("abort", cancelReader)
         reader.releaseLock()
       }
       const tail = decoder.decode()
@@ -756,6 +782,15 @@ async function execBash(
         cb?.(tail)
       }
       return acc
+    }
+
+    const onAbort = () => {
+      aborted = true
+      escalateKill()
+    }
+    if (signal) {
+      if (signal.aborted) onAbort()
+      else signal.addEventListener("abort", onAbort, { once: true })
     }
 
     let stdout = ""
