@@ -46,20 +46,22 @@ const SHOW_OVERAGE = process.env.MINIMAL_AGENT_QUOTA_OVERAGE === "1"
  * via `--model`, but the live-area footer is per-process and we'd rather
  * not re-resolve on every paint.
  *
- * Defaults to 200_000 (Anthropic's standard context window) when:
- *   - the env var is missing,
- *   - or the model has no `[1m]` suffix.
- *
- * Returns 1_000_000 for `[1m]` variants (Sonnet 4.6, Opus 4.6 with the
- * explicit 1M opt-in). We do NOT try to auto-detect 1M support beyond
- * the suffix — that's the user's signal that they're using the 1M
- * endpoint, and erring on the side of "smaller window assumed" means
- * the bar shows a higher fill ratio (closer to the danger zone) when
- * we're unsure, which is the safer default for a "watch your context"
- * indicator.
+ * Returns:
+ *   - `1_000_000` for `[1m]` variants (Sonnet 4.6 [1m], Opus 4.6 [1m],
+ *     Opus 4.7 [1m] — the explicit 1M opt-in).
+ *   - `200_000` for any other resolved model id (Anthropic's standard
+ *     context window).
+ *   - `undefined` when `MINIMAL_AGENT_MODEL` is missing or empty. The
+ *     renderer treats this as "unknown" and falls back to the `·`
+ *     placeholder for the segment's label (dropping the bar+percent,
+ *     keeping the trailing count). This branch is rare in normal
+ *     operation — the agent sets the env var before plugin load — but
+ *     it covers dev/test runs and the brief window if the loader
+ *     order ever changes.
  */
-function resolveContextWindow(): number {
+function resolveContextWindow(): number | undefined {
   const model = process.env.MINIMAL_AGENT_MODEL ?? ""
+  if (!model) return undefined
   return has1mContext(model) ? 1_000_000 : 200_000
 }
 const CONTEXT_WINDOW = resolveContextWindow()
