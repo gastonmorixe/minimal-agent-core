@@ -30,6 +30,24 @@ function makeOutput(opts: { isTTY?: boolean } = {}): Capture {
 
 const joined = (cap: Capture) => cap.writes.join("")
 
+function makeTermOutput(term: FakeTerminal) {
+  // Wrap a FakeTerminal so Compositor can write into it. FakeTerminal
+  // models scrollback the way iTerm does (\x1b[J-erased cells are NOT
+  // preserved in history; only naturally-scrolled rows go to scrollback)
+  // so it's the right substrate for "resize must not lose scrollback"
+  // regression guards.
+  return {
+    isTTY: true,
+    columns: term.cols,
+    rows: term.rows,
+    // biome-ignore lint/suspicious/noExplicitAny: test-only shape coercion
+    write: (s: string) => {
+      term.feed(s)
+      return true
+    },
+  } as unknown as Capture["output"]
+}
+
 describe("Compositor (non-TTY)", () => {
   it("mount/unmount are no-ops on non-TTY output", () => {
     const cap = makeOutput({ isTTY: false })
@@ -414,7 +432,7 @@ describe("Compositor (DECSET 2026 synchronized output)", () => {
 })
 
 describe("Compositor (notifyResize)", () => {
-  it("on TTY emits \\x1b[H\\x1b[J (full viewport wipe) and zeroes counters", () => {
+  it("scrolls the viewport into scrollback (does NOT wipe with \\x1b[H\\x1b[J)", () => {
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output })
     c.mount()
@@ -423,14 +441,95 @@ describe("Compositor (notifyResize)", () => {
     cap.writes.length = 0
     c.notifyResize()
     const out = joined(cap)
-    // Full viewport wipe: home then erase-to-end-of-screen. Anything
-    // less leaves reflowed upper portions of the old live area visible
-    // above the cursor, and drawLiveSeq paints fresh status+prompt
-    // below them — the duplication the user originally reported.
-    expect(out).toContain("\x1b[H\x1b[J")
+    // The preserve-scrollback preamble: CUD-clamped-at-bottom + LF×rows
+    // pushes every visible row off the top of the viewport, into
+    // scrollback. A bare `\x1b[H\x1b[J` would silently drop those rows
+    // on iTerm (and several other terminals that don't preserve
+    // \x1b[J-erased cells in history) — see regression history in
+    // notifyResize() docstring.
+    expect(out).toContain(`\x1b[${cap.output.rows}B`)
+    expect(out).toContain("\n".repeat(cap.output.rows))
+    expect(out).not.toContain("\x1b[H\x1b[J")
     // Counters reset so the next setLiveArea won't issue a stale
     // relative-up sequence (which would land mid-reflow and leave debris).
     expect(c.liveHeight).toBe(0)
+  })
+
+  it("preserves visible mutable-area content into scrollback before wiping", () => {
+    // Regression for the iTerm "header / Bash tool block / response
+    // tail vanishes on terminal resize" bug. Before 5b36689 (and again
+    // after 86d2d3b accidentally reverted it), notifyResize() emitted a
+    // bare \x1b[H\x1b[J — which iTerm drops from history. This test
+    // drives a real Compositor through FakeTerminal (which matches
+    // iTerm's \x1b[J-drops-from-scrollback semantics) and asserts that
+    // every stream line written before notifyResize() is reachable
+    // somewhere post-resize.
+    const term = new FakeTerminal({ cols: 40, rows: 8, scrollbackLimit: 200 })
+    const c = new Compositor({ output: makeTermOutput(term) })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    // Stream 14 lines into the compositor. The first ~6 will scroll
+    // naturally into scrollback as the viewport fills; the last 8 sit
+    // on the visible viewport when the resize fires.
+    for (let i = 1; i <= 14; i++) c.writeStream(`line-${i}\n`)
+    // Sanity: scrollback so far has the early lines but NOT the last
+    // ones (they're still in the visible viewport when the resize hits).
+    expect(term.scrollback.join("\n")).toContain("line-1")
+    expect(term.scrollback.join("\n")).not.toContain("line-14")
+    // Now resize.
+    c.notifyResize()
+    // After the fix, every payload line must be reachable somewhere —
+    // either still in scrollback (where most belong) or in the visible
+    // screen if the terminal preserved any. Pre-fix this assertion failed
+    // for line-9 through line-14 (the visible-viewport tail at resize).
+    const all = [...term.scrollback, ...term.screen()].join("\n")
+    for (let i = 1; i <= 14; i++) {
+      expect(all).toContain(`line-${i}`)
+    }
+  })
+
+  it("preserves a viewport-full of stream content into scrollback (mid-stream resize)", () => {
+    // Mid-stream resize: assistant is in the middle of emitting a long
+    // markdown response, the user resizes. The most recent ~viewport-
+    // rows of stream content sit on the visible viewport at the moment
+    // notifyResize() fires. After the fix, they survive in scrollback
+    // so the user can scroll up to read.
+    const term = new FakeTerminal({ cols: 60, rows: 20, scrollbackLimit: 500 })
+    const c = new Compositor({ output: makeTermOutput(term) })
+    c.mount()
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    // 50 unique payload rows so we can verify each one survives.
+    for (let i = 1; i <= 50; i++) c.writeStream(`payload-row-${i}\n`)
+    c.notifyResize()
+    const all = [...term.scrollback, ...term.screen()].join("\n")
+    for (let i = 1; i <= 50; i++) {
+      expect(all).toContain(`payload-row-${i}`)
+    }
+  })
+
+  it("positions cursor so the next live-area paint lands at the viewport bottom (sticky prompt)", () => {
+    // Without the cursor-up-by-oldHeight repositioning, the next
+    // drawLiveSeq paint after notifyResize would land at row 0 — the
+    // "prompt jumped to the top of the viewport" UX bug the user
+    // reported. With the fix, drawLiveSeq lands the last live-area row
+    // (the prompt) at the viewport bottom (row `rows-1`).
+    const term = new FakeTerminal({ cols: 40, rows: 10, scrollbackLimit: 200 })
+    const c = new Compositor({ output: makeTermOutput(term) })
+    c.mount()
+    c.setLiveArea(["status", "", "❯ hi"], { row: 2, col: 4 })
+    expect(c.liveHeight).toBe(3)
+    c.notifyResize()
+    // Editor.notifyResize() repaints with the same lines (under the new
+    // width — same here since FakeTerminal didn't actually resize).
+    c.setLiveArea(["status", "", "❯ hi"], { row: 2, col: 4 })
+    // After the paint, the LAST live-area row ("❯ hi") must sit on the
+    // bottom row of the viewport, and the screen above must be blank
+    // (no transcript content in the visible viewport — it's in
+    // scrollback).
+    const screen = term.screen()
+    expect(screen[screen.length - 1]).toContain("❯ hi")
+    expect(screen[screen.length - 2]).toBe("")
+    expect(screen[screen.length - 3]).toContain("status")
   })
 
   it("the next setLiveArea after a resize emits no \\x1b[nA up-moves (clean repaint)", () => {
@@ -442,9 +541,10 @@ describe("Compositor (notifyResize)", () => {
     cap.writes.length = 0
     c.setLiveArea(["status", "❯ "], { row: 1, col: 2 })
     const out = joined(cap)
-    // No relative up-moves should appear in this paint — the resize wiped
-    // the canvas, so the live area redraws starting at the current row
-    // without trying to step over a stale OLD live area.
+    // No relative up-moves should appear in this paint — the resize
+    // preserved scrollback and pre-positioned the cursor, so the live
+    // area redraws straight from the cursor without trying to step over
+    // a stale OLD live area.
     expect(out).not.toMatch(/\x1b\[\d*A/)
     // It DID draw the new content.
     expect(out).toContain("status")
@@ -467,7 +567,7 @@ describe("Compositor (notifyResize)", () => {
     expect(cap.writes).toEqual([])
   })
 
-  it("wraps the erase in BSU/ESU when synchronized output is enabled", () => {
+  it("wraps the recovery sequence in BSU/ESU when synchronized output is enabled", () => {
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output, syncOutput: true })
     c.mount()
@@ -475,17 +575,19 @@ describe("Compositor (notifyResize)", () => {
     cap.writes.length = 0
     c.notifyResize()
     const out = joined(cap)
-    // BSU then ESU around the erase, atomic on supporting terminals.
+    // BSU then ESU around the preserve-scroll preamble, atomic on
+    // supporting terminals so the user never sees a half-applied
+    // resize recovery.
     const bsu = "\x1b[?2026h"
     const esu = "\x1b[?2026l"
     expect(out.indexOf(bsu)).toBeGreaterThanOrEqual(0)
     expect(out.indexOf(esu)).toBeGreaterThan(out.indexOf(bsu))
-    expect(out).toContain("\x1b[H\x1b[J")
+    expect(out).toContain(`\x1b[${cap.output.rows}B`)
   })
 })
 
 describe("Compositor (cols-drift recovery)", () => {
-  it("setLiveArea after a silent cols change emits the resize wipe before redraw", () => {
+  it("setLiveArea after a silent cols change preserves viewport into scrollback before redraw", () => {
     // Reproduces the bug observed in user session 9d832ab0-…:
     //   process.stdout.columns oscillated between 131 and 127 mid-session
     //   without a SIGWINCH-driven notifyResize(). The compositor's
@@ -505,16 +607,15 @@ describe("Compositor (cols-drift recovery)", () => {
     cap.output.columns = 127
     c.setLiveArea(["❯ hello"], { row: 0, col: 7 })
     const out = joined(cap)
-    // The full-viewport wipe MUST appear before the redraw, otherwise
-    // any stale wrapped content above the live area survives and gets
-    // pushed into scrollback by the next write.
-    const wipeIdx = out.indexOf("\x1b[H\x1b[J")
-    expect(wipeIdx).toBeGreaterThanOrEqual(0)
-    // And after recovery the immediate redraw must NOT issue a relative
-    // up-move (counters were zeroed, so nothing to step over).
-    const afterWipe = out.slice(wipeIdx + "\x1b[H\x1b[J".length)
-    expect(afterWipe).not.toMatch(/\x1b\[\d*A/)
-    expect(afterWipe).toContain("❯ hello")
+    // The preserve-scroll preamble (\x1b[<rows>B + LF×rows) MUST appear
+    // before the redraw — otherwise iTerm drops the prior content from
+    // scrollback (and any stale wrapped content above the live area
+    // would scroll into scrollback on the next write anyway).
+    const preambleIdx = out.indexOf(`\x1b[${cap.output.rows}B`)
+    expect(preambleIdx).toBeGreaterThanOrEqual(0)
+    // A bare \x1b[H\x1b[J wipe must NOT appear — that's the regression.
+    expect(out).not.toContain("\x1b[H\x1b[J")
+    expect(out).toContain("❯ hello")
   })
 
   it("setLiveArea is a no-op (no extra wipe) when cols hasn't changed", () => {
@@ -559,10 +660,12 @@ describe("Compositor (cols-drift recovery)", () => {
     expect(out).toContain("  Thinking")
   })
 
-  it("writeStream after a silent cols change also wipes before appending", () => {
+  it("writeStream after a silent cols change preserves viewport before appending", () => {
     // Same failure mode at the scrollback seam: a chunk written while
     // the stale live area is still on screen would push the wrapped-but-
-    // uncounted top rows into permanent scrollback.
+    // uncounted top rows into permanent scrollback. The recovery must
+    // preserve viewport into scrollback (NOT bare-wipe) so the in-flight
+    // stream content above doesn't vanish.
     const cap = makeOutput()
     cap.output.columns = 131
     const c = new Compositor({ output: cap.output })
@@ -572,7 +675,8 @@ describe("Compositor (cols-drift recovery)", () => {
     cap.output.columns = 80
     c.writeStream("response chunk\n")
     const out = joined(cap)
-    expect(out).toContain("\x1b[H\x1b[J")
+    expect(out).toContain(`\x1b[${cap.output.rows}B`)
+    expect(out).not.toContain("\x1b[H\x1b[J")
     expect(out).toContain("response chunk")
   })
 
