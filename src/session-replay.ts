@@ -26,6 +26,7 @@ import {
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
+  toolContinuationIndentCells,
 } from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import { Formatter } from "./formatter.ts"
@@ -235,9 +236,14 @@ export async function replayToScrollback(
           `\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, replayCols))}\n`,
         )
         // Continuation rows: `> <line>` for `\n`-separated multi-line,
-        // `↳ <op> <body>` for soft-split single-line overflow.
+        // `↳ <op> <body>` for soft-split single-line overflow. Indented
+        // so the sigil aligns directly under the start of the command
+        // body in the header (replay header has no icon, so the indent
+        // is narrower than the live agent : `toolContinuationIndentCells`
+        // accounts for that via the optional `iconText` arg).
+        const contIndent = " ".repeat(toolContinuationIndentCells(tu.name))
         for (const cont of formatToolInputContinuation(tu, replayCols)) {
-          sink.write(`  ${c.dimCyan("│")} ${c.dim(cont)}\n`)
+          sink.write(`  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}\n`)
         }
         // Header→body separator (mirrors live agent rendering: the empty
         // gutter row that sits between the tool header and the first

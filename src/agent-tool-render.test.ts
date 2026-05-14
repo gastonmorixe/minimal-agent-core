@@ -22,8 +22,14 @@
  *   - `formatToolPreview` output (the TUI transcript) shows facts only.
  */
 import { describe, it, expect } from "bun:test"
-import { formatToolInput, formatToolInputContinuation, formatToolPreview } from "./agent.ts"
+import {
+  formatToolInput,
+  formatToolInputContinuation,
+  formatToolPreview,
+  toolContinuationIndentCells,
+} from "./agent.ts"
 import type { ToolUseBlock } from "./client.ts"
+import { displayWidth } from "./term-width.ts"
 import type { TruncationInfo } from "./tools/truncation.ts"
 
 /** Strip ANSI escapes so assertions don't fight against the SGR wrap. */
@@ -927,5 +933,55 @@ describe("formatToolInput / formatToolInputContinuation — 2+ operator split at
     // depend on this.
     expect(formatToolInput(tu("Bash", { command: "a && b | c" }))).toBe("$ a && b | c")
     expect(formatToolInputContinuation(tu("Bash", { command: "a && b | c" }))).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// toolContinuationIndentCells — alignment under command body
+// ---------------------------------------------------------------------------
+
+describe("toolContinuationIndentCells — Bash continuation alignment", () => {
+  it("aligns ↳/> under the command body when icon is present (live agent)", () => {
+    // Live agent header: `  ╭ » Bash  $ cd …`
+    //   - "  ╭ "  = 4 cells (frame, not counted)
+    //   - "» "    = 2 cells (icon + trailing space)
+    //   - "Bash"  = 4 cells
+    //   - "  "    = 2 cells (label→content gap)
+    //   - "$ "    = 2 cells (Bash sigil from formatToolInput)
+    //   = 10 cells past the frame → continuation rows need 10 spaces
+    //   of indent after `  │ ` for `↳`/`>` to land at col 14 (under
+    //   the `c` of `cd …`).
+    expect(toolContinuationIndentCells("Bash", "»")).toBe(10)
+  })
+
+  it("aligns ↳/> under the command body when no icon is present (session replay)", () => {
+    // Replay header: `  ╭ Bash  $ cd …` (no icon)
+    //   - "Bash"  = 4 cells
+    //   - "  "    = 2 cells (gap)
+    //   - "$ "    = 2 cells
+    //   = 8 cells past the frame
+    expect(toolContinuationIndentCells("Bash")).toBe(8)
+  })
+
+  it("returns 0 for non-Bash tools (no continuation rows there today)", () => {
+    expect(toolContinuationIndentCells("Read", "★")).toBe(0)
+    expect(toolContinuationIndentCells("Grep")).toBe(0)
+    expect(toolContinuationIndentCells("Glob", "*")).toBe(0)
+    expect(toolContinuationIndentCells("Edit")).toBe(0)
+    expect(toolContinuationIndentCells("Write")).toBe(0)
+  })
+
+  it("scales the icon width via displayWidth (wide icons add an extra cell)", () => {
+    // If a future Bash icon were 2 cells wide (e.g. a CJK glyph), the
+    // indent must absorb that extra cell so the alignment stays under
+    // the command body. NOTE: PUA codepoints like Nerd Font glyphs are
+    // intentionally treated as 1 cell by `displayWidth` because PUA cell
+    // width depends on the active font (see term-width.ts comment) — so
+    // we exercise the wide-glyph path here with a real East-Asian Wide
+    // codepoint instead.
+    const wideIcon = "中" // U+4E2D, 2 cells per UAX #11
+    expect(displayWidth(wideIcon)).toBe(2)
+    // 2 (wide icon) + 1 (trailing space) + 4 (Bash) + 2 (gap) + 2 ($ ) = 11
+    expect(toolContinuationIndentCells("Bash", wideIcon)).toBe(11)
   })
 })
