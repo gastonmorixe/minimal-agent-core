@@ -42,42 +42,51 @@ describe("renderQuotaFooter", () => {
 
   it("renders the session block even when there are no quota windows", () => {
     // Pre-traffic, before the first response arrives, we still want users
-    // to see their context budget signpost (✦ ░░░░░░░░ 0% 0 ctx).
+    // to see their context budget signpost (`· ░░░░░░░░ 0% 0`).
     const out = stripAnsi(renderQuotaFooter(new Map(), NO_TOKENS))
-    expect(out).toContain("✦")
-    expect(out).toContain("ctx")
+    // `✦` was retired — the dim middle-dot is the session marker.
+    expect(out).not.toContain("✦")
+    expect(out).toContain("·") // session label (LEFT slot)
     expect(out).toContain("0%")
+    // Trailing count `0` appears after the percent (word-boundary safe).
+    expect(out).toMatch(/0% 0\b/)
+    // The window MAX is NOT a label in this layout — `200k`/`1M` only
+    // exists implicitly as the denominator of the % calculation.
+    expect(out).not.toContain("200k")
   })
 
   it("never starts with the word 'quota'", () => {
     const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.21"]])
     const out = stripAnsi(renderQuotaFooter(rl, SOME_TOKENS))
     expect(out.startsWith("quota")).toBe(false)
-    // The first char must be one of the bar fill glyphs.
-    const BAR_GLYPHS = new Set(["█", "░", "▏", "▎", "▍", "▌", "▋", "▊", "▉"])
-    expect(BAR_GLYPHS.has(out[0]!)).toBe(true)
+    // A2: first char is the window NAME label, not a bar glyph.
+    expect(out.startsWith("5h ")).toBe(true)
   })
 
   it("uses an 8-cell bar (fill + empty glyphs sum to 8 per window)", () => {
     const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.5"]])
     const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { showSession: false }))
-    const lead = out.match(/^[█▏▎▍▌▋▊▉░]+/)![0]
-    expect(lead.length).toBe(8)
+    // The bar follows the window-name label (`5h `) — extract by matching
+    // the first run of bar glyphs anywhere in the line.
+    const m = out.match(/[█▏▎▍▌▋▊▉░]+/)
+    expect(m).not.toBeNull()
+    expect(m![0].length).toBe(8)
   })
 
-  it("renders the percent right after the bar, then the window name", () => {
+  it("renders the window name LEFT of the bar, then bar + percent", () => {
     const rl = new Map([
       ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
       ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
     ])
     const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { showSession: false }))
-    expect(out).toMatch(/[█▏▎▍▌▋▊▉░]{8} 21% 5h/)
-    expect(out).toMatch(/[█▏▎▍▌▋▊▉░]{8} 8% 7d/)
+    // A2 layout: `<name> <bar> <pct>` — name leads.
+    expect(out).toMatch(/5h [█▏▎▍▌▋▊▉░]{8} 21%/)
+    expect(out).toMatch(/7d [█▏▎▍▌▋▊▉░]{8} 8%/)
     // 5h must precede 7d.
     expect(out.indexOf("5h")).toBeLessThan(out.indexOf("7d"))
   })
 
-  it("appends the reset countdown as a dim trailing word (no ↻ icon)", () => {
+  it("appends the reset countdown as a trailing dim duration (no · separator, no ↻ icon)", () => {
     const now = 1_700_000_000_000
     const rl = new Map([
       ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
@@ -86,25 +95,37 @@ describe("renderQuotaFooter", () => {
         String(Math.floor((now + 90 * 60_000) / 1000)),
       ],
     ])
+    // `showSession: false` so the session block (which intentionally
+    // uses `·` as its label) doesn't leak into this assertion.
     const out = stripAnsi(
       renderQuotaFooter(rl, NO_TOKENS, { now: () => now, showSession: false }),
     )
-    expect(out).toContain("1h30m")
+    // Shape: `<name> <bar> <pct> <reset>` — single-space gaps everywhere.
+    // The dim color of the reset countdown is enough visual separation
+    // from the bold-colored percent; no `·` middle-dot, no `↻` icon.
+    expect(out).toMatch(/21% 1h30m/)
+    expect(out).not.toContain("·")
     expect(out).not.toContain("↻")
   })
 
-  it("appends the session block with ✦, an 8-cell bar, %, contextSize, and 'ctx'", () => {
+  it("appends the session block as `· <bar> <pct> <used>` (structurally identical to quota)", () => {
     const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
     const out = stripAnsi(renderQuotaFooter(rl, SOME_TOKENS))
-    expect(out).toContain("✦")
+    expect(out).not.toContain("✦")
     expect(out).toContain("47.5k")
-    expect(out).toContain("ctx")
     // 47.5k / 200k = 23.75% → rounds to 24%
     expect(out).toContain("24%")
-    // The session bar is also an 8-cell strip: ✦ <bar><pct> ...
-    expect(out).toMatch(/✦ [█▏▎▍▌▋▊▉░]{8} 24% 47\.5k ctx/)
+    // Shape: `· <8-cell-bar> <pct> <used>`. Dim middle-dot is the LEFT
+    // label (parallel slot to 5h/7d, minimalist marker); used count
+    // trails (parallel to the quota reset countdown slot). No `/`.
+    expect(out).toMatch(/· [█▏▎▍▌▋▊▉░]{8} 24% 47\.5k/)
+    expect(out).not.toContain("/")
+    // The window MAX (`200k`/`1M`) is NOT a label in this layout.
+    expect(out).not.toContain("200k")
     // The "N cached" sub-segment is gone (would inherit the inflation).
     expect(out).not.toContain("cached")
+    // The trailing word `ctx` was retired.
+    expect(out).not.toMatch(/ ctx\b/)
   })
 
   it("uses contextSize (not the inflated cumulative `total`) for the displayed number", () => {
@@ -120,11 +141,61 @@ describe("renderQuotaFooter", () => {
     // response), the context-budget signpost should be visible.
     const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
     const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS))
-    expect(out).toContain("✦")
-    expect(out).toContain("ctx")
+    expect(out).not.toContain("✦")
     expect(out).toContain("0%")
-    // The bar at 0% is all-empty cells.
-    expect(out).toMatch(/✦ [░]{8} 0% 0 ctx/)
+    // Bar at 0% is all-empty cells; dim middle-dot leads, trailing `0` count.
+    expect(out).toMatch(/· [░]{8} 0% 0\b/)
+  })
+
+  it("trailing count is bold when contextSize > 0, dim when = 0", () => {
+    // User-visible requirement: the live count is the actionable bit on
+    // the footer (it grows as you work). Once it's > 0 it must NOT be
+    // faint. The zero state can stay quiet — there's no live data to
+    // emphasise, and parallel to 5h/7d's dim pre-traffic shape.
+    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const live = renderQuotaFooter(rl, SOME_TOKENS) ?? ""
+    const cold = renderQuotaFooter(rl, NO_TOKENS) ?? ""
+    // Bold SGR opener (\x1b[1m) wraps the live numerator.
+    expect(live).toContain("\x1b[1m47.5k\x1b[22m")
+    // Live numerator is NOT inside a faintWhite wrap.
+    expect(live).not.toContain("\x1b[2;37m47.5k")
+    // Cold trailing `0` IS dim (the session label `·` and the trailing
+    // count both use c.dim — just dim, no white-fg modifier).
+    expect(cold).toContain("\x1b[2m0\x1b[22m")
+  })
+
+  it("renders no `·` (middle-dot) on the quota segments — single-space + dim color is enough", () => {
+    // Regression guard for the quota segments: `·` used to sit before
+    // the reset countdown ("21% · 1h30m") and was retired. The session
+    // segment intentionally uses `·` as its left label, so this guard
+    // is scoped to a `showSession: false` render.
+    const now = 1_700_000_000_000
+    const rl = new Map([
+      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+      [
+        "anthropic-ratelimit-unified-5h-reset",
+        String(Math.floor((now + 90 * 60_000) / 1000)),
+      ],
+      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      [
+        "anthropic-ratelimit-unified-7d-reset",
+        String(Math.floor((now + 6 * 86400_000) / 1000)),
+      ],
+    ])
+    const out = stripAnsi(
+      renderQuotaFooter(rl, SOME_TOKENS, { now: () => now, showSession: false }),
+    )
+    expect(out).not.toContain("·")
+  })
+
+  it("uses `·` as the session label (LEFT slot, minimalist marker)", () => {
+    // Counterpart to the prior test: the session segment intentionally
+    // uses `·` in the same slot where 5h/7d sit. The placeholder in
+    // manifest.json mirrors this shape.
+    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const out = stripAnsi(renderQuotaFooter(rl, SOME_TOKENS))
+    // `·` precedes the session bar (after the 4-space group separator).
+    expect(out).toMatch(/ {4}· [█▏▎▍▌▋▊▉░]{8}/)
   })
 
   it("honors contextWindow opt (1M model context → smaller fill % for the same tokens)", () => {
@@ -229,19 +300,24 @@ describe("renderQuotaFooter", () => {
     )
 
     // Wide: everything visible, including the session bar.
-    expect(wide).toContain("✦")
-    expect(wide).toContain("ctx")
+    expect(wide).not.toContain("✦")
+    expect(wide).not.toContain("/") // no slash anywhere
+    expect(wide).not.toContain("200k") // window MAX is NOT a label
+    expect(wide).toContain("·") // session label (LEFT slot)
+    expect(wide).toContain("47.5k") // used count (trailing)
     expect(wide).toContain("24%") // session bar percent
     expect(wide).toContain("7d")
     expect(wide).toContain("1h30m")
+    // No trailing `ctx` word.
+    expect(wide).not.toMatch(/ ctx\b/)
 
     // Tight: only the 5h bar.
     expect(tight).toContain("5h")
     expect(tight).not.toContain("7d")
-    expect(tight).not.toContain("✦")
+    expect(tight).not.toContain("47.5k")
   })
 
-  it("drops the session bar but keeps `✦ N ctx` at medium widths", () => {
+  it("drops the session bar but keeps the trailing count at medium widths", () => {
     const now = 1_700_000_000_000
     const rl = new Map([
       ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
@@ -254,11 +330,14 @@ describe("renderQuotaFooter", () => {
     expect(mid.length).toBeLessThanOrEqual(55 + 1)
     expect(mid).toContain("5h")
     expect(mid).toContain("7d")
-    expect(mid).toContain("✦")
-    expect(mid).toContain("ctx")
-    // The session bar's `24%` should be gone (bar dropped); the quota bars
-    // still keep their own percents.
+    expect(mid).not.toContain("✦")
+    // Bar-dropped session segment is JUST the live count — the `·`
+    // label loses its purpose without the bar's "fraction of this"
+    // reading, and the percent is also gone with the bar.
     expect(mid).toContain("47.5k")
+    expect(mid).not.toContain("200k") // no window MAX anywhere
+    expect(mid).not.toContain("24%") // session percent dropped with the bar
+    expect(mid).not.toContain("/") // no slash anywhere
   })
 
   it("fmtTokens rounds .0 cleanly (e.g. 1000 → '1k', not '1.0k')", () => {
@@ -290,8 +369,8 @@ describe("renderQuotaFooter", () => {
     const out = stripAnsi(
       renderQuotaFooter(rl, NO_TOKENS, { now: () => now, showSession: false }),
     )
-    // No countdown word should appear — bar + pct + label only.
-    expect(out).toMatch(/[█▏▎▍▌▋▊▉░]{8} 10% 5h$/)
+    // A2: no countdown clause — `<name> <bar> <pct>` with nothing trailing.
+    expect(out).toMatch(/5h [█▏▎▍▌▋▊▉░]{8} 10%$/)
   })
 
   it("respects showSession: false (suppresses the block even with traffic)", () => {
@@ -300,6 +379,9 @@ describe("renderQuotaFooter", () => {
       renderQuotaFooter(rl, SOME_TOKENS, { showSession: false }),
     )
     expect(out).not.toContain("✦")
-    expect(out).not.toContain("ctx")
+    // The live count `47.5k` is the unambiguous session marker. Its
+    // absence confirms the block was suppressed. (The `·` label alone
+    // wouldn't be a reliable absence-check — it could appear anywhere.)
+    expect(out).not.toContain("47.5k")
   })
 })

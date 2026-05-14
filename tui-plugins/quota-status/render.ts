@@ -3,22 +3,40 @@
  *
  * Visual (term width permitting):
  *
- *   █▌░░░░░░ 21% 5h 4h32m    ░░░░░░░░  8% 7d 6d11h    ✦ ▎░░░░░░░ 24% 47.5k ctx
+ *   5h █▌░░░░░░ 21% 4h32m    7d ░░░░░░░░ 8% 6d11h    · ▎░░░░░░░ 24% 232.4k
  *
- * Design rules:
+ * Design rules (A2 layout — May 2026):
  *   - No leading "quota" word — the bar is the visual cue.
- *   - 8-cell bar with fractional fill (1/8th eighth-block ramp) for sub-cell precision.
+ *   - 8-cell bar with fractional fill (1/8th eighth-block ramp) for sub-cell
+ *     precision.
  *   - Bar fill colour-graded by severity (green <60%, yellow 60-84%, red ≥85%).
- *   - Reset time appears as a dim trailing word, no `↻` icon.
- *   - Session block on the right: sky-blue ✦ accent, then the SAME bar style
- *     showing `contextSize / contextWindow` (latest turn's input footprint
- *     vs. the model's context limit), then bold token count + dim `ctx`.
- *     The cumulative-sum approach (previous behavior) over-counted cached
- *     prefixes by ~N× since the same prefix is re-read every turn.
+ *   - **Window name is a LEFT label**, not a trailing word. Promotes the name
+ *     from grammatically-a-duration (next to the reset countdown, which is
+ *     itself a duration) to grammatically-a-title (anchoring the segment).
+ *     Pre-A2 the trailing pair `<pct> <name> <reset>` (e.g. "88% 5h 14m")
+ *     was ambiguous to the eye — `5h` and `14m` are visually identical.
+ *   - Reset countdown follows the bar+pct as a dim trailing duration.
+ *     No `·` separator — dim color + single-space gap is enough
+ *     disambiguation, and it saves two cells per segment. No `↻` icon
+ *     either (heavier than the values it joins).
+ *   - Session block on the right: shares the same skeleton as a quota
+ *     segment — `<label> <bar> <pct> <meta>`. The label is a dim
+ *     middle-dot `·` — minimalist marker that matches the manifest
+ *     placeholder's session slot and stays out of the way of the quota
+ *     labels. The bar shows `contextSize / contextWindow`. The trailing
+ *     meta is the live count: bold when contextSize > 0 ("this is your
+ *     current usage"), dim when 0 (pre-traffic shape stays quiet,
+ *     parallel to `5h`/`7d`). Earlier iterations used `✦` (sparkle,
+ *     sky-blue — clashed with dim quota labels) and then the model's
+ *     context window (`1M`/`200k`, faint-white — noisy, the magnitude
+ *     is already implicit in the trailing count). The cumulative-sum
+ *     approach (pre-May 2026) over-counted cached prefixes by ~N× since
+ *     the same prefix is re-read every turn; `contextSize` is the
+ *     latest-turn value, not a sum.
  *   - Session block ALWAYS renders when `showSession` is on, even at 0 tokens.
- *     Pre-traffic users see `✦ ░░░░░░░░ 0% 0 ctx` — the bar acts as a
+ *     Pre-traffic users see `· ░░░░░░░░ 0% 0` — the bar acts as a
  *     "this is your context budget" signpost from the very first paint.
- *   - 4-space group separator between distinct windows.
+ *   - 4-space group separator between distinct segments.
  *   - "overage" hidden by default (set MINIMAL_AGENT_QUOTA_OVERAGE=1 to surface).
  *   - Responsive degradation: drop tail segments when the result would overflow `cols`.
  *
@@ -119,7 +137,14 @@ const colorPctBold = (pct: number) =>
 function renderWindowSegment(w: ParsedWindow, now: number, withReset: boolean): string {
   const pct = Math.round((w.util ?? 0) * 100)
   const { full, empty } = bar(pct)
-  let s = `${colorBar(pct)(full)}${c.dim(empty)} ${colorPctBold(pct)(`${pct}%`)} ${c.faintWhite(w.name)}`
+  // Layout: `<name> <bar> <pct> <reset>`.
+  // The window name is a LEFT label (grammatically a title) — distinct
+  // visual role from the trailing reset countdown (grammatically a
+  // duration). Pre-A2 the two sat side-by-side at the right ("88% 5h 14m")
+  // and were indistinguishable to the eye since both look like durations.
+  // Promoting `name` to the front fixes that without extra ink. No `·`
+  // separator before the reset: dim color + single-space gap is enough.
+  let s = `${c.faintWhite(w.name)} ${colorBar(pct)(full)}${c.dim(empty)} ${colorPctBold(pct)(`${pct}%`)}`
   if (withReset && w.reset) {
     const human = humanReset(w.reset, now)
     if (human) s += ` ${c.dim(human)}`
@@ -133,8 +158,20 @@ function renderWindowSegment(w: ParsedWindow, now: number, withReset: boolean): 
 /**
  * Build the session block.
  *
- * `withBar=true` →   `✦ ▎░░░░░░░ 24% 47.5k ctx`
- * `withBar=false` →  `✦ 47.5k ctx`
+ * `withBar=true` →   `· ▎░░░░░░░ 24% 232.4k`
+ * `withBar=false` →  `232.4k`
+ *
+ * Structurally identical to {@link renderWindowSegment}: same skeleton
+ * `<label> <bar> <pct> <meta>`. Here label is a dim middle-dot `·`
+ * (minimalist marker, matches the manifest placeholder's session slot),
+ * and the meta slot holds the live count instead of a reset countdown.
+ * Count is bold when contextSize > 0, dim when 0 (parallel to the quiet
+ * pre-traffic shape on the quota windows).
+ *
+ * Earlier iterations used `✦` (sparkle, sky-blue) or the model's window
+ * MAX (`200k`/`1M`, faint-white) — both were retired. The sparkle had no
+ * semantic content and clashed with the dim quota labels; the window-MAX
+ * label was noisy and the trailing count already conveys the magnitude.
  *
  * Percentage is `contextSize / contextWindow`, capped at 100 (overflows are
  * clamped — the renderer can't predict a model's hard error threshold).
@@ -146,21 +183,33 @@ function renderSessionSegment(
   contextWindow: number,
   withBar: boolean,
 ): string {
-  const tokenStr = `${c.bold(fmtTokens(s.contextSize))} ${c.dim("ctx")}`
-  if (!withBar) return `${c.sky("✦")} ${tokenStr}`
+  const usedStr = fmtTokens(s.contextSize)
+  // Live count pops at bold weight once contextSize > 0 ("this is your
+  // current usage"); dims when 0 to keep the pre-traffic shape quiet.
+  const used = s.contextSize > 0 ? c.bold(usedStr) : c.dim(usedStr)
+  // Bar-dropped form: the dot label alone doesn't earn its space.
+  // Show only the count.
+  if (!withBar) return used
 
   const pct = Math.max(
     0,
     Math.min(100, Math.round((s.contextSize / contextWindow) * 100)),
   )
   const { full, empty } = bar(pct)
-  // Same shape as renderWindowSegment, just with ✦ instead of a "5h"/"7d" name
-  // and tokens instead of a reset countdown.
+  // Shape: <·> <bar> <pct> <used> — structurally identical to the quota
+  // segments (label + bar + pct + dim trailing). The dim middle-dot
+  // marks the session slot without competing for ink with the quota
+  // labels. (Concat over template literals is deliberate — minimises
+  // Edit-tool backtick collisions on future tweaks; see project memory.)
   return (
-    `${c.sky("✦")} ` +
-    `${colorBar(pct)(full)}${c.dim(empty)} ` +
-    `${colorPctBold(pct)(`${pct}%`)} ` +
-    tokenStr
+    c.dim("·") +
+    " " +
+    colorBar(pct)(full) +
+    c.dim(empty) +
+    " " +
+    colorPctBold(pct)(pct + "%") +
+    " " +
+    used
   )
 }
 
