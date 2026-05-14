@@ -140,6 +140,14 @@ type StatusEntry = {
 }
 
 export interface StatusSnapshot {
+  /**
+   * Stable identity of the underlying entry. Increments on every
+   * `StatusBus.create()`. Renderers use this to detect "new entry"
+   * vs "label updated on same entry" -- needed for the per-status
+   * elapsed timer, which must reset on (new tool / new request)
+   * but persist across phase transitions on the same handle.
+   */
+  id: number
   label: string
   notificationId?: string
   category?: string
@@ -149,6 +157,45 @@ export interface StatusSnapshot {
 
 function dim(text: string): string {
   return `\x1b[2m${text}\x1b[22m`
+}
+
+/**
+ * Compact "wall-clock elapsed" formatter for status-row suffixes.
+ *
+ * Ladder:
+ *   - `< 60s`              -> `"<n>s"`              (e.g. `"2s"`)
+ *   - `60s..3599s`         -> `"<m>m <s>s"`         (e.g. `"1m 2s"`)
+ *   - `>= 3600s`           -> `"<h>h <m>m"`         (e.g. `"1h 2m"` -- seconds dropped at hour scale)
+ *
+ * Negative inputs and `NaN` are clamped to `0` (returns `"0s"`).
+ */
+export function formatElapsed(ms: number): string {
+  const safe = Number.isFinite(ms) && ms > 0 ? ms : 0
+  const totalSec = Math.floor(safe / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const totalMin = Math.floor(totalSec / 60)
+  const sec = totalSec - totalMin * 60
+  if (totalMin < 60) return `${totalMin}m ${sec}s`
+  const hours = Math.floor(totalMin / 60)
+  const min = totalMin - hours * 60
+  return `${hours}h ${min}m`
+}
+
+/**
+ * Returns a renderable "elapsed" suffix for a status row, already
+ * wrapped in faint SGR codes (so the parens + digits visually fade
+ * relative to the label).
+ *
+ * Suppressed under 1 second to avoid flicker on fast operations that
+ * complete in <1s (the row would briefly flash `(0s)` and then clear).
+ *
+ * Includes the LEADING space, so callers concatenate
+ * unconditionally: `${label}${formatElapsedSuffix(ms)}` produces
+ * either `"Thinking"` or `"Thinking <faint>(2s)</faint>"`.
+ */
+export function formatElapsedSuffix(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 1000) return ""
+  return ` ${dim(`(${formatElapsed(ms)})`)}`
 }
 
 /**
@@ -238,6 +285,7 @@ export class StatusBus {
     const entry = this.entries.length > 0 ? this.entries[this.entries.length - 1] : null
     if (!entry) return null
     return {
+      id: entry.id,
       label: entry.label,
       notificationId: entry.notificationId,
       category: entry.category,
@@ -276,6 +324,7 @@ export class StatusRenderer {
   private readonly output: StatusOutput
   private readonly maxFps: number
   private readonly spinnerManager: SpinnerManager<StatusSpinnerTheme>
+  private readonly now: () => number
   private readonly gap = " "
   private baseSpinnerTheme: StatusSpinnerTheme
   private unsubscribe: (() => void) | null = null
@@ -284,6 +333,9 @@ export class StatusRenderer {
   private spinnerGlyph = ""
   private visible = false
   private suspended = false
+  /** See LiveAreaStatusController for the reset-on-id-change rationale. */
+  private statusId: number | null = null
+  private statusStartedAt = 0
 
   constructor(
     bus: StatusBus,
@@ -301,6 +353,7 @@ export class StatusRenderer {
 
     this.maxFps = normalized.maxFps ?? 12.5
     this.baseSpinnerTheme = normalized.spinnerTheme ?? {}
+    this.now = normalized.now ?? (() => Date.now())
     this.spinnerManager = new SpinnerManager<StatusSpinnerTheme>({
       spinner: normalized.spinner ?? new BlinkingNerdSpinner(),
       theme: this.baseSpinnerTheme,
@@ -325,6 +378,8 @@ export class StatusRenderer {
     }
     this.spinnerManager.unmount()
     this.clearLine()
+    this.statusId = null
+    this.statusStartedAt = 0
   }
 
   suspend(): void {
@@ -369,7 +424,17 @@ export class StatusRenderer {
       this.spinnerManager.unmount()
       this.stopTimer()
       if (!this.suspended) this.clearLine()
+      this.statusId = null
+      this.statusStartedAt = 0
       return
+    }
+
+    // Per-status elapsed timer: reset on entry-identity change (new
+    // `create()`), preserve across `update()`s on the same handle.
+    // See LiveAreaStatusController.onBusUpdate for the rationale.
+    if (status.id !== this.statusId) {
+      this.statusId = status.id
+      this.statusStartedAt = this.now()
     }
 
     this.spinnerManager.ensureMounted()
@@ -413,7 +478,13 @@ export class StatusRenderer {
   private renderLine(): void {
     if (!this.label) return
     const prefix = this.spinnerGlyph ? `${this.spinnerGlyph}${this.gap}` : ""
-    this.output.write(`\r\x1b[2K${prefix}${dim(this.label)}`)
+    // Append the faint elapsed suffix (e.g. " \x1b[2m(2s)\x1b[22m").
+    // Empty under 1s. The label is already dim in line-mode so the
+    // suffix blends in tonally, but it still gives a wall-clock signal
+    // for long-running operations.
+    const elapsedMs = this.statusStartedAt > 0 ? this.now() - this.statusStartedAt : 0
+    const suffix = formatElapsedSuffix(elapsedMs)
+    this.output.write(`\r\x1b[2K${prefix}${dim(this.label)}${suffix}`)
     this.visible = true
   }
 
