@@ -27,13 +27,13 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { configPath as userConfigPath } from "./config.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
-import { acquireLock, LockAbortedError, LockTimeoutError, type LockHandle } from "./file-lock.ts"
+import { acquireLock, LockAbortedError, type LockHandle, LockTimeoutError } from "./file-lock.ts"
 import { parseJsonc } from "./jsonc.ts"
 import { getSessionId } from "./metadata.ts"
-import { truncateToolOutput, type TruncateCtx, type TruncationInfo } from "./tools/truncation.ts"
+import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -679,9 +679,29 @@ async function execBash(
     // echoed, and Ctrl+C couldn't be handled. With `Bun.spawn` the agent
     // can keep painting the status bar and (eventually) honor a user-key
     // abort routed through `opts.signal`.
+    //
+    // We inject `COLUMNS`/`LINES` from the host's view of the controlling
+    // terminal so tools inside Bash (`tput cols`, `stty size` fallback,
+    // shell scripts that consult `$COLUMNS`) see real values instead of
+    // tput's hardcoded 80x24 last-resort fallback. Snapshot-at-spawn, not
+    // live : if the user resizes mid-command, `$COLUMNS` inside that bash
+    // does NOT update. Acceptable because bash commands are short-lived;
+    // mirrors the stance documented in `src/formatter.ts:buildEnv`.
+    // `TERM=dumb` is kept : it prevents subprocess tools from emitting
+    // ANSI escapes that would corrupt our tool-output rendering. Size
+    // belongs to env vars; capabilities belong to TERM.
+    const env: Record<string, string> = { ...process.env, TERM: "dumb" }
+    const stdoutCols = process.stdout.columns
+    const stdoutRows = process.stdout.rows
+    if (typeof stdoutCols === "number" && stdoutCols > 0) {
+      env.COLUMNS = String(Math.floor(stdoutCols))
+    }
+    if (typeof stdoutRows === "number" && stdoutRows > 0) {
+      env.LINES = String(Math.floor(stdoutRows))
+    }
     const proc = Bun.spawn(["bash", "-c", command], {
       cwd: bashCwd,
-      env: { ...process.env, TERM: "dumb" },
+      env,
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
