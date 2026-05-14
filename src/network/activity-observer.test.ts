@@ -1,9 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { StatusBus, type StatusActivity } from "../status.ts"
-import {
-  NetworkActivityObserver,
-  NetworkActivityTracker,
-} from "./activity-observer.ts"
+import { NetworkActivityObserver, NetworkActivityTracker } from "./activity-observer.ts"
 import { NetworkResponse, type NetworkRequest } from "./types.ts"
 
 function makeRequest(overrides: Partial<NetworkRequest> = {}): NetworkRequest {
@@ -275,10 +272,7 @@ describe("NetworkActivityObserver", () => {
     const obs = new NetworkActivityObserver()
     obs.attach("req-1", handle)
 
-    obs.onResponse(
-      makeRequest({ id: "req-1" }),
-      makeResponse({ protocol: undefined }),
-    )
+    obs.onResponse(makeRequest({ id: "req-1" }), makeResponse({ protocol: undefined }))
 
     const target = bus.currentStatus()?.activity?.target
     expect(target?.host).toBe("api.anthropic.com")

@@ -2047,10 +2047,46 @@ function clampToolPreviewBodyLine(line: string, maxWidth: number | undefined): s
 // (CSI `m`) sequences : we don't need to handle OSC / DCS / etc. here.
 const OUTER_FRAME_CLOSE_RE = /^ {0,2}(?:\x1b\[[\d;]*m)*╰/
 
+/**
+ * Detect whether a transcript line is the outermost-gutter `╰` closer of
+ * a tool block (as opposed to a body line that incidentally contains the
+ * `╰` glyph — e.g. tasks subtree connectors, Bash grep output, Edit diff
+ * bodies). Used by `runReplLiveArea`'s transcript sink to decide whether
+ * to emit the extra trailing `\n` that visually separates one tool block
+ * from the next.
+ *
+ * Strict anchor at `^`, ≤2 leading spaces (the outer gutter indent),
+ * optional SGR CSI sequences for color, then `╰`. NOT a substring match —
+ * see regression coverage in `src/agent.outer-frame-close.test.ts`.
+ */
 export function isOuterFrameClose(line: string): boolean {
   return OUTER_FRAME_CLOSE_RE.test(line)
 }
 
+/**
+ * Render a tool's result block for the transcript: the rows between
+ * `╭ <header>` (written separately by the caller) and the closing `╰`.
+ * Inserts the `│ ` gutter on each row, applies the per-tool body line
+ * budget (`TOOL_PREVIEW_LINES`), and appends a structured footer for
+ * truncation / line-count overflow when applicable.
+ *
+ * When `display` is provided AND `isError` is falsy, the pre-rendered
+ * ANSI string (Edit/Write diffs, plugin custom payloads) is emitted
+ * verbatim without truncation — diffs and structured renders are the
+ * point of the override channel.
+ *
+ * @param content   Raw tool output (model-facing payload); may carry a
+ *                  trailing `[truncated: ...]` notice which is stripped
+ *                  before display (the human-facing footer carries the
+ *                  same facts in compact form).
+ * @param isError   When true, render bias toward visibility (no display
+ *                  override, no overflow trim).
+ * @param display   Optional pre-rendered ANSI payload to use instead of
+ *                  the truncated `content`.
+ * @param opts      `tool` (line budget), `info` (truncation facts for
+ *                  the footer), `footer` (display-mode footer override),
+ *                  `cols` (per-line clamp width).
+ */
 export function formatToolPreview(
   content: string,
   isError?: boolean,

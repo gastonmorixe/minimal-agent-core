@@ -378,9 +378,9 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
       break
     case "list":
       if (stats.total === 0) {
-        middle = `${color(ansi, `${ANSI.DIM}\x1b[3m`, "no tasks")}`
+        middle = color(ansi, `${ANSI.DIM}\x1b[3m`, "no tasks")
       } else {
-        middle = `${color(ansi, ANSI.LGRAY, `${stats.total} task${stats.total === 1 ? "" : "s"}`)}`
+        middle = color(ansi, ANSI.LGRAY, `${stats.total} task${stats.total === 1 ? "" : "s"}`)
       }
       break
   }
@@ -441,27 +441,33 @@ function styleNumCol(v: View, ansi: boolean, targeted: boolean): string {
     // removed row's number col would look like "still alive".
     return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
   }
-  if (targeted) {
-    switch (v.task.status) {
-      case "done":
-        return color(ansi, `${ANSI.LIME}${ANSI.BOLD}${ANSI.STRIKE}`, numStr)
-      case "doing":
-        return color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, numStr)
-      case "todo":
-        return color(ansi, ANSI.BOLD, numStr)
-      case "canceled":
-        return color(ansi, `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}`, numStr)
-    }
-  }
+  // Single switch with `targeted` selecting between the two palettes.
+  // Collapsing the prior two-switch form also closes a latent
+  // fall-through bug: a `targeted` row with a hypothetical new status
+  // variant would have silently picked up the non-targeted palette
+  // from the second switch instead of erroring at the exhaustive default.
   switch (v.task.status) {
     case "done":
-      return color(ansi, ANSI.DIM, numStr)
+      return targeted
+        ? color(ansi, `${ANSI.LIME}${ANSI.BOLD}${ANSI.STRIKE}`, numStr)
+        : color(ansi, ANSI.DIM, numStr)
     case "doing":
-      return color(ansi, ANSI.BOLD, numStr)
+      return targeted
+        ? color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, numStr)
+        : color(ansi, ANSI.BOLD, numStr)
     case "todo":
-      return color(ansi, ANSI.LGRAY, numStr)
+      return targeted ? color(ansi, ANSI.BOLD, numStr) : color(ansi, ANSI.LGRAY, numStr)
     case "canceled":
-      return color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
+      return targeted
+        ? color(ansi, `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}`, numStr)
+        : color(ansi, `${ANSI.DIM}${ANSI.STRIKE}`, numStr)
+    default: {
+      // Closed-union exhaustiveness check; mirrors the pattern in
+      // `statusGlyph` above. Adding a new TaskStatus variant will
+      // trigger a type error here.
+      const _exhaustive: never = v.task.status
+      throw new Error(`unhandled status: ${String(_exhaustive)}`)
+    }
   }
 }
 

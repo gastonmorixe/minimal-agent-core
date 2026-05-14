@@ -306,14 +306,10 @@ export function computeCursorVisualPos(
   // `cursorVisualCol` (from term-width.ts) park the exact-fill cursor at
   // the end of the current row; we follow the same convention so the
   // visual position we return matches what the user sees.
-  const visualRow =
-    totalCells <= 0
-      ? 0
-      : Math.floor(Math.max(0, totalCells - 1) / cols)
+  const visualRow = totalCells <= 0 ? 0 : Math.floor(Math.max(0, totalCells - 1) / cols)
   const mod = totalCells === 0 ? 0 : totalCells % cols
   const visualCol = mod === 0 && totalCells > 0 ? cols : mod
-  const rowsInLine =
-    lineWidth <= 0 ? 1 : Math.max(1, Math.ceil(lineWidth / cols))
+  const rowsInLine = lineWidth <= 0 ? 1 : Math.max(1, Math.ceil(lineWidth / cols))
   return { visualRow, visualCol, rowsInLine }
 }
 
