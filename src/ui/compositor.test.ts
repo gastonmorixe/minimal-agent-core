@@ -432,7 +432,24 @@ describe("Compositor (DECSET 2026 synchronized output)", () => {
 })
 
 describe("Compositor (notifyResize)", () => {
-  it("on TTY emits \\x1b[H\\x1b[J (full viewport wipe) and zeroes counters", () => {
+  it("emits NOTHING — no clears, no \\r\\n, no cursor moves", () => {
+    // HARD RULE locked in May 14 2026 after a long bug-fix loop (sessions
+    // b50c7354, fc196c6e). Three failure modes were ruled out:
+    //   (a) `\x1b[H\x1b[J` — destroys ~20 rows of scrollback on iTerm
+    //       every resize (iTerm drops `\x1b[J` cells from history).
+    //   (b) `\r\n` + reset counters — pushes old live area into
+    //       scrollback as a ghost row PER resize / drift event; under
+    //       cols oscillation (8fps spinner ticks + flapping
+    //       process.stdout.columns) this stacks 6+ `❯` rows.
+    //   (c) Resetting counters without emit — drops walk-up math, next
+    //       draw starts at current cursor (end of editor row),
+    //       overstrikes old `❯` → "❯ ❯".
+    // The fix: emit NOTHING on resize, KEEP the counters. The next
+    // `setLiveArea` (which `editor.notifyResize()` triggers synchronously)
+    // runs the normal `eraseLiveSeq` walk-up + `drawLiveSeq` per-row
+    // `\x1b[K` overwrite, covering the old live area in place. Counters
+    // may be ±1 row stale under cols-change reflow; that residue is
+    // bounded and self-heals on the next paint.
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output })
     c.mount()
@@ -441,67 +458,76 @@ describe("Compositor (notifyResize)", () => {
     cap.writes.length = 0
     c.notifyResize()
     const out = joined(cap)
-    // Full viewport wipe: home then erase-to-end-of-screen. No
-    // LF-preamble (those attempts duplicated the live area into
-    // scrollback whenever the live area wasn't sticky-to-bottom).
-    expect(out).toContain("\x1b[H\x1b[J")
-    expect(out).not.toContain("\n".repeat(cap.output.rows))
-    // Counters reset so the next setLiveArea won't issue a stale
-    // relative-up sequence (which would land mid-reflow and leave debris).
-    expect(c.liveHeight).toBe(0)
+    expect(out).toBe("")
+    // Counters preserved (they are our best estimate of the live area
+    // location post-reflow; the next paint uses them for the walk-up).
+    expect(c.liveHeight).toBe(2)
   })
 
-  it("does NOT duplicate the live area into scrollback (the 5b36689 / 4e7c0fd bug)", () => {
-    // Regression guard for the "every resize commits the status row
-    // + editor + footer to scrollback" bug. 5b36689 emitted `\n × rows`
-    // (full viewport scroll). 4e7c0fd narrowed it to `\n × (rows - live)`
-    // but that assumed live area was sticky-to-bottom. When it wasn't,
-    // LFs still pushed live-area content into history. Bare `\x1b[H\x1b[J`
-    // is the only approach that reliably avoids this.
-    //
-    // Drive a real Compositor through FakeTerminal: paint a distinctive
-    // live area, stream some content (so the live area is NOT at the
-    // viewport bottom), resize 3 times. Assert the distinctive prompt
-    // appears AT MOST ONCE in scrollback: there's no per-resize copy.
+  it("preserves all pre-resize scrollback byte-for-byte (the iTerm-destroys-history bug)", () => {
+    // FakeTerminal mirrors iTerm semantics: `\x1b[J`-erased cells are
+    // dropped from history. Stream lines must survive every resize.
+    // (Use \r\n so FakeTerminal treats LF as a true line break with CR.)
     const term = new FakeTerminal({ cols: 60, rows: 12, scrollbackLimit: 200 })
     const c = new Compositor({ output: makeTermOutput(term) })
     c.mount()
+    for (let i = 1; i <= 15; i++) c.writeStream(`STREAM_LINE_${i}\r\n`)
     c.setLiveArea(["STATUS_FOO", "", "❯ DISTINCT_PROMPT"], { row: 2, col: 18 })
-    for (let i = 1; i <= 5; i++) c.writeStream(`STREAM_LINE_${i}\n`)
-    // Repaint with same content: content-dedup short-circuits.
-    c.setLiveArea(["STATUS_FOO", "", "❯ DISTINCT_PROMPT"], { row: 2, col: 18 })
-    // Three resize events.
     c.notifyResize()
     c.setLiveArea(["STATUS_FOO", "", "❯ DISTINCT_PROMPT"], { row: 2, col: 18 })
     c.notifyResize()
     c.setLiveArea(["STATUS_FOO", "", "❯ DISTINCT_PROMPT"], { row: 2, col: 18 })
     c.notifyResize()
     c.setLiveArea(["STATUS_FOO", "", "❯ DISTINCT_PROMPT"], { row: 2, col: 18 })
-    // Count occurrences in scrollback + screen combined. The CURRENT
-    // live area lives in screen, so DISTINCT_PROMPT may appear ONCE
-    // there. It must NEVER appear in scrollback (no historical copies).
-    const scrollbackText = term.scrollback.join("\n")
-    expect(scrollbackText).not.toContain("DISTINCT_PROMPT")
-    expect(scrollbackText).not.toContain("STATUS_FOO")
+    // Strip all whitespace to be robust against terminal wrap quirks.
+    const all = (term.scrollback.join("\n") + "\n" + term.screen().join("\n")).replace(/\s+/g, "")
+    for (let i = 1; i <= 15; i++) {
+      expect(all).toContain(`STREAM_LINE_${i}`)
+    }
   })
 
-  it("the next setLiveArea after a resize emits no \\x1b[nA up-moves (clean repaint)", () => {
+  it("does NOT accumulate stacked ghost editor rows across many resizes", () => {
+    // Regression for the 6-stacked-`❯` bug (user-reported May 14 2026,
+    // session fc196c6e): when notifyResize emitted `\r\n`, every drift
+    // event pushed one editor row into scrollback. With the no-emit
+    // invariant on notifyResize/maybeRecoverFromColsDrift, scrollback
+    // growth is bounded by stream content only — the live area is
+    // redrawn IN PLACE on the next setLiveArea via eraseLiveSeq's
+    // walk-up + `\x1b[J` (which only erases owned cells).
+    const term = new FakeTerminal({ cols: 80, rows: 10, scrollbackLimit: 500 })
+    const c = new Compositor({ output: makeTermOutput(term) })
+    c.mount()
+    c.writeStream("PRE_RESIZE_CONTENT_X\n")
+    c.setLiveArea(["", "❯ DISTINCT"], { row: 1, col: 10 })
+    // 10 simulated resize+repaint cycles.
+    for (let i = 0; i < 10; i++) {
+      c.notifyResize()
+      c.setLiveArea(["", "❯ DISTINCT"], { row: 1, col: 10 })
+    }
+    const scrollbackText = term.scrollback.join("\n")
+    // DISTINCT must never appear in scrollback — it's the current live
+    // area, lives in `screen` only.
+    const distinctOccurrencesInScrollback = scrollbackText.split("DISTINCT").length - 1
+    expect(distinctOccurrencesInScrollback).toBe(0)
+  })
+
+  it("the next setLiveArea after a resize redraws the live area in place", () => {
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output })
     c.mount()
     c.setLiveArea(["status", "❯ "], { row: 1, col: 2 })
     c.notifyResize()
     cap.writes.length = 0
-    c.setLiveArea(["status", "❯ "], { row: 1, col: 2 })
+    // Different content so the drawnLiveKey dedup doesn't short-circuit.
+    c.setLiveArea(["status changed", "❯ x"], { row: 1, col: 3 })
     const out = joined(cap)
-    // No relative up-moves should appear in this paint — the resize
-    // preserved scrollback and pre-positioned the cursor, so the live
-    // area redraws straight from the cursor without trying to step over
-    // a stale OLD live area.
-    expect(out).not.toMatch(/\x1b\[\d*A/)
-    // It DID draw the new content.
-    expect(out).toContain("status")
-    expect(out).toContain("❯ ")
+    expect(out).toContain("status changed")
+    expect(out).toContain("❯ x")
+    // No \x1b[H (cursor-home) on resize-driven repaints. \x1b[J is
+    // OK here — it's eraseLiveSeq's owned-region erase, which is the
+    // load-bearing in-place clear.
+    expect(out).not.toContain("\x1b[H\x1b[J")
+    expect(out).not.toContain("\x1b[2J")
   })
 
   it("is a no-op on non-TTY", () => {
@@ -515,38 +541,17 @@ describe("Compositor (notifyResize)", () => {
   it("is a no-op when not mounted", () => {
     const cap = makeOutput()
     const c = new Compositor({ output: cap.output })
-    // No mount() — should be silent.
     c.notifyResize()
     expect(cap.writes).toEqual([])
-  })
-
-  it("wraps the wipe in BSU/ESU when synchronized output is enabled", () => {
-    const cap = makeOutput()
-    const c = new Compositor({ output: cap.output, syncOutput: true })
-    c.mount()
-    c.setLiveArea(["❯ "], { row: 0, col: 2 })
-    cap.writes.length = 0
-    c.notifyResize()
-    const out = joined(cap)
-    // BSU then ESU around the wipe, atomic on supporting terminals.
-    const bsu = "\x1b[?2026h"
-    const esu = "\x1b[?2026l"
-    expect(out.indexOf(bsu)).toBeGreaterThanOrEqual(0)
-    expect(out.indexOf(esu)).toBeGreaterThan(out.indexOf(bsu))
-    expect(out).toContain("\x1b[H\x1b[J")
   })
 })
 
 describe("Compositor (cols-drift recovery)", () => {
-  it("setLiveArea after a silent cols change emits the resize wipe before redraw", () => {
-    // Reproduces the bug observed in user session 9d832ab0-…:
-    //   process.stdout.columns oscillated between 131 and 127 mid-session
-    //   without a SIGWINCH-driven notifyResize(). The compositor's
-    //   `cursorRowInLive` was measured under the old width, so the next
-    //   eraseLiveSeq's `\x1b[<n>A` undershot (content emitted under the
-    //   old width may have wrapped under the new width). The stale top
-    //   of the live area then scrolled into scrollback on every repaint,
-    //   producing dozens of duplicate "ASK ❯ ─── ^ N more lines" rows.
+  it("setLiveArea after a silent cols change does NOT emit \\x1b[H or \\x1b[H\\x1b[J", () => {
+    // Cols-drift recovery is a true no-op (no \r\n, no \x1b[J, no
+    // \x1b[H). The subsequent eraseLiveSeq+drawLiveSeq path runs as
+    // usual; eraseLiveSeq's \x1b[J is fine because the walk-up keeps
+    // the cursor inside our owned region.
     const cap = makeOutput()
     cap.output.columns = 131
     const c = new Compositor({ output: cap.output })
@@ -554,23 +559,16 @@ describe("Compositor (cols-drift recovery)", () => {
     c.setLiveArea(["❯ hello"], { row: 0, col: 7 })
     expect(c.liveHeight).toBe(1)
     cap.writes.length = 0
-    // Terminal got narrower without our SIGWINCH path firing.
     cap.output.columns = 127
     c.setLiveArea(["❯ hello"], { row: 0, col: 7 })
     const out = joined(cap)
-    // The full-viewport wipe MUST appear before the redraw, otherwise
-    // any stale wrapped content above the live area survives and gets
-    // pushed into scrollback by the next write.
-    const wipeIdx = out.indexOf("\x1b[H\x1b[J")
-    expect(wipeIdx).toBeGreaterThanOrEqual(0)
-    // And after recovery the immediate redraw must NOT issue a relative
-    // up-move (counters were zeroed, so nothing to step over).
-    const afterWipe = out.slice(wipeIdx + "\x1b[H\x1b[J".length)
-    expect(afterWipe).not.toMatch(/\x1b\[\d*A/)
-    expect(afterWipe).toContain("❯ hello")
+    // Cursor-home never appears.
+    expect(out).not.toContain("\x1b[H")
+    expect(out).not.toContain("\x1b[2J")
+    expect(out).toContain("❯ hello")
   })
 
-  it("setLiveArea is a no-op (no extra wipe) when cols hasn't changed", () => {
+  it("setLiveArea steady-state repaint emits eraseLiveSeq's \\x1b[J (in-place erase)", () => {
     const cap = makeOutput()
     cap.output.columns = 127
     const c = new Compositor({ output: cap.output })
@@ -579,8 +577,11 @@ describe("Compositor (cols-drift recovery)", () => {
     cap.writes.length = 0
     c.setLiveArea(["❯ b"], { row: 0, col: 3 })
     const out = joined(cap)
-    // No full wipe — this is the steady-state repaint path.
-    expect(out).not.toContain("\x1b[H\x1b[J")
+    // No cursor-home (HARD RULE).
+    expect(out).not.toContain("\x1b[H")
+    expect(out).not.toContain("\x1b[2J")
+    // The in-place erase IS allowed (cursor is in our owned region).
+    expect(out).toContain("\x1b[J")
     expect(out).toContain("❯ b")
   })
 
@@ -612,10 +613,7 @@ describe("Compositor (cols-drift recovery)", () => {
     expect(out).toContain("  Thinking")
   })
 
-  it("writeStream after a silent cols change also wipes before appending", () => {
-    // Same failure mode at the scrollback seam: a chunk written while
-    // the stale live area is still on screen would push the wrapped-but-
-    // uncounted top rows into permanent scrollback.
+  it("writeStream after a silent cols change does NOT emit \\x1b[H", () => {
     const cap = makeOutput()
     cap.output.columns = 131
     const c = new Compositor({ output: cap.output })
@@ -625,7 +623,8 @@ describe("Compositor (cols-drift recovery)", () => {
     cap.output.columns = 80
     c.writeStream("response chunk\n")
     const out = joined(cap)
-    expect(out).toContain("\x1b[H\x1b[J")
+    expect(out).not.toContain("\x1b[H")
+    expect(out).not.toContain("\x1b[2J")
     expect(out).toContain("response chunk")
   })
 
@@ -637,9 +636,52 @@ describe("Compositor (cols-drift recovery)", () => {
     cap.writes.length = 0
     c.setLiveArea(["❯ "], { row: 0, col: 2 })
     const out = joined(cap)
-    // No prior draw → nothing to recover from.
+    // No prior draw → nothing to recover from. No clear sequences ever.
     expect(out).not.toContain("\x1b[H\x1b[J")
+    expect(out).not.toContain("\x1b[J")
+    expect(out).not.toContain("\x1b[H")
     expect(out).toContain("❯ ")
+  })
+})
+
+describe("Compositor (HARD RULE: never touch scrollback on resize)", () => {
+  // Pinned May 14 2026 after sessions b50c7354 / fc196c6e. The HARD
+  // RULE applies to `notifyResize` and `maybeRecoverFromColsDrift`:
+  // those handlers must NEVER emit `\x1b[H` (cursor home), `\x1b[J`
+  // (erase-to-end-of-screen), `\x1b[2J` (erase-whole-screen), or even
+  // bare `\r\n`. Reasoning:
+  //   - `\x1b[H\x1b[J` destroys ~20 rows of scrollback on iTerm every
+  //     resize because iTerm drops erased cells from history.
+  //   - `\r\n` + reset counters pushes the old live area into
+  //     scrollback as a ghost row, accumulating under cols flapping
+  //     into 6+ stacked editor rows.
+  //   - Resetting counters drops walk-up math, causing the next draw
+  //     to overstrike the old editor (`❯ ❯` bug).
+  // The fix: handlers are TRUE no-ops. The subsequent setLiveArea
+  // uses the still-near-accurate counters for its eraseLiveSeq
+  // walk-up + `\x1b[J` (safe because cursor is in our owned region).
+  // The `\x1b[J` in eraseLiveSeq is NOT covered by the HARD RULE
+  // because the walk-up keeps the cursor inside our owned territory.
+  it("scrollback survives 5 sequential resizes byte-for-byte", () => {
+    const term = new FakeTerminal({ cols: 80, rows: 10, scrollbackLimit: 500 })
+    const c = new Compositor({ output: makeTermOutput(term) })
+    c.mount()
+    const markers: string[] = []
+    for (let i = 1; i <= 20; i++) {
+      const m = `HISTORY_${i}_xyz`
+      markers.push(m)
+      c.writeStream(`${m}\r\n`)
+    }
+    c.setLiveArea(["STATUS", "❯ typed"], { row: 1, col: 8 })
+    for (let i = 0; i < 5; i++) {
+      c.notifyResize()
+      c.setLiveArea(["STATUS", "❯ typed"], { row: 1, col: 8 })
+    }
+    // Whitespace-strip to be robust against terminal wrap quirks.
+    const all = (term.scrollback.join("\n") + "\n" + term.screen().join("\n")).replace(/\s+/g, "")
+    for (const m of markers) {
+      expect(all).toContain(m)
+    }
   })
 })
 

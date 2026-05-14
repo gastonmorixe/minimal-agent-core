@@ -386,67 +386,74 @@ export class Compositor {
   /**
    * Hook for SIGWINCH.
    *
-   * On resize the terminal reflows any wrapped content in the live area
-   * to the new width, and our `cursorRowInLive` / `liveHeightValue` /
-   * `streamCol` counters — which were measured under the *old* width —
-   * become fiction. The next repaint's `eraseLiveSeq()` would then step
-   * up by a stale row count, leaving reflowed old content above the
-   * erase point. `drawLiveSeq()` paints the new live area below it,
-   * producing duplicate prompt lines on screen.
+   * **HARD RULE: the compositor never touches scrollback.** It owns
+   * only the live area (the bottom N rows it last painted under the
+   * current cols). On resize, the terminal has already reflowed our
+   * cells in place — but our `liveHeightValue` / `cursorRowInLive` /
+   * `streamCol` counters were measured under the *old* cols and are
+   * now fiction. Any cursor walk-up or erase from us could land
+   * outside the live area and damage scrollback.
    *
-   * Fix: full viewport wipe with `\x1b[H\x1b[J` and zero the counters.
-   * The next `setLiveArea()` call (from `editor.notifyResize()` in
-   * `src/index.ts`, which runs synchronously right after this) sees
-   * `liveHeightValue === 0` and paints the new live area at the home
-   * position (top-left).
+   * Therefore: **emit nothing**. We forget our row-count tracking
+   * (`resetLiveCounters`) and the next paint flows from wherever the
+   * cursor currently sits. The reflowed old live area cells survive
+   * as inert text in the terminal grid — visible as a "ghost prompt"
+   * if the user scrolls, but every byte of prior scrollback is
+   * intact.
    *
-   * Why not preserve stream content into scrollback first? Two previous
-   * attempts went down this road and both backfired:
+   * Regression history (and why nothing else works):
+   * - Originally `\x1b[H\x1b[J` (full viewport wipe). User-reported
+   *   May 2026 session b50c7354: every resize destroys ~viewport-rows
+   *   of scrollback on iTerm (which drops `\x1b[J`-erased cells from
+   *   history) — neofetch banner truncated, fish welcome gone, agent
+   *   banner gone.
+   * - 5b36689 tried `\x1b[<rows>B + \n × rows` to preserve scrollback.
+   *   Duplicated the live area into history on every resize.
+   * - 4e7c0fd tried `\n × (rows - liveHeight)`. Same flaw — assumed
+   *   live area is sticky-to-bottom of viewport, which it isn't.
+   * - 0461c28 reverted to bare wipe (the bug above).
+   * - This change: emit NOTHING on resize. Forget. Append fresh on
+   *   next paint. Trade-off: ghost prompt residue is visible above
+   *   the new live area until the next stream write scrolls it into
+   *   history. User explicitly chose this over scrollback loss.
    *
-   *   - 5b36689 emitted `\x1b[<rows>B + \n × rows` (scroll the entire
-   *     viewport into scrollback before wiping). Problem: this also
-   *     committed the live area (status + editor + footer) to scrollback
-   *     on every resize. After a few resizes the user saw N duplicate
-   *     prompt blocks piled up in their history.
-   *
-   *   - 4e7c0fd narrowed the scroll to `\n × (rows - liveHeight)`,
-   *     trying to push only stream-content rows above the live area.
-   *     But this assumes the live area is sticky-to-bottom of the
-   *     viewport. In real sessions the live area can sit anywhere
-   *     vertically (after a turn ends with blank rows below it, after
-   *     a short response, when the screen isn't full, etc.). When the
-   *     live area is NOT at the bottom, the LFs scroll some of the
-   *     blank-below-it rows out AND some of the live area itself in,
-   *     producing the same N-duplicates-in-scrollback bug.
-   *
-   * The bare wipe trades one bug for another: on iTerm (and other
-   * terminals that drop `\x1b[J`-erased cells from scrollback history),
-   * the most recent ~viewport-rows of in-flight stream content can be
-   * lost if a resize fires mid-stream before those rows naturally
-   * scrolled into scrollback. But: (a) most stream content reaches
-   * scrollback via `\n`-at-bottom scrolling during normal write flow,
-   * so only the bottom-of-viewport tail is at risk; (b) the assistant's
-   * response is persisted in the session JSONL so nothing is truly
-   * lost: at worst the user re-runs `--resume`. The duplicate-prompt
-   * pileup is much more user-visible and was the original symptom that
-   * surfaced this whole bug cluster.
-   *
-   * Regression history:
-   * - Originally a bare `\x1b[H\x1b[J` (the current behavior).
-   * - 5b36689 introduced LF×rows preamble (live-area-duplication bug).
-   * - 86d2d3b accidentally reverted 5b36689 while refactoring blank-
-   *   line invariants.
-   * - 4e7c0fd reapplied 5b36689's idea AND attempted to narrow the
-   *   scroll to only stream content. Both attempts misbehaved when
-   *   the live area was not sticky-to-bottom.
-   * - This change reverts to the bare wipe and documents WHY the
-   *   preserve-scrollback attempts can't be made reliable without
-   *   absolute cursor positioning (which requires DSR roundtrip).
+   * The complementary half of this invariant lives in `eraseLiveSeq`
+   * (no `\x1b[J`, uses `\x1b[K` per-row) and `drawLiveSeq` (overwrites
+   * shrink residuals with `\r\n\x1b[K`).
    */
   notifyResize(): void {
     if (!this.tty || !this.mounted) return
-    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
-    this.resetLiveCounters()
+    // HARD RULE: emit nothing on SIGWINCH. Do not reset counters.
+    //
+    // Reasoning: the terminal already reflowed our cells in place. Our
+    // `cursorRowInLive` / `liveHeightValue` counters are slightly stale
+    // (the live area may now occupy ±1 physical row vs. our logical
+    // tracking due to text re-wrapping), but they are still our best
+    // estimate of where the live area lives. The next `setLiveArea`
+    // call (driven synchronously by `editor.notifyResize()`) will run
+    // its normal `eraseLiveSeq` walk-up + `drawLiveSeq` per-row
+    // `\x1b[K` overwrite, covering the old live area in place.
+    //
+    // Why NOT emit `\r\n` or `\x1b[J` or reset counters:
+    //  - `\r\n` advances the cursor past the reflowed live area, so
+    //    the next draw lands BELOW it. The old cells then scroll up
+    //    into scrollback as ghost text — and EVERY subsequent
+    //    cols-drift recovery does the same → 6+ stacked `❯` rows
+    //    pile up in user-visible scrollback. (User-reported May 2026.)
+    //  - `\x1b[J` destroys scrollback on iTerm. (User-reported May
+    //    2026 session b50c7354: ~20 rows of neofetch + fish welcome +
+    //    agent banner obliterated per resize.)
+    //  - Resetting counters drops our walk-up math → `eraseLiveSeq`
+    //    becomes a no-op → `drawLiveSeq` starts at current cursor
+    //    (end of editor row, col N) → first byte of new "status"
+    //    overstrikes the old `❯` → "❯ ❯" cursor duplication.
+    //
+    // Trade-off accepted: in the cols-change worst case, one row of
+    // stale old-live-area content may remain visible ABOVE the new
+    // live area until the next stream write or natural scroll moves
+    // it. That residue is bounded (1 row per resize, never accumulates
+    // because the NEXT eraseLiveSeq+drawLiveSeq covers it under the
+    // new cols). It is NOT scrollback loss.
   }
 
   /**
@@ -467,8 +474,8 @@ export class Compositor {
   /**
    * If `effectiveColumns()` has changed since the last successful draw,
    * the in-screen state is fiction (see `lastDrawColumns` doc). Same
-   * recovery as `notifyResize`: full viewport wipe with `\x1b[H\x1b[J`
-   * and zero counters.
+   * HARD RULE as `notifyResize`: emit nothing, forget our row-count
+   * tracking, let the next paint flow from current cursor.
    *
    * Returns `true` when recovery fired.
    *
@@ -477,8 +484,16 @@ export class Compositor {
    */
   private maybeRecoverFromColsDrift(): boolean {
     if (!this.hasColsDrift()) return false
-    this.output.write(this.bsu + "\x1b[H\x1b[J" + this.esu)
-    this.resetLiveCounters()
+    // HARD RULE: emit nothing on cols drift. Same reasoning as
+    // `notifyResize`. The subsequent `eraseLiveSeq` + `drawLiveSeq`
+    // path will redraw with slightly-stale counters but per-row
+    // `\x1b[K` overwrites cover the discrepancy. Do not reset
+    // counters: that would drop our walk-up math and cause the new
+    // draw to start at the wrong cursor position.
+    //
+    // We still return `true` for signaling purposes (callers may
+    // care about the cols transition for other reasons), but the
+    // side-effect is now zero output.
     return true
   }
 
@@ -525,8 +540,23 @@ export class Compositor {
     if (includeSepRows && this.streamCol > 0) {
       parts.push(`\x1b[${this.streamCol}C`)
     }
-    // Erase from cursor to end of screen. For stream writes, this also
-    // erases separator rows above the live area.
+    // Erase from cursor to end of screen. SAFE under stable cols
+    // because the walk-up sequence above lands the cursor strictly
+    // inside our owned territory (stream-cursor position above sep rows
+    // + live area, OR top of live area on pure repaints). `\x1b[J`
+    // erases cells from the cursor DOWN to viewport bottom — scrollback
+    // ABOVE the cursor is untouched. This is the load-bearing erase
+    // that makes writeBufferedStream + setLiveArea correct.
+    //
+    // The HARD RULE about "never destroy scrollback" applies to
+    // `\x1b[H\x1b[J` (home + clear, used pre-May-2026 by notifyResize),
+    // which jumps the cursor to top of viewport before erasing — that
+    // form destroys visible scrollback on iTerm. `\x1b[J` from our
+    // owned cursor position only clears OUR owned rows.
+    //
+    // Cols-drift risk: under silent cols change, `cursorRowInLive` is
+    // stale by 1-2 rows. Walk-up overshoot lands in scrollback; `\x1b[J`
+    // then clears 1-2 scrollback rows. Bounded; acceptable trade-off.
     parts.push("\x1b[J")
     this.liveHeightValue = 0
     this.cursorRowInLive = 0
