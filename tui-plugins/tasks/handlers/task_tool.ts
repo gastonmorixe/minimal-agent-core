@@ -32,8 +32,8 @@
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
 import { renderToolDisplay, type RenderAction } from "../lib/render.ts"
-import { TaskStore, TaskStoreError } from "../lib/store.ts"
-import { isTaskStatus, type TaskStatus } from "../lib/parse.ts"
+import { buildViews, TaskStore, TaskStoreError, type View } from "../lib/store.ts"
+import { isTaskStatus, type Task, type TaskStatus } from "../lib/parse.ts"
 
 // ---------------------------------------------------------------------------
 // Input validation
@@ -248,8 +248,13 @@ function renderResult(
   store: TaskStore,
   action: RenderAction,
   format: "text" | "json" = "text",
+  viewsOverride?: readonly View[],
 ): { content: string; display: string; displayHeader: string; displayFooter: string } {
-  const views = store.views()
+  // `viewsOverride` lets the handler inject augmented views (ghost rows
+  // for `remove`, diff overlays for `update`) so the user sees WHAT
+  // changed rather than only the post-state. Stats are always
+  // post-mutation — the overlay is purely visual residue.
+  const views = viewsOverride ?? store.views()
   const stats = store.stats()
   const displayParts = renderToolDisplay(views, stats, { ansi: true, action })
   const contentParts = renderToolDisplay(views, stats, { ansi: false, action })
@@ -285,8 +290,9 @@ function ok(
   store: TaskStore,
   action: RenderAction,
   format?: "text" | "json",
+  viewsOverride?: readonly View[],
 ): TUIResult {
-  const rendered = renderResult(store, action, format ?? "text")
+  const rendered = renderResult(store, action, format ?? "text", viewsOverride)
   return {
     kind: "tool_result",
     content: rendered.content,
@@ -294,6 +300,22 @@ function ok(
     displayHeader: rendered.displayHeader,
     displayFooter: rendered.displayFooter,
   }
+}
+
+/**
+ * Build views from the PRE-removal task list, with `ghost: "removed"`
+ * stamped on the rows that no longer exist post-mutation. The result
+ * has the deleted task(s) re-injected at their original position with
+ * the original numbering, so the renderer can show "row 3 was here, X'd
+ * out" rather than silently collapsing.
+ */
+function viewsWithGhostRemoved(
+  beforeTasks: readonly Task[],
+  removedIds: ReadonlySet<string>,
+): View[] {
+  return buildViews(beforeTasks).map((v) =>
+    removedIds.has(v.task.id) ? { ...v, ghost: "removed" as const } : v,
+  )
 }
 
 function err(message: string): TUIResult {
@@ -396,9 +418,23 @@ function doAddMany(store: TaskStore, input: ParsedInput): TUIResult {
 }
 
 function doUpdate(store: TaskStore, input: ParsedInput): TUIResult {
+  // Capture the old title BEFORE the mutation so the renderer can show
+  // `<old struck through>  →  <new>` inline instead of silently swapping
+  // the title.
+  const before = store.resolve(input.id!)
+  const oldTitle = before?.title ?? null
   const updated = store.update(input.id!, input.title!)
   if (updated === null) return err(`id "${input.id}" not found`)
-  return ok(store, { kind: "updated", hash: updated.id }, input.format)
+  const views = store.views()
+  // Skip the diff overlay when nothing actually changed (whitespace-only
+  // edit, or update to the same string) — showing `x  →  x` is noise.
+  const augmented: readonly View[] =
+    oldTitle !== null && oldTitle !== updated.title
+      ? views.map((v) =>
+          v.task.id === updated.id ? { ...v, diff: { oldTitle } } : v,
+        )
+      : views
+  return ok(store, { kind: "updated", hash: updated.id }, input.format, augmented)
 }
 
 function doStatus(store: TaskStore, input: ParsedInput): TUIResult {
@@ -448,10 +484,17 @@ function doDone(store: TaskStore, input: ParsedInput): TUIResult {
 }
 
 function doRemove(store: TaskStore, input: ParsedInput): TUIResult {
+  // Snapshot pre-mutation tasks so we can re-inject the just-removed
+  // task(s) as ghost rows in the rendered output. The user sees the
+  // tombstone (red ✘ + red strikethrough title) instead of a silent
+  // disappearance.
+  const beforeTasks = store.list()
   const target = store.resolve(input.id!)
   if (target === null) return err(`id "${input.id}" not found`)
-  store.remove(target.id)
-  return ok(store, { kind: "removed", hash: target.id }, input.format)
+  const removed = store.remove(target.id)
+  const removedIds = new Set(removed.map((t) => t.id))
+  const augmented = viewsWithGhostRemoved(beforeTasks, removedIds)
+  return ok(store, { kind: "removed", hash: target.id }, input.format, augmented)
 }
 
 function doReorder(store: TaskStore, input: ParsedInput): TUIResult {
