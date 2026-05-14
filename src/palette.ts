@@ -63,7 +63,14 @@ const MODERN = {
   /** Vivid spring green. Used as the modern "success / addition" green. */
   lime: "\x1b[38;5;118m",
   sky: "\x1b[38;5;45m",
-  violet: "\x1b[38;5;93m",
+  /**
+   * Lavender / vivid violet. Truecolor `rgb(180, 140, 255)` (#B48CFF) —
+   * matches mdstream's inline-code / H5 color so the queue-decoration
+   * header reads as part of the same visual family as backtick spans
+   * everywhere else. Previously 256-color 93 (#8700FF), which was too
+   * dark to register against the dim-violet row numbers below it.
+   */
+  violet: "\x1b[38;2;180;140;255m",
   gold: "\x1b[38;5;214m",
 } as const
 

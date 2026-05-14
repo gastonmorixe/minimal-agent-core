@@ -65,6 +65,27 @@ const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
 const faintWhite = (s: string): string => `\x1b[2;37m${s}\x1b[22;39m`
 
 /**
+ * SGR violet (palette token `violet`). Truecolor `rgb(180, 140, 255)`
+ * (#B48CFF) — same bytes mdstream emits for inline code / H5, so the
+ * `⏳ queued` header reads as part of the visual family of backtick
+ * spans everywhere else. Visually distinct from:
+ *   - `sky` (256-color 45) — tasks "doing" status
+ *   - `lime` (118) — tasks "done" / addition / success
+ *   - `pink` (199) — agent brand / prompt arrow
+ *   - `gold` (214) / `yellow` — warning / quota tiers
+ * Non-dim so the header pops above the dim item rows that follow.
+ * Keep in sync with `PALETTE.violet` in `./palette.ts`.
+ */
+const violet = (s: string): string => `\x1b[38;2;180;140;255m${s}\x1b[39m`
+
+/**
+ * SGR violet + dim. Same hue as the header but muted, used for the row
+ * numbers so they read as "part of the queue family" without competing
+ * with the header for attention. Bytes match `\x1b[2m` + `PALETTE.violet`.
+ */
+const dimViolet = (s: string): string => `\x1b[2;38;2;180;140;255m${s}\x1b[22;39m`
+
+/**
  * Build the per-row preview text from a single queue entry: whitespace
  * collapsed, then display-width-aware truncation with a `(+Nch)` hint.
  */
@@ -82,7 +103,10 @@ function buildPreview(entry: string): string {
 export function buildQueueDecorationLines(queue: readonly string[]): string[] {
   if (queue.length === 0) return []
   const count = queue.length
-  const header = `  ${faintWhite("⏳")} ${dim(`queued · ${count}`)}`
+  // Header: violet `⏳ queued` (full color, no dim) + faint `· N` badge.
+  // The count is intentionally dim so it reads as a trailing metadata
+  // badge rather than competing with the label for attention.
+  const header = `  ${violet("⏳")} ${violet("queued")} ${faintWhite(`· ${count}`)}`
   const lines: string[] = [header]
   const visibleCount = Math.min(QUEUE_MAX_VISIBLE_ITEMS, count)
   const hasOverflow = count > QUEUE_MAX_VISIBLE_ITEMS
@@ -94,11 +118,20 @@ export function buildQueueDecorationLines(queue: readonly string[]): string[] {
     const isClosingRow = i === visibleCount - 1 && !hasOverflow
     const glyph = isClosingRow ? "╰" : "┊"
     const num = i + 1
-    lines.push(`  ${dim(glyph)}  ${dim(`${num} ${QUEUE_ITEM_SEPARATOR} ${preview}`)}`)
+    // Per-row hierarchy:
+    //   glyph (┊/╰) — dim, structural
+    //   number       — dim-violet, ties row back to the violet header
+    //   ▸ separator  — dim, structural
+    //   preview      — faintWhite, slightly more readable than pure dim
+    //                  so the user can re-scan what they typed without
+    //                  the whole block reading as "fainted out"
+    lines.push(
+      `  ${dim(glyph)}  ${dimViolet(`${num}`)} ${dim(QUEUE_ITEM_SEPARATOR)} ${faintWhite(preview)}`,
+    )
   }
   if (hasOverflow) {
     const remaining = count - QUEUE_MAX_VISIBLE_ITEMS
-    lines.push(`  ${dim("╰")}  ${dim(`... and ${remaining} more`)}`)
+    lines.push(`  ${dim("╰")}  ${faintWhite(`... and ${remaining} more`)}`)
   }
   return lines
 }
