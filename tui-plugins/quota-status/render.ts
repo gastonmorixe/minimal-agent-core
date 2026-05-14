@@ -20,22 +20,25 @@
  *     disambiguation, and it saves two cells per segment. No `↻` icon
  *     either (heavier than the values it joins).
  *   - Session block on the right: shares the same skeleton as a quota
- *     segment — `<label> <bar> <pct> <meta>`. The label is a dim
- *     middle-dot `·` — minimalist marker that matches the manifest
- *     placeholder's session slot and stays out of the way of the quota
- *     labels. The bar shows `contextSize / contextWindow`. The trailing
- *     meta is the live count: bold when contextSize > 0 ("this is your
- *     current usage"), dim when 0 (pre-traffic shape stays quiet,
- *     parallel to `5h`/`7d`). Earlier iterations used `✦` (sparkle,
- *     sky-blue — clashed with dim quota labels) and then the model's
- *     context window (`1M`/`200k`, faint-white — noisy, the magnitude
- *     is already implicit in the trailing count). The cumulative-sum
- *     approach (pre-May 2026) over-counted cached prefixes by ~N× since
- *     the same prefix is re-read every turn; `contextSize` is the
- *     latest-turn value, not a sum.
+ *     segment — `<label> <bar> <pct> <meta>`. The label is the model's
+ *     context-window size formatted compactly (`200k`, `1M`, `500k`,
+ *     etc.) — informative, parallel-in-role to the quota labels
+ *     (`5h`/`7d`) that anchor each segment with what their bar
+ *     represents. When the context window is **unknown** (no
+ *     `MINIMAL_AGENT_MODEL` in env), the label falls back to a dim
+ *     middle-dot `·` placeholder and the bar+percent drop (we can't
+ *     compute fill without a denominator); the trailing count remains.
+ *     The bar (when shown) renders `contextSize / contextWindow`. The
+ *     trailing meta is the live count: bold when contextSize > 0 ("this
+ *     is your current usage"), dim when 0 (pre-traffic shape stays
+ *     quiet, parallel to `5h`/`7d`). The cumulative-sum approach
+ *     (pre-May 2026) over-counted cached prefixes by ~N× since the same
+ *     prefix is re-read every turn; `contextSize` is the latest-turn
+ *     value, not a sum.
  *   - Session block ALWAYS renders when `showSession` is on, even at 0 tokens.
- *     Pre-traffic users see `· ░░░░░░░░ 0% 0` — the bar acts as a
- *     "this is your context budget" signpost from the very first paint.
+ *     Pre-traffic users see `1M ░░░░░░░░ 0% 0` (or `· 0` if window is
+ *     unknown) — a "this is your context budget" signpost from the
+ *     very first paint.
  *   - 4-space group separator between distinct segments.
  *   - "overage" hidden by default (set MINIMAL_AGENT_QUOTA_OVERAGE=1 to surface).
  *   - Responsive degradation: drop tail segments when the result would overflow `cols`.
@@ -56,8 +59,15 @@ export interface RenderOpts {
   showSession?: boolean
   /**
    * Model context window in tokens, for computing the session bar's
-   * fill percentage (`contextSize / contextWindow`). Default 200_000 —
-   * Anthropic's standard context limit. Pass 1_000_000 for `[1m]` models.
+   * fill percentage (`contextSize / contextWindow`) AND for rendering
+   * the segment's LEFT label (`200k`, `1M`, `500k`, …).
+   *
+   * When omitted/undefined, the renderer treats the window as unknown:
+   * the label falls back to a dim middle-dot `·` placeholder and the
+   * bar+percent drop (we can't compute fill without a denominator).
+   * The trailing token count still renders. Callers should pass the
+   * resolved value whenever the model is known (the agent's handler
+   * resolves it from `MINIMAL_AGENT_MODEL`).
    */
   contextWindow?: number
   /** Clock injection for tests. Default: `Date.now`. */
@@ -68,7 +78,6 @@ const BAR_CELLS = 8
 /** 1/8th-block ramp: index = number of eighths filled within one cell. */
 const SLICES = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] as const
 const EMPTY_CELL = "░"
-const DEFAULT_CONTEXT_WINDOW = 200_000
 
 function bar(pct: number): { full: string; empty: string } {
   const eighths = Math.max(
@@ -158,37 +167,57 @@ function renderWindowSegment(w: ParsedWindow, now: number, withReset: boolean): 
 /**
  * Build the session block.
  *
- * `withBar=true` →   `· ▎░░░░░░░ 24% 232.4k`
- * `withBar=false` →  `232.4k`
+ * Known window, `withBar=true`  → `1M ▎░░░░░░░ 24% 232.4k`
+ * Known window, `withBar=false` → `232.4k`
+ * Unknown window (any withBar)  → `· 232.4k`
  *
  * Structurally identical to {@link renderWindowSegment}: same skeleton
- * `<label> <bar> <pct> <meta>`. Here label is a dim middle-dot `·`
- * (minimalist marker, matches the manifest placeholder's session slot),
- * and the meta slot holds the live count instead of a reset countdown.
- * Count is bold when contextSize > 0, dim when 0 (parallel to the quiet
- * pre-traffic shape on the quota windows).
+ * `<label> <bar> <pct> <meta>`. Here the label is the model's context
+ * window formatted compactly (`200k`, `1M`, `500k`, …) — informative,
+ * parallel in role to `5h`/`7d` (each segment's label says what the
+ * bar represents). The meta slot holds the live count instead of a
+ * reset countdown. Count is bold when contextSize > 0, dim when 0
+ * (parallel to the quiet pre-traffic shape on the quota windows).
  *
- * Earlier iterations used `✦` (sparkle, sky-blue) or the model's window
- * MAX (`200k`/`1M`, faint-white) — both were retired. The sparkle had no
- * semantic content and clashed with the dim quota labels; the window-MAX
- * label was noisy and the trailing count already conveys the magnitude.
+ * When `contextWindow` is undefined the renderer falls back to a dim
+ * middle-dot `·` placeholder for the label, drops the bar+percent
+ * (no denominator → no fill), and shows only the trailing count. In
+ * normal production the agent always knows the window from
+ * `MINIMAL_AGENT_MODEL`; this branch covers dev/test runs and the
+ * brief startup window before the model is resolved.
  *
- * Percentage is `contextSize / contextWindow`, capped at 100 (overflows are
- * clamped — the renderer can't predict a model's hard error threshold).
- * Always renders, even at 0 tokens — the zero-state shows an empty bar at 0%,
- * which is informative on its own (≈ "you have a clean context budget").
+ * Earlier iterations used `✦` (sparkle, sky-blue — clashed with the
+ * dim quota labels) and a dim middle-dot as the unconditional label
+ * (lost the magnitude signal — users couldn't see at a glance whether
+ * they were on a 200k or 1M model). Hoisting the size to the label
+ * keeps the % math implicit and the segment self-documenting.
+ *
+ * Percentage is `contextSize / contextWindow`, capped at 100 (overflows
+ * are clamped — the renderer can't predict a model's hard error
+ * threshold). Always renders when `showSession` is on, even at 0
+ * tokens — the zero-state shows an empty bar at 0%, which is
+ * informative on its own (≈ "you have a clean context budget").
  */
 function renderSessionSegment(
   s: SessionTokens,
-  contextWindow: number,
+  contextWindow: number | undefined,
   withBar: boolean,
 ): string {
   const usedStr = fmtTokens(s.contextSize)
   // Live count pops at bold weight once contextSize > 0 ("this is your
   // current usage"); dims when 0 to keep the pre-traffic shape quiet.
   const used = s.contextSize > 0 ? c.bold(usedStr) : c.dim(usedStr)
-  // Bar-dropped form: the dot label alone doesn't earn its space.
-  // Show only the count.
+
+  // Unknown context window → dim middle-dot placeholder + count only.
+  // No bar (no denominator), no percent (same reason). The dot keeps
+  // the segment visually anchored so it doesn't look like an orphan
+  // number trailing the quota windows.
+  if (contextWindow == null || !(contextWindow > 0)) {
+    return c.dim("·") + " " + used
+  }
+
+  // Bar-dropped form (responsive degradation): the size label alone
+  // doesn't earn its space without the bar+pct context. Show only the count.
   if (!withBar) return used
 
   const pct = Math.max(
@@ -196,13 +225,14 @@ function renderSessionSegment(
     Math.min(100, Math.round((s.contextSize / contextWindow) * 100)),
   )
   const { full, empty } = bar(pct)
-  // Shape: <·> <bar> <pct> <used> — structurally identical to the quota
-  // segments (label + bar + pct + dim trailing). The dim middle-dot
-  // marks the session slot without competing for ink with the quota
-  // labels. (Concat over template literals is deliberate — minimises
-  // Edit-tool backtick collisions on future tweaks; see project memory.)
+  // Shape: <size> <bar> <pct> <used> — structurally identical to the
+  // quota segments (label + bar + pct + dim trailing). The size label
+  // uses the same faintWhite tint as `5h`/`7d` so the three sit on
+  // the same visual tier. (Concat over template literals is deliberate
+  // — minimises Edit-tool backtick collisions on future tweaks; see
+  // project memory.)
   return (
-    c.dim("·") +
+    c.faintWhite(fmtTokens(contextWindow)) +
     " " +
     colorBar(pct)(full) +
     c.dim(empty) +
@@ -238,7 +268,12 @@ export function renderQuotaFooter(
 ): string | null {
   const now = (opts.now ?? Date.now)()
   const showOverage = opts.showOverage ?? false
-  const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  // No default — passing `undefined` is the renderer's "unknown
+  // context window" signal (label falls back to `·`, bar+pct drop).
+  // The agent's handler always resolves a real value from
+  // `MINIMAL_AGENT_MODEL`; this `undefined` path is for dev/test
+  // callers and the brief pre-model-resolution startup window.
+  const contextWindow = opts.contextWindow
   const windows = parseWindows(rl, showOverage)
   const showSession = opts.showSession ?? true
   const tail = showOverage ? overageTail(rl) : null
