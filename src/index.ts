@@ -77,6 +77,7 @@ import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import { formatStartupToolsRow } from "./startup-tools-row.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
+import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 import { runAuthStatusCommand } from "./commands/auth-status.ts"
 import { runDumpCommand, DumpCommandError } from "./commands/dump.ts"
@@ -721,6 +722,32 @@ async function main() {
   printStartupRow("thinking", thinkingLabel)
   printStartupRow("effort", effortLabel)
 
+  // Terminal viewport the compositor / mdstream will use for partial-redraw
+  // and wrap math. Mirror `Compositor.effectiveColumns()` (src/ui/compositor.ts):
+  // fall back to `$COLUMNS` / `$LINES` when stdout reports 0 or undefined
+  // (most commonly: macOS BSD `script(1)` allocating a slave PTY without
+  // propagating WINSZ). Surfacing this at boot makes width/height surprises
+  // visible before they cause duplicated-paragraph or stuck-prompt artifacts.
+  const envCols = Number.parseInt(process.env.COLUMNS ?? "", 10)
+  const envRows = Number.parseInt(process.env.LINES ?? "", 10)
+  const effCols =
+    typeof process.stdout.columns === "number" && process.stdout.columns > 0
+      ? process.stdout.columns
+      : Number.isFinite(envCols) && envCols > 0
+        ? envCols
+        : 0
+  const effRows =
+    typeof process.stdout.rows === "number" && process.stdout.rows > 0
+      ? process.stdout.rows
+      : Number.isFinite(envRows) && envRows > 0
+        ? envRows
+        : 0
+  const termLabel =
+    effCols > 0 && effRows > 0
+      ? `${effCols} × ${effRows} ${c.dim("(cols × rows)")}`
+      : c.dim("unknown")
+  printStartupRow("term", termLabel)
+
   // Load TUI plugins from ~/.agents/tui-plugins and <cwd>/tui-plugins.
   // Core tool names must always win over plugin names.
   const coreToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name))
@@ -852,6 +879,11 @@ async function main() {
   let resumeSid: string | null = null
   let initialMessages: import("./client.ts").Message[] = []
   let resumeBanner: string | null = null
+  // tool_use_id → epoch ms, derived from each AssistantRecord's `ts` field
+  // for the tool_use blocks it contained. Threaded through replayToScrollback
+  // so the time-hint suffix on replayed tool headers shows the historical
+  // moment, not the time-of-replay. Stays empty when not resuming.
+  let toolStartTimes: Map<string, number> | null = null
   if (resumeArg) {
     try {
       resumeSid = resolveSessionTarget(resumeArg, process.cwd())
@@ -861,6 +893,23 @@ async function main() {
       }
       const loaded = loadSession(resumeSid)
       initialMessages = loaded.messages
+      // Build the tool_use_id → ts(ms) lookup for the replay time-hint.
+      // We use AssistantRecord.ts because that's the moment the assistant
+      // message containing the tool_use block arrived — i.e. the moment
+      // the live REPL drew the `╭` header. This is approximate (the tool
+      // executes shortly after) but accurate enough for the human-facing
+      // "when did this happen" hint.
+      toolStartTimes = new Map<string, number>()
+      for (const r of loaded.records) {
+        if (r.kind !== "assistant") continue
+        const ms = Date.parse(r.ts)
+        if (Number.isNaN(ms)) continue
+        for (const blk of r.content) {
+          if (blk.type === "tool_use") {
+            toolStartTimes.set((blk as import("./client.ts").ToolUseBlock).id, ms)
+          }
+        }
+      }
       const turns = initialMessages.length
       const droppedNote =
         loaded.dropped.length > 0
@@ -893,9 +942,27 @@ async function main() {
         : modeAddition !== ""
           ? modeAddition
           : null
-  const { buildSystemPrompt } = await import("./headers.ts")
+  const { buildSystemPrompt, DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } =
+    await import("./headers.ts")
+  // Mirror Agent's runtime defaults explicitly so the systemHash captured
+  // at session open matches what `agent.run()` will compute on the first
+  // turn. Resume drift detection compares these two hashes : if they
+  // diverge, a yellow warning fires on --resume. The defaults below MUST
+  // track the Agent class field defaults in src/agent.ts (reflectionInterval,
+  // reflectionCooldownMs, maxToolRounds=Number.POSITIVE_INFINITY).
+  //
+  // If we later add CLI flags or config-file knobs for these values, both
+  // call sites must thread the same value : the buildSystemPrompt arg here
+  // and the Agent constructor opt at the session-startup point further down.
   const systemForHash = sessionContextForHash
-    ? JSON.stringify(buildSystemPrompt({ sessionContext: sessionContextForHash }))
+    ? JSON.stringify(
+        buildSystemPrompt({
+          sessionContext: sessionContextForHash,
+          reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
+          reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
+          maxToolRounds: Number.POSITIVE_INFINITY,
+        }),
+      )
     : ""
   const allToolsForHash = (hasPlugins ? loader : null)
     ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as typeof TOOL_DEFINITIONS)]
@@ -1005,6 +1072,14 @@ async function main() {
     })
   }
 
+  // Shared time-hint tracker. One instance threads through both
+  // session-replay (for the historical tool headers when --resume hydrates
+  // from JSONL) AND the live Agent (for new tool headers in this session).
+  // The tracker carries day-state across calls so the date prefix only
+  // re-emits on calendar rollover — including the rollover from the last
+  // replayed tool to the first live tool.
+  const toolTimeTracker = new ToolTimeTracker()
+
   const agent = new Agent({
     auth,
     model: selectedModel,
@@ -1017,6 +1092,7 @@ async function main() {
     tasksAttachment,
     store,
     initialMessages,
+    toolTimeTracker,
   })
 
   // Replay prior conversation to scrollback when resuming. We write
@@ -1038,7 +1114,12 @@ async function main() {
         model: selectedModel,
       }),
     )
-    await replayToScrollback(initialMessages, stdoutSink, { modeManager, formatterCmd })
+    await replayToScrollback(initialMessages, stdoutSink, {
+      modeManager,
+      formatterCmd,
+      toolTimeTracker,
+      toolStartTimes,
+    })
     stdoutSink.write("\n")
   }
 

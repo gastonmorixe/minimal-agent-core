@@ -27,6 +27,7 @@
 
 import { abortBus } from "./abort-bus.ts"
 import type { AuthResult } from "./auth.ts"
+import { shouldSoftSplit, splitBashSegments } from "./bash-split.ts"
 import {
   type ContentBlock,
   listModels as defaultListModels,
@@ -39,23 +40,27 @@ import {
   type ToolUseBlock,
 } from "./client.ts"
 import { Formatter } from "./formatter.ts"
-import { buildSystemPrompt } from "./headers.ts"
+import {
+  buildSystemPrompt,
+  DEFAULT_REFLECTION_COOLDOWN_MS,
+  DEFAULT_REFLECTION_INTERVAL,
+} from "./headers.ts"
 import { RawInput } from "./input.ts"
 import { ModeManager } from "./modes.ts"
+import { PALETTE } from "./palette.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import type { ManifestMode, ResolvedLiveAreaSlot } from "./plugins/types.ts"
+import { buildQueueDecorationLines } from "./queue-decoration.ts"
 import type { SessionStore } from "./session-store.ts"
 import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
-import { PALETTE } from "./palette.ts"
-import { executeTool, TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
+import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
+import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import type { TruncationInfo } from "./tools/truncation.ts"
-import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
+import { executeTool, TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
 import { truncHint } from "./truncate-hint.ts"
-import { splitBashSegments, shouldSoftSplit } from "./bash-split.ts"
-import { buildQueueDecorationLines } from "./queue-decoration.ts"
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -224,6 +229,123 @@ export function withRollingCacheBreakpoint(messages: Message[]): Message[] {
 }
 
 // ---------------------------------------------------------------------------
+// Reflection checkpoint helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Regex matching a `<ma::reflection-ack silence-for="K" reason="..." />`
+ * tag in assistant response text. Both attributes are optional in either
+ * order. Anchored to `\b` boundaries on the attribute names so a typo
+ * like `silencefor` doesn't accidentally match.
+ *
+ * Captures: group 1 = silence-for value (digits), group 2 = reason text.
+ * When the attribute is absent the capture is `undefined`. The model is
+ * expected to emit this tag at most once per response : when multiple
+ * tags appear the LAST well-formed one wins (see {@link parseReflectionAck}).
+ */
+const REFLECTION_ACK_RE =
+  /<ma::reflection-ack(?:\s+(?:silence-for="(\d+)"|reason="([^"]*)")){0,2}\s*\/>/g
+
+/**
+ * Parse `<ma::reflection-ack ... />` tags out of an assistant response.
+ *
+ * Returns the LAST well-formed tag's parsed values (or `null` if none),
+ * so a model that hedges by emitting multiple acks ends with the value
+ * it most recently committed to. `silenceFor` defaults to 1 when the
+ * attribute is omitted; a 0 disables the ack (no silence applied).
+ * Reason is stored verbatim for transcript logging.
+ */
+export function parseReflectionAck(
+  responseText: string,
+): { silenceFor: number; reason: string } | null {
+  let result: { silenceFor: number; reason: string } | null = null
+  for (const m of responseText.matchAll(REFLECTION_ACK_RE)) {
+    const silenceForRaw = m[1]
+    const reason = m[2] ?? ""
+    const silenceFor = silenceForRaw === undefined ? 1 : Number.parseInt(silenceForRaw, 10)
+    if (!Number.isFinite(silenceFor) || silenceFor < 0) continue
+    result = { silenceFor, reason }
+  }
+  return result
+}
+
+/**
+ * Wall-clock cooldown applied at a reflection checkpoint. Surfaces a
+ * live countdown in the global status bus (same channel the spinner /
+ * `Running <tool>` indicator uses), so the human watching sees
+ * `⏸ reflection @ round 50 · 59s remaining · press Esc to interrupt`
+ * tick down in the live area without spamming scrollback.
+ *
+ * The pause is interruptible via the optional `AbortSignal`. When
+ * aborted, the helper resolves immediately and the caller's existing
+ * abort path (the top-of-loop `if (signal?.aborted) throw AbortError`)
+ * handles teardown.
+ *
+ * No-op when `totalMs <= 0` : the checkpoint attachment is still
+ * injected by the caller in that case (model-facing marker without
+ * the wall-clock penalty).
+ */
+async function runReflectionCooldown(opts: {
+  totalMs: number
+  round: number
+  signal?: AbortSignal
+  statusBus: StatusBus
+}): Promise<void> {
+  const { totalMs, round, signal, statusBus } = opts
+  if (totalMs <= 0) return
+  if (signal?.aborted) return
+  const totalSec = Math.max(1, Math.ceil(totalMs / 1000))
+  const fmt = (sec: number) =>
+    `⏸ reflection @ round ${round} · ${sec}s remaining · press Esc to interrupt`
+  const handle = statusBus.create(fmt(totalSec), {
+    notificationId: "agent.reflection-cooldown",
+    category: "reflection",
+  })
+  let remaining = totalSec
+  const tick = setInterval(() => {
+    remaining = Math.max(0, remaining - 1)
+    if (remaining > 0) handle.update(fmt(remaining))
+  }, 1000)
+  try {
+    await new Promise<void>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const onAbort = (): void => {
+        if (timer !== null) clearTimeout(timer)
+        resolve()
+      }
+      timer = setTimeout(() => {
+        if (signal) signal.removeEventListener("abort", onAbort)
+        resolve()
+      }, totalMs)
+      if (signal) signal.addEventListener("abort", onAbort, { once: true })
+    })
+  } finally {
+    clearInterval(tick)
+    handle.clear()
+  }
+}
+
+/**
+ * Build the `<ma::reflection-checkpoint ... />` attachment text that
+ * gets injected into the next user content after a cooldown. The
+ * `cooldown-applied-seconds` attribute carries the wall-clock penalty
+ * the model can reason about; the trailing prose restates the soft-
+ * checkpoint contract so a model that didn't read the system-prompt
+ * paragraph carefully still has the ack syntax right next to where it
+ * matters.
+ */
+function buildReflectionCheckpointBlock(round: number, cooldownMs: number): ContentBlock {
+  const cooldownSec = Math.max(0, Math.round(cooldownMs / 1000))
+  return {
+    type: "text",
+    text:
+      `<ma::reflection-checkpoint round="${round}" cooldown-applied-seconds="${cooldownSec}" />\n` +
+      `Soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user. ` +
+      `Emit \`<ma::reflection-ack silence-for="K" reason="..." />\` anywhere in your response to suppress the next K checkpoints (skipping both the cooldown and this attachment).`,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Agent class
 // ---------------------------------------------------------------------------
 
@@ -326,11 +448,55 @@ export class Agent {
    */
   private store: SessionStore | null
   /**
-   * Hard limit on tool execution rounds within a single `run()` call.
-   * Prevents infinite loops if the model keeps calling tools forever.
-   * Set generously (50) since real agentic sessions can hit 30+ rounds.
+   * Emergency hard cap on tool-execution rounds within a single `run()`
+   * call. **Defaults to {@link Number.POSITIVE_INFINITY}** : there is NO
+   * hard stop by default, because long autonomous tasks (refactors,
+   * audits, sustained research) legitimately run for hundreds of rounds
+   * and a fixed cap defeats the point.
+   *
+   * Hosts that want a finite ceiling (cost-bounded batch jobs, sandboxes)
+   * can opt in via the constructor `maxToolRounds` option. When a finite
+   * cap is set and reached, the loop does NOT abruptly exit with an
+   * orphaned tool_use : instead it sends ONE final API request with
+   * tools disabled and a `<ma::emergency-cap-triggered round="N" />`
+   * attachment so the model can write a clean wrap-up summary.
+   *
+   * The actual safety device against runaway loops is the reflection
+   * checkpoint mechanism : see {@link reflectionInterval} below.
    */
-  private maxToolRounds = 50
+  private maxToolRounds: number = Number.POSITIVE_INFINITY
+  /**
+   * Reflection checkpoint cadence (in tool rounds). Every Nth round a
+   * `<ma::reflection-checkpoint round="N" cooldown-applied-seconds="..." />`
+   * attachment is injected into the next user content, preceded by a
+   * wall-clock cooldown (see {@link reflectionCooldownMs}). This is the
+   * default-on safety device : not a stop signal, but a "are you on
+   * track?" nudge that also gives a human watching a window to press Esc.
+   *
+   * Defaults to {@link DEFAULT_REFLECTION_INTERVAL} (50). Set to 0 to
+   * disable checkpoints entirely.
+   */
+  private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
+  /**
+   * Wall-clock cooldown (ms) applied at each reflection checkpoint before
+   * the next API request goes out. Surfaces to the model via the
+   * `cooldown-applied-seconds` attribute on the checkpoint tag (so the
+   * model can reason about elapsed wall time) and gives a human watching
+   * the agent a chance to interrupt with Esc.
+   *
+   * Defaults to {@link DEFAULT_REFLECTION_COOLDOWN_MS} (60s). Set to 0
+   * to keep the checkpoint attachment but skip the pause.
+   */
+  private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
+  /**
+   * Per-run counter for the ack/silence opt-out. When the model emits
+   * `<ma::reflection-ack silence-for="K" reason="..." />` in its
+   * response, this is set to K and decremented at each would-be
+   * checkpoint. While positive, both the cooldown and the attachment are
+   * skipped. Reset to 0 at the start of every `run()` call : silence is
+   * per-turn, not session-wide.
+   */
+  private reflectionSilenceRemaining = 0
   /**
    * Streak / pattern soft-warning tracker : Layer 3 of the size-feedback
    * design. Observes per-tool consecutive truncations and emits a
@@ -341,6 +507,19 @@ export class Agent {
    * See `src/tools/feedback-tracker.ts` for the full behavior contract.
    */
   private feedbackTracker = new ToolFeedbackTracker()
+  /**
+   * Optional tool-header time-hint tracker. When set, every tool block's
+   * `╭ <icon> <label>  <content>` header gets a dim ` · <time>` suffix
+   * showing when the tool was executed. The tracker carries day-state
+   * across calls so the date prefix only repaints on calendar rollover
+   * (per-session day key) — see {@link ToolTimeTracker} and
+   * {@link fmtToolTime} in `src/tool-time.ts`.
+   *
+   * Off by default (no suffix emitted). `src/index.ts` constructs and
+   * injects one for production; tests opt in per-case so existing
+   * byte-exact header assertions stay stable.
+   */
+  private toolTimeTracker: ToolTimeTracker | null = null
 
   /**
    * Create an agent with auth, model, plugin, mode, and transport settings.
@@ -386,6 +565,35 @@ export class Agent {
      * append to the same file.
      */
     initialMessages?: Message[]
+    /**
+     * Reflection checkpoint cadence (rounds). Default
+     * {@link DEFAULT_REFLECTION_INTERVAL} (50). Pass 0 to disable
+     * checkpoints entirely. See {@link Agent.reflectionInterval}.
+     */
+    reflectionInterval?: number
+    /**
+     * Wall-clock cooldown (ms) at each reflection checkpoint. Default
+     * {@link DEFAULT_REFLECTION_COOLDOWN_MS} (60_000). Pass 0 to skip
+     * the pause and only inject the attachment. See
+     * {@link Agent.reflectionCooldownMs}.
+     */
+    reflectionCooldownMs?: number
+    /**
+     * Emergency hard cap on tool-execution rounds per `run()`. Default
+     * `Number.POSITIVE_INFINITY` (no hard stop). Set to a finite number
+     * to opt into the graceful-wrap-up safety net. See
+     * {@link Agent.maxToolRounds}.
+     */
+    maxToolRounds?: number
+    /**
+     * Optional tool-header time-hint tracker. When provided, every tool
+     * block's `╭` header is augmented with a dim ` · <time>` suffix
+     * (e.g. `· May 14 15:42:03` on cold-start / day-rollover; `· 15:42:03`
+     * thereafter). When omitted (the default) no suffix is appended :
+     * existing tests asserting on exact header bytes stay green.
+     * See {@link Agent.toolTimeTracker} and `src/tool-time.ts`.
+     */
+    toolTimeTracker?: ToolTimeTracker | null
   }) {
     this.auth = opts.auth
     this.model = opts.model ?? "claude-sonnet-4-6"
@@ -398,6 +606,22 @@ export class Agent {
     this.tasksAttachment = opts.tasksAttachment ?? null
     this.sendFn = opts.sendFn ?? sendMessage
     this.store = opts.store ?? null
+    // Loop-safety knobs : defaults are "no hard cap, 50-round reflection
+    // checkpoint with 60s cooldown". See the field JSDoc for the why.
+    // Negative values are coerced to 0 (disabled) defensively : we never
+    // want a negative interval/cooldown leaking through to the loop math.
+    if (typeof opts.reflectionInterval === "number" && opts.reflectionInterval >= 0) {
+      this.reflectionInterval = Math.floor(opts.reflectionInterval)
+    }
+    if (typeof opts.reflectionCooldownMs === "number" && opts.reflectionCooldownMs >= 0) {
+      this.reflectionCooldownMs = Math.floor(opts.reflectionCooldownMs)
+    }
+    if (typeof opts.maxToolRounds === "number" && opts.maxToolRounds > 0) {
+      this.maxToolRounds = Math.floor(opts.maxToolRounds)
+    }
+    if (opts.toolTimeTracker !== undefined) {
+      this.toolTimeTracker = opts.toolTimeTracker
+    }
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       for (const m of opts.initialMessages) this.messages.push(m)
     }
@@ -616,6 +840,17 @@ export class Agent {
     this.store?.appendUser(initialUserContent)
 
     let rounds = 0
+    // Silence is per-turn : the model has to re-ack each new user turn.
+    // Reset here at the seam between turns so a stale silence counter
+    // from the previous `run()` can't suppress checkpoints in this one.
+    this.reflectionSilenceRemaining = 0
+    // True iff we exited the loop because `rounds < this.maxToolRounds`
+    // became false (i.e. an explicit finite emergency cap was reached
+    // mid-task). Stays false on natural exit (model returned no tool_use
+    // and we `break`'d). Used post-loop to decide whether to run the
+    // graceful wrap-up turn : pessimistic default so a hypothetical
+    // missing-break code path doesn't silently skip the wrap-up.
+    let exitedByCap = true
     let lastResponse: StreamedResponse = {
       blocks: [],
       text: "",
@@ -642,7 +877,19 @@ export class Agent {
     // is reserved for the session hash in src/index.ts so volatile fragment
     // content (date, terminal size) doesn't bust resume drift detection.
     const pluginBlock = (await this.loader?.getPromptBlockAsync()) ?? null
-    const system = pluginBlock ? buildSystemPrompt({ sessionContext: pluginBlock }) : undefined
+    // Always pass the loop-safety knobs so the appended "Tool-use loop
+    // safety" paragraph in system[2] reflects the runtime config (interval,
+    // cooldown, emergency cap). Default values produce stable text, so the
+    // cache key matches the corresponding systemHash computed at session
+    // open in index.ts when both call sites use the same Agent defaults.
+    const system = pluginBlock
+      ? buildSystemPrompt({
+          sessionContext: pluginBlock,
+          reflectionInterval: this.reflectionInterval,
+          reflectionCooldownMs: this.reflectionCooldownMs,
+          maxToolRounds: this.maxToolRounds,
+        })
+      : undefined
     const allTools: ToolDefinition[] = this.loader
       ? [...TOOL_DEFINITIONS, ...(this.loader.getExtraTools() as ToolDefinition[])]
       : [...TOOL_DEFINITIONS]
@@ -730,11 +977,36 @@ export class Agent {
         )
       }
 
+      // Reflection ack scan. The model can opt out of the next K
+      // reflection checkpoints by emitting a `<ma::reflection-ack
+      // silence-for="K" reason="..." />` tag anywhere in its assistant
+      // text. We scan the concatenated response text (cheaper and more
+      // robust than walking each text block individually : the regex is
+      // anchored and content-blind to surrounding prose). The reason is
+      // surfaced via writeTranscript so the human running the agent sees
+      // WHY the model silenced itself : helps catch a model that's just
+      // pattern-matching the syntax without a genuine autonomous-work
+      // justification.
+      if (this.reflectionInterval > 0 && lastResponse.text.length > 0) {
+        const ack = parseReflectionAck(lastResponse.text)
+        if (ack !== null && ack.silenceFor > 0) {
+          this.reflectionSilenceRemaining = ack.silenceFor
+          const reasonSuffix = ack.reason.length > 0 ? ` — ${ack.reason}` : ""
+          writeTranscript(
+            `  ${c.dim("›")} ${c.dim(`reflection ack: silencing next ${ack.silenceFor} checkpoint${ack.silenceFor === 1 ? "" : "s"}${reasonSuffix}`)}`,
+          )
+        }
+      }
+
       // Check for tool use blocks
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
 
       if (toolBlocks.length === 0) {
-        // No tool calls : model is done
+        // No tool calls : model is done. Mark this as a natural exit so
+        // the post-loop wrap-up turn does NOT fire : the model already
+        // wrote its final text, we'd just be duplicating output (and
+        // wasting an API call) if we sent another request.
+        exitedByCap = false
         break
       }
 
@@ -748,50 +1020,56 @@ export class Agent {
         const writeToolHeader = (override?: string): void => {
           if (headerWritten) return
           headerWritten = true
-          if (override !== undefined) {
-            writeTranscript(`\n  ${c.dimCyan("╭")} ${override}`)
-          } else {
-            const labelColor =
-              pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
-                ? (c as Record<string, (s: string) => string>)[pres.color]
-                : c.orange
-            const icon = pres?.icon ? `${labelColor(pres.icon)} ` : ""
-            writeTranscript(
-              `\n  ${c.dimCyan("╭")} ${icon}${c.bold(labelColor(tool.name))}  ${c.dim(formatToolInput(tool, renderCols))}`,
-            )
+          // Header layout is always `╭ [icon] [label]  [content] [· <time>]`.
+          // The icon and label come from the manifest unconditionally (so
+          // the tool's identity stays visible regardless of what the plugin
+          // renders); the content slot is the only thing a plugin can
+          // customize, via `displayHeader`. When no override is provided,
+          // the slot is filled with the default `formatToolInput` summary
+          // plus any continuation rows the formatter wants to add. The
+          // optional ` · <time>` suffix is appended last when an
+          // Agent.toolTimeTracker is wired up (production always; tests
+          // opt in). See src/tool-time.ts for the format ladder
+          // (HH:MM:SS / Mon DD HH:MM:SS).
+          const labelColor =
+            pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
+              ? (c as Record<string, (s: string) => string>)[pres.color]
+              : c.orange
+          const icon = pres?.icon ? `${labelColor(pres.icon)} ` : ""
+          const label = c.bold(labelColor(tool.name))
+          // Capture the time-hint BEFORE formatting the content so
+          // soft-split (and continuation rows) can be told to leave room
+          // for it on the right. First-tool / day-rollover suffix is
+          // "May 14 15:42:03" (15 cells); steady-state is "15:42:03"
+          // (8 cells). The leading ` · ` separator adds 3 more, plus a
+          // small gutter so the suffix doesn't visually butt against the
+          // wrap edge. Both formatToolInput AND formatToolInputContinuation
+          // get the SAME adjusted cols so the soft-split decision is
+          // consistent across the first row and continuation rows.
+          const timeText = this.toolTimeTracker?.format(Date.now())
+          const timeSuffix = timeText !== undefined ? ` · ${timeText}` : ""
+          const TIME_HINT_GUTTER = 2
+          const adjustedCols =
+            renderCols !== undefined && timeSuffix.length > 0
+              ? Math.max(20, renderCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
+              : renderCols
+          const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
+          const content = override ?? c.dim(formatToolInput(tool, adjustedCols))
+          const headerLine =
+            content.length === 0
+              ? `${icon}${label}${dimTimeSuffix}`
+              : `${icon}${label}  ${content}${dimTimeSuffix}`
+          writeTranscript(`\n  ${c.dimCyan("╭")} ${headerLine}`)
+          if (override === undefined) {
             // Indent so `↳`/`>` aligns directly under the start of the
             // command body in the header (under `c` of `cd …`). See
             // {@link toolContinuationIndentCells} for the layout walk.
             const indent = " ".repeat(toolContinuationIndentCells(tool.name, pres?.icon))
-            for (const cont of formatToolInputContinuation(tool, renderCols)) {
+            for (const cont of formatToolInputContinuation(tool, adjustedCols)) {
               writeTranscript(`  ${c.dimCyan("│")} ${indent}${c.dim(cont)}`)
             }
           }
-          // NOTE: the empty header→body separator row is NOT emitted here.
-          // The caller emits it lazily via `writeHeaderBodySep` once the
-          // tool has run and `truncInfo` is known, because the choice of
-          // glyph depends on whether the body starts mid-source:
-          //   - `│` (solid) when no discontinuity above the first body row
-          //     (body starts at line 1 of source, OR no source notion at all
-          //      : Bash stdout, plugin tools, refusal lines, etc.).
-          //   - `┊` (light-dotted) when the body starts mid-source : the
-          //     same "something was cut here" semantics as the truncation
-          //     separator above `╰ <footer>` at the bottom of the block.
-          //     Today this fires for `Read` with `offset > 0`, signalled
-          //     via `TruncationInfo.startLine > 0`.
-          // session-replay.ts can't reconstruct startLine (not persisted in
-          // the JSONL), so it always uses `│`.
-        }
-        // Lazy emit of the header→body separator. Captured by closure over
-        // `headerWritten` / `sepEmitted` so callers can fire it from any
-        // branch (streamed Bash, plugin tool, formatToolPreview path,
-        // refusal) without worrying about double-emission.
-        let sepEmitted = false
-        const writeHeaderBodySep = (startTruncated: boolean): void => {
-          if (sepEmitted) return
-          if (!headerWritten) return
-          sepEmitted = true
-          writeTranscript(`  ${c.dimCyan(startTruncated ? "┊" : "│")}`)
+          writeTranscript(`  ${c.dimCyan("│")}`)
         }
 
         let content: string
@@ -812,10 +1090,6 @@ export class Agent {
         const gate = this.modeManager?.isToolAllowed(tool.name) ?? { allowed: true as const }
         if (!gate.allowed) {
           writeToolHeader()
-          // Refusal lines never start-truncate : the body is the
-          // synthesized refusal message, not output from a source with a
-          // "above this" notion. Always solid `│`.
-          writeHeaderBodySep(false)
           content = gate.message
           isError = true
           // Render a denial line in the transcript so the user sees what
@@ -856,10 +1130,6 @@ export class Agent {
                 isError = true
               }
               writeToolHeader(displayHeader)
-              // Plugin tools don't surface `TruncationInfo` through the
-              // dispatcher protocol, so we have no startLine signal here.
-              // Always solid `│`.
-              writeHeaderBodySep(false)
             } else {
               // Live-stream Bash stdout/stderr to the transcript as the
               // child writes it, instead of waiting for the process to
@@ -888,13 +1158,6 @@ export class Agent {
 
               const flushLineToBuffer = (raw: string) => {
                 didStream = true
-                // Bash stdout has no "above this" notion : output starts
-                // at the first byte the child writes, so always `│`. We
-                // emit on the FIRST line (rather than eagerly after the
-                // header) so zero-output Bash runs : where didStream
-                // stays false : don't get an orphan separator row above
-                // the eventual `╰ (no output)` close.
-                writeHeaderBodySep(false)
                 if (streamedLineCount >= STREAM_BUDGET) {
                   streamedLineCount++
                   return
@@ -988,19 +1251,11 @@ export class Agent {
 
           if (!streamedRendered) {
             if (!headerWritten) writeToolHeader(displayHeader)
-            // `Read` with `offset > 0` populates `truncInfo.startLine`
-            // (see src/tools.ts:861 → src/tools/truncation.ts) : that's
-            // the only signal we have today for "body starts mid-source".
-            // Any future tool that returns the same will get the `┊`
-            // top-of-body separator for free. The post-block render path
-            // is the only place where `truncInfo` is reliably populated
-            // before any body row hits the transcript, so this is where
-            // start-truncation gets visualized.
-            writeHeaderBodySep((truncInfo?.startLine ?? 0) > 0)
             for (const line of formatToolPreview(content, isError, display, {
               tool: tool.name,
               info: truncInfo,
               footer: displayFooter,
+              cols: renderCols,
             })) {
               writeTranscript(line)
             }
@@ -1091,13 +1346,111 @@ export class Agent {
         this.store?.appendUser([{ type: "text", text: queuedText }])
         onQueueInject?.(queuedText)
       }
+
+      // Reflection checkpoint. After a full round (assistant response +
+      // tool execution) at every Nth round, apply the wall-clock cooldown
+      // (interruptible via Esc through the existing AbortSignal path),
+      // then inject the model-facing `<ma::reflection-checkpoint>` marker.
+      // The ack/silence counter (set by parseReflectionAck on the
+      // assistant response above) gates BOTH the cooldown and the
+      // attachment : when silenceRemaining > 0 we decrement and skip
+      // both, so the model gets exactly what it asked for. Order: the
+      // checkpoint attachment goes LAST in userContent so it's the most
+      // recent context the model reads on the next request (peak
+      // salience for "act on this now").
+      if (this.reflectionInterval > 0 && rounds % this.reflectionInterval === 0) {
+        if (this.reflectionSilenceRemaining > 0) {
+          this.reflectionSilenceRemaining -= 1
+        } else {
+          await runReflectionCooldown({
+            totalMs: this.reflectionCooldownMs,
+            round: rounds,
+            statusBus: GLOBAL_STATUS_BUS,
+            ...(signal ? { signal } : {}),
+          })
+          // If Esc landed during the cooldown the top-of-loop check on
+          // the next iteration will throw AbortError; pushing the
+          // checkpoint marker here is still safe because the messages
+          // history stays well-formed (tool_result-first ordering is
+          // preserved, the trailing text is a normal user-message
+          // continuation).
+          userContent.push(buildReflectionCheckpointBlock(rounds, this.reflectionCooldownMs))
+        }
+      }
+
       this.messages.push({ role: "user", content: userContent })
     }
 
-    if (rounds >= this.maxToolRounds) {
+    // Graceful emergency-cap wrap-up turn. Only fires when a host has
+    // explicitly configured a finite `maxToolRounds` AND we exited the
+    // loop because that cap was reached (not because the model returned
+    // a tool_use-free response on its own). Default-configured Agents
+    // have `maxToolRounds === Number.POSITIVE_INFINITY` so this branch
+    // is dead code unless opted into.
+    //
+    // The wrap-up replaces the old abrupt-cliff behavior (last assistant
+    // turn was a `tool_use` that got no `tool_result` and no follow-up
+    // text). Instead we append a model-facing
+    // `<ma::emergency-cap-triggered>` marker to the last user message
+    // (which already carries the tool_results from the cap-th round,
+    // satisfying the Anthropic API's "tool_result must follow tool_use
+    // immediately" constraint) and send one more request with `tools`
+    // undefined : the model can't call tools, so it has to write a
+    // summary text. We update `lastResponse` so the caller sees that
+    // clean final response instead of the orphaned tool_use round.
+    if (exitedByCap && Number.isFinite(this.maxToolRounds)) {
       writeTranscript(
-        `\n  ${c.boldYellow("!")} ${c.yellow(`Safety limit reached (${this.maxToolRounds} tool rounds)`)}`,
+        `\n  ${c.boldYellow("!")} ${c.yellow(`Emergency cap reached (${this.maxToolRounds} tool rounds) — sending final tools-disabled wrap-up`)}`,
       )
+
+      const lastMsg = this.messages[this.messages.length - 1]
+      if (lastMsg && lastMsg.role === "user") {
+        const content = Array.isArray(lastMsg.content)
+          ? lastMsg.content
+          : [{ type: "text" as const, text: lastMsg.content }]
+        content.push({
+          type: "text",
+          text:
+            `<ma::emergency-cap-triggered round="${this.maxToolRounds}" />\n` +
+            `You have reached the configured emergency tool-round cap for this user turn. Tools are disabled for this final response. Summarize what you accomplished, surface anything the user should know, and stop.`,
+        })
+        lastMsg.content = content
+      }
+
+      const wrapGen = this.sendFn({
+        auth: this.auth,
+        messages: withRollingCacheBreakpoint(this.messages),
+        model: this.model,
+        // tools intentionally omitted : the model cannot call tools on
+        // this final turn, so it MUST write text and finish.
+        system,
+        ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...(this.thinkingDisplay
+          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+          : {}),
+        ...sendOpts,
+        ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
+        ...(onThinkingDelta ? { onThinkingDelta } : {}),
+        ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
+        ...(textStop ? { onTextStop: textStop } : {}),
+        ...(signal ? { signal } : {}),
+      })
+      let wrapResponse: StreamedResponse | undefined
+      while (true) {
+        const { done, value } = await wrapGen.next()
+        if (done) {
+          wrapResponse = value as unknown as StreamedResponse
+          break
+        }
+        yield value
+      }
+      if (wrapResponse) {
+        lastResponse = wrapResponse
+        if (wrapResponse.blocks.length > 0) {
+          this.messages.push({ role: "assistant", content: wrapResponse.blocks })
+          this.store?.appendAssistant(wrapResponse.blocks, wrapResponse.stopReason, undefined)
+        }
+      }
     }
 
     return lastResponse
@@ -1595,6 +1948,20 @@ function tuiPreviewHint(tool: string): string {
  * pathological line eating the screen.
  */
 const TOOL_PREVIEW_LINE_WIDTH = 300
+const TOOL_PREVIEW_GUTTER_WIDTH = 4
+const TOOL_PREVIEW_WRAP_SAFETY_WIDTH = 1
+
+function toolPreviewBodyWidth(cols?: number): number | undefined {
+  const raw = cols ?? process.stdout.columns
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined
+  const max = Math.floor(raw) - TOOL_PREVIEW_GUTTER_WIDTH - TOOL_PREVIEW_WRAP_SAFETY_WIDTH
+  return max > 0 ? max : 0
+}
+
+function clampToolPreviewBodyLine(line: string, maxWidth: number | undefined): string {
+  if (maxWidth === undefined || displayWidth(line) <= maxWidth) return line
+  return truncateDisplayWidth(line, maxWidth, "...")
+}
 
 /**
  * Format the body of a `tool_result` for the bordered transcript preview.
@@ -1615,11 +1982,49 @@ const TOOL_PREVIEW_LINE_WIDTH = 300
  * Per-tool body line budgets live in {@link TOOL_PREVIEW_LINES}; per-line
  * display width is capped at {@link TOOL_PREVIEW_LINE_WIDTH}.
  */
+
+/**
+ * True when `line` is the **outer frame closer** of a tool transcript block
+ * (the bottom-left `╰` glyph in the gutter). The live-area sink uses this
+ * signal to add one blank row of breathing room before the next block.
+ *
+ * The discriminator must be specific to the **outer-gutter** position
+ * (immediately after the 2 leading spaces and any ANSI prefix), NOT a
+ * blanket "anywhere in the line" check : body content can legitimately
+ * carry `╰` as a tree-last connector (e.g. the tasks plugin's `treeLast`
+ * glyph in the subtask block), in titles, in user-supplied filenames,
+ * etc. A blanket match misclassifies those rows as block-closers and
+ * the sink emits an extra `\n`, producing a bare blank row with no `│`
+ * gutter behind it.
+ *
+ * Recognized shapes (all match):
+ *   "  ╰ 5 done · 1 doing · 2 todo"
+ *   "  \x1b[36m╰\x1b[0m  0/3"
+ *   "  \x1b[36;2m╰\x1b[0m"               (just the glyph, no body)
+ *
+ * Non-matches (body rows that happen to contain ╰):
+ *   "  │        ╰  ○  #abc  Add regression test"   ← tasks treeLast
+ *   "  │ note: file named ╰.txt"                   ← body content
+ */
+// Match the outer-gutter `╰`: start-of-line, optional ≤2 leading spaces
+// (the gutter indent), then any number of ANSI CSI SGR sequences
+// (`\x1b[<digits-and-semicolons>m`), then the `╰` glyph. Anchored at
+// `^` so it cannot fire on `╰` appearing later in the body.
+//
+// Why CSI-only: every glyph emitted at this position goes through one of
+// the `c.*` color combinators in this file, which exclusively use SGR
+// (CSI `m`) sequences : we don't need to handle OSC / DCS / etc. here.
+const OUTER_FRAME_CLOSE_RE = /^ {0,2}(?:\x1b\[[\d;]*m)*╰/
+
+export function isOuterFrameClose(line: string): boolean {
+  return OUTER_FRAME_CLOSE_RE.test(line)
+}
+
 export function formatToolPreview(
   content: string,
   isError?: boolean,
   display?: string,
-  opts?: { tool?: string; info?: TruncationInfo; footer?: string },
+  opts?: { tool?: string; info?: TruncationInfo; footer?: string; cols?: number },
 ): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
   // unified diff from Edit/Write), render it as-is, line by line, with the
@@ -1627,6 +2032,7 @@ export function formatToolPreview(
   if (display !== undefined && !isError) {
     const out: string[] = []
     const footer = opts?.footer
+    const bodyWidth = footer === undefined ? undefined : toolPreviewBodyWidth(opts?.cols)
     const body = footer === undefined ? display.replace(/\n$/, "") : display
     const dlines = body.length === 0 ? [] : body.split("\n")
     if (dlines.length === 0 && footer === undefined) {
@@ -1635,14 +2041,16 @@ export function formatToolPreview(
     }
     for (let i = 0; i < dlines.length; i++) {
       const connector = footer === undefined && i === dlines.length - 1 ? "╰" : "│"
+      const line = clampToolPreviewBodyLine(dlines[i], bodyWidth)
       out.push(
-        dlines[i].length === 0
-          ? `  ${c.dimCyan(connector)}`
-          : `  ${c.dimCyan(connector)} ${dlines[i]}`,
+        line.length === 0 ? `  ${c.dimCyan(connector)}` : `  ${c.dimCyan(connector)} ${line}`,
       )
     }
     if (footer !== undefined) {
-      out.push(footer.length === 0 ? `  ${c.dimCyan("╰")}` : `  ${c.dimCyan("╰")} ${footer}`)
+      const footerLine = clampToolPreviewBodyLine(footer, bodyWidth)
+      out.push(
+        footerLine.length === 0 ? `  ${c.dimCyan("╰")}` : `  ${c.dimCyan("╰")} ${footerLine}`,
+      )
     }
     return out
   }
@@ -2724,7 +3132,7 @@ async function runReplLiveArea(
         // adjacent `╰`-then-`╭` doesn't pile up to two blank rows. This
         // closes the "missing blank between `╰ shown 10/20 L` and
         // `● Thinking`" visual bug (May 2026).
-        const isBlockClose = line.includes("╰")
+        const isBlockClose = isOuterFrameClose(line)
         compositor.writeStream(isBlockClose ? `${line}\n\n` : `${line}\n`)
         lastKind = "transcript"
       }

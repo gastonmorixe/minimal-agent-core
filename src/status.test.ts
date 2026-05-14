@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { StatusBus, StatusRenderer } from "./status.ts"
+import { StatusBus, StatusRenderer, type StatusActivity } from "./status.ts"
 import type { Spinner } from "./spinner.ts"
 
 class FakeTTYOutput {
@@ -117,5 +117,157 @@ describe("status", () => {
 
     handle.clear()
     renderer.stop()
+  })
+
+  describe("activity payload (structured)", () => {
+    it("snapshots an initial activity passed via create()", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", {
+        notificationId: "network.request",
+        category: "network",
+        activity: {
+          direction: "up",
+          phase: "upload",
+          sentBytes: 47_312,
+          sentTokens: 124_000,
+          target: { host: "api.anthropic.com", protocol: "h2", model: "opus-4-7" },
+          startedAt: 1_000,
+        },
+      })
+
+      const snap = bus.currentStatus()
+      expect(snap?.label).toBe("Sending")
+      expect(snap?.activity?.phase).toBe("upload")
+      expect(snap?.activity?.direction).toBe("up")
+      expect(snap?.activity?.sentBytes).toBe(47_312)
+      expect(snap?.activity?.target).toEqual({
+        host: "api.anthropic.com",
+        protocol: "h2",
+        model: "opus-4-7",
+      })
+
+      handle.clear()
+    })
+
+    it("merges activity field-by-field on update() (undefined keeps prior)", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", {
+        activity: {
+          phase: "upload",
+          sentBytes: 1_000,
+          target: { host: "api.anthropic.com" },
+        },
+      })
+
+      handle.update("Streaming", { activity: { phase: "stream", recvBytes: 512 } })
+
+      const snap = bus.currentStatus()
+      expect(snap?.label).toBe("Streaming")
+      expect(snap?.activity?.phase).toBe("stream")
+      expect(snap?.activity?.sentBytes).toBe(1_000) // preserved
+      expect(snap?.activity?.recvBytes).toBe(512) // new
+      expect(snap?.activity?.target?.host).toBe("api.anthropic.com") // preserved
+
+      handle.clear()
+    })
+
+    it("merges target sub-object instead of replacing", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", {
+        activity: { target: { host: "api.anthropic.com", protocol: "h2" } },
+      })
+
+      // Only model changes; host + protocol must survive.
+      handle.updateActivity({ target: { model: "opus-4-7[1m]" } })
+
+      const snap = bus.currentStatus()
+      expect(snap?.activity?.target).toEqual({
+        host: "api.anthropic.com",
+        protocol: "h2",
+        model: "opus-4-7[1m]",
+      })
+
+      handle.clear()
+    })
+
+    it("updateActivity() does not change the label", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", { activity: { phase: "upload" } })
+
+      const seen: Array<string | null> = []
+      const unsub = bus.subscribe((label) => seen.push(label))
+
+      handle.updateActivity({ sentBytes: 4096 })
+      handle.updateActivity({ sentBytes: 8192 })
+
+      // Listener was invoked on subscribe + two activity updates.
+      // Label stayed "Sending" throughout (no change).
+      expect(seen).toEqual(["Sending", "Sending", "Sending"])
+      expect(bus.currentStatus()?.activity?.sentBytes).toBe(8192)
+
+      unsub()
+      handle.clear()
+    })
+
+    it("listeners still receive label-only payloads (no breaking change)", () => {
+      const bus = new StatusBus()
+      const seen: Array<string | null> = []
+      const unsub = bus.subscribe((label) => seen.push(label))
+
+      const handle = bus.create("Sending", {
+        activity: { phase: "upload", sentBytes: 1024 },
+      })
+      handle.update("Streaming", { activity: { phase: "stream" } })
+      handle.clear()
+
+      expect(seen).toEqual([null, "Sending", "Streaming", null])
+      unsub()
+    })
+
+    it("clear() removes the activity along with the entry", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", { activity: { phase: "upload" } })
+      expect(bus.currentStatus()?.activity?.phase).toBe("upload")
+
+      handle.clear()
+      expect(bus.currentStatus()).toBeNull()
+    })
+
+    it("snapshot is a copy, not a live reference", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", { activity: { sentBytes: 100 } })
+
+      const snap = bus.currentStatus()
+      handle.updateActivity({ sentBytes: 200 })
+
+      // First snapshot must remain at 100 (not mutated by the later update).
+      expect(snap?.activity?.sentBytes).toBe(100)
+      expect(bus.currentStatus()?.activity?.sentBytes).toBe(200)
+
+      handle.clear()
+    })
+
+    it("update() without activity in metadata does not erase existing activity", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Sending", {
+        activity: { phase: "upload", sentBytes: 1024 },
+      })
+
+      // Caller only changes notificationId — activity stays.
+      handle.update("Waiting", { notificationId: "network.request" })
+
+      const snap = bus.currentStatus()
+      expect(snap?.label).toBe("Waiting")
+      expect(snap?.activity?.phase).toBe("upload")
+      expect(snap?.activity?.sentBytes).toBe(1024)
+
+      handle.clear()
+    })
+
+    it("type smoke: StatusActivity fields are all optional", () => {
+      // Compile-time check that an empty object is a valid activity.
+      const a: StatusActivity = {}
+      expect(a).toEqual({})
+    })
   })
 })

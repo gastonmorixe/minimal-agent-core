@@ -14,7 +14,7 @@
       "position": "footer",
       "refreshMs": 300000,
       "timeoutMs": 8000,
-      "placeholder": "\u001b[2m5h \u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 \u00b7\u00b7%        7d \u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 \u00b7\u00b7%        \u00b7 \u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591 \u00b7\u00b7%\u001b[22m",
+      "placeholder": "\u001b[2m\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591  \u00b7\u00b7%        \u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591  \u00b7\u00b7%        \u2726 \u00b7\u001b[22m",
       "refreshOn": ["quota.headersReceived"]
     }
   ]

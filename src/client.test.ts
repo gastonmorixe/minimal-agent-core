@@ -65,6 +65,72 @@ describe("client", () => {
       expect(blocks[3].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
     })
 
+    describe("buildSystemPrompt — tool-use loop safety paragraph", () => {
+      it("default config appends a reflection-checkpoint paragraph to system[2] (and OMITS the emergency-cap section since the default cap is Infinity)", () => {
+        const blocks = buildSystemPrompt()
+        const sys2 = blocks[2].text
+        // Section heading and the soft-checkpoint contract are present.
+        expect(sys2).toContain("# Tool-use loop safety")
+        expect(sys2).toContain("no fixed turn cap by default")
+        // The default cadence and cooldown make it into the prose with
+        // concrete numbers so the model sees the actual config it's
+        // running under (not just symbolic placeholders).
+        expect(sys2).toContain("every 50 tool rounds")
+        expect(sys2).toContain("60-second wall-clock cooldown")
+        // Ack/silence opt-out is documented next to the cadence so a
+        // model that skipped earlier prose still finds the syntax.
+        expect(sys2).toContain('`<ma::reflection-ack silence-for="K" reason="..." />`')
+        // Default cap is Infinity, so the emergency-cap paragraph MUST
+        // be absent : we don't want the model to think a hard stop
+        // exists when none does.
+        expect(sys2).not.toContain("emergency hard cap")
+        expect(sys2).not.toContain("emergency-cap-triggered")
+      })
+
+      it("finite maxToolRounds adds the emergency-cap paragraph with the configured number", () => {
+        const blocks = buildSystemPrompt({ maxToolRounds: 200 })
+        const sys2 = blocks[2].text
+        expect(sys2).toContain("emergency hard cap is configured at 200 rounds")
+        expect(sys2).toContain('`<ma::emergency-cap-triggered round="200" />`')
+        // The reflection paragraph still leads (cap is the SECOND
+        // layer; the reflection checkpoint is the primary device).
+        const checkpointIdx = sys2.indexOf("reflection checkpoint")
+        const capIdx = sys2.indexOf("emergency hard cap")
+        expect(checkpointIdx).toBeGreaterThan(-1)
+        expect(capIdx).toBeGreaterThan(checkpointIdx)
+      })
+
+      it("reflectionInterval=0 omits the reflection paragraph (checkpoint disabled)", () => {
+        const blocks = buildSystemPrompt({ reflectionInterval: 0, maxToolRounds: 100 })
+        const sys2 = blocks[2].text
+        // Cap still mentioned (it was opt-in).
+        expect(sys2).toContain("emergency hard cap is configured at 100 rounds")
+        // But the cadence prose is gone : nothing fires every N rounds.
+        expect(sys2).not.toContain("every 0 tool rounds")
+        expect(sys2).not.toContain("reflection checkpoint fires every")
+      })
+
+      it("reflectionCooldownMs=0 keeps the checkpoint but describes it as paused-free", () => {
+        const blocks = buildSystemPrompt({ reflectionCooldownMs: 0 })
+        const sys2 = blocks[2].text
+        expect(sys2).toContain("every 50 tool rounds")
+        // No cooldown clause when ms=0.
+        expect(sys2).not.toContain("wall-clock cooldown")
+        // The attachment is still mentioned with cooldown=0 baked in.
+        expect(sys2).toContain('cooldown-applied-seconds="0"')
+      })
+
+      it("everything off produces no safety paragraph at all (instructions are pristine)", () => {
+        const blocks = buildSystemPrompt({
+          reflectionInterval: 0,
+          maxToolRounds: Number.POSITIVE_INFINITY,
+        })
+        const sys2 = blocks[2].text
+        expect(sys2).not.toContain("# Tool-use loop safety")
+        expect(sys2).not.toContain("reflection")
+      })
+    })
+
     it("conversation request body matches 2.1.118 wire shape", async () => {
       // Empirical verification of tasks #3-#7: capture the actual JSON body
       // sent to /v1/messages and assert it carries (a) cache_control with

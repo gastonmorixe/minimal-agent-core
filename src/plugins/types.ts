@@ -92,8 +92,44 @@ export type TUIResult =
       kind: "tool_result"
       content: string
       is_error?: boolean
+      /**
+       * Body content. Rendered line-by-line between the `┊` connector and
+       * the closing `╰` glyph, with the standard `│` gutter. ANSI escapes
+       * pass through verbatim and are NOT truncated (unlike `content`).
+       *
+       * When `displayFooter` is absent, the LAST line of `display` is
+       * rewritten to start with `╰` instead of `│` (matching Edit/Write
+       * diff rendering).
+       */
       display?: string
+      /**
+       * Header CONTENT slot — fills the position that `formatToolInput(tool)`
+       * occupies by default, AFTER the agent-drawn chrome:
+       *
+       *   ╭ <icon> <label>  <displayHeader || formatToolInput(tool)>
+       *     ^^^^^^^^^^^^^^                  ^^^^^^^^^^^^^^^^^^^^^^
+       *     agent-owned                     plugin-owned slot
+       *
+       * The icon, label, frame glyphs (`╭`, `┊`, `│`, `╰`), and the
+       * two-space gap between label and content all come from the manifest
+       * + agent unconditionally. A plugin that wants a richer summary than
+       * the raw input JSON ("+ added 7 tasks · 0/7" instead of
+       * `action="add_many"`) writes it here and the agent splices it into
+       * the slot — without losing the tool's identity.
+       *
+       * Single-line. Empty string is treated as "no content slot, just
+       * the chrome" (renders as `╭ <icon> <label>` with no trailing
+       * separator).
+       */
       displayHeader?: string
+      /**
+       * Footer CONTENT slot — fills the position after the closing `╰`:
+       *
+       *   ╰ <displayFooter>
+       *
+       * When omitted, the last body line of `display` absorbs the `╰`
+       * connector. When present, the closer is its own row.
+       */
       displayFooter?: string
     }
   | { kind: "rendered"; ansi: string }
@@ -122,24 +158,7 @@ export interface ManifestFile {
   name: string
   version: string
   description: string
-  /**
-   * Optional relative path to a `PROMPT.md` file (default: `./PROMPT.md`).
-   *
-   * Three states:
-   * - `undefined` (field omitted): the loader looks for `./PROMPT.md`. If
-   *   absent or empty, the plugin contributes no prompt body and gets no
-   *   `<plugin>` wrapper in the assembled system-prompt block.
-   * - `""` (explicit empty string): the loader skips the lookup entirely.
-   *   Use this for plugins that have no model-facing surface (no tools,
-   *   no inline tags, no modes, no prompt fragments) — e.g. a live-area
-   *   slot that only renders a footer line. Identical effect to omitting
-   *   the field plus deleting `PROMPT.md`, but signals intent in the
-   *   manifest so source readers don't wonder where the prompt went.
-   * - `"<relative path>"`: the loader reads that file. Absent file is
-   *   silently treated as "no prompt body".
-   *
-   * `description` is NOT a prompt fallback. It's human-facing metadata.
-   */
+  /** Optional relative path to a PROMPT.md file (default: `./PROMPT.md`). */
   prompt?: string
   /**
    * Async prompt fragments. Each fragment is a producer (subprocess or

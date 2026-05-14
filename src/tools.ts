@@ -1082,24 +1082,12 @@ async function execGrep(
       return { content: "No matches found." }
     }
     const allLines = raw.split("\n")
-    // For `files_with_matches` mode, prepend an explicit count header so a
-    // single-hit result never looks like a tautological echo of the search
-    // path. Without it, `Grep /foo/ in src/x.ts` returning `src/x.ts` is
-    // visually indistinguishable from "no matches, here's what I searched"
-    // : a real failure mode that confused even the in-session agent
-    // (transcript 2026-05-13T16:08 "The grep search came up empty").
-    // Content and count modes already have unambiguous body shapes
-    // (`path:line:text`, `path:count`), so they're left alone.
-    const header =
-      outputMode === "files_with_matches"
-        ? `${allLines.length} file${allLines.length === 1 ? "" : "s"} matched\n`
-        : ""
-    const totalBytes = Buffer.byteLength(raw, "utf8") + Buffer.byteLength(header, "utf8")
-    const totalLines = allLines.length + (header ? 1 : 0)
+    const totalBytes = Buffer.byteLength(raw, "utf8")
+    const totalLines = allLines.length
     const limited =
       headLimit > 0 && allLines.length > headLimit ? allLines.slice(0, headLimit).join("\n") : raw
     return {
-      content: header + limited,
+      content: limited,
       _truncCtx: { totalBytes, totalLines },
     }
   } catch (e) {

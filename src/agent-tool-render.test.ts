@@ -390,6 +390,24 @@ describe("formatToolPreview — display channel (Edit/Write diffs)", () => {
     expect(plain[1]).toMatch(/^\s*│\s*$/)
     expect(plain[2]).toMatch(/^\s*╰\s0 done/)
   })
+
+  it("keeps footer-framed display rows below terminal width", () => {
+    const display =
+      "       ╰  ○  #26843da  Audit existing addSessionUsage callers\n" +
+      "   2  ○  #a6b6e5  Add contextSize tracking with cache reads\n"
+    const lines = formatToolPreview("compact for model", false, display, {
+      tool: "Task",
+      footer: "0 done · 0 doing · 2 todo",
+      cols: 65,
+    })
+    const plain = lines.map(stripAnsi)
+    for (const line of plain) {
+      expect(displayWidth(line)).toBeLessThan(65)
+    }
+    expect(plain[0]).toContain("...")
+    expect(plain[0]).toMatch(/^\s*│\s/)
+    expect(plain.at(-1)).toMatch(/^\s*╰\s/)
+  })
 })
 
 describe("formatToolPreview — body preview budget", () => {

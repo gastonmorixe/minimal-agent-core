@@ -908,3 +908,219 @@ describe("EditorController — Shift+Enter via bare LF", () => {
     ctrl.stop()
   })
 })
+
+describe("EditorController — wrap-aware up/down (visual rows)", () => {
+  // Helper: build a 20-col terminal with a fresh controller.
+  // Prompt is "> " (2 cells) so each wrap chunk past the first has 20 cells.
+  function makeWrap(opts: { columns?: number; prompt?: string; continuation?: string } = {}) {
+    return make({
+      columns: opts.columns ?? 20,
+      prompt: opts.prompt ?? "> ",
+      continuation: opts.continuation ?? "  ",
+    })
+  }
+
+  it("Up on a wrapped logical line walks to the previous wrap chunk of the SAME line", () => {
+    // 50-char line on a 20-col term with "> " prompt → 3 visual rows:
+    //   row 0: prompt "> " + first 18 chars
+    //   row 1: chars 18..37 (20 cells)
+    //   row 2: chars 38..49 (12 cells)
+    const { ctrl, stdin } = makeWrap()
+    ctrl.start()
+    const text = "0123456789".repeat(5) // 50 chars
+    stdin.send(text)
+    // Cursor at end of line, on visual row 2 (col 12 of the row 2).
+    expect(ctrl.buffer().col).toBe(50)
+    expect(ctrl.buffer().row).toBe(0)
+    // Press Up: should stay on logical row 0, but move buf.col so visual
+    // pos is on row 1, col 12 (preserving column 12). That maps to
+    // char index = (row1 start = 18) + 12 = 30.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(30)
+    // Press Up again: should walk to visual row 0, col 12. Row 0 starts
+    // after "> " (promptW=2), so target absolute cell = 0*20 + 12 = 12.
+    // Subtract promptW=2 → content cells = 10. col = 10.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(10)
+    // Press Up at top: no-op.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(10)
+    ctrl.stop()
+  })
+
+  it("Down on a wrapped logical line walks to the next wrap chunk of the SAME line", () => {
+    const { ctrl, stdin } = makeWrap()
+    ctrl.start()
+    const text = "0123456789".repeat(5) // 50 chars
+    stdin.send(text)
+    // Cursor at end (col 50, visual row 2). Press Home → col 0, visual
+    // row 0. Then Down → visual row 1. Then Down → visual row 2.
+    stdin.send("\x1b[H") // Home: col 0 of logical row 0
+    expect(ctrl.buffer().col).toBe(0)
+    stdin.send("\x1b[B") // Down
+    // Cursor at col 0 on visual row 0 = visual col 2 (prompt "> " is 2
+    // cells). Sticky sample: desiredVisualCol = 2. Target visual row 1,
+    // visual col 2. Row 1 starts at char 18 (row 0 held 18 chars before
+    // wrap) and has no prompt, so visual col 2 → char 18 + 2 = 20.
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(20)
+    stdin.send("\x1b[B") // Down → visual row 2, visual col 2 = char 38 + 2 = 40
+    expect(ctrl.buffer().col).toBe(40)
+    // Press Down again. Sticky col is 2; only 12 cells of content in
+    // row 2 so visual col 2 is still inside the row. But we're already
+    // on the LAST visual row of logical line 0, AND there's no logical
+    // line 1, so it's a no-op.
+    stdin.send("\x1b[B")
+    expect(ctrl.buffer().col).toBe(40)
+    ctrl.stop()
+  })
+
+  it("Up from the first wrap chunk of a logical line crosses into prior logical line's LAST wrap chunk", () => {
+    const { ctrl, stdin } = makeWrap()
+    ctrl.start()
+    // Logical line 0: 30 chars (wraps to 2 visual rows on 20-col term
+    // with 2-cell prompt: row 0 = 18 chars, row 1 = 12 chars).
+    stdin.send("0123456789".repeat(3))
+    stdin.send("\x1b\r") // Alt+Enter: insert newline
+    // Logical line 1: 10 chars (1 visual row).
+    stdin.send("ABCDEFGHIJ")
+    expect(ctrl.buffer().row).toBe(1)
+    expect(ctrl.buffer().col).toBe(10)
+    // Press Up: from logical row 1, visual row 0, visual col 12 (10
+    // chars + 2-cell continuation prompt). Should cross into logical
+    // row 0's LAST visual row (row 1 of 2), at visual col 12.
+    // Row 1 of logical line 0 starts at char 18 (since row 0 held
+    // 0..17). Visual col 12 → char index 18 + 12 = 30 (end of line).
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(30)
+    // Press Up again: from logical row 0, visual row 1 → visual row 0.
+    // Target visual col 12 on row 0; row 0 has prompt eating cells 0..1,
+    // so target char = visual col 12 - prompt 2 = char index 10.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(10)
+    ctrl.stop()
+  })
+
+  it("Down from the last wrap chunk crosses into next logical line at the same visual col", () => {
+    const { ctrl, stdin } = makeWrap()
+    ctrl.start()
+    stdin.send("0123456789".repeat(3)) // logical 0, 30 chars
+    stdin.send("\x1b\r")
+    stdin.send("ABCDEFGHIJ") // logical 1, 10 chars
+    // Move back to logical 0, last visual row, col 24 (visual col 6 on
+    // row 1: chars 18..29 in line). char index 24.
+    stdin.send("\x1b[H") // line start (logical 0, col 0) — wait, we're on logical 1
+    // Reset cursor: Home goes to logical-line start, not visual-row start.
+    // From logical 1 col 10 → Home → logical 1 col 0.
+    stdin.send("\x1b[A") // up → logical 0, last visual row, visual col 0 + continuationPromptW
+    // logical 1 had continuationPromptW=2, visualCol of col=0 = 2.
+    // Up: target visual col 2 on logical 0 last visual row.
+    // Row 1 of logical 0: chars 18..29, no prompt. visual col 2 = char 18 + 2 = 20.
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(20)
+    // Press Down: cross from logical 0 last visual row to logical 1 first row.
+    // Target visual col 2 on logical 1 row 0. Row 0 has continuationPromptW=2,
+    // so target char = visual col 2 - prompt 2 = 0.
+    stdin.send("\x1b[B")
+    expect(ctrl.buffer().row).toBe(1)
+    expect(ctrl.buffer().col).toBe(0)
+    ctrl.stop()
+  })
+
+  it("sticky desired-visual-col survives walking through SHORTER rows then re-extends", () => {
+    const { ctrl, stdin } = makeWrap()
+    ctrl.start()
+    // Line 0: 25 chars (wraps to 2 rows: 18 + 7)
+    stdin.send("0123456789".repeat(2) + "ABCDE") // 25 chars
+    stdin.send("\x1b\r")
+    // Line 1: 5 chars (1 row)
+    stdin.send("XYZAB")
+    stdin.send("\x1b\r")
+    // Line 2: 25 chars (wraps to 2 rows: 18 + 7)
+    stdin.send("9876543210".repeat(2) + "VWXYZ")
+    // Cursor at end of line 2, visual col = 7 (chars 18..24 = 7 cells; cursor after).
+    expect(ctrl.buffer().row).toBe(2)
+    expect(ctrl.buffer().col).toBe(25)
+    // Up: walk through line 2's row 0 (visual col 7). col = 7 cells from
+    // line start, prompt is continuation (2), so content col = 7-2 = 5.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(2)
+    expect(ctrl.buffer().col).toBe(5)
+    // Up: into line 1 (only 5 chars, 1 visual row). visual col 7 is
+    // past the line's actual content; clamp to end-of-line. col = 5.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(1)
+    expect(ctrl.buffer().col).toBe(5)
+    // Up: into line 0 last visual row (row 1: chars 18..24). visual col
+    // 7 maps to char 18 + 7 = 25 (end of line). Sticky col is STILL 7
+    // (carried from initial sample), so even though line 1 forced us to
+    // col 5 visually, we should land at visual col 7 here. col = 25.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    expect(ctrl.buffer().col).toBe(25)
+    ctrl.stop()
+  })
+
+  it("a horizontal move between vertical moves invalidates the sticky col", () => {
+    const { ctrl, stdin } = makeWrap()
+    ctrl.start()
+    stdin.send("0123456789".repeat(3)) // logical 0: 30 chars, 2 visual rows
+    stdin.send("\x1b\r")
+    stdin.send("ABCDE") // logical 1: 5 chars
+    stdin.send("\x1b\r")
+    stdin.send("0123456789".repeat(3)) // logical 2: 30 chars
+    // Cursor at end of line 2 (col 30, visual col 12 on row 1 of 2).
+    // Up → line 2 row 0 visual col 12 = char 12 (prompt is 2, visual 12 → char 10? wait line 2 has continuationPromptW=2 on row 0 because it's a non-first LOGICAL row but the FIRST visual row of that logical line. Yes promptW=2 for row 0 of logical lines >0.)
+    // So target visual col 12 on logical 2 row 0 → char = 12-2 = 10.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().col).toBe(10)
+    // Move left a few times — invalidates sticky.
+    stdin.send("\x1b[D")
+    stdin.send("\x1b[D")
+    stdin.send("\x1b[D")
+    expect(ctrl.buffer().col).toBe(7)
+    // Up: should re-sample current visual col (=9 since col 7 + promptW 2 = 9),
+    // NOT use the old sticky 12. From logical 2 row 0 → logical 1 (5 chars).
+    // visual col 9 is past end → clamp to col 5.
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(1)
+    expect(ctrl.buffer().col).toBe(5)
+    ctrl.stop()
+  })
+
+  it("falls back to logical moveUp/moveDown when terminal width is unknown", () => {
+    // No columns → non-TTY/test fallback. moveUp/moveDown should still
+    // work (jumping by logical line) so cursor navigation remains usable
+    // even when wrap layout isn't computable.
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    output.columns = 0 // unknown
+    const compositor = new FakeCompositor()
+    const ctrl = new EditorController({
+      prompt: "> ",
+      continuationPrompt: "  ",
+      compositor: compositor as any,
+      stdin: stdin as any,
+      output: output as any,
+    })
+    ctrl.start()
+    stdin.send("L1")
+    stdin.send("\x1b\r")
+    stdin.send("L2")
+    stdin.send("\x1b\r")
+    stdin.send("L3")
+    expect(ctrl.buffer().row).toBe(2)
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(1)
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    stdin.send("\x1b[B")
+    expect(ctrl.buffer().row).toBe(1)
+    ctrl.stop()
+  })
+})

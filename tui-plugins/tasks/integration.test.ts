@@ -282,7 +282,7 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
     // The cosmetic icon + color flow into `toolPresentation` in agent.ts.
     // We just verify the manifest fields are carried through to the
     // loader's external tool list — the rendering itself lives in agent.ts.
-    expect((task as unknown as { icon?: string }).icon).toBe("◉")
+    expect((task as unknown as { icon?: string }).icon).toBe("✔")
     expect((task as unknown as { color?: string }).color).toBe("lime")
   })
 })

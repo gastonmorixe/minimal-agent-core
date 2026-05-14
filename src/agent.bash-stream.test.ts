@@ -125,4 +125,63 @@ describe("Agent.run live-streams Bash stdout to transcript", () => {
     const dupBody = lines.find((l) => l.includes("│") && l.includes("only-line"))
     expect(dupBody).toBeUndefined()
   }, 10_000)
+
+  it("header→body separator is `│` for Bash (no start-truncation)", async () => {
+    // Regression for the gutter glyph between header and body. The `┊`
+    // (LIGHT QUADRUPLE DASH VERTICAL, U+250A) is reserved for genuine
+    // truncation discontinuities : (a) body starts mid-source (Read with
+    // `offset > 0`, info.startLine > 0), or (b) tail elided before the
+    // footer at the bottom of the block. Bash stdout always starts at
+    // the first byte the child writes, so the top-of-body separator is
+    // the solid `│`.
+    let round = 0
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      if (round === 1) {
+        return {
+          blocks: [
+            {
+              type: "tool_use" as const,
+              id: "call-1",
+              name: "Bash",
+              input: { command: "echo body-line" },
+            },
+          ],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const agent = new Agent({
+      auth: { type: "api-key", token: "t" } as AuthResult,
+      model: "test",
+      sendFn,
+    })
+    const lines: string[] = []
+    const gen = agent.run("go", {
+      onTranscriptLine: (line: string) => lines.push(stripAnsi(line)),
+    })
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    // Connector row should be a bare `│` (with leading indent), sitting
+    // immediately after the `╭ <header>` line.
+    const headerIdx = lines.findIndex((l) => l.includes("╭"))
+    expect(headerIdx).toBeGreaterThanOrEqual(0)
+    const connector = lines[headerIdx + 1]
+    expect(connector).toMatch(/^\s*│\s*$/)
+    // Negative check: no bare `┊` row anywhere in the block. Bash output
+    // never start-truncates, and this short single-line run also doesn't
+    // tail-elide, so the only `┊`-eligible spots stay dormant.
+    const bareDot = lines.find((l) => /^\s*┊\s*$/.test(l))
+    expect(bareDot).toBeUndefined()
+  }, 10_000)
 })
