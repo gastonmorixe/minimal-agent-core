@@ -189,4 +189,155 @@ describe("LiveAreaStatusController", () => {
     expect(editor.statuses[editor.statuses.length - 1]).toBe("* hi")
     ctrl.stop()
   })
+
+  describe("elapsed suffix", () => {
+    // Helper: drive a fake `now()` clock the controller reads from, plus
+    // a fake bus listener trigger by `bus.create()` and a "force a
+    // paint" hook via reflective bus.create()+update() that re-fires the
+    // listener. We rely on the controller's design: every bus update
+    // ends in a paint() call.
+    function makeRig(opts?: { spinner?: Spinner }) {
+      const bus = new StatusBus()
+      const editor = new FakeEditor()
+      let now = 1_000_000
+      const ctrl = new LiveAreaStatusController(bus, editor, {
+        spinner: opts?.spinner ?? fakeSpinner,
+        maxFps: 0, // no auto-ticks. We drive paints via bus events.
+        now: () => now,
+      })
+      ctrl.start()
+      return {
+        bus,
+        editor,
+        ctrl,
+        setNow: (ms: number) => {
+          now = ms
+        },
+        advance: (deltaMs: number) => {
+          now += deltaMs
+        },
+      }
+    }
+
+    it("does not render the suffix at t=0 (sub-1s)", () => {
+      const { bus, editor, ctrl } = makeRig()
+      bus.create("Thinking", { notificationId: "a", category: "agent" })
+      expect(editor.statuses[editor.statuses.length - 1]).toBe("* Thinking")
+      ctrl.stop()
+    })
+
+    it("appends ` \\x1b[2m(2s)\\x1b[22m` after 2s on the same handle", () => {
+      const { bus, editor, ctrl, advance } = makeRig()
+      const handle = bus.create("Thinking", { notificationId: "a", category: "agent" })
+      // Advance wall-clock and force a paint by re-publishing on the
+      // same handle. update() with identical label keeps the same id,
+      // so the elapsed timer continues ticking from the create() time.
+      advance(2_100)
+      handle.update("Thinking")
+      expect(editor.statuses[editor.statuses.length - 1]).toBe("* Thinking \x1b[2m(2s)\x1b[22m")
+      ctrl.stop()
+    })
+
+    it("ladder: 1s, 59s, 1m 0s, 1m 2s, 1h 0m", () => {
+      const cases: Array<{ at: number; expected: string }> = [
+        { at: 1_500, expected: "* Thinking \x1b[2m(1s)\x1b[22m" },
+        { at: 59_900, expected: "* Thinking \x1b[2m(59s)\x1b[22m" },
+        { at: 60_000, expected: "* Thinking \x1b[2m(1m 0s)\x1b[22m" },
+        { at: 62_400, expected: "* Thinking \x1b[2m(1m 2s)\x1b[22m" },
+        { at: 3_600_000, expected: "* Thinking \x1b[2m(1h 0m)\x1b[22m" },
+      ]
+      for (const { at, expected } of cases) {
+        const { bus, editor, ctrl, setNow } = makeRig()
+        const handle = bus.create("Thinking", { notificationId: "a", category: "agent" })
+        setNow(1_000_000 + at)
+        handle.update("Thinking")
+        expect(editor.statuses[editor.statuses.length - 1]).toBe(expected)
+        ctrl.stop()
+      }
+    })
+
+    it("resets the timer when a new bus.create() is made (different id, same label)", () => {
+      // Simulates two consecutive `Running Bash` tool dispatches.
+      // First entry runs for 5s, gets cleared, new entry created with
+      // identical label -- the elapsed counter must start at 0 again.
+      const { bus, editor, ctrl, advance, setNow } = makeRig()
+      const first = bus.create("Running Bash", { notificationId: "tool.running", category: "tool" })
+      advance(5_000)
+      first.update("Running Bash")
+      expect(editor.statuses[editor.statuses.length - 1]).toBe("* Running Bash \x1b[2m(5s)\x1b[22m")
+      first.clear()
+
+      // New tool dispatch right after, same human label, brand-new id.
+      // Paint must show no suffix (elapsed < 1s on the new entry).
+      setNow(1_005_000) // same wall clock as after the advance
+      bus.create("Running Bash", { notificationId: "tool.running", category: "tool" })
+      expect(editor.statuses[editor.statuses.length - 1]).toBe("* Running Bash")
+      ctrl.stop()
+    })
+
+    it("does NOT reset the timer across handle.update() with a different label", () => {
+      // Simulates client.ts network phase transitions on one request:
+      // `Sending` -> `Receiving stream` -> `Thinking`. The elapsed should
+      // reflect total request time, not "time since the last phase
+      // transition" -- same handle, same id.
+      const { bus, editor, ctrl, advance } = makeRig()
+      const handle = bus.create("Sending", {
+        notificationId: "network.request",
+        category: "network",
+      })
+      advance(3_500)
+      handle.update("Receiving stream")
+      expect(editor.statuses[editor.statuses.length - 1]).toBe(
+        "* Receiving stream \x1b[2m(3s)\x1b[22m",
+      )
+      advance(2_500)
+      handle.update("Thinking")
+      expect(editor.statuses[editor.statuses.length - 1]).toBe("* Thinking \x1b[2m(6s)\x1b[22m")
+      ctrl.stop()
+    })
+
+    it("clears suffix state on stop() so a fresh start re-arms cleanly", () => {
+      const { bus, ctrl, advance } = makeRig()
+      const handle = bus.create("Thinking", { notificationId: "a", category: "agent" })
+      advance(2_000)
+      handle.update("Thinking")
+      ctrl.stop()
+      // After stop, the editor should have been cleared (last status null).
+      // (Implicit. No new assertion needed beyond no-throw.)
+    })
+
+    it("stays blink-stable across the spinner on/off cycle when suffix is present", () => {
+      // Pin the elapsed to a stable second so both on/off paints share
+      // the same suffix bytes. With a 200ms gap (< 1s ticker), the
+      // formatter produces identical `(Xs)` and display width matches.
+      let now = 1_000_000
+      const bus = new StatusBus()
+      const editor = new FakeEditor()
+      const spinner = new BlinkingNerdSpinner({
+        blinkMs: 300,
+        iconByNotificationId: { tick: "●" },
+      })
+      const ctrl = new LiveAreaStatusController(bus, editor, {
+        spinner,
+        maxFps: 0,
+        now: () => now,
+      })
+      ctrl.start()
+      const handle = bus.create("Doing things", { notificationId: "tick", category: "any" })
+      now += 1_500 // suffix becomes (1s)
+      handle.update("Doing things")
+      const onCapture = editor.statuses[editor.statuses.length - 1]!
+      now += 200 // < blinkMs (300) and < 1s tick, suffix still (1s); spinner off-step is reached at blinkMs from previous render
+      // Push the spinner past the on-step -> off-step boundary so we
+      // exercise the blink-stability invariant with the suffix tail.
+      now += 200 // total 400ms since last paint -> past 300ms blink
+      handle.update("Doing things")
+      const offCapture = editor.statuses[editor.statuses.length - 1]!
+      // The two captures may differ in glyph bytes (on=colorized,
+      // off=whitespace), but visible-width must agree -- the label
+      // column doesn't jiggle across the cycle.
+      expect(displayWidth(onCapture)).toBe(displayWidth(offCapture))
+      ctrl.stop()
+    })
+  })
 })

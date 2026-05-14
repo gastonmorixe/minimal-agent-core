@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { StatusBus, StatusRenderer, type StatusActivity } from "./status.ts"
+import {
+  formatElapsed,
+  formatElapsedSuffix,
+  StatusBus,
+  StatusRenderer,
+  type StatusActivity,
+} from "./status.ts"
 import type { Spinner } from "./spinner.ts"
 
 class FakeTTYOutput {
@@ -269,5 +275,169 @@ describe("status", () => {
       const a: StatusActivity = {}
       expect(a).toEqual({})
     })
+  })
+
+  describe("StatusSnapshot.id", () => {
+    it("exposes the entry id and increments per create()", () => {
+      const bus = new StatusBus()
+      const a = bus.create("first")
+      const id1 = bus.currentStatus()?.id
+      expect(typeof id1).toBe("number")
+
+      a.clear()
+      expect(bus.currentStatus()).toBeNull()
+
+      bus.create("second")
+      const id2 = bus.currentStatus()?.id
+      expect(typeof id2).toBe("number")
+      expect(id2).not.toBe(id1)
+    })
+
+    it("preserves id across handle.update() on the same entry", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Thinking")
+      const id1 = bus.currentStatus()?.id
+      handle.update("Writing response")
+      const id2 = bus.currentStatus()?.id
+      expect(id2).toBe(id1)
+    })
+
+    it("a second `create()` while the first is alive returns a different id", () => {
+      // Two consecutive `Running Bash` tools both push their own
+      // entry. Both share the same human label but each gets its own
+      // id, so a renderer can reset per-status timers on the second
+      // dispatch.
+      const bus = new StatusBus()
+      bus.create("Running Bash")
+      const idA = bus.currentStatus()?.id
+      bus.create("Running Bash")
+      const idB = bus.currentStatus()?.id
+      expect(idA).toBeDefined()
+      expect(idB).toBeDefined()
+      expect(idB).not.toBe(idA)
+    })
+  })
+})
+
+describe("StatusRenderer elapsed suffix", () => {
+  // Helper rig: deterministic now() and a maxFps:0 renderer so paints
+  // happen only on bus events. The label is already wrapped in
+  // `\x1b[2m...\x1b[22m` by the renderer (legacy line-mode dims the
+  // whole label), and our suffix adds its own `\x1b[2m(Xs)\x1b[22m`
+  // -- so the assertion is on the suffix bytes appearing in the
+  // chunk's tail.
+  function makeRig() {
+    const bus = new StatusBus()
+    const output = new FakeTTYOutput()
+    let now = 1_000_000
+    const renderer = new StatusRenderer(bus, output, {
+      maxFps: 0,
+      spinner: { render: () => ({ glyph: "" }) },
+      now: () => now,
+    })
+    renderer.start()
+    return {
+      bus,
+      output,
+      renderer,
+      advance: (deltaMs: number) => {
+        now += deltaMs
+      },
+    }
+  }
+
+  it("no suffix at t=0 (sub-1s)", () => {
+    const { bus, output, renderer } = makeRig()
+    bus.create("Thinking")
+    const last = output.chunks.at(-1)!
+    expect(last.includes("\x1b[2m(")).toBe(false)
+    renderer.stop()
+  })
+
+  it("appends faint `(2s)` after 2s on the same handle", () => {
+    const { bus, output, renderer, advance } = makeRig()
+    const handle = bus.create("Thinking")
+    advance(2_100)
+    handle.update("Thinking")
+    const last = output.chunks.at(-1)!
+    expect(last.endsWith(" \x1b[2m(2s)\x1b[22m")).toBe(true)
+    renderer.stop()
+  })
+
+  it("resets the timer when a new bus.create() is made (different id, same label)", () => {
+    const { bus, output, renderer, advance } = makeRig()
+    const first = bus.create("Running Bash")
+    advance(5_000)
+    first.update("Running Bash")
+    expect(output.chunks.at(-1)!.endsWith(" \x1b[2m(5s)\x1b[22m")).toBe(true)
+    first.clear()
+
+    bus.create("Running Bash") // new id
+    const last = output.chunks.at(-1)!
+    expect(last.includes("\x1b[2m(")).toBe(false)
+    renderer.stop()
+  })
+
+  it("preserves the timer across update() with a different label (phase transition)", () => {
+    const { bus, output, renderer, advance } = makeRig()
+    const handle = bus.create("Sending")
+    advance(3_500)
+    handle.update("Receiving stream")
+    expect(output.chunks.at(-1)!.endsWith(" \x1b[2m(3s)\x1b[22m")).toBe(true)
+    advance(2_500)
+    handle.update("Thinking")
+    expect(output.chunks.at(-1)!.endsWith(" \x1b[2m(6s)\x1b[22m")).toBe(true)
+    renderer.stop()
+  })
+})
+
+describe("formatElapsed", () => {
+  it("< 60s renders as `<n>s`", () => {
+    expect(formatElapsed(0)).toBe("0s")
+    expect(formatElapsed(999)).toBe("0s") // sub-second floors to 0
+    expect(formatElapsed(1_000)).toBe("1s")
+    expect(formatElapsed(2_400)).toBe("2s") // floor, not round
+    expect(formatElapsed(59_000)).toBe("59s")
+    expect(formatElapsed(59_999)).toBe("59s")
+  })
+
+  it("60s..3599s renders as `<m>m <s>s`", () => {
+    expect(formatElapsed(60_000)).toBe("1m 0s")
+    expect(formatElapsed(62_000)).toBe("1m 2s")
+    expect(formatElapsed(125_000)).toBe("2m 5s")
+    expect(formatElapsed(3_599_000)).toBe("59m 59s")
+  })
+
+  it(">= 3600s renders as `<h>h <m>m` (seconds dropped)", () => {
+    expect(formatElapsed(3_600_000)).toBe("1h 0m")
+    expect(formatElapsed(3_660_000)).toBe("1h 1m")
+    expect(formatElapsed(7_320_000)).toBe("2h 2m")
+  })
+
+  it("clamps negative/NaN/Infinity inputs to 0s", () => {
+    expect(formatElapsed(-1)).toBe("0s")
+    expect(formatElapsed(Number.NaN)).toBe("0s")
+    expect(formatElapsed(Number.POSITIVE_INFINITY)).toBe("0s")
+  })
+})
+
+describe("formatElapsedSuffix", () => {
+  it("returns empty string below the 1s threshold", () => {
+    expect(formatElapsedSuffix(0)).toBe("")
+    expect(formatElapsedSuffix(999)).toBe("")
+    expect(formatElapsedSuffix(-5)).toBe("")
+    expect(formatElapsedSuffix(Number.NaN)).toBe("")
+  })
+
+  it("wraps the elapsed in faint SGR codes with a leading space and parens", () => {
+    // Shape: " " + "\x1b[2m" + "(<elapsed>)" + "\x1b[22m"
+    expect(formatElapsedSuffix(1_500)).toBe(" \x1b[2m(1s)\x1b[22m")
+    expect(formatElapsedSuffix(62_000)).toBe(" \x1b[2m(1m 2s)\x1b[22m")
+    expect(formatElapsedSuffix(3_660_000)).toBe(" \x1b[2m(1h 1m)\x1b[22m")
+  })
+
+  it("concatenates with a plain label to form a renderable status line", () => {
+    expect(`Thinking${formatElapsedSuffix(2_000)}`).toBe("Thinking \x1b[2m(2s)\x1b[22m")
+    expect(`Running Bash${formatElapsedSuffix(62_000)}`).toBe("Running Bash \x1b[2m(1m 2s)\x1b[22m")
   })
 })

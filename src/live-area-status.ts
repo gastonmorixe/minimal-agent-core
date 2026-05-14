@@ -11,7 +11,12 @@
  * @module live-area-status
  */
 
-import type { StatusBus, StatusSnapshot, StatusSpinnerTheme } from "./status.ts"
+import {
+  formatElapsedSuffix,
+  type StatusBus,
+  type StatusSnapshot,
+  type StatusSpinnerTheme,
+} from "./status.ts"
 import type { StatusController } from "./agent.ts"
 import {
   BlinkingNerdSpinner,
@@ -37,12 +42,23 @@ export class LiveAreaStatusController implements StatusController {
   private readonly editor: EditorStatusSink
   private readonly maxFps: number
   private readonly spinnerManager: SpinnerManager<StatusSpinnerTheme>
+  private readonly now: () => number
   private baseTheme: StatusSpinnerTheme
   private unsubscribe: (() => void) | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private label: string | null = null
   private spinnerGlyph = ""
   private suspended = false
+  /**
+   * Identity of the entry whose elapsed timer is currently running.
+   * Reset triggers: bus.create() (new id), cleared status (null), or
+   * controller stop. `update()` on the same handle keeps the same id
+   * so phase transitions on one network request keep ticking from the
+   * original start (e.g. `Sending` -> `Receiving stream` -> `Thinking`
+   * all share an elapsed counter).
+   */
+  private statusId: number | null = null
+  private statusStartedAt = 0
 
   constructor(bus: StatusBus, editor: EditorStatusSink, opts: LiveAreaStatusOptions = {}) {
     this.bus = bus
@@ -53,8 +69,14 @@ export class LiveAreaStatusController implements StatusController {
     // repaints, so the cost when the spinner state hasn't changed is one
     // cheap string compare per tick — no terminal write. Setting maxFps
     // to 0 here disables the timer entirely (useful for tests).
+    //
+    // The same timer also drives the per-status elapsed suffix
+    // (`Thinking (2s)`). At 125 ms tick the second-boundary is crossed
+    // within one tick of wall-clock truth, so the suffix advances
+    // smoothly.
     this.maxFps = opts.maxFps ?? 8
     this.baseTheme = opts.spinnerTheme ?? {}
+    this.now = opts.now ?? (() => Date.now())
     this.spinnerManager = new SpinnerManager<StatusSpinnerTheme>({
       spinner: opts.spinner ?? new BlinkingNerdSpinner(),
       theme: this.baseTheme,
@@ -79,6 +101,8 @@ export class LiveAreaStatusController implements StatusController {
     this.spinnerManager.unmount()
     this.editor.setStatus(null)
     this.label = null
+    this.statusId = null
+    this.statusStartedAt = 0
   }
 
   /**
@@ -103,7 +127,19 @@ export class LiveAreaStatusController implements StatusController {
       this.spinnerManager.unmount()
       this.stopTimer()
       this.editor.setStatus(null)
+      this.statusId = null
+      this.statusStartedAt = 0
       return
+    }
+    // Reset the elapsed timer on entry-identity change (new
+    // `bus.create()`) but NOT on label updates to the same entry -- so
+    // two consecutive `Running Bash` tool dispatches each restart from
+    // 0, while client.ts phase transitions on one network request
+    // (`Sending` -> `Receiving stream` -> ...) keep ticking from the
+    // original handle's birth.
+    if (status.id !== this.statusId) {
+      this.statusId = status.id
+      this.statusStartedAt = this.now()
     }
     this.spinnerManager.ensureMounted()
     this.spinnerManager.setNotification(this.toNotification(status))
@@ -131,7 +167,13 @@ export class LiveAreaStatusController implements StatusController {
     // pulse-instead-of-blink design makes that compensation
     // unnecessary because the byte-width is identical every frame.
     const slot = this.spinnerGlyph || " "
-    this.editor.setStatus(`${slot} ${this.label}`)
+    // Append the faint elapsed suffix (e.g. " \x1b[2m(2s)\x1b[22m").
+    // Empty string under 1s, then ticks per second. The compositor's
+    // `drawnLiveKey` content-dedup absorbs paints where neither glyph
+    // nor seconds-bucket changed, so cost is one string compare.
+    const elapsedMs = this.statusStartedAt > 0 ? this.now() - this.statusStartedAt : 0
+    const suffix = formatElapsedSuffix(elapsedMs)
+    this.editor.setStatus(`${slot} ${this.label}${suffix}`)
   }
 
   private toNotification(status: StatusSnapshot): SpinnerNotification {

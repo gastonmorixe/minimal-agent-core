@@ -45,7 +45,16 @@ desc("tmux smoke: streaming status updates with detailed labels", () => {
         const m = line.match(
           /(?:Calling \w+:.*|Receiving stream|Writing response|Thinking|Finalizing)/,
         )
-        if (m) seenLabels.add(m[0].trim())
+        if (m) {
+          // Strip the per-status elapsed suffix added by
+          // LiveAreaStatusController / StatusRenderer (e.g.
+          // `Calling Write: dispatching (2s)`). The suffix is a faint
+          // wall-clock indicator and is not part of the label
+          // semantics this test cares about. Keep the assertions
+          // pinned to the label content itself.
+          const normalized = m[0].trim().replace(/\s*\((?:\d+s|\d+m \d+s|\d+h \d+m)\)$/, "")
+          seenLabels.add(normalized)
+        }
       }
       if (pane.includes("DONE")) {
         done = true
