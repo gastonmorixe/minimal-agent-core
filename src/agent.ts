@@ -52,6 +52,7 @@ import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import type { ManifestMode, ResolvedLiveAreaSlot } from "./plugins/types.ts"
 import { buildQueueDecorationLines } from "./queue-decoration.ts"
+import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
 import type { SessionStore } from "./session-store.ts"
 import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
@@ -954,13 +955,24 @@ export class Agent {
       })
 
       let response: StreamedResponse | undefined
+      // Strip `<ma::reflection-ack ... />` from the streamed text channel
+      // before it reaches the REPL sink. The agent still parses the tag
+      // out of `lastResponse.text` (built from the same SSE deltas inside
+      // the client) and surfaces a dim transcript line — that's the
+      // user-visible artifact; the raw XML is internal protocol and
+      // should not appear in scrollback. See
+      // `src/reflection-ack-stripper.ts`.
+      const ackStripper = createReflectionAckStripper()
       while (true) {
         const { done, value } = await gen.next()
         if (done) {
           response = value as unknown as StreamedResponse
+          const tail = ackStripper.flush()
+          if (tail.length > 0) yield tail
           break
         }
-        yield value
+        const cleaned = ackStripper.write(value)
+        if (cleaned.length > 0) yield cleaned
       }
 
       lastResponse = response ?? { blocks: [], text: "", stopReason: null }
@@ -1436,13 +1448,19 @@ export class Agent {
         ...(signal ? { signal } : {}),
       })
       let wrapResponse: StreamedResponse | undefined
+      // Fresh stripper for the wrap-up turn — separate stream from the
+      // main loop above so it gets its own tail buffer.
+      const wrapAckStripper = createReflectionAckStripper()
       while (true) {
         const { done, value } = await wrapGen.next()
         if (done) {
           wrapResponse = value as unknown as StreamedResponse
+          const tail = wrapAckStripper.flush()
+          if (tail.length > 0) yield tail
           break
         }
-        yield value
+        const cleaned = wrapAckStripper.write(value)
+        if (cleaned.length > 0) yield cleaned
       }
       if (wrapResponse) {
         lastResponse = wrapResponse
@@ -1477,7 +1495,11 @@ export class Agent {
       content: [{ type: "text", text: userText }],
     })
 
-    const gen = sendMessage({
+    // Use `this.sendFn` (the injectable transport) so tests can stub the
+    // SSE layer the same way they do for `run()`. Previously this called
+    // `sendMessage` directly, which left `send()` un-testable without
+    // hitting the real API.
+    const gen = this.sendFn({
       auth: this.auth,
       messages: withRollingCacheBreakpoint(this.messages),
       model: this.model,
@@ -1489,13 +1511,22 @@ export class Agent {
     })
 
     let response: StreamedResponse | undefined
+    // Strip `<ma::reflection-ack ... />` from the streamed text channel.
+    // `send()` is the no-tools single-shot variant and doesn't run the
+    // reflection-checkpoint loop, so a model rarely has reason to emit
+    // the tag here — but we strip defensively so accidental emissions
+    // don't leak into scrollback. See `src/reflection-ack-stripper.ts`.
+    const ackStripper = createReflectionAckStripper()
     while (true) {
       const { done, value } = await gen.next()
       if (done) {
         response = value as unknown as StreamedResponse
+        const tail = ackStripper.flush()
+        if (tail.length > 0) yield tail
         break
       }
-      yield value
+      const cleaned = ackStripper.write(value)
+      if (cleaned.length > 0) yield cleaned
     }
 
     const result = response ?? { blocks: [], text: "", stopReason: null }
