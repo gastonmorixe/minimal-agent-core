@@ -29,6 +29,8 @@ export const ICON_GEAR = "⚙" // U+2699
 export const ICON_BOLT = "⚡" // U+26A1
 export const ICON_HOURGLASS = "⌛" // U+231B
 export const ICON_NETWORK = "◉" // U+25C9 — fisheye, reads as "transmitting"
+export const ICON_SQUARE = "■" // U+25A0 — black square, BMP narrow, no emoji promotion
+export const ICON_TRIANGLE_RIGHT = "▸" // U+25B8 — small triangle, "running"
 
 // ─── Nerd Font (Material Design + FontAwesome ranges) ───────────────────────
 // Codepoints kept in comments so they're greppable even on non-NF terminals.
