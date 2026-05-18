@@ -190,10 +190,12 @@ export interface ProbeResult {
 export interface ProbeOptions {
   /**
    * Sample Nerd Font glyph to measure. Defaults to U+F1064 (nf-md-tools,
-   * `󱁤`) which is the icon used for the `tool.running` status row.
-   * Different glyphs in the same font CAN have different cell widths in
-   * pathological terminals, but in practice all PUA-A glyphs from a
-   * given Nerd Font render at the same width.
+   * `󱁤`). All PUA glyphs in a given Nerd Font render at the same width
+   * in practice, so any of them works as the probe sample. The default
+   * is retained even though `tool.running` no longer uses NF_TOOLS
+   * (swapped to `▸` to avoid the width-ambiguity headache) — the result
+   * still applies to `auth.refresh` (NF_LOCK is PUA) and any future PUA
+   * icon swap-in.
    */
   sample?: string
   /**
