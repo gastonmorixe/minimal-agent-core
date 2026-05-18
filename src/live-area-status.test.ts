@@ -1,8 +1,9 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { StatusBus } from "./status.ts"
 import { BlinkingNerdSpinner, type Spinner } from "./spinner.ts"
 import { LiveAreaStatusController } from "./live-area-status.ts"
 import { displayWidth } from "./term-width.ts"
+import { _resetNerdGlyphCellsForTest, setNerdGlyphCells } from "./nerd-glyph-width.ts"
 
 class FakeEditor {
   readonly statuses: Array<string | null> = []
@@ -20,6 +21,16 @@ const fakeSpinner: Spinner = {
 }
 
 describe("LiveAreaStatusController", () => {
+  // Reset the nerd-glyph cache between tests so a `setNerdGlyphCells(2)`
+  // in one test doesn't leak into a later test that depends on the
+  // default (1).
+  beforeEach(() => {
+    _resetNerdGlyphCellsForTest()
+  })
+  afterEach(() => {
+    _resetNerdGlyphCellsForTest()
+  })
+
   it("publishes 'glyph label' when a status appears on the bus", () => {
     const bus = new StatusBus()
     const editor = new FakeEditor()
@@ -49,11 +60,11 @@ describe("LiveAreaStatusController", () => {
     expect(editor.statuses).toContain(null)
   })
 
-  it("uses plain 1-space gap for a 1-cell icon", () => {
+  it("uses 1-space gap for a 1-cell narrow icon (●)", () => {
     const bus = new StatusBus()
     const editor = new FakeEditor()
     const ctrl = new LiveAreaStatusController(bus, editor, {
-      spinner: { ...fakeSpinner, render: () => ({ glyph: "●" }) },
+      spinner: { ...fakeSpinner, render: () => ({ glyph: "●", iconCells: 1 }) },
       maxFps: 0,
     })
     ctrl.start()
@@ -62,28 +73,61 @@ describe("LiveAreaStatusController", () => {
     ctrl.stop()
   })
 
-  it("uses plain 1-space gap for a wide PUA nerd-font icon (no special padding)", () => {
+  it("uses 2-space gap for a wide PUA nerd-font icon when iconCells=2", () => {
     const bus = new StatusBus()
     const editor = new FakeEditor()
     const wideGlyph = "\u{F1064}" // 󱁤 nf-md-tools, U+F1064, PUA-A
     const ctrl = new LiveAreaStatusController(bus, editor, {
-      spinner: { ...fakeSpinner, render: () => ({ glyph: wideGlyph }) },
+      spinner: { ...fakeSpinner, render: () => ({ glyph: wideGlyph, iconCells: 2 }) },
       maxFps: 0,
     })
     ctrl.start()
     bus.create("Running Bash", { notificationId: "n2", category: "agent" })
-    // Same 1-space gap as narrow icons. Visual width may be tight in
-    // patched-Nerd-Font terminals (glyph fills 2 cells), but byte
-    // emission is stable — see pulse-instead-of-blink test below.
+    // Two ASCII spaces between glyph and label so that in a patched
+    // Nerd Font terminal (glyph fills 2 cells edge-to-edge) the label
+    // gets one cell of breathing room at its left edge instead of
+    // butting against the glyph.
+    expect(editor.statuses[editor.statuses.length - 1]).toBe(`${wideGlyph}  Running Bash`)
+    ctrl.stop()
+  })
+
+  it("uses 1-space gap for a wide PUA glyph when iconCells=1 (unpatched font)", () => {
+    const bus = new StatusBus()
+    const editor = new FakeEditor()
+    const wideGlyph = "\u{F1064}"
+    const ctrl = new LiveAreaStatusController(bus, editor, {
+      // Same glyph, but the spinner reports iconCells=1 because the
+      // terminal+font config renders PUA as 1 cell (unpatched fallback).
+      spinner: { ...fakeSpinner, render: () => ({ glyph: wideGlyph, iconCells: 1 }) },
+      maxFps: 0,
+    })
+    ctrl.start()
+    bus.create("Running Bash", { notificationId: "n2b", category: "agent" })
     expect(editor.statuses[editor.statuses.length - 1]).toBe(`${wideGlyph} Running Bash`)
     ctrl.stop()
   })
 
-  it("uses plain 1-space gap when the spinner is between frames (empty glyph)", () => {
+  it("falls back to visualCellsForGlyph when the spinner omits iconCells (legacy)", () => {
+    setNerdGlyphCells(2) // PUA detected as 2 cells
+    const bus = new StatusBus()
+    const editor = new FakeEditor()
+    const wideGlyph = "\u{F1064}"
+    const ctrl = new LiveAreaStatusController(bus, editor, {
+      // NO iconCells field — exercises the fallback path for older spinners.
+      spinner: { ...fakeSpinner, render: () => ({ glyph: wideGlyph }) },
+      maxFps: 0,
+    })
+    ctrl.start()
+    bus.create("Running Bash", { notificationId: "n2c", category: "agent" })
+    expect(editor.statuses[editor.statuses.length - 1]).toBe(`${wideGlyph}  Running Bash`)
+    ctrl.stop()
+  })
+
+  it("uses 1-space gap when the spinner is between frames (empty glyph)", () => {
     const bus = new StatusBus()
     const editor = new FakeEditor()
     const ctrl = new LiveAreaStatusController(bus, editor, {
-      spinner: { ...fakeSpinner, render: () => ({ glyph: "" }) },
+      spinner: { ...fakeSpinner, render: () => ({ glyph: "", iconCells: 1 }) },
       maxFps: 0,
     })
     ctrl.start()
@@ -118,6 +162,50 @@ describe("LiveAreaStatusController", () => {
     await new Promise((resolve) => setTimeout(resolve, 200))
 
     expect(editor.statuses.length).toBeGreaterThan(afterCreate)
+    ctrl.stop()
+  })
+
+  it("blink-stable when PUA is detected as 2 cells (patched Nerd Font)", () => {
+    // With cache=2, paint must emit 2 ASCII spaces between a PUA glyph
+    // and the label so the label gets one cell of breathing room past
+    // the (visually 2-cell) icon. Off-frame slot is 2 ASCII spaces (the
+    // spinner's `" ".repeat(iconCells)` pad), so the structural string
+    // BEFORE the label is "<glyph or 2 spaces>  " — same 4 chars in both
+    // frames. The label column doesn't jiggle.
+    setNerdGlyphCells(2)
+    const wideGlyph = "\u{F1064}"
+    let now = 1_000_000
+    const bus = new StatusBus()
+    const editor = new FakeEditor()
+    const spinner = new BlinkingNerdSpinner({
+      blinkMs: 300,
+      iconByNotificationId: { wide: wideGlyph },
+    })
+    const ctrl = new LiveAreaStatusController(bus, editor, {
+      spinner,
+      maxFps: 0,
+      now: () => now,
+    })
+    ctrl.start()
+    bus.create("Running Bash", { notificationId: "wide", category: "tool" })
+    const onCapture = editor.statuses[editor.statuses.length - 1]!
+    now += 350 // > blinkMs (300), advance to off-step
+    bus.create("Running Bash", { notificationId: "wide", category: "tool" })
+    const offCapture = editor.statuses[editor.statuses.length - 1]!
+    // Strip ANSI so we compare the structural bytes, not the SGR escapes.
+    const stripAnsi = (s: string): string =>
+      s.replace(new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "")
+    // On-frame: <glyph><2 spaces>Running Bash → leading 3 codepoints.
+    expect(stripAnsi(onCapture).startsWith(`${wideGlyph}  Running Bash`)).toBe(true)
+    // Off-frame: "<2 spaces>  Running Bash" → 4 leading spaces, then label.
+    expect(stripAnsi(offCapture).startsWith("    Running Bash")).toBe(true)
+    // Both captures have the same number of cells BEFORE "Running":
+    //   on : 1 glyph cell (per term-width.ts model) + 2 spaces = 3 chars
+    //   off: 4 spaces                                          = 4 chars
+    // displayWidth disagrees with reality on the on-frame (it counts
+    // PUA as 1, not 2), so the byte-for-byte structure is the test --
+    // the visible columns match at 4 in both frames in a patched-font
+    // terminal because the glyph itself occupies 2 visual cells.
     ctrl.stop()
   })
 

@@ -25,7 +25,7 @@ import {
   DEFAULT_NERD_ICON,
 } from "./presets.ts"
 import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
-import { displayWidth } from "../term-width.ts"
+import { effectiveDisplayWidth, visualCellsForGlyph } from "../nerd-glyph-width.ts"
 
 const DEFAULT_BLINK_MS = 500
 
@@ -86,7 +86,11 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
         : step
       const colorizer = palette.length > 0 ? palette[colorIndex % palette.length] : undefined
       const glyph = typeof colorizer === "function" ? colorizer(frame) : frame
-      return { glyph, requestedFps: 1000 / interval }
+      // Animated rotor frames are uniformly narrow (Braille U+28xx,
+      // ASCII spinners, etc.) — report 1 cell unconditionally. If we
+      // ever ship a 2-cell animated rotor, derive this from
+      // `visualCellsForGlyph(frame)` instead.
+      return { glyph, requestedFps: 1000 / interval, iconCells: 1 }
     }
 
     const blinkMs =
@@ -102,17 +106,32 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
     // which is the appearance most users expect from a "blinking"
     // status indicator.
     //
-    // Cell-width caveat: `displayWidth` returns 1 for both BMP narrow
-    // glyphs (●, U+25CF) and Nerd-Font PUA glyphs (`src/term-width.ts`
-    // explicitly drops PUA out of the wide range). For narrow icons
-    // this is exact. For PUA icons in a patched-Nerd-Font terminal
-    // that renders them as 2 cells visually, the label will jiggle 1
-    // cell during the off-frame. If that becomes a problem we can
-    // branch here on `cp >= 0xE000` to keep a pulse (dim SGR) variant
-    // for PUA icons only.
+    // Off-frame width matches the on-frame icon's visual cell count via
+    // `visualCellsForGlyph`. For BMP-narrow icons (●, U+25CF) and
+    // Braille rotor frames it returns 1. For PUA Nerd Font glyphs
+    // (`󱁤`, `󰌾`, …) it returns the value detected by `probeNerdGlyphCells`
+    // at startup (1 for unpatched fallback fonts, 2 for patched Nerd
+    // Fonts) — so the label column stays put on every blink instead of
+    // jiggling 1 cell with the icon's real width on the on-frame and
+    // its `displayWidth` model width on the off-frame.
+    // TWO width concepts in play, each serving a distinct purpose:
+    //
+    //   - `padCells` = total visible cell count of the spec across all
+    //     codepoints, PUA-aware. Drives the off-frame whitespace pad so
+    //     it occupies the same number of columns as the on-frame icon
+    //     (e.g. ASCII "NET" = 3, single PUA glyph in patched font = 2,
+    //     `●` = 1). Keeps the LABEL column stable on every blink.
+    //
+    //   - `iconCells` = 1 or 2 layout-policy class of the FIRST
+    //     codepoint. Hands to `live-area-status.paint` so it can pick
+    //     the gap width (1 ASCII space for narrow / multi-char ASCII,
+    //     2 ASCII spaces for wide PUA / wide UAX glyphs). Stays the
+    //     SAME value across on/off frames.
+    const padCells = Math.max(1, effectiveDisplayWidth(spec))
+    const iconCells = visualCellsForGlyph(spec)
+
     if (step % 2 !== 0) {
-      const cells = Math.max(1, displayWidth(spec))
-      return { glyph: " ".repeat(cells), requestedFps }
+      return { glyph: " ".repeat(padCells), requestedFps, iconCells }
     }
 
     // Color advances ONCE per on/off cycle so the visible sequence is
@@ -125,7 +144,7 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
     const colorIndex = Math.floor(step / 2)
     const colorizer = palette.length > 0 ? palette[colorIndex % palette.length] : undefined
     const glyph = typeof colorizer === "function" ? colorizer(spec) : spec
-    return { glyph, requestedFps }
+    return { glyph, requestedFps, iconCells }
   }
 
   private resolveIcon(context: SpinnerRenderContext<BlinkingNerdSpinnerTheme>): IconSpec {

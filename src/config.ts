@@ -84,6 +84,21 @@ export interface UserConfig {
    * plugin-declared default for interactive.
    */
   mode?: string
+  /**
+   * Visual cell width of a Nerd Font PUA glyph in the user's terminal,
+   * used to size the gap between the spinner icon and the label on the
+   * live-area status row. PUA codepoints are UAX-#11 "Ambiguous"; each
+   * terminal + font config picks 1 or 2.
+   *
+   *   - `1`      : force 1-cell PUA width (unpatched fallback font).
+   *   - `2`      : force 2-cell PUA width (patched Nerd Font).
+   *   - `"auto"` : probe at startup via cursor-position-report; falls
+   *                back to `1` on probe failure / non-TTY / inside tmux.
+   *
+   * Default: `"auto"`. Override at runtime via env
+   * `MINIMAL_AGENT_NERD_GLYPH_CELLS=1|2|auto`.
+   */
+  nerdGlyphCells?: 1 | 2 | "auto"
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -160,6 +175,13 @@ export function loadUserConfig(): UserConfig {
   if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
   if (typeof obj.header === "boolean") out.header = obj.header
   if (typeof obj.mode === "string" && obj.mode.length > 0) out.mode = obj.mode
+  // nerdGlyphCells: literal 1 or 2 numbers, or string "auto". Anything else
+  // (including "1" / "2" as strings) is rejected to keep the surface tight.
+  if (obj.nerdGlyphCells === 1 || obj.nerdGlyphCells === 2) {
+    out.nerdGlyphCells = obj.nerdGlyphCells
+  } else if (obj.nerdGlyphCells === "auto") {
+    out.nerdGlyphCells = "auto"
+  }
 
   return out
 }
