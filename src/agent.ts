@@ -1112,9 +1112,28 @@ export class Agent {
           )
         } else {
           if (!pluginTool) writeToolHeader()
+          const toolStartedAt = Date.now()
           const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
             notificationId: "tool.running",
             category: "tool",
+            // Seed `direction:"down"` AND `lastChunkAt: toolStartedAt` so
+            // the activity infix auto-flips to the amber
+            //   `⋯ stalled · last byte Ns ago`
+            // form after 2s of no chunks (see STALL_THRESHOLD_MS in
+            // status.ts → formatActivityInfix). This is the visible
+            // signal that distinguishes a subprocess that's working
+            // silently from one that's piping into a buffering filter
+            // like `tail -N` / `head -N` / `sort` (which holds all stdout
+            // until EOF — the user observes this as "Bash is frozen").
+            // When chunks DO start arriving (onChunk below), `lastChunkAt`
+            // is bumped and the stalled state clears, giving way to
+            // `↓ 1.2 KB · 12 B/s` etc.
+            activity: {
+              direction: "down",
+              startedAt: toolStartedAt,
+              recvBytes: 0,
+              lastChunkAt: toolStartedAt,
+            },
           })
 
           try {
@@ -1188,8 +1207,22 @@ export class Agent {
                 streamedLineCount++
               }
 
+              // Track bytes streamed AND timestamp the most recent chunk so
+              // the live-area status row renders `↓ 1.2 KB · 12 B/s` while
+              // bash is producing output, AND flips to `⋯ stalled · last
+              // byte Ns ago` when the subprocess goes quiet (which the user
+              // observes as "Bash is frozen with no feedback" -- common
+              // when the command pipes through a buffering filter like
+              // `tail -N` or `head -N` that holds all output until EOF).
+              let recvBytes = 0
               const onChunk = (s: string) => {
                 pendingChunk += s
+                recvBytes += Buffer.byteLength(s, "utf8")
+                toolStatus.updateActivity({
+                  direction: "down",
+                  recvBytes,
+                  lastChunkAt: Date.now(),
+                })
                 let nl: number
                 while ((nl = pendingChunk.indexOf("\n")) !== -1) {
                   flushLineToBuffer(pendingChunk.slice(0, nl))

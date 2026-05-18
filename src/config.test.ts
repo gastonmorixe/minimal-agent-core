@@ -121,6 +121,26 @@ describe("loadUserConfig", () => {
     expect(loadUserConfig()).toEqual({})
   })
 
+  it("parses nerdGlyphCells: 1 | 2 | 'auto'", () => {
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 1 }))
+    expect(loadUserConfig()).toEqual({ nerdGlyphCells: 1 })
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 2 }))
+    expect(loadUserConfig()).toEqual({ nerdGlyphCells: 2 })
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: "auto" }))
+    expect(loadUserConfig()).toEqual({ nerdGlyphCells: "auto" })
+  })
+
+  it("rejects unsupported nerdGlyphCells shapes (strings '1'/'2', 0, 3, null)", () => {
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: "1" }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 0 }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: 3 }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ nerdGlyphCells: null }))
+    expect(loadUserConfig()).toEqual({})
+  })
+
   it("accepts JSONC syntax: line comments, block comments, trailing commas", () => {
     writeFileSync(
       path,

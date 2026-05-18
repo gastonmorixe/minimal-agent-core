@@ -22,6 +22,18 @@ export interface SpinnerRenderFrame {
    * negotiated rate.
    */
   requestedFps?: number
+  /**
+   * Visual cell width of the *canonical icon* this frame represents.
+   * Both on-frame and off-frame should report the SAME value so the
+   * downstream layout (e.g. live-area status row gap-after-glyph) stays
+   * stable across the blink cycle. Without this, renderers fall back to
+   * inspecting `glyph` — which mis-counts cells for PUA Nerd Font glyphs
+   * (`displayWidth` returns 1, real visual is 1 or 2 depending on font)
+   * AND for off-frame whitespace pads (glyph is " ", visual is whatever
+   * the on-frame was). Optional for back-compat; absent = renderer
+   * falls back to its own heuristic.
+   */
+  iconCells?: 1 | 2
 }
 
 /** Coarse routing key — used by spinners to pick an icon / frame set. */

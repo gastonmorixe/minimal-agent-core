@@ -12,6 +12,7 @@
  */
 
 import {
+  formatActivityInfix,
   formatElapsedSuffix,
   type StatusBus,
   type StatusSnapshot,
@@ -24,10 +25,19 @@ import {
   type Spinner,
   type SpinnerNotification,
 } from "./spinner.ts"
+import { visualCellsForGlyph } from "./nerd-glyph-width.ts"
 
 interface EditorStatusSink {
   setStatus(text: string | null): void
 }
+
+/**
+ * Trailing-parens byte-count detector. Matches `(10 B)`, `(2.0 KB)`,
+ * `(1.5 MB)`. Used to decide whether the label already shows the byte
+ * counter (in which case the activity infix suppresses its own bytes
+ * segment to avoid duplication). See `formatActivityInfix.hideBytes`.
+ */
+const LABEL_BYTES_RE = /\(\d+(?:\.\d+)?\s?(?:B|KB|MB)\)\s*$/
 
 export interface LiveAreaStatusOptions {
   maxFps?: number
@@ -59,6 +69,15 @@ export class LiveAreaStatusController implements StatusController {
    */
   private statusId: number | null = null
   private statusStartedAt = 0
+  /**
+   * Visual cell width of the canonical icon for the current spinner
+   * frame. Stays the same across on-frame (colorized glyph) and
+   * off-frame (whitespace pad) of one icon, so the gap-after-glyph
+   * the paint emits doesn't jiggle on blink. Sourced from the spinner
+   * frame's `iconCells` hint when present; falls back to
+   * `visualCellsForGlyph(glyph)` for spinners that predate the field.
+   */
+  private spinnerIconCells: 1 | 2 = 1
 
   constructor(bus: StatusBus, editor: EditorStatusSink, opts: LiveAreaStatusOptions = {}) {
     this.bus = bus
@@ -154,26 +173,45 @@ export class LiveAreaStatusController implements StatusController {
       this.editor.setStatus(null)
       return
     }
-    // Plain 1-space gap. The label column stays stable because every
-    // frame the spinner emits is the SAME glyph (only the SGR escape
-    // differs — bright color for on-step, dim for off-step). See the
-    // pulse-instead-of-blink comment in BlinkingNerdSpinner.render.
-    //
-    // No `displayWidth`-based padding here: it tries to compensate for
-    // wide PUA glyphs but in practice PUA cell width is unreliable
-    // across terminal/font configs (iTerm + non-patched fallback font
-    // renders Nerd Font PUA as 1 cell, while patched fonts render
-    // them as 2). Padding for one config jiggles in the other. The
-    // pulse-instead-of-blink design makes that compensation
-    // unnecessary because the byte-width is identical every frame.
+    // Gap mirrors the *canonical icon's* visual cell width — sourced
+    // from `spinnerIconCells` (the `SpinnerRenderFrame.iconCells` hint,
+    // stable across on-frame and off-frame), NOT from inspecting the
+    // current slot. Inspecting the slot would mis-measure the off-frame
+    // (whose glyph is whitespace and reads as 1 cell even when the
+    // on-frame icon is 2-cell PUA), causing the label column to jiggle
+    // by 1 cell on every blink. With the hint, the gap stays put:
+    //   - 1-cell icon (●, rotor frame): 1 ASCII space → 2 cells before label
+    //   - 2-cell icon (PUA Nerd glyph with probed cells=2): 2 ASCII spaces
+    //     → 4 cells before label (icon spans cells 0-1, gap is cells 2-3)
+    // In both cases there's exactly one cell of breathing room between
+    // the icon's right edge and the label's left edge.
     const slot = this.spinnerGlyph || " "
+    const iconCells = this.spinnerIconCells
+    const gap = iconCells === 2 ? "  " : " "
     // Append the faint elapsed suffix (e.g. " \x1b[2m(2s)\x1b[22m").
     // Empty string under 1s, then ticks per second. The compositor's
     // `drawnLiveKey` content-dedup absorbs paints where neither glyph
     // nor seconds-bucket changed, so cost is one string compare.
-    const elapsedMs = this.statusStartedAt > 0 ? this.now() - this.statusStartedAt : 0
+    const now = this.now()
+    const elapsedMs = this.statusStartedAt > 0 ? now - this.statusStartedAt : 0
     const suffix = formatElapsedSuffix(elapsedMs)
-    this.editor.setStatus(`${slot} ${this.label}${suffix}`)
+    // Compose the activity infix from the current bus snapshot. The 8 fps
+    // spinner timer drives `paint()` already, so the byte/token/rate
+    // segments tick smoothly without any new timer. The infix is empty
+    // when no activity is attached (back-compat with code paths that
+    // never publish bytes — e.g. local tool execution without streaming).
+    // `hideBytes` is set when the label already ends with `(N B)` /
+    // `(N KB)` / `(N MB)` so we don't double-render the byte counter
+    // (today's `Calling Write: streaming input (10 B)` pattern from
+    // client.ts uses this).
+    const status = this.bus.currentStatus()
+    const labelHasBytes = LABEL_BYTES_RE.test(this.label)
+    const infix = formatActivityInfix(status?.activity, {
+      now,
+      entryStartedAt: this.statusStartedAt,
+      hideBytes: labelHasBytes,
+    })
+    this.editor.setStatus(`${slot}${gap}${this.label}${infix}${suffix}`)
   }
 
   private toNotification(status: StatusSnapshot): SpinnerNotification {
@@ -202,7 +240,25 @@ export class LiveAreaStatusController implements StatusController {
     this.timer = null
   }
 
+  /**
+   * Pull the next frame from the spinner manager and stash both the
+   * glyph and the icon's visual cell width for the next `paint()`.
+   * Returns the glyph string for caller-readability.
+   */
   private nextGlyph(): string {
-    return this.spinnerManager.render(this.maxFps)?.glyph ?? ""
+    const frame = this.spinnerManager.render(this.maxFps)
+    if (!frame) {
+      this.spinnerIconCells = 1
+      return ""
+    }
+    // Prefer the spinner-supplied hint (stable across on/off frames).
+    // Fall back to inspecting the glyph for spinners that predate the
+    // field. Off-frame glyphs are whitespace pads -- their codepoint
+    // is " " which `visualCellsForGlyph` reports as 1 cell, so without
+    // the hint the off-frame disagrees with the on-frame on a wide
+    // icon. The hint fixes that.
+    this.spinnerIconCells =
+      frame.iconCells != null ? frame.iconCells : visualCellsForGlyph(frame.glyph)
+    return frame.glyph
   }
 }

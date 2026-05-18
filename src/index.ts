@@ -1197,6 +1197,7 @@ async function main() {
     const { EditorController } = await import("./editor-controller.ts")
     const { StdioInterceptor } = await import("./ui/stdio-interceptor.ts")
     const { detectSynchronizedOutput } = await import("./ui/term-caps.ts")
+    const { probeNerdGlyphCells, setNerdGlyphCells } = await import("./nerd-glyph-width.ts")
 
     // Probe the terminal for DEC mode 2026 (synchronized output) BEFORE
     // creating the editor. Detection puts stdin into raw mode briefly,
@@ -1210,6 +1211,39 @@ async function main() {
       process.env.MINIMAL_AGENT_NO_SYNC === "1"
         ? { syncOutput: false, unparsed: "" }
         : await detectSynchronizedOutput(process.stdin as any, process.stdout as any)
+
+    // Resolve PUA Nerd-Font glyph cell width. Precedence:
+    //   env MINIMAL_AGENT_NERD_GLYPH_CELLS  >  config.nerdGlyphCells  >  probe
+    //
+    // The env / config values "1" and "2" force the width without probing.
+    // "auto" (or unset) runs the probe; on probe failure / non-TTY / inside
+    // tmux the module default (`1`) survives. We re-use stdin in raw mode
+    // here -- detectSynchronizedOutput already raw'd it -- and chain the
+    // probes with `alreadyRaw: true` so we don't double-toggle.
+    const envCells = process.env.MINIMAL_AGENT_NERD_GLYPH_CELLS
+    const cfgCells = userConfig.nerdGlyphCells
+    let nerdProbeUnparsed = ""
+    if (envCells === "1" || cfgCells === 1) {
+      setNerdGlyphCells(1)
+    } else if (envCells === "2" || cfgCells === 2) {
+      setNerdGlyphCells(2)
+    } else if (envCells === undefined || envCells === "auto" || cfgCells === "auto") {
+      const r = await probeNerdGlyphCells(process.stdin as any, process.stdout as any, {
+        alreadyRaw: true,
+      })
+      nerdProbeUnparsed = r.unparsed
+      // r.cells is null on failure → module-level default (`1`) is preserved.
+    } else if (envCells === "0" || envCells === "off" || envCells === "false") {
+      // Treat falsy values as "skip probe, keep default" -- matches
+      // MINIMAL_AGENT_NO_SYNC's stance for the sync probe.
+      // (No-op: setNerdGlyphCells not called.)
+    } else {
+      // Unrecognized value: fall through to probe (don't break startup on a typo).
+      const r = await probeNerdGlyphCells(process.stdin as any, process.stdout as any, {
+        alreadyRaw: true,
+      })
+      nerdProbeUnparsed = r.unparsed
+    }
 
     // Two-phase wiring: the StdioInterceptor needs a compositor to forward
     // intercepted writes to, and the Compositor needs an output that
@@ -1299,7 +1333,10 @@ async function main() {
         useLiveArea: true,
         compositor,
         editor,
-        initialStdinBytes: syncProbe.unparsed,
+        // Forward typeahead bytes captured by EITHER probe (DECRPM and the
+        // Nerd-glyph CPR probe) so a fast-typing user's first keystroke
+        // isn't lost. Order: sync probe first (ran first), then nerd probe.
+        initialStdinBytes: syncProbe.unparsed + nerdProbeUnparsed,
       })
     } finally {
       interceptor.uninstall()
