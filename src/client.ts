@@ -10,6 +10,7 @@
  *   - SSE parsing for signature_delta and input_json_delta
  */
 
+import { randomUUID } from "node:crypto"
 import { type AuthResult, readKeychain } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import {
@@ -22,7 +23,11 @@ import {
 } from "./headers.ts"
 import { buildMetadata, getSessionId } from "./metadata.ts"
 import { redactHeaders } from "./net-dbg.ts"
-import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
+import {
+  defaultNetworkClient,
+  type NetworkClient,
+  networkActivityObserver,
+} from "./network/index.ts"
 import { broadcastResponseRateLimits, rebroadcastQuotaForSessionUpdate } from "./quota-broadcast.ts"
 import { addSessionUsage } from "./session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
@@ -1077,6 +1082,20 @@ export async function* sendMessage(
     category: "network",
   })
 
+  // Bind the status handle to the network activity observer BEFORE firing
+  // the request. The observer auto-fills `status.activity.sentBytes` /
+  // `recvBytes` / `target.host` / `target.protocol` / `lastChunkAt` from
+  // the transport's per-chunk callbacks, so renderers (LiveAreaStatusController,
+  // StatusRenderer) can show live ↑/↓ bytes and the "⋯ stalled" state when
+  // the model goes quiet mid-stream. Without this attach, every chunk falls
+  // through the observer's trackers Map and gets discarded; the label would
+  // freeze at whatever the last input_json_delta snapshotted (the
+  // "Calling Write: streaming input (10 B) (30s)" bug). We pre-generate a
+  // request id so we can attach BEFORE the request fires — networkClient
+  // auto-uuids if no id is passed, but then we'd have no way to bind.
+  const reqId = randomUUID()
+  networkActivityObserver.attach(reqId, requestStatus)
+
   const reqSnapshot = snapshotRequest(body, model)
   const detector = getCacheDetector()
 
@@ -1089,6 +1108,7 @@ export async function* sendMessage(
       else if (h["x-api-key"]) h["x-api-key"] = token
 
       return networkClient.request({
+        id: reqId,
         label: "messages.send",
         method: "POST",
         url: API_URL,
@@ -1242,6 +1262,19 @@ export async function* sendMessage(
     const STATUS_THROTTLE_MS = 100
     const STATUS_THROTTLE_BYTES = 2048
 
+    // Layer 4: per-block output-token estimate (chars/3.5 heuristic). The
+    // Anthropic SSE stream doesn't include `output_tokens` until the final
+    // `message_delta`, so to give the user a live `~215 tok · 84 tok/s`
+    // segment in the activity infix we estimate from delta text/JSON length.
+    // Reset on every content_block_start so each block (text, tool_use)
+    // counts its own contribution — the activity-infix renderer composes
+    // them per-block, not per-turn. The final `message_delta.usage.
+    // output_tokens` (when present) overwrites the estimate so the trailing
+    // glance lands on the truth.
+    let outputChars = 0
+    let lastTokenPublishAt = 0
+    const TOKENS_PER_CHAR = 1 / 3.5 // ≈0.286 tok/char, matches our cache.ts heuristic
+
     for await (const event of parseSSE(response.body)) {
       if (!sawStreamEvent) {
         sawStreamEvent = true
@@ -1287,6 +1320,16 @@ export async function* sendMessage(
               signature: cb.signature ?? "",
             }
             thinkingSig = cb.signature ?? ""
+            // Token estimate setup, symmetric with text + tool_use branches:
+            // count thinking_delta characters into outputChars so the
+            // activity infix shows `~N tok · M tok/s` during "Thinking" too
+            // (not just during "Writing response"). Without this, long
+            // adaptive-thinking blocks (a minute+ of silence on the wire
+            // can be 10k+ tokens of hidden reasoning) showed bytes/host
+            // but no token signal — user couldn't tell if the model was
+            // generating slowly or stuck.
+            outputChars = initialThinking.length
+            lastTokenPublishAt = 0 // first delta always publishes
             requestStatus.update("Thinking")
             await onThinkingStart?.()
             if (initialThinking) await onThinkingDelta?.(initialThinking)
@@ -1302,9 +1345,17 @@ export async function* sendMessage(
             activeToolName = cb.name ?? "tool"
             lastStatusBytes = 0
             lastStatusUpdateAt = Date.now()
+            outputChars = 0
+            // Reset to 0 (not Date.now()) so the FIRST delta of this
+            // block always passes the throttle gate — gives the user
+            // immediate first-token feedback instead of waiting for the
+            // 100ms throttle window to elapse.
+            lastTokenPublishAt = 0
             requestStatus.update(`Calling ${activeToolName}: streaming input`)
           } else if (cb.type === "text") {
             currentBlock = { type: "text", text: cb.text ?? "" }
+            outputChars = 0
+            lastTokenPublishAt = 0 // see comment above
             requestStatus.update("Writing response")
           }
           break
@@ -1320,11 +1371,41 @@ export async function* sendMessage(
             }
             fullText += d.text
             yield d.text
+            outputChars += d.text.length
+            // Throttled recvTokens publish. Mirrors the input_json_delta
+            // throttle: at most ~10 emits/sec to the bus. The activity-infix
+            // renderer pairs this with entryStartedAt to compute tok/s.
+            // Without this, "Writing response" would show no live token
+            // counter — the user couldn't tell a slow stream from a stuck
+            // one. We don't update the label (the label stays "Writing
+            // response" — the count goes into structured activity).
+            const now = Date.now()
+            if (now - lastTokenPublishAt >= STATUS_THROTTLE_MS) {
+              lastTokenPublishAt = now
+              requestStatus.updateActivity({
+                recvTokens: Math.round(outputChars * TOKENS_PER_CHAR),
+              })
+            }
           } else if (d.type === "thinking_delta" && d.thinking) {
             if (currentBlock?.type === "thinking") {
               ;(currentBlock as ThinkingBlock).thinking += d.thinking
             }
             await onThinkingDelta?.(d.thinking)
+            outputChars += d.thinking.length
+            // Same throttled recvTokens publish as text_delta — the
+            // estimate isn't a billed count (Anthropic's thinking tokens
+            // are also output_tokens, billed identically, so the ~3.5
+            // chars/token heuristic applies symmetrically). Without this
+            // mirror, "Thinking" status row shows everything BUT the
+            // token signal — defeats the whole point of Layer 4 for the
+            // longest visible phase of a turn.
+            const now = Date.now()
+            if (now - lastTokenPublishAt >= STATUS_THROTTLE_MS) {
+              lastTokenPublishAt = now
+              requestStatus.updateActivity({
+                recvTokens: Math.round(outputChars * TOKENS_PER_CHAR),
+              })
+            }
           } else if (d.type === "signature_delta" && d.signature) {
             thinkingSig += d.signature
             if (currentBlock?.type === "thinking") {
@@ -1332,6 +1413,7 @@ export async function* sendMessage(
             }
           } else if (d.type === "input_json_delta" && d.partial_json != null) {
             toolJsonParts += d.partial_json
+            outputChars = toolJsonParts.length
             // Throttled status update : every ~2KB of accumulated JSON or
             // every ~100ms, whichever fires first. Without throttling we'd
             // re-render the spinner line on every delta (potentially hundreds
@@ -1342,12 +1424,17 @@ export async function* sendMessage(
             if (grewEnough || elapsedEnough) {
               lastStatusBytes = toolJsonParts.length
               lastStatusUpdateAt = now
+              lastTokenPublishAt = now
               const hint = extractToolHint(activeToolName, toolJsonParts)
               const size = formatBytes(toolJsonParts.length)
               const label = hint
                 ? `Calling ${activeToolName}: ${hint} (${size})`
                 : `Calling ${activeToolName}: streaming input (${size})`
-              requestStatus.update(label)
+              // Update the label AND the structured token estimate in one
+              // shot. The renderer picks up both on the next paint.
+              requestStatus.update(label, {
+                activity: { recvTokens: Math.round(outputChars * TOKENS_PER_CHAR) },
+              })
             }
           }
           break
@@ -1389,6 +1476,17 @@ export async function* sendMessage(
           if (event.delta?.stop_reason) {
             stopReason = event.delta.stop_reason
           }
+          // Anthropic sometimes ships the final `output_tokens` count in a
+          // `message_delta` near the end of the stream. When present, it's
+          // the authoritative number — swap our chars/3.5 estimate for the
+          // truth so the last visible token count lands on the billed
+          // value. The status row clears very shortly after this (the SSE
+          // loop is wrapping up), so the user often won't even see the
+          // swap — but when they do, it's accurate.
+          const finalOut = (event as { usage?: { output_tokens?: number } }).usage?.output_tokens
+          if (typeof finalOut === "number" && finalOut > 0) {
+            requestStatus.updateActivity({ recvTokens: finalOut })
+          }
           break
         }
       }
@@ -1397,6 +1495,7 @@ export async function* sendMessage(
     return { blocks, text: fullText, stopReason }
   } finally {
     requestStatus.clear()
+    networkActivityObserver.detach(reqId)
   }
 }
 

@@ -52,7 +52,16 @@ desc("tmux smoke: streaming status updates with detailed labels", () => {
           // wall-clock indicator and is not part of the label
           // semantics this test cares about. Keep the assertions
           // pinned to the label content itself.
-          const normalized = m[0].trim().replace(/\s*\((?:\d+s|\d+m \d+s|\d+h \d+m)\)$/, "")
+          //
+          // Also strip the Layer 2+3+4 activity infix that lands between
+          // the label and the elapsed suffix (e.g. `↓ 1.2 KB · ~32 tok
+          // · 8 tok/s · api.anthropic.com:h2`). The infix starts at the
+          // first arrow glyph (↑/↓/⋯/·) or "⋯ stalled" run and continues
+          // until the elapsed parens — strip everything from the first
+          // arrow onward so the label-content semantics this test cares
+          // about (label string before the infix) remain stable.
+          let normalized = m[0].trim().replace(/\s*\((?:\d+s|\d+m \d+s|\d+h \d+m)\)$/, "")
+          normalized = normalized.replace(/\s+(?:↑|↓|⋯|·)\s.*$/, "")
           seenLabels.add(normalized)
         }
       }
