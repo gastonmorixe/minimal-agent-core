@@ -286,4 +286,95 @@ describe("NetworkActivityObserver", () => {
     const a: StatusActivity = { phase: "stream", recvBytes: 100 }
     expect(a.phase).toBe("stream")
   })
+
+  describe("lastChunkAt — stalled-detector heartbeat", () => {
+    // Layer 3 (May 2026): the tracker bumps `lastChunkAt` on EVERY chunk,
+    // even when the status update is throttle-coalesced. The renderer's
+    // stalled detector (in `formatActivityInfix`) reads this to decide
+    // when to flip to the amber `⋯ stalled · last byte Ns ago` form.
+    // Decoupling per-chunk timestamp from throttled emit is load-bearing:
+    // a steady stream of small SSE pings within the throttle window
+    // would otherwise look stalled because the last EMIT was >2s ago,
+    // even though the wire is healthy.
+
+    it("emits lastChunkAt on every throttle-window emit", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Streaming")
+      const obs = new NetworkActivityObserver()
+      let now = 5_000
+      obs.attach("req-1", handle, { now: () => now, throttleMs: 100 })
+
+      obs.onChunk(makeRequest({ id: "req-1" }), new Uint8Array(100))
+      expect(bus.currentStatus()?.activity?.lastChunkAt).toBe(5_000)
+
+      now += 200
+      obs.onChunk(makeRequest({ id: "req-1" }), new Uint8Array(50))
+      expect(bus.currentStatus()?.activity?.lastChunkAt).toBe(5_200)
+
+      handle.clear()
+    })
+
+    it("bumps lastChunkAt internally even on throttle-coalesced chunks", () => {
+      // Crucially: the tracker's internal lastChunkAt MUST advance on
+      // every chunk, not just on emitted ones. Otherwise the next
+      // post-throttle emit (which carries `lastChunkAt` to the renderer)
+      // would lag the actual wire timestamp by up to throttleMs, and a
+      // burst of pings followed by a real stall would look stalled
+      // throttleMs too early.
+      const bus = new StatusBus()
+      const handle = bus.create("Streaming")
+      const obs = new NetworkActivityObserver()
+      let now = 1_000
+      const tracker = obs.attach("req-1", handle, { now: () => now, throttleMs: 100 })
+
+      obs.onChunk(makeRequest({ id: "req-1" }), new Uint8Array(100)) // emitted
+      expect(tracker.lastChunkTimestamp()).toBe(1_000)
+
+      now += 10 // within throttle window
+      obs.onChunk(makeRequest({ id: "req-1" }), new Uint8Array(10)) // NOT emitted
+      expect(tracker.lastChunkTimestamp()).toBe(1_010) // but internal stamp bumped
+
+      now += 200 // cross throttle boundary
+      obs.onChunk(makeRequest({ id: "req-1" }), new Uint8Array(10)) // emitted
+      // The emitted lastChunkAt must be the wire timestamp of THIS chunk,
+      // not the previous emitted-chunk stamp.
+      expect(bus.currentStatus()?.activity?.lastChunkAt).toBe(1_210)
+
+      handle.clear()
+    })
+
+    it("onEnd flushes lastChunkAt of the most recent chunk (not now())", () => {
+      const bus = new StatusBus()
+      const handle = bus.create("Streaming")
+      const obs = new NetworkActivityObserver()
+      let now = 2_000
+      obs.attach("req-1", handle, { now: () => now, throttleMs: 100 })
+
+      obs.onChunk(makeRequest({ id: "req-1" }), new Uint8Array(100))
+      expect(bus.currentStatus()?.activity?.lastChunkAt).toBe(2_000)
+
+      now = 3_500 // 1.5s gap before onEnd
+      obs.onEnd(makeRequest({ id: "req-1" }))
+      // The onEnd flush should NOT mark the end-of-stream moment as a
+      // "chunk" — the stream is closed, not delivering data. Preserve
+      // the last actual chunk's timestamp so the renderer can still
+      // detect "no bytes arrived for the trailing 1.5s before close".
+      expect(bus.currentStatus()?.activity?.lastChunkAt).toBe(2_000)
+      expect(bus.currentStatus()?.activity?.direction).toBe("idle")
+    })
+
+    it("onEnd without any prior chunk does not stamp a 0 lastChunkAt", () => {
+      // Edge case: an empty-body response (e.g. 204 No Content). The
+      // tracker never saw a chunk, so lastChunkAt should be undefined,
+      // NOT 0. A literal 0 would render as "last byte 5000s ago" in the
+      // renderer because it's the unix epoch.
+      const bus = new StatusBus()
+      const handle = bus.create("Streaming")
+      const obs = new NetworkActivityObserver()
+      obs.attach("req-1", handle, { now: () => 1_000 })
+
+      obs.onEnd(makeRequest({ id: "req-1" }))
+      expect(bus.currentStatus()?.activity?.lastChunkAt).toBeUndefined()
+    })
+  })
 })

@@ -60,6 +60,7 @@ export interface NetworkActivityAttachOptions {
 export class NetworkActivityTracker {
   private recvBytes = 0
   private lastEmit = 0
+  private lastChunkAt = 0
   readonly throttleMs: number
 
   constructor(
@@ -93,15 +94,35 @@ export class NetworkActivityTracker {
     })
   }
 
-  /** Called for every body chunk. Throttled internally. */
+  /**
+   * Called for every body chunk. Throttled internally for the status
+   * update, but `lastChunkAt` is bumped on EVERY chunk so the stalled
+   * detector in `formatActivityInfix` (see {@link STALL_THRESHOLD_MS})
+   * has truthful "did the wire just go silent" data. The bump and the
+   * emit are decoupled deliberately:
+   *
+   *   - `lastChunkAt` MUST be fresh (per-chunk) — otherwise a steady
+   *     stream of 50-byte SSE pings within the throttle window would
+   *     look stalled because the last EMIT was >2s ago, even though
+   *     the wire is healthy.
+   *   - The status update is still throttled (default 100ms) so we
+   *     don't repaint the row on every TCP frame.
+   *
+   * The emitted activity payload always carries the latest `lastChunkAt`,
+   * even on the throttle-coalesced emits, so the next renderer paint
+   * sees the right "last byte" timestamp without needing its own
+   * out-of-band hook.
+   */
   onChunk(chunk: Uint8Array): void {
     this.recvBytes += chunk.byteLength
     const now = this.now()
+    this.lastChunkAt = now
     if (now - this.lastEmit < this.throttleMs) return
     this.lastEmit = now
     this.handle.updateActivity({
       direction: "down",
       recvBytes: this.recvBytes,
+      lastChunkAt: this.lastChunkAt,
     })
   }
 
@@ -110,6 +131,7 @@ export class NetworkActivityTracker {
     this.handle.updateActivity({
       direction: "idle",
       recvBytes: this.recvBytes,
+      lastChunkAt: this.lastChunkAt > 0 ? this.lastChunkAt : undefined,
     })
   }
 
@@ -118,7 +140,13 @@ export class NetworkActivityTracker {
     this.handle.updateActivity({
       direction: "idle",
       recvBytes: this.recvBytes,
+      lastChunkAt: this.lastChunkAt > 0 ? this.lastChunkAt : undefined,
     })
+  }
+
+  /** Test helper: timestamp of the most recent chunk (0 if none). */
+  lastChunkTimestamp(): number {
+    return this.lastChunkAt
   }
 
   /** Test helper: current accumulated recvBytes. */

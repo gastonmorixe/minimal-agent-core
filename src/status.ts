@@ -5,6 +5,7 @@ import {
   type Spinner,
   type SpinnerNotification,
 } from "./spinner.ts"
+import { displayWidth } from "./term-width.ts"
 
 type StatusListener = (label: string | null) => void
 
@@ -101,6 +102,17 @@ export interface StatusActivity {
   target?: StatusActivityTarget
   /** ms timestamp (`Date.now()`) of the entry's start. Renderer derives elapsed. */
   startedAt?: number
+  /**
+   * ms timestamp (`Date.now()`) of the most recent chunk arrival. The renderer
+   * uses this to detect the "no bytes for >N seconds" stalled state, which is
+   * the answer to "why is `Calling Write: streaming input (10 B) (30s)`
+   * frozen?" — the model went quiet mid-stream but the elapsed clock keeps
+   * ticking on its own timer. When `lastChunkAt` exists AND
+   * `now - lastChunkAt > STALL_THRESHOLD_MS`, the row flips to the amber
+   * `⋯ stalled · last byte Ns ago` form so the user can tell the difference
+   * between "still receiving slowly" and "actually hung".
+   */
+  lastChunkAt?: number
   /** Tool name when `phase` is one of the `"tool-*"` values. */
   toolName?: string
   /** Short one-line hint extracted from tool input (e.g. `"cd /tmp && ls"`). */
@@ -198,6 +210,233 @@ export function formatElapsedSuffix(ms: number): string {
   return ` ${dim(`(${formatElapsed(ms)})`)}`
 }
 
+// ---------------------------------------------------------------------------
+// Activity infix
+//
+// Renders the structured StatusActivity payload (bytes / tokens / direction /
+// host / lastChunkAt) as a compact infix between the label and the elapsed
+// suffix. Without this, the rich data populated by `NetworkActivityObserver`
+// is silently discarded: renderers only ever painted `{glyph} {label}` and
+// the user had no way to tell "model is streaming slowly" from "frozen, no
+// bytes for 30s". See docs/changes/2026-05-17-feat-live-activity-row.md.
+// ---------------------------------------------------------------------------
+
+/**
+ * Time without a chunk after which the row flips to the amber "⋯ stalled"
+ * form. Picked at 2s as the boundary between "model is generating slowly"
+ * (which can take a couple seconds between tokens for deep thinking blocks)
+ * and "the wire has gone dead" (which the user needs to know about so they
+ * can hit Esc and retry instead of staring at a frozen counter).
+ */
+export const STALL_THRESHOLD_MS = 2_000
+
+/** Faint white SGR pair for the segment value text. */
+function faintWhite(text: string): string {
+  return `\x1b[2;37m${text}\x1b[22;39m`
+}
+
+/** Internal compact byte formatter — mirrors client.ts and agent.ts copies. */
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** Internal compact token formatter — mirrors quota-status/render.ts. */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}k`
+  return String(n)
+}
+
+/**
+ * Options for {@link formatActivityInfix}.
+ */
+export interface FormatActivityOptions {
+  /** Wall clock for stall detection + rate calc. Defaults to `Date.now()`. */
+  now?: number
+  /**
+   * Maximum display cells the rendered infix may consume. When set,
+   * trailing segments (host, rate, tokens, then bytes) are dropped
+   * right-to-left until the result fits. Returns "" if even just the
+   * arrow doesn't fit. Unset = no width cap.
+   */
+  maxWidth?: number
+  /** Override the stalled threshold. Defaults to {@link STALL_THRESHOLD_MS}. */
+  stallThresholdMs?: number
+  /**
+   * ms timestamp the status entry was created. Used only for the per-second
+   * rate segment (bytes/s when no token signal, tok/s when recvTokens is
+   * present). Omit to suppress the rate segment.
+   */
+  entryStartedAt?: number
+  /**
+   * When true, suppress the bytes segment. Used by renderers when the label
+   * itself already shows a trailing `(N B)` (today's pattern in
+   * `client.ts` for tool-input streaming) — otherwise the row would render
+   * both `(10 B)` in the label AND `1.2 KB` in the infix, which is
+   * actively misleading because the numbers come from different sources
+   * (model-emitted JSON length vs. on-the-wire chunk bytes).
+   */
+  hideBytes?: boolean
+}
+
+/**
+ * Render the {@link StatusActivity} payload as a compact infix string.
+ *
+ * Shape (leading space included so callers concatenate unconditionally):
+ *
+ *     ` {arrow} {bytes} · {tokens} · {rate} · {host}:{proto}`
+ *
+ * Returns `""` when there's no activity or nothing to show.
+ *
+ * Arrow semantics:
+ *   - `↑` (sky)            — `direction: "up"`, body is uploading
+ *   - `↓` (lime)           — `direction: "down"`, chunks arriving
+ *   - `·` (dim)            — `direction: "idle"` or unspecified
+ *   - `⋯ stalled` (gold)   — `direction: "down"` AND no chunk for
+ *                             >`stallThresholdMs` ms
+ *
+ * Segment drop order under `maxWidth` pressure (right-to-left):
+ *   1. host:proto   (lowest priority — context, not progress)
+ *   2. rate
+ *   3. tokens
+ *   4. bytes        (highest priority — the "is it moving" signal)
+ */
+export function formatActivityInfix(
+  activity: StatusActivity | undefined,
+  opts: FormatActivityOptions = {},
+): string {
+  if (!activity) return ""
+  const now = opts.now ?? Date.now()
+  const stallThresh = opts.stallThresholdMs ?? STALL_THRESHOLD_MS
+  const dir = activity.direction
+  const stalled =
+    dir === "down" && activity.lastChunkAt != null && now - activity.lastChunkAt > stallThresh
+
+  // ---- arrow ----
+  // Three colors map to the three useful directional states. The stalled
+  // case wins over direction because it's a strictly more important
+  // signal — "moving" answers "is something happening", "stalled" answers
+  // "is anything happening at all".
+  let arrow: string
+  if (stalled)
+    arrow = `\x1b[38;5;214m⋯ stalled\x1b[39m` // gold
+  else if (dir === "up")
+    arrow = `\x1b[38;5;45m↑\x1b[39m` // sky
+  else if (dir === "down")
+    arrow = `\x1b[38;5;118m↓\x1b[39m` // lime
+  else arrow = `\x1b[2m·\x1b[22m` // dim
+
+  // ---- segments (left-to-right priority) ----
+  const segs: string[] = []
+
+  // Bytes (highest priority — answers "how much").
+  if (!opts.hideBytes) {
+    const b = pickBytesForDirection(activity)
+    if (b != null && b > 0) segs.push(faintWhite(fmtBytes(b)))
+  }
+
+  // Tokens (model-side counter — only available when caller estimates).
+  const tok = dir === "up" ? activity.sentTokens : activity.recvTokens
+  if (tok != null && tok > 0) {
+    // The `~` prefix is load-bearing UX: any non-final value is an
+    // estimate (chars/3.5 heuristic), and we don't want to imply it's the
+    // billed count. Final `output_tokens` from the server can be plugged
+    // in by the caller without the `~` (we just render whatever number
+    // the caller supplied — the `~` is unconditional today).
+    segs.push(faintWhite(`~${fmtTokens(tok)} tok`))
+  }
+
+  // Rate (computed against entry-start time, which the renderer owns —
+  // skipped if no startedAt or if elapsed < 500ms so the number doesn't
+  // jitter wildly on the first few hundred ms of a request).
+  if (opts.entryStartedAt != null && opts.entryStartedAt > 0) {
+    const elapsedMs = now - opts.entryStartedAt
+    if (elapsedMs >= 500) {
+      const rate = computeRate(activity, elapsedMs, dir)
+      if (rate) segs.push(dim(rate))
+    }
+  }
+
+  // Target host/proto (lowest priority — context, drops first).
+  const target = activity.target
+  if (target?.host) {
+    const proto = target.protocol ? `:${target.protocol}` : ""
+    segs.push(faintWhite(`${target.host}${proto}`))
+  }
+
+  // Stalled gets an extra "last byte Ns ago" segment FIRST in the segs
+  // list (most relevant info first). Pre-prepended so it survives
+  // right-to-left dropping below.
+  if (stalled && activity.lastChunkAt != null) {
+    const sinceMs = now - activity.lastChunkAt
+    const sinceS = Math.max(1, Math.floor(sinceMs / 1000))
+    segs.unshift(faintWhite(`last byte ${sinceS}s ago`))
+  }
+
+  // ---- composition + width-aware degradation ----
+  // For the stalled case the arrow is a two-word phrase (`⋯ stalled`),
+  // so we use a `·` between the arrow and the first segment instead of
+  // a bare space — otherwise `⋯ stalled last byte 5s ago` reads as one
+  // run-on phrase. For the single-glyph arrows (↑/↓/·) the existing
+  // single-space gap is cleaner.
+  const sep = dim(" · ")
+  const arrowGap = stalled && segs.length > 0 ? sep : " "
+  const compose = (parts: string[]): string =>
+    parts.length === 0 ? ` ${arrow}` : ` ${arrow}${arrowGap}${parts.join(sep)}`
+  let result = compose(segs)
+
+  if (opts.maxWidth != null && Number.isFinite(opts.maxWidth)) {
+    while (displayWidth(result) > opts.maxWidth && segs.length > 0) {
+      segs.pop()
+      result = compose(segs)
+    }
+    if (displayWidth(result) > opts.maxWidth) return ""
+  }
+  return result
+}
+
+/**
+ * Pick the bytes counter that matches the current direction. Falls back to
+ * whichever counter is populated so a tracker that misses a `direction`
+ * update doesn't silently lose its number.
+ */
+function pickBytesForDirection(activity: StatusActivity): number | undefined {
+  if (activity.direction === "up") return activity.sentBytes ?? activity.recvBytes
+  if (activity.direction === "down") return activity.recvBytes ?? activity.sentBytes
+  // idle / unspecified: prefer whichever moved last (recvBytes wins because
+  // most of our lifecycle is "receiving stream").
+  return activity.recvBytes ?? activity.sentBytes
+}
+
+/**
+ * Compute a per-second rate string. Prefers tok/s when tokens are
+ * available (more meaningful for "streaming text"), falls back to bytes/s.
+ * Returns null when nothing useful can be computed.
+ */
+function computeRate(
+  activity: StatusActivity,
+  elapsedMs: number,
+  dir: StatusDirection | undefined,
+): string | null {
+  const secs = elapsedMs / 1000
+  if (secs <= 0) return null
+  const tok = dir === "up" ? activity.sentTokens : activity.recvTokens
+  if (tok != null && tok > 0) {
+    const tps = tok / secs
+    if (tps < 10) return `${tps.toFixed(1)} tok/s`
+    return `${Math.round(tps)} tok/s`
+  }
+  const b = pickBytesForDirection(activity)
+  if (b != null && b > 0) {
+    const bps = b / secs
+    if (bps < 1024) return `${Math.round(bps)} B/s`
+    return `${(bps / 1024).toFixed(1)} KB/s`
+  }
+  return null
+}
+
 /**
  * Merge a {@link StatusActivity} partial onto an entry's existing
  * activity. Fields that are `undefined` on the partial leave the prior
@@ -213,6 +452,7 @@ function applyActivity(entry: StatusEntry, partial: StatusActivity): void {
   if (partial.sentTokens !== undefined) a.sentTokens = partial.sentTokens
   if (partial.recvTokens !== undefined) a.recvTokens = partial.recvTokens
   if (partial.startedAt !== undefined) a.startedAt = partial.startedAt
+  if (partial.lastChunkAt !== undefined) a.lastChunkAt = partial.lastChunkAt
   if (partial.toolName !== undefined) a.toolName = partial.toolName
   if (partial.hint !== undefined) a.hint = partial.hint
   if (partial.target) {
@@ -310,6 +550,14 @@ export class StatusBus {
 type StatusOutput = Pick<NodeJS.WriteStream, "write"> & {
   isTTY?: boolean
 }
+
+/**
+ * Trailing-parens byte-count detector, shared with `LiveAreaStatusController`.
+ * Matches `(10 B)`, `(2.0 KB)`, `(1.5 MB)`. Used by the renderer to suppress
+ * the activity infix's bytes segment when the label already shows bytes
+ * (today's `Calling Write: streaming input (10 B)` pattern from client.ts).
+ */
+const LABEL_BYTES_RE = /\(\d+(?:\.\d+)?\s?(?:B|KB|MB)\)\s*$/
 
 export interface StatusRendererOptions {
   maxFps?: number
@@ -482,9 +730,22 @@ export class StatusRenderer {
     // Empty under 1s. The label is already dim in line-mode so the
     // suffix blends in tonally, but it still gives a wall-clock signal
     // for long-running operations.
-    const elapsedMs = this.statusStartedAt > 0 ? this.now() - this.statusStartedAt : 0
+    const now = this.now()
+    const elapsedMs = this.statusStartedAt > 0 ? now - this.statusStartedAt : 0
     const suffix = formatElapsedSuffix(elapsedMs)
-    this.output.write(`\r\x1b[2K${prefix}${dim(this.label)}${suffix}`)
+    // Activity infix — bytes/tokens/rate/host between label and elapsed.
+    // Same logic as LiveAreaStatusController.paint; see that file for
+    // the full rationale (the two renderers stay in step). Empty when
+    // no activity is attached, which preserves the legacy "{glyph} {label}
+    // (Xs)" line-mode output for callers that don't publish activity.
+    const status = this.bus.currentStatus()
+    const labelHasBytes = LABEL_BYTES_RE.test(this.label)
+    const infix = formatActivityInfix(status?.activity, {
+      now,
+      entryStartedAt: this.statusStartedAt,
+      hideBytes: labelHasBytes,
+    })
+    this.output.write(`\r\x1b[2K${prefix}${dim(this.label)}${infix}${suffix}`)
     this.visible = true
   }
 

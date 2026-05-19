@@ -1,11 +1,14 @@
 import { describe, expect, it } from "bun:test"
 import {
+  formatActivityInfix,
   formatElapsed,
   formatElapsedSuffix,
+  STALL_THRESHOLD_MS,
   StatusBus,
   StatusRenderer,
   type StatusActivity,
 } from "./status.ts"
+import { stripAnsi } from "./term-width.ts"
 import type { Spinner } from "./spinner.ts"
 
 class FakeTTYOutput {
@@ -439,5 +442,350 @@ describe("formatElapsedSuffix", () => {
   it("concatenates with a plain label to form a renderable status line", () => {
     expect(`Thinking${formatElapsedSuffix(2_000)}`).toBe("Thinking \x1b[2m(2s)\x1b[22m")
     expect(`Running Bash${formatElapsedSuffix(62_000)}`).toBe("Running Bash \x1b[2m(1m 2s)\x1b[22m")
+  })
+})
+
+describe("formatActivityInfix", () => {
+  // Most assertions use stripAnsi() to keep the test pinned to visible
+  // content, not the exact SGR opcodes. A few targeted color assertions
+  // pin the arrow's foreground (sky / lime / gold) directly, since the
+  // color IS user-visible state — the rest of the row stays color-agnostic.
+
+  const NOW = 100_000
+
+  it("returns empty string when activity is undefined", () => {
+    expect(formatActivityInfix(undefined)).toBe("")
+  })
+
+  it("returns empty string for an empty activity object (no direction, no bytes)", () => {
+    // No data to render → no infix. Without the early-out we'd render
+    // ` · ` (the idle dot alone) which adds visual noise to every status
+    // that doesn't publish activity.
+    const got = formatActivityInfix({})
+    // Idle dot with no segments is fine (just the arrow on its own).
+    // What we MUST NOT see is the segment separator ` · ` since segs=[].
+    expect(stripAnsi(got)).toBe(" ·")
+  })
+
+  it("renders ↑ (sky) + bytes for an upload-direction activity", () => {
+    const a: StatusActivity = { direction: "up", sentBytes: 48_456 }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toBe(" ↑ 47.3 KB")
+    expect(out).toContain("\x1b[38;5;45m↑\x1b[39m") // sky arrow
+    expect(out).toContain("47.3 KB")
+  })
+
+  it("renders ↓ (lime) + bytes for a download-direction activity", () => {
+    const a: StatusActivity = { direction: "down", recvBytes: 12_700 }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toBe(" ↓ 12.4 KB")
+    expect(out).toContain("\x1b[38;5;118m↓\x1b[39m") // lime arrow
+  })
+
+  it("renders idle dot (dim) when direction is omitted but other fields present", () => {
+    const a: StatusActivity = { recvBytes: 512 }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toBe(" · 512 B")
+    expect(out).toContain("\x1b[2m·\x1b[22m") // dim dot
+  })
+
+  it("appends tokens segment with ~ prefix (estimate marker)", () => {
+    const a: StatusActivity = {
+      direction: "down",
+      recvBytes: 4_096,
+      recvTokens: 215,
+    }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toBe(" ↓ 4.0 KB · ~215 tok")
+  })
+
+  it("renders tokens with k suffix at >=1k", () => {
+    const a: StatusActivity = { direction: "down", recvTokens: 1_500 }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toContain("~1.5k tok")
+  })
+
+  it("includes target host:proto as the lowest-priority segment", () => {
+    const a: StatusActivity = {
+      direction: "down",
+      recvBytes: 4_096,
+      target: { host: "api.anthropic.com", protocol: "h2" },
+    }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toBe(" ↓ 4.0 KB · api.anthropic.com:h2")
+  })
+
+  it("renders host alone when protocol is missing", () => {
+    const a: StatusActivity = {
+      direction: "down",
+      recvBytes: 4_096,
+      target: { host: "api.anthropic.com" },
+    }
+    expect(stripAnsi(formatActivityInfix(a))).toBe(" ↓ 4.0 KB · api.anthropic.com")
+  })
+
+  it("computes tok/s rate when entryStartedAt and tokens are present", () => {
+    const a: StatusActivity = { direction: "down", recvTokens: 168, recvBytes: 4_096 }
+    const out = formatActivityInfix(a, {
+      now: NOW,
+      entryStartedAt: NOW - 2_000, // 2 seconds elapsed → 84 tok/s
+    })
+    expect(stripAnsi(out)).toContain("84 tok/s")
+  })
+
+  it("falls back to B/s or KB/s rate when no token signal", () => {
+    const a: StatusActivity = { direction: "down", recvBytes: 2_048 }
+    const out = formatActivityInfix(a, {
+      now: NOW,
+      entryStartedAt: NOW - 1_000, // 1 second elapsed → 2.0 KB/s
+    })
+    expect(stripAnsi(out)).toContain("2.0 KB/s")
+  })
+
+  it("suppresses rate segment when elapsed < 500ms (noisy)", () => {
+    const a: StatusActivity = { direction: "down", recvBytes: 2_048 }
+    const out = formatActivityInfix(a, {
+      now: NOW,
+      entryStartedAt: NOW - 200, // 200ms elapsed
+    })
+    expect(stripAnsi(out)).not.toContain("KB/s")
+    expect(stripAnsi(out)).not.toContain("B/s")
+  })
+
+  it("hideBytes:true suppresses the bytes segment (when label already shows them)", () => {
+    // Today's `Calling Write: streaming input (10 B)` pattern from
+    // client.ts already shows bytes in the label — render the rest of
+    // the infix without re-rendering bytes.
+    const a: StatusActivity = {
+      direction: "down",
+      recvBytes: 12_700,
+      target: { host: "api.anthropic.com", protocol: "h2" },
+    }
+    const out = formatActivityInfix(a, { hideBytes: true })
+    expect(stripAnsi(out)).toBe(" ↓ api.anthropic.com:h2")
+    expect(stripAnsi(out)).not.toContain("KB")
+  })
+
+  it("drops trailing segments right-to-left to fit maxWidth", () => {
+    const a: StatusActivity = {
+      direction: "down",
+      recvBytes: 12_700,
+      recvTokens: 215,
+      target: { host: "api.anthropic.com", protocol: "h2" },
+    }
+    // Full width: ` ↓ 12.4 KB · ~215 tok · api.anthropic.com:h2` ≈ 45 cells.
+    // Capping at 25 must drop host first, then maybe tokens.
+    const out = formatActivityInfix(a, { maxWidth: 25 })
+    const plain = stripAnsi(out)
+    expect(plain).not.toContain("api.anthropic.com") // host dropped first
+    expect(plain).toContain("12.4 KB") // bytes survive (highest priority)
+  })
+
+  it("drops everything but the arrow at very narrow maxWidth", () => {
+    const a: StatusActivity = {
+      direction: "down",
+      recvBytes: 12_700,
+      recvTokens: 215,
+    }
+    const out = formatActivityInfix(a, { maxWidth: 3 })
+    // Just ` ↓` (3 cells: space, arrow, end)
+    expect(stripAnsi(out)).toBe(" ↓")
+  })
+
+  it("returns empty string when even the arrow exceeds maxWidth", () => {
+    const a: StatusActivity = { direction: "down", recvBytes: 100 }
+    // maxWidth of 1 can't fit even ` ↓`
+    expect(formatActivityInfix(a, { maxWidth: 1 })).toBe("")
+  })
+
+  it("rate uses tokens-per-second when both bytes and tokens are present (tokens win)", () => {
+    const a: StatusActivity = { direction: "down", recvBytes: 8_192, recvTokens: 200 }
+    const out = formatActivityInfix(a, { now: NOW, entryStartedAt: NOW - 2_000 })
+    // 200 / 2 = 100 tok/s. NOT 4096 B/s. The rate prefers the more
+    // human-meaningful counter.
+    const plain = stripAnsi(out)
+    expect(plain).toContain("100 tok/s")
+    expect(plain).not.toContain("KB/s")
+  })
+
+  it("rate decimal for sub-10 tok/s readings (prevents '0 tok/s' rounding)", () => {
+    const a: StatusActivity = { direction: "down", recvTokens: 6, recvBytes: 200 }
+    const out = formatActivityInfix(a, { now: NOW, entryStartedAt: NOW - 2_000 })
+    // 6 / 2 = 3.0 tok/s — must render with one decimal so the user
+    // sees movement even at very slow rates.
+    expect(stripAnsi(out)).toContain("3.0 tok/s")
+  })
+
+  it("STALL_THRESHOLD_MS is exported and reasonable (1-5s range)", () => {
+    expect(STALL_THRESHOLD_MS).toBeGreaterThanOrEqual(1_000)
+    expect(STALL_THRESHOLD_MS).toBeLessThanOrEqual(5_000)
+  })
+
+  it("upload-direction picks sentTokens not recvTokens for the tokens segment", () => {
+    const a: StatusActivity = {
+      direction: "up",
+      sentBytes: 47_312,
+      sentTokens: 11_800,
+      recvTokens: 999, // should NOT appear (wrong direction)
+    }
+    const out = formatActivityInfix(a)
+    expect(stripAnsi(out)).toContain("~11.8k tok")
+    expect(stripAnsi(out)).not.toContain("999")
+  })
+
+  describe("stalled detector", () => {
+    // The biggest UX win of Layer 3: the row flips to amber ⋯ stalled
+    // when the wire goes silent for >2s. Before this, "Calling Write:
+    // streaming input (10 B) (30s)" looked identical at 2s and at 30s —
+    // user had no way to tell if the model was slow or genuinely hung.
+
+    it("flips to ⋯ stalled (gold) when no chunk for >STALL_THRESHOLD_MS", () => {
+      const NOW = 100_000
+      const a: StatusActivity = {
+        direction: "down",
+        recvBytes: 10,
+        lastChunkAt: NOW - STALL_THRESHOLD_MS - 500, // 2.5s ago
+      }
+      const out = formatActivityInfix(a, { now: NOW })
+      const plain = stripAnsi(out)
+      expect(plain).toContain("⋯ stalled")
+      expect(plain).toContain("last byte 2s ago")
+      expect(out).toContain("\x1b[38;5;214m") // gold SGR open
+      // The arrow should NOT be the green ↓ — stalled wins over direction.
+      expect(out).not.toContain("\x1b[38;5;118m↓")
+    })
+
+    it("stays in ↓ (lime) form when chunks are still arriving within threshold", () => {
+      const NOW = 100_000
+      const a: StatusActivity = {
+        direction: "down",
+        recvBytes: 10_000,
+        lastChunkAt: NOW - 500, // 500ms ago, well below 2s
+      }
+      const out = formatActivityInfix(a, { now: NOW })
+      expect(out).toContain("\x1b[38;5;118m↓\x1b[39m") // lime arrow
+      expect(stripAnsi(out)).not.toContain("⋯ stalled")
+      expect(stripAnsi(out)).not.toContain("last byte")
+    })
+
+    it("does NOT trigger stall when direction is 'up' (uploads can pause legitimately)", () => {
+      // Uploads can pause for backpressure, large form bodies, etc. Only
+      // download stalls are user-actionable ("model went silent"), so the
+      // amber form is gated on direction="down".
+      const NOW = 100_000
+      const a: StatusActivity = {
+        direction: "up",
+        sentBytes: 1_000,
+        lastChunkAt: NOW - 5_000, // 5s ago
+      }
+      const out = formatActivityInfix(a, { now: NOW })
+      expect(stripAnsi(out)).not.toContain("⋯ stalled")
+      expect(out).toContain("\x1b[38;5;45m↑\x1b[39m") // sky arrow stays
+    })
+
+    it("does NOT trigger stall when lastChunkAt is undefined (no chunk seen yet)", () => {
+      const a: StatusActivity = {
+        direction: "down",
+        recvBytes: 0,
+        // lastChunkAt omitted — TTFB phase, no chunks yet
+      }
+      const out = formatActivityInfix(a, { now: 100_000 })
+      expect(stripAnsi(out)).not.toContain("⋯ stalled")
+    })
+
+    it("custom stallThresholdMs is honored", () => {
+      const NOW = 100_000
+      const a: StatusActivity = {
+        direction: "down",
+        recvBytes: 10,
+        lastChunkAt: NOW - 800, // 800ms ago
+      }
+      // With a 500ms threshold, this IS stalled.
+      const out = formatActivityInfix(a, { now: NOW, stallThresholdMs: 500 })
+      expect(stripAnsi(out)).toContain("⋯ stalled")
+    })
+
+    it("renders stalled WITH the bytes segment so the user sees the total transferred", () => {
+      // The bytes segment isn't dropped when stalled — knowing "10 B
+      // total before silence" is the actionable signal that lets the
+      // user decide whether to wait or abort.
+      const NOW = 100_000
+      const a: StatusActivity = {
+        direction: "down",
+        recvBytes: 10,
+        lastChunkAt: NOW - 30_000, // 30s ago — matches the user's screenshot
+        target: { host: "api.anthropic.com" },
+      }
+      const out = formatActivityInfix(a, { now: NOW })
+      const plain = stripAnsi(out)
+      expect(plain).toContain("⋯ stalled")
+      expect(plain).toContain("last byte 30s ago")
+      expect(plain).toContain("10 B") // the "total" survives
+    })
+
+    it("stalled clamps 'last byte 0s ago' to 1s minimum (no flicker on sub-second)", () => {
+      // If the threshold is custom-set to 0ms and lastChunkAt was 1ms
+      // ago, Math.floor would round to 0s. The clamp prevents the
+      // visually ugly "last byte 0s ago" string.
+      const NOW = 100_000
+      const a: StatusActivity = {
+        direction: "down",
+        recvBytes: 10,
+        lastChunkAt: NOW - 100,
+      }
+      const out = formatActivityInfix(a, { now: NOW, stallThresholdMs: 50 })
+      expect(stripAnsi(out)).toContain("last byte 1s ago")
+      expect(stripAnsi(out)).not.toContain("last byte 0s")
+    })
+  })
+})
+
+describe("LiveAreaStatusController + StatusRenderer infix wiring", () => {
+  // Two end-to-end smoke tests pinning that the renderer reads the
+  // activity off the bus AND that the LABEL_BYTES_RE suppresses the
+  // bytes segment when the label already shows a trailing `(N <unit>)`.
+
+  it("StatusRenderer renders the infix when activity is attached to the entry", () => {
+    const bus = new StatusBus()
+    const output = new FakeTTYOutput()
+    const renderer = new StatusRenderer(bus, output, {
+      maxFps: 0, // no timer
+      spinner: { render: () => ({ glyph: "●", fpsHint: 0 }) },
+      now: () => 100_000,
+    })
+    renderer.start()
+    const handle = bus.create("Receiving stream", {
+      activity: { direction: "down", recvBytes: 4_096 },
+    })
+    const last = output.chunks.at(-1) ?? ""
+    expect(stripAnsi(last)).toContain("Receiving stream")
+    expect(stripAnsi(last)).toContain("↓ 4.0 KB")
+    handle.clear()
+    renderer.stop()
+  })
+
+  it("StatusRenderer hides the infix bytes segment when label ends with `(N B)`", () => {
+    const bus = new StatusBus()
+    const output = new FakeTTYOutput()
+    const renderer = new StatusRenderer(bus, output, {
+      maxFps: 0,
+      spinner: { render: () => ({ glyph: "●", fpsHint: 0 }) },
+      now: () => 100_000,
+    })
+    renderer.start()
+    // Mirror client.ts's `Calling Write: streaming input (10 B)` shape.
+    const handle = bus.create("Calling Write: streaming input (10 B)", {
+      activity: {
+        direction: "down",
+        recvBytes: 12_700,
+        target: { host: "api.anthropic.com" },
+      },
+    })
+    const last = stripAnsi(output.chunks.at(-1) ?? "")
+    expect(last).toContain("Calling Write: streaming input (10 B)")
+    expect(last).toContain("api.anthropic.com") // host survives
+    expect(last).not.toContain("12.4 KB") // bytes suppressed (would duplicate label)
+    handle.clear()
+    renderer.stop()
   })
 })
