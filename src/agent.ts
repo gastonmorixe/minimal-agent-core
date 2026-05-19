@@ -48,6 +48,7 @@ import {
 import { RawInput } from "./input.ts"
 import { ModeManager } from "./modes.ts"
 import { PALETTE } from "./palette.ts"
+import { printGoodbye } from "./goodbye-banner.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import type { ManifestMode, ResolvedLiveAreaSlot } from "./plugins/types.ts"
@@ -1149,6 +1150,11 @@ export class Agent {
                   tool_use_id: tool.id,
                 },
                 process.cwd(),
+                // Forward the per-turn AbortSignal so Esc / Ctrl+C can
+                // cancel a long-running plugin tool (Fetch, WebSearch, …).
+                // Without this, abort no-ops until the manifest timeoutMs
+                // fires — see loader.test.ts "dispatch external AbortSignal".
+                signal,
               )
               if (pluginResult.kind === "tool_result") {
                 content = pluginResult.content
@@ -2405,8 +2411,16 @@ export interface ReplEditor {
    * (Bug 393). Listeners that only care about `text` can ignore it.
    */
   on(event: "submit", listener: (text: string, commitLines?: string[]) => void): unknown
-  on(event: "cancel", listener: () => void): unknown
-  off?(event: "submit" | "cancel", listener: (...args: unknown[]) => void): unknown
+  on(event: "cancel", listener: (reason?: string) => void): unknown
+  /**
+   * Emitted by the abort-quit FSM when the user has confirmed a quit
+   * (second Ctrl+C inside the 10s armed window OR the escape-hatch
+   * "rapid double Ctrl+C"). Reason indicates which path fired. The
+   * legacy `"cancel"` event is also emitted for back-compat (with the
+   * same reason argument).
+   */
+  on(event: "quit", listener: (reason: "confirmed" | "escape-hatch") => void): unknown
+  off?(event: "submit" | "cancel" | "quit", listener: (...args: unknown[]) => void): unknown
   /** Called by the live-area status controller to push the spinner row. */
   setStatus?(text: string | null): void
   /** Called after terminal resize so live-area rows can reflow immediately. */
@@ -2448,6 +2462,18 @@ export interface ReplEditor {
    * text.
    */
   setBuffer?(text: string): void
+  /**
+   * Optional. Notify the editor's abort-quit FSM that a turn has started.
+   * The FSM transitions idle/armed → working and dismisses any armed
+   * footer. No-op when the editor doesn't implement quit-confirm.
+   */
+  notifyTurnStart?(): void
+  /**
+   * Optional. Notify the editor that a turn has settled (success, error,
+   * or aborted). Transitions working → idle (or stays armed if a Ctrl+C
+   * abort had already pushed us into armed:post-abort).
+   */
+  notifyTurnEnd?(): void
 }
 
 /**
@@ -2509,6 +2535,12 @@ export async function runRepl(
     editor?: ReplEditor
     /** Forwarded to {@link runReplLiveArea}; see its docs. */
     initialStdinBytes?: string
+    /**
+     * Forwarded to {@link runReplLiveArea} for the goodbye banner. When
+     * provided, a quit (confirmed Ctrl+C×2 or escape-hatch) prints the
+     * resume hint with this id. Omit / empty → degraded copy.
+     */
+    sessionId?: string
   },
 ): Promise<void> {
   if (opts?.useLiveArea) {
@@ -2834,6 +2866,13 @@ async function runReplLiveArea(
      * a fast-typing user doesn't lose the first keystroke of the session.
      */
     initialStdinBytes?: string
+    /**
+     * Session id used in the goodbye banner's `--resume <id>` hint. When
+     * the user quits (confirmed Ctrl+C×2 OR escape-hatch), the banner is
+     * printed AFTER the editor/compositor teardown so it lands in normal
+     * scrollback. Omit / empty → degraded copy without the resume line.
+     */
+    sessionId?: string
   },
 ): Promise<void> {
   if (!opts.compositor || !opts.editor) {
@@ -2978,6 +3017,8 @@ async function runReplLiveArea(
     compositor.writeStream(`\n\n\n${item.commitLines.join("\n")}\n`)
   }
   let cancelled = false
+  /** When non-null, the goodbye banner uses this reason in the closer copy. */
+  let quitReason: "confirmed" | "escape-hatch" | null = null
   let resolveWaiter: (() => void) | null = null
   const wakeWaiter = () => {
     const r = resolveWaiter
@@ -3017,8 +3058,11 @@ async function runReplLiveArea(
     renderDecoration()
     wakeWaiter()
   }
-  const onCancel = (): void => {
+  const onCancel = (reason?: string): void => {
     cancelled = true
+    if (reason === "confirmed" || reason === "escape-hatch") {
+      quitReason = reason
+    }
     wakeWaiter()
   }
 
@@ -3289,6 +3333,11 @@ async function runReplLiveArea(
       // so an abort tears down the SDK stream AND any in-flight tool
       // (Bash child gets SIGTERM → SIGKILL escalation, Read/Write/etc.
       // throw before further IO).
+      //
+      // Also tell the abort-quit FSM the turn has started — this transitions
+      // it from idle/armed → working, and dismisses any armed footer that
+      // may still be visible from a prior idle-confirm window.
+      editor.notifyTurnStart?.()
       const ctrl = abortBus.beginTurn()
       let aborted = false
       const onBusAbort = (): void => {
@@ -3351,6 +3400,11 @@ async function runReplLiveArea(
         // throw. `off` keeps the listener count stable across turns.
         abortBus.off("abort", onBusAbort)
         abortBus.endTurn()
+        // Tell the abort-quit FSM the turn settled. In the natural case
+        // this transitions working → idle. If a Ctrl+C abort already
+        // pushed us into armed:post-abort, the FSM stays armed (its
+        // turn-end transition while armed is a no-op).
+        editor.notifyTurnEnd?.()
         running = false
         renderDecoration()
         turnStatus.clear()
@@ -3412,6 +3466,17 @@ async function runReplLiveArea(
     statusRenderer?.stop()
     editor.stop()
     compositor.unmount()
+    // Goodbye banner — print AFTER teardown so the terminal is in normal
+    // mode and the framed block lands in scrollback. Only printed when a
+    // user-confirmed quit fired (Ctrl+C×2 / escape-hatch); a clean
+    // program-end (no quit) leaves no banner so the user can see whatever
+    // last output the agent produced.
+    if (quitReason !== null) {
+      printGoodbye({
+        sessionId: opts.sessionId ?? null,
+        reason: quitReason,
+      })
+    }
   }
 }
 

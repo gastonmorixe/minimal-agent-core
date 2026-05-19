@@ -13,6 +13,16 @@
 
 import { EventEmitter } from "node:events"
 import { type AbortBus, abortBus } from "./abort-bus.ts"
+import {
+  EscapeHatch,
+  type FsmEffect,
+  type FsmOptions,
+  type FsmState,
+  type QuitReason,
+  initialState as initialFsmState,
+  step as fsmStep,
+} from "./abort-quit-fsm.ts"
+import { formatArmedFooter } from "./armed-footer.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
 import { computeCursorVisualPos, EditorRenderer, findColAtVisualPos } from "./editor-renderer.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
@@ -113,13 +123,31 @@ export interface EditorControllerOptions {
    * Inject the {@link AbortBus} singleton (or a fresh one for tests). When
    * a turn is in flight (`abortBus.isTurnInFlight()`) and the user presses
    * bare Esc or Ctrl+C, this controller calls
-   * `abortBus.requestAbort({kind:"user-key", key:"Esc"|"Ctrl+C"})`. When no
-   * turn is in flight the keys retain their legacy meaning (Esc: ignore;
-   * Ctrl+C: clear buffer / quit on empty buffer).
+   * `abortBus.requestAbort({kind:"user-key", key:"Esc"|"Ctrl+C"})`. The
+   * abort-quit FSM also decides whether to arm the quit-confirm window
+   * (Ctrl+C arms it, Esc does not — see {@link FsmState}).
    *
    * Defaults to the singleton from `./abort-bus.ts`.
    */
   abortBus?: AbortBus
+  /**
+   * Options forwarded to the abort-quit FSM. Currently just
+   * `armedDurationMs` (default 10s). Override in tests to shorten the
+   * confirmation window.
+   */
+  quitFsm?: FsmOptions
+  /**
+   * Custom clock for the abort-quit FSM + escape hatch. Default
+   * `Date.now`. Injecting a fake clock lets tests drive the countdown
+   * without real timers.
+   */
+  nowFn?: () => number
+  /**
+   * Override the recurring armed-state tick interval. Default 250ms (4
+   * paints/sec while armed). Tests can set this very small or 0 to
+   * disable the timer (and drive ticks manually).
+   */
+  armedTickMs?: number
 }
 
 type ParsedKey = {
@@ -184,6 +212,26 @@ export class EditorController extends EventEmitter {
   private readonly bareEscapeMs: number
   private readonly abortBus: AbortBus
   private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
+  // ── abort/quit FSM ──────────────────────────────────────────────────────
+  //
+  // Owns the Ctrl+C / Esc → abort / quit-confirm state machine. Kept inside
+  // the editor (rather than the REPL) because every input byte for the
+  // FSM passes through here AND so does the footer rendering, so the two
+  // halves don't need to round-trip events.
+  //
+  // See {@link applyEffects} for the effect → IO mapping. The host
+  // subscribes to the `"quit"` event (replaces the old `"cancel"` event).
+  private fsmState: FsmState = initialFsmState()
+  private readonly fsmOptions: FsmOptions
+  private readonly nowFn: () => number
+  private readonly escapeHatch = new EscapeHatch()
+  private readonly armedTickMs: number
+  private armedTicker: ReturnType<typeof setInterval> | null = null
+  private armedExpireTimer: ReturnType<typeof setTimeout> | null = null
+  /** Cached armed-source so re-paints (every 250ms) reuse it. */
+  private armedSource: "idle-confirm" | "post-abort" | null = null
+  /** Cached armed expiresAt so the tick painter can format the countdown. */
+  private armedExpiresAt = 0
   // ── input-event broadcasting ────────────────────────────────────────────
   // Coalesced "buffer text changed" notification. Listeners (e.g. the
   // auto-ASK heuristic) subscribe via `editor.on("input", ...)`. Fires
@@ -219,6 +267,132 @@ export class EditorController extends EventEmitter {
     this.bareEscapeMs = opts.bareEscapeMs ?? 20
     this.inputDebounceMs = opts.inputDebounceMs ?? 120
     this.abortBus = opts.abortBus ?? abortBus
+    this.fsmOptions = opts.quitFsm ?? {}
+    this.nowFn = opts.nowFn ?? (() => Date.now())
+    this.armedTickMs = opts.armedTickMs ?? 250
+  }
+
+  // ── abort/quit FSM helpers ──────────────────────────────────────────────
+
+  /** For tests / diagnostics. */
+  fsmStateForTest(): FsmState {
+    return this.fsmState
+  }
+
+  /**
+   * Drive the abort-quit FSM with an input and apply the resulting
+   * effects to the editor / abortBus / footer. Returns the effects so
+   * tests can assert on them without scraping side-effects.
+   */
+  private feedFsm(input: Parameters<typeof fsmStep>[1]): FsmEffect[] {
+    const r = fsmStep(this.fsmState, input, this.fsmOptions)
+    this.fsmState = r.state
+    if (r.effects.length > 0) this.applyEffects(r.effects)
+    return r.effects
+  }
+
+  private applyEffects(effects: FsmEffect[]): void {
+    for (const e of effects) {
+      switch (e.kind) {
+        case "abort-turn": {
+          // Forward to the abort bus. The bus is idempotent — if no turn
+          // is in flight, this is a no-op.
+          if (this.abortBus.isTurnInFlight()) {
+            this.abortBus.requestAbort({ kind: "user-key", key: "Ctrl+C" })
+          }
+          break
+        }
+        case "show-armed": {
+          this.armedSource = e.source
+          this.armedExpiresAt = e.expiresAt
+          this.repaintArmedFooter()
+          this.startArmedTimers(e.expiresAt)
+          break
+        }
+        case "hide-armed": {
+          this.armedSource = null
+          this.armedExpiresAt = 0
+          this.stopArmedTimers()
+          // Force-clear the footer (setFooterLines is no-op when content
+          // matches — we hold no footer, set [] explicitly).
+          this.setFooterLines([])
+          break
+        }
+        case "quit": {
+          this.stopArmedTimers()
+          this.setFooterLines([])
+          // Emit AFTER footer cleanup so the REPL teardown path sees a
+          // clean editor state.
+          this.emit("quit", e.reason)
+          // For back-compat with consumers (draft-store cleanup, REPL
+          // exit loop) that listen on the legacy "cancel" event.
+          this.emit("cancel", e.reason)
+          break
+        }
+      }
+    }
+  }
+
+  private startArmedTimers(expiresAt: number): void {
+    this.stopArmedTimers()
+    if (this.armedTickMs > 0) {
+      this.armedTicker = setInterval(() => {
+        // Repaint the countdown. The natural-expiry tick is delivered
+        // via `armedExpireTimer` below, so this just refreshes the
+        // visible "Xs" digit.
+        this.repaintArmedFooter()
+      }, this.armedTickMs)
+      ;(this.armedTicker as { unref?: () => void }).unref?.()
+    }
+    const remainingMs = Math.max(0, expiresAt - this.nowFn())
+    this.armedExpireTimer = setTimeout(() => {
+      this.armedExpireTimer = null
+      // Feed the FSM a `tick` at expiresAt. The FSM transitions
+      // armed → idle and emits hide-armed (which `applyEffects` will
+      // route back to `setFooterLines([])` and stop the painter).
+      this.feedFsm({ kind: "tick", at: this.nowFn() })
+    }, remainingMs)
+    ;(this.armedExpireTimer as { unref?: () => void }).unref?.()
+  }
+
+  private stopArmedTimers(): void {
+    if (this.armedTicker !== null) {
+      clearInterval(this.armedTicker)
+      this.armedTicker = null
+    }
+    if (this.armedExpireTimer !== null) {
+      clearTimeout(this.armedExpireTimer)
+      this.armedExpireTimer = null
+    }
+  }
+
+  private repaintArmedFooter(): void {
+    if (this.armedSource === null) return
+    const line = formatArmedFooter({
+      source: this.armedSource,
+      expiresAt: this.armedExpiresAt,
+      now: this.nowFn(),
+    })
+    this.setFooterLines(line === null ? [] : [line])
+  }
+
+  /**
+   * Signal that an agent turn has started. The REPL calls this right
+   * before dispatching the user's prompt to the agent. The FSM
+   * transitions idle/armed → working; effects (hide-armed if armed)
+   * are applied.
+   */
+  notifyTurnStart(): void {
+    this.feedFsm({ kind: "turn-start", at: this.nowFn() })
+  }
+
+  /**
+   * Signal that an agent turn has ended (success / error / aborted).
+   * The FSM transitions working → idle; if a Ctrl+C-driven abort had
+   * already pushed us into `armed:post-abort`, we stay armed.
+   */
+  notifyTurnEnd(): void {
+    this.feedFsm({ kind: "turn-end", at: this.nowFn() })
   }
 
   /**
@@ -286,6 +460,8 @@ export class EditorController extends EventEmitter {
       clearTimeout(this.inputDebounce)
       this.inputDebounce = null
     }
+    // Tear down the abort-quit FSM's recurring painter + expiry timer.
+    this.stopArmedTimers()
     this.stdin.off("data", this.onDataBound)
     this.bracketedPaste = false
     this.output.write(
@@ -645,20 +821,47 @@ export class EditorController extends EventEmitter {
     if (this.pending === "\x1b") {
       this.pending = ""
     }
-    if (this.abortBus.isTurnInFlight()) {
-      this.abortBus.requestAbort({ kind: "user-key", key: "Esc" })
-    }
+    // Esc breaks the escape-hatch run too — otherwise (Ctrl+C, Esc,
+    // Ctrl+C) would force-quit even though the user said "cancel that".
+    this.escapeHatch.reset()
+    // Feed the FSM. In `working` state this emits `abort-turn` (no arm).
+    // In `armed` state this emits `hide-armed` (Esc cancels the modal).
+    // In `idle` state this is a no-op.
+    this.feedFsm({ kind: "esc", at: this.nowFn() })
   }
 
   private consumePending(): void {
     let dirty = false
     while (this.pending.length > 0) {
       if (this.bracketedPaste) {
+        // A bracketed paste while the quit-confirm modal is open means
+        // the user is back to editing — dismiss.
+        if (this.fsmState.kind === "armed") {
+          this.feedFsm({ kind: "printable", at: this.nowFn() })
+        }
         const r = this.consumeBracketedPaste()
         if (r === "wait") return
         if (r) dirty = true
         continue
       }
+
+      // FSM dismiss on engagement: while armed, ANY input other than
+      // Ctrl+C (which would quit) or a bare Esc byte (which will route
+      // through the bareEscape path → FSM esc → also hides) means the
+      // user is back to typing/navigating. Dismiss the modal immediately
+      // so the next keystroke feels live. Safe to call when not armed
+      // (FSM transition is a no-op).
+      const lead = this.pending[0]
+      const isCtrlC = lead === "\x03"
+      const isBareEsc = lead === "\x1b" && this.pending.length === 1
+      if (this.fsmState.kind === "armed" && !isCtrlC && !isBareEsc) {
+        this.feedFsm({ kind: "printable", at: this.nowFn() })
+      }
+
+      // Reset the escape-hatch run on any non-Ctrl+C keystroke. Two
+      // Ctrl+Cs with non-Ctrl+C input between them are NOT a "rapid
+      // double" anymore, even if they land within 500ms.
+      if (!isCtrlC) this.escapeHatch.reset()
 
       if (this.pending.startsWith("\x1b")) {
         // Lone Esc byte: arm the disambiguation timer and stop processing.
@@ -739,24 +942,25 @@ export class EditorController extends EventEmitter {
         return
       }
       if (char === "\x03") {
-        // Ctrl+C composes two behaviors that share a key. When a turn
-        // is in flight, the dominant intent is "stop what you're doing"
-        // — route to the abort bus and DO NOT emit `cancel`/clear the
-        // buffer (the REPL's `handleAbort` will restore the in-flight
-        // prompt to the editor anyway). When no turn is in flight the
-        // legacy meaning kicks in: clear a non-empty buffer, or emit
-        // `cancel` (REPL exit) on an empty buffer. Phase 2 will replace
-        // the empty-buffer exit with a quit-confirm modal.
-        if (this.abortBus.isTurnInFlight()) {
-          this.abortBus.requestAbort({ kind: "user-key", key: "Ctrl+C" })
-          continue
-        }
-        if (this.buf.isBlank()) {
-          this.emit("cancel")
+        // Ctrl+C is owned by the abort-quit FSM (May 2026 — see
+        // `src/abort-quit-fsm.ts` and project memory #abort-quit-ux-spec).
+        //
+        // BEFORE we feed the FSM, observe the escape-hatch: two Ctrl+Cs
+        // within 500ms force-quit regardless of FSM state. This is the
+        // hard guarantee the user demanded — if the FSM somehow wedges,
+        // the second rapid Ctrl+C still leaves.
+        const now = this.nowFn()
+        if (this.escapeHatch.observe(now) === "force-quit") {
+          this.stopArmedTimers()
+          this.setFooterLines([])
+          this.fsmState = { kind: "quitting", reason: "escape-hatch" }
+          this.emit("quit", "escape-hatch" as QuitReason)
+          this.emit("cancel", "escape-hatch" as QuitReason)
           return
         }
-        this.buf.clear()
-        dirty = true
+        // Normal path: feed the FSM, let `applyEffects` do the IO.
+        this.feedFsm({ kind: "ctrl-c", at: now })
+        if (this.fsmState.kind === "quitting") return
         continue
       }
       if (char === "\x04") {

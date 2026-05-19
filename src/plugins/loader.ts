@@ -778,8 +778,19 @@ export class PluginLoader {
    *
    * @param trigger - The activation event.
    * @param agentCwd - The agent's current working directory.
+   * @param externalSignal - Optional caller-provided AbortSignal (typically
+   *   the agent's per-turn abort). When provided, it is OR-ed with the
+   *   loader's internal timeout controller — either source firing aborts
+   *   the handler's `ctx.abort`. Without this, Esc / Ctrl+C while a
+   *   plugin tool was running could not reach the handler's subprocess
+   *   (regression #mpdXX, see loader.test.ts "dispatch external
+   *   AbortSignal" block for the full story).
    */
-  async dispatch(trigger: TUITrigger, agentCwd: string): Promise<TUIResult> {
+  async dispatch(
+    trigger: TUITrigger,
+    agentCwd: string,
+    externalSignal?: AbortSignal,
+  ): Promise<TUIResult> {
     let handler: ResolvedHandler | undefined
     if (trigger.type === "tool") {
       // Canonical lookup first. On miss, fall through to the alias map —
@@ -810,6 +821,21 @@ export class PluginLoader {
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs).unref?.()
     void timer
 
+    // Compose the caller's signal with the internal timeout controller.
+    // Either source firing aborts ctx.abort. The listener is `once` and
+    // attached only when the caller actually supplied a signal.
+    let externalAbortListener: (() => void) | undefined
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        ctrl.abort()
+      } else {
+        externalAbortListener = () => ctrl.abort()
+        externalSignal.addEventListener("abort", externalAbortListener, {
+          once: true,
+        })
+      }
+    }
+
     const ctx: TUIContext = {
       trigger,
       packageDir: findPackageDirFor(this.plugins, handler),
@@ -836,6 +862,13 @@ export class PluginLoader {
       }
       // Inline handler: emit empty render and let the caller fall back to raw.
       return { kind: "rendered", ansi: "" }
+    } finally {
+      // Drop our listener on the caller's signal so we don't pin a long-lived
+      // turn AbortController via a still-attached listener after the handler
+      // has returned. The internal timeout timer is `.unref()`-d already.
+      if (externalSignal && externalAbortListener) {
+        externalSignal.removeEventListener("abort", externalAbortListener)
+      }
     }
   }
 }

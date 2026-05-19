@@ -988,3 +988,163 @@ describe("PluginLoader / liveAreaSlots: placeholder + refreshOn", () => {
     rmSync(join(HOME, "tui-plugins", "la-ro"), { recursive: true })
   })
 })
+
+// ---------------------------------------------------------------------------
+// dispatch — external AbortSignal propagation
+// ---------------------------------------------------------------------------
+//
+// REGRESSION GUARD (May 2026): the loader's `dispatch()` used to ignore the
+// agent's per-turn AbortSignal entirely — its only abort source was an
+// internal AbortController bounded by the handler's manifest `timeoutMs`.
+// So when a user pressed Esc / Ctrl+C while a plugin tool (Fetch, WebSearch,
+// …) was running, the abort fired on the agent's turn signal but never
+// reached `ctx.abort`, leaving the plugin's headless-browser / subprocess
+// hung until the manifest timeout (often minutes). User-visible symptom:
+// "Running Fetch ⋯ stalled · last byte 15m ago" and Esc/Ctrl+C no-ops.
+//
+// Fix: `dispatch(trigger, agentCwd, externalSignal?)` accepts the caller's
+// AbortSignal and OR-s it with the internal timeout controller, so either
+// source aborts `ctx.abort`. Plugin handlers (ma-fetch's `lib/backend.ts`
+// etc.) already listen on `ctx.abort` and do SIGTERM→SIGKILL on subprocs.
+// ---------------------------------------------------------------------------
+
+const HANGING_HANDLER_BODY = `
+export default async function handler(ctx) {
+  // Resolve only when ctx.abort fires; otherwise hang forever. This is
+  // the canonical shape of plugin handlers that spawn long-running
+  // subprocesses (ma-fetch obscura, ma-search browsers, etc.).
+  await new Promise((resolve) => {
+    if (ctx.abort.aborted) return resolve();
+    ctx.abort.addEventListener("abort", () => resolve(), { once: true });
+  });
+  return {
+    kind: "tool_result",
+    content: "aborted-via-ctx",
+    is_error: true,
+  };
+}
+`
+
+describe("PluginLoader / dispatch external AbortSignal", () => {
+  beforeAll(() => {
+    mkdirSync(HOME, { recursive: true })
+    mkdirSync(PROJECT, { recursive: true })
+  })
+  afterAll(() => {
+    rmSync(ROOT, { recursive: true, force: true })
+  })
+
+  it("aborts an in-flight plugin handler when externalSignal fires", async () => {
+    writePackage(HOME, "abrt1", toolManifest("abrt1", "hang_tool", "./h.ts"), {
+      "h.ts": HANGING_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const ctrl = new AbortController()
+    const t0 = Date.now()
+    setTimeout(() => ctrl.abort(), 30)
+    const result = await loader.dispatch(
+      {
+        type: "tool",
+        name: "hang_tool",
+        input: {},
+        tool_use_id: "toolu_abrt1",
+      },
+      process.cwd(),
+      ctrl.signal,
+    )
+    const elapsed = Date.now() - t0
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    expect(result.content).toBe("aborted-via-ctx")
+    // Should resolve within a small window after the 30ms abort fires.
+    // Generous upper bound (500ms) to avoid CI flake; the bug had this
+    // hang for minutes.
+    expect(elapsed).toBeLessThan(500)
+    rmSync(join(HOME, "tui-plugins", "abrt1"), { recursive: true })
+  })
+
+  it("does not crash when externalSignal is omitted (back-compat)", async () => {
+    writePackage(HOME, "abrt2", toolManifest("abrt2", "echo_tool2", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    // No third argument — pre-existing callers must keep working.
+    const result = await loader.dispatch(
+      {
+        type: "tool",
+        name: "echo_tool2",
+        input: { msg: "hi" },
+        tool_use_id: "toolu_abrt2",
+      },
+      process.cwd(),
+    )
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    expect(result.content).toContain("hi")
+    rmSync(join(HOME, "tui-plugins", "abrt2"), { recursive: true })
+  })
+
+  it("aborts immediately when externalSignal is already aborted on entry", async () => {
+    writePackage(HOME, "abrt3", toolManifest("abrt3", "hang_tool3", "./h.ts"), {
+      "h.ts": HANGING_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const ctrl = new AbortController()
+    ctrl.abort() // pre-aborted
+    const t0 = Date.now()
+    const result = await loader.dispatch(
+      {
+        type: "tool",
+        name: "hang_tool3",
+        input: {},
+        tool_use_id: "toolu_abrt3",
+      },
+      process.cwd(),
+      ctrl.signal,
+    )
+    const elapsed = Date.now() - t0
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    expect(result.content).toBe("aborted-via-ctx")
+    expect(elapsed).toBeLessThan(150)
+    rmSync(join(HOME, "tui-plugins", "abrt3"), { recursive: true })
+  })
+
+  it("internal timeoutMs still works independent of externalSignal", async () => {
+    writePackage(HOME, "abrt4", toolManifest("abrt4", "hang_tool4", "./h.ts"), {
+      "h.ts": HANGING_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      timeoutMs: 80,
+    })
+    // No externalSignal — should still abort via the internal timeout.
+    const t0 = Date.now()
+    const result = await loader.dispatch(
+      {
+        type: "tool",
+        name: "hang_tool4",
+        input: {},
+        tool_use_id: "toolu_abrt4",
+      },
+      process.cwd(),
+    )
+    const elapsed = Date.now() - t0
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    expect(result.content).toBe("aborted-via-ctx")
+    expect(elapsed).toBeGreaterThanOrEqual(60)
+    expect(elapsed).toBeLessThan(400)
+    rmSync(join(HOME, "tui-plugins", "abrt4"), { recursive: true })
+  })
+})
