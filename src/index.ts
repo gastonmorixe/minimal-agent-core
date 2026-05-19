@@ -1337,6 +1337,10 @@ async function main() {
         // Nerd-glyph CPR probe) so a fast-typing user's first keystroke
         // isn't lost. Order: sync probe first (ran first), then nerd probe.
         initialStdinBytes: syncProbe.unparsed + nerdProbeUnparsed,
+        // Threaded into the goodbye banner's `--resume <id>` hint. Empty
+        // string when not yet initialized; runReplLiveArea degrades the
+        // closer copy in that case.
+        sessionId: getSessionId(),
       })
     } finally {
       interceptor.uninstall()
