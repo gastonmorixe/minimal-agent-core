@@ -21,8 +21,9 @@
  *     with the action verb hint — that's the model's resume signal.
  *   - `formatToolPreview` output (the TUI transcript) shows facts only.
  */
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
 import {
+  clampTranscriptRow,
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
@@ -667,24 +668,183 @@ describe("formatToolPreview — `┊` truncation separator", () => {
 })
 
 describe("formatToolPreview — per-line display-width clamp", () => {
-  it("clamps a single mega-line to 300 cells with truncHint", () => {
+  it("clamps a single mega-line to the 300-cell hard cap with truncHint reserve", () => {
     const huge = "x".repeat(5_000)
     const lines = formatToolPreview(huge, false, undefined, { tool: "Bash" })
     // One body row.
     expect(lines.length).toBe(1)
     const visible = stripAnsi(lines[0])
-    // The connector + space prefix is 4 chars; the body itself is the
-    // clamped line + truncHint marker.
     expect(visible).toContain("...(+")
-    // The trimmed-x portion is exactly 300 chars (display-width slice).
+    // Body must fit within the 300-cell cap : the trim reserves
+    // `TOOL_PREVIEW_HINT_RESERVE_WIDTH` (12) cells for the hint marker,
+    // so the x-run is 300 - 12 = 288 cells. The full body (xs + hint)
+    // lands at ≤ 300 cells, which is the invariant the user cares
+    // about (no terminal wrap on terminals ≥ 305 cols).
     const xs = visible.match(/x+/)?.[0] ?? ""
-    expect(xs.length).toBe(300)
+    expect(xs.length).toBe(288)
+    // Body + gutter prefix ("  │ " = 4 cells) ≤ 304 cells.
+    expect(displayWidth(visible)).toBeLessThanOrEqual(304)
   })
 
   it("does NOT clamp lines under the per-line cap", () => {
     const line = "x".repeat(250)
     const lines = formatToolPreview(line, false, undefined, { tool: "Bash" })
     expect(stripAnsi(lines[0])).not.toContain("...(+")
+  })
+})
+
+describe("formatToolPreview — terminal-cols clamp on body lines", () => {
+  // Regression for the May 2026 user-reported bug where a Bash result
+  // containing a long JSON line soft-wrapped into the gutter
+  //
+  //   "  │ {\"v\":1,\"id\":\"5ba940\",\"parent\":null,\"status\":\"do
+  //   ne\",\"title\":\"Scaffold rese
+  //   arch/...
+  //
+  // because `formatToolPreview` only clamped at the 300-cell hard cap
+  // and a 200-char body line in a 90-col terminal fits the 300 cap but
+  // overflows the visible width. The fix : clamp to
+  // `min(terminal_cols - gutter - safety, 300)` at render time.
+  it("clamps body lines to terminal width when cols is passed (no terminal wrap)", () => {
+    // 200-char line, cols=90 → effective width = 90 - 4 - 1 = 85.
+    // The trim reserves 12 cells for the truncHint marker, so the y-run
+    // is 85 - 12 = 73 cells. Body (ys + hint) = 85 cells; +4 gutter =
+    // ≤ 89 cells visible, comfortably under the 90-col terminal width.
+    const line = "y".repeat(200)
+    const lines = formatToolPreview(line, false, undefined, { tool: "Bash", cols: 90 })
+    expect(lines.length).toBe(1)
+    const visible = stripAnsi(lines[0])
+    // The load-bearing assertion : the rendered row fits the terminal.
+    expect(displayWidth(visible)).toBeLessThanOrEqual(90)
+    // truncHint marker present : the line WAS clamped.
+    expect(visible).toContain("...(+")
+    const ys = visible.match(/y+/)?.[0] ?? ""
+    expect(ys.length).toBe(73)
+  })
+
+  it("uses the 300-cell hard cap when terminal cols are wider than 305", () => {
+    // 5_000-char line, cols=400 → effective width = min(395, 300) = 300.
+    // Hint reserve cuts the z-run to 300 - 12 = 288. Same shape as the
+    // "no cols" test (where cols defaults to 300).
+    const huge = "z".repeat(5_000)
+    const lines = formatToolPreview(huge, false, undefined, { tool: "Bash", cols: 400 })
+    expect(lines.length).toBe(1)
+    const visible = stripAnsi(lines[0])
+    expect(visible).toContain("...(+")
+    const zs = visible.match(/z+/)?.[0] ?? ""
+    expect(zs.length).toBe(288)
+    // Body + gutter ≤ 304 cells (under the 400-col terminal).
+    expect(displayWidth(visible)).toBeLessThanOrEqual(304)
+  })
+
+  it("does NOT trim a body line that fits in the terminal", () => {
+    // 60-char line in a 100-col terminal : fits under 100 - 4 - 1 = 95.
+    const line = "k".repeat(60)
+    const lines = formatToolPreview(line, false, undefined, { tool: "Bash", cols: 100 })
+    expect(stripAnsi(lines[0])).not.toContain("...(+")
+  })
+
+  it("clamps the display channel too when cols is passed (Edit/Write diffs in narrow terminal)", () => {
+    // A 200-char synthetic diff line in an 80-col terminal MUST clamp,
+    // even though it's the "display" branch (where 300-cell preview cap
+    // doesn't apply : but the terminal-cols rule still does).
+    const display = `+${"a".repeat(199)}`
+    const lines = formatToolPreview("model-compact", false, display, {
+      tool: "Edit",
+      cols: 80,
+    })
+    expect(lines.length).toBe(1)
+    const visible = stripAnsi(lines[0])
+    expect(displayWidth(visible)).toBeLessThanOrEqual(80)
+    // `clampToolPreviewBodyLine` uses "..." (3 dots) as its truncation
+    // suffix : different from the body path's `truncHint("ch")`. We just
+    // assert the line was visibly clamped.
+    expect(visible).toContain("...")
+  })
+
+  it("ignores cols=0 / NaN / negative and falls back to the 300-cell hard cap", () => {
+    const huge = "w".repeat(5_000)
+    // Each pathological cols input falls back to the hard cap so the
+    // body always renders with a visible content slice.
+    for (const cols of [0, -10, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const lines = formatToolPreview(huge, false, undefined, { tool: "Bash", cols })
+      const visible = stripAnsi(lines[0])
+      expect(visible).toContain("...(+")
+      const ws = visible.match(/w+/)?.[0] ?? ""
+      // 288 for all of the above : finite-but-≤0 collapses to the
+      // 300-cell hard cap, Infinity goes to the cap via Math.min, and
+      // both then reserve 12 cells for the hint marker → 288 body.
+      expect(ws.length).toBe(288)
+    }
+  })
+
+  it("body width depends ONLY on `opts.cols` (not process.stdout.columns) when supplied", () => {
+    // The helper prefers opts.cols when it's a positive finite number.
+    // Pass cols explicitly and assert the slice : independent of the
+    // host process's TTY width.
+    const huge = "q".repeat(5_000)
+    const lines = formatToolPreview(huge, false, undefined, { tool: "Bash", cols: 50 })
+    const visible = stripAnsi(lines[0])
+    // 50 - 4 - 1 = 45 cells of body budget, minus 12 cells of hint
+    // reserve = 33 cells of body content. Total rendered row ≤ 50.
+    const qs = visible.match(/q+/)?.[0] ?? ""
+    expect(qs.length).toBe(33)
+    expect(displayWidth(visible)).toBeLessThanOrEqual(50)
+  })
+})
+
+describe("clampTranscriptRow — outer-row width clamp for header lines", () => {
+  // Regression for the May 2026 user-reported HEADER overflow:
+  //
+  //     ╭ » Bash  $ cat ~/.minimal-agent/sessions/21fd455d-082b-40fe-a8a4-edfe1c16a
+  //   1ff.tasks.jsonl 2>&1 | head -50 · 07:30:26
+  //
+  // The Bash header for a NO-operator long command (or one with a
+  // single `|` pipe that the soft-split rule rejects below its
+  // overflow trigger) used to soft-wrap into the next physical row,
+  // breaking the bordered block. `clampTranscriptRow` catches every
+  // case the inner soft-split machinery doesn't.
+
+  it("passes a fitting row through verbatim", () => {
+    const row = "  ╭ » Bash  $ ls -la"
+    expect(clampTranscriptRow(row, 80)).toBe(row)
+  })
+
+  it("clamps a too-long row to cols with truncHint marker", () => {
+    const row = `  ╭ » Bash  $ cat ${"/very/long/path".repeat(20)}`
+    const clamped = clampTranscriptRow(row, 90)
+    expect(clamped).toContain("...(+")
+    expect(displayWidth(clamped)).toBeLessThanOrEqual(90)
+  })
+
+  it("preserves the leading gutter glyph (`╭ ` / `│ ` / `╰ `) when clamping", () => {
+    const row = `  ╭ » Bash  $ ${"x".repeat(500)}`
+    const clamped = clampTranscriptRow(row, 80)
+    // The gutter `  ╭ ` is preserved verbatim at the row's start —
+    // never clipped (we trim from the right end, which holds the
+    // command body).
+    expect(clamped.startsWith("  ╭ ")).toBe(true)
+  })
+
+  it("returns the row unmodified when cols is undefined / NaN / ≤ 0", () => {
+    const row = `  ╭ » Bash  $ ${"y".repeat(200)}`
+    for (const cols of [undefined, Number.NaN, 0, -10]) {
+      expect(clampTranscriptRow(row, cols)).toBe(row)
+    }
+  })
+
+  it("handles ANSI escapes inside the row (icon color, label bold) without breaking width math", () => {
+    // Build a realistic header row with the same ANSI shape the live
+    // agent emits : dim-cyan gutter, orange bold label, dim body.
+    const ansiRow =
+      "  \x1b[2;36m╭\x1b[22;39m \x1b[38;5;208m»\x1b[39m " +
+      "\x1b[1;38;5;208mBash\x1b[22;39m  " +
+      `\x1b[2m$ ${"z".repeat(200)}\x1b[22m`
+    const clamped = clampTranscriptRow(ansiRow, 90)
+    // ANSI escapes don't contribute to display width : the rendered
+    // row fits within the cap.
+    expect(displayWidth(clamped)).toBeLessThanOrEqual(90)
+    expect(clamped).toContain("...(+")
   })
 })
 

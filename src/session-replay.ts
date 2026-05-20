@@ -22,6 +22,7 @@
 
 import {
   c,
+  clampTranscriptRow,
   faintThinkingChunk,
   formatToolInput,
   formatToolInputContinuation,
@@ -274,9 +275,10 @@ export async function replayToScrollback(
             ? Math.max(20, replayCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
             : replayCols
         const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
-        sink.write(
-          `\n  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, adjustedCols))}${dimTimeSuffix}\n`,
-        )
+        // Outer-row clamp catches header overflow at narrow terminal
+        // widths : see {@link clampTranscriptRow} in src/agent.ts.
+        const headerRow = `  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, adjustedCols))}${dimTimeSuffix}`
+        sink.write(`\n${clampTranscriptRow(headerRow, replayCols)}\n`)
         // Continuation rows: `> <line>` for `\n`-separated multi-line,
         // `↳ <op> <body>` for soft-split single-line overflow. Indented
         // so the sigil aligns directly under the start of the command
@@ -285,7 +287,8 @@ export async function replayToScrollback(
         // accounts for that via the optional `iconText` arg).
         const contIndent = " ".repeat(toolContinuationIndentCells(tu.name))
         for (const cont of formatToolInputContinuation(tu, adjustedCols)) {
-          sink.write(`  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}\n`)
+          const contRow = `  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}`
+          sink.write(`${clampTranscriptRow(contRow, replayCols)}\n`)
         }
         // Header→body separator (mirrors live agent rendering: the empty
         // `│` gutter row that sits between the tool header and the first
@@ -307,8 +310,17 @@ export async function replayToScrollback(
           // The trailing `[truncated: ...]` notice in `content` is still
           // stripped from the displayed body by `formatToolPreview` since
           // it scans for the magic prefix.
+          //
+          // `cols: replayCols` forwards the live terminal width so the
+          // per-line clamp activates the same way it does in the live
+          // agent : a 200-cell body line in a 90-col terminal trims at
+          // the visible width instead of soft-wrapping into the gutter.
+          // Captured-at-block-start (NOT live-on-each-line) is correct
+          // here : replay walks the whole transcript in one pass and
+          // doesn't observe mid-replay resizes.
           for (const line of formatToolPreview(content, !!result.is_error, undefined, {
             tool: tu.name,
+            cols: replayCols,
           })) {
             sink.write(`${line}\n`)
           }
