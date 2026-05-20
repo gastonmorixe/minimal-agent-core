@@ -98,6 +98,12 @@ export interface ReplayOptions {
 /**
  * One-line dim header announcing the resume. This is the ONLY dim text
  * in the replay output — see the fidelity contract in the module docs.
+ *
+ * Returns `  ── resumed from <sid> (...) ──\n\n` with NO leading `\n`.
+ * The caller is responsible for spacing above the header. When the
+ * ready banner (`src/ready-banner.ts`) is written immediately before
+ * this, its trailing `\n\n` already provides the blank row of breathing
+ * room — adding another `\n` here would compound into two blank rows.
  */
 export function buildResumeHeader(opts: {
   sid: string
@@ -110,7 +116,7 @@ export function buildResumeHeader(opts: {
   if (opts.repaired) parts.push("repaired")
   if (opts.dropped && opts.dropped > 0) parts.push(`dropped ${opts.dropped}`)
   const meta = parts.join(", ")
-  return `\n  ${c.dim("──")} ${c.dim(`resumed from ${opts.sid} (${meta})`)} ${c.dim("──")}\n\n`
+  return `  ${c.dim("──")} ${c.dim(`resumed from ${opts.sid} (${meta})`)} ${c.dim("──")}\n\n`
 }
 
 /**

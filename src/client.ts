@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto"
 import { type AuthResult, readKeychain } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
+import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"
 import {
   API_URL,
   buildHeaders,
@@ -29,6 +30,7 @@ import {
   networkActivityObserver,
 } from "./network/index.ts"
 import { broadcastResponseRateLimits, rebroadcastQuotaForSessionUpdate } from "./quota-broadcast.ts"
+import { abortableSleep } from "./retry.ts"
 import { addSessionUsage } from "./session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 import { clampWithHint } from "./truncate-hint.ts"
@@ -981,7 +983,30 @@ function shortenHint(s: string): string {
  *
  * @throws Error if the API returns a non-2xx status (after 401 retry)
  */
-export async function* sendMessage(
+/**
+ * Single-attempt request lifecycle: POST + auth refresh + (streaming)
+ * SSE consumption + StreamedResponse return. The {@link sendMessage}
+ * public export wraps this in a retry coordinator (see further down)
+ * that re-invokes a fresh attempt when:
+ *
+ *   - The throw came from an SSE `event: error` of a transient kind
+ *     (`overloaded_error`, `api_error`) — tagged via `streamErrorType`
+ *     in `case "error":` above.
+ *   - Nothing has been yielded to the consumer yet (re-streaming
+ *     after partial text reached the UI would duplicate output).
+ *   - The attempt count + total wall-clock budget are not exhausted.
+ *
+ * Splitting the wrapper from the attempt keeps the existing
+ * read-modify-write body of one HTTP request unmodified, so the diff
+ * is small and the per-attempt streaming state (blocks, accumulators,
+ * fullText, currentBlock, …) resets naturally on each new
+ * `sendMessageOnce` call.
+ */
+// Exported (not just module-internal) so tests can exercise one
+// request lifecycle in isolation from the retry coordinator — see
+// `src/client.test.ts > SSE error event handling`. Production code
+// should always call {@link sendMessage} so retries fire.
+export async function* sendMessageOnce(
   opts: SendOptions,
 ): AsyncGenerator<string, StreamedResponse, undefined> {
   const {
@@ -1285,6 +1310,45 @@ export async function* sendMessage(
         requestStatus.update("Receiving stream")
       }
       switch (event.type) {
+        case "error": {
+          // Anthropic returns mid-stream errors as `event: error` over
+          // HTTP 200 (overloaded_error, api_error, invalid_request_error,
+          // …). Before this case existed the event fell through the
+          // switch silently: the SSE stream closed, sendMessage
+          // returned an empty { blocks: [], text: "", stopReason: null },
+          // and the agent loop (agent.ts ~L1017) treated the empty
+          // blocks as a natural end-of-turn — no scrollback, no
+          // warning, no retry. See `~/.minimal-agent/.net-dbg/.../*-04-res-body.txt`
+          // for the wire shape.
+          //
+          // We `diag.error(...)` first so all decoupled sinks
+          // (FileLogSink, TuiDiagnosticSurface footer, the persistent
+          // ScrollbackDiagnosticSink) render the failure in their own
+          // surfaces. Then we throw a tagged Error so the agent's
+          // outer turnError catch sees a real exception (and skips its
+          // bare `error <msg>` fallback line — see
+          // `isErrorDiagEmitted` in `diagnostic-bus.ts`).
+          const errObj = (event as { error?: { type?: string; message?: string } }).error ?? {}
+          const errType = errObj.type ?? "unknown_error"
+          const errMessage = errObj.message ?? "stream error"
+          const requestId = (event as { request_id?: string }).request_id
+          diag.error("api.stream-error", `${errType}: ${errMessage}`, {
+            "error-type": errType,
+            ...(requestId ? { "request-id": requestId } : {}),
+          })
+          // Tag the error with the stream-error type so the retry
+          // classifier (Stage B, below) can decide retryability without
+          // parsing the message string. The marker survives normal
+          // exception propagation; it never leaks into serialized
+          // payloads (the property is intentionally enumerable since
+          // it's stable user-facing metadata).
+          const streamErr = markErrorAsDiagEmitted(
+            new Error(`Anthropic stream error: ${errType} — ${errMessage}`),
+          ) as Error & { streamErrorType?: string }
+          streamErr.streamErrorType = errType
+          throw streamErr
+        }
+
         case "message_start": {
           // Anthropic returns the full `usage` payload right at message_start,
           // since cache lookup happens during prefill : before any output
@@ -1496,6 +1560,136 @@ export async function* sendMessage(
   } finally {
     requestStatus.clear()
     networkActivityObserver.detach(reqId)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// sendMessage : retry coordinator around sendMessageOnce
+// ---------------------------------------------------------------------------
+
+/**
+ * SSE error types we'll retry automatically. Both are transient: a
+ * server-side capacity issue (`overloaded_error`) or a generic API
+ * dispatcher hiccup (`api_error`). Anthropic emits these as
+ * `event: error` SSE frames over HTTP 200 (see the `case "error":`
+ * arm in `sendMessageOnce` above), so a status-code retry wouldn't
+ * catch them — we retry on the tagged thrown Error from there.
+ *
+ * Notably absent (and intentionally NOT retryable):
+ *   - `invalid_request_error` / `permission_error` / `not_found_error` —
+ *     the request itself is wrong; re-issuing won't change the outcome.
+ *   - `authentication_error` — auth refresh is handled separately,
+ *     upstream of the retry boundary.
+ */
+const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set(["overloaded_error", "api_error"])
+
+/**
+ * Defaults tuned for Anthropic capacity recovery (slower than typical
+ * rate-limit windows because the bottleneck is server-side compute
+ * scheduling). Override-free for now; if a deployment needs different
+ * numbers, promote them to {@link SendOptions}.
+ */
+const RETRY_MAX_ATTEMPTS = 4
+const RETRY_BASE_DELAY_MS = 1_000
+const RETRY_MAX_DELAY_MS = 30_000
+const RETRY_TOTAL_DEADLINE_MS = 120_000
+
+/**
+ * Send a message to the Messages API, retrying transient stream errors.
+ *
+ * Thin wrapper around {@link sendMessageOnce}. Each iteration consumes
+ * one full attempt's generator; if it throws with a retryable
+ * `streamErrorType` tag AND nothing has been yielded to the caller yet,
+ * we sleep (full-jitter exponential backoff bounded by the deadline)
+ * and start a fresh attempt. Any yield to the caller marks
+ * `hasYielded = true` and disables further retries — re-streaming after
+ * partial content reached the UI would duplicate output.
+ *
+ * Surfacing during retry:
+ *
+ *   - `diag.warn("api.retry", ...)` per attempt — picked up by every
+ *     decoupled diagnostic sink (file log, TUI footer slot, and the
+ *     persistent {@link ScrollbackDiagnosticSink}). The user sees a
+ *     gold gutter block in scrollback per retry attempt.
+ *   - A dedicated `GLOBAL_STATUS_BUS` handle keeps the live status
+ *     row populated during the sleep window — without it, the live
+ *     area would go blank between attempts (because `sendMessageOnce`'s
+ *     `finally` clears its own status handle on each throw).
+ *
+ * Permanent errors (non-retryable types, exhausted attempts, deadline
+ * crossed, or post-yield) re-throw on first occurrence — identical to
+ * pre-retry behavior.
+ *
+ * @yields Streamed text deltas from the in-flight attempt's
+ *   {@link sendMessageOnce} generator. Once a yield has fired, retry
+ *   is disabled and subsequent attempt failures propagate.
+ */
+export async function* sendMessage(
+  opts: SendOptions,
+): AsyncGenerator<string, StreamedResponse, undefined> {
+  let hasYielded = false
+  const startedAt = Date.now()
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const gen = sendMessageOnce(opts)
+      // We can't `yield*` the inner generator because we need to
+      // observe each yield to flip `hasYielded` (the retry gate). The
+      // manual drain pattern preserves both yield order AND the
+      // generator's final return value.
+      let result: IteratorResult<string, StreamedResponse>
+      while (!(result = await gen.next()).done) {
+        hasYielded = true
+        yield result.value
+      }
+      return result.value
+    } catch (err) {
+      const streamErrType = (err as Error & { streamErrorType?: string }).streamErrorType
+      const elapsedMs = Date.now() - startedAt
+      const retryable =
+        streamErrType !== undefined &&
+        RETRYABLE_STREAM_ERROR_TYPES.has(streamErrType) &&
+        !hasYielded &&
+        attempt < RETRY_MAX_ATTEMPTS &&
+        elapsedMs < RETRY_TOTAL_DEADLINE_MS
+
+      if (!retryable) throw err
+
+      // Full-jitter exponential backoff: random in [0, ideal) so
+      // concurrent agents desynchronize on collision. Aligns with the
+      // algorithm used in `src/retry.ts` for the Brave WebSearch path.
+      const ideal = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** (attempt - 1))
+      const delayMs = Math.floor(Math.random() * ideal)
+      const nextAttempt = attempt + 1
+
+      diag.warn(
+        "api.retry",
+        `${streamErrType}: retrying attempt ${nextAttempt}/${RETRY_MAX_ATTEMPTS} after ${(delayMs / 1000).toFixed(1)}s`,
+        {
+          "error-type": streamErrType ?? "unknown",
+          attempt: nextAttempt,
+          "max-attempts": RETRY_MAX_ATTEMPTS,
+          "delay-ms": delayMs,
+        },
+      )
+
+      // Keep the live status row populated during sleep. Without this
+      // the user sees the previous attempt's "Sending request" clear
+      // (sendMessageOnce's finally runs on throw) and then a blank
+      // status bar for up to 30s — exactly the "is anything happening?"
+      // silence we're trying to fix.
+      const retryStatus = GLOBAL_STATUS_BUS.create(
+        `Retrying after ${streamErrType} (attempt ${nextAttempt}/${RETRY_MAX_ATTEMPTS}) — sleeping ${(delayMs / 1000).toFixed(1)}s…`,
+        { notificationId: "network.retry", category: "network" },
+      )
+      try {
+        await abortableSleep(delayMs, opts.signal)
+      } finally {
+        retryStatus.clear()
+      }
+      // Fall through to the next loop iteration: a fresh sendMessageOnce
+      // with the (possibly refreshed) auth token from the prior attempt.
+    }
   }
 }
 
