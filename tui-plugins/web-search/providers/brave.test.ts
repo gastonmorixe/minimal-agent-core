@@ -184,6 +184,9 @@ describe("BraveProvider.search errors", () => {
       fetch: makeFetch(() => {
         throw new Error("ECONNREFUSED")
       }),
+      // Disable retry — without this, the default 3-attempt policy makes
+      // this test take ~1s due to backoff sleeps.
+      retry: { maxAttempts: 1 },
     })
     await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(/fetch failed/)
   })
@@ -218,5 +221,185 @@ describe("BraveProvider.search empty results", () => {
     const resp = await p.search("q", baseOpts, new AbortController().signal)
     expect(resp.hits).toEqual([])
     expect(resp.provider).toBe("brave")
+  })
+})
+
+// --- retry behavior ------------------------------------------------------
+//
+// Verifies the wiring between brave.ts and src/retry.ts: which statuses
+// trigger backoff, Retry-After honoring, exhaustion → existing
+// `!resp.ok` body-excerpt path, and the test-only `retry.maxAttempts: 1`
+// escape hatch.
+
+describe("BraveProvider.search — retry behavior", () => {
+  test("recovers from a transient 429 then succeeds on retry", async () => {
+    let attempts = 0
+    const p = braveFactory({
+      apiKey: "k",
+      // Tiny delays so the test runs fast even though retry IS exercised.
+      retry: { baseDelayMs: 1, maxDelayMs: 1 },
+      fetch: makeFetch(() => {
+        attempts++
+        if (attempts === 1) {
+          return new Response("rate limited", { status: 429, statusText: "Too Many Requests" })
+        }
+        return jsonResponse({ web: { results: [] }, query: { original: "q" } })
+      }),
+    })
+    const resp = await p.search("q", baseOpts, new AbortController().signal)
+    expect(attempts).toBe(2)
+    expect(resp.provider).toBe("brave")
+  })
+
+  test("honors Retry-After header (seconds form) as a floor", async () => {
+    let attempts = 0
+    const onRetryDelays: number[] = []
+    const p = braveFactory({
+      apiKey: "k",
+      retry: {
+        baseDelayMs: 1, // tiny jitter — Retry-After should dominate
+        maxDelayMs: 100,
+        // Capture observed delay for assertion.
+        onRetry: ({ delayMs }) => onRetryDelays.push(delayMs),
+      },
+      fetch: makeFetch(() => {
+        attempts++
+        if (attempts === 1) {
+          return new Response("", {
+            status: 429,
+            statusText: "Too Many Requests",
+            headers: { "retry-after": "1" },
+          })
+        }
+        return jsonResponse({ web: { results: [] } })
+      }),
+    })
+    await p.search("q", baseOpts, new AbortController().signal)
+    expect(attempts).toBe(2)
+    // 1 second from Retry-After, capped at maxDelayMs=100ms → 100.
+    expect(onRetryDelays).toEqual([100])
+  })
+
+  test("HTTP-date Retry-After form falls back to jitter (not parsed)", async () => {
+    let attempts = 0
+    const onRetryDelays: number[] = []
+    const p = braveFactory({
+      apiKey: "k",
+      retry: { baseDelayMs: 5, maxDelayMs: 50, onRetry: ({ delayMs }) => onRetryDelays.push(delayMs) },
+      fetch: makeFetch(() => {
+        attempts++
+        if (attempts === 1) {
+          return new Response("", {
+            status: 503,
+            headers: { "retry-after": "Wed, 21 Oct 2099 07:28:00 GMT" },
+          })
+        }
+        return jsonResponse({ web: { results: [] } })
+      }),
+    })
+    await p.search("q", baseOpts, new AbortController().signal)
+    expect(attempts).toBe(2)
+    // Pure jitter: somewhere in [0, baseDelayMs=5).
+    expect(onRetryDelays[0]).toBeGreaterThanOrEqual(0)
+    expect(onRetryDelays[0]).toBeLessThan(5)
+  })
+
+  test("retries 502/503/504 (transient upstream errors)", async () => {
+    for (const status of [502, 503, 504]) {
+      let attempts = 0
+      const p = braveFactory({
+        apiKey: "k",
+        retry: { baseDelayMs: 1, maxDelayMs: 1 },
+        fetch: makeFetch(() => {
+          attempts++
+          if (attempts === 1) return new Response("", { status })
+          return jsonResponse({ web: { results: [] } })
+        }),
+      })
+      await p.search("q", baseOpts, new AbortController().signal)
+      expect(attempts).toBe(2)
+    }
+  })
+
+  test("does NOT retry 4xx (other than 429) or 500", async () => {
+    for (const status of [400, 401, 403, 404, 500]) {
+      let attempts = 0
+      const p = braveFactory({
+        apiKey: "k",
+        retry: { baseDelayMs: 1, maxDelayMs: 1 },
+        fetch: makeFetch(() => {
+          attempts++
+          return new Response("bad", { status })
+        }),
+      })
+      await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(
+        new RegExp(`HTTP ${status}`),
+      )
+      expect(attempts).toBe(1) // exactly one call — no retry
+    }
+  })
+
+  test("exhausts retries on persistent 429 and surfaces body excerpt", async () => {
+    let attempts = 0
+    const p = braveFactory({
+      apiKey: "k",
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1 },
+      fetch: makeFetch(() => {
+        attempts++
+        return new Response("plan exhausted", { status: 429, statusText: "Too Many Requests" })
+      }),
+    })
+    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(
+      /HTTP 429.*plan exhausted/,
+    )
+    expect(attempts).toBe(3) // full exhaustion
+  })
+
+  test("network errors retry up to maxAttempts then bubble as fetch failed", async () => {
+    let attempts = 0
+    const p = braveFactory({
+      apiKey: "k",
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1 },
+      fetch: makeFetch(() => {
+        attempts++
+        throw new Error("ECONNRESET")
+      }),
+    })
+    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(
+      /fetch failed: ECONNRESET/,
+    )
+    expect(attempts).toBe(3)
+  })
+
+  test("retry.maxAttempts:1 disables retry (one call only)", async () => {
+    let attempts = 0
+    const p = braveFactory({
+      apiKey: "k",
+      retry: { maxAttempts: 1 },
+      fetch: makeFetch(() => {
+        attempts++
+        return new Response("", { status: 429 })
+      }),
+    })
+    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(/HTTP 429/)
+    expect(attempts).toBe(1)
+  })
+
+  test("AbortSignal aborts retry loop without consuming the full budget", async () => {
+    let attempts = 0
+    const ac = new AbortController()
+    const p = braveFactory({
+      apiKey: "k",
+      retry: { maxAttempts: 5, baseDelayMs: 50, maxDelayMs: 50 },
+      fetch: makeFetch(() => {
+        attempts++
+        // Schedule an abort right after the first failure so the
+        // subsequent backoff sleep is interrupted.
+        if (attempts === 1) queueMicrotask(() => ac.abort(new Error("user-cancel")))
+        return new Response("", { status: 503 })
+      }),
+    })
+    await expect(p.search("q", baseOpts, ac.signal)).rejects.toThrow(/fetch failed: user-cancel/)
+    expect(attempts).toBe(1)
   })
 })
