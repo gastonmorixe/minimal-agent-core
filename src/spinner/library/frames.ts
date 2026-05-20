@@ -96,6 +96,14 @@ export const BAR_GROW: readonly string[] = [
   "▎",
 ]
 
+/**
+ * Heavy big/small square size-pulse. Two frames; pair with a wide interval
+ * (~500ms) for a "lazy color-and-size pulse" feel. Both glyphs carry
+ * `U+FE0E` to force text presentation — see comments on `ICON_SQUARE_BIG` /
+ * `ICON_SQUARE_SMALL` in `library/icons.ts`.
+ */
+export const SQUARE_PULSE: readonly string[] = ["\u25FC\uFE0E", "\u25FE\uFE0E"]
+
 // ─── Recommended AnimatedIcon bundles (frames + intervalMs) ─────────────────
 
 export const THINKING_ROTOR_ASCII: AnimatedIcon = {
@@ -165,4 +173,17 @@ export const THINKING_BAR_GROW: AnimatedIcon = {
   frames: BAR_GROW,
   intervalMs: 70,
   steadyColor: true,
+}
+
+/**
+ * Heavy lazy size-pulse for `tool.running`. 500ms per frame → 1 s full
+ * `◼ ↔ ◾` cycle. `steadyColor` is intentionally OMITTED so the color
+ * advances per frame: at 500ms intervals, `◼` and `◾` each land on a
+ * different palette entry, giving a deliberate "lazy color-and-size
+ * pulse" that matches the cadence of the legacy static blink (500ms on /
+ * 500ms off) but stays continuously visible — no off-frame whitespace.
+ */
+export const TOOL_SQUARE_PULSE: AnimatedIcon = {
+  frames: SQUARE_PULSE,
+  intervalMs: 500,
 }

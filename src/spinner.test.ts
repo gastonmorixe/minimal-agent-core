@@ -2,6 +2,21 @@ import { describe, expect, it } from "bun:test"
 import type { Spinner } from "./spinner.ts"
 import { BlinkingNerdSpinner, SpinnerManager } from "./spinner.ts"
 import { displayWidth } from "./term-width.ts"
+import {
+  DEFAULT_ICON_BY_CATEGORY,
+  DEFAULT_ICON_BY_NOTIFICATION_ID,
+  DEFAULT_NERD_ICON,
+} from "./spinner/presets.ts"
+import {
+  ICON_DOT_FILLED,
+  ICON_PAUSE,
+  ICON_SQUARE_BIG,
+  ICON_SQUARE_SMALL,
+  NF_LOCK,
+} from "./spinner/library/icons.ts"
+import { THINKING_BREATHING, TOOL_SQUARE_PULSE } from "./spinner/library/frames.ts"
+import { isAnimatedIcon } from "./spinner/types.ts"
+import { effectiveDisplayWidth } from "./nerd-glyph-width.ts"
 
 describe("SpinnerManager", () => {
   it("switches spinners after the negotiated grace window", () => {
@@ -222,6 +237,39 @@ describe("BlinkingNerdSpinner", () => {
     ])
   })
 
+  it("animated icons (e.g. TOOL_SQUARE_PULSE) stay continuously visible — no off-frame whitespace", () => {
+    // Regression for the "blinking icon I can barely see" bug: the
+    // previous `tool.running` default was a static glyph (`▸`) routed
+    // through the static-blink branch, which replaces it with whitespace
+    // every other 500ms step. Switching to an animated rotor
+    // (TOOL_SQUARE_PULSE) routes through the animated branch, where
+    // every step renders a frame from the frames[] array. Sample a
+    // 4-frame span (covering 2 full big↔small cycles) at 500ms steps
+    // and assert NONE of them are pure whitespace — i.e. the icon is
+    // always visible.
+    const spinner = new BlinkingNerdSpinner({
+      blinkMs: 500,
+      // Single-colorizer palette so we can scrub it cleanly to inspect
+      // the glyph payload.
+      colorizers: [(t) => t],
+    })
+    const base = {
+      now: 0,
+      startedAt: 0,
+      maxFps: 30,
+      currentFps: 30,
+      theme: {},
+      notification: { notificationId: "tool.running" },
+    }
+    for (let step = 0; step < 4; step++) {
+      const frame = spinner.render({ ...base, elapsedMs: step * 500 })
+      // Strip any SGR (none in this palette) and assert non-whitespace.
+      expect(frame.glyph.trim().length).toBeGreaterThan(0)
+      // And one of the two SQUARE_PULSE frames must be present.
+      expect([ICON_SQUARE_BIG, ICON_SQUARE_SMALL]).toContain(frame.glyph)
+    }
+  })
+
   it("on-step and off-step have IDENTICAL display width (no jiggle)", () => {
     // Cover the three icon-width regimes. "NET" is 3 ASCII cells,
     // "●" is 1 cell, "\u{F1064}" is the 󱁤 nf-md-tools PUA glyph.
@@ -258,4 +306,84 @@ describe("BlinkingNerdSpinner", () => {
       })
     }
   })
+})
+
+describe("DEFAULT_ICON_BY_NOTIFICATION_ID (live-area status defaults)", () => {
+  // These mappings drive what the user sees in the live status row.
+  // Pinning each explicitly prevents accidental regressions when the
+  // library/frames.ts presets get reshuffled.
+
+  it("agent.thinking → breathing dot (animated, calm)", () => {
+    expect(DEFAULT_ICON_BY_NOTIFICATION_ID["agent.thinking"]).toBe(THINKING_BREATHING)
+    expect(isAnimatedIcon(THINKING_BREATHING)).toBe(true)
+    // `steadyColor: true` keeps the rainbow advance slow (one hue per
+    // full breath rather than per frame).
+    expect(THINKING_BREATHING.steadyColor).toBe(true)
+  })
+
+  it("tool.running → big/small square size-pulse (animated, no off-frame blank)", () => {
+    expect(DEFAULT_ICON_BY_NOTIFICATION_ID["tool.running"]).toBe(TOOL_SQUARE_PULSE)
+    expect(isAnimatedIcon(TOOL_SQUARE_PULSE)).toBe(true)
+    // Color advances per frame (no steadyColor) — gives the "lazy
+    // color-and-size pulse" feel.
+    expect(TOOL_SQUARE_PULSE.steadyColor).toBeUndefined()
+    expect(TOOL_SQUARE_PULSE.intervalMs).toBe(500)
+    expect(TOOL_SQUARE_PULSE.frames).toEqual([ICON_SQUARE_BIG, ICON_SQUARE_SMALL])
+  })
+
+  it("network.request → blinking filled dot (static, rainbow per cycle)", () => {
+    expect(DEFAULT_ICON_BY_NOTIFICATION_ID["network.request"]).toBe(ICON_DOT_FILLED)
+    expect(isAnimatedIcon(ICON_DOT_FILLED)).toBe(false)
+  })
+
+  it("auth.refresh → blinking NF lock (static)", () => {
+    expect(DEFAULT_ICON_BY_NOTIFICATION_ID["auth.refresh"]).toBe(NF_LOCK)
+    expect(isAnimatedIcon(NF_LOCK)).toBe(false)
+  })
+
+  it("agent.reflection-cooldown → blinking pause (regression: was silently the fallback dot)", () => {
+    // Pre-this-change, the reflection-cooldown emitter had no entry in
+    // either `iconByNotificationId` or `iconByCategory[reflection]`, so
+    // it silently fell through to DEFAULT_NERD_ICON (the tiny `·`).
+    // This test pins the explicit mapping so a future preset refactor
+    // can't silently revert the fallback.
+    expect(DEFAULT_ICON_BY_NOTIFICATION_ID["agent.reflection-cooldown"]).toBe(ICON_PAUSE)
+    expect(DEFAULT_ICON_BY_NOTIFICATION_ID["agent.reflection-cooldown"]).not.toBe(DEFAULT_NERD_ICON)
+  })
+
+  it("category mappings mirror notification-id mappings for the same semantic", () => {
+    // The category map is the fallback when no notification id matches.
+    // Today the two maps are aligned for the five known states — keep
+    // them aligned so a plugin emitting `category: "tool"` without a
+    // notification id still gets the same visual.
+    expect(DEFAULT_ICON_BY_CATEGORY.agent).toBe(THINKING_BREATHING)
+    expect(DEFAULT_ICON_BY_CATEGORY.tool).toBe(TOOL_SQUARE_PULSE)
+    expect(DEFAULT_ICON_BY_CATEGORY.network).toBe(ICON_DOT_FILLED)
+    expect(DEFAULT_ICON_BY_CATEGORY.auth).toBe(NF_LOCK)
+    expect(DEFAULT_ICON_BY_CATEGORY.reflection).toBe(ICON_PAUSE)
+  })
+})
+
+describe("VS-15 force text presentation (no emoji 2-cell promotion)", () => {
+  // Three of the new icons (ICON_SQUARE_BIG, ICON_SQUARE_SMALL, ICON_PAUSE)
+  // are Unicode codepoints with Emoji_Presentation=Yes. Without the
+  // U+FE0E suffix terminals render them as 2-cell color emoji, which
+  // would break the spinner's pad-math (it assumes the rendered width
+  // matches `effectiveDisplayWidth` — 1 cell for these). The suffix is
+  // load-bearing; this test pins it.
+  const cases = [
+    { name: "ICON_SQUARE_BIG (◼)", glyph: ICON_SQUARE_BIG, base: 0x25fc },
+    { name: "ICON_SQUARE_SMALL (◾)", glyph: ICON_SQUARE_SMALL, base: 0x25fe },
+    { name: "ICON_PAUSE (⏸)", glyph: ICON_PAUSE, base: 0x23f8 },
+  ] as const
+
+  for (const { name, glyph, base } of cases) {
+    it(`${name} carries U+FE0E and reports 1-cell width`, () => {
+      // Two codepoints: the base + VS-15.
+      const codepoints = Array.from(glyph).map((c) => c.codePointAt(0))
+      expect(codepoints).toEqual([base, 0xfe0e])
+      // Treated as 1 cell by the spinner's pad-math.
+      expect(effectiveDisplayWidth(glyph)).toBe(1)
+    })
+  }
 })
