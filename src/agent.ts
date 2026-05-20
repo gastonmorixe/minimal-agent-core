@@ -1072,14 +1072,23 @@ export class Agent {
             content.length === 0
               ? `${icon}${label}${dimTimeSuffix}`
               : `${icon}${label}  ${content}${dimTimeSuffix}`
-          writeTranscript(`\n  ${c.dimCyan("╭")} ${headerLine}`)
+          // Outer-row clamp catches cases the inner soft-split machinery
+          // doesn't (Bash commands with no operators, long file paths,
+          // generic JSON-fallback headers). Pre-clamp the row INCLUDING
+          // its `  ╭ ` gutter prefix so it never overflows the visible
+          // column count. See {@link clampTranscriptRow}.
+          writeTranscript(
+            `\n${clampTranscriptRow(`  ${c.dimCyan("╭")} ${headerLine}`, renderCols)}`,
+          )
           if (override === undefined) {
             // Indent so `↳`/`>` aligns directly under the start of the
             // command body in the header (under `c` of `cd …`). See
             // {@link toolContinuationIndentCells} for the layout walk.
             const indent = " ".repeat(toolContinuationIndentCells(tool.name, pres?.icon))
             for (const cont of formatToolInputContinuation(tool, adjustedCols)) {
-              writeTranscript(`  ${c.dimCyan("│")} ${indent}${c.dim(cont)}`)
+              writeTranscript(
+                clampTranscriptRow(`  ${c.dimCyan("│")} ${indent}${c.dim(cont)}`, renderCols),
+              )
             }
           }
           writeTranscript(`  ${c.dimCyan("│")}`)
@@ -1202,14 +1211,15 @@ export class Agent {
                 if (bufferedLastLine !== null) {
                   writeTranscript(`  ${c.dimCyan("│")} ${c.dim(bufferedLastLine)}`)
                 }
-                let line = raw
-                if (displayWidth(line) > TOOL_PREVIEW_LINE_WIDTH) {
-                  const trimmed = truncateDisplayWidth(line, TOOL_PREVIEW_LINE_WIDTH, "")
-                  // eslint-disable-next-line typescript-eslint/no-misused-spread
-                  const cpCut = [...line].length - [...trimmed].length
-                  line = `${trimmed}${truncHint(cpCut, "ch")}`
-                }
-                bufferedLastLine = line
+                // Per-line width clamp : `min(terminal_cols - gutter,
+                // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is
+                // emitted. Live width (no `cols` arg → reads
+                // `process.stdout.columns` now), so a mid-stream resize
+                // takes effect on the very next line. Scrollback above
+                // never re-renders, but no NEW line will overflow the
+                // current visible columns. See {@link
+                // effectiveBodyLineWidth} and {@link clampBodyWithHint}.
+                bufferedLastLine = clampBodyWithHint(raw, effectiveBodyLineWidth())
                 streamedLineCount++
               }
 
@@ -2011,16 +2021,38 @@ function tuiPreviewHint(tool: string): string {
 }
 
 /**
- * Per-line display-width cap for body lines. A single 10_000-char minified
- * JSON line in a Read result shouldn't dominate the preview; clamp to a
- * fixed value (NOT terminal width : we don't reflow on resize). 300 chars
- * is generous enough to read most code and structured output without one
- * pathological line eating the screen.
+ * Hard per-line cap for body lines. Protects against pathological cases
+ * (e.g. a 10_000-char minified JSON line in a `Read` result) on terminals
+ * wider than this value : without the cap, one mega-line would still
+ * dominate the preview even when it physically fits. 300 cells is
+ * generous enough to read most code and structured output.
+ *
+ * The terminal width takes precedence when narrower : see
+ * {@link effectiveBodyLineWidth}. Lines are truncated **at render time**
+ * with the current `process.stdout.columns` (or the snapshot the caller
+ * passed via `opts.cols`), so a body line never overflows the visible
+ * column count and the terminal never has to wrap it. Scrollback is
+ * permanent : a later resize does not re-render older blocks, but every
+ * new tool block paints correctly under the new width.
  */
 const TOOL_PREVIEW_LINE_WIDTH = 300
 const TOOL_PREVIEW_GUTTER_WIDTH = 4
 const TOOL_PREVIEW_WRAP_SAFETY_WIDTH = 1
 
+/**
+ * Compute the safe body width for a tool transcript line as
+ * `terminal_cols - gutter - wrap_safety`. Returns `undefined` when the
+ * caller has no width signal (non-TTY contexts like unit tests where
+ * `process.stdout.columns` is also unset). That sentinel lets the
+ * display-channel branch (Edit/Write diffs) opt out of clamping when
+ * width is unknown : tests get deterministic full-width output, and
+ * production gets a real number.
+ *
+ * The `gutter` accounts for the `"  │ "` (or `"  ╰ "`) prefix every row
+ * carries (4 cells); the 1-cell `WRAP_SAFETY` keeps a column free at the
+ * right edge so a single off-by-one in a wide-glyph terminal can't tip
+ * the line into a wrap.
+ */
 function toolPreviewBodyWidth(cols?: number): number | undefined {
   const raw = cols ?? process.stdout.columns
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined
@@ -2028,9 +2060,88 @@ function toolPreviewBodyWidth(cols?: number): number | undefined {
   return max > 0 ? max : 0
 }
 
+/**
+ * Body-line render width for the main preview path : the effective
+ * `min(terminal_cols - gutter - safety, TOOL_PREVIEW_LINE_WIDTH)`.
+ *
+ * Always returns a positive integer. When the terminal width signal is
+ * missing OR pathologically small (≤ gutter), falls back to the fixed
+ * hard cap so the behavior in unit tests (no TTY, no `cols` argument)
+ * stays deterministic at 300 cells. In production with a real TTY the
+ * terminal-derived width almost always wins (e.g. an 127-col terminal
+ * gives 127 − 4 − 1 = 122, well below the 300 cap).
+ *
+ * Mirrors the semantic of `toolPreviewBodyWidth` but collapses the
+ * "no width" sentinel to the hard cap so callers don't need a separate
+ * fallback branch.
+ */
+function effectiveBodyLineWidth(cols?: number): number {
+  const termBased = toolPreviewBodyWidth(cols)
+  if (termBased === undefined || termBased <= 0) return TOOL_PREVIEW_LINE_WIDTH
+  return Math.min(termBased, TOOL_PREVIEW_LINE_WIDTH)
+}
+
 function clampToolPreviewBodyLine(line: string, maxWidth: number | undefined): string {
   if (maxWidth === undefined || displayWidth(line) <= maxWidth) return line
   return truncateDisplayWidth(line, maxWidth, "...")
+}
+
+/**
+ * Width budget reserved for the `truncHint("ch")` marker
+ * (`...(+NNNNch)`) when a body line is clamped. The marker is appended
+ * AFTER the trim, so the trim itself must leave room for it inside
+ * `maxWidth` : otherwise `body = trimmed + hint` exceeds the visible
+ * column count and the terminal soft-wraps the row into the gutter.
+ *
+ * 12 cells covers `"...(+99999ch)"` (worst realistic case for `head -c`
+ * sized output) ; rare overshoots (cut > 99_999 chars) drift one cell
+ * past the cap, far below the `WRAP_SAFETY` slop on the outside of the
+ * row. Picked over an iterative "compute hint width, re-trim" loop for
+ * simplicity : the lost 1–2 body cells are imperceptible.
+ */
+const TOOL_PREVIEW_HINT_RESERVE_WIDTH = 12
+
+/**
+ * Trim a body line to `maxWidth` cells with the standard `...(+Nch)`
+ * truncation marker. Reserves {@link TOOL_PREVIEW_HINT_RESERVE_WIDTH}
+ * cells for the marker so the rendered total (`trimmed + hint`) never
+ * exceeds `maxWidth`. Returns the line unmodified when it already fits.
+ *
+ * Shared by the live Bash stream renderer (`flushLineToBuffer`) and the
+ * batched `formatToolPreview` body path so both paths produce identical
+ * shape under identical widths.
+ */
+function clampBodyWithHint(line: string, maxWidth: number): string {
+  if (displayWidth(line) <= maxWidth) return line
+  const trimWidth = Math.max(1, maxWidth - TOOL_PREVIEW_HINT_RESERVE_WIDTH)
+  const trimmed = truncateDisplayWidth(line, trimWidth, "")
+  // eslint-disable-next-line typescript-eslint/no-misused-spread
+  const cpCut = [...line].length - [...trimmed].length
+  return `${trimmed}${truncHint(cpCut, "ch")}`
+}
+
+/**
+ * Outer-row clamp for a fully-composed transcript line including its
+ * gutter prefix (`  ╭ …` / `  │ …` / `  ╰ …`). When `cols` is known
+ * and the row's display width exceeds it, truncate to fit with the
+ * standard `...(+Nch)` hint marker; otherwise pass through verbatim.
+ *
+ * Used by `writeToolHeader` to catch the cases the inner soft-split
+ * machinery doesn't cover : Bash commands with no operators that
+ * overflow, long single-path Read/Write/Edit/Glob/Grep headers,
+ * generic JSON-fallback headers. The body preview path already
+ * handles this in `formatToolPreview` (see `clampBodyWithHint`).
+ *
+ * Trade-off: when a header truly overflows, the trailing time-hint
+ * suffix (` · 07:30:26`) gets eaten by the trim. That's preferable to
+ * the alternative (preserve time, lose the path tail) since the path
+ * tail is far more semantically valuable than the timestamp.
+ */
+export function clampTranscriptRow(row: string, cols?: number): string {
+  if (cols === undefined || !Number.isFinite(cols) || cols <= 0) return row
+  const maxWidth = Math.floor(cols) - TOOL_PREVIEW_WRAP_SAFETY_WIDTH
+  if (maxWidth <= 0) return row
+  return clampBodyWithHint(row, maxWidth)
 }
 
 /**
@@ -2134,11 +2245,18 @@ export function formatToolPreview(
 ): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
   // unified diff from Edit/Write), render it as-is, line by line, with the
-  // standard `│ ... └` connector gutter. No truncation: diffs are the point.
+  // standard `│ ... └` connector gutter. Per-line clamp to the live
+  // terminal width still applies so a 400-char diff line in a 90-col
+  // terminal doesn't soft-wrap into the gutter ; we don't apply the 300-
+  // cell preview cap here (diffs are the point on wide terminals). When
+  // the caller has no width signal (e.g. unit tests with no TTY and no
+  // `opts.cols`), `toolPreviewBodyWidth` returns `undefined` and
+  // `clampToolPreviewBodyLine` becomes a no-op : full-width verbatim
+  // output for tests, terminal-aware clamping in production.
   if (display !== undefined && !isError) {
     const out: string[] = []
     const footer = opts?.footer
-    const bodyWidth = footer === undefined ? undefined : toolPreviewBodyWidth(opts?.cols)
+    const bodyWidth = toolPreviewBodyWidth(opts?.cols)
     const body = footer === undefined ? display.replace(/\n$/, "") : display
     const dlines = body.length === 0 ? [] : body.split("\n")
     if (dlines.length === 0 && footer === undefined) {
@@ -2178,18 +2296,21 @@ export function formatToolPreview(
   let body = noticeIdx >= 0 ? content.slice(0, noticeIdx) : content
 
   // 2. Per-line width clamp (display-width-aware so wide chars / emoji /
-  //    CJK don't blow past the budget).
+  //    CJK don't blow past the budget). The clamp is the effective body
+  //    width : `min(terminal_cols - gutter, TOOL_PREVIEW_LINE_WIDTH)`.
+  //    Without the terminal-width factor an N-cell preview line in an
+  //    M-col terminal where N > M would soft-wrap and produce the
+  //    "  │ start..." / "...end of line" split scrollback (user-reported,
+  //    May 2026). Scrollback never re-renders on resize, but every new
+  //    tool block paints under the live width. See {@link
+  //    effectiveBodyLineWidth} for the cap rationale and {@link
+  //    clampBodyWithHint} for the hint-reserve detail.
   const maxLines = TOOL_PREVIEW_LINES[tool ?? ""] ?? TOOL_PREVIEW_LINES_DEFAULT
   const allLines = (body || "(no output)").split("\n")
   const visible = allLines.slice(0, maxLines)
   const linesElided = allLines.length - visible.length
-  const renderedLines: string[] = visible.map((line) => {
-    if (displayWidth(line) <= TOOL_PREVIEW_LINE_WIDTH) return line
-    const trimmed = truncateDisplayWidth(line, TOOL_PREVIEW_LINE_WIDTH, "")
-    // eslint-disable-next-line typescript-eslint/no-misused-spread
-    const cpCut = [...line].length - [...trimmed].length
-    return `${trimmed}${truncHint(cpCut, "ch")}`
-  })
+  const lineWidth = effectiveBodyLineWidth(opts?.cols)
+  const renderedLines: string[] = visible.map((line) => clampBodyWithHint(line, lineWidth))
 
   // 3. Build the footer.
   //    The footer always reads "shown <visible-in-TUI> / <real-source-total>"
