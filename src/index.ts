@@ -43,44 +43,19 @@
 
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Agent, c, runRepl } from "./agent.ts"
-import { normalizeArgs } from "./cli-args.ts"
-import { extractPromptFromArgs } from "./extract-prompt.ts"
-import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
-import { planCommand } from "./cli/command-plan.ts"
-import { getAuth } from "./auth.ts"
-import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
-import { resolveEffort } from "./effort-resolution.ts"
-import { catRows, DEFAULT_CAT } from "./cats.ts"
-import { displayWidth } from "./term-width.ts"
-import { checkQuota } from "./client.ts"
-import { formatQuotaSummary } from "./quota-format.ts"
-import { setGlobalEventBus } from "./global-bus.ts"
 import { SaveEchoCollector } from "../tui-plugins/memory/lib/save-echo.ts"
 import { ShortTermSnapshot } from "../tui-plugins/memory/lib/short-term-snapshot.ts"
 import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
-import { Formatter, parseFormatterCommand } from "./formatter.ts"
-import { resolveFormatter } from "./auto-formatter.ts"
-import { DEFAULT_MODEL, VERSION } from "./headers.ts"
-import { getSessionId } from "./metadata.ts"
-import { ModeManager } from "./modes.ts"
+import { Agent, c, runRepl } from "./agent.ts"
+import { getAuth } from "./auth.ts"
 import { AutoAskController } from "./auto-ask.ts"
-import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
-import { loadSession } from "./session-restore.ts"
-import { SessionStore, shortHash } from "./session-store.ts"
-import { defaultNetworkClient } from "./network/index.ts"
-import { PluginLoader } from "./plugins/loader.ts"
-import { PluginStream } from "./plugins/stream.ts"
-import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
-import type { Spinner } from "./spinner.ts"
-import { BREATHING_DOT } from "./spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
-import { formatStartupToolsRow } from "./startup-tools-row.ts"
-import type { StatusSpinnerTheme } from "./status.ts"
-import { ToolTimeTracker } from "./tool-time.ts"
-import { TOOL_DEFINITIONS } from "./tools.ts"
+import { resolveFormatter } from "./auto-formatter.ts"
+import { catRows, DEFAULT_CAT } from "./cats.ts"
+import { planCommand } from "./cli/command-plan.ts"
+import { normalizeArgs } from "./cli-args.ts"
+import { checkQuota } from "./client.ts"
 import { runAuthStatusCommand } from "./commands/auth-status.ts"
-import { runDumpCommand, DumpCommandError } from "./commands/dump.ts"
+import { DumpCommandError, runDumpCommand } from "./commands/dump.ts"
 import { runListFlagsCommand } from "./commands/list-flags.ts"
 import { runListModelsCommand } from "./commands/list-models.ts"
 import { runListSpinnersCommand } from "./commands/list-spinners.ts"
@@ -88,6 +63,33 @@ import { runLoginCommand } from "./commands/login.ts"
 import { runLogoutCommand } from "./commands/logout.ts"
 import { resolveSessionTarget } from "./commands/session-index.ts"
 import { runSessionsCommand } from "./commands/sessions.ts"
+import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
+import { getDiagnosticBus } from "./diagnostic-bus.ts"
+import { resolveEffort } from "./effort-resolution.ts"
+import { extractPromptFromArgs } from "./extract-prompt.ts"
+import { Formatter, parseFormatterCommand } from "./formatter.ts"
+import { setGlobalEventBus } from "./global-bus.ts"
+import { DEFAULT_MODEL, VERSION } from "./headers.ts"
+import { getSessionId } from "./metadata.ts"
+import { ModeManager } from "./modes.ts"
+import { defaultNetworkClient } from "./network/index.ts"
+import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
+import { PluginLoader } from "./plugins/loader.ts"
+import { PluginStream } from "./plugins/stream.ts"
+import { formatQuotaSummary } from "./quota-format.ts"
+import { buildReadyBanner } from "./ready-banner.ts"
+import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
+import { loadSession } from "./session-restore.ts"
+import { SessionStore, shortHash } from "./session-store.ts"
+import { BREATHING_DOT } from "./spinner/library/frames.ts"
+import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
+import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
+import type { Spinner } from "./spinner.ts"
+import { formatStartupToolsRow } from "./startup-tools-row.ts"
+import type { StatusSpinnerTheme } from "./status.ts"
+import { displayWidth } from "./term-width.ts"
+import { ToolTimeTracker } from "./tool-time.ts"
+import { TOOL_DEFINITIONS } from "./tools.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -662,6 +664,35 @@ async function main() {
   printStartupHeader()
   printStartupRow("session", c.dim(getSessionId()))
 
+  // Diagnostic bus: attach the file sink as early as possible so even
+  // plugin-load warnings land in `~/.minimal-agent/logs/ma-session-<sid>.log`.
+  // The TUI surface attaches later from `runReplLiveArea` (it needs the
+  // editor / aggregator). The stderr mirror is opt-in.
+  {
+    const { FileLogSink } = await import("./log-file.ts")
+    new FileLogSink(getSessionId()).attach(getDiagnosticBus())
+    // Scrollback sink — renders Warning+ events as gutter-bracketed
+    // blocks (gold ⚠ warn / red ✗ error) in the persistent terminal
+    // transcript. Complements the file sink (full history, off-screen)
+    // and the TuiDiagnosticSurface footer slot (last 0..2 events,
+    // transient). Without it, mid-stream API errors (e.g. Anthropic's
+    // `event: error` overload, returned over HTTP 200) land ONLY in
+    // the file log — the user sees the status bar flash then silence,
+    // with no in-context signal that anything went wrong. Attached
+    // here, before any other subsystem can emit, so the first error
+    // of the session is captured.
+    const { ScrollbackDiagnosticSink } = await import("./log-scrollback.ts")
+    new ScrollbackDiagnosticSink().attach(getDiagnosticBus())
+    if (process.env.MINIMAL_AGENT_LOG_STDERR === "1") {
+      // No interceptor yet — write straight to fd 2. Once the
+      // interceptor is installed below, we'd want `rawStderrWrite` to
+      // avoid the compositor; we re-attach it from the live-area
+      // bootstrap after `interceptor` exists.
+      const { StderrMirrorSink } = await import("./log-stderr.ts")
+      new StderrMirrorSink().attach(getDiagnosticBus())
+    }
+  }
+
   const auth = await getAuthWithFirstTimePrompt()
   printStartupRow(
     "auth",
@@ -1094,6 +1125,23 @@ async function main() {
     initialMessages,
     toolTimeTracker,
   })
+
+  // Ready banner — emitted ONCE here so it lands in scrollback right
+  // under the startup header, BEFORE any resume replay. Previously the
+  // banner was emitted from inside `runRepl` / `runReplLiveArea`, which
+  // on resume placed it BELOW the replayed content (visible jump:
+  // header → replay → hint, instead of header → hint → replay).
+  //
+  // Skipped for non-interactive modes (`--prompt`, `-`, bare positional)
+  // where there's no REPL prompt to introduce. `extractPromptFromArgs`
+  // is pure (no stdin read) so calling it here is cheap; the later
+  // `extractPrompt()` call still runs to drive the actual non-interactive
+  // branch.
+  const promptSource = extractPromptFromArgs(args)
+  const willEnterRepl = promptSource.kind === "none"
+  if (willEnterRepl) {
+    process.stdout.write(buildReadyBanner(modeManager))
+  }
 
   // Replay prior conversation to scrollback when resuming. We write
   // straight to stdout BEFORE the live-area compositor mounts, so the

@@ -1,8 +1,7 @@
+import { describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-
-import { describe, expect, it } from "bun:test"
 import { Agent, type ReplAgentLike, runRepl, withRollingCacheBreakpoint } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "./client.ts"
@@ -74,7 +73,7 @@ function makeAgent(
 }
 
 describe("runRepl", () => {
-  it("ignores blank turns, advertises Ctrl+C quit, and omits turn separators", async () => {
+  it("ignores blank turns and omits turn separators", async () => {
     const calls: string[] = []
     const input = new FakeInput(["", "hello", null])
     const output = new FakeOutput()
@@ -87,8 +86,10 @@ describe("runRepl", () => {
 
     const text = stripAnsi(output.text())
     expect(calls).toEqual(["hello"])
-    // REPL header advertises the quit chord. Pinned to current spelling.
-    expect(text).toContain("ctrl+c quit")
+    // The "ctrl+c quit" hint banner used to be emitted from runRepl
+    // itself, but moved to `src/index.ts` (May 2026) so it lands above
+    // resume replay rather than below it. The banner string lives in
+    // `src/ready-banner.ts`; its content has its own unit test.
     expect(text).not.toContain("^D")
     expect(text).not.toContain("clear")
     expect(text).not.toContain("────────────────")

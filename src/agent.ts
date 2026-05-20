@@ -39,7 +39,9 @@ import {
   type ToolResultBlock,
   type ToolUseBlock,
 } from "./client.ts"
+import { isErrorDiagEmitted } from "./diagnostic-bus.ts"
 import { Formatter } from "./formatter.ts"
+import { printGoodbye } from "./goodbye-banner.ts"
 import {
   buildSystemPrompt,
   DEFAULT_REFLECTION_COOLDOWN_MS,
@@ -48,7 +50,6 @@ import {
 import { RawInput } from "./input.ts"
 import { ModeManager } from "./modes.ts"
 import { PALETTE } from "./palette.ts"
-import { printGoodbye } from "./goodbye-banner.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import type { ManifestMode, ResolvedLiveAreaSlot } from "./plugins/types.ts"
@@ -2712,18 +2713,11 @@ export async function runRepl(
   }
   if (input instanceof RawInput) input.enable()
 
-  const dot = c.faintWhite("·")
-  const baseHint =
-    `${c.faintWhite("enter")} ${c.bold("send")}  ${dot}  ` +
-    `${c.faintWhite("shift+enter")} ${c.bold("new line")}  ${dot}  ` +
-    `${c.faintWhite("ctrl+c")} ${c.bold("quit")}`
-  const modeHint =
-    modeManager && modeManager.hasModes()
-      ? `  ${dot}  ${c.faintWhite("shift+tab")} ${c.bold("cycle mode")}`
-      : ""
-  output.write(
-    `\n  ${c.bold(c.purple("status"))} ${c.faintWhite("ready")}\n  ${baseHint}${modeHint}\n\n`,
-  )
+  // Ready banner is now written from `src/index.ts` BEFORE any resume
+  // replay (see `buildReadyBanner` in `./ready-banner.ts`). This REPL
+  // entry point no longer emits it — keeps the banner at the top of
+  // scrollback for both fresh starts and `--resume` sessions instead of
+  // landing below the replayed content.
 
   const loader = agent.pluginLoader()
 
@@ -2901,7 +2895,13 @@ export async function runRepl(
       if (turnError) {
         const msg = turnError instanceof Error ? turnError.message : String(turnError)
         statusRenderer?.suspend()
-        errOutput.write(`\n  ${c.boldRed("error")} ${msg}\n`)
+        // Same gating as the live-REPL path: when the throw already
+        // routed through `diag.error(...)`, the ScrollbackDiagnosticSink
+        // has rendered the failure as a rich block. Skip the bare
+        // fallback line to avoid duplicating the message.
+        if (!isErrorDiagEmitted(turnError)) {
+          errOutput.write(`\n  ${c.boldRed("error")} ${msg}\n`)
+        }
         // Discard the failed user turn so the next attempt doesn't send
         // two back-to-back user messages (the API rejects that).
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
@@ -3072,52 +3072,28 @@ async function runReplLiveArea(
   }
   statusRenderer?.start()
 
-  // Plugin-contributed live-area slots: schedule periodic producers that
-  // populate the editor's footer (and, in future cuts, decoration). The
-  // scheduler is started AFTER editor.start() so the first repaint
-  // lands in an already-mounted live area; stopped at REPL teardown.
+  // Footer band setup is deferred to AFTER `editor.on("submit", ...)`
+  // registration below : the dynamic imports here suspend execution
+  // for ≥3 microtask cycles, and any stdin bytes that arrive during
+  // that window fire the editor's "submit" event into the void
+  // (no listener attached yet). Tests that submit immediately after
+  // `runRepl(...)` + 2 `await Promise.resolve()` ticks would lose
+  // their first keystroke. We pre-declare the locals here so the
+  // `finally` block at end-of-fn can still reference them.
   const slotRows = loader?.getLiveAreaSlots() ?? []
   let liveAreaScheduler: import("./live-area-providers.ts").LiveAreaScheduler | null = null
-  if (slotRows.length > 0 && typeof editor.setFooterLines === "function") {
-    const { LiveAreaScheduler } = await import("./live-area-providers.ts")
-    liveAreaScheduler = new LiveAreaScheduler(
-      slotRows as ResolvedLiveAreaSlot[],
-      {
-        setFooterLines: (lines) => editor.setFooterLines?.(lines),
-      },
-      {
-        // Wire the loader's event bus so slots with a `refreshOn` list
-        // re-fire on the named events (e.g. `quota.headersReceived`
-        // emitted from `client.ts` after every successful response).
-        // When `loader` is absent (degenerate test paths) we still
-        // create the scheduler but skip event-driven refresh.
-        bus: loader?.bus(),
-      },
-    )
-    liveAreaScheduler.start()
-  }
+  let tuiDiagnosticSurface: import("./log-tui.ts").TuiDiagnosticSurface | null = null
 
-  // One-time ready banner above the prompt. Goes through writeStream so
-  // it lands in normal scrollback (above the pinned live area).
-  const dot = c.faintWhite("·")
-  const baseHint =
-    `${c.faintWhite("enter")} ${c.bold("send")}  ${dot}  ` +
-    `${c.faintWhite("shift+enter")} ${c.bold("new line")}  ${dot}  ` +
-    `${c.faintWhite("ctrl+c")} ${c.bold("quit")}`
-  const modeHint =
-    modeManager && modeManager.hasModes()
-      ? `  ${dot}  ${c.faintWhite("shift+tab")} ${c.bold("cycle mode")}`
-      : ""
-  // Trailing `\n\n` (NOT `\n`) gives one blank row between the hint
-  // row and the prompt below. The compositor's `capBlankLines` caps
-  // consecutive `\n` runs at 2, so a single blank row is the most we
-  // can get : the user explicitly requested breathing room above the
-  // prompt at startup ("MISSING NEW BLANK LINE AFTER THIS LINE" bug,
-  // May 2026). The compositor no longer auto-draws a blank above the
-  // live area : the banner has to provide it.
-  compositor.writeStream(
-    `\n  ${c.bold(c.purple("status"))} ${c.faintWhite("ready")}\n  ${baseHint}${modeHint}\n\n`,
-  )
+  // Ready banner is now written from `src/index.ts` via direct stdout
+  // BEFORE the compositor mounts and BEFORE any resume replay. See
+  // `buildReadyBanner` in `./ready-banner.ts` for the rationale (on
+  // resume the banner used to land below the replayed content because
+  // the replay had already streamed straight to stdout pre-mount;
+  // moving the banner to the top of the scrollback phase fixes that).
+  //
+  // The trailing `\n\n` in the banner provides the one blank row of
+  // breathing room above whatever comes next (resume separator or
+  // prompt), so we no longer need to emit it here.
 
   // Submit queue: keystrokes never block, but we serialize agent turns.
   // Each queue item carries BOTH the user's text (for the agent) AND the
@@ -3189,6 +3165,62 @@ async function runReplLiveArea(
 
   editor.on("submit", onSubmit)
   editor.on("cancel", onCancel)
+
+  // Footer band: two producers share the editor's `setFooterLines` —
+  // (1) plugin-contributed slots driven by `LiveAreaScheduler` (the
+  // quota row), and (2) the `TuiDiagnosticSurface` (the last-warn /
+  // last-err summary). They merge through `FooterAggregator` so the
+  // editor receives a single combined `[diagnostic..., plugin...]`
+  // array on every change. Diagnostic lines come FIRST so a stale
+  // warning never gets shoved off-screen by a freshly-painted quota
+  // line.
+  //
+  // The plugin scheduler is gated on (a) at least one slot existing
+  // AND (b) the editor supporting `setFooterLines`. The diagnostic
+  // surface is unconditional — even a no-plugin run can encounter
+  // auth refresh storms or other diag-emitting code paths.
+  //
+  // Setup runs AFTER `editor.on("submit"/"cancel", ...)` registration
+  // so the dynamic imports here cannot orphan a fast-arriving submit
+  // event (see the comment above the `slotRows` declaration).
+  if (typeof editor.setFooterLines === "function") {
+    const { FooterAggregator } = await import("./log-aggregator.ts")
+    const { TuiDiagnosticSurface } = await import("./log-tui.ts")
+    const { getDiagnosticBus } = await import("./diagnostic-bus.ts")
+
+    const aggregator = new FooterAggregator(
+      (lines) => editor.setFooterLines?.(lines),
+      // setDecoration is unused by the diagnostic surface (header
+      // band stays owned by the queue display); the plugin sink's
+      // setDecorationLines passthrough still works for any slot
+      // that requests `position: "header"` (the scheduler falls
+      // back to footer with a one-time notice; future cuts can
+      // route real header slots here).
+      (lines) => editor.setDecorationLines?.(lines),
+    )
+
+    tuiDiagnosticSurface = new TuiDiagnosticSurface()
+    tuiDiagnosticSurface.bindSink(aggregator.diagnosticSink())
+    tuiDiagnosticSurface.attach(getDiagnosticBus())
+
+    if (slotRows.length > 0) {
+      const { LiveAreaScheduler } = await import("./live-area-providers.ts")
+      liveAreaScheduler = new LiveAreaScheduler(
+        slotRows as ResolvedLiveAreaSlot[],
+        aggregator.pluginSink(),
+        {
+          // Loader's event bus drives `refreshOn` slot events
+          // (e.g. `quota.headersReceived` from `client.ts`).
+          bus: loader?.bus(),
+          // Singleton diagnostic bus picks up the scheduler's own
+          // timeout / failure / recovery events. Tests inject an
+          // isolated bus; production defaults to the singleton.
+          // (Left implicit so the default kicks in.)
+        },
+      )
+      liveAreaScheduler.start()
+    }
+  }
 
   try {
     while (!cancelled) {
@@ -3570,7 +3602,15 @@ async function runReplLiveArea(
         if (typeof editor.setBuffer === "function") editor.setBuffer(text)
       } else if (turnError) {
         const msg = turnError instanceof Error ? turnError.message : String(turnError)
-        compositor.writeStream(`\n  ${c.boldRed("error")} ${msg}\n`)
+        // When the throw already routed through `diag.error(...)` the
+        // ScrollbackDiagnosticSink has already painted a rich
+        // gutter-bracketed block ABOVE this point in scrollback. A
+        // second bare `error <msg>` line here would just duplicate
+        // the same string in plain red. Skip it; the rich block is
+        // the user's signal that this turn failed.
+        if (!isErrorDiagEmitted(turnError)) {
+          compositor.writeStream(`\n  ${c.boldRed("error")} ${msg}\n`)
+        }
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
       } else if (wroteOutput && !lastChunkEndedWithNewline) {
         // Terminate the partial response line so the next stream write (or
@@ -3584,6 +3624,7 @@ async function runReplLiveArea(
     }
   } finally {
     liveAreaScheduler?.stop()
+    tuiDiagnosticSurface?.detach()
     statusRenderer?.stop()
     editor.stop()
     compositor.unmount()
