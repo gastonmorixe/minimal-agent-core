@@ -18,6 +18,7 @@
  * @module live-area-providers
  */
 
+import { type DiagnosticBus, Facility, getDiagnosticBus, Severity } from "./diagnostic-bus.ts"
 import type { EventBus } from "./plugins/event-bus.ts"
 import type { ResolvedLiveAreaSlot } from "./plugins/types.ts"
 
@@ -29,7 +30,15 @@ export interface LiveAreaSink {
 
 /** Optional dependencies for testability. */
 export interface LiveAreaSchedulerDeps {
-  /** Diagnostic stream. Defaults to `process.stderr`. */
+  /**
+   * Diagnostic stream. Retained for backwards compatibility but
+   * unused by the scheduler's own diagnostics (those go through
+   * {@link LiveAreaSchedulerDeps.diagnosticBus}). Some legacy tests
+   * still set it.
+   *
+   * @deprecated The scheduler no longer writes here. Slot handlers
+   * receive their own `ctx.stderr` independently.
+   */
   stderr?: NodeJS.WriteStream
   /**
    * `setTimeout` injection for fake-timer tests. The scheduler
@@ -40,7 +49,21 @@ export interface LiveAreaSchedulerDeps {
   setTimeout?: (cb: () => void, ms: number) => unknown
   /** `clearTimeout` injection paired with {@link setTimeout}. */
   clearTimeout?: (handle: unknown) => void
-  /** Logger for transient errors. Defaults to writing to stderr. */
+  /**
+   * Diagnostic bus for scheduler-emitted timeout / failure events.
+   * Defaults to the process-wide singleton ({@link getDiagnosticBus}).
+   * Tests can inject an isolated bus to assert on emitted events.
+   */
+  diagnosticBus?: DiagnosticBus
+  /**
+   * Backwards-compat logger override. When set, replaces the
+   * structured `diagnosticBus.emit(...)` calls with a single-line
+   * string write — the historical behaviour. Pre-bus tests use this
+   * to assert against substring matches without touching the bus.
+   * Production code leaves it undefined.
+   *
+   * @deprecated Prefer subscribing to {@link diagnosticBus}.
+   */
   logger?: (msg: string) => void
   /**
    * Plugin event bus. When provided, every slot whose definition
@@ -64,6 +87,13 @@ interface SlotState {
   timer: unknown
   abort: AbortController | null
   warnedHeader: boolean
+  /**
+   * `true` when the previous tick emitted a timeout or failure diag
+   * event. The next successful tick emits a recovery notice (via
+   * `emitRecovery`) so the {@link TuiDiagnosticSurface} can clear its
+   * matching slot. Resets on success.
+   */
+  hadFailure: boolean
 }
 
 /**
@@ -78,7 +108,8 @@ export class LiveAreaScheduler {
   private readonly sink: LiveAreaSink
   private readonly setT: (cb: () => void, ms: number) => unknown
   private readonly clearT: (h: unknown) => void
-  private readonly logger: (msg: string) => void
+  private readonly diagnosticBus: DiagnosticBus
+  private readonly legacyLogger: ((msg: string) => void) | null
   private readonly bus: EventBus | null
   /** Listener disposers (one per `(slot, event)` pair). Walked at `stop()`. */
   private readonly busDisposers: Array<() => void> = []
@@ -97,6 +128,7 @@ export class LiveAreaScheduler {
       timer: null,
       abort: null,
       warnedHeader: false,
+      hadFailure: false,
     }))
     this.sink = sink
     this.bus = deps.bus ?? null
@@ -106,16 +138,86 @@ export class LiveAreaScheduler {
     // shape is internally consistent (cast safely confined here).
     this.clearT =
       deps.clearTimeout ?? ((h) => clearTimeout(h as Parameters<typeof clearTimeout>[0]))
-    const stderr = deps.stderr ?? process.stderr
-    this.logger =
-      deps.logger ??
-      ((msg) => {
-        try {
-          stderr.write(`[live-area] ${msg}\n`)
-        } catch {
-          // best-effort
-        }
-      })
+    this.diagnosticBus = deps.diagnosticBus ?? getDiagnosticBus()
+    this.legacyLogger = deps.logger ?? null
+  }
+
+  // ---------- diagnostic emit helpers ------------------------------------
+  //
+  // When `legacyLogger` is set (test injection) we emit a single-line
+  // string in the historical shape. Otherwise we publish a structured
+  // {@link LogEvent} on the diagnostic bus. The string shape preserves
+  // the substrings legacy tests assert on (`"timed out"`,
+  // `"<pluginId>/<slotId>"`, `"failed:"`). Production wiring leaves
+  // `legacyLogger` null so the bus handles fan-out to file + TUI surface.
+  private emitTimeout(slotLabel: string, timeoutMs: number): void {
+    if (this.legacyLogger) {
+      this.legacyLogger(
+        "slot " +
+          JSON.stringify(slotLabel) +
+          " timed out after " +
+          timeoutMs +
+          "ms (invoke did not resolve in time); releasing inFlight gate so subsequent ticks can run",
+      )
+      return
+    }
+    this.diagnosticBus.emit({
+      ts: Date.now(),
+      severity: Severity.Warning,
+      facility: Facility.User,
+      source: "live-area.timeout",
+      message:
+        'slot "' +
+        slotLabel +
+        '" timed out after ' +
+        timeoutMs +
+        "ms (invoke did not resolve in time)",
+      structuredData: { slot: slotLabel, "timeout-ms": timeoutMs },
+    })
+  }
+
+  private emitFailure(slotLabel: string, err: unknown): void {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (this.legacyLogger) {
+      this.legacyLogger("slot " + JSON.stringify(slotLabel) + " failed: " + msg)
+      return
+    }
+    this.diagnosticBus.emit({
+      ts: Date.now(),
+      severity: Severity.Error,
+      facility: Facility.User,
+      source: "live-area.handler-failed",
+      message: 'slot "' + slotLabel + '" handler failed: ' + msg,
+      structuredData: { slot: slotLabel, error: msg },
+    })
+  }
+
+  private emitRecovery(slotLabel: string): void {
+    // No legacy-logger equivalent — recoveries were never logged in the
+    // old code. The TuiDiagnosticSurface uses this to clear the matching
+    // warn/error slot when a previously-failing producer becomes
+    // healthy again.
+    if (this.legacyLogger) return
+    this.diagnosticBus.emit({
+      ts: Date.now(),
+      severity: Severity.Notice,
+      facility: Facility.User,
+      // Source matches the failure sources so the TUI surface clears
+      // both the timeout (warn) and handler-failed (error) slots in
+      // one shot. The recovery flag tells the surface to clear, not
+      // populate.
+      source: "live-area.timeout",
+      message: 'slot "' + slotLabel + '" producing values again',
+      structuredData: { slot: slotLabel, recovery: "true" },
+    })
+    this.diagnosticBus.emit({
+      ts: Date.now(),
+      severity: Severity.Notice,
+      facility: Facility.User,
+      source: "live-area.handler-failed",
+      message: 'slot "' + slotLabel + '" producing values again',
+      structuredData: { slot: slotLabel, recovery: "true" },
+    })
   }
 
   /**
@@ -246,6 +348,15 @@ export class LiveAreaScheduler {
       s.inFlight = false
       s.abort = null
       if (this.stopped) return
+      // Recovery: a successful tick (non-null result) after a streak
+      // of failures clears the matching warn/error slot on the TUI
+      // surface. We don't emit on null because null can mean "still
+      // unhealthy, just falling back to placeholder" depending on
+      // the slot semantics.
+      if (next !== null && s.hadFailure) {
+        s.hadFailure = false
+        this.emitRecovery(slotLabel)
+      }
       // null from the handler means "no fresh data this tick". We
       // hold on the placeholder rather than clearing the row — a
       // clear would shrink the live-area height by one row and
@@ -292,13 +403,8 @@ export class LiveAreaScheduler {
         .then(() => Promise.resolve())
         .then(() => {
           if (settled) return
-          this.logger(
-            "slot " +
-              JSON.stringify(slotLabel) +
-              " timed out after " +
-              timeoutMs +
-              "ms (handler did not honor ctx.abort); releasing inFlight gate so subsequent ticks can run",
-          )
+          this.emitTimeout(slotLabel, timeoutMs)
+          s.hadFailure = true
           handle(null)
         })
     }, timeoutMs)
@@ -313,12 +419,8 @@ export class LiveAreaScheduler {
           // diagnostic and an extra "AbortError" line is just
           // noise).
           if (!settled) {
-            this.logger(
-              "slot " +
-                JSON.stringify(slotLabel) +
-                " failed: " +
-                (err instanceof Error ? err.message : String(err)),
-            )
+            this.emitFailure(slotLabel, err)
+            s.hadFailure = true
           }
           handle(null)
         },
@@ -348,10 +450,22 @@ export class LiveAreaScheduler {
       const line = s.current
       if (line == null || line.length === 0) continue
       if ((s.slot.definition.position ?? "footer") === "header" && !s.warnedHeader) {
-        this.logger(
-          `slot "${s.slot.pluginId}/${s.slot.definition.id}" requested ` +
-            `position="header"; rendered as footer until queue/decoration mediator lands`,
-        )
+        const slotLabel = `${s.slot.pluginId}/${s.slot.definition.id}`
+        const msg =
+          `slot "${slotLabel}" requested position="header"; ` +
+          `rendered as footer until queue/decoration mediator lands`
+        if (this.legacyLogger) {
+          this.legacyLogger(msg)
+        } else {
+          this.diagnosticBus.emit({
+            ts: Date.now(),
+            severity: Severity.Notice,
+            facility: Facility.User,
+            source: "live-area.header-position",
+            message: msg,
+            structuredData: { slot: slotLabel },
+          })
+        }
         s.warnedHeader = true
       }
       footer.push(line)
