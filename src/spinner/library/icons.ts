@@ -32,6 +32,23 @@ export const ICON_NETWORK = "◉" // U+25C9 — fisheye, reads as "transmitting"
 export const ICON_SQUARE = "■" // U+25A0 — black square, BMP narrow, no emoji promotion
 export const ICON_TRIANGLE_RIGHT = "▸" // U+25B8 — small triangle, "running"
 
+// ─── BMP-narrow with VS-15 (force text presentation) ────────────────────────
+// These codepoints have `Emoji_Presentation = Yes` in the Unicode emoji-data
+// table, so terminals render them as 2-cell color emoji by default. The
+// `\uFE0E` (Variation Selector-15) suffix forces text presentation (1
+// cell). Our `effectiveDisplayWidth` treats `U+FE0E` as zero-width (see
+// `src/term-width.ts:44`, `src/nerd-glyph-width.ts:123`), so the pad math
+// for the spinner's off-frame matches the rendered text width.
+
+/** Black medium square (big) — pair with `ICON_SQUARE_SMALL` for size-pulse. */
+export const ICON_SQUARE_BIG = "\u25FC\uFE0E" // ◼ U+25FC + VS-15
+
+/** Black medium-small square (small) — pair with `ICON_SQUARE_BIG`. */
+export const ICON_SQUARE_SMALL = "\u25FE\uFE0E" // ◾ U+25FE + VS-15
+
+/** Pause symbol — calm "waiting / cooldown" indicator. */
+export const ICON_PAUSE = "\u23F8\uFE0E" // ⏸ U+23F8 + VS-15
+
 // ─── Nerd Font (Material Design + FontAwesome ranges) ───────────────────────
 // Codepoints kept in comments so they're greppable even on non-NF terminals.
 
