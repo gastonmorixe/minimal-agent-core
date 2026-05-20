@@ -21,6 +21,7 @@
  * @module web-search/providers/brave
  */
 
+import { retry, type RetryOptions } from "../../../src/retry.ts"
 import type {
   ProviderConfig,
   ProviderFactory,
@@ -146,6 +147,13 @@ interface BraveConfig {
   baseUrl?: string
   /** Optional override for `fetch` (tests). */
   fetch?: typeof fetch
+  /**
+   * Per-call retry tuning. User overrides are MERGED into defaults; pass
+   * `{ maxAttempts: 1 }` to disable retry entirely (useful in unit
+   * tests that don't want backoff delays). `signal` and `shouldRetry`
+   * are always supplied by the provider and cannot be overridden.
+   */
+  retry?: Partial<Omit<RetryOptions, "signal" | "shouldRetry">>
 }
 
 function readBraveConfig(raw: ProviderConfig): BraveConfig {
@@ -155,7 +163,64 @@ function readBraveConfig(raw: ProviderConfig): BraveConfig {
     out.apiKeyEnv = raw.apiKeyEnv
   if (typeof raw.baseUrl === "string" && raw.baseUrl.length > 0) out.baseUrl = raw.baseUrl
   if (typeof raw.fetch === "function") out.fetch = raw.fetch as typeof fetch
+  if (typeof raw.retry === "object" && raw.retry !== null) {
+    out.retry = raw.retry as BraveConfig["retry"]
+  }
   return out
+}
+
+/**
+ * HTTP status codes we treat as transient and worth retrying.
+ *
+ * - `429` rate-limited (Brave Free plan: 1 req/sec)
+ * - `502/503/504` upstream / gateway errors
+ *
+ * Notably we do NOT retry `500` since it often indicates a malformed
+ * request the server can't parse — repeating won't help. We DO retry
+ * `502/503/504` because they typically indicate transient upstream
+ * issues.
+ */
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504])
+
+/** Default retry config tuned for Brave's Free plan (1 qps + 2k/mo quota). */
+const DEFAULT_RETRY: RetryOptions = {
+  maxAttempts: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 5_000,
+  maxTotalMs: 15_000,
+}
+
+/**
+ * Internal marker error: lets us pass a Response through `retry()` (which
+ * only retries on thrown errors) while preserving the Response for the
+ * caller's `!resp.ok` body-excerpt path when retries are exhausted or
+ * shouldRetry returns false.
+ */
+type ResponseError = Error & { response: Response }
+
+function isResponseError(err: unknown): err is ResponseError {
+  return (
+    err instanceof Error &&
+    "response" in err &&
+    (err as { response: unknown }).response instanceof Response
+  )
+}
+
+/**
+ * Build the retry classifier closing over our defaults. Honors
+ * `Retry-After` (seconds form only — HTTP-date form falls through to
+ * jitter); refuses to retry non-`RETRYABLE_STATUSES` HTTP failures.
+ */
+function classifyError(err: unknown): { retry: boolean; retryAfterMs?: number } {
+  if (!isResponseError(err)) {
+    // Network failure / DNS / abort — retryable by default.
+    return { retry: true }
+  }
+  const r = err.response
+  if (!RETRYABLE_STATUSES.has(r.status)) return { retry: false }
+  const ra = r.headers.get("retry-after")
+  const retryAfterMs = ra && /^\d+$/.test(ra) ? Number(ra) * 1000 : undefined
+  return { retry: true, retryAfterMs }
 }
 
 class BraveProvider implements WebSearchProvider {
@@ -226,9 +291,36 @@ class BraveProvider implements WebSearchProvider {
 
     let resp: Response
     try {
-      resp = await this.fetchImpl(url, { headers, signal })
+      // Wrap in retry: transient statuses (429/5xx) trigger backoff with
+      // Retry-After honoring. Non-transient failures (4xx other than 429)
+      // throw immediately. Network errors retry by default. The merged
+      // options always force our `signal` and `shouldRetry`.
+      resp = await retry<Response>(
+        async () => {
+          const r = await this.fetchImpl(url, { headers, signal })
+          if (RETRYABLE_STATUSES.has(r.status)) {
+            const err = new Error(`HTTP ${r.status} ${r.statusText}`) as ResponseError
+            err.response = r
+            throw err
+          }
+          return r
+        },
+        {
+          ...DEFAULT_RETRY,
+          ...this.cfg.retry,
+          signal,
+          shouldRetry: classifyError,
+        },
+      )
     } catch (err) {
-      throw new WebSearchProviderError(this.id, `fetch failed: ${(err as Error).message}`, err)
+      // A non-retryable response (e.g. 403) reaches here as our
+      // ResponseError marker — surface it to the existing `!resp.ok`
+      // body-excerpt path by recovering the underlying Response.
+      if (isResponseError(err)) {
+        resp = err.response
+      } else {
+        throw new WebSearchProviderError(this.id, `fetch failed: ${(err as Error).message}`, err)
+      }
     }
 
     if (!resp.ok) {
