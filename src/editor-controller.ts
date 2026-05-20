@@ -18,9 +18,9 @@ import {
   type FsmEffect,
   type FsmOptions,
   type FsmState,
-  type QuitReason,
-  initialState as initialFsmState,
   step as fsmStep,
+  initialState as initialFsmState,
+  type QuitReason,
 } from "./abort-quit-fsm.ts"
 import { formatArmedFooter } from "./armed-footer.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
@@ -113,7 +113,7 @@ export interface EditorControllerOptions {
   bareEscapeMs?: number
   /**
    * Debounce window (ms) for the `"input"` event. The event fires this
-   * long after the most recent buffer-text change. Default: 120ms — short
+   * long after the most recent buffer-text change. Default: 120ms - short
    * enough to feel live, long enough to coalesce a fast typist's stream
    * into a single notification per pause. Set to 0 in tests to fire
    * synchronously.
@@ -125,7 +125,7 @@ export interface EditorControllerOptions {
    * bare Esc or Ctrl+C, this controller calls
    * `abortBus.requestAbort({kind:"user-key", key:"Esc"|"Ctrl+C"})`. The
    * abort-quit FSM also decides whether to arm the quit-confirm window
-   * (Ctrl+C arms it, Esc does not — see {@link FsmState}).
+   * (Ctrl+C arms it, Esc does not - see {@link FsmState}).
    *
    * Defaults to the singleton from `./abort-bus.ts`.
    */
@@ -186,13 +186,13 @@ export class EditorController extends EventEmitter {
    * column of `j`/`k` (or arrow keys) walks straight up/down even past
    * short rows. Implicitly reset by {@link moveUpVisual}/{@link moveDownVisual}
    * when they detect the cursor has moved away from where the previous
-   * vertical move parked it — see {@link lastVerticalEndRow}.
+   * vertical move parked it - see {@link lastVerticalEndRow}.
    *
    * Why no explicit "reset on every non-vertical action": doing so
    * would require touching ~30 keystroke handler sites (left/right,
    * line start/end, word jumps, every edit, paste, submit, abort,
    * etc.). The endpoint-match probe achieves the same semantics with
-   * zero instrumentation cost — any action that mutates `buf.row`
+   * zero instrumentation cost - any action that mutates `buf.row`
    * or `buf.col` away from the last vertical-move endpoint invalidates
    * the sticky column on the next up/down keystroke.
    */
@@ -200,11 +200,11 @@ export class EditorController extends EventEmitter {
   /**
    * Buffer (row, col) where the previous successful vertical move left
    * the cursor. {@link moveUpVisual}/{@link moveDownVisual} compare these
-   * to the cursor's current position on entry — a mismatch means some
+   * to the cursor's current position on entry - a mismatch means some
    * non-vertical action ran in between and the sticky column is stale.
    *
    * `null` means "no vertical move has happened yet this session" (or
-   * a vertical move returned false because cursor couldn't move) —
+   * a vertical move returned false because cursor couldn't move) -
    * treated as a mismatch, forcing a fresh sample.
    */
   private lastVerticalEndRow: number | null = null
@@ -239,7 +239,7 @@ export class EditorController extends EventEmitter {
   // (cursor-only moves do NOT fire), with a `inputDebounceMs` debounce
   // so a fast typist gets one event per pause, not one per keystroke.
   // Producer-side debouncing keeps the keystroke path free of listener
-  // work — the timer callback is the only thing that runs on the event
+  // work - the timer callback is the only thing that runs on the event
   // loop after typing stops, and listeners run inside that callback (so
   // a slow listener delays only the NEXT debounce window, not the next
   // keystroke).
@@ -295,7 +295,7 @@ export class EditorController extends EventEmitter {
     for (const e of effects) {
       switch (e.kind) {
         case "abort-turn": {
-          // Forward to the abort bus. The bus is idempotent — if no turn
+          // Forward to the abort bus. The bus is idempotent - if no turn
           // is in flight, this is a no-op.
           if (this.abortBus.isTurnInFlight()) {
             this.abortBus.requestAbort({ kind: "user-key", key: "Ctrl+C" })
@@ -314,7 +314,7 @@ export class EditorController extends EventEmitter {
           this.armedExpiresAt = 0
           this.stopArmedTimers()
           // Force-clear the footer (setFooterLines is no-op when content
-          // matches — we hold no footer, set [] explicitly).
+          // matches - we hold no footer, set [] explicitly).
           this.setFooterLines([])
           break
         }
@@ -397,7 +397,7 @@ export class EditorController extends EventEmitter {
 
   /**
    * Schedule a coalesced `"input"` emission. Safe to call on every
-   * {@link repaint} — when the buffer text hasn't changed since the last
+   * {@link repaint} - when the buffer text hasn't changed since the last
    * emission the timer callback skips the emit.
    *
    * Listeners receive `{text, seq}`. `seq` is monotonic so listeners can
@@ -408,7 +408,7 @@ export class EditorController extends EventEmitter {
   private scheduleInputEmit(): void {
     if (this.inputDebounce) clearTimeout(this.inputDebounce)
     if (this.inputDebounceMs <= 0) {
-      // Synchronous mode — used by tests that don't want to drive timers.
+      // Synchronous mode - used by tests that don't want to drive timers.
       this.fireInputEvent()
       return
     }
@@ -423,7 +423,7 @@ export class EditorController extends EventEmitter {
     if (text === this.lastEmittedInputText) return
     this.lastEmittedInputText = text
     this.inputSeq += 1
-    // Emitter is synchronous BUT we never call it on the keystroke path —
+    // Emitter is synchronous BUT we never call it on the keystroke path -
     // the only callers are the debounce timer above and the synchronous
     // shortcut for tests. A slow listener here delays the NEXT debounce
     // window, never the next keystroke.
@@ -477,7 +477,7 @@ export class EditorController extends EventEmitter {
 
   /**
    * Last-ditch terminal restore for signal/exit handlers. Idempotent and
-   * swallows errors; do not call from normal control flow — use {@link stop}.
+   * swallows errors; do not call from normal control flow - use {@link stop}.
    * @internal
    */
   emergencyRestore(): void {
@@ -583,7 +583,7 @@ export class EditorController extends EventEmitter {
    * (shallow string compare); a no-op otherwise so the live area doesn't
    * flicker when the REPL polls the queue at unchanged steady state.
    *
-   * Decoration rows count against the editor's live-height budget — they
+   * Decoration rows count against the editor's live-height budget - they
    * shrink the editor's available rows by `lines.length`. Callers should
    * keep the queue display compact (one row per queued item, plus an
    * optional header) on small terminals.
@@ -592,7 +592,7 @@ export class EditorController extends EventEmitter {
    * Replace the editor buffer with the given text and repaint. Used by the
    * abort flow (`runReplLiveArea` → `handleAbort`) to restore the prompt
    * the user just sent so they can edit and resubmit it. Cursor lands at
-   * the end of the inserted text — same place users expect to be after a
+   * the end of the inserted text - same place users expect to be after a
    * paste, since the typical follow-up is "tweak and resubmit".
    *
    * Multi-line text is split on `\n` and inserted line-by-line with
@@ -629,7 +629,7 @@ export class EditorController extends EventEmitter {
    * competing with what the user is typing.
    *
    * Each entry is one already-styled line. Empty array clears. Footer
-   * rows count against the editor's live-height budget — they shrink
+   * rows count against the editor's live-height budget - they shrink
    * the editor's available rows by `lines.length`. Callers should keep
    * the footer compact (one row is the common case).
    */
@@ -665,7 +665,7 @@ export class EditorController extends EventEmitter {
    * Sticky column ({@link desiredVisualCol}): when up/down navigation runs
    * consecutively, the cursor's visual column at the start of the run is
    * captured and reused. Standard vim/VSCode "keep column when walking
-   * through short rows" behavior — without it, the cursor drifts to the
+   * through short rows" behavior - without it, the cursor drifts to the
    * left edge through varied-width rows. The endpoint-match probe in
    * {@link isVerticalStickyAlive} invalidates the column automatically
    * whenever a non-vertical action moves the cursor between presses.
@@ -721,7 +721,7 @@ export class EditorController extends EventEmitter {
   }
 
   /**
-   * Wrap-aware "cursor down by one PHYSICAL row" — mirror of
+   * Wrap-aware "cursor down by one PHYSICAL row" - mirror of
    * {@link moveUpVisual}. When more wrap chunks remain inside the current
    * logical line, walks down one chunk; otherwise crosses into the next
    * logical line and lands on its FIRST chunk, at the sticky visual col.
@@ -767,7 +767,7 @@ export class EditorController extends EventEmitter {
 
   /**
    * `true` when the cursor still sits where the last vertical move
-   * parked it — i.e. no non-vertical action (left/right, edit, paste,
+   * parked it - i.e. no non-vertical action (left/right, edit, paste,
    * etc.) has run since. Drives the implicit reset of
    * {@link desiredVisualCol} so no other keystroke handler needs to
    * touch it.
@@ -792,7 +792,7 @@ export class EditorController extends EventEmitter {
   }
 
   private onData(chunk: string | Buffer): void {
-    // Any new input invalidates a pending bare-Esc — either it's the
+    // Any new input invalidates a pending bare-Esc - either it's the
     // continuation bytes of a CSI we were holding, or it's a separate
     // key entirely. In both cases the disambiguation timer must NOT
     // fire, so cancel it before appending and re-running the consumer.
@@ -821,7 +821,7 @@ export class EditorController extends EventEmitter {
     if (this.pending === "\x1b") {
       this.pending = ""
     }
-    // Esc breaks the escape-hatch run too — otherwise (Ctrl+C, Esc,
+    // Esc breaks the escape-hatch run too - otherwise (Ctrl+C, Esc,
     // Ctrl+C) would force-quit even though the user said "cancel that".
     this.escapeHatch.reset()
     // Feed the FSM. In `working` state this emits `abort-turn` (no arm).
@@ -835,7 +835,7 @@ export class EditorController extends EventEmitter {
     while (this.pending.length > 0) {
       if (this.bracketedPaste) {
         // A bracketed paste while the quit-confirm modal is open means
-        // the user is back to editing — dismiss.
+        // the user is back to editing - dismiss.
         if (this.fsmState.kind === "armed") {
           this.feedFsm({ kind: "printable", at: this.nowFn() })
         }
@@ -852,15 +852,29 @@ export class EditorController extends EventEmitter {
       // so the next keystroke feels live. Safe to call when not armed
       // (FSM transition is a no-op).
       const lead = this.pending[0]
-      const isCtrlC = lead === "\x03"
+      const isCtrlC_bare = lead === "\x03"
       const isBareEsc = lead === "\x1b" && this.pending.length === 1
-      if (this.fsmState.kind === "armed" && !isCtrlC && !isBareEsc) {
+      // Lookahead for CSI-encoded Ctrl+C (kitty CSI-u `\x1b[99;5u` or xterm
+      // modifyOtherKeys `\x1b[27;5;99~`). Without this, the escape-hatch
+      // reset below would zero the timestamp BEFORE parseModifiedKeySequence
+      // gets a chance to observe - breaking rapid-double-Ctrl+C across
+      // mixed encodings (e.g. \x03 then \x1b[99;5u within 500ms).
+      const isCtrlC_csi = this.pendingHeadIsCsiCtrlC()
+      const isCtrlC = isCtrlC_bare || isCtrlC_csi
+      // Same lookahead for CSI-encoded ESC (kitty `\x1b[27u` or xterm
+      // `\x1b[27;1;27~`). Treated as bare Esc for the armed-dismiss
+      // gate below: Esc dismisses via the FSM esc transition, not via
+      // the "printable" path.
+      const isCsiEsc = this.pendingHeadIsCsiEsc()
+      if (this.fsmState.kind === "armed" && !isCtrlC && !isBareEsc && !isCsiEsc) {
         this.feedFsm({ kind: "printable", at: this.nowFn() })
       }
 
       // Reset the escape-hatch run on any non-Ctrl+C keystroke. Two
       // Ctrl+Cs with non-Ctrl+C input between them are NOT a "rapid
-      // double" anymore, even if they land within 500ms.
+      // double" anymore, even if they land within 500ms. The CSI
+      // lookahead above ensures kitty/xterm-encoded Ctrl+C preserves
+      // the timestamp.
       if (!isCtrlC) this.escapeHatch.reset()
 
       if (this.pending.startsWith("\x1b")) {
@@ -885,10 +899,12 @@ export class EditorController extends EventEmitter {
           this.submit()
           return // submit() repaints; stop processing here
         }
-        if (handled === "cancel") {
-          this.emit("cancel")
-          return
-        }
+        // CSI-encoded Ctrl+C / ESC route through the FSM inside
+        // parseModifiedKeySequence (May 2026 - fixes Bug A + Bug B per
+        // `src/abort-quit-keystroke.test.ts`). If those transitions land
+        // us in `quitting`, bail out before processing more pending bytes
+        // - mirrors the bare-\x03 handler at the bottom of this loop.
+        if (this.fsmState.kind === "quitting") return
         if (handled === "changed") dirty = true
         continue
       }
@@ -899,7 +915,7 @@ export class EditorController extends EventEmitter {
       this.pending = this.pending.slice(char.length)
 
       if (char === "\r" || char === "\n") {
-        // Coalesce CRLF / LFCR. Track whether we ate the partner byte —
+        // Coalesce CRLF / LFCR. Track whether we ate the partner byte -
         // a coalesced CRLF is unambiguously "plain Enter" regardless of
         // which half arrived first; a *bare* LF (no CR partner) is what
         // terminals send for Ctrl+J and for Shift+Enter when the user
@@ -942,12 +958,12 @@ export class EditorController extends EventEmitter {
         return
       }
       if (char === "\x03") {
-        // Ctrl+C is owned by the abort-quit FSM (May 2026 — see
+        // Ctrl+C is owned by the abort-quit FSM (May 2026 - see
         // `src/abort-quit-fsm.ts` and project memory #abort-quit-ux-spec).
         //
         // BEFORE we feed the FSM, observe the escape-hatch: two Ctrl+Cs
         // within 500ms force-quit regardless of FSM state. This is the
-        // hard guarantee the user demanded — if the FSM somehow wedges,
+        // hard guarantee the user demanded - if the FSM somehow wedges,
         // the second rapid Ctrl+C still leaves.
         const now = this.nowFn()
         if (this.escapeHatch.observe(now) === "force-quit") {
@@ -992,7 +1008,7 @@ export class EditorController extends EventEmitter {
         continue
       }
       if (char === "\x1c") {
-        // Ctrl+\ — toggle show-hidden debug rendering
+        // Ctrl+\ - toggle show-hidden debug rendering
         this.setShowHidden(!this.showHiddenChars)
         dirty = true
         continue
@@ -1021,7 +1037,52 @@ export class EditorController extends EventEmitter {
     if (dirty) this.repaint()
   }
 
-  private consumeEscape(): "wait" | "ignore" | "changed" | "submit" | "cancel" {
+  /**
+   * Lookahead: is `this.pending` currently headed by a complete CSI sequence
+   * that parses to Ctrl+C (kitty CSI-u `\x1b[99;5u` or xterm modifyOtherKeys
+   * `\x1b[27;5;99~`)?
+   *
+   * Used by `consumePending` to decide whether to reset the escape-hatch
+   * BEFORE the CSI sequence is parsed. Without this, mixed-encoding
+   * rapid-double-Ctrl+C (\x03 → \x1b[99;5u within 500ms) would lose its
+   * timestamp and the escape-hatch backstop would silently fail. See
+   * `src/abort-quit-keystroke.test.ts` "armed state transitions" for the
+   * cross-encoding regression guard.
+   *
+   * Returns false on incomplete sequences (the next read will retry).
+   */
+  private pendingHeadIsCsiCtrlC(): boolean {
+    if (!this.pending.startsWith("\x1b[")) return false
+    const end = this.findCsiEnd(this.pending)
+    if (end === null) return false
+    const seq = this.pending.slice(0, end + 1)
+    const key = this.parseCsiUKey(seq) ?? this.parseXtermOtherKey(seq)
+    if (!key) return false
+    // Code 99 = 'c'; modifier bit 2 = ctrl per kitty/xterm.
+    return key.code === 99 && this.hasModifier(key.modifiers, 2)
+  }
+
+  /**
+   * Lookahead: is `this.pending` currently headed by a complete CSI sequence
+   * that parses to plain ESC (kitty `\x1b[27u` or xterm `\x1b[27;1;27~`)?
+   *
+   * Used by `consumePending`'s armed-dismiss gate to treat CSI-encoded ESC
+   * the same as a bare `\x1b` byte (route via FSM `esc`, not via FSM
+   * `printable`). Without this, kitty ESC while armed would dismiss as a
+   * printable key - semantically incorrect even though end-state happens
+   * to match.
+   */
+  private pendingHeadIsCsiEsc(): boolean {
+    if (!this.pending.startsWith("\x1b[")) return false
+    const end = this.findCsiEnd(this.pending)
+    if (end === null) return false
+    const seq = this.pending.slice(0, end + 1)
+    const key = this.parseCsiUKey(seq) ?? this.parseXtermOtherKey(seq)
+    if (!key) return false
+    return key.code === 27 && key.modifiers <= 1
+  }
+
+  private consumeEscape(): "wait" | "ignore" | "changed" | "submit" {
     const input = this.pending
     if (input.length === 1) return "wait"
 
@@ -1036,7 +1097,7 @@ export class EditorController extends EventEmitter {
       }
       // Legacy shift+tab (back-tab). Most terminals emit ESC[Z for it.
       // Cycle modes when a handler is wired; otherwise drop it (don't
-      // insert a literal tab — the user's intent was clearly Shift+Tab).
+      // insert a literal tab - the user's intent was clearly Shift+Tab).
       if (seq === "\x1b[Z") {
         if (this.cycleForward) this.cycleForward()
         return "ignore"
@@ -1099,7 +1160,7 @@ export class EditorController extends EventEmitter {
     }
   }
 
-  private parseModifiedKeySequence(seq: string): "ignore" | "changed" | "submit" | "cancel" | null {
+  private parseModifiedKeySequence(seq: string): "ignore" | "changed" | "submit" | null {
     const key = this.parseCsiUKey(seq) ?? this.parseXtermOtherKey(seq)
     if (!key) return null
     if (key.eventType !== 1) return "ignore"
@@ -1108,6 +1169,45 @@ export class EditorController extends EventEmitter {
     const shift = this.hasModifier(modifiers, 0)
     const alt = this.hasModifier(modifiers, 1)
     const ctrl = this.hasModifier(modifiers, 2)
+
+    // ── Abort-quit FSM routing (May 2026, fixes Bug A + Bug B) ───────────
+    // iTerm 3.5+ with kitty proto, and xterm with modifyOtherKeys=2, send
+    // ESC and Ctrl+C through CSI sequences instead of bare bytes. They MUST
+    // route through the abort-quit FSM identically to the bare paths,
+    // otherwise:
+    //   - Kitty Ctrl+C (\x1b[99;5u) silently quits the agent without a
+    //     goodbye banner because the legacy `case 99` branch returned
+    //     "cancel" → bare `emit("cancel")` in consumePending → REPL's
+    //     `on("cancel")` set `cancelled = true` and exited.
+    //   - Kitty ESC (\x1b[27u) silently no-ops because code=27 is not
+    //     printable and fell through to "ignore".
+    // Regression guards live in `src/abort-quit-keystroke.test.ts`.
+    //
+    // Ctrl+C - observe the escape-hatch BEFORE feeding the FSM so two
+    // rapid Ctrl+Cs across encodings (\x03 then \x1b[99;5u within 500ms)
+    // still force-quit per spec rule 5.
+    if (code === 99 && ctrl && !alt) {
+      const now = this.nowFn()
+      if (this.escapeHatch.observe(now) === "force-quit") {
+        this.stopArmedTimers()
+        this.setFooterLines([])
+        this.fsmState = { kind: "quitting", reason: "escape-hatch" }
+        this.emit("quit", "escape-hatch" as QuitReason)
+        this.emit("cancel", "escape-hatch" as QuitReason)
+        return "ignore"
+      }
+      this.feedFsm({ kind: "ctrl-c", at: now })
+      return "ignore"
+    }
+
+    // ESC - feed FSM as `esc`. Mirrors `fireBareEscape`. The
+    // `escapeHatch.reset()` ran in consumePending (lead byte is `\x1b`),
+    // matching `fireBareEscape`'s own `escapeHatch.reset()` so the same
+    // "Esc breaks the Ctrl+C run" invariant holds across encodings.
+    if (code === 27 && !shift && !alt && !ctrl) {
+      this.feedFsm({ kind: "esc", at: this.nowFn() })
+      return "ignore"
+    }
 
     if ((code === 10 || code === 13) && !ctrl) {
       if (shift || alt) {
@@ -1150,15 +1250,13 @@ export class EditorController extends EventEmitter {
 
     if (ctrl) {
       switch (code) {
-        case 92: // \ — Ctrl+\ toggles show-hidden debug rendering
+        case 92: // \ - Ctrl+\ toggles show-hidden debug rendering
           this.setShowHidden(!this.showHiddenChars)
           return "changed"
         case 97:
           return this.buf.moveLineStart() ? "changed" : "ignore"
-        case 99:
-          if (this.buf.isBlank()) return "cancel"
-          this.buf.clear()
-          return "changed"
+        // case 99 (Ctrl+C) handled at the top of this method via the
+        // abort-quit FSM routing block - never reaches this switch.
         case 100:
           return this.buf.deleteForward() ? "changed" : "ignore"
         case 101:
@@ -1448,7 +1546,7 @@ export class EditorController extends EventEmitter {
       //   2. `<prompt><label>` when prompt + label fit but no dash room.
       //      The prompt's trailing space already separates it from the `^`.
       //   3. ` <label>` bare fallback when even the prompt doesn't fit.
-      //      Same shape as the pre-mode-aware indicator — graceful degrade.
+      //      Same shape as the pre-mode-aware indicator - graceful degrade.
       if (w >= promptW + labelW + 3) {
         const dashes = w - promptW - labelW - 2
         indicatorLine = `${prompt}\x1b[2m${"\u2500".repeat(dashes)} ${label}\x1b[22m`
