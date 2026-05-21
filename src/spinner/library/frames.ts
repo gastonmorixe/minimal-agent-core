@@ -16,6 +16,7 @@
  */
 
 import type { AnimatedIcon } from "../types.ts"
+import { ICON_SQUARE_BIG, ICON_SQUARE_SMALL } from "./icons.ts"
 
 // ─── Bare frame sets (combine with your own intervalMs) ─────────────────────
 
@@ -97,12 +98,14 @@ export const BAR_GROW: readonly string[] = [
 ]
 
 /**
- * Heavy big/small square size-pulse. Two frames; pair with a wide interval
- * (~500ms) for a "lazy color-and-size pulse" feel. Both glyphs carry
- * `U+FE0E` to force text presentation — see comments on `ICON_SQUARE_BIG` /
- * `ICON_SQUARE_SMALL` in `library/icons.ts`.
+ * Big/small square size-pulse. Two frames; pair with a wide interval
+ * (~500ms) for a "lazy color-and-size pulse" feel. Glyphs sourced from
+ * `ICON_SQUARE_BIG` (■ U+25A0) and `ICON_SQUARE_SMALL` (▪ U+25AA) — both
+ * have `Emoji_Presentation = No`, so they render as 1-cell text everywhere
+ * without needing a VS-15 suffix. See the header comment in
+ * `library/icons.ts` for the iTerm/VS-15 history behind this choice.
  */
-export const SQUARE_PULSE: readonly string[] = ["\u25FC\uFE0E", "\u25FE\uFE0E"]
+export const SQUARE_PULSE: readonly string[] = [ICON_SQUARE_BIG, ICON_SQUARE_SMALL]
 
 // ─── Recommended AnimatedIcon bundles (frames + intervalMs) ─────────────────
 

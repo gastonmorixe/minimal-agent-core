@@ -365,25 +365,40 @@ describe("DEFAULT_ICON_BY_NOTIFICATION_ID (live-area status defaults)", () => {
 })
 
 describe("VS-15 force text presentation (no emoji 2-cell promotion)", () => {
-  // Three of the new icons (ICON_SQUARE_BIG, ICON_SQUARE_SMALL, ICON_PAUSE)
-  // are Unicode codepoints with Emoji_Presentation=Yes. Without the
-  // U+FE0E suffix terminals render them as 2-cell color emoji, which
-  // would break the spinner's pad-math (it assumes the rendered width
-  // matches `effectiveDisplayWidth` — 1 cell for these). The suffix is
-  // load-bearing; this test pins it.
-  const cases = [
-    { name: "ICON_SQUARE_BIG (◼)", glyph: ICON_SQUARE_BIG, base: 0x25fc },
-    { name: "ICON_SQUARE_SMALL (◾)", glyph: ICON_SQUARE_SMALL, base: 0x25fe },
-    { name: "ICON_PAUSE (⏸)", glyph: ICON_PAUSE, base: 0x23f8 },
-  ] as const
+  // ICON_PAUSE (⏸ U+23F8) has Emoji_Presentation=Yes; without the U+FE0E
+  // suffix terminals render it as 2-cell color emoji, which would break
+  // the spinner's pad-math (it assumes the rendered width matches
+  // `effectiveDisplayWidth` — 1 cell). The suffix is load-bearing.
+  //
+  // Square icons (ICON_SQUARE_BIG, ICON_SQUARE_SMALL) were previously in
+  // this set using ◼ U+25FC / ◾ U+25FE + VS-15, but VS-15 turned out to
+  // be unreliable in iTerm for those codepoints, causing the
+  // `tool.running` label column to slide 1 cell between rotor frames.
+  // They've been swapped for ■ U+25A0 / ▪ U+25AA, which have
+  // Emoji_Presentation=No and default to text presentation without any
+  // VS-15 suffix — pinned by the separate describe block below.
+  it("ICON_PAUSE (⏸) carries U+FE0E and reports 1-cell width", () => {
+    const codepoints = Array.from(ICON_PAUSE).map((c) => c.codePointAt(0))
+    expect(codepoints).toEqual([0x23f8, 0xfe0e])
+    expect(effectiveDisplayWidth(ICON_PAUSE)).toBe(1)
+  })
+})
 
-  for (const { name, glyph, base } of cases) {
-    it(`${name} carries U+FE0E and reports 1-cell width`, () => {
-      // Two codepoints: the base + VS-15.
-      const codepoints = Array.from(glyph).map((c) => c.codePointAt(0))
-      expect(codepoints).toEqual([base, 0xfe0e])
-      // Treated as 1 cell by the spinner's pad-math.
-      expect(effectiveDisplayWidth(glyph)).toBe(1)
-    })
-  }
+describe("square icons default to text without VS-15 (regression for label jiggle)", () => {
+  // Regression guard for "tool.running label jumps 1 space" reported
+  // May 2026. The earlier ◼/◾ + VS-15 pair relied on terminals honoring
+  // VS-15; iTerm doesn't reliably do that for "medium square"
+  // codepoints. ■ (U+25A0) has Emoji=No, ▪ (U+25AA) has Emoji=Yes but
+  // Emoji_Presentation=No — both default to 1-cell text presentation
+  // in every conforming terminal. NO VS-15 suffix on either.
+  it("ICON_SQUARE_BIG is ■ U+25A0 (no VS-15)", () => {
+    const codepoints = Array.from(ICON_SQUARE_BIG).map((c) => c.codePointAt(0))
+    expect(codepoints).toEqual([0x25a0])
+    expect(effectiveDisplayWidth(ICON_SQUARE_BIG)).toBe(1)
+  })
+  it("ICON_SQUARE_SMALL is ▪ U+25AA (no VS-15)", () => {
+    const codepoints = Array.from(ICON_SQUARE_SMALL).map((c) => c.codePointAt(0))
+    expect(codepoints).toEqual([0x25aa])
+    expect(effectiveDisplayWidth(ICON_SQUARE_SMALL)).toBe(1)
+  })
 })
