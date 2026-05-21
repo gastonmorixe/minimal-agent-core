@@ -276,8 +276,11 @@ export function parseReflectionAck(
  * Wall-clock cooldown applied at a reflection checkpoint. Surfaces a
  * live countdown in the global status bus (same channel the spinner /
  * `Running <tool>` indicator uses), so the human watching sees
- * `⏸ reflection @ round 50 · 59s remaining · press Esc to interrupt`
- * tick down in the live area without spamming scrollback.
+ * `<blinking-⏸> reflection @ round 50 · 59s remaining · press Esc to interrupt`
+ * tick down in the live area without spamming scrollback. The leading
+ * pause glyph is contributed by the live-area status icon (see
+ * `agent.reflection-cooldown` in `src/spinner/presets.ts`) : the label
+ * itself MUST NOT carry one too or the row reads as a duplicated icon.
  *
  * The pause is interruptible via the optional `AbortSignal`. When
  * aborted, the helper resolves immediately and the caller's existing
@@ -299,7 +302,7 @@ async function runReflectionCooldown(opts: {
   if (signal?.aborted) return
   const totalSec = Math.max(1, Math.ceil(totalMs / 1000))
   const fmt = (sec: number) =>
-    `⏸ reflection @ round ${round} · ${sec}s remaining · press Esc to interrupt`
+    `reflection @ round ${round} · ${sec}s remaining · press Esc to interrupt`
   const handle = statusBus.create(fmt(totalSec), {
     notificationId: "agent.reflection-cooldown",
     category: "reflection",
