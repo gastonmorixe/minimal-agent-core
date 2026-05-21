@@ -103,7 +103,7 @@ export interface ReplayOptions {
  * The caller is responsible for spacing above the header. When the
  * ready banner (`src/ready-banner.ts`) is written immediately before
  * this, its trailing `\n\n` already provides the blank row of breathing
- * room — adding another `\n` here would compound into two blank rows.
+ * room : adding another `\n` here would compound into two blank rows.
  */
 export function buildResumeHeader(opts: {
   sid: string

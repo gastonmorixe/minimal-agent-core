@@ -2730,7 +2730,7 @@ export async function runRepl(
 
   // Ready banner is now written from `src/index.ts` BEFORE any resume
   // replay (see `buildReadyBanner` in `./ready-banner.ts`). This REPL
-  // entry point no longer emits it — keeps the banner at the top of
+  // entry point no longer emits it : keeps the banner at the top of
   // scrollback for both fresh starts and `--resume` sessions instead of
   // landing below the replayed content.
 
@@ -3064,6 +3064,27 @@ async function runReplLiveArea(
   }
   const loader = agent.pluginLoader()
 
+  // Host-side listener for `editor.buffer.set` — plugins (e.g. a future
+  // Ctrl+R search modal in `history`) may need to replace the editor
+  // buffer OUTSIDE the `editor.key` flow (where they can already do so
+  // via `result.buffer`). Payload: `{text}`. setBuffer parks the cursor
+  // at end-of-buffer; plugins that need finer cursor placement should
+  // use the `editor.key` payload's `result.cursor` instead.
+  //
+  // No-op when no plugins are loaded; the listener never fires.
+  if (loader) {
+    loader.hooks().on(
+      "editor.buffer.set",
+      (payload: unknown) => {
+        if (!payload || typeof payload !== "object") return
+        const p = payload as { text?: unknown }
+        if (typeof p.text !== "string") return
+        if (typeof editor.setBuffer === "function") editor.setBuffer(p.text)
+      },
+      { source: "agent", priority: 5000, label: "agent:editor.buffer.set" },
+    )
+  }
+
   // Initial live-area height: 1 row (the prompt). The editor will grow it
   // as needed via setLiveHeight().
   compositor.mount(1)
@@ -3169,6 +3190,20 @@ async function runReplLiveArea(
     queue.push({ text, commitLines })
     renderDecoration()
     wakeWaiter()
+    // Fan out to the plugin bus so subscribers (notably the `history`
+    // plugin) see every submit. Fire-and-forget — the bus is microtask-
+    // deferred, never blocks this onSubmit path. We emit AFTER the
+    // queue push so subscribers observe the same queue ordering the
+    // agent will process.
+    if (loader) {
+      loader.bus().emit("prompt.submitted", {
+        text,
+        cwd: process.cwd(),
+        sid: opts.sessionId ?? null,
+        exit: "submitted",
+        queuePos: queue.length - 1,
+      })
+    }
   }
   const onCancel = (reason?: string): void => {
     cancelled = true
