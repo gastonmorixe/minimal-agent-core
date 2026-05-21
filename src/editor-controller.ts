@@ -25,6 +25,7 @@ import {
 import { formatArmedFooter } from "./armed-footer.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
 import { computeCursorVisualPos, EditorRenderer, findColAtVisualPos } from "./editor-renderer.ts"
+import type { Hooks } from "./plugins/hooks/hooks.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 
 interface CompositorLike {
@@ -148,6 +149,64 @@ export interface EditorControllerOptions {
    * disable the timer (and drive ticks manually).
    */
   armedTickMs?: number
+  /**
+   * Optional {@link Hooks} facade. When provided, the editor emits the
+   * `editor.key` broadcast-sync channel BEFORE applying selected
+   * navigation/control keys (currently: ArrowUp, ArrowDown, Ctrl+R).
+   * Listeners may set `result.halt = true` to consume the keystroke and
+   * optionally `result.buffer` / `result.cursor` to replace editor state.
+   *
+   * When omitted (tests / no-plugin runs), the editor skips the emit
+   * entirely — no behavioral change.
+   */
+  hooks?: Hooks
+}
+
+/**
+ * Mutable holder injected into the `editor.key` payload. Listeners write
+ * back into this object to influence the editor's response to the key.
+ *
+ * Convention: leave fields untouched when you want pass-through; set
+ * `halt: true` to suppress default handling; set `buffer` / `cursor` to
+ * replace editor state in addition to (or instead of) halting.
+ */
+export interface EditorKeyResult {
+  halt?: boolean
+  buffer?: string
+  cursor?: { row: number; col: number }
+}
+
+/**
+ * Payload shape for the `editor.key` channel. See
+ * `plugins/hooks/channels.ts` for the channel description.
+ *
+ * `cursor.visualRow` / `cursor.rowsInLogicalLine` are the renderer's
+ * wrap-aware coordinates of the cursor's CURRENT logical line — the
+ * history plugin uses them to decide whether ↑/↓ should steal the key
+ * (only when cursor is on the first/last visual row of the buffer).
+ */
+export interface EditorKeyPayload {
+  /** Canonical key name. Currently emitted: "ArrowUp", "ArrowDown", "Ctrl+R". */
+  key: string
+  /** Current full buffer text (with `\n` line separators). */
+  buffer: string
+  /** Logical cursor position + wrap-aware visual context. */
+  cursor: {
+    row: number
+    col: number
+    /** 0-based wrap chunk within the current logical line. */
+    visualRow: number
+    /** Total wrap rows the current logical line occupies. */
+    rowsInLogicalLine: number
+    /** Total logical lines in the buffer. */
+    totalLines: number
+  }
+  /**
+   * Mutable holder. Listeners write to `result.halt` / `result.buffer`
+   * / `result.cursor` to influence the editor's response. Initialized
+   * to `{}` by the editor before each emit.
+   */
+  result: EditorKeyResult
 }
 
 type ParsedKey = {
@@ -211,6 +270,12 @@ export class EditorController extends EventEmitter {
   private lastVerticalEndCol: number | null = null
   private readonly bareEscapeMs: number
   private readonly abortBus: AbortBus
+  /**
+   * Optional hooks facade. Non-null when constructed with `hooks` opt.
+   * Only consulted before applying intercept-eligible keys (currently
+   * ArrowUp, ArrowDown, Ctrl+R). Null means "skip the emit, run default".
+   */
+  private readonly hooks: Hooks | null
   private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
   // ── abort/quit FSM ──────────────────────────────────────────────────────
   //
@@ -270,6 +335,68 @@ export class EditorController extends EventEmitter {
     this.fsmOptions = opts.quitFsm ?? {}
     this.nowFn = opts.nowFn ?? (() => Date.now())
     this.armedTickMs = opts.armedTickMs ?? 250
+    this.hooks = opts.hooks ?? null
+  }
+
+  /**
+   * Build the `editor.key` payload, fire the broadcast-sync emit, and
+   * apply any state mutations listeners wrote into `result`. Returns
+   * `true` if a listener set `result.halt` (caller skips default
+   * handling); `false` if pass-through (caller runs default).
+   *
+   * Cheap when no listeners are registered — `Hooks.emitSync` short-
+   * circuits on a Map lookup + empty-array check (~ microseconds). Safe
+   * to call from the keystroke pump on every eligible key.
+   *
+   * @param key Canonical key name ("ArrowUp", "ArrowDown", "Ctrl+R", …).
+   * @internal
+   */
+  private dispatchKeyHook(key: string): boolean {
+    if (!this.hooks) return false
+    const cols = (this.output as { columns?: number }).columns
+    const line = this.buf.lines[this.buf.row] ?? ""
+    const promptW = this.renderer.promptDisplayWidthForRow(this.buf.row)
+    let visualRow = 0
+    let rowsInLogicalLine = 1
+    if (cols && cols > 0) {
+      const cur = computeCursorVisualPos(line, this.buf.col, promptW, cols)
+      visualRow = cur.visualRow
+      rowsInLogicalLine = cur.rowsInLine
+    }
+    const payload: EditorKeyPayload = {
+      key,
+      buffer: this.buf.toString(),
+      cursor: {
+        row: this.buf.row,
+        col: this.buf.col,
+        visualRow,
+        rowsInLogicalLine,
+        totalLines: this.buf.lines.length,
+      },
+      result: {},
+    }
+    try {
+      this.hooks.emitSync("editor.key", payload)
+    } catch (e) {
+      // emitSync absorbs listener errors itself; an exception here means
+      // the bus itself threw (e.g. shape mismatch). Best-effort log
+      // and fall through to default handling.
+      process.stderr.write(
+        `[editor-controller] editor.key emit threw: ${e instanceof Error ? e.message : String(e)}\n`,
+      )
+      return false
+    }
+    if (payload.result.buffer !== undefined) {
+      this.setBuffer(payload.result.buffer)
+      // setBuffer already calls repaint(); cursor placement below may
+      // override the default end-of-buffer cursor that setBuffer parks at.
+    }
+    if (payload.result.cursor) {
+      this.buf.row = payload.result.cursor.row
+      this.buf.col = payload.result.cursor.col
+      if (this.started) this.repaint()
+    }
+    return payload.result.halt === true
   }
 
   // ── abort/quit FSM helpers ──────────────────────────────────────────────
@@ -1007,6 +1134,14 @@ export class EditorController extends EventEmitter {
         if (this.buf.deleteWordBackward()) dirty = true
         continue
       }
+      if (char === "\x12") {
+        // Ctrl+R — reverse history search (history plugin). When no
+        // listener consumes it, swallow silently rather than inserting
+        // a control byte; readline-style "Ctrl+R but no history" is
+        // a no-op everywhere we've ever seen.
+        if (this.dispatchKeyHook("Ctrl+R")) dirty = true
+        continue
+      }
       if (char === "\x1c") {
         // Ctrl+\ - toggle show-hidden debug rendering
         this.setShowHidden(!this.showHiddenChars)
@@ -1112,8 +1247,13 @@ export class EditorController extends EventEmitter {
         case "\x1b[C":
           return this.buf.moveRight() ? "changed" : "ignore"
         case "\x1b[A":
+          // Plugins (notably `history`) can intercept ↑. The hook may
+          // halt + replace the buffer; otherwise we fall through to the
+          // wrap-aware in-buffer cursor-up.
+          if (this.dispatchKeyHook("ArrowUp")) return "changed"
           return this.moveUpVisual() ? "changed" : "ignore"
         case "\x1b[B":
+          if (this.dispatchKeyHook("ArrowDown")) return "changed"
           return this.moveDownVisual() ? "changed" : "ignore"
         case "\x1b[1;3D":
           return this.buf.moveWordLeft() ? "changed" : "ignore"

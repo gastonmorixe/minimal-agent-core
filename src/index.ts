@@ -1126,11 +1126,11 @@ async function main() {
     toolTimeTracker,
   })
 
-  // Ready banner — emitted ONCE here so it lands in scrollback right
+  // Ready banner : emitted ONCE here so it lands in scrollback right
   // under the startup header, BEFORE any resume replay. Previously the
   // banner was emitted from inside `runRepl` / `runReplLiveArea`, which
   // on resume placed it BELOW the replayed content (visible jump:
-  // header → replay → hint, instead of header → hint → replay).
+  // header > replay > hint, instead of header > hint > replay).
   //
   // Skipped for non-interactive modes (`--prompt`, `-`, bare positional)
   // where there's no REPL prompt to introduce. `extractPromptFromArgs`
@@ -1331,6 +1331,11 @@ async function main() {
       compositor,
       maxLiveHeight: () => Math.max(2, Math.floor((process.stdout.rows ?? 24) / 2)),
       showHidden: showHiddenCharsInit,
+      // Pass the plugin hooks facade so the editor can emit `editor.key`
+      // for ArrowUp / ArrowDown / Ctrl+R. Plugins (notably `history`)
+      // subscribe via their manifest's `hooks` array. Null when no
+      // plugins are loaded — the editor short-circuits the emit.
+      ...(hasPlugins ? { hooks: loader.hooks() } : {}),
     })
     // Keep show-hidden in sync with mode changes: a mode with
     // `editorShowHidden: true` overrides the env-var/flag baseline.

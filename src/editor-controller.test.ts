@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
 import { AbortBus } from "./abort-bus.ts"
-import { EditorController } from "./editor-controller.ts"
+import { EditorController, type EditorKeyPayload } from "./editor-controller.ts"
+import { Hooks } from "./plugins/hooks/hooks.ts"
 import { displayWidth } from "./term-width.ts"
 import { FakeTerminal } from "./test-utils/fake-terminal.ts"
 import { Compositor } from "./ui/compositor.ts"
@@ -77,6 +78,7 @@ function make(
     armedTickMs?: number
     /** Inject a clock for the abort-quit FSM. */
     nowFn?: () => number
+    hooks?: Hooks
   } = {},
 ) {
   const stdin = new FakeTTYInput()
@@ -93,6 +95,7 @@ function make(
     ...(opts.abortBus ? { abortBus: opts.abortBus } : {}),
     ...(opts.armedTickMs !== undefined ? { armedTickMs: opts.armedTickMs } : {}),
     ...(opts.nowFn ? { nowFn: opts.nowFn } : {}),
+    ...(opts.hooks ? { hooks: opts.hooks } : {}),
   })
   return { ctrl, stdin, output, compositor }
 }
@@ -1208,6 +1211,142 @@ describe("EditorController — wrap-aware up/down (visual rows)", () => {
     expect(ctrl.buffer().row).toBe(0)
     stdin.send("\x1b[B")
     expect(ctrl.buffer().row).toBe(1)
+    ctrl.stop()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// editor.key hook integration (May 2026 — history plugin's intercept seam)
+// ---------------------------------------------------------------------------
+//
+// The editor emits a `broadcast-sync` event on the `editor.key` channel
+// BEFORE applying selected navigation/control keys (ArrowUp, ArrowDown,
+// Ctrl+R). Listeners may set `result.halt = true` to consume the key and
+// optionally `result.buffer` / `result.cursor` to replace editor state.
+//
+// These tests pin the intercept-and-replace round-trip without going
+// through a real plugin manifest — the editor's contract is purely with
+// the Hooks facade.
+// ---------------------------------------------------------------------------
+
+describe("EditorController — editor.key hook", () => {
+  it("when no hooks are provided, ArrowUp behaves normally (no-emit)", () => {
+    const { ctrl, stdin } = make()
+    ctrl.start()
+    stdin.send("L1")
+    stdin.send("\x1b\r") // newline
+    stdin.send("L2")
+    expect(ctrl.buffer().row).toBe(1)
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().row).toBe(0)
+    ctrl.stop()
+  })
+
+  it("ArrowUp emits editor.key with cursor + buffer; plugin halts + replaces buffer", () => {
+    const hooks = new Hooks()
+    const seen: EditorKeyPayload[] = []
+    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
+      seen.push({ ...payload, result: { ...payload.result } })
+      if (payload.key === "ArrowUp") {
+        payload.result.halt = true
+        payload.result.buffer = "recalled prompt"
+      }
+    })
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\x1b[A")
+    expect(seen.length).toBe(1)
+    expect(seen[0].key).toBe("ArrowUp")
+    expect(seen[0].buffer).toBe("")
+    expect(seen[0].cursor.row).toBe(0)
+    expect(seen[0].cursor.col).toBe(0)
+    expect(seen[0].cursor.totalLines).toBe(1)
+    expect(ctrl.buffer().lines.join("\n")).toBe("recalled prompt")
+    ctrl.stop()
+  })
+
+  it("ArrowDown is emitted with the same shape", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
+      seen.push(payload.key)
+      if (payload.key === "ArrowDown") payload.result.halt = true
+    })
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\x1b[B")
+    expect(seen).toEqual(["ArrowDown"])
+    ctrl.stop()
+  })
+
+  it("ArrowUp falls through to default buffer nav when listener does NOT halt", () => {
+    const hooks = new Hooks()
+    hooks.on<EditorKeyPayload>("editor.key", () => {
+      // observe-only: do not set halt
+    })
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("L1")
+    stdin.send("\x1b\r")
+    stdin.send("L2") // row=1 col=2
+    stdin.send("\x1b[A") // should move cursor up (default behavior)
+    expect(ctrl.buffer().row).toBe(0)
+    ctrl.stop()
+  })
+
+  it("Ctrl+R fires the hook (and is silently swallowed when no listener halts)", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
+      seen.push(payload.key)
+    })
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\x12") // Ctrl+R
+    expect(seen).toEqual(["Ctrl+R"])
+    // Buffer must remain empty — Ctrl+R is NOT inserted as a literal byte
+    expect(ctrl.buffer().lines.join("\n")).toBe("")
+    ctrl.stop()
+  })
+
+  it("cursor field includes wrap-aware visualRow / rowsInLogicalLine / totalLines", () => {
+    const hooks = new Hooks()
+    let captured: EditorKeyPayload | null = null
+    hooks.on<EditorKeyPayload>("editor.key", (p) => {
+      captured = JSON.parse(JSON.stringify({ ...p, result: {} })) as EditorKeyPayload
+    })
+    const { ctrl, stdin } = make({ hooks, columns: 80 })
+    ctrl.start()
+    // 3 logical lines, cursor on last
+    stdin.send("alpha")
+    stdin.send("\x1b\r")
+    stdin.send("beta")
+    stdin.send("\x1b\r")
+    stdin.send("gamma")
+    stdin.send("\x1b[A") // ArrowUp emits the hook with our 3-line state
+    expect(captured).not.toBeNull()
+    const c = captured as unknown as EditorKeyPayload
+    expect(c.cursor.totalLines).toBe(3)
+    expect(c.cursor.row).toBe(2)
+    expect(c.cursor.rowsInLogicalLine).toBe(1) // short row, no wrap
+    expect(c.cursor.visualRow).toBe(0)
+    ctrl.stop()
+  })
+
+  it("result.cursor placement is honored alongside result.buffer", () => {
+    const hooks = new Hooks()
+    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
+      if (payload.key === "ArrowUp") {
+        payload.result.halt = true
+        payload.result.buffer = "hello world"
+        payload.result.cursor = { row: 0, col: 5 }
+      }
+    })
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\x1b[A")
+    expect(ctrl.buffer().lines.join("\n")).toBe("hello world")
+    expect(ctrl.buffer().col).toBe(5)
     ctrl.stop()
   })
 })
