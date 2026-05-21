@@ -1060,7 +1060,13 @@ export class Agent {
           // wrap edge. Both formatToolInput AND formatToolInputContinuation
           // get the SAME adjusted cols so the soft-split decision is
           // consistent across the first row and continuation rows.
-          const timeText = this.toolTimeTracker?.format(Date.now())
+          // `suppressToolTime` is set by plugins that draw their own
+          // trailing date+time inside `displayHeader` (e.g. the tasks
+          // plugin renders `· YYYY-MM-DD HH:MM:SS` with year). Skip the
+          // agent's `· HH:MM:SS` suffix entirely AND do NOT advance the
+          // ToolTimeTracker — letting a later non-suppressed tool emit
+          // the normal day-rollover prefix if appropriate.
+          const timeText = suppressToolTime ? undefined : this.toolTimeTracker?.format(Date.now())
           const timeSuffix = timeText !== undefined ? ` · ${timeText}` : ""
           const TIME_HINT_GUTTER = 2
           const adjustedCols =
@@ -1103,6 +1109,14 @@ export class Agent {
         let truncInfo: TruncationInfo | undefined
         let streamedRendered = false
         let aborted = false
+        /**
+         * Plugin opt-in: when true, the tool header skips the agent's
+         * automatic `· HH:MM:SS` time suffix so the plugin can own the
+         * trailing date+time chrome inside `displayHeader`. Used by the
+         * tasks plugin (full `· YYYY-MM-DD HH:MM:SS` with year). See
+         * `TUIResult.suppressToolTime` in `src/plugins/types.ts`.
+         */
+        let suppressToolTime = false
 
         // Mode dispatch gate. Tools stay registered in the request body
         // (so the cached prefix is mode-independent), but the harness
@@ -1172,6 +1186,7 @@ export class Agent {
                 display = pluginResult.display
                 displayHeader = pluginResult.displayHeader
                 displayFooter = pluginResult.displayFooter
+                suppressToolTime = pluginResult.suppressToolTime ?? false
               } else {
                 content = `Plugin tool "${tool.name}" returned a non-tool_result value`
                 isError = true

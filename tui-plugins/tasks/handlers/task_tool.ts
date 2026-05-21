@@ -299,6 +299,11 @@ function ok(
     display: rendered.display,
     displayHeader: rendered.displayHeader,
     displayFooter: rendered.displayFooter,
+    // The renderer already emits the trailing ` · YYYY-MM-DD HH:MM:SS`
+    // chrome inside the displayHeader (so the date+year is always
+    // visible on every task block). Suppress the agent's automatic
+    // `· HH:MM:SS` suffix so the time isn't duplicated.
+    suppressToolTime: true,
   }
 }
 
