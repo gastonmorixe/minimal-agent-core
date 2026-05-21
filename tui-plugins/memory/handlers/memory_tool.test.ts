@@ -76,6 +76,19 @@ function makeToolCtx(opts: {
     stdout: process.stdout as NodeJS.WriteStream,
     stdin: process.stdin as NodeJS.ReadStream,
     stderr: process.stderr as NodeJS.WriteStream,
+    log: (() => {
+      const noop = () => {}
+      return {
+        emergency: noop,
+        alert: noop,
+        critical: noop,
+        error: noop,
+        warn: noop,
+        notice: noop,
+        info: noop,
+        debug: noop,
+      }
+    })(),
   }
 }
 

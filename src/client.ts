@@ -1185,10 +1185,17 @@ export async function* sendMessageOnce(
             notificationId: "auth.refresh",
             category: "auth",
           })
+          diag.info(
+            "auth.refresh",
+            "peer-process rotated token; retrying with fresh keychain value",
+          )
           auth.token = freshToken
           response = await doRequest(freshToken)
           if (response.ok) {
             recovered = true
+            diag.notice("auth.refresh", "recovered via peer-process token refresh", {
+              recovery: "true",
+            })
             requestStatus.update(stream ? "Waiting for response" : "Reading response", {
               notificationId: "network.request",
               category: "network",
@@ -1207,6 +1214,7 @@ export async function* sendMessageOnce(
           notificationId: "auth.refresh",
           category: "auth",
         })
+        diag.info("auth.refresh", "access token expired (401); refreshing")
         try {
           const refreshed = await auth.refresh()
           // Persist on the AuthResult so subsequent turns reuse the new
@@ -1222,12 +1230,21 @@ export async function* sendMessageOnce(
             category: "network",
           })
           if (response.status === 401) {
+            diag.error(
+              "auth.refresh",
+              "401 persists after token refresh; keychain credentials are stale",
+            )
             throw new Error(
               "401 after token refresh. The keychain credentials are stale : " +
                 "run `minimal-agent --login` (or `claude`) to re-login.",
             )
           }
+          diag.notice("auth.refresh", "token refreshed cleanly", { recovery: "true" })
         } catch (e) {
+          const m = e instanceof Error ? e.message : String(e)
+          diag.error("auth.refresh", `refresh failed: ${m}`, {
+            "invalid-grant": m.includes("invalid_grant") ? "true" : "false",
+          })
           throw new Error(`Token refresh failed: ${e instanceof Error ? e.message : String(e)}`, {
             cause: e,
           })

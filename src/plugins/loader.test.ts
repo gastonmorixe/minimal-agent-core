@@ -4,6 +4,27 @@ import { join, resolve } from "node:path"
 import { PluginLoader } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"
 
+/**
+ * Noop `PluginLogger` stand-in for ad-hoc `LiveAreaHandlerContext`
+ * fixtures in this file. Production wiring uses `createPluginLogger`
+ * from `src/diagnostic-bus.ts` (which fans events out to file +
+ * scrollback + TUI surface); tests don't want that — they just need
+ * the type to satisfy.
+ */
+function noopLogger(): import("../diagnostic-bus.ts").PluginLogger {
+  const noop = () => {}
+  return {
+    emergency: noop,
+    alert: noop,
+    critical: noop,
+    error: noop,
+    warn: noop,
+    notice: noop,
+    info: noop,
+    debug: noop,
+  }
+}
+
 const ROOT = resolve(__dirname, "../../tmp/loader-tests")
 const HOME = join(ROOT, "home")
 const PROJECT = join(ROOT, "project")
@@ -776,6 +797,7 @@ describe("PluginLoader / liveAreaSlots", () => {
       env: {},
       abort: new AbortController().signal,
       stderr: process.stderr,
+      log: noopLogger(),
       tick: 0,
     })
     expect(out).toBe("ambient@0")
@@ -860,6 +882,7 @@ describe("PluginLoader / liveAreaSlots", () => {
         env: {},
         abort: new AbortController().signal,
         stderr: process.stderr,
+        log: noopLogger(),
         tick: 0,
       }),
     ).rejects.toThrow(/returned non-string/)
@@ -1146,5 +1169,190 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     expect(elapsed).toBeGreaterThanOrEqual(60)
     expect(elapsed).toBeLessThan(400)
     rmSync(join(HOME, "tui-plugins", "abrt4"), { recursive: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// manifest.hooks → HookBus wiring (May 2026)
+// ---------------------------------------------------------------------------
+//
+// Adds support for `manifest.hooks` (module-handler subscriptions on
+// chain/broadcast-sync/stream channels). Permission-gated by the
+// channel's `permission` against the manifest's `permissions[]`.
+// ---------------------------------------------------------------------------
+
+const SYNC_HOOK_HANDLER_BODY = `
+export default function handler(payload, ctx) {
+  // Mutate a holder field — that's the broadcast-sync pattern for
+  // returning data without making the dispatcher async.
+  if (payload && typeof payload === "object" && "result" in payload) {
+    payload.result.handled = true;
+    payload.result.from = ctx.channel + ":" + ctx.priority;
+  }
+}
+`
+
+describe("PluginLoader / manifest.hooks", () => {
+  const HOOK_ROOT = resolve(__dirname, "../../tmp/loader-hook-tests")
+  const HOOK_HOME = join(HOOK_ROOT, "home")
+  const HOOK_PROJECT = join(HOOK_ROOT, "project")
+
+  beforeAll(() => {
+    mkdirSync(HOOK_HOME, { recursive: true })
+    mkdirSync(HOOK_PROJECT, { recursive: true })
+  })
+  afterAll(() => {
+    rmSync(HOOK_ROOT, { recursive: true, force: true })
+  })
+
+  it("subscribes a module hook on a broadcast-sync channel", async () => {
+    writePackage(
+      HOOK_HOME,
+      "hk1",
+      {
+        id: "hk1",
+        name: "hk1",
+        version: "0.1.0",
+        description: "test",
+        events: [
+          {
+            id: "noop",
+            on: "prompt.submitted",
+            handler: { type: "module", path: "./noop.ts", export: "default" },
+          },
+        ],
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      {
+        "noop.ts": "export default async function() {}",
+        "key.ts": SYNC_HOOK_HANDLER_BODY,
+      },
+    )
+    const loader = await PluginLoader.load({
+      homeDir: HOOK_HOME,
+      projectDir: join(HOOK_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const subs = loader.getHookSubs()
+    expect(subs.length).toBe(1)
+    expect(subs[0].pluginId).toBe("hk1")
+    expect(subs[0].sub.definition.channel).toBe("editor.key")
+
+    // End-to-end: emitting on the channel runs the plugin handler.
+    const holder = { handled: false, from: "" }
+    loader.hooks().emitSync("editor.key", { key: "Up", result: holder })
+    expect(holder.handled).toBe(true)
+    expect(holder.from).toBe("editor.key:50") // default plugin priority
+    rmSync(join(HOOK_HOME, "tui-plugins", "hk1"), { recursive: true })
+  })
+
+  it("skips a hook subscription missing required permission", async () => {
+    const logs: string[] = []
+    writePackage(
+      HOOK_HOME,
+      "hk2",
+      {
+        id: "hk2",
+        name: "hk2",
+        version: "0.1.0",
+        description: "test",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        // missing permissions
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+    const loader = await PluginLoader.load({
+      homeDir: HOOK_HOME,
+      projectDir: join(HOOK_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.getHookSubs().length).toBe(0)
+    expect(logs.some((l) => l.includes("permissions doesn't grant"))).toBe(true)
+    rmSync(join(HOOK_HOME, "tui-plugins", "hk2"), { recursive: true })
+  })
+
+  it("skips hooks for plugins with requiresUnsafeHooks when UNSAFE_HOOKS is unset", async () => {
+    const prior = process.env.UNSAFE_HOOKS
+    delete process.env.UNSAFE_HOOKS
+    const logs: string[] = []
+    writePackage(
+      HOOK_HOME,
+      "hk3",
+      {
+        id: "hk3",
+        name: "hk3",
+        version: "0.1.0",
+        description: "test",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+        requiresUnsafeHooks: true,
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+    const loader = await PluginLoader.load({
+      homeDir: HOOK_HOME,
+      projectDir: join(HOOK_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.getHookSubs().length).toBe(0)
+    expect(logs.some((l) => l.includes("UNSAFE_HOOKS=1 is not set"))).toBe(true)
+    rmSync(join(HOOK_HOME, "tui-plugins", "hk3"), { recursive: true })
+    if (prior !== undefined) process.env.UNSAFE_HOOKS = prior
+  })
+
+  it("logs and skips subprocess hook handlers (not yet supported)", async () => {
+    const logs: string[] = []
+    writePackage(
+      HOOK_HOME,
+      "hk4",
+      {
+        id: "hk4",
+        name: "hk4",
+        version: "0.1.0",
+        description: "test",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "subprocess", command: ["./exe.sh"] },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      { "exe.sh": "#!/bin/sh\nexit 0\n" },
+    )
+    // Make exe executable so the manifest parser doesn't reject it
+    // for unrelated reasons.
+    chmodSync(join(HOOK_HOME, "tui-plugins", "hk4", "exe.sh"), 0o755)
+    const loader = await PluginLoader.load({
+      homeDir: HOOK_HOME,
+      projectDir: join(HOOK_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.getHookSubs().length).toBe(0)
+    expect(logs.some((l) => l.includes("subprocess handlers are not yet supported"))).toBe(true)
+    rmSync(join(HOOK_HOME, "tui-plugins", "hk4"), { recursive: true })
   })
 })

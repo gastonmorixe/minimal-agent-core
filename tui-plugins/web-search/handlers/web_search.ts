@@ -163,7 +163,11 @@ export default async function webSearchHandler(ctx: TUIContext): Promise<TUIResu
 
   const config = loadWebSearchConfig()
   const opts = mergeOptions(v.value, config)
-  const logger = (msg: string) => ctx.stderr.write(`[web-search] ${msg}\n`)
+  // Provider chain diagnostics ride the per-plugin logger so a flaky
+  // provider populates the file log + TUI surface instead of dumping
+  // into the compositor's scrollback. The source suffix `chain` is
+  // auto-prefixed by the loader to `web-search.chain`.
+  const logger = (msg: string) => ctx.log.warn("chain", msg)
   const chain = buildChain(config, undefined, logger)
 
   try {

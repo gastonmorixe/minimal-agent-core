@@ -119,6 +119,27 @@ function makeSaveCtx(opts: {
     stdout: process.stdout as NodeJS.WriteStream,
     stdin: process.stdin as NodeJS.ReadStream,
     stderr: process.stderr as NodeJS.WriteStream,
+    log: makeNoopLogger(),
+  }
+}
+
+/**
+ * Stub `PluginLogger` for tests. The diagnostic-bus routes the real
+ * logger through the singleton bus + file sink, which we don't want
+ * touching disk in unit tests. This shape mirrors `PluginLogger`
+ * exactly.
+ */
+function makeNoopLogger() {
+  const noop = (_s: string, _m: string, _sd?: Readonly<Record<string, string | number | boolean>>) => {}
+  return {
+    emergency: noop,
+    alert: noop,
+    critical: noop,
+    error: noop,
+    warn: noop,
+    notice: noop,
+    info: noop,
+    debug: noop,
   }
 }
 
@@ -446,6 +467,7 @@ function makeLoadCtx(cwd: string): PromptFragmentContext {
     sessionId: undefined,
     abort: new AbortController().signal,
     stderr: process.stderr as NodeJS.WriteStream,
+    log: makeNoopLogger(),
   }
 }
 

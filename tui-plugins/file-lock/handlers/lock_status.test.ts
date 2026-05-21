@@ -385,6 +385,19 @@ describe("default export adapter", () => {
       stdout: process.stdout,
       stdin: process.stdin,
       stderr: process.stderr,
+      log: (() => {
+        const noop = () => {}
+        return {
+          emergency: noop,
+          alert: noop,
+          critical: noop,
+          error: noop,
+          warn: noop,
+          notice: noop,
+          info: noop,
+          debug: noop,
+        }
+      })(),
     }
   }
 

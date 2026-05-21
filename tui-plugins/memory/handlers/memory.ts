@@ -86,7 +86,9 @@ export default async function memoryHandler(
   if (scope === "short-term" && !sid) {
     const ansi =
       "\x1b[31m· memory save refused: short-term scope requires a session id (none plumbed through)\x1b[0m\n"
-    ctx.stderr.write("[memory] refused short-term write: no MINIMAL_AGENT_SESSION_ID\n")
+    ctx.log.warn("short-term-no-sid", "refused short-term write: MINIMAL_AGENT_SESSION_ID is empty", {
+      scope,
+    })
     return { kind: "rendered", ansi }
   }
 
@@ -100,7 +102,10 @@ export default async function memoryHandler(
   // the same guard still pays off.
   if (store.path.startsWith(`${ctx.packageDir}/`) || store.path === ctx.packageDir) {
     const ansi = `\x1b[31m· memory save refused: target inside plugin dir (${store.path})\x1b[0m\n`
-    ctx.stderr.write(`[memory] refused write under packageDir: ${store.path}\n`)
+    ctx.log.error("save-refused-package-dir", "refused write under plugin packageDir", {
+      scope,
+      path: store.path,
+    })
     return { kind: "rendered", ansi }
   }
 
@@ -132,7 +137,7 @@ export default async function memoryHandler(
     return { kind: "rendered", ansi }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    ctx.stderr.write(`[memory] save failed: ${msg}\n`)
+    ctx.log.error("save-failed", msg, { scope })
     const ansi = `\x1b[31m· memory save failed: ${msg}\x1b[0m\n`
     return { kind: "rendered", ansi }
   }
