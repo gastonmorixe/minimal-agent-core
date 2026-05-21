@@ -45,7 +45,7 @@
  */
 
 import type { Stats, View } from "./store.ts"
-import type { Task, TaskStatus } from "./parse.ts"
+import { localIsoDateTime, type Task, type TaskStatus } from "./parse.ts"
 
 // ---------------------------------------------------------------------------
 // Glyphs (pure unicode, no nerd-font, no emoji)
@@ -135,6 +135,143 @@ export interface RenderOptions {
   action: RenderAction
   /** Optional cap on title length per row; longer titles are ellipsis-truncated. */
   maxTitleLen?: number
+  /**
+   * Time source for duration-rendering. Defaults to `Date.now()` (epoch
+   * ms). Tests inject a fixed epoch so the live-elapsed math for `doing`
+   * rows is deterministic. The same value is fed BOTH to {@link
+   * localIsoDateTime} for the header date suffix AND to the `active_ms +
+   * (now − last_resumed_at)` math on doing rows.
+   */
+  now?: () => number
+}
+
+// ---------------------------------------------------------------------------
+// Duration formatting + per-task active-time math (schema v2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Column width for the per-row duration slot, in display cells.
+ *
+ * The renderer right-aligns inside this width so the column reads as a
+ * straight vertical guide regardless of value. Choosing 7 keeps the
+ * longest realistic value (`1h 04m` = 6, plus one cell of safety
+ * margin) flush; `2h 14m 03s`-style values would need 8 but the
+ * format ladder collapses to `1h 04m` once we cross the hour mark, so
+ * 7 is the right number.
+ */
+const DURATION_COL_WIDTH = 7
+
+/**
+ * Format an elapsed milliseconds count for a row duration column.
+ *
+ *  - `< 1000ms`           → `""` (no flicker / noise for fast ops)
+ *  - `< 60_000ms`         → `"42s"`
+ *  - `< 3_600_000ms`      → `"4m 22s"`
+ *  - `< 86_400_000ms`     → `"1h 04m"` (seconds dropped past the hour)
+ *  - `>= 86_400_000ms`    → `"1d 03h"` (defensive — unlikely in practice)
+ *
+ * The return value is the BARE value; the renderer right-pads it to
+ * {@link DURATION_COL_WIDTH} cells in a separate step. Exported for tests.
+ */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 1000) return ""
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const remS = s % 60
+  if (m < 60) return `${m}m ${pad2(remS)}s`
+  const h = Math.floor(m / 60)
+  const remM = m % 60
+  if (h < 24) return `${h}h ${pad2(remM)}m`
+  const d = Math.floor(h / 24)
+  const remH = h % 24
+  return `${d}d ${pad2(remH)}h`
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n)
+}
+
+/**
+ * Pad a duration text to the column width by left-padding with spaces.
+ * Empty values produce a full-width whitespace block so the column
+ * stays vertically aligned even when many rows have no duration.
+ */
+function padDuration(text: string): string {
+  if (text.length >= DURATION_COL_WIDTH) return text
+  return " ".repeat(DURATION_COL_WIDTH - text.length) + text
+}
+
+/**
+ * Compute the milliseconds spent in `doing` for ONE task, including the
+ * in-flight chunk if the task is currently `doing` (live elapsed).
+ *
+ * For a `done`, `canceled`, or `todo` task, this returns the persisted
+ * `active_ms`. For a `doing` task with a valid `last_resumed_at`, it
+ * adds `now − Date.parse(last_resumed_at)` so the column shows the
+ * current elapsed time at the moment of render.
+ */
+export function taskActiveMs(t: Task, nowEpochMs: number): number {
+  if (t.status !== "doing") return t.active_ms
+  if (t.last_resumed_at === null) return t.active_ms
+  const resumedMs = Date.parse(t.last_resumed_at)
+  if (!Number.isFinite(resumedMs) || nowEpochMs < resumedMs) return t.active_ms
+  return t.active_ms + (nowEpochMs - resumedMs)
+}
+
+/**
+ * Compute the duration text for a TOP-LEVEL row, which is the task's
+ * own active_ms PLUS the sum of its subtasks' active_ms (each computed
+ * live). Subtasks running in parallel inside one parent are SUMMED (no
+ * wall-clock clamp): if the user genuinely had two children running
+ * concurrently, the parent line shows the work-equivalent, which reads
+ * more faithfully than the wall-clock span on a busy phase.
+ */
+function topLevelTotalMs(v: View, allTasks: readonly Task[], nowEpochMs: number): number {
+  let total = taskActiveMs(v.task, nowEpochMs)
+  for (const child of allTasks) {
+    if (child.parent === v.task.id) total += taskActiveMs(child, nowEpochMs)
+  }
+  return total
+}
+
+/**
+ * Wall-clock total for the CLOSER line: earliest `started_at` across
+ * all tasks → latest `done_at` across all tasks (or `now` when the
+ * list is still mid-flight). Returns `0` when no task has ever been
+ * started.
+ *
+ * This is intentionally NOT a sum-of-active-ms (which would double-count
+ * parallel work). The closer should read like "this task list took 12
+ * minutes from start to finish", which is wall-clock by definition.
+ */
+export function listTotalElapsedMs(tasks: readonly Task[], nowEpochMs: number): number {
+  let earliestStart: number | null = null
+  let latestEnd: number | null = null
+  let anyDoing = false
+  for (const t of tasks) {
+    if (t.started_at !== null) {
+      const startMs = Date.parse(t.started_at)
+      if (Number.isFinite(startMs)) {
+        if (earliestStart === null || startMs < earliestStart) earliestStart = startMs
+      }
+    }
+    if (t.status === "doing") anyDoing = true
+    if (t.done_at !== null) {
+      const endMs = Date.parse(t.done_at)
+      if (Number.isFinite(endMs)) {
+        if (latestEnd === null || endMs > latestEnd) latestEnd = endMs
+      }
+    }
+  }
+  if (earliestStart === null) return 0
+  // If anything is still doing, the upper bound is now. Otherwise use
+  // the latest done_at (the moment the list "finished"). When neither
+  // applies (e.g. tasks started but all canceled with no done_at), fall
+  // back to now for an honest mid-flight reading.
+  const upper = anyDoing ? nowEpochMs : latestEnd ?? nowEpochMs
+  if (upper < earliestStart) return 0
+  return upper - earliestStart
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +447,28 @@ function truncate(s: string, max?: number): string {
 // Header rendering
 // ---------------------------------------------------------------------------
 
-function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): string {
+/**
+ * Compose the trailing date-and-time chrome appended to every task block
+ * header: `" · YYYY-MM-DD HH:MM:SS"`. Dim throughout — the same visual
+ * weight as the other separators so it reads as chrome, not content.
+ *
+ * The plugin owns this entirely because the tasks plugin sets
+ * `suppressToolTime: true` on its tool result; the agent skips its own
+ * `· HH:MM:SS` suffix when that flag is set, so there's no duplication.
+ * See `TUIResult.suppressToolTime` in `src/plugins/types.ts`.
+ */
+function renderHeaderDateSuffix(ansi: boolean, nowEpochMs: number): string {
+  const text = localIsoDateTime(() => new Date(nowEpochMs))
+  const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
+  return ` ${dot} ${color(ansi, ANSI.DIM, text)}`
+}
+
+function renderHeaderText(
+  action: RenderAction,
+  stats: Stats,
+  ansi: boolean,
+  nowEpochMs: number,
+): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
 
   // Common N/M trailer. The leading ` ${dot} ` separates the action verb
@@ -407,10 +565,20 @@ function renderHeaderText(action: RenderAction, stats: Stats, ansi: boolean): st
     suffix = ` ${dot} ${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, String(stats.done))}${color(ansi, ANSI.DIM, `/${stats.total}`)}`
   }
 
-  return `${middle}${suffix}`
+  // Trailing date-and-time chrome — emitted UNCONDITIONALLY at the end
+  // of the header content, regardless of action kind. The plugin owns
+  // this slot in full because the tool-frame chrome's auto-time-suffix
+  // is suppressed (see `suppressToolTime` on the tool result).
+  const dateSuffix = renderHeaderDateSuffix(ansi, nowEpochMs)
+  return `${middle}${suffix}${dateSuffix}`
 }
 
-function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string {
+function renderHeader(
+  action: RenderAction,
+  stats: Stats,
+  ansi: boolean,
+  nowEpochMs: number,
+): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameTL)
   // CLI-only brand prefix. The agent path uses `renderToolDisplay` (which
   // skips this wrapper) and gets its identity from the manifest's icon
@@ -419,7 +587,7 @@ function renderHeader(action: RenderAction, stats: Stats, ansi: boolean): string
   // into the agent's transcript where it would sit next to "Task" from
   // the manifest.
   const brand = `${color(ansi, ANSI.DIM, GLYPHS.pending)} ${color(ansi, ANSI.BOLD, "Tasks")}`
-  const content = renderHeaderText(action, stats, ansi)
+  const content = renderHeaderText(action, stats, ansi, nowEpochMs)
   const sep = content.length === 0 ? "" : ` ${color(ansi, ANSI.DIM, GLYPHS.bullet)} `
   return `${frame} ${brand}${sep}${content}`
 }
@@ -496,23 +664,78 @@ function styleIdCol(v: View, ansi: boolean, targeted: boolean): string {
   )
 }
 
+/**
+ * Style the duration column for one row.
+ *
+ *  - todo / ghost-removed / 0ms       → blank, full-width whitespace
+ *  - doing                            → sky+bold, ticking live each render
+ *  - done                             → faintWhite (one notch above dim;
+ *                                       reads as "informational chrome",
+ *                                       not "actively important")
+ *  - canceled                         → red+dim+strike (matches row family)
+ */
+function styleDurationCol(
+  ms: number,
+  status: TaskStatus,
+  ansi: boolean,
+  ghost?: "removed",
+): string {
+  const text = formatDuration(ms)
+  if (text === "") return padDuration("")
+  const padded = padDuration(text)
+  if (ghost === "removed") {
+    return color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, padded)
+  }
+  switch (status) {
+    case "doing":
+      // Sky+bold matches the `◐` icon and the row's title color — the
+      // whole "doing" row reads as one blue gesture, and the duration
+      // is the cell that ticks every render.
+      return color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, padded)
+    case "done":
+      // LGRAY (256-color 246) is one notch brighter than DIM — chosen
+      // so the duration of completed tasks is readable but quiet,
+      // letting the eye land on the title text first.
+      return color(ansi, ANSI.LGRAY, padded)
+    case "canceled":
+      return color(ansi, `${ANSI.RED}${ANSI.DIM}${ANSI.STRIKE}`, padded)
+    case "todo":
+      // Defensive — a todo task shouldn't have non-zero active_ms in
+      // practice (no transition has happened yet), but if it does
+      // we paint it DIM so the row still reads as "not started".
+      return color(ansi, ANSI.DIM, padded)
+    default: {
+      const _exhaustive: never = status
+      throw new Error(`unhandled status: ${String(_exhaustive)}`)
+    }
+  }
+}
+
 function renderTopLevelRowBody(
   v: View,
   ansi: boolean,
   maxTitleLen?: number,
   targeted = false,
+  durMs = 0,
 ): string {
   const t = v.task
   const numCol = styleNumCol(v, ansi, targeted)
   const stCol = statusGlyph(t.status, ansi, v.ghost)
   const idCol = styleIdCol(v, ansi, targeted)
+  const durCol = styleDurationCol(durMs, t.status, ansi, v.ghost)
   const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff, targeted)
-  return `  ${numCol}  ${stCol}  ${idCol}  ${titleCol}`
+  return `  ${numCol}  ${stCol}  ${idCol}  ${durCol}  ${titleCol}`
 }
 
-function renderTopLevelRow(v: View, ansi: boolean, maxTitleLen?: number, targeted = false): string {
+function renderTopLevelRow(
+  v: View,
+  ansi: boolean,
+  maxTitleLen?: number,
+  targeted = false,
+  durMs = 0,
+): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
-  return `${frame} ${renderTopLevelRowBody(v, ansi, maxTitleLen, targeted)}`
+  return `${frame} ${renderTopLevelRowBody(v, ansi, maxTitleLen, targeted, durMs)}`
 }
 
 function renderSubtaskRowBody(
@@ -520,19 +743,27 @@ function renderSubtaskRowBody(
   ansi: boolean,
   maxTitleLen?: number,
   targeted = false,
+  durMs = 0,
 ): string {
   const t = v.task
   const isLast = v.siblingCount !== null && v.childIndex === v.siblingCount - 1
   const treeGlyph = color(ansi, ANSI.DGRAY, isLast ? GLYPHS.treeLast : GLYPHS.treeMid)
   const stCol = statusGlyph(t.status, ansi, v.ghost)
   const idCol = styleIdCol(v, ansi, targeted)
+  const durCol = styleDurationCol(durMs, t.status, ansi, v.ghost)
   const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff, targeted)
-  return `       ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}`
+  return `       ${treeGlyph}  ${stCol}  ${idCol}  ${durCol}  ${titleCol}`
 }
 
-function renderSubtaskRow(v: View, ansi: boolean, maxTitleLen?: number, targeted = false): string {
+function renderSubtaskRow(
+  v: View,
+  ansi: boolean,
+  maxTitleLen?: number,
+  targeted = false,
+  durMs = 0,
+): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameML)
-  return `${frame} ${renderSubtaskRowBody(v, ansi, maxTitleLen, targeted)}`
+  return `${frame} ${renderSubtaskRowBody(v, ansi, maxTitleLen, targeted, durMs)}`
 }
 
 function renderGap(ansi: boolean): string {
@@ -622,7 +853,11 @@ function targetHashFromAction(action: RenderAction): string | null {
 // Closer rendering
 // ---------------------------------------------------------------------------
 
-function renderCloserText(stats: Stats, ansi: boolean): string {
+function renderCloserText(
+  stats: Stats,
+  ansi: boolean,
+  elapsedMs: number,
+): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   const parts: string[] = []
   const allDone = isAllDone(stats)
@@ -646,12 +881,33 @@ function renderCloserText(stats: Stats, ansi: boolean): string {
   if (stats.canceled > 0) {
     parts.push(color(ansi, `${ANSI.DIM}${ANSI.RED}`, `${stats.canceled} canceled`))
   }
+
+  // Trailing elapsed / total. The user wanted "total time it took" to
+  // live in the footer ONLY (header carries date+time, no duration),
+  // and to render in BOLD LIME GREEN at the all-done moment as the
+  // single point of celebration. Mid-flight gets the same number in
+  // quieter LGRAY — "informational, list is still running".
+  //
+  //  - all-done state with elapsed >= 1s → ` · 12m 34s` (LIME+BOLD)
+  //  - mid-flight with elapsed >= 1s     → ` · 12m 12s` (LGRAY)
+  //  - elapsed < 1s (or no started_at)   → suppressed entirely
+  //                                        (matches the per-row
+  //                                        formatDuration policy:
+  //                                        no flicker for fast ops)
+  const elapsedText = formatDuration(elapsedMs)
+  if (elapsedText !== "") {
+    const styled = allDone
+      ? color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, elapsedText)
+      : color(ansi, ANSI.LGRAY, elapsedText)
+    parts.push(styled)
+  }
+
   return parts.join(` ${dot} `)
 }
 
-function renderCloser(stats: Stats, ansi: boolean): string {
+function renderCloser(stats: Stats, ansi: boolean, elapsedMs: number): string {
   const frame = color(ansi, ANSI.DGRAY, GLYPHS.frameBL)
-  return `${frame}  ${renderCloserText(stats, ansi)}`
+  return `${frame}  ${renderCloserText(stats, ansi, elapsedMs)}`
 }
 
 export interface ToolDisplayParts {
@@ -665,6 +921,11 @@ export function renderToolDisplay(
   stats: Stats,
   opts: RenderOptions,
 ): ToolDisplayParts {
+  const nowEpochMs = (opts.now ?? Date.now)()
+  // Snapshot the underlying Task[] once for per-row duration computation
+  // (top-level rows sum their subtasks' active_ms) and for the closer's
+  // wall-clock elapsed.
+  const allTasks = views.map((v) => v.task)
   const bodyLines: string[] = []
   if (views.length === 0) {
     if (opts.action.kind === "list" || opts.action.kind === "cleared") {
@@ -676,18 +937,23 @@ export function renderToolDisplay(
     const targetHash = targetHashFromAction(opts.action)
     for (const v of views) {
       const targeted = targetHash !== null && v.task.id === targetHash
+      const durMs =
+        v.task.parent === null
+          ? topLevelTotalMs(v, allTasks, nowEpochMs)
+          : taskActiveMs(v.task, nowEpochMs)
       bodyLines.push(
         v.task.parent === null
-          ? renderTopLevelRowBody(v, opts.ansi, opts.maxTitleLen, targeted)
-          : renderSubtaskRowBody(v, opts.ansi, opts.maxTitleLen, targeted),
+          ? renderTopLevelRowBody(v, opts.ansi, opts.maxTitleLen, targeted, durMs)
+          : renderSubtaskRowBody(v, opts.ansi, opts.maxTitleLen, targeted, durMs),
       )
     }
   }
   bodyLines.push("")
+  const elapsedMs = listTotalElapsedMs(allTasks, nowEpochMs)
   return {
-    header: renderHeaderText(opts.action, stats, opts.ansi),
+    header: renderHeaderText(opts.action, stats, opts.ansi, nowEpochMs),
     body: bodyLines.join("\n"),
-    footer: views.length === 0 ? "" : ` ${renderCloserText(stats, opts.ansi)}`,
+    footer: views.length === 0 ? "" : ` ${renderCloserText(stats, opts.ansi, elapsedMs)}`,
   }
 }
 
@@ -711,8 +977,10 @@ export function renderBlock(
   stats: Stats,
   opts: RenderOptions,
 ): string {
+  const nowEpochMs = (opts.now ?? Date.now)()
+  const allTasks = views.map((v) => v.task)
   const lines: string[] = []
-  lines.push(renderHeader(opts.action, stats, opts.ansi))
+  lines.push(renderHeader(opts.action, stats, opts.ansi, nowEpochMs))
   if (views.length === 0) {
     lines.push(renderGap(opts.ansi))
     if (opts.action.kind === "list" || opts.action.kind === "cleared") {
@@ -730,13 +998,18 @@ export function renderBlock(
   const targetHash = targetHashFromAction(opts.action)
   for (const v of views) {
     const targeted = targetHash !== null && v.task.id === targetHash
+    const durMs =
+      v.task.parent === null
+        ? topLevelTotalMs(v, allTasks, nowEpochMs)
+        : taskActiveMs(v.task, nowEpochMs)
     if (v.task.parent === null) {
-      lines.push(renderTopLevelRow(v, opts.ansi, opts.maxTitleLen, targeted))
+      lines.push(renderTopLevelRow(v, opts.ansi, opts.maxTitleLen, targeted, durMs))
     } else {
-      lines.push(renderSubtaskRow(v, opts.ansi, opts.maxTitleLen, targeted))
+      lines.push(renderSubtaskRow(v, opts.ansi, opts.maxTitleLen, targeted, durMs))
     }
   }
   lines.push(renderGap(opts.ansi))
-  lines.push(renderCloser(stats, opts.ansi))
+  const elapsedMs = listTotalElapsedMs(allTasks, nowEpochMs)
+  lines.push(renderCloser(stats, opts.ansi, elapsedMs))
   return `${lines.join("\n")}\n`
 }

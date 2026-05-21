@@ -131,6 +131,25 @@ export type TUIResult =
        * connector. When present, the closer is its own row.
        */
       displayFooter?: string
+      /**
+       * When `true`, the agent SKIPS its automatic ` · HH:MM:SS` (or
+       * ` · Mon DD HH:MM:SS` on day-rollover) time suffix on the tool
+       * header. The plugin then owns the time chrome inside its
+       * `displayHeader` and can render whatever date/time format it wants.
+       *
+       * Opt-in: omitted / `false` keeps the legacy behavior of the agent
+       * appending the time suffix. Used by the `tasks` plugin so its
+       * header carries the full `· YYYY-MM-DD HH:MM:SS` chrome (date +
+       * year, single-source-of-truth) without the agent's HH:MM:SS
+       * duplicating the time portion. See `tui-plugins/tasks/lib/render.ts`.
+       *
+       * Setting this also detaches the plugin's tool call from the
+       * agent's `ToolTimeTracker` day-rollover state machine — the
+       * tracker is not advanced for suppressed calls, so a tasks block
+       * doesn't accidentally swallow the rollover signal a later Bash
+       * tool would otherwise emit.
+       */
+      suppressToolTime?: boolean
     }
   | { kind: "rendered"; ansi: string }
   | { kind: "interactive_result"; value: unknown }

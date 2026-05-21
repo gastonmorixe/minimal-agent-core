@@ -58,6 +58,27 @@ import { TaskStore, type StoreDeps } from "./store.ts"
  *
  * Exported for tests; the public API is {@link TasksAttachment.toAttachment}.
  */
+/**
+ * Format `active_ms` for the attachment's duration column. Same ladder
+ * the renderer uses (1s precision → minutes → hours → days), but
+ * inlined here to keep the attachment module pure (no dependency on
+ * the renderer). Empty string for `< 1s`.
+ */
+function fmtDur(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 1000) return ""
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rs = s % 60
+  if (m < 60) return `${m}m${rs.toString().padStart(2, "0")}s`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  if (h < 24) return `${h}h${rm.toString().padStart(2, "0")}m`
+  const d = Math.floor(h / 24)
+  const rh = h % 24
+  return `${d}d${rh.toString().padStart(2, "0")}h`
+}
+
 export function renderAttachmentBody(tasks: readonly Task[]): string {
   if (tasks.length === 0) return ""
   // Pre-compute per-task display position: top-level tasks get a 1-indexed
@@ -85,13 +106,26 @@ export function renderAttachmentBody(tasks: readonly Task[]): string {
   // position string" (e.g. "10c" = 3 chars).
   let posWidth = 0
   for (const p of positions.values()) posWidth = Math.max(posWidth, p.length)
+  // Duration column width — widest formatted active_ms across the list,
+  // capped at a sensible bound. `"99m59s"` is 6 chars; days bump it to
+  // 7. We pre-measure so resumed sessions with mixed durations line up
+  // visually in the attachment too.
+  const durs = tasks.map((t) => fmtDur(t.active_ms))
+  let durWidth = 0
+  for (const d of durs) durWidth = Math.max(durWidth, d.length)
   const lines: string[] = []
-  for (const t of tasks) {
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i]
     const pos = positions.get(t.id) ?? "?"
     const posCol = pos.padEnd(posWidth)
     const idCol = `#${t.id}`.padEnd(8) // "#abc123" = 7, "#abc123a" = 8
     const statusCol = t.status.padEnd(8) // "canceled" = 8
-    lines.push(`${posCol}  ${idCol}  ${statusCol}  ${t.title}`)
+    // Duration column. Omitted entirely when no task in the list has
+    // any duration (keeps the model's view as compact as possible for
+    // a freshly-added plan), included otherwise.
+    let durCol = ""
+    if (durWidth > 0) durCol = `${durs[i].padStart(durWidth)}  `
+    lines.push(`${posCol}  ${idCol}  ${statusCol}  ${durCol}${t.title}`)
   }
   return lines.join("\n")
 }

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 
-import { GLYPHS, renderBlock, renderToolDisplay, type RenderOptions } from "./render.ts"
+import {
+  formatDuration,
+  GLYPHS,
+  listTotalElapsedMs,
+  renderBlock,
+  renderToolDisplay,
+  taskActiveMs,
+  type RenderOptions,
+} from "./render.ts"
 import type { Task } from "./parse.ts"
 import type { View, Stats } from "./store.ts"
 
@@ -17,9 +25,36 @@ function task(over: Partial<Task> = {}): Task {
     created_at: "2026-05-12T15:30:00-04:00",
     done_at: null,
     reason: null,
+    // v2 duration fields. Default for a freshly-added todo: never started,
+    // no accumulated active time. Per-test overrides exercise non-zero
+    // durations (e.g. for the duration-column tests).
+    started_at: null,
+    last_resumed_at: null,
+    active_ms: 0,
     ...over,
   }
 }
+
+/**
+ * Frozen render clock for deterministic header date-suffix assertions.
+ * `2026-05-20 18:07:42` is the canonical mockup time the user approved.
+ * Tests that need a different moment can override `now` on the
+ * RenderOptions directly.
+ */
+const FIXED_NOW_MS = new Date(2026, 4, 20, 18, 7, 42).getTime()
+const FIXED_NOW_ISO_DATETIME = "2026-05-20 18:07:42"
+
+function withFixedNow(over: Partial<RenderOptions> = {}): Partial<RenderOptions> {
+  return { now: () => FIXED_NOW_MS, ...over }
+}
+
+/**
+ * 7-cell padded empty-duration slot. Most row-layout tests use tasks
+ * with `active_ms: 0` (never started), which render as a blank but
+ * column-aligned cell. Embedded as `  ${DUR_EMPTY}  ` between `#hash`
+ * and `<title>` everywhere a row body is asserted.
+ */
+const DUR_EMPTY = " ".repeat(7)
 
 function topView(t: Task, n: number): View {
   return { task: t, n, childIndex: null, siblingCount: null }
@@ -34,7 +69,11 @@ function stats(over: Partial<Stats> = {}): Stats {
 }
 
 function plain(views: readonly View[], s: Stats, opts: Partial<RenderOptions> = {}): string {
-  return renderBlock(views, s, { ansi: false, action: { kind: "list" }, ...opts })
+  return renderBlock(views, s, {
+    ansi: false,
+    action: { kind: "list" },
+    ...withFixedNow(opts),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +127,7 @@ describe("renderToolDisplay — host-owned frame parts", () => {
       action: { kind: "started", hash: "a7b3c4" },
     })
     expect(out.header).toContain(`${GLYPHS.doing} started #a7b3c4`)
-    expect(out.body).toContain(`  1  ${GLYPHS.doing}  #a7b3c4  x`)
+    expect(out.body).toContain(`  1  ${GLYPHS.doing}  #a7b3c4  ${DUR_EMPTY}  x`)
     expect(out.body).not.toContain(GLYPHS.frameTL)
     expect(out.body).not.toContain(GLYPHS.frameML)
     expect(out.footer).toContain("1 doing")
@@ -183,22 +222,22 @@ describe("renderBlock — top-level rows", () => {
   test("done row has bold check, dim+strike title", () => {
     const t = task({ status: "done", title: "x", done_at: "2026-05-12T15:31:00-04:00" })
     const out = plain([topView(t, 1)], stats({ total: 1, done: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.done}  #a7b3c4  x`)
+    expect(out).toContain(` 1  ${GLYPHS.done}  #a7b3c4  ${DUR_EMPTY}  x`)
   })
   test("doing row has half-circle glyph and bold title", () => {
     const t = task({ status: "doing", title: "x" })
     const out = plain([topView(t, 1)], stats({ total: 1, doing: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.doing}  #a7b3c4  x`)
+    expect(out).toContain(` 1  ${GLYPHS.doing}  #a7b3c4  ${DUR_EMPTY}  x`)
   })
   test("todo row has dim circle glyph and plain title", () => {
     const t = task({ status: "todo", title: "x" })
     const out = plain([topView(t, 1)], stats({ total: 1, todo: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.pending}  #a7b3c4  x`)
+    expect(out).toContain(` 1  ${GLYPHS.pending}  #a7b3c4  ${DUR_EMPTY}  x`)
   })
   test("canceled row has red ✘ in status column, title + (reason) suffix, no title prefix glyph", () => {
     const t = task({ status: "canceled", title: "abandon", reason: "user redirected" })
     const out = plain([topView(t, 1)], stats({ total: 1, canceled: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.canceled}  #a7b3c4  abandon  (user redirected)`)
+    expect(out).toContain(` 1  ${GLYPHS.canceled}  #a7b3c4  ${DUR_EMPTY}  abandon  (user redirected)`)
     // The redundant `✘ ` title prefix is gone (icon column carries it now).
     expect(out).not.toContain(`${GLYPHS.canceled} abandon`)
   })
@@ -260,9 +299,9 @@ describe("renderBlock — subtasks", () => {
       subView(child3, 2, 3),
     ]
     const out = plain(views, stats({ total: 4, done: 1, doing: 2, todo: 1 }))
-    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.done}  #d04c91a  c1`)
-    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.doing}  #d04c91b  c2`)
-    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.pending}  #d04c91c  c3`)
+    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.done}  #d04c91a  ${DUR_EMPTY}  c1`)
+    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.doing}  #d04c91b  ${DUR_EMPTY}  c2`)
+    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.pending}  #d04c91c  ${DUR_EMPTY}  c3`)
   })
   test("single child uses ╰ (siblingCount=1, childIndex=0)", () => {
     const views: View[] = [topView(parent, 1), subView(child1, 0, 1)]
@@ -640,7 +679,7 @@ describe("renderBlock — ghost-removed overlay", () => {
     expect(out).toContain(`beta`)
     expect(out).toContain(`gamma`)
     // Ghost row carries the canceled glyph in the status column.
-    expect(out).toContain(` 2  ${GLYPHS.canceled}  #bbbbbb  beta`)
+    expect(out).toContain(` 2  ${GLYPHS.canceled}  #bbbbbb  ${DUR_EMPTY}  beta`)
     // Header verb says "removed".
     expect(out.split("\n")[0]).toContain(`${GLYPHS.canceled} removed #bbbbbb`)
     // Closer reflects post-state.
@@ -706,7 +745,7 @@ describe("renderBlock — ghost-removed overlay", () => {
     )
     // Tree-last connector + ✘ + #id + title — the child is shown as a ghost
     // BUT still visually attached to its parent via the tree glyph.
-    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.canceled}  #p00000a  child`)
+    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.canceled}  #p00000a  ${DUR_EMPTY}  child`)
   })
 
   test("ghost row's number column is dim+strike (matches canceled-row dimming)", () => {
@@ -827,5 +866,405 @@ describe("renderBlock — title truncation", () => {
     })
     expect(out).toContain("short")
     expect(out).not.toContain("…")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Duration formatting (schema v2)
+// ---------------------------------------------------------------------------
+
+describe("formatDuration", () => {
+  test("< 1s collapses to empty (no flicker for fast ops)", () => {
+    expect(formatDuration(0)).toBe("")
+    expect(formatDuration(500)).toBe("")
+    expect(formatDuration(999)).toBe("")
+  })
+  test("1s..59s renders as `Ns`", () => {
+    expect(formatDuration(1_000)).toBe("1s")
+    expect(formatDuration(12_000)).toBe("12s")
+    expect(formatDuration(59_999)).toBe("59s")
+  })
+  test("1m..59m renders as `Mm SSs` with zero-padded seconds", () => {
+    expect(formatDuration(60_000)).toBe("1m 00s")
+    expect(formatDuration(60_000 + 4_000)).toBe("1m 04s")
+    expect(formatDuration(60_000 * 4 + 22_000)).toBe("4m 22s")
+    expect(formatDuration(60_000 * 12 + 12_000)).toBe("12m 12s")
+  })
+  test(">= 1h drops seconds: `Hh MMm`", () => {
+    expect(formatDuration(3_600_000)).toBe("1h 00m")
+    expect(formatDuration(3_600_000 + 4 * 60_000)).toBe("1h 04m")
+    expect(formatDuration(2 * 3_600_000 + 14 * 60_000 + 30_000)).toBe("2h 14m")
+  })
+  test(">= 24h drops minutes: `Dd HHh`", () => {
+    expect(formatDuration(86_400_000)).toBe("1d 00h")
+    expect(formatDuration(86_400_000 + 3 * 3_600_000)).toBe("1d 03h")
+  })
+  test("non-finite input → empty", () => {
+    expect(formatDuration(Number.NaN)).toBe("")
+    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// taskActiveMs — pure per-task duration math
+// ---------------------------------------------------------------------------
+
+describe("taskActiveMs", () => {
+  const nowMs = new Date(2026, 4, 20, 18, 7, 42).getTime()
+
+  test("non-doing task returns persisted active_ms unchanged", () => {
+    const t = task({ status: "done", active_ms: 30_000 })
+    expect(taskActiveMs(t, nowMs)).toBe(30_000)
+  })
+
+  test("doing task with last_resumed_at adds (now − resumedAt) to active_ms", () => {
+    // last_resumed_at = 30s ago, active_ms already accumulated = 12s
+    const resumedAt = new Date(nowMs - 30_000).toISOString()
+    const t = task({
+      status: "doing",
+      last_resumed_at: resumedAt,
+      active_ms: 12_000,
+    })
+    expect(taskActiveMs(t, nowMs)).toBe(42_000)
+  })
+
+  test("doing task with null last_resumed_at falls back to active_ms (defensive)", () => {
+    const t = task({ status: "doing", last_resumed_at: null, active_ms: 8_000 })
+    expect(taskActiveMs(t, nowMs)).toBe(8_000)
+  })
+
+  test("doing task whose last_resumed_at is in the future does NOT go negative", () => {
+    // Clock skew / out-of-order writes shouldn't underflow active_ms.
+    const futureResumed = new Date(nowMs + 5_000).toISOString()
+    const t = task({
+      status: "doing",
+      last_resumed_at: futureResumed,
+      active_ms: 100,
+    })
+    expect(taskActiveMs(t, nowMs)).toBe(100)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Duration column in row rendering
+// ---------------------------------------------------------------------------
+
+describe("renderBlock — duration column", () => {
+  test("done task with non-zero active_ms shows formatted duration in row", () => {
+    const t = task({
+      status: "done",
+      title: "first",
+      done_at: "2026-05-20T18:00:48-04:00",
+      started_at: "2026-05-20T18:00:00-04:00",
+      active_ms: 48_000,
+    })
+    const out = plain([topView(t, 1)], stats({ total: 1, done: 1 }))
+    // Right-padded to 7 cells: "    48s" (4 spaces + "48s")
+    expect(out).toContain("    48s  first")
+  })
+
+  test("doing task with last_resumed_at ticks live elapsed = active_ms + (now - resumed)", () => {
+    // 30s of active_ms accumulated, currently doing for another 12s.
+    // Total live elapsed at render = 42s → "    42s" in row.
+    const resumedAt = new Date(FIXED_NOW_MS - 12_000).toISOString()
+    const t = task({
+      status: "doing",
+      title: "in flight",
+      started_at: resumedAt,
+      last_resumed_at: resumedAt,
+      active_ms: 30_000,
+    })
+    const out = plain([topView(t, 1)], stats({ total: 1, doing: 1 }))
+    expect(out).toContain("    42s  in flight")
+  })
+
+  test("todo task shows empty duration cell (column-aligned blank)", () => {
+    const t = task({ status: "todo", title: "x" })
+    const out = plain([topView(t, 1)], stats({ total: 1, todo: 1 }))
+    expect(out).toContain(`#a7b3c4  ${DUR_EMPTY}  x`)
+  })
+
+  test("top-level row sums children's active_ms into its duration cell", () => {
+    // Phase total = parent's own active_ms (0) + sum of children = 12 + 30 = 42s.
+    const parent = task({ id: "p11111", title: "Phase", status: "done" })
+    const c1 = task({
+      id: "p11111a",
+      parent: "p11111",
+      status: "done",
+      active_ms: 12_000,
+    })
+    const c2 = task({
+      id: "p11111b",
+      parent: "p11111",
+      status: "done",
+      active_ms: 30_000,
+    })
+    const out = plain(
+      [topView(parent, 1), subView(c1, 0, 2), subView(c2, 1, 2)],
+      stats({ total: 3, done: 3 }),
+    )
+    // Parent row carries the summed 42s; children carry their own 12s / 30s.
+    expect(out).toContain("    42s  Phase")
+    expect(out).toContain("    12s")
+    expect(out).toContain("    30s")
+  })
+
+  test("ANSI: doing-row duration is SKY+BOLD (matches ◐ icon + title family)", () => {
+    const resumedAt = new Date(FIXED_NOW_MS - 5_000).toISOString()
+    const t = task({
+      status: "doing",
+      started_at: resumedAt,
+      last_resumed_at: resumedAt,
+      active_ms: 0,
+    })
+    const out = renderBlock([topView(t, 1)], stats({ total: 1, doing: 1 }), {
+      ansi: true,
+      action: { kind: "started", hash: "a7b3c4" },
+      ...withFixedNow(),
+    })
+    // SKY = \x1b[38;5;45m, BOLD = \x1b[1m
+    expect(out).toMatch(/\x1b\[38;5;45m\x1b\[1m[^\x1b]*?5s[^\x1b]*?\x1b\[0m/)
+  })
+
+  test("ANSI: done-row duration is LGRAY (informational chrome, quieter than title)", () => {
+    const t = task({
+      status: "done",
+      done_at: "2026-05-20T18:00:30-04:00",
+      started_at: "2026-05-20T18:00:00-04:00",
+      active_ms: 30_000,
+    })
+    const out = renderBlock([topView(t, 1)], stats({ total: 1, done: 1 }), {
+      ansi: true,
+      action: { kind: "marked_done", hash: "a7b3c4" },
+      ...withFixedNow(),
+    })
+    // LGRAY = \x1b[38;5;246m. Match the duration token "30s" inside an LGRAY span.
+    expect(out).toMatch(/\x1b\[38;5;246m[^\x1b]*?30s[^\x1b]*?\x1b\[0m/)
+  })
+
+  test("ANSI: canceled-row duration is RED+DIM+STRIKE (matches row family)", () => {
+    const t = task({
+      status: "canceled",
+      reason: "redirected",
+      started_at: "2026-05-20T18:00:00-04:00",
+      active_ms: 15_000,
+    })
+    const out = renderBlock([topView(t, 1)], stats({ total: 1, canceled: 1 }), {
+      ansi: true,
+      action: { kind: "marked_canceled", hash: "a7b3c4" },
+      ...withFixedNow(),
+    })
+    // RED + DIM + STRIKE around the duration token. Order is exact: \x1b[31m\x1b[2m\x1b[9m
+    expect(out).toMatch(/\x1b\[31m\x1b\[2m\x1b\[9m[^\x1b]*?15s[^\x1b]*?\x1b\[0m/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Header date suffix (the chrome the user explicitly approved)
+// ---------------------------------------------------------------------------
+
+describe("renderBlock — header date+time suffix", () => {
+  test("header ends with ` · YYYY-MM-DD HH:MM:SS` (single-space between date and time)", () => {
+    const t = task()
+    const out = plain([topView(t, 1)], stats({ total: 1, todo: 1 }))
+    const head = out.split("\n")[0]
+    // The fixed `now` in withFixedNow() is 2026-05-20 18:07:42.
+    expect(head).toContain(`· ${FIXED_NOW_ISO_DATETIME}`)
+    // No trailing duplicated date / time.
+    expect(head.match(/2026-05-20/g)?.length ?? 0).toBe(1)
+    expect(head.match(/18:07:42/g)?.length ?? 0).toBe(1)
+  })
+
+  test("date suffix renders regardless of action kind (always-on chrome)", () => {
+    const v = topView(task({ status: "done", done_at: "x" }), 1)
+    const s = stats({ total: 1, done: 1 })
+    for (const action of [
+      { kind: "marked_done", hash: "a7b3c4" } as const,
+      { kind: "added", hash: "a7b3c4" } as const,
+      { kind: "list" } as const,
+      { kind: "all_done" } as const,
+    ]) {
+      const out = plain([v], s, { action })
+      expect(out.split("\n")[0]).toContain(FIXED_NOW_ISO_DATETIME)
+    }
+  })
+
+  test("ANSI: date suffix wears DIM throughout (chrome, not content)", () => {
+    const t = task()
+    const out = renderBlock([topView(t, 1)], stats({ total: 1, todo: 1 }), {
+      ansi: true,
+      action: { kind: "list" },
+      ...withFixedNow(),
+    })
+    // DIM = \x1b[2m. The date should be inside a DIM span.
+    expect(out).toMatch(/\x1b\[2m[^\x1b]*?2026-05-20 18:07:42[^\x1b]*?\x1b\[0m/)
+  })
+
+  test("date suffix advances with the injected `now`", () => {
+    const t = task()
+    const altNowMs = new Date(2027, 11, 31, 23, 59, 59).getTime()
+    const out = renderBlock([topView(t, 1)], stats({ total: 1, todo: 1 }), {
+      ansi: false,
+      action: { kind: "list" },
+      now: () => altNowMs,
+    })
+    expect(out.split("\n")[0]).toContain("2027-12-31 23:59:59")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Closer — elapsed snapshot mid-flight, bold-lime total at all-done
+// ---------------------------------------------------------------------------
+
+describe("listTotalElapsedMs", () => {
+  const nowMs = new Date(2026, 4, 20, 18, 7, 42).getTime()
+
+  test("returns 0 when no task has ever been started", () => {
+    expect(listTotalElapsedMs([task()], nowMs)).toBe(0)
+  })
+
+  test("returns now − earliest_started_at when any task is still doing", () => {
+    const t = task({
+      status: "doing",
+      started_at: new Date(nowMs - 12 * 60_000 - 12_000).toISOString(), // 12m 12s ago
+      last_resumed_at: new Date(nowMs - 5_000).toISOString(),
+      active_ms: 0,
+    })
+    expect(listTotalElapsedMs([t], nowMs)).toBe(12 * 60_000 + 12_000)
+  })
+
+  test("returns latest_done_at − earliest_started_at when all are done", () => {
+    const t1 = task({
+      id: "aaaaaa",
+      status: "done",
+      started_at: "2026-05-20T18:00:00-04:00",
+      done_at: "2026-05-20T18:05:00-04:00",
+      active_ms: 300_000,
+    })
+    const t2 = task({
+      id: "bbbbbb",
+      status: "done",
+      started_at: "2026-05-20T18:02:00-04:00",
+      done_at: "2026-05-20T18:12:34-04:00",
+      active_ms: 634_000,
+    })
+    const elapsed = listTotalElapsedMs([t1, t2], nowMs)
+    // 18:00:00 → 18:12:34 = 12m 34s.
+    expect(formatDuration(elapsed)).toBe("12m 34s")
+  })
+})
+
+describe("renderBlock — closer elapsed/total", () => {
+  test("mid-flight closer appends ` · <elapsed>` after the count summary (LGRAY, not lime)", () => {
+    const t1 = task({
+      id: "aaaaaa",
+      status: "done",
+      started_at: new Date(FIXED_NOW_MS - 12 * 60_000 - 12_000).toISOString(),
+      done_at: new Date(FIXED_NOW_MS - 10_000).toISOString(),
+      active_ms: 12 * 60_000,
+    })
+    const t2 = task({
+      id: "bbbbbb",
+      status: "doing",
+      started_at: new Date(FIXED_NOW_MS - 12 * 60_000).toISOString(),
+      last_resumed_at: new Date(FIXED_NOW_MS - 5_000).toISOString(),
+      active_ms: 7_000,
+    })
+    const out = plain(
+      [topView(t1, 1), topView(t2, 2)],
+      stats({ total: 2, done: 1, doing: 1 }),
+    )
+    const closer = out.trimEnd().split("\n").at(-1)!
+    // Whole-list wall-clock = 12m 12s.
+    expect(closer).toContain("12m 12s")
+    // Mid-flight, ALL DONE celebration is NOT present (we still have 1 doing).
+    expect(closer).not.toContain("ALL DONE")
+  })
+
+  test("all-done closer renders total in LIME+BOLD (the single celebrated number)", () => {
+    const t1 = task({
+      id: "aaaaaa",
+      status: "done",
+      started_at: "2026-05-20T17:55:08-04:00",
+      done_at: "2026-05-20T18:00:00-04:00",
+      active_ms: 292_000,
+    })
+    const t2 = task({
+      id: "bbbbbb",
+      status: "done",
+      started_at: "2026-05-20T18:00:30-04:00",
+      done_at: "2026-05-20T18:07:42-04:00",
+      active_ms: 432_000,
+    })
+    const out = renderBlock(
+      [topView(t1, 1), topView(t2, 2)],
+      stats({ total: 2, done: 2 }),
+      {
+        ansi: true,
+        action: { kind: "marked_done", hash: "bbbbbb" },
+        ...withFixedNow(),
+      },
+    )
+    const lines = out.trimEnd().split("\n")
+    const closer = lines.at(-1)!
+    // ALL DONE celebration leads.
+    expect(closer).toContain("ALL DONE")
+    // 17:55:08 → 18:07:42 = 12m 34s wall-clock total.
+    expect(closer).toContain("12m 34s")
+    // The total wears LIME+BOLD (\x1b[38;5;118m\x1b[1m).
+    expect(closer).toMatch(/\x1b\[38;5;118m\x1b\[1m[^\x1b]*?12m 34s[^\x1b]*?\x1b\[0m/)
+  })
+
+  test("closer suppresses elapsed entirely when < 1s (no flicker for fast list calls)", () => {
+    // Tasks exist but none have been started — listTotalElapsedMs = 0 → suppressed.
+    const t = task()
+    const out = plain([topView(t, 1)], stats({ total: 1, todo: 1 }))
+    const closer = out.trimEnd().split("\n").at(-1)!
+    expect(closer).not.toMatch(/\d+s/)
+    expect(closer).toContain("1 todo")
+  })
+
+  test("user-approved mockup: full all-done block reads cleanly end-to-end (smoke)", () => {
+    // Mirrors the mockup the user approved:
+    //
+    //   ╭ ○ Tasks · ✔ ALL DONE · 2/2 · 2026-05-20 18:07:42
+    //   │
+    //   │    1  ✔  #aaaaaa  4m 52s  Phase 1
+    //   │    2  ✔  #bbbbbb  7m 12s  Phase 2
+    //   │
+    //   ╰  ✦ ALL DONE · 2 done · 12m 34s     ← LIME+BOLD total
+    const t1 = task({
+      id: "aaaaaa",
+      status: "done",
+      title: "Phase 1",
+      started_at: "2026-05-20T17:55:08-04:00",
+      done_at: "2026-05-20T18:00:00-04:00",
+      active_ms: 292_000,
+    })
+    const t2 = task({
+      id: "bbbbbb",
+      status: "done",
+      title: "Phase 2",
+      started_at: "2026-05-20T18:00:30-04:00",
+      done_at: "2026-05-20T18:07:42-04:00",
+      active_ms: 432_000,
+    })
+    const out = plain(
+      [topView(t1, 1), topView(t2, 2)],
+      stats({ total: 2, done: 2 }),
+      { action: { kind: "all_done" } },
+    )
+    const lines = out.trimEnd().split("\n")
+    expect(lines[0]).toContain("ALL DONE")
+    expect(lines[0]).toContain("2/2")
+    expect(lines[0]).toContain(FIXED_NOW_ISO_DATETIME)
+    // Row durations.
+    expect(out).toContain(" 4m 52s  Phase 1")
+    expect(out).toContain(" 7m 12s  Phase 2")
+    // Closer celebration + total.
+    const closer = lines.at(-1)!
+    expect(closer).toContain("✦ ALL DONE")
+    expect(closer).toContain("2 done")
+    expect(closer).toContain("12m 34s")
   })
 })

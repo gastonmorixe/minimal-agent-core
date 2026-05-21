@@ -5,6 +5,7 @@ import {
   isSubtaskId,
   isTaskId,
   isTaskStatus,
+  localIsoDateTime,
   localIsoSeconds,
   newTopLevelId,
   normalizeIdRef,
@@ -149,6 +150,21 @@ describe("localIsoSeconds", () => {
   })
 })
 
+describe("localIsoDateTime", () => {
+  test("formats `YYYY-MM-DD HH:MM:SS` with single space (no T, no offset)", () => {
+    const out = localIsoDateTime(() => new Date(2026, 4, 20, 18, 7, 42))
+    expect(out).toBe("2026-05-20 18:07:42")
+  })
+  test("pads month, day, and time components to two digits", () => {
+    const out = localIsoDateTime(() => new Date(2026, 0, 3, 9, 5, 7))
+    expect(out).toBe("2026-01-03 09:05:07")
+  })
+  test("uses current time by default", () => {
+    const out = localIsoDateTime()
+    expect(out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // JSONL round-trip
 // ---------------------------------------------------------------------------
@@ -161,6 +177,11 @@ const sampleTask: Task = {
   created_at: "2026-05-12T15:30:00-04:00",
   done_at: null,
   reason: null,
+  // v2 duration fields. Default for a freshly-added todo: never started,
+  // no accumulated active time.
+  started_at: null,
+  last_resumed_at: null,
+  active_ms: 0,
 }
 
 describe("formatTask / parseTask", () => {
@@ -250,6 +271,91 @@ describe("parseTask robustness", () => {
     expect(t).not.toBeNull()
     expect(t!.done_at).toBeNull()
     expect(t!.reason).toBeNull()
+  })
+
+  // ---- v2 forward-compat ----
+
+  test("treats v1 lines (no duration fields) as started_at=null, last_resumed_at=null, active_ms=0", () => {
+    // Exactly the v1 shape — what an existing session file from before
+    // the schema bump contains. Must parse cleanly with zeroed duration
+    // fields so resumed sessions don't crash.
+    const v1Line = JSON.stringify({
+      v: 1,
+      id: "a7b3c4",
+      parent: null,
+      status: "done",
+      title: "Old done task",
+      created_at: "2026-05-12T15:30:00-04:00",
+      done_at: "2026-05-12T15:31:00-04:00",
+      reason: null,
+    })
+    const t = parseTask(v1Line)
+    expect(t).not.toBeNull()
+    expect(t!.started_at).toBeNull()
+    expect(t!.last_resumed_at).toBeNull()
+    expect(t!.active_ms).toBe(0)
+    // Pre-existing fields preserved.
+    expect(t!.id).toBe("a7b3c4")
+    expect(t!.status).toBe("done")
+    expect(t!.done_at).toBe("2026-05-12T15:31:00-04:00")
+  })
+
+  test("round-trips a v2 task with non-zero duration fields", () => {
+    const t: Task = {
+      id: "a7b3c4",
+      parent: null,
+      status: "doing",
+      title: "In flight",
+      created_at: "2026-05-12T15:30:00-04:00",
+      done_at: null,
+      reason: null,
+      started_at: "2026-05-12T15:30:15-04:00",
+      last_resumed_at: "2026-05-12T15:32:00-04:00",
+      active_ms: 47_000,
+    }
+    expect(parseTask(formatTask(t))).toEqual(t)
+  })
+
+  test("rejects negative active_ms (corrupt)", () => {
+    const bad = JSON.stringify({
+      v: 2,
+      id: "a7b3c4",
+      parent: null,
+      status: "done",
+      title: "x",
+      created_at: "2026-05-12T00:00:00-00:00",
+      done_at: null,
+      reason: null,
+      started_at: null,
+      last_resumed_at: null,
+      active_ms: -1,
+    })
+    expect(parseTask(bad)).toBeNull()
+  })
+
+  test("rejects non-finite active_ms (corrupt)", () => {
+    // Note: JSON.stringify converts +Infinity / NaN to "null", so we
+    // craft the line as raw text to keep the bad payload intact.
+    const bad =
+      '{"v":2,"id":"a7b3c4","parent":null,"status":"done","title":"x","created_at":"2026-05-12T00:00:00-00:00","done_at":null,"reason":null,"started_at":null,"last_resumed_at":null,"active_ms":"oops"}'
+    expect(parseTask(bad)).toBeNull()
+  })
+
+  test("rejects non-string started_at / last_resumed_at (corrupt)", () => {
+    const badStarted = JSON.stringify({
+      v: 2,
+      id: "a7b3c4",
+      parent: null,
+      status: "doing",
+      title: "x",
+      created_at: "2026-05-12T00:00:00-00:00",
+      done_at: null,
+      reason: null,
+      started_at: 1700000000000,
+      last_resumed_at: null,
+      active_ms: 0,
+    })
+    expect(parseTask(badStarted)).toBeNull()
   })
 })
 

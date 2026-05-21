@@ -81,6 +81,35 @@ export interface Task {
   done_at: string | null
   /** Optional reason recorded with a `canceled` status. */
   reason: string | null
+  /**
+   * ISO 8601 timestamp of the FIRST `*→doing` transition this task ever
+   * experienced (schema v2+). Set once when the task first enters `doing`
+   * and never overwritten — even on subsequent `doing→todo→doing` cycles.
+   * `null` for tasks that never started. The renderer uses this together
+   * with {@link active_ms} to render duration columns.
+   *
+   * On v1-format input, this parses as `null`.
+   */
+  started_at: string | null
+  /**
+   * ISO 8601 timestamp of the MOST RECENT `*→doing` transition (schema
+   * v2+). Set on every entry into `doing`, cleared on every exit. While
+   * the task is `doing`, live elapsed = {@link active_ms} + (now − this).
+   * `null` whenever the task is not currently `doing`.
+   *
+   * On v1-format input, this parses as `null`.
+   */
+  last_resumed_at: string | null
+  /**
+   * Total accumulated time-in-`doing` (milliseconds), accruing across
+   * pause/resume cycles. On every `doing→*` transition the store adds
+   * `now − last_resumed_at` to this counter. For a task currently in
+   * `doing`, this is the time accumulated UP TO the most recent resume —
+   * live elapsed is `active_ms + (now − last_resumed_at)`.
+   *
+   * On v1-format input, this parses as `0`.
+   */
+  active_ms: number
 }
 
 /**
@@ -102,8 +131,18 @@ export interface NewTaskInput {
  * changes incompatibly. Older lines with a missing or lower version
  * are still parsed best-effort (forward-compatibility within the major
  * series), then re-serialized with the current version on the next write.
+ *
+ * ## Version history
+ *
+ * - **v1** — initial shape: id, parent, status, title, created_at,
+ *   done_at, reason.
+ * - **v2** — adds `started_at`, `last_resumed_at`, `active_ms` for
+ *   per-task duration tracking. v1 files parse forward-compatibly with
+ *   the new fields defaulted to `null` / `0` (best-effort: tasks created
+ *   pre-v2 never accrue retroactive durations, but the renderer simply
+ *   omits the duration column for them).
  */
-export const TASK_LINE_SCHEMA_VERSION = 1
+export const TASK_LINE_SCHEMA_VERSION = 2
 
 // ---------------------------------------------------------------------------
 // Id helpers
@@ -169,9 +208,9 @@ export function subtaskId(parentId: string, counter: number): string {
 
 /**
  * ISO 8601 local-time timestamp with offset, second precision. Used for
- * `created_at` and `done_at`. Matches the memory plugin's
- * `localIsoSeconds` exactly so a future merge of the two formats stays
- * easy.
+ * `created_at`, `done_at`, `started_at`, and `last_resumed_at`. Matches
+ * the memory plugin's `localIsoSeconds` exactly so a future merge of
+ * the two formats stays easy.
  */
 export function localIsoSeconds(now: () => Date = () => new Date()): string {
   const d = now()
@@ -189,6 +228,29 @@ export function localIsoSeconds(now: () => Date = () => new Date()): string {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${sign}${offH}:${offM}`
 }
 
+/**
+ * Local date+time formatted as `"YYYY-MM-DD HH:MM:SS"` (no `T`, no
+ * timezone offset, second precision). Used by the renderer for the
+ * minimalist date-and-year suffix in the task block header.
+ *
+ *     2026-05-20 18:07:42
+ *
+ * Matches the ISO calendar date the user explicitly approved, with the
+ * action time appended in the same `tool-time.ts`-compatible `HH:MM:SS`
+ * format. Pure presentation — never serialized to disk.
+ */
+export function localIsoDateTime(now: () => Date = () => new Date()): string {
+  const d = now()
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0")
+  const yyyy = d.getFullYear()
+  const mm = pad(d.getMonth() + 1)
+  const dd = pad(d.getDate())
+  const hh = pad(d.getHours())
+  const mi = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
+}
+
 // ---------------------------------------------------------------------------
 // Serialization
 // ---------------------------------------------------------------------------
@@ -196,6 +258,10 @@ export function localIsoSeconds(now: () => Date = () => new Date()): string {
 /**
  * On-disk shape — JSON object with a `v` field for schema versioning.
  * Field order is fixed for human-readable diffs.
+ *
+ * v2 added `started_at`, `last_resumed_at`, `active_ms` at the tail of
+ * the field order so v1 lines remain a strict prefix of v2 lines for
+ * easy `diff` reading across the schema bump.
  */
 interface OnDisk {
   v: number
@@ -206,14 +272,20 @@ interface OnDisk {
   created_at: string
   done_at: string | null
   reason: string | null
+  /** v2+ */
+  started_at: string | null
+  /** v2+ */
+  last_resumed_at: string | null
+  /** v2+ */
+  active_ms: number
 }
 
 /**
  * Serialize one task to a JSONL line (no trailing newline).
  *
  * Field order is fixed (`v`, `id`, `parent`, `status`, `title`,
- * `created_at`, `done_at`, `reason`) so git diffs on the file are
- * stable across writers.
+ * `created_at`, `done_at`, `reason`, `started_at`, `last_resumed_at`,
+ * `active_ms`) so git diffs on the file are stable across writers.
  */
 export function formatTask(t: Task): string {
   const line: OnDisk = {
@@ -225,6 +297,9 @@ export function formatTask(t: Task): string {
     created_at: t.created_at,
     done_at: t.done_at,
     reason: t.reason,
+    started_at: t.started_at,
+    last_resumed_at: t.last_resumed_at,
+    active_ms: t.active_ms,
   }
   return JSON.stringify(line)
 }
@@ -234,6 +309,13 @@ export function formatTask(t: Task): string {
  * or lines that don't validate as a task (corrupted file, future schema).
  * The store treats `null` lines as "skip silently" so a partial-write
  * crash doesn't render the whole file unusable.
+ *
+ * Forward-compat: v1 lines (no `started_at` / `last_resumed_at` /
+ * `active_ms`) parse cleanly with those fields defaulted to `null` /
+ * `null` / `0`. The renderer treats `active_ms === 0` as "no duration
+ * to show" and elides the column, so a v1 session resumed under v2
+ * code shows the new column only for tasks that have actually been
+ * started/transitioned under v2.
  */
 export function parseTask(line: string): Task | null {
   const trimmed = line.trim()
@@ -256,6 +338,29 @@ export function parseTask(line: string): Task | null {
   if (o.done_at !== null && o.done_at !== undefined && typeof o.done_at !== "string") return null
   if (o.reason !== null && o.reason !== undefined && typeof o.reason !== "string") return null
 
+  // v2+ fields (optional for forward-compat with v1 lines).
+  if (
+    o.started_at !== null &&
+    o.started_at !== undefined &&
+    typeof o.started_at !== "string"
+  ) {
+    return null
+  }
+  if (
+    o.last_resumed_at !== null &&
+    o.last_resumed_at !== undefined &&
+    typeof o.last_resumed_at !== "string"
+  ) {
+    return null
+  }
+  // `active_ms` may be absent (v1) or any non-negative finite number (v2).
+  // Negative / NaN / +Inf are corrupt and reject; missing is fine.
+  if (o.active_ms !== undefined) {
+    if (typeof o.active_ms !== "number" || !Number.isFinite(o.active_ms) || o.active_ms < 0) {
+      return null
+    }
+  }
+
   return {
     id: o.id,
     parent: o.parent ?? null,
@@ -264,6 +369,9 @@ export function parseTask(line: string): Task | null {
     created_at: o.created_at,
     done_at: (o.done_at as string | null | undefined) ?? null,
     reason: (o.reason as string | null | undefined) ?? null,
+    started_at: (o.started_at as string | null | undefined) ?? null,
+    last_resumed_at: (o.last_resumed_at as string | null | undefined) ?? null,
+    active_ms: typeof o.active_ms === "number" ? o.active_ms : 0,
   }
 }
 

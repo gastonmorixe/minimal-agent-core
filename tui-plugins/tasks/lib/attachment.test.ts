@@ -159,3 +159,75 @@ describe("TasksAttachment", () => {
     expect(text!.startsWith("<tui::")).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Duration column in attachment body (schema v2)
+// ---------------------------------------------------------------------------
+
+describe("renderAttachmentBody — duration column", () => {
+  test("omits the duration column entirely when every task has active_ms === 0", () => {
+    // Freshly-added plan: nothing has been started yet. Keep the
+    // attachment as compact as possible for the model.
+    const s = withRand(["aaaaaa", "bbbbbb"])
+    s.add({ title: "first" })
+    s.add({ title: "second" })
+    const body = renderAttachmentBody(s.list())
+    // No `12s` / `1m02s` / etc. patterns.
+    expect(body).not.toMatch(/\b\d+s\b/)
+    expect(body).not.toMatch(/\b\d+m\d+s\b/)
+    // Title still right after the status column.
+    expect(body).toContain("todo      first")
+    expect(body).toContain("todo      second")
+  })
+
+  test("renders an active_ms column when any task has been started", () => {
+    // One task with non-zero active_ms → column appears for ALL rows
+    // (visually aligned). Zero-duration rows get blanks in the slot.
+    const s = withRand(["aaaaaa", "bbbbbb"])
+    s.add({ title: "first" })
+    s.add({ title: "second" })
+    const t = s.list()[0]
+    // Pump active_ms via a doing→done cycle. Use a fixed clock.
+    const t0 = new Date(2026, 4, 20, 18, 0, 0)
+    const t1 = new Date(2026, 4, 20, 18, 0, 12)
+    let i = 0
+    const ticks = [t0, t1]
+    const s2 = new TaskStore(sid, {
+      home: tmpHome,
+      now: () => ticks[Math.min(i++, ticks.length - 1)],
+    })
+    s2.setStatus(t.id, "doing") // tick t0
+    s2.setStatus(t.id, "done") // tick t1 → +12s active_ms
+    const body = renderAttachmentBody(s2.list())
+    // First task carries `12s`.
+    expect(body).toContain("12s")
+    // Second task's duration slot is blank (just spaces), but the title
+    // still appears at the same column position as the first row's title.
+    const lines = body.split("\n")
+    expect(lines).toHaveLength(2)
+    // Both row titles align horizontally: locate "first" / "second" and
+    // confirm same column offset.
+    const firstTitleCol = lines[0].indexOf("first")
+    const secondTitleCol = lines[1].indexOf("second")
+    expect(secondTitleCol).toBe(firstTitleCol)
+  })
+
+  test("duration column widens to fit the longest formatted value", () => {
+    // Forge a task with a "1h04m" duration; second task has "5s". The
+    // column width is 5 (longest of the two), so 5s pads to "   5s".
+    const s = withRand(["aaaaaa", "bbbbbb"])
+    s.add({ title: "long" })
+    s.add({ title: "short" })
+    const tasks = s.list()
+    tasks[0].active_ms = 3_600_000 + 4 * 60_000 // 1h04m
+    tasks[1].active_ms = 5_000 // 5s
+    const body = renderAttachmentBody(tasks)
+    // Both formatted variants are present.
+    expect(body).toContain("1h04m")
+    expect(body).toContain("5s")
+    // Right-padded so the title column lines up: locate the start of
+    // each row's title and confirm equal offsets.
+    const lines = body.split("\n")
+    expect(lines[0].indexOf("long")).toBe(lines[1].indexOf("short"))
+  })
+})

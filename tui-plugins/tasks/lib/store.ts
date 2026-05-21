@@ -48,6 +48,77 @@ import {
 } from "./parse.ts"
 
 // ---------------------------------------------------------------------------
+// Duration transitions (schema v2+)
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply a status transition to a task, accruing time-in-`doing` and
+ * stamping the relevant ISO timestamps. Pure — returns the next task,
+ * does NOT touch disk.
+ *
+ * The duration model has three fields (schema v2+):
+ *  - `started_at` — set ONCE on first entry into `doing`, never overwritten.
+ *  - `last_resumed_at` — set on EVERY entry into `doing`, cleared on every exit.
+ *  - `active_ms` — cumulative time spent in `doing`. Bumped by
+ *    `nowEpoch − Date.parse(last_resumed_at)` on every `doing → other`
+ *    transition.
+ *
+ * Edge cases:
+ *  - `doing → doing` is a no-op for timing (same as no transition).
+ *  - `* → done` also stamps `done_at` (preserved from pre-v2 behavior).
+ *  - `* → canceled` clears `reason` only if the caller doesn't preserve it.
+ *  - When `last_resumed_at` is missing or unparseable on a `doing →
+ *    other` transition (resumed v1 file, file corruption), no time is
+ *    accrued — `active_ms` stays put. Better to lose a few seconds of
+ *    history than to inject NaN into the counter.
+ *
+ * Exported for tests; the store uses it via {@link TaskStore.setStatus}
+ * and {@link TaskStore.start}.
+ */
+export function applyStatusTransition(
+  prev: Task,
+  next: TaskStatus,
+  nowIso: string,
+  nowEpochMs: number,
+  reason?: string | null,
+): Task {
+  let started_at = prev.started_at
+  let last_resumed_at = prev.last_resumed_at
+  let active_ms = prev.active_ms
+  const wasDoing = prev.status === "doing"
+  const willBeDoing = next === "doing"
+
+  if (!wasDoing && willBeDoing) {
+    // Enter `doing` from anywhere else: set started_at if first time,
+    // and always set last_resumed_at to now.
+    if (started_at === null) started_at = nowIso
+    last_resumed_at = nowIso
+  } else if (wasDoing && !willBeDoing) {
+    // Leave `doing`: accrue the in-flight chunk into active_ms and
+    // clear last_resumed_at. If last_resumed_at is somehow null /
+    // unparseable, skip the accrual (defensive on resumed v1 data).
+    if (last_resumed_at !== null) {
+      const resumedMs = Date.parse(last_resumed_at)
+      if (Number.isFinite(resumedMs) && nowEpochMs >= resumedMs) {
+        active_ms += nowEpochMs - resumedMs
+      }
+    }
+    last_resumed_at = null
+  }
+  // Same-status (doing → doing, todo → todo, etc.) — no timing change.
+
+  return {
+    ...prev,
+    status: next,
+    done_at: next === "done" ? prev.done_at ?? nowIso : null,
+    reason: next === "canceled" ? (reason?.trim() || prev.reason || null) : null,
+    started_at,
+    last_resumed_at,
+    active_ms,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // View types
 // ---------------------------------------------------------------------------
 
@@ -274,6 +345,12 @@ export class TaskStore {
       } while (usedIds.has(id))
     }
 
+    // Timing fields (schema v2). For the rare case of `add({status:
+    // "doing"})` — opening straight into the running state — we stamp
+    // started_at and last_resumed_at to created_at so the live elapsed
+    // ticks from the same moment. Default `status: "todo"` (the only
+    // common path) leaves the duration fields zeroed.
+    const startedInDoing = status === "doing"
     const task: Task = {
       id,
       parent: input.parent ?? null,
@@ -282,6 +359,9 @@ export class TaskStore {
       created_at,
       done_at: status === "done" ? created_at : null,
       reason: null,
+      started_at: startedInDoing ? created_at : null,
+      last_resumed_at: startedInDoing ? created_at : null,
+      active_ms: 0,
     }
 
     // Insertion point.
@@ -352,23 +432,22 @@ export class TaskStore {
   }
 
   /**
-   * Change a task's status. `done_at` is stamped when flipping TO `done`
-   * and cleared when flipping AWAY from `done`. `reason` is set only
-   * when flipping TO `canceled`.
+   * Change a task's status. Delegates to {@link applyStatusTransition},
+   * which:
+   *  - stamps `done_at` when flipping TO `done` (and clears when flipping AWAY)
+   *  - sets `reason` only when flipping TO `canceled`
+   *  - stamps `started_at` on FIRST entry into `doing` (preserves on repeat)
+   *  - stamps `last_resumed_at` on EVERY entry into `doing`, clears on exit
+   *  - accrues `active_ms += now − last_resumed_at` on every `doing → other`
    */
   setStatus(ref: string | number, status: TaskStatus, reason?: string | null): Task | null {
     const tasks = this.list()
     const target = this.resolveFrom(ref, tasks)
     if (target === null) return null
     const idx = tasks.indexOf(target)
-    const now = localIsoSeconds(this.deps.now)
+    const { nowIso, nowMs } = this.nowPair()
 
-    const next: Task = {
-      ...target,
-      status,
-      done_at: status === "done" ? target.done_at ?? now : null,
-      reason: status === "canceled" ? (reason?.trim() || target.reason || null) : null,
-    }
+    const next = applyStatusTransition(target, status, nowIso, nowMs, reason)
     tasks[idx] = next
     this.writeAll(tasks)
     return next
@@ -387,28 +466,31 @@ export class TaskStore {
     const tasks = this.list()
     const target = this.resolveFrom(ref, tasks)
     if (target === null) return null
-    const now = localIsoSeconds(this.deps.now)
+    const { nowIso, nowMs } = this.nowPair()
 
     if (!opts.parallel) {
+      // Demoted siblings: route through applyStatusTransition so their
+      // in-flight `active_ms` chunk gets accrued before flipping back to
+      // `todo`. Pre-v2 this was a plain `{...t, status: "todo"}` which
+      // silently discarded the time the sibling had spent in `doing`.
       const scope = target.parent // null for top-level scope, parentId for subtask scope
       for (let i = 0; i < tasks.length; i++) {
         const t = tasks[i]
         if (t.id === target.id) continue
         if (t.parent === scope && t.status === "doing") {
-          tasks[i] = { ...t, status: "todo" }
+          tasks[i] = applyStatusTransition(t, "todo", nowIso, nowMs)
         }
       }
     }
 
     const idx = tasks.indexOf(target)
-    const next: Task = { ...target, status: "doing", done_at: null, reason: null }
     // Re-find idx because `target` is the original; the slice that
     // contains it may have been swapped via the demotion loop above only
     // if the original was already demoted — which is impossible since we
     // skip target via id-equality. So idx is still valid.
+    const next = applyStatusTransition(target, "doing", nowIso, nowMs)
     tasks[idx] = next
     this.writeAll(tasks)
-    void now // reserved for a future "started_at" field; not on disk yet.
     return next
   }
 
@@ -549,5 +631,25 @@ export class TaskStore {
     const dir = dirname(this.path)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     writeFileSync(this.path, serializeFile(tasks), "utf8")
+  }
+
+  /**
+   * Resolve "now" exactly once into a paired ISO+epoch tuple. Using a
+   * single sample for both representations avoids tiny millisecond
+   * drift between the ISO timestamp stamped on `started_at` /
+   * `last_resumed_at` and the epoch number fed to
+   * {@link applyStatusTransition}'s accrual math (which has to subtract
+   * `Date.parse(last_resumed_at)` from `nowMs` and would underflow by
+   * 1ms if the two samples crossed a second boundary).
+   *
+   * Both come from the same injected `deps.now` (or wall clock).
+   */
+  private nowPair(): { nowIso: string; nowMs: number } {
+    const nowDate = this.deps.now?.() ?? new Date()
+    const nowMs = nowDate.getTime()
+    // Hand the same Date back to localIsoSeconds so the ISO and epoch
+    // are derived from one observation.
+    const nowIso = localIsoSeconds(() => nowDate)
+    return { nowIso, nowMs }
   }
 }
