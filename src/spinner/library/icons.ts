@@ -32,19 +32,28 @@ export const ICON_NETWORK = "◉" // U+25C9 — fisheye, reads as "transmitting"
 export const ICON_SQUARE = "■" // U+25A0 — black square, BMP narrow, no emoji promotion
 export const ICON_TRIANGLE_RIGHT = "▸" // U+25B8 — small triangle, "running"
 
-// ─── BMP-narrow with VS-15 (force text presentation) ────────────────────────
-// These codepoints have `Emoji_Presentation = Yes` in the Unicode emoji-data
-// table, so terminals render them as 2-cell color emoji by default. The
-// `\uFE0E` (Variation Selector-15) suffix forces text presentation (1
-// cell). Our `effectiveDisplayWidth` treats `U+FE0E` as zero-width (see
-// `src/term-width.ts:44`, `src/nerd-glyph-width.ts:123`), so the pad math
-// for the spinner's off-frame matches the rendered text width.
+// ─── Square pair for size-pulse rotors ──────────────────────────────────────
+// Both square codepoints have `Emoji_Presentation = No` in Unicode
+// emoji-data, so they default to text presentation in every terminal — no
+// VS-15 dance required. An earlier iteration used ◼ U+25FC + ◾ U+25FE with
+// `\uFE0E` suffixes, but iTerm (and other terminals) do not reliably honor
+// VS-15 for those "medium square" codepoints, causing the `tool.running`
+// label column to slide 1 cell between rotor frames when one rendered as
+// text (1 cell) and the other as color emoji (2 cells). Sticking to
+// `Emoji_Presentation=No` codepoints avoids the whole question.
+//
+// `ICON_PAUSE` (⏸ U+23F8) still has `Emoji_Presentation=Yes`, so it
+// retains its VS-15 suffix. Our `effectiveDisplayWidth` treats `U+FE0E` as
+// zero-width (see `src/term-width.ts:44`, `src/nerd-glyph-width.ts:123`),
+// so the pad math for the spinner's off-frame matches the rendered text
+// width when the suffix IS honored. If the same iTerm/VS-15 issue ever
+// shows up for the pause icon, swap to a non-emoji alternative.
 
-/** Black medium square (big) — pair with `ICON_SQUARE_SMALL` for size-pulse. */
-export const ICON_SQUARE_BIG = "\u25FC\uFE0E" // ◼ U+25FC + VS-15
+/** Black square (big) — pair with `ICON_SQUARE_SMALL` for size-pulse. */
+export const ICON_SQUARE_BIG = "■" // U+25A0 — Emoji_Presentation=No, 1-cell text
 
-/** Black medium-small square (small) — pair with `ICON_SQUARE_BIG`. */
-export const ICON_SQUARE_SMALL = "\u25FE\uFE0E" // ◾ U+25FE + VS-15
+/** Black small square (small) — pair with `ICON_SQUARE_BIG`. */
+export const ICON_SQUARE_SMALL = "▪" // U+25AA — Emoji_Presentation=No, 1-cell text
 
 /** Pause symbol — calm "waiting / cooldown" indicator. */
 export const ICON_PAUSE = "\u23F8\uFE0E" // ⏸ U+23F8 + VS-15
