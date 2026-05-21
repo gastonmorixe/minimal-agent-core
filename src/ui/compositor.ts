@@ -337,6 +337,22 @@ export class Compositor {
   }
 
   setLiveArea(lines: string[], cursor: { row: number; col: number } | null): void {
+    // Snapshot the PREVIOUSLY-drawn lines/cursor BEFORE overwriting
+    // `lastLines`/`lastCursor`. `eraseLiveSeq` needs them to re-measure
+    // the physical-row span of the still-on-screen live area under the
+    // CURRENT cols — which may be smaller than `lastDrawColumns`, in
+    // which case lines that exceeded the new cols have wrapped on the
+    // terminal side, putting the cursor at a lower physical row than
+    // the stored logical `cursorRowInLive`. Walking up by the stale
+    // logical count would leave the top of the reflowed live area
+    // unerased (orphan), which subsequent `writeBufferedStream` calls
+    // scroll into permanent scrollback as duplicated status / editor
+    // rows. The fallback in `eraseLiveSeq` reads `this.lastLines`/
+    // `this.lastCursor`, which is correct for `writeBufferedStream` /
+    // `withSuspendedLiveArea` (they don't reassign), but NOT for the
+    // `setLiveArea` path — hence the explicit hand-off here.
+    const prevLines = this.lastLines
+    const prevCursor = this.lastCursor
     const nextLines = [...lines]
     const nextCursor = cursor ? { ...cursor } : null
     const nextKey = liveAreaKey(nextLines, nextCursor)
@@ -354,7 +370,13 @@ export class Compositor {
     const parts: string[] = []
     parts.push(this.bsu)
     parts.push("\x1b[?25l")
-    parts.push(this.eraseLiveSeq({ includeSepRows: !repaintExistingLiveArea }))
+    parts.push(
+      this.eraseLiveSeq({
+        includeSepRows: !repaintExistingLiveArea,
+        drawnLines: prevLines,
+        drawnCursor: prevCursor,
+      }),
+    )
     parts.push(this.drawLiveSeq({ reuseExistingGap: repaintExistingLiveArea }))
     parts.push(this.esu)
     this.output.write(parts.join(""))
@@ -509,17 +531,48 @@ export class Compositor {
 
   // ------------------------- internal sequences -------------------------
 
-  private eraseLiveSeq(opts: { includeSepRows?: boolean } = {}): string {
+  private eraseLiveSeq(
+    opts: {
+      includeSepRows?: boolean
+      /**
+       * Previously-drawn lines / cursor. Pass explicitly from
+       * `setLiveArea` because it overwrites `this.lastLines` /
+       * `this.lastCursor` BEFORE calling here.
+       * `writeBufferedStream` and `withSuspendedLiveArea` leave those
+       * fields intact (they hold the currently-on-screen lines), so
+       * they can omit the option and the fallback to `this.lastLines`
+       * / `this.lastCursor` is correct for them.
+       */
+      drawnLines?: string[]
+      drawnCursor?: { row: number; col: number } | null
+    } = {},
+  ): string {
     if (this.liveHeightValue === 0) {
       // No live area drawn yet; nothing to erase. Cursor is at the natural
       // stream position already.
       return ""
     }
     const includeSepRows = opts.includeSepRows !== false
+    const drawnLines = opts.drawnLines ?? this.lastLines
+    const drawnCursor = opts.drawnCursor !== undefined ? opts.drawnCursor : this.lastCursor
     const parts: string[] = []
     // Move from editor cursor row up to top of live area, col 0.
-    if (this.cursorRowInLive > 0) {
-      parts.push(`\x1b[${this.cursorRowInLive}A`)
+    //
+    // The walk-up MUST count physical rows under CURRENT cols, not the
+    // logical `cursorRowInLive` we stored at draw time. Under stable
+    // cols the two agree (each drawn line fits in `lastDrawColumns`
+    // cells, so logical row count == physical row count). Under cols
+    // drift smaller than `lastDrawColumns`, lines whose `displayWidth`
+    // now exceeds the new cols have wrapped on the terminal side,
+    // pushing the cursor's physical row down — walking up by the
+    // logical count leaves the top of the reflowed live area
+    // unerased, and subsequent stream chunks scroll those owned rows
+    // into permanent scrollback as orphans. (User-reported May 21
+    // 2026: duplicated status rows pile into scrollback when typing
+    // / waiting for response in a narrowed terminal.)
+    const walkUpRows = this.computePhysicalCursorRowInLive(drawnLines, drawnCursor)
+    if (walkUpRows > 0) {
+      parts.push(`\x1b[${walkUpRows}A`)
     }
     parts.push("\r")
     // Stream writes must walk back over any rows that `drawLiveSeq`
@@ -563,6 +616,68 @@ export class Compositor {
     this.drawnLiveKey = null
     if (includeSepRows) this.sepRowsAboveLive = 0
     return parts.join("")
+  }
+
+  /**
+   * Cursor's physical-row offset from the top of the previously-drawn
+   * live area, given the effective cols RIGHT NOW.
+   *
+   * Mirrors {@link EditorRenderer}'s wrap math (and {@link wrapRows}
+   * in `term-width.ts`) so we agree with the renderer that produced
+   * the cells in the first place. Used by {@link eraseLiveSeq} to
+   * walk the cursor up to the actual top of the on-screen live area,
+   * even when the terminal has reflowed previously-drawn cells under
+   * a smaller cols since the last paint.
+   *
+   * Behavior:
+   *   - Stable cols (`cols === lastDrawColumns`): every drawn line is
+   *     ≤ cols cells wide, so each contributes exactly 1 physical row;
+   *     the result equals the stored logical `cursor.row`, which is
+   *     what `cursorRowInLive` was set to in {@link drawLiveSeq}. No
+   *     behavioral change vs the pre-fix code.
+   *   - Cols drift smaller than `lastDrawColumns`: lines whose
+   *     `displayWidth` exceeds the new cols wrap on the terminal
+   *     side. Each such line above the cursor contributes
+   *     `ceil(width / cols) - 1` extra physical rows; within the
+   *     cursor's own line, `floor(cursor.col / cols)` extra wrap
+   *     chunks sit above the cursor. The result is the correct
+   *     physical walk-up to reach the top of the reflowed live area.
+   *   - Cols drift larger than `lastDrawColumns`: lines fit unchanged
+   *     (they were sized at the smaller `lastDrawColumns` and the
+   *     terminal won't pack them tighter), so the result still
+   *     equals the logical `cursor.row`. No-op.
+   *
+   * Assumes the terminal preserved the cursor's CHARACTER position
+   * across the resize — true for iTerm2, kitty, GNOME Terminal,
+   * xterm, tmux, macOS Terminal.app, etc. On a terminal that pins
+   * the cursor to the same physical row instead, this can overshoot
+   * by the wrap delta and the subsequent `\x1b[J` would clear that
+   * many rows of scrollback. The overshoot is bounded by
+   * `physicalLiveArea - cursorRowInLive` (a handful of rows in
+   * practice) and is vastly better than the pre-fix orphan
+   * accumulation, where every cols-drifting paint left rows in
+   * scrollback unbounded across the lifetime of the session.
+   *
+   * Falls back to `this.cursorRowInLive` (legacy logical count) when
+   * the cursor / lines snapshot is unusable (cursor null,
+   * `effectiveColumns()` is 0, or drawn lines absent).
+   */
+  private computePhysicalCursorRowInLive(
+    drawnLines: string[],
+    drawnCursor: { row: number; col: number } | null,
+  ): number {
+    const cols = this.effectiveColumns()
+    if (cols <= 0 || !drawnCursor) return this.cursorRowInLive
+    let phys = 0
+    const upTo = Math.min(drawnCursor.row, drawnLines.length)
+    for (let i = 0; i < upTo; i++) {
+      const line = drawnLines[i]
+      if (line === undefined) break
+      const w = displayWidth(line)
+      phys += Math.max(1, Math.ceil(w / cols))
+    }
+    if (drawnCursor.col > 0) phys += Math.floor(drawnCursor.col / cols)
+    return phys
   }
 
   private drawLiveSeq(opts: { reuseExistingGap?: boolean } = {}): string {

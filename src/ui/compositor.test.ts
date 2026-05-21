@@ -685,6 +685,176 @@ describe("Compositor (HARD RULE: never touch scrollback on resize)", () => {
   })
 })
 
+describe("Compositor (eraseLiveSeq wrap-aware walk-up)", () => {
+  // Regression for user-reported bug May 21 2026: when the user
+  // resized the terminal SMALLER while a status row was showing AND
+  // the prompt input had content, every status tick / keystroke
+  // committed a duplicate status row to scrollback, piling up many
+  // copies over time. Root cause: `eraseLiveSeq`'s walk-up used the
+  // LOGICAL `cursorRowInLive` saved at draw time — under a
+  // width-shrinking resize, previously-drawn wide lines (e.g. a
+  // 60-cell status row) wrap on the terminal side, pushing the
+  // cursor's PHYSICAL row down. Walking up the stale logical count
+  // landed the cursor inside the reflowed live area, not at its
+  // top; `\x1b[J` cleared from there down, and the surviving top
+  // rows became orphans that subsequent `writeBufferedStream` calls
+  // scrolled into permanent scrollback. The fix re-measures the
+  // walk-up in physical rows under current cols using the same
+  // wrap math `EditorRenderer` uses.
+  //
+  // Tests assert on the byte-level CSI walk-up `\x1b[<n>A` because
+  // FakeTerminal doesn't model cols-change reflow. A separate tmux
+  // smoke driver (tmp/resize-orphan-tmux-driver.ts) exercises the
+  // full path end-to-end.
+  it("walks up logical rows under stable cols (no wrap, no behavior change)", () => {
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    c.setLiveArea(["status row", "", "", "❯ abc"], { row: 3, col: 5 })
+    cap.writes.length = 0
+    // Force a re-paint with different content (drawnLiveKey dedup
+    // would otherwise short-circuit).
+    c.setLiveArea(["status row changed", "", "", "❯ abc"], { row: 3, col: 5 })
+    const out = joined(cap)
+    // All lines fit in cols=100; logical == physical → walk up cursor.row=3.
+    expect(out).toContain("\x1b[3A")
+    // Sanity: no surprise extra walk-up.
+    expect(out).not.toContain("\x1b[4A")
+  })
+
+  it("walks up extra rows when previously-drawn lines wrap under new cols", () => {
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    // ~63-cell status row — fits in cols=100 (1 row), wraps to 2
+    // rows under cols=40.
+    const wideStatus = "Sending request ↑ 266.1 KB · 181.0 KB/s · api.anthropic.com (1s)"
+    c.setLiveArea([wideStatus, "", "", "❯ abc"], { row: 3, col: 5 })
+    expect(c.liveHeight).toBe(4)
+
+    // Simulate "user resized to cols=40". On the terminal side the
+    // wide status row reflows to 2 physical rows; cursor (which sat
+    // at end of editor under cols=100) follows its character and
+    // is now at physical row 4 (rows 0–1 are wrapped status, 2 is
+    // blank, 3 is blank, 4 is editor).
+    cap.output.columns = 40
+    cap.writes.length = 0
+    // Different content so drawnLiveKey dedup doesn't short-circuit.
+    c.setLiveArea(["truncated", "", "", "❯ abc"], { row: 3, col: 5 })
+    const out = joined(cap)
+    // Walk-up math:
+    //   line 0 (wideStatus, ~63 cells): ceil(63/40) = 2 rows.
+    //   line 1 (""):  max(1, 0) = 1 row.
+    //   line 2 (""):  max(1, 0) = 1 row.
+    //   cursor.col = 5 < 40 → +0.
+    //   Total physical walk-up: 4 rows.
+    expect(out).toContain("\x1b[4A")
+    // The stale logical count 3 MUST NOT appear (would leave the
+    // top wrap row of the old status as an orphan).
+    expect(out).not.toContain("\x1b[3A")
+  })
+
+  it("accounts for the cursor's intra-line wrap chunk", () => {
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    // Editor line wider than the future smaller cols; cursor.col
+    // mid-line so wrap chunks sit above the cursor under reflow.
+    // The renderer normally pre-wraps editor content, but under
+    // cols drift the previously-drawn line may have been wider
+    // than the new cols.
+    const wideEditor = "❯ " + "x".repeat(98) // 100 cells
+    c.setLiveArea(["status", "", "", wideEditor], { row: 3, col: 60 })
+    cap.output.columns = 40
+    cap.writes.length = 0
+    c.setLiveArea(["status", "", "", "❯ shorter"], { row: 3, col: 5 })
+    const out = joined(cap)
+    // Walk-up math under cols=40 using the PREVIOUS drawn lines:
+    //   line 0 ("status", 6 cells): max(1, ceil(6/40)) = 1 row.
+    //   line 1 (""):  1 row.
+    //   line 2 (""):  1 row.
+    //   cursor.col = 60 → floor(60/40) = 1 (cursor sits on the
+    //   2nd wrap chunk of its line).
+    //   Total physical walk-up: 4 rows.
+    expect(out).toContain("\x1b[4A")
+  })
+
+  it("does NOT inflate walk-up when cols grew larger than lastDrawColumns", () => {
+    const cap = makeOutput()
+    cap.output.columns = 40
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    // Status fits in cols=40 (≤ 40 cells).
+    c.setLiveArea(["status row", "", "", "❯ abc"], { row: 3, col: 5 })
+    // Cols GROWS to 100. No reflow.
+    cap.output.columns = 100
+    cap.writes.length = 0
+    c.setLiveArea(["status row again", "", "", "❯ abc"], { row: 3, col: 5 })
+    const out = joined(cap)
+    // Each line still fits in 1 row under cols=100; walk-up stays
+    // at logical cursor.row=3.
+    expect(out).toContain("\x1b[3A")
+    expect(out).not.toContain("\x1b[4A")
+  })
+
+  it("ignores ANSI styling when computing the wrap math", () => {
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    // Status row with ANSI styling but only 50 visible cells.
+    const styled = `\x1b[38;5;208m${"a".repeat(50)}\x1b[0m`
+    c.setLiveArea([styled, "", "", "❯ abc"], { row: 3, col: 5 })
+    cap.output.columns = 40
+    cap.writes.length = 0
+    c.setLiveArea(["x", "", "", "❯ abc"], { row: 3, col: 5 })
+    const out = joined(cap)
+    // displayWidth strips ANSI; 50 cells under cols=40 → ceil(50/40)=2 rows.
+    //   line 0: 2 rows. line 1: 1 row. line 2: 1 row. cursor.col=5: +0.
+    //   walk-up: 4 rows.
+    expect(out).toContain("\x1b[4A")
+  })
+
+  it("first-paint after mount still emits zero walk-up (no drawn area yet)", () => {
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    cap.writes.length = 0
+    c.setLiveArea(["❯ "], { row: 0, col: 2 })
+    const out = joined(cap)
+    // First paint: liveHeightValue==0 → eraseLiveSeq early-returns ""
+    // → no walk-up emitted at all.
+    expect(out).not.toMatch(/\x1b\[\d+A/)
+  })
+
+  it("writeBufferedStream uses physical walk-up too (no orphan leak via stream chunks)", () => {
+    // The user's symptom was specifically about stream chunks
+    // committing the orphan top of a reflowed live area into
+    // scrollback. Both call sites of `eraseLiveSeq` must use the
+    // physical walk-up.
+    const cap = makeOutput()
+    cap.output.columns = 100
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    const wideStatus = "X".repeat(63)
+    c.setLiveArea([wideStatus, "", "", "❯ abc"], { row: 3, col: 5 })
+    // Simulate cols dropping to 40 between writes — without a new
+    // setLiveArea call in between, so we exercise the
+    // writeBufferedStream → eraseLiveSeq path under drift.
+    cap.output.columns = 40
+    cap.writes.length = 0
+    c.writeStream("hello\n")
+    const out = joined(cap)
+    // Same walk-up math as the setLiveArea case: 4 physical rows.
+    expect(out).toContain("\x1b[4A")
+    expect(out).not.toContain("\x1b[3A")
+  })
+})
+
 describe("updateStreamCol", () => {
   it("advances col by visible width when chunk has no newline", () => {
     expect(updateStreamCol("hello", 0)).toBe(5)
