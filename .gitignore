@@ -1,19 +1,22 @@
-node_modules/**/*
+# dependencies
 node_modules/
-.net-dbg
-.node-net-dbg
-.DS_Store
+
+# private / local-only (research notes, plans, logbooks, internal docs)
+private/
+research/
+work/
+PROGRESS.md
+docs/internal/
+.swarm/
+
+# runtime / generated
 tmp/
 .logs/
+.net-dbg/
+.node-net-dbg/
 *.log
-research/nerdfonts/repo/
-.swarm/
-work/
-tmp/
-.DS_Store
-research/
-docs/internal/
 
-# vim swap files
+# editor / OS
+.DS_Store
 *.swp
 *.swo
