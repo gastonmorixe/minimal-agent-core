@@ -18,7 +18,13 @@
  * @module live-area-providers
  */
 
-import { type DiagnosticBus, Facility, getDiagnosticBus, Severity } from "./diagnostic-bus.ts"
+import {
+  createPluginLogger,
+  type DiagnosticBus,
+  Facility,
+  getDiagnosticBus,
+  Severity,
+} from "./diagnostic-bus.ts"
 import type { EventBus } from "./plugins/event-bus.ts"
 import type { ResolvedLiveAreaSlot } from "./plugins/types.ts"
 
@@ -313,6 +319,10 @@ export class LiveAreaScheduler {
       env: { ...process.env } as Record<string, string>,
       abort: ac.signal,
       stderr: process.stderr,
+      // Plugin-scoped logger auto-prefixes source with this slot's
+      // plugin id. Slot handlers that emit `ctx.log.warn("api-fail", ...)`
+      // get the emitted source `<pluginId>.api-fail` on the diag bus.
+      log: createPluginLogger(s.slot.pluginId, this.diagnosticBus),
       tick,
     }
 

@@ -59,6 +59,7 @@ function writeConfig(extra: Record<string, unknown> = {}) {
 function makeCtx(input: Record<string, unknown>): TUIContext {
   const noop = (_chunk: unknown) => true
   const fakeStream = { write: noop } as unknown as NodeJS.WriteStream
+  const noopLog = () => {}
   return {
     trigger: { type: "tool", name: "WebSearch", input, tool_use_id: "toolu_test" },
     packageDir: join(import.meta.dirname ?? __dirname, ".."),
@@ -68,6 +69,16 @@ function makeCtx(input: Record<string, unknown>): TUIContext {
     stdout: fakeStream,
     stdin: process.stdin,
     stderr: fakeStream,
+    log: {
+      emergency: noopLog,
+      alert: noopLog,
+      critical: noopLog,
+      error: noopLog,
+      warn: noopLog,
+      notice: noopLog,
+      info: noopLog,
+      debug: noopLog,
+    },
   }
 }
 

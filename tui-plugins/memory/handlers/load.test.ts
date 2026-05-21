@@ -38,6 +38,7 @@ afterEach(() => {
 })
 
 function makeCtx(home: string, cwd: string): PromptFragmentContext {
+  const noop = () => {}
   return {
     packageDir: "/fake/plugin",
     cwd,
@@ -45,6 +46,16 @@ function makeCtx(home: string, cwd: string): PromptFragmentContext {
     sessionId: "test-session",
     abort: new AbortController().signal,
     stderr: process.stderr as NodeJS.WriteStream,
+    log: {
+      emergency: noop,
+      alert: noop,
+      critical: noop,
+      error: noop,
+      warn: noop,
+      notice: noop,
+      info: noop,
+      debug: noop,
+    },
   }
 }
 

@@ -221,10 +221,28 @@ export interface RefreshResult {
   reason: string
 }
 
-/** Default logger writes to stderr (off by default unless DEBUG=1). */
+/**
+ * Default logger routes through the singleton diagnostic bus (file
+ * log + TUI surface). When DEBUG=1 we also keep a verbose-info trail;
+ * otherwise summary-refresh diagnostics ride the Notice severity so
+ * they show up in the log file but stay out of the TUI surface (which
+ * only surfaces Warning + more severe).
+ */
 function defaultLog(msg: string): void {
-  if (process.env.DEBUG === "1") {
-    process.stderr.write(`[memory-summary] ${msg}\n`)
+  // Lazy import: keep `summary-refresh.ts` lightweight when the
+  // optional dependency surface (diagnostic-bus) isn't loaded yet.
+  // Failing the import = silently drop; this is best-effort logging.
+  try {
+    // biome-ignore lint/suspicious/noExplicitAny: lazy import for optional dep
+    void import("../../../src/diagnostic-bus.ts").then(({ diag }: any) => {
+      if (process.env.DEBUG === "1") {
+        diag.info("memory.summary-refresh", msg)
+      } else {
+        diag.notice("memory.summary-refresh", msg)
+      }
+    })
+  } catch {
+    // Logging is best-effort and must never throw.
   }
 }
 

@@ -10,6 +10,13 @@
  * @module plugins/types
  */
 
+import type { PluginLogger } from "../diagnostic-bus.ts"
+
+// Re-export for plugin authors; they can `import type { PluginLogger }
+// from "<minimal-agent>/src/plugins/types"` without reaching into
+// `diagnostic-bus`.
+export type { PluginLogger } from "../diagnostic-bus.ts"
+
 // ---------------------------------------------------------------------------
 // Trigger shapes
 // ---------------------------------------------------------------------------
@@ -68,8 +75,25 @@ export interface TUIContext {
   stdout: NodeJS.WriteStream
   /** Terminal stdin handle for interactive tool-call handlers. */
   stdin: NodeJS.ReadStream
-  /** Debug log stream. */
+  /**
+   * Debug log stream.
+   *
+   * @deprecated Prefer `log` for structured diagnostics. `stderr` writes
+   * land in the compositor's scrollback (in-process) which is exactly
+   * the spam-above-the-prompt failure mode we want to avoid. Kept for
+   * backwards compatibility; remove in a future cut.
+   */
   stderr: NodeJS.WriteStream
+  /**
+   * Plugin-scoped diagnostic logger. Source is auto-prefixed with this
+   * plugin's id. Events route to the file log (`~/.minimal-agent/logs/...`),
+   * the TUI "last warn / last error" surface, and (opt-in) stderr.
+   *
+   * Use this for ANY warning / error / info that the user or operator
+   * might care about. Don't write to `stderr` for diagnostics — it
+   * pollutes scrollback.
+   */
+  log: PluginLogger
 }
 
 // ---------------------------------------------------------------------------
@@ -322,8 +346,14 @@ export interface PromptFragmentContext {
   sessionId?: string
   /** Aborts when the fragment's timeout fires. */
   abort: AbortSignal
-  /** Diagnostic stream. */
+  /**
+   * Diagnostic stream.
+   *
+   * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
+   */
   stderr: NodeJS.WriteStream
+  /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
+  log: PluginLogger
 }
 
 /**
@@ -386,8 +416,14 @@ export interface EventHandlerContext<TPayload = unknown> {
   emit: (event: string, payload?: unknown) => void
   /** Aborts when the agent is shutting down. */
   abort: AbortSignal
-  /** Debug log stream. */
+  /**
+   * Debug log stream.
+   *
+   * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
+   */
   stderr: NodeJS.WriteStream
+  /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
+  log: PluginLogger
 }
 
 /**
@@ -521,8 +557,14 @@ export interface LiveAreaHandlerContext {
   env: Record<string, string>
   /** Aborts when the per-invocation timeout fires or the REPL is closing. */
   abort: AbortSignal
-  /** Diagnostic stream. Writers should be lightweight; the live area is hot. */
+  /**
+   * Diagnostic stream.
+   *
+   * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
+   */
   stderr: NodeJS.WriteStream
+  /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
+  log: PluginLogger
   /**
    * Monotonically increasing tick counter for this slot. `0` for the
    * first call, `1` for the second, etc. Useful for slots that want to
@@ -905,8 +947,14 @@ export interface HookHandlerContext {
   abort: AbortSignal
   /** Resolved priority (post-clamping). */
   priority: number
-  /** Diagnostic stream. */
+  /**
+   * Diagnostic stream.
+   *
+   * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.
+   */
   stderr: NodeJS.WriteStream
+  /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
+  log: PluginLogger
 }
 
 /**

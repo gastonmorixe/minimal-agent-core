@@ -28,18 +28,23 @@
 
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs"
 import { join, resolve, isAbsolute } from "node:path"
+import { createPluginLogger } from "../diagnostic-bus.ts"
 import { paletteEnvJson } from "../palette.ts"
 import { EventBus, type EventContext } from "./event-bus.ts"
+import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
+import { Hooks } from "./hooks/hooks.ts"
 import { parseManifest, ManifestError } from "./manifest.ts"
 import type {
   EventHandler,
   EventHandlerContext,
+  HookHandlerContext,
   LiveAreaHandler,
   LiveAreaHandlerContext,
   LoadedPlugin,
   ManifestEventSubscription,
   ManifestFile,
   ManifestHandler,
+  ManifestHookSubscription,
   ManifestLiveAreaSlot,
   ManifestMode,
   ManifestPromptFragment,
@@ -47,12 +52,34 @@ import type {
   PromptFragmentHandler,
   ResolvedEventSub,
   ResolvedHandler,
+  ResolvedHookSub,
   ResolvedLiveAreaSlot,
   TUIContext,
   TUIHandler,
   TUIResult,
   TUITrigger,
 } from "./types.ts"
+
+/**
+ * Module-handler default-export signature for hook subscriptions.
+ *
+ * Receives the hook payload and an {@link HookHandlerContext}. May return:
+ * - `void`            — pass-through (no mutation, no halt). The default.
+ * - For chain channels: a {@link ChainResult} (currently unused since the
+ *   only registered channels are broadcast-sync, but we type the return
+ *   loosely so future chain channels work without changing callers).
+ * - For broadcast-sync channels with a mutable `result` holder in the
+ *   payload: mutate `payload.result` directly. The return value is
+ *   ignored.
+ *
+ * Subprocess handlers are NOT currently supported (the manifest parser
+ * accepts them, but the loader logs and skips them — chain/sync handlers
+ * require synchronous, in-process invocation that subprocess can't deliver).
+ */
+export type HookHandler<TPayload = unknown> = (
+  payload: TPayload,
+  ctx: HookHandlerContext,
+) => unknown
 
 /**
  * A mode declaration as exposed by the loader to consumers.
@@ -193,6 +220,14 @@ export class PluginLoader {
   private readonly defaultModeId: string | null
   private readonly timeoutMs: number
   private readonly eventBus: EventBus
+  /**
+   * Hooks facade. Wraps {@link eventBus} (for `broadcast-async` channels)
+   * AND an internal {@link HookBus} (for `chain`, `broadcast-sync`, `stream`
+   * channels). Plugin `manifest.hooks` entries are subscribed here at load
+   * time. Host code (the editor's key dispatch, REPL lifecycle) emits
+   * through the same facade so plugins see a uniform surface.
+   */
+  private readonly hooksFacade: Hooks
   private readonly pendingFrags: PendingFragment[]
   private readonly logger: (msg: string) => void
   /**
@@ -219,6 +254,7 @@ export class PluginLoader {
     defaultModeId: string | null,
     timeoutMs: number,
     eventBus: EventBus,
+    hooksFacade: Hooks,
     pendingFrags: PendingFragment[],
     logger: (msg: string) => void,
     sessionId: string | undefined,
@@ -231,6 +267,7 @@ export class PluginLoader {
     this.defaultModeId = defaultModeId
     this.timeoutMs = timeoutMs
     this.eventBus = eventBus
+    this.hooksFacade = hooksFacade
     this.pendingFrags = pendingFrags
     this.logger = logger
     this.sessionId = sessionId
@@ -250,6 +287,22 @@ export class PluginLoader {
   }
 
   /**
+   * Shared {@link Hooks} facade. Routes registrations and emits to the
+   * right backend based on the channel's declared {@link ChannelShape}:
+   *
+   * - `broadcast-async` → the same {@link EventBus} returned by {@link bus}.
+   * - `broadcast-sync`, `chain`, `stream` → an internal {@link HookBus}.
+   *
+   * Plugin `manifest.hooks` entries are subscribed here at load time.
+   * Host code uses this facade to emit on channels that have synchronous
+   * delivery requirements (e.g. `editor.key`, where the editor's keystroke
+   * pump cannot yield to async work between bytes).
+   */
+  hooks(): Hooks {
+    return this.hooksFacade
+  }
+
+  /**
    * Discover, parse, and resolve tui-plugin packages. See
    * {@link PluginLoaderOptions} for configuration.
    *
@@ -262,6 +315,7 @@ export class PluginLoader {
     const coreToolNames = opts.coreToolNames ?? new Set<string>()
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const eventBus = opts.bus ?? new EventBus(logger)
+    const hooksFacade = new Hooks({ eventBus, logger })
     const sessionId = opts.sessionId
     const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
 
@@ -463,7 +517,54 @@ export class PluginLoader {
 
       // Subscribe each on the shared bus.
       for (const r of resolvedSubs) {
-        registerEventSub(eventBus, pkg.packageDir, r, logger)
+        registerEventSub(eventBus, pkg.packageDir, r, logger, pkg.manifest.id)
+      }
+
+      // Resolve hook subscriptions. Same lenient policy as events: a broken
+      // hook handler is logged and skipped, never disqualifies the plugin.
+      // Permission gate runs first — a hook on a channel the manifest's
+      // `permissions[]` doesn't grant is dropped with a clear log.
+      //
+      // `requiresUnsafeHooks: true` is honored at the plugin level: when
+      // the manifest sets it AND `UNSAFE_HOOKS=1` is unset, we skip every
+      // hook subscription this plugin declares (the plugin's tools / tags /
+      // events continue to work).
+      const unsafeOk = process.env.UNSAFE_HOOKS === "1"
+      const skipAllHooks = (pkg.manifest.requiresUnsafeHooks ?? false) && !unsafeOk
+      if (skipAllHooks) {
+        logger(
+          `${pkg.packageDir}: skipping all hooks for plugin "${pkg.manifest.id}" — ` +
+            `manifest.requiresUnsafeHooks is true but UNSAFE_HOOKS=1 is not set`,
+        )
+      }
+      const resolvedHookSubs: ResolvedHookSub[] = []
+      if (!skipAllHooks) {
+        const granted = pkg.manifest.permissions ?? []
+        for (const sub of pkg.manifest.hooks ?? []) {
+          const spec = CHANNEL_BY_NAME.get(sub.channel)
+          if (!spec) {
+            logger(
+              `${pkg.packageDir}: hook "${sub.id}" — channel "${sub.channel}" is not ` +
+                `in the catalog; skipping`,
+            )
+            continue
+          }
+          if (!hasPermission(granted, spec.permission)) {
+            logger(
+              `${pkg.packageDir}: hook "${sub.id}" — channel "${sub.channel}" requires ` +
+                `permission "${spec.permission}", but manifest.permissions doesn't grant it; skipping`,
+            )
+            continue
+          }
+          const r = await resolveHookSub(sub, pkg.packageDir, logger)
+          if (r) resolvedHookSubs.push(r)
+        }
+      }
+      pkg.hookSubs = resolvedHookSubs
+
+      // Subscribe each on the hooks facade.
+      for (const r of resolvedHookSubs) {
+        registerHookSub(hooksFacade, pkg.packageDir, r, logger, pkg.manifest.id)
       }
 
       // Resolve live-area slots. Same lenient policy as event subs: a
@@ -511,7 +612,7 @@ export class PluginLoader {
     for (const pkg of finalPlugins) {
       for (const frag of pkg.manifest.promptFragments ?? []) {
         const startedAt = Date.now()
-        const promise = startFragment(frag, pkg.packageDir, logger, sessionId)
+        const promise = startFragment(frag, pkg.packageDir, logger, sessionId, pkg.manifest.id)
         pendingFrags.push({
           pluginId: pkg.manifest.id,
           fragmentId: frag.id,
@@ -538,6 +639,7 @@ export class PluginLoader {
       defaultModeId,
       timeoutMs,
       eventBus,
+      hooksFacade,
       pendingFrags,
       logger,
       sessionId,
@@ -563,6 +665,19 @@ export class PluginLoader {
     const out: { pluginId: string; sub: ResolvedEventSub }[] = []
     for (const pkg of this.plugins) {
       for (const s of pkg.eventSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
+    }
+    return out
+  }
+
+  /**
+   * Hook subscriptions installed on the hooks facade, flattened across
+   * all plugins. Diagnostics-only — the facade is the runtime source
+   * of truth.
+   */
+  getHookSubs(): ReadonlyArray<{ pluginId: string; sub: ResolvedHookSub }> {
+    const out: { pluginId: string; sub: ResolvedHookSub }[] = []
+    for (const pkg of this.plugins) {
+      for (const s of pkg.hookSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
     }
     return out
   }
@@ -850,6 +965,7 @@ export class PluginLoader {
       stdout: process.stdout,
       stdin: process.stdin,
       stderr: process.stderr,
+      log: createPluginLogger(findPluginIdFor(this.plugins, handler)),
     }
 
     try {
@@ -999,6 +1115,18 @@ function findPackageDirFor(plugins: LoadedPlugin[], handler: ResolvedHandler): s
   return process.cwd()
 }
 
+/**
+ * Locate the plugin id that owns the given handler instance. Returns
+ * an empty string when no plugin matches (a degenerate test-fixture
+ * case; the resulting logger emits with an unprefixed source).
+ */
+function findPluginIdFor(plugins: LoadedPlugin[], handler: ResolvedHandler): string {
+  for (const pkg of plugins) {
+    if (pkg.handlers.includes(handler)) return pkg.manifest.id
+  }
+  return ""
+}
+
 // ---------------------------------------------------------------------------
 // Async prompt-fragment producers
 // ---------------------------------------------------------------------------
@@ -1039,8 +1167,9 @@ function startFragment(
   packageDir: string,
   logger: (msg: string) => void,
   sessionId: string | undefined,
+  pluginId: string,
 ): Promise<string | null> {
-  return runFragment(frag, packageDir, sessionId).catch((e) => {
+  return runFragment(frag, packageDir, sessionId, pluginId).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
     )
@@ -1052,6 +1181,7 @@ async function runFragment(
   frag: ManifestPromptFragment,
   packageDir: string,
   sessionId: string | undefined,
+  pluginId: string,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -1084,6 +1214,7 @@ async function runFragment(
       sessionId,
       abort: ctrl.signal,
       stderr: process.stderr,
+      log: createPluginLogger(pluginId),
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null
@@ -1185,6 +1316,7 @@ function registerEventSub(
   packageDir: string,
   sub: ResolvedEventSub,
   logger: (msg: string) => void,
+  pluginId: string,
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const listener = (ctx: EventContext): void | Promise<void> => {
@@ -1201,6 +1333,7 @@ function registerEventSub(
       emit: ctx.emit,
       abort: ctx.abort,
       stderr: process.stderr,
+      log: createPluginLogger(pluginId),
     }
     try {
       return sub.invoke(handlerCtx)
@@ -1212,6 +1345,104 @@ function registerEventSub(
   bus.on(sub.definition.on, listener, {
     coalesce: sub.definition.coalesce,
     throttleMs: sub.definition.throttleMs,
+    label,
+  })
+}
+
+/**
+ * Resolve a single manifest hook subscription to invocable form.
+ *
+ * Mirrors {@link resolveEventSub} but for hook handlers (which may run on
+ * the synchronous {@link HookBus} for `broadcast-sync` / `chain` channels).
+ *
+ * Currently MODULE handlers only — subprocess hook handlers are logged
+ * and skipped (sync dispatch cannot tolerate an `await proc.exited` round
+ * trip in the editor's keystroke pump). When a real use case arrives we
+ * can extend this with a stdin/stdout JSON envelope protocol like
+ * {@link invokeEventSubprocess}, but only for `broadcast-async` channels.
+ *
+ * Returns `null` and logs on failure. The plugin's tools / inline tags
+ * / event subs continue to work; just this one hook is dropped.
+ */
+async function resolveHookSub(
+  sub: ManifestHookSubscription,
+  packageDir: string,
+  logger: (msg: string) => void,
+): Promise<ResolvedHookSub | null> {
+  if (sub.handler.type !== "module") {
+    logger(`${packageDir}: hook "${sub.id}" — subprocess handlers are not yet supported; skipping`)
+    return null
+  }
+  const abs = resolvePath(packageDir, sub.handler.path)
+  if (!existsSync(abs)) {
+    logger(`${packageDir}: hook handler module not found: ${abs}`)
+    return null
+  }
+  let mod: { default?: HookHandler }
+  try {
+    mod = (await import(abs)) as { default?: HookHandler }
+  } catch (e) {
+    logger(
+      `${packageDir}: failed to import hook handler ${abs}: ${e instanceof Error ? e.message : String(e)}`,
+    )
+    return null
+  }
+  const fn = mod.default
+  if (typeof fn !== "function") {
+    logger(`${packageDir}: hook handler ${abs} has no default export function`)
+    return null
+  }
+  return {
+    definition: sub,
+    entryAbsolute: abs,
+    invoke: (payload: unknown, ctx: HookHandlerContext) => fn(payload, ctx),
+  }
+}
+
+/**
+ * Subscribe a resolved hook sub on the {@link Hooks} facade. Routes by
+ * the channel's declared shape (broadcast-async, broadcast-sync, chain,
+ * stream — the facade picks the right backend).
+ *
+ * Errors and timeouts are absorbed by the bus so the agent never sees a
+ * plugin exception.
+ */
+function registerHookSub(
+  hooks: Hooks,
+  packageDir: string,
+  sub: ResolvedHookSub,
+  logger: (msg: string) => void,
+  pluginId: string,
+): void {
+  const label = `${packageDir}:${sub.definition.id}`
+  const channel = sub.definition.channel
+  const listener = (payload: unknown, ctx: { abort: AbortSignal; priority: number }): unknown => {
+    const handlerCtx: HookHandlerContext = {
+      channel,
+      packageDir,
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        TUI_PLUGIN_PROTOCOL: "1",
+        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
+      } as Record<string, string>,
+      abort: ctx.abort,
+      priority: ctx.priority,
+      stderr: process.stderr,
+      log: createPluginLogger(pluginId),
+    }
+    try {
+      return sub.invoke(payload, handlerCtx)
+    } catch (e) {
+      logger(`${label}: handler threw: ${e instanceof Error ? e.message : String(e)}`)
+      return undefined
+    }
+  }
+  hooks.on(channel, listener, {
+    source: pluginId,
+    priority: sub.definition.priority,
+    timeoutMs: sub.definition.timeoutMs,
+    observeOnly: sub.definition.observeOnly,
     label,
   })
 }

@@ -126,6 +126,38 @@ export const CHANNELS = [
     permission: "hooks:repl.modeDidChange",
     description: "Emitted after the active mode changes.",
   },
+
+  // -- Editor surface (history plugin, May 2026) -----------------------------
+  {
+    name: "editor.key",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.key",
+    description:
+      "Sync broadcast fired BEFORE the editor applies a parsed key (arrow keys, " +
+      "Ctrl+R, etc.). Payload carries `{key, buffer, cursor, result}` where " +
+      "`result` is a mutable holder. Listeners may set `result.halt = true` to " +
+      "consume the keystroke (suppress default handling) and optionally " +
+      "`result.buffer`/`result.cursor` to replace editor state. Synchronous by " +
+      "necessity — the editor's keystroke pump must not yield to async work " +
+      "between bytes.",
+  },
+  {
+    name: "editor.buffer.set",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.buffer.set",
+    description:
+      "Plugin → host signal to replace the editor buffer. Payload `{text, " +
+      "cursor?}`. The host listens on this channel and calls " +
+      "EditorController.setBuffer(text) on the next repaint.",
+  },
+  {
+    name: "prompt.submitted",
+    shape: "broadcast-async",
+    permission: "hooks:prompt.submitted",
+    description:
+      "Emitted after the user submits a non-empty prompt (queued for the agent). " +
+      "Payload `{text, cwd, sid, exit, queuePos}`. `exit ∈ {submitted, canceled}`.",
+  },
 ] as const satisfies readonly ChannelSpec[]
 
 export type ChannelName = (typeof CHANNELS)[number]["name"]
