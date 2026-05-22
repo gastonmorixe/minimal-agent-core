@@ -433,6 +433,41 @@ describe("parseManifest / liveAreaSlots", () => {
   })
 })
 
+describe("parseManifest / prompt as a contribution", () => {
+  // A non-empty top-level `prompt` field is itself a valid contribution.
+  // The PROMPT.md it references is injected into the system prompt at session
+  // start. A plugin that contributes nothing but a writing-style discipline
+  // or coding-conventions doc should NOT need a no-op promptFragments stub
+  // to get past the "must declare at least one" gate.
+  const base = {
+    id: "ma-agent-writing-style",
+    name: "Agent Writing Style",
+    version: "0.1.0",
+    description: "tests",
+  }
+
+  it("accepts a prompt-only manifest (no tuis/modes/events/hooks/promptFragments/liveAreaSlots)", () => {
+    expect(() => parseManifest({ ...base, prompt: "./PROMPT.md" }, "/x")).not.toThrow()
+  })
+
+  it("preserves the prompt path on the parsed result", () => {
+    const m = parseManifest({ ...base, prompt: "./PROMPT.md" }, "/x")
+    expect(m.prompt).toBe("./PROMPT.md")
+  })
+
+  it("rejects an empty-string prompt as not a contribution", () => {
+    expect(() => parseManifest({ ...base, prompt: "" }, "/x")).toThrow(/at least one/i)
+  })
+
+  it("rejects a whitespace-only prompt as not a contribution", () => {
+    expect(() => parseManifest({ ...base, prompt: "   " }, "/x")).toThrow(/at least one/i)
+  })
+
+  it("error message lists prompt in the at-least-one set", () => {
+    expect(() => parseManifest({ ...base }, "/x")).toThrow(/prompt/)
+  })
+})
+
 describe("parseManifest / liveAreaSlots: placeholder + refreshOn", () => {
   const base = {
     id: "p",

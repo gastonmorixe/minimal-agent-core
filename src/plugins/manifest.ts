@@ -151,17 +151,25 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     liveAreaSlots.push(parseLiveAreaSlot(slotsRaw[i], i, manifestPath, seenSlotIds))
   }
 
+  // A non-empty top-level `prompt` field is itself a valid contribution.
+  // The PROMPT.md it points at is injected into the system prompt at session
+  // start, same as a static-content `promptFragments` entry would be. So a
+  // plugin that contributes nothing but a prompt file (e.g. a writing-style
+  // discipline, a coding-conventions doc) is a fully legitimate shape.
+  const hasPrompt = typeof obj.prompt === "string" && obj.prompt.trim() !== ""
+
   if (
     tuis.length === 0 &&
     modes.length === 0 &&
     events.length === 0 &&
     hooks.length === 0 &&
     promptFragments.length === 0 &&
-    liveAreaSlots.length === 0
+    liveAreaSlots.length === 0 &&
+    !hasPrompt
   ) {
     err(
       "manifest must declare at least one tuis, modes, events, hooks, " +
-        "promptFragments, or liveAreaSlots entry",
+        "promptFragments, liveAreaSlots, or prompt entry",
     )
   }
 
