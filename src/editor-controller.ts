@@ -69,6 +69,70 @@ function installCleanupHooksOnce(): void {
   }
 }
 
+// ----------------------------- footer-layer surface -----------------------------
+//
+// See the long-form comment on `EditorController.footerLayers` below for
+// the architecture rationale (Bug 2801: two producers stomping on one
+// mutable field). The surface is small and documented public API:
+//
+//   - producers own a stable `FooterLayerId`;
+//   - `setFooterLayer(id, lines, {priority})` registers / updates;
+//   - `clearFooterLayer(id)` removes;
+//   - render-time composition picks the highest-priority non-empty layer.
+
+/**
+ * A stable string id naming one producer's footer-band content. Two
+ * producers MUST NOT share a layer id; collisions silently overwrite
+ * (last-writer-wins within a single layer is fine, across layers it is
+ * the exact bug we are avoiding).
+ *
+ * Use one of the exported `FOOTER_LAYER_*` constants when the layer is
+ * a known canonical surface (e.g. the armed-quit overlay); use a
+ * descriptive ad-hoc id for plugin-private overlays.
+ */
+export type FooterLayerId = string
+
+/**
+ * One layer's pinned content + z-index. Stored immutably on the
+ * controller; consumers receive a fresh array on every read so they
+ * cannot mutate live state.
+ *
+ * @internal Exported for type assertions in tests; the public mutation
+ *   surface is {@link EditorController.setFooterLayer} /
+ *   {@link EditorController.clearFooterLayer}.
+ */
+export interface FooterLayer {
+  readonly id: FooterLayerId
+  readonly priority: number
+  readonly lines: readonly string[]
+}
+
+export interface SetFooterLayerOptions {
+  /**
+   * Higher priority wins composition. When omitted, the previous
+   * priority is preserved (or 0 if this is the layer's first set).
+   * Negative values are accepted but discouraged; reserve negatives
+   * for layers that should sit BELOW the legacy default.
+   */
+  priority?: number
+}
+
+/**
+ * The default / legacy layer id. Maps to whatever any caller pushes
+ * through the back-compat {@link EditorController.setFooterLines}
+ * setter. Lives at priority 0.
+ */
+export const FOOTER_LAYER_DEFAULT: FooterLayerId = "default"
+
+/**
+ * The armed-quit overlay layer id. Pinned by {@link EditorController}'s
+ * abort-quit FSM effects; sits at {@link FOOTER_PRIORITY_ARMED}.
+ */
+export const FOOTER_LAYER_ARMED: FooterLayerId = "armed-quit"
+
+/** Priority of {@link FOOTER_LAYER_ARMED}. */
+export const FOOTER_PRIORITY_ARMED = 100
+
 export interface EditorControllerOptions {
   prompt: string
   continuationPrompt: string
@@ -440,14 +504,19 @@ export class EditorController extends EventEmitter {
           this.armedSource = null
           this.armedExpiresAt = 0
           this.stopArmedTimers()
-          // Force-clear the footer (setFooterLines is no-op when content
-          // matches - we hold no footer, set [] explicitly).
-          this.setFooterLines([])
+          // Drop ONLY the armed-quit layer. Any base content (quota row,
+          // last-warning, etc.) on lower-priority layers re-emerges via
+          // composition. Pre-Bug-2801 this called `setFooterLines([])`
+          // which blew away the aggregator's content.
+          this.clearFooterLayer(FOOTER_LAYER_ARMED)
           break
         }
         case "quit": {
           this.stopArmedTimers()
-          this.setFooterLines([])
+          // Same single-layer scope as `hide-armed`. The editor is
+          // about to tear down and the host prints the goodbye banner;
+          // clearing base content here would just be busywork.
+          this.clearFooterLayer(FOOTER_LAYER_ARMED)
           // Emit AFTER footer cleanup so the REPL teardown path sees a
           // clean editor state.
           this.emit("quit", e.reason)
@@ -500,7 +569,14 @@ export class EditorController extends EventEmitter {
       expiresAt: this.armedExpiresAt,
       now: this.nowFn(),
     })
-    this.setFooterLines(line === null ? [] : [line])
+    // Paint into our OWN layer (priority 100). When the countdown
+    // expires (`line === null`) the layer is cleared, revealing any
+    // base content below. Composition is decided in `composeFooter`.
+    if (line === null) {
+      this.clearFooterLayer(FOOTER_LAYER_ARMED)
+    } else {
+      this.setFooterLayer(FOOTER_LAYER_ARMED, [line], { priority: FOOTER_PRIORITY_ARMED })
+    }
   }
 
   /**
@@ -760,22 +836,137 @@ export class EditorController extends EventEmitter {
    * the editor's available rows by `lines.length`. Callers should keep
    * the footer compact (one row is the common case).
    */
-  private footerLines: string[] = []
+  // ----------------------------- footer layers -----------------------------
+  //
+  // Multiple unrelated producers paint into the footer band: the plugin
+  // scheduler / diagnostic aggregator (the "quota row" and last-warning
+  // summary), and the abort-quit FSM (the armed-quit overlay). Earlier
+  // designs gave both producers a SINGLE mutable `footerLines: string[]`
+  // field reachable through `setFooterLines(lines)`. Last writer won. When
+  // the FSM dismissed the armed overlay it called `setFooterLines([])`
+  // which BLEW AWAY the aggregator's content; the aggregator was not
+  // notified to re-emit, so the quota row stayed gone until the next
+  // periodic refresh (see Bug 2801).
+  //
+  // The fix is a small layer-stack model:
+  //   - Each producer owns a stable {@link FooterLayerId} and mutates
+  //     ONLY its own layer via {@link setFooterLayer} / {@link clearFooterLayer}.
+  //   - Layers compose by priority: the highest-priority non-empty layer
+  //     wins composition (overlay semantics — clearing an upper layer
+  //     reveals the one below).
+  //   - {@link setFooterLines} stays as the back-compat sugar mapping to
+  //     the {@link FOOTER_LAYER_DEFAULT} layer at priority 0, so the
+  //     plugin aggregator and any other legacy callers keep working
+  //     without changes.
+  //   - The armed-quit FSM uses {@link FOOTER_LAYER_ARMED} at priority
+  //     {@link FOOTER_PRIORITY_ARMED}, leaving room for future
+  //     intermediate overlays (slash-menu completion bar, mid-prompt
+  //     command surface, etc.).
+  //
+  // Dedup is at the COMPOSED-output level so a mutation to an OBSCURED
+  // layer does NOT trigger a repaint (no flicker, no work).
+
+  private footerLayers: Map<FooterLayerId, FooterLayer> = new Map()
+  /**
+   * Last composed footer pushed to {@link repaint}. Used purely for
+   * dedup in {@link setFooterLayer} / {@link clearFooterLayer}; the
+   * canonical render-path source of truth is always {@link composeFooter}.
+   */
+  private composedFooterCache: string[] = []
 
   /**
-   * Set footer rows (drawn below the editor prompt in the live area).
-   * Pass `[]` to clear. Triggers a repaint when contents change
-   * (shallow compare); a no-op otherwise so plugins polling at steady
-   * state don't flicker the live area.
+   * Set / replace a footer LAYER. Multiple producers can paint into the
+   * footer band side-by-side; each owns a stable layer id and the
+   * highest-priority non-empty layer wins composition.
+   *
+   * Passing `lines: []` is equivalent to {@link clearFooterLayer}: the
+   * layer becomes invisible and the next-highest non-empty layer below
+   * re-emerges.
+   *
+   * `opts.priority` is captured on first set and reused on subsequent
+   * calls that omit it; pass it explicitly when the producer "owns" a
+   * known z-index (e.g. the armed-quit FSM pins
+   * {@link FOOTER_PRIORITY_ARMED}).
+   *
+   * Triggers a repaint iff the COMPOSED footer changed; a no-op
+   * otherwise. Mutating an obscured layer is silent.
+   */
+  setFooterLayer(layerId: FooterLayerId, lines: string[], opts?: SetFooterLayerOptions): void {
+    const prev = this.footerLayers.get(layerId)
+    const priority = opts?.priority ?? prev?.priority ?? 0
+    if (lines.length === 0) {
+      if (prev === undefined) return
+      this.footerLayers.delete(layerId)
+    } else {
+      const unchanged =
+        prev !== undefined &&
+        prev.priority === priority &&
+        prev.lines.length === lines.length &&
+        prev.lines.every((l, i) => l === lines[i])
+      if (unchanged) return
+      this.footerLayers.set(layerId, { id: layerId, priority, lines: [...lines] })
+    }
+    this.applyFooterChange()
+  }
+
+  /**
+   * Remove a footer LAYER entirely. Equivalent to
+   * `setFooterLayer(id, [])`. Unknown ids are a silent no-op (no
+   * repaint).
+   */
+  clearFooterLayer(layerId: FooterLayerId): void {
+    if (!this.footerLayers.has(layerId)) return
+    this.footerLayers.delete(layerId)
+    this.applyFooterChange()
+  }
+
+  /**
+   * Set footer rows (back-compat shim).
+   *
+   * Routes to {@link setFooterLayer} on the {@link FOOTER_LAYER_DEFAULT}
+   * layer at priority 0. Existing callers (the plugin scheduler /
+   * diagnostic aggregator) keep working unchanged; their content shows
+   * up at the bottom of the layer stack and is obscured (but not
+   * destroyed) by any higher-priority overlay (e.g. the armed-quit
+   * footer).
+   *
+   * Pass `[]` to clear the default layer. The default layer is fully
+   * independent of any other layer the host may have pushed.
    */
   setFooterLines(lines: string[]): void {
-    if (
-      lines.length === this.footerLines.length &&
-      lines.every((l, i) => l === this.footerLines[i])
-    ) {
-      return
+    this.setFooterLayer(FOOTER_LAYER_DEFAULT, lines, { priority: 0 })
+  }
+
+  /**
+   * Pure: compose the visible footer by picking the highest-priority
+   * non-empty layer. Multi-line layers are returned in full (so a
+   * future layer that wants 2 rows still composes correctly). Returns
+   * a fresh array; the caller may freely mutate it.
+   *
+   * @internal Exposed for unit-test stability assertions.
+   */
+  composeFooter(): string[] {
+    let best: FooterLayer | null = null
+    for (const layer of this.footerLayers.values()) {
+      if (layer.lines.length === 0) continue
+      if (best === null || layer.priority > best.priority) best = layer
     }
-    this.footerLines = [...lines]
+    return best ? [...best.lines] : []
+  }
+
+  /**
+   * Shared tail of {@link setFooterLayer} / {@link clearFooterLayer}:
+   * compute the new composed footer, shallow-compare against the last
+   * one we pushed, and call {@link repaint} only when the visible
+   * footer actually changed.
+   */
+  private applyFooterChange(): void {
+    const composed = this.composeFooter()
+    const prev = this.composedFooterCache
+    const unchanged =
+      composed.length === prev.length && composed.every((l, i) => l === prev[i])
+    if (unchanged) return
+    this.composedFooterCache = composed
     if (this.started) this.repaint()
   }
 
@@ -1095,7 +1286,7 @@ export class EditorController extends EventEmitter {
         const now = this.nowFn()
         if (this.escapeHatch.observe(now) === "force-quit") {
           this.stopArmedTimers()
-          this.setFooterLines([])
+          this.clearFooterLayer(FOOTER_LAYER_ARMED)
           this.fsmState = { kind: "quitting", reason: "escape-hatch" }
           this.emit("quit", "escape-hatch" as QuitReason)
           this.emit("cancel", "escape-hatch" as QuitReason)
@@ -1330,7 +1521,7 @@ export class EditorController extends EventEmitter {
       const now = this.nowFn()
       if (this.escapeHatch.observe(now) === "force-quit") {
         this.stopArmedTimers()
-        this.setFooterLines([])
+        this.clearFooterLayer(FOOTER_LAYER_ARMED)
         this.fsmState = { kind: "quitting", reason: "escape-hatch" }
         this.emit("quit", "escape-hatch" as QuitReason)
         this.emit("cancel", "escape-hatch" as QuitReason)
@@ -1586,8 +1777,12 @@ export class EditorController extends EventEmitter {
     // A blank row between editor content and the footer when both are
     // present, so footer lines (quota, ambient status, etc.) don't visually
     // butt against the prompt's `❯ ` row.
-    const footerSpacerRows = this.footerLines.length > 0 ? 1 : 0
-    const footerRows = this.footerLines.length + footerSpacerRows
+    // Compose ONCE per repaint and thread the result through height
+    // math (above) and layout assembly (below). The layer stack is
+    // the source of truth; we never read a stale field.
+    const composedFooter = this.composeFooter()
+    const footerSpacerRows = composedFooter.length > 0 ? 1 : 0
+    const footerRows = composedFooter.length + footerSpacerRows
     const cap = Math.max(1, this.maxLiveHeight())
     const editorBudget = Math.max(1, cap - statusRows - statusGapRows - footerRows)
 
@@ -1711,14 +1906,17 @@ export class EditorController extends EventEmitter {
     //   [indicatorLine?]          ← 0..1 row (scroll indicator, if needed)
     //   [...lines]                ← editor content
     //   [footerSpacer = ""]       ← 0 or 1 row (only when footer is present)
-    //   [...footerLines]          ← 0..N rows (quota, ambient status, etc.)
+    //   [...composedFooter]       ← 0..N rows (highest-priority non-empty layer
+    //                               wins composition: quota/diagnostic at
+    //                               priority 0, armed-quit at priority 100,
+    //                               etc. See `setFooterLayer` and
+    //                               `composeFooter` for the contract.)
     // Cursor offset = (statusRows = statusFilled?1:0 + decorationRows)
     //               + statusGapRows + indicatorOffset.
     const decoration = this.decorationLines
     const head: string[] = statusReserved ? [statusLine] : []
     const gap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
-    const footer = this.footerLines
-    const footerWithSpacer = footer.length > 0 ? ["", ...footer] : []
+    const footerWithSpacer = composedFooter.length > 0 ? ["", ...composedFooter] : []
     const baseOffset = statusRows + statusGapRows
     if (actualNeedSeparate && indicatorLine) {
       // Separate indicator row above content.
