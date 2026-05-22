@@ -1,7 +1,7 @@
 The `memory` plugin gives you persistent, per-user memory plus a per-session
-scratchpad. Two write paths and one read/edit/remove path -- see below.
+scratchpad. Two write paths and one read/edit/remove path. See below.
 
-## Three scopes -- pick deliberately
+## Three scopes: pick deliberately
 
 | Scope        | Lives in                                                | Use when                                                      |
 | ------------ | ------------------------------------------------------- | ------------------------------------------------------------- |
@@ -19,23 +19,23 @@ etc.
 If `MINIMAL_AGENT_MEMORY_NAMESPACE=<name>` was set when the agent
 started, every path above is rebased under
 `~/.minimal-agent/namespaces/<name>/...` and the user's real memory
-files are untouched. You won't see this directly -- you operate on
+files are untouched. You won't see this directly. You operate on
 whatever store is wired up. But if the user says "I'm testing memory in
 a fresh namespace" or the `## Saved memories` snapshot looks
 unexpectedly empty, that's the likely reason. Don't try to "restore"
-anything -- the namespaced store is intentional.
+anything. The namespaced store is intentional.
 
-## Freshness -- the snapshot is frozen at session start
+## Freshness: the snapshot is frozen at session start
 
 The `## Saved memories` section in your system prompt is captured **once
-at session start** and never refreshes. Mid-session it can drift: you
+at session start** and never refreshes. Mid-session it can drift. You
 add bullets that aren't in the snapshot, another agent in a shared
 worktree writes concurrently, the user edits via the CLI. `short-term`
-is the exception -- it re-reads on every turn via `<short-term-memory>`.
+is the exception. It re-reads on every turn via `<short-term-memory>`.
 
-So when staleness matters -- the user asks "what do you remember?",
+So when staleness matters (the user asks "what do you remember?",
 you're about to save and want to avoid duplicates, you're debugging a
-symptom that may already be documented -- `list` first, don't recite
+symptom that may already be documented), `list` first, don't recite
 from the snapshot.
 
 ## Decision tree (run top-to-bottom before saving)
@@ -46,7 +46,7 @@ from the snapshot.
     - No → `short-term` (or don't save at all)
 
 2. **Is it actionable / specific?** Vague aspirations ("we should fix
-   the bug") aren't memories -- that's task state, use a TODO list.
+   the bug") aren't memories. That's task state, use a TODO list.
 
 3. **Is something close to it already saved?** List with a `query`
    first. If a near-duplicate exists, edit it instead. Clusters of
@@ -61,7 +61,7 @@ look at every turn or every few turns:
 
 - "user said the failing test is in `foo.test.ts:47`"
 - "symptom: snapshot diff fails only when `COLUMNS<80`"
-- "tried setting `LANG=C` -- no change, don't loop back to it"
+- "tried setting `LANG=C`, no change, don't loop back to it"
 - "user's intent for this work block: refactor X without touching Y"
 
 Short-term entries appear in your context as `<short-term-memory>` at the
@@ -70,14 +70,14 @@ cap (20 entries, FIFO eviction), so consolidate as you go.
 
 ## Don't save (any scope)
 
-- Transient turn-by-turn task state -- use a TODO list in the response.
+- Transient turn-by-turn task state. Use a TODO list in the response.
 - Long verbatim content. One or two sentences max.
 - Things already in `CLAUDE.md` / `AGENTS.md` / the README.
 - Manually-prefixed dates in the body (`[2026-05-10] foo …`). The
-  store attaches `[<ts>]` automatically -- duplicating it is noise.
+  store attaches `[<ts>]` automatically. Duplicating it is noise.
 - Secrets, tokens, credentials.
 
-## Saving -- inline tag (preferred)
+## Saving via inline tag (preferred)
 
 Mid-response, low-friction. The body is hidden from the user (the tag
 is replaced with a dim confirmation line), and whitespace is collapsed
@@ -105,9 +105,9 @@ need if you later want to edit or remove the entry. When short-term
 overflows the cap, the echo also reports the eviction count
 (`evicted="1"`).
 
-## Editing / browsing -- `MemoryTool`
+## Editing and browsing via `MemoryTool`
 
-Once you need structured I/O -- listing, reading by id, editing, removing --
+Once you need structured I/O (listing, reading by id, editing, removing),
 use the tool. Schema: `{action, scope, id?, body?, query?, limit?, format?}`.
 `scope` is always required. `id` is required for `read`/`edit`/`remove`.
 `body` is required for `add`/`edit`. `query`+`limit` are list-only.
@@ -131,9 +131,9 @@ global/project is a footgun, so remove individual ids instead.
 
 ### High-value `list` patterns
 
-- **User-asked recall** ("what do you remember about X?") -- list with a
+- **User-asked recall** ("what do you remember about X?"). List with a
   `query`, don't paraphrase the system-prompt snapshot.
-- **Before debugging a known-feeling symptom** -- list `project` with the
+- **Before debugging a known-feeling symptom**. List `project` with the
   symptom keyword. Saves re-deriving a documented fix.
 - **Curation pass** when you spot overlapping bullets on one subsystem:
   list, read the worst, edit one to be comprehensive, remove the rest.
@@ -150,15 +150,15 @@ verbatim under "Recent saves (not yet in summary)" at the tail.
 The agent should treat the summary as a **router**, not as content:
 
 - **Need a specific fact?** Use the id list and
-  `MemoryTool({action: "read", scope, id})` to fetch the full body --
-  the summary intentionally drops detail.
+  `MemoryTool({action: "read", scope, id})` to fetch the full body. The
+  summary intentionally drops detail.
 - **Extending an existing topic with a new save?** First `read` the
   most relevant bullet by id to recover the full text. Saving a new
   bullet built on the summary's lossy view risks introducing
   near-duplicates of content that's actually richer in source.
-- **Curating?** Same as before -- `list` then `read` then `edit`/`remove`.
+- **Curating?** Same as before. `list` then `read` then `edit`/`remove`.
 
-Disabled by default; behaves identically to the legacy verbatim
+Disabled by default. Behaves identically to the legacy verbatim
 injection until a user opts in.
 
 ## Id formats
@@ -166,7 +166,7 @@ injection until a user opts in.
 - **Persistent** (`global`, `project`): `<base36-millis>-<rand4hex>`,
   e.g. `lwq8tg-a8f3`. Sortable by time, opaque to you.
 - **Short-term**: integer auto-incrementing per session, e.g. `1`, `2`,
-  `3`. Never reuses gaps left by removes -- id 4 follows even after
+  `3`. Never reuses gaps left by removes. Id 4 follows even after
   id 2 was deleted.
 - **Legacy** (untagged bullets in pre-v0.3 files): `legacy:<sha12>`,
   derived from the line text. Addressable by `MemoryTool` actions just

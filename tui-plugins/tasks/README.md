@@ -95,7 +95,7 @@ Reads the same session id (`MINIMAL_AGENT_SESSION_ID` env or
 A `<ma::tui::tasks total="…" done="…" doing="…" todo="…" canceled="…">…</ma::tui::tasks>`
 attachment is prepended to the first user message of every `Agent.run`,
 so the model always knows the current plan. Omitted when zero tasks
-exist — no token cost unless tasks are in play.
+exist. No token cost unless tasks are in play.
 
 ## Design doc
 
