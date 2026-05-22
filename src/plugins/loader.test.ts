@@ -1356,3 +1356,252 @@ describe("PluginLoader / manifest.hooks", () => {
     rmSync(join(HOOK_HOME, "tui-plugins", "hk4"), { recursive: true })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Silent plugins: PROMPT.md is OPTIONAL.
+//
+// A plugin that contributes only editor hooks, live-area slots, events, or
+// other UX-layer behavior has nothing to teach the model. It should ship
+// NO `PROMPT.md` at all (no HTML-comment placeholder, no empty file). The
+// loader recognizes this and omits the `<plugin id="...">` wrapper for
+// that plugin in the assembled system-prompt block.
+//
+// Critically, the loader must NOT fall back to `manifest.description` for
+// silent plugins. The description is developer metadata, and surfacing it
+// in the cached system prompt would defeat the whole point of skipping.
+// ---------------------------------------------------------------------------
+
+describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
+  const SILENT_ROOT = resolve(__dirname, "../../tmp/loader-silent-tests")
+  const SILENT_HOME = join(SILENT_ROOT, "home")
+
+  beforeAll(() => {
+    rmSync(SILENT_ROOT, { recursive: true, force: true })
+    mkdirSync(SILENT_HOME, { recursive: true })
+  })
+  afterAll(() => {
+    rmSync(SILENT_ROOT, { recursive: true, force: true })
+  })
+
+  it("omits the <plugin> wrapper when a plugin has no PROMPT.md and no fragments", async () => {
+    // Hooks-only manifest, history-style. No PROMPT.md.
+    writePackage(
+      SILENT_HOME,
+      "silent_a",
+      {
+        id: "silent_a",
+        name: "silent_a",
+        version: "0.1.0",
+        description: "this dev-doc description must NOT leak into the system prompt",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+    // A second, model-facing plugin so the outer <tui-plugins> wrapper is
+    // still emitted and we can assert the silent one is absent inside.
+    writePackage(SILENT_HOME, "loud_a", toolManifest("loud_a", "tool_loud_a", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+      "PROMPT.md": PROMPT_BODY_A,
+    })
+
+    const loader = await PluginLoader.load({
+      homeDir: SILENT_HOME,
+      projectDir: join(SILENT_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+
+    const block = loader.getPromptBlock()
+    expect(block).toBeString()
+    expect(block).toContain('<plugin id="loud_a">')
+    expect(block).toContain(PROMPT_BODY_A)
+    expect(block).not.toContain('<plugin id="silent_a">')
+    expect(block).not.toContain("this dev-doc description must NOT leak")
+    rmSync(join(SILENT_HOME, "tui-plugins", "silent_a"), { recursive: true })
+    rmSync(join(SILENT_HOME, "tui-plugins", "loud_a"), { recursive: true })
+  })
+
+  it("returns null when every loaded plugin is silent", async () => {
+    writePackage(
+      SILENT_HOME,
+      "silent_b",
+      {
+        id: "silent_b",
+        name: "silent_b",
+        version: "0.1.0",
+        description: "must not leak",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: SILENT_HOME,
+      projectDir: join(SILENT_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+
+    expect(loader.getPromptBlock()).toBeNull()
+    expect(await loader.getPromptBlockAsync()).toBeNull()
+    rmSync(join(SILENT_HOME, "tui-plugins", "silent_b"), { recursive: true })
+  })
+
+  it("warns when manifest.prompt is explicitly set but the file is missing", async () => {
+    // Author explicitly opted into a PROMPT.md they forgot to create.
+    writePackage(
+      SILENT_HOME,
+      "ghost",
+      {
+        id: "ghost",
+        name: "ghost",
+        version: "0.1.0",
+        description: "must not leak",
+        prompt: "./PROMPT.md",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: SILENT_HOME,
+      projectDir: join(SILENT_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+
+    expect(logs.some((l) => l.includes("PROMPT.md") && l.includes("missing"))).toBe(true)
+    expect(loader.getPromptBlock()).toBeNull()
+    rmSync(join(SILENT_HOME, "tui-plugins", "ghost"), { recursive: true })
+  })
+
+  it("warns when a manifest declares no contributions AND ships no PROMPT.md", async () => {
+    // Dead-weight plugin: passes manifest validation (the validator
+    // dropped the 'at least one contribution' gate) but contributes
+    // literally nothing. Should still load, but the loader needs to
+    // surface a diagnostic so an unfinished/typo'd plugin doesn't sit
+    // there silently doing nothing.
+    writePackage(
+      SILENT_HOME,
+      "deadweight",
+      {
+        id: "deadweight",
+        name: "deadweight",
+        version: "0.1.0",
+        description: "loads but does nothing",
+      },
+      {}, // no files: no PROMPT.md, no handlers
+    )
+
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: SILENT_HOME,
+      projectDir: join(SILENT_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+
+    expect(
+      logs.some(
+        (l) =>
+          l.includes("deadweight") &&
+          l.includes("declares no contributions") &&
+          l.includes("no PROMPT.md"),
+      ),
+    ).toBe(true)
+    // It still loads (we don't reject), just contributes nothing.
+    expect(loader.getPromptBlock()).toBeNull()
+    rmSync(join(SILENT_HOME, "tui-plugins", "deadweight"), { recursive: true })
+  })
+
+  it("does NOT warn (dead-weight) when a plugin has hooks but no PROMPT.md", async () => {
+    // Hooks-only is a legitimate shape (history, ma-slash-menu). Should
+    // load silently in the system prompt, no dead-weight diagnostic.
+    writePackage(
+      SILENT_HOME,
+      "hooks_only",
+      {
+        id: "hooks_only",
+        name: "hooks_only",
+        version: "0.1.0",
+        description: "tests",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+
+    const logs: string[] = []
+    await PluginLoader.load({
+      homeDir: SILENT_HOME,
+      projectDir: join(SILENT_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+
+    expect(logs.some((l) => l.includes("declares no contributions"))).toBe(false)
+    rmSync(join(SILENT_HOME, "tui-plugins", "hooks_only"), { recursive: true })
+  })
+
+  it("does NOT warn when PROMPT.md is absent and manifest.prompt is unset", async () => {
+    // No `prompt` field in the manifest → absence of PROMPT.md is the
+    // intentional silent-plugin path. We must not bother the operator.
+    writePackage(
+      SILENT_HOME,
+      "quiet",
+      {
+        id: "quiet",
+        name: "quiet",
+        version: "0.1.0",
+        description: "must not leak",
+        hooks: [
+          {
+            id: "key",
+            channel: "editor.key",
+            handler: { type: "module", path: "./key.ts", export: "default" },
+          },
+        ],
+        permissions: ["hooks:editor.key"],
+      },
+      { "key.ts": SYNC_HOOK_HANDLER_BODY },
+    )
+
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: SILENT_HOME,
+      projectDir: join(SILENT_ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+
+    expect(logs.some((l) => l.includes("PROMPT.md") && l.includes("missing"))).toBe(false)
+    expect(loader.getPromptBlock()).toBeNull()
+    rmSync(join(SILENT_HOME, "tui-plugins", "quiet"), { recursive: true })
+  })
+})

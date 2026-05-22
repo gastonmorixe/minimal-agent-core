@@ -383,11 +383,55 @@ export class PluginLoader {
       }
 
       // Resolve prompt content.
+      //
+      // PROMPT.md is genuinely optional. A plugin that contributes only
+      // editor hooks, live-area slots, or other UX-layer behavior has
+      // nothing to teach the model and should ship NO PROMPT.md at all
+      // (the `buildBlock` codepath below then omits the `<plugin id="...">`
+      // wrapper entirely). Falling back to `manifest.description` here
+      // would leak per-plugin dev docs into the cached system prompt for
+      // every request, which is what we're trying to avoid.
+      //
+      // If `manifest.prompt` is explicitly set but the referenced file is
+      // missing, that's an authoring error (the author asked for a specific
+      // file). Warn so it surfaces in the file log without breaking load.
+      const promptExplicit = typeof manifest.prompt === "string"
       const promptRel = manifest.prompt ?? "./PROMPT.md"
       const promptAbs = resolvePath(dir, promptRel)
       let prompt: string | null = null
       if (existsSync(promptAbs)) {
         prompt = readFileSync(promptAbs, "utf-8")
+      } else if (promptExplicit) {
+        logger(
+          `${dir}: manifest.prompt points to "${promptRel}" but the file is ` +
+            `missing; the plugin will be silent in the system prompt`,
+        )
+      }
+
+      // Dead-weight check: a plugin with no declared contributions AND no
+      // PROMPT.md on disk loads successfully but does nothing. This is
+      // almost always an authoring mistake (typo'd manifest, abandoned
+      // scaffold). Surface it via the logger so the operator notices,
+      // but don't block. The loader keeps going.
+      //
+      // We deliberately let `prompt` count (any non-null `prompt` value,
+      // resolved from disk via either the default `./PROMPT.md` or an
+      // explicit `manifest.prompt` override). A plugin whose entire
+      // value is a system-prompt fragment (writing-style discipline,
+      // coding-conventions doc) is a legitimate shape.
+      const hasAnyDeclared =
+        (manifest.tuis?.length ?? 0) > 0 ||
+        (manifest.modes?.length ?? 0) > 0 ||
+        (manifest.events?.length ?? 0) > 0 ||
+        (manifest.hooks?.length ?? 0) > 0 ||
+        (manifest.promptFragments?.length ?? 0) > 0 ||
+        (manifest.liveAreaSlots?.length ?? 0) > 0
+      if (!hasAnyDeclared && prompt === null) {
+        logger(
+          `${dir}: plugin "${manifest.id}" declares no contributions (tuis, ` +
+            `modes, events, hooks, promptFragments, liveAreaSlots) and ships ` +
+            `no PROMPT.md; it will load but do nothing`,
+        )
       }
 
       parsed.push({
@@ -826,9 +870,27 @@ export class PluginLoader {
    * If `fragmentTexts` is `null`, fragments are omitted entirely (sync
    * path used for the session hash). Otherwise resolved fragment text is
    * appended inside each plugin's `<plugin>` block.
+   *
+   * A plugin with NO `PROMPT.md` AND NO resolved prompt fragments is
+   * silent: its `<plugin id="...">` wrapper is omitted entirely. We do
+   * NOT fall back to `manifest.description` (that would leak per-plugin
+   * dev docs into the cached system prompt). If every loaded plugin is
+   * silent, the whole `<tui-plugins>` block is omitted and this returns
+   * `null`, same as having no plugins at all.
    */
   private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
     if (this.plugins.length === 0) return null
+    const pluginParts: string[] = []
+    for (const pkg of this.plugins) {
+      const promptBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
+      const frags = fragmentTexts?.get(pkg.manifest.id) ?? []
+      const fragSection = frags.length > 0 ? frags.map((t) => t.trimEnd()).join("\n\n") : ""
+      if (!promptBody && !fragSection) continue
+      const body =
+        promptBody && fragSection ? `${promptBody}\n\n${fragSection}` : promptBody || fragSection
+      pluginParts.push(`<plugin id="${pkg.manifest.id}">\n${body}\n</plugin>`)
+    }
+    if (pluginParts.length === 0) return null
     const parts: string[] = []
     parts.push("<tui-plugins>")
     parts.push(
@@ -845,13 +907,7 @@ export class PluginLoader {
         "Inline tags are for non-interactive rendering only.\n" +
         "</overview>",
     )
-    for (const pkg of this.plugins) {
-      const body = stripLeadingHeading(pkg.prompt ?? pkg.manifest.description)
-      const frags = fragmentTexts?.get(pkg.manifest.id) ?? []
-      const fragSection =
-        frags.length > 0 ? `\n\n${frags.map((t) => t.trimEnd()).join("\n\n")}` : ""
-      parts.push(`<plugin id="${pkg.manifest.id}">\n${body}${fragSection}\n</plugin>`)
-    }
+    parts.push(...pluginParts)
     parts.push("</tui-plugins>")
     return parts.join("\n\n")
   }

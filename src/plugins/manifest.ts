@@ -73,12 +73,25 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   requireString(obj, "version", err)
   requireString(obj, "description", err)
 
-  if (obj.prompt != null && typeof obj.prompt !== "string") {
-    err("prompt must be a string if present")
+  if (obj.prompt != null) {
+    if (typeof obj.prompt !== "string") {
+      err("prompt must be a string if present")
+    }
+    if ((obj.prompt as string).trim() === "") {
+      err(
+        "prompt must be a non-empty string if present (omit the field " +
+          "to use the default ./PROMPT.md, or point at a custom path)",
+      )
+    }
   }
 
-  // tuis is optional; modes is optional; but at least one must be present
-  // and non-empty so the plugin actually contributes something.
+  // tuis is optional; modes is optional; every contribution field is
+  // optional. The validator does NOT enforce "at least one contribution"
+  // because PROMPT.md is implicit: a plugin can ship just a PROMPT.md
+  // file with no manifest-declared contributions, and that's a legitimate
+  // shape. The loader has filesystem access and surfaces a warning if a
+  // plugin truly contributes nothing (no declared fields AND no PROMPT.md
+  // on disk).
   if (obj.tuis != null && !Array.isArray(obj.tuis)) {
     err("tuis must be an array if present")
   }
@@ -151,27 +164,11 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     liveAreaSlots.push(parseLiveAreaSlot(slotsRaw[i], i, manifestPath, seenSlotIds))
   }
 
-  // A non-empty top-level `prompt` field is itself a valid contribution.
-  // The PROMPT.md it points at is injected into the system prompt at session
-  // start, same as a static-content `promptFragments` entry would be. So a
-  // plugin that contributes nothing but a prompt file (e.g. a writing-style
-  // discipline, a coding-conventions doc) is a fully legitimate shape.
-  const hasPrompt = typeof obj.prompt === "string" && obj.prompt.trim() !== ""
-
-  if (
-    tuis.length === 0 &&
-    modes.length === 0 &&
-    events.length === 0 &&
-    hooks.length === 0 &&
-    promptFragments.length === 0 &&
-    liveAreaSlots.length === 0 &&
-    !hasPrompt
-  ) {
-    err(
-      "manifest must declare at least one tuis, modes, events, hooks, " +
-        "promptFragments, liveAreaSlots, or prompt entry",
-    )
-  }
+  // No "at least one contribution" gate here. PROMPT.md is implicit:
+  // looked up by the loader on disk, and the manifest doesn't get to
+  // see the filesystem. If a manifest declares zero contribution fields
+  // AND ships no PROMPT.md, the loader logs a warning at load time.
+  // The validator's job is purely syntactic shape checking.
 
   return {
     id,

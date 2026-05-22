@@ -3,7 +3,6 @@
   "name": "Memory",
   "version": "0.4.0",
   "description": "Persistent cross-session memory plus per-session short-term scratchpad. Saves via the inline <tui::memory> tag (zero-friction, mid-response); reads/edits/removes via the MemoryTool (structured CRUD by id). Three scopes: global (~/.minimal-agent/memory.md), project (~/.minimal-agent/projects/<cwd>/memory.md), short-term (~/.minimal-agent/sessions/<sid>.scratch.md). Persistent scopes are NOT injected into the system prompt by default (use `MemoryTool({action: \"list\"})` to query); short-term rides as a per-turn user-message attachment.",
-  "prompt": "./PROMPT.md",
   "tuis": [
     {
       "id": "memory_save",

@@ -3,7 +3,6 @@
   "name": "Web Search",
   "version": "0.1.0",
   "description": "Search the web from the agent. Provider-pluggable; ships with Brave as the default.",
-  "prompt": "./PROMPT.md",
   "tuis": [
     {
       "id": "web_search",

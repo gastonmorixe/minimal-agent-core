@@ -3,7 +3,6 @@
   "name": "File Lock",
   "version": "0.1.0",
   "description": "Cooperative locking for concurrent agents in a shared worktree. Edit/Write acquire a sibling .locked file before mutating; stale locks (dead PID, time threshold) are auto-broken. The LockStatus tool inspects locks under cwd, and a CLI is shipped for human use. Disable via `plugins[\"file-lock\"].enabled = false` in `~/.minimal-agent/config.jsonc` or the env var `MINIMAL_AGENT_FILE_LOCK_DISABLED=1`.",
-  "prompt": "./PROMPT.md",
   "tuis": [
     {
       "id": "lock_status_tool",
