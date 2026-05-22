@@ -3,7 +3,7 @@
  *
  * The function is a pure formatter: given the user's rolled-back prompt
  * text and an optional active mode label, it returns a single string
- * (multi-line via `\n`) carrying the dim-red `⊘` badge, the `ABORTED`
+ * (multi-line via `\n`) carrying the bold-red `✘` badge, the `ABORTED`
  * marker, the optional mode label, the bold `❯` arrow, and the user's
  * text wrapped in dim+strikethrough.
  *
@@ -26,7 +26,7 @@ describe("formatAbortedEcho", () => {
     // input: the caller appends its own line terminator).
     expect(plain.includes("\n")).toBe(false)
     // Anchor + marker + arrow + body all present in the documented order.
-    expect(plain).toContain("⊘")
+    expect(plain).toContain("✘")
     expect(plain).toContain("ABORTED")
     expect(plain).toContain("·")
     expect(plain).toContain("❯")
@@ -46,14 +46,14 @@ describe("formatAbortedEcho", () => {
     const out = formatAbortedEcho("first\nsecond\nthird")
     const lines = out.split("\n")
     expect(lines.length).toBe(3)
-    // Header row has `⊘ ABORTED · ❯ first`.
-    expect(stripAnsi(lines[0])).toContain("⊘ ABORTED")
+    // Header row has `✘ ABORTED · ❯ first`.
+    expect(stripAnsi(lines[0])).toContain("✘ ABORTED")
     expect(stripAnsi(lines[0])).toContain("❯ first")
     // Continuation rows: indented (4 leading spaces), body visible,
-    // NO repeat of the `⊘ ABORTED` header.
+    // NO repeat of the `✘ ABORTED` header.
     expect(stripAnsi(lines[1])).toMatch(/^    second/)
     expect(stripAnsi(lines[2])).toMatch(/^    third/)
-    expect(stripAnsi(lines[1])).not.toContain("⊘")
+    expect(stripAnsi(lines[1])).not.toContain("✘")
     expect(stripAnsi(lines[2])).not.toContain("ABORTED")
   })
 
@@ -108,7 +108,7 @@ describe("formatAbortedEcho", () => {
     // The header is still emitted (so the user sees that *something* was
     // aborted) but there's no visible body content. Single line.
     expect(plain.includes("\n")).toBe(false)
-    expect(plain).toContain("⊘ ABORTED")
+    expect(plain).toContain("✘ ABORTED")
     expect(plain).toContain("❯")
     // After the arrow there is only the (empty) body: i.e. a single
     // space + nothing visible.
@@ -146,14 +146,20 @@ describe("formatAbortedEcho", () => {
     expect(out.includes("\x1b[29m")).toBe(true)
   })
 
-  it("badge uses dim-red foreground (matches `c.dimRed`)", () => {
-    // Visually, the `⊘` badge wears a dim-red wash to read as "rolled back
-    // / undone". The exact SGR sequence is `\x1b[2;31m … \x1b[22;39m`.
+  it("badge uses bold-red foreground (matches `c.boldRed`)", () => {
+    // Visually, the `✘` badge wears a bold-red wash so the "rolled back"
+    // anchor is unmistakable. The exact SGR sequence is
+    // `\x1b[1;31m … \x1b[22;39m`. The previous design used `c.dimRed`
+    // (`\x1b[2;31m`) on `⊘`, a thin outline glyph that visually
+    // disappeared on antialiased fonts.
     const out = formatAbortedEcho("x")
-    expect(out).toContain("\x1b[2;31m") // dim + red foreground
+    expect(out).toContain("\x1b[1;31m") // bold + red foreground
     // The badge glyph follows the open code.
-    const openIdx = out.indexOf("\x1b[2;31m")
-    expect(out.slice(openIdx).startsWith("\x1b[2;31m⊘")).toBe(true)
+    const openIdx = out.indexOf("\x1b[1;31m")
+    expect(out.slice(openIdx).startsWith("\x1b[1;31m✘")).toBe(true)
+    // The old dim-red prefix MUST NOT appear (regression guard against
+    // reverting to the invisible `c.dimRed("⊘")` shape).
+    expect(out).not.toContain("\x1b[2;31m")
   })
 
   it("does not crash on text containing ANSI escape sequences", () => {
@@ -164,7 +170,7 @@ describe("formatAbortedEcho", () => {
     const evil = "hello \x1b[31mred\x1b[0m world"
     const out = formatAbortedEcho(evil)
     const plain = stripAnsi(out)
-    expect(plain).toContain("⊘ ABORTED")
+    expect(plain).toContain("✘ ABORTED")
     expect(plain).toContain("hello")
     expect(plain).toContain("red")
     expect(plain).toContain("world")
