@@ -1,5 +1,5 @@
 /**
- * Memory summary refresh — the policy layer.
+ * Memory summary refresh: the policy layer.
  *
  * One public entry point: {@link refreshAndRender}. Called from
  * `handlers/load.ts` at session start, once per scope (global/project).
@@ -25,7 +25,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import type { MemorySummaryConfig } from "./memory-config.ts"
+import type { MemorySummaryParams } from "./memory-config.ts"
 import { type Bullet, parseFile } from "./parse.ts"
 import { summarize as realSummarize, SummarizeError } from "./summarize.ts"
 
@@ -38,17 +38,17 @@ import { summarize as realSummarize, SummarizeError } from "./summarize.ts"
  * Lets `mtime`, `ls`, and casual inspection group source + view.
  */
 export function summaryPathFor(memoryPath: string): string {
-  // Replace the trailing "memory.md" with "memory.summary.md" — preserves
+  // Replace the trailing "memory.md" with "memory.summary.md": preserves
   // any namespace / project subdir prefix.
   return memoryPath.replace(/memory\.md$/, "memory.summary.md")
 }
 
-/** Global summary path — `~/.minimal-agent/memory.summary.md`. */
+/** Global summary path: `~/.minimal-agent/memory.summary.md`. */
 export function globalSummaryPath(home: string = homedir()): string {
   return join(home, ".minimal-agent", "memory.summary.md")
 }
 
-/** Project summary path — `~/.minimal-agent/projects/<cwd>/memory.summary.md`. */
+/** Project summary path: `~/.minimal-agent/projects/<cwd>/memory.summary.md`. */
 export function projectSummaryPath(cwd: string, home: string = homedir()): string {
   const rel = cwd.replace(/^\/+/, "")
   return join(home, ".minimal-agent", "projects", rel, "memory.summary.md")
@@ -102,14 +102,14 @@ export function withCutoffHeader(summaryBody: string, cutoffIso: string): string
 /**
  * Split bullets into "already covered by summary" vs "pending".
  *
- * - Bullets with no timestamp (legacy lines) are always pending — we
+ * - Bullets with no timestamp (legacy lines) are always pending: we
  *   can't tell when they were added, so we conservatively show them.
  * - Bullets whose timestamp is strictly AFTER `cutoffIso` are pending.
  * - Everything else is in-summary.
  *
  * Comparison is via `Date.parse` so different timezone offsets compare
  * correctly (lexicographic on ISO 8601 only works for same-offset
- * strings; we don't get that guarantee across DST or machines).
+ * strings, we don't get that guarantee across DST or machines).
  */
 export function partitionByCutoff(
   bullets: readonly Bullet[],
@@ -119,7 +119,7 @@ export function partitionByCutoff(
   const pending: Bullet[] = []
   const cutoffMs = Date.parse(cutoffIso)
   if (Number.isNaN(cutoffMs)) {
-    // Bad cutoff — treat everything as pending. Caller will likely
+    // Bad cutoff: treat everything as pending. Caller will likely
     // regen on top of this anyway.
     return { inSummary: [], pending: [...bullets] }
   }
@@ -196,8 +196,13 @@ export interface RefreshAndRenderOpts {
   memoryPath: string
   /** Path to the derived `memory.summary.md`. Written when regen runs. */
   summaryPath: string
-  /** Resolved memory-summary config. */
-  cfg: MemorySummaryConfig
+  /**
+   * Summary mode parameters (model + thresholds). The "should we
+   * summarize at all" gate now lives in `handlers/load.ts` via the
+   * inject-mode strategy switch. This function is only called when
+   * summary mode is active.
+   */
+  cfg: MemorySummaryParams
 }
 
 export interface RefreshAndRenderDeps {
@@ -231,7 +236,7 @@ export interface RefreshResult {
 function defaultLog(msg: string): void {
   // Lazy import: keep `summary-refresh.ts` lightweight when the
   // optional dependency surface (diagnostic-bus) isn't loaded yet.
-  // Failing the import = silently drop; this is best-effort logging.
+  // Failing the import = silently drop. This is best-effort logging.
   try {
     // biome-ignore lint/suspicious/noExplicitAny: lazy import for optional dep
     void import("../../../src/diagnostic-bus.ts").then(({ diag }: any) => {
@@ -277,12 +282,9 @@ export async function refreshAndRender(
     return { text: "", regenerated: false, reason: "empty-memory" }
   }
 
-  // 2. Quick exit: summarization disabled → verbatim.
-  if (!cfg.enabled) {
-    return { text: trimmed, regenerated: false, reason: "disabled" }
-  }
-
-  // 3. Threshold check: small memory → verbatim, skip the LLM round-trip.
+  // 2. Threshold check: small memory → verbatim, skip the LLM round-trip.
+  //    (The "should we summarize at all" gate lives upstream in load.ts.
+  //    By the time we get here, summary mode is selected.)
   const bullets = parseFile(memoryContent)
   if (bullets.length < cfg.minBullets || memoryContent.length < cfg.minBytes) {
     return {
@@ -314,7 +316,7 @@ export async function refreshAndRender(
     pending = bullets
     reason = "no-summary"
   } else if (cutoff === null) {
-    // Summary exists but lacks a cutoff — treat as legacy / corrupt,
+    // Summary exists but lacks a cutoff: treat as legacy / corrupt,
     // regen unconditionally.
     needRegen = true
     pending = bullets

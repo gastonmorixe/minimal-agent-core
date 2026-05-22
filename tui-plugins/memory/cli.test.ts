@@ -201,7 +201,7 @@ describe("main — list", () => {
     const io = makeIO()
     await main(["list", "--no-color", "-L", "2"], io)
     const text = io.out.join("")
-    expect(text).toContain("(showing 2 of 4 entries)")
+    expect(text).toContain("(showing 2 of 4 entries, offset 0)")
     expect(text).toContain("e3")
     expect(text).toContain("e4")
     expect(text).not.toContain("e1")

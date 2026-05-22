@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { DEFAULT_MEMORY_SUMMARY_CONFIG, type MemorySummaryConfig } from "./memory-config.ts"
+import { DEFAULT_MEMORY_CONFIG, type MemorySummaryParams } from "./memory-config.ts"
 import {
   headlineOf,
   parseCutoff,
@@ -51,8 +51,8 @@ function mkBullet(id: string, ts: string | null, body: string): string {
 }
 
 /**
- * Format a Date as `YYYY-MM-DDTHH:MM:SS+00:00` — UTC offset, no
- * milliseconds — to match `parse.ts:TS_RE`. Without this, `parseFile`
+ * Format a Date as `YYYY-MM-DDTHH:MM:SS+00:00`: UTC offset, no
+ * milliseconds: to match `parse.ts:TS_RE`. Without this, `parseFile`
  * treats the timestamp prefix as legacy non-timestamped text.
  */
 function formatTsNoMs(d: Date): string {
@@ -64,23 +64,24 @@ function manyBullets(n: number, tsBase = "2026-05-01T00:00:00-04:00"): string {
   return Array.from({ length: n }, (_, i) => {
     const ts = formatTsNoMs(new Date(baseMs + i * 1000))
     // Pad each body so the file easily clears any sane minBytes threshold.
-    const body = `body for bullet ${i} — `.padEnd(120, "x")
+    const body = `body for bullet ${i}: `.padEnd(120, "x")
     return mkBullet(`b${i}`, ts, body)
   }).join("\n")
 }
 
-// Enabled config tuned so tests are fast: drop the thresholds so even
-// small fixtures trigger the LLM path.
-const ENABLED_CFG: MemorySummaryConfig = {
-  ...DEFAULT_MEMORY_SUMMARY_CONFIG,
-  enabled: true,
+// Test config tuned so tests are fast: drop the thresholds so even
+// small fixtures trigger the LLM path. (The "enabled" gate moved
+// upstream to handlers/load.ts via inject-mode strategy; refreshAndRender
+// is only ever called when summary mode is selected.)
+const ENABLED_CFG: MemorySummaryParams = {
+  ...DEFAULT_MEMORY_CONFIG.summary,
   minBullets: 5,
   minBytes: 100,
   dirtyBullets: 2,
 }
 
 // ---------------------------------------------------------------------------
-// Unit tests — cutoff header
+// Unit tests: cutoff header
 // ---------------------------------------------------------------------------
 
 describe("parseCutoff", () => {
@@ -125,7 +126,7 @@ describe("stripCutoffHeader / withCutoffHeader round-trip", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Unit tests — partitionByCutoff
+// Unit tests: partitionByCutoff
 // ---------------------------------------------------------------------------
 
 describe("partitionByCutoff", () => {
@@ -173,7 +174,7 @@ describe("partitionByCutoff", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Unit tests — headlines & pending rendering
+// Unit tests: headlines & pending rendering
 // ---------------------------------------------------------------------------
 
 describe("headlineOf", () => {
@@ -240,7 +241,7 @@ describe("renderPendingSection", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Unit tests — summaryPathFor
+// Unit tests: summaryPathFor
 // ---------------------------------------------------------------------------
 
 describe("summaryPathFor", () => {
@@ -255,7 +256,7 @@ describe("summaryPathFor", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Integration tests — refreshAndRender
+// Integration tests: refreshAndRender
 // ---------------------------------------------------------------------------
 
 function makeFakeSummarize(out: string) {
@@ -267,7 +268,7 @@ function makeFakeSummarize(out: string) {
   return { fn, calls }
 }
 
-describe("refreshAndRender — short-circuits", () => {
+describe("refreshAndRender: short-circuits", () => {
   it("returns empty text when memory file is absent", async () => {
     const dir = makeTempDir()
     const r = await refreshAndRender({
@@ -294,20 +295,11 @@ describe("refreshAndRender — short-circuits", () => {
     expect(r.reason).toBe("empty-memory")
   })
 
-  it("returns verbatim when summary is disabled", async () => {
-    const dir = makeTempDir()
-    const memContent = manyBullets(50)
-    writeFileSync(join(dir, "memory.md"), memContent)
-    const r = await refreshAndRender({
-      scope: "project",
-      memoryPath: join(dir, "memory.md"),
-      summaryPath: join(dir, "memory.summary.md"),
-      cfg: { ...DEFAULT_MEMORY_SUMMARY_CONFIG, enabled: false },
-    })
-    expect(r.text).toBe(memContent.trim())
-    expect(r.regenerated).toBe(false)
-    expect(r.reason).toBe("disabled")
-  })
+  // NOTE: an earlier "returns verbatim when summary is disabled" case
+  // lived here. The `enabled` knob moved upstream to handlers/load.ts
+  // (via inject-mode strategy), so refreshAndRender no longer has an
+  // internal disabled-state: its caller decides whether to invoke it
+  // at all. The load.ts tests cover the new behavior.
 
   it("returns verbatim when below minBullets threshold", async () => {
     const dir = makeTempDir()
@@ -330,12 +322,12 @@ describe("refreshAndRender — short-circuits", () => {
 
   it("returns verbatim when below minBytes threshold", async () => {
     const dir = makeTempDir()
-    // 6 bullets — clears minBullets=5, but content is ~720 bytes — under
+    // 6 bullets: clears minBullets=5, but content is ~720 bytes: under
     // a high minBytes setting.
     const memContent = manyBullets(6)
     writeFileSync(join(dir, "memory.md"), memContent)
     const fake = makeFakeSummarize("does not run")
-    const cfgWithHighMinBytes: MemorySummaryConfig = { ...ENABLED_CFG, minBytes: 100_000 }
+    const cfgWithHighMinBytes: MemorySummaryParams = { ...ENABLED_CFG, minBytes: 100_000 }
     const r = await refreshAndRender(
       {
         scope: "project",
@@ -351,7 +343,7 @@ describe("refreshAndRender — short-circuits", () => {
   })
 })
 
-describe("refreshAndRender — regen triggers", () => {
+describe("refreshAndRender: regen triggers", () => {
   it("regens when no summary.md exists", async () => {
     const dir = makeTempDir()
     const memContent = manyBullets(20)
@@ -435,7 +427,7 @@ describe("refreshAndRender — regen triggers", () => {
   })
 })
 
-describe("refreshAndRender — fresh-enough path (no regen)", () => {
+describe("refreshAndRender: fresh-enough path (no regen)", () => {
   it("returns existing summary with empty pending when nothing is dirty", async () => {
     const dir = makeTempDir()
     writeFileSync(join(dir, "memory.md"), manyBullets(10, "2026-05-01T00:00:00-04:00"))
@@ -491,7 +483,7 @@ describe("refreshAndRender — fresh-enough path (no regen)", () => {
   })
 })
 
-describe("refreshAndRender — failure modes", () => {
+describe("refreshAndRender: failure modes", () => {
   it("falls back to last-good summary on summarize error", async () => {
     const dir = makeTempDir()
     // 20 bullets dated AFTER the old-summary cutoff → forces regen attempt.
@@ -544,7 +536,7 @@ describe("refreshAndRender — failure modes", () => {
   })
 })
 
-describe("refreshAndRender — atomic write", () => {
+describe("refreshAndRender: atomic write", () => {
   it("writes summary.md in one step (no torn write on early exit)", async () => {
     const dir = makeTempDir()
     writeFileSync(join(dir, "memory.md"), manyBullets(20))

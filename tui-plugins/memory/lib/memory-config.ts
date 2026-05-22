@@ -2,13 +2,36 @@
  * Memory plugin user-config reader.
  *
  * Reads `~/.minimal-agent/config.jsonc` (overridable via
- * `MINIMAL_AGENT_CONFIG`) and extracts the memory-plugin-specific slice
- * at `plugins.memory.summary.*`. Returns a fully-defaulted config so
- * callers don't have to deal with `undefined`s.
+ * `MINIMAL_AGENT_CONFIG`) and extracts the `plugins.memory.*` slice into
+ * a fully-defaulted {@link MemoryConfig} so callers don't have to deal
+ * with `undefined`s.
  *
  * Lives in the memory plugin (not `src/config.ts`) to keep the agent
  * core unaware of plugin-specific keys. Other plugins follow the same
  * pattern (`tui-plugins/quota-status/`, `tui-plugins/web-search/`).
+ *
+ * ## Inject mode
+ *
+ * The single most important knob is {@link MemoryConfig.inject}, which
+ * controls whether (and how) the plugin injects memory bullets into the
+ * system prompt at session start:
+ *
+ *   - `"none"` (default): no bullet dump. The plugin's `PROMPT.md` and
+ *     the `MemoryTool` schema still load, so the model knows the tool
+ *     exists and is taught to query it on demand. Keeps the system
+ *     prompt small.
+ *   - `"verbatim"`: legacy behavior: full `memory.md` injected as a
+ *     `## Saved memories` block.
+ *   - `"summary"`: LLM-derived condensed view via `summary-refresh.ts`.
+ *     Uses {@link MemoryConfig.summary} for thresholds.
+ *
+ * ## Back-compat
+ *
+ * Earlier versions used `plugins.memory.summary.enabled: boolean` as the
+ * sole gate (default false → verbatim). Users who set that to `true`
+ * are silently migrated to `inject: "summary"` when `inject` itself is
+ * unset. Users who were on the default (false) are migrated to the new
+ * default `inject: "none"` (the explicit intent of this change).
  *
  * Lenient parsing: unknown keys ignored, invalid types fall back to
  * defaults. Never throws.
@@ -23,22 +46,37 @@ import { join } from "node:path"
 import { MODELS } from "../../../src/headers.ts"
 import { parseJsonc } from "../../../src/jsonc.ts"
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 /**
- * Fully-resolved memory-summary config. All fields are required (the
- * loader fills in defaults so callers don't have to).
+ * How (or whether) memories are injected into the system prompt at
+ * session start. See module docstring for semantics.
  */
-export interface MemorySummaryConfig {
-  /** Master switch. Default: false (opt-in until vetted). */
-  enabled: boolean
+export type MemoryInjectMode = "none" | "verbatim" | "summary"
+
+/** Whitelist of accepted string values for {@link MemoryInjectMode}. */
+const VALID_INJECT_MODES: ReadonlySet<MemoryInjectMode> = new Set([
+  "none",
+  "verbatim",
+  "summary",
+])
+
+/**
+ * Parameters used by the optional LLM-summary pipeline. Only consulted
+ * when {@link MemoryConfig.inject} === "summary".
+ */
+export interface MemorySummaryParams {
   /**
    * Model id used for the summary LLM call. Defaults to Haiku
-   * (`claude-haiku-4-5-20251001`) — cheap, fast, fine for compression.
+   * (`claude-haiku-4-5`): cheap, fast, fine for compression.
    * Pass-through to the wire: server validates.
    */
   model: string
   /**
-   * Below this bullet count, skip the summarizer and inject verbatim.
-   * Small memory files don't need compression. Default: 30.
+   * Below this bullet count, skip the summarizer and fall back to
+   * verbatim. Small memory files don't need compression. Default: 30.
    */
   minBullets: number
   /**
@@ -55,18 +93,40 @@ export interface MemorySummaryConfig {
   dirtyBullets: number
 }
 
-/** Defaults, applied when keys are missing or malformed. */
-export const DEFAULT_MEMORY_SUMMARY_CONFIG: MemorySummaryConfig = {
-  enabled: false,
-  model: MODELS.HAIKU,
-  minBullets: 30,
-  minBytes: 15_000,
-  dirtyBullets: 3,
+/**
+ * Resolved, fully-defaulted memory-plugin config. Returned by
+ * {@link loadMemoryConfig}.
+ */
+export interface MemoryConfig {
+  /** How (or whether) to inject memories at session start. */
+  inject: MemoryInjectMode
+  /** Summary-mode params. Only used when {@link inject} === "summary". */
+  summary: MemorySummaryParams
 }
+
+/** Built-in defaults, applied per-key when missing or malformed. */
+export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+  inject: "none",
+  summary: {
+    model: MODELS.HAIKU,
+    minBullets: 30,
+    minBytes: 15_000,
+    dirtyBullets: 3,
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Path resolution
+// ---------------------------------------------------------------------------
 
 /**
  * Resolve the user-config path. Mirrors `src/config.ts:configPath`
  * exactly so both readers see the same file.
+ *
+ * Resolution order (highest precedence first):
+ *   1. `MINIMAL_AGENT_CONFIG` env var (full path override)
+ *   2. `<home>/.minimal-agent/config.jsonc`
+ *   3. `<home>/.minimal-agent/config.json` (legacy fallback)
  */
 export function memoryConfigPath(opts: { home?: string; env?: NodeJS.ProcessEnv } = {}): string {
   const env = opts.env ?? process.env
@@ -79,71 +139,112 @@ export function memoryConfigPath(opts: { home?: string; env?: NodeJS.ProcessEnv 
   return join(dir, "config.json")
 }
 
-/**
- * Read and validate the memory-summary slice of the user config.
- *
- * Returns {@link DEFAULT_MEMORY_SUMMARY_CONFIG} for any failure mode
- * (missing file, parse error, wrong types). Never throws.
- *
- * The optional `opts.path` argument is for tests; in production callers
- * pass nothing and `memoryConfigPath()` is consulted.
- */
-export function loadMemorySummaryConfig(
-  opts: { path?: string; home?: string; env?: NodeJS.ProcessEnv } = {},
-): MemorySummaryConfig {
-  const path = opts.path ?? memoryConfigPath({ home: opts.home, env: opts.env })
-  if (!existsSync(path)) return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
+// ---------------------------------------------------------------------------
+// Loader
+// ---------------------------------------------------------------------------
 
+interface RawMemorySlice {
+  inject?: unknown
+  summary?: Record<string, unknown>
+}
+
+/**
+ * Read and validate the memory slice of the user config.
+ *
+ * Returns a {@link MemoryConfig} cloned from {@link DEFAULT_MEMORY_CONFIG}
+ * for any failure mode (missing file, parse error, wrong types). Never
+ * throws.
+ *
+ * The optional `opts.path` argument is for tests. In production callers
+ * pass nothing and {@link memoryConfigPath} is consulted.
+ */
+export function loadMemoryConfig(
+  opts: { path?: string; home?: string; env?: NodeJS.ProcessEnv } = {},
+): MemoryConfig {
+  const path = opts.path ?? memoryConfigPath({ home: opts.home, env: opts.env })
+  const raw = readRawMemorySlice(path)
+  return resolveMemoryConfig(raw)
+}
+
+/**
+ * Pure resolver: takes a raw (untrusted) `plugins.memory` slice and
+ * returns a fully-defaulted {@link MemoryConfig}. Exported for tests.
+ *
+ * Back-compat: legacy `summary.enabled === true` with no top-level
+ * `inject` field resolves to `inject: "summary"`.
+ */
+export function resolveMemoryConfig(raw: RawMemorySlice | null): MemoryConfig {
+  const cfg: MemoryConfig = {
+    inject: DEFAULT_MEMORY_CONFIG.inject,
+    summary: { ...DEFAULT_MEMORY_CONFIG.summary },
+  }
+  if (!raw) return cfg
+
+  // 1. Explicit inject mode (takes precedence over legacy summary.enabled).
+  let injectSet = false
+  if (typeof raw.inject === "string" && VALID_INJECT_MODES.has(raw.inject as MemoryInjectMode)) {
+    cfg.inject = raw.inject as MemoryInjectMode
+    injectSet = true
+  }
+
+  // 2. Summary sub-slice.
+  const s = raw.summary
+  if (s && typeof s === "object" && !Array.isArray(s)) {
+    // 2a. Back-compat: legacy `summary.enabled: true` implies summary
+    //     mode when the explicit knob is unset.
+    if (!injectSet && s.enabled === true) {
+      cfg.inject = "summary"
+    }
+
+    // 2b. Summary params (per-key validation, lenient).
+    if (typeof s.model === "string" && s.model.length > 0) {
+      cfg.summary.model = s.model
+    }
+    if (
+      typeof s.minBullets === "number" &&
+      Number.isFinite(s.minBullets) &&
+      s.minBullets >= 0
+    ) {
+      cfg.summary.minBullets = Math.floor(s.minBullets)
+    }
+    if (typeof s.minBytes === "number" && Number.isFinite(s.minBytes) && s.minBytes >= 0) {
+      cfg.summary.minBytes = Math.floor(s.minBytes)
+    }
+    if (
+      typeof s.dirtyBullets === "number" &&
+      Number.isFinite(s.dirtyBullets) &&
+      s.dirtyBullets >= 0
+    ) {
+      cfg.summary.dirtyBullets = Math.floor(s.dirtyBullets)
+    }
+  }
+
+  return cfg
+}
+
+/**
+ * Read the raw `plugins.memory` slice from disk. Returns `null` for any
+ * failure (no file, bad JSON, missing slice). Pure I/O wrapper around
+ * the JSONC parser.
+ */
+function readRawMemorySlice(path: string): RawMemorySlice | null {
+  if (!existsSync(path)) return null
   let raw: string
   try {
     raw = readFileSync(path, "utf-8")
   } catch {
-    return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
+    return null
   }
-
   let parsed: unknown
   try {
     parsed = parseJsonc(raw)
   } catch {
-    return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
+    return null
   }
-
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
-  }
-
-  const root = parsed as Record<string, unknown>
-  const plugins = root.plugins
-  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) {
-    return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
-  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+  const plugins = (parsed as Record<string, unknown>).plugins
+  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) return null
   const memSlice = (plugins as Record<string, unknown>).memory
-  if (!memSlice || typeof memSlice !== "object" || Array.isArray(memSlice)) {
-    return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
-  }
-  const summarySlice = (memSlice as Record<string, unknown>).summary
-  if (!summarySlice || typeof summarySlice !== "object" || Array.isArray(summarySlice)) {
-    return { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
-  }
-
-  const s = summarySlice as Record<string, unknown>
-  const out: MemorySummaryConfig = { ...DEFAULT_MEMORY_SUMMARY_CONFIG }
-
-  if (typeof s.enabled === "boolean") out.enabled = s.enabled
-  if (typeof s.model === "string" && s.model.length > 0) out.model = s.model
-  if (typeof s.minBullets === "number" && Number.isFinite(s.minBullets) && s.minBullets >= 0) {
-    out.minBullets = Math.floor(s.minBullets)
-  }
-  if (typeof s.minBytes === "number" && Number.isFinite(s.minBytes) && s.minBytes >= 0) {
-    out.minBytes = Math.floor(s.minBytes)
-  }
-  if (
-    typeof s.dirtyBullets === "number" &&
-    Number.isFinite(s.dirtyBullets) &&
-    s.dirtyBullets >= 0
-  ) {
-    out.dirtyBullets = Math.floor(s.dirtyBullets)
-  }
-
-  return out
+  if (!memSlice || typeof memSlice !== "object" || Array.isArray(memSlice)) return null
+  return memSlice as RawMemorySlice
 }

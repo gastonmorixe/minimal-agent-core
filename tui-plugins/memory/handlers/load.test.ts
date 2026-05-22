@@ -1,9 +1,14 @@
 /**
- * Tests for the summary-aware injection path in {@link loadMemories}.
+ * Tests for the inject-mode strategy switch in {@link loadMemories}.
  *
- * Legacy verbatim-injection tests already live in `memory.test.ts`
- * (which covers default behavior — config disabled, no summary
- * artifacts). This file covers the new opt-in summary path.
+ * Coverage:
+ *   - inject="none" (default) → empty string, no file reads, no refresh
+ *   - inject="verbatim"       → full memory.md formatted under section header
+ *   - inject="summary"        → calls refreshAndRender, surfaces its result
+ *
+ * Legacy verbatim-mode tests with file-on-disk fixtures live in
+ * `memory.test.ts` ("memory: load fragment" describe block). This file
+ * focuses on the strategy dispatch + summary branch.
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
@@ -13,8 +18,8 @@ import { join } from "node:path"
 
 import type { PromptFragmentContext } from "../../../src/plugins/types.ts"
 import {
-  DEFAULT_MEMORY_SUMMARY_CONFIG,
-  type MemorySummaryConfig,
+  DEFAULT_MEMORY_CONFIG,
+  type MemoryConfig,
 } from "../lib/memory-config.ts"
 import type { refreshAndRender } from "../lib/summary-refresh.ts"
 
@@ -61,7 +66,7 @@ function makeCtx(home: string, cwd: string): PromptFragmentContext {
 
 /**
  * Prime the file layout under `<home>/.minimal-agent/namespaces/loadtest/...`
- * — matches what `globalMemoryPath` / `projectMemoryPath` resolve to when
+ *: matches what `globalMemoryPath` / `projectMemoryPath` resolve to when
  * `MINIMAL_AGENT_MEMORY_NAMESPACE=loadtest` is set in the env.
  *
  * We use a namespace so the helper paths don't accidentally touch the
@@ -98,50 +103,116 @@ afterEach(() => {
   else process.env.HOME = ORIGINAL_HOME
 })
 
-const enabledCfg: MemorySummaryConfig = {
-  ...DEFAULT_MEMORY_SUMMARY_CONFIG,
-  enabled: true,
-  minBullets: 5,
-  minBytes: 100,
-  dirtyBullets: 2,
+/** Build a config with the given inject mode + summary defaults. */
+function cfgWith(inject: MemoryConfig["inject"]): MemoryConfig {
+  return {
+    ...DEFAULT_MEMORY_CONFIG,
+    inject,
+    summary: { ...DEFAULT_MEMORY_CONFIG.summary, minBullets: 5, minBytes: 100, dirtyBullets: 2 },
+  }
 }
 
-const disabledCfg: MemorySummaryConfig = { ...DEFAULT_MEMORY_SUMMARY_CONFIG, enabled: false }
+// ---------------------------------------------------------------------------
+// inject="none": default
+// ---------------------------------------------------------------------------
 
-describe("loadMemories — summary disabled (legacy path)", () => {
-  it("does NOT invoke refreshAndRender when config is disabled", async () => {
+describe("loadMemories: inject='none' (default)", () => {
+  it("returns empty string even when memory files have content", async () => {
     process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
     const home = makeTempDir()
     const cwd = "/Users/x/proj"
-    primeNamespaced(home, cwd, { global: "- legacy global bullet" })
+    primeNamespaced(home, cwd, { global: "- global bullet", project: "- project bullet" })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("none"),
+    })
+    expect(out).toBe("")
+  })
+
+  it("does NOT invoke refreshAndRender in 'none' mode", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: "- bullet" })
+
     let called = false
     const fakeRefresh: typeof refreshAndRender = async () => {
       called = true
-      return { text: "should not be used", regenerated: false, reason: "n/a" }
+      return { text: "should not run", regenerated: false, reason: "n/a" }
     }
-    const out = await loadMemories(makeCtx(home, cwd), {
-      loadConfig: () => disabledCfg,
+    await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("none"),
       refresh: fakeRefresh,
     })
     expect(called).toBe(false)
-    expect(out).toContain("- legacy global bullet")
-    // No summary-mode explanatory header.
+  })
+})
+
+// ---------------------------------------------------------------------------
+// inject="verbatim": legacy opt-in
+// ---------------------------------------------------------------------------
+
+describe("loadMemories: inject='verbatim'", () => {
+  it("emits both scope sections when both files exist", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, {
+      global: "- global bullet",
+      project: "- project bullet",
+    })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("verbatim"),
+    })
+    expect(out).toContain("## Saved memories")
+    expect(out).toContain("### Global")
+    expect(out).toContain("- global bullet")
+    expect(out).toContain("### Project")
+    expect(out).toContain("- project bullet")
+  })
+
+  it("includes the legacy freshness disclaimer", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: "- bullet" })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("verbatim"),
+    })
+    expect(out).toContain("Snapshot taken at session start")
+    expect(out).toContain("MemoryTool")
+  })
+
+  it("does NOT include the summary-mode explanatory header", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: "- bullet" })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("verbatim"),
+    })
     expect(out).not.toContain("CONDENSED summary")
   })
 
-  it("emits empty string when no memory files exist (regardless of config)", async () => {
+  it("returns empty string when both files are absent", async () => {
     process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
     const home = makeTempDir()
     const cwd = "/Users/x/proj"
     const out = await loadMemories(makeCtx(home, cwd), {
-      loadConfig: () => enabledCfg,
-      refresh: async () => ({ text: "", regenerated: false, reason: "no-memory-file" }),
+      loadConfig: () => cfgWith("verbatim"),
     })
     expect(out).toBe("")
   })
 })
 
-describe("loadMemories — summary enabled", () => {
+// ---------------------------------------------------------------------------
+// inject="summary": opt-in (LLM-driven)
+// ---------------------------------------------------------------------------
+
+describe("loadMemories: inject='summary'", () => {
   it("invokes refreshAndRender with the right per-scope args", async () => {
     process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
     const home = makeTempDir()
@@ -161,7 +232,7 @@ describe("loadMemories — summary enabled", () => {
       }
     }
     const out = await loadMemories(makeCtx(home, cwd), {
-      loadConfig: () => enabledCfg,
+      loadConfig: () => cfgWith("summary"),
       refresh: fakeRefresh,
     })
     expect(calls.length).toBe(2)
@@ -175,7 +246,7 @@ describe("loadMemories — summary enabled", () => {
     expect(out).toContain("summary for project")
   })
 
-  it("includes the summary-mode explanatory header when enabled", async () => {
+  it("includes the summary-mode explanatory header", async () => {
     process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
     const home = makeTempDir()
     const cwd = "/Users/x/proj"
@@ -186,7 +257,7 @@ describe("loadMemories — summary enabled", () => {
       reason: "fresh",
     })
     const out = await loadMemories(makeCtx(home, cwd), {
-      loadConfig: () => enabledCfg,
+      loadConfig: () => cfgWith("summary"),
       refresh: fakeRefresh,
     })
     expect(out).toContain("CONDENSED summary")
@@ -209,7 +280,7 @@ describe("loadMemories — summary enabled", () => {
       }
     }
     const out = await loadMemories(makeCtx(home, cwd), {
-      loadConfig: () => enabledCfg,
+      loadConfig: () => cfgWith("summary"),
       refresh: fakeRefresh,
     })
     expect(out).not.toContain("### Global")
@@ -221,16 +292,37 @@ describe("loadMemories — summary enabled", () => {
     process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
     const home = makeTempDir()
     const cwd = "/Users/x/proj"
-    // No primeNamespaced — both files absent.
+    // No primeNamespaced: both files absent.
     const fakeRefresh: typeof refreshAndRender = async () => ({
       text: "",
       regenerated: false,
       reason: "no-memory-file",
     })
     const out = await loadMemories(makeCtx(home, cwd), {
-      loadConfig: () => enabledCfg,
+      loadConfig: () => cfgWith("summary"),
       refresh: fakeRefresh,
     })
     expect(out).toBe("")
+  })
+
+  it("forwards the summary params slice to refreshAndRender", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: "- bullet" })
+
+    let seenCfg: unknown = null
+    const fakeRefresh: typeof refreshAndRender = async (opts) => {
+      seenCfg = opts.cfg
+      return { text: "x", regenerated: false, reason: "fresh" }
+    }
+    const cfg = cfgWith("summary")
+    await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfg,
+      refresh: fakeRefresh,
+    })
+    // refreshAndRender should receive ONLY the summary sub-slice, not
+    // the top-level config. Lets us refactor inject-mode independently.
+    expect(seenCfg).toEqual(cfg.summary)
   })
 })
