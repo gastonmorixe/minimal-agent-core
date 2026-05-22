@@ -9,7 +9,7 @@
  *  3. When `abortBus.requestAbort` fires while a turn is in flight, the
  *     REPL:
  *       - swallows the resulting `AbortError` (no `error` footer);
- *       - prints a faint+strikethrough "⊘ ABORTED · ❯ <echoed body>" block
+ *       - prints a faint+strikethrough "✘ ABORTED · ❯ <echoed body>" block
  *         (see `formatAbortedEcho` : replaces the older single-line
  *         "⊘ aborted by user : prompt restored to editor" footer);
  *       - calls `editor.setBuffer(text)` to restore the in-flight prompt;
@@ -226,7 +226,7 @@ describe("runReplLiveArea : abort bus integration", () => {
     await replPromise
   })
 
-  it("Esc/Ctrl+C while turn in-flight: faint+strikethrough '⊘ ABORTED' echo, no 'error' line", async () => {
+  it("Esc/Ctrl+C while turn in-flight: faint+strikethrough '✘ ABORTED' echo, no 'error' line", async () => {
     const compositor = new FakeCompositor()
     const editor = new FakeEditor()
     const f = makeAbortableAgent()
@@ -247,11 +247,11 @@ describe("runReplLiveArea : abort bus integration", () => {
     await tick()
 
     const all = stripAnsi(compositor.streams.join(""))
-    // The new abort-echo block uses the `⊘ ABORTED` anchor (vs the older
+    // The new abort-echo block uses the `✘ ABORTED` anchor (vs the older
     // single-line `⊘ aborted by user : prompt restored to editor` footer).
     // Echoes the rolled-back submission in dim+strikethrough so the user
     // can disambiguate from the re-submitted prompt visually.
-    expect(all).toContain("⊘ ABORTED")
+    expect(all).toContain("✘ ABORTED")
     expect(all).toContain("the user prompt") // the echoed body
     // Generic error path uses the literal "error" prefix : must NOT fire here.
     const errorLines = compositor.streams.filter((s) => s.includes("\x1b[1;31merror"))
@@ -335,7 +335,7 @@ describe("runReplLiveArea : abort bus integration", () => {
     await tick()
 
     expect(editor.setBufferCalls.length).toBe(1)
-    const footers = compositor.streams.filter((s) => stripAnsi(s).includes("⊘ ABORTED"))
+    const footers = compositor.streams.filter((s) => stripAnsi(s).includes("✘ ABORTED"))
     expect(footers.length).toBe(1)
 
     editor.cancel()
@@ -434,7 +434,7 @@ describe("runReplLiveArea : abort bus integration", () => {
 
     const all = compositor.streams.join("")
     expect(stripAnsi(all)).toContain("error boom not abort")
-    expect(stripAnsi(all)).not.toContain("⊘ ABORTED")
+    expect(stripAnsi(all)).not.toContain("✘ ABORTED")
     expect(editor.setBufferCalls.length).toBe(0)
     expect(rollbacks).toBe(1)
     // Bus must be reset even on real errors.
@@ -544,7 +544,7 @@ describe("runReplLiveArea : abort kills in-flight tool", () => {
     // Wait for the abort path to land. SIGTERM grace is 2s in Bun.spawn,
     // SIGKILL escalation after that. We allow 4s ceiling.
     let waited = 0
-    while (compositor.streams.every((s) => !stripAnsi(s).includes("⊘ ABORTED"))) {
+    while (compositor.streams.every((s) => !stripAnsi(s).includes("✘ ABORTED"))) {
       if (waited > 4000) break
       await new Promise((r) => setTimeout(r, 50))
       waited += 50
@@ -552,7 +552,7 @@ describe("runReplLiveArea : abort kills in-flight tool", () => {
     const dt = Date.now() - t0
 
     expect(dt).toBeLessThan(4000)
-    expect(stripAnsi(compositor.streams.join(""))).toContain("⊘ ABORTED")
+    expect(stripAnsi(compositor.streams.join(""))).toContain("✘ ABORTED")
     expect(editor.setBufferCalls).toEqual(["run sleep"])
 
     editor.cancel()

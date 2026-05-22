@@ -126,7 +126,7 @@ export const faintThinkingChunk = (s: string): string => {
 /**
  * Render an "aborted prompt echo" block: a faint, struck-through
  * reproduction of the user's just-rolled-back submission, prefixed with a
- * dim-red `⊘` badge and an `ABORTED` label. Replaces the old single-line
+ * bold-red `✘` badge and an `ABORTED` label. Replaces the old single-line
  * `⊘ aborted by user : prompt restored to editor` footer.
  *
  * The motivation: when a user aborts and re-submits, both the original
@@ -138,7 +138,7 @@ export const faintThinkingChunk = (s: string): string => {
  *
  * Format:
  * ```
- *   ⊘ ABORTED · ❯ <line 1, dim+strikethrough>
+ *   ✘ ABORTED · ❯ <line 1, dim+strikethrough>
  *     <line 2, dim+strikethrough, indented>
  *     <line 3, dim+strikethrough, indented>
  * ```
@@ -147,8 +147,15 @@ export const faintThinkingChunk = (s: string): string => {
  * between the separator and the arrow, matching the live prompt's
  * `ASK ❯` shape (also dimmed):
  * ```
- *   ⊘ ABORTED · ASK ❯ <text…>
+ *   ✘ ABORTED · ASK ❯ <text…>
  * ```
+ *
+ * The `✘` (U+2718 HEAVY BALLOT X) is the same glyph + bold-red treatment
+ * the tasks plugin uses for canceled rows and the armed-quit footer uses
+ * for the post-abort heading : one visual vocabulary across the agent
+ * for "this thing got stopped." Previously this used `c.dimRed("⊘")`
+ * which was a thin outline at low contrast and visually disappeared on
+ * antialiased fonts.
  *
  * Pure / no IO; the caller writes the returned string (followed by `\n`)
  * to the compositor's scrollback stream.
@@ -163,7 +170,7 @@ export function formatAbortedEcho(
   text: string,
   opts: { activeModeLabel?: string | null } = {},
 ): string {
-  const badge = c.dimRed("⊘")
+  const badge = c.boldRed("✘")
   const label = c.dim("ABORTED")
   const sep = c.dim("·")
   const modeLabel = opts.activeModeLabel ? ` ${c.dim(opts.activeModeLabel.toUpperCase())}` : ""
@@ -183,7 +190,7 @@ export function formatAbortedEcho(
   // Continuation lines: 4-space indent (2 outer + 2 inner) so they
   // visually nest under the badge rather than aligning under the content
   // of line 1 : keeps the block compact for long submissions and makes
-  // the `⊘ ABORTED` anchor unambiguous as the "left margin" of the echo.
+  // the `✘ ABORTED` anchor unambiguous as the "left margin" of the echo.
   const rest = lines.slice(1).map((l) => `    ${wrap(l)}`)
   return [first, ...rest].join("\n")
 }

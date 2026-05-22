@@ -8,12 +8,12 @@
  * conventional `tmux send-keys` translates key names through tmux's input
  * keymap and would NOT deliver `\x1b[99;5u` verbatim), and asserts:
  *
- *   1. **Kitty CSI-u Ctrl+C while working** produces the `⊘ ABORTED` echo +
- *      restored buffer + armed footer ("press Ctrl+C again within 10s").
+ *   1. **Kitty CSI-u Ctrl+C while working** produces the `✘ ABORTED` echo +
+ *      restored buffer + armed footer ("✘ Aborted.  ⌃C to quit · 10s · esc resume").
  *      Pre-fix this byte sequence bypassed the FSM via the legacy
  *      `consumeEscape() === "cancel"` path and silently exited the REPL.
  *
- *   2. **Kitty CSI-u ESC while working** produces the `⊘ ABORTED` echo +
+ *   2. **Kitty CSI-u ESC while working** produces the `✘ ABORTED` echo +
  *      restored buffer, and the agent stays alive (NO goodbye banner).
  *      Pre-fix this byte sequence fell through `parseModifiedKeySequence`
  *      to `"ignore"` and silently no-op'd.
@@ -87,11 +87,14 @@ desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", ()
 
       // Pre-fix this assertion FAILED - the path bypassed the FSM and the
       // REPL quit silently with no echo.
-      expect(pane).toContain("⊘ ABORTED")
+      expect(pane).toContain("✘ ABORTED")
       // Buffer was restored (not cleared, which was the legacy bug).
       expect(pane).toContain("first prompt")
-      // Armed footer reflects post-abort source.
-      expect(pane).toContain("press Ctrl+C again")
+      // Armed footer reflects post-abort source. `⌃C to quit` is the
+      // post-abort verb (idle-confirm would say `⌃C confirm` instead),
+      // so this substring is source-discriminating as well as
+      // presence-asserting.
+      expect(pane).toContain("⌃C to quit")
       // Did NOT print the goodbye banner: a single Ctrl+C never quits.
       expect(pane).not.toContain("thanks for using minimal-agent")
     } finally {
@@ -123,10 +126,12 @@ desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", ()
       const pane1 = captureAfter(session, 800)
 
       // ESC abort echo present, buffer restored.
-      expect(pane1).toContain("⊘ ABORTED")
+      expect(pane1).toContain("✘ ABORTED")
       expect(pane1).toContain("first prompt")
-      // ESC never arms (rule 4): no armed footer.
-      expect(pane1).not.toContain("press Ctrl+C again")
+      // ESC never arms (rule 4): no armed footer. We check for `⌃C` itself
+      // (the only place it appears is the armed footer) rather than a verb
+      // substring, so an accidental layout shift can't sneak past.
+      expect(pane1).not.toContain("⌃C")
       // ESC never quits: no banner.
       expect(pane1).not.toContain("thanks for using minimal-agent")
 
@@ -164,9 +169,10 @@ desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", ()
       spawnSync("tmux", ["send-keys", "-t", session, "Escape"])
       const pane = captureAfter(session, 800)
 
-      expect(pane).toContain("⊘ ABORTED")
+      expect(pane).toContain("✘ ABORTED")
       expect(pane).toContain("bare esc test")
-      expect(pane).not.toContain("press Ctrl+C again")
+      // No armed footer: same rationale as the kitty-ESC parity above.
+      expect(pane).not.toContain("⌃C")
       expect(pane).not.toContain("thanks for using minimal-agent")
     } finally {
       killSession(session)
