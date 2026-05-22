@@ -33,7 +33,7 @@ manifest:
 
 Three feeds keep the row up-to-date:
 
-1. **`placeholder`** — painted synchronously at REPL start, BEFORE any
+1. **`placeholder`**. Painted synchronously at REPL start, BEFORE any
    `invoke` resolves. This reserves the live-area row from t=0 so the
    prompt doesn't visually shift up by one row when real data lands a
    moment later. (Without it: `❯` would appear, sit alone for ~1s,
@@ -41,15 +41,15 @@ Three feeds keep the row up-to-date:
    the row is there from the first repaint, real data replaces the
    placeholder in-place.)
 
-2. **`refreshOn: ["quota.headersReceived"]`** — the agent's
+2. **`refreshOn: ["quota.headersReceived"]`**. The agent's
    `client.ts` emits this event on the plugin event bus after EVERY
    successful API response (real chat completions and the dedicated
    `checkQuota` probe). The scheduler subscribes and off-cycle re-fires
-   the slot. The handler then reads from `getLastRateLimits()` —
-   populated by the same emit — without a fresh round-trip. End-to-end
+   the slot. The handler then reads from `getLastRateLimits()`,
+   populated by the same emit, without a fresh round-trip. End-to-end
    latency: low milliseconds.
 
-3. **`refreshMs: 300000`** — heartbeat polling every 5 minutes for the
+3. **`refreshMs: 300000`**. Heartbeat polling every 5 minutes for the
    idle / multi-agent case (another process drains the budget while
    this one is silent). Falls back to a real `checkQuota()` request if
    the cache hasn't been freshened in the last `refreshMs/2` window.
@@ -63,7 +63,7 @@ used to print.
 When this plugin is loaded, `src/index.ts` sees a slot with
 `id === "quota"` in `loader.getLiveAreaSlots()` and **skips the
 synchronous `quota` startup row entirely**. The blocking
-`checkQuota()` request that used to gate the REPL boot is gone; the
+`checkQuota()` request that used to gate the REPL boot is gone. The
 slot fetches the same data asynchronously, after the editor is
 already accepting keystrokes.
 

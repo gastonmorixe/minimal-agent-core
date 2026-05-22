@@ -7,7 +7,7 @@ UI cues when active:
 Cycle modes from the REPL with **Shift+Tab** (forward) or
 **Ctrl+Shift+Tab** (back).
 
-This plugin contributes only a mode -- it has no tools and no inline tags.
+This plugin contributes only a mode. It has no tools and no inline tags.
 
 ## When the active mode is `ask`
 
@@ -39,6 +39,6 @@ recent turns, you are NOT in ASK mode and full tooling is available.
 Conversely, a `<mode-change to="default" ...>` block restores normal
 operation.
 
-The block is intentionally tiny -- the policy lives in this PROMPT.md
+The block is intentionally tiny. The policy lives in this PROMPT.md
 (which is permanently part of the cached system prompt). The attachment
 just carries the activation pointer.
