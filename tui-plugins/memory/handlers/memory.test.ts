@@ -28,6 +28,7 @@ import type {
   TUIContext,
 } from "../../../src/plugins/types.ts"
 
+import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "../lib/memory-config.ts"
 import {
   MEMORY_SAVED,
   type MemorySavedPayload,
@@ -35,6 +36,16 @@ import {
 import { shortTermMemoryPath } from "../lib/store.ts"
 import loadMemories, { globalMemoryPath, projectMemoryPath } from "./load.ts"
 import memoryHandler, { localIsoSeconds } from "./memory.ts"
+
+/**
+ * Build a {@link MemoryConfig} cloned from {@link DEFAULT_MEMORY_CONFIG}
+ * with the given inject mode. These tests pin behavior under a SPECIFIC
+ * inject mode; using this helper avoids having to update every test
+ * when the default flips.
+ */
+function cfgWith(inject: MemoryConfig["inject"]): MemoryConfig {
+  return { ...DEFAULT_MEMORY_CONFIG, inject, summary: { ...DEFAULT_MEMORY_CONFIG.summary } }
+}
 
 // Regex fragments. New v0.3 bullet shape: `- [#<id>] [<ts>][ [session:<sid>]] body\n`.
 // `ID_RE` matches both flavors: persistent (`<base36>-<hex>`) and short-term int.
@@ -143,7 +154,7 @@ function makeNoopLogger() {
   }
 }
 
-describe("memory: save handler — project / global / short-term", () => {
+describe("memory: save handler: project / global / short-term", () => {
   it("default scope is project; appends bullet to project file with id+ts prefix", async () => {
     const cwd = "/Users/x/code"
     const res = await memoryHandler(makeSaveCtx({ body: "hello", cwd }))
@@ -231,7 +242,7 @@ describe("memory: save handler — project / global / short-term", () => {
   })
 })
 
-describe("memory: save handler — file IO and back-compat", () => {
+describe("memory: save handler: file IO and back-compat", () => {
   it("appends to a file with pre-existing untimestamped (legacy) bullets without rewriting them", async () => {
     const cwd = "/legacy"
     const path = projectMemoryPath(cwd, tmpHome)
@@ -354,7 +365,7 @@ describe("memory: save handler — file IO and back-compat", () => {
 // Bus emit (memory.saved)
 // ---------------------------------------------------------------------------
 
-describe("memory: save handler — emits memory.saved on global bus", () => {
+describe("memory: save handler: emits memory.saved on global bus", () => {
   it("emits payload {scope,id,body} after a successful save", async () => {
     const bus = new EventBus()
     setGlobalEventBus(bus)
@@ -365,7 +376,7 @@ describe("memory: save handler — emits memory.saved on global bus", () => {
     })
 
     await memoryHandler(makeSaveCtx({ body: "with bus", cwd: "/p" }))
-    // Bus dispatches via queueMicrotask — wait one tick.
+    // Bus dispatches via queueMicrotask: wait one tick.
     await Promise.resolve()
 
     expect(events.length).toBe(1)
@@ -421,7 +432,7 @@ describe("memory: save handler — emits memory.saved on global bus", () => {
     // Up to the cap, no eviction.
     expect(events.every((e) => !e.evicted)).toBe(true)
 
-    // One more — triggers eviction.
+    // One more: triggers eviction.
     await memoryHandler(
       makeSaveCtx({ body: "overflow", attrs: { scope: "short-term" }, env }),
     )
@@ -471,11 +482,47 @@ function makeLoadCtx(cwd: string): PromptFragmentContext {
   }
 }
 
-describe("memory: load fragment", () => {
-  it("returns empty string when neither file exists", async () => {
+describe("memory: load fragment (default: inject='none')", () => {
+  it("returns empty string when neither file exists (default mode)", async () => {
     const out = await loadMemories(makeLoadCtx("/p"))
     expect(out).toBe("")
   })
+
+  it("returns empty string EVEN WHEN files exist (default no-injection mode)", async () => {
+    // Regression guard: the whole point of the v0.4 rewrite is that
+    // memories are NOT in the system prompt by default. They must be
+    // queried via MemoryTool. If this ever flips back, context
+    // saturation returns silently.
+    const gp = globalMemoryPath(tmpHome)
+    const pp = projectMemoryPath("/p", tmpHome)
+    require("node:fs").mkdirSync(require("node:path").dirname(gp), { recursive: true })
+    require("node:fs").mkdirSync(require("node:path").dirname(pp), { recursive: true })
+    writeFileSync(gp, "- some global lesson\n")
+    writeFileSync(pp, "- some project lesson\n")
+
+    const out = await loadMemories(makeLoadCtx("/p"))
+    expect(out).toBe("")
+  })
+
+  it("skips both file reads entirely on the fast path", async () => {
+    // The handler should NEVER touch disk in default mode: saves cost
+    // on session-start latency. We assert by passing a loadConfig that
+    // returns inject="none" and a refresh fake that records calls.
+    let refreshCalls = 0
+    const out = await loadMemories(makeLoadCtx("/p"), {
+      loadConfig: () => cfgWith("none"),
+      refresh: async () => {
+        refreshCalls++
+        return { text: "should not run", regenerated: false, reason: "n/a" }
+      },
+    })
+    expect(out).toBe("")
+    expect(refreshCalls).toBe(0)
+  })
+})
+
+describe("memory: load fragment (inject='verbatim' opt-in)", () => {
+  const verbatimCfg = cfgWith("verbatim")
 
   it("includes only Global section when only global file exists", async () => {
     const gp = globalMemoryPath(tmpHome)
@@ -484,7 +531,7 @@ describe("memory: load fragment", () => {
     })
     writeFileSync(gp, "- alpha\n- beta\n")
 
-    const out = await loadMemories(makeLoadCtx("/p"))
+    const out = await loadMemories(makeLoadCtx("/p"), { loadConfig: () => verbatimCfg })
     expect(out).toContain("## Saved memories")
     expect(out).toContain("### Global")
     expect(out).toContain("- alpha")
@@ -499,7 +546,7 @@ describe("memory: load fragment", () => {
     })
     writeFileSync(pp, "- gamma\n")
 
-    const out = await loadMemories(makeLoadCtx("/work/p"))
+    const out = await loadMemories(makeLoadCtx("/work/p"), { loadConfig: () => verbatimCfg })
     expect(out).toContain("### Project")
     expect(out).toContain("- gamma")
     expect(out).not.toContain("### Global")
@@ -517,7 +564,7 @@ describe("memory: load fragment", () => {
     writeFileSync(gp, "- global-one\n")
     writeFileSync(pp, "- project-one\n")
 
-    const out = await loadMemories(makeLoadCtx("/work/p"))
+    const out = await loadMemories(makeLoadCtx("/work/p"), { loadConfig: () => verbatimCfg })
     const gIdx = out.indexOf("### Global")
     const pIdx = out.indexOf("### Project")
     expect(gIdx).toBeGreaterThan(-1)
@@ -538,7 +585,7 @@ describe("memory: load fragment", () => {
         "- [#abc-1234] [2026-05-05T21:06:20-04:00] new bullet\n",
     )
 
-    const out = await loadMemories(makeLoadCtx("/p"))
+    const out = await loadMemories(makeLoadCtx("/p"), { loadConfig: () => verbatimCfg })
     expect(out).toContain("- legacy bullet, no timestamp")
     expect(out).toContain("- [#abc-1234] [2026-05-05T21:06:20-04:00] new bullet")
   })
@@ -549,26 +596,29 @@ describe("memory: load fragment", () => {
       recursive: true,
     })
     writeFileSync(gp, "\n\n\n- only\n\n\n\n")
-    const out = await loadMemories(makeLoadCtx("/p"))
+    const out = await loadMemories(makeLoadCtx("/p"), { loadConfig: () => verbatimCfg })
     expect(out).not.toMatch(/\n\n\n\n/)
     expect(out).toContain("- only")
   })
 
   it("includes a freshness disclaimer pointing at MemoryTool list", async () => {
-    // Regression guard: the snapshot is captured at session start and
-    // doesn't live-refresh, so the section must tell the model how to
-    // get the current state mid-session. Without this disclaimer the
-    // model will recite the (possibly stale) snapshot when asked
-    // "what do you remember?" — a real failure mode observed in dev.
+    // Regression guard: under verbatim opt-in the snapshot is captured
+    // at session start and doesn't live-refresh, so the section must
+    // tell the model how to get the current state mid-session.
     const gp = globalMemoryPath(tmpHome)
     require("node:fs").mkdirSync(require("node:path").dirname(gp), {
       recursive: true,
     })
     writeFileSync(gp, "- a\n")
-    const out = await loadMemories(makeLoadCtx("/p"))
+    const out = await loadMemories(makeLoadCtx("/p"), { loadConfig: () => verbatimCfg })
     expect(out).toContain("Snapshot taken at session start")
     expect(out).toContain("MemoryTool")
-    expect(out).toContain("\"list\"")
+    expect(out).toContain('"list"')
+  })
+
+  it("returns empty string when files are absent even in verbatim mode", async () => {
+    const out = await loadMemories(makeLoadCtx("/p"), { loadConfig: () => verbatimCfg })
+    expect(out).toBe("")
   })
 })
 
@@ -577,15 +627,39 @@ describe("memory: load fragment", () => {
 // ---------------------------------------------------------------------------
 
 describe("memory: integration with PluginLoader", () => {
-  it("loads the memory plugin and embeds saved memories into the prompt block", async () => {
+  /**
+   * Point loadMemoryConfig at a temp config file for the duration of
+   * one test, set inject mode, restore after. We use the public env
+   * override `MINIMAL_AGENT_CONFIG` since the integration test uses the
+   * REAL handler (no DI shortcut available through the loader API).
+   */
+  async function withInjectMode<T>(
+    mode: MemoryConfig["inject"],
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const configPath = join(tmpHome, "config.jsonc")
+    writeFileSync(
+      configPath,
+      JSON.stringify({ plugins: { memory: { inject: mode } } }),
+    )
+    const prev = process.env.MINIMAL_AGENT_CONFIG
+    process.env.MINIMAL_AGENT_CONFIG = configPath
+    try {
+      return await fn()
+    } finally {
+      if (prev === undefined) delete process.env.MINIMAL_AGENT_CONFIG
+      else process.env.MINIMAL_AGENT_CONFIG = prev
+    }
+  }
+
+  it("default (no config, no opt-in): memories are NOT in the prompt block", async () => {
+    // The whole point of v0.4. The plugin loads, the tool is in the
+    // tool list, PROMPT.md is in the system prompt: but memory bullet
+    // contents stay out. Regression guard against accidental re-flip.
     const gp = globalMemoryPath(tmpHome)
     const pp = projectMemoryPath(process.cwd(), tmpHome)
-    require("node:fs").mkdirSync(require("node:path").dirname(gp), {
-      recursive: true,
-    })
-    require("node:fs").mkdirSync(require("node:path").dirname(pp), {
-      recursive: true,
-    })
+    require("node:fs").mkdirSync(require("node:path").dirname(gp), { recursive: true })
+    require("node:fs").mkdirSync(require("node:path").dirname(pp), { recursive: true })
     writeFileSync(gp, "- E2E global memory line\n")
     writeFileSync(pp, "- E2E project memory line\n")
 
@@ -595,11 +669,36 @@ describe("memory: integration with PluginLoader", () => {
     })
 
     const block = await loader.getPromptBlockAsync()
-    expect(block).not.toBeNull()
-    if (block === null) throw new Error("unreachable")
-    expect(block).toContain("## Saved memories")
-    expect(block).toContain("- E2E global memory line")
-    expect(block).toContain("- E2E project memory line")
+    // The block itself may still exist (other plugins inject) but it
+    // MUST NOT carry the memory contents.
+    const blockText = block ?? ""
+    expect(blockText).not.toContain("- E2E global memory line")
+    expect(blockText).not.toContain("- E2E project memory line")
+    // The plugin's PROMPT.md still tells the model the tool exists.
+    expect(blockText).toMatch(/MemoryTool/)
+  })
+
+  it("inject='verbatim' opt-in: memories ARE embedded in the prompt block", async () => {
+    const gp = globalMemoryPath(tmpHome)
+    const pp = projectMemoryPath(process.cwd(), tmpHome)
+    require("node:fs").mkdirSync(require("node:path").dirname(gp), { recursive: true })
+    require("node:fs").mkdirSync(require("node:path").dirname(pp), { recursive: true })
+    writeFileSync(gp, "- E2E global memory line\n")
+    writeFileSync(pp, "- E2E project memory line\n")
+
+    await withInjectMode("verbatim", async () => {
+      const loader = await PluginLoader.load({
+        embeddedDir: PROJECT_ROOT,
+        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+      })
+
+      const block = await loader.getPromptBlockAsync()
+      expect(block).not.toBeNull()
+      if (block === null) throw new Error("unreachable")
+      expect(block).toContain("## Saved memories")
+      expect(block).toContain("- E2E global memory line")
+      expect(block).toContain("- E2E project memory line")
+    })
   })
 
   it("loader threads its sessionId into the saved bullet", async () => {
@@ -662,9 +761,9 @@ describe("memory: integration with PluginLoader", () => {
     // The full closing-the-loop flow as wired in `src/index.ts`:
     //
     //   1. Loader is constructed.
-    //   2. setGlobalEventBus(loader.bus()) — so `getGlobalEventBus()` from
+    //   2. setGlobalEventBus(loader.bus()): so `getGlobalEventBus()` from
     //      inside the handler resolves to the same bus.
-    //   3. SaveEchoCollector.attach(loader.bus()) — subscribes to MEMORY_SAVED.
+    //   3. SaveEchoCollector.attach(loader.bus()): subscribes to MEMORY_SAVED.
     //   4. A `<tui::memory>` tag is dispatched through the loader.
     //   5. The collector should now have a queued ContentBlock the agent
     //      would prepend to the next user turn.
@@ -690,10 +789,10 @@ describe("memory: integration with PluginLoader", () => {
       },
       process.cwd(),
     )
-    // Bus dispatches via queueMicrotask — wait one tick.
+    // Bus dispatches via queueMicrotask: wait one tick.
     await Promise.resolve()
 
-    // Drain — exactly one block, with the expected <memory-saved> shape.
+    // Drain: exactly one block, with the expected <memory-saved> shape.
     const blocks = collector.consumeAll()
     expect(blocks.length).toBe(1)
     expect(blocks[0]?.type).toBe("text")

@@ -1,5 +1,5 @@
 /**
- * Tests for `MemoryTool` — the model-facing CRUD tool for saved memories.
+ * Tests for `MemoryTool`: the model-facing CRUD tool for saved memories.
  *
  * Each test gets a temp `$HOME` so we never touch the real
  * `~/.minimal-agent/`. The tool handler is exercised directly (not
@@ -34,7 +34,12 @@ import {
   shortTermMemoryPath,
   SHORT_TERM_CAP,
 } from "../lib/store.ts"
-import memoryToolHandler from "./memory_tool.ts"
+import memoryToolHandler, {
+  DEFAULT_LIST_LIMIT,
+  LIST_PREVIEW_MAX,
+  MAX_LIST_LIMIT,
+  paginateNewestFirst,
+} from "./memory_tool.ts"
 
 const PLUGIN_DIR = resolve(__dirname, "..")
 
@@ -102,7 +107,7 @@ function stripAnsi(s: string): string {
 // Input validation
 // ---------------------------------------------------------------------------
 
-describe("MemoryTool — input validation", () => {
+describe("MemoryTool: input validation", () => {
   it("rejects missing action", async () => {
     const r = await memoryToolHandler(makeToolCtx({ input: { scope: "project" } }))
     expect(r.kind).toBe("tool_result")
@@ -276,7 +281,8 @@ describe("MemoryTool.list", () => {
     )
     if (r.kind !== "tool_result") return
     const content = stripAnsi(r.content)
-    expect(content).toContain("project (2 entries)")
+    // shown===total → un-paginated form; "matching" suffix reflects the query.
+    expect(content).toContain(`project (2 entries matching "ACTIVE")`)
     expect(content).toContain("width 80")
     expect(content).toContain("TLS handshake")
     expect(content).not.toContain("noise about")
@@ -294,7 +300,8 @@ describe("MemoryTool.list", () => {
     )
     if (r.kind !== "tool_result") return
     const content = stripAnsi(r.content)
-    expect(content).toContain("(showing 2 of 5 entries)")
+    expect(content).toContain("showing 2 of 5 entries")
+    expect(content).toContain("offset 0")
     expect(content).toContain("entry 4")
     expect(content).toContain("entry 5")
     expect(content).not.toContain("entry 1")
@@ -312,6 +319,250 @@ describe("MemoryTool.list", () => {
     // ANSI escapes present in display, absent in content.
     expect(r.display).toContain("\x1b[")
     expect(r.content).not.toContain("\x1b[")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// list: pagination + truncation contract
+// ---------------------------------------------------------------------------
+
+describe("MemoryTool.list: pagination", () => {
+  it("default limit is DEFAULT_LIST_LIMIT (regression guard)", () => {
+    // Pinning the constant rather than the magic number makes the test
+    // fail loudly if someone bumps the default without updating PROMPT.md.
+    expect(DEFAULT_LIST_LIMIT).toBe(20)
+  })
+
+  it("returns at most DEFAULT_LIST_LIMIT entries when limit is unset", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 25; i++) s.add(`entry ${i}`)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({ input: { action: "list", scope: "project" }, cwd: "/p" }),
+    )
+    if (r.kind !== "tool_result") return
+    const content = stripAnsi(r.content)
+    expect(content).toContain(`showing ${DEFAULT_LIST_LIMIT} of 25 entries`)
+    expect(content).toContain("offset 0")
+    // First few oldest entries from the source are NOT in the most-recent page.
+    expect(content).not.toContain("entry 1\n")
+    expect(content).toContain("entry 25")
+  })
+
+  it("returns a next-page hint when there are more entries", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 25; i++) s.add(`entry ${i}`)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({ input: { action: "list", scope: "project" }, cwd: "/p" }),
+    )
+    if (r.kind !== "tool_result") return
+    expect(stripAnsi(r.content)).toContain(
+      `next: MemoryTool({action: "list", scope: "project", offset: ${DEFAULT_LIST_LIMIT}, limit: ${DEFAULT_LIST_LIMIT}})`,
+    )
+  })
+
+  it("offset walks BACKWARD in time (toward older entries)", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 25; i++) s.add(`entry ${i}`)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "list", scope: "project", limit: 5, offset: 5 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    const content = stripAnsi(r.content)
+    expect(content).toContain("showing 5 of 25 entries")
+    expect(content).toContain("offset 5")
+    // The page should be entries 16..20 (5 from end is 21..25 most recent;
+    // offset=5 skips those, gives us 16..20).
+    expect(content).toContain("entry 16")
+    expect(content).toContain("entry 20")
+    expect(content).not.toContain("entry 21")
+    expect(content).not.toContain("entry 15")
+  })
+
+  it("last page omits the next-page hint", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 22; i++) s.add(`entry ${i}`)
+
+    // offset=20, limit=20 leaves only entries 1..2: last page, no more.
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "list", scope: "project", limit: 20, offset: 20 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    const content = stripAnsi(r.content)
+    expect(content).toContain("showing 2 of 22 entries")
+    expect(content).not.toContain("next:")
+  })
+
+  it("offset >= total returns an empty page (no rows, no hint)", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 5; i++) s.add(`entry ${i}`)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "list", scope: "project", limit: 10, offset: 100 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    const content = stripAnsi(r.content)
+    expect(content).toContain("showing 0 of 5 entries")
+    expect(content).toContain("offset 100")
+    expect(content).not.toContain("next:")
+  })
+
+  it("clamps a runaway limit and notes the clamp in the result", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 5; i++) s.add(`entry ${i}`)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "list", scope: "project", limit: 5000 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    expect(r.is_error).toBeFalsy()
+    const content = stripAnsi(r.content)
+    expect(content).toContain(`limit clamped to ${MAX_LIST_LIMIT}`)
+  })
+
+  it("rejects negative offset", async () => {
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "list", scope: "project", offset: -1 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    expect(r.is_error).toBe(true)
+    expect(r.content).toContain("`offset` must be a non-negative integer")
+  })
+
+  it("rejects offset outside list", async () => {
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "read", scope: "project", id: "x", offset: 0 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    expect(r.is_error).toBe(true)
+    expect(r.content).toContain("`offset` is only valid for action=\"list\"")
+  })
+
+  it("query + pagination compose: filter first, then page", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    for (let i = 1; i <= 30; i++) {
+      s.add(i % 2 === 0 ? `even ${i}` : `odd ${i}`)
+    }
+    // 15 odds; first page of 5 should be odds 21, 23, 25, 27, 29.
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "list", scope: "project", query: "odd", limit: 5 },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    const content = stripAnsi(r.content)
+    expect(content).toContain('matching "odd"')
+    expect(content).toContain("showing 5 of 15 entries")
+    expect(content).toContain("odd 21")
+    expect(content).toContain("odd 29")
+    expect(content).not.toContain("even ")
+  })
+
+  it("clips body previews to LIST_PREVIEW_MAX characters", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    const longBody = "x".repeat(LIST_PREVIEW_MAX + 50)
+    s.add(longBody)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({ input: { action: "list", scope: "project" }, cwd: "/p" }),
+    )
+    if (r.kind !== "tool_result") return
+    const content = stripAnsi(r.content)
+    // Ellipsis indicates truncation.
+    expect(content).toContain("…")
+    // No row should contain a continuous run of x's longer than the cap.
+    const xs = content.match(/x+/g) ?? []
+    for (const run of xs) {
+      expect(run.length).toBeLessThan(LIST_PREVIEW_MAX)
+    }
+  })
+
+  it("read still returns the FULL body (truncation is only in list)", async () => {
+    const s = MemoryStore.project("/p", { home: tmpHome })
+    const longBody = "x".repeat(LIST_PREVIEW_MAX * 3)
+    const { bullet } = s.add(longBody)
+
+    const r = await memoryToolHandler(
+      makeToolCtx({
+        input: { action: "read", scope: "project", id: bullet.id },
+        cwd: "/p",
+      }),
+    )
+    if (r.kind !== "tool_result") return
+    expect(r.is_error).toBeFalsy()
+    // The full body must be present; read is the escape hatch.
+    expect(stripAnsi(r.content)).toContain(longBody)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// paginateNewestFirst: pure helper
+// ---------------------------------------------------------------------------
+
+describe("paginateNewestFirst", () => {
+  it("returns last N items in source order (page 0)", () => {
+    const items = [1, 2, 3, 4, 5]
+    const { slice, nextOffset } = paginateNewestFirst(items, 0, 2)
+    expect(slice).toEqual([4, 5])
+    expect(nextOffset).toBe(2)
+  })
+
+  it("walks backward as offset grows", () => {
+    const items = [1, 2, 3, 4, 5]
+    const { slice, nextOffset } = paginateNewestFirst(items, 2, 2)
+    expect(slice).toEqual([2, 3])
+    expect(nextOffset).toBe(4)
+  })
+
+  it("returns the remainder on the last page", () => {
+    const items = [1, 2, 3, 4, 5]
+    const { slice, nextOffset } = paginateNewestFirst(items, 4, 2)
+    expect(slice).toEqual([1])
+    expect(nextOffset).toBe(null)
+  })
+
+  it("returns [] when offset >= total", () => {
+    const items = [1, 2, 3]
+    const { slice, nextOffset } = paginateNewestFirst(items, 10, 5)
+    expect(slice).toEqual([])
+    expect(nextOffset).toBe(null)
+  })
+
+  it("returns [] for an empty source", () => {
+    const { slice, nextOffset } = paginateNewestFirst<number>([], 0, 5)
+    expect(slice).toEqual([])
+    expect(nextOffset).toBe(null)
+  })
+
+  it("clamps non-finite or sub-one limit/offset values", () => {
+    // The handler validates these at the boundary, but the pure helper
+    // should be defensive enough that direct callers (CLI, tests) don't
+    // segfault on bad inputs.
+    const items = [1, 2, 3, 4, 5]
+    const a = paginateNewestFirst(items, -5, -1)
+    expect(a.slice).toEqual([5]) // limit floored to 1, offset floored to 0
+    expect(a.nextOffset).toBe(1)
   })
 })
 
@@ -574,7 +825,7 @@ describe("MemoryTool.clear", () => {
 // format=json
 // ---------------------------------------------------------------------------
 
-describe("MemoryTool — format='json'", () => {
+describe("MemoryTool: format='json'", () => {
   it("list returns parseable JSON", async () => {
     const s = MemoryStore.project("/p", { home: tmpHome })
     s.add("alpha")
@@ -691,7 +942,7 @@ describe("MemoryTool — format='json'", () => {
 // Defensive paths
 // ---------------------------------------------------------------------------
 
-describe("MemoryTool — defensive paths", () => {
+describe("MemoryTool: defensive paths", () => {
   it("non-tool trigger returns is_error", async () => {
     const ctx: TUIContext = {
       ...makeToolCtx({ input: { action: "list", scope: "project" } }),

@@ -1,8 +1,8 @@
 {
   "id": "memory",
   "name": "Memory",
-  "version": "0.3.0",
-  "description": "Persistent cross-session memory plus per-session short-term scratchpad. Saves via the inline <tui::memory> tag (zero-friction, mid-response); reads/edits/removes via the MemoryTool (structured CRUD by id). Three scopes: global (~/.minimal-agent/memory.md), project (~/.minimal-agent/projects/<cwd>/memory.md), short-term (~/.minimal-agent/sessions/<sid>.scratch.md). The first two are reloaded into the system prompt on every session start; short-term rides as a per-turn user-message attachment.",
+  "version": "0.4.0",
+  "description": "Persistent cross-session memory plus per-session short-term scratchpad. Saves via the inline <tui::memory> tag (zero-friction, mid-response); reads/edits/removes via the MemoryTool (structured CRUD by id). Three scopes: global (~/.minimal-agent/memory.md), project (~/.minimal-agent/projects/<cwd>/memory.md), short-term (~/.minimal-agent/sessions/<sid>.scratch.md). Persistent scopes are NOT injected into the system prompt by default (use `MemoryTool({action: \"list\"})` to query); short-term rides as a per-turn user-message attachment.",
   "prompt": "./PROMPT.md",
   "tuis": [
     {
@@ -24,7 +24,7 @@
         "type": "tool",
         "tool": {
           "name": "MemoryTool",
-          "description": "List, read, add, edit, or remove saved memories. Three scopes: global (cross-project), project (this codebase), short-term (this session only). For in-flight saves mid-response, prefer the inline <tui::memory> tag — it's lower friction and the save-echo gives you the id back on the next turn. Use this tool for retrieval and curation. `id` is required for read/edit/remove; `body` for add/edit; `query` and `limit` are list-only. `clear` is only allowed for scope=short-term.",
+          "description": "List, read, add, edit, or remove saved memories. Memories are NOT shown in your system prompt by default; use this tool to query them whenever a saved lesson might apply (debugging a familiar symptom, recalling a user's preferences, looking up prior solutions on this codebase). Three scopes: `global` (cross-project, about working with this user), `project` (about this codebase), `short-term` (this session only). For in-flight saves mid-response, prefer the inline <tui::memory> tag (lower friction, save-echo returns the id next turn). `list` is paginated: default returns the most recent 20 entries with body previews clipped to ~160 chars; the header includes a paste-ready `next: MemoryTool({...})` hint for the next page. Use `read` to fetch the full body of a specific bullet by id. `id` is required for read/edit/remove; `body` for add/edit; `query`/`limit`/`offset` are list-only. `clear` is only allowed for scope=short-term.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -48,12 +48,17 @@
               },
               "query": {
                 "type": "string",
-                "description": "Optional case-insensitive substring filter for action=list."
+                "description": "Optional case-insensitive substring filter for action=list. Pairs with limit/offset for filtered pagination."
               },
               "limit": {
                 "type": "integer",
                 "minimum": 1,
-                "description": "For action=list, return only the N most recent matches. Default: all."
+                "description": "For action=list, page size. Default 20, max 100 (over-large values are clamped). Pair with `offset` to page through the full set."
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "For action=list, number of entries to skip counted FROM THE NEWEST END. offset=0 (default) returns the most recent page; offset=20 returns the page before that, and so on. The response header's `next:` hint shows the exact value for the next page."
               },
               "format": {
                 "type": "string",
