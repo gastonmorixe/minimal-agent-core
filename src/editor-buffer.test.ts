@@ -139,4 +139,116 @@ describe("EditorBuffer", () => {
     b.moveLineEnd()
     expect(b.col).toBe(5)
   })
+
+  it("moveWordLeft crosses line boundaries", () => {
+    // ["foo bar", "baz qux"], cursor at start of "baz" (row=1, col=0).
+    // Alt+B should jump to the start of "bar" on the previous line.
+    const b = new EditorBuffer()
+    b.insert("foo bar")
+    b.newline()
+    b.insert("baz qux")
+    b.row = 1
+    b.col = 0
+    expect(b.moveWordLeft()).toBe(true)
+    expect(b.row).toBe(0)
+    expect(b.col).toBe(4)
+    // Another Alt+B walks to the start of "foo".
+    expect(b.moveWordLeft()).toBe(true)
+    expect(b.row).toBe(0)
+    expect(b.col).toBe(0)
+    // At (0,0) there's nothing further left.
+    expect(b.moveWordLeft()).toBe(false)
+  })
+
+  it("moveWordLeft hops over a blank line", () => {
+    // ["abc", "", "|"] - cursor on a trailing empty line, blank line in
+    // the middle. Word-left should skip both blank rows and the newlines
+    // and land at the start of "abc".
+    const b = new EditorBuffer()
+    b.insert("abc")
+    b.newline()
+    b.newline()
+    expect(b.row).toBe(2)
+    expect(b.col).toBe(0)
+    expect(b.moveWordLeft()).toBe(true)
+    expect(b.row).toBe(0)
+    expect(b.col).toBe(0)
+  })
+
+  it("moveWordRight crosses line boundaries", () => {
+    // ["foo bar", "baz qux"], cursor at end of "foo bar" (row=0, col=7).
+    // Alt+F should jump forward, treating the newline as whitespace, and
+    // land at the end of "baz".
+    const b = new EditorBuffer()
+    b.insert("foo bar")
+    b.newline()
+    b.insert("baz qux")
+    b.row = 0
+    b.col = 7
+    expect(b.moveWordRight()).toBe(true)
+    expect(b.row).toBe(1)
+    expect(b.col).toBe(3)
+    // Another Alt+F walks to the end of "qux".
+    expect(b.moveWordRight()).toBe(true)
+    expect(b.row).toBe(1)
+    expect(b.col).toBe(7)
+    // No further movement possible.
+    expect(b.moveWordRight()).toBe(false)
+  })
+
+  it("moveWordRight from start of word crosses a leading blank line", () => {
+    // ["", "  abc"] - cursor at (0,0) on the empty leading row. Alt+F
+    // should hop to the end of "abc".
+    const b = new EditorBuffer()
+    b.newline()
+    b.insert("  abc")
+    b.row = 0
+    b.col = 0
+    expect(b.moveWordRight()).toBe(true)
+    expect(b.row).toBe(1)
+    expect(b.col).toBe(5)
+  })
+
+  it("deleteWordBackward at col 0 joins with previous line and deletes its trailing word", () => {
+    // ["foo bar", "baz"], cursor at row=1 col=0. Ctrl+W should delete
+    // "bar\n" so the buffer collapses to ["foo baz"] with cursor right
+    // after "foo ".
+    const b = new EditorBuffer()
+    b.insert("foo bar")
+    b.newline()
+    b.insert("baz")
+    b.row = 1
+    b.col = 0
+    expect(b.deleteWordBackward()).toBe(true)
+    expect(b.lines).toEqual(["foo baz"])
+    expect(b.row).toBe(0)
+    expect(b.col).toBe(4)
+  })
+
+  it("deleteWordBackward across leading whitespace joins lines correctly", () => {
+    // ["foo bar", "   baz"], cursor right before "baz" (row=1, col=3).
+    // Ctrl+W should eat the three spaces AND the newline AND the word
+    // "bar", landing at the end of "foo ".
+    const b = new EditorBuffer()
+    b.insert("foo bar")
+    b.newline()
+    b.insert("   baz")
+    b.row = 1
+    b.col = 3
+    expect(b.deleteWordBackward()).toBe(true)
+    expect(b.lines).toEqual(["foo baz"])
+    expect(b.row).toBe(0)
+    expect(b.col).toBe(4)
+  })
+
+  it("deleteWordBackward at start of buffer returns false", () => {
+    const b = new EditorBuffer()
+    b.insert("foo")
+    b.newline()
+    b.insert("bar")
+    b.row = 0
+    b.col = 0
+    expect(b.deleteWordBackward()).toBe(false)
+    expect(b.lines).toEqual(["foo", "bar"])
+  })
 })
