@@ -157,22 +157,18 @@ export class EditorBuffer {
   }
 
   moveWordLeft(): boolean {
-    const chars = this.lineChars(this.rowValue)
-    let next = this.colValue
-    while (next > 0 && this.isWhitespace(chars[next - 1])) next -= 1
-    while (next > 0 && !this.isWhitespace(chars[next - 1])) next -= 1
-    if (next === this.colValue) return false
-    this.colValue = next
+    const [row, col] = this.scanWordLeft(this.rowValue, this.colValue)
+    if (row === this.rowValue && col === this.colValue) return false
+    this.rowValue = row
+    this.colValue = col
     return true
   }
 
   moveWordRight(): boolean {
-    const chars = this.lineChars(this.rowValue)
-    let next = this.colValue
-    while (next < chars.length && this.isWhitespace(chars[next])) next += 1
-    while (next < chars.length && !this.isWhitespace(chars[next])) next += 1
-    if (next === this.colValue) return false
-    this.colValue = next
+    const [row, col] = this.scanWordRight(this.rowValue, this.colValue)
+    if (row === this.rowValue && col === this.colValue) return false
+    this.rowValue = row
+    this.colValue = col
     return true
   }
 
@@ -203,19 +199,89 @@ export class EditorBuffer {
   }
 
   deleteWordBackward(): boolean {
-    const chars = this.lineChars(this.rowValue)
-    let start = this.colValue
-    while (start > 0 && this.isWhitespace(chars[start - 1])) start -= 1
-    while (start > 0 && !this.isWhitespace(chars[start - 1])) start -= 1
-    if (start === this.colValue) return false
-    this.linesValue[this.rowValue] =
-      chars.slice(0, start).join("") + chars.slice(this.colValue).join("")
-    this.colValue = start
+    const endRow = this.rowValue
+    const endCol = this.colValue
+    const [startRow, startCol] = this.scanWordLeft(endRow, endCol)
+    if (startRow === endRow && startCol === endCol) return false
+    if (startRow === endRow) {
+      const chars = this.lineChars(endRow)
+      this.linesValue[endRow] = chars.slice(0, startCol).join("") + chars.slice(endCol).join("")
+    } else {
+      const startChars = this.lineChars(startRow)
+      const endChars = this.lineChars(endRow)
+      const merged = startChars.slice(0, startCol).join("") + endChars.slice(endCol).join("")
+      this.linesValue.splice(startRow, endRow - startRow + 1, merged)
+    }
+    this.rowValue = startRow
+    this.colValue = startCol
     return true
   }
 
   lineLength(row: number): number {
     return this.charLength(this.linesValue[row])
+  }
+
+  /**
+   * Walk left from (row, col) over one "word", treating line breaks as
+   * whitespace so cursor / delete motions cross line boundaries the same
+   * way they would in any normal multi-line editor (VS Code, micro, nano,
+   * macOS Terminal's word-left, etc.).
+   *
+   * Phase 1 eats whitespace to the left, hopping to the end of the
+   * previous line when col reaches 0. Phase 2 then eats non-whitespace
+   * until the next whitespace or buffer start. Stays put when there is
+   * nothing to the left.
+   */
+  private scanWordLeft(row: number, col: number): [number, number] {
+    let r = row
+    let c = col
+    while (true) {
+      if (c === 0) {
+        if (r === 0) break
+        r -= 1
+        c = this.lineLength(r)
+        continue
+      }
+      const chars = this.lineChars(r)
+      if (!this.isWhitespace(chars[c - 1])) break
+      c -= 1
+    }
+    while (c > 0) {
+      const chars = this.lineChars(r)
+      if (this.isWhitespace(chars[c - 1])) break
+      c -= 1
+    }
+    return [r, c]
+  }
+
+  /**
+   * Mirror of {@link scanWordLeft} going forward. Treats newlines as
+   * whitespace so the scan hops to the start of the next line when col
+   * reaches the line's end.
+   */
+  private scanWordRight(row: number, col: number): [number, number] {
+    let r = row
+    let c = col
+    while (true) {
+      const lineLen = this.lineLength(r)
+      if (c === lineLen) {
+        if (r === this.linesValue.length - 1) break
+        r += 1
+        c = 0
+        continue
+      }
+      const chars = this.lineChars(r)
+      if (!this.isWhitespace(chars[c])) break
+      c += 1
+    }
+    while (true) {
+      const lineLen = this.lineLength(r)
+      if (c === lineLen) break
+      const chars = this.lineChars(r)
+      if (this.isWhitespace(chars[c])) break
+      c += 1
+    }
+    return [r, c]
   }
 
   private lineChars(row: number): string[] {

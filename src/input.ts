@@ -1029,41 +1029,78 @@ export class RawInput {
   }
 
   private moveWordLeft(): boolean {
-    const chars = this.lineChars(this.row)
-    let nextCol = this.col
-
-    while (nextCol > 0 && this.isWhitespace(chars[nextCol - 1])) {
-      nextCol -= 1
-    }
-    while (nextCol > 0 && !this.isWhitespace(chars[nextCol - 1])) {
-      nextCol -= 1
-    }
-
-    if (nextCol === this.col) {
+    const [row, col] = this.scanWordLeft(this.row, this.col)
+    if (row === this.row && col === this.col) {
       return false
     }
-
-    this.col = nextCol
+    this.row = row
+    this.col = col
     return true
   }
 
   private moveWordRight(): boolean {
-    const chars = this.lineChars(this.row)
-    let nextCol = this.col
-
-    while (nextCol < chars.length && this.isWhitespace(chars[nextCol])) {
-      nextCol += 1
-    }
-    while (nextCol < chars.length && !this.isWhitespace(chars[nextCol])) {
-      nextCol += 1
-    }
-
-    if (nextCol === this.col) {
+    const [row, col] = this.scanWordRight(this.row, this.col)
+    if (row === this.row && col === this.col) {
       return false
     }
-
-    this.col = nextCol
+    this.row = row
+    this.col = col
     return true
+  }
+
+  /**
+   * Walk left from (row, col) over one "word", treating line breaks as
+   * whitespace. Mirrors {@link EditorBuffer.scanWordLeft} so multi-line
+   * word motion / delete behave the same in both code paths.
+   */
+  private scanWordLeft(row: number, col: number): [number, number] {
+    let r = row
+    let c = col
+    while (true) {
+      if (c === 0) {
+        if (r === 0) break
+        r -= 1
+        c = this.lineLength(r)
+        continue
+      }
+      const chars = this.lineChars(r)
+      if (!this.isWhitespace(chars[c - 1])) break
+      c -= 1
+    }
+    while (c > 0) {
+      const chars = this.lineChars(r)
+      if (this.isWhitespace(chars[c - 1])) break
+      c -= 1
+    }
+    return [r, c]
+  }
+
+  /**
+   * Mirror of {@link scanWordLeft} going forward.
+   */
+  private scanWordRight(row: number, col: number): [number, number] {
+    let r = row
+    let c = col
+    while (true) {
+      const lineLen = this.lineLength(r)
+      if (c === lineLen) {
+        if (r === this.lines.length - 1) break
+        r += 1
+        c = 0
+        continue
+      }
+      const chars = this.lineChars(r)
+      if (!this.isWhitespace(chars[c])) break
+      c += 1
+    }
+    while (true) {
+      const lineLen = this.lineLength(r)
+      if (c === lineLen) break
+      const chars = this.lineChars(r)
+      if (this.isWhitespace(chars[c])) break
+      c += 1
+    }
+    return [r, c]
   }
 
   private moveLineStart(): boolean {
@@ -1109,22 +1146,23 @@ export class RawInput {
   }
 
   private deleteWordBackward(): boolean {
-    const chars = this.lineChars(this.row)
-    let start = this.col
-
-    while (start > 0 && this.isWhitespace(chars[start - 1])) {
-      start -= 1
-    }
-    while (start > 0 && !this.isWhitespace(chars[start - 1])) {
-      start -= 1
-    }
-
-    if (start === this.col) {
+    const endRow = this.row
+    const endCol = this.col
+    const [startRow, startCol] = this.scanWordLeft(endRow, endCol)
+    if (startRow === endRow && startCol === endCol) {
       return false
     }
-
-    this.lines[this.row] = chars.slice(0, start).join("") + chars.slice(this.col).join("")
-    this.col = start
+    if (startRow === endRow) {
+      const chars = this.lineChars(endRow)
+      this.lines[endRow] = chars.slice(0, startCol).join("") + chars.slice(endCol).join("")
+    } else {
+      const startChars = this.lineChars(startRow)
+      const endChars = this.lineChars(endRow)
+      const merged = startChars.slice(0, startCol).join("") + endChars.slice(endCol).join("")
+      this.lines.splice(startRow, endRow - startRow + 1, merged)
+    }
+    this.row = startRow
+    this.col = startCol
     return true
   }
 
