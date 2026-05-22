@@ -48,9 +48,14 @@ describe("parseManifest", () => {
     expect(() => parseManifest(bad, "/x")).toThrow(/id/i)
   })
 
-  it("rejects empty tuis array", () => {
-    const bad = { ...valid, tuis: [] }
-    expect(() => parseManifest(bad, "/x")).toThrow(/tuis/i)
+  it("accepts an empty tuis array (it's just a no-op contribution)", () => {
+    // Previously this threw because the validator enforced "at least one
+    // contribution". That gate moved to the loader (see
+    // `parseManifest / no declared contributions`). An empty `tuis: []`
+    // is now just an explicit "no TUI contributions" declaration; the
+    // parser accepts it and the loader handles the dead-weight case.
+    const ok = { ...valid, tuis: [] }
+    expect(() => parseManifest(ok, "/x")).not.toThrow()
   })
 
   it("rejects duplicate handler ids within a package", () => {
@@ -334,9 +339,13 @@ describe("parseManifest / hooks", () => {
 })
 
 describe("parseManifest / liveAreaSlots", () => {
-  // Minimal manifest shell: no tools/modes/events — `liveAreaSlots`
-  // alone is a valid contribution shape (the manifest parser's
-  // "must declare at least one of …" gate accepts it).
+  // Minimal manifest shell: no tools/modes/events. `liveAreaSlots`
+  // alone is a valid contribution shape.
+  //
+  // Note: the validator no longer enforces "at least one contribution"
+  // (that gate moved to the loader, which has filesystem visibility for
+  // the implicit PROMPT.md). See `parseManifest / no declared contributions`
+  // below.
   const base = {
     id: "quota-status",
     name: "Quota Status",
@@ -363,15 +372,6 @@ describe("parseManifest / liveAreaSlots", () => {
 
   it("accepts a manifest with NO tuis/modes/events/hooks/promptFragments when liveAreaSlots is non-empty", () => {
     expect(() => parseManifest({ ...base, liveAreaSlots: [goodSlot] }, "/x")).not.toThrow()
-  })
-
-  it("still rejects a manifest with EVERYTHING empty", () => {
-    expect(() => parseManifest({ ...base }, "/x")).toThrow(/at least one/i)
-    expect(() => parseManifest({ ...base, liveAreaSlots: [] }, "/x")).toThrow(/at least one/i)
-  })
-
-  it("error message lists liveAreaSlots in the at-least-one set", () => {
-    expect(() => parseManifest({ ...base }, "/x")).toThrow(/liveAreaSlots/)
   })
 
   it("rejects liveAreaSlots that isn't an array", () => {
@@ -433,12 +433,13 @@ describe("parseManifest / liveAreaSlots", () => {
   })
 })
 
-describe("parseManifest / prompt as a contribution", () => {
-  // A non-empty top-level `prompt` field is itself a valid contribution.
-  // The PROMPT.md it references is injected into the system prompt at session
-  // start. A plugin that contributes nothing but a writing-style discipline
-  // or coding-conventions doc should NOT need a no-op promptFragments stub
-  // to get past the "must declare at least one" gate.
+describe("parseManifest / prompt field", () => {
+  // The top-level `prompt` field is OPTIONAL and only used when a plugin
+  // wants a non-default PROMPT.md path. The default (`./PROMPT.md`) is
+  // resolved by the loader at load time without any manifest declaration.
+  // A plugin whose entire value is a system-prompt fragment (writing-style
+  // discipline, coding-conventions doc) just ships a `PROMPT.md` next to
+  // its `manifest.json` and is done.
   const base = {
     id: "ma-agent-writing-style",
     name: "Agent Writing Style",
@@ -446,25 +447,65 @@ describe("parseManifest / prompt as a contribution", () => {
     description: "tests",
   }
 
-  it("accepts a prompt-only manifest (no tuis/modes/events/hooks/promptFragments/liveAreaSlots)", () => {
-    expect(() => parseManifest({ ...base, prompt: "./PROMPT.md" }, "/x")).not.toThrow()
+  it("accepts an explicit prompt path (e.g. when the file isn't named PROMPT.md)", () => {
+    expect(() => parseManifest({ ...base, prompt: "./STYLE.md" }, "/x")).not.toThrow()
   })
 
-  it("preserves the prompt path on the parsed result", () => {
-    const m = parseManifest({ ...base, prompt: "./PROMPT.md" }, "/x")
-    expect(m.prompt).toBe("./PROMPT.md")
+  it("preserves the explicit prompt path on the parsed result", () => {
+    const m = parseManifest({ ...base, prompt: "./STYLE.md" }, "/x")
+    expect(m.prompt).toBe("./STYLE.md")
   })
 
-  it("rejects an empty-string prompt as not a contribution", () => {
-    expect(() => parseManifest({ ...base, prompt: "" }, "/x")).toThrow(/at least one/i)
+  it("rejects an empty-string prompt", () => {
+    expect(() => parseManifest({ ...base, prompt: "" }, "/x")).toThrow(/non-empty string/i)
   })
 
-  it("rejects a whitespace-only prompt as not a contribution", () => {
-    expect(() => parseManifest({ ...base, prompt: "   " }, "/x")).toThrow(/at least one/i)
+  it("rejects a whitespace-only prompt", () => {
+    expect(() => parseManifest({ ...base, prompt: "   " }, "/x")).toThrow(/non-empty string/i)
   })
 
-  it("error message lists prompt in the at-least-one set", () => {
-    expect(() => parseManifest({ ...base }, "/x")).toThrow(/prompt/)
+  it("rejects a non-string prompt", () => {
+    expect(() => parseManifest({ ...base, prompt: 42 }, "/x")).toThrow(/prompt must be a string/i)
+  })
+
+  it("accepts a manifest with NO prompt field (the default ./PROMPT.md is implicit)", () => {
+    const m = parseManifest({ ...base }, "/x")
+    expect(m.prompt).toBeUndefined()
+  })
+})
+
+describe("parseManifest / no declared contributions", () => {
+  // The validator no longer enforces "manifest must declare at least one
+  // contribution". The reason: PROMPT.md is implicit (looked up by the
+  // loader on disk) and the manifest can't see the filesystem. If a plugin
+  // declares no fields AND ships no PROMPT.md, the LOADER warns at load
+  // time. The validator's job is purely syntactic shape checking.
+  const base = {
+    id: "minimal",
+    name: "minimal",
+    version: "0.1.0",
+    description: "tests",
+  }
+
+  it("accepts a manifest with no contribution fields whatsoever", () => {
+    expect(() => parseManifest({ ...base }, "/x")).not.toThrow()
+  })
+
+  it("accepts a manifest with all contribution fields explicitly empty", () => {
+    expect(() =>
+      parseManifest(
+        {
+          ...base,
+          tuis: [],
+          modes: [],
+          events: [],
+          hooks: [],
+          promptFragments: [],
+          liveAreaSlots: [],
+        },
+        "/x",
+      ),
+    ).not.toThrow()
   })
 })
 

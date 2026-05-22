@@ -3,7 +3,6 @@
   "name": "Diff Viewer",
   "version": "0.1.0",
   "description": "Renders unified diffs with ANSI colors and exposes a ShowDiff tool.",
-  "prompt": "./PROMPT.md",
   "tuis": [
     {
       "id": "show_diff",

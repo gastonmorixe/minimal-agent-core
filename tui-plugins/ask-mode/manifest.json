@@ -3,7 +3,6 @@
   "name": "Ask Mode",
   "version": "0.2.0",
   "description": "Read-only Q&A mode. The harness refuses Edit and Write at dispatch time and asks the model to present changes as diffs.",
-  "prompt": "./PROMPT.md",
   "modes": [
     {
       "id": "ask",
