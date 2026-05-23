@@ -4,6 +4,7 @@ import {
   cursorRowOffset,
   cursorVisualCol,
   displayWidth,
+  expandTabs,
   stripAnsi,
   truncateDisplayWidth,
   wrapRows,
@@ -97,5 +98,81 @@ describe("term-width", () => {
     expect(displayWidth(out)).toBe(8)
     expect(out).toContain("\x1b[31m")
     expect(out).toContain("\x1b[0m")
+  })
+})
+
+describe("expandTabs", () => {
+  it("passes through text with no tabs verbatim", () => {
+    expect(expandTabs("hello world", 0)).toBe("hello world")
+    expect(expandTabs("", 4)).toBe("")
+    expect(expandTabs("\x1b[31mred\x1b[0m", 0)).toBe("\x1b[31mred\x1b[0m")
+  })
+
+  it("expands a tab at startCol=0 to a full tabSize-wide run", () => {
+    // From col 0, tab lands at col 8 → 8 spaces.
+    expect(expandTabs("\tx", 0)).toBe("        x")
+  })
+
+  it("expands a tab so the next character lands at the next tab stop", () => {
+    // After gutter (4 cells) + "3" (1 cell), cursor is at col 5.
+    // Next tab stop is col 8 → 3 spaces of fill. This is the Read
+    // tool's exact case (`<linenum>\t<content>`).
+    expect(expandTabs("3\tcontent", 4)).toBe("3   content")
+  })
+
+  it("handles consecutive tabs", () => {
+    // From col 0: tab → col 8 (8 sp), tab → col 16 (8 sp).
+    expect(expandTabs("\t\tx", 0)).toBe(" ".repeat(16) + "x")
+  })
+
+  it("handles tab landing exactly on a tab stop boundary", () => {
+    // From col 0, "12345678" advances to col 8. Tab from col 8 →
+    // col 16 (8 cells of fill, not zero).
+    expect(expandTabs("12345678\tx", 0)).toBe("12345678" + " ".repeat(8) + "x")
+  })
+
+  it("passes ANSI SGR escapes through without affecting column tracking", () => {
+    // SGR contributes 0 cells; "3" is 1 cell so tab from col 5 lands
+    // at col 8 (3 spaces of fill).
+    const out = expandTabs("\x1b[33m3\x1b[0m\tcontent", 4)
+    expect(out).toBe("\x1b[33m3\x1b[0m   content")
+    // displayWidth ignores the SGR, sees "3" + 3 spaces + "content".
+    expect(displayWidth(out)).toBe(1 + 3 + "content".length)
+  })
+
+  it("counts wide codepoints as 2 cells when advancing toward the next tab stop", () => {
+    // "漢" is width 2. After a wide char starting at col 0, cursor is
+    // at col 2. Tab → col 8 (6 spaces of fill).
+    expect(expandTabs("漢\tx", 0)).toBe("漢" + " ".repeat(6) + "x")
+  })
+
+  it("treats zero-width codepoints as 0 cells when advancing", () => {
+    // "e" (1) + combining acute (0) → col 1. Tab from col 1 → col 8
+    // (7 spaces of fill).
+    expect(expandTabs("e\u0301\tx", 0)).toBe("e\u0301" + " ".repeat(7) + "x")
+  })
+
+  it("respects a custom tabSize", () => {
+    // tabSize=4: from col 0, tab → col 4 (4 sp).
+    expect(expandTabs("\tx", 0, 4)).toBe("    x")
+    // From col 5 with tabSize=4: next stop is col 8 (3 sp).
+    expect(expandTabs("\tx", 5, 4)).toBe("   x")
+  })
+
+  it("clamps a negative startCol to 0", () => {
+    // Don't go negative; treat as col 0.
+    expect(expandTabs("\tx", -3)).toBe("        x")
+  })
+
+  it("produces a string whose displayWidth matches what the terminal renders", () => {
+    // The whole point: after expansion, displayWidth(line) +
+    // startCol === terminal column the cursor lands at after the
+    // line. This is the property the tool-transcript clamp relies on.
+    const startCol = 4
+    const line = "3\tHow to express classic design patterns"
+    const expanded = expandTabs(line, startCol)
+    // "3" (1) + tab from col 5 → col 8 (3) + "How to..." (35).
+    expect(displayWidth(expanded)).toBe(1 + 3 + "How to express classic design patterns".length)
+    expect(expanded).not.toContain("\t")
   })
 })
