@@ -791,6 +791,71 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
     expect(qs.length).toBe(33)
     expect(displayWidth(visible)).toBeLessThanOrEqual(50)
   })
+
+  // Regression for the May 2026 user-reported bug where a Read tool
+  // line containing a `<linenum>\t<content>` body overflowed the
+  // visible cols by 1–8 cells and the trailing `...(+Nch)` hint wrapped
+  // into the gutter. Root cause: `displayWidth` counts `\t` (HT, 0x09)
+  // as 0 cells (it's a control char), but the terminal expands it to
+  // an advance to the next tab stop (1–8 cells depending on the
+  // current column). Fix: `expandTabs(line, gutterWidth)` runs before
+  // `clampBodyWithHint` so the width math accounts for the tab.
+  it("clamps a Read-style `<linenum>\\t<content>` line without overflowing visible cols", () => {
+    // The reported scenario: a 1-digit line number + tab + long body
+    // at cols=137. Before the fix this rendered 138 visible cells (1
+    // past the terminal width) and the closing `)` of the truncHint
+    // wrapped to a new row.
+    const longBody =
+      "How to express classic design patterns idiomatically in TypeScript 5.x. " +
+      "Covers `satisfies`, `const` type parameters, " +
+      "x".repeat(300)
+    const line = `3\t${longBody}`
+    const lines = formatToolPreview(line, false, undefined, { tool: "Read", cols: 137 })
+    expect(lines.length).toBeGreaterThanOrEqual(1)
+    const visible = stripAnsi(lines[0])
+    // Load-bearing : after the fix, no rendered row exceeds the visible
+    // cols (the body's `displayWidth` matches what the terminal paints
+    // because `expandTabs` already turned `\t` into the right run of
+    // ASCII spaces).
+    expect(displayWidth(visible)).toBeLessThanOrEqual(137)
+    // Clamp happened (line was much longer than 137 cells).
+    expect(visible).toContain("...(+")
+    // Verify the tab was expanded (no literal `\t` survives into the
+    // rendered transcript output).
+    expect(visible).not.toContain("\t")
+  })
+
+  it("clamps a Read-style body with a 4-digit line number (worst-case tab advance)", () => {
+    // For "1234\t<content>" at cols=137: after the 4-cell gutter and
+    // 4 digits, cursor is at col 8. The tab from col 8 advances to
+    // col 16 → 8 cells of fill (the worst case). Pre-fix, displayWidth
+    // saw 0 cells for the tab; post-fix, it sees 8.
+    const line = `1234\t${"y".repeat(500)}`
+    const lines = formatToolPreview(line, false, undefined, { tool: "Read", cols: 137 })
+    const visible = stripAnsi(lines[0])
+    expect(displayWidth(visible)).toBeLessThanOrEqual(137)
+    expect(visible).toContain("...(+")
+    expect(visible).not.toContain("\t")
+  })
+
+  it("Read body line with tab passes through unmodified when it fits", () => {
+    // Short Read line with one tab : no clamp triggers, the line
+    // still has its tab expanded to spaces in the rendered output.
+    // (We don't want a literal `\t` leaking into the transcript even
+    // for short lines, since the underlying terminal would still draw
+    // it as a tab-stop advance and any downstream consumer measuring
+    // the rendered output would mis-count it.)
+    const line = `12\tshort content`
+    const lines = formatToolPreview(line, false, undefined, { tool: "Read", cols: 100 })
+    const visible = stripAnsi(lines[0])
+    // No clamp marker (line fits).
+    expect(visible).not.toContain("...(+")
+    // Tab was still expanded.
+    expect(visible).not.toContain("\t")
+    // Width sanity : 4-cell gutter + 2 digits (cursor at col 6) +
+    // 2-cell tab fill (advance to col 8) + 13 chars body = 21 cells.
+    expect(displayWidth(visible)).toBe(21)
+  })
 })
 
 describe("clampTranscriptRow — outer-row width clamp for header lines", () => {

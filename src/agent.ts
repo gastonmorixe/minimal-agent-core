@@ -58,7 +58,7 @@ import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
 import type { SessionStore } from "./session-store.ts"
 import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
-import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
+import { displayWidth, expandTabs, truncateDisplayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import type { TruncationInfo } from "./tools/truncation.ts"
@@ -1245,7 +1245,17 @@ export class Agent {
                 // never re-renders, but no NEW line will overflow the
                 // current visible columns. See {@link
                 // effectiveBodyLineWidth} and {@link clampBodyWithHint}.
-                bufferedLastLine = clampBodyWithHint(raw, effectiveBodyLineWidth())
+                //
+                // Expand `\t` first using the body's start column
+                // (after the 4-cell gutter) so the width math accounts
+                // for the terminal's tab-stop advance. Without this,
+                // a `<linenum>\t<content>` line (Read, also TSV-style
+                // Bash output) underflows the cap by 1–8 cells and the
+                // trailing `...(+Nch)` hint wraps into the gutter.
+                bufferedLastLine = clampBodyWithHint(
+                  expandTabs(raw, TOOL_PREVIEW_GUTTER_WIDTH),
+                  effectiveBodyLineWidth(),
+                )
                 streamedLineCount++
               }
 
@@ -2336,7 +2346,15 @@ export function formatToolPreview(
   const visible = allLines.slice(0, maxLines)
   const linesElided = allLines.length - visible.length
   const lineWidth = effectiveBodyLineWidth(opts?.cols)
-  const renderedLines: string[] = visible.map((line) => clampBodyWithHint(line, lineWidth))
+  // Expand `\t` to spaces using the gutter as the starting column. A
+  // literal tab is a 0-cell glyph under `displayWidth` but the
+  // terminal renders it as an advance to the next tab stop, so
+  // without this the body row can overflow the visible columns by up
+  // to one tab-size and wrap into the gutter. Common offender is
+  // Read's `<linenum>\t<content>` format (see `expandTabs` rationale).
+  const renderedLines: string[] = visible.map((line) =>
+    clampBodyWithHint(expandTabs(line, TOOL_PREVIEW_GUTTER_WIDTH), lineWidth),
+  )
 
   // 3. Build the footer.
   //    The footer always reads "shown <visible-in-TUI> / <real-source-total>"

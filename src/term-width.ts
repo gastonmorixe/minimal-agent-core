@@ -141,6 +141,66 @@ export function truncateDisplayWidth(text: string, maxWidth: number, suffix = ".
 }
 
 /**
+ * Expand `\t` (HT, 0x09) to the right number of ASCII spaces to land
+ * the next character at the next tab stop, given the terminal column
+ * the text *starts at*.
+ *
+ * Why this exists: a literal tab is a 0-cell glyph under
+ * {@link codePointWidth}/{@link displayWidth} (matches how `cat -A`
+ * shows it as `^I`), but every modern terminal renders it as an
+ * advance to the next multiple-of-`tabSize` column. The two views
+ * disagree by 1–`tabSize` cells, which is enough for a "just under
+ * the cap" body row to overflow the visible columns and wrap into the
+ * gutter. Callers that pre-expand tabs before measuring see a width
+ * that matches what the terminal actually paints.
+ *
+ * `startCol` is the terminal column the first character of `text`
+ * will occupy (0-indexed). For tool transcript body rows that's the
+ * gutter width (4) — the body sits to the right of the `"  │ "`
+ * prefix the renderer prepends. Pass 0 when the text already includes
+ * its own leading prefix.
+ *
+ * ANSI CSI / SGR escapes pass through verbatim (they contribute 0
+ * cells, same as `displayWidth`). After expansion the result contains
+ * no `\t` characters and the visual rendering is identical (terminals
+ * draw a tab as the same blank advance the replacement spaces
+ * produce).
+ */
+export function expandTabs(text: string, startCol: number, tabSize = 8): string {
+  if (text.indexOf("\t") === -1) return text
+  const stops = Math.max(1, Math.floor(tabSize))
+  let col = Math.max(0, Math.floor(startCol))
+  let out = ""
+  for (let i = 0; i < text.length; ) {
+    if (text.charCodeAt(i) === 0x1b && text[i + 1] === "[") {
+      let j = i + 2
+      while (j < text.length) {
+        const c = text.charCodeAt(j)
+        j += 1
+        if (c >= 0x40 && c <= 0x7e) break
+      }
+      out += text.slice(i, j)
+      i = j
+      continue
+    }
+    const ch = text[i]
+    if (ch === "\t") {
+      const next = Math.floor(col / stops) * stops + stops
+      out += " ".repeat(next - col)
+      col = next
+      i += 1
+      continue
+    }
+    const cp = text.codePointAt(i)
+    if (cp === undefined) break
+    out += String.fromCodePoint(cp)
+    col += codePointWidth(cp)
+    i += cp > 0xffff ? 2 : 1
+  }
+  return out
+}
+
+/**
  * How many physical rows a string of given display width occupies in a
  * terminal of `columns` cells.
  *
