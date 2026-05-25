@@ -80,6 +80,45 @@ when reordering or doing bulk operations, lean on the hash. For single
 - `status: "canceled"` from any state, with optional `reason`.
 - `status: "todo"` to reset (rare, usually `start` again instead).
 
+## `canceled` is "abandoned", not "done"
+
+`canceled` means the work was given up on. `done` means the work
+finished. The two are not interchangeable, and the renderer paints them
+in opposite colors (lime ✔ for done, red ✘ with strikethrough for
+canceled), so picking the wrong verb reads as the opposite of intent.
+
+Common confusions:
+
+- **Phase / section headers.** If you add a top-level task like
+  `"PHASE 1: Setup"` and the work under it finishes, the header is
+  `done`, not `canceled`. The phase IS done. Reasoning like "the
+  header itself had no direct work, so it was never going to be done"
+  is wrong. The meaning of the header is the work it represents, and
+  that work happened.
+- **Parents with all-done children.** Same idea. A parent task whose
+  subtasks are all `done` should itself be `done`. The store does not
+  auto-promote, that is on you.
+- **Tasks made moot by a sibling.** If task B made task A's goal
+  unnecessary because the goal already got achieved (just elsewhere),
+  A is `done`. If A's goal was actively rejected, A is `canceled`
+  with a one-line `reason`.
+
+For multi-phase plans, real parent/subtask structure is cleaner than
+flat pseudo-headers. Phase becomes the parent, and the work under it
+becomes subtasks:
+
+```
+const phase1 = Task({action: "add", title: "Phase 1: Setup"})
+Task({action: "add", title: "step a", parent: `#${phase1.hash}`})
+Task({action: "add", title: "step b", parent: `#${phase1.hash}`})
+   ...
+Task({action: "done", id: `#${phase1.hash}`})
+```
+
+A flat list with "PHASE 1" pseudo-headers at the top level also works,
+but each header is then a real task and needs a real `done` (or
+`canceled` with a reason) when the phase ends.
+
 ## Examples
 
 Start a new plan:
@@ -130,6 +169,10 @@ Task({action: "status", id: 6, status: "canceled", reason: "user wants to keep t
   audit trail. Use `status: "canceled"` for anything that materially
   existed but was later abandoned. Only `remove` tasks you accidentally
   added or that the user explicitly asks to drop.
+- Don't reach for `canceled` when you mean `done`. If a phase header,
+  parent task, or planning placeholder has no direct work of its own
+  but the work it represents finished, mark it `done`. See "`canceled`
+  is 'abandoned', not 'done'" above.
 - Don't fight the single-doing discipline with `parallel: true` unless
   you genuinely have parallel work. The discipline is the point. The
   user reads the meter as "where is the agent right now".

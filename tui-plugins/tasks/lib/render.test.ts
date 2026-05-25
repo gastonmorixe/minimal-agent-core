@@ -48,14 +48,6 @@ function withFixedNow(over: Partial<RenderOptions> = {}): Partial<RenderOptions>
   return { now: () => FIXED_NOW_MS, ...over }
 }
 
-/**
- * 7-cell padded empty-duration slot. Most row-layout tests use tasks
- * with `active_ms: 0` (never started), which render as a blank but
- * column-aligned cell. Embedded as `  ${DUR_EMPTY}  ` between `#hash`
- * and `<title>` everywhere a row body is asserted.
- */
-const DUR_EMPTY = " ".repeat(7)
-
 function topView(t: Task, n: number): View {
   return { task: t, n, childIndex: null, siblingCount: null }
 }
@@ -127,7 +119,7 @@ describe("renderToolDisplay — host-owned frame parts", () => {
       action: { kind: "started", hash: "a7b3c4" },
     })
     expect(out.header).toContain(`${GLYPHS.doing} started #a7b3c4`)
-    expect(out.body).toContain(`  1  ${GLYPHS.doing}  #a7b3c4  ${DUR_EMPTY}  x`)
+    expect(out.body).toContain(`  1  ${GLYPHS.doing}  #a7b3c4  x`)
     expect(out.body).not.toContain(GLYPHS.frameTL)
     expect(out.body).not.toContain(GLYPHS.frameML)
     expect(out.footer).toContain("1 doing")
@@ -222,22 +214,22 @@ describe("renderBlock — top-level rows", () => {
   test("done row has bold check, dim+strike title", () => {
     const t = task({ status: "done", title: "x", done_at: "2026-05-12T15:31:00-04:00" })
     const out = plain([topView(t, 1)], stats({ total: 1, done: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.done}  #a7b3c4  ${DUR_EMPTY}  x`)
+    expect(out).toContain(` 1  ${GLYPHS.done}  #a7b3c4  x`)
   })
   test("doing row has half-circle glyph and bold title", () => {
     const t = task({ status: "doing", title: "x" })
     const out = plain([topView(t, 1)], stats({ total: 1, doing: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.doing}  #a7b3c4  ${DUR_EMPTY}  x`)
+    expect(out).toContain(` 1  ${GLYPHS.doing}  #a7b3c4  x`)
   })
   test("todo row has dim circle glyph and plain title", () => {
     const t = task({ status: "todo", title: "x" })
     const out = plain([topView(t, 1)], stats({ total: 1, todo: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.pending}  #a7b3c4  ${DUR_EMPTY}  x`)
+    expect(out).toContain(` 1  ${GLYPHS.pending}  #a7b3c4  x`)
   })
   test("canceled row has red ✘ in status column, title + (reason) suffix, no title prefix glyph", () => {
     const t = task({ status: "canceled", title: "abandon", reason: "user redirected" })
     const out = plain([topView(t, 1)], stats({ total: 1, canceled: 1 }))
-    expect(out).toContain(` 1  ${GLYPHS.canceled}  #a7b3c4  ${DUR_EMPTY}  abandon  (user redirected)`)
+    expect(out).toContain(` 1  ${GLYPHS.canceled}  #a7b3c4  abandon  (user redirected)`)
     // The redundant `✘ ` title prefix is gone (icon column carries it now).
     expect(out).not.toContain(`${GLYPHS.canceled} abandon`)
   })
@@ -299,9 +291,9 @@ describe("renderBlock — subtasks", () => {
       subView(child3, 2, 3),
     ]
     const out = plain(views, stats({ total: 4, done: 1, doing: 2, todo: 1 }))
-    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.done}  #d04c91a  ${DUR_EMPTY}  c1`)
-    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.doing}  #d04c91b  ${DUR_EMPTY}  c2`)
-    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.pending}  #d04c91c  ${DUR_EMPTY}  c3`)
+    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.done}  #d04c91a  c1`)
+    expect(out).toContain(`${GLYPHS.treeMid}  ${GLYPHS.doing}  #d04c91b  c2`)
+    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.pending}  #d04c91c  c3`)
   })
   test("single child uses ╰ (siblingCount=1, childIndex=0)", () => {
     const views: View[] = [topView(parent, 1), subView(child1, 0, 1)]
@@ -679,7 +671,7 @@ describe("renderBlock — ghost-removed overlay", () => {
     expect(out).toContain(`beta`)
     expect(out).toContain(`gamma`)
     // Ghost row carries the canceled glyph in the status column.
-    expect(out).toContain(` 2  ${GLYPHS.canceled}  #bbbbbb  ${DUR_EMPTY}  beta`)
+    expect(out).toContain(` 2  ${GLYPHS.canceled}  #bbbbbb  beta`)
     // Header verb says "removed".
     expect(out.split("\n")[0]).toContain(`${GLYPHS.canceled} removed #bbbbbb`)
     // Closer reflects post-state.
@@ -745,7 +737,7 @@ describe("renderBlock — ghost-removed overlay", () => {
     )
     // Tree-last connector + ✘ + #id + title — the child is shown as a ghost
     // BUT still visually attached to its parent via the tree glyph.
-    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.canceled}  #p00000a  ${DUR_EMPTY}  child`)
+    expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.canceled}  #p00000a  child`)
   })
 
   test("ghost row's number column is dim+strike (matches canceled-row dimming)", () => {
@@ -949,8 +941,8 @@ describe("taskActiveMs", () => {
 // Duration column in row rendering
 // ---------------------------------------------------------------------------
 
-describe("renderBlock — duration column", () => {
-  test("done task with non-zero active_ms shows formatted duration in row", () => {
+describe("renderBlock — trailing duration suffix", () => {
+  test("done task with non-zero active_ms shows the duration trailing the title", () => {
     const t = task({
       status: "done",
       title: "first",
@@ -959,13 +951,15 @@ describe("renderBlock — duration column", () => {
       active_ms: 48_000,
     })
     const out = plain([topView(t, 1)], stats({ total: 1, done: 1 }))
-    // Right-padded to 7 cells: "    48s" (4 spaces + "48s")
-    expect(out).toContain("    48s  first")
+    // Duration appears AFTER the title, separated by a 2-space gap.
+    expect(out).toContain("first  48s")
+    // And NOT in the old between-#hash-and-title middle slot.
+    expect(out).not.toContain("    48s  first")
   })
 
   test("doing task with last_resumed_at ticks live elapsed = active_ms + (now - resumed)", () => {
     // 30s of active_ms accumulated, currently doing for another 12s.
-    // Total live elapsed at render = 42s → "    42s" in row.
+    // Total live elapsed at render = 42s → "in flight  42s" in row.
     const resumedAt = new Date(FIXED_NOW_MS - 12_000).toISOString()
     const t = task({
       status: "doing",
@@ -975,16 +969,20 @@ describe("renderBlock — duration column", () => {
       active_ms: 30_000,
     })
     const out = plain([topView(t, 1)], stats({ total: 1, doing: 1 }))
-    expect(out).toContain("    42s  in flight")
+    expect(out).toContain("in flight  42s")
   })
 
-  test("todo task shows empty duration cell (column-aligned blank)", () => {
+  test("todo task omits the duration suffix entirely (row ends at title, no trailing whitespace)", () => {
     const t = task({ status: "todo", title: "x" })
     const out = plain([topView(t, 1)], stats({ total: 1, todo: 1 }))
-    expect(out).toContain(`#a7b3c4  ${DUR_EMPTY}  x`)
+    // Row ends at the title with no middle whitespace gutter…
+    expect(out).toContain(`#a7b3c4  x`)
+    // …and no 7-cell padded slot survives anywhere on the row.
+    expect(out).not.toContain(`#a7b3c4  ${" ".repeat(7)}  x`)
+    expect(out).not.toContain(`x  ${" ".repeat(7)}`)
   })
 
-  test("top-level row sums children's active_ms into its duration cell", () => {
+  test("top-level row sums children's active_ms into its trailing duration", () => {
     // Phase total = parent's own active_ms (0) + sum of children = 12 + 30 = 42s.
     const parent = task({ id: "p11111", title: "Phase", status: "done" })
     const c1 = task({
@@ -1003,10 +1001,11 @@ describe("renderBlock — duration column", () => {
       [topView(parent, 1), subView(c1, 0, 2), subView(c2, 1, 2)],
       stats({ total: 3, done: 3 }),
     )
-    // Parent row carries the summed 42s; children carry their own 12s / 30s.
-    expect(out).toContain("    42s  Phase")
-    expect(out).toContain("    12s")
-    expect(out).toContain("    30s")
+    // Parent row's title is followed by the summed 42s; each child
+    // row carries its own 12s / 30s trailing its title.
+    expect(out).toContain("Phase  42s")
+    expect(out).toContain("  12s")
+    expect(out).toContain("  30s")
   })
 
   test("ANSI: doing-row duration is SKY+BOLD (matches ◐ icon + title family)", () => {
@@ -1225,12 +1224,12 @@ describe("renderBlock — closer elapsed/total", () => {
   })
 
   test("user-approved mockup: full all-done block reads cleanly end-to-end (smoke)", () => {
-    // Mirrors the mockup the user approved:
+    // Mirrors the mockup the user approved (duration trails the title):
     //
     //   ╭ ○ Tasks · ✔ ALL DONE · 2/2 · 2026-05-20 18:07:42
     //   │
-    //   │    1  ✔  #aaaaaa  4m 52s  Phase 1
-    //   │    2  ✔  #bbbbbb  7m 12s  Phase 2
+    //   │    1  ✔  #aaaaaa  Phase 1  4m 52s
+    //   │    2  ✔  #bbbbbb  Phase 2  7m 12s
     //   │
     //   ╰  ✦ ALL DONE · 2 done · 12m 34s     ← LIME+BOLD total
     const t1 = task({
@@ -1258,9 +1257,9 @@ describe("renderBlock — closer elapsed/total", () => {
     expect(lines[0]).toContain("ALL DONE")
     expect(lines[0]).toContain("2/2")
     expect(lines[0]).toContain(FIXED_NOW_ISO_DATETIME)
-    // Row durations.
-    expect(out).toContain(" 4m 52s  Phase 1")
-    expect(out).toContain(" 7m 12s  Phase 2")
+    // Row durations trail the titles.
+    expect(out).toContain("Phase 1  4m 52s")
+    expect(out).toContain("Phase 2  7m 12s")
     // Closer celebration + total.
     const closer = lines.at(-1)!
     expect(closer).toContain("✦ ALL DONE")

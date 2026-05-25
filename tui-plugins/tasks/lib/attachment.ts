@@ -106,26 +106,20 @@ export function renderAttachmentBody(tasks: readonly Task[]): string {
   // position string" (e.g. "10c" = 3 chars).
   let posWidth = 0
   for (const p of positions.values()) posWidth = Math.max(posWidth, p.length)
-  // Duration column width — widest formatted active_ms across the list,
-  // capped at a sensible bound. `"99m59s"` is 6 chars; days bump it to
-  // 7. We pre-measure so resumed sessions with mixed durations line up
-  // visually in the attachment too.
-  const durs = tasks.map((t) => fmtDur(t.active_ms))
-  let durWidth = 0
-  for (const d of durs) durWidth = Math.max(durWidth, d.length)
   const lines: string[] = []
-  for (let i = 0; i < tasks.length; i++) {
-    const t = tasks[i]
+  for (const t of tasks) {
     const pos = positions.get(t.id) ?? "?"
     const posCol = pos.padEnd(posWidth)
     const idCol = `#${t.id}`.padEnd(8) // "#abc123" = 7, "#abc123a" = 8
     const statusCol = t.status.padEnd(8) // "canceled" = 8
-    // Duration column. Omitted entirely when no task in the list has
-    // any duration (keeps the model's view as compact as possible for
-    // a freshly-added plan), included otherwise.
-    let durCol = ""
-    if (durWidth > 0) durCol = `${durs[i].padStart(durWidth)}  `
-    lines.push(`${posCol}  ${idCol}  ${statusCol}  ${durCol}${t.title}`)
+    // Duration trails the title with a 2-space gap. Omitted entirely
+    // for tasks with no duration so the row ends at the title and
+    // doesn't carry a whitespace gutter through the middle of the
+    // line. Mirrors the human-facing renderer's row shape so the
+    // model's view and the user's TUI agree on column order.
+    const durText = fmtDur(t.active_ms)
+    const durSuffix = durText.length > 0 ? `  ${durText}` : ""
+    lines.push(`${posCol}  ${idCol}  ${statusCol}  ${t.title}${durSuffix}`)
   }
   return lines.join("\n")
 }

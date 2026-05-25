@@ -161,11 +161,11 @@ describe("TasksAttachment", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Duration column in attachment body (schema v2)
+// Trailing duration suffix in attachment body (schema v2)
 // ---------------------------------------------------------------------------
 
-describe("renderAttachmentBody — duration column", () => {
-  test("omits the duration column entirely when every task has active_ms === 0", () => {
+describe("renderAttachmentBody — trailing duration suffix", () => {
+  test("emits no duration when every task has active_ms === 0", () => {
     // Freshly-added plan: nothing has been started yet. Keep the
     // attachment as compact as possible for the model.
     const s = withRand(["aaaaaa", "bbbbbb"])
@@ -175,14 +175,16 @@ describe("renderAttachmentBody — duration column", () => {
     // No `12s` / `1m02s` / etc. patterns.
     expect(body).not.toMatch(/\b\d+s\b/)
     expect(body).not.toMatch(/\b\d+m\d+s\b/)
-    // Title still right after the status column.
+    // Title still right after the status column, and rows end at the
+    // title (no trailing whitespace gutter).
     expect(body).toContain("todo      first")
     expect(body).toContain("todo      second")
+    for (const line of body.split("\n")) {
+      expect(line).toBe(line.trimEnd())
+    }
   })
 
-  test("renders an active_ms column when any task has been started", () => {
-    // One task with non-zero active_ms → column appears for ALL rows
-    // (visually aligned). Zero-duration rows get blanks in the slot.
+  test("appends the duration token AFTER the title with a 2-space gap when a task has been started", () => {
     const s = withRand(["aaaaaa", "bbbbbb"])
     s.add({ title: "first" })
     s.add({ title: "second" })
@@ -199,22 +201,23 @@ describe("renderAttachmentBody — duration column", () => {
     s2.setStatus(t.id, "doing") // tick t0
     s2.setStatus(t.id, "done") // tick t1 → +12s active_ms
     const body = renderAttachmentBody(s2.list())
-    // First task carries `12s`.
-    expect(body).toContain("12s")
-    // Second task's duration slot is blank (just spaces), but the title
-    // still appears at the same column position as the first row's title.
     const lines = body.split("\n")
     expect(lines).toHaveLength(2)
-    // Both row titles align horizontally: locate "first" / "second" and
-    // confirm same column offset.
-    const firstTitleCol = lines[0].indexOf("first")
-    const secondTitleCol = lines[1].indexOf("second")
-    expect(secondTitleCol).toBe(firstTitleCol)
+    // First task's row ends with "first  12s" (trailing suffix).
+    expect(lines[0]).toMatch(/first {2}12s$/)
+    // Second task has no duration: row ends at the title, no
+    // trailing whitespace gutter.
+    expect(lines[1]).toMatch(/second$/)
+    // Title column still aligns horizontally across both rows : the
+    // shape of the leading `pos  #hash  status   ` prefix didn't change.
+    expect(lines[0].indexOf("first")).toBe(lines[1].indexOf("second"))
   })
 
-  test("duration column widens to fit the longest formatted value", () => {
-    // Forge a task with a "1h04m" duration; second task has "5s". The
-    // column width is 5 (longest of the two), so 5s pads to "   5s".
+  test("trailing duration uses each task's own value (no global column padding)", () => {
+    // One task with a `1h04m` duration, another with `5s`. With the
+    // duration moved to the end of the row, there's no shared column
+    // to pad against : each row emits its own bare value with a
+    // 2-space gap after the title.
     const s = withRand(["aaaaaa", "bbbbbb"])
     s.add({ title: "long" })
     s.add({ title: "short" })
@@ -222,12 +225,12 @@ describe("renderAttachmentBody — duration column", () => {
     tasks[0].active_ms = 3_600_000 + 4 * 60_000 // 1h04m
     tasks[1].active_ms = 5_000 // 5s
     const body = renderAttachmentBody(tasks)
-    // Both formatted variants are present.
-    expect(body).toContain("1h04m")
-    expect(body).toContain("5s")
-    // Right-padded so the title column lines up: locate the start of
-    // each row's title and confirm equal offsets.
     const lines = body.split("\n")
+    // Each row ends with `<title>  <duration>` , no left-padding on the
+    // short value.
+    expect(lines[0]).toMatch(/long {2}1h04m$/)
+    expect(lines[1]).toMatch(/short {2}5s$/)
+    // Title columns still align (leading prefix is unchanged).
     expect(lines[0].indexOf("long")).toBe(lines[1].indexOf("short"))
   })
 })
