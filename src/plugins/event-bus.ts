@@ -52,6 +52,8 @@
  * @module plugins/event-bus
  */
 
+import { diag } from "../diagnostic-bus.ts"
+
 /**
  * Listener invocation context. Same shape regardless of event.
  */
@@ -139,7 +141,11 @@ export class EventBus {
    *   writing to `process.stderr`. Pass a no-op in tests.
    */
   constructor(logger?: (msg: string) => void) {
-    this.logger = logger ?? ((msg) => process.stderr.write(`[event-bus] ${msg}\n`))
+    // Default fans out through the diagnostic bus (gold ⚠ chrome in the
+    // scrollback sink, RFC 5424 in the file log). Tests construct a bus
+    // with an injected no-op or capture-array logger; passing `undefined`
+    // never reaches this branch in practice for them.
+    this.logger = logger ?? ((msg) => diag.warn("plugin.event-bus", msg))
   }
 
   /**

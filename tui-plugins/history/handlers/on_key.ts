@@ -80,6 +80,13 @@ const handler = (payload: unknown, ctx: HookHandlerContext): void => {
   if (!isPayload(payload)) return
   const { key, buffer, cursor, result } = payload
 
+  // Polite-listener convention: an earlier higher-priority listener
+  // already claimed this key (e.g. the slash-menu overlay halts
+  // ArrowUp/Down for selection nav when its menu is open). Yield
+  // silently — recall now would overwrite their `result.buffer` and
+  // double-handle the keystroke.
+  if (result.halt === true) return
+
   if (key === "ArrowUp") {
     if (!isAtTop(cursor)) return // pass-through — cursor isn't on top row
     const r = recallFor(ctx.cwd).up(buffer)

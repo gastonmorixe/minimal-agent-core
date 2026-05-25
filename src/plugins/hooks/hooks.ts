@@ -22,6 +22,7 @@
  * @module plugins/hooks/hooks
  */
 
+import { diag } from "../../diagnostic-bus.ts"
 import { EventBus, type Listener as EventListener } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "./channels.ts"
 import { HookBus, type StreamHandle } from "./hook-bus.ts"
@@ -69,7 +70,9 @@ export class Hooks {
   private readonly extra = new Map<string, ChannelShape>()
 
   constructor(opts: HooksOptions = {}) {
-    this.logger = opts.logger ?? ((m) => process.stderr.write(`[hooks] ${m}\n`))
+    // Default sink fans out through the diagnostic bus so warnings get
+    // the gold ⚠ chrome and land in the file log. Tests inject their own.
+    this.logger = opts.logger ?? ((m) => diag.warn("plugin.hooks", m))
     this.eventBus = opts.eventBus ?? new EventBus(this.logger)
     this.hookBus = opts.hookBus ?? new HookBus(this.logger)
     this.unsafe = opts.unsafeHooks ?? process.env.UNSAFE_HOOKS === "1"
@@ -95,17 +98,29 @@ export class Hooks {
   /**
    * Subscribe a listener. The bus and clamping behaviour are decided
    * by the channel's shape and the caller's privilege.
+   *
+   * `caller` is **required** so subscribers explicitly declare their
+   * privilege band. This prevents the silent-typo failure where
+   * passing `source: "agent"` (the free-form label field) instead of
+   * `caller: "agent"` made the listener default to the plugin band and
+   * silently clamped a 5000-priority listener down to 100. See the
+   * regression test `"agent listener registered with caller:'agent'
+   * keeps its priority"` in `hooks.test.ts`.
+   *
+   * The runtime fallback (`opts.caller ?? "plugin"`) is retained as
+   * defense-in-depth against callers that bypass type-checking via
+   * `as never` / `any`.
    */
   // oxlint-disable-next-line typescript-eslint/no-unnecessary-type-parameters
   on<T>(
     channel: string,
     fn: (payload: T, ctx: HookCtx) => unknown,
-    opts?: ListenOpts & { caller?: CallerKind },
+    opts: ListenOpts & { caller: CallerKind },
   ): Disposer
   on(
     channel: string,
     fn: (payload: unknown, ctx: HookCtx) => unknown,
-    opts: ListenOpts & { caller?: CallerKind } = {},
+    opts: ListenOpts & { caller?: CallerKind },
   ): Disposer {
     const shape = this.shapeOf(channel)
     const caller = opts.caller ?? "plugin"

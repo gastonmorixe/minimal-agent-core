@@ -133,6 +133,22 @@ export const FOOTER_LAYER_ARMED: FooterLayerId = "armed-quit"
 /** Priority of {@link FOOTER_LAYER_ARMED}. */
 export const FOOTER_PRIORITY_ARMED = 100
 
+/**
+ * Plugin-overlay layer id. Used by the host bridge for the
+ * `editor.footer.set` plugin channel — overlays like the slash-menu
+ * paint here so the quota-status FooterAggregator (which writes to
+ * {@link FOOTER_LAYER_DEFAULT}) doesn't stomp them on its next refresh.
+ *
+ * Sits between DEFAULT (0) and ARMED (100) at {@link FOOTER_PRIORITY_OVERLAY}
+ * (50). A plugin overlay visually obscures the quota row while open;
+ * the armed-quit confirm modal is critical enough to obscure even the
+ * overlay.
+ */
+export const FOOTER_LAYER_OVERLAY: FooterLayerId = "overlay"
+
+/** Priority of {@link FOOTER_LAYER_OVERLAY}. */
+export const FOOTER_PRIORITY_OVERLAY = 50
+
 export interface EditorControllerOptions {
   prompt: string
   continuationPrompt: string
@@ -374,6 +390,14 @@ export class EditorController extends EventEmitter {
   // keystroke).
   private inputDebounce: ReturnType<typeof setTimeout> | null = null
   private lastEmittedInputText: string | null = null
+  /**
+   * Last buffer text we broadcast on `editor.buffer.changed`. Separate
+   * from {@link lastEmittedInputText} because the `"input"` EventEmitter
+   * channel is debounced (~120 ms by default) and the
+   * `editor.buffer.changed` plugin channel is not — overlays like the
+   * slash menu need per-edit precision.
+   */
+  private lastEmittedBufferText: string | null = null
   private inputSeq = 0
   private readonly inputDebounceMs: number
   private onDataBound = (chunk: string | Buffer): void => {
@@ -631,6 +655,41 @@ export class EditorController extends EventEmitter {
     // shortcut for tests. A slow listener here delays the NEXT debounce
     // window, never the next keystroke.
     this.emit("input", { text, seq: this.inputSeq })
+  }
+
+  /**
+   * Broadcast `editor.buffer.changed` on the plugin bus when text changed
+   * since the last emit. Plugin handlers run on the next microtask
+   * (broadcast-async), so this is safe to call from the keystroke pump.
+   *
+   * Dedup is essential: every `repaint()` call lands here, including ones
+   * triggered by cursor-only navigation, status-row updates, and
+   * `setFooterLines` — but only ones where the buffer text actually
+   * changed should wake the overlay's re-render path. Without dedup, a
+   * spinner tick would cause N plugin invocations per second.
+   *
+   * @internal
+   */
+  private fireBufferChangedHook(): void {
+    if (!this.hooks) return
+    const text = this.buf.toString()
+    if (text === this.lastEmittedBufferText) return
+    this.lastEmittedBufferText = text
+    try {
+      this.hooks.emitAsync("editor.buffer.changed", {
+        text,
+        cursor: { row: this.buf.row, col: this.buf.col },
+      })
+    } catch (e) {
+      // broadcast-async should never throw, but defend against bus
+      // declaration mismatches and similar host-side failures so the
+      // keystroke pump cannot be wedged by a misconfigured bus.
+      process.stderr.write(
+        `[editor-controller] editor.buffer.changed emit threw: ${
+          e instanceof Error ? e.message : String(e)
+        }\n`,
+      )
+    }
   }
 
   /** Current monotonic input sequence (mostly for tests). */
@@ -963,8 +1022,7 @@ export class EditorController extends EventEmitter {
   private applyFooterChange(): void {
     const composed = this.composeFooter()
     const prev = this.composedFooterCache
-    const unchanged =
-      composed.length === prev.length && composed.every((l, i) => l === prev[i])
+    const unchanged = composed.length === prev.length && composed.every((l, i) => l === prev[i])
     if (unchanged) return
     this.composedFooterCache = composed
     if (this.started) this.repaint()
@@ -1139,6 +1197,14 @@ export class EditorController extends EventEmitter {
     if (this.pending === "\x1b") {
       this.pending = ""
     }
+    // Plugins (slash-menu, etc.) get first crack at bare-Escape so they
+    // can close transient overlays without triggering the abort-quit
+    // FSM. The halt is honored only when the FSM is `idle` — when the
+    // agent is working, abort-on-Esc takes precedence so the user
+    // always has a way out (see #abort-quit-ux-spec).
+    if (this.fsmState.kind === "idle" && this.dispatchKeyHook("Escape")) {
+      return
+    }
     // Esc breaks the escape-hatch run too - otherwise (Ctrl+C, Esc,
     // Ctrl+C) would force-quit even though the user said "cancel that".
     this.escapeHatch.reset()
@@ -1272,6 +1338,13 @@ export class EditorController extends EventEmitter {
           dirty = true
           continue
         }
+        // Plugins (slash-menu, etc.) can intercept Enter on a non-empty
+        // buffer to swallow the submit (e.g. "execute the selected menu
+        // item instead"). When halted, the listener typically also
+        // sets `result.buffer = ""` to clear the prompt afterwards.
+        if (this.dispatchKeyHook("Enter")) {
+          continue
+        }
         this.submit()
         return
       }
@@ -1340,6 +1413,14 @@ export class EditorController extends EventEmitter {
         continue
       }
       if (char === "\t") {
+        // Plugins (notably the slash-menu overlay) can intercept Tab.
+        // When halted, the listener has either consumed the key (e.g.
+        // tab-complete inside an overlay) or replaced the buffer; the
+        // default literal-tab insertion is suppressed.
+        if (this.dispatchKeyHook("Tab")) {
+          dirty = true
+          continue
+        }
         this.buf.insert(char)
         dirty = true
         continue
@@ -1763,6 +1844,11 @@ export class EditorController extends EventEmitter {
     // repaint). The fire path skips when buffer text is unchanged, so
     // cursor-only repaints don't generate spurious events.
     if (this.started) this.scheduleInputEmit()
+    // Plugin-channel emit for `editor.buffer.changed`. Undebounced so
+    // overlays (slash-menu, autocomplete, etc.) can re-render in lock-
+    // step with the keystroke pump. Dedup'd internally — cursor-only
+    // repaints don't trigger it.
+    this.fireBufferChangedHook()
     const cols = (this.output as { columns?: number }).columns
     const decorationRows = this.decorationLines.length
     // Do not reserve the status band at cold idle. Once a status has
