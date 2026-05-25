@@ -31,7 +31,9 @@ import {
 } from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import { Formatter } from "./formatter.ts"
+import { buildModeChangeChip, type ChipRenderInput } from "./mode-change-chip.ts"
 import type { ModeManager } from "./modes.ts"
+import type { SessionRecord } from "./session-store.ts"
 import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 
@@ -93,6 +95,25 @@ export interface ReplayOptions {
    * When omitted, no time hint is appended even if `toolTimeTracker` is set.
    */
   toolStartTimes?: Map<string, number> | null
+
+  /**
+   * Optional per-message timestamps, parallel to {@link messages}. Used
+   * by the mode-change chip renderer to stamp each historical toggle
+   * with the date+time it actually took effect (specifically, when the
+   * user pressed Enter on the message that flushed the toggle to the
+   * model). The chip is rendered as
+   * `  · ✦ mode →  ASK   2026-05-22 17:52  from default`.
+   *
+   * Indices where the timestamp is unknown (or the message is not a
+   * user message) should be `null`. When the array is omitted entirely
+   * OR when the relevant index is `null`, the mode-change chip falls
+   * back to a "(historical)" stamp WITHOUT a date : the toggle is
+   * still announced visually, just without the time.
+   *
+   * Production callers (`src/index.ts`) build this from the session
+   * store's UserRecord `ts` values via {@link userTimestampsFromRecords}.
+   */
+  userTimestamps?: readonly (Date | null)[]
 }
 
 /**
@@ -124,7 +145,7 @@ export function buildResumeHeader(opts: {
  *
  * - **User messages**: prompt prefix `❯ ` (or the per-mode prefix such
  *   as `ASK ❯` when `opts.modeManager` is supplied and the turn carried
- *   a `<mode-change from=… to=… />` activation block) followed by the
+ *   a `<mode-change from=… to=… at=… />` activation block) followed by the
  *   user's text in normal weight. The activation block itself is always
  *   stripped from the rendered text — it is a transport detail, not
  *   user-visible content. Tool_result blocks are not rendered here —
@@ -154,6 +175,36 @@ export async function replayToScrollback(
   const formatterCmd = opts.formatterCmd
   const toolTimeTracker = opts.toolTimeTracker ?? null
   const toolStartTimes = opts.toolStartTimes ?? null
+  const userTimestamps = opts.userTimestamps ?? null
+
+  /**
+   * Emit a mode-change chip to the sink for the given transition. Uses
+   * the modeManager (when present) to resolve target colors and labels,
+   * falling back to dim/uppercased-id labels otherwise. Pure write : no
+   * side effects on the manager.
+   */
+  const emitModeChangeChip = (from: string, to: string, at: Date | null): void => {
+    const fromId = from === "default" ? null : from
+    const toId = to === "default" ? null : to
+    const fromMode = modeManager?.modeById(fromId) ?? null
+    const toMode = modeManager?.modeById(toId) ?? null
+    const fromLabel = fromMode?.label ?? (fromId ? fromId.toUpperCase() : "default")
+    const toLabel = toMode?.label ?? (toId ? toId.toUpperCase() : "default")
+    const toFgOpen = modeManager?.resolvedForId(toId)?.label.fgOpen ?? null
+    // When the user-record timestamp is unknown, fall back to the Unix
+    // epoch so the chip still renders with a (clearly-wrong-looking)
+    // date. The alternative was a "(historical)" placeholder, but a
+    // visible 1970-01-01 makes "we lost the timestamp" obvious to the
+    // operator instead of looking like the chip is hiding info. In
+    // practice every user record carries a `ts` so this branch is rare.
+    const chipInput: ChipRenderInput = {
+      fromLabel,
+      toLabel,
+      toFgOpen,
+      at: at ?? new Date(0),
+    }
+    sink.write(`${buildModeChangeChip(chipInput)}\n\n`)
+  }
   // Wrap the sink as a `FormatterOutput` so a spawned Formatter can pipe
   // its rendered stdout back into the same scrollback target. `columns`
   // / `rows` come from the host stdout — `COLUMNS` is load-bearing for
@@ -182,23 +233,43 @@ export async function replayToScrollback(
     }
   }
 
-  for (const msg of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    const msgTs = userTimestamps?.[i] ?? null
     if (msg.role === "user") {
       const content = msg.content
-      // Skip user messages whose content is ONLY tool_results (and/or a
-      // `<mode-change>` activation block) — those have no user-visible
-      // payload of their own. Tool results are rendered under the
-      // corresponding assistant turn; the mode-change is consumed for
-      // its side effect on the prompt prefix of LATER turns.
+      // Skip user messages whose content is ONLY tool_results and/or
+      // runtime-injected attachment blocks (mode-change,
+      // short-term-memory, ma::tui::tasks, ma::reflection-checkpoint,
+      // memory-saved). None of those have a user-visible payload of
+      // their own : tool_results render under the corresponding
+      // assistant turn, and runtime attachments are a model-only
+      // transport detail. The mode-change block is also consumed here
+      // for its side effect on the prompt prefix of LATER turns AND
+      // emits a scrollback chip so the historical toggle is visible
+      // on `--resume` exactly as it was when live.
       if (
         Array.isArray(content) &&
-        content.every((b) => b.type === "tool_result" || isModeChangeBlock(b))
+        content.every((b) => b.type === "tool_result" || isRuntimeAttachmentBlock(b))
       ) {
         for (const b of content) {
-          const to = readModeChangeTo(b)
-          if (to !== undefined) activeModeId = to === "default" ? null : to
+          const change = readModeChangeFromTo(b)
+          if (change !== undefined) {
+            emitModeChangeChip(change.from, change.to, msgTs)
+            activeModeId = change.to === "default" ? null : change.to
+          }
         }
         continue
+      }
+      // Mode-change blocks inside a user message that ALSO carries text
+      // get rendered FIRST (chip above the prompt arrow) before the
+      // user text itself : the toggle took effect just before the user
+      // typed the prompt, so visually it belongs above the `❯`.
+      if (Array.isArray(content)) {
+        for (const b of content) {
+          const change = readModeChangeFromTo(b)
+          if (change !== undefined) emitModeChangeChip(change.from, change.to, msgTs)
+        }
       }
       const { text, modeAfter } = stringifyUserText(content, activeModeId)
       activeModeId = modeAfter
@@ -372,19 +443,130 @@ function makeFormatterOutput(
 }
 
 /**
- * Match a `<mode-change from=… to=… />` activation block exactly as
+ * Match a `<mode-change from=… to=… at=… />` activation block exactly as
  * written by `ModeManager.consumePendingAttachment`. The block is always
  * emitted as a self-contained text block (one per user turn), so an
  * exact whole-string match is sufficient — no inline parsing needed.
+ *
+ * The `at` attribute is optional in the regex so older session logs
+ * (recorded before the timestamp was added) still replay cleanly.
  */
-const MODE_CHANGE_RE = /^\s*<mode-change\s+from="([^"]*)"\s+to="([^"]*)"\s*\/>\s*$/
+const MODE_CHANGE_RE =
+  /^\s*<mode-change\s+from="([^"]*)"\s+to="([^"]*)"(?:\s+at="([^"]*)")?\s*\/>\s*$/
 
 /**
- * True iff `b` is a text content block holding ONLY a mode-change
- * activation tag (and possibly surrounding whitespace).
+ * Build the `userTimestamps` array for {@link replayToScrollback} from
+ * the raw {@link SessionRecord}s a session file holds. The output is
+ * parallel to the {@link Message}s that `foldRecords` produces : one
+ * entry per message, populated with the source record's `ts` when
+ * available and `null` otherwise.
+ *
+ * Folding rules (mirror of `foldRecords` in `src/session-restore.ts`):
+ *
+ * - `meta` / `note` records produce no message → skipped.
+ * - `user` records produce one user message → ts copied.
+ * - `assistant` records produce one assistant message → ts copied.
+ * - `tool_result` records APPEND to the trailing user message if it's
+ *   already a tool-block user; otherwise they START a new synthetic
+ *   user message. We mirror that: append-case leaves the parent's ts
+ *   alone (it's still the parent's submit time, which is what the chip
+ *   wants anyway); start-case populates with the tool_result's ts.
+ * - `rewind` records truncate the message list. We do the same to keep
+ *   the indices aligned with the post-fold `messages[]`.
+ *
+ * Returns a fresh array. Pure : no I/O. Safe to call before / after
+ * `foldRecords` with the same `records` input.
  */
-function isModeChangeBlock(b: ContentBlock): boolean {
-  return b.type === "text" && MODE_CHANGE_RE.test(b.text)
+export function userTimestampsFromRecords(records: readonly SessionRecord[]): (Date | null)[] {
+  const out: (Date | null)[] = []
+  // Track which user-record ids we've already produced a message for,
+  // so a `rewind` can truncate `out` to the matching offset.
+  const userIdToIndex = new Map<string, number>()
+  let lastMessageIsToolUser = false
+  for (const rec of records) {
+    switch (rec.kind) {
+      case "meta":
+      case "note":
+        continue
+      case "user": {
+        out.push(parseDate(rec.ts))
+        if (rec.id !== undefined) userIdToIndex.set(rec.id, out.length - 1)
+        lastMessageIsToolUser =
+          Array.isArray(rec.content) && rec.content.some((b) => b.type === "tool_result")
+        continue
+      }
+      case "assistant":
+        out.push(parseDate(rec.ts))
+        lastMessageIsToolUser = false
+        continue
+      case "tool_result":
+        if (lastMessageIsToolUser) {
+          // Appends to the existing user message; no new index, ts of
+          // the parent user record stays as the chip-relevant time.
+          continue
+        }
+        // Starts a new synthetic user message.
+        out.push(parseDate(rec.ts))
+        lastMessageIsToolUser = true
+        continue
+      case "rewind": {
+        const targetIdx = userIdToIndex.get(rec.to)
+        if (targetIdx === undefined) continue
+        out.length = targetIdx + 1
+        // Prune the map; any id pointing past the kept range goes away.
+        for (const [k, v] of userIdToIndex) if (v > targetIdx) userIdToIndex.delete(k)
+        lastMessageIsToolUser = false
+        continue
+      }
+      default:
+        continue
+    }
+  }
+  return out
+}
+
+function parseDate(ts: string): Date | null {
+  if (!ts) return null
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+/**
+ * Openers for the runtime-injected attachment blocks the agent
+ * prepends to user messages (see `Agent.run` in `src/agent.ts`). When
+ * a user-role text block starts with one of these, it has no
+ * user-visible payload : it's a transport detail aimed at the model
+ * (live context: tasks, scratchpad, save echoes, reflection
+ * checkpoints, mode toggles) and must NOT be replayed verbatim into
+ * the scrollback on `--resume`.
+ *
+ * The match is anchored at the start of the (trimmed) block. Each
+ * attachment is emitted by the agent as its own dedicated text block
+ * (verified at every push site in agent.ts), so a starts-with check
+ * is sufficient : we don't need to validate the closing tag. A user
+ * who pastes one of these openers as the FIRST non-whitespace of
+ * their own prompt is the only false-positive scenario, which is
+ * acceptable (they're typing a tag that, by convention, belongs to
+ * the agent runtime, not the user).
+ */
+const RUNTIME_ATTACHMENT_OPENERS: readonly RegExp[] = [
+  /^\s*<mode-change\b/,
+  /^\s*<short-term-memory\b/,
+  /^\s*<memory-saved\b/,
+  /^\s*<ma::tui::[a-z][a-z0-9_-]*\b/i,
+  /^\s*<ma::reflection-checkpoint\b/,
+]
+
+/**
+ * True iff `b` is a text content block that the agent runtime
+ * prepended to a user message (mode-change, short-term-memory,
+ * ma::tui::*, ma::reflection-checkpoint, memory-saved). These have
+ * no user-visible payload and must be skipped during replay.
+ */
+function isRuntimeAttachmentBlock(b: ContentBlock): boolean {
+  if (b.type !== "text") return false
+  return RUNTIME_ATTACHMENT_OPENERS.some((re) => re.test(b.text))
 }
 
 /**
@@ -395,6 +577,17 @@ function readModeChangeTo(b: ContentBlock): string | undefined {
   if (b.type !== "text") return undefined
   const m = b.text.match(MODE_CHANGE_RE)
   return m ? m[2] : undefined
+}
+
+/**
+ * If `b` is a mode-change activation block, return both `from=` and `to=`.
+ * Used by the replay chip renderer; the prompt-prefix path only cares
+ * about `to`.
+ */
+function readModeChangeFromTo(b: ContentBlock): { from: string; to: string } | undefined {
+  if (b.type !== "text") return undefined
+  const m = b.text.match(MODE_CHANGE_RE)
+  return m ? { from: m[1], to: m[2] } : undefined
 }
 
 /**
@@ -416,11 +609,16 @@ function stringifyUserText(
   const parts: string[] = []
   for (const b of content) {
     if (b.type !== "text") continue
+    // Thread mode forward via the mode-change side effect, then drop
+    // every runtime-injected attachment from the rendered text. The
+    // attachment set is broader than mode-change alone : it also
+    // includes <short-term-memory>, <ma::tui::tasks>, <memory-saved>,
+    // and <ma::reflection-checkpoint>, all of which the agent prepends
+    // to user content for model context and which would otherwise leak
+    // into scrollback verbatim on `--resume`.
     const to = readModeChangeTo(b)
-    if (to !== undefined) {
-      modeAfter = to === "default" ? null : to
-      continue
-    }
+    if (to !== undefined) modeAfter = to === "default" ? null : to
+    if (isRuntimeAttachmentBlock(b)) continue
     parts.push(b.text)
   }
   return { text: parts.join(" ").trim(), modeAfter }

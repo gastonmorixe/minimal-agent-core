@@ -48,6 +48,7 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
 } from "./headers.ts"
 import { RawInput } from "./input.ts"
+import { buildPendingModeChangeChip } from "./mode-change-chip.ts"
 import { ModeManager } from "./modes.ts"
 import { PALETTE } from "./palette.ts"
 import { PluginLoader } from "./plugins/loader.ts"
@@ -573,9 +574,10 @@ export class Agent {
     /**
      * Pre-existing conversation to seed the agent with (used by
      * `--resume <sid>` to rehydrate from a saved log). Pushed onto
-     * `this.messages` verbatim. The store, if any, is NOT re-written :
-     * resume opens its store with `existsOk: true` so subsequent turns
-     * append to the same file.
+     * `this.messages` verbatim. The store, if any, is NOT re-written
+     * here — resume forks the parent on disk via `SessionStore.fork()`
+     * before constructing the Agent, so the store already contains the
+     * copied history. New turns append to the fork file, not the parent.
      */
     initialMessages?: Message[]
     /**
@@ -821,7 +823,7 @@ export class Agent {
     // prompt and tool list are mode-independent under this design.
     // Initial user message. Prepended attachments (in this order):
     //
-    //   1. <mode-change from="…" to="…" />            : pending mode toggle.
+    //   1. <mode-change from="…" to="…" at="…" />     : pending mode toggle.
     //   2. <short-term-memory>…</short-term-memory>    : session scratchpad.
     //   3. <ma::tui::tasks …>…</ma::tui::tasks>        : active task list.
     //   4. <memory-saved scope="…" id="…">…</…>+      : id echo for any
@@ -2749,6 +2751,12 @@ export async function runRepl(
       input.redraw()
     }
     modeManager.subscribe(onChange)
+    // No eager scrollback chip in the legacy REPL: a chip per toggle
+    // would commit intermediate transitions the model never saw (ASK →
+    // default → ASK with no send between would leave three stale chips
+    // in scrollback). The prompt-prefix repaint above is the live cue;
+    // session-replay reconstructs chips from `<mode-change>` blocks in
+    // the message log on resume, so the historical record is intact.
     input.setModeCycleHandlers(
       () => modeManager.cycleNext(),
       () => modeManager.cyclePrev(),
@@ -3071,6 +3079,13 @@ async function runReplLiveArea(
     // Apply the current prompt immediately in case a default mode is
     // already active at startup.
     repaintPrompt()
+
+    // No mode-toggle decoration subscriber. The prompt-prefix repaint
+    // (the other `onChange` subscriber above) is the live cue, and
+    // `flushPendingModeChangeChip` (defined below) writes the chip to
+    // scrollback at send time. There is intentionally NO "queued mode
+    // change" band : it duplicated the prompt prefix at idle and
+    // duplicated the scrollback chip on send, so it only added noise.
   }
   // Live-area status defaults to a LiveAreaStatusController that paints the
   // spinner+label as the top row of the live area. Tests can pass `null` to
@@ -3229,6 +3244,35 @@ async function runReplLiveArea(
     // scrollback), trailing `\n` to terminate the prompt line.
     compositor.writeStream(`\n\n\n${item.commitLines.join("\n")}\n`)
   }
+  /**
+   * If a mode change is pending advertisement, paint the scrollback
+   * chip for it RIGHT NOW. Called once per consume, immediately before
+   * the queue item(s) flush their `❯ <text>` line(s). The chip lands
+   * one blank line above the user prompt (capBlankLines collapses the
+   * joined `\n` runs to ≤2).
+   *
+   * Pairs with `agent.run()`'s `consumePendingAttachment` call: peek
+   * here, then the synchronous prefix of `agent.run` (up to the initial
+   * consume / loop-body consume) runs within the same tick. Between
+   * peek and consume the event loop never yields, so the chip's
+   * from/to and the consumed `<mode-change>` block carry identical
+   * data.
+   *
+   * No-op when no change is pending (active matches lastAdvertised):
+   * net-zero toggle sequences write nothing to scrollback.
+   */
+  const flushPendingModeChangeChip = (): void => {
+    if (modeManager == null) return
+    if (typeof compositor.writeStream !== "function") return
+    const chip = buildPendingModeChangeChip(
+      modeManager.peekPendingAttachment(),
+      (id) => (id == null ? "default" : (modeManager.modeById(id)?.label ?? id.toUpperCase())),
+      (id) => modeManager.resolvedForId(id)?.label.fgOpen ?? null,
+      new Date(),
+    )
+    if (chip == null) return
+    compositor.writeStream(`\n${chip}\n`)
+  }
   let cancelled = false
   /** When non-null, the goodbye banner uses this reason in the closer copy. */
   let quitReason: "confirmed" | "escape-hatch" | null = null
@@ -3248,13 +3292,9 @@ async function runReplLiveArea(
   /**
    * Paint the queued-message decoration block between the live-area
    * status row and the editor prompt. Only rendered while a turn is in
-   * flight (steady-state idle would visually flash since the main loop
-   * drains items immediately).
-   *
-   * The byte-exact layout (numbering, `┊` / `╰` glyph choice, preview
-   * truncation) lives in the pure builder `buildQueueDecorationLines`
-   * — see src/queue-decoration.ts and its unit tests for the regression
-   * guards.
+   * flight : at idle the main loop drains items immediately so there
+   * would be nothing to queue. Byte-exact layout lives in the pure
+   * builder `buildQueueDecorationLines` in `src/queue-decoration.ts`.
    */
   const renderDecoration = (): void => {
     if (typeof editor.setDecorationLines !== "function") return
@@ -3369,6 +3409,10 @@ async function runReplLiveArea(
       // microseconds after Enter, indistinguishable from the old behavior.
       // Decoration must be re-rendered AFTER the shift so the queue widget
       // shrinks by one row in lockstep with the scrollback commit.
+      // Mode-change chip (if any) lands BEFORE the user prompt line so
+      // it reads as "this turn was sent in mode X". One emit per
+      // consume : peek+chip here, agent.run consumes synchronously.
+      flushPendingModeChangeChip()
       flushQueueItemToScrollback(item)
       renderDecoration()
 
@@ -3597,6 +3641,10 @@ async function runReplLiveArea(
         // sees their queued prompts materialize in scrollback at the moment
         // they're handed to the agent (mid-turn drain at a tool boundary) :
         // mirrors what a sequence of solo turns would look like.
+        // Mode-change chip lands ONCE for the whole drained batch (the
+        // model consumes a single `<mode-change>` per loop body),
+        // positioned above the first prompt line.
+        flushPendingModeChangeChip()
         for (const item of drained) flushQueueItemToScrollback(item)
         renderDecoration()
         return drained.map((i) => i.text).join("\n\n")

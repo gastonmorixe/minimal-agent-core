@@ -32,12 +32,19 @@ While in this mode, you should:
 ## Activation signal
 
 The currently active mode is announced via a small text block of the form
-`<mode-change from="..." to="..." />` prepended to the user message that
-immediately follows any toggle. There is no implicit state: if you do not
-see a `<mode-change to="ask" ...>` in this turn or have not seen one in
-recent turns, you are NOT in ASK mode and full tooling is available.
-Conversely, a `<mode-change to="default" ...>` block restores normal
-operation.
+`<mode-change from="..." to="..." at="..." />` prepended to the user
+message that immediately follows any toggle. There is no implicit state:
+if you do not see a `<mode-change to="ask" ...>` in this turn or have
+not seen one in recent turns, you are NOT in ASK mode and full tooling
+is available. Conversely, a `<mode-change to="default" ...>` block
+restores normal operation.
+
+The `at` attribute is an ISO-8601 timestamp of when the toggle actually
+happened. When the user fidgets Shift+Tab while you're idle, only the
+final net change is advertised: `from` is the mode you were last told
+about, `to` is the current one, and `at` reflects the most recent toggle
+(not the first). A gap between `at` and the user message's send time
+means the user toggled and then sat on it for a while before sending.
 
 The block is intentionally tiny. The policy lives in this PROMPT.md
 (which is permanently part of the cached system prompt). The attachment

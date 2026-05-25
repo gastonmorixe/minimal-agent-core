@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import type { Message } from "./client.ts"
-import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
+import {
+  buildResumeHeader,
+  replayToScrollback,
+  userTimestampsFromRecords,
+} from "./session-replay.ts"
+import type { SessionRecord } from "./session-store.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 
 class CaptureSink {
@@ -129,6 +134,31 @@ describe("replayToScrollback", () => {
     expect(plain).not.toContain("ASK ❯ back to default")
   })
 
+  it("parses <mode-change> blocks that include the at= timestamp attribute", async () => {
+    // Forward-compat: new logs carry `at="..."`. The replay should treat
+    // them identically to the legacy no-`at` form (strip + thread mode).
+    const { ModeManager } = await import("./modes.ts")
+    const ASK_MANIFEST = { id: "ask", label: "ASK" }
+    const modeManager = new ModeManager([ASK_MANIFEST])
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: '<mode-change from="default" to="ask" at="2026-05-22T20:43:12.000Z" />',
+          },
+          { type: "text", text: "ask question" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { modeManager })
+    const plain = stripAnsi(sink.out)
+    expect(plain).not.toContain("<mode-change")
+    expect(plain).toContain("ASK ❯ ask question")
+  })
+
   it("ignores a tool_result-only user message that also carries a <mode-change> block", async () => {
     const { ModeManager } = await import("./modes.ts")
     const ASK_MANIFEST = { id: "ask", label: "ASK" }
@@ -181,6 +211,164 @@ describe("replayToScrollback", () => {
     // …and the prompt falls back to the bare arrow rather than crashing.
     expect(plain).toContain("❯ no manager")
     expect(plain).not.toContain("ASK ❯")
+  })
+
+  // ──────────────────────────────────────────────────────────────────
+  // Runtime-attachment stripping. The agent prepends several
+  // model-only attachment blocks to user messages (see Agent.run in
+  // src/agent.ts). On --resume these MUST NOT leak into the scrollback
+  // as if the user typed them.
+  // ──────────────────────────────────────────────────────────────────
+
+  it("strips <ma::tui::tasks> attachment from the rendered user turn", async () => {
+    const tasksAttachment =
+      '<ma::tui::tasks total="2" done="0" doing="1" todo="1" canceled="0">\n' +
+      "1  #abc123  doing  Phase 1: types.ts\n" +
+      "2  #def456  todo   Phase 2: palette.ts\n" +
+      "</ma::tui::tasks>"
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: tasksAttachment },
+          { type: "text", text: "keep going" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    // The attachment must not appear, neither the opener nor any
+    // of its body lines.
+    expect(plain).not.toContain("<ma::tui::tasks")
+    expect(plain).not.toContain("</ma::tui::tasks>")
+    expect(plain).not.toContain("Phase 1: types.ts")
+    expect(plain).not.toContain("Phase 2: palette.ts")
+    // The actual user text still renders cleanly under a single arrow.
+    expect(plain).toContain("❯ keep going")
+    const arrows = plain.match(/❯ /g)?.length ?? 0
+    expect(arrows).toBe(1)
+  })
+
+  it("strips <short-term-memory> attachment from the rendered user turn", async () => {
+    const stmAttachment =
+      "<short-term-memory>\n[#1] hypothesis: wrap bug only at COLUMNS<80\n</short-term-memory>"
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: stmAttachment },
+          { type: "text", text: "what next?" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    expect(plain).not.toContain("<short-term-memory")
+    expect(plain).not.toContain("hypothesis: wrap bug")
+    expect(plain).toContain("❯ what next?")
+  })
+
+  it("strips <memory-saved> save-echo blocks from the rendered user turn", async () => {
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: '<memory-saved scope="project" id="lwq8tg-a8f3">tests live in src/*.test.ts</memory-saved>',
+          },
+          {
+            type: "text",
+            text: '<memory-saved scope="short-term" id="2" evicted="1">trying LANG=C</memory-saved>',
+          },
+          { type: "text", text: "carry on" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    expect(plain).not.toContain("<memory-saved")
+    expect(plain).not.toContain("tests live in src")
+    expect(plain).not.toContain("LANG=C")
+    expect(plain).toContain("❯ carry on")
+  })
+
+  it("strips a tool_result + <ma::reflection-checkpoint> user turn (no own arrow row)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "kick off" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_1", content: "ok", is_error: false },
+          {
+            type: "text",
+            text:
+              '<ma::reflection-checkpoint round="50" cooldown-applied-seconds="60" />\n' +
+              "Soft checkpoint, not a stop signal. Briefly consider whether you are still on track.",
+          },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "still on track" }] },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    // Neither the tag nor the prose body sneaks into the scrollback.
+    expect(plain).not.toContain("<ma::reflection-checkpoint")
+    expect(plain).not.toContain("Soft checkpoint")
+    // The mid-loop user turn renders no own arrow row (it's a
+    // tool_result + attachment pairing with no user payload).
+    const arrows = plain.match(/❯ /g)?.length ?? 0
+    expect(arrows).toBe(1) // only the original "kick off" prompt
+    expect(plain).toContain("still on track")
+  })
+
+  it("strips a mixed bag of attachments (mode-change + short-term + tasks + memory-saved + user text)", async () => {
+    // Mirror the exact ordering Agent.run uses at the initial seam:
+    // mode-change, short-term-memory, ma::tui::tasks, memory-saved, user text.
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: "<short-term-memory>\n[#1] note\n</short-term-memory>" },
+          {
+            type: "text",
+            text:
+              '<ma::tui::tasks total="1" done="0" doing="1" todo="0" canceled="0">\n' +
+              "1  #abc123  doing  do the thing\n" +
+              "</ma::tui::tasks>",
+          },
+          {
+            type: "text",
+            text: '<memory-saved scope="project" id="x-1">prior save</memory-saved>',
+          },
+          { type: "text", text: "all done?" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    expect(plain).not.toContain("<mode-change")
+    expect(plain).not.toContain("<short-term-memory")
+    expect(plain).not.toContain("<ma::tui::tasks")
+    expect(plain).not.toContain("<memory-saved")
+    expect(plain).not.toContain("[#1] note")
+    expect(plain).not.toContain("do the thing")
+    expect(plain).not.toContain("prior save")
+    // Exactly one rendered arrow row, carrying just the user's text.
+    expect(plain).toContain("❯ all done?")
+    const arrows = plain.match(/❯ /g)?.length ?? 0
+    expect(arrows).toBe(1)
   })
 
   // ──────────────────────────────────────────────────────────────────
@@ -410,5 +598,211 @@ describe("replayToScrollback", () => {
     // "· HH:MM:SS" (steady-state form).
     const suffixRe = / · (?:[A-Z][a-z]{2} \d{1,2} )?\d{2}:\d{2}:\d{2}/g
     expect(plain.match(suffixRe)?.length ?? 0).toBe(1)
+  })
+
+  it("emits a mode-change chip with the user-record timestamp when replayed", async () => {
+    const { ModeManager } = await import("./modes.ts")
+    const ASK_MANIFEST = { id: "ask", label: "ASK" }
+    const modeManager = new ModeManager([ASK_MANIFEST])
+    const at = new Date(2026, 4, 22, 17, 52, 30)
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: "ask question" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { modeManager, userTimestamps: [at] })
+    const plain = stripAnsi(sink.out)
+    // The chip is emitted ABOVE the prompt arrow, with the from/to labels.
+    expect(plain).toContain("mode →")
+    expect(plain).toContain("ASK")
+    expect(plain).toContain("from default")
+    // Timestamp from the user-record `ts`, formatted as YYYY-MM-DD HH:MM.
+    expect(plain).toContain("2026-05-22 17:52")
+    // The tag itself never leaks into the rendered output.
+    expect(plain).not.toContain("<mode-change")
+    // The prompt arrow + user text still renders below the chip.
+    expect(plain).toContain("ASK ❯ ask question")
+    // Chip appears BEFORE the prompt arrow in the rendered output.
+    const chipIdx = plain.indexOf("mode →")
+    const arrowIdx = plain.indexOf("ASK ❯")
+    expect(chipIdx).toBeGreaterThanOrEqual(0)
+    expect(arrowIdx).toBeGreaterThan(chipIdx)
+  })
+
+  it("emits a chip for a tool_result-only user message that carries a mode-change", async () => {
+    const { ModeManager } = await import("./modes.ts")
+    const ASK_MANIFEST = { id: "ask", label: "ASK" }
+    const modeManager = new ModeManager([ASK_MANIFEST])
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "kick off" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_1", content: "ok", is_error: false },
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "now in ask" }],
+      },
+    ]
+    const at = new Date(2026, 4, 22, 17, 52)
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, {
+      modeManager,
+      // Index 2 is the synthetic tool_result+mode-change user message.
+      userTimestamps: [null, null, at, null],
+    })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("mode →")
+    expect(plain).toContain("2026-05-22 17:52")
+    expect(plain).toContain("ASK ❯ now in ask")
+  })
+
+  it("falls back to epoch 1970 when the timestamp slot is null", async () => {
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: "hello" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { userTimestamps: [null] })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("mode →")
+    // 1970-01-01 is the documented "we lost the timestamp" marker.
+    expect(plain).toContain("1970-01-01")
+  })
+
+  it("renders chip even without a modeManager (uses uppercased ids)", async () => {
+    const at = new Date(2026, 4, 22, 17, 52)
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<mode-change from="default" to="ask" />' },
+          { type: "text", text: "hello" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { userTimestamps: [at] })
+    const plain = stripAnsi(sink.out)
+    // No modeManager → label is uppercased id, no color, but chip still renders.
+    expect(plain).toContain("mode →")
+    expect(plain).toContain("ASK")
+    expect(plain).toContain("from default")
+    expect(plain).toContain("2026-05-22 17:52")
+  })
+})
+
+describe("userTimestampsFromRecords", () => {
+  it("returns one entry per produced message, parallel to foldRecords", () => {
+    const t1 = "2026-05-22T17:00:00.000Z"
+    const t2 = "2026-05-22T17:00:01.000Z"
+    const t3 = "2026-05-22T17:00:02.000Z"
+    const records: SessionRecord[] = [
+      {
+        kind: "meta",
+        formatVersion: 1,
+        sid: "x",
+        createdAt: t1,
+        model: "m",
+        cwd: "/",
+        systemHash: "h",
+        toolsHash: "h",
+        agentVersion: "v",
+      },
+      { kind: "user", ts: t1, content: "hi", id: "u1" },
+      {
+        kind: "assistant",
+        ts: t2,
+        content: [{ type: "text", text: "hello" }],
+        stopReason: "end_turn",
+      },
+      { kind: "user", ts: t3, content: "more", id: "u2" },
+    ]
+    const out = userTimestampsFromRecords(records)
+    expect(out).toHaveLength(3) // 1 user + 1 assistant + 1 user
+    expect(out[0]).toEqual(new Date(t1))
+    expect(out[1]).toEqual(new Date(t2))
+    expect(out[2]).toEqual(new Date(t3))
+  })
+
+  it("appends tool_result to the prior tool_result-user message (no new index)", () => {
+    const t1 = "2026-05-22T17:00:00.000Z"
+    const t2 = "2026-05-22T17:00:01.000Z"
+    const t3 = "2026-05-22T17:00:02.000Z"
+    const records: SessionRecord[] = [
+      { kind: "user", ts: t1, content: "hi", id: "u1" },
+      { kind: "assistant", ts: t2, content: [], stopReason: "end_turn" },
+      // First tool_result starts a new synthetic user message…
+      { kind: "tool_result", ts: t3, tool_use_id: "tu_1", content: "ok", isError: false },
+      // …and a second tool_result APPENDS to it, no new entry.
+      { kind: "tool_result", ts: t3, tool_use_id: "tu_2", content: "ok", isError: false },
+    ]
+    const out = userTimestampsFromRecords(records)
+    expect(out).toHaveLength(3) // user + assistant + synthetic tool user
+    expect(out[2]).toEqual(new Date(t3))
+  })
+
+  it("truncates the array on rewind to the matching user-record offset", () => {
+    const t = (s: number) => `2026-05-22T17:00:0${s}.000Z`
+    const records: SessionRecord[] = [
+      { kind: "user", ts: t(0), content: "hi", id: "u1" },
+      { kind: "assistant", ts: t(1), content: [], stopReason: "end_turn" },
+      { kind: "user", ts: t(2), content: "follow up", id: "u2" },
+      { kind: "assistant", ts: t(3), content: [], stopReason: "end_turn" },
+      // Rewind to u1: keep [u1] only, drop everything after.
+      { kind: "rewind", ts: t(4), to: "u1", droppedCount: 2 },
+    ]
+    const out = userTimestampsFromRecords(records)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toEqual(new Date(t(0)))
+  })
+
+  it("returns null for unparseable timestamps but keeps the index slot", () => {
+    const records: SessionRecord[] = [
+      { kind: "user", ts: "not-a-date", content: "hi", id: "u1" },
+      { kind: "assistant", ts: "2026-05-22T17:00:01.000Z", content: [], stopReason: "end_turn" },
+    ]
+    const out = userTimestampsFromRecords(records)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toBeNull()
+    expect(out[1]).toEqual(new Date("2026-05-22T17:00:01.000Z"))
+  })
+
+  it("skips meta and note records (they produce no message)", () => {
+    const records: SessionRecord[] = [
+      {
+        kind: "meta",
+        formatVersion: 1,
+        sid: "x",
+        createdAt: "t",
+        model: "m",
+        cwd: "/",
+        systemHash: "h",
+        toolsHash: "h",
+        agentVersion: "v",
+      },
+      { kind: "note", ts: "2026-05-22T17:00:00.000Z", text: "n" },
+      { kind: "user", ts: "2026-05-22T17:00:01.000Z", content: "hi", id: "u1" },
+    ]
+    const out = userTimestampsFromRecords(records)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toEqual(new Date("2026-05-22T17:00:01.000Z"))
   })
 })

@@ -27,26 +27,68 @@
  * @module modes
  */
 
-import type { ManifestMode } from "./plugins/types.ts"
-import type { ContentBlock } from "./client.ts"
 import { c } from "./agent.ts"
+import type { ContentBlock } from "./client.ts"
 import {
   clampLabel,
   detectStyleEnv,
   paint,
-  resolveModeStyle,
-  styleFromLegacyColor,
   type ResolvedModeStyle,
   type ResolvedSurfaceStyle,
+  resolveModeStyle,
   type StyleEnv,
+  styleFromLegacyColor,
 } from "./mode-style.ts"
+import type { ManifestMode } from "./plugins/types.ts"
 
 /**
  * Subscriber callback notified whenever the active mode changes.
  *
- * Receives the new active mode (or `null` when no mode is active).
+ * Receives the new active mode (or `null` when no mode is active). The
+ * optional second argument carries richer metadata about the transition
+ * (the prior mode and the timestamp the change took effect) for
+ * subscribers that want to render a scrollback chip or audit-log entry.
+ * Subscribers that only care about the new active mode can keep ignoring
+ * the second arg.
  */
-export type ModeChangeListener = (active: ManifestMode | null) => void
+export type ModeChangeListener = (active: ManifestMode | null, event?: ModeChangeEvent) => void
+
+/**
+ * Payload for a single mode transition. Built inside {@link ModeManager.notify}
+ * and handed to every subscriber that opts in to the second arg.
+ *
+ * - `from` / `to` carry the FULL {@link ManifestMode} (not just the id) so
+ *   chip renderers can read `label`, `style`, etc. without a second
+ *   lookup. `null` means "no mode active".
+ * - `at` is the wall-clock time the change took effect (i.e. when the
+ *   user pressed Shift+Tab or a programmatic `setMode` ran). Set from the
+ *   manager's injected `now` clock, so tests can pin it to a fixed Date.
+ */
+export interface ModeChangeEvent {
+  from: ManifestMode | null
+  to: ManifestMode | null
+  at: Date
+}
+
+/**
+ * Read-only view of the pending advertisement (current active mode vs
+ * the last mode the model was told about). Returned by
+ * {@link ModeManager.peekPendingAttachment} so renderers can display a
+ * "will ship on send" decoration WITHOUT consuming the attachment.
+ *
+ * `null` when nothing is pending : either the model already knows the
+ * active mode, or the user toggled back to the previously-advertised
+ * state before sending (the classic ASK → default → ASK net-zero case).
+ *
+ * - `fromId` is the id the model currently believes is active (`null` =
+ *   default / no mode).
+ * - `toId` is the id the active mode will be after the next consume
+ *   (`null` = default / no mode).
+ */
+export interface PendingModeAttachment {
+  fromId: string | null
+  toId: string | null
+}
 
 /**
  * Color helpers indexed by the manifest's `color` field.
@@ -122,7 +164,7 @@ export class ModeManager {
   /**
    * Mode that was active immediately before the most recent change.
    * Captured by `setMode`, `cycleNext`, `cyclePrev`. Used to render
-   * `<mode-change from="…" to="…" />` when the next user turn assembles.
+   * `<mode-change from="…" to="…" at="…" />` when the next user turn assembles.
    */
   private prevModeId: string | null = null
   /**
@@ -131,17 +173,39 @@ export class ModeManager {
    * doesn't spam stderr.
    */
   private warnedSystemPromptAppend = false
+  /**
+   * Wall-clock source for {@link ModeChangeEvent.at}. Injected so tests
+   * can pin the timestamp to a fixed Date without monkey-patching
+   * `Date.now`. Defaults to `() => new Date()`.
+   */
+  private readonly now: () => Date
+  /**
+   * Last transition we built and handed to subscribers. Retained so
+   * late-attaching subscribers can ask "what was the most recent change?"
+   * without having to derive it from `prevModeId` themselves. `null`
+   * when no toggle has happened in this process.
+   */
+  private lastEvent: ModeChangeEvent | null = null
 
   /**
    * @param modes - The list of available modes (in cycle order).
    * @param defaultModeId - Optional id of the mode to start in. When the id
    *   is unknown or omitted, the manager starts with no active mode.
    * @param env - Style resolver environment. Defaults to {@link detectStyleEnv}.
+   * @param now - Wall-clock injection point for {@link ModeChangeEvent.at}.
+   *   Defaults to `() => new Date()`. Tests use a fixed Date for byte-stable
+   *   chip rendering.
    */
-  constructor(modes: ManifestMode[], defaultModeId?: string | null, env?: StyleEnv) {
+  constructor(
+    modes: ManifestMode[],
+    defaultModeId?: string | null,
+    env?: StyleEnv,
+    now?: () => Date,
+  ) {
     this.modes = [...modes]
     this.idx = -1
     this.env = env ?? detectStyleEnv()
+    this.now = now ?? (() => new Date())
     this.resolvedCache = this.modes.map((m) => {
       const req = m.style ?? styleFromLegacyColor(m.color)
       return req ? resolveModeStyle(req, this.env) : null
@@ -275,8 +339,8 @@ export class ModeManager {
    *
    * If the active mode differs from the one the model was last told
    * about (via a previously-consumed attachment), returns a small
-   * `<mode-change from="…" to="…" />` text content block to prepend to
-   * the next outgoing user message. If active === lastAdvertised,
+   * `<mode-change from="…" to="…" at="…" />` text content block to
+   * prepend to the next outgoing user message. If active === lastAdvertised,
    * returns `null` and emits nothing.
    *
    * The block is intentionally minimal: the policy / behavior text for
@@ -285,6 +349,13 @@ export class ModeManager {
    * activation pointer. Riding the user-turn boundary keeps it inside
    * the rolling-tail breakpoint that's invalidated every turn anyway —
    * mode toggles cost zero additional cache.
+   *
+   * The `at` attribute is an ISO-8601 timestamp of the most recent
+   * toggle ({@link lastEvent}.at). When several toggles happen between
+   * two consumes (e.g. the user fidgets Shift+Tab while the agent is
+   * idle), only the final net change is advertised and `at` reflects
+   * the last toggle. Falls back to `now()` if no toggle has happened
+   * yet (only possible when `defaultModeId` was set at startup).
    *
    * Idempotent: consuming twice without an intervening toggle returns
    * `null` the second time. Also safe to call when no plugins/modes are
@@ -299,9 +370,10 @@ export class ModeManager {
     const from = this.lastAdvertisedModeId ?? "default"
     const to = currentId ?? "default"
     this.lastAdvertisedModeId = currentId
+    const at = (this.lastEvent?.at ?? this.now()).toISOString()
     return {
       type: "text",
-      text: `<mode-change from="${from}" to="${to}" />`,
+      text: `<mode-change from="${from}" to="${to}" at="${at}" />`,
     }
   }
 
@@ -314,6 +386,40 @@ export class ModeManager {
    */
   previousModeId(): string | null {
     return this.prevModeId
+  }
+
+  /**
+   * Most-recent {@link ModeChangeEvent} this manager built, or `null`
+   * when no transition has happened yet in this process. Late-attaching
+   * subscribers can use this to render a one-time chip on attach
+   * (e.g. session-replay rendering historical changes).
+   */
+  lastTransition(): ModeChangeEvent | null {
+    return this.lastEvent
+  }
+
+  /**
+   * Non-mutating peek at the pending advertisement: what
+   * {@link consumePendingAttachment} would emit if called right now.
+   * Returns `null` when nothing is pending (current active matches the
+   * last-advertised mode).
+   *
+   * Used by the decoration band to surface a "mode change queued · will
+   * ship on send" hint between the live-area status row and the editor
+   * prompt. The decoration peeks every frame; the actual `consume` only
+   * runs at user-turn assembly inside `agent.ts`. Calling this is free
+   * and side-effect-free.
+   */
+  peekPendingAttachment(): PendingModeAttachment | null {
+    const currentId = this.activeId()
+    if (currentId === this.lastAdvertisedModeId) return null
+    return { fromId: this.lastAdvertisedModeId, toId: currentId }
+  }
+
+  /** Look up a mode by id. Convenience for chip renderers that hold an id. */
+  modeById(id: string | null): ManifestMode | null {
+    if (id == null) return null
+    return this.modes.find((m) => m.id === id) ?? null
   }
 
   /**
@@ -400,7 +506,7 @@ export class ModeManager {
    *
    * Used by session replay (see `session-replay.ts`) to render past
    * user turns under the prompt prefix that was active at the time,
-   * reconstructed from the `<mode-change from=… to=… />` attachments
+   * reconstructed from the `<mode-change from=… to=… at=… />` attachments
    * stored alongside the user content. Pure: never mutates `this.idx` or
    * `lastAdvertisedModeId` — safe to call repeatedly while walking
    * historical messages.
@@ -444,6 +550,19 @@ export class ModeManager {
   }
 
   /**
+   * Resolved style for an arbitrary mode by id. Returns `null` when the
+   * id is unknown OR when the mode declared no style. Used by the chip
+   * renderer to look up the target mode's accent color without binding
+   * the renderer to the manager's internal cache.
+   */
+  resolvedForId(id: string | null): ResolvedModeStyle | null {
+    if (id == null) return null
+    const idx = this.modes.findIndex((m) => m.id === id)
+    if (idx === -1) return null
+    return this.resolvedCache[idx]
+  }
+
+  /**
    * Resolved style for the status spinner surface, or `null` when no mode
    * is active or the mode does not contribute a style.
    */
@@ -467,6 +586,16 @@ export class ModeManager {
 
   private notify(): void {
     const a = this.active()
-    for (const l of this.listeners) l(a)
+    // Build the event from prevModeId (captured right before idx moved)
+    // and the now-current active mode. `modeById(null)` returns null so
+    // the default ↔ default edge case stays type-safe even though notify
+    // is never called for it (the setters bail before reaching here).
+    const event: ModeChangeEvent = {
+      from: this.modeById(this.prevModeId),
+      to: a,
+      at: this.now(),
+    }
+    this.lastEvent = event
+    for (const l of this.listeners) l(a, event)
   }
 }

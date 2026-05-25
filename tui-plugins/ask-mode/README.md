@@ -30,10 +30,10 @@ swap prompt prefix, recolor the status spinner).
 ## Activation signal in the system prompt
 
 When the user toggles modes, the next user message is prefixed with a
-`<mode-change from="..." to="..." />` block. The agent reads that to
-know which policy is currently in effect. The block is intentionally
-tiny because the policy is permanent in `PROMPT.md` (which sits on the
-prompt cache breakpoint).
+`<mode-change from="..." to="..." at="..." />` block. The agent reads
+that to know which policy is currently in effect and when the toggle
+happened (ISO-8601). The block is intentionally tiny because the policy
+is permanent in `PROMPT.md` (which sits on the prompt cache breakpoint).
 
 ## How the harness enforces the refusal
 

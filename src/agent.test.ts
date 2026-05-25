@@ -784,6 +784,12 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     refusalHint: "Present the proposed change as a unified diff.",
   }
 
+  // Pinned wall-clock for tests that assert on the literal `<mode-change … at="…" />`
+  // payload. Injecting `now` into ModeManager keeps the marker byte-stable.
+  const FIXED_AT = new Date("2026-05-22T20:43:12.000Z")
+  const FIXED_AT_ISO = FIXED_AT.toISOString()
+  const fixedNow = () => FIXED_AT
+
   /**
    * Build a 2-round sendFn that records every request body it receives,
    * emits a `tool_use(Edit)` on round 1 and a final text on round 2.
@@ -916,7 +922,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
 
   it("attaches a <mode-change> block to the next user message after a toggle, then stops on steady state", async () => {
     const { ModeManager } = await import("./modes.ts")
-    const modeManager = new ModeManager([ASK_MANIFEST])
+    const modeManager = new ModeManager([ASK_MANIFEST], null, undefined, fixedNow)
 
     // 3-turn sendFn: each turn just emits text and ends.
     let round = 0
@@ -978,7 +984,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     // model sees the activation context before the user's actual input).
     expect({ type: turn2Blocks[0].type, text: turn2Blocks[0].text }).toEqual({
       type: "text",
-      text: '<mode-change from="default" to="ask" />',
+      text: `<mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
     expect({ type: turn2Blocks[1].type, text: turn2Blocks[1].text }).toEqual({
       type: "text",
@@ -1062,7 +1068,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   // --------------------------------------------------------------------------
   it("places tool_result FIRST and <mode-change> AFTER when a toggle happens mid-tool-loop", async () => {
     const { ModeManager } = await import("./modes.ts")
-    const modeManager = new ModeManager([ASK_MANIFEST])
+    const modeManager = new ModeManager([ASK_MANIFEST], null, undefined, fixedNow)
 
     let round = 0
     const records: Array<Record<string, unknown>> = []
@@ -1116,7 +1122,9 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(blocks[0].type).toBe("tool_result")
     expect((blocks[0] as { tool_use_id: string }).tool_use_id).toBe("call-1")
     expect(blocks[1].type).toBe("text")
-    expect((blocks[1] as { text: string }).text).toBe('<mode-change from="default" to="ask" />')
+    expect((blocks[1] as { text: string }).text).toBe(
+      `<mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+    )
   })
 
   it("rollbackPendingTurn() refuses to discard a user message containing tool_result blocks", async () => {
