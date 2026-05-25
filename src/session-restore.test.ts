@@ -403,3 +403,67 @@ describe("firstUserPromptSnippet", () => {
     expect(firstUserPromptSnippet(records)).toBe("blocky hi")
   })
 })
+
+// ---------------------------------------------------------------------------
+// Fork round-trip: parent → SessionStore.fork() → loadSession(fork) must
+// reproduce the same conversation messages. This is the end-to-end guard
+// that protects the user-visible promise: "--resume <fork-sid>" yields the
+// same conversation as "--resume <parent-sid>" (minus any fork-time
+// content drift, which there is none of in this test).
+// ---------------------------------------------------------------------------
+
+describe("loadSession(fork) round-trip", () => {
+  it("a fork yields the same messages as its parent", () => {
+    const dir = tmp()
+    const srcSid = "ma-restore-parent"
+    const dstSid = "ma-restore-fork"
+    const parent = SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    parent.appendAttach()
+    parent.appendUser("hello")
+    parent.appendAssistant(
+      [
+        { type: "text", text: "world" },
+        { type: "tool_use", id: "toolu_y", name: "Bash", input: { command: "echo hi" } },
+      ],
+      "tool_use",
+    )
+    parent.appendToolResult({
+      type: "tool_result",
+      tool_use_id: "toolu_y",
+      content: "hi",
+      is_error: false,
+    })
+    parent.appendAssistant([{ type: "text", text: "done" }], "end_turn")
+    parent.appendDetach("exit", 0)
+
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    const parentLoad = loadSession(srcSid, dir)
+    const forkLoad = loadSession(dstSid, dir)
+    // Same conversation, byte-identical message JSON.
+    expect(JSON.stringify(forkLoad.messages)).toBe(JSON.stringify(parentLoad.messages))
+    // Fork's meta carries the parent pointer; parent's meta has neither.
+    expect(forkLoad.meta?.parentSid).toBe(srcSid)
+    expect(forkLoad.meta?.forkedAt).toBeDefined()
+    expect(parentLoad.meta?.parentSid).toBeUndefined()
+    expect(parentLoad.meta?.forkedAt).toBeUndefined()
+  })
+
+  it("rewinds in the parent fold correctly through the fork", () => {
+    const dir = tmp()
+    const srcSid = "ma-restore-rewind-parent"
+    const dstSid = "ma-restore-rewind-fork"
+    const parent = SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    const id1 = parent.appendUser("first")
+    parent.appendAssistant([{ type: "text", text: "ans1" }], "end_turn")
+    parent.appendUser("second")
+    parent.appendAssistant([{ type: "text", text: "ans2" }], "end_turn")
+    parent.appendRewind(id1, 3)
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    const forkLoad = loadSession(dstSid, dir)
+    // Rewind keeps the prompt with id=id1; everything after is dropped.
+    expect(forkLoad.messages).toHaveLength(1)
+    expect(forkLoad.messages[0]?.role).toBe("user")
+  })
+})

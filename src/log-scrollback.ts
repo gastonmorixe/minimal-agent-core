@@ -138,12 +138,59 @@ export class ScrollbackDiagnosticSink {
   private now: () => number
   private active: Map<string, DedupState> = new Map() // keyed by source
   private disposeFn: (() => void) | null = null
+  /**
+   * When non-null the sink is in BUFFERING mode: renderings are appended
+   * to this array instead of going to `writeImpl`. {@link flushBuffer}
+   * drains and switches back to pass-through.
+   *
+   * Wired from `src/index.ts` so any plugin-loader / auth / config
+   * diagnostic that fires DURING the startup banner box doesn't tear
+   * through the box mid-paint. The buffer flushes once
+   * `closeStartupTree()` has committed the final `╰` row, so warnings
+   * land cleanly BELOW the banner with the proper `⚠ warn ╰` chrome.
+   */
+  private buffer: string[] | null = null
 
   constructor(opts: ScrollbackSinkOptions = {}) {
     this.writeImpl = opts.write ?? ((s: string) => void process.stderr.write(s))
     this.dedupWindowMs = opts.dedupWindowMs ?? 30_000
     this.dedupRepaintMinMs = opts.dedupRepaintMinMs ?? 500
     this.now = opts.now ?? (() => Date.now())
+  }
+
+  /**
+   * Enter buffering mode. Subsequent renderings are queued in memory
+   * instead of being written. Idempotent (calling twice does nothing).
+   */
+  startBuffering(): void {
+    if (this.buffer === null) this.buffer = []
+  }
+
+  /**
+   * Drain the buffered renderings through `writeImpl` (preserving order)
+   * and exit buffering mode. Idempotent: if no buffer was active, this
+   * is a no-op. Safe to call from `finally` blocks.
+   */
+  flushBuffer(): void {
+    const buffered = this.buffer
+    if (buffered === null) return
+    this.buffer = null
+    for (const chunk of buffered) {
+      try {
+        this.writeImpl(chunk)
+      } catch {
+        // Same isolation policy as the rest of the sink: a misbehaving
+        // writer must not break drainage of the remaining entries.
+      }
+    }
+  }
+
+  /**
+   * True iff the sink is currently buffering. Exposed for tests; callers
+   * shouldn't need this — use start/flush in symmetric pairs.
+   */
+  isBuffering(): boolean {
+    return this.buffer !== null
   }
 
   /** Subscribe to a bus. Idempotent. */
@@ -201,7 +248,7 @@ export class ScrollbackDiagnosticSink {
       // after the cooldown reflects the true total.
       if (tsNow - existing.lastPaintedAt >= this.dedupRepaintMinMs) {
         existing.lastPaintedAt = tsNow
-        this.writeImpl(`${renderDedupLine(e, existing)}\n`)
+        this.emit(`${renderDedupLine(e, existing)}\n`)
       }
       return
     }
@@ -213,7 +260,20 @@ export class ScrollbackDiagnosticSink {
       lastAt: tsNow,
       lastPaintedAt: tsNow,
     })
-    this.writeImpl(`${renderBlock(e)}\n`)
+    this.emit(`${renderBlock(e)}\n`)
+  }
+
+  /**
+   * Route a rendered chunk through the buffer (when active) or the
+   * writer. Centralized so the buffering policy can't drift between
+   * the full-block and dedup-line paths.
+   */
+  private emit(chunk: string): void {
+    if (this.buffer !== null) {
+      this.buffer.push(chunk)
+      return
+    }
+    this.writeImpl(chunk)
   }
 }
 

@@ -45,6 +45,20 @@ export interface MetaRecord {
   /** Hash of the tool list (names + descriptions + schemas) at session start. */
   toolsHash: string
   agentVersion: string
+  /**
+   * Fork ancestry — present when this session was created by `--resume <sid>`.
+   * Both fields are written together by {@link SessionStore.fork}; old sessions
+   * (and brand-new ones from {@link SessionStore.open}) have neither.
+   *
+   * `parentSid` is the immediate parent only — multi-step fork chains
+   * (A → B → C) require walking the chain via `loadSession` if you need
+   * full ancestry. Kept intentionally simple: one parent pointer is enough
+   * for audit + provenance, full chain reconstruction is a downstream
+   * concern.
+   */
+  parentSid?: string
+  /** ISO 8601 timestamp the fork was created. Pairs with {@link parentSid}. */
+  forkedAt?: string
 }
 
 export interface UserRecord {
@@ -358,6 +372,130 @@ export class SessionStore {
       }
       appendFileSync(indexFilePath(dir), `${JSON.stringify(indexRecord)}\n`)
     }
+
+    return store
+  }
+
+  /**
+   * Fork an existing session into a new session file.
+   *
+   * Reads `srcSid.jsonl`, copies every conversation record (user / assistant /
+   * tool_result / note / rewind) into a brand-new `dstSid.jsonl` under a fresh
+   * `meta` record that records the parent linkage (`parentSid` + `forkedAt`).
+   * The parent file is NEVER modified — fork is non-destructive.
+   *
+   * Filtered OUT of the copy:
+   *   - the parent's `meta` record (we write our own, with the new sid/hashes)
+   *   - any `attach` / `detach` records (those are per-process pointers and
+   *     belong to other processes; the new fork's own attach is written
+   *     separately by the caller via `appendAttach()`)
+   *
+   * Preserved in the copy, in original write order:
+   *   - `user`, `assistant`, `tool_result`, `note`, `rewind`
+   *
+   * `existsOk` defaults to false — fork into an existing dstSid throws (sid
+   * collision is almost certainly a bug).
+   *
+   * Why fork instead of continue-in-place? When `--resume <X>` is invoked,
+   * the rest of the agent (banner, logs, plugin sessionId, tasks/scratch
+   * files, the goodbye banner's `--resume <id>` hint) ALL use the fresh
+   * per-process UUID. The session JSONL was the odd one out, silently
+   * appending to the parent file under the old sid — so the goodbye
+   * banner's resume hint pointed to a file that did not exist. Forking
+   * aligns the store with the rest of the agent: one consistent sid that
+   * actually round-trips through `--resume`.
+   */
+  static fork(opts: {
+    srcSid: string
+    dstSid: string
+    model: string
+    cwd: string
+    systemHash: string
+    toolsHash: string
+    agentVersion: string
+    argv?: string[]
+    dir?: string
+    /** Allow forking onto an existing dstSid file. Default false. */
+    existsOk?: boolean
+    /** Override the timestamp; tests use this for determinism. */
+    now?: () => Date
+  }): SessionStore {
+    const dir = opts.dir ?? defaultSessionsDir()
+    mkdirSync(dir, { recursive: true })
+    const store = new SessionStore(opts.dstSid, dir, opts.agentVersion)
+    const now = (opts.now ?? (() => new Date()))()
+    const createdAt = now.toISOString()
+
+    const dstExists = (() => {
+      try {
+        readFileSync(store.path, "utf-8")
+        return true
+      } catch {
+        return false
+      }
+    })()
+
+    if (dstExists && !opts.existsOk) {
+      throw new Error(
+        `SessionStore.fork: destination already exists at ${store.path} (pass existsOk:true to append)`,
+      )
+    }
+
+    // Read parent. Missing parent is a fatal error — caller should have
+    // verified the parent exists before requesting a fork.
+    const srcPath = sessionFilePath(opts.srcSid, dir)
+    const srcText = readFileSync(srcPath, "utf-8")
+    const { records: srcRecords } = parseLines(srcText)
+
+    // Build the fork file: new meta on top, then every preserved record
+    // verbatim in original order. `attach`/`detach` are dropped because
+    // they reference other processes; the caller writes its own attach
+    // via `appendAttach()` after fork() returns.
+    const meta: MetaRecord = {
+      kind: "meta",
+      formatVersion: 1,
+      sid: opts.dstSid,
+      createdAt,
+      model: opts.model,
+      cwd: opts.cwd,
+      systemHash: opts.systemHash,
+      toolsHash: opts.toolsHash,
+      agentVersion: opts.agentVersion,
+      parentSid: opts.srcSid,
+      forkedAt: createdAt,
+    }
+    const lines: string[] = [JSON.stringify(meta)]
+    for (const r of srcRecords) {
+      switch (r.kind) {
+        case "meta":
+        case "attach":
+        case "detach":
+          continue
+        default:
+          lines.push(JSON.stringify(r))
+      }
+    }
+    // `wx` ensures we never silently overwrite a dst that appeared
+    // between the existence check and the write (TOCTOU). When existsOk
+    // is true we accept overwrite, so use the plain write path.
+    if (dstExists && opts.existsOk) {
+      writeFileSync(store.path, `${lines.join("\n")}\n`)
+    } else {
+      writeFileSync(store.path, `${lines.join("\n")}\n`, { flag: "wx" })
+    }
+
+    // Index entry for the new fork. Mirrors `open()` — discoverable by
+    // `--resume last` and surfaced in any session listing. We do NOT add
+    // an `argv`-shaped marker for "this was a fork"; the meta record
+    // carries `parentSid` already, which is the canonical source.
+    const indexRecord: IndexRecord = {
+      sid: opts.dstSid,
+      createdAt,
+      cwd: opts.cwd,
+      model: opts.model,
+      argv: opts.argv,
+    }
+    appendFileSync(indexFilePath(dir), `${JSON.stringify(indexRecord)}\n`)
 
     return store
   }

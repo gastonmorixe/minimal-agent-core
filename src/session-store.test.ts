@@ -4,8 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   type AssistantRecord,
-  indexFilePath,
   type IndexRecord,
+  indexFilePath,
   type MetaRecord,
   parseLines,
   type RewindRecord,
@@ -275,5 +275,232 @@ describe("shortHash", () => {
     expect(shortHash("hello")).toBe(shortHash("hello"))
     expect(shortHash("hello")).not.toBe(shortHash("hello!"))
     expect(shortHash("")).toMatch(/^[0-9a-f]{8}$/)
+  })
+})
+
+describe("SessionStore.fork", () => {
+  // Set up a parent session with one of every preserved record kind plus a
+  // pair of attach/detach records (which fork should DROP). Used by most
+  // tests in this describe block.
+  function seedParent(dir: string, srcSid: string) {
+    const parent = SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    parent.appendAttach()
+    const userId = parent.appendUser("first user prompt")
+    parent.appendAssistant(
+      [
+        { type: "text", text: "hi" },
+        { type: "tool_use", id: "toolu_x", name: "Bash", input: { command: "ls" } },
+      ],
+      "tool_use",
+    )
+    parent.appendToolResult({
+      type: "tool_result",
+      tool_use_id: "toolu_x",
+      content: "ok",
+      is_error: false,
+    })
+    parent.appendAssistant([{ type: "text", text: "done" }], "end_turn")
+    parent.appendNote("free-form")
+    parent.appendRewind(userId, 0)
+    parent.appendDetach("exit", 0)
+    return { parent, userId }
+  }
+
+  it("copies parent conversation records under a fresh meta with parentSid + forkedAt", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-A"
+    const dstSid = "ma-fork-A"
+    seedParent(dir, srcSid)
+
+    const forkAt = new Date("2026-05-21T20:00:00.000Z")
+    const fork = SessionStore.fork({
+      ...baseOpenOpts,
+      srcSid,
+      dstSid,
+      dir,
+      now: () => forkAt,
+    })
+
+    const lines = readJsonl(fork.path)
+    const kinds = lines.map((l) => (l as { kind: string }).kind)
+    // meta + user + assistant + tool_result + assistant + note + rewind = 7
+    // attach + detach from parent are DROPPED.
+    expect(kinds).toEqual([
+      "meta",
+      "user",
+      "assistant",
+      "tool_result",
+      "assistant",
+      "note",
+      "rewind",
+    ])
+
+    const meta = lines[0] as MetaRecord
+    expect(meta.sid).toBe(dstSid)
+    expect(meta.parentSid).toBe(srcSid)
+    expect(meta.forkedAt).toBe(forkAt.toISOString())
+    expect(meta.createdAt).toBe(forkAt.toISOString())
+    expect(meta.model).toBe(baseOpenOpts.model)
+    expect(meta.systemHash).toBe(baseOpenOpts.systemHash)
+    expect(meta.toolsHash).toBe(baseOpenOpts.toolsHash)
+  })
+
+  it("preserves user record ids so subsequent rewinds still resolve", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-B"
+    const dstSid = "ma-fork-B"
+    const { userId } = seedParent(dir, srcSid)
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    const forkLines = readJsonl(sessionFilePath(dstSid, dir))
+    const user = forkLines.find((l) => (l as { kind: string }).kind === "user") as
+      | UserRecord
+      | undefined
+    expect(user?.id).toBe(userId)
+    const rewind = forkLines.find((l) => (l as { kind: string }).kind === "rewind") as
+      | RewindRecord
+      | undefined
+    expect(rewind?.to).toBe(userId)
+  })
+
+  it("writes an index entry for the fork (so --resume last finds it)", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-C"
+    const dstSid = "ma-fork-C"
+    seedParent(dir, srcSid)
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    const idxLines = readJsonl(indexFilePath(dir))
+    expect(idxLines.length).toBe(2) // parent + fork
+    const forkIdx = idxLines.find((l) => (l as IndexRecord).sid === dstSid) as
+      | IndexRecord
+      | undefined
+    expect(forkIdx).toBeDefined()
+    expect(forkIdx?.cwd).toBe(baseOpenOpts.cwd)
+  })
+
+  it("throws when destination exists and existsOk is false", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-D"
+    const dstSid = "ma-fork-D"
+    seedParent(dir, srcSid)
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    expect(() => SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })).toThrow(
+      /destination already exists/,
+    )
+  })
+
+  it("throws ENOENT when parent does not exist", () => {
+    const dir = tmp()
+    expect(() =>
+      SessionStore.fork({
+        ...baseOpenOpts,
+        srcSid: "ma-does-not-exist",
+        dstSid: "ma-fork-E",
+        dir,
+      }),
+    ).toThrow(/ENOENT|no such file/)
+  })
+
+  it("fork is non-destructive: parent file is byte-identical after fork", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-F"
+    const dstSid = "ma-fork-F"
+    seedParent(dir, srcSid)
+    const parentBefore = readFileSync(sessionFilePath(srcSid, dir))
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    const parentAfter = readFileSync(sessionFilePath(srcSid, dir))
+    expect(parentAfter.equals(parentBefore)).toBe(true)
+  })
+
+  it("fork stamps the CURRENT (caller-supplied) hashes, not the parent's", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-G"
+    const dstSid = "ma-fork-G"
+    seedParent(dir, srcSid)
+    SessionStore.fork({
+      ...baseOpenOpts,
+      srcSid,
+      dstSid,
+      dir,
+      systemHash: "newsys00",
+      toolsHash: "newtools",
+    })
+    const meta = readJsonl(sessionFilePath(dstSid, dir))[0] as MetaRecord
+    expect(meta.systemHash).toBe("newsys00")
+    expect(meta.toolsHash).toBe("newtools")
+  })
+
+  it("new turns appended to the fork do NOT leak into the parent file", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-H"
+    const dstSid = "ma-fork-H"
+    seedParent(dir, srcSid)
+    const parentLinesBefore = readJsonl(sessionFilePath(srcSid, dir)).length
+    const fork = SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    fork.appendAttach()
+    fork.appendUser("new prompt on the fork")
+    fork.appendAssistant([{ type: "text", text: "fork reply" }], "end_turn")
+    const parentLinesAfter = readJsonl(sessionFilePath(srcSid, dir)).length
+    expect(parentLinesAfter).toBe(parentLinesBefore)
+  })
+
+  it("forking an empty parent (meta only) succeeds and produces a meta-only fork", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-empty"
+    const dstSid = "ma-fork-empty"
+    SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    const lines = readJsonl(sessionFilePath(dstSid, dir))
+    expect(lines.length).toBe(1)
+    expect((lines[0] as MetaRecord).kind).toBe("meta")
+    expect((lines[0] as MetaRecord).parentSid).toBe(srcSid)
+  })
+
+  it("fork chains: forking a fork records the immediate parent only", () => {
+    const dir = tmp()
+    const sidA = "ma-A"
+    const sidB = "ma-B"
+    const sidC = "ma-C"
+    seedParent(dir, sidA)
+    SessionStore.fork({ ...baseOpenOpts, srcSid: sidA, dstSid: sidB, dir })
+    SessionStore.fork({ ...baseOpenOpts, srcSid: sidB, dstSid: sidC, dir })
+    const metaC = readJsonl(sessionFilePath(sidC, dir))[0] as MetaRecord
+    expect(metaC.parentSid).toBe(sidB)
+    expect(metaC.sid).toBe(sidC)
+  })
+})
+
+describe("MetaRecord (parentSid / forkedAt)", () => {
+  it("a vanilla open() produces meta WITHOUT parentSid / forkedAt", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-plain", dir })
+    const meta = readJsonl(store.path)[0] as MetaRecord
+    expect(meta.parentSid).toBeUndefined()
+    expect(meta.forkedAt).toBeUndefined()
+  })
+
+  it("old session files (no parentSid field) still parse cleanly", () => {
+    // Hand-craft a pre-fork-feature meta record on disk and verify
+    // parseLines accepts it without choking.
+    const dir = tmp()
+    const sid = "ma-legacy"
+    const path = join(dir, `${sid}.jsonl`)
+    const legacyMeta = {
+      kind: "meta",
+      formatVersion: 1,
+      sid,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      model: "claude-sonnet-4-6",
+      cwd: "/tmp",
+      systemHash: "deadbeef",
+      toolsHash: "cafebabe",
+      agentVersion: "legacy",
+    }
+    writeFileSync(path, `${JSON.stringify(legacyMeta)}\n`)
+    const { records, dropped } = parseLines(readFileSync(path, "utf-8"))
+    expect(dropped).toHaveLength(0)
+    expect(records).toHaveLength(1)
+    expect((records[0] as MetaRecord).sid).toBe(sid)
   })
 })

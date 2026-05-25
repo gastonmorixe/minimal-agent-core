@@ -668,6 +668,15 @@ async function main() {
   // plugin-load warnings land in `~/.minimal-agent/logs/ma-session-<sid>.log`.
   // The TUI surface attaches later from `runReplLiveArea` (it needs the
   // editor / aggregator). The stderr mirror is opt-in.
+  //
+  // The scrollback sink is constructed here and kept on a process-scoped
+  // variable so we can `startBuffering()` it BEFORE any startup-banner
+  // row is drawn and `flushBuffer()` AFTER `closeStartupTree()` commits
+  // the final `╰`. Without this two-phase wiring, a plugin-loader (or
+  // auth / config) warning emitted mid-banner would tear through the
+  // box mid-paint instead of landing cleanly below it with the proper
+  // `⚠ warn ╰` chrome.
+  let scrollbackSink: import("./log-scrollback.ts").ScrollbackDiagnosticSink | null = null
   {
     const { FileLogSink } = await import("./log-file.ts")
     new FileLogSink(getSessionId()).attach(getDiagnosticBus())
@@ -682,7 +691,14 @@ async function main() {
     // here, before any other subsystem can emit, so the first error
     // of the session is captured.
     const { ScrollbackDiagnosticSink } = await import("./log-scrollback.ts")
-    new ScrollbackDiagnosticSink().attach(getDiagnosticBus())
+    scrollbackSink = new ScrollbackDiagnosticSink()
+    scrollbackSink.attach(getDiagnosticBus())
+    // Start buffering immediately. We're about to start drawing the
+    // startup banner; any diagnostic that fires during that window
+    // (plugin-loader warnings, auth refresh hints, formatter
+    // resolution gripes) gets queued and flushed below the banner
+    // once `closeStartupTree()` has committed the final `╰` row.
+    if (SHOW_HEADER) scrollbackSink.startBuffering()
     if (process.env.MINIMAL_AGENT_LOG_STDERR === "1") {
       // No interceptor yet — write straight to fd 2. Once the
       // interceptor is installed below, we'd want `rawStderrWrite` to
@@ -959,6 +975,15 @@ async function main() {
   }
   closeStartupTree()
 
+  // Flush any diagnostics that fired during the banner draw. The
+  // scrollback sink was put into buffering mode right after construction
+  // (above) precisely so a plugin-loader / auth / config warning
+  // emitted mid-banner can't tear through the `╭ │ │ ╰` box mid-paint.
+  // After this call any further `diag.warn(...)` lands directly in
+  // scrollback via the sink's writer, which is what we want for the
+  // interactive session.
+  scrollbackSink?.flushBuffer()
+
   // Compute systemHash + toolsHash for the session-store meta record (and
   // for resume drift detection). These mirror what agent.run() would
   // compute internally — we duplicate the recipe here because the meta
@@ -1008,22 +1033,46 @@ async function main() {
   const systemHash = shortHash(systemForHash)
   const toolsHash = shortHash(toolsForHash)
 
-  // Open the session store. New session: open(sid). Resume: existsOk:true
-  // so subsequent appends go to the existing file. Resume drift check
-  // emits a one-line yellow warning when system/tools have changed.
-  const sid = resumeSid ?? getSessionId()
+  // Open the session store. Two paths:
+  //   - new session: SessionStore.open(getSessionId())
+  //   - resume:      SessionStore.fork({ srcSid: resumeSid, dstSid: getSessionId() })
+  //
+  // Fork semantics matter: every other subsystem (banner, file log, plugin
+  // sessionId, tasks/scratch files, goodbye banner's `--resume <id>` hint)
+  // ALREADY uses `getSessionId()` — the fresh per-process UUID. Before this
+  // path was wired, the store was the only outlier: it appended to the
+  // parent's `<resumeSid>.jsonl` (with existsOk:true), so the goodbye
+  // banner's `minimal-agent --resume <new-sid>` pointed to a file that
+  // did not exist. Forking copies the parent's records into a new file
+  // under the new sid, aligns the store with everything else, and leaves
+  // the parent untouched (non-destructive — re-resuming the parent works
+  // forever).
+  //
+  // Resume drift check emits a one-line yellow warning when system/tools
+  // have changed since the parent was saved.
+  const sid = getSessionId()
   let store: SessionStore | null = null
   try {
-    store = SessionStore.open({
-      sid,
-      model: selectedModel,
-      cwd: process.cwd(),
-      systemHash,
-      toolsHash,
-      agentVersion: VERSION,
-      argv: process.argv,
-      existsOk: !!resumeSid,
-    })
+    store = resumeSid
+      ? SessionStore.fork({
+          srcSid: resumeSid,
+          dstSid: sid,
+          model: selectedModel,
+          cwd: process.cwd(),
+          systemHash,
+          toolsHash,
+          agentVersion: VERSION,
+          argv: process.argv,
+        })
+      : SessionStore.open({
+          sid,
+          model: selectedModel,
+          cwd: process.cwd(),
+          systemHash,
+          toolsHash,
+          agentVersion: VERSION,
+          argv: process.argv,
+        })
   } catch (err) {
     // Persistence is best-effort; never block startup on it. The agent
     // will work without a store (just no resume for THIS session).

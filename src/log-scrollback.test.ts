@@ -382,3 +382,98 @@ describe("ScrollbackDiagnosticSink — bus wiring", () => {
     expect(w2.calls).toHaveLength(1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Startup-banner buffering
+//
+// Plugin-loader / auth / config warnings can fire mid-banner (the
+// loader runs between the `term` row and the `tools` row). Without
+// buffering, those renderings would tear through the `╭ │ │ ╰` box.
+// `startBuffering()` queues renderings in memory; `flushBuffer()`
+// drains them after `closeStartupTree()` commits the final `╰` row.
+// ---------------------------------------------------------------------------
+
+describe("ScrollbackDiagnosticSink — startup-banner buffering", () => {
+  it("buffers renderings while active; flushBuffer drains in order", () => {
+    const w = makeWriter()
+    const sink = new ScrollbackDiagnosticSink({
+      write: w.write,
+      now: () => T0,
+    })
+    sink.startBuffering()
+    expect(sink.isBuffering()).toBe(true)
+    sink.onEvent(event({ message: "first" }))
+    sink.onEvent(event({ severity: Severity.Error, source: "x.b", message: "second" }))
+    // Nothing written through yet.
+    expect(w.calls).toHaveLength(0)
+    sink.flushBuffer()
+    expect(sink.isBuffering()).toBe(false)
+    // Both blocks drained in order, preserving chrome.
+    expect(w.calls).toHaveLength(2)
+    expect(strip(w.calls[0]!)).toContain("╰ first")
+    expect(strip(w.calls[1]!)).toContain("╰ second")
+  })
+
+  it("flushBuffer is a no-op when never buffering", () => {
+    const w = makeWriter()
+    const sink = new ScrollbackDiagnosticSink({
+      write: w.write,
+      now: () => T0,
+    })
+    sink.onEvent(event())
+    expect(w.calls).toHaveLength(1)
+    sink.flushBuffer() // no-op
+    expect(w.calls).toHaveLength(1)
+  })
+
+  it("startBuffering is idempotent (re-entry does not lose entries)", () => {
+    const w = makeWriter()
+    const sink = new ScrollbackDiagnosticSink({
+      write: w.write,
+      now: () => T0,
+    })
+    sink.startBuffering()
+    sink.onEvent(event({ message: "first" }))
+    sink.startBuffering() // idempotent
+    sink.onEvent(event({ severity: Severity.Error, source: "x.b", message: "second" }))
+    sink.flushBuffer()
+    expect(w.calls).toHaveLength(2)
+  })
+
+  it("after flushBuffer, subsequent events stream pass-through", () => {
+    const w = makeWriter()
+    const sink = new ScrollbackDiagnosticSink({
+      write: w.write,
+      now: () => T0,
+    })
+    sink.startBuffering()
+    sink.onEvent(event({ message: "buffered" }))
+    sink.flushBuffer()
+    expect(w.calls).toHaveLength(1)
+    sink.onEvent(event({ severity: Severity.Error, source: "x.b", message: "live" }))
+    expect(w.calls).toHaveLength(2)
+    expect(strip(w.calls[1]!)).toContain("╰ live")
+  })
+
+  it("dedup paths also respect the buffer (storm during banner stays queued)", () => {
+    const w = makeWriter()
+    let nowMs = T0
+    const sink = new ScrollbackDiagnosticSink({
+      write: w.write,
+      now: () => nowMs,
+      dedupRepaintMinMs: 0,
+    })
+    sink.startBuffering()
+    sink.onEvent(event()) // full block
+    nowMs = T0 + 10
+    sink.onEvent(event({ ts: nowMs })) // dedup (×2)
+    nowMs = T0 + 20
+    sink.onEvent(event({ ts: nowMs })) // dedup (×3)
+    expect(w.calls).toHaveLength(0)
+    sink.flushBuffer()
+    expect(w.calls).toHaveLength(3)
+    expect(strip(w.calls[0]!)).toContain("╰")
+    expect(strip(w.calls[1]!)).toMatch(/\(×2/)
+    expect(strip(w.calls[2]!)).toMatch(/\(×3/)
+  })
+})
