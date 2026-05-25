@@ -1520,13 +1520,17 @@ describe("EditorController — editor.key hook", () => {
   it("ArrowUp emits editor.key with cursor + buffer; plugin halts + replaces buffer", () => {
     const hooks = new Hooks()
     const seen: EditorKeyPayload[] = []
-    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
-      seen.push({ ...payload, result: { ...payload.result } })
-      if (payload.key === "ArrowUp") {
-        payload.result.halt = true
-        payload.result.buffer = "recalled prompt"
-      }
-    })
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push({ ...payload, result: { ...payload.result } })
+        if (payload.key === "ArrowUp") {
+          payload.result.halt = true
+          payload.result.buffer = "recalled prompt"
+        }
+      },
+      { caller: "plugin" },
+    )
     const { ctrl, stdin } = make({ hooks })
     ctrl.start()
     stdin.send("\x1b[A")
@@ -1543,10 +1547,14 @@ describe("EditorController — editor.key hook", () => {
   it("ArrowDown is emitted with the same shape", () => {
     const hooks = new Hooks()
     const seen: string[] = []
-    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
-      seen.push(payload.key)
-      if (payload.key === "ArrowDown") payload.result.halt = true
-    })
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push(payload.key)
+        if (payload.key === "ArrowDown") payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
     const { ctrl, stdin } = make({ hooks })
     ctrl.start()
     stdin.send("\x1b[B")
@@ -1556,9 +1564,13 @@ describe("EditorController — editor.key hook", () => {
 
   it("ArrowUp falls through to default buffer nav when listener does NOT halt", () => {
     const hooks = new Hooks()
-    hooks.on<EditorKeyPayload>("editor.key", () => {
-      // observe-only: do not set halt
-    })
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      () => {
+        // observe-only: do not set halt
+      },
+      { caller: "plugin" },
+    )
     const { ctrl, stdin } = make({ hooks })
     ctrl.start()
     stdin.send("L1")
@@ -1572,9 +1584,13 @@ describe("EditorController — editor.key hook", () => {
   it("Ctrl+R fires the hook (and is silently swallowed when no listener halts)", () => {
     const hooks = new Hooks()
     const seen: string[] = []
-    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
-      seen.push(payload.key)
-    })
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push(payload.key)
+      },
+      { caller: "plugin" },
+    )
     const { ctrl, stdin } = make({ hooks })
     ctrl.start()
     stdin.send("\x12") // Ctrl+R
@@ -1587,9 +1603,13 @@ describe("EditorController — editor.key hook", () => {
   it("cursor field includes wrap-aware visualRow / rowsInLogicalLine / totalLines", () => {
     const hooks = new Hooks()
     let captured: EditorKeyPayload | null = null
-    hooks.on<EditorKeyPayload>("editor.key", (p) => {
-      captured = JSON.parse(JSON.stringify({ ...p, result: {} })) as EditorKeyPayload
-    })
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (p) => {
+        captured = JSON.parse(JSON.stringify({ ...p, result: {} })) as EditorKeyPayload
+      },
+      { caller: "plugin" },
+    )
     const { ctrl, stdin } = make({ hooks, columns: 80 })
     ctrl.start()
     // 3 logical lines, cursor on last
@@ -1610,18 +1630,201 @@ describe("EditorController — editor.key hook", () => {
 
   it("result.cursor placement is honored alongside result.buffer", () => {
     const hooks = new Hooks()
-    hooks.on<EditorKeyPayload>("editor.key", (payload) => {
-      if (payload.key === "ArrowUp") {
-        payload.result.halt = true
-        payload.result.buffer = "hello world"
-        payload.result.cursor = { row: 0, col: 5 }
-      }
-    })
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key === "ArrowUp") {
+          payload.result.halt = true
+          payload.result.buffer = "hello world"
+          payload.result.cursor = { row: 0, col: 5 }
+        }
+      },
+      { caller: "plugin" },
+    )
     const { ctrl, stdin } = make({ hooks })
     ctrl.start()
     stdin.send("\x1b[A")
     expect(ctrl.buffer().lines.join("\n")).toBe("hello world")
     expect(ctrl.buffer().col).toBe(5)
+    ctrl.stop()
+  })
+
+  // -- Phase 1a extensions for the slash-menu overlay --------------------
+  // The original editor.key hook only fired on ArrowUp / ArrowDown / Ctrl+R
+  // (the history plugin's needs). Overlays like ma-slash-menu also need
+  // to halt Tab / Enter / bare Escape so the user can dismiss/select the
+  // menu without the editor's default action firing.
+
+  it("Tab is dispatched to editor.key; halt suppresses literal-tab insertion", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push(payload.key)
+        if (payload.key === "Tab") payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\t")
+    expect(seen).toEqual(["Tab"])
+    // Halt suppressed the literal-tab insertion.
+    expect(ctrl.buffer().lines.join("\n")).toBe("")
+    ctrl.stop()
+  })
+
+  it("Tab without halt falls through to literal-tab insertion (default)", () => {
+    const hooks = new Hooks()
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      () => {
+        // observe-only, do not halt
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\t")
+    expect(ctrl.buffer().lines.join("\n")).toBe("\t")
+    ctrl.stop()
+  })
+
+  it("Enter on non-empty buffer dispatches editor.key; halt suppresses submit", () => {
+    const hooks = new Hooks()
+    const submits: string[] = []
+    const keys: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        keys.push(payload.key)
+        if (payload.key === "Enter") {
+          payload.result.halt = true
+          payload.result.buffer = ""
+        }
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.on("submit", (text: string) => submits.push(text))
+    ctrl.start()
+    stdin.send("/config")
+    stdin.send("\r")
+    expect(keys).toContain("Enter")
+    expect(submits).toEqual([])
+    expect(ctrl.buffer().lines.join("\n")).toBe("")
+    ctrl.stop()
+  })
+
+  it("Enter without halt still submits (default)", () => {
+    const hooks = new Hooks()
+    const submits: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      () => {
+        // observe-only
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.on("submit", (text: string) => submits.push(text))
+    ctrl.start()
+    stdin.send("hi")
+    stdin.send("\r")
+    expect(submits).toEqual(["hi"])
+    ctrl.stop()
+  })
+
+  it("bare Escape dispatches editor.key('Escape') in idle state; halt stops the bare-esc FSM feed", () => {
+    const hooks = new Hooks()
+    const keys: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        keys.push(payload.key)
+        if (payload.key === "Escape") payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    // bareEscapeMs = 0 so the timer fires immediately.
+    const { ctrl, stdin } = make({ hooks, bareEscapeMs: 0 })
+    ctrl.start()
+    stdin.send("\x1b")
+    // Wait one macrotask for the bare-esc timer.
+    return new Promise<void>((resolve) =>
+      setTimeout(() => {
+        expect(keys).toEqual(["Escape"])
+        ctrl.stop()
+        resolve()
+      }, 5),
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// editor.buffer.changed hook (Phase 1b — async observation for overlays)
+// ---------------------------------------------------------------------------
+describe("EditorController — editor.buffer.changed hook", () => {
+  it("emits {text, cursor} after a successful buffer mutation", async () => {
+    const hooks = new Hooks()
+    const seen: Array<{ text: string; cursor: { row: number; col: number } }> = []
+    hooks.on<{ text: string; cursor: { row: number; col: number } }>(
+      "editor.buffer.changed",
+      (p) => {
+        seen.push(p)
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("a")
+    // broadcast-async = next microtask
+    await new Promise<void>((r) => setTimeout(r, 1))
+    expect(seen.length).toBeGreaterThanOrEqual(1)
+    expect(seen[seen.length - 1]!.text).toBe("a")
+    expect(seen[seen.length - 1]!.cursor.col).toBe(1)
+    ctrl.stop()
+  })
+
+  it("dedups: same text twice → one emit", async () => {
+    const hooks = new Hooks()
+    let count = 0
+    hooks.on<unknown>(
+      "editor.buffer.changed",
+      () => {
+        count++
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("x")
+    await new Promise<void>((r) => setTimeout(r, 1))
+    const first = count
+    // Cursor-only movement should NOT re-emit.
+    stdin.send("\x1b[D") // ArrowLeft
+    stdin.send("\x1b[C") // ArrowRight
+    await new Promise<void>((r) => setTimeout(r, 1))
+    expect(count).toBe(first)
+    ctrl.stop()
+  })
+
+  it("fires on setBuffer too (programmatic replace)", async () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<{ text: string }>(
+      "editor.buffer.changed",
+      (p) => {
+        seen.push(p.text)
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl } = make({ hooks })
+    ctrl.start()
+    ctrl.setBuffer("hello")
+    await new Promise<void>((r) => setTimeout(r, 1))
+    expect(seen).toContain("hello")
     ctrl.stop()
   })
 })

@@ -26,14 +26,14 @@
  * @module plugins/loader
  */
 
-import { readdirSync, readFileSync, existsSync, statSync } from "node:fs"
-import { join, resolve, isAbsolute } from "node:path"
-import { createPluginLogger } from "../diagnostic-bus.ts"
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { isAbsolute, join, resolve } from "node:path"
+import { createPluginLogger, diag } from "../diagnostic-bus.ts"
 import { paletteEnvJson } from "../palette.ts"
 import { EventBus, type EventContext } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
-import { parseManifest, ManifestError } from "./manifest.ts"
+import { ManifestError, parseManifest } from "./manifest.ts"
 import type {
   EventHandler,
   EventHandlerContext,
@@ -311,7 +311,12 @@ export class PluginLoader {
    * Only unrecoverable internal errors surface as exceptions.
    */
   static async load(opts: PluginLoaderOptions = {}): Promise<PluginLoader> {
-    const logger = opts.logger ?? ((msg) => process.stderr.write(`[plugins] ${msg}\n`))
+    // Default logger fans out through the diagnostic bus so warnings get
+    // the gold ⚠ chrome via `ScrollbackDiagnosticSink`, RFC 5424 records in
+    // the file log, and the optional `MINIMAL_AGENT_LOG_STDERR=1` mirror —
+    // instead of racing the startup banner box with a raw stderr write.
+    // Tests inject their own logger and bypass the bus.
+    const logger = opts.logger ?? ((msg: string) => diag.warn("plugin-loader", msg))
     const coreToolNames = opts.coreToolNames ?? new Set<string>()
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const eventBus = opts.bus ?? new EventBus(logger)
@@ -338,14 +343,51 @@ export class PluginLoader {
       }
     }
 
+    // Dedupe by realpath BEFORE the id-collision check. Two roots can
+    // legitimately point at the same physical directory:
+    //   - cwd == $HOME → projectDir = $HOME → scans $HOME/.agents/tui-plugins
+    //   - homeDir = $HOME/.agents       → scans $HOME/.agents/tui-plugins (same dir!)
+    //   - symlinks under ~/.agents/tui-plugins pointing into a shared
+    //     dev checkout that also lives under projectDir
+    // Keep only the highest-precedence root (project > home > embedded)
+    // for each physical package. This is not a user-actionable warning —
+    // emit a Notice that lands in the file log only, not the scrollback.
+    const ROOT_PRECEDENCE = { project: 3, home: 2, embedded: 1 } as const
+    const byRealPath = new Map<string, { dir: string; root: "embedded" | "home" | "project" }>()
+    for (const pkg of packages) {
+      let real: string
+      try {
+        real = realpathSync(pkg.dir)
+      } catch {
+        // realpath failed (broken symlink, racing unlink, permission) —
+        // fall back to the lexical path so we still dedupe identical strings.
+        real = pkg.dir
+      }
+      const existing = byRealPath.get(real)
+      if (existing === undefined) {
+        byRealPath.set(real, pkg)
+        continue
+      }
+      // Same physical directory discovered through a second root.
+      const winner = ROOT_PRECEDENCE[pkg.root] > ROOT_PRECEDENCE[existing.root] ? pkg : existing
+      const loser = winner === pkg ? existing : pkg
+      byRealPath.set(real, winner)
+      diag.notice(
+        "plugin-loader",
+        `deduped overlapping package roots for ${real}: kept ${winner.root}, ` +
+          `dropped ${loser.root} (${loser.dir})`,
+      )
+    }
+    const dedupedPackages = Array.from(byRealPath.values())
+
     // Parse manifests.
     const parsed: LoadedPlugin[] = []
     const seenIds = new Set<string>()
     // Walk in precedence order: project > home > embedded.
     const ordered = [
-      ...packages.filter((p) => p.root === "project"),
-      ...packages.filter((p) => p.root === "home"),
-      ...packages.filter((p) => p.root === "embedded"),
+      ...dedupedPackages.filter((p) => p.root === "project"),
+      ...dedupedPackages.filter((p) => p.root === "home"),
+      ...dedupedPackages.filter((p) => p.root === "embedded"),
     ]
     for (const { dir, root } of ordered) {
       const manifestPath = join(dir, "manifest.json")
@@ -561,7 +603,7 @@ export class PluginLoader {
 
       // Subscribe each on the shared bus.
       for (const r of resolvedSubs) {
-        registerEventSub(eventBus, pkg.packageDir, r, logger, pkg.manifest.id)
+        registerEventSub(eventBus, hooksFacade, pkg.packageDir, r, logger, pkg.manifest.id)
       }
 
       // Resolve hook subscriptions. Same lenient policy as events: a broken
@@ -1369,6 +1411,7 @@ async function resolveEventSub(
  */
 function registerEventSub(
   bus: EventBus,
+  hooks: Hooks,
   packageDir: string,
   sub: ResolvedEventSub,
   logger: (msg: string) => void,
@@ -1386,7 +1429,33 @@ function registerEventSub(
         TUI_PLUGIN_PROTOCOL: "1",
         MINIMAL_AGENT_PALETTE: paletteEnvJson(),
       } as Record<string, string>,
-      emit: ctx.emit,
+      // Shape-aware emit:
+      //
+      //   1. **Declared channels** (in `channels.ts`) route via the
+      //      Hooks facade, which picks emitSync / emitAsync based on
+      //      the channel's declared shape. Required for channels like
+      //      `editor.footer.set` (broadcast-sync, host listener lives
+      //      on the HookBus, NOT the EventBus).
+      //
+      //   2. **Ad-hoc channels** (no declaration) fall through to the
+      //      raw EventBus emit. Preserves the legacy "any string is a
+      //      valid event name" contract that pre-Hooks tests rely on.
+      emit: (chan: string, p?: unknown) => {
+        const shape = CHANNEL_BY_NAME.get(chan)?.shape
+        try {
+          if (shape === "broadcast-async" || shape === undefined) {
+            // Ad-hoc OR declared-async: go via EventBus directly. For
+            // declared-async we could call hooks.emitAsync but the
+            // round-trip is the same listener set.
+            bus.emit(chan, p)
+            return
+          }
+          // broadcast-sync / chain / stream — must go via Hooks facade.
+          hooks.emitSync(chan, p)
+        } catch (e) {
+          logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      },
       abort: ctx.abort,
       stderr: process.stderr,
       log: createPluginLogger(pluginId),
@@ -1484,6 +1553,22 @@ function registerHookSub(
       } as Record<string, string>,
       abort: ctx.abort,
       priority: ctx.priority,
+      // Shape-aware emit so plugin hook handlers can fan out to other
+      // channels regardless of shape. Declared channels route via the
+      // Hooks facade (which picks the right bus); ad-hoc channels go
+      // straight to EventBus to preserve legacy behavior.
+      emit: (chan: string, p?: unknown) => {
+        const shape = CHANNEL_BY_NAME.get(chan)?.shape
+        try {
+          if (shape === "broadcast-async" || shape === undefined) {
+            hooks.eventBus.emit(chan, p)
+            return
+          }
+          hooks.emitSync(chan, p)
+        } catch (e) {
+          logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      },
       stderr: process.stderr,
       log: createPluginLogger(pluginId),
     }
@@ -1495,6 +1580,7 @@ function registerHookSub(
     }
   }
   hooks.on(channel, listener, {
+    caller: "plugin",
     source: pluginId,
     priority: sub.definition.priority,
     timeoutMs: sub.definition.timeoutMs,

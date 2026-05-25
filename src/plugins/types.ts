@@ -948,6 +948,23 @@ export interface HookHandlerContext {
   /** Resolved priority (post-clamping). */
   priority: number
   /**
+   * Emit on the agent bus. The bus routes by channel shape:
+   *
+   *   - `broadcast-async` channels: handler returns immediately, the
+   *     payload is dispatched to listeners on the next microtask.
+   *   - `broadcast-sync` channels: inline emit; listeners run before
+   *     the call returns. Use sparingly from inside hook handlers
+   *     (you're already on the keystroke pump for `editor.key`).
+   *
+   * Errors thrown by listeners on the target channel are absorbed by
+   * the bus and logged through this plugin's diagnostic sink.
+   *
+   * Required for overlays (slash-menu) and any plugin that needs to
+   * fan out side-effects to host listeners (e.g. emitting
+   * `editor.footer.set` from inside an `editor.key` handler).
+   */
+  emit: (channel: string, payload?: unknown) => void
+  /**
    * Diagnostic stream.
    *
    * @deprecated Prefer `log`. See {@link TUIContext.stderr} for rationale.

@@ -3109,7 +3109,59 @@ async function runReplLiveArea(
         if (typeof p.text !== "string") return
         if (typeof editor.setBuffer === "function") editor.setBuffer(p.text)
       },
-      { source: "agent", priority: 5000, label: "agent:editor.buffer.set" },
+      { caller: "agent", priority: 5000, label: "agent:editor.buffer.set" },
+    )
+
+    // Host-side listener for `editor.footer.set` — overlays (slash-menu
+    // is the first user) paint into the editor's footer band by emitting
+    // on this channel. Payload `{lines: string[]}`. Empty array clears.
+    //
+    // CRITICAL: route to the dedicated `overlay` footer layer, NOT the
+    // default layer. The default layer is owned by the FooterAggregator
+    // (quota row + diagnostic surface) — if we wrote there, the next
+    // quota-status tick would overwrite the menu mid-typing. The overlay
+    // layer sits ABOVE default in z-order, so an overlay obscures the
+    // quota row while open and the quota row pops back when the overlay
+    // clears. ARMED (Ctrl+C confirm) still wins over both.
+    loader.hooks().on(
+      "editor.footer.set",
+      (payload: unknown) => {
+        if (!payload || typeof payload !== "object") return
+        const p = payload as { lines?: unknown }
+        if (!Array.isArray(p.lines)) return
+        if (!p.lines.every((l) => typeof l === "string")) return
+        const lines = p.lines as string[]
+        // Dynamic import keeps the agent free of editor-controller
+        // module references when no plugins ever emit on this channel.
+        import("./editor-controller.ts")
+          .then(({ FOOTER_LAYER_OVERLAY, FOOTER_PRIORITY_OVERLAY }) => {
+            const e = editor as unknown as {
+              setFooterLayer?: (id: string, lines: string[], opts?: { priority?: number }) => void
+              clearFooterLayer?: (id: string) => void
+            }
+            if (lines.length === 0) {
+              if (typeof e.clearFooterLayer === "function") {
+                e.clearFooterLayer(FOOTER_LAYER_OVERLAY)
+              }
+              return
+            }
+            if (typeof e.setFooterLayer === "function") {
+              e.setFooterLayer(FOOTER_LAYER_OVERLAY, lines, {
+                priority: FOOTER_PRIORITY_OVERLAY,
+              })
+            } else if (typeof editor.setFooterLines === "function") {
+              // Back-compat path: older editor without layer support.
+              editor.setFooterLines(lines)
+            }
+          })
+          .catch(() => {
+            // Best-effort fallback when the import fails.
+            if (typeof editor.setFooterLines === "function") {
+              editor.setFooterLines(lines)
+            }
+          })
+      },
+      { caller: "agent", priority: 5000, label: "agent:editor.footer.set" },
     )
   }
 

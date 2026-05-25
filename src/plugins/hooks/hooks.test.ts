@@ -33,7 +33,7 @@ describe("Hooks facade", () => {
 
   test("rejects emit/listen on unknown channel", () => {
     const h = new Hooks({ logger: noLog })
-    expect(() => h.on("nope.unknown", () => {})).toThrow(/unknown channel/)
+    expect(() => h.on("nope.unknown", () => {}, { caller: "plugin" })).toThrow(/unknown channel/)
     expect(() => h.emitAsync("nope.unknown")).toThrow(/unknown channel/)
   })
 
@@ -60,6 +60,49 @@ describe("Hooks facade", () => {
     expect(runs).toBe(1)
     expect(lastPrio).toBe(100)
     expect(logs.join("\n")).toContain("clamped priority")
+  })
+
+  test("agent listener registered with caller:'agent' keeps its priority (regression: do not confuse 'source' with 'caller')", async () => {
+    // Regression for src/agent.ts:editor.buffer.set, where the registration
+    // opt key was `source: "agent"` instead of `caller: "agent"`. Since
+    // `Hooks.on()` reads `opts.caller ?? "plugin"`, the typo silently
+    // misclassified the listener as a plugin caller, then clamped the
+    // requested priority 5000 down to 100 with a noisy log line.
+    //
+    // This test pins the contract from the AGENT side: any code path that
+    // wants the agent privilege band MUST pass `caller: "agent"`. If a
+    // future refactor renames the field, the warning should fire and this
+    // test should break loudly.
+    const logs: string[] = []
+    const h = new Hooks({ logger: (m) => logs.push(m), unsafeHooks: false })
+    let prio = -1
+    h.on(
+      "turn.willStart",
+      (_n, ctx) => {
+        prio = (ctx as { priority: number }).priority
+      },
+      { caller: "agent", priority: 5000, label: "agent:test" },
+    )
+    await h.emitChain("turn.willStart", 1)
+    expect(prio).toBe(5000)
+    expect(logs.join("\n")).not.toContain("clamped priority")
+  })
+
+  test("typo regression: passing 'source' instead of 'caller' falls through to plugin band and clamps", () => {
+    // Documents the exact failure mode that bit src/agent.ts. If someone
+    // re-introduces the typo, the misclassification is silent in code but
+    // loud in this assertion: the listener registers in the plugin band
+    // (clamped to 100), not at the requested 5000.
+    const logs: string[] = []
+    const h = new Hooks({ logger: (m) => logs.push(m), unsafeHooks: false })
+    h.on(
+      "turn.willStart",
+      () => undefined,
+      // @ts-expect-error: 'source' is a label, not the caller-kind field.
+      // The cast simulates the historical typo at src/agent.ts:3084.
+      { source: "agent", priority: 5000 },
+    )
+    expect(logs.join("\n")).toContain("clamped priority 5000 -> [0..100]")
   })
 
   test("UNSAFE_HOOKS lets plugin priority into the agent band", async () => {

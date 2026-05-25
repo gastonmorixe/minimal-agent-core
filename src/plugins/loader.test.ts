@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test"
-import { mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { PluginLoader } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"
@@ -560,6 +560,85 @@ describe("PluginLoader", () => {
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_home"])
     rmSync(join(EMBEDDED, "tui-plugins", "two_way"), { recursive: true })
     rmSync(join(HOME, "tui-plugins", "two_way"), { recursive: true })
+  })
+
+  // Reproduces the user-reported bug where running minimal-agent from
+  // `$HOME` made the loader scan `cwd/.agents/tui-plugins` (= project)
+  // AND `$HOME/.agents/tui-plugins` (= home) — the same physical
+  // directory through two different roots. The pre-fix loader emitted a
+  // spurious "already loaded" warning for every plugin inside; the
+  // post-fix loader silently keeps the highest-precedence copy and the
+  // warning never fires.
+  it("deduplicates by realpath when project and home roots overlap (cwd=$HOME case)", async () => {
+    // PROJECT-as-cwd points at HOME, so projectDir/.agents/tui-plugins ===
+    // homeDir/tui-plugins. We don't need symlinks for this scenario; just
+    // pass homeDir=HOME and projectDir=parent(HOME-tui-plugins-prefix).
+    // Concretely: project's `.agents/tui-plugins` and home's `tui-plugins`
+    // are the SAME directory.
+    const overlapRoot = join(ROOT, "overlap")
+    rmSync(overlapRoot, { recursive: true, force: true })
+    mkdirSync(overlapRoot, { recursive: true })
+    // The shared plugin dir lives at: <overlapRoot>/.agents/tui-plugins/shared
+    // Reachable two ways:
+    //   homeDir = <overlapRoot>/.agents  → scans .agents/tui-plugins
+    //   projectDir = <overlapRoot>       → scans .agents/tui-plugins
+    writePackage(
+      overlapRoot,
+      "shared_overlap",
+      toolManifest("shared_overlap", "tool_overlap", "./h.ts"),
+      { "h.ts": TOOL_HANDLER_BODY },
+      ".agents/tui-plugins",
+    )
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: join(overlapRoot, ".agents"),
+      projectDir: overlapRoot,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    // Loaded exactly once.
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_overlap"])
+    // No "already loaded" warning — the pre-fix loader emitted one here
+    // and it bled into the user's startup banner box.
+    expect(logs.some((l) => l.includes("already loaded"))).toBe(false)
+    rmSync(overlapRoot, { recursive: true, force: true })
+  })
+
+  // Symlink variant: a plugin author can keep their dev checkout at an
+  // arbitrary location (e.g. `~/Projects/foo-plugin`) and surface it
+  // under both `~/.agents/tui-plugins/foo-plugin` AND the embedded
+  // tree without the loader complaining about a duplicate.
+  it("deduplicates by realpath across roots when symlinks point to the same target", async () => {
+    const real = join(ROOT, "real-symlink-target")
+    rmSync(real, { recursive: true, force: true })
+    mkdirSync(real, { recursive: true })
+    writeFileSync(
+      join(real, "manifest.json"),
+      JSON.stringify(toolManifest("sym_pkg", "tool_sym", "./h.ts"), null, 2),
+    )
+    writeFileSync(join(real, "h.ts"), TOOL_HANDLER_BODY)
+    // Surface the same physical dir under both home/tui-plugins AND
+    // embedded/tui-plugins via symlinks.
+    const homeLink = join(HOME, "tui-plugins", "sym_pkg")
+    const embLink = join(EMBEDDED, "tui-plugins", "sym_pkg")
+    mkdirSync(join(HOME, "tui-plugins"), { recursive: true })
+    mkdirSync(join(EMBEDDED, "tui-plugins"), { recursive: true })
+    rmSync(homeLink, { force: true, recursive: true })
+    rmSync(embLink, { force: true, recursive: true })
+    symlinkSync(real, homeLink, "dir")
+    symlinkSync(real, embLink, "dir")
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      embeddedDir: EMBEDDED,
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_sym"])
+    expect(logs.some((l) => l.includes("already loaded"))).toBe(false)
+    rmSync(homeLink, { force: true })
+    rmSync(embLink, { force: true })
+    rmSync(real, { recursive: true, force: true })
   })
 
   it("disabledPluginIds skips matching packages with a diagnostic", async () => {

@@ -151,6 +151,28 @@ export const CHANNELS = [
       "EditorController.setBuffer(text) on the next repaint.",
   },
   {
+    name: "editor.buffer.changed",
+    shape: "broadcast-async",
+    permission: "hooks:editor.buffer.changed",
+    description:
+      "Fires after the editor buffer text changes. Payload `{text, cursor: " +
+      "{row, col}}`. Dedup'd: only emits when the new text differs from the " +
+      "last-emitted text. Use for overlays / autocomplete that need to " +
+      "re-render their UI on each edit (slash-menu, @-mentions, file picker, " +
+      "etc.). Async to avoid back-pressure on the keystroke pump.",
+  },
+  {
+    name: "editor.footer.set",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.footer.set",
+    description:
+      "Plugin → host signal to paint a footer below the editor. Payload " +
+      "`{lines: string[]}`. Empty array clears the footer. The host listens " +
+      "and calls EditorController.setFooterLines() on the next repaint. " +
+      "Mirrors the editor.buffer.set pattern. Used by overlays (slash-menu) " +
+      "that want to draw without grabbing the EditorController directly.",
+  },
+  {
     name: "prompt.submitted",
     shape: "broadcast-async",
     permission: "hooks:prompt.submitted",

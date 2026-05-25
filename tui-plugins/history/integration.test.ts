@@ -210,6 +210,46 @@ describe("history plugin / end-to-end", () => {
     expect(up2.result.halt).toBeUndefined() // pass-through
   })
 
+  it("polite-listener: ArrowUp with result.halt already set bails before recall (no buffer overwrite)", async () => {
+    // Regression for the slash-menu vs history clash discovered May 2026:
+    // ma-slash-menu sets `result.halt = true` on ArrowUp to navigate its
+    // own menu. Before the polite-listener fix, history STILL recalled
+    // and overwrote `result.buffer`, closing the menu and disrupting
+    // user intent. The fix: history checks `result.halt` and bails if
+    // an upstream listener already claimed the key.
+    const loader = await load()
+    const cwd = TEST_CWD
+    // Seed an entry so a recall would succeed if it got past the gate.
+    loader.bus().emit("prompt.submitted", { text: "would-be-recalled", cwd, sid: null, exit: "submitted" })
+    await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    // Simulate the upstream listener having already halted.
+    const p = keyPayload({ key: "ArrowUp" })
+    p.result.halt = true
+    loader.hooks().emitSync("editor.key", p)
+    // Halt stays true (history didn't touch it) AND buffer untouched.
+    expect(p.result.halt).toBe(true)
+    expect(p.result.buffer).toBeUndefined()
+    expect(p.result.cursor).toBeUndefined()
+  })
+
+  it("polite-listener: ArrowDown with result.halt already set also bails", async () => {
+    const loader = await load()
+    const cwd = TEST_CWD
+    loader.bus().emit("prompt.submitted", { text: "would-be-recalled", cwd, sid: null, exit: "submitted" })
+    await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    const p = keyPayload({
+      key: "ArrowDown",
+      buffer: "would-be-recalled",
+      row: 0,
+      col: 17,
+      totalLines: 1,
+    })
+    p.result.halt = true
+    loader.hooks().emitSync("editor.key", p)
+    expect(p.result.halt).toBe(true)
+    expect(p.result.buffer).toBeUndefined()
+  })
+
   it("Ctrl+R is silently consumed (no-op halt) in v0.1", async () => {
     const loader = await load()
     const p = keyPayload({ key: "Ctrl+R" })

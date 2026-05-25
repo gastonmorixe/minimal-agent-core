@@ -12,6 +12,7 @@
  * @module plugins/manifest
  */
 
+import { diag } from "../diagnostic-bus.ts"
 import type {
   ColorRequest,
   ManifestEventSubscription,
@@ -514,8 +515,12 @@ function parseMode(
   }
   if (style && obj.color != null) {
     // Both forms present. Style wins; warn so the author can tidy up.
-    console.warn(
-      `[manifest] ${manifestPath}: mode "${id}" declares both \`color\` and \`style\`; ` +
+    // Route through the diagnostic bus so the message gets the gold ⚠
+    // chrome in scrollback and lands in the file log alongside every
+    // other plugin warning.
+    diag.warn(
+      "plugin.manifest",
+      `${manifestPath}: mode "${id}" declares both \`color\` and \`style\`; ` +
         `\`style\` takes precedence and \`color\` will be ignored.`,
     )
   }
