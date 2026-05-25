@@ -78,7 +78,11 @@ import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaSummary } from "./quota-format.ts"
 import { buildReadyBanner } from "./ready-banner.ts"
-import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
+import {
+  buildResumeHeader,
+  replayToScrollback,
+  userTimestampsFromRecords,
+} from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
 import { SessionStore, shortHash } from "./session-store.ts"
 import { BREATHING_DOT } from "./spinner/library/frames.ts"
@@ -931,6 +935,11 @@ async function main() {
   // so the time-hint suffix on replayed tool headers shows the historical
   // moment, not the time-of-replay. Stays empty when not resuming.
   let toolStartTimes: Map<string, number> | null = null
+  // Per-message timestamp parallel to `initialMessages`, also derived from
+  // the JSONL records. Used by replayToScrollback to stamp each
+  // `<mode-change>` chip with `YYYY-MM-DD HH:MM` of the prompt that
+  // shipped the toggle, instead of "(now)". Stays null when not resuming.
+  let userTimestamps: (Date | null)[] | null = null
   if (resumeArg) {
     try {
       resumeSid = resolveSessionTarget(resumeArg, process.cwd())
@@ -957,6 +966,11 @@ async function main() {
           }
         }
       }
+      // Per-message timestamps for the replay mode-change chip. Derived
+      // from the same `records` walk that `foldRecords` uses, so the
+      // resulting array is index-parallel to `initialMessages`. See
+      // `userTimestampsFromRecords` in `src/session-replay.ts`.
+      userTimestamps = userTimestampsFromRecords(loaded.records)
       const turns = initialMessages.length
       const droppedNote =
         loaded.dropped.length > 0
@@ -1216,6 +1230,7 @@ async function main() {
       formatterCmd,
       toolTimeTracker,
       toolStartTimes,
+      userTimestamps: userTimestamps ?? undefined,
     })
     stdoutSink.write("\n")
   }

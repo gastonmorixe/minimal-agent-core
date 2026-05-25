@@ -44,6 +44,13 @@ const DEBUG_MODE: ManifestMode = {
   // No disallowedTools — mode is purely a UX state, no dispatch refusals.
 }
 
+// Fixed wall-clock used by tests that assert on the literal `<mode-change … at="…" />`
+// payload. The byte-stable timestamp lets us keep `.toEqual` instead of regex matchers.
+const FIXED_AT = new Date("2026-05-22T20:43:12.000Z")
+const FIXED_AT_ISO = FIXED_AT.toISOString()
+const mkMgr = (modes: ManifestMode[], defaultId: string | null = null) =>
+  new ModeManager(modes, defaultId, undefined, () => FIXED_AT)
+
 // ---------------------------------------------------------------------------
 // isToolAllowed (dispatch gate)
 // ---------------------------------------------------------------------------
@@ -115,13 +122,13 @@ describe("ModeManager.consumePendingAttachment", () => {
   })
 
   test("emits <mode-change from='default' to='ask'> after entering ASK", () => {
-    const m = new ModeManager([ASK_MODE])
+    const m = mkMgr([ASK_MODE])
     m.setMode("ask")
     const block = m.consumePendingAttachment()
     expect(block).not.toBeNull()
     expect(block).toEqual({
       type: "text",
-      text: '<mode-change from="default" to="ask" />',
+      text: `<mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -133,14 +140,14 @@ describe("ModeManager.consumePendingAttachment", () => {
   })
 
   test("emits <mode-change from='ask' to='default'> when exiting back to no-mode", () => {
-    const m = new ModeManager([ASK_MODE])
+    const m = mkMgr([ASK_MODE])
     m.setMode("ask")
     m.consumePendingAttachment() // advertise ASK first
     m.setMode(null)
     const block = m.consumePendingAttachment()
     expect(block).toEqual({
       type: "text",
-      text: '<mode-change from="ask" to="default" />',
+      text: `<mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -168,13 +175,13 @@ describe("ModeManager.consumePendingAttachment", () => {
 
   test("emits one attachment when toggled twice but only the final state matters", () => {
     // ask -> plan (with no consume in between). Net change: default -> plan.
-    const m = new ModeManager([ASK_MODE, PLAN_MODE])
+    const m = mkMgr([ASK_MODE, PLAN_MODE])
     m.setMode("ask")
     m.setMode("plan")
     const block = m.consumePendingAttachment()
     expect(block).toEqual({
       type: "text",
-      text: '<mode-change from="default" to="plan" />',
+      text: `<mode-change from="default" to="plan" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -186,7 +193,7 @@ describe("ModeManager.consumePendingAttachment", () => {
   })
 
   test("cycleNext / cyclePrev populate prevModeId and produce attachments", () => {
-    const m = new ModeManager([ASK_MODE, PLAN_MODE])
+    const m = mkMgr([ASK_MODE, PLAN_MODE])
     expect(m.previousModeId()).toBeNull()
     m.cycleNext() // -> ask
     expect(m.activeId()).toBe("ask")
@@ -201,7 +208,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     // First consume reflects the *current* (= "ask") vs lastAdvertised (= null).
     expect(m.consumePendingAttachment()).toEqual({
       type: "text",
-      text: '<mode-change from="default" to="ask" />',
+      text: `<mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
   })
 })
