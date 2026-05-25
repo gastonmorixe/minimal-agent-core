@@ -150,19 +150,7 @@ export interface RenderOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Column width for the per-row duration slot, in display cells.
- *
- * The renderer right-aligns inside this width so the column reads as a
- * straight vertical guide regardless of value. Choosing 7 keeps the
- * longest realistic value (`1h 04m` = 6, plus one cell of safety
- * margin) flush; `2h 14m 03s`-style values would need 8 but the
- * format ladder collapses to `1h 04m` once we cross the hour mark, so
- * 7 is the right number.
- */
-const DURATION_COL_WIDTH = 7
-
-/**
- * Format an elapsed milliseconds count for a row duration column.
+ * Format an elapsed milliseconds count for a row duration suffix.
  *
  *  - `< 1000ms`           → `""` (no flicker / noise for fast ops)
  *  - `< 60_000ms`         → `"42s"`
@@ -170,8 +158,10 @@ const DURATION_COL_WIDTH = 7
  *  - `< 86_400_000ms`     → `"1h 04m"` (seconds dropped past the hour)
  *  - `>= 86_400_000ms`    → `"1d 03h"` (defensive — unlikely in practice)
  *
- * The return value is the BARE value; the renderer right-pads it to
- * {@link DURATION_COL_WIDTH} cells in a separate step. Exported for tests.
+ * Returned value is the BARE token. The renderer appends it to the END
+ * of the row (after the title), so no padding is needed : rows with no
+ * duration simply omit the suffix entirely and the title is the last
+ * thing on the line. Exported for tests.
  */
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 1000) return ""
@@ -190,16 +180,6 @@ export function formatDuration(ms: number): string {
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n)
-}
-
-/**
- * Pad a duration text to the column width by left-padding with spaces.
- * Empty values produce a full-width whitespace block so the column
- * stays vertically aligned even when many rows have no duration.
- */
-function padDuration(text: string): string {
-  if (text.length >= DURATION_COL_WIDTH) return text
-  return " ".repeat(DURATION_COL_WIDTH - text.length) + text
 }
 
 /**
@@ -665,50 +645,62 @@ function styleIdCol(v: View, ansi: boolean, targeted: boolean): string {
 }
 
 /**
- * Style the duration column for one row.
+ * Render the trailing duration suffix for one row.
  *
- *  - todo / ghost-removed / 0ms       → blank, full-width whitespace
+ * Returns either an empty string (no duration to show) or a 2-space
+ * gap followed by the styled duration token. The renderer appends this
+ * to the END of the row, after the title. No column padding : a row
+ * without a duration ends cleanly at the title, no trailing whitespace
+ * to copy/paste-mangle.
+ *
+ *  - todo / ghost-removed / 0ms       → `""` (suffix omitted entirely)
  *  - doing                            → sky+bold, ticking live each render
- *  - done                             → faintWhite (one notch above dim;
+ *  - done                             → LGRAY (one notch above dim;
  *                                       reads as "informational chrome",
  *                                       not "actively important")
  *  - canceled                         → red+dim+strike (matches row family)
  */
-function styleDurationCol(
+function renderDurationSuffix(
   ms: number,
   status: TaskStatus,
   ansi: boolean,
   ghost?: "removed",
 ): string {
   const text = formatDuration(ms)
-  if (text === "") return padDuration("")
-  const padded = padDuration(text)
+  if (text === "") return ""
+  let styled: string
   if (ghost === "removed") {
-    return color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, padded)
-  }
-  switch (status) {
-    case "doing":
-      // Sky+bold matches the `◐` icon and the row's title color — the
-      // whole "doing" row reads as one blue gesture, and the duration
-      // is the cell that ticks every render.
-      return color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, padded)
-    case "done":
-      // LGRAY (256-color 246) is one notch brighter than DIM — chosen
-      // so the duration of completed tasks is readable but quiet,
-      // letting the eye land on the title text first.
-      return color(ansi, ANSI.LGRAY, padded)
-    case "canceled":
-      return color(ansi, `${ANSI.RED}${ANSI.DIM}${ANSI.STRIKE}`, padded)
-    case "todo":
-      // Defensive — a todo task shouldn't have non-zero active_ms in
-      // practice (no transition has happened yet), but if it does
-      // we paint it DIM so the row still reads as "not started".
-      return color(ansi, ANSI.DIM, padded)
-    default: {
-      const _exhaustive: never = status
-      throw new Error(`unhandled status: ${String(_exhaustive)}`)
+    styled = color(ansi, `${ANSI.DGRAY}${ANSI.STRIKE}`, text)
+  } else {
+    switch (status) {
+      case "doing":
+        // Sky+bold matches the `◐` icon and the row's title color — the
+        // whole "doing" row reads as one blue gesture, and the duration
+        // is the token that ticks every render.
+        styled = color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, text)
+        break
+      case "done":
+        // LGRAY (256-color 246) is one notch brighter than DIM — chosen
+        // so the duration of completed tasks is readable but quiet,
+        // letting the eye land on the title text first.
+        styled = color(ansi, ANSI.LGRAY, text)
+        break
+      case "canceled":
+        styled = color(ansi, `${ANSI.RED}${ANSI.DIM}${ANSI.STRIKE}`, text)
+        break
+      case "todo":
+        // Defensive — a todo task shouldn't have non-zero active_ms in
+        // practice (no transition has happened yet), but if it does
+        // we paint it DIM so the row still reads as "not started".
+        styled = color(ansi, ANSI.DIM, text)
+        break
+      default: {
+        const _exhaustive: never = status
+        throw new Error(`unhandled status: ${String(_exhaustive)}`)
+      }
     }
   }
+  return `  ${styled}`
 }
 
 function renderTopLevelRowBody(
@@ -722,9 +714,12 @@ function renderTopLevelRowBody(
   const numCol = styleNumCol(v, ansi, targeted)
   const stCol = statusGlyph(t.status, ansi, v.ghost)
   const idCol = styleIdCol(v, ansi, targeted)
-  const durCol = styleDurationCol(durMs, t.status, ansi, v.ghost)
   const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff, targeted)
-  return `  ${numCol}  ${stCol}  ${idCol}  ${durCol}  ${titleCol}`
+  // Duration trails the title — see `renderDurationSuffix`. Empty for
+  // todo / 0ms rows, so the line ends at the title with no trailing
+  // whitespace gutter eating horizontal real estate from the title.
+  const durSuffix = renderDurationSuffix(durMs, t.status, ansi, v.ghost)
+  return `  ${numCol}  ${stCol}  ${idCol}  ${titleCol}${durSuffix}`
 }
 
 function renderTopLevelRow(
@@ -750,9 +745,11 @@ function renderSubtaskRowBody(
   const treeGlyph = color(ansi, ANSI.DGRAY, isLast ? GLYPHS.treeLast : GLYPHS.treeMid)
   const stCol = statusGlyph(t.status, ansi, v.ghost)
   const idCol = styleIdCol(v, ansi, targeted)
-  const durCol = styleDurationCol(durMs, t.status, ansi, v.ghost)
   const titleCol = styleTitle(t, ansi, maxTitleLen, v.ghost, v.diff, targeted)
-  return `       ${treeGlyph}  ${stCol}  ${idCol}  ${durCol}  ${titleCol}`
+  // Trailing duration suffix — empty for todo / 0ms rows. See the
+  // sibling top-level builder for the rationale.
+  const durSuffix = renderDurationSuffix(durMs, t.status, ansi, v.ghost)
+  return `       ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}${durSuffix}`
 }
 
 function renderSubtaskRow(

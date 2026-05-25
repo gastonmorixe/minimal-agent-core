@@ -286,6 +286,25 @@ describe("setStatus()", () => {
     expect(u!.reason).toBe("user redirected")
     expect(u!.status).toBe("canceled")
   })
+  test("canceled → done clears the bogus reason and stamps done_at", () => {
+    // Recovery path for the May 2026 PROMPT.md issue: an earlier turn
+    // marked a phase header `canceled` with reason "phase header, all
+    // subtasks done" thinking that meant "phase complete". The
+    // intended status was `done`. Flipping canceled → done must clear
+    // the now-bogus reason and stamp done_at, so the row paints lime
+    // ✔ with no parenthetical and the closer count moves from
+    // "canceled" into "done".
+    const s = withRand(["aaaaaa"])
+    const t = s.add({ title: "PHASE 1 · Setup" })
+    s.setStatus(t.id, "canceled", "phase header, all subtasks done")
+    const after = s.list()[0]
+    expect(after.status).toBe("canceled")
+    expect(after.reason).toBe("phase header, all subtasks done")
+    const fixed = s.setStatus(t.id, "done")
+    expect(fixed!.status).toBe("done")
+    expect(fixed!.reason).toBeNull()
+    expect(fixed!.done_at).not.toBeNull()
+  })
   test("returns null for unknown id", () => {
     expect(store.setStatus("deadbe", "done")).toBeNull()
   })
@@ -604,6 +623,30 @@ describe("applyStatusTransition — pure timing math", () => {
     expect(next.status).toBe("canceled")
     expect(next.reason).toBe("redirected")
     expect(next.active_ms).toBe(90_000) // 90s
+    expect(next.last_resumed_at).toBeNull()
+  })
+
+  test("canceled → done: clears reason, stamps done_at, preserves duration fields", () => {
+    // Recovery transition: an earlier mutation parked the task in
+    // `canceled` with a reason, and a follow-up realizes the task
+    // actually completed. The reason must clear (it no longer
+    // applies), done_at must stamp, and the duration fields ride
+    // through untouched (they record real wall-clock history we
+    // don't want to lose).
+    const prev = makeTask({
+      status: "canceled",
+      reason: "wrongly canceled",
+      started_at: null,
+      last_resumed_at: null,
+      active_ms: 5_000,
+      done_at: null,
+    })
+    const next = applyStatusTransition(prev, "done", nowIso, nowMs)
+    expect(next.status).toBe("done")
+    expect(next.reason).toBeNull()
+    expect(next.done_at).toBe(nowIso)
+    expect(next.active_ms).toBe(5_000)
+    expect(next.started_at).toBeNull()
     expect(next.last_resumed_at).toBeNull()
   })
 
