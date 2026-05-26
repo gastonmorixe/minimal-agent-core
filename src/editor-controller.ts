@@ -1199,11 +1199,21 @@ export class EditorController extends EventEmitter {
       this.pending = ""
     }
     // Plugins (slash-menu, etc.) get first crack at bare-Escape so they
-    // can close transient overlays without triggering the abort-quit
-    // FSM. The halt is honored only when the FSM is `idle` — when the
-    // agent is working, abort-on-Esc takes precedence so the user
-    // always has a way out (see #abort-quit-ux-spec).
-    if (this.fsmState.kind === "idle" && this.dispatchKeyHook("Escape")) {
+    // can close transient overlays. Priority order via the editor.key
+    // chain — topmost overlay claims first. If a plugin halts, the
+    // abort-quit FSM does NOT see this ESC: the user's NEXT ESC will
+    // reach it (1st ESC closes overlay, 2nd aborts the turn).
+    //
+    // This holds in ALL FSM states (idle / working / armed). The
+    // earlier `fsmState.kind === "idle"` gate broke the slash-menu
+    // UX: pressing ESC with both an open menu AND an in-flight turn
+    // aborted the turn while leaving the menu visible.
+    //
+    // "Always a way out" is preserved by the rapid double-Ctrl+C
+    // escape hatch (`EscapeHatch`, spec rule 5) — it bypasses both
+    // the hook chain AND the FSM, so a wedged plugin can never trap
+    // the user. See #abort-quit-ux-spec.
+    if (this.dispatchKeyHook("Escape")) {
       return
     }
     // Esc breaks the escape-hatch run too - otherwise (Ctrl+C, Esc,
@@ -1613,11 +1623,16 @@ export class EditorController extends EventEmitter {
       return "ignore"
     }
 
-    // ESC - feed FSM as `esc`. Mirrors `fireBareEscape`. The
-    // `escapeHatch.reset()` ran in consumePending (lead byte is `\x1b`),
-    // matching `fireBareEscape`'s own `escapeHatch.reset()` so the same
+    // ESC - mirror `fireBareEscape`: plugins (slash-menu, etc.) get
+    // first crack across ALL encodings (bare \x1b, kitty \x1b[27u,
+    // xterm modifyOtherKeys \x1b[27;1;27~). Without this dispatch the
+    // overlay-claim path was encoding-dependent: bare ESC went through
+    // the hook chain, CSI-encoded ESC didn't — same visible key, two
+    // behaviors. The `escapeHatch.reset()` ran in consumePending (lead
+    // byte is `\x1b`), matching `fireBareEscape`'s own reset so the
     // "Esc breaks the Ctrl+C run" invariant holds across encodings.
     if (code === 27 && !shift && !alt && !ctrl) {
+      if (this.dispatchKeyHook("Escape")) return "ignore"
       this.feedFsm({ kind: "esc", at: this.nowFn() })
       return "ignore"
     }
