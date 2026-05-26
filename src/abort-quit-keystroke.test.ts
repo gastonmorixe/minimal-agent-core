@@ -75,7 +75,8 @@ import { EventEmitter } from "node:events"
 import { describe, expect, it } from "bun:test"
 
 import { AbortBus, type AbortReason } from "./abort-bus.ts"
-import { EditorController } from "./editor-controller.ts"
+import { EditorController, type EditorKeyPayload } from "./editor-controller.ts"
+import { Hooks } from "./plugins/hooks/hooks.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true
@@ -142,7 +143,9 @@ interface Harness {
   aborts: AbortReason[]
 }
 
-function makeWorkingHarness(opts: { bareEscapeMs?: number; armedTickMs?: number } = {}): Harness {
+function makeWorkingHarness(
+  opts: { bareEscapeMs?: number; armedTickMs?: number; hooks?: Hooks } = {},
+): Harness {
   const bus = new AbortBus()
   const stdin = new FakeTTYInput()
   const output = new FakeOutput()
@@ -157,6 +160,7 @@ function makeWorkingHarness(opts: { bareEscapeMs?: number; armedTickMs?: number 
     // 0ms so bare-Esc fires on the next microtask without real timers.
     bareEscapeMs: opts.bareEscapeMs ?? 0,
     armedTickMs: opts.armedTickMs ?? 0,
+    ...(opts.hooks ? { hooks: opts.hooks } : {}),
   })
   const cancels: unknown[] = []
   const quits: unknown[] = []
@@ -389,6 +393,140 @@ describe("EditorController - armed state transitions (all Ctrl+C encodings)", ()
     h.stdin.send("\x1b[27u") // dismiss via kitty ESC
     expect(h.quits).toEqual([])
     expect(h.ctrl.fsmStateForTest().kind).toBe("idle")
+    h.ctrl.stop()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Overlay precedence: editor.key plugins claim ESC BEFORE the abort-quit FSM
+// ---------------------------------------------------------------------------
+//
+// Bug (May 2026, reproduced via the ma-slash-menu plugin): when an overlay
+// (e.g. an open slash-menu) was visible AND a turn was in flight, pressing
+// ESC aborted the turn instead of closing the overlay. The user expected
+// 1st-ESC = close overlay, 2nd-ESC = abort (the same precedence the chain
+// already gives Tab / Enter / ArrowUp / ArrowDown).
+//
+// Root cause: `fireBareEscape` and `consumeEscape` short-circuited the
+// `editor.key` dispatch when the abort-quit FSM was NOT in `idle`. Plugins
+// never got first crack in `working` / `armed` states. Removing the gate
+// restores the Chain-of-Responsibility semantics: a plugin that sets
+// `result.halt = true` consumes the ESC; the FSM only sees ESC when no
+// plugin claims it.
+//
+// "Always a way out" is preserved by the rapid double-Ctrl+C escape hatch
+// (`EscapeHatch`, spec rule 5) — that path bypasses both the hook chain
+// AND the FSM, so a wedged plugin cannot trap the user.
+//
+// These guards pin the precedence at the byte level across all three ESC
+// encodings (bare, kitty CSI-u, xterm modifyOtherKeys).
+describe("EditorController - overlay plugin claims ESC before abort-quit FSM", () => {
+  /**
+   * A hooks facade that simulates an overlay (e.g. slash-menu) whose
+   * `editor.key` listener halts the FIRST ESC, then unhooks itself so the
+   * NEXT ESC falls through to the FSM. Mirrors the real slash-menu
+   * behavior: it only halts while its internal state is "open"; the close
+   * transition is implicit (here: removing the listener; in the real
+   * plugin: a `state.kind = "closed"` flip + clear-footer effect).
+   */
+  function singleShotEscapeOverlay(): { hooks: Hooks; closeCount: () => number } {
+    const hooks = new Hooks()
+    let closes = 0
+    let dispose: (() => void) | null = null
+    dispose = hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key !== "Escape") return
+        payload.result.halt = true
+        closes++
+        // Unregister so the NEXT ESC sees no claim and falls through to the
+        // FSM. Mirrors the real slash-menu's "close + halt" transition.
+        dispose?.()
+      },
+      { caller: "plugin" },
+    )
+    return { hooks, closeCount: () => closes }
+  }
+
+  it("bare ESC while working: plugin halts → NO abort, FSM stays working", async () => {
+    const { hooks, closeCount } = singleShotEscapeOverlay()
+    const h = makeWorkingHarness({ hooks })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    expect(closeCount()).toBe(1)
+    expect(h.aborts).toEqual([])
+    expect(h.cancels).toEqual([])
+    expect(h.quits).toEqual([])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    h.ctrl.stop()
+  })
+
+  it("two bare ESCs while working: 1st closes overlay, 2nd aborts the turn", async () => {
+    const { hooks, closeCount } = singleShotEscapeOverlay()
+    const h = makeWorkingHarness({ hooks })
+    enterWorking(h)
+    // 1st ESC → overlay claims, no abort.
+    h.stdin.send("\x1b")
+    await tick()
+    expect(closeCount()).toBe(1)
+    expect(h.aborts).toEqual([])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    // 2nd ESC → overlay is gone, FSM sees it, aborts.
+    h.stdin.send("\x1b")
+    await tick()
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    expect(h.cancels).toEqual([])
+    expect(h.quits).toEqual([])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    h.ctrl.stop()
+  })
+
+  it("kitty CSI-u ESC while working: plugin halts → NO abort (CSI path parity)", () => {
+    const { hooks, closeCount } = singleShotEscapeOverlay()
+    const h = makeWorkingHarness({ hooks })
+    enterWorking(h)
+    h.stdin.send("\x1b[27u")
+    expect(closeCount()).toBe(1)
+    expect(h.aborts).toEqual([])
+    expect(h.cancels).toEqual([])
+    expect(h.quits).toEqual([])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    h.ctrl.stop()
+  })
+
+  it("xterm modifyOtherKeys ESC while working: plugin halts → NO abort (CSI path parity)", () => {
+    const { hooks, closeCount } = singleShotEscapeOverlay()
+    const h = makeWorkingHarness({ hooks })
+    enterWorking(h)
+    h.stdin.send("\x1b[27;1;27~")
+    expect(closeCount()).toBe(1)
+    expect(h.aborts).toEqual([])
+    expect(h.cancels).toEqual([])
+    expect(h.quits).toEqual([])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    h.ctrl.stop()
+  })
+
+  it("ESC while working with no plugin halt: still aborts (regression guard)", async () => {
+    // Plugin is wired but observes only — never halts. Behavior must match
+    // the no-plugin baseline: the FSM aborts as before.
+    const hooks = new Hooks()
+    let observed = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key === "Escape") observed++
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    expect(observed).toBe(1)
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
     h.ctrl.stop()
   })
 })
