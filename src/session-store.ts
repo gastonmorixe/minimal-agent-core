@@ -24,7 +24,14 @@
 
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir, hostname as osHostname } from "node:os"
 import { join } from "node:path"
 
@@ -447,6 +454,15 @@ export class SessionStore {
    * banner's resume hint pointed to a file that did not exist. Forking
    * aligns the store with the rest of the agent: one consistent sid that
    * actually round-trips through `--resume`.
+   *
+   * Sidecar files (`<srcSid>.tasks.jsonl`, `<srcSid>.scratch.md`,
+   * `<srcSid>.draft`, anything else of the form `<srcSid>.<ext>`) are
+   * ALSO copied across to the new sid as part of the fork, so a resumed
+   * session sees the same per-sid state the parent had. The blob
+   * DIRECTORY (`<srcSid>.blobs/`) is intentionally NOT copied: tool
+   * results in the conversation log carry absolute paths into the
+   * parent's blob dir, so blobs survive resume by reference. See the
+   * implementation block below for the exact rule.
    */
   static fork(opts: {
     srcSid: string
@@ -539,6 +555,49 @@ export class SessionStore {
       argv: opts.argv,
     }
     appendFileSync(indexFilePath(dir), `${JSON.stringify(indexRecord)}\n`)
+
+    // Per-sid sidecar files (tasks plugin, memory short-term scratch,
+    // input draft, future plugins) live in the same directory under the
+    // SAME `<sid>.<ext>` prefix and are looked up at runtime by the
+    // CURRENT sid. Without copying them across the fork, a resumed
+    // session sees an empty tasks list, empty short-term scratchpad,
+    // empty draft, etc. — even though the conversation log has been
+    // forked verbatim. The model is then forced to reconcile a turn
+    // history that references task ids it cannot find, scratchpad
+    // entries that no longer exist, etc.
+    //
+    // Copy any sibling FILE that starts with `<srcSid>.` (other than
+    // the JSONL itself, which fork just wrote in its new form) to the
+    // matching `<dstSid>.<suffix>` path. Directories are skipped —
+    // notably `<srcSid>.blobs/`, which is intentionally NOT duplicated:
+    // tool-result records carry ABSOLUTE paths into the parent's blob
+    // directory, so blobs already survive resume by reference and
+    // copying them would waste disk without any correctness gain.
+    //
+    // Per-sidecar failures are best-effort: we don't want a single
+    // unreadable scratch file (or weird filesystem error) to abort the
+    // whole resume. The JSONL is the authoritative state; missing
+    // sidecars just degrade to empty, which was the pre-fix behavior.
+    try {
+      const srcJsonlBasename = `${opts.srcSid}.jsonl`
+      const srcPrefix = `${opts.srcSid}.`
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isFile()) continue
+        if (entry.name === srcJsonlBasename) continue
+        if (!entry.name.startsWith(srcPrefix)) continue
+        const suffix = entry.name.slice(opts.srcSid.length) // includes the leading "."
+        const srcPath = join(dir, entry.name)
+        const dstPath = join(dir, `${opts.dstSid}${suffix}`)
+        try {
+          copyFileSync(srcPath, dstPath)
+        } catch {
+          // best-effort per sidecar; silent on copy failure
+        }
+      }
+    } catch {
+      // best-effort directory scan; if the sessions dir is unreadable
+      // here, the JSONL writes above would have failed first
+    }
 
     return store
   }
