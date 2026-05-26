@@ -251,7 +251,18 @@ function makePluginLoaderStub(pluginResult: TUIResult): PluginLoader {
   return stub as unknown as PluginLoader
 }
 
-async function runOnePluginTool(opts: { sid: string; pluginResult: TUIResult }): Promise<{
+async function runOnePluginTool(opts: {
+  sid: string
+  pluginResult: TUIResult
+  /**
+   * Override the agent's resolved `blobSkipTools` after construction.
+   * The Agent reads `loadBlobStoreConfig().skipTools` once at
+   * construction; tests that want to flip the list for a single run
+   * patch the private field directly rather than going through the
+   * cached config loader (which would leak between tests).
+   */
+  skipToolsOverride?: ReadonlySet<string>
+}): Promise<{
   blobsDir: string
   toolResultContent: string
   jsonl: ToolResultRecord[]
@@ -301,6 +312,15 @@ async function runOnePluginTool(opts: { sid: string; pluginResult: TUIResult }):
   }
 
   const agent = new Agent({ auth, model: "test-model", sendFn, store, blobStore, loader })
+  if (opts.skipToolsOverride !== undefined) {
+    // Reach into the private `blobSkipTools` field. TS's `private`
+    // marker is compile-time only; runtime bracket access is allowed
+    // and keeps the production API surface clean (no public setter
+    // exists for production code, which has no reason to flip the
+    // list after construction).
+    ;(agent as unknown as { blobSkipTools: ReadonlySet<string> }).blobSkipTools =
+      opts.skipToolsOverride
+  }
   const gen = agent.run("go")
   while (true) {
     const { done } = await gen.next()
@@ -354,20 +374,42 @@ describe("Agent → BlobStore: plugin tool path (universal clamp applies)", () =
     expect(blob).not.toContain("[truncated:")
   })
 
-  it("plugin tool's `display` override (e.g. tasks, ShowDiff) is NOT clamped or blob-persisted", async () => {
-    // tasks plugin / ShowDiff / LockStatus set `display` to render their own
-    // body. Even if `content` is enormous, the agent must NOT clamp it (the
-    // plugin owns the audience-split here) and the blob hook should skip
-    // too. This protects plugin authors from a regression where their own
-    // formatted output gets a `[truncated: …]` notice spliced in.
+  it("plugin tool that sets `display` (Fetch-style) still gets the clamp + blob; only `skipTools` opts out", async () => {
+    // Fetch (and any other plugin that wants a transcript preview)
+    // sets `display` for the user but keeps the FULL body in `content`
+    // for the model. The agent must still clamp + blob-persist that
+    // body. The previous design accidentally gated both on
+    // `!display`, which silently dropped Fetch from the feature. Now
+    // the only opt-out is the `skipTools` list (tasks, ShowDiff,
+    // LockStatus, MemoryTool — covered by a separate test).
     const giantBody = "Y".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
     const r = await runOnePluginTool({
-      sid: "sid-plugin-display",
+      sid: "sid-plugin-display-still-clamped",
       pluginResult: {
         kind: "tool_result",
         content: giantBody,
-        display: "rendered ANSI body here", // any non-empty display disables the clamp
+        display: "rendered ANSI preview here",
       },
+    })
+    expect(r.toolResultContent).toContain("[truncated:")
+    expect(r.toolResultContent).toMatch(/\[raw-output:/)
+    expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
+    expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
+  })
+
+  it("plugin tools on the `skipTools` list bypass both clamp and blob even with huge content", async () => {
+    // Task / MemoryTool / ShowDiff / LockStatus opt out of the agent's
+    // post-hoc handling because they render audience-split bodies that
+    // would be mangled by a clamp or pointer footer. We exercise this
+    // by overriding the agent's resolved skipTools to include `Fetch`
+    // (a tool that ordinarily IS clamped). The dispatch path still
+    // fires; the agent leaves `content` alone.
+    const giantBody = "Z".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
+    const r = await runOnePluginTool({
+      sid: "sid-plugin-skiptools-bypass",
+      pluginResult: { kind: "tool_result", content: giantBody, display: "preview" },
+      // Patch the agent's skipTools to include Fetch for this run.
+      skipToolsOverride: new Set(["Fetch"]),
     })
     expect(r.toolResultContent).not.toContain("[truncated:")
     expect(r.toolResultContent).not.toMatch(/\[raw-output:/)

@@ -1267,14 +1267,16 @@ export class Agent {
                 // below. Recoverable via the `[raw-output: …]` pointer
                 // footer the agent appends a few lines down.
                 //
-                // Skipped when:
-                //   - the plugin set `display` (e.g. tasks plugin, ShowDiff,
-                //     LockStatus). Those tools already render their own
-                //     audience-aware output and would be mangled by an
-                //     after-the-fact clamp on the model-facing `content`.
+                // Tools that want full plugin control over the
+                // model-facing body (tasks, ShowDiff, LockStatus,
+                // MemoryTool) live on the `skipTools` list resolved at
+                // construction. Setting `display` alone does NOT
+                // disable the clamp: Fetch sets `display` for the
+                // transcript preview while `content` carries the full
+                // body, and we genuinely want that body clamped.
                 //
                 // See `src/tools/truncation.ts` and `src/blob-store.ts`.
-                if (!display) {
+                if (!this.blobSkipTools.has(tool.name)) {
                   const preClamp = content
                   const { content: clamped, info } = truncateToolOutput(preClamp, {
                     tool: tool.name,
@@ -1465,19 +1467,23 @@ export class Agent {
           //
           // Skipped when:
           //   - blobStore is null (config disabled, or construction failed)
-          //   - tool is on the user-configurable skip list (Task, MemoryTool, ShowDiff, LockStatus)
-          //   - tool returned `display` (Edit/Write diff: small, structured)
+          //   - tool is on the user-configurable skip list (Task,
+          //     MemoryTool, ShowDiff, LockStatus). These plugins own
+          //     full audience-split and would be mangled by an
+          //     after-the-fact blob+footer on the model-facing body.
           //   - tool was aborted (partial output, no point)
           //   - body too small to be useful (gated inside BlobStore.write
           //     via `minBytesToPersist`)
           //
+          // Setting `display` alone does NOT disable the blob: Fetch
+          // sets `display` for the transcript preview while `content`
+          // carries the full body, and we genuinely want that body
+          // persisted. For Edit/Write the `content` is "File written:
+          // …" sized, so the `minBytesToPersist` gate inside the store
+          // handles them without an explicit `!display` guard here.
+          //
           // See `src/blob-store.ts`.
-          if (
-            this.blobStore !== null &&
-            !this.blobSkipTools.has(tool.name) &&
-            !display &&
-            !aborted
-          ) {
+          if (this.blobStore !== null && !this.blobSkipTools.has(tool.name) && !aborted) {
             const rawBody = rawForBlob ?? content
             blobWrite = this.blobStore.write(tool.id, rawBody)
             if (blobWrite) {
