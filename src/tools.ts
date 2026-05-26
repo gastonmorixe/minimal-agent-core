@@ -152,6 +152,17 @@ export interface ToolExecResult {
    * @internal
    */
   _aborted?: boolean
+  /**
+   * Internal: pre-clamp body, populated by {@link executeTool} ONLY when
+   * the universal truncation clamp actually fired (`info.truncated ===
+   * true`). The agent uses this as the source for the per-session blob
+   * store (see `src/blob-store.ts`) so the FULL output survives even
+   * though the model only sees the clamped `content`. Absent when the
+   * body fit under both budgets (no information to preserve). Stripped
+   * before serialization by {@link stripInternalFields}.
+   * @internal
+   */
+  _raw?: string
 }
 
 /**
@@ -177,17 +188,19 @@ export interface ToolExecOpts {
 }
 
 /**
- * Strip internal-only fields (`_truncCtx`, `_truncInfo`, `_aborted`) from
- * a result before sending it back to the API.
+ * Strip internal-only fields (`_truncCtx`, `_truncInfo`, `_aborted`,
+ * `_raw`) from a result before sending it back to the API.
  *
- * {@link executeTool} already strips `_truncCtx` (input-only). `_truncInfo`
- * and `_aborted` are preserved through `executeTool` so the renderer can
- * see them, and stripped here right before serialization.
+ * {@link executeTool} already strips `_truncCtx` (input-only).
+ * `_truncInfo`, `_aborted`, and `_raw` are preserved through
+ * `executeTool` so the renderer / agent's blob-store hook can see them,
+ * and stripped here right before serialization.
  */
 export function stripInternalFields(r: ToolExecResult): void {
   delete r._truncCtx
   delete r._truncInfo
   delete r._aborted
+  delete r._raw
 }
 
 const ABORTED_RESULT = (): ToolExecResult => ({
@@ -434,7 +447,8 @@ export async function executeTool(
   // (e.g. a runaway `yes` for 5s before ESC) genuinely needs the clamp.
   if (!r.display) {
     const ctx: TruncateCtx = { tool: name, ...(r._truncCtx ?? {}) }
-    const { content, info } = truncateToolOutput(r.content, ctx)
+    const preClamp = r.content
+    const { content, info } = truncateToolOutput(preClamp, ctx)
     r.content = content
     // Hand the renderer structured "what got cut" data, separate from the
     // model-facing `[truncated: ...]` notice that lives inside `content`.
@@ -442,10 +456,16 @@ export async function executeTool(
     // reads the verbose notice. Audiences split. See `formatToolPreview`
     // in `src/agent.ts`.
     r._truncInfo = info
+    // Surface the pre-clamp body to the agent's blob-store hook ONLY
+    // when the clamp actually fired. When `info.truncated === false`,
+    // `content` already equals the full body and there's nothing
+    // additional to preserve. See `src/blob-store.ts`.
+    if (info.truncated) r._raw = preClamp
   }
   // `_truncCtx` was an executor→clamp ferry; once consumed, drop it. We
-  // intentionally KEEP `_truncInfo` and `_aborted` so the renderer can see
-  // them; both are stripped by `stripInternalFields` before serialization.
+  // intentionally KEEP `_truncInfo`, `_aborted`, and `_raw` so the
+  // renderer / blob-store hook can see them; all three are stripped by
+  // `stripInternalFields` before serialization.
   delete r._truncCtx
   return r
 }

@@ -37,7 +37,16 @@ beforeAll(() => {
   mkdirSync(sub)
   writeFileSync(join(sub, "marker.txt"), "hello\n")
 })
-afterAll(() => {
+afterAll(async () => {
+  // Restore the Bash tool's persistent cwd to the test process's cwd
+  // BEFORE we delete the tmp dir. Without this, the module-level
+  // `bashCwd` in `src/tools.ts` is still pointing at the about-to-be-
+  // deleted directory, and any subsequent test in the same `bun test`
+  // run that actually spawns bash via `executeTool("Bash", …)` gets
+  // `ENOENT … posix_spawn 'bash'` because the subprocess can't start
+  // in a vanished cwd. See `agent.blob-store.integration.test.ts`,
+  // which was the first downstream test to expose this leak.
+  await executeTool("Bash", { command: `cd ${realpathSync(process.cwd())}` })
   rmSync(dir, { recursive: true, force: true })
 })
 
