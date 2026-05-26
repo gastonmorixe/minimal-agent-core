@@ -34,10 +34,10 @@
  * @module spinner
  */
 
-export * from "./types.ts"
-export * from "./manager.ts"
-export * from "./braille.ts"
 export * from "./blinking-nerd.ts"
-export * from "./presets.ts"
-export * from "./named-presets.ts"
+export * from "./braille.ts"
 export * as library from "./library/index.ts"
+export * from "./manager.ts"
+export * from "./named-presets.ts"
+export * from "./presets.ts"
+export * from "./types.ts"

@@ -1,6 +1,8 @@
-import { describe, it, expect } from "bun:test"
-import { readFileSync, readdirSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { buildUserId, getDeviceId } from "./metadata.ts"
 
 /** Path to the real CLI config */

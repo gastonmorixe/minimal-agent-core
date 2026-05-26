@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+
 import { HookBus } from "./hook-bus.ts"
 
 const noLog = (_: string) => {}

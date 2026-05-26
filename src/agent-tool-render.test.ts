@@ -22,6 +22,7 @@
  *   - `formatToolPreview` output (the TUI transcript) shows facts only.
  */
 import { describe, expect, it } from "bun:test"
+
 import {
   clampTranscriptRow,
   formatToolInput,

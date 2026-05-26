@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
+
 import {
   ASK_THRESHOLD,
-  REVERT_THRESHOLD,
   isActionConfident,
   isQuestionConfident,
+  REVERT_THRESHOLD,
   scoreQuestion,
 } from "./ask-mode-heuristic.ts"
 

@@ -1,7 +1,9 @@
-import { describe, expect, it } from "bun:test"
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
 import { executeTool } from "./tools.ts"
 

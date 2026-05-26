@@ -1,15 +1,18 @@
-import { describe, expect, it } from "bun:test"
-import { createServer } from "node:http2"
 import type { Http2Server, ServerHttp2Stream } from "node:http2"
+import { createServer } from "node:http2"
+
+import { describe, expect, it } from "bun:test"
+
 import { getAuth } from "../auth.ts"
 import { buildHeaders } from "../headers.ts"
 import { getSessionId } from "../metadata.ts"
+
 import {
+  defaultNetworkClient,
   Http2Transport,
   NetworkClient,
-  NetworkResponse,
-  defaultNetworkClient,
   type NetworkRequest,
+  NetworkResponse,
   type NetworkTransport,
 } from "./index.ts"
 

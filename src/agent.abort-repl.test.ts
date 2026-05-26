@@ -30,12 +30,15 @@
  * a `FakeCompositor`, mirroring the patterns established in
  * `src/agent.test.ts`.
  */
-import { describe, expect, it } from "bun:test"
+
 import { EventEmitter } from "node:events"
+
+import { describe, expect, it } from "bun:test"
+
+import { abortBus as globalAbortBus } from "./abort-bus.ts"
 import { Agent, type ReplAgentLike, runRepl } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "./client.ts"
-import { abortBus as globalAbortBus } from "./abort-bus.ts"
 import { StatusBus } from "./status.ts"
 
 // ----------------------------- fakes ---------------------------------------

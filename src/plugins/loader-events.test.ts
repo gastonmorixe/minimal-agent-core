@@ -6,9 +6,11 @@
  * and re-emit via `ctx.emit`.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
 import { EventBus } from "./event-bus.ts"
 import { PluginLoader } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"

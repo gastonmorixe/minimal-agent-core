@@ -16,6 +16,7 @@
  *     (which ends on a `╰` row with no trailing blank of its own)
  */
 import { describe, expect, it } from "bun:test"
+
 import type { ModeManager } from "./modes.ts"
 import { buildReadyBanner } from "./ready-banner.ts"
 

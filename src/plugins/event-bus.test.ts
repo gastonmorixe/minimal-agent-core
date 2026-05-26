@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+
 import { EventBus, type EventContext } from "./event-bus.ts"
 
 function silentBus(): EventBus {

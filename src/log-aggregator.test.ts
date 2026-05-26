@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import { FooterAggregator } from "./log-aggregator.ts"
 
 interface Tap {

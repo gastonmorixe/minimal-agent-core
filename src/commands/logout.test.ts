@@ -1,9 +1,12 @@
-import { describe, expect, it } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { ANTHROPIC_PLAN_OAUTH, clearCredentials, writeCredentials } from "../auth.ts"
 import { AuthStore } from "../auth-store.ts"
+
 import { runLogoutCommand } from "./logout.ts"
 
 function captureOut(): { out: { write: (s: string) => void }; text(): string } {

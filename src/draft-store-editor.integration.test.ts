@@ -14,11 +14,14 @@
  * synchronously from the keystroke handler — keeps assertions deterministic
  * without sleeping for the default 120ms debounce.
  */
-import { describe, expect, it } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync } from "node:fs"
+
 import { EventEmitter } from "node:events"
+import { existsSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { DraftStore, draftFilePath } from "./draft-store.ts"
 import { EditorController } from "./editor-controller.ts"
 

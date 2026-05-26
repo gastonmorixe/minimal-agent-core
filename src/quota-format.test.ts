@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import { formatQuotaSummary } from "./quota-format.ts"
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "")

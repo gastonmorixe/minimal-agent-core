@@ -11,27 +11,27 @@
  * @module spinner/named-presets
  */
 
-import { BlinkingNerdSpinner } from "./blinking-nerd.ts"
-import type { Spinner } from "./types.ts"
 import type { BlinkingNerdSpinnerTheme } from "./blinking-nerd.ts"
+import { BlinkingNerdSpinner } from "./blinking-nerd.ts"
 import {
-  THINKING_ROTOR_ASCII,
-  THINKING_ROTOR_BOX,
-  THINKING_DOT_ORBIT,
+  THINKING_BLOCK,
   THINKING_BREATHING,
-  THINKING_PULSE,
+  THINKING_DOT_ORBIT,
   THINKING_PHASE_HALF,
   THINKING_PHASE_QUADRANT,
-  THINKING_BLOCK,
+  THINKING_PULSE,
+  THINKING_ROTOR_ASCII,
+  THINKING_ROTOR_BOX,
 } from "./library/frames.ts"
 import {
-  ANSI_PALETTE_RAINBOW,
+  ANSI_PALETTE_BREATHE_CYAN,
   ANSI_PALETTE_COOL,
-  ANSI_PALETTE_WARM,
   ANSI_PALETTE_MONO_CYAN,
   ANSI_PALETTE_MONO_DIM,
-  ANSI_PALETTE_BREATHE_CYAN,
+  ANSI_PALETTE_RAINBOW,
+  ANSI_PALETTE_WARM,
 } from "./library/palettes.ts"
+import type { Spinner } from "./types.ts"
 
 export interface NamedSpinnerPreset {
   /** Identifier passed to `--spinner`. */

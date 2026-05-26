@@ -8,10 +8,13 @@
  *   3. The resumed agent continues appending to the SAME file.
  *   4. After resume + new turn, the full record sequence reads back correctly.
  */
-import { describe, expect, it } from "bun:test"
+
 import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { StreamedResponse } from "./client.ts"

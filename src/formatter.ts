@@ -36,6 +36,7 @@
  */
 
 import type { FileSink, Subprocess } from "bun"
+
 import { AnsiStreamBuffer } from "./ansi-stream.ts"
 
 type FormatterOutput = Pick<NodeJS.WriteStream, "write"> & {

@@ -14,10 +14,12 @@
  * network or `~/.minimal-agent/` involvement.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import { BlobStore } from "./blob-store.ts"

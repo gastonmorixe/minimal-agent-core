@@ -10,8 +10,9 @@
  * body is tee'd so the caller still gets a readable stream for SSE parsing.
  */
 
-import { mkdirSync, existsSync, writeFileSync, appendFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+
 import { getSessionId } from "./metadata.ts"
 
 /**

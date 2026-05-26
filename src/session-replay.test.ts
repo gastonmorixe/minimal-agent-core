@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import type { Message } from "./client.ts"
 import {
   buildResumeHeader,

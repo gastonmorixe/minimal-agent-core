@@ -1,4 +1,5 @@
 import { beginRequest, warnLoggerErrorOnce } from "../net-dbg.ts"
+
 import type { NetworkObserver, NetworkRequest } from "./types.ts"
 
 /**

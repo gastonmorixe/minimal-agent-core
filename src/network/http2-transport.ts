@@ -1,11 +1,12 @@
-import { connect, constants } from "node:http2"
 import type {
   ClientHttp2Session,
   ClientHttp2Stream,
   IncomingHttpHeaders,
   OutgoingHttpHeaders,
 } from "node:http2"
-import { NetworkResponse, type NetworkRequest, type NetworkTransport } from "./types.ts"
+import { connect, constants } from "node:http2"
+
+import { type NetworkRequest, NetworkResponse, type NetworkTransport } from "./types.ts"
 
 type SessionEntry = {
   session: ClientHttp2Session

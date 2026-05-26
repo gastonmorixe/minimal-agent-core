@@ -56,6 +56,7 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import { AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import { withLock } from "./lockfile.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"

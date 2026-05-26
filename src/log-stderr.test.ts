@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
 import { StderrMirrorSink } from "./log-stderr.ts"
 

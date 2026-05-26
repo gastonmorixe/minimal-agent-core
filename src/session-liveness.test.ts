@@ -1,8 +1,10 @@
-import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getSessionLiveness, livenessFromRecords, type LivenessDeps } from "./session-liveness.ts"
+
+import { describe, expect, test } from "bun:test"
+
+import { getSessionLiveness, type LivenessDeps, livenessFromRecords } from "./session-liveness.ts"
 import {
   type AttachRecord,
   type DetachRecord,

@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+
 import type { AuthResult } from "./auth.ts"
 
 // ---------------------------------------------------------------------------

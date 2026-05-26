@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { StatusBus, type StatusActivity } from "../status.ts"
+
+import { type StatusActivity, StatusBus } from "../status.ts"
+
 import { NetworkActivityObserver, NetworkActivityTracker } from "./activity-observer.ts"
-import { NetworkResponse, type NetworkRequest } from "./types.ts"
+import { type NetworkRequest, NetworkResponse } from "./types.ts"
 
 function makeRequest(overrides: Partial<NetworkRequest> = {}): NetworkRequest {
   return {

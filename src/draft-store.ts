@@ -39,6 +39,7 @@
 import { readFileSync } from "node:fs"
 import { rename, rm } from "node:fs/promises"
 import { join } from "node:path"
+
 import { defaultSessionsDir } from "./session-store.ts"
 
 /**

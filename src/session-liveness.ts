@@ -22,6 +22,7 @@
 
 import { readFileSync } from "node:fs"
 import { hostname as osHostname } from "node:os"
+
 import {
   type AttachRecord,
   parseLines,

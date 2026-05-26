@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import { Agent } from "./agent.ts"
 import type { StreamedResponse } from "./client.ts"
 import { ToolTimeTracker } from "./tool-time.ts"

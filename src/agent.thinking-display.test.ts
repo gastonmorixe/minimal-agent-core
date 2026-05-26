@@ -1,4 +1,5 @@
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
+
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { SendOptions, StreamedResponse } from "./client.ts"

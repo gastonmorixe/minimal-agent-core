@@ -20,10 +20,13 @@
  *      operators actually take effect — even if the command starts with `cd`.
  *   4. Quoted paths and trailing whitespace are tolerated.
  */
-import { describe, it, expect, beforeAll, afterAll } from "bun:test"
+
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
 import { executeTool } from "./tools.ts"
 
 let dir: string

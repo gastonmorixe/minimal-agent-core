@@ -1,4 +1,5 @@
-import { describe, test, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
+
 import { QuitModal } from "./quit-modal.ts"
 
 function renderJoined(m: QuitModal, width = 40): string {

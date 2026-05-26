@@ -1,5 +1,5 @@
-import { join } from "path"
 import { homedir } from "os"
+import { join } from "path"
 export function generateSessionId() {
   return (
     "ma-session-" +

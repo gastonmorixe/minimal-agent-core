@@ -9,6 +9,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
+
 import { StdioInterceptor } from "./stdio-interceptor.ts"
 
 class FakeCompositor {

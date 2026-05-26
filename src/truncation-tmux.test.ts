@@ -1,5 +1,6 @@
-import { describe, it, expect } from "bun:test"
 import { spawnSync } from "node:child_process"
+
+import { describe, expect, it } from "bun:test"
 
 function haveTmux(): boolean {
   return spawnSync("tmux", ["-V"]).status === 0

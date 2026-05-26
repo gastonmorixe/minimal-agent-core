@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+
 import { NetworkClient } from "../client.ts"
 import { Http3NegotiationCache } from "../http3-cache.ts"
 import type { NetworkRequest, NetworkResponse, NetworkTransport } from "../types.ts"
+
 import { type H3DecisionEvent, http3OpportunisticPolicy } from "./h3-opportunistic.ts"
 
 // ── Test helpers ─────────────────────────────────────────────────────────

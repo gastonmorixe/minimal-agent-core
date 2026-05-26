@@ -1,7 +1,9 @@
-import { describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { SessionStore } from "./session-store.ts"
 
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {

@@ -13,12 +13,14 @@
  * @module live-area-e2e.test
  */
 
-import { describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
-import { Compositor } from "./ui/compositor.ts"
+
+import { describe, expect, it } from "bun:test"
+
+import { type ReplAgentLike, runRepl } from "./agent.ts"
 import { EditorController } from "./editor-controller.ts"
-import { runRepl, type ReplAgentLike } from "./agent.ts"
 import { StatusBus } from "./status.ts"
+import { Compositor } from "./ui/compositor.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true

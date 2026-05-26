@@ -12,16 +12,17 @@
  * isolation; this file covers only the integration seam in `tools.ts`.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import {
   buildHolder,
   lockPathFor,
-  serializeHolder,
   _resetForTests as resetLockLib,
+  serializeHolder,
 } from "./file-lock.ts"
 import { _resetFileLockConfigForTests, executeTool } from "./tools.ts"
 

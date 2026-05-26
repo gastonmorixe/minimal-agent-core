@@ -12,6 +12,7 @@
  */
 
 import { EventEmitter } from "node:events"
+
 import { type AbortBus, abortBus } from "./abort-bus.ts"
 import {
   EscapeHatch,

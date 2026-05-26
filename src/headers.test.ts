@@ -1,17 +1,19 @@
-import { describe, it, expect } from "bun:test"
-import { readFileSync, readdirSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
+import type { AuthResult } from "./auth.ts"
 import {
-  buildHeaders,
-  buildBetaFlags,
   ANTHROPIC_VERSION,
+  BetaFlagId,
+  buildBetaFlags,
+  buildHeaders,
+  DEFAULT_MODEL,
+  MODELS,
   STAINLESS_SDK_VERSION,
   USER_AGENT,
-  BetaFlagId,
-  MODELS,
-  DEFAULT_MODEL,
 } from "./headers.ts"
-import type { AuthResult } from "./auth.ts"
 
 const NET_DBG_DIR = join(process.env.HOME ?? "", "Projects/claude-cli-versions/.node-net-dbg")
 

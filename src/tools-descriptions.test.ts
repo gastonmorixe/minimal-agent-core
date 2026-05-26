@@ -14,8 +14,9 @@
  * the constants so they don't drift.
  */
 import { describe, expect, it } from "bun:test"
-import { TOOL_DEFINITIONS } from "./tools.ts"
+
 import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./tools/truncation.ts"
+import { TOOL_DEFINITIONS } from "./tools.ts"
 
 function descOf(name: string): string {
   const t = TOOL_DEFINITIONS.find((d) => d.name === name)

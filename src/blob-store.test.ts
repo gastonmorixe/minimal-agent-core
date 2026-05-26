@@ -7,7 +7,6 @@
  * promise that failed writes never throw.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -19,6 +18,9 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import {
   _resetBlobStoreConfigForTests,
   BlobStore,

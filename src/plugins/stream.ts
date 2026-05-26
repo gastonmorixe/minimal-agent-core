@@ -19,8 +19,8 @@
  * @module plugins/stream
  */
 
-import { TagScanner, type TagSpan } from "./scanner.ts"
 import type { PluginLoader } from "./loader.ts"
+import { TagScanner, type TagSpan } from "./scanner.ts"
 
 type StreamEvent = { type: "text"; data: string } | { type: "tag"; span: TagSpan }
 

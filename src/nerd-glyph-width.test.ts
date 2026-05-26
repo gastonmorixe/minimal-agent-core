@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import {
   _resetNerdGlyphCellsForTest,
   effectiveDisplayWidth,

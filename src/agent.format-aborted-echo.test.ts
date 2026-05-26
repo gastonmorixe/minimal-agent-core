@@ -11,6 +11,7 @@
  * separately in `src/agent.abort-repl.test.ts`.
  */
 import { describe, expect, it } from "bun:test"
+
 import { formatAbortedEcho } from "./agent.ts"
 
 /** Strip ANSI escapes for substring assertions. */

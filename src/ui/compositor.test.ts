@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
+
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
+
 import { Compositor, updateStreamCol } from "./compositor.ts"
 
 type Capture = {

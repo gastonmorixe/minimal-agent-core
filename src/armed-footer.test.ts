@@ -1,4 +1,5 @@
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
+
 import { formatArmedFooter, isArmedFooterActive } from "./armed-footer.ts"
 
 const ANSI = /\x1b\[[\d;]*m/g

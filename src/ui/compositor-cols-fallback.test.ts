@@ -32,7 +32,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import { displayWidth } from "../term-width.ts"
+
 import { Compositor } from "./compositor.ts"
 
 const PARAGRAPH_183 =

@@ -11,6 +11,14 @@
  * @module live-area-status
  */
 
+import type { StatusController } from "./agent.ts"
+import { visualCellsForGlyph } from "./nerd-glyph-width.ts"
+import {
+  BlinkingNerdSpinner,
+  type Spinner,
+  SpinnerManager,
+  type SpinnerNotification,
+} from "./spinner.ts"
 import {
   formatActivityInfix,
   formatElapsedSuffix,
@@ -18,14 +26,6 @@ import {
   type StatusSnapshot,
   type StatusSpinnerTheme,
 } from "./status.ts"
-import type { StatusController } from "./agent.ts"
-import {
-  BlinkingNerdSpinner,
-  SpinnerManager,
-  type Spinner,
-  type SpinnerNotification,
-} from "./spinner.ts"
-import { visualCellsForGlyph } from "./nerd-glyph-width.ts"
 
 interface EditorStatusSink {
   setStatus(text: string | null): void

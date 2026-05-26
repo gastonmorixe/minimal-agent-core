@@ -1,5 +1,6 @@
-import { describe, it, expect } from "bun:test"
-import { truncateToolOutput, MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./truncation.ts"
+import { describe, expect, it } from "bun:test"
+
+import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES, truncateToolOutput } from "./truncation.ts"
 
 describe("truncateToolOutput — passthrough", () => {
   it("returns input unchanged when under both budgets", () => {

@@ -28,8 +28,10 @@
 
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
+
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
 import { paletteEnvJson } from "../palette.ts"
+
 import { EventBus, type EventContext } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"

@@ -14,11 +14,13 @@
  * test runs don't collide on the same lockfile path.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { acquireLock, isProcessAlive, withLock, _resetLocksForTest } from "./lockfile.ts"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
+import { _resetLocksForTest, acquireLock, isProcessAlive, withLock } from "./lockfile.ts"
 
 let tmpDir: string
 

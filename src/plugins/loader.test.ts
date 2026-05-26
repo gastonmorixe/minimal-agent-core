@@ -1,6 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
 import { PluginLoader } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"
 

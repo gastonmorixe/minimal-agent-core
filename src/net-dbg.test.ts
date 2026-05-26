@@ -1,11 +1,12 @@
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
+
 import {
-  formatTzOffset,
-  formatSessionDirName,
-  redactHeaders,
-  netDbgEnabled,
-  warnLoggerErrorOnce,
   _resetLoggerErrorReportedForTest,
+  formatSessionDirName,
+  formatTzOffset,
+  netDbgEnabled,
+  redactHeaders,
+  warnLoggerErrorOnce,
 } from "./net-dbg.ts"
 
 describe("net-dbg", () => {

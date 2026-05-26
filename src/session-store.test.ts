@@ -1,7 +1,9 @@
-import { describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import {
   type AssistantRecord,
   type IndexRecord,
@@ -468,6 +470,101 @@ describe("SessionStore.fork", () => {
     const metaC = readJsonl(sessionFilePath(sidC, dir))[0] as MetaRecord
     expect(metaC.parentSid).toBe(sidB)
     expect(metaC.sid).toBe(sidC)
+  })
+
+  // ---------------------------------------------------------------------
+  // Sidecar duplication on fork
+  //
+  // Per-sid sidecars (tasks, short-term scratch, draft, future plugins)
+  // are addressed at runtime by the CURRENT sid. Without copying them
+  // across the fork, a resumed session reads from an empty sidecar even
+  // though the JSONL it just forked references the prior state. The
+  // user-visible symptom is `Task({action: "done", id: N})` returning
+  // "id N not found" right after resume.
+  // ---------------------------------------------------------------------
+
+  it("copies per-sid sidecar files (tasks/scratch/draft) to the new sid", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-side-A"
+    const dstSid = "ma-fork-side-A"
+    seedParent(dir, srcSid)
+
+    // Plant one of each well-known sidecar shape, plus a generic one
+    // to prove the rule is suffix-agnostic.
+    const tasksBody = `{"id":"abc123","title":"do the thing","status":"todo"}\n`
+    const scratchBody = "[2026-05-25T16:51:56-04:00] note one\n"
+    const draftBody = "in-progress prompt text"
+    const futureBody = "anything keyed by sid"
+    writeFileSync(join(dir, `${srcSid}.tasks.jsonl`), tasksBody)
+    writeFileSync(join(dir, `${srcSid}.scratch.md`), scratchBody)
+    writeFileSync(join(dir, `${srcSid}.draft`), draftBody)
+    writeFileSync(join(dir, `${srcSid}.future-plugin.bin`), futureBody)
+
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    // Each sidecar should now exist under the new sid with identical bytes.
+    expect(readFileSync(join(dir, `${dstSid}.tasks.jsonl`), "utf-8")).toBe(tasksBody)
+    expect(readFileSync(join(dir, `${dstSid}.scratch.md`), "utf-8")).toBe(scratchBody)
+    expect(readFileSync(join(dir, `${dstSid}.draft`), "utf-8")).toBe(draftBody)
+    expect(readFileSync(join(dir, `${dstSid}.future-plugin.bin`), "utf-8")).toBe(futureBody)
+
+    // Parent sidecars must remain in place (fork is non-destructive).
+    expect(existsSync(join(dir, `${srcSid}.tasks.jsonl`))).toBe(true)
+    expect(existsSync(join(dir, `${srcSid}.scratch.md`))).toBe(true)
+    expect(existsSync(join(dir, `${srcSid}.draft`))).toBe(true)
+  })
+
+  it("does NOT copy the parent's blob directory (blobs survive resume by absolute path)", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-side-B"
+    const dstSid = "ma-fork-side-B"
+    seedParent(dir, srcSid)
+
+    // Plant a `<srcSid>.blobs/` directory with a fake blob inside.
+    const blobsDir = join(dir, `${srcSid}.blobs`)
+    mkdirSync(blobsDir, { recursive: true })
+    writeFileSync(join(blobsDir, "toolu_x.raw"), "raw bytes")
+
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    // The new sid must NOT have a sibling blob directory: blobs are
+    // referenced via absolute paths inside the conversation log, which
+    // still point at the parent's `<srcSid>.blobs/`. Copying them
+    // would waste disk and create stale duplicates.
+    expect(existsSync(join(dir, `${dstSid}.blobs`))).toBe(false)
+    // Parent blob dir remains untouched.
+    expect(existsSync(blobsDir)).toBe(true)
+  })
+
+  it("does not touch sidecars belonging to unrelated sessions in the same dir", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-side-C"
+    const dstSid = "ma-fork-side-C"
+    const otherSid = "ma-unrelated-side-C"
+    seedParent(dir, srcSid)
+
+    writeFileSync(join(dir, `${srcSid}.tasks.jsonl`), "source\n")
+    writeFileSync(join(dir, `${otherSid}.tasks.jsonl`), "untouched\n")
+
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+
+    // Other-session sidecar must be byte-identical after the fork.
+    expect(readFileSync(join(dir, `${otherSid}.tasks.jsonl`), "utf-8")).toBe("untouched\n")
+    // And the dst sidecar exists and matches the source.
+    expect(readFileSync(join(dir, `${dstSid}.tasks.jsonl`), "utf-8")).toBe("source\n")
+  })
+
+  it("fork succeeds when the parent has no sidecars at all", () => {
+    const dir = tmp()
+    const srcSid = "ma-parent-side-D"
+    const dstSid = "ma-fork-side-D"
+    seedParent(dir, srcSid)
+    // No sidecars planted. fork should still complete without throwing.
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    // And no sidecars should magically appear under the dst sid.
+    expect(existsSync(join(dir, `${dstSid}.tasks.jsonl`))).toBe(false)
+    expect(existsSync(join(dir, `${dstSid}.scratch.md`))).toBe(false)
+    expect(existsSync(join(dir, `${dstSid}.draft`))).toBe(false)
   })
 })
 

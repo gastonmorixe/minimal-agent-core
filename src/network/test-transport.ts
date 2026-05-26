@@ -1,4 +1,4 @@
-import { NetworkResponse, type NetworkRequest, type NetworkTransport } from "./types.ts"
+import { type NetworkRequest, NetworkResponse, type NetworkTransport } from "./types.ts"
 
 /**
  * Test-only transport for spawned CLI smoke tests.

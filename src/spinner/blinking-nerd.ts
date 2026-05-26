@@ -11,6 +11,14 @@
  * @module spinner/blinking-nerd
  */
 
+import { effectiveDisplayWidth, visualCellsForGlyph } from "../nerd-glyph-width.ts"
+
+import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
+import {
+  DEFAULT_ICON_BY_CATEGORY,
+  DEFAULT_ICON_BY_NOTIFICATION_ID,
+  DEFAULT_NERD_ICON,
+} from "./presets.ts"
 import type {
   Colorizer,
   IconSpec,
@@ -19,13 +27,6 @@ import type {
   SpinnerRenderFrame,
 } from "./types.ts"
 import { isAnimatedIcon } from "./types.ts"
-import {
-  DEFAULT_ICON_BY_NOTIFICATION_ID,
-  DEFAULT_ICON_BY_CATEGORY,
-  DEFAULT_NERD_ICON,
-} from "./presets.ts"
-import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
-import { effectiveDisplayWidth, visualCellsForGlyph } from "../nerd-glyph-width.ts"
 
 const DEFAULT_BLINK_MS = 500
 

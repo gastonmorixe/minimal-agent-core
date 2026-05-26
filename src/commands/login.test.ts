@@ -10,8 +10,10 @@
  * the exit code, or printing the banner only on success, etc.
  */
 
-import { describe, expect, it } from "bun:test"
 import { PassThrough } from "node:stream"
+
+import { describe, expect, it } from "bun:test"
+
 import { readLine } from "./login.ts"
 
 describe("commands/login module shape", () => {

@@ -32,9 +32,9 @@
 
 import {
   ASK_THRESHOLD,
-  REVERT_THRESHOLD,
   isActionConfident,
   isQuestionConfident,
+  REVERT_THRESHOLD,
   scoreQuestion,
 } from "./ask-mode-heuristic.ts"
 import type { ModeManager } from "./modes.ts"

@@ -38,6 +38,7 @@ import {
 } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import { configPath as userConfigPath } from "./config.ts"
 import { parseJsonc } from "./jsonc.ts"
 

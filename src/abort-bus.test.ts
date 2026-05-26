@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import { AbortBus, type AbortReason } from "./abort-bus"
 
 describe("AbortBus", () => {

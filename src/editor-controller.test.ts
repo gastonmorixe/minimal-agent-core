@@ -1,5 +1,7 @@
-import { describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
+
+import { describe, expect, it } from "bun:test"
+
 import { AbortBus } from "./abort-bus.ts"
 import { EditorController, type EditorKeyPayload } from "./editor-controller.ts"
 import { Hooks } from "./plugins/hooks/hooks.ts"

@@ -20,7 +20,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { abortableSleep, retry, type RetryDeps, type RetryOptions } from "./retry.ts"
+
+import { abortableSleep, type RetryDeps, type RetryOptions, retry } from "./retry.ts"
 
 // --- fake clock / RNG harness --------------------------------------------
 

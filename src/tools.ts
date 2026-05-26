@@ -28,6 +28,7 @@
 
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
+
 import { configPath as userConfigPath } from "./config.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
 import { acquireLock, LockAbortedError, type LockHandle, LockTimeoutError } from "./file-lock.ts"

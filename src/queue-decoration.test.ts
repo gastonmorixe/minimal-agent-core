@@ -12,6 +12,7 @@
  *   - alignment: item content column matches header content column
  */
 import { describe, expect, it } from "bun:test"
+
 import {
   buildQueueDecorationLines,
   QUEUE_ITEM_SEPARATOR,

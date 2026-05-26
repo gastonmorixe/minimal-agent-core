@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import { renderAuthStatus, runAuthStatusCommand } from "./auth-status.ts"
 
 /**

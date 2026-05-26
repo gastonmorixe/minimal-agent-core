@@ -15,11 +15,12 @@
  *   bun run scripts/session-restore-tmux-demo.ts --mode show --sid demo-1 --dir /tmp/ma-demo
  */
 import { readFileSync } from "node:fs"
+
 import { Agent } from "../src/agent.ts"
 import type { AuthResult } from "../src/auth.ts"
 import type { StreamedResponse } from "../src/client.ts"
 import { loadSession } from "../src/session-restore.ts"
-import { sessionFilePath, SessionStore } from "../src/session-store.ts"
+import { SessionStore, sessionFilePath } from "../src/session-store.ts"
 
 const args = process.argv.slice(2)
 function arg(name: string, def?: string): string | undefined {
