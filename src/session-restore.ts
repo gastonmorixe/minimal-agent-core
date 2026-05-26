@@ -31,7 +31,12 @@ import {
  *
  * - `meta` and `note` records are skipped (metadata only).
  * - `user` → push `{role:"user", content}`.
- * - `assistant` → push `{role:"assistant", content}`.
+ * - `assistant` → push `{role:"assistant", content}`. The block array is
+ *   pushed verbatim, which means `thinking` blocks (and their
+ *   cryptographic `signature` fields) ride back into history unchanged.
+ *   That round-trip is what lets the `redact-thinking-2026-02-12` beta
+ *   keep working across resume — see `AssistantRecord` in
+ *   `session-store.ts` for the persistence-side note.
  * - `tool_result` → if the LAST message is `user` whose content is a
  *   block array, append a `tool_result` block to it; otherwise start a
  *   new `{role:"user", content:[<block>]}` message. This mirrors how the
