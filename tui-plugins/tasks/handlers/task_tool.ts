@@ -318,9 +318,17 @@ function viewsWithGhostRemoved(
   beforeTasks: readonly Task[],
   removedIds: ReadonlySet<string>,
 ): View[] {
-  return buildViews(beforeTasks).map((v) =>
-    removedIds.has(v.task.id) ? { ...v, ghost: "removed" as const } : v,
-  )
+  // `buildViews` returns a fresh `View[]` with fresh `View` objects every
+  // call (see `lib/store.ts`), so we can mutate in place. The previous
+  // shape `(v) => { ...v, ghost: "removed" as const }` inside `.map`
+  // tripped oxlint's `no-map-spread` (one fresh allocation per element
+  // is wasteful when the source array isn't shared). One pass, no
+  // extra allocation, identical semantics.
+  const views = buildViews(beforeTasks)
+  for (const v of views) {
+    if (removedIds.has(v.task.id)) v.ghost = "removed"
+  }
+  return views
 }
 
 function err(message: string): TUIResult {
