@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test"
-import { runLogoutCommand, stripClaudeJsonOauthAccount } from "./logout.ts"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { ANTHROPIC_PLAN_OAUTH, clearCredentials, writeCredentials } from "../auth.ts"
+import { AuthStore } from "../auth-store.ts"
+import { runLogoutCommand } from "./logout.ts"
 
 function captureOut(): { out: { write: (s: string) => void }; text(): string } {
   const lines: string[] = []
@@ -12,128 +17,52 @@ function captureOut(): { out: { write: (s: string) => void }; text(): string } {
   }
 }
 
-describe("stripClaudeJsonOauthAccount", () => {
-  it("removes oauthAccount but preserves other fields", () => {
-    let written = ""
-    const ok = stripClaudeJsonOauthAccount({
-      home: "/tmp/fakehome",
-      readFile: () =>
-        JSON.stringify({
-          hasCompletedOnboarding: true,
-          firstStartTime: "2024-01-01T00:00:00Z",
-          oauthAccount: { accountUuid: "abc", emailAddress: "x@y" },
-        }),
-      writeFile: (_path, contents) => {
-        written = contents
-      },
-    })
-    expect(ok).toBe(true)
-    const parsed = JSON.parse(written)
-    expect(parsed.oauthAccount).toBeUndefined()
-    expect(parsed.hasCompletedOnboarding).toBe(true)
-    expect(parsed.firstStartTime).toBe("2024-01-01T00:00:00Z")
-  })
-
-  it("returns false when ~/.claude.json doesn't exist", () => {
-    const ok = stripClaudeJsonOauthAccount({
-      home: "/tmp/fakehome",
-      readFile: () => null,
-      writeFile: () => {
-        throw new Error("should not be called")
-      },
-    })
-    expect(ok).toBe(false)
-  })
-
-  it("returns false when oauthAccount field is missing", () => {
-    const ok = stripClaudeJsonOauthAccount({
-      home: "/tmp/fakehome",
-      readFile: () => JSON.stringify({ hasCompletedOnboarding: true }),
-      writeFile: () => {
-        throw new Error("should not be called")
-      },
-    })
-    expect(ok).toBe(false)
-  })
-
-  it("returns false on malformed JSON without throwing", () => {
-    const ok = stripClaudeJsonOauthAccount({
-      home: "/tmp/fakehome",
-      readFile: () => "{not json}",
-      writeFile: () => {
-        throw new Error("should not be called")
-      },
-    })
-    expect(ok).toBe(false)
-  })
-
-  it("returns false when $HOME is empty", () => {
-    const ok = stripClaudeJsonOauthAccount({
-      home: "",
-      readFile: () => "ignored",
-      writeFile: () => {
-        throw new Error("should not be called")
-      },
-    })
-    expect(ok).toBe(false)
-  })
-})
-
 describe("runLogoutCommand", () => {
-  it("deletes keychain + strips json + reports both", async () => {
+  it("removes credentials and reports removed", async () => {
     const cap = captureOut()
-    let writtenContents = ""
-    const code = await runLogoutCommand({
-      deleteKeychain: () => true,
-      home: "/tmp/fakehome",
-      readFile: () =>
-        JSON.stringify({
-          hasCompletedOnboarding: true,
-          oauthAccount: { accountUuid: "abc" },
-        }),
-      writeFile: (_path, contents) => {
-        writtenContents = contents
-      },
-      output: cap.out,
-    })
+    const code = await runLogoutCommand({ clearCredentials: () => true, output: cap.out })
     expect(code).toBe(0)
     const t = cap.text()
-    expect(t).toContain("keychain  removed")
-    expect(t).toContain("config    stripped oauthAccount")
+    expect(t).toContain("credentials  removed")
     expect(t).toContain("Logged out")
-    expect(JSON.parse(writtenContents).oauthAccount).toBeUndefined()
   })
 
-  it("idempotent: no entries to delete still exits 0", async () => {
+  it("idempotent: nothing to remove still exits 0 with (no entry)", async () => {
     const cap = captureOut()
-    const code = await runLogoutCommand({
-      deleteKeychain: () => false,
-      home: "/tmp/fakehome",
-      readFile: () => null,
-      writeFile: () => {
-        throw new Error("should not be called")
-      },
-      output: cap.out,
-    })
+    const code = await runLogoutCommand({ clearCredentials: () => false, output: cap.out })
     expect(code).toBe(0)
     const t = cap.text()
     expect(t).toContain("(no entry)")
-    expect(t).toContain("(nothing to strip)")
+    expect(t).toContain("Logged out")
   })
 
-  it("doesn't throw when keychain delete throws — degrades gracefully", async () => {
+  it("degrades gracefully when removal throws", async () => {
     const cap = captureOut()
     const code = await runLogoutCommand({
-      deleteKeychain: () => {
-        throw new Error("security tool unavailable")
+      clearCredentials: () => {
+        throw new Error("store locked")
       },
-      home: "/tmp/fakehome",
-      readFile: () => null,
-      writeFile: () => {},
       output: cap.out,
     })
     expect(code).toBe(0)
     expect(cap.text()).toContain("warn")
-    expect(cap.text()).toContain("security tool unavailable")
+    expect(cap.text()).toContain("store locked")
+  })
+
+  it("end-to-end: clears a real store entry and is idempotent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-logout-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      writeCredentials({ claudeAiOauth: { accessToken: "AT", refreshToken: "RT" } }, store)
+      expect(store.has(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name)).toBe(true)
+
+      expect(clearCredentials(store)).toBe(true) // first removal succeeds
+      expect(clearCredentials(store)).toBe(false) // second is a no-op
+      expect(store.has(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name)).toBe(false)
+      // the file still parses (banner preserved by the store on the write)
+      expect(() => readFileSync(join(dir, "auth.jsonc"), "utf-8")).not.toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

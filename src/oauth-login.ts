@@ -17,10 +17,12 @@
  *      format from the success page, and pastes it back at our prompt.
  *   7. POST to the token endpoint with `grant_type=authorization_code`,
  *      `code`, `redirect_uri`, `client_id`, `code_verifier`, `state`.
- *   8. Persist the resulting tokens to the macOS Keychain
- *      (`Claude Code-credentials`) and merge `oauthAccount` into
- *      `~/.claude.json` so both minimal-agent and the official CLI find the
- *      same account uuid.
+ *   8. Persist the resulting tokens — access/refresh/expiry/scopes plus the
+ *      account+org uuids and email from the exchange response — into
+ *      minimal-agent's OWN credential store (`~/.minimal-agent/auth.jsonc`,
+ *      see {@link ../auth-store.ts}). We do NOT write the macOS Keychain or
+ *      `~/.claude.json`; minimal-agent is fully independent of the official
+ *      `claude` CLI's storage.
  *
  * Why manual-paste only:
  *   - No localhost HTTP listener → works inside SSH, headless containers,
@@ -40,8 +42,8 @@
 import { createHash, randomBytes } from "node:crypto"
 import {
   type CredentialsData,
+  writeCredentials as defaultWriteCredentials,
   getOauthRefreshConfig,
-  writeKeychain as defaultWriteKeychain,
 } from "./auth.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
@@ -333,49 +335,36 @@ export async function exchangeCodeForTokens(
 }
 
 // ---------------------------------------------------------------------------
-// Persistence: keychain + ~/.claude.json
+// Persistence: minimal-agent's own credential store
 // ---------------------------------------------------------------------------
 
 export interface InstallCredentialsDeps {
-  /** Override the keychain writer (tests). */
-  writeKeychain?: (data: CredentialsData, service?: string) => void
-  /** Override the ~/.claude.json updater (tests). Passed accountUuid + organizationUuid. */
-  writeClaudeJson?: (info: {
-    accountUuid: string
-    emailAddress?: string
-    organizationUuid?: string
-  }) => void
-  /** Filesystem read for ~/.claude.json (defaults to readFileSync). Tests inject. */
-  readFile?: (path: string) => string | null
-  /** Filesystem write for ~/.claude.json (defaults to writeFileSync). Tests inject. */
-  writeFile?: (path: string, contents: string) => void
-  /** Resolve $HOME (tests). */
-  home?: string
+  /**
+   * Override credential persistence (tests). Receives the assembled
+   * {@link CredentialsData}; defaults to {@link writeCredentials} from
+   * `auth.ts`, which writes the `anthropic-plan-oauth` entry into
+   * `~/.minimal-agent/auth.jsonc`.
+   */
+  writeCredentials?: (data: CredentialsData) => void
 }
 
 /**
- * Persist a successful token-exchange result into the macOS Keychain and
- * (best-effort) merge the `oauthAccount` block into `~/.claude.json`.
+ * Persist a successful token-exchange result into minimal-agent's own
+ * credential store ({@link ../auth-store.ts}). Captures everything we need to
+ * run independently of the official `claude` CLI — tokens, expiry, scopes,
+ * and the account/org uuids + email from the exchange response — so there is
+ * no dependency on the macOS Keychain or `~/.claude.json`.
  *
- * The Keychain entry uses the same shape the official CLI writes:
+ * The assembled in-memory shape is:
  *
  * ```json
  * {
  *   "claudeAiOauth": { "accessToken": "...", "refreshToken": "...", "expiresAt": ..., "scopes": [...] },
- *   "oauthAccount": { "accountUuid": "...", "organizationUuid": "..." }   // optional
+ *   "oauthAccount":  { "accountUuid": "...", "organizationUuid": "...", "emailAddress": "..." }
  * }
  * ```
  *
- * The `oauthAccount` mirror in `~/.claude.json` is what the official CLI
- * reads at startup (`y_()` → `j8().oauthAccount` at L240111-240112), so
- * keeping it in sync means the user can still run `claude` afterwards
- * without it complaining about a missing account uuid.
- *
- * `~/.claude.json` may already contain unrelated CLI state (rolepath
- * cache, settings, onboarding flags) so we **merge** rather than overwrite:
- * read existing JSON if any, layer `oauthAccount` on top, write back. If
- * the file doesn't exist or is unparseable we create a fresh one with just
- * the account block.
+ * which `writeCredentials` packs into the store's opaque secret bag.
  */
 export function installCredentials(
   resp: TokenExchangeResponse,
@@ -384,7 +373,6 @@ export function installCredentials(
   const expiresAt = Date.now() + resp.expires_in * 1000
   const scopes = (resp.scope ?? "").split(" ").filter(Boolean)
 
-  // 1. Build CredentialsData and write to keychain.
   const account = resp.account
   const organization = resp.organization
   const credentials: CredentialsData = {
@@ -397,32 +385,13 @@ export function installCredentials(
   }
   if (account || organization) {
     credentials.oauthAccount = {
-      ...(account ? { accountUuid: account.uuid, displayName: undefined } : {}),
+      ...(account ? { accountUuid: account.uuid, emailAddress: account.email_address } : {}),
       ...(organization ? { organizationUuid: organization.uuid } : {}),
     }
   }
-  const writeKc = deps.writeKeychain ?? defaultWriteKeychain
-  writeKc(credentials)
 
-  // 2. Mirror `oauthAccount` into ~/.claude.json (merge, don't clobber).
-  if (account) {
-    if (deps.writeClaudeJson) {
-      deps.writeClaudeJson({
-        accountUuid: account.uuid,
-        emailAddress: account.email_address,
-        organizationUuid: organization?.uuid,
-      })
-    } else {
-      mergeClaudeJsonOauthAccount(
-        {
-          accountUuid: account.uuid,
-          emailAddress: account.email_address,
-          organizationUuid: organization?.uuid,
-        },
-        deps,
-      )
-    }
-  }
+  const write = deps.writeCredentials ?? defaultWriteCredentials
+  write(credentials)
 
   return {
     accessToken: resp.access_token,
@@ -431,81 +400,6 @@ export function installCredentials(
     scopes,
     ...(account ? { account: { uuid: account.uuid, emailAddress: account.email_address } } : {}),
     ...(organization ? { organization: { uuid: organization.uuid } } : {}),
-  }
-}
-
-/**
- * Read `~/.claude.json` (if any), shallow-merge `oauthAccount`, and write
- * back. Safe in the face of missing/malformed files: a parse failure causes
- * us to create a minimal `{ oauthAccount }` document without losing
- * anything (because there was nothing valid to lose).
- *
- * Best-effort: a write failure logs to stderr but does not throw. Keychain
- * is the source of truth for tokens; `~/.claude.json` is only a hint for
- * `accountUuid` resolution and isn't worth aborting login over.
- *
- * Exposed (non-`export` is fine) but kept module-internal — call
- * `installCredentials` instead so tests can inject deps cleanly.
- */
-function mergeClaudeJsonOauthAccount(
-  info: {
-    accountUuid: string
-    emailAddress?: string
-    organizationUuid?: string
-  },
-  deps: InstallCredentialsDeps,
-): void {
-  const home = deps.home ?? process.env.HOME ?? ""
-  if (!home) return // no home dir → nothing safe to write
-
-  const path = `${home}/.claude.json`
-
-  let existing: Record<string, unknown> = {}
-  if (deps.readFile) {
-    const raw = deps.readFile(path)
-    if (raw) {
-      try {
-        existing = JSON.parse(raw) as Record<string, unknown>
-      } catch {
-        existing = {}
-      }
-    }
-  } else {
-    try {
-      const fs = require("node:fs") as typeof import("node:fs")
-      const raw = fs.readFileSync(path, "utf-8")
-      existing = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      existing = {}
-    }
-  }
-
-  const prevOauth = (existing.oauthAccount ?? {}) as Record<string, unknown>
-  const merged = {
-    ...existing,
-    oauthAccount: {
-      ...prevOauth,
-      accountUuid: info.accountUuid,
-      ...(info.emailAddress !== undefined ? { emailAddress: info.emailAddress } : {}),
-      ...(info.organizationUuid !== undefined ? { organizationUuid: info.organizationUuid } : {}),
-    },
-  }
-  const json = JSON.stringify(merged, null, 2)
-
-  if (deps.writeFile) {
-    deps.writeFile(path, json)
-    return
-  }
-
-  try {
-    const fs = require("node:fs") as typeof import("node:fs")
-    fs.writeFileSync(path, json, { mode: 0o600 })
-  } catch (err) {
-    process.stderr.write(
-      `warn: could not update ~/.claude.json with oauthAccount info: ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
-    )
   }
 }
 
@@ -556,8 +450,8 @@ export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: fals
  * format the error nicely without unwinding the stack. Network / unexpected
  * errors still throw — the wrapper catches them.
  *
- * Test-friendly: every I/O surface (network, browser, stdin, keychain,
- * `~/.claude.json`, randomness) goes through `LoginDeps`.
+ * Test-friendly: every I/O surface (network, browser, stdin, credential
+ * store, randomness) goes through `LoginDeps`.
  */
 export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   const oauth = getOauthRefreshConfig()

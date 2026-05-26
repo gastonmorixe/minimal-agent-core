@@ -1,11 +1,11 @@
 /**
  * `minimal-agent --auth-status` command.
  *
- * Reads the macOS Keychain credentials (without refreshing) and prints a
- * compact, human-readable summary: logged in/out, account uuid, scopes,
- * subscription type, expiry, refresh token presence. Mirrors the official
- * CLI's `claude auth status` text format roughly, but limited to the
- * fields we can resolve without making network calls.
+ * Reads minimal-agent's own credential store (`~/.minimal-agent/auth.jsonc`,
+ * without refreshing) and prints a compact, human-readable summary: logged
+ * in/out, account uuid, scopes, subscription type, expiry, refresh token
+ * presence — limited to the fields we can resolve without making network
+ * calls.
  *
  * Returns exit code 0 when logged in, 1 otherwise (matches the official
  * CLI's behavior — useful for `if minimal-agent --auth-status; then …` in
@@ -15,10 +15,10 @@
  */
 
 import { c } from "../agent.ts"
-import { type CredentialsData, readKeychain } from "../auth.ts"
+import { type CredentialsData, readCredentials } from "../auth.ts"
 
 export interface AuthStatusDeps {
-  /** Override keychain read (tests). */
+  /** Override the credential-store read (tests). */
   read?: (service?: string) => CredentialsData | null
   /** Where rows go (defaults to stderr). */
   output?: { write: (s: string) => void }
@@ -33,18 +33,14 @@ export interface AuthStatusDeps {
 export function renderAuthStatus(deps: AuthStatusDeps = {}): boolean {
   const out = deps.output ?? { write: (s: string) => process.stderr.write(s) }
   const now = deps.now ? deps.now() : Date.now()
-  const read = deps.read ?? readKeychain
+  const read = deps.read ?? readCredentials
   const creds = read()
 
   out.write(`  ${c.bold(c.pink("ⓘ"))} ${c.bold("Auth status")}\n`)
 
   if (!creds) {
     out.write(`  ${c.faintWhite("╰")} ${c.dim("not logged in")} ${c.boldYellow("✗")}\n`)
-    out.write(
-      `\n  ${c.dim(
-        "run `minimal-agent --login` to sign in, or `claude` if you prefer the official CLI.",
-      )}\n`,
-    )
+    out.write(`\n  ${c.dim("run `minimal-agent --login` to sign in.")}\n`)
     return false
   }
 
@@ -57,7 +53,7 @@ export function renderAuthStatus(deps: AuthStatusDeps = {}): boolean {
   const oauth = creds.claudeAiOauth
   if (!oauth?.accessToken) {
     out.write(
-      `  ${c.faintWhite("╰")} ${c.dim("keychain entry exists but has no access token")} ${c.boldRed("✗")}\n`,
+      `  ${c.faintWhite("╰")} ${c.dim("credential entry exists but has no access token")} ${c.boldRed("✗")}\n`,
     )
     return false
   }

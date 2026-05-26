@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { type AuthResult, readKeychain } from "./auth.ts"
+import { type AuthResult, readCredentials } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"
 import {
@@ -1178,7 +1178,7 @@ export async function* sendMessageOnce(
       // through to the refresh path.
       let recovered = false
       try {
-        const fresh = readKeychain()
+        const fresh = readCredentials()
         const freshToken = fresh?.claudeAiOauth?.accessToken
         if (freshToken && freshToken !== auth.token) {
           requestStatus.update("Auth refreshed elsewhere, retrying...", {
@@ -1933,7 +1933,7 @@ export async function checkQuota(
     if (response.status === 401 && auth.refresh) {
       let recovered = false
       try {
-        const fresh = readKeychain()
+        const fresh = readCredentials()
         const freshToken = fresh?.claudeAiOauth?.accessToken
         if (freshToken && freshToken !== auth.token) {
           auth.token = freshToken

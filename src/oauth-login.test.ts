@@ -10,8 +10,15 @@
  *   - runOAuthLogin orchestrator: success, retries, state mismatch, exhaustion
  */
 
-import { createHash } from "node:crypto"
 import { afterEach, describe, expect, it } from "bun:test"
+import { createHash } from "node:crypto"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { type CredentialsData, readCredentials, writeCredentials } from "./auth.ts"
+import { AuthStore } from "./auth-store.ts"
+import { NetworkClient, type NetworkRequest, NetworkResponse } from "./network/index.ts"
+import type { NetworkTransport } from "./network/types.ts"
 import {
   base64UrlEncode,
   buildAuthUrl,
@@ -27,9 +34,6 @@ import {
   runOAuthLogin,
   type TokenExchangeResponse,
 } from "./oauth-login.ts"
-import { NetworkClient, NetworkResponse, type NetworkRequest } from "./network/index.ts"
-import type { NetworkTransport } from "./network/types.ts"
-import type { CredentialsData } from "./auth.ts"
 
 // ---------------------------------------------------------------------------
 // Tiny helpers
@@ -330,7 +334,7 @@ describe("exchangeCodeForTokens", () => {
 // ---------------------------------------------------------------------------
 
 describe("installCredentials", () => {
-  it("writes a CredentialsData with claudeAiOauth + oauthAccount to the keychain", () => {
+  it("writes CredentialsData with claudeAiOauth + oauthAccount via writeCredentials", () => {
     let written: CredentialsData | null = null
     const resp: TokenExchangeResponse = {
       access_token: "AT",
@@ -342,10 +346,9 @@ describe("installCredentials", () => {
     }
 
     const result = installCredentials(resp, {
-      writeKeychain: (data) => {
+      writeCredentials: (data) => {
         written = data
       },
-      writeClaudeJson: () => {}, // skip the disk write in this test
     })
 
     expect(written).not.toBeNull()
@@ -355,6 +358,7 @@ describe("installCredentials", () => {
     expect(written!.claudeAiOauth?.expiresAt).toBeGreaterThan(Date.now())
     expect(written!.oauthAccount?.accountUuid).toBe("acc-uuid")
     expect(written!.oauthAccount?.organizationUuid).toBe("org-uuid")
+    expect(written!.oauthAccount?.emailAddress).toBe("u@example.com")
     expect(result.account?.uuid).toBe("acc-uuid")
     expect(result.organization?.uuid).toBe("org-uuid")
   })
@@ -367,116 +371,76 @@ describe("installCredentials", () => {
         refresh_token: "RT",
         expires_in: 60,
       } as TokenExchangeResponse,
-      { writeKeychain: () => {}, writeClaudeJson: () => {} },
+      { writeCredentials: () => {} },
     )
     const after = Date.now()
     expect(result.expiresAt).toBeGreaterThanOrEqual(before + 60_000)
     expect(result.expiresAt).toBeLessThanOrEqual(after + 60_000 + 50) // 50ms wall-clock slack
   })
 
-  it("merges oauthAccount into existing ~/.claude.json without losing other fields", () => {
-    let writtenPath = ""
-    let writtenContents = ""
+  it("omits oauthAccount entirely when the response has no account or organization", () => {
+    let written: CredentialsData | null = null
     installCredentials(
       {
         access_token: "AT",
         refresh_token: "RT",
         expires_in: 3600,
-        account: { uuid: "acc-uuid", email_address: "u@example.com" },
-        organization: { uuid: "org-uuid" },
+        // no `account`, no `organization`
       },
       {
-        writeKeychain: () => {},
-        readFile: (path) => {
-          if (path.endsWith(".claude.json")) {
-            return JSON.stringify({
-              hasCompletedOnboarding: true,
-              firstStartTime: "2024-01-01T00:00:00Z",
-              oauthAccount: { stale: "value" },
-            })
-          }
-          return null
+        writeCredentials: (data) => {
+          written = data
         },
-        writeFile: (path, contents) => {
-          writtenPath = path
-          writtenContents = contents
-        },
-        home: "/tmp/fakehome",
       },
     )
-
-    expect(writtenPath).toBe("/tmp/fakehome/.claude.json")
-    const written = JSON.parse(writtenContents)
-    expect(written.hasCompletedOnboarding).toBe(true)
-    expect(written.firstStartTime).toBe("2024-01-01T00:00:00Z")
-    expect(written.oauthAccount.accountUuid).toBe("acc-uuid")
-    expect(written.oauthAccount.emailAddress).toBe("u@example.com")
-    expect(written.oauthAccount.organizationUuid).toBe("org-uuid")
-    expect(written.oauthAccount.stale).toBe("value") // unrelated keys survive
+    expect(written).not.toBeNull()
+    expect(written!.oauthAccount).toBeUndefined()
+    expect(written!.claudeAiOauth?.accessToken).toBe("AT")
   })
 
-  it("creates ~/.claude.json from scratch when missing", () => {
-    let writtenContents = ""
+  it("records account uuid + email even without an organization", () => {
+    let written: CredentialsData | null = null
     installCredentials(
       {
         access_token: "AT",
         refresh_token: "RT",
         expires_in: 3600,
-        account: { uuid: "acc-uuid", email_address: "u@example.com" },
+        account: { uuid: "acc-only", email_address: "a@b.example" },
       },
       {
-        writeKeychain: () => {},
-        readFile: () => null,
-        writeFile: (_p, c) => {
-          writtenContents = c
+        writeCredentials: (data) => {
+          written = data
         },
-        home: "/tmp/fakehome",
       },
     )
-    const written = JSON.parse(writtenContents)
-    expect(written.oauthAccount.accountUuid).toBe("acc-uuid")
-    expect(written.oauthAccount.emailAddress).toBe("u@example.com")
+    expect(written!.oauthAccount?.accountUuid).toBe("acc-only")
+    expect(written!.oauthAccount?.emailAddress).toBe("a@b.example")
+    expect(written!.oauthAccount?.organizationUuid).toBeUndefined()
   })
 
-  it("survives a malformed existing ~/.claude.json by treating it as empty", () => {
-    let writtenContents = ""
-    installCredentials(
-      {
-        access_token: "AT",
-        refresh_token: "RT",
-        expires_in: 3600,
-        account: { uuid: "acc-uuid", email_address: "u@example.com" },
-      },
-      {
-        writeKeychain: () => {},
-        readFile: () => "{not json}",
-        writeFile: (_p, c) => {
-          writtenContents = c
+  it("persists end-to-end through a real AuthStore round-trip", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      installCredentials(
+        {
+          access_token: "AT",
+          refresh_token: "RT",
+          expires_in: 3600,
+          scope: "user:profile",
+          account: { uuid: "acc-uuid", email_address: "u@example.com" },
+          organization: { uuid: "org-uuid" },
         },
-        home: "/tmp/fakehome",
-      },
-    )
-    const written = JSON.parse(writtenContents)
-    expect(written.oauthAccount.accountUuid).toBe("acc-uuid")
-  })
-
-  it("skips ~/.claude.json update when the response has no account block", () => {
-    let touched = false
-    installCredentials(
-      {
-        access_token: "AT",
-        refresh_token: "RT",
-        expires_in: 3600,
-        // no `account`
-      },
-      {
-        writeKeychain: () => {},
-        writeClaudeJson: () => {
-          touched = true
-        },
-      },
-    )
-    expect(touched).toBe(false)
+        { writeCredentials: (data) => writeCredentials(data, store) },
+      )
+      const creds = readCredentials(store)!
+      expect(creds.claudeAiOauth?.accessToken).toBe("AT")
+      expect(creds.oauthAccount?.accountUuid).toBe("acc-uuid")
+      expect(creds.oauthAccount?.organizationUuid).toBe("org-uuid")
+      expect(creds.oauthAccount?.emailAddress).toBe("u@example.com")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -557,9 +521,8 @@ describe("runOAuthLogin", () => {
       readPaste: async () => `AUTHCODE#${orchState}`,
       randomBytes: orchestratorRand,
       install: {
-        writeKeychain: () => {},
-        writeClaudeJson: ({ accountUuid }) => {
-          installedAccount = accountUuid
+        writeCredentials: (data) => {
+          installedAccount = data.oauthAccount?.accountUuid
         },
       },
     })
@@ -612,7 +575,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
       display: (m) => messages.push(m),
-      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
+      install: { writeCredentials: () => {} },
     })
     expect(outcome.ok).toBe(true)
     expect(messages.some((m) => /Invalid code/.test(m))).toBe(true)
@@ -644,7 +607,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
       display: (m) => messages.push(m),
-      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
+      install: { writeCredentials: () => {} },
     })
     expect(outcome.ok).toBe(true)
     expect(messages.some((m) => /State mismatch/i.test(m))).toBe(true)
@@ -665,7 +628,7 @@ describe("runOAuthLogin", () => {
       readPaste: async () => "nope",
       maxAttempts: 2,
       randomBytes: orchestratorRand,
-      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
+      install: { writeCredentials: () => {} },
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) {
@@ -695,7 +658,7 @@ describe("runOAuthLogin", () => {
         networkClient: new NetworkClient({ primary: tokenSrv }),
         readPaste: async () => `BAD#${orchState}`,
         randomBytes: orchestratorRand,
-        install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
+        install: { writeCredentials: () => {} },
       }),
     ).rejects.toThrow(/invalid authorization code/i)
   })
@@ -724,7 +687,7 @@ describe("runOAuthLogin", () => {
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => `OK#${orchState}`,
       randomBytes: orchestratorRand,
-      install: { writeKeychain: () => {}, writeClaudeJson: () => {} },
+      install: { writeCredentials: () => {} },
     })
     expect(outcome.ok).toBe(true)
   })

@@ -259,7 +259,7 @@ function printHelp(): void {
     "",
     `  ${c.bold("Auth")} ${c.dim("(also as subcommands: `login`, `logout`, `auth-status`)")}`,
     `    ${c.cyan("--login")} ${c.dim("[--email <addr>]")}   Sign in via OAuth (PKCE manual-paste flow)`,
-    `    ${c.cyan("--logout")}                   Clear keychain credentials and ${c.dim("~/.claude.json")} oauthAccount`,
+    `    ${c.cyan("--logout")}                   Clear minimal-agent credentials ${c.dim("(~/.minimal-agent/auth.jsonc)")}`,
     `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
     "",
     `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
@@ -491,11 +491,12 @@ async function extractPrompt(): Promise<string | null> {
 /**
  * Wrap `getAuth()` with a first-time / stale-credentials login prompt.
  *
- * On a fresh install the keychain has no `Claude Code-credentials` entry;
- * `getAuth()` throws `"No credentials in keychain. …"`. Rather than dump
- * the user back at the shell with an error, we detect that case in
- * interactive mode (TTY on stdout AND stdin) and offer to run `--login`
- * inline. If they accept, we run the OAuth flow and retry `getAuth()`.
+ * On a fresh install minimal-agent's own store (`~/.minimal-agent/auth.jsonc`)
+ * is empty; `getAuth()` throws `"No minimal-agent credentials found …"`.
+ * Rather than dump the user back at the shell with an error, we detect that
+ * case in interactive mode (TTY on stdout AND stdin) and offer to run
+ * `--login` inline. If they accept, we run the OAuth flow and retry
+ * `getAuth()`.
  *
  * Non-interactive runs (non-TTY, `--prompt`, piped stdin) keep the current
  * "fail fast with a hint" behavior — script-friendly and predictable.
@@ -514,7 +515,9 @@ async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<typeof g
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     const looksLikeMissing =
-      /No credentials in keychain|No OAuth access token|No refresh token/i.test(msg)
+      /No minimal-agent credentials|No credentials found|No OAuth access token|No refresh token/i.test(
+        msg,
+      )
     const looksLikeStale = /invalid_grant|stale/i.test(msg)
     const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true
 
@@ -573,11 +576,19 @@ async function readSingleLineFromStdin(promptText: string): Promise<string> {
   return new Promise<string>((resolve) => {
     process.stderr.write(promptText)
     const rl = createInterface({ input: process.stdin, terminal: false })
+    // Resolve BEFORE closing + a `settled` guard: `rl.close()` emits
+    // `'close'` synchronously, so `resolve(line)` after `rl.close()` would
+    // lose the race to the close handler's `resolve("")`. Mirrors the fix in
+    // commands/login.ts's `readLine` and src/input.ts's `readFallback`.
+    let settled = false
     rl.once("line", (line) => {
-      rl.close()
+      settled = true
       resolve(line)
+      rl.close()
     })
-    rl.once("close", () => resolve(""))
+    rl.once("close", () => {
+      if (!settled) resolve("")
+    })
   })
 }
 
