@@ -1083,6 +1083,16 @@ async function main() {
   // the parent untouched (non-destructive — re-resuming the parent works
   // forever).
   //
+  // `SessionStore.fork` ALSO copies per-sid sidecar files (tasks plugin's
+  // `<sid>.tasks.jsonl`, memory plugin's `<sid>.scratch.md`, draft store's
+  // `<sid>.draft`, …) from `srcSid` to `dstSid`. Without this, sidecar
+  // plugins read from an empty file on resume even though the
+  // conversation log references their prior state (e.g. the model marks
+  // task #6 done but task #6 doesn't exist in the new file). The blob
+  // DIRECTORY is the one exception — tool results carry absolute paths
+  // into the parent's `<srcSid>.blobs/`, so blobs survive resume by
+  // reference without duplication.
+  //
   // Resume drift check emits a one-line yellow warning when system/tools
   // have changed since the parent was saved.
   const sid = getSessionId()
