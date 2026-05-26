@@ -1,89 +1,30 @@
 /**
  * `minimal-agent --logout` command.
  *
- * Mirrors the official CLI's `performLogout({ clearOnboarding: false })`
- * (see `cc-03312026-2.1.88/src/commands/logout/logout.js`) trimmed to two
- * effects:
+ * Removes minimal-agent's own credentials from its independent store
+ * (`~/.minimal-agent/auth.jsonc`, see {@link ../auth-store.ts}). It does NOT
+ * touch the macOS Keychain or `~/.claude.json` — those belong to the official
+ * `claude` CLI and minimal-agent no longer shares them, so logging out here
+ * leaves any official-CLI login completely intact.
  *
- *   1. Delete the macOS Keychain entry for `Claude Code-credentials`.
- *   2. Strip the `oauthAccount` block from `~/.claude.json` (preserve other
- *      fields — onboarding, settings, project state belongs to the official
- *      CLI and we don't touch it).
- *
- * Both steps are idempotent: running `--logout` twice in a row exits 0 the
- * second time.
+ * Idempotent: running `--logout` twice in a row exits 0 the second time
+ * (the second run simply finds nothing to remove).
  *
  * @module commands/logout
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
 import { c } from "../agent.ts"
-import { deleteKeychain } from "../auth.ts"
+import { clearCredentials } from "../auth.ts"
 
 export interface LogoutDeps {
-  /** Override keychain delete (tests). Returns `true` if a row was deleted. */
-  deleteKeychain?: () => boolean
-  /** Override fs read (tests). */
-  readFile?: (path: string) => string | null
-  /** Override fs write (tests). */
-  writeFile?: (path: string, contents: string) => void
-  /** Override $HOME (tests). */
-  home?: string
+  /**
+   * Override credential removal (tests). Returns `true` if an entry was
+   * actually removed, `false` if there was nothing to remove. Defaults to
+   * {@link clearCredentials}.
+   */
+  clearCredentials?: () => boolean
   /** Where progress / footer rows go (defaults to stderr). */
   output?: { write: (s: string) => void }
-}
-
-/**
- * Strip `oauthAccount` from `~/.claude.json` if it exists. Preserves all
- * other top-level keys. Best-effort: missing file or parse failure is
- * treated as "nothing to strip" and returns silently. Returns `true` if a
- * write actually occurred.
- */
-export function stripClaudeJsonOauthAccount(
-  deps: Pick<LogoutDeps, "readFile" | "writeFile" | "home"> = {},
-): boolean {
-  const home = deps.home ?? process.env.HOME ?? ""
-  if (!home) return false
-  const path = join(home, ".claude.json")
-
-  let raw: string | null = null
-  if (deps.readFile) {
-    raw = deps.readFile(path)
-  } else {
-    try {
-      raw = readFileSync(path, "utf-8")
-    } catch {
-      raw = null
-    }
-  }
-  if (!raw) return false
-
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    return false
-  }
-  if (!("oauthAccount" in parsed)) return false
-
-  // Use destructuring with `_` to extract+drop the field; a clean
-  // `delete parsed.oauthAccount` works too but biome dislikes the
-  // `delete` operator in strict mode.
-  const { oauthAccount: _drop, ...rest } = parsed
-  void _drop
-  const json = JSON.stringify(rest, null, 2)
-
-  if (deps.writeFile) {
-    deps.writeFile(path, json)
-  } else {
-    try {
-      writeFileSync(path, json, { mode: 0o600 })
-    } catch {
-      return false
-    }
-  }
-  return true
 }
 
 /**
@@ -92,37 +33,23 @@ export function stripClaudeJsonOauthAccount(
  */
 export async function runLogoutCommand(deps: LogoutDeps = {}): Promise<number> {
   const out = deps.output ?? { write: (s: string) => process.stderr.write(s) }
-  const del = deps.deleteKeychain ?? deleteKeychain
+  const clear = deps.clearCredentials ?? clearCredentials
 
   out.write(`  ${c.bold(c.pink("⊖"))} ${c.bold("Sign out")}\n`)
 
   let removed = false
   try {
-    removed = del()
+    removed = clear()
   } catch (err) {
     out.write(
-      `  ${c.boldYellow("warn")} keychain delete failed: ${
+      `  ${c.boldYellow("warn")} credential removal failed: ${
         err instanceof Error ? err.message : String(err)
       }\n`,
     )
   }
   out.write(
-    `  ${c.faintWhite("│")} keychain  ${removed ? c.boldGreen("removed") : c.dim("(no entry)")}\n`,
-  )
-
-  let strippedJson = false
-  try {
-    strippedJson = stripClaudeJsonOauthAccount(deps)
-  } catch (err) {
-    out.write(
-      `  ${c.boldYellow("warn")} ~/.claude.json strip failed: ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
-    )
-  }
-  out.write(
-    `  ${c.faintWhite("╰")} config    ${
-      strippedJson ? c.boldGreen("stripped oauthAccount") : c.dim("(nothing to strip)")
+    `  ${c.faintWhite("╰")} credentials  ${
+      removed ? c.boldGreen("removed") : c.dim("(no entry)")
     }\n`,
   )
 

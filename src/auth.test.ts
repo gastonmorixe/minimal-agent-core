@@ -1,61 +1,67 @@
-import { describe, it, expect } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   type CredentialsData,
-  type TokenRefreshResult,
   getAuth,
   getOauthRefreshConfig,
-  readKeychain,
+  readCredentials,
   refreshAccessToken,
+  type TokenRefreshResult,
+  writeCredentials,
 } from "./auth.ts"
+import { AuthStore } from "./auth-store.ts"
 
 describe("auth", () => {
-  describe("readKeychain", () => {
-    it("reads Claude Code credentials and returns expected shape", () => {
-      const creds = readKeychain("Claude Code-credentials")
-      // On a machine with Claude Code installed, this should succeed
-      if (!creds) {
-        console.warn("SKIP: no keychain entry found (not logged in)")
-        return
-      }
-
-      expect(creds).toHaveProperty("claudeAiOauth")
-      expect(creds.claudeAiOauth).toHaveProperty("accessToken")
-      expect(typeof creds.claudeAiOauth!.accessToken).toBe("string")
-      expect(creds.claudeAiOauth!.accessToken.length).toBeGreaterThan(10)
-
-      // Should have refresh token and expiry
-      expect(creds.claudeAiOauth).toHaveProperty("refreshToken")
-      expect(creds.claudeAiOauth).toHaveProperty("expiresAt")
-      expect(typeof creds.claudeAiOauth!.expiresAt).toBe("number")
+  describe("readCredentials / writeCredentials (store-backed)", () => {
+    let dir: string
+    let store: AuthStore
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "ma-auth-"))
+      store = new AuthStore({ path: join(dir, "auth.jsonc") })
+    })
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true })
     })
 
-    it("returns null for nonexistent service", () => {
-      const creds = readKeychain("nonexistent-service-12345")
-      expect(creds).toBeNull()
+    it("returns null when the store is empty (not logged in)", () => {
+      expect(readCredentials(store)).toBeNull()
     })
 
-    it("has oauthAccount with accountUuid (from keychain or ~/.claude.json)", () => {
-      const creds = readKeychain("Claude Code-credentials")
-      if (!creds) return
+    it("round-trips OAuth credentials through the store", () => {
+      writeCredentials(
+        {
+          claudeAiOauth: {
+            accessToken: "AT",
+            refreshToken: "RT",
+            expiresAt: 123,
+            scopes: ["user:profile", "user:inference"],
+            subscriptionType: "max",
+            rateLimitTier: "default_claude_max_20x",
+          },
+          oauthAccount: {
+            accountUuid: "abcdef01-2345-6789-abcd-ef0123456789",
+            organizationUuid: "11111111-2222-3333-4444-555555555555",
+            emailAddress: "u@example.com",
+          },
+        },
+        store,
+      )
+      const creds = readCredentials(store)!
+      expect(creds.claudeAiOauth?.accessToken).toBe("AT")
+      expect(creds.claudeAiOauth?.refreshToken).toBe("RT")
+      expect(creds.claudeAiOauth?.expiresAt).toBe(123)
+      expect(creds.claudeAiOauth?.scopes).toEqual(["user:profile", "user:inference"])
+      expect(creds.claudeAiOauth?.subscriptionType).toBe("max")
+      expect(creds.oauthAccount?.accountUuid).toBe("abcdef01-2345-6789-abcd-ef0123456789")
+      expect(creds.oauthAccount?.organizationUuid).toBe("11111111-2222-3333-4444-555555555555")
+      expect(creds.oauthAccount?.emailAddress).toBe("u@example.com")
+    })
 
-      // oauthAccount may be in keychain or in ~/.claude.json depending on version
-      if (creds.oauthAccount?.accountUuid) {
-        expect(creds.oauthAccount.accountUuid).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-        )
-      } else {
-        // Read from ~/.claude.json instead
-        const { readFileSync } = require("node:fs")
-        const { join } = require("node:path")
-        try {
-          const config = JSON.parse(readFileSync(join(process.env.HOME, ".claude.json"), "utf-8"))
-          expect(config.oauthAccount?.accountUuid).toMatch(
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-          )
-        } catch {
-          console.warn("SKIP: no accountUuid in keychain or ~/.claude.json")
-        }
-      }
+    it("round-trips an API-key credential", () => {
+      writeCredentials({ apiKey: "sk-ant-xyz" }, store)
+      expect(readCredentials(store)).toEqual({ apiKey: "sk-ant-xyz" })
     })
   })
 
@@ -147,10 +153,9 @@ describe("auth", () => {
       })
 
       await expect(auth.refresh!()).rejects.toThrow(/invalid_grant/)
-      // Hint mentions both `--login` (preferred) and `claude` (fallback) so
-      // grepping for either substring continues to work.
-      await expect(auth.refresh!()).rejects.toThrow(/--login/)
-      await expect(auth.refresh!()).rejects.toThrow(/claude/)
+      // Hint points at our own `minimal-agent --login`; we no longer mention
+      // the official `claude` CLI since storage is fully independent.
+      await expect(auth.refresh!()).rejects.toThrow(/minimal-agent --login/)
     })
 
     it("doRefresh skips the server call when keychain already has a fresher token", async () => {

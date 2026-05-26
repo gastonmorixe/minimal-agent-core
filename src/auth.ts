@@ -1,43 +1,62 @@
 /**
- * Auth module: macOS Keychain access + OAuth token refresh.
+ * Auth module: credential resolution + OAuth token refresh.
  *
- * The Claude Code CLI stores credentials in the macOS Keychain under a
- * service name constructed by `HE()` (cli.pretty.js L129869-129875):
+ * ───────────────────────────────────────────────────────────────────────────
+ *  STORAGE: fully independent, no sharing with the official `claude` CLI
+ * ───────────────────────────────────────────────────────────────────────────
+ * minimal-agent stores credentials in its OWN file via {@link AuthStore}
+ * (`~/.minimal-agent/auth.jsonc`). It does NOT touch the macOS Keychain entry
+ * `Claude Code-credentials` nor the `oauthAccount` block in `~/.claude.json`
+ * that the official CLI uses — that sharing is gone. The two tools log in,
+ * refresh, and log out completely independently.
  *
- *     `Claude Code${OAUTH_FILE_SUFFIX}${suffix}${configDirHash}`
+ * This module is, for now, the sole consumer of the generic auth store and
+ * effectively plays the role of the *one* provider that exists today:
  *
- * For standard first-party (claude.ai) OAuth, OAUTH_FILE_SUFFIX is "" and
- * the suffix is "-credentials" (var `Z_6` at L129905), giving us:
+ *     id   = "anthropic-plan-oauth"        (the slug an auth plugin will match)
+ *     name = "Anthropic Plan (OAuth)"      (the human label shown in a TUI)
  *
- *     "Claude Code-credentials"
+ * i.e. Anthropic, authenticated via the Claude Pro/Max subscription OAuth
+ * flow. When auth becomes a plugin surface (multiple providers, each with its
+ * own credential mechanics), the provider-specific bits below — the secret-bag
+ * shape, the refresh grant, the scopes — move into a plugin keyed by that
+ * slug, and {@link AuthStore} stays exactly as it is. Everything here is
+ * written with that future in mind: the store never sees Anthropic-specific
+ * fields; only this file knows how to pack/unpack the opaque secret bag.
  *
- * The keychain entry is read via `security find-generic-password` using the
- * current $USER as the account name (function `fB9()` at L238740-238761).
- *
- * The stored JSON has this shape (confirmed via `security find-generic-password -s "Claude Code-credentials" -w`):
+ * SECRET BAG SHAPE (private to this "provider", opaque to the store):
  *
  *     {
- *       claudeAiOauth: {
- *         accessToken: "sk-ant-oat01-...",
- *         refreshToken: "sk-ant-ort01-...",
- *         expiresAt: 1774880291250,        // ms since epoch
- *         scopes: ["user:profile", ...],
- *         subscriptionType: "max",
- *         rateLimitTier: "default_claude_max_20x"
- *       }
+ *       "tokenType": "oauth" | "api-key",
+ *       // oauth:
+ *       "accessToken": "sk-ant-oat01-…",
+ *       "refreshToken": "sk-ant-ort01-…",
+ *       "expiresAt": 1774880291250,           // ms since epoch
+ *       "scopes": ["user:profile", …],
+ *       "subscriptionType": "max",
+ *       "rateLimitTier": "default_claude_max_20x",
+ *       "accountUuid": "…",
+ *       "organizationUuid": "…",
+ *       "displayName": "…",
+ *       "emailAddress": "…",
+ *       // api-key:
+ *       "apiKey": "sk-ant-…"
  *     }
  *
- * Note: `oauthAccount` (containing accountUuid) is stored in ~/.claude.json,
- * NOT in the keychain. This was confirmed by inspecting the keychain entry
- * which only has `claudeAiOauth` at the top level. The CLI reads accountUuid
- * from its config via `y_()` → `j8().oauthAccount` (L240111-240112).
+ * Account info (uuid/org/email) used to live in `~/.claude.json`; now we
+ * capture it from the OAuth token-exchange response at login time and persist
+ * it in our own secret bag, so nothing depends on the official CLI's files.
  *
- * Token refresh uses the standard OAuth2 refresh_token grant, hitting
- * the same endpoint the CLI uses: `BB6()` at L129419-129489.
+ * Token refresh uses the standard OAuth2 refresh_token grant against the
+ * same first-party endpoint the official CLI uses (`BB6()` at
+ * cli.pretty.js L129419-129489).
+ *
+ * @module auth
  */
 
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import { withLock } from "./lockfile.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
@@ -46,11 +65,14 @@ import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 // ---------------------------------------------------------------------------
 
 /**
- * Keychain service name for standard first-party OAuth.
- * Constructed by `HE("-credentials")` at L238742 which calls `HE()` at L129869.
- * For non-custom CLAUDE_CONFIG_DIR installs, this is always "Claude Code-credentials".
+ * The single provider minimal-agent ships with today. `id` is the stable
+ * slug a future auth plugin will claim; `name` is the display label. See the
+ * module doc for the future-plugins rationale.
  */
-const KEYCHAIN_SERVICE = "Claude Code-credentials"
+export const ANTHROPIC_PLAN_OAUTH = {
+  id: "anthropic-plan-oauth",
+  name: "Anthropic Plan (OAuth)",
+} as const
 
 /**
  * Current first-party OAuth client id from Claude Code v2.1.104 source.
@@ -89,9 +111,10 @@ const OAUTH_SCOPES = [
  */
 const EXPIRY_BUFFER_MS = 60_000
 
-function sanitizeServiceName(service: string): string {
-  const sanitized = service.replace(/[^A-Za-z0-9._-]+/g, "_")
-  return sanitized.length > 0 ? sanitized : "service"
+/** Sanitize a provider id into a safe lockfile name component. */
+function sanitizeForFilename(id: string): string {
+  const sanitized = id.replace(/[^A-Za-z0-9._-]+/g, "_")
+  return sanitized.length > 0 ? sanitized : "provider"
 }
 
 // ---------------------------------------------------------------------------
@@ -99,12 +122,14 @@ function sanitizeServiceName(service: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Shape of the JSON stored in the macOS Keychain under "Claude Code-credentials".
+ * In-memory representation of a resolved credential, shared by `getAuth`,
+ * the login installer, `--auth-status`, and the client's 401 retry path.
  *
- * The CLI writes this via its credential store backend (L238956-238964 for
- * plaintext fallback, or keychain backend `BD7` at L238747-238758 for macOS).
- * Only `claudeAiOauth` is stored in the keychain. `oauthAccount` data lives
- * in ~/.claude.json and is NOT part of the keychain entry (verified empirically).
+ * This nested shape (claudeAiOauth + oauthAccount) is retained as the
+ * *internal* contract those consumers were written against; it is mapped
+ * to/from the flat, opaque secret bag the {@link AuthStore} persists by
+ * {@link credentialsToSecrets} / {@link secretsToCredentials}. It is no
+ * longer tied to any on-disk format owned by another tool.
  */
 export interface CredentialsData {
   apiKey?: string
@@ -119,14 +144,11 @@ export interface CredentialsData {
     /** e.g. "default_claude_max_20x" — cached rate limit tier */
     rateLimitTier?: string
   }
-  /**
-   * May be present in some keychain entries (older CLI versions stored it here),
-   * but in v2.1.87 this lives in ~/.claude.json instead.
-   */
   oauthAccount?: {
     accountUuid?: string
     organizationUuid?: string
     displayName?: string
+    emailAddress?: string
   }
 }
 
@@ -156,80 +178,106 @@ export interface OAuthRefreshConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Keychain read/write
+// Secret-bag <-> CredentialsData mapping (the "provider" codec)
 // ---------------------------------------------------------------------------
 
 /**
- * Read credentials from the macOS Keychain.
- *
- * Uses `security find-generic-password -s <service> -w` which prints
- * the password (the stored JSON blob) to stdout. This matches the CLI's
- * `fB9()` function at L238740-238761.
- *
- * The `-a` (account) flag is NOT used here because the CLI's stored entry
- * uses the $USER at write time, and `-w` without `-a` works when there's
- * only one entry for the service. The CLI itself uses `-a $USER` for reads
- * (L238806), but omitting it is equivalent on single-user machines.
+ * Pack {@link CredentialsData} into the flat secret bag the store persists.
+ * `undefined` fields are dropped so the JSON stays tidy. This is the only
+ * place that knows the bag's field names — i.e. the provider's private wire
+ * format inside the otherwise-opaque store.
  */
-export function readKeychain(service: string = KEYCHAIN_SERVICE): CredentialsData | null {
-  const result = Bun.spawnSync(["security", "find-generic-password", "-s", service, "-w"])
-
-  if (result.exitCode !== 0) return null
-
-  const raw = result.stdout.toString().trim()
-  if (!raw) return null
-
-  try {
-    return JSON.parse(raw) as CredentialsData
-  } catch {
-    return null
+export function credentialsToSecrets(data: CredentialsData): SecretBag {
+  const bag: SecretBag = {}
+  if (data.apiKey) {
+    bag.tokenType = "api-key"
+    bag.apiKey = data.apiKey
+    return bag
   }
+  const o = data.claudeAiOauth
+  bag.tokenType = "oauth"
+  if (o) {
+    if (o.accessToken !== undefined) bag.accessToken = o.accessToken
+    if (o.refreshToken !== undefined) bag.refreshToken = o.refreshToken
+    if (o.expiresAt !== undefined) bag.expiresAt = o.expiresAt
+    if (o.scopes !== undefined) bag.scopes = o.scopes
+    if (o.subscriptionType !== undefined) bag.subscriptionType = o.subscriptionType
+    if (o.rateLimitTier !== undefined) bag.rateLimitTier = o.rateLimitTier
+  }
+  const a = data.oauthAccount
+  if (a) {
+    if (a.accountUuid !== undefined) bag.accountUuid = a.accountUuid
+    if (a.organizationUuid !== undefined) bag.organizationUuid = a.organizationUuid
+    if (a.displayName !== undefined) bag.displayName = a.displayName
+    if (a.emailAddress !== undefined) bag.emailAddress = a.emailAddress
+  }
+  return bag
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined
+}
+function num(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined
+}
+function strArr(v: unknown): string[] | undefined {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined
+}
+
+/** Unpack a stored secret bag back into {@link CredentialsData}. */
+export function secretsToCredentials(bag: SecretBag): CredentialsData {
+  if (bag.tokenType === "api-key" || (bag.apiKey != null && bag.tokenType !== "oauth")) {
+    return { apiKey: str(bag.apiKey) ?? "" }
+  }
+  const data: CredentialsData = {
+    claudeAiOauth: {
+      accessToken: str(bag.accessToken) ?? "",
+      refreshToken: str(bag.refreshToken),
+      expiresAt: num(bag.expiresAt),
+      scopes: strArr(bag.scopes),
+      subscriptionType: str(bag.subscriptionType),
+      rateLimitTier: str(bag.rateLimitTier),
+    },
+  }
+  const accountUuid = str(bag.accountUuid)
+  const organizationUuid = str(bag.organizationUuid)
+  const displayName = str(bag.displayName)
+  const emailAddress = str(bag.emailAddress)
+  if (accountUuid || organizationUuid || displayName || emailAddress) {
+    data.oauthAccount = { accountUuid, organizationUuid, displayName, emailAddress }
+  }
+  return data
+}
+
+// ---------------------------------------------------------------------------
+// Store-backed read/write/clear for the current provider
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the current provider's credentials from the auth store, or `null` when
+ * not logged in. Used by `getAuth`, `--auth-status`, and the client's
+ * 401 peer-detection path.
+ */
+export function readCredentials(store: AuthStore = defaultAuthStore()): CredentialsData | null {
+  const bag = store.getSecrets(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name)
+  if (!bag) return null
+  return secretsToCredentials(bag)
+}
+
+/** Persist the current provider's credentials into the auth store. */
+export function writeCredentials(
+  data: CredentialsData,
+  store: AuthStore = defaultAuthStore(),
+): void {
+  store.set(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name, credentialsToSecrets(data))
 }
 
 /**
- * Write credentials back to the macOS Keychain.
- *
- * Used after a token refresh to persist the new access/refresh tokens.
- * The CLI does this in its credential store backend — we replicate it
- * with delete-then-add because `security` doesn't support in-place updates.
+ * Remove the current provider's credentials (logout). Returns `true` if an
+ * entry was removed, `false` if there was nothing to remove (idempotent).
  */
-export function writeKeychain(data: CredentialsData, service: string = KEYCHAIN_SERVICE): void {
-  const user = process.env.USER ?? Bun.spawnSync(["whoami"]).stdout.toString().trim()
-  const json = JSON.stringify(data)
-
-  // Delete existing entry (ignore errors if it doesn't exist)
-  Bun.spawnSync(["security", "delete-generic-password", "-a", user, "-s", service])
-
-  // Add new entry
-  const result = Bun.spawnSync([
-    "security",
-    "add-generic-password",
-    "-a",
-    user,
-    "-s",
-    service,
-    "-w",
-    json,
-  ])
-
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to write keychain: ${result.stderr.toString()}`)
-  }
-}
-
-/**
- * Delete the keychain entry, if any. Returns `true` when a row was deleted,
- * `false` when no matching entry existed (also non-fatal).
- *
- * Used by the `--logout` command. Mirrors the CLI's `performLogout()` flow,
- * which is essentially `security delete-generic-password` plus a config strip.
- */
-export function deleteKeychain(service: string = KEYCHAIN_SERVICE): boolean {
-  const user = process.env.USER ?? Bun.spawnSync(["whoami"]).stdout.toString().trim()
-  const result = Bun.spawnSync(["security", "delete-generic-password", "-a", user, "-s", service])
-  // `security` returns non-zero when there's no entry to delete; treat that
-  // as "already logged out" rather than an error so logout is idempotent.
-  return result.exitCode === 0
+export function clearCredentials(store: AuthStore = defaultAuthStore()): boolean {
+  return store.remove(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name)
 }
 
 /**
@@ -310,61 +358,30 @@ export async function refreshAccessToken(
 // ---------------------------------------------------------------------------
 
 /**
- * Read accountUuid from ~/.claude.json.
- *
- * In v2.1.87, the CLI stores oauthAccount data in its config file
- * (the path resolved by `aM()` at L45457-45462), NOT in the keychain.
- * The keychain only stores `claudeAiOauth` (tokens + subscription info).
- *
- * The config path is `~/.claude.json` by default (or `~/.claude/.config.json`
- * if it exists, checked at L45458). We read `oauthAccount.accountUuid` from
- * there, which is needed for the metadata.user_id field.
- *
- * @see cli.pretty.js L240111-240112: `y_() → sH() ? j8().oauthAccount : void 0`
- */
-function readAccountUuidFromConfig(): string | undefined {
-  try {
-    const { readFileSync } = require("node:fs")
-    const { join } = require("node:path")
-    const raw = readFileSync(join(process.env.HOME ?? "", ".claude.json"), "utf-8")
-    const config = JSON.parse(raw) as {
-      oauthAccount?: { accountUuid?: string; organizationUuid?: string }
-    }
-    return config.oauthAccount?.accountUuid
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Get authentication credentials, auto-refreshing if the token is expired.
- *
- * Flow:
- *   1. Read keychain → get claudeAiOauth.accessToken + expiresAt
- *   2. Read ~/.claude.json → get oauthAccount.accountUuid
- *   3. If expiresAt is within EXPIRY_BUFFER_MS of now, refresh proactively
- *   4. Return AuthResult with a `refresh` closure for 401 retry
- *
- * The refresh closure updates the keychain with new tokens so subsequent
- * calls (and other processes reading the keychain) get the fresh token.
- */
-/**
  * Injectable dependencies for {@link getAuth}. Production callers can omit
- * this; tests pass mocks to drive keychain/refresh behavior deterministically.
+ * this; tests pass mocks to drive store/refresh behavior deterministically.
+ *
+ * `read`/`write` operate on {@link CredentialsData}. Their defaults read and
+ * write the auth store for the current provider; tests inject in-memory
+ * fakes and never touch the filesystem.
  */
 export interface GetAuthDeps {
-  read?: (service: string) => CredentialsData | null
-  write?: (data: CredentialsData, service: string) => void
+  read?: (providerId: string) => CredentialsData | null
+  write?: (data: CredentialsData, providerId: string) => void
   refresh?: (refreshToken: string) => Promise<TokenRefreshResult>
 }
 
 /**
- * Resolve OAuth credentials and return an `AuthResult` with a token plus a
- * lazy `refresh` closure. Re-reads the keychain on every refresh so that
- * cross-process rotation (e.g. by the official `claude` CLI) is honored.
+ * Resolve credentials and return an `AuthResult` with a token plus a lazy
+ * `refresh` closure. Re-reads the store on every refresh so that
+ * cross-process rotation (another minimal-agent process refreshing under the
+ * shared advisory lock) is honored.
+ *
+ * @param providerId Provider slug to resolve (defaults to the one provider we
+ *   ship with). Also used to key the per-provider refresh lockfile.
  */
 export async function getAuth(
-  service: string = KEYCHAIN_SERVICE,
+  providerId: string = ANTHROPIC_PLAN_OAUTH.id,
   deps: GetAuthDeps = {},
 ): Promise<AuthResult> {
   if (process.env.MINIMAL_AGENT_TEST_AUTH === "1") {
@@ -375,14 +392,16 @@ export async function getAuth(
     return { type: "oauth", token: "test-token", accountUuid: "test-account" }
   }
 
-  const read = deps.read ?? readKeychain
-  const write = deps.write ?? writeKeychain
+  const read = deps.read ?? ((_id: string) => readCredentials())
+  const write = deps.write ?? ((data: CredentialsData, _id: string) => writeCredentials(data))
   const refreshFn = deps.refresh ?? refreshAccessToken
+  const service = providerId
 
   const creds = read(service)
   if (!creds) {
     throw new Error(
-      "No credentials in keychain. Run `minimal-agent --login` (or `claude`) to sign in.",
+      "No minimal-agent credentials found (~/.minimal-agent/auth.jsonc). " +
+        "Run `minimal-agent --login` to sign in.",
     )
   }
 
@@ -394,15 +413,14 @@ export async function getAuth(
   const oauth = creds.claudeAiOauth
   if (!oauth?.accessToken) {
     throw new Error(
-      "No OAuth access token found in keychain. Run `minimal-agent --login` to sign in.",
+      "No OAuth access token found in the auth store. Run `minimal-agent --login` to sign in.",
     )
   }
 
-  // accountUuid: try keychain first (older versions), fall back to ~/.claude.json
-  const accountUuid = creds.oauthAccount?.accountUuid ?? readAccountUuidFromConfig()
+  const accountUuid = creds.oauthAccount?.accountUuid
   const organizationUuid = creds.oauthAccount?.organizationUuid
 
-  // Build a refresh closure that re-reads the keychain on every call AND
+  // Build a refresh closure that re-reads the store on every call AND
   // coordinates with other processes via a cross-process advisory lock.
   //
   // Why re-read instead of using the closed-over `oauth` snapshot:
@@ -410,65 +428,57 @@ export async function getAuth(
   //      our snapshot still holds the OLD one. A second refresh later in
   //      the same long-running session would resend the old RT and get
   //      `invalid_grant` from the server.
-  //   2. Another process (e.g. the official `claude` CLI) may rotate the
-  //      keychain entry while we are idle. Reading fresh picks that up.
+  //   2. Another minimal-agent process may rotate the store entry while we
+  //      are idle. Reading fresh picks that up.
   // Both modes produce the same "Refresh token not found or invalid"
   // 400 from /v1/oauth/token; both are fixed by reading current state.
   //
   // Why the lockfile (May 2026): with N concurrent agent processes
-  // sharing one keychain entry, server-side refresh-token rotation makes
+  // sharing one store entry, server-side refresh-token rotation makes
   // every successful refresh by ANY process invalidate the access tokens
   // cached by the OTHER N-1. They each 401 next, refresh in parallel,
-  // and the storm never settles. With 100s of agents the symptom is a
-  // constant `󰌾 Auth refreshed, resuming...` flash in every live area.
-  // Net-dbg trace from session c0ab6ba6: 24/105 requests (23%) returned
-  // 401 with 1:1 refresh ratio. The fix is to serialize refreshes
-  // through a lockfile in `~/.minimal-agent/.refresh-<service>.lock`:
+  // and the storm never settles. The fix is to serialize refreshes
+  // through a lockfile in `~/.minimal-agent/.refresh-<provider>.lock`:
   //
   //   1. Acquire the lock (or time out at 5s → fall through to refresh
   //      anyway; better to thrash than block forever).
-  //   2. RE-READ keychain UNDER the lock. If the access token there
+  //   2. RE-READ the store UNDER the lock. If the access token there
   //      differs from what we last issued, another process just
   //      finished refreshing — use their fresh token, no server call,
   //      no rotation.
-  //   3. Otherwise actually refresh, write keychain.
+  //   3. Otherwise actually refresh, write the store.
   //
   // For 100 agents at typical traffic this collapses N concurrent
-  // refreshes per "true expiry" event into 1 — steady-state refresh
-  // rate drops from O(agents × traffic) to O(traffic / token_TTL).
+  // refreshes per "true expiry" event into 1.
   //
   // `lastIssuedToken` is the closure-captured "what this auth pipe
   // most recently observed/issued". Initialized to the first read in
   // getAuth, advanced on every successful refresh AND on every
-  // skip-via-keychain. The compare in step 2 uses it as the "is the
-  // keychain newer than what I have?" signal. Without `lastIssuedToken`
-  // we'd compare against `oauth.accessToken` (frozen at session start)
-  // and incorrectly classify our own already-issued refresh as "newer
-  // than us".
+  // skip-via-store.
   let lastIssuedToken = oauth.accessToken
   let lastIssuedRefreshToken = oauth.refreshToken
   let lastIssuedExpiresAt = oauth.expiresAt ?? 0
   const lockPath = join(
     homedir(),
     ".minimal-agent",
-    `.refresh-${sanitizeServiceName(service)}.lock`,
+    `.refresh-${sanitizeForFilename(service)}.lock`,
   )
 
   const doRefreshUnlocked = async (): Promise<AuthResult> => {
     const current = read(service) ?? creds
     const currentOauth = current.claudeAiOauth
 
-    // Keychain may already hold a fresher token (another process refreshed
+    // The store may already hold a fresher token (another process refreshed
     // while we were waiting on the lock). Use it directly — no server
     // round-trip, no rotation, no race propagation.
-    const keychainHasNewerToken =
+    const storeHasNewerToken =
       currentOauth?.accessToken &&
       currentOauth.accessToken !== lastIssuedToken &&
       (currentOauth.refreshToken != null
         ? currentOauth.refreshToken !== lastIssuedRefreshToken
         : currentOauth.expiresAt != null && currentOauth.expiresAt > lastIssuedExpiresAt)
 
-    if (keychainHasNewerToken) {
+    if (storeHasNewerToken) {
       lastIssuedToken = currentOauth.accessToken
       lastIssuedRefreshToken = currentOauth.refreshToken
       lastIssuedExpiresAt = currentOauth.expiresAt ?? 0
@@ -482,9 +492,7 @@ export async function getAuth(
     }
 
     if (!currentOauth?.refreshToken) {
-      throw new Error(
-        "No refresh token available. Run `minimal-agent --login` (or `claude`) to sign in.",
-      )
+      throw new Error("No refresh token available. Run `minimal-agent --login` to sign in.")
     }
 
     let refreshed: TokenRefreshResult
@@ -495,14 +503,14 @@ export async function getAuth(
       if (msg.includes("invalid_grant")) {
         throw new Error(
           "Refresh token rejected by server (invalid_grant). " +
-            "Run `minimal-agent --login` (or `claude`) to re-login.",
+            "Run `minimal-agent --login` to re-login.",
           { cause: e },
         )
       }
       throw e
     }
 
-    // Update keychain with new tokens so other processes see them too
+    // Update the store with new tokens so other processes see them too.
     const updated: CredentialsData = {
       ...current,
       claudeAiOauth: {
@@ -527,8 +535,7 @@ export async function getAuth(
   }
 
   const doRefresh = async (): Promise<AuthResult> => {
-    // Skip the lock entirely under the test-only env flag (some tests
-    // inject fake `read`/`write`/`refresh` deps and don't want to
+    // Skip the lock entirely when fakes are injected (tests don't want to
     // touch the real filesystem at all).
     if (deps.read || deps.write || deps.refresh) {
       return await doRefreshUnlocked()
@@ -537,9 +544,9 @@ export async function getAuth(
     if (result.ok) return result.value
     // Lock acquisition timed out (5s without progress). Fall through to
     // an unlocked refresh — uncoordinated, but better than blocking
-    // forever. The keychain re-read in `doRefreshUnlocked` still gives
-    // us the keychain-first benefit if another process happened to
-    // finish writing while we were waiting.
+    // forever. The store re-read in `doRefreshUnlocked` still gives us
+    // the store-first benefit if another process happened to finish
+    // writing while we were waiting.
     return await doRefreshUnlocked()
   }
 

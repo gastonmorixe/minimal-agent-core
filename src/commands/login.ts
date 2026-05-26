@@ -16,7 +16,7 @@
 
 import { createInterface } from "node:readline"
 import { c } from "../agent.ts"
-import { runOAuthLogin, type LoginInstallResult, type LoginOutcome } from "../oauth-login.ts"
+import { type LoginInstallResult, type LoginOutcome, runOAuthLogin } from "../oauth-login.ts"
 
 /**
  * Open a URL in the user's default browser. Returns `true` on success,
@@ -77,8 +77,16 @@ export interface LoginCommandOptions {
  *
  * Caveat: on a piped stdin, this reads up to the first newline and returns;
  * EOF before a newline returns whatever was read (or "" for an empty pipe).
+ *
+ * `input` / `output` are injectable for tests (a `PassThrough` pair drives
+ * the line/close ordering deterministically without a real TTY); production
+ * defaults to `process.stdin` / `process.stderr`.
  */
-async function readLine(promptText: string): Promise<string> {
+export async function readLine(
+  promptText: string,
+  input: NodeJS.ReadableStream & { isTTY?: boolean } = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+): Promise<string> {
   return new Promise<string>((resolve) => {
     // Output the prompt + read from stdin via readline. We aim the
     // readline output at stderr to match the rest of our UI rows (the
@@ -88,18 +96,31 @@ async function readLine(promptText: string): Promise<string> {
     // never writes anything meaningful to stdout, so a redirect like
     // `--login > /tmp/x` shouldn't capture UI noise).
     const rl = createInterface({
-      input: process.stdin,
-      output: process.stderr,
-      terminal: process.stderr.isTTY ?? false,
+      input,
+      output,
+      // `terminal` describes the INPUT stream (whether to do raw-mode line
+      // editing), so it must reflect the input's TTY-ness — NOT stderr's.
+      // The old `process.stderr.isTTY` was the wrong stream: harmless when
+      // both are the same TTY, but conceptually backwards and a latent bug
+      // when they diverge (e.g. stdin a TTY, stderr redirected).
+      terminal: input.isTTY ?? false,
     })
     rl.setPrompt(promptText)
     rl.prompt()
+    // `settled` + resolve-before-close: `rl.close()` emits `'close'`
+    // SYNCHRONOUSLY, so a `resolve(line)` placed *after* `rl.close()` loses
+    // the race to the close handler's `resolve("")` — the captured line is
+    // silently dropped and the caller sees an empty paste ("no code
+    // pasted"). Resolving first and guarding the close path fixes it. Same
+    // shape as `readFallback` in src/input.ts.
+    let settled = false
     rl.once("line", (line) => {
-      rl.close()
+      settled = true
       resolve(line)
+      rl.close()
     })
     rl.once("close", () => {
-      resolve("")
+      if (!settled) resolve("")
     })
   })
 }

@@ -15,6 +15,10 @@ tmp/
 .net-dbg/
 .node-net-dbg/
 *.log
+# stray scratch / captured tool output (raw response bodies + captured stderr).
+# Curated copies live under private/research/, already ignored above.
+*.raw
+*.stderr
 
 # editor / OS
 .DS_Store
