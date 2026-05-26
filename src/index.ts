@@ -85,6 +85,7 @@ import {
 } from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
 import { SessionStore, shortHash } from "./session-store.ts"
+import { BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
@@ -1035,6 +1036,12 @@ async function main() {
   // If we later add CLI flags or config-file knobs for these values, both
   // call sites must thread the same value : the buildSystemPrompt arg here
   // and the Agent constructor opt at the session-startup point further down.
+  // Resolve blob-store enablement BEFORE the hash so the resume drift
+  // detector treats "blob store on" vs "blob store off" as distinct
+  // prefix shapes. Cheap (config loader is memoized) and matches the
+  // "thread the same value to buildSystemPrompt and the Agent" rule
+  // documented in the comment above.
+  const blobStoreEnabled = loadBlobStoreConfig().config.enabled
   const systemForHash = sessionContextForHash
     ? JSON.stringify(
         buildSystemPrompt({
@@ -1042,6 +1049,7 @@ async function main() {
           reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
           reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
           maxToolRounds: Number.POSITIVE_INFINITY,
+          blobStoreEnabled,
         }),
       )
     : ""
@@ -1103,6 +1111,28 @@ async function main() {
     // will work without a store (just no resume for THIS session).
     console.error(
       `  ${c.boldYellow("warn")} session store unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  // Per-session blob store for raw tool outputs. Lives at
+  // `~/.minimal-agent/sessions/<sid>.blobs/`, populated lazily as tools
+  // emit large or truncated bodies. Best-effort like the session store:
+  // a missing or disabled blob store means tool results still flow,
+  // just without the `[raw-output: …]` footer pointer. The config gates
+  // (enabled, minBytesToPersist, max caps, skipTools, env opt-out) are
+  // resolved here and frozen for the session.
+  let blobStore: BlobStore | null = null
+  try {
+    const { config: blobConfig } = loadBlobStoreConfig()
+    if (blobConfig.enabled) {
+      blobStore = new BlobStore({
+        sid,
+        config: blobConfig,
+      })
+    }
+  } catch (err) {
+    console.error(
+      `  ${c.boldYellow("warn")} blob store unavailable: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
 
@@ -1196,6 +1226,7 @@ async function main() {
     shortTermSnapshot,
     tasksAttachment,
     store,
+    blobStore,
     initialMessages,
     toolTimeTracker,
   })

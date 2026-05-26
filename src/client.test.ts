@@ -139,6 +139,37 @@ describe("client", () => {
       })
     })
 
+    describe("buildSystemPrompt — tool output conventions paragraph", () => {
+      it("default config OMITS the raw-output conventions paragraph (legacy prompt shape)", () => {
+        const blocks = buildSystemPrompt()
+        const sys2 = blocks[2].text
+        expect(sys2).not.toContain("# Tool output conventions")
+        expect(sys2).not.toContain("[raw-output:")
+      })
+
+      it("blobStoreEnabled=true appends a one-paragraph conventions section", () => {
+        const blocks = buildSystemPrompt({ blobStoreEnabled: true })
+        const sys2 = blocks[2].text
+        expect(sys2).toContain("# Tool output conventions")
+        expect(sys2).toContain("[raw-output: <abs-path>")
+        expect(sys2).toContain("`Read({file_path: ...})`")
+        // The blurb mentions what triggers persistence: large OR clamped.
+        expect(sys2).toMatch(/large or got clamped/i)
+        // Section comes AFTER the loop-safety paragraph (loop safety is
+        // higher priority, conventions are reference material).
+        const safetyIdx = sys2.indexOf("# Tool-use loop safety")
+        const convIdx = sys2.indexOf("# Tool output conventions")
+        expect(safetyIdx).toBeGreaterThan(-1)
+        expect(convIdx).toBeGreaterThan(safetyIdx)
+      })
+
+      it("blobStoreEnabled=false (explicit) matches the default-off case byte-for-byte", () => {
+        const a = buildSystemPrompt({ blobStoreEnabled: false })[2].text
+        const b = buildSystemPrompt()[2].text
+        expect(a).toBe(b)
+      })
+    })
+
     it("conversation request body matches 2.1.118 wire shape", async () => {
       // Empirical verification of tasks #3-#7: capture the actual JSON body
       // sent to /v1/messages and assert it carries (a) cache_control with

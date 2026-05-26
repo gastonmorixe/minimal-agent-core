@@ -57,12 +57,18 @@ import type { ManifestMode, ResolvedLiveAreaSlot } from "./plugins/types.ts"
 import { buildQueueDecorationLines } from "./queue-decoration.ts"
 import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
 import type { SessionStore } from "./session-store.ts"
+import {
+  type BlobStore,
+  type BlobWriteResult,
+  formatRawOutputFooter,
+  loadBlobStoreConfig,
+} from "./blob-store.ts"
 import type { Spinner } from "./spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "./status.ts"
 import { displayWidth, expandTabs, truncateDisplayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
-import type { TruncationInfo } from "./tools/truncation.ts"
+import { type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
 import { executeTool, TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
 import { truncHint } from "./truncate-hint.ts"
 
@@ -462,6 +468,18 @@ export class Agent {
    */
   private store: SessionStore | null
   /**
+   * Optional per-session blob store for raw tool outputs. When set, large
+   * or truncated tool bodies are persisted verbatim at
+   * `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw` and a
+   * single-line `[raw-output: …]` footer pointing at the file is appended
+   * to the model-visible `content`. Best-effort like `store`: a null
+   * blobStore means tool results still flow, just without the pointer.
+   * See `src/blob-store.ts`.
+   */
+  private blobStore: BlobStore | null
+  /** Tools whose output is excluded from blob persistence (small/structured replies). */
+  private blobSkipTools: ReadonlySet<string>
+  /**
    * Emergency hard cap on tool-execution rounds within a single `run()`
    * call. **Defaults to {@link Number.POSITIVE_INFINITY}** : there is NO
    * hard stop by default, because long autonomous tasks (refactors,
@@ -572,6 +590,15 @@ export class Agent {
     sendFn?: typeof sendMessage
     store?: SessionStore | null
     /**
+     * Optional per-session blob store. When supplied, raw pre-clamp
+     * tool outputs are persisted to `<sessionsDir>/<sid>.blobs/` and
+     * the model receives a `[raw-output: …]` pointer footer. When
+     * omitted (or null), the agent runs the legacy path: clamped
+     * content goes to API + JSONL with no separate raw copy.
+     * See `src/blob-store.ts`.
+     */
+    blobStore?: BlobStore | null
+    /**
      * Pre-existing conversation to seed the agent with (used by
      * `--resume <sid>` to rehydrate from a saved log). Pushed onto
      * `this.messages` verbatim. The store, if any, is NOT re-written
@@ -621,6 +648,13 @@ export class Agent {
     this.tasksAttachment = opts.tasksAttachment ?? null
     this.sendFn = opts.sendFn ?? sendMessage
     this.store = opts.store ?? null
+    this.blobStore = opts.blobStore ?? null
+    // Resolve the skipTools list once at construction. Reads
+    // `~/.minimal-agent/config.jsonc :: plugins["blob-store"].skipTools`
+    // when set, otherwise falls back to the built-in default list (Task,
+    // MemoryTool, ShowDiff, LockStatus). Cheap to compute, the loader
+    // itself caches.
+    this.blobSkipTools = loadBlobStoreConfig().skipTools
     // Loop-safety knobs : defaults are "no hard cap, 50-round reflection
     // checkpoint with 60s cooldown". See the field JSDoc for the why.
     // Negative values are coerced to 0 (disabled) defensively : we never
@@ -903,6 +937,12 @@ export class Agent {
           reflectionInterval: this.reflectionInterval,
           reflectionCooldownMs: this.reflectionCooldownMs,
           maxToolRounds: this.maxToolRounds,
+          // Mirror the value index.ts threaded into the systemHash so the
+          // cached prefix is stable. When the agent was constructed with
+          // a non-null `blobStore`, the corresponding paragraph appears
+          // in system[2]; null disables it (and matches the pre-blob-store
+          // prompt shape exactly).
+          blobStoreEnabled: this.blobStore !== null,
         })
       : undefined
     const allTools: ToolDefinition[] = this.loader
@@ -1122,6 +1162,23 @@ export class Agent {
         let streamedRendered = false
         let aborted = false
         /**
+         * Pre-clamp body the agent should persist via {@link Agent.blobStore}.
+         * Set from `executeTool` result's `_raw` field when the universal
+         * truncation clamp fired (built-in path). Left undefined for the
+         * plugin path: the plugin result's `content` IS the full body in
+         * that case, so the agent falls back to `content` for the blob.
+         * See `src/tools.ts` :: `executeTool` and `src/blob-store.ts`.
+         */
+        let rawForBlob: string | undefined
+        /**
+         * Outcome of the blob write, populated inside the else-execute
+         * branch and read after the if-refused/else-execute structure
+         * when building the JSONL record. `null` when no blob was
+         * written (store disabled, body too small, tool on skip list,
+         * write failure, etc.).
+         */
+        let blobWrite: BlobWriteResult | null = null
+        /**
          * Plugin opt-in: when true, the tool header skips the agent's
          * automatic `· HH:MM:SS` time suffix so the plugin can own the
          * trailing date+time chrome inside `displayHeader`. Used by the
@@ -1199,6 +1256,33 @@ export class Agent {
                 displayHeader = pluginResult.displayHeader
                 displayFooter = pluginResult.displayFooter
                 suppressToolTime = pluginResult.suppressToolTime ?? false
+
+                // Universal post-hoc clamp for plugin tools. Mirrors what
+                // `executeTool` already does for built-in tools (Bash/Read/…).
+                // Plugin handlers (Fetch, WebSearch, …) used to bypass the
+                // clamp entirely, so a 5 MiB markdown from Fetch would ship
+                // straight to the API. Now plugin output is clamped to the
+                // same 64 KB / 1000-line budgets and the FULL pre-clamp body
+                // is preserved in `rawForBlob` for the blob-store hook
+                // below. Recoverable via the `[raw-output: …]` pointer
+                // footer the agent appends a few lines down.
+                //
+                // Skipped when:
+                //   - the plugin set `display` (e.g. tasks plugin, ShowDiff,
+                //     LockStatus). Those tools already render their own
+                //     audience-aware output and would be mangled by an
+                //     after-the-fact clamp on the model-facing `content`.
+                //
+                // See `src/tools/truncation.ts` and `src/blob-store.ts`.
+                if (!display) {
+                  const preClamp = content
+                  const { content: clamped, info } = truncateToolOutput(preClamp, {
+                    tool: tool.name,
+                  })
+                  content = clamped
+                  truncInfo = info
+                  if (info.truncated) rawForBlob = preClamp
+                }
               } else {
                 content = `Plugin tool "${tool.name}" returned a non-tool_result value`
                 isError = true
@@ -1293,6 +1377,11 @@ export class Agent {
               isError = result.is_error
               display = result.display
               truncInfo = result._truncInfo
+              // Pre-clamp body, present only when the universal clamp
+              // fired (see `src/tools.ts` :: `executeTool`). The agent's
+              // blob-store hook below prefers this over the clamped
+              // `content` so the persisted file is the FULL output.
+              rawForBlob = result._raw
 
               // Flush any trailing partial line (no terminating newline).
               if (pendingChunk.length > 0) {
@@ -1360,6 +1449,53 @@ export class Agent {
             }
           }
 
+          // Raw-output blob capture (NEW, design 2026-05-26). The model's
+          // `content` may be the clamped body (built-in tools that hit the
+          // 64KB/1000L universal cap) OR the full body (plugin tools, OR
+          // built-ins under cap). When persistable, write the FULL bytes
+          // to `<sid>.blobs/<tool_use_id>.raw` and append a
+          // `[raw-output: …]` pointer footer so the model can `Read` the
+          // file when the inline body isn't enough.
+          //
+          // Source of truth for the blob:
+          //   - `result._raw` (built-in clamp branch) when set: pre-clamp
+          //     body, never includes the trailing `[truncated: …]` notice.
+          //   - `content` otherwise: full output (no clamp ran, or plugin
+          //     tool which currently doesn't clamp at all).
+          //
+          // Skipped when:
+          //   - blobStore is null (config disabled, or construction failed)
+          //   - tool is on the user-configurable skip list (Task, MemoryTool, ShowDiff, LockStatus)
+          //   - tool returned `display` (Edit/Write diff: small, structured)
+          //   - tool was aborted (partial output, no point)
+          //   - body too small to be useful (gated inside BlobStore.write
+          //     via `minBytesToPersist`)
+          //
+          // See `src/blob-store.ts`.
+          if (
+            this.blobStore !== null &&
+            !this.blobSkipTools.has(tool.name) &&
+            !display &&
+            !aborted
+          ) {
+            const rawBody = rawForBlob ?? content
+            blobWrite = this.blobStore.write(tool.id, rawBody)
+            if (blobWrite) {
+              // Footer order: existing `[truncated: …]` notice is already
+              // inside `content` (appended by truncation.ts when the clamp
+              // fired). Our `[raw-output: …]` goes AFTER that and BEFORE
+              // the `<ma::tui-preview …>` annotation appended below. The
+              // model-facing tail therefore reads:
+              //   <body>
+              //   [truncated: …]               ← only when clamp fired
+              //
+              //   [raw-output: <path>  85kB · sha256=…]   ← new
+              //
+              //   <ma::tui-preview shown=… total=…>…</ma::tui-preview>   ← only when TUI elided
+              content = `${content}\n\n${formatRawOutputFooter(blobWrite)}`
+            }
+          }
+
           // Layer 1b of size-feedback (companion to truncation.ts notice and
           // feedback-tracker.ts streak note): when the user's transcript
           // clamped MORE lines than the API cap did (every tool with a tight
@@ -1400,7 +1536,13 @@ export class Agent {
           is_error: isError,
         }
         toolResults.push(resultBlock)
-        this.store?.appendToolResult(resultBlock)
+        this.store?.appendToolResult(
+          resultBlock,
+          undefined,
+          blobWrite
+            ? { path: blobWrite.path, bytes: blobWrite.bytes, sha256: blobWrite.sha256 }
+            : undefined,
+        )
       }
 
       // Send tool results back. Before the next API request, give the host

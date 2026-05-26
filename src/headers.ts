@@ -401,6 +401,30 @@ export function buildLoopSafetyParagraph(opts: {
 }
 
 /**
+ * Build the "Tool output conventions" paragraph appended to `system[2]`
+ * so the model knows about the per-session raw-output blob store and
+ * the `[raw-output: …]` pointer footer convention. One short section,
+ * tool-agnostic: every tool that returns a large or clamped body lands
+ * a full copy at `<sid>.blobs/<tool_use_id>.raw` and the path is
+ * appended to the model-visible `tool_result.content`. The model uses
+ * `Read` (or `Bash`) on that path when the inline body isn't enough.
+ *
+ * Returns an empty string when the blob store is disabled, so the
+ * cache key is identical to a session without the feature.
+ *
+ * Pure function of `opts.blobStoreEnabled` (and a stable copy text):
+ * default-config sessions all share the same cached prefix.
+ */
+export function buildToolOutputConventionsParagraph(opts: { blobStoreEnabled: boolean }): string {
+  if (!opts.blobStoreEnabled) return ""
+  return [
+    "# Tool output conventions",
+    "",
+    "Every tool result whose body is large or got clamped by the universal 64KB / 1000-line cap also lands intact at `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw`. The agent appends a single line `[raw-output: <abs-path>  <size> · sha256=<hex>]` to the `tool_result.content` whenever that file was written. Use `Read({file_path: ...})` or `Bash({command: \"wc -l '...'\"})` on that path when the inline body isn't enough : the file is the FULL pre-clamp, pre-annotation output. The blob also survives session resume, so a later turn can analyze the original bytes without re-running the tool. Small bodies (under the configured `minBytesToPersist`, default 4096 B) are NOT persisted and emit no footer : the `content` IS the full output in that case.",
+  ].join("\n")
+}
+
+/**
  * System prompt: 4 text blocks sent in the `system` array of Messages API calls.
  *
  * Verified against v2.1.118 capture (fetch-024 in
@@ -465,6 +489,14 @@ export function buildSystemPrompt(opts?: {
   reflectionInterval?: number
   reflectionCooldownMs?: number
   maxToolRounds?: number
+  /**
+   * Whether the per-session blob store is active for this run. When
+   * `true`, `buildSystemPrompt` appends a one-paragraph "Tool output
+   * conventions" section so the model knows about the
+   * `[raw-output: …]` pointer footer. Default `false`: matches
+   * behavior of older sessions that pre-date the blob store.
+   */
+  blobStoreEnabled?: boolean
 }): SystemBlock[] {
   const blocks: SystemBlock[] = [
     {
@@ -490,15 +522,22 @@ export function buildSystemPrompt(opts?: {
   const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
   const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
   const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
+  const blobStoreEnabled = opts?.blobStoreEnabled ?? false
   const instructionsBase = opts?.instructions ?? DEFAULT_INSTRUCTIONS
   const safetyParagraph = buildLoopSafetyParagraph({
     reflectionInterval,
     reflectionCooldownMs,
     maxToolRounds,
   })
-  const instructions = safetyParagraph
-    ? `${instructionsBase}\n\n${safetyParagraph}`
-    : instructionsBase
+  const conventionsParagraph = buildToolOutputConventionsParagraph({
+    blobStoreEnabled,
+  })
+  // Chain the optional sections, glueing each with a blank line. Skip
+  // empty fragments so the resulting text is stable for the
+  // "everything-off" case (matches the legacy cache key shape).
+  const instructions = [instructionsBase, safetyParagraph, conventionsParagraph]
+    .filter((s) => s.length > 0)
+    .join("\n\n")
   blocks.push({
     type: "text",
     text: instructions,

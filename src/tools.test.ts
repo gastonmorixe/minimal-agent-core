@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test"
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { executeTool } from "./tools.ts"
+import { executeTool, stripInternalFields, type ToolExecResult } from "./tools.ts"
 import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./tools/truncation.ts"
 
 let dir: string
@@ -100,5 +100,63 @@ describe("executeTool — universal clamp wiring", () => {
     const r = await executeTool("Bash", { command: "echo hello" })
     expect(r.content.trim()).toBe("hello")
     expect(r.content).not.toContain("[truncated:")
+  })
+})
+
+describe("executeTool — _raw pre-clamp surface (for blob store)", () => {
+  it("populates _raw when the clamp fires (Bash byte cap)", async () => {
+    const r = await executeTool("Bash", {
+      command: `yes BIG | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
+    })
+    expect(r.content).toContain("[truncated:")
+    expect(r._raw).toBeDefined()
+    // _raw is the pre-clamp body. It must be at least as large as the
+    // post-clamp content (which still includes the trailing notice).
+    expect(r._raw!.length).toBeGreaterThan(r.content.length)
+    // Trailing notice must NOT be in the raw body (raw is pre-clamp).
+    expect(r._raw!).not.toContain("[truncated:")
+  })
+
+  it("populates _raw when the clamp fires (Read line cap)", async () => {
+    const path = join(dir, "rawcheck.txt")
+    const totalLines = MAX_TOOL_OUTPUT_LINES * 2
+    writeFileSync(path, Array.from({ length: totalLines }, (_, i) => `line ${i}`).join("\n"))
+    const r = await executeTool("Read", { file_path: path })
+    expect(r.content).toContain("[truncated:")
+    expect(r._raw).toBeDefined()
+    // Pre-clamp body for Read carries the same `cat -n` style prefix.
+    // Count lines: should equal totalLines (no clamp on raw).
+    expect(r._raw!.split("\n").length).toBeGreaterThanOrEqual(totalLines)
+  })
+
+  it("does NOT set _raw when content fits under the cap", async () => {
+    const r = await executeTool("Bash", { command: "echo small" })
+    expect(r.content).not.toContain("[truncated:")
+    expect(r._raw).toBeUndefined()
+  })
+
+  it("does NOT set _raw when the executor returns display (Edit/Write)", async () => {
+    const path = join(dir, "raw-edit.txt")
+    writeFileSync(path, "x\n")
+    const r = await executeTool("Edit", {
+      file_path: path,
+      old_string: "x",
+      new_string: "y",
+    })
+    expect(r.display).toBeDefined()
+    expect(r._raw).toBeUndefined()
+  })
+
+  it("stripInternalFields removes _raw alongside _truncInfo and _aborted", () => {
+    const r: ToolExecResult = {
+      content: "ok",
+      _raw: "pre-clamp body",
+      _truncInfo: { tool: "Bash", truncated: false, shownBytes: 2, shownLines: 1, cutLine: 1 },
+      _aborted: false,
+    }
+    stripInternalFields(r)
+    expect(r._raw).toBeUndefined()
+    expect(r._truncInfo).toBeUndefined()
+    expect(r._aborted).toBeUndefined()
   })
 })

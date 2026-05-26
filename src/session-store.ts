@@ -93,6 +93,31 @@ export interface ToolResultRecord {
   tool_use_id: string
   content: string | ContentBlock[]
   isError: boolean
+  /**
+   * Absolute path to the raw, pre-clamp body of this tool call, when the
+   * agent's per-session blob store decided to persist it. Present only
+   * when the body exceeded `plugins.blob-store.minBytesToPersist` OR was
+   * clamped by the universal truncation guardrail (`src/tools/truncation.ts`).
+   * Absent when `content` IS the full output, when the store is
+   * disabled, or when the write failed (best-effort).
+   *
+   * The path stays valid for the lifetime of the session blobs
+   * directory (`<sid>.blobs/`). LRU eviction may delete it: callers
+   * MUST handle ENOENT as a normal stale-pointer case. See
+   * `src/blob-store.ts`.
+   *
+   * Additive field: missing from records written before the blob store
+   * landed; `parseLines` reads them unchanged.
+   */
+  rawPath?: string
+  /** Size in bytes of the persisted blob. Paired with `rawPath`. */
+  rawBytes?: number
+  /**
+   * sha256 hex digest of the persisted blob, truncated to 16 chars.
+   * Used during session resume to detect "this blob on disk no longer
+   * matches what we recorded" drift. NOT a cryptographic guarantee.
+   */
+  rawSha256?: string
 }
 
 export interface NoteRecord {
@@ -562,15 +587,31 @@ export class SessionStore {
     this.write({ kind: "assistant", ts: now.toISOString(), content, stopReason, usage })
   }
 
-  /** Append a `tool_result` record. Call after every tool execution incl. abort. */
-  appendToolResult(block: ToolResultBlock, now: Date = new Date()): void {
-    this.write({
+  /**
+   * Append a `tool_result` record. Call after every tool execution incl.
+   * abort. The optional `rawBlob` parameter is populated by the agent
+   * when the per-session blob store persisted the pre-clamp body of
+   * this call (see `src/blob-store.ts`). It is recorded in the JSONL so
+   * session resume / dump can find the raw bytes on disk again.
+   */
+  appendToolResult(
+    block: ToolResultBlock,
+    now: Date = new Date(),
+    rawBlob?: { path: string; bytes: number; sha256: string },
+  ): void {
+    const rec: ToolResultRecord = {
       kind: "tool_result",
       ts: now.toISOString(),
       tool_use_id: block.tool_use_id,
       content: block.content,
       isError: !!block.is_error,
-    })
+    }
+    if (rawBlob) {
+      rec.rawPath = rawBlob.path
+      rec.rawBytes = rawBlob.bytes
+      rec.rawSha256 = rawBlob.sha256
+    }
+    this.write(rec)
   }
 
   /** Free-form annotation (mode change, error, manual marker). */

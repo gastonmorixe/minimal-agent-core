@@ -143,8 +143,17 @@ function defaultHint(tool: string | undefined, cutLine: number, shownBytes: numb
       return `output exceeded ${MAX_TOOL_OUTPUT_BYTES} bytes; re-run piping through \`head -c ${shownBytes}\`, \`sed -n\`, or \`awk\` to bound output.`
     case "Glob":
       return `narrow the pattern or search a subdirectory.`
+    case "Fetch":
+      // Plugin tool. Clamped by the agent now that raw is recoverable
+      // via the blob store. Steer toward narrowing rather than re-fetch.
+      return `the full body is preserved at the \`[raw-output: …]\` path below; use Read on that path, or re-call Fetch with a CSS \`selector\` to scope to a specific element.`
+    case "WebSearch":
+      return `lower \`count\`, narrow the query, or use the result's \`url\` to Fetch a specific page.`
     default:
-      return `re-run with narrower parameters.`
+      // Plugin tools we don't know about land here. The pointer footer
+      // appended by the agent below tells the model where to find the
+      // full bytes, so the "narrower parameters" copy doesn't strand it.
+      return `re-run with narrower parameters; the full body is preserved at the \`[raw-output: …]\` path below.`
   }
 }
 
