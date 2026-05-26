@@ -76,6 +76,7 @@ import { describe, expect, it } from "bun:test"
 
 import { AbortBus, type AbortReason } from "./abort-bus.ts"
 import { EditorController, type EditorKeyPayload } from "./editor-controller.ts"
+import { InputCaptureStack } from "./input-capture-stack.ts"
 import { Hooks } from "./plugins/hooks/hooks.ts"
 
 class FakeTTYInput extends EventEmitter {
@@ -144,7 +145,12 @@ interface Harness {
 }
 
 function makeWorkingHarness(
-  opts: { bareEscapeMs?: number; armedTickMs?: number; hooks?: Hooks } = {},
+  opts: {
+    bareEscapeMs?: number
+    armedTickMs?: number
+    hooks?: Hooks
+    inputCaptureStack?: InputCaptureStack
+  } = {},
 ): Harness {
   const bus = new AbortBus()
   const stdin = new FakeTTYInput()
@@ -161,6 +167,7 @@ function makeWorkingHarness(
     bareEscapeMs: opts.bareEscapeMs ?? 0,
     armedTickMs: opts.armedTickMs ?? 0,
     ...(opts.hooks ? { hooks: opts.hooks } : {}),
+    ...(opts.inputCaptureStack ? { inputCaptureStack: opts.inputCaptureStack } : {}),
   })
   const cancels: unknown[] = []
   const quits: unknown[] = []
@@ -525,6 +532,230 @@ describe("EditorController - overlay plugin claims ESC before abort-quit FSM", (
     h.stdin.send("\x1b")
     await tick()
     expect(observed).toBe(1)
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    h.ctrl.stop()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Three-layer ESC dispatch precedence: InputCaptureStack → hook chain → FSM
+// ---------------------------------------------------------------------------
+//
+// The {@link InputCaptureStack} sits in FRONT of the `editor.key` hook chain
+// on the ESC path. The contract these tests pin:
+//
+//   1. A capture pushed onto the stack claims ESC BEFORE the priority-based
+//      hook chain ever runs. (Use case: an agent-side overlay like the
+//      reflection cooldown that has no plugin manifest.)
+//   2. LIFO: when two captures are stacked, the one pushed LAST wins.
+//   3. Walk order: stack (LIFO) → hook chain (priority) → FSM. Any layer
+//      claiming short-circuits the rest.
+//   4. Empty stack is a no-op: dispatch falls straight through to the chain
+//      and then the FSM, same as before the stack existed.
+//   5. CSI-encoded ESC (\x1b[27u, \x1b[27;1;27~) routes identically to bare
+//      \x1b. Encoding-dependent precedence is a forbidden regression.
+//
+// See `src/input-capture-stack.ts` for the design and the dispatch pipeline
+// diagram.
+describe("EditorController - InputCaptureStack precedence over hook chain + FSM", () => {
+  it("stack capture claims ESC BEFORE the hook chain even sees it", async () => {
+    const hooks = new Hooks()
+    let chainSawEscape = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key === "Escape") {
+          chainSawEscape++
+          payload.result.halt = true // would normally claim
+        }
+      },
+      { caller: "plugin" },
+    )
+    const stack = new InputCaptureStack()
+    let stackSawEscape = 0
+    stack.push("overlay", (key) => {
+      if (key !== "Escape") return false
+      stackSawEscape++
+      return true
+    })
+    const h = makeWorkingHarness({ hooks, inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    // Stack claimed first; the hook chain was NEVER invoked for this key.
+    expect(stackSawEscape).toBe(1)
+    expect(chainSawEscape).toBe(0)
+    // FSM never saw it either.
+    expect(h.aborts).toEqual([])
+    expect(h.ctrl.fsmStateForTest().kind).toBe("working")
+    h.ctrl.stop()
+  })
+
+  it("LIFO: two captures stacked, ESC walks top first (most recent wins)", async () => {
+    const stack = new InputCaptureStack()
+    const order: string[] = []
+    stack.push("bottom", (k) => {
+      if (k === "Escape") {
+        order.push("bottom")
+        return true
+      }
+      return false
+    })
+    stack.push("top", (k) => {
+      if (k === "Escape") {
+        order.push("top")
+        return true
+      }
+      return false
+    })
+    const h = makeWorkingHarness({ inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    // Top claimed; bottom NEVER saw the key.
+    expect(order).toEqual(["top"])
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
+  it("LIFO peel-off: each ESC pops the top capture, then FSM aborts", async () => {
+    // Mirrors the canonical user scenario: stack is [bottom, top] with
+    // the reflection cooldown on top and a slash-menu-like overlay
+    // below. Each ESC closes the top capture (which disposes itself);
+    // the third ESC sees an empty stack and falls through to the FSM.
+    const stack = new InputCaptureStack()
+    const order: string[] = []
+    let bottomOff: (() => void) | null = null
+    bottomOff = stack.push("bottom", (k) => {
+      if (k !== "Escape") return false
+      order.push("bottom")
+      bottomOff?.()
+      return true
+    })
+    let topOff: (() => void) | null = null
+    topOff = stack.push("top", (k) => {
+      if (k !== "Escape") return false
+      order.push("top")
+      topOff?.()
+      return true
+    })
+    const h = makeWorkingHarness({ inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b") // top claims, pops itself; stack = [bottom]
+    await tick()
+    expect(stack.depth()).toBe(1)
+    expect(stack.topId()).toBe("bottom")
+    h.stdin.send("\x1b") // bottom claims, pops itself; stack = []
+    await tick()
+    expect(stack.depth()).toBe(0)
+    h.stdin.send("\x1b") // stack empty, FSM aborts
+    await tick()
+    expect(order).toEqual(["top", "bottom"])
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    h.ctrl.stop()
+  })
+
+  it("stack pass-through, chain claims: chain still owns ESC", async () => {
+    const hooks = new Hooks()
+    let chainClaims = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key === "Escape") {
+          chainClaims++
+          payload.result.halt = true
+        }
+      },
+      { caller: "plugin" },
+    )
+    const stack = new InputCaptureStack()
+    let stackSeen = 0
+    stack.push("observer", (key) => {
+      if (key === "Escape") stackSeen++
+      return false // pass-through
+    })
+    const h = makeWorkingHarness({ hooks, inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    expect(stackSeen).toBe(1)
+    expect(chainClaims).toBe(1)
+    expect(h.aborts).toEqual([]) // chain claimed → no abort
+    h.ctrl.stop()
+  })
+
+  it("stack pass-through, chain pass-through: FSM aborts (full fall-through)", async () => {
+    const hooks = new Hooks()
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      () => {
+        /* observe only */
+      },
+      { caller: "plugin" },
+    )
+    const stack = new InputCaptureStack()
+    stack.push("observer", () => false) // never claims
+    const h = makeWorkingHarness({ hooks, inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    h.ctrl.stop()
+  })
+
+  it("kitty CSI-u ESC: stack claim wins (encoding parity)", () => {
+    const stack = new InputCaptureStack()
+    let claims = 0
+    stack.push("overlay", (k) => {
+      if (k === "Escape") {
+        claims++
+        return true
+      }
+      return false
+    })
+    const h = makeWorkingHarness({ inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b[27u")
+    expect(claims).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
+  it("xterm modifyOtherKeys ESC: stack claim wins (encoding parity)", () => {
+    const stack = new InputCaptureStack()
+    let claims = 0
+    stack.push("overlay", (k) => {
+      if (k === "Escape") {
+        claims++
+        return true
+      }
+      return false
+    })
+    const h = makeWorkingHarness({ inputCaptureStack: stack })
+    enterWorking(h)
+    h.stdin.send("\x1b[27;1;27~")
+    expect(claims).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
+  it("captureStack() returns the injected stack instance", () => {
+    const stack = new InputCaptureStack()
+    const h = makeWorkingHarness({ inputCaptureStack: stack })
+    expect(h.ctrl.captureStack()).toBe(stack)
+    h.ctrl.stop()
+  })
+
+  it("empty stack + no hooks: ESC behavior identical to the baseline (FSM abort)", async () => {
+    // Belt-and-suspenders: when nothing is pushed and no hooks are
+    // registered, the stack-aware code path must behave EXACTLY like
+    // the pre-stack code path. This is the "we added the layer, but
+    // it's invisible to existing users" guard.
+    const h = makeWorkingHarness({ inputCaptureStack: new InputCaptureStack() })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
     expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
     expect(h.ctrl.fsmStateForTest().kind).toBe("working")
     h.ctrl.stop()

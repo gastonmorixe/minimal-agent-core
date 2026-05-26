@@ -26,6 +26,7 @@ import {
 import { formatArmedFooter } from "./armed-footer.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
 import { computeCursorVisualPos, EditorRenderer, findColAtVisualPos } from "./editor-renderer.ts"
+import { type InputCaptureStack, inputCaptureStack } from "./input-capture-stack.ts"
 import type { Hooks } from "./plugins/hooks/hooks.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 
@@ -241,6 +242,19 @@ export interface EditorControllerOptions {
    * entirely — no behavioral change.
    */
   hooks?: Hooks
+  /**
+   * Inject the {@link InputCaptureStack} singleton (or a fresh one for
+   * tests). The stack sits in FRONT of the `editor.key` hook chain in
+   * the ESC dispatch pipeline: top-of-stack gets first crack, then the
+   * chain, then the abort-quit FSM.
+   *
+   * Push onto this stack when an overlay opens that owns "ESC means
+   * me, not abort" — the reflection cooldown, future confirm modals,
+   * or any plugin that needs strict LIFO precedence over peer overlays.
+   *
+   * Defaults to the singleton from `./input-capture-stack.ts`.
+   */
+  inputCaptureStack?: InputCaptureStack
 }
 
 /**
@@ -357,6 +371,12 @@ export class EditorController extends EventEmitter {
    * ArrowUp, ArrowDown, Ctrl+R). Null means "skip the emit, run default".
    */
   private readonly hooks: Hooks | null
+  /**
+   * LIFO transient capture stack consulted BEFORE {@link hooks} on the
+   * ESC dispatch path. See {@link InputCaptureStack} for the design;
+   * see {@link fireBareEscape} / {@link consumeEscape} for the order.
+   */
+  private readonly inputCaptureStack: InputCaptureStack
   private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
   // ── abort/quit FSM ──────────────────────────────────────────────────────
   //
@@ -425,6 +445,7 @@ export class EditorController extends EventEmitter {
     this.nowFn = opts.nowFn ?? (() => Date.now())
     this.armedTickMs = opts.armedTickMs ?? 250
     this.hooks = opts.hooks ?? null
+    this.inputCaptureStack = opts.inputCaptureStack ?? inputCaptureStack
   }
 
   /**
@@ -493,6 +514,17 @@ export class EditorController extends EventEmitter {
   /** For tests / diagnostics. */
   fsmStateForTest(): FsmState {
     return this.fsmState
+  }
+
+  /**
+   * The {@link InputCaptureStack} this controller routes ESC through
+   * before the hook chain and the abort-quit FSM. Exposed so agent-
+   * side / host-side overlays (reflection cooldown, future confirm
+   * modals) can `push` onto it without taking a separate import on
+   * the singleton — useful for tests that inject a fresh stack.
+   */
+  captureStack(): InputCaptureStack {
+    return this.inputCaptureStack
   }
 
   /**
@@ -1198,21 +1230,29 @@ export class EditorController extends EventEmitter {
     if (this.pending === "\x1b") {
       this.pending = ""
     }
-    // Plugins (slash-menu, etc.) get first crack at bare-Escape so they
-    // can close transient overlays. Priority order via the editor.key
-    // chain — topmost overlay claims first. If a plugin halts, the
-    // abort-quit FSM does NOT see this ESC: the user's NEXT ESC will
-    // reach it (1st ESC closes overlay, 2nd aborts the turn).
+    // Two-layer dispatch for ESC. Top to bottom:
     //
-    // This holds in ALL FSM states (idle / working / armed). The
-    // earlier `fsmState.kind === "idle"` gate broke the slash-menu
-    // UX: pressing ESC with both an open menu AND an in-flight turn
-    // aborted the turn while leaving the menu visible.
+    //   1. InputCaptureStack (LIFO, transient): reflection cooldown,
+    //      confirm modals, anything that wants strict "most recently
+    //      opened, first to close" precedence.
+    //   2. editor.key hook chain (priority, durable): plugins like
+    //      slash-menu / autocomplete.
+    //   3. abort-quit FSM (fallback): the only place that aborts the
+    //      turn.
+    //
+    // If anyone in (1) or (2) claims, the FSM never sees this ESC.
+    // The user's NEXT ESC pops the next layer (or aborts if the stack
+    // and chain are both empty). N overlays → N ESCs to peel them
+    // off, then one more to abort. Predictable LIFO.
     //
     // "Always a way out" is preserved by the rapid double-Ctrl+C
     // escape hatch (`EscapeHatch`, spec rule 5) — it bypasses both
-    // the hook chain AND the FSM, so a wedged plugin can never trap
-    // the user. See #abort-quit-ux-spec.
+    // (1), (2), AND the FSM, so a wedged capture can never trap the
+    // user. See #abort-quit-ux-spec and the InputCaptureStack
+    // module docstring.
+    if (this.inputCaptureStack.dispatch("Escape")) {
+      return
+    }
     if (this.dispatchKeyHook("Escape")) {
       return
     }
@@ -1623,15 +1663,17 @@ export class EditorController extends EventEmitter {
       return "ignore"
     }
 
-    // ESC - mirror `fireBareEscape`: plugins (slash-menu, etc.) get
-    // first crack across ALL encodings (bare \x1b, kitty \x1b[27u,
-    // xterm modifyOtherKeys \x1b[27;1;27~). Without this dispatch the
-    // overlay-claim path was encoding-dependent: bare ESC went through
-    // the hook chain, CSI-encoded ESC didn't — same visible key, two
-    // behaviors. The `escapeHatch.reset()` ran in consumePending (lead
-    // byte is `\x1b`), matching `fireBareEscape`'s own reset so the
-    // "Esc breaks the Ctrl+C run" invariant holds across encodings.
+    // ESC - mirror `fireBareEscape`'s two-layer dispatch across ALL
+    // encodings (bare \x1b, kitty \x1b[27u, xterm modifyOtherKeys
+    // \x1b[27;1;27~). The InputCaptureStack and editor.key hook chain
+    // get first crack BEFORE the FSM so overlay precedence is the
+    // same regardless of how the terminal encodes the byte. Without
+    // this dispatch the overlay-claim path was encoding-dependent.
+    // The `escapeHatch.reset()` ran in consumePending (lead byte is
+    // `\x1b`), matching `fireBareEscape`'s own reset so the "Esc
+    // breaks the Ctrl+C run" invariant holds across encodings.
     if (code === 27 && !shift && !alt && !ctrl) {
+      if (this.inputCaptureStack.dispatch("Escape")) return "ignore"
       if (this.dispatchKeyHook("Escape")) return "ignore"
       this.feedFsm({ kind: "esc", at: this.nowFn() })
       return "ignore"

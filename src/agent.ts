@@ -54,6 +54,7 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
 } from "./headers.ts"
 import { RawInput } from "./input.ts"
+import { type InputCaptureStack, inputCaptureStack } from "./input-capture-stack.ts"
 import { buildPendingModeChangeChip } from "./mode-change-chip.ts"
 import { ModeManager } from "./modes.ts"
 import { PALETTE } from "./palette.ts"
@@ -296,22 +297,44 @@ export function parseReflectionAck(
  * `agent.reflection-cooldown` in `src/spinner/presets.ts`) : the label
  * itself MUST NOT carry one too or the row reads as a duplicated icon.
  *
- * The pause is interruptible via the optional `AbortSignal`. When
- * aborted, the helper resolves immediately and the caller's existing
- * abort path (the top-of-loop `if (signal?.aborted) throw AbortError`)
- * handles teardown.
+ * Three ways this resolves
+ * ------------------------
+ *  1. **Timer elapsed** (normal): the countdown reaches 0, the wait
+ *     resolves, the caller continues to inject the checkpoint marker.
+ *  2. **Esc pressed** (skip, via `inputCaptureStack`): the cooldown
+ *     ends but the turn does NOT abort. The user just said "go faster"
+ *     not "abort". The checkpoint marker is still injected: peeling
+ *     the wall-clock pause off the front does not change what the
+ *     model is supposed to see.
+ *  3. **Abort signal fires** (turn aborting, e.g. Ctrl+C or a second
+ *     Esc after this cooldown closed): the wait resolves immediately
+ *     and the caller's top-of-loop `if (signal?.aborted) throw
+ *     AbortError` tears the turn down on the next iteration. The
+ *     checkpoint marker is still pushed; messages stay well-formed.
+ *
+ * Without a stack (back-compat path), behavior (2) collapses into
+ * behavior (3): Esc on its own goes through the abort-quit FSM and
+ * aborts the turn. The stack is what gives Esc a "skip cooldown but
+ * keep going" meaning.
  *
  * No-op when `totalMs <= 0` : the checkpoint attachment is still
  * injected by the caller in that case (model-facing marker without
  * the wall-clock penalty).
  */
-async function runReflectionCooldown(opts: {
+export async function runReflectionCooldown(opts: {
   totalMs: number
   round: number
   signal?: AbortSignal
   statusBus: StatusBus
+  /**
+   * Stack to push the "Esc skips this cooldown" capture onto. When
+   * omitted (tests / standalone use), Esc routes through the editor's
+   * FSM as before and aborts the turn instead of just skipping the
+   * cooldown.
+   */
+  inputCaptureStack?: InputCaptureStack
 }): Promise<void> {
-  const { totalMs, round, signal, statusBus } = opts
+  const { totalMs, round, signal, statusBus, inputCaptureStack: stack } = opts
   if (totalMs <= 0) return
   if (signal?.aborted) return
   const totalSec = Math.max(1, Math.ceil(totalMs / 1000))
@@ -326,20 +349,48 @@ async function runReflectionCooldown(opts: {
     remaining = Math.max(0, remaining - 1)
     if (remaining > 0) handle.update(fmt(remaining))
   }, 1000)
+  // The capture is registered for the LIFETIME of this cooldown only.
+  // On any resolution path (timer / skip / abort), the `finally` block
+  // releases it so the stack returns to its prior state. The handler
+  // returns `true` (claims the key) so Esc does NOT reach the
+  // abort-quit FSM while the cooldown is visible.
+  //
+  // Initialised to a no-op so TypeScript's control-flow narrowing
+  // doesn't pin it to `null` after the closure assignment inside the
+  // Promise executor (the canonical `let X: T | null = null` then
+  // assign-in-callback pattern triggers `Type 'never' has no call
+  // signatures` in strict mode). The no-op is also a safe default for
+  // the `stack === undefined` branch where no push happens.
+  let releaseCapture: () => void = () => {}
   try {
     await new Promise<void>((resolve) => {
       let timer: ReturnType<typeof setTimeout> | null = null
-      const onAbort = (): void => {
-        if (timer !== null) clearTimeout(timer)
+      const settle = (): void => {
+        if (timer !== null) {
+          clearTimeout(timer)
+          timer = null
+        }
         resolve()
       }
+      const onAbort = (): void => settle()
       timer = setTimeout(() => {
         if (signal) signal.removeEventListener("abort", onAbort)
-        resolve()
+        settle()
       }, totalMs)
       if (signal) signal.addEventListener("abort", onAbort, { once: true })
+      if (stack) {
+        releaseCapture = stack.push("agent.reflection-cooldown", (key) => {
+          if (key !== "Escape") return false
+          // Esc = skip the cooldown but DO NOT abort the turn. Settle
+          // the promise synchronously; the agent loop continues
+          // normally on the next iteration.
+          settle()
+          return true
+        })
+      }
     })
   } finally {
+    releaseCapture()
     clearInterval(tick)
     handle.clear()
   }
@@ -1613,14 +1664,22 @@ export class Agent {
             totalMs: this.reflectionCooldownMs,
             round: rounds,
             statusBus: GLOBAL_STATUS_BUS,
+            // Route Esc through the shared InputCaptureStack so it
+            // SKIPS the cooldown without aborting the turn. This is
+            // the same singleton EditorController consults in front
+            // of its `editor.key` hook chain — see the
+            // `input-capture-stack.ts` module docstring for the
+            // dispatch pipeline.
+            inputCaptureStack,
             ...(signal ? { signal } : {}),
           })
-          // If Esc landed during the cooldown the top-of-loop check on
-          // the next iteration will throw AbortError; pushing the
-          // checkpoint marker here is still safe because the messages
-          // history stays well-formed (tool_result-first ordering is
-          // preserved, the trailing text is a normal user-message
-          // continuation).
+          // Three ways we reach this point: (1) the wall-clock timer
+          // elapsed, (2) the user pressed Esc and the cooldown skipped
+          // without aborting (no signal flip), (3) the signal aborted
+          // (the top-of-loop check on the next iteration throws
+          // AbortError). In all three cases the messages history stays
+          // well-formed (tool_result-first ordering is preserved), so
+          // injecting the checkpoint marker is unconditionally safe.
           userContent.push(buildReflectionCheckpointBlock(rounds, this.reflectionCooldownMs))
         }
       }
