@@ -77,6 +77,23 @@ export interface UserRecord {
 export interface AssistantRecord {
   kind: "assistant"
   ts: string
+  /**
+   * The full block array from the assistant turn, persisted verbatim.
+   * Includes every `ContentBlock` variant the model emitted:
+   * `text`, `tool_use`, AND `thinking` (`ThinkingBlock` in `client.ts`).
+   *
+   * Thinking blocks are persisted with their cryptographic `signature`
+   * intact. The signature is what the `redact-thinking-2026-02-12` beta
+   * needs to verify on the next request, so a resumed session can re-send
+   * its full prior turn (including thinking) and the API will accept it
+   * as a continuation rather than rejecting the message. Restore is
+   * lossless: `session-restore.ts` pushes `content` back onto
+   * `messages[]` as-is, no filtering on block type.
+   *
+   * When `thinking.display === "omitted"` the model still emits a
+   * thinking block with an empty `thinking` field and a populated
+   * `signature` — both fields survive the round trip.
+   */
   content: ContentBlock[]
   stopReason: string | null
   usage?: {
