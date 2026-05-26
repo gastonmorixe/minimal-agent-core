@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+
 import { networkActivityObserver } from "./activity-observer.ts"
 import { FetchTransport } from "./fetch-transport.ts"
 import { Http2Transport } from "./http2-transport.ts"

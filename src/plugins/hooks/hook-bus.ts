@@ -29,6 +29,7 @@
  */
 
 import { diag } from "../../diagnostic-bus.ts"
+
 import type {
   ChainEmitResult,
   ChainListener,

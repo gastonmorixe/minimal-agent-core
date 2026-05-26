@@ -34,8 +34,9 @@
  */
 
 import { randomBytes, randomUUID } from "node:crypto"
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+
 import type { AuthResult } from "./auth.ts"
 
 // ---------------------------------------------------------------------------

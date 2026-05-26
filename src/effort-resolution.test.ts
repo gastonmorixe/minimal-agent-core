@@ -1,5 +1,6 @@
-import { describe, it, expect } from "bun:test"
-import { resolveEffort, KNOWN_EFFORT } from "./effort-resolution.ts"
+import { describe, expect, it } from "bun:test"
+
+import { KNOWN_EFFORT, resolveEffort } from "./effort-resolution.ts"
 
 describe("resolveEffort", () => {
   it("returns undefined when nothing is set", () => {

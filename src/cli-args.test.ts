@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { normalizeArgs } from "./cli-args.ts"
 
 describe("normalizeArgs", () => {

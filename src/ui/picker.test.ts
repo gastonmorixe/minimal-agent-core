@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { Picker, type PickerItem } from "./picker.ts"
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")

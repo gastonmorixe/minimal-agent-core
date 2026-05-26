@@ -10,8 +10,9 @@
  *  - Note bodies are tool-aware (Read mentions offset/limit, Bash mentions
  *    head/tail, etc.).
  */
-import { describe, it, expect } from "bun:test"
-import { ToolFeedbackTracker, DEFAULT_STREAK_THRESHOLD } from "./feedback-tracker.ts"
+import { describe, expect, it } from "bun:test"
+
+import { DEFAULT_STREAK_THRESHOLD, ToolFeedbackTracker } from "./feedback-tracker.ts"
 
 describe("ToolFeedbackTracker — basic streak detection", () => {
   it("emits null on the first truncation (below threshold)", () => {

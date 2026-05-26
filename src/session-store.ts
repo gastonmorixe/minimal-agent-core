@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto"
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir, hostname as osHostname } from "node:os"
 import { join } from "node:path"
+
 import type { ContentBlock, ToolResultBlock } from "./client.ts"
 
 // ---------------------------------------------------------------------------

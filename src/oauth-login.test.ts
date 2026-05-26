@@ -10,11 +10,13 @@
  *   - runOAuthLogin orchestrator: success, retries, state mismatch, exhaustion
  */
 
-import { afterEach, describe, expect, it } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterEach, describe, expect, it } from "bun:test"
+
 import { type CredentialsData, readCredentials, writeCredentials } from "./auth.ts"
 import { AuthStore } from "./auth-store.ts"
 import { NetworkClient, type NetworkRequest, NetworkResponse } from "./network/index.ts"

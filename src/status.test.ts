@@ -1,15 +1,16 @@
 import { describe, expect, it } from "bun:test"
+
+import type { Spinner } from "./spinner.ts"
 import {
   formatActivityInfix,
   formatElapsed,
   formatElapsedSuffix,
   STALL_THRESHOLD_MS,
+  type StatusActivity,
   StatusBus,
   StatusRenderer,
-  type StatusActivity,
 } from "./status.ts"
 import { stripAnsi } from "./term-width.ts"
-import type { Spinner } from "./spinner.ts"
 
 class FakeTTYOutput {
   isTTY = true

@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import type { AuthResult } from "./auth.ts"
 import { type Message, sendMessageFull } from "./client.ts"
 import {

@@ -16,8 +16,9 @@
  * @module auto-formatter
  */
 
-import { mkdirSync, chmodSync, existsSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
+
 import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 

@@ -32,12 +32,12 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
+import { TaskStore } from "../tui-plugins/tasks/lib/store.ts"
+
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { ContentBlock, SendOptions, StreamedResponse } from "./client.ts"
-
-import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
-import { TaskStore } from "../tui-plugins/tasks/lib/store.ts"
 
 // ---------------------------------------------------------------------------
 // Test fakes

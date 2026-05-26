@@ -13,10 +13,11 @@
  * driver.ts` is missing.
  */
 
-import { describe, expect, it } from "bun:test"
-import { existsSync } from "node:fs"
 import { spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { resolve } from "node:path"
+
+import { describe, expect, it } from "bun:test"
 
 function haveTmux(): boolean {
   return spawnSync("tmux", ["-V"]).status === 0

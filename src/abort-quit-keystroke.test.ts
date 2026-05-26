@@ -69,8 +69,11 @@
  *     intentionally complementary to this file's byte-level coverage).
  *   - Project memory `#abort-quit-ux-spec`, `#abort-quit-fsm`.
  */
-import { describe, expect, it } from "bun:test"
+
 import { EventEmitter } from "node:events"
+
+import { describe, expect, it } from "bun:test"
+
 import { AbortBus, type AbortReason } from "./abort-bus.ts"
 import { EditorController } from "./editor-controller.ts"
 

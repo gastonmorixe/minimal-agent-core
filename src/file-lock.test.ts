@@ -12,12 +12,15 @@
  * registrations across the test file.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import {
+  _heldLocksSnapshot,
+  _resetForTests,
   acquireLock,
   buildHolder,
   DEFAULT_BACKOFF_MS,
@@ -28,17 +31,15 @@ import {
   LOCK_FORMAT_VERSION,
   LOCK_SUFFIX,
   LockAbortedError,
+  type LockHolder,
+  type LockOpts,
   LockTimeoutError,
-  _heldLocksSnapshot,
-  _resetForTests,
   listLocksUnder,
   lockPathFor,
   parseHolder,
   readLockFile,
   serializeHolder,
   tryAcquireOnce,
-  type LockHolder,
-  type LockOpts,
 } from "./file-lock.ts"
 
 let dir: string

@@ -6,13 +6,14 @@
  * tokenizer correctness — quoting, escaping, subshells — independent of
  * any rendering concerns.
  */
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
+
 import {
-  splitBashSegments,
-  shouldSoftSplit,
-  BASH_OPERATORS,
   BASH_HEADER_PREFIX_CELLS_DEFAULT,
+  BASH_OPERATORS,
   MULTI_OP_SOFT_SPLIT_MIN,
+  shouldSoftSplit,
+  splitBashSegments,
 } from "./bash-split.ts"
 
 // ---------------------------------------------------------------------------

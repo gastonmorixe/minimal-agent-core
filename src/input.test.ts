@@ -1,6 +1,8 @@
-import { describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
+
+import { describe, expect, it } from "bun:test"
+
 import { RawInput } from "./input.ts"
 
 class FakeTTYInput extends EventEmitter {

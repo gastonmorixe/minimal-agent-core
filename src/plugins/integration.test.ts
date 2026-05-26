@@ -15,8 +15,10 @@
  * bytes, matching the scanner's fallback behavior.
  */
 
-import { describe, it, expect, beforeAll } from "bun:test"
 import { resolve } from "node:path"
+
+import { beforeAll, describe, expect, it } from "bun:test"
+
 import { PluginLoader } from "./loader.ts"
 import { PluginStream } from "./stream.ts"
 

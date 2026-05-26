@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import { AnsiStreamBuffer, findEscapeSafeSplit, MAX_PENDING } from "./ansi-stream.ts"
 
 describe("findEscapeSafeSplit", () => {

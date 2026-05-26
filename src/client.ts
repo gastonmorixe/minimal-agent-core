@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+
 import { type AuthResult, readCredentials } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
 import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"

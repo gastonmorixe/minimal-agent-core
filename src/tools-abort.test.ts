@@ -2,10 +2,13 @@
  * Tests for Phase 1.2 abort/signal plumbing in tools (executeTool + per-tool
  * runners). See `work/plans/abort-quit-rewind.md` §1.2.
  */
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+
 import { executeTool, stripInternalFields, type ToolExecResult } from "./tools.ts"
 
 let dir: string

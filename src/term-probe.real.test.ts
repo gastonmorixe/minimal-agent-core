@@ -13,9 +13,11 @@
  * them ahead of time and unit tests can't see them.
  */
 
-import { test, expect } from "bun:test"
-import { openSync, writeSync, createReadStream, closeSync, existsSync } from "node:fs"
-import { probeGlyphWidth, type ProbeIO } from "./term-probe.ts"
+import { closeSync, createReadStream, existsSync, openSync, writeSync } from "node:fs"
+
+import { expect, test } from "bun:test"
+
+import { type ProbeIO, probeGlyphWidth } from "./term-probe.ts"
 
 // We talk to /dev/tty directly because `bun test` captures process.stdout
 // (its isTTY is undefined inside test workers), which would silently

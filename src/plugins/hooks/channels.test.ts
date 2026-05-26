@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { CHANNELS, CHANNEL_BY_NAME, hasPermission, permissionMatches } from "./channels.ts"
+
+import { CHANNEL_BY_NAME, CHANNELS, hasPermission, permissionMatches } from "./channels.ts"
 
 describe("channels registry", () => {
   test("no duplicate names", () => {

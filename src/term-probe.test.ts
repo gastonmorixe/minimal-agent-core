@@ -4,8 +4,9 @@
  * advances, so we can verify the round-trip math without a real PTY.
  */
 
-import { test, expect } from "bun:test"
-import { probeGlyphWidth, type ProbeIO } from "./term-probe.ts"
+import { expect, test } from "bun:test"
+
+import { type ProbeIO, probeGlyphWidth } from "./term-probe.ts"
 
 /**
  * Build a fake terminal whose cursor advances by `advance` cells for

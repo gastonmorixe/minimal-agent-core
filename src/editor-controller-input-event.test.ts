@@ -5,8 +5,11 @@
  * during repaint(), keeping assertions deterministic. The 120ms default
  * is exercised by the tmux smoke driver.
  */
-import { describe, expect, it } from "bun:test"
+
 import { EventEmitter } from "node:events"
+
+import { describe, expect, it } from "bun:test"
+
 import { EditorController } from "./editor-controller.ts"
 
 class FakeTTYInput extends EventEmitter {

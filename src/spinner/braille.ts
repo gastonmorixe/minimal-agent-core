@@ -5,8 +5,8 @@
  * @module spinner/braille
  */
 
-import type { Spinner, SpinnerRenderContext, SpinnerRenderFrame } from "./types.ts"
 import { BRAILLE_DOTS } from "./library/frames.ts"
+import type { Spinner, SpinnerRenderContext, SpinnerRenderFrame } from "./types.ts"
 
 export interface BrailleSpinnerTheme {
   accent?: (text: string) => string

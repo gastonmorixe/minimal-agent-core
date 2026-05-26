@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline"
+
 import {
   codePointWidth,
   cursorRowOffset,

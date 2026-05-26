@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import { EditorBuffer } from "./editor-buffer.ts"
 import { EditorRenderer } from "./editor-renderer.ts"
 

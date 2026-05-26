@@ -20,6 +20,7 @@
  */
 
 import { format } from "node:util"
+
 import { AnsiStreamBuffer } from "../ansi-stream.ts"
 
 interface CompositorLike {

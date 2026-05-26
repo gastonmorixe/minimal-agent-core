@@ -1,8 +1,8 @@
 import {
   BlinkingNerdSpinner,
-  SpinnerManager,
   type BlinkingNerdSpinnerTheme,
   type Spinner,
+  SpinnerManager,
   type SpinnerNotification,
 } from "./spinner.ts"
 import { displayWidth } from "./term-width.ts"

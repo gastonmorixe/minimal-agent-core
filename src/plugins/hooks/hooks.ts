@@ -24,6 +24,7 @@
 
 import { diag } from "../../diagnostic-bus.ts"
 import { EventBus, type Listener as EventListener } from "../event-bus.ts"
+
 import { CHANNEL_BY_NAME } from "./channels.ts"
 import { HookBus, type StreamHandle } from "./hook-bus.ts"
 import type { ChainEmitResult, ChannelShape, Disposer, HookCtx, ListenOpts } from "./types.ts"

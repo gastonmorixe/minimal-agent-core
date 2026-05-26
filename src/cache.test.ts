@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test"
+
 import {
   CacheAnomalyDetector,
-  formatCacheLine,
-  snapshotRequest,
   type CacheUsage,
+  formatCacheLine,
   type RequestContextSnapshot,
+  snapshotRequest,
 } from "./cache.ts"
 
 const ANSI = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")

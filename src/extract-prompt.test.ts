@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { normalizeArgs } from "./cli-args.ts"
 import { extractPromptFromArgs, FLAGS_NO_VALUE, FLAGS_WITH_VALUES } from "./extract-prompt.ts"
 

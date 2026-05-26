@@ -43,13 +43,16 @@
 
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+
 import { SaveEchoCollector } from "../tui-plugins/memory/lib/save-echo.ts"
 import { ShortTermSnapshot } from "../tui-plugins/memory/lib/short-term-snapshot.ts"
 import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
+
 import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
 import { AutoAskController } from "./auto-ask.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
+import { BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { planCommand } from "./cli/command-plan.ts"
 import { normalizeArgs } from "./cli-args.ts"
@@ -85,7 +88,6 @@ import {
 } from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
 import { SessionStore, shortHash } from "./session-store.ts"
-import { BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"

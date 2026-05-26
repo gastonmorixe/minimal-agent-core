@@ -1,7 +1,9 @@
-import { describe, expect, it } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import {
   firstUserPromptSnippet,

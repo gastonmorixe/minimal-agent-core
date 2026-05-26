@@ -1,5 +1,6 @@
-import { describe, it, expect } from "bun:test"
-import { parseManifest, ManifestError } from "./manifest.ts"
+import { describe, expect, it } from "bun:test"
+
+import { ManifestError, parseManifest } from "./manifest.ts"
 
 describe("parseManifest", () => {
   const valid = {

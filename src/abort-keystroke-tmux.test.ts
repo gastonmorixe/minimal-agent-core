@@ -28,8 +28,10 @@
  * variant suffices for tmux smoke because both go through the same
  * `parseModifiedKeySequence` branches.
  */
-import { describe, expect, it } from "bun:test"
+
 import { spawnSync } from "node:child_process"
+
+import { describe, expect, it } from "bun:test"
 
 function haveTmux(): boolean {
   return spawnSync("tmux", ["-V"]).status === 0

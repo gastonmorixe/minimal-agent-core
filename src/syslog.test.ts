@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import { Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
 import { formatRfc5424 } from "./syslog.ts"
 

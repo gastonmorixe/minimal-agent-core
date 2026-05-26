@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { Hooks } from "./hooks.ts"
 
 const noLog = (_: string) => {}

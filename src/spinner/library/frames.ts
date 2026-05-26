@@ -16,6 +16,7 @@
  */
 
 import type { AnimatedIcon } from "../types.ts"
+
 import { ICON_SQUARE_BIG, ICON_SQUARE_SMALL } from "./icons.ts"
 
 // ─── Bare frame sets (combine with your own intervalMs) ─────────────────────

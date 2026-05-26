@@ -1,7 +1,9 @@
-import { describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { Agent, type ReplAgentLike, runRepl, withRollingCacheBreakpoint } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "./client.ts"

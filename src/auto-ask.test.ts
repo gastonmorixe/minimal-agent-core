@@ -1,5 +1,7 @@
-import { describe, expect, it } from "bun:test"
 import { EventEmitter } from "node:events"
+
+import { describe, expect, it } from "bun:test"
+
 import { AutoAskController } from "./auto-ask.ts"
 import { ModeManager } from "./modes.ts"
 import type { ManifestMode } from "./plugins/types.ts"

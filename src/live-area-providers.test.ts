@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import { LiveAreaScheduler, type LiveAreaSink } from "./live-area-providers.ts"
 import type {
   LiveAreaHandlerContext,

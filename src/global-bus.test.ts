@@ -6,8 +6,9 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test"
-import { EventBus } from "./plugins/event-bus.ts"
+
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
+import { EventBus } from "./plugins/event-bus.ts"
 
 afterEach(() => setGlobalEventBus(null))
 

@@ -1,6 +1,7 @@
-import { loadSession } from "../session-restore.ts"
-import { formatSessionAsMarkdown, formatSessionAsXml } from "../session-dump.ts"
 import { writeStdoutSafely } from "../infra/safe-stdout.ts"
+import { formatSessionAsMarkdown, formatSessionAsXml } from "../session-dump.ts"
+import { loadSession } from "../session-restore.ts"
+
 import { resolveSessionTarget } from "./session-index.ts"
 
 export interface DumpCommandInput {

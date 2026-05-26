@@ -1,4 +1,4 @@
-import { NetworkResponse, type NetworkRequest, type NetworkTransport } from "./types.ts"
+import { type NetworkRequest, NetworkResponse, type NetworkTransport } from "./types.ts"
 
 /** Fetch-based HTTP/1.1 transport used for opt-in fallback paths. */
 export class FetchTransport implements NetworkTransport {

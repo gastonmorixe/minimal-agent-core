@@ -5,7 +5,8 @@
  * Each row of the spec gets at least one test; many rows get inverse-
  * direction guards (e.g. "ESC while armed does NOT quit, it cancels").
  */
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
+
 import {
   ARMED_DURATION_MS,
   ESCAPE_HATCH_MS,

@@ -10,9 +10,9 @@
  * @module spinner/presets
  */
 
-import type { IconSpec } from "./types.ts"
-import { ICON_DOT_FILLED, ICON_DOT_SMALL, ICON_PAUSE, NF_LOCK } from "./library/icons.ts"
 import { THINKING_BREATHING, TOOL_SQUARE_PULSE } from "./library/frames.ts"
+import { ICON_DOT_FILLED, ICON_DOT_SMALL, ICON_PAUSE, NF_LOCK } from "./library/icons.ts"
+import type { IconSpec } from "./types.ts"
 
 /** Fallback when no notification matches. Font-free dot, never invisible. */
 export const DEFAULT_NERD_ICON: IconSpec = ICON_DOT_SMALL

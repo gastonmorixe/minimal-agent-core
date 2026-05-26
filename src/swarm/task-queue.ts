@@ -1,4 +1,5 @@
 import type { Task } from "./swarm"
+
 const P: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
 export class TaskQueue {
   private q: Task[] = []

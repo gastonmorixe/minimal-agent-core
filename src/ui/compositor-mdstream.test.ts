@@ -26,11 +26,14 @@
  * spawning a subprocess.
  */
 
-import { describe, expect, it } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
 import { Formatter } from "../formatter.ts"
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
+
 import { Compositor } from "./compositor.ts"
 
 function loadFixture(name: string): string {

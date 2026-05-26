@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
+
 import { c } from "../agent.ts"
 import { firstUserPromptSnippet } from "../session-restore.ts"
 import {
@@ -7,6 +8,7 @@ import {
   parseLines as parseSessionLines,
   sessionFilePath,
 } from "../session-store.ts"
+
 import { readSessionIndex } from "./session-index.ts"
 
 const PATH_COL_WIDTH = 30

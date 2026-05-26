@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test"
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
 
 describe("loadUserConfig", () => {

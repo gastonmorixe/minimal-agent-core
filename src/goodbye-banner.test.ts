@@ -9,7 +9,8 @@
  *   - degraded copy when session id missing
  *   - escape-hatch reason changes the closer copy
  */
-import { describe, it, expect } from "bun:test"
+import { describe, expect, it } from "bun:test"
+
 import { formatGoodbye, printGoodbye } from "./goodbye-banner.ts"
 
 const SID = "30a088be-0000-4000-8000-82cd27e6b341"

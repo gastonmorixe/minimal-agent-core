@@ -11,9 +11,11 @@
  * live area is still re-drawn.
  */
 
-import { describe, expect, it } from "bun:test"
-import { EditorController } from "./editor-controller.ts"
 import { EventEmitter } from "node:events"
+
+import { describe, expect, it } from "bun:test"
+
+import { EditorController } from "./editor-controller.ts"
 
 class FakeStdin extends EventEmitter {
   isTTY = true

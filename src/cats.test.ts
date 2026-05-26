@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { catBlock, catFace, catRows, CATS, DEFAULT_CAT, type CatExpression } from "./cats.ts"
+
+import { CATS, type CatExpression, catBlock, catFace, catRows, DEFAULT_CAT } from "./cats.ts"
 import { displayWidth } from "./term-width.ts"
 
 describe("cats", () => {

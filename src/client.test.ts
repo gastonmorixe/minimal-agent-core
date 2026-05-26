@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import { type AuthResult, getAuth } from "./auth.ts"
 import {
   checkQuota,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+
 import { FakeTerminal } from "./fake-terminal.ts"
 
 describe("FakeTerminal — printable text + CR/LF", () => {
