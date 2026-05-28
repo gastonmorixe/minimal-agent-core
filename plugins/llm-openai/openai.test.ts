@@ -266,3 +266,29 @@ describe("translateOpenAIResponsesStream (fixtures)", () => {
     expect(() => JSON.parse(joinedText(events))).not.toThrow()
   })
 })
+
+describe("validateOpenAIRequest — modality gating", () => {
+  function bootstrap() {
+    clearModelRegistry()
+    clearProviderRegistry()
+    bootstrapOpenAI()
+  }
+  const audioReq = (id: string): CanonicalRequest => ({
+    modelId: id,
+    messages: [
+      { role: "user", content: [{ type: "audio", source: { kind: "base64", format: "wav", data: "AA" } }] },
+    ],
+  })
+
+  it("gpt-4o accepts audio input (text+image+audio modality)", () => {
+    bootstrap()
+    expect(resolveProvider("openai").validate(audioReq("gpt-4o"), resolveModel("gpt-4o")).ok).toBe(true)
+  })
+
+  it("gpt-4o-mini rejects audio input (no audio modality)", () => {
+    bootstrap()
+    const res = resolveProvider("openai").validate(audioReq("gpt-4o-mini"), resolveModel("gpt-4o-mini"))
+    expect(res.ok).toBe(false)
+    expect(res.errors.some((e) => e.capability === "modalities")).toBe(true)
+  })
+})
