@@ -4,7 +4,7 @@
  * @module llm/providers/openai
  */
 
-export { bootstrapOpenAI, openaiAdapter } from "./adapter.ts"
+export { bootstrapOpenAI, openaiAdapter, openaiProviderPlugin } from "./adapter.ts"
 export {
   CAPS_GPT_4O_CHAT,
   CAPS_GPT_4O_MINI_CHAT,

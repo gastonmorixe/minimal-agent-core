@@ -24,6 +24,7 @@ import {
   type SurfaceId,
   type ValidationResult,
 } from "../../provider.ts"
+import type { ProviderPlugin } from "../../provider-plugin.ts"
 import { parseSse } from "../../streaming/sse-parser.ts"
 
 import { buildAnthropicHeaders } from "./headers.ts"
@@ -115,6 +116,14 @@ export const anthropicAdapter: ProviderAdapter = {
 export function bootstrapAnthropic(): void {
   registerAnthropicModels()
   registerProvider(anthropicAdapter)
+}
+
+/** This provider packaged for the {@link ProviderPlugin} registry. */
+export const anthropicProviderPlugin: ProviderPlugin = {
+  id: "anthropic",
+  displayName: "Anthropic",
+  shortCode: "anth",
+  register: bootstrapAnthropic,
 }
 
 export type { ProviderAuth }

@@ -29,6 +29,7 @@ import type {
   SurfaceId,
   ValidationResult,
 } from "../../provider.ts"
+import type { ProviderPlugin } from "../../provider-plugin.ts"
 import { parseSse } from "../../streaming/sse-parser.ts"
 
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
@@ -141,6 +142,14 @@ export const openaiAdapter: ProviderAdapter = {
 export function bootstrapOpenAI(): void {
   registerOpenAIModels()
   registerProvider(openaiAdapter)
+}
+
+/** This provider packaged for the {@link ProviderPlugin} registry. */
+export const openaiProviderPlugin: ProviderPlugin = {
+  id: "openai",
+  displayName: "OpenAI",
+  shortCode: "oai",
+  register: bootstrapOpenAI,
 }
 
 export type { ProviderAuth }
