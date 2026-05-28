@@ -21,8 +21,15 @@
 
 export type Effort = string
 /** Documentation-only list of levels known to the server at time of writing.
- *  Not used for validation — the wire value is whatever the user passed. */
-export const KNOWN_EFFORT: readonly string[] = ["low", "medium", "high", "max"]
+ *  Not used for validation — the wire value is whatever the user passed.
+ *
+ *  Per-model availability (as of 2026-05-28):
+ *  - `low` / `medium` / `high`: opus-4-5+, opus-4-6, opus-4-7, opus-4-8, sonnet-4-6
+ *  - `xhigh`: opus-4-7, opus-4-8 only (claude-code's REPL default for opus tier)
+ *  - `max`:   opus-4-5+ only (gated by user subscription tier)
+ *
+ *  Sonnet 4.5 and haiku 4.5 reject `effort` outright with a 400. */
+export const KNOWN_EFFORT: readonly string[] = ["low", "medium", "high", "xhigh", "max"]
 
 export type EffortSource = "cli" | "env" | "config"
 

@@ -41,12 +41,15 @@
  * @module index
  */
 
+import { existsSync, readFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { SaveEchoCollector } from "../plugins/memory/lib/save-echo.ts"
 import { ShortTermSnapshot } from "../plugins/memory/lib/short-term-snapshot.ts"
 import { TasksAttachment } from "../plugins/tasks/lib/attachment.ts"
+import { parseFile as parseTasksFile } from "../plugins/tasks/lib/parse.ts"
 
 import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
@@ -73,6 +76,7 @@ import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
+import { bootstrapAnthropic } from "./llm/providers/anthropic/index.ts"
 import { getSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -104,6 +108,13 @@ import { TOOL_DEFINITIONS } from "./tools.ts"
 // ---------------------------------------------------------------------------
 
 const args = normalizeArgs(process.argv.slice(2))
+
+// Populate the canonical LLM model + provider registry. Idempotent.
+// Done at top-level so `--list-models`, `--model`, and downstream
+// `Agent.run` all see the registered Anthropic catalog. Other
+// providers (OpenAI, …) will register themselves the same way once
+// their adapters land (see private/research/2026-05-28-llm-providers/).
+bootstrapAnthropic()
 
 if (args.includes("--help") || args.includes("-h")) {
   printHelp()
@@ -186,6 +197,15 @@ const thinkingDisplay: "summarized" | "omitted" | undefined =
     ? thinkingDisplayRaw
     : undefined
 
+// --fast / -F  →  speed: "fast" on the request body. Opt-in only; default
+// omits the field so the server treats it as normal. Capability-gated at
+// the registry (sonnet-4-6 / haiku-4-5 don't support fast mode; the flag
+// is forwarded silently and the Anthropic adapter's request-body builder
+// no-ops it when the resolved model declares `speedFast: false`).
+// Env mirror: MINIMAL_AGENT_FAST=1
+const speedFast = args.includes("--fast") || process.env.MINIMAL_AGENT_FAST === "1"
+const speed: "normal" | "fast" = speedFast ? "fast" : "normal"
+
 const formatterExplicitIdx = args.indexOf("--formatter")
 const formatterExplicitArg: string[] | undefined =
   formatterExplicitIdx !== -1 && args[formatterExplicitIdx + 1]
@@ -256,7 +276,8 @@ function printHelp(): void {
     "",
     `  ${c.bold("Options")}`,
     `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
-    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
+    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, xhigh, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
+    `    ${c.cyan("--fast")}                    Fast-mode dispatch ${c.dim('(speed:"fast"; opus-4-8 only; ~2.5x tok/s, ~2x cost; or MINIMAL_AGENT_FAST=1)')}`,
     `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
     `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
     `    ${c.cyan("--formatter-args")} ${c.dim("<args>")}   Extra args appended to the formatter ${c.dim('(e.g. "--table-fit"; or MINIMAL_AGENT_FORMATTER_ARGS)')}`,
@@ -291,7 +312,8 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_NET_DBG=1")}  Mirror raw HTTP req/res to ${c.dim("./.net-dbg/")}`,
     `    ${c.cyan("CLAUDE_CODE_EXTRA_METADATA")}  JSON object merged into metadata.user_id`,
     `    ${c.cyan("MINIMAL_AGENT_SPINNER")}    Spinner preset id ${c.dim("(same values as --spinner)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_EFFORT")}     Reasoning effort ${c.dim("(low | medium | high | max)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_EFFORT")}     Reasoning effort ${c.dim("(low | medium | high | xhigh | max)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_FAST=1")}     Opt into fast-mode dispatch ${c.dim("(opus-4-8 only)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
     `    ${c.cyan("MINIMAL_AGENT_FORMATTER_ARGS")}  Extra args for the formatter ${c.dim('(shell-style, e.g. "--table-fit")')}`,
     `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
@@ -788,6 +810,31 @@ async function main() {
     `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`,
   )
 
+  // Fire-and-forget Anthropic bootstrap probe (v2.1.154+). Hits
+  // /api/claude_cli/bootstrap once and overlays any server-shipped
+  // model-cost overrides (`additional_model_costs`) onto the canonical
+  // registry — lets Anthropic ship a new model id without a CLI release.
+  //
+  // OAuth-only (the endpoint 4xx's API-key callers). Failures (network
+  // hiccup, server error) are absorbed silently; the local pricing
+  // tables remain authoritative as a fallback.
+  if (auth.type === "oauth") {
+    const { fetchBootstrap, applyBootstrapOverrides } = await import(
+      "./llm/providers/anthropic/index.ts"
+    )
+    const registry = await import("./llm/model-registry.ts")
+    const selectedModelForBootstrap = model ?? userConfig.model ?? DEFAULT_MODEL
+    void fetchBootstrap({
+      auth: { kind: "oauth", token: auth.token },
+      modelId: selectedModelForBootstrap.replace(/\[(1|2)m\]/gi, ""),
+    })
+      .then((resp) => applyBootstrapOverrides(resp, registry))
+      .catch(() => {
+        // Tolerated: bootstrap is a UX improvement, not a correctness
+        // requirement. Local pricing tables stay authoritative.
+      })
+  }
+
   // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
   let formatterCmd: string[] | undefined
   if (commandPlan.needsFormatter) {
@@ -1100,11 +1147,27 @@ async function main() {
       // `userTimestampsFromRecords` in `src/session-replay.ts`.
       userTimestamps = userTimestampsFromRecords(loaded.records)
       // Live transcript presentation overrides (display / displayHeader
-      // / displayFooter), keyed by tool_use_id. Empty when no tool
-      // results carried overrides (pre-fix session files, runs with
-      // only Bash/Read/Grep). See `toolDisplaysFromRecords` in
-      // `src/session-replay.ts`.
-      toolDisplays = toolDisplaysFromRecords(loaded.records)
+      // / displayFooter), keyed by tool_use_id. Threads the per-session
+      // `<sid>.tasks.jsonl` sidecar (when present) so the Task deriver
+      // can render historical task calls with full ANSI styling AND
+      // per-call status snapshots, instead of falling back to the
+      // structural content-split path. The sidecar load is best-effort:
+      // a missing file just yields a `null` sidecar, which the deriver
+      // handles by taking the structural path. See
+      // `toolDisplaysFromRecords` + `deriveTaskDisplay` for the
+      // per-call cutoff semantics.
+      const sidecarPath = join(homedir(), ".minimal-agent", "sessions", `${resumeSid}.tasks.jsonl`)
+      let sidecarTasks: import("../plugins/tasks/lib/parse.ts").Task[] | null = null
+      try {
+        if (existsSync(sidecarPath)) {
+          const text = readFileSync(sidecarPath, "utf8")
+          sidecarTasks = parseTasksFile(text)
+        }
+      } catch {
+        // Best-effort: a malformed sidecar is just treated as missing.
+        sidecarTasks = null
+      }
+      toolDisplays = toolDisplaysFromRecords(loaded.records, { sidecarTasks })
       const turns = initialMessages.length
       const droppedNote =
         loaded.dropped.length > 0
@@ -1380,6 +1443,7 @@ async function main() {
     auth,
     model: selectedModel,
     effort,
+    speed,
     thinkingDisplay,
     loader: hasPlugins ? loader : null,
     modeManager,

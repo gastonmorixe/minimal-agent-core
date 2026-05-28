@@ -147,6 +147,9 @@ describe("headers", () => {
           "prompt-caching-scope-2026-01-05",
           "advanced-tool-use-2025-11-20",
           "effort-2025-11-24",
+          // 2026-05-28: added for v2.1.154 parity with live capture
+          "mid-conversation-system-2026-04-07",
+          "extended-cache-ttl-2025-04-11",
         ].join(","),
       )
     })

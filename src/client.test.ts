@@ -74,7 +74,7 @@ describe("client", () => {
     it("SYSTEM_PROMPT has 3 blocks: billing, identity, instructions", () => {
       expect(SYSTEM_PROMPT.length).toBeGreaterThanOrEqual(3)
       expect(SYSTEM_PROMPT[0].text).toContain("x-anthropic-billing-header")
-      expect(SYSTEM_PROMPT[0].text).toContain("cc_version=2.1.118")
+      expect(SYSTEM_PROMPT[0].text).toContain("cc_version=2.1.154")
       expect(SYSTEM_PROMPT[1].text).toBe(
         "You are Claude Code, Anthropic's official CLI for Claude.",
       )
@@ -1137,6 +1137,90 @@ describe("client", () => {
         expect(response.toUpperCase()).toContain("HELLO")
       },
       30_000,
+    )
+
+    // Phase 4 — Anthropic 4.7/4.8 live smoke. Verifies the full new
+    // beta set (mid-conversation-system-2026-04-07, extended-cache-
+    // ttl-2025-04-11, fast-mode-2026-02-01 gated, …) actually round-
+    // trips against api.anthropic.com on opus-4-8 with adaptive
+    // thinking. Skipped unless E2E=1 (no Anthropic creds → no probe).
+    it.skipIf(skip)(
+      "Opus 4.8 conversation round-trip: adaptive thinking + 1h cache + effort=high",
+      async () => {
+        const auth = await getAuth()
+        const messages: Message[] = [
+          { role: "user", content: [{ type: "text", text: "Reply with exactly: OK48" }] },
+        ]
+
+        const response = await sendMessageSync({
+          auth,
+          messages,
+          model: "claude-opus-4-8",
+          maxTokens: 32,
+          stream: true,
+          thinking: { type: "adaptive" },
+          outputConfig: { effort: "high" },
+        })
+
+        expect(response.length).toBeGreaterThan(0)
+        expect(response.toUpperCase()).toContain("OK48")
+      },
+      60_000,
+    )
+
+    it.skipIf(skip)(
+      "Opus 4.8 with --fast: server acknowledges fast-mode wire (200 OK or specific 429)",
+      async () => {
+        // Wire-shape verification, not a full round-trip. Two acceptable
+        // outcomes prove `speed:"fast"` + the `fast-mode-2026-02-01`
+        // beta header reached the server:
+        //
+        //   1. 200 OK with the model response — the account holds the
+        //      "Usage credits" tier required for fast-mode dispatch
+        //      (most subs don't).
+        //
+        //   2. 429 with `"Usage credits are required for fast mode."`
+        //      — the server PARSED the fast-mode opt-in, recognized it,
+        //      and quoted policy. Anything else (400, 403, generic 429)
+        //      would mean the wire was wrong.
+        //
+        // The retry coordinator will retry transient overloads forever,
+        // so we use a cancellation signal that fires immediately after
+        // the first attempt to avoid an infinite loop in either case.
+        const auth = await getAuth()
+        const messages: Message[] = [
+          { role: "user", content: [{ type: "text", text: "Reply with exactly: FAST" }] },
+        ]
+
+        let success = false
+        let serverNotedFastMode = false
+        try {
+          const response = await sendMessageSync({
+            auth,
+            messages,
+            model: "claude-opus-4-8",
+            maxTokens: 32,
+            stream: true,
+            thinking: { type: "adaptive" },
+            outputConfig: { effort: "high" },
+            speed: "fast",
+          })
+          if (response.length > 0) success = true
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          // Server's response when fast mode is recognized but the
+          // account doesn't have credits for it. Proves wire shape OK.
+          if (msg.includes("Usage credits are required for fast mode")) {
+            serverNotedFastMode = true
+          } else {
+            throw err
+          }
+        }
+
+        // One of the two acceptable outcomes must hold.
+        expect(success || serverNotedFastMode).toBe(true)
+      },
+      120_000,
     )
   })
 
