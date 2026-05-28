@@ -1,6 +1,6 @@
 # OpenAI provider + provider-plugin seam + footer tag
 
-**Status:** shipped (canonical OpenAI provider + ProviderPlugin contract + footer tag). Physical plugin extraction (`plugins/llm-*`) deferred; plan below.
+**Status:** shipped (canonical OpenAI provider + ProviderPlugin contract + footer tag + physical extraction into `plugins/llm-anthropic` / `plugins/llm-openai` with a discovery loader).
 **Owner:** agent (session continuing 4efe61e0)
 **Builds on:** [`2026-05-28-anthropic-opus-4-8.md`](./2026-05-28-anthropic-opus-4-8.md) (the canonical core + Anthropic adapter + Opus 4.8).
 
@@ -48,14 +48,16 @@ The quota-status footer's trailing segment now reads `<tag>:<level>` (e.g. `anth
 
 `bun run check` green throughout. Test count: 3392 → **3416 pass / 9 skip / 0 fail** (+16 OpenAI, +3 provider-plugin, +5 model-label/footer). The legacy `src/client.ts` retry/watchdog/observer/401-refresh infrastructure was not touched.
 
-## Deferred: physical plugin extraction (`plugins/llm-*`)
+## Shipped: physical plugin extraction (`plugins/llm-*`)
 
-The provider-plugin **contract** landed; the **physical move** of the provider code into `plugins/llm-anthropic` / `plugins/llm-openai` is a separate, larger epic (the handoff deferred it until "the seam is stable"). Plan:
+The providers now live as plugins and the core imports no provider by name (5 more commits, each green):
 
-1. **Manifest + types**: add a `providers` capability to the plugin manifest schema (`src/plugins/manifest.ts`) and types (`src/plugins/types.ts`), pointing at a module handler that exports a `ProviderPlugin`.
-2. **Loader (sequencing-sensitive)**: provider plugins must register EARLY (before `--list-models` / model resolution at `src/index.ts` startup), so they need a dedicated early-discovery pass, NOT the async TUI `PluginLoader.load()` that runs later in `runMain`.
-3. **Move** `src/llm/providers/anthropic` → `plugins/llm-anthropic/` and `openai` → `plugins/llm-openai/`: each with a `manifest.json`, fixed import paths (canonical core is now `../../src/llm/...`), and relocated tests. Snapshot wire identity against the existing `__fixtures__/`.
-4. **De-hardcode**: drop the in-tree builtin barrel; load providers via plugin discovery so the core imports no provider by name.
-5. **Cross-plugin reuse**: a future `plugins/llm-<groq|azure|together>/` can depend on `llm-openai`'s translators/request-body (same wire spec, different endpoint + capabilities).
+1. **Move** (`git mv`, history preserved): `src/llm/providers/anthropic` → `plugins/llm-anthropic/`, `src/llm/providers/openai` → `plugins/llm-openai/`. Imports to the canonical core rewritten to `../../src/llm/*` (and `../../../src/llm/*` from the OpenAI `chat/`+`responses/` subdirs), including inline `import()` forms and `src/headers.ts` / `src/network`. Tests + fixtures moved with their code.
+2. **Descriptor**: each plugin ships a `provider.json` (`id` / `entry` / `export`), kept SEPARATE from the TUI `manifest.json` so the late async `PluginLoader` never touches providers (and no plugin-count surprises).
+3. **Discovery loader** (`src/llm/provider-discovery.ts`): scans a plugins dir for `provider.json`, dynamically imports each declared `ProviderPlugin` (path absolutized via `resolve`, since a bare relative path in `import()` resolves against the module, not cwd), and registers it. A dedicated EARLY loader, deliberately separate from the TUI `PluginLoader` (which runs too late for startup model resolution).
+4. **Wired**: `main()` calls `registerDiscoveredProviders(<repo>/plugins)` + `activateProviderPlugins()` before the bootstrap probe / footer / canonical `run()` read the registry. The static builtin barrel (`src/llm/providers/index.ts`) is deleted; `src/index.ts` imports zero provider code by name.
+5. **Cross-plugin reuse**: a future `plugins/llm-<groq|azure|together>/` can import `plugins/llm-openai`'s translators/request-body (same wire spec, different endpoint + capabilities) and ship its own `provider.json` + `ProviderPlugin`.
+
+Final state: `bun run check` green, **3419 pass / 9 skip / 0 fail**.
 
 Note: a model selected via `--model` still runs through the legacy Anthropic transport in the agent loop; making `--model gpt-5.5` actually dispatch to OpenAI at runtime is the separate "Phase 4-extended" agent-canonicalization epic and intentionally out of scope here.
