@@ -10,6 +10,7 @@
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { CapabilityViolation } from "../../src/llm/errors.ts"
+import { modalityViolations } from "../../src/llm/modality-check.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 import type { ValidationResult } from "../../src/llm/provider.ts"
 
@@ -131,6 +132,9 @@ export function validateOpenAIRequest(req: CanonicalRequest, model: ModelEntry):
       ),
     )
   }
+
+  // Multimodal input gating (image/audio/file) — shared across providers.
+  errors.push(...modalityViolations(req.messages, caps, model.id))
 
   return { ok: errors.length === 0, errors }
 }

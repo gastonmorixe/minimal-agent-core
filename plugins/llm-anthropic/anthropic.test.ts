@@ -655,3 +655,51 @@ function parseSseFixture(raw: string): unknown[] {
 
 // Reference to silence unused-import warnings; classifyRequest covered above.
 void registerAnthropicModels
+
+describe("validateAnthropicRequest — modality gating", () => {
+  const imageReq = (id: string): CanonicalRequest => ({
+    modelId: id,
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "image", source: { kind: "base64", mediaType: "image/png", data: "AA" } }],
+      },
+    ],
+  })
+  const audioReq = (id: string): CanonicalRequest => ({
+    modelId: id,
+    messages: [
+      { role: "user", content: [{ type: "audio", source: { kind: "base64", format: "wav", data: "AA" } }] },
+    ],
+  })
+  const fileReq = (id: string): CanonicalRequest => ({
+    modelId: id,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "file", source: { kind: "base64", mediaType: "application/pdf", data: "AA" } },
+        ],
+      },
+    ],
+  })
+
+  it("Opus 4.8 accepts image + PDF, rejects audio", () => {
+    setup()
+    const p = resolveProvider("anthropic")
+    expect(p.validate(imageReq("claude-opus-4-8"), resolveModel("claude-opus-4-8")).ok).toBe(true)
+    expect(p.validate(fileReq("claude-opus-4-8"), resolveModel("claude-opus-4-8")).ok).toBe(true)
+    const audio = p.validate(audioReq("claude-opus-4-8"), resolveModel("claude-opus-4-8"))
+    expect(audio.ok).toBe(false)
+    expect(audio.errors.some((e) => e.capability === "modalities")).toBe(true)
+  })
+
+  it("Haiku 4.5 accepts image, rejects PDF (no pdf modality)", () => {
+    setup()
+    const p = resolveProvider("anthropic")
+    expect(p.validate(imageReq("claude-haiku-4-5"), resolveModel("claude-haiku-4-5")).ok).toBe(true)
+    const file = p.validate(fileReq("claude-haiku-4-5"), resolveModel("claude-haiku-4-5"))
+    expect(file.ok).toBe(false)
+    expect(file.errors.some((e) => e.capability === "modalities")).toBe(true)
+  })
+})
