@@ -1,0 +1,8 @@
+{
+  "id": "deepseek",
+  "name": "LLM Provider: DeepSeek (OpenAI-compatible)",
+  "version": "0.1.0",
+  "description": "DeepSeek (deepseek-chat) over the OpenAI Chat Completions wire spec. Reuses plugins/llm-openai's request body + SSE translator + validator; only the endpoint differs.",
+  "entry": "./index.ts",
+  "export": "deepseekProviderPlugin"
+}
