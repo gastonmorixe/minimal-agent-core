@@ -134,7 +134,7 @@ export class Agent {
    * stream summaries. Unset → server default per model.
    */
   private thinkingDisplay: "summarized" | "omitted" | undefined
-  /** Optional TUI plugin loader. When set, plugin tools merge with core tools. */
+  /** Optional Plugin loader. When set, plugin tools merge with core tools. */
   private loader: PluginLoader | null
   /** Optional mode manager (mode-aware system prompt + tool filter). */
   private modeManager: ModeManager | null
@@ -147,28 +147,28 @@ export class Agent {
    * next turn, with no extra tool round-trip.
    *
    * Off by default; the agent is fully functional without it.
-   * See `tui-plugins/memory/lib/save-echo.ts`.
+   * See `plugins/memory/lib/save-echo.ts`.
    */
   private saveEcho: { consumeAll(): ContentBlock[] } | null
   /**
    * Optional short-term snapshot producer. When set, the per-session
-   * `<short-term-memory>…</short-term-memory>` attachment is prepended
+   * `<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>` attachment is prepended
    * to the FIRST user message of each `run()` call.
    *
    * Only emitted at the initial seam (not at the loop seam after
    * tool_use rounds), to avoid re-emitting stale snapshots within the
-   * same turn : see `tui-plugins/memory/lib/short-term-snapshot.ts`.
+   * same turn : see `plugins/memory/lib/short-term-snapshot.ts`.
    */
   private shortTermSnapshot: { toAttachment(): ContentBlock | null } | null
   /**
    * Optional tasks-list attachment producer. When set, the per-session
-   * `<ma::tui::tasks …>…</ma::tui::tasks>` attachment is prepended to
+   * `<ma::plugin::tasks …>…</ma::plugin::tasks>` attachment is prepended to
    * the FIRST user message of each `run()` call. Mirrors
    * {@link Agent.shortTermSnapshot} exactly : same structural-type
    * pattern, same initial-seam-only emission rule, same null-on-empty
    * behavior (zero token cost when the session has no tasks).
    *
-   * See `tui-plugins/tasks/lib/attachment.ts`.
+   * See `plugins/tasks/lib/attachment.ts`.
    */
   private tasksAttachment: { toAttachment(): ContentBlock | null } | null
   /**
@@ -188,7 +188,7 @@ export class Agent {
    * Optional per-session blob store for raw tool outputs. When set, large
    * or truncated tool bodies are persisted verbatim at
    * `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw` and a
-   * single-line `[raw-output: …]` footer pointing at the file is appended
+   * single-line `<ma::agent::raw-output …/>` footer pointing at the file is appended
    * to the model-visible `content`. Best-effort like `store`: a null
    * blobStore means tool results still flow, just without the pointer.
    * See `src/blob-store.ts`.
@@ -207,7 +207,7 @@ export class Agent {
    * can opt in via the constructor `maxToolRounds` option. When a finite
    * cap is set and reached, the loop does NOT abruptly exit with an
    * orphaned tool_use : instead it sends ONE final API request with
-   * tools disabled and a `<ma::emergency-cap-triggered round="N" />`
+   * tools disabled and a `<ma::agent::emergency-cap-triggered round="N" />`
    * attachment so the model can write a clean wrap-up summary.
    *
    * The actual safety device against runaway loops is the reflection
@@ -216,7 +216,7 @@ export class Agent {
   private maxToolRounds: number = Number.POSITIVE_INFINITY
   /**
    * Reflection checkpoint cadence (in tool rounds). Every Nth round a
-   * `<ma::reflection-checkpoint round="N" cooldown-applied-seconds="..." />`
+   * `<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="..." />`
    * attachment is injected into the next user content, preceded by a
    * wall-clock cooldown (see {@link reflectionCooldownMs}). This is the
    * default-on safety device : not a stop signal, but a "are you on
@@ -239,7 +239,7 @@ export class Agent {
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   /**
    * Per-run counter for the ack/silence opt-out. When the model emits
-   * `<ma::reflection-ack silence-for="K" reason="..." />` in its
+   * `<ma::agent::reflection-ack silence-for="K" reason="..." />` in its
    * response, this is set to K and decremented at each would-be
    * checkpoint. While positive, both the cooldown and the attachment are
    * skipped. Reset to 0 at the start of every `run()` call : silence is
@@ -275,7 +275,7 @@ export class Agent {
    *
    * @param opts.auth - Authenticated credentials from {@link getAuth}
    * @param opts.model - Model ID (default: `claude-sonnet-4-6`)
-   * @param opts.loader - Optional TUI plugin loader. When provided, its tools
+   * @param opts.loader - Optional Plugin loader. When provided, its tools
    *   merge with the core tools and its PROMPT.md fragments are appended to
    *   the system prompt's session-context block.
    * @param opts.sendFn - Injectable Messages API function (defaults to the
@@ -309,7 +309,7 @@ export class Agent {
     /**
      * Optional per-session blob store. When supplied, raw pre-clamp
      * tool outputs are persisted to `<sessionsDir>/<sid>.blobs/` and
-     * the model receives a `[raw-output: …]` pointer footer. When
+     * the model receives a `<ma::agent::raw-output …/>` pointer footer. When
      * omitted (or null), the agent runs the legacy path: clamped
      * content goes to API + JSONL with no separate raw copy.
      * See `src/blob-store.ts`.
@@ -650,8 +650,8 @@ export class Agent {
     // Initial user message. Prepended attachments (in this order):
     //
     //   1. <mode-change from="…" to="…" at="…" />     : pending mode toggle.
-    //   2. <short-term-memory>…</short-term-memory>    : session scratchpad.
-    //   3. <ma::tui::tasks …>…</ma::tui::tasks>        : active task list.
+    //   2. <ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>    : session scratchpad.
+    //   3. <ma::plugin::tasks …>…</ma::plugin::tasks>        : active task list.
     //   4. <memory-saved scope="…" id="…">…</…>+      : id echo for any
     //      memory(ies) the model saved on the previous turn.
     //   5. user text                                   : the actual user input.
@@ -840,7 +840,7 @@ export class Agent {
       })
 
       let response: StreamedResponse | undefined
-      // Strip `<ma::reflection-ack ... />` from the streamed text channel
+      // Strip `<ma::agent::reflection-ack ... />` from the streamed text channel
       // before it reaches the REPL sink. The agent still parses the tag
       // out of `lastResponse.text` (built from the same SSE deltas inside
       // the client) and surfaces a dim transcript line — that's the
@@ -875,7 +875,7 @@ export class Agent {
       }
 
       // Reflection ack scan. The model can opt out of the next K
-      // reflection checkpoints by emitting a `<ma::reflection-ack
+      // reflection checkpoints by emitting a `<ma::agent::reflection-ack
       // silence-for="K" reason="..." />` tag anywhere in its assistant
       // text. We scan the concatenated response text (cheaper and more
       // robust than walking each text block individually : the regex is
@@ -1080,7 +1080,7 @@ export class Agent {
           // The result is small, deterministic, side-effect-free, and
           // doesn't need a spinner or the bash-streaming machinery. It
           // ships through the same `tool_result` shape as everything
-          // else and picks up the trailing `<ma::mode-active>` stamp
+          // else and picks up the trailing `<ma::agent::mode-active>` stamp
           // below.
           writeToolHeader()
           const mm = this.modeManager
@@ -1166,7 +1166,7 @@ export class Agent {
                 // straight to the API. Now plugin output is clamped to the
                 // same 64 KB / 1000-line budgets and the FULL pre-clamp body
                 // is preserved in `rawForBlob` for the blob-store hook
-                // below. Recoverable via the `[raw-output: …]` pointer
+                // below. Recoverable via the `<ma::agent::raw-output …/>` pointer
                 // footer the agent appends a few lines down.
                 //
                 // Tools that want full plugin control over the
@@ -1358,7 +1358,7 @@ export class Agent {
           // 64KB/1000L universal cap) OR the full body (plugin tools, OR
           // built-ins under cap). When persistable, write the FULL bytes
           // to `<sid>.blobs/<tool_use_id>.raw` and append a
-          // `[raw-output: …]` pointer footer so the model can `Read` the
+          // `<ma::agent::raw-output …/>` pointer footer so the model can `Read` the
           // file when the inline body isn't enough.
           //
           // Source of truth for the blob:
@@ -1391,15 +1391,15 @@ export class Agent {
             if (blobWrite) {
               // Footer order: existing `[truncated: …]` notice is already
               // inside `content` (appended by truncation.ts when the clamp
-              // fired). Our `[raw-output: …]` goes AFTER that and BEFORE
-              // the `<ma::tui-preview …>` annotation appended below. The
+              // fired). Our `<ma::agent::raw-output …/>` goes AFTER that and BEFORE
+              // the `<ma::agent::output-preview …>` annotation appended below. The
               // model-facing tail therefore reads:
               //   <body>
               //   [truncated: …]               ← only when clamp fired
               //
-              //   [raw-output: <path>  85kB · sha256=…]   ← new
+              //   <ma::agent::raw-output path="<path>" size="85kB" sha256="…" />   ← new
               //
-              //   <ma::tui-preview shown=… total=…>…</ma::tui-preview>   ← only when TUI elided
+              //   <ma::agent::output-preview shown=… total=…>…</ma::agent::output-preview>   ← only when TUI elided
               content = `${content}\n\n${formatRawOutputFooter(blobWrite)}`
             }
           }
@@ -1408,7 +1408,7 @@ export class Agent {
           // feedback-tracker.ts streak note): when the user's transcript
           // clamped MORE lines than the API cap did (every tool with a tight
           // preview budget : Bash=10, Read=15, Grep=12, Glob=25), append a
-          // model-only `<ma::tui-preview …>` annotation to `content` BEFORE
+          // model-only `<ma::agent::output-preview …>` annotation to `content` BEFORE
           // we push it to `toolResults`, so the model knows the audiences
           // diverged. Without this, the model sees the full body and
           // assumes the user did too, leading to "as you can see above"
@@ -1429,10 +1429,10 @@ export class Agent {
             if (e) {
               const hint = tuiPreviewHint(tool.name)
               content =
-                `${content}\n\n<ma::tui-preview ` +
+                `${content}\n\n<ma::agent::output-preview ` +
                 `shown="${e.shown}" total="${e.total}" tool="${tool.name}">` +
                 hint +
-                `</ma::tui-preview>`
+                `</ma::agent::output-preview>`
             }
           }
         }
@@ -1464,12 +1464,38 @@ export class Agent {
           is_error: isError,
         }
         toolResults.push(resultBlock)
+        // Persist the live transcript's presentation overrides so
+        // `--resume` can recreate the exact body / header the user
+        // saw without re-running the tool. Without this, plugin-driven
+        // tools (Edit's diff, Tasks' tree) lose their custom rendering
+        // on resume and fall back to the model-facing `content` (e.g.
+        // "File edited: ..." or JSON args). `aborted` runs go through
+        // the canceled-footer renderer instead of `display`, so
+        // there's nothing useful to persist in that case : keep the
+        // record minimal so a resume of an aborted run renders the
+        // same dim "canceled" footer the live agent drew. See the
+        // matching consumer in `src/session-replay.ts`.
+        const presentation: {
+          display?: string
+          displayHeader?: string
+          displayFooter?: string
+        } = {}
+        if (!aborted) {
+          if (display !== undefined) presentation.display = display
+          if (displayHeader !== undefined) presentation.displayHeader = displayHeader
+          if (displayFooter !== undefined) presentation.displayFooter = displayFooter
+        }
+        const hasPresentation =
+          presentation.display !== undefined ||
+          presentation.displayHeader !== undefined ||
+          presentation.displayFooter !== undefined
         this.store?.appendToolResult(
           resultBlock,
           undefined,
           blobWrite
             ? { path: blobWrite.path, bytes: blobWrite.bytes, sha256: blobWrite.sha256 }
             : undefined,
+          hasPresentation ? presentation : undefined,
         )
       }
 
@@ -1519,7 +1545,7 @@ export class Agent {
       // Reflection checkpoint. After a full round (assistant response +
       // tool execution) at every Nth round, apply the wall-clock cooldown
       // (interruptible via Esc through the existing AbortSignal path),
-      // then inject the model-facing `<ma::reflection-checkpoint>` marker.
+      // then inject the model-facing `<ma::agent::reflection-checkpoint>` marker.
       // The ack/silence counter (set by parseReflectionAck on the
       // assistant response above) gates BOTH the cooldown and the
       // attachment : when silenceRemaining > 0 we decrement and skip
@@ -1568,7 +1594,7 @@ export class Agent {
     // The wrap-up replaces the old abrupt-cliff behavior (last assistant
     // turn was a `tool_use` that got no `tool_result` and no follow-up
     // text). Instead we append a model-facing
-    // `<ma::emergency-cap-triggered>` marker to the last user message
+    // `<ma::agent::emergency-cap-triggered>` marker to the last user message
     // (which already carries the tool_results from the cap-th round,
     // satisfying the Anthropic API's "tool_result must follow tool_use
     // immediately" constraint) and send one more request with `tools`
@@ -1588,7 +1614,7 @@ export class Agent {
         content.push({
           type: "text",
           text:
-            `<ma::emergency-cap-triggered round="${this.maxToolRounds}" />\n` +
+            `<ma::agent::emergency-cap-triggered round="${this.maxToolRounds}" />\n` +
             `You have reached the configured emergency tool-round cap for this user turn. Tools are disabled for this final response. Summarize what you accomplished, surface anything the user should know, and stop.`,
         })
         lastMsg.content = content
@@ -1640,7 +1666,7 @@ export class Agent {
     // above (see the `toolBlocks.length === 0` branch). When the
     // assistant ends a turn with text only AND a mode toggle is
     // pending, that branch synthesizes a user turn carrying the
-    // `<ma::mode-change>` attachment and `continue`s. This keeps the
+    // `<ma::agent::mode-change>` attachment and `continue`s. This keeps the
     // tool-execution machinery in one place: if the model responds
     // to the new mode by calling a tool (e.g. ASK→default + "save
     // this file" → Bash), the next loop iteration handles tools
@@ -1688,7 +1714,7 @@ export class Agent {
     })
 
     let response: StreamedResponse | undefined
-    // Strip `<ma::reflection-ack ... />` from the streamed text channel.
+    // Strip `<ma::agent::reflection-ack ... />` from the streamed text channel.
     // `send()` is the no-tools single-shot variant and doesn't run the
     // reflection-checkpoint loop, so a model rarely has reason to emit
     // the tag here — but we strip defensively so accidental emissions

@@ -4,7 +4,7 @@
  * Single source of truth for every named SGR-open string we paint with.
  * The agent's `c.*` helpers (`src/agent.ts`), the mode-style resolver
  * (`src/mode-style.ts`), the theme tokens (`src/ui/theme.ts`), and the
- * diff-view plugin (`tui-plugins/diff-view`) all consume from here.
+ * diff-view plugin (`plugins/diff-view`) all consume from here.
  *
  * # Layers
  *

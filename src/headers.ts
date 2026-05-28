@@ -338,7 +338,7 @@ export const DEFAULT_REFLECTION_INTERVAL = 50
  * `Agent.reflectionCooldownMs`. Serves two purposes: (1) gives a human
  * watching the agent a window to press Esc and interrupt, (2) surfaces the
  * elapsed wall time to the model via the `cooldown-applied-seconds`
- * attribute on the injected `<ma::reflection-checkpoint>` tag, so the model
+ * attribute on the injected `<ma::agent::reflection-checkpoint>` tag, so the model
  * has a concrete signal that wall-clock time has passed. Configurable
  * per-Agent; pass 0 to keep the checkpoint attachment but skip the pause.
  */
@@ -378,23 +378,23 @@ export function buildLoopSafetyParagraph(opts: {
     )
     if (hasCooldown) {
       parts.push(
-        `A reflection checkpoint fires every ${reflectionInterval} tool rounds: the harness applies a ${cooldownSec}-second wall-clock cooldown (a human watching can press Esc to interrupt during the countdown), then injects a \`<ma::reflection-checkpoint round="N" cooldown-applied-seconds="${cooldownSec}" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
+        `A reflection checkpoint fires every ${reflectionInterval} tool rounds: the harness applies a ${cooldownSec}-second wall-clock cooldown (a human watching can press Esc to interrupt during the countdown), then injects a \`<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="${cooldownSec}" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
       )
     } else {
       parts.push(
-        `A reflection checkpoint fires every ${reflectionInterval} tool rounds. The harness injects a \`<ma::reflection-checkpoint round="N" cooldown-applied-seconds="0" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
+        `A reflection checkpoint fires every ${reflectionInterval} tool rounds. The harness injects a \`<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="0" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
       )
     }
     parts.push(
       "",
-      'To suppress the next K checkpoints during sustained autonomous work (skipping both the cooldown and the attachment), emit `<ma::reflection-ack silence-for="K" reason="..." />` anywhere in your assistant response. The `reason` appears in the user-visible transcript so the human running you can see why you opted out.',
+      'To suppress the next K checkpoints during sustained autonomous work (skipping both the cooldown and the attachment), emit `<ma::agent::reflection-ack silence-for="K" reason="..." />` anywhere in your assistant response. The `reason` appears in the user-visible transcript so the human running you can see why you opted out.',
     )
   }
 
   if (hasEmergencyCap) {
     parts.push(
       "",
-      `An emergency hard cap is configured at ${maxToolRounds} rounds for this session. Reaching it disables tools for one final response and surfaces a \`<ma::emergency-cap-triggered round="${maxToolRounds}" />\` attachment : use that turn to summarize what you accomplished and surface anything the user should know.`,
+      `An emergency hard cap is configured at ${maxToolRounds} rounds for this session. Reaching it disables tools for one final response and surfaces a \`<ma::agent::emergency-cap-triggered round="${maxToolRounds}" />\` attachment : use that turn to summarize what you accomplished and surface anything the user should know.`,
     )
   }
 
@@ -404,7 +404,7 @@ export function buildLoopSafetyParagraph(opts: {
 /**
  * Build the "Tool output conventions" paragraph appended to `system[2]`
  * so the model knows about the per-session raw-output blob store and
- * the `[raw-output: …]` pointer footer convention. One short section,
+ * the `<ma::agent::raw-output …/>` pointer footer convention. One short section,
  * tool-agnostic: every tool that returns a large or clamped body lands
  * a full copy at `<sid>.blobs/<tool_use_id>.raw` and the path is
  * appended to the model-visible `tool_result.content`. The model uses
@@ -421,7 +421,7 @@ export function buildToolOutputConventionsParagraph(opts: { blobStoreEnabled: bo
   return [
     "# Tool output conventions",
     "",
-    "Every tool result whose body is large or got clamped by the universal 64KB / 1000-line cap also lands intact at `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw`. The agent appends a single line `[raw-output: <abs-path>  <size> · sha256=<hex>]` to the `tool_result.content` whenever that file was written. Use `Read({file_path: ...})` or `Bash({command: \"wc -l '...'\"})` on that path when the inline body isn't enough : the file is the FULL pre-clamp, pre-annotation output. The blob also survives session resume, so a later turn can analyze the original bytes without re-running the tool. Small bodies (under the configured `minBytesToPersist`, default 4096 B) are NOT persisted and emit no footer : the `content` IS the full output in that case.",
+    'Every tool result whose body is large or got clamped by the universal 64KB / 1000-line cap also lands intact at `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw`. The agent appends a single line `<ma::agent::raw-output path="<abs-path>" size="<size>" sha256="<hex>" />` to the `tool_result.content` whenever that file was written. Use `Read({file_path: ...})` or `Bash({command: "wc -l \'...\'"})` on that path when the inline body isn\'t enough : the file is the FULL pre-clamp, pre-annotation output. The blob also survives session resume, so a later turn can analyze the original bytes without re-running the tool. Small bodies (under the configured `minBytesToPersist`, default 4096 B) are NOT persisted and emit no footer : the `content` IS the full output in that case.',
   ].join("\n")
 }
 
@@ -494,7 +494,7 @@ export function buildSystemPrompt(opts?: {
    * Whether the per-session blob store is active for this run. When
    * `true`, `buildSystemPrompt` appends a one-paragraph "Tool output
    * conventions" section so the model knows about the
-   * `[raw-output: …]` pointer footer. Default `false`: matches
+   * `<ma::agent::raw-output …/>` pointer footer. Default `false`: matches
    * behavior of older sessions that pre-date the blob store.
    */
   blobStoreEnabled?: boolean

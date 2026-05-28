@@ -4,6 +4,7 @@ import type { Message } from "./client.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
+  toolDisplaysFromRecords,
   userTimestampsFromRecords,
 } from "./session-replay.ts"
 import type { SessionRecord } from "./session-store.ts"
@@ -221,12 +222,12 @@ describe("replayToScrollback", () => {
   // as if the user typed them.
   // ──────────────────────────────────────────────────────────────────
 
-  it("strips <ma::tui::tasks> attachment from the rendered user turn", async () => {
+  it("strips <ma::plugin::tasks> attachment from the rendered user turn", async () => {
     const tasksAttachment =
-      '<ma::tui::tasks total="2" done="0" doing="1" todo="1" canceled="0">\n' +
+      '<ma::plugin::tasks total="2" done="0" doing="1" todo="1" canceled="0">\n' +
       "1  #abc123  doing  Phase 1: types.ts\n" +
       "2  #def456  todo   Phase 2: palette.ts\n" +
-      "</ma::tui::tasks>"
+      "</ma::plugin::tasks>"
     const messages: Message[] = [
       {
         role: "user",
@@ -242,8 +243,8 @@ describe("replayToScrollback", () => {
     const plain = stripAnsi(sink.out)
     // The attachment must not appear, neither the opener nor any
     // of its body lines.
-    expect(plain).not.toContain("<ma::tui::tasks")
-    expect(plain).not.toContain("</ma::tui::tasks>")
+    expect(plain).not.toContain("<ma::plugin::tasks")
+    expect(plain).not.toContain("</ma::plugin::tasks>")
     expect(plain).not.toContain("Phase 1: types.ts")
     expect(plain).not.toContain("Phase 2: palette.ts")
     // The actual user text still renders cleanly under a single arrow.
@@ -252,9 +253,9 @@ describe("replayToScrollback", () => {
     expect(arrows).toBe(1)
   })
 
-  it("strips <short-term-memory> attachment from the rendered user turn", async () => {
+  it("strips <ma::plugin::memory::short-term> attachment from the rendered user turn", async () => {
     const stmAttachment =
-      "<short-term-memory>\n[#1] hypothesis: wrap bug only at COLUMNS<80\n</short-term-memory>"
+      "<ma::plugin::memory::short-term>\n[#1] hypothesis: wrap bug only at COLUMNS<80\n</ma::plugin::memory::short-term>"
     const messages: Message[] = [
       {
         role: "user",
@@ -267,7 +268,7 @@ describe("replayToScrollback", () => {
     const sink = new CaptureSink()
     await replayToScrollback(messages, sink)
     const plain = stripAnsi(sink.out)
-    expect(plain).not.toContain("<short-term-memory")
+    expect(plain).not.toContain("<ma::plugin::memory::short-term")
     expect(plain).not.toContain("hypothesis: wrap bug")
     expect(plain).toContain("❯ what next?")
   })
@@ -279,11 +280,11 @@ describe("replayToScrollback", () => {
         content: [
           {
             type: "text",
-            text: '<memory-saved scope="project" id="lwq8tg-a8f3">tests live in src/*.test.ts</memory-saved>',
+            text: '<memory-saved scope="project" id="lwq8tg-a8f3">tests live in src/*.test.ts</ma::plugin::memory::saved>',
           },
           {
             type: "text",
-            text: '<memory-saved scope="short-term" id="2" evicted="1">trying LANG=C</memory-saved>',
+            text: '<memory-saved scope="short-term" id="2" evicted="1">trying LANG=C</ma::plugin::memory::saved>',
           },
           { type: "text", text: "carry on" },
         ],
@@ -298,7 +299,7 @@ describe("replayToScrollback", () => {
     expect(plain).toContain("❯ carry on")
   })
 
-  it("strips a tool_result + <ma::reflection-checkpoint> user turn (no own arrow row)", async () => {
+  it("strips a tool_result + <ma::agent::reflection-checkpoint> user turn (no own arrow row)", async () => {
     const messages: Message[] = [
       { role: "user", content: [{ type: "text", text: "kick off" }] },
       {
@@ -312,7 +313,7 @@ describe("replayToScrollback", () => {
           {
             type: "text",
             text:
-              '<ma::reflection-checkpoint round="50" cooldown-applied-seconds="60" />\n' +
+              '<ma::agent::reflection-checkpoint round="50" cooldown-applied-seconds="60" />\n' +
               "Soft checkpoint, not a stop signal. Briefly consider whether you are still on track.",
           },
         ],
@@ -323,7 +324,7 @@ describe("replayToScrollback", () => {
     await replayToScrollback(messages, sink)
     const plain = stripAnsi(sink.out)
     // Neither the tag nor the prose body sneaks into the scrollback.
-    expect(plain).not.toContain("<ma::reflection-checkpoint")
+    expect(plain).not.toContain("<ma::agent::reflection-checkpoint")
     expect(plain).not.toContain("Soft checkpoint")
     // The mid-loop user turn renders no own arrow row (it's a
     // tool_result + attachment pairing with no user payload).
@@ -334,23 +335,26 @@ describe("replayToScrollback", () => {
 
   it("strips a mixed bag of attachments (mode-change + short-term + tasks + memory-saved + user text)", async () => {
     // Mirror the exact ordering Agent.run uses at the initial seam:
-    // mode-change, short-term-memory, ma::tui::tasks, memory-saved, user text.
+    // mode-change, ma::plugin::memory::short-term, ma::plugin::tasks, memory-saved, user text.
     const messages: Message[] = [
       {
         role: "user",
         content: [
           { type: "text", text: '<mode-change from="default" to="ask" />' },
-          { type: "text", text: "<short-term-memory>\n[#1] note\n</short-term-memory>" },
           {
             type: "text",
-            text:
-              '<ma::tui::tasks total="1" done="0" doing="1" todo="0" canceled="0">\n' +
-              "1  #abc123  doing  do the thing\n" +
-              "</ma::tui::tasks>",
+            text: "<ma::plugin::memory::short-term>\n[#1] note\n</ma::plugin::memory::short-term>",
           },
           {
             type: "text",
-            text: '<memory-saved scope="project" id="x-1">prior save</memory-saved>',
+            text:
+              '<ma::plugin::tasks total="1" done="0" doing="1" todo="0" canceled="0">\n' +
+              "1  #abc123  doing  do the thing\n" +
+              "</ma::plugin::tasks>",
+          },
+          {
+            type: "text",
+            text: '<memory-saved scope="project" id="x-1">prior save</ma::plugin::memory::saved>',
           },
           { type: "text", text: "all done?" },
         ],
@@ -360,8 +364,8 @@ describe("replayToScrollback", () => {
     await replayToScrollback(messages, sink)
     const plain = stripAnsi(sink.out)
     expect(plain).not.toContain("<mode-change")
-    expect(plain).not.toContain("<short-term-memory")
-    expect(plain).not.toContain("<ma::tui::tasks")
+    expect(plain).not.toContain("<ma::plugin::memory::short-term")
+    expect(plain).not.toContain("<ma::plugin::tasks")
     expect(plain).not.toContain("<memory-saved")
     expect(plain).not.toContain("[#1] note")
     expect(plain).not.toContain("do the thing")
@@ -705,6 +709,367 @@ describe("replayToScrollback", () => {
     expect(plain).toContain("mode")
     expect(plain).toContain("default → ASK")
     expect(plain).toContain("2026-05-22 17:52")
+  })
+})
+
+describe("replayToScrollback — tool presentation parity", () => {
+  // Regression: before this fix, --resume dropped the tool header's
+  // icon (» / ✦ / ✔) and color, falling back to the bare bold tool
+  // name in orange regardless of the tool's manifest. The snapshot
+  // diff captured `╭ Bash` instead of `╭ » Bash` for Bash, and the
+  // same kind of icon-less row for Edit (✦) and Task (✔).
+  it("renders the manifest icon prefix on the ╭ header (Bash/»)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: "a", is_error: false }],
+      },
+    ]
+    const presentation = new Map([["Bash", { icon: "»", color: "orange" }]])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { toolPresentation: presentation })
+    const plain = stripAnsi(sink.out)
+    // The icon sits between `╭ ` and the tool name.
+    expect(plain).toMatch(/╭ » Bash/)
+  })
+
+  it("falls back to the bare tool name (no icon) when no presentation map is supplied", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: "a", is_error: false }],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    // Bare bold name (no `»`) when the caller didn't pass a presentation map.
+    expect(plain).toMatch(/╭ Bash/)
+    expect(plain).not.toMatch(/╭ » Bash/)
+  })
+
+  it("renders the icon for every tool name present in the map (Edit/✦, Task/✔)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "do work" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_edit",
+            name: "Edit",
+            input: { file_path: "/x", old_string: "a", new_string: "b" },
+          },
+          { type: "tool_use", id: "tu_task", name: "Task", input: { action: "done", id: "#abc" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_edit", content: "edited", is_error: false },
+          { type: "tool_result", tool_use_id: "tu_task", content: "ok", is_error: false },
+        ],
+      },
+    ]
+    const presentation = new Map([
+      ["Edit", { icon: "✦", color: "gold" }],
+      ["Task", { icon: "✔", color: "lime" }],
+    ])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { toolPresentation: presentation })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toMatch(/╭ ✦ Edit/)
+    expect(plain).toMatch(/╭ ✔ Task/)
+  })
+
+  it("renders an unknown color name in the default orange (graceful fallback)", async () => {
+    // The live agent does the same: an unknown color key just no-ops to orange.
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok", is_error: false }],
+      },
+    ]
+    const presentation = new Map([["Bash", { icon: "»", color: "not-a-real-color" }]])
+    const sink = new CaptureSink()
+    // Should not throw : the renderer must tolerate unknown color names.
+    await replayToScrollback(messages, sink, { toolPresentation: presentation })
+    expect(stripAnsi(sink.out)).toMatch(/╭ » Bash/)
+  })
+})
+
+describe("replayToScrollback — display / displayHeader / displayFooter parity", () => {
+  // Regression: before this fix, --resume rendered the model-facing
+  // `content` text in place of the live transcript's `display` field.
+  // For Edit, that meant "File edited: ..." replaced the unified diff;
+  // for Task, the raw JSON args replaced "✔ ALL DONE · 39/39 · ..."
+  // in the header AND the task tree was replaced by truncated content.
+  it("uses display from the sidecar map as the tool body (Edit diff survives resume)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "make the change" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_edit",
+            name: "Edit",
+            input: { file_path: "/x.json", old_string: "old", new_string: "new" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_edit",
+            content: "File edited: /x.json (1 replacement(s))",
+            is_error: false,
+          },
+        ],
+      },
+    ]
+    const diffBody = "--- a//x.json\n+++ b//x.json\n@@\n-old\n+new"
+    const toolDisplays = new Map([["tu_edit", { display: diffBody }]])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { toolDisplays })
+    const plain = stripAnsi(sink.out)
+    // The diff lines must appear in the rendered body…
+    expect(plain).toContain("--- a//x.json")
+    expect(plain).toContain("+++ b//x.json")
+    expect(plain).toContain("-old")
+    expect(plain).toContain("+new")
+    // …and the model-facing "File edited" text must NOT (it's only what
+    // the model saw, never what the user saw in the live transcript).
+    expect(plain).not.toContain("File edited")
+  })
+
+  it("uses displayHeader as the header content slot (Task summary survives resume)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "mark done" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_task",
+            name: "Task",
+            input: { action: "done", id: "#56b7b5" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_task",
+            content: '{"action":"done","id":"#56b7b5"}',
+            is_error: false,
+          },
+        ],
+      },
+    ]
+    const taskHeader = "✔ ALL DONE · 39/39 · 2026-05-28 08:29:05"
+    const taskTreeBody = "   8  ✔  #56b7b5  Final verification\n      ├  ✔  #56b7b5a  Run check"
+    const toolDisplays = new Map([
+      ["tu_task", { display: taskTreeBody, displayHeader: taskHeader }],
+    ])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { toolDisplays })
+    const plain = stripAnsi(sink.out)
+    // The header summary replaces the raw JSON args…
+    expect(plain).toContain("✔ ALL DONE · 39/39 · 2026-05-28 08:29:05")
+    expect(plain).not.toMatch(/╭.*\{"action":"done"/)
+    // …and the rich body replaces the model-facing JSON.
+    expect(plain).toContain("Final verification")
+    expect(plain).toContain("#56b7b5a")
+  })
+
+  it("uses displayFooter as the trailing footer row when supplied", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "search" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_q", name: "WebSearch", input: { query: "claude" } }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_q", content: "raw model body", is_error: false },
+        ],
+      },
+    ]
+    const toolDisplays = new Map([
+      [
+        "tu_q",
+        {
+          display: "result 1\nresult 2",
+          displayFooter: "WebSearch[brave/web] · 2 hits · 312ms",
+        },
+      ],
+    ])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { toolDisplays })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("result 1")
+    expect(plain).toContain("result 2")
+    expect(plain).toContain("WebSearch[brave/web] · 2 hits · 312ms")
+    // Footer attaches directly to the `╰` closer in the `display`
+    // branch (no `┊` separator — that's the truncation-only path).
+    expect(plain).toMatch(/╰ WebSearch\[brave\/web\]/)
+  })
+
+  it("falls back to content when no toolDisplays entry exists (back-compat for old sessions)", async () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tu_1", content: "a.txt\nb.txt", is_error: false },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    // Pass an empty map : the code path is taken but no entry matches.
+    await replayToScrollback(messages, sink, { toolDisplays: new Map() })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("a.txt")
+    expect(plain).toContain("b.txt")
+  })
+
+  it("skips the soft-split continuation rows when displayHeader takes over (plugin owns the row)", async () => {
+    // Long Bash command that would normally trigger `↳` continuation rows.
+    // When displayHeader is supplied the plugin owns the header rendering
+    // entirely, so the continuation rows must NOT be emitted — matching
+    // the live agent's `writeToolHeader(override)` semantics.
+    const longCmd = "echo aaaaa && echo bbbbb && echo ccccc && echo ddddd && echo eeeee"
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "do it" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: longCmd } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "tu_1", content: "done", is_error: false }],
+      },
+    ]
+    const toolDisplays = new Map([
+      ["tu_1", { display: "done", displayHeader: "running long script" }],
+    ])
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { toolDisplays })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("running long script")
+    // No `↳` continuation marker when the plugin owns the header.
+    expect(plain).not.toContain("↳")
+  })
+})
+
+describe("toolDisplaysFromRecords", () => {
+  it("returns a map keyed by tool_use_id with every present display field", () => {
+    const t = "2026-05-22T17:00:00.000Z"
+    const records: SessionRecord[] = [
+      {
+        kind: "tool_result",
+        ts: t,
+        tool_use_id: "tu_edit",
+        content: "File edited: /x (1)",
+        isError: false,
+        display: "--- a\n+++ b\n-old\n+new",
+      },
+      {
+        kind: "tool_result",
+        ts: t,
+        tool_use_id: "tu_task",
+        content: '{"action":"done"}',
+        isError: false,
+        display: "task tree body",
+        displayHeader: "✔ ALL DONE · 39/39",
+      },
+      {
+        kind: "tool_result",
+        ts: t,
+        tool_use_id: "tu_q",
+        content: "raw",
+        isError: false,
+        display: "render",
+        displayFooter: "footer · 1ms",
+      },
+    ]
+    const map = toolDisplaysFromRecords(records)
+    expect(map.size).toBe(3)
+    expect(map.get("tu_edit")?.display).toContain("--- a")
+    expect(map.get("tu_task")?.displayHeader).toBe("✔ ALL DONE · 39/39")
+    expect(map.get("tu_q")?.displayFooter).toBe("footer · 1ms")
+  })
+
+  it("skips tool_result records that have no display overrides (old logs render the same)", () => {
+    const t = "2026-05-22T17:00:00.000Z"
+    const records: SessionRecord[] = [
+      { kind: "tool_result", ts: t, tool_use_id: "tu_1", content: "ok", isError: false },
+      { kind: "tool_result", ts: t, tool_use_id: "tu_2", content: "ok", isError: false },
+    ]
+    const map = toolDisplaysFromRecords(records)
+    expect(map.size).toBe(0)
+  })
+
+  it("ignores non-tool_result records", () => {
+    const records: SessionRecord[] = [
+      { kind: "user", ts: "2026-05-22T17:00:00.000Z", content: "hi", id: "u1" },
+      { kind: "assistant", ts: "2026-05-22T17:00:01.000Z", content: [], stopReason: "end_turn" },
+      { kind: "note", ts: "2026-05-22T17:00:02.000Z", text: "n" },
+    ]
+    const map = toolDisplaysFromRecords(records)
+    expect(map.size).toBe(0)
+  })
+
+  it("returns the last entry's overrides when the same tool_use_id appears twice (defensive)", () => {
+    // Not expected in practice (tool_result records are append-only and
+    // tool_use_ids are unique), but we should still survive the case
+    // without throwing or returning a stale value.
+    const t = "2026-05-22T17:00:00.000Z"
+    const records: SessionRecord[] = [
+      {
+        kind: "tool_result",
+        ts: t,
+        tool_use_id: "tu_dup",
+        content: "first",
+        isError: false,
+        display: "first display",
+      },
+      {
+        kind: "tool_result",
+        ts: t,
+        tool_use_id: "tu_dup",
+        content: "second",
+        isError: false,
+        display: "second display",
+      },
+    ]
+    const map = toolDisplaysFromRecords(records)
+    expect(map.get("tu_dup")?.display).toBe("second display")
   })
 })
 

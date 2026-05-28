@@ -231,7 +231,7 @@ const BASH_TOOL: ToolDefinition = {
     "tables, generated reports) : they will only see a fraction. To show visual " +
     "content, put it in your text reply instead, which the user reads in full. " +
     "When the TUI preview clamped more lines than the API cap did, you will " +
-    "receive a `<ma::tui-preview shown=N total=M>` annotation on the tool_result " +
+    "receive a `<ma::agent::output-preview shown=N total=M>` annotation on the tool_result " +
     "so the divergence is visible to you on the next turn.\n\n" +
     "The working directory persists between commands, but shell state does not.",
   input_schema: {
@@ -408,7 +408,7 @@ const MODE_TOOL: ToolDefinition = {
     '`id: null` means no mode is active (fully unrestricted). `allow: ["*"]` means ' +
     "every tool is allowed except those in `deny` (deny wins on overlap).\n\n" +
     "You do NOT need to call this routinely : every tool_result you receive carries " +
-    "a trailing `<ma::mode-active id=... since=... />` stamp with the same id. Use " +
+    "a trailing `<ma::agent::mode-active id=... since=... />` stamp with the same id. Use " +
     "this tool when no recent tool round has fired and you want to confirm.",
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",

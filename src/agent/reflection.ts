@@ -3,7 +3,7 @@
  *
  * Three primitives live here:
  *
- *  - {@link parseReflectionAck} extracts the `<ma::reflection-ack
+ *  - {@link parseReflectionAck} extracts the `<ma::agent::reflection-ack
  *    silence-for="K" reason="..." />` tag out of an assistant response.
  *  - {@link runReflectionCooldown} applies a wall-clock pause + live
  *    status surface, with Esc as a "skip cooldown but keep going"
@@ -23,7 +23,7 @@ import type { InputCaptureStack } from "../input-capture-stack.ts"
 import type { StatusBus } from "../status.ts"
 
 /**
- * Regex matching a `<ma::reflection-ack silence-for="K" reason="..." />`
+ * Regex matching a `<ma::agent::reflection-ack silence-for="K" reason="..." />`
  * tag in assistant response text. Both attributes are optional in either
  * order. Anchored to `\b` boundaries on the attribute names so a typo
  * like `silencefor` doesn't accidentally match.
@@ -34,10 +34,10 @@ import type { StatusBus } from "../status.ts"
  * tags appear the LAST well-formed one wins (see {@link parseReflectionAck}).
  */
 const REFLECTION_ACK_RE =
-  /<ma::reflection-ack(?:\s+(?:silence-for="(\d+)"|reason="([^"]*)")){0,2}\s*\/>/g
+  /<ma::agent::reflection-ack(?:\s+(?:silence-for="(\d+)"|reason="([^"]*)")){0,2}\s*\/>/g
 
 /**
- * Parse `<ma::reflection-ack ... />` tags out of an assistant response.
+ * Parse `<ma::agent::reflection-ack ... />` tags out of an assistant response.
  *
  * Returns the LAST well-formed tag's parsed values (or `null` if none),
  * so a model that hedges by emitting multiple acks ends with the value
@@ -181,7 +181,7 @@ export async function runReflectionCooldown(opts: {
 }
 
 /**
- * Build the `<ma::reflection-checkpoint ... />` attachment text that
+ * Build the `<ma::agent::reflection-checkpoint ... />` attachment text that
  * gets injected into the next user content after a cooldown. The
  * `cooldown-applied-seconds` attribute carries the wall-clock penalty
  * the model can reason about; the trailing prose restates the soft-
@@ -199,8 +199,8 @@ export function buildReflectionCheckpointBlock(round: number, cooldownMs: number
   return {
     type: "text",
     text:
-      `<ma::reflection-checkpoint round="${round}" cooldown-applied-seconds="${cooldownSec}" />\n` +
+      `<ma::agent::reflection-checkpoint round="${round}" cooldown-applied-seconds="${cooldownSec}" />\n` +
       `Soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user. ` +
-      `Emit \`<ma::reflection-ack silence-for="K" reason="..." />\` anywhere in your response to suppress the next K checkpoints (skipping both the cooldown and this attachment).`,
+      `Emit \`<ma::agent::reflection-ack silence-for="K" reason="..." />\` anywhere in your response to suppress the next K checkpoints (skipping both the cooldown and this attachment).`,
   }
 }

@@ -142,10 +142,12 @@ describe("Agent → BlobStore: built-in path (Bash, universal clamp fires)", () 
     })
     // a) tool_result.content has BOTH the truncation notice and the pointer footer
     expect(r.toolResultContent).toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/\[raw-output: .+\.raw\s+\S+\s+·\s+sha256=[0-9a-f]{16}\]/)
+    expect(r.toolResultContent).toMatch(
+      /<ma::agent::raw-output path="[^"]+\.raw" size="[^"]+" sha256="[0-9a-f]{16}" \/>/,
+    )
     // b) Footer ordering: [truncated: …] appears BEFORE [raw-output: …]
     const truncatedIdx = r.toolResultContent.indexOf("[truncated:")
-    const rawOutputIdx = r.toolResultContent.indexOf("[raw-output:")
+    const rawOutputIdx = r.toolResultContent.indexOf("<ma::agent::raw-output")
     expect(truncatedIdx).toBeGreaterThan(-1)
     expect(rawOutputIdx).toBeGreaterThan(truncatedIdx)
     // c) JSONL record carries rawPath/Bytes/Sha256
@@ -171,7 +173,7 @@ describe("Agent → BlobStore: built-in path (no clamp, but body >= minBytes)", 
       command: "printf 'x%.0s' $(seq 1 8192)",
     })
     expect(r.toolResultContent).not.toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
     const rec = r.jsonl[0]
     expect(rec.rawPath).toBeDefined()
     expect(rec.rawBytes).toBeGreaterThanOrEqual(8192)
@@ -180,7 +182,7 @@ describe("Agent → BlobStore: built-in path (no clamp, but body >= minBytes)", 
     expect(blobBody.length).toBe(rec.rawBytes ?? 0)
     // The blob doesn't contain the pointer footer (footer is added to
     // `content`, not to the blob).
-    expect(blobBody).not.toMatch(/\[raw-output:/)
+    expect(blobBody).not.toMatch(/<ma::agent::raw-output\b/)
   })
 })
 
@@ -190,7 +192,7 @@ describe("Agent → BlobStore: built-in path (body below minBytes)", () => {
       sid: "sid-tiny",
       command: "echo hello",
     })
-    expect(r.toolResultContent).not.toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).not.toMatch(/<ma::agent::raw-output\b/)
     expect(r.jsonl[0].rawPath).toBeUndefined()
     expect(r.jsonl[0].rawBytes).toBeUndefined()
     expect(r.jsonl[0].rawSha256).toBeUndefined()
@@ -204,7 +206,7 @@ describe("Agent → BlobStore: store disabled", () => {
       command: `yes BIG | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
       config: { enabled: false, minBytesToPersist: 0 },
     })
-    expect(r.toolResultContent).not.toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).not.toMatch(/<ma::agent::raw-output\b/)
     expect(r.jsonl[0].rawPath).toBeUndefined()
   })
 })
@@ -222,7 +224,7 @@ describe("Agent → BlobStore: Edit/Write path (display is set)", () => {
       toolInput: { file_path: target, old_string: "old content", new_string: big },
       command: "unused",
     })
-    expect(r.toolResultContent).not.toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).not.toMatch(/<ma::agent::raw-output\b/)
     expect(r.jsonl[0].rawPath).toBeUndefined()
   })
 })
@@ -361,10 +363,12 @@ describe("Agent → BlobStore: plugin tool path (universal clamp applies)", () =
       },
     })
     expect(r.toolResultContent).toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/\[raw-output: .+\.raw\s+\S+\s+·\s+sha256=[0-9a-f]{16}\]/)
+    expect(r.toolResultContent).toMatch(
+      /<ma::agent::raw-output path="[^"]+\.raw" size="[^"]+" sha256="[0-9a-f]{16}" \/>/,
+    )
     // Order: truncated before raw-output.
     const tIdx = r.toolResultContent.indexOf("[truncated:")
-    const rIdx = r.toolResultContent.indexOf("[raw-output:")
+    const rIdx = r.toolResultContent.indexOf("<ma::agent::raw-output")
     expect(tIdx).toBeGreaterThan(-1)
     expect(rIdx).toBeGreaterThan(tIdx)
     // JSONL captures the raw blob metadata.
@@ -394,7 +398,7 @@ describe("Agent → BlobStore: plugin tool path (universal clamp applies)", () =
       },
     })
     expect(r.toolResultContent).toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
     expect(r.jsonl[0].rawPath).toMatch(/\.raw$/)
     expect(r.jsonl[0].rawBytes).toBeGreaterThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
   })
@@ -414,7 +418,7 @@ describe("Agent → BlobStore: plugin tool path (universal clamp applies)", () =
       skipToolsOverride: new Set(["Fetch"]),
     })
     expect(r.toolResultContent).not.toContain("[truncated:")
-    expect(r.toolResultContent).not.toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).not.toMatch(/<ma::agent::raw-output\b/)
     expect(r.jsonl[0].rawPath).toBeUndefined()
   })
 
@@ -428,7 +432,7 @@ describe("Agent → BlobStore: plugin tool path (universal clamp applies)", () =
       pluginResult: { kind: "tool_result", content: "Z".repeat(8192) },
     })
     expect(r.toolResultContent).not.toContain("[truncated:")
-    expect(r.toolResultContent).toMatch(/\[raw-output:/)
+    expect(r.toolResultContent).toMatch(/<ma::agent::raw-output\b/)
     expect(r.jsonl[0].rawPath).toBeDefined()
     expect(r.jsonl[0].rawBytes).toBe(8192)
   })

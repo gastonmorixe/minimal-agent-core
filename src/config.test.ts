@@ -4,7 +4,12 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
+import {
+  loadDisabledPluginIds,
+  loadEnabledPluginIds,
+  loadPluginEnabledOverrides,
+  loadUserConfig,
+} from "./config.ts"
 
 describe("loadUserConfig", () => {
   let dir: string
@@ -233,5 +238,70 @@ describe("loadDisabledPluginIds", () => {
   it("malformed JSON → empty set, no throw", () => {
     writeFileSync(path, "{ not valid")
     expect(loadDisabledPluginIds()).toEqual(new Set())
+  })
+})
+
+describe("loadEnabledPluginIds + loadPluginEnabledOverrides", () => {
+  let dir: string
+  let path: string
+  const prevEnv = process.env.MINIMAL_AGENT_CONFIG
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "minimal-agent-enabled-"))
+    path = join(dir, "config.jsonc")
+    process.env.MINIMAL_AGENT_CONFIG = path
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (prevEnv === undefined) delete process.env.MINIMAL_AGENT_CONFIG
+    else process.env.MINIMAL_AGENT_CONFIG = prevEnv
+  })
+
+  it("collects ids with enabled === true (literal only)", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        plugins: {
+          "interleave-thinking": { enabled: true },
+          "diff-view": { enabled: false },
+          "env-info": {}, // no key
+          "ask-mode": { enabled: 1 }, // truthy but not literal true
+        },
+      }),
+    )
+    expect(loadEnabledPluginIds()).toEqual(new Set(["interleave-thinking"]))
+  })
+
+  it("loadPluginEnabledOverrides returns both sets in one walk", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        plugins: {
+          a: { enabled: true },
+          b: { enabled: false },
+          c: { enabled: true },
+          d: { enabled: false },
+          e: {},
+        },
+      }),
+    )
+    const overrides = loadPluginEnabledOverrides()
+    expect(overrides.forceEnabled).toEqual(new Set(["a", "c"]))
+    expect(overrides.forceDisabled).toEqual(new Set(["b", "d"]))
+  })
+
+  it("missing config → both sets empty", () => {
+    process.env.MINIMAL_AGENT_CONFIG = join(dir, "nope.jsonc")
+    const overrides = loadPluginEnabledOverrides()
+    expect(overrides.forceEnabled).toEqual(new Set())
+    expect(overrides.forceDisabled).toEqual(new Set())
+  })
+
+  it("malformed JSON → both sets empty, no throw", () => {
+    writeFileSync(path, "{ not valid")
+    const overrides = loadPluginEnabledOverrides()
+    expect(overrides.forceEnabled).toEqual(new Set())
+    expect(overrides.forceDisabled).toEqual(new Set())
   })
 })

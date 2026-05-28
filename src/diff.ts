@@ -17,7 +17,7 @@
  * pass straight into {@link renderUnifiedDiff} from the diff-view plugin.
  */
 
-export { renderUnifiedDiff } from "../tui-plugins/diff-view/handlers/render.ts"
+export { renderUnifiedDiff } from "../plugins/diff-view/handlers/render.ts"
 
 interface Hunk {
   oldStart: number // 1-based line number in `before`

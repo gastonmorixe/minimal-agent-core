@@ -1,7 +1,7 @@
 /**
- * TUI plugin loader.
+ * Plugin loader.
  *
- * Discovers tui-plugin packages under two roots (home + project), parses
+ * Discovers plugin packages under two roots (home + project), parses
  * their manifests, resolves handler entry points, and exposes three
  * capabilities to the rest of the agent:
  *
@@ -95,8 +95,8 @@ export interface PluginToolDefinition {
 export interface PluginLoaderOptions {
   /**
    * Absolute path to the agent's install directory (the dir containing
-   * `src/` and the bundled `tui-plugins/`). The loader looks for a
-   * `tui-plugins/` subdirectory under this path. These are the
+   * `src/` and the bundled `plugins/`). The loader looks for a
+   * `plugins/` subdirectory under this path. These are the
    * "embedded" / built-in plugins that ship with minimal-agent itself
    * (e.g. ask-mode, diff-view, env-info, memory). Lowest precedence on
    * package-id collision — project and home both shadow embedded.
@@ -107,13 +107,13 @@ export interface PluginLoaderOptions {
   embeddedDir?: string
   /**
    * Absolute path to the user's home-dir plugins root. The loader looks for
-   * a `tui-plugins/` subdirectory under this path. Defaults to
+   * a `plugins/` subdirectory under this path. Defaults to
    * `~/.agents`.
    */
   homeDir?: string
   /**
    * Absolute path to the project root (typically the agent's cwd). The
-   * loader looks for a `.agents/tui-plugins/` subdirectory under this
+   * loader looks for a `.agents/plugins/` subdirectory under this
    * path. Highest precedence — project plugins shadow home and embedded
    * on package-id collision.
    */
@@ -164,6 +164,17 @@ export interface PluginLoaderOptions {
    * each plugin having to implement disabling itself.
    */
   disabledPluginIds?: Set<string>
+  /**
+   * Set of plugin ids the user has explicitly enabled in their config
+   * (`plugins.<id>.enabled === true`). This is an override signal that
+   * brings back manifests shipped with `enabled: false`. Ids in
+   * {@link disabledPluginIds} still win — deny beats allow.
+   *
+   * The loader only consults this set when a manifest has its OWN
+   * `enabled: false` opt-out. If both sets are empty (the common case),
+   * behavior is identical to before this option existed.
+   */
+  enabledPluginIds?: Set<string>
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -187,7 +198,7 @@ interface PendingFragment {
 }
 
 /**
- * Loaded collection of tui-plugins with a dispatch entry point.
+ * Loaded collection of plugins with a dispatch entry point.
  *
  * Call {@link load} once at agent startup. The resulting loader is
  * reusable across turns and immutable after construction.
@@ -291,7 +302,7 @@ export class PluginLoader {
   }
 
   /**
-   * Discover, parse, and resolve tui-plugin packages. See
+   * Discover, parse, and resolve plugin packages. See
    * {@link PluginLoaderOptions} for configuration.
    *
    * This method never throws for bad plugins. All plugin-level failures are
@@ -311,31 +322,32 @@ export class PluginLoader {
     const hooksFacade = new Hooks({ eventBus, logger })
     const sessionId = opts.sessionId
     const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
+    const enabledPluginIds = opts.enabledPluginIds ?? new Set<string>()
 
     // Discover packages in all three roots. Precedence on package-id
     // collision: project > home > embedded (closer-to-user wins).
     const packages: { dir: string; root: "embedded" | "home" | "project" }[] = []
     if (opts.embeddedDir) {
-      for (const d of discoverPackageDirs(opts.embeddedDir, "tui-plugins")) {
+      for (const d of discoverPackageDirs(opts.embeddedDir, "plugins")) {
         packages.push({ dir: d, root: "embedded" })
       }
     }
     if (opts.homeDir) {
-      for (const d of discoverPackageDirs(opts.homeDir, "tui-plugins")) {
+      for (const d of discoverPackageDirs(opts.homeDir, "plugins")) {
         packages.push({ dir: d, root: "home" })
       }
     }
     if (opts.projectDir) {
-      for (const d of discoverPackageDirs(opts.projectDir, ".agents/tui-plugins")) {
+      for (const d of discoverPackageDirs(opts.projectDir, ".agents/plugins")) {
         packages.push({ dir: d, root: "project" })
       }
     }
 
     // Dedupe by realpath BEFORE the id-collision check. Two roots can
     // legitimately point at the same physical directory:
-    //   - cwd == $HOME → projectDir = $HOME → scans $HOME/.agents/tui-plugins
-    //   - homeDir = $HOME/.agents       → scans $HOME/.agents/tui-plugins (same dir!)
-    //   - symlinks under ~/.agents/tui-plugins pointing into a shared
+    //   - cwd == $HOME → projectDir = $HOME → scans $HOME/.agents/plugins
+    //   - homeDir = $HOME/.agents       → scans $HOME/.agents/plugins (same dir!)
+    //   - symlinks under ~/.agents/plugins pointing into a shared
     //     dev checkout that also lives under projectDir
     // Keep only the highest-precedence root (project > home > embedded)
     // for each physical package. This is not a user-actionable warning —
@@ -407,6 +419,30 @@ export class PluginLoader {
           `skipping ${dir}: plugin "${manifest.id}" is disabled in user config ` +
             `(plugins.${manifest.id}.enabled = false)`,
         )
+        // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
+        seenIds.add(manifest.id)
+        continue
+      }
+
+      // Manifest-level opt-out: plugin author shipped with `enabled: false`.
+      // The user can still bring it back online with an explicit `enabled:
+      // true` in their config (the `enabledPluginIds` override set).
+      //
+      // Unlike the user-config opt-out above, this is BY DESIGN: the author
+      // intentionally shipped the package disabled. Emit as a notice (file
+      // log only, never stderr) so the by-design state stays auditable
+      // without polluting the scrollback. Tests that inject a custom
+      // `logger` still see the message verbatim.
+      if (manifest.enabled === false && !enabledPluginIds.has(manifest.id)) {
+        const msg =
+          `skipping ${dir}: plugin "${manifest.id}" is disabled by its manifest ` +
+          `(manifest.enabled = false); set plugins.${manifest.id}.enabled = true ` +
+          `in ~/.minimal-agent/config.jsonc to enable`
+        if (opts.logger) {
+          opts.logger(msg)
+        } else {
+          diag.notice("plugin-loader", msg)
+        }
         // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
         seenIds.add(manifest.id)
         continue
@@ -798,18 +834,18 @@ export class PluginLoader {
    * the host document's heading hierarchy:
    *
    * ```
-   * <tui-plugins>
-   *   <overview>...</overview>
-   *   <plugin id="...">...PROMPT.md body...</plugin>
+   * <ma::plugins>
+   *   <ma::plugins-overview>...</ma::plugins-overview>
+   *   <ma::plugin id="...">...PROMPT.md body...</ma::plugin>
    *   ...
-   * </tui-plugins>
+   * </ma::plugins>
    * ```
    *
-   * Each plugin's `PROMPT.md` is embedded verbatim except that a single
-   * leading top-level heading (e.g. `# ask-mode`) is stripped if present —
-   * the surrounding `<plugin id="...">` tag already names the plugin, and
-   * keeping the `#` would both duplicate the id and inject a stray H1 into
-   * the host prompt.
+   * Every element sits in the `<ma::*>` namespace so plugin-contributed
+   * text never collides with the host document's tags. Each plugin's
+   * `PROMPT.md` is embedded verbatim except that a single leading
+   * top-level heading (e.g. `# ask-mode`) is stripped if present — the
+   * surrounding `<ma::plugin id="...">` already names the plugin.
    */
   getPromptBlock(): string | null {
     return this.buildBlock(null)
@@ -902,11 +938,11 @@ export class PluginLoader {
    * appended inside each plugin's `<plugin>` block.
    *
    * A plugin with NO `PROMPT.md` AND NO resolved prompt fragments is
-   * silent: its `<plugin id="...">` wrapper is omitted entirely. We do
-   * NOT fall back to `manifest.description` (that would leak per-plugin
-   * dev docs into the cached system prompt). If every loaded plugin is
-   * silent, the whole `<tui-plugins>` block is omitted and this returns
-   * `null`, same as having no plugins at all.
+   * silent: its `<ma::plugin id="...">` wrapper is omitted entirely.
+   * We do NOT fall back to `manifest.description` (that would leak
+   * per-plugin dev docs into the cached system prompt). If every loaded
+   * plugin is silent, the whole `<ma::plugins>` block is omitted and
+   * this returns `null`, same as having no plugins at all.
    */
   private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
     if (this.plugins.length === 0) return null
@@ -918,27 +954,27 @@ export class PluginLoader {
       if (!promptBody && !fragSection) continue
       const body =
         promptBody && fragSection ? `${promptBody}\n\n${fragSection}` : promptBody || fragSection
-      pluginParts.push(`<plugin id="${pkg.manifest.id}">\n${body}\n</plugin>`)
+      pluginParts.push(`<ma::plugin id="${pkg.manifest.id}">\n${body}\n</ma::plugin>`)
     }
     if (pluginParts.length === 0) return null
     const parts: string[] = []
-    parts.push("<tui-plugins>")
+    parts.push("<ma::plugins>")
     parts.push(
-      "<overview>\n" +
-        "You have access to the following TUI plugins. Each plugin provides one\n" +
+      "<ma::plugins-overview>\n" +
+        "You have access to the following plugins. Each plugin contributes one\n" +
         "or more tools and/or inline rendering tags.\n" +
         "\n" +
         "Inline tags are detected in your streamed output and rendered by the\n" +
-        "plugin in place. Tag shape: <tui::NAME attr=\"val\" attr2='val'>body</tui::NAME>,\n" +
-        'or self-closing <tui::NAME attr="val" />. Tag names must match exactly.\n' +
+        'plugin in place. Tag shape: <ma::plugin::NAME attr="val">body</ma::plugin::NAME>,\n' +
+        'or self-closing <ma::plugin::NAME attr="val" />. Tag names must match exactly.\n' +
         "Attribute values must be quoted.\n" +
         "\n" +
-        "Interactive TUIs MUST be invoked via a tool call, not an inline tag.\n" +
+        "Interactive plugin tools MUST be invoked via a tool call, not an inline tag.\n" +
         "Inline tags are for non-interactive rendering only.\n" +
-        "</overview>",
+        "</ma::plugins-overview>",
     )
     parts.push(...pluginParts)
-    parts.push("</tui-plugins>")
+    parts.push("</ma::plugins>")
     return parts.join("\n\n")
   }
 

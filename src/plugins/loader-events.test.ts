@@ -19,7 +19,7 @@ const ROOT = resolve(__dirname, "../../tmp/loader-events-tests")
 const HOME = join(ROOT, "home")
 
 function writePackage(id: string, manifest: ManifestFile, files: Record<string, string> = {}) {
-  const dir = join(HOME, "tui-plugins", id)
+  const dir = join(HOME, "plugins", id)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2))
   for (const [rel, content] of Object.entries(files)) {

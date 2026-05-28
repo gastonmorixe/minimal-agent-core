@@ -313,7 +313,7 @@ export interface PluginLogger {
  * (default: the process-wide singleton) and carry a source field of
  * `${pluginId}.${source}`.
  *
- * For TUI plugins the loader constructs this once per handler context;
+ * For Plugins the loader constructs this once per handler context;
  * the same pluginId stamps every emit from that handler.
  */
 export function createPluginLogger(pluginId: string, bus?: DiagnosticBus): PluginLogger {

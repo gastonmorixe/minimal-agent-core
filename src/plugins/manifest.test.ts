@@ -70,6 +70,31 @@ describe("parseManifest", () => {
     expect(() => parseManifest(bad, "/x")).toThrow(/duplicate/i)
   })
 
+  describe("enabled (author opt-out)", () => {
+    it("defaults to undefined when omitted (= ENABLED)", () => {
+      const m = parseManifest(valid, "/x")
+      expect(m.enabled).toBeUndefined()
+    })
+
+    it("normalizes enabled=true to undefined (= ENABLED)", () => {
+      // We don't carry the explicit `true` through to ManifestFile because
+      // that's the default; only `false` is meaningful in the output type.
+      const m = parseManifest({ ...valid, enabled: true }, "/x")
+      expect(m.enabled).toBeUndefined()
+    })
+
+    it("preserves enabled=false (= DISABLED by author)", () => {
+      const m = parseManifest({ ...valid, enabled: false }, "/x")
+      expect(m.enabled).toBe(false)
+    })
+
+    it("rejects non-boolean enabled", () => {
+      expect(() => parseManifest({ ...valid, enabled: "yes" }, "/x")).toThrow(/boolean/i)
+      expect(() => parseManifest({ ...valid, enabled: 1 }, "/x")).toThrow(/boolean/i)
+      expect(() => parseManifest({ ...valid, enabled: null }, "/x")).not.toThrow()
+    })
+  })
+
   it("rejects unknown trigger.type", () => {
     const bad = {
       ...valid,

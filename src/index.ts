@@ -44,9 +44,9 @@
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { SaveEchoCollector } from "../tui-plugins/memory/lib/save-echo.ts"
-import { ShortTermSnapshot } from "../tui-plugins/memory/lib/short-term-snapshot.ts"
-import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
+import { SaveEchoCollector } from "../plugins/memory/lib/save-echo.ts"
+import { ShortTermSnapshot } from "../plugins/memory/lib/short-term-snapshot.ts"
+import { TasksAttachment } from "../plugins/tasks/lib/attachment.ts"
 
 import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
@@ -66,7 +66,7 @@ import { runLoginCommand } from "./commands/login.ts"
 import { runLogoutCommand } from "./commands/logout.ts"
 import { resolveSessionTarget } from "./commands/session-index.ts"
 import { runSessionsCommand } from "./commands/sessions.ts"
-import { loadDisabledPluginIds, loadModeUserOverrides, loadUserConfig } from "./config.ts"
+import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
 import { getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
@@ -84,6 +84,7 @@ import { buildReadyBanner } from "./ready-banner.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
+  toolDisplaysFromRecords,
   userTimestampsFromRecords,
 } from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
@@ -302,14 +303,20 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
     `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
     `    ${c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1")}       Skip startup quota check`,
+    `    ${c.cyan("MINIMAL_AGENT_NO_HISTORY=1")}       Disable ↑/↓ prompt history ${c.dim("(history plugin)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_FILE_LOCK_DISABLED=1")}  Disable cooperative file locking ${c.dim("(file-lock plugin)")}`,
     `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
     "",
-    `  ${c.bold("Plugins")} ${c.dim("(opt-out via ~/.minimal-agent/config.jsonc)")}`,
-    `    ${c.dim('{ "plugins": { "<id>": { "enabled": false } } }')}`,
-    `    ${c.dim("Built-in ids:")} ask-mode, diff-view, env-info, file-lock, interleave-thinking,`,
-    `    ${c.dim("             ")} memory, quota-status, tasks, web-search`,
+    `  ${c.bold("Plugins")} ${c.dim("(toggle via ~/.minimal-agent/config.jsonc)")}`,
+    `    ${c.dim("Opt out  :")} ${c.dim('{ "plugins": { "<id>": { "enabled": false } } }')}`,
+    `    ${c.dim("Opt in   :")} ${c.dim('{ "plugins": { "<id>": { "enabled": true } } }')}  ${c.dim("(for plugins shipped disabled)")}`,
+    "",
+    `    ${c.dim("Built-in :")} ask-mode, diff-view, env-info, file-lock, history,`,
+    `    ${c.dim("           ")} memory, quota-status, tasks, web-search`,
+    `    ${c.dim("Disabled :")} interleave-thinking ${c.dim("(opt in to use; see Opt in above)")}`,
     "",
     `  ${c.bold("Docs")}`,
+    `    ${c.dim("docs/CHANGELOG.md")}                Release notes`,
     `    ${c.dim("docs/caching.md")}                  Prompt caching: breakpoints, TTL, verification`,
     `    ${c.dim("docs/tool-icons-and-colors.md")}    Tool transcript icons and color scheme`,
     `    ${c.dim("docs/plugin-prompt-block-structure.md")}  How plugin PROMPT.md blocks compose`,
@@ -861,11 +868,11 @@ async function main() {
       : c.dim("unknown")
   printStartupRow("term", termLabel)
 
-  // Load TUI plugins from ~/.agents/tui-plugins and <cwd>/tui-plugins.
+  // Load Plugins from ~/.agents/plugins and <cwd>/plugins.
   // Core tool names must always win over plugin names.
   const coreToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name))
   const homeDir = process.env.HOME ? join(process.env.HOME, ".agents") : undefined
-  // Embedded plugins ship inside the agent's own checkout: `<repo>/tui-plugins/`.
+  // Embedded plugins ship inside the agent's own checkout: `<repo>/plugins/`.
   // `import.meta.dirname` (Bun + Node 20+) of this file is `<repo>/src`, so
   // climb one level. This makes ask-mode/diff-view/env-info/memory work
   // regardless of the user's cwd, not just when cwd === <repo>.
@@ -895,6 +902,7 @@ async function main() {
   // other consumers (env-info prompt fragments, downstream tools) can
   // still see the unabridged value if they need it.
   process.env.MINIMAL_AGENT_SESSION_ID = getSessionId()
+  const pluginOverrides = loadPluginEnabledOverrides()
   const loader = await PluginLoader.load({
     embeddedDir,
     homeDir,
@@ -906,7 +914,11 @@ async function main() {
     sessionId: getSessionId(),
     // Universal opt-out: any plugin with `plugins.<id>.enabled === false`
     // in ~/.minimal-agent/config.jsonc is dropped before validation.
-    disabledPluginIds: loadDisabledPluginIds(),
+    // The matching `enabled === true` set overrides a manifest-level
+    // `enabled: false` author opt-out, so users can flip on a plugin
+    // shipped disabled by default.
+    disabledPluginIds: pluginOverrides.forceDisabled,
+    enabledPluginIds: pluginOverrides.forceEnabled,
   })
   // Expose the loader's event bus to deep emit-points (notably
   // `client.ts`, which broadcasts `quota.headersReceived` after every
@@ -916,16 +928,16 @@ async function main() {
   // (or read from disk on demand). The Agent receives them via its
   // optional `saveEcho` / `shortTermSnapshot` constructor params and
   // drains them at every user-message seam — see `Agent.run` and
-  // `tui-plugins/memory/lib/{save-echo,short-term-snapshot}.ts`.
+  // `plugins/memory/lib/{save-echo,short-term-snapshot}.ts`.
   const saveEcho = SaveEchoCollector.attach(loader.bus())
   const shortTermSnapshot = new ShortTermSnapshot(getSessionId())
   // Tasks plugin attachment producer. Reads the per-session JSONL on
-  // every initial-seam call and renders `<ma::tui::tasks …>…</ma::tui::tasks>`
+  // every initial-seam call and renders `<ma::plugin::tasks …>…</ma::plugin::tasks>`
   // for the model. Unconditional construction (mirrors ShortTermSnapshot):
   // if the user disables the `tasks` plugin in config, the Task tool is
   // skipped at loader time and the file stays empty, so this attachment
   // returns null and costs nothing. See
-  // `tui-plugins/tasks/lib/attachment.ts`.
+  // `plugins/tasks/lib/attachment.ts`.
   const tasksAttachment = new TasksAttachment(getSessionId())
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
@@ -1036,6 +1048,17 @@ async function main() {
   // `<mode-change>` chip with `YYYY-MM-DD HH:MM` of the prompt that
   // shipped the toggle, instead of "(now)". Stays null when not resuming.
   let userTimestamps: (Date | null)[] | null = null
+  // tool_use_id → live transcript presentation overrides (display /
+  // displayHeader / displayFooter) for each tool result that carried
+  // them at write time. Threaded through replayToScrollback so plugin-
+  // driven renders (Edit's unified diff, Tasks' tree, etc.) survive
+  // `--resume` instead of regressing to the model-facing `content`
+  // text. Stays null for sessions written before the field landed and
+  // for non-resume runs.
+  let toolDisplays: Map<
+    string,
+    { display?: string; displayHeader?: string; displayFooter?: string }
+  > | null = null
   // Trailing user message that was typed and submitted but never got an
   // assistant reply (aborted/crashed/killed before any tokens streamed).
   // `loadSession` extracts it from `messages` so the API never sees a
@@ -1076,6 +1099,12 @@ async function main() {
       // resulting array is index-parallel to `initialMessages`. See
       // `userTimestampsFromRecords` in `src/session-replay.ts`.
       userTimestamps = userTimestampsFromRecords(loaded.records)
+      // Live transcript presentation overrides (display / displayHeader
+      // / displayFooter), keyed by tool_use_id. Empty when no tool
+      // results carried overrides (pre-fix session files, runs with
+      // only Bash/Read/Grep). See `toolDisplaysFromRecords` in
+      // `src/session-replay.ts`.
+      toolDisplays = toolDisplaysFromRecords(loaded.records)
       const turns = initialMessages.length
       const droppedNote =
         loaded.dropped.length > 0
@@ -1238,7 +1267,7 @@ async function main() {
   // `~/.minimal-agent/sessions/<sid>.blobs/`, populated lazily as tools
   // emit large or truncated bodies. Best-effort like the session store:
   // a missing or disabled blob store means tool results still flow,
-  // just without the `[raw-output: …]` footer pointer. The config gates
+  // just without the `<ma::agent::raw-output …/>` footer pointer. The config gates
   // (enabled, minBytesToPersist, max caps, skipTools, env opt-out) are
   // resolved here and frozen for the session.
   let blobStore: BlobStore | null = null
@@ -1411,12 +1440,34 @@ async function main() {
       }),
     )
     if (initialMessages.length > 0) {
+      // Build the tool presentation map (icon + color) for replay. Mirror
+      // the live agent's `toolPresentation` construction in
+      // `src/agent.ts`: built-ins come from `TOOL_DEFINITIONS`, plugin
+      // tools come from `PluginLoader.getExtraTools`, and aliases inherit
+      // their canonical's presentation. Without this map the replayed
+      // `╭` header drops the icon (`» Bash`, `✦ Edit`, `✔ Task`) and
+      // falls back to the bare bold tool name in orange.
+      const toolPresentation = new Map<string, { icon?: string; color?: string }>()
+      for (const t of TOOL_DEFINITIONS) {
+        if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
+      }
+      if (loader) {
+        for (const t of loader.getExtraTools()) {
+          if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
+        }
+        for (const [alias, canonical] of loader.getToolAliases()) {
+          const pres = toolPresentation.get(canonical)
+          if (pres && !toolPresentation.has(alias)) toolPresentation.set(alias, pres)
+        }
+      }
       await replayToScrollback(initialMessages, stdoutSink, {
         modeManager,
         formatterCmd,
         toolTimeTracker,
         toolStartTimes,
         userTimestamps: userTimestamps ?? undefined,
+        toolDisplays,
+        toolPresentation,
       })
       stdoutSink.write("\n")
     }

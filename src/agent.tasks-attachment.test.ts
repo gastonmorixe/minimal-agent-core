@@ -5,7 +5,7 @@
  *
  *   - `tasksAttachment` — `{toAttachment(): ContentBlock | null}` called
  *     once at the INITIAL user-message seam only; produces a
- *     `<ma::tui::tasks …>…</ma::tui::tasks>` block.
+ *     `<ma::plugin::tasks …>…</ma::plugin::tasks>` block.
  *
  * Structurally identical to `shortTermSnapshot` (see
  * `agent.memory-attachments.test.ts`) so the assertions here mirror that
@@ -14,7 +14,7 @@
  *   1. Zero-regression: with no `tasksAttachment`, message shape is
  *      unchanged (`[text]` only).
  *   2. Attachment alone: prepended BEFORE user text.
- *   3. Tasks comes AFTER short-term-memory but BEFORE save-echoes (the
+ *   3. Tasks comes AFTER ma::plugin::memory::short-term but BEFORE save-echoes (the
  *      ORDER NOTE in agent.ts spells out the rationale).
  *   4. With mode-change too: mode-change FIRST, then STM, then tasks,
  *      then save-echoes.
@@ -32,8 +32,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { TasksAttachment } from "../tui-plugins/tasks/lib/attachment.ts"
-import { TaskStore } from "../tui-plugins/tasks/lib/store.ts"
+import { TasksAttachment } from "../plugins/tasks/lib/attachment.ts"
+import { TaskStore } from "../plugins/tasks/lib/store.ts"
 
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
@@ -167,7 +167,7 @@ describe("Agent.run — tasks attachment (initial seam)", () => {
     const sendFn = makeTextSendFn(records)
     const tasks = new FakeTasksAttachment({
       type: "text",
-      text: '<ma::tui::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  hello\n</ma::tui::tasks>',
+      text: '<ma::plugin::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  hello\n</ma::plugin::tasks>',
     })
     const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment: tasks })
 
@@ -178,27 +178,27 @@ describe("Agent.run — tasks attachment (initial seam)", () => {
     const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
     const content = messages[0]?.content ?? []
     expect(content.length).toBe(2)
-    expect((content[0] as { text: string }).text).toContain("<ma::tui::tasks")
+    expect((content[0] as { text: string }).text).toContain("<ma::plugin::tasks")
     expect((content[0] as { text: string }).text).toContain("hello")
     expect((content[1] as { text: string }).text).toBe("hi")
   })
 })
 
 // ---------------------------------------------------------------------------
-// (3) Order with short-term-memory: STM first, then tasks
+// (3) Order with ma::plugin::memory::short-term: STM first, then tasks
 // ---------------------------------------------------------------------------
 
 describe("Agent.run — tasks attachment (combined order)", () => {
-  it("places short-term-memory BEFORE tasks (STM is ambient, tasks is structured plan)", async () => {
+  it("places ma::plugin::memory::short-term BEFORE tasks (STM is ambient, tasks is structured plan)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeTextSendFn(records)
     const stm = new FakeSnapshot({
       type: "text",
-      text: "<short-term-memory>\n[#1] hypothesis: X\n</short-term-memory>",
+      text: "<ma::plugin::memory::short-term>\n[#1] hypothesis: X\n</ma::plugin::memory::short-term>",
     })
     const tasks = new FakeTasksAttachment({
       type: "text",
-      text: '<ma::tui::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::tui::tasks>',
+      text: '<ma::plugin::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::plugin::tasks>',
     })
     const agent = new Agent({
       auth,
@@ -215,8 +215,8 @@ describe("Agent.run — tasks attachment (combined order)", () => {
     const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
     const content = messages[0]?.content ?? []
     expect(content.length).toBe(3)
-    expect((content[0] as { text: string }).text).toContain("<short-term-memory>")
-    expect((content[1] as { text: string }).text).toContain("<ma::tui::tasks")
+    expect((content[0] as { text: string }).text).toContain("<ma::plugin::memory::short-term>")
+    expect((content[1] as { text: string }).text).toContain("<ma::plugin::tasks")
     expect((content[2] as { text: string }).text).toBe("hi")
   })
 
@@ -225,12 +225,12 @@ describe("Agent.run — tasks attachment (combined order)", () => {
     const sendFn = makeTextSendFn(records)
     const tasks = new FakeTasksAttachment({
       type: "text",
-      text: '<ma::tui::tasks total="0" done="0" doing="0" todo="0" canceled="0">\n</ma::tui::tasks>',
+      text: '<ma::plugin::tasks total="0" done="0" doing="0" todo="0" canceled="0">\n</ma::plugin::tasks>',
     })
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="abc">prev</memory-saved>',
+      text: '<memory-saved scope="project" id="abc">prev</ma::plugin::memory::saved>',
     })
     const agent = new Agent({
       auth,
@@ -247,7 +247,7 @@ describe("Agent.run — tasks attachment (combined order)", () => {
     const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
     const content = messages[0]?.content ?? []
     expect(content.length).toBe(3)
-    expect((content[0] as { text: string }).text).toContain("<ma::tui::tasks")
+    expect((content[0] as { text: string }).text).toContain("<ma::plugin::tasks")
     expect((content[1] as { text: string }).text).toContain("<memory-saved")
     expect((content[2] as { text: string }).text).toBe("hi")
   })
@@ -260,16 +260,16 @@ describe("Agent.run — tasks attachment (combined order)", () => {
     const sendFn = makeTextSendFn(records)
     const stm = new FakeSnapshot({
       type: "text",
-      text: "<short-term-memory>\n[#1] x\n</short-term-memory>",
+      text: "<ma::plugin::memory::short-term>\n[#1] x\n</ma::plugin::memory::short-term>",
     })
     const tasks = new FakeTasksAttachment({
       type: "text",
-      text: '<ma::tui::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  go\n</ma::tui::tasks>',
+      text: '<ma::plugin::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  go\n</ma::plugin::tasks>',
     })
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="abc">p</memory-saved>',
+      text: '<memory-saved scope="project" id="abc">p</ma::plugin::memory::saved>',
     })
     const agent = new Agent({
       auth,
@@ -288,9 +288,9 @@ describe("Agent.run — tasks attachment (combined order)", () => {
     const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
     const content = messages[0]?.content ?? []
     expect(content.length).toBe(5)
-    expect((content[0] as { text: string }).text).toContain("<ma::mode-change")
-    expect((content[1] as { text: string }).text).toContain("<short-term-memory>")
-    expect((content[2] as { text: string }).text).toContain("<ma::tui::tasks")
+    expect((content[0] as { text: string }).text).toContain("<ma::agent::mode-change")
+    expect((content[1] as { text: string }).text).toContain("<ma::plugin::memory::short-term>")
+    expect((content[2] as { text: string }).text).toContain("<ma::plugin::tasks")
     expect((content[3] as { text: string }).text).toContain("<memory-saved")
     expect((content[4] as { text: string }).text).toBe("hi")
   })
@@ -306,7 +306,7 @@ describe("Agent.run — tasks attachment (loop seam)", () => {
     const sendFn = makeRecordingSendFnWithToolUse(records)
     const tasks = new FakeTasksAttachment({
       type: "text",
-      text: '<ma::tui::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::tui::tasks>',
+      text: '<ma::plugin::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n1  #a7b3c4  todo  step\n</ma::plugin::tasks>',
     })
     const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment: tasks })
 
@@ -331,7 +331,7 @@ describe("Agent.run — tasks attachment (loop seam)", () => {
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)
     for (const t of textBlocks) {
-      expect(t).not.toContain("<ma::tui::tasks")
+      expect(t).not.toContain("<ma::plugin::tasks")
     }
 
     // toAttachment must have been called exactly ONCE (initial seam only).
@@ -374,7 +374,7 @@ describe("Agent.run — tasks attachment (real TasksAttachment integration)", ()
     const content = messages[0]?.content ?? []
     expect(content.length).toBe(2)
     const attText = (content[0] as { text: string }).text
-    expect(attText).toContain("<ma::tui::tasks")
+    expect(attText).toContain("<ma::plugin::tasks")
     expect(attText).toContain(`total="2"`)
     expect(attText).toContain("first task")
     expect(attText).toContain("second task")

@@ -38,7 +38,7 @@
  *      "callId":"toolu_01abc","filePath":"/abs/foo.ts",
  *      "acquiredAt":"2026-05-10T05:45:30-04:00","acquiredAtMs":1715332530123}
  *
- * **Companion plugin**: `tui-plugins/file-lock/` ships a `LockStatus` tool and
+ * **Companion plugin**: `plugins/file-lock/` ships a `LockStatus` tool and
  * CLI for human-and-model inspection, plus opt-out via
  * `plugins["file-lock"].enabled = false` in `~/.minimal-agent/config.jsonc`.
  *

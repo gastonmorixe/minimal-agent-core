@@ -1,5 +1,5 @@
 /**
- * Stream-aware stripper for the `<ma::reflection-ack ... />` tag emitted by
+ * Stream-aware stripper for the `<ma::agent::reflection-ack ... />` tag emitted by
  * the model in its assistant text.
  *
  * **Why this exists.** The reflection-ack tag is internal protocol between the
@@ -11,8 +11,8 @@
  * the rendered confirmation. The tag should be hidden, the rendered line is
  * the user-visible artifact.
  *
- * **Why not the `<tui::` inline-tag scanner.** That scanner is namespaced to
- * `<tui::` openers (see `OPENER_PROBE` in `src/plugins/scanner.ts`) and only
+ * **Why not the `<ma::plugin::` inline-tag scanner.** That scanner is namespaced to
+ * `<ma::plugin::` openers (see `OPENER_PROBE` in `src/plugins/scanner.ts`) and only
  * matches plugin-contributed tags. The `<ma::` namespace is agent-runtime
  * protocol and intentionally not plugin-handleable — see the project memory
  * note on namespace conventions (#mp2793zz-e02e).
@@ -36,7 +36,7 @@
  * tag, and the visual win doesn't justify the state-machine complexity.
  *
  * **Bounded buffer.** If the held tail ever exceeds `MAX_BUFFER` bytes (a
- * model that emits `<ma::reflection-ack` then runs away without closing),
+ * model that emits `<ma::agent::reflection-ack` then runs away without closing),
  * the buffered bytes flush verbatim. This bounds worst-case memory and
  * preserves output if the model misbehaves.
  *
@@ -50,10 +50,10 @@
  * whitespace is intentionally NOT consumed; see the blank-line policy
  * note in the module header.
  */
-const TAG_RE = /<ma::reflection-ack(?:\s+(?:silence-for="\d+"|reason="[^"]*")){0,2}\s*\/>/g
+const TAG_RE = /<ma::agent::reflection-ack(?:\s+(?:silence-for="\d+"|reason="[^"]*")){0,2}\s*\/>/g
 
 /** Literal opener prefix used for cross-chunk hold detection. */
-const OPENER = "<ma::reflection-ack"
+const OPENER = "<ma::agent::reflection-ack"
 
 /**
  * Maximum bytes we'll hold in the tail buffer without completing a match
@@ -91,7 +91,7 @@ export interface ReflectionAckStripper {
  *
  * Two cases produce a hold:
  *
- * 1. A complete opener `<ma::reflection-ack` appears in `s` but no `/>`
+ * 1. A complete opener `<ma::agent::reflection-ack` appears in `s` but no `/>`
  *    closes it. Hold from the opener position.
  * 2. The tail of `s` is a prefix of the opener (e.g. `<ma::`, `<ma::r`).
  *    Hold from where the prefix begins.
