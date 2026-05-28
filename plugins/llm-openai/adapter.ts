@@ -18,19 +18,19 @@
  * @module llm/providers/openai/adapter
  */
 
-import { defaultNetworkClient, type NetworkClient } from "../../../network/index.ts"
-import type { CanonicalEvent } from "../../canonical-events.ts"
-import type { CanonicalRequest } from "../../canonical-request.ts"
-import { type ModelEntry, registerProvider } from "../../model-registry.ts"
+import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
+import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import type {
   ProviderAdapter,
   ProviderAuth,
   RunContext,
   SurfaceId,
   ValidationResult,
-} from "../../provider.ts"
-import type { ProviderPlugin } from "../../provider-plugin.ts"
-import { parseSse } from "../../streaming/sse-parser.ts"
+} from "../../src/llm/provider.ts"
+import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
+import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
