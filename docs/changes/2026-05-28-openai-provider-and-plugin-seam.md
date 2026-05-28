@@ -58,10 +58,6 @@ The providers now live as plugins and the core imports no provider by name (5 mo
 4. **Wired**: `main()` calls `registerDiscoveredProviders(<repo>/plugins)` + `activateProviderPlugins()` before the bootstrap probe / footer / canonical `run()` read the registry. The static builtin barrel (`src/llm/providers/index.ts`) is deleted; `src/index.ts` imports zero provider code by name.
 5. **Cross-plugin reuse**: a future `plugins/llm-<groq|azure|together>/` can import `plugins/llm-openai`'s translators/request-body (same wire spec, different endpoint + capabilities) and ship its own `provider.json` + `ProviderPlugin`.
 
-## Cross-plugin reuse, demonstrated: `plugins/llm-deepseek`
-
-To prove the payoff, `plugins/llm-deepseek` adds a THIRD provider with zero core changes. DeepSeek is OpenAI Chat-compatible, so the adapter REUSES `plugins/llm-openai`'s `buildOpenAIChatBody`, `translateOpenAIChatStream`, `buildOpenAIHeaders`, and `validateOpenAIRequest` wholesale: `deepseek-chat` registers on the SHARED `openai-chat` surface and only the endpoint (`api.deepseek.com`), catalog, and pricing differ. It ships a `provider.json`, so the discovery loader auto-registers it at startup. A new OpenAI-compatible vendor is ~5 small files plus a `provider.json`. (Pricing/capabilities are best-effort, refreshable.)
-
-Final state: `bun run check` green, **3422 pass / 9 skip / 0 fail**; 3 providers auto-discovered (anthropic, openai, deepseek).
+Final state: `bun run check` green, **3419 pass / 9 skip / 0 fail**.
 
 Note: a model selected via `--model` still runs through the legacy Anthropic transport in the agent loop; making `--model gpt-5.5` actually dispatch to OpenAI at runtime is the separate "Phase 4-extended" agent-canonicalization epic and intentionally out of scope here.

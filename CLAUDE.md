@@ -127,8 +127,6 @@ side-effect of provider work.**
   the `ProviderAdapter` port + a `bootstrap<Id>()`, export a `ProviderPlugin`,
   and add a `provider.json` pointing at it. Discovery registers it at startup.
   A provider that reuses another's wire spec (e.g. an OpenAI-compatible gateway)
-  can import that plugin's translators/request-body (see `plugins/llm-deepseek/`
-  for a worked example: it reuses `llm-openai`'s wire layer on the shared
-  `openai-chat` surface, swapping only the endpoint). The CLI does not validate
+  can import that plugin's translators/request-body. The CLI does not validate
   `--model` against the registry (the server is the source of truth), so
   forward-compat ids pass through.
