@@ -78,19 +78,29 @@ Vendor-neutral types and the orchestrator. Import everything from the barrel
 - `streaming/sse-parser.ts` : a generic line-buffered SSE parser the adapters
   reuse.
 
-### Provider adapters (`src/llm/providers/<id>/`)
+### Provider plugins (`plugins/llm-<id>/`)
 
-Each adapter is the only place that knows a wire format. Shape: `validate.ts`
-(capability gating), `request-body.ts` (canonical → wire), `response-stream.ts`
-(wire SSE → `CanonicalEvent`), `capabilities.ts` + `models.ts` (registry data),
-`headers.ts`, `adapter.ts` (implements the port + a `bootstrap<Provider>()`).
+Each provider is a PLUGIN under `plugins/llm-<id>/`, not part of the core. A
+plugin ships a `provider.json` descriptor (`id` / `entry` / `export`) and
+exports a `ProviderPlugin` (`id` / `displayName` / `shortCode` / `register()`).
+Inside, the adapter is the only place that knows a wire format. Shape:
+`validate.ts` (capability gating), `request-body.ts` (canonical → wire),
+`response-stream.ts` (wire SSE → `CanonicalEvent`), `capabilities.ts` +
+`models.ts` (registry data), `headers.ts`, `adapter.ts` (implements the port +
+`bootstrap<Provider>()` + the exported `ProviderPlugin`). Canonical-core imports
+use `../../src/llm/*`.
 
-- `providers/anthropic/` is complete: 6 models, full Messages mapping, live SSE
-  fixtures, 38 tests. `bootstrapAnthropic()` registers it.
-- `providers/openai/` has the foundation (wire-constants, headers, capabilities,
-  pricing, chat + responses request-body/response-stream, live fixtures) but no
-  `adapter.ts`/`models.ts` yet, so it is NOT registered. Do not
-  `bootstrapOpenAI()` until those land.
+- `plugins/llm-anthropic/` is complete: 6 models, full Messages mapping, live
+  SSE fixtures, 38 tests.
+- `plugins/llm-openai/` is complete: Chat + Responses surfaces, gpt-5.x / gpt-4 /
+  o-series (gpt-5.5 registered dual-surface), live SSE fixtures, 16 tests.
+
+`src/llm/provider-discovery.ts` is the EARLY provider loader: it scans
+`plugins/llm-*` for `provider.json`, dynamically imports each `ProviderPlugin`,
+and registers it. `main()` calls `registerDiscoveredProviders(<repo>/plugins)`
+then `activateProviderPlugins()` BEFORE any model resolution, so `src/index.ts`
+names no provider. This is separate from the TUI `PluginLoader` (which runs
+later for tools / live-area slots; provider registration must happen earlier).
 
 ### Coexistence with the legacy client (important)
 
@@ -110,10 +120,13 @@ side-effect of provider work.**
 
 ### Adding a model or provider
 
-- New Anthropic model: add a `Capabilities` record in
-  `providers/anthropic/capabilities.ts` and a `registerModel({...})` entry in
-  `providers/anthropic/models.ts`.
-- New provider: create `src/llm/providers/<id>/` mirroring the Anthropic layout,
-  implement the `ProviderAdapter` port, register it with a `bootstrap<Id>()`.
-  The CLI does not validate `--model` against the registry (the server is the
-  source of truth), so forward-compat ids pass through.
+- New model for an existing provider: add a `Capabilities` record in that
+  plugin's `capabilities.ts` and a `registerModel({...})` entry in its
+  `models.ts` (e.g. under `plugins/llm-anthropic/`).
+- New provider: create `plugins/llm-<id>/` mirroring an existing one, implement
+  the `ProviderAdapter` port + a `bootstrap<Id>()`, export a `ProviderPlugin`,
+  and add a `provider.json` pointing at it. Discovery registers it at startup.
+  A provider that reuses another's wire spec (e.g. an OpenAI-compatible gateway)
+  can import that plugin's translators/request-body. The CLI does not validate
+  `--model` against the registry (the server is the source of truth), so
+  forward-compat ids pass through.
