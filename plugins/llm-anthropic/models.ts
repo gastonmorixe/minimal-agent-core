@@ -11,8 +11,8 @@
  * @module llm/providers/anthropic/models
  */
 
-import type { CanonicalRequest } from "../../canonical-request.ts"
-import { registerModel } from "../../model-registry.ts"
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import { registerModel } from "../../src/llm/model-registry.ts"
 import {
   ANTHROPIC_HAIKU_45,
   ANTHROPIC_OPUS_4X_FAST_LEGACY,
@@ -20,7 +20,7 @@ import {
   ANTHROPIC_OPUS_48_FAST,
   ANTHROPIC_SONNET_STANDARD,
   type MTokRate,
-} from "../../pricing.ts"
+} from "../../src/llm/pricing.ts"
 
 import {
   CAPS_HAIKU_45,

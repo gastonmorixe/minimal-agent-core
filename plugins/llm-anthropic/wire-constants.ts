@@ -25,7 +25,7 @@ export {
   USER_AGENT_MCP,
   USER_AGENT_OAUTH,
   VERSION,
-} from "../../../headers.ts"
+} from "../../src/headers.ts"
 
 /** Bootstrap endpoint introduced in v2.1.154. */
 export const BOOTSTRAP_URL_BASE = "https://api.anthropic.com/api/claude_cli/bootstrap"

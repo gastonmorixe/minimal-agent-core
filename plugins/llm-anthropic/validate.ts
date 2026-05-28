@@ -10,10 +10,10 @@
  * @module llm/providers/anthropic/validate
  */
 
-import type { CanonicalRequest } from "../../canonical-request.ts"
-import { CapabilityViolation } from "../../errors.ts"
-import type { ModelEntry } from "../../model-registry.ts"
-import type { ValidationResult } from "../../provider.ts"
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import { CapabilityViolation } from "../../src/llm/errors.ts"
+import type { ModelEntry } from "../../src/llm/model-registry.ts"
+import type { ValidationResult } from "../../src/llm/provider.ts"
 
 export function validateAnthropicRequest(
   req: CanonicalRequest,

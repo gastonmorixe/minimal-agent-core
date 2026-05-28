@@ -28,7 +28,7 @@ import {
   resolveModel,
   systemMessage,
   userText,
-} from "../../index.ts"
+} from "../../src/llm/index.ts"
 
 import { bootstrapAnthropic } from "./adapter.ts"
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags } from "./beta-flags.ts"

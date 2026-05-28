@@ -11,9 +11,9 @@
 
 import { randomUUID } from "node:crypto"
 
-import type { CanonicalRequest } from "../../canonical-request.ts"
-import type { ModelEntry } from "../../model-registry.ts"
-import type { ProviderAuth } from "../../provider.ts"
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import type { ModelEntry } from "../../src/llm/model-registry.ts"
+import type { ProviderAuth } from "../../src/llm/provider.ts"
 
 import { type AnthropicBetaFlag, buildBetaFlags, classifyRequest } from "./beta-flags.ts"
 import { ANTHROPIC_VERSION, STAINLESS_SDK_VERSION, USER_AGENT } from "./wire-constants.ts"

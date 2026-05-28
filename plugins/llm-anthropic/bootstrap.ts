@@ -21,9 +21,9 @@
  * @module llm/providers/anthropic/bootstrap
  */
 
-import { defaultNetworkClient, type NetworkClient } from "../../../network/index.ts"
-import type { MTokRate } from "../../pricing.ts"
-import type { ProviderAuth } from "../../provider.ts"
+import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
+import type { MTokRate } from "../../src/llm/pricing.ts"
+import type { ProviderAuth } from "../../src/llm/provider.ts"
 
 import { BOOTSTRAP_URL_BASE, USER_AGENT_OAUTH } from "./wire-constants.ts"
 
@@ -128,7 +128,7 @@ export async function fetchBootstrap(opts: FetchBootstrapOpts): Promise<Bootstra
  */
 export function applyBootstrapOverrides(
   bootstrap: BootstrapResponse | null,
-  registry: typeof import("../../model-registry.ts"),
+  registry: typeof import("../../src/llm/model-registry.ts"),
 ): void {
   if (!bootstrap?.additional_model_costs) return
   for (const [modelId, raw] of Object.entries(bootstrap.additional_model_costs)) {
