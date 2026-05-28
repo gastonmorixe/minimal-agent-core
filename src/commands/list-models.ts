@@ -1,29 +1,66 @@
 import { c } from "../agent.ts"
 import type { AuthResult } from "../auth.ts"
 import { listModels } from "../client.ts"
+import { listRegisteredModels } from "../llm/model-registry.ts"
+
+interface ModelRow {
+  id: string
+  displayName?: string
+  providerId: string
+  date?: string
+}
 
 export async function runListModelsCommand(auth: AuthResult): Promise<void> {
-  const models = await listModels(auth)
+  const byId = new Map<string, ModelRow>()
 
-  const families = new Map<string, typeof models>()
-  for (const modelInfo of models) {
-    const family = modelInfo.id.replace(/-\d.*$/, "")
-    if (!families.has(family)) {
-      families.set(family, [])
+  // Live Anthropic catalog (authoritative + real-time from api.anthropic.com).
+  // Resilient: a network/auth failure shouldn't hide the registered catalog.
+  try {
+    for (const m of await listModels(auth)) {
+      byId.set(m.id, {
+        id: m.id,
+        displayName: m.display_name,
+        providerId: "anthropic",
+        date: m.created_at?.slice(0, 10),
+      })
     }
-    families.get(family)!.push(modelInfo)
+  } catch (err) {
+    console.error(
+      `  ${c.dim(`(live Anthropic model list unavailable: ${err instanceof Error ? err.message : String(err)})`)}`,
+    )
+  }
+
+  // Canonical registry adds every other registered provider (OpenAI's
+  // gpt-5.x / gpt-4 / o-series, plus any discovered provider plugins).
+  // Live entries win on id collision (they carry real created_at dates).
+  for (const entry of listRegisteredModels()) {
+    if (byId.has(entry.id)) continue
+    byId.set(entry.id, {
+      id: entry.id,
+      displayName: entry.displayName,
+      providerId: entry.providerId,
+      date: entry.knowledgeCutoff,
+    })
+  }
+
+  // Group by provider (anthropic / openai / …).
+  const byProvider = new Map<string, ModelRow[]>()
+  for (const row of byId.values()) {
+    const list = byProvider.get(row.providerId)
+    if (list) list.push(row)
+    else byProvider.set(row.providerId, [row])
   }
 
   console.log("")
-  for (const [family, members] of [...families.entries()].sort()) {
-    console.log(`  ${c.bold(family)}`)
-    for (const modelInfo of members.sort((a, b) => a.id.localeCompare(b.id))) {
-      const id = c.cyan(modelInfo.id.padEnd(24))
-      const name = modelInfo.display_name ? c.dim(modelInfo.display_name.padEnd(28)) : "".padEnd(28)
-      const date = modelInfo.created_at ? c.dim(modelInfo.created_at.slice(0, 10)) : ""
+  for (const [provider, rows] of [...byProvider.entries()].sort()) {
+    console.log(`  ${c.bold(provider)}`)
+    for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
+      const id = c.cyan(row.id.padEnd(30))
+      const name = row.displayName ? c.dim(row.displayName.padEnd(28)) : "".padEnd(28)
+      const date = row.date ? c.dim(row.date) : ""
       console.log(`    ${id} ${name} ${date}`)
     }
     console.log("")
   }
-  console.log(`  ${c.dim(`${models.length} models available`)}`)
+  console.log(`  ${c.dim(`${byId.size} models available`)}`)
 }
