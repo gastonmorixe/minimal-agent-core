@@ -10,7 +10,10 @@ interface ModelRow {
   date?: string
 }
 
-export async function runListModelsCommand(auth: AuthResult): Promise<void> {
+export async function runListModelsCommand(
+  auth: AuthResult,
+  providerFilter?: string,
+): Promise<void> {
   const byId = new Map<string, ModelRow>()
 
   // Live Anthropic catalog (authoritative + real-time from api.anthropic.com).
@@ -51,16 +54,25 @@ export async function runListModelsCommand(auth: AuthResult): Promise<void> {
     else byProvider.set(row.providerId, [row])
   }
 
+  const providerIds = providerFilter ? [providerFilter] : [...byProvider.keys()].sort()
+  let shown = 0
   console.log("")
-  for (const [provider, rows] of [...byProvider.entries()].sort()) {
+  for (const provider of providerIds) {
+    const rows = byProvider.get(provider)
+    if (!rows || rows.length === 0) {
+      if (providerFilter)
+        console.log(`  ${c.dim(`no models registered for provider "${provider}"`)}`)
+      continue
+    }
     console.log(`  ${c.bold(provider)}`)
     for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
       const id = c.cyan(row.id.padEnd(30))
       const name = row.displayName ? c.dim(row.displayName.padEnd(28)) : "".padEnd(28)
       const date = row.date ? c.dim(row.date) : ""
       console.log(`    ${id} ${name} ${date}`)
+      shown++
     }
     console.log("")
   }
-  console.log(`  ${c.dim(`${byId.size} models available`)}`)
+  console.log(`  ${c.dim(`${shown} models available`)}`)
 }

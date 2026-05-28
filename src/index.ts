@@ -64,6 +64,7 @@ import { runAuthStatusCommand } from "./commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "./commands/dump.ts"
 import { runListFlagsCommand } from "./commands/list-flags.ts"
 import { runListModelsCommand } from "./commands/list-models.ts"
+import { runListProvidersCommand } from "./commands/list-providers.ts"
 import { runListSpinnersCommand } from "./commands/list-spinners.ts"
 import { runLoginCommand } from "./commands/login.ts"
 import { runLogoutCommand } from "./commands/logout.ts"
@@ -137,6 +138,14 @@ const modelIdx = args.indexOf("--model")
 const model = modelIdx !== -1 && args[modelIdx + 1] ? args[modelIdx + 1] : undefined // config.model applied later (after loadUserConfig is called)
 
 const wantListModels = args.includes("--list-models")
+const wantListProviders = args.includes("--list-providers")
+// `providers models <providerId>` carries the filter as the value after
+// --list-models (e.g. `providers models openai` → ["--list-models", "openai"]).
+const listModelsIdx = args.indexOf("--list-models")
+const listModelsProvider =
+  listModelsIdx >= 0 && args[listModelsIdx + 1] && !args[listModelsIdx + 1].startsWith("-")
+    ? args[listModelsIdx + 1]
+    : undefined
 const wantListFlags = args.includes("--list-flags")
 const wantListSpinners = args.includes("--list-spinners")
 
@@ -256,6 +265,7 @@ const commandPlan = planCommand({
   wantListFlags,
   wantListSpinners,
   wantListModels,
+  wantListProviders,
   wantLogin,
   wantLogout,
   wantAuthStatus,
@@ -293,7 +303,8 @@ function printHelp(): void {
     `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
     "",
     `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
-    `    ${c.cyan("--list-models")} ${c.dim("/")} ${c.cyan("--models")}       Fetch and display available models`,
+    `    ${c.cyan("providers")}                     List registered providers ${c.dim("(id · surfaces)")}`,
+    `    ${c.cyan("providers models")} ${c.dim("[<id>]")}      List models, optionally one provider ${c.dim("(alias: --list-models)")}`,
     `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
     `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
     `    ${c.cyan("--sessions")} ${c.dim("[<query>]")}          List saved sessions ${c.dim("(fuzzy filter on date/sid/cwd)")}`,
@@ -733,7 +744,11 @@ async function main() {
       return
     case "list-models": {
       const auth = await getAuth()
-      await runListModelsCommand(auth)
+      await runListModelsCommand(auth, listModelsProvider)
+      return
+    }
+    case "list-providers": {
+      runListProvidersCommand()
       return
     }
     case "login": {
