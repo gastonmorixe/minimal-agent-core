@@ -538,6 +538,16 @@ describe("renderQuotaFooter", () => {
       expect(out).toContain("\x1b[1mhigh\x1b[22m")
     })
 
+    it("renders <tag>:<level> (bold tag, faint level) when modelLabel is set, replacing the word", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = renderQuotaFooter(rl, NO_TOKENS, { effort: "max", modelLabel: "anth-4.8" }) ?? ""
+      // The compact form drops the literal "effort" word for the tag.
+      expect(stripAnsi(out)).toContain("anth-4.8:max")
+      expect(stripAnsi(out)).not.toContain("effort")
+      expect(out).toContain("\x1b[1manth-4.8\x1b[22m") // bold/bright tag
+      expect(out).toContain("\x1b[2m:max\x1b[22m") // faint ":level"
+    })
+
     it("does NOT colour-grade the effort value (no green/yellow/red)", () => {
       // Severity palette belongs to the quota bars. Carrying it onto
       // effort would read "high effort == bad", which is wrong.
