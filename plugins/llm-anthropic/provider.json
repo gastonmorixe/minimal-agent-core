@@ -1,0 +1,8 @@
+{
+  "id": "anthropic",
+  "name": "LLM Provider: Anthropic",
+  "version": "0.1.0",
+  "description": "Anthropic Messages adapter (Claude Opus/Sonnet/Haiku) for the canonical LLM layer.",
+  "entry": "./index.ts",
+  "export": "anthropicProviderPlugin"
+}
