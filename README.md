@@ -75,14 +75,38 @@ Core commands:
 
 Useful flags:
 
-- **Model:** `--model <id>`
-- **Effort:** `--effort <level>`
+- **Model:** `--model <id>` (alias `-m`)
+- **Effort:** `--effort <low|medium|high|xhigh|max>` (alias `-e`)
+- **Fast mode:** `--fast` (alias `-F`)
 - **Thinking display:** `--thinking-display summarized`
 - **Formatter:** `--formatter mdstream`
 - **Spinner:** `--spinner <preset>`
 - **Debug logging:** `--debug`
 - **Hidden characters:** `--show-hidden-chars`
 - **Skip quota check:** `--skip-quota`
+
+### Models
+
+Pick a model with `--model <id>` (or set `MINIMAL_AGENT_MODEL` / `model` in
+config). The default is `claude-sonnet-4-6`. `--list-models` prints the full
+live catalog, including the `[1m]` 1M-context aliases and older tiers
+(`claude-opus-4-6`, `claude-sonnet-4-5`).
+
+| Model | `--model` id | Context | Max output | Effort levels | Fast | Price /MTok (in / out) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Opus 4.8 | `claude-opus-4-8` | 1M | 128K | low · medium · high · xhigh · max | yes | $5 / $25 (fast $10 / $50) |
+| Opus 4.7 | `claude-opus-4-7` | 1M | 128K | low · medium · high · xhigh · max | yes¹ | $5 / $25 |
+| Sonnet 4.6 | `claude-sonnet-4-6` | 1M | 64K | low · medium · high | no | $3 / $15 |
+| Haiku 4.5 | `claude-haiku-4-5` | 200K | 64K | none² | no | $1 / $5 |
+
+- **Effort** (`--effort` / `-e`): `low | medium | high | xhigh | max`. Opus 4.7/4.8
+  accept `xhigh`; Sonnet 4.6 tops out at `high`; Haiku ignores effort. Default is
+  `high` for Opus, `medium` for Sonnet.
+- **Fast mode** (`--fast` / `-F`, or `MINIMAL_AGENT_FAST=1`): sends `speed:"fast"`
+  for roughly 2.5× throughput. It is capability-gated: only the Opus tier honors
+  it, and on Sonnet/Haiku the flag is silently dropped. For Opus 4.8 fast mode
+  bills at ~2× ($10 / $50). ¹Opus 4.7 fast uses the older 6× rate ($30 / $150), so
+  `--fast` is meant for Opus 4.8. ²Haiku has no thinking or effort.
 
 ## Config
 
@@ -152,7 +176,9 @@ Common environment variables:
 - **`MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1`:** Permit fetch fallback after HTTP/2 failure.
 - **`MINIMAL_AGENT_NET_DBG=1`:** Mirror raw HTTP traffic to `.net-dbg/`.
 - **`MINIMAL_AGENT_SPINNER`:** Select the spinner preset.
-- **`MINIMAL_AGENT_EFFORT`:** Set reasoning effort.
+- **`MINIMAL_AGENT_MODEL`:** Select the model (same as `--model`).
+- **`MINIMAL_AGENT_EFFORT`:** Set reasoning effort (`low`…`max`).
+- **`MINIMAL_AGENT_FAST=1`:** Opt into fast-mode dispatch (Opus 4.8).
 - **`MINIMAL_AGENT_THINKING_DISPLAY`:** Set `summarized` or `omitted`.
 - **`MINIMAL_AGENT_NO_LIVE_AREA=1`:** Use the legacy raw input path.
 - **`MINIMAL_AGENT_AUTO_ASK=0`:** Disable automatic ASK mode detection.
