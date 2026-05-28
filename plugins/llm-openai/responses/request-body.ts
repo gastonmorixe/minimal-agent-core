@@ -22,11 +22,11 @@
  * @module llm/providers/openai/responses/request-body
  */
 
-import type { CanonicalBlock, CanonicalMessage } from "../../../canonical-messages.ts"
-import type { CanonicalRequest } from "../../../canonical-request.ts"
-import type { CanonicalToolDefinition, ToolChoice } from "../../../canonical-tools.ts"
-import type { ServerToolId } from "../../../capabilities.ts"
-import type { ModelEntry } from "../../../model-registry.ts"
+import type { CanonicalBlock, CanonicalMessage } from "../../../src/llm/canonical-messages.ts"
+import type { CanonicalRequest } from "../../../src/llm/canonical-request.ts"
+import type { CanonicalToolDefinition, ToolChoice } from "../../../src/llm/canonical-tools.ts"
+import type { ServerToolId } from "../../../src/llm/capabilities.ts"
+import type { ModelEntry } from "../../../src/llm/model-registry.ts"
 
 // ---------------------------------------------------------------------------
 // Wire types

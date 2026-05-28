@@ -8,7 +8,7 @@
  * @module llm/providers/openai/pricing
  */
 
-import type { MTokRate } from "../../pricing.ts"
+import type { MTokRate } from "../../src/llm/pricing.ts"
 
 /** gpt-4o standard pricing. */
 export const PRICING_GPT_4O: MTokRate = {

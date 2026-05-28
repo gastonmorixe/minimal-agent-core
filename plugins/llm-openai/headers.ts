@@ -6,7 +6,7 @@
  * @module llm/providers/openai/headers
  */
 
-import type { ProviderAuth } from "../../provider.ts"
+import type { ProviderAuth } from "../../src/llm/provider.ts"
 
 import { OPENAI_USER_AGENT } from "./wire-constants.ts"
 

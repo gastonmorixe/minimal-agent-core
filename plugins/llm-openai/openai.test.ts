@@ -22,8 +22,8 @@ import {
   resolveModel,
   resolveProvider,
   userText,
-} from "../../index.ts"
-import { parseSse } from "../../streaming/sse-parser.ts"
+} from "../../src/llm/index.ts"
+import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
 import { bootstrapOpenAI } from "./adapter.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"

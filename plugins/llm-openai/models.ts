@@ -14,7 +14,7 @@
  * @module llm/providers/openai/models
  */
 
-import { registerModel } from "../../model-registry.ts"
+import { registerModel } from "../../src/llm/model-registry.ts"
 
 import {
   CAPS_GPT_4O_CHAT,
