@@ -4,7 +4,7 @@
  * @module llm/providers/anthropic
  */
 
-export { anthropicAdapter, bootstrapAnthropic } from "./adapter.ts"
+export { anthropicAdapter, anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
 export {
   ANTHROPIC_BETA_FLAGS,
   type AnthropicBetaFlag,

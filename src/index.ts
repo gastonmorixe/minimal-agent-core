@@ -76,8 +76,7 @@ import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
-import { bootstrapAnthropic } from "./llm/providers/anthropic/index.ts"
-import { bootstrapOpenAI } from "./llm/providers/openai/index.ts"
+import { activateBuiltinProviders } from "./llm/providers/index.ts"
 import { getSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -112,13 +111,14 @@ const args = normalizeArgs(process.argv.slice(2))
 
 // Populate the canonical LLM model + provider registries. Idempotent.
 // Done at top-level so `--list-models`, `--model`, and the canonical
-// `run()` see every registered catalog. Anthropic remains the agent
-// loop's transport (legacy client.ts emits identical bytes); the OpenAI
-// catalog is reachable through the canonical layer (see
-// private/research/2026-05-28-llm-providers/). Registration is pure
-// (no network), so both are safe to call at module load.
-bootstrapAnthropic()
-bootstrapOpenAI()
+// `run()` see every registered catalog. The entrypoint names NO provider:
+// `activateBuiltinProviders()` activates every registered ProviderPlugin
+// (today the in-tree Anthropic + OpenAI builtins; later the plugin loader
+// can discover plugins/llm-<id>/ and register the same contract). Pure
+// (no network), so it's safe at module load. Anthropic remains the agent
+// loop's transport via the legacy client; the OpenAI catalog is reachable
+// through the canonical run() (see private/research/2026-05-28-llm-providers/).
+activateBuiltinProviders()
 
 if (args.includes("--help") || args.includes("-h")) {
   printHelp()
