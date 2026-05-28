@@ -43,6 +43,7 @@ const SHORT_TO_LONG: Record<string, string> = {
 
 const LONG_ALIAS: Record<string, string> = {
   "--models": "--list-models",
+  "--providers": "--list-providers",
   "--list-model": "--list-models",
   "--flags": "--list-flags",
   "--list-flag": "--list-flags",
@@ -60,6 +61,7 @@ interface SubcommandSpec {
 
 const SUBCOMMANDS: Record<string, SubcommandSpec> = {
   models: { flag: "--list-models" },
+  providers: { flag: "--list-providers" },
   flags: { flag: "--list-flags" },
   spinners: { flag: "--list-spinners" },
   sessions: { flag: "--sessions" },
@@ -109,6 +111,25 @@ export function normalizeArgs(raw: string[]): string[] {
       } else {
         // `sessions <query>` — pass the query value through.
         out.push("--sessions", second)
+        start = 2
+      }
+    } else if (head === "providers" && raw[1] !== undefined && !raw[1].startsWith("-")) {
+      // Nested `providers <verb>` grammar (parallels `sessions`):
+      //   providers models [<providerId>] → --list-models [<providerId>]
+      //   providers list                  → --list-providers
+      //   providers <other>               → --list-providers (bare list)
+      // Bare `providers` (no verb, or a flag next) falls through to
+      // SUBCOMMANDS → --list-providers.
+      const second = raw[1]
+      if (second === "models") {
+        out.push("--list-models")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push(raw[2])
+          start = 3
+        }
+      } else {
+        out.push("--list-providers")
         start = 2
       }
     } else {

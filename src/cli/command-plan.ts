@@ -4,6 +4,7 @@ export type CommandName =
   | "list-flags"
   | "list-spinners"
   | "list-models"
+  | "list-providers"
   | "login"
   | "logout"
   | "auth-status"
@@ -28,6 +29,8 @@ export interface PlanCommandInput {
   wantListFlags: boolean
   wantListSpinners: boolean
   wantListModels: boolean
+  /** `providers` (bare): list registered providers from the canonical registry. */
+  wantListProviders?: boolean
   /**
    * Auth-related top-level commands. Routed BEFORE `run` so they bypass
    * credential acquisition — login can't depend on already being logged
@@ -44,8 +47,10 @@ function capabilities(command: CommandName): CommandCapabilities {
     case "sessions":
     case "list-flags":
     case "list-spinners":
+    case "list-providers":
     case "logout":
     case "auth-status":
+      // list-providers reads the in-process canonical registry only.
       return {
         needsStartupUi: false,
         needsAuth: false,
@@ -113,13 +118,15 @@ export function planCommand(input: PlanCommandInput): CommandPlan {
           ? "list-spinners"
           : input.wantListModels
             ? "list-models"
-            : input.wantLogin
-              ? "login"
-              : input.wantLogout
-                ? "logout"
-                : input.wantAuthStatus
-                  ? "auth-status"
-                  : "run"
+            : input.wantListProviders
+              ? "list-providers"
+              : input.wantLogin
+                ? "login"
+                : input.wantLogout
+                  ? "logout"
+                  : input.wantAuthStatus
+                    ? "auth-status"
+                    : "run"
 
   return {
     command,
