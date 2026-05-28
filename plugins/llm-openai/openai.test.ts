@@ -26,6 +26,8 @@ import {
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
 import { bootstrapOpenAI } from "./adapter.ts"
+import { buildOpenAIChatBody } from "./chat/request-body.ts"
+import { buildOpenAIResponsesBody } from "./responses/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
 import { registerOpenAIModels } from "./models.ts"
 import {
@@ -290,5 +292,60 @@ describe("validateOpenAIRequest — modality gating", () => {
     const res = resolveProvider("openai").validate(audioReq("gpt-4o-mini"), resolveModel("gpt-4o-mini"))
     expect(res.ok).toBe(false)
     expect(res.errors.some((e) => e.capability === "modalities")).toBe(true)
+  })
+})
+
+describe("multimodal request encoding", () => {
+  function bootstrap() {
+    clearModelRegistry()
+    clearProviderRegistry()
+    bootstrapOpenAI()
+  }
+
+  it("Chat: base64 image → image_url data URL; url image → plain url", () => {
+    bootstrap()
+    const base64: CanonicalRequest = {
+      modelId: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "image", source: { kind: "base64", mediaType: "image/png", data: "AAAA" } }],
+        },
+      ],
+    }
+    const j1 = JSON.stringify(buildOpenAIChatBody(base64, resolveModel("gpt-4o")))
+    expect(j1).toContain('"type":"image_url"')
+    expect(j1).toContain("data:image/png;base64,AAAA")
+
+    const url: CanonicalRequest = {
+      modelId: "gpt-4o",
+      messages: [
+        { role: "user", content: [{ type: "image", source: { kind: "url", url: "https://x/y.png" } }] },
+      ],
+    }
+    expect(JSON.stringify(buildOpenAIChatBody(url, resolveModel("gpt-4o")))).toContain(
+      '"url":"https://x/y.png"',
+    )
+  })
+
+  it("Responses: url image → input_image; file_id → input_file", () => {
+    bootstrap()
+    const req: CanonicalRequest = {
+      modelId: "gpt-5.5",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { kind: "url", url: "https://x/y.png" } },
+            { type: "file", source: { kind: "file_id", fileId: "file_123" } },
+          ],
+        },
+      ],
+    }
+    const j = JSON.stringify(buildOpenAIResponsesBody(req, resolveModel("gpt-5.5")))
+    expect(j).toContain('"type":"input_image"')
+    expect(j).toContain("https://x/y.png")
+    expect(j).toContain('"type":"input_file"')
+    expect(j).toContain('"file_id":"file_123"')
   })
 })

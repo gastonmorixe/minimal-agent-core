@@ -703,3 +703,39 @@ describe("validateAnthropicRequest — modality gating", () => {
     expect(file.errors.some((e) => e.capability === "modalities")).toBe(true)
   })
 })
+
+describe("buildAnthropicRequestBody — image encoding", () => {
+  it("base64 image → source {type:base64, media_type, data}", () => {
+    setup()
+    const req: CanonicalRequest = {
+      modelId: "claude-opus-4-8",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            { type: "image", source: { kind: "base64", mediaType: "image/png", data: "AAAA" } },
+          ],
+        },
+      ],
+    }
+    const j = JSON.stringify(buildAnthropicRequestBody(req, resolveModel("claude-opus-4-8")))
+    expect(j).toContain('"type":"image"')
+    expect(j).toContain('"type":"base64"')
+    expect(j).toContain('"media_type":"image/png"')
+    expect(j).toContain('"data":"AAAA"')
+  })
+
+  it("url image → source {type:url, url}", () => {
+    setup()
+    const req: CanonicalRequest = {
+      modelId: "claude-opus-4-8",
+      messages: [
+        { role: "user", content: [{ type: "image", source: { kind: "url", url: "https://x/y.png" } }] },
+      ],
+    }
+    const j = JSON.stringify(buildAnthropicRequestBody(req, resolveModel("claude-opus-4-8")))
+    expect(j).toContain('"type":"url"')
+    expect(j).toContain('"url":"https://x/y.png"')
+  })
+})
