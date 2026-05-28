@@ -76,7 +76,7 @@ import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
-import { activateBuiltinProviders } from "./llm/providers/index.ts"
+import { activateProviderPlugins, registerDiscoveredProviders } from "./llm/index.ts"
 import { getSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -109,16 +109,9 @@ import { TOOL_DEFINITIONS } from "./tools.ts"
 
 const args = normalizeArgs(process.argv.slice(2))
 
-// Populate the canonical LLM model + provider registries. Idempotent.
-// Done at top-level so `--list-models`, `--model`, and the canonical
-// `run()` see every registered catalog. The entrypoint names NO provider:
-// `activateBuiltinProviders()` activates every registered ProviderPlugin
-// (today the in-tree Anthropic + OpenAI builtins; later the plugin loader
-// can discover plugins/llm-<id>/ and register the same contract). Pure
-// (no network), so it's safe at module load. Anthropic remains the agent
-// loop's transport via the legacy client; the OpenAI catalog is reachable
-// through the canonical run() (see private/research/2026-05-28-llm-providers/).
-activateBuiltinProviders()
+// Provider plugins (plugins/llm-*) are discovered + registered at the top
+// of main() via the provider loader, before any model resolution. The
+// entrypoint imports no provider by name.
 
 if (args.includes("--help") || args.includes("-h")) {
   printHelp()
@@ -696,6 +689,15 @@ async function readSingleLineFromStdin(promptText: string): Promise<string> {
  * the external process for realtime formatting.
  */
 async function main() {
+  // Register provider plugins by discovery (plugins/llm-*) BEFORE any model
+  // resolution (the bootstrap probe + footer + canonical run() all read the
+  // registry). Replaces the old static builtin barrel: the entrypoint imports
+  // no provider by name. Idempotent; a missing plugins dir yields no providers
+  // rather than throwing.
+  const srcDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
+  await registerDiscoveredProviders(join(dirname(srcDir), "plugins"))
+  activateProviderPlugins()
+
   switch (commandPlan.command) {
     case "dump": {
       if (!dumpArg) {

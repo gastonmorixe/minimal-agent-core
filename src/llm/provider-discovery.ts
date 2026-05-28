@@ -21,7 +21,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import { type ProviderPlugin, registerProviderPlugin } from "./provider-plugin.ts"
 
@@ -84,7 +84,10 @@ export function findProviderPluginDirs(
 export async function discoverProviderPlugins(pluginsDir: string): Promise<ProviderPlugin[]> {
   const plugins: ProviderPlugin[] = []
   for (const { dir, descriptor } of findProviderPluginDirs(pluginsDir)) {
-    const mod = (await import(join(dir, descriptor.entry))) as Record<string, unknown>
+    // Absolutize: a bare relative path in import() resolves against THIS
+    // module, not cwd. `resolve` anchors it to cwd when `dir` is relative
+    // and is a no-op when it's already absolute.
+    const mod = (await import(resolve(dir, descriptor.entry))) as Record<string, unknown>
     const candidate = mod[descriptor.export]
     if (isProviderPlugin(candidate)) plugins.push(candidate)
   }
