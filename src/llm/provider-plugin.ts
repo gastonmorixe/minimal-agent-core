@@ -6,12 +6,10 @@
  * registries when activated. It is the seam the composition root uses to
  * wire providers, so the agent entrypoint never names a provider by hand.
  *
- * This is deliberately the SAME shape a future `plugins/llm-<id>/`
- * package will export: today the in-tree builtins register through
- * `src/llm/providers/index.ts`; tomorrow the plugin loader can discover
- * `plugins/llm-*` packages and register the exact same contract without
- * the core importing any provider by name (see
- * `private/research/2026-05-28-llm-providers/`).
+ * This is the SAME shape each `plugins/llm-<id>/` package exports. The
+ * provider loader (`provider-discovery.ts`) scans `plugins/llm-*` for a
+ * `provider.json`, dynamically imports the declared `ProviderPlugin`, and
+ * registers it here, so the core never imports a provider by name.
  *
  * @module llm/provider-plugin
  */
