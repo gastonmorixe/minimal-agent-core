@@ -28,6 +28,7 @@
 import { c } from "../../src/agent.ts"
 import { getAuth } from "../../src/auth.ts"
 import { checkQuota, has1mContext } from "../../src/client.ts"
+import { modelShortLabel } from "../../src/llm/index.ts"
 import { getLastRateLimits } from "../../src/quota-cache.ts"
 import { getSessionTokens } from "../../src/session-tokens.ts"
 import type { LiveAreaHandlerContext } from "../../src/plugins/types.ts"
@@ -96,6 +97,17 @@ function resolveEffort(): string | undefined {
 const EFFORT = resolveEffort()
 
 /**
+ * Compact provider-model tag (e.g. `anth-4.8`, `oai-5.5`) for the effort
+ * segment, derived from `MINIMAL_AGENT_MODEL` via the canonical model
+ * registry (populated at agent startup, before plugin load). Snapshot-once,
+ * matching the EFFORT / MODEL patterns above. When set, the footer's effort
+ * segment reads `<tag>:<level>` instead of `effort <level>`.
+ */
+const MODEL_LABEL = process.env.MINIMAL_AGENT_MODEL
+  ? modelShortLabel(process.env.MINIMAL_AGENT_MODEL)
+  : undefined
+
+/**
  * Shortened session-id anchor for the trailing footer segment.
  *
  * `MINIMAL_AGENT_SESSION_ID` carries the full UUIDv4 (set by the agent
@@ -156,6 +168,7 @@ export default async function handle(
       showOverage: SHOW_OVERAGE,
       contextWindow: CONTEXT_WINDOW,
       effort: EFFORT,
+      modelLabel: MODEL_LABEL,
       sid: SID,
       overflow: OVERFLOW,
     })

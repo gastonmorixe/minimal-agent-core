@@ -97,6 +97,14 @@ export interface RenderOpts {
    */
   effort?: string
   /**
+   * Compact provider-model tag (e.g. `anth-4.8`, `oai-5.5`) from
+   * `modelShortLabel()`. When present, the effort segment's full form
+   * renders `<tag>:<level>` (bold tag + faint level), replacing the
+   * literal `effort` label. Compressed forms drop the tag. Omit to keep
+   * the legacy `effort <level>` rendering.
+   */
+  modelLabel?: string
+  /**
    * Pre-shortened session-id anchor (e.g. the first 8 hex chars of a
    * UUIDv4) for line-end visual reference. Rendered verbatim, dim, no
    * label, no separator from the rest beyond the standard 4-space
@@ -378,9 +386,16 @@ function shortenEffort(level: string): string {
 function renderEffortSegment(
   level: string | undefined,
   fmt: EffortFmt = "full",
+  modelLabel?: string,
 ): string | null {
   if (!level) return null
-  if (fmt === "full") return c.faintWhite("effort") + " " + c.bold(level)
+  if (fmt === "full") {
+    // With a provider-model tag the segment reads e.g. "anth-4.8:max"
+    // (bold/bright tag, faint ":level") — the tag replaces the literal
+    // "effort" label. Without one, keep the legacy "effort <level>".
+    if (modelLabel) return c.bold(modelLabel) + c.dim(`:${level}`)
+    return c.faintWhite("effort") + " " + c.bold(level)
+  }
   if (fmt === "value") return c.bold(level)
   return c.bold(shortenEffort(level))
 }
@@ -544,7 +559,7 @@ export function renderQuotaFooter(
     // static-per-session. Drops before the session block in the
     // ladder, after compressing through `full → value → short`.
     if (cfg.withEffort && opts.effort) {
-      const seg = renderEffortSegment(opts.effort, cfg.effortFmt)
+      const seg = renderEffortSegment(opts.effort, cfg.effortFmt, opts.modelLabel)
       if (seg) segs.push(seg)
     }
     // Sid is the ABSOLUTE last segment — terminal double-click /
