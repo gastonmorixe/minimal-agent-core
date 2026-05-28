@@ -824,7 +824,7 @@ async function main() {
   // tables remain authoritative as a fallback.
   if (auth.type === "oauth") {
     const { fetchBootstrap, applyBootstrapOverrides } = await import(
-      "./llm/providers/anthropic/index.ts"
+      "../plugins/llm-anthropic/index.ts"
     )
     const registry = await import("./llm/model-registry.ts")
     const selectedModelForBootstrap = model ?? userConfig.model ?? DEFAULT_MODEL

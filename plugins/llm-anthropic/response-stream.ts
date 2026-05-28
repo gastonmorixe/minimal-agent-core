@@ -27,7 +27,7 @@ import type {
   CanonicalUsage,
   StopDetails,
   StopReason,
-} from "../../canonical-events.ts"
+} from "../../src/llm/canonical-events.ts"
 
 // ---------------------------------------------------------------------------
 // Anthropic wire types (subset we consume)

@@ -15,10 +15,9 @@
  * @module llm/providers
  */
 
+import { anthropicProviderPlugin } from "../../../plugins/llm-anthropic/index.ts"
 import { openaiProviderPlugin } from "../../../plugins/llm-openai/index.ts"
 import { activateProviderPlugins, registerProviderPlugin } from "../provider-plugin.ts"
-
-import { anthropicProviderPlugin } from "./anthropic/index.ts"
 
 /** The in-tree provider plugins, in registration order. */
 export const BUILTIN_PROVIDER_PLUGINS = [anthropicProviderPlugin, openaiProviderPlugin] as const

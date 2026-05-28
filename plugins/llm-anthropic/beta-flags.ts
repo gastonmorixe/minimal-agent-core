@@ -13,8 +13,8 @@
  * @module llm/providers/anthropic/beta-flags
  */
 
-import type { CanonicalRequest } from "../../canonical-request.ts"
-import type { ModelEntry } from "../../model-registry.ts"
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import type { ModelEntry } from "../../src/llm/model-registry.ts"
 
 /** Every known beta header value, in declaration order. */
 export const ANTHROPIC_BETA_FLAGS = {

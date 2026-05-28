@@ -13,19 +13,19 @@
  * @module llm/providers/anthropic/adapter
  */
 
-import { defaultNetworkClient, type NetworkClient } from "../../../network/index.ts"
-import type { CanonicalEvent } from "../../canonical-events.ts"
-import type { CanonicalRequest } from "../../canonical-request.ts"
-import { type ModelEntry, registerProvider } from "../../model-registry.ts"
+import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
+import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import {
   type ProviderAdapter,
   type ProviderAuth,
   type RunContext,
   type SurfaceId,
   type ValidationResult,
-} from "../../provider.ts"
-import type { ProviderPlugin } from "../../provider-plugin.ts"
-import { parseSse } from "../../streaming/sse-parser.ts"
+} from "../../src/llm/provider.ts"
+import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
+import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
 import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"
