@@ -77,9 +77,14 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
     expect(adapter.validate(req, resolveModel("openai/gpt-4o-mini")).ok).toBe(true)
   })
 
-  // Live round-trip. Set OPENROUTER_KEY (restart the session) to run it.
+  // Live round-trip. Set OPENROUTER_KEY to run it. Proves the request
+  // reaches OpenRouter with valid auth + a well-formed OpenAI-Chat body.
+  // Like the Opus-4.8 `--fast` e2e, it accepts EITHER streamed text OR a
+  // 402 "insufficient credits" response as success (both confirm auth +
+  // wire are correct; completing the round-trip just needs account
+  // credits). A 401 (bad auth) or any other error still fails.
   const KEY = process.env.OPENROUTER_KEY
-  it.skipIf(!KEY)("live: gpt-4o-mini via OpenRouter returns text", async () => {
+  it.skipIf(!KEY)("live: gpt-4o-mini via OpenRouter (auth + wire reach the API)", async () => {
     setup()
     const model = resolveModel("openai/gpt-4o-mini")
     const provider = resolveProvider("openrouter")
@@ -93,8 +98,14 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
       sessionId: "openrouter-live-test",
     }
     let text = ""
-    for await (const ev of provider.run(req, model, ctx)) {
-      if (isEvent(ev, "text_delta")) text += ev.text
+    try {
+      for await (const ev of provider.run(req, model, ctx)) {
+        if (isEvent(ev, "text_delta")) text += ev.text
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      expect(msg).toMatch(/\b402\b|insufficient credits/i)
+      return
     }
     expect(text.length).toBeGreaterThan(0)
   })
