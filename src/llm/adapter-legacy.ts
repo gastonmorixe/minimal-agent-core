@@ -39,8 +39,10 @@ import type { SystemBlock } from "../headers.ts"
 
 import type { CanonicalEvent, CanonicalUsage, StopDetails, StopReason } from "./canonical-events.ts"
 import type { CanonicalBlock, CanonicalMessage } from "./canonical-messages.ts"
-import type { CanonicalRequest } from "./canonical-request.ts"
+import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
+import type { EffortLevel } from "./capabilities.ts"
+import type { ProviderAuth } from "./provider.ts"
 
 // ---------------------------------------------------------------------------
 // canonical → legacy SendOptions
@@ -414,6 +416,332 @@ export async function* runLegacyAsCanonical(opts: {
     }
   }
   yield { type: "message_stop" }
+}
+
+// ===========================================================================
+// INVERSE DIRECTION: legacy SendOptions -> canonical, canonical events ->
+// legacy stream. Used by the provider-neutral transport (canonical-send.ts)
+// that sits behind `Agent.sendFn` so non-Anthropic models actually dispatch.
+// ===========================================================================
+
+type LegacyCacheControl = { type: "ephemeral"; ttl?: "5m" | "1h"; scope?: "global" }
+
+/** legacy `cache_control` -> canonical `cache` hint. */
+function legacyCacheToCanonical(
+  cc?: LegacyCacheControl,
+): NonNullable<CanonicalBlock["cache"]> | undefined {
+  if (!cc) return undefined
+  const out: NonNullable<CanonicalBlock["cache"]> = { kind: "ephemeral" }
+  if (cc.ttl) out.ttl = cc.ttl
+  if (cc.scope) out.scope = cc.scope
+  return out
+}
+
+/** legacy assistant/user `ContentBlock` -> canonical block (null = dropped). */
+function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | null {
+  switch (block.type) {
+    case "text": {
+      const out: CanonicalBlock = { type: "text", text: block.text }
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
+    case "thinking": {
+      const out: CanonicalBlock = { type: "thinking", text: block.thinking }
+      if (block.signature) out.signature = block.signature
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
+    case "tool_use": {
+      const out: CanonicalBlock = {
+        type: "tool_use",
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      }
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
+    case "tool_result": {
+      // Legacy tool_result content is `string | ContentBlock[]`. Canonical
+      // wants `ToolResultContentBlock[]` (text/image). Coerce: a bare string
+      // becomes one text block; an array keeps only its text blocks (the
+      // only shape the legacy agent ever emits in a tool_result).
+      const content =
+        typeof block.content === "string"
+          ? [{ type: "text" as const, text: block.content }]
+          : block.content
+              .filter((b): b is Extract<LegacyContentBlock, { type: "text" }> => b.type === "text")
+              .map((b) => ({ type: "text" as const, text: b.text }))
+      const out: CanonicalBlock = {
+        type: "tool_result",
+        toolUseId: block.tool_use_id,
+        content,
+      }
+      if (block.is_error !== undefined) out.isError = block.is_error
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
+    default: {
+      const _exhaustive: never = block
+      throw new Error(`unhandled legacy block: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
+}
+
+/** legacy `Message` -> canonical message. */
+function legacyMessageToCanonical(msg: LegacyMessage): CanonicalMessage {
+  const blocks =
+    typeof msg.content === "string"
+      ? [{ type: "text" as const, text: msg.content }]
+      : (msg.content.map(legacyBlockToCanonical).filter(Boolean) as CanonicalBlock[])
+  return { role: msg.role, content: blocks }
+}
+
+/** legacy `SystemBlock` -> canonical text block (preserving cache hints). */
+function systemBlockToCanonical(sb: SystemBlock): CanonicalBlock {
+  const out: CanonicalBlock = { type: "text", text: sb.text }
+  const cache = legacyCacheToCanonical(sb.cache_control)
+  if (cache) out.cache = cache
+  return out
+}
+
+/** legacy thinking opt -> canonical `ThinkingConfig`. */
+function legacyThinkingToCanonical(
+  thinking: LegacySendOptions["thinking"],
+): ThinkingConfig | undefined {
+  if (thinking === undefined) return undefined
+  if (thinking === false) return { mode: "off" }
+  // `{type:"adaptive", display?}`. Map display: legacy "omitted" -> canonical
+  // "omitted"; "summarized" -> canonical "summary" (round-trips back to wire
+  // "summarized" via the Anthropic request-body mapper).
+  if (thinking.display === undefined) return { mode: "adaptive" }
+  return { mode: "adaptive", display: thinking.display === "omitted" ? "omitted" : "summary" }
+}
+
+/**
+ * Map the legacy `AuthResult` to the provider-neutral `ProviderAuth`. The
+ * OAuth refresh callback is preserved (re-shaped to the `{token}` return
+ * the canonical transport expects); the multi-process keychain-first race
+ * fix lives in the transport middleware, not here.
+ */
+export function legacyAuthToProviderAuth(auth: AuthResult): ProviderAuth {
+  if (auth.type === "oauth") {
+    if (auth.refresh) {
+      const refresh = auth.refresh
+      return {
+        kind: "oauth",
+        token: auth.token,
+        refresh: async () => ({ token: (await refresh()).token }),
+      }
+    }
+    return { kind: "oauth", token: auth.token }
+  }
+  return { kind: "api-key", key: auth.token }
+}
+
+/**
+ * Translate a legacy `SendOptions` into a `CanonicalRequest`. The inverse
+ * of {@link canonicalToSendOptions}. Transport-level fields (`auth`,
+ * `networkClient`, lifecycle callbacks) are NOT part of the request : the
+ * caller threads them into the `RunContext` / event bridge separately.
+ *
+ * `modelId` falls back to the current foundation model when unset, matching
+ * the legacy client's `DEFAULT_MODEL` behavior; in practice `Agent.run`
+ * always sets `model`.
+ */
+export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalRequest {
+  const req: CanonicalRequest = {
+    modelId: opts.model ?? "claude-opus-4-8",
+    messages: opts.messages.map(legacyMessageToCanonical),
+    stream: opts.stream ?? true,
+  }
+  if (opts.system) req.system = opts.system.map(systemBlockToCanonical)
+  if (opts.tools && opts.tools.length > 0) {
+    req.tools = opts.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.input_schema as CanonicalToolDefinition["inputSchema"],
+    }))
+  }
+  const generation: NonNullable<CanonicalRequest["generation"]> = {}
+  if (opts.maxTokens !== undefined) generation.maxOutputTokens = opts.maxTokens
+  if (opts.temperature !== undefined) generation.temperature = opts.temperature
+  if (Object.keys(generation).length > 0) req.generation = generation
+  const thinking = legacyThinkingToCanonical(opts.thinking)
+  if (thinking) req.thinking = thinking
+  if (opts.outputConfig?.effort) req.effort = opts.outputConfig.effort as EffortLevel
+  if (opts.outputConfig?.format?.type === "json_schema" && opts.outputConfig.format.schema) {
+    req.outputFormat = {
+      type: "json_schema",
+      schema: opts.outputConfig.format.schema as object,
+    }
+  }
+  if (opts.speed) req.speed = opts.speed
+  if (opts.contextManagement !== undefined) {
+    req.vendor = { anthropic: { contextManagement: opts.contextManagement } }
+  }
+  if (opts.signal) req.signal = opts.signal
+  if (opts.streamIdleTimeoutMs !== undefined) req.streamIdleTimeoutMs = opts.streamIdleTimeoutMs
+  if (opts.attemptHardTimeoutMs !== undefined) req.attemptHardTimeoutMs = opts.attemptHardTimeoutMs
+  return req
+}
+
+/** Lifecycle hooks the legacy stream fires as side-channels (not yielded). */
+export interface LegacyStreamCallbacks {
+  onThinkingStart?: () => void | Promise<void>
+  onThinkingDelta?: (text: string) => void | Promise<void>
+  onThinkingStop?: () => void | Promise<void>
+  onTextStop?: () => void | Promise<void>
+}
+
+/** Best-effort JSON parse of an accumulated tool-input fragment. */
+function safeParseToolInput(json: string): Record<string, unknown> {
+  if (json.trim().length === 0) return {}
+  try {
+    const parsed = JSON.parse(json)
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Re-shape a canonical `StreamErrorEvent` into the tagged `Error` the legacy
+ * retry classifier understands (`streamErrorType`). The raw Phase-1 transport
+ * has no retry loop, so this just throws; the Phase-2 retry middleware
+ * intercepts `stream_error` events upstream and never lets them reach here.
+ */
+function taggedStreamError(ev: Extract<CanonicalEvent, { type: "stream_error" }>): Error {
+  const byCategory: Record<string, string> = {
+    overloaded: "overloaded_error",
+    api: "api_error",
+    timeout: "stream_idle",
+    auth: "authentication_error",
+    canceled: "request_canceled",
+    unknown: "unknown_error",
+  }
+  const streamErrorType = byCategory[ev.category ?? "unknown"] ?? "unknown_error"
+  const err = (
+    ev.cause instanceof Error
+      ? ev.cause
+      : new Error(`canonical stream error: ${ev.category ?? "unknown"}`)
+  ) as Error & { streamErrorType?: string }
+  if (err.streamErrorType === undefined) err.streamErrorType = streamErrorType
+  return err
+}
+
+/**
+ * Consume a canonical event stream and re-emit the legacy transport
+ * contract: YIELD text deltas (text channel only : thinking flows via the
+ * `onThinkingDelta` callback, never the yield channel), fire the lifecycle
+ * callbacks in stream order, accumulate structured blocks, and RETURN the
+ * final `StreamedResponse`.
+ *
+ * This is the exact surface `client.transport-contract.test.ts` pins for
+ * the legacy `sendMessage`, so a canonical transport built on top of this
+ * is observably interchangeable behind `Agent.sendFn`.
+ *
+ * @yields text deltas as they arrive (the legacy string channel).
+ */
+export async function* canonicalEventsToLegacyStream(
+  events: AsyncIterable<CanonicalEvent>,
+  cb: LegacyStreamCallbacks = {},
+): AsyncGenerator<string, LegacyStreamedResponse, undefined> {
+  const blocks: LegacyContentBlock[] = []
+  let fullText = ""
+  let stopReason: string | null = null
+  let stopDetails: { type: string; message?: string } | null = null
+
+  type Cur =
+    | { kind: "text"; text: string }
+    | { kind: "thinking"; thinking: string; signature: string }
+    | { kind: "tool_use"; id: string; name: string; json: string }
+    | null
+  let cur: Cur = null
+
+  for await (const ev of events) {
+    switch (ev.type) {
+      case "message_start":
+        // Usage is broadcast through RunContext.onUsage, not this bridge.
+        break
+      case "text_start":
+        cur = { kind: "text", text: "" }
+        break
+      case "text_delta":
+        if (cur?.kind === "text") cur.text += ev.text
+        fullText += ev.text
+        yield ev.text
+        break
+      case "text_stop": {
+        const text = cur?.kind === "text" ? cur.text : (ev.finalText ?? "")
+        blocks.push({ type: "text", text })
+        cur = null
+        await cb.onTextStop?.()
+        break
+      }
+      case "thinking_start":
+        cur = { kind: "thinking", thinking: "", signature: "" }
+        await cb.onThinkingStart?.()
+        break
+      case "thinking_delta":
+        if (cur?.kind === "thinking") cur.thinking += ev.text
+        await cb.onThinkingDelta?.(ev.text)
+        break
+      case "thinking_signature":
+        if (cur?.kind === "thinking") cur.signature = ev.signature
+        break
+      case "thinking_stop":
+        if (cur?.kind === "thinking") {
+          blocks.push({ type: "thinking", thinking: cur.thinking, signature: cur.signature })
+        }
+        cur = null
+        await cb.onThinkingStop?.()
+        break
+      case "tool_use_start":
+        cur = { kind: "tool_use", id: ev.id, name: ev.name, json: "" }
+        break
+      case "tool_use_input_delta":
+        if (cur?.kind === "tool_use") cur.json += ev.partialJson
+        break
+      case "tool_use_stop": {
+        if (cur?.kind === "tool_use") {
+          const input =
+            ev.input !== undefined && ev.input !== null
+              ? (ev.input as Record<string, unknown>)
+              : safeParseToolInput(cur.json)
+          blocks.push({ type: "tool_use", id: cur.id, name: cur.name, input })
+        }
+        cur = null
+        break
+      }
+      case "refusal_delta":
+        // OpenAI surfaces refusals on a dedicated channel; fold into the
+        // text stream so the legacy consumer doesn't silently drop it.
+        fullText += ev.text
+        yield ev.text
+        break
+      case "message_delta":
+        stopReason = ev.stopReason
+        stopDetails = ev.stopDetails ?? null
+        break
+      case "message_stop":
+        break
+      case "stream_error":
+        throw taggedStreamError(ev)
+      case "ping":
+        break
+      default: {
+        const _exhaustive: never = ev
+        throw new Error(`unhandled canonical event: ${JSON.stringify(_exhaustive)}`)
+      }
+    }
+  }
+
+  return { blocks, text: fullText, stopReason, stopDetails }
 }
 
 // ---------------------------------------------------------------------------
