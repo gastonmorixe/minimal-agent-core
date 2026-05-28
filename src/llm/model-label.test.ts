@@ -1,16 +1,21 @@
+import { join } from "node:path"
+
 import { beforeAll, describe, expect, it } from "bun:test"
 
 import { clearModelRegistry, clearProviderRegistry } from "./index.ts"
 import { modelShortLabel } from "./model-label.ts"
-import { clearProviderPlugins } from "./provider-plugin.ts"
-import { activateBuiltinProviders } from "./providers/index.ts"
+import { registerDiscoveredProviders } from "./provider-discovery.ts"
+import { activateProviderPlugins, clearProviderPlugins } from "./provider-plugin.ts"
+
+const PLUGINS_DIR = join(import.meta.dir, "../../plugins")
 
 describe("modelShortLabel", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     clearModelRegistry()
     clearProviderRegistry()
     clearProviderPlugins()
-    activateBuiltinProviders()
+    await registerDiscoveredProviders(PLUGINS_DIR)
+    activateProviderPlugins()
   })
 
   it("tags registered Anthropic models as anth-<maj>.<min>", () => {
