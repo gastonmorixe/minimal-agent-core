@@ -1,0 +1,48 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_09b59d8b621158b0006a189f3f4fb481929716067a2f25f632","object":"response","created_at":1779998527,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":500,"max_tool_calls":null,"model":"gpt-5.5-2026-04-23","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"current_turn","effort":"none","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[{"type":"function","description":"Get current weather","name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string","enum":["c","f"]}},"required":["city","unit"],"additionalProperties":false},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_09b59d8b621158b0006a189f3f4fb481929716067a2f25f632","object":"response","created_at":1779998527,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":500,"max_tool_calls":null,"model":"gpt-5.5-2026-04-23","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"current_turn","effort":"none","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[{"type":"function","description":"Get current weather","name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string","enum":["c","f"]}},"required":["city","unit"],"additionalProperties":false},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","type":"function_call","status":"in_progress","arguments":"","call_id":"call_dKz8CR6Te46LpgyLjIDnHJPj","name":"get_weather"},"output_index":0,"sequence_number":2}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{\"","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"jCzsiSs4Yll4un","output_index":0,"sequence_number":3}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"city","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"8ALjga8burjo","output_index":0,"sequence_number":4}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"mDuL6qFOMgMCE","output_index":0,"sequence_number":5}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"NY","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"l1adExHsL0n8z0","output_index":0,"sequence_number":6}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"C","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"k9mdigqMKE8nGKM","output_index":0,"sequence_number":7}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\",\"","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"I6inw84hkxakp","output_index":0,"sequence_number":8}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"unit","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"flSn7PUkhjyN","output_index":0,"sequence_number":9}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":\"","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"SwBO4iubD34Pz","output_index":0,"sequence_number":10}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"f","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"V12b13AuHYiR31o","output_index":0,"sequence_number":11}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"}","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","obfuscation":"mIMCavc64J6sMb","output_index":0,"sequence_number":12}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","arguments":"{\"city\":\"NYC\",\"unit\":\"f\"}","item_id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","output_index":0,"sequence_number":13}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","type":"function_call","status":"completed","arguments":"{\"city\":\"NYC\",\"unit\":\"f\"}","call_id":"call_dKz8CR6Te46LpgyLjIDnHJPj","name":"get_weather"},"output_index":0,"sequence_number":14}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_09b59d8b621158b0006a189f3f4fb481929716067a2f25f632","object":"response","created_at":1779998527,"status":"completed","background":false,"completed_at":1779998528,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":500,"max_tool_calls":null,"model":"gpt-5.5-2026-04-23","moderation":null,"output":[{"id":"fc_09b59d8b621158b0006a189f4016b88192995f793511df5c1d","type":"function_call","status":"completed","arguments":"{\"city\":\"NYC\",\"unit\":\"f\"}","call_id":"call_dKz8CR6Te46LpgyLjIDnHJPj","name":"get_weather"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"current_turn","effort":"none","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[{"type":"function","description":"Get current weather","name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string","enum":["c","f"]}},"required":["city","unit"],"additionalProperties":false},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":64,"input_tokens_details":{"cached_tokens":0},"output_tokens":23,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":87},"user":null,"metadata":{}},"sequence_number":15}
+

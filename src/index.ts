@@ -77,6 +77,7 @@ import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { bootstrapAnthropic } from "./llm/providers/anthropic/index.ts"
+import { bootstrapOpenAI } from "./llm/providers/openai/index.ts"
 import { getSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -109,12 +110,15 @@ import { TOOL_DEFINITIONS } from "./tools.ts"
 
 const args = normalizeArgs(process.argv.slice(2))
 
-// Populate the canonical LLM model + provider registry. Idempotent.
-// Done at top-level so `--list-models`, `--model`, and downstream
-// `Agent.run` all see the registered Anthropic catalog. Other
-// providers (OpenAI, …) will register themselves the same way once
-// their adapters land (see private/research/2026-05-28-llm-providers/).
+// Populate the canonical LLM model + provider registries. Idempotent.
+// Done at top-level so `--list-models`, `--model`, and the canonical
+// `run()` see every registered catalog. Anthropic remains the agent
+// loop's transport (legacy client.ts emits identical bytes); the OpenAI
+// catalog is reachable through the canonical layer (see
+// private/research/2026-05-28-llm-providers/). Registration is pure
+// (no network), so both are safe to call at module load.
 bootstrapAnthropic()
+bootstrapOpenAI()
 
 if (args.includes("--help") || args.includes("-h")) {
   printHelp()
