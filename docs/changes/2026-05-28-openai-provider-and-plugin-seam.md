@@ -58,6 +58,12 @@ The providers now live as plugins and the core imports no provider by name (5 mo
 4. **Wired**: `main()` calls `registerDiscoveredProviders(<repo>/plugins)` + `activateProviderPlugins()` before the bootstrap probe / footer / canonical `run()` read the registry. The static builtin barrel (`src/llm/providers/index.ts`) is deleted; `src/index.ts` imports zero provider code by name.
 5. **Cross-plugin reuse**: a future `plugins/llm-<groq|azure|together>/` can import `plugins/llm-openai`'s translators/request-body (same wire spec, different endpoint + capabilities) and ship its own `provider.json` + `ProviderPlugin`.
 
-Final state: `bun run check` green, **3419 pass / 9 skip / 0 fail**.
+## Follow-ups (same session)
+
+- **Multimodality gating + tests.** A shared `modalityViolations()` (`src/llm/modality-check.ts`) makes Anthropic + OpenAI reject image/audio/file inputs the model doesn't accept (a `CapabilityViolation` instead of a silent drop). Tests cover gating (Opus accepts image + PDF / rejects audio; Haiku rejects PDF; gpt-4o accepts audio / gpt-4o-mini rejects) and the request-encoding wire shapes across all three surfaces.
+- **OpenRouter provider** (`plugins/llm-openrouter`) — the cross-plugin-reuse example. It is OpenAI Chat-compatible, so it reuses `llm-openai`'s request body + SSE translator + headers + validator wholesale; only the endpoint (`openrouter.ai/api/v1`) + catalog differ. Auth via `OPENROUTER_KEY`. Offline tests pass; a live `gpt-4o-mini` round-trip is gated on `OPENROUTER_KEY` (run after restarting with the env set).
+- **`--list-models` fix + `providers` CLI grammar.** `--list-models` now merges the canonical registry (it only showed Anthropic before). New `providers` / `providers models [id]` subcommands list registered providers and (optionally filtered) models; `--list-models` / `--models` kept as a deprecated alias.
+
+Final state: `bun run check` green, **3436 pass / 10 skip / 0 fail**; three providers auto-discovered (anthropic, openai, openrouter).
 
 Note: a model selected via `--model` still runs through the legacy Anthropic transport in the agent loop; making `--model gpt-5.5` actually dispatch to OpenAI at runtime is the separate "Phase 4-extended" agent-canonicalization epic and intentionally out of scope here.
