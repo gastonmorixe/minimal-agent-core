@@ -26,28 +26,19 @@
  * @module plugins/loader
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
 import { paletteEnvJson } from "../palette.ts"
 
-import { EventBus, type EventContext } from "./event-bus.ts"
+import { EventBus } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import { ManifestError, parseManifest } from "./manifest.ts"
 import type {
-  EventHandler,
-  EventHandlerContext,
-  HookHandlerContext,
-  LiveAreaHandler,
-  LiveAreaHandlerContext,
   LoadedPlugin,
-  ManifestEventSubscription,
   ManifestFile,
-  ManifestHandler,
-  ManifestHookSubscription,
-  ManifestLiveAreaSlot,
   ManifestMode,
   ManifestPromptFragment,
   PromptFragmentContext,
@@ -57,7 +48,6 @@ import type {
   ResolvedHookSub,
   ResolvedLiveAreaSlot,
   TUIContext,
-  TUIHandler,
   TUIResult,
   TUITrigger,
 } from "./types.ts"
@@ -78,10 +68,6 @@ import type {
  * accepts them, but the loader logs and skips them — chain/sync handlers
  * require synchronous, in-process invocation that subprocess can't deliver).
  */
-export type HookHandler<TPayload = unknown> = (
-  payload: TPayload,
-  ctx: HookHandlerContext,
-) => unknown
 
 /**
  * A mode declaration as exposed by the loader to consumers.
@@ -1090,142 +1076,31 @@ export class PluginLoader {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers (extracted to ./loader/helpers.ts) +
+// Event-sub resolution (extracted to ./loader/event-subs.ts)
 // ---------------------------------------------------------------------------
 
-function discoverPackageDirs(rootDir: string, sub: string): string[] {
-  const base = join(rootDir, sub)
-  if (!existsSync(base) || !statSync(base).isDirectory()) return []
-  const out: string[] = []
-  for (const entry of readdirSync(base)) {
-    const full = join(base, entry)
-    if (!statSync(full).isDirectory()) continue
-    if (!existsSync(join(full, "manifest.json"))) continue
-    out.push(full)
-  }
-  return out
-}
-
-function resolvePath(pkgDir: string, rel: string): string {
-  return isAbsolute(rel) ? rel : resolve(pkgDir, rel)
-}
-
-/**
- * Strip a single leading ATX-style top-level heading (`# ...`) from a
- * Markdown body, plus any blank lines that follow it. Used when embedding a
- * plugin's `PROMPT.md` inside a `<plugin id="...">` wrapper so the plugin id
- * doesn't appear twice (once as the XML attribute, once as a stray H1) and
- * so plugin authors don't accidentally inject a top-level heading into the
- * host system prompt's outline.
- *
- * Only the first heading is removed, and only if it is the very first
- * non-empty line. Deeper headings (`##`, `###`, ...) and headings that appear
- * later in the body are left untouched.
- */
-function stripLeadingHeading(body: string): string {
-  // Tolerate a UTF-8 BOM and any leading blank lines before the heading.
-  const match = body.match(/^\uFEFF?\s*#[ \t]+[^\n]*\n+/)
-  if (!match) return body.trim()
-  return body.slice(match[0].length).trim()
-}
-
-async function resolveHandler(
-  h: ManifestHandler,
-  packageDir: string,
-  logger: (msg: string) => void,
-): Promise<ResolvedHandler | null> {
-  if (h.handler.type === "module") {
-    const abs = resolvePath(packageDir, h.handler.path)
-    if (!existsSync(abs)) {
-      logger(`${packageDir}: module handler not found: ${abs}`)
-      return null
-    }
-    let mod: { default?: TUIHandler }
-    try {
-      mod = await import(abs)
-    } catch (e) {
-      logger(
-        `${packageDir}: failed to import ${abs}: ${e instanceof Error ? e.message : String(e)}`,
-      )
-      return null
-    }
-    const fn = mod.default
-    if (typeof fn !== "function") {
-      logger(`${packageDir}: ${abs} has no default export function`)
-      return null
-    }
-    return {
-      definition: h,
-      entryAbsolute: abs,
-      invoke: async (ctx) => fn(ctx),
-    }
-  }
-
-  // subprocess
-  const cmd = h.handler.command
-  const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
-    logger(`${packageDir}: subprocess executable not found: ${exeAbs}`)
-    return null
-  }
-  return {
-    definition: h,
-    entryAbsolute: exeAbs,
-    invoke: async (ctx) => invokeSubprocess(exeAbs, cmd.slice(1), ctx),
-  }
-}
-
-/**
- * Spawn a subprocess handler with the v1 stdio protocol.
- *
- * The subprocess receives a JSON envelope on stdin and writes its response
- * to stdout. Tool-call non-interactive handlers return stdout as
- * `tool_result.content`. Inline handlers return stdout as `rendered.ansi`.
- * Interactive handlers are not yet supported via subprocess; they fall back
- * to the module-handler path.
- */
-async function invokeSubprocess(exe: string, args: string[], ctx: TUIContext): Promise<TUIResult> {
-  const proc = Bun.spawn([exe, ...args], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "inherit",
-    cwd: ctx.packageDir,
-    env: ctx.env,
-  })
-  const envelope = JSON.stringify({
-    trigger: ctx.trigger,
-    cwd: ctx.cwd,
-    env: ctx.env,
-  })
-  void proc.stdin.write(envelope + "\n")
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  const code = await proc.exited
-  if (ctx.trigger.type === "tool") {
-    return { kind: "tool_result", content: out, is_error: code !== 0 }
-  }
-  return { kind: "rendered", ansi: out }
-}
-
-function findPackageDirFor(plugins: LoadedPlugin[], handler: ResolvedHandler): string {
-  for (const pkg of plugins) {
-    if (pkg.handlers.includes(handler)) return pkg.packageDir
-  }
-  return process.cwd()
-}
-
-/**
- * Locate the plugin id that owns the given handler instance. Returns
- * an empty string when no plugin matches (a degenerate test-fixture
- * case; the resulting logger emits with an unprefixed source).
- */
-function findPluginIdFor(plugins: LoadedPlugin[], handler: ResolvedHandler): string {
-  for (const pkg of plugins) {
-    if (pkg.handlers.includes(handler)) return pkg.manifest.id
-  }
-  return ""
-}
+import {
+  registerEventSub,
+  registerHookSub,
+  resolveEventSub,
+  resolveHookSub,
+  resolveLiveAreaSlot,
+} from "./loader/event-subs.ts"
+// Pure filesystem + handler-resolution helpers live in
+// `src/plugins/loader/helpers.ts`. Async event-sub / hook-sub /
+// live-area-slot resolution + registration live in
+// `src/plugins/loader/event-subs.ts`. Both are imported here for the
+// `PluginLoader` class's internal use and are NOT re-exported (no
+// external consumer of this module touched those names).
+import {
+  discoverPackageDirs,
+  findPackageDirFor,
+  findPluginIdFor,
+  resolveHandler,
+  resolvePath,
+  stripLeadingHeading,
+} from "./loader/helpers.ts"
 
 // ---------------------------------------------------------------------------
 // Async prompt-fragment producers
@@ -1344,411 +1219,4 @@ async function runFragment(
   const code = await proc.exited
   if (code !== 0) throw new Error(`exited with code ${code}`)
   return out
-}
-
-// ---------------------------------------------------------------------------
-// Event subscription resolution
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve a manifest event subscription to an invocable form. Mirrors
- * {@link resolveHandler} but for one-way event handlers (no `TUIResult`,
- * no return value).
- *
- * Returns `null` and logs on failure. The plugin keeps its tool/tag
- * functionality; only this one subscription is dropped.
- */
-async function resolveEventSub(
-  sub: ManifestEventSubscription,
-  packageDir: string,
-  logger: (msg: string) => void,
-): Promise<ResolvedEventSub | null> {
-  if (sub.handler.type === "module") {
-    const abs = resolvePath(packageDir, sub.handler.path)
-    if (!existsSync(abs)) {
-      logger(`${packageDir}: event handler module not found: ${abs}`)
-      return null
-    }
-    let mod: { default?: EventHandler }
-    try {
-      mod = await import(abs)
-    } catch (e) {
-      logger(
-        `${packageDir}: failed to import event handler ${abs}: ${e instanceof Error ? e.message : String(e)}`,
-      )
-      return null
-    }
-    const fn = mod.default
-    if (typeof fn !== "function") {
-      logger(`${packageDir}: event handler ${abs} has no default export function`)
-      return null
-    }
-    return {
-      definition: sub,
-      entryAbsolute: abs,
-      invoke: async (ctx) => fn(ctx),
-    }
-  }
-
-  // subprocess
-  const cmd = sub.handler.command
-  const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
-    logger(`${packageDir}: event subprocess executable not found: ${exeAbs}`)
-    return null
-  }
-  return {
-    definition: sub,
-    entryAbsolute: exeAbs,
-    invoke: async (ctx) => invokeEventSubprocess(exeAbs, cmd.slice(1), ctx),
-  }
-}
-
-/**
- * Subscribe a resolved event sub on the shared bus. The bus owns
- * coalesce/throttle/error handling; we just adapt its `EventContext`
- * (event + payload + emit + abort) to the plugin's
- * `EventHandlerContext` (which adds `packageDir`, `cwd`, `env`, `stderr`).
- */
-function registerEventSub(
-  bus: EventBus,
-  hooks: Hooks,
-  packageDir: string,
-  sub: ResolvedEventSub,
-  logger: (msg: string) => void,
-  pluginId: string,
-): void {
-  const label = `${packageDir}:${sub.definition.id}`
-  const listener = (ctx: EventContext): void | Promise<void> => {
-    const handlerCtx: EventHandlerContext = {
-      event: ctx.event,
-      payload: ctx.payload,
-      packageDir,
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-      } as Record<string, string>,
-      // Shape-aware emit:
-      //
-      //   1. **Declared channels** (in `channels.ts`) route via the
-      //      Hooks facade, which picks emitSync / emitAsync based on
-      //      the channel's declared shape. Required for channels like
-      //      `editor.footer.set` (broadcast-sync, host listener lives
-      //      on the HookBus, NOT the EventBus).
-      //
-      //   2. **Ad-hoc channels** (no declaration) fall through to the
-      //      raw EventBus emit. Preserves the legacy "any string is a
-      //      valid event name" contract that pre-Hooks tests rely on.
-      emit: (chan: string, p?: unknown) => {
-        const shape = CHANNEL_BY_NAME.get(chan)?.shape
-        try {
-          if (shape === "broadcast-async" || shape === undefined) {
-            // Ad-hoc OR declared-async: go via EventBus directly. For
-            // declared-async we could call hooks.emitAsync but the
-            // round-trip is the same listener set.
-            bus.emit(chan, p)
-            return
-          }
-          // broadcast-sync / chain / stream — must go via Hooks facade.
-          hooks.emitSync(chan, p)
-        } catch (e) {
-          logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      },
-      abort: ctx.abort,
-      stderr: process.stderr,
-      log: createPluginLogger(pluginId),
-    }
-    try {
-      return sub.invoke(handlerCtx)
-    } catch (e) {
-      logger(`${label}: handler threw: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-
-  bus.on(sub.definition.on, listener, {
-    coalesce: sub.definition.coalesce,
-    throttleMs: sub.definition.throttleMs,
-    label,
-  })
-}
-
-/**
- * Resolve a single manifest hook subscription to invocable form.
- *
- * Mirrors {@link resolveEventSub} but for hook handlers (which may run on
- * the synchronous {@link HookBus} for `broadcast-sync` / `chain` channels).
- *
- * Currently MODULE handlers only — subprocess hook handlers are logged
- * and skipped (sync dispatch cannot tolerate an `await proc.exited` round
- * trip in the editor's keystroke pump). When a real use case arrives we
- * can extend this with a stdin/stdout JSON envelope protocol like
- * {@link invokeEventSubprocess}, but only for `broadcast-async` channels.
- *
- * Returns `null` and logs on failure. The plugin's tools / inline tags
- * / event subs continue to work; just this one hook is dropped.
- */
-async function resolveHookSub(
-  sub: ManifestHookSubscription,
-  packageDir: string,
-  logger: (msg: string) => void,
-): Promise<ResolvedHookSub | null> {
-  if (sub.handler.type !== "module") {
-    logger(`${packageDir}: hook "${sub.id}" — subprocess handlers are not yet supported; skipping`)
-    return null
-  }
-  const abs = resolvePath(packageDir, sub.handler.path)
-  if (!existsSync(abs)) {
-    logger(`${packageDir}: hook handler module not found: ${abs}`)
-    return null
-  }
-  let mod: { default?: HookHandler }
-  try {
-    mod = (await import(abs)) as { default?: HookHandler }
-  } catch (e) {
-    logger(
-      `${packageDir}: failed to import hook handler ${abs}: ${e instanceof Error ? e.message : String(e)}`,
-    )
-    return null
-  }
-  const fn = mod.default
-  if (typeof fn !== "function") {
-    logger(`${packageDir}: hook handler ${abs} has no default export function`)
-    return null
-  }
-  return {
-    definition: sub,
-    entryAbsolute: abs,
-    invoke: (payload: unknown, ctx: HookHandlerContext) => fn(payload, ctx),
-  }
-}
-
-/**
- * Subscribe a resolved hook sub on the {@link Hooks} facade. Routes by
- * the channel's declared shape (broadcast-async, broadcast-sync, chain,
- * stream — the facade picks the right backend).
- *
- * Errors and timeouts are absorbed by the bus so the agent never sees a
- * plugin exception.
- */
-function registerHookSub(
-  hooks: Hooks,
-  packageDir: string,
-  sub: ResolvedHookSub,
-  logger: (msg: string) => void,
-  pluginId: string,
-): void {
-  const label = `${packageDir}:${sub.definition.id}`
-  const channel = sub.definition.channel
-  const listener = (payload: unknown, ctx: { abort: AbortSignal; priority: number }): unknown => {
-    const handlerCtx: HookHandlerContext = {
-      channel,
-      packageDir,
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-      } as Record<string, string>,
-      abort: ctx.abort,
-      priority: ctx.priority,
-      // Shape-aware emit so plugin hook handlers can fan out to other
-      // channels regardless of shape. Declared channels route via the
-      // Hooks facade (which picks the right bus); ad-hoc channels go
-      // straight to EventBus to preserve legacy behavior.
-      emit: (chan: string, p?: unknown) => {
-        const shape = CHANNEL_BY_NAME.get(chan)?.shape
-        try {
-          if (shape === "broadcast-async" || shape === undefined) {
-            hooks.eventBus.emit(chan, p)
-            return
-          }
-          hooks.emitSync(chan, p)
-        } catch (e) {
-          logger(`${label}: emit("${chan}") failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      },
-      stderr: process.stderr,
-      log: createPluginLogger(pluginId),
-    }
-    try {
-      return sub.invoke(payload, handlerCtx)
-    } catch (e) {
-      logger(`${label}: handler threw: ${e instanceof Error ? e.message : String(e)}`)
-      return undefined
-    }
-  }
-  hooks.on(channel, listener, {
-    caller: "plugin",
-    source: pluginId,
-    priority: sub.definition.priority,
-    timeoutMs: sub.definition.timeoutMs,
-    observeOnly: sub.definition.observeOnly,
-    label,
-  })
-}
-
-/**
- * Subprocess event-handler protocol.
- *
- * The subprocess receives a JSON envelope on stdin:
- *
- *   `{event, payload, cwd, env}\n`
- *
- * It writes zero or more re-emit lines to stdout, one JSON object per
- * line:
- *
- *   `{"emit": "<event>", "payload": <any>}\n`
- *
- * Stdout EOF terminates parsing. Lines that don't parse, lack `emit`, or
- * specify a non-string event name are silently dropped — this is a
- * notification path, not a tool call; we don't want a sloppy plugin to
- * crash the bus.
- */
-async function invokeEventSubprocess(
-  exe: string,
-  args: string[],
-  ctx: EventHandlerContext,
-): Promise<void> {
-  const proc = Bun.spawn([exe, ...args], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "inherit",
-    cwd: ctx.packageDir,
-    env: ctx.env,
-  })
-  const envelope = JSON.stringify({
-    event: ctx.event,
-    payload: ctx.payload,
-    cwd: ctx.cwd,
-    env: ctx.env,
-  })
-  void proc.stdin.write(envelope + "\n")
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  for (const raw of out.split("\n")) {
-    const line = raw.trim()
-    if (!line) continue
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(line)
-    } catch {
-      continue
-    }
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      typeof (parsed as { emit?: unknown }).emit === "string"
-    ) {
-      const p = parsed as { emit: string; payload?: unknown }
-      ctx.emit(p.emit, p.payload)
-    }
-  }
-}
-
-/**
- * Resolve a single {@link ManifestLiveAreaSlot} to invocable form.
- *
- * Module handlers must `export default` a {@link LiveAreaHandler}. The
- * loader applies normalized defaults (position=`"footer"`,
- * refreshMs=60_000, timeoutMs=5000) before invocation so the scheduler
- * never has to second-guess them.
- *
- * Returns `null` (with a logged diagnostic) on missing module / bad
- * default export / missing executable. The plugin's tools and other
- * subscriptions are NOT affected — broken slot ≠ broken plugin.
- */
-async function resolveLiveAreaSlot(
-  slot: ManifestLiveAreaSlot,
-  pluginId: string,
-  packageDir: string,
-  logger: (msg: string) => void,
-): Promise<ResolvedLiveAreaSlot | null> {
-  const definition: ManifestLiveAreaSlot = {
-    ...slot,
-    position: slot.position ?? "footer",
-    refreshMs: slot.refreshMs ?? 60_000,
-    timeoutMs: slot.timeoutMs ?? 5000,
-    // Pass through verbatim — empty string is a deliberate opt-out;
-    // undefined means "no row reserved before first invoke".
-    placeholder: slot.placeholder,
-    // Normalize undefined/null → empty array so the scheduler can iterate
-    // without a null check.
-    refreshOn: slot.refreshOn ?? [],
-  }
-
-  if (slot.handler.type === "module") {
-    const abs = resolvePath(packageDir, slot.handler.path)
-    if (!existsSync(abs)) {
-      logger(`${packageDir}: live-area slot handler module not found: ${abs}`)
-      return null
-    }
-    let mod: { default?: LiveAreaHandler }
-    try {
-      mod = await import(abs)
-    } catch (e) {
-      logger(
-        `${packageDir}: failed to import live-area slot handler ${abs}: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      )
-      return null
-    }
-    const fn = mod.default
-    if (typeof fn !== "function") {
-      logger(`${packageDir}: live-area slot handler ${abs} has no default export function`)
-      return null
-    }
-    return {
-      definition,
-      pluginId,
-      packageDir,
-      entryAbsolute: abs,
-      invoke: async (ctx: LiveAreaHandlerContext) => {
-        const out = await fn(ctx)
-        if (out == null) return null
-        if (typeof out !== "string") {
-          throw new Error(
-            `live-area slot "${slot.id}" returned non-string (${typeof out}); expected string | null`,
-          )
-        }
-        return out
-      },
-    }
-  }
-
-  // subprocess
-  const cmd = slot.handler.command
-  const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
-    logger(`${packageDir}: live-area slot executable not found: ${exeAbs}`)
-    return null
-  }
-  return {
-    definition,
-    pluginId,
-    packageDir,
-    entryAbsolute: exeAbs,
-    invoke: async (ctx: LiveAreaHandlerContext) => {
-      const proc = Bun.spawn([exeAbs, ...cmd.slice(1)], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "inherit",
-        cwd: ctx.packageDir,
-        env: ctx.env,
-      })
-      const envelope = JSON.stringify({ tick: ctx.tick, cwd: ctx.cwd, env: ctx.env })
-      void proc.stdin.write(envelope + "\n")
-      void proc.stdin.end()
-      const out = await new Response(proc.stdout).text()
-      await proc.exited
-      const trimmed = out.replace(/\n+$/, "")
-      return trimmed.length === 0 ? null : trimmed
-    },
-  }
 }

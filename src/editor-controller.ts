@@ -24,24 +24,53 @@ import {
   type QuitReason,
 } from "./abort-quit-fsm.ts"
 import { formatArmedFooter } from "./armed-footer.ts"
+import {
+  BRACKETED_PASTE_END,
+  BRACKETED_PASTE_START,
+  type CompositorLike,
+  type EditorControllerOptions,
+  type EditorKeyPayload,
+  type EditorKeyResult,
+  FOOTER_LAYER_ARMED,
+  FOOTER_LAYER_DEFAULT,
+  FOOTER_LAYER_OVERLAY,
+  FOOTER_PRIORITY_ARMED,
+  FOOTER_PRIORITY_OVERLAY,
+  type FooterLayer,
+  type FooterLayerId,
+  KITTY_KEYBOARD_DISABLE,
+  KITTY_KEYBOARD_ENABLE,
+  type ParsedKey,
+  type SetFooterLayerOptions,
+  XTERM_FORMAT_OTHER_KEYS_DISABLE,
+  XTERM_FORMAT_OTHER_KEYS_ENABLE,
+  XTERM_MODIFY_OTHER_KEYS_DISABLE,
+  XTERM_MODIFY_OTHER_KEYS_ENABLE,
+} from "./editor/types.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
 import { computeCursorVisualPos, EditorRenderer, findColAtVisualPos } from "./editor-renderer.ts"
 import { type InputCaptureStack, inputCaptureStack } from "./input-capture-stack.ts"
 import type { Hooks } from "./plugins/hooks/hooks.ts"
 import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 
-interface CompositorLike {
-  setLiveArea(lines: string[], cursor: { row: number; col: number } | null): void
-  setLiveHeight(n: number): void
-  liveHeight: number
-  /**
-   * Optional. When present, used by {@link EditorController.submit} to
-   * commit the just-submitted prompt into the terminal's native scrollback
-   * (so users can scroll up to re-read what they typed) before the live
-   * area is cleared for the next turn. Compositors without scrollback
-   * (e.g. test stubs) can omit it.
-   */
-  writeStream?(chunk: string): void
+// Public surface lives in `src/editor/types.ts` and is re-exported here
+// so external consumers (commands, tests, plugins) keep their existing
+// `import { ... } from "./editor-controller.ts"` paths.
+export type {
+  CompositorLike,
+  EditorControllerOptions,
+  EditorKeyPayload,
+  EditorKeyResult,
+  FooterLayer,
+  FooterLayerId,
+  SetFooterLayerOptions,
+}
+export {
+  FOOTER_LAYER_ARMED,
+  FOOTER_LAYER_DEFAULT,
+  FOOTER_LAYER_OVERLAY,
+  FOOTER_PRIORITY_ARMED,
+  FOOTER_PRIORITY_OVERLAY,
 }
 
 /**
@@ -70,255 +99,6 @@ function installCleanupHooksOnce(): void {
     })
   }
 }
-
-// ----------------------------- footer-layer surface -----------------------------
-//
-// See the long-form comment on `EditorController.footerLayers` below for
-// the architecture rationale (Bug 2801: two producers stomping on one
-// mutable field). The surface is small and documented public API:
-//
-//   - producers own a stable `FooterLayerId`;
-//   - `setFooterLayer(id, lines, {priority})` registers / updates;
-//   - `clearFooterLayer(id)` removes;
-//   - render-time composition picks the highest-priority non-empty layer.
-
-/**
- * A stable string id naming one producer's footer-band content. Two
- * producers MUST NOT share a layer id; collisions silently overwrite
- * (last-writer-wins within a single layer is fine, across layers it is
- * the exact bug we are avoiding).
- *
- * Use one of the exported `FOOTER_LAYER_*` constants when the layer is
- * a known canonical surface (e.g. the armed-quit overlay); use a
- * descriptive ad-hoc id for plugin-private overlays.
- */
-export type FooterLayerId = string
-
-/**
- * One layer's pinned content + z-index. Stored immutably on the
- * controller; consumers receive a fresh array on every read so they
- * cannot mutate live state.
- *
- * @internal Exported for type assertions in tests; the public mutation
- *   surface is {@link EditorController.setFooterLayer} /
- *   {@link EditorController.clearFooterLayer}.
- */
-export interface FooterLayer {
-  readonly id: FooterLayerId
-  readonly priority: number
-  readonly lines: readonly string[]
-}
-
-export interface SetFooterLayerOptions {
-  /**
-   * Higher priority wins composition. When omitted, the previous
-   * priority is preserved (or 0 if this is the layer's first set).
-   * Negative values are accepted but discouraged; reserve negatives
-   * for layers that should sit BELOW the legacy default.
-   */
-  priority?: number
-}
-
-/**
- * The default / legacy layer id. Maps to whatever any caller pushes
- * through the back-compat {@link EditorController.setFooterLines}
- * setter. Lives at priority 0.
- */
-export const FOOTER_LAYER_DEFAULT: FooterLayerId = "default"
-
-/**
- * The armed-quit overlay layer id. Pinned by {@link EditorController}'s
- * abort-quit FSM effects; sits at {@link FOOTER_PRIORITY_ARMED}.
- */
-export const FOOTER_LAYER_ARMED: FooterLayerId = "armed-quit"
-
-/** Priority of {@link FOOTER_LAYER_ARMED}. */
-export const FOOTER_PRIORITY_ARMED = 100
-
-/**
- * Plugin-overlay layer id. Used by the host bridge for the
- * `editor.footer.set` plugin channel — overlays like the slash-menu
- * paint here so the quota-status FooterAggregator (which writes to
- * {@link FOOTER_LAYER_DEFAULT}) doesn't stomp them on its next refresh.
- *
- * Sits between DEFAULT (0) and ARMED (100) at {@link FOOTER_PRIORITY_OVERLAY}
- * (50). A plugin overlay visually obscures the quota row while open;
- * the armed-quit confirm modal is critical enough to obscure even the
- * overlay.
- */
-export const FOOTER_LAYER_OVERLAY: FooterLayerId = "overlay"
-
-/** Priority of {@link FOOTER_LAYER_OVERLAY}. */
-export const FOOTER_PRIORITY_OVERLAY = 50
-
-export interface EditorControllerOptions {
-  prompt: string
-  continuationPrompt: string
-  compositor: CompositorLike
-  stdin?: NodeJS.ReadStream
-  output?: Pick<NodeJS.WriteStream, "write">
-  /**
-   * Maximum live-area height in physical rows (status row + editor rows
-   * combined). When the buffer exceeds the editor's share of this budget
-   * (`maxLiveHeight - statusRows`), the editor scrolls a window onto the
-   * buffer so the cursor's logical line stays visible.
-   *
-   * Pass a number for a static cap, or a function for a dynamic cap that
-   * tracks the terminal's current row count.
-   *
-   * Defaults to `Infinity` (no cap) for backwards-compatible tests.
-   */
-  maxLiveHeight?: number | (() => number)
-  /**
-   * When `true`, invisible characters (spaces as `·`, tabs as `→`,
-   * line-ends as `↵`) are shown as faint glyphs in the editor.
-   * Toggle at runtime via {@link EditorController.setShowHidden}.
-   *
-   * Enabled automatically by `MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1` or
-   * `--show-hidden-chars` CLI flag, or by a manifest mode with
-   * `editorShowHidden: true`.
-   */
-  showHidden?: boolean
-  /**
-   * Bare-Esc disambiguation window in milliseconds. Esc is the lead byte
-   * of every CSI escape sequence (`\x1b[A`, `\x1b[200~`, etc.), so when
-   * we see a lone `\x1b` in `pending` we cannot tell yet whether it's
-   * "user pressed Esc and stopped" or "more bytes are en route across a
-   * second stdin chunk". We arm a short timer; if no follow-up bytes
-   * arrive before it fires, we treat the byte as a true bare Esc and
-   * route it to {@link AbortBus.requestAbort}.
-   *
-   * 20ms is short enough to feel instant and long enough to swallow the
-   * cross-chunk gap on typical terminals. Override via test harness.
-   *
-   * Default: 20.
-   */
-  bareEscapeMs?: number
-  /**
-   * Debounce window (ms) for the `"input"` event. The event fires this
-   * long after the most recent buffer-text change. Default: 120ms - short
-   * enough to feel live, long enough to coalesce a fast typist's stream
-   * into a single notification per pause. Set to 0 in tests to fire
-   * synchronously.
-   */
-  inputDebounceMs?: number
-  /**
-   * Inject the {@link AbortBus} singleton (or a fresh one for tests). When
-   * a turn is in flight (`abortBus.isTurnInFlight()`) and the user presses
-   * bare Esc or Ctrl+C, this controller calls
-   * `abortBus.requestAbort({kind:"user-key", key:"Esc"|"Ctrl+C"})`. The
-   * abort-quit FSM also decides whether to arm the quit-confirm window
-   * (Ctrl+C arms it, Esc does not - see {@link FsmState}).
-   *
-   * Defaults to the singleton from `./abort-bus.ts`.
-   */
-  abortBus?: AbortBus
-  /**
-   * Options forwarded to the abort-quit FSM. Currently just
-   * `armedDurationMs` (default 10s). Override in tests to shorten the
-   * confirmation window.
-   */
-  quitFsm?: FsmOptions
-  /**
-   * Custom clock for the abort-quit FSM + escape hatch. Default
-   * `Date.now`. Injecting a fake clock lets tests drive the countdown
-   * without real timers.
-   */
-  nowFn?: () => number
-  /**
-   * Override the recurring armed-state tick interval. Default 250ms (4
-   * paints/sec while armed). Tests can set this very small or 0 to
-   * disable the timer (and drive ticks manually).
-   */
-  armedTickMs?: number
-  /**
-   * Optional {@link Hooks} facade. When provided, the editor emits the
-   * `editor.key` broadcast-sync channel BEFORE applying selected
-   * navigation/control keys (currently: ArrowUp, ArrowDown, Ctrl+R).
-   * Listeners may set `result.halt = true` to consume the keystroke and
-   * optionally `result.buffer` / `result.cursor` to replace editor state.
-   *
-   * When omitted (tests / no-plugin runs), the editor skips the emit
-   * entirely — no behavioral change.
-   */
-  hooks?: Hooks
-  /**
-   * Inject the {@link InputCaptureStack} singleton (or a fresh one for
-   * tests). The stack sits in FRONT of the `editor.key` hook chain in
-   * the ESC dispatch pipeline: top-of-stack gets first crack, then the
-   * chain, then the abort-quit FSM.
-   *
-   * Push onto this stack when an overlay opens that owns "ESC means
-   * me, not abort" — the reflection cooldown, future confirm modals,
-   * or any plugin that needs strict LIFO precedence over peer overlays.
-   *
-   * Defaults to the singleton from `./input-capture-stack.ts`.
-   */
-  inputCaptureStack?: InputCaptureStack
-}
-
-/**
- * Mutable holder injected into the `editor.key` payload. Listeners write
- * back into this object to influence the editor's response to the key.
- *
- * Convention: leave fields untouched when you want pass-through; set
- * `halt: true` to suppress default handling; set `buffer` / `cursor` to
- * replace editor state in addition to (or instead of) halting.
- */
-export interface EditorKeyResult {
-  halt?: boolean
-  buffer?: string
-  cursor?: { row: number; col: number }
-}
-
-/**
- * Payload shape for the `editor.key` channel. See
- * `plugins/hooks/channels.ts` for the channel description.
- *
- * `cursor.visualRow` / `cursor.rowsInLogicalLine` are the renderer's
- * wrap-aware coordinates of the cursor's CURRENT logical line — the
- * history plugin uses them to decide whether ↑/↓ should steal the key
- * (only when cursor is on the first/last visual row of the buffer).
- */
-export interface EditorKeyPayload {
-  /** Canonical key name. Currently emitted: "ArrowUp", "ArrowDown", "Ctrl+R". */
-  key: string
-  /** Current full buffer text (with `\n` line separators). */
-  buffer: string
-  /** Logical cursor position + wrap-aware visual context. */
-  cursor: {
-    row: number
-    col: number
-    /** 0-based wrap chunk within the current logical line. */
-    visualRow: number
-    /** Total wrap rows the current logical line occupies. */
-    rowsInLogicalLine: number
-    /** Total logical lines in the buffer. */
-    totalLines: number
-  }
-  /**
-   * Mutable holder. Listeners write to `result.halt` / `result.buffer`
-   * / `result.cursor` to influence the editor's response. Initialized
-   * to `{}` by the editor before each emit.
-   */
-  result: EditorKeyResult
-}
-
-type ParsedKey = {
-  code: number
-  modifiers: number
-  eventType: number
-  text: string | null
-}
-
-const BRACKETED_PASTE_START = "\x1b[200~"
-const BRACKETED_PASTE_END = "\x1b[201~"
-const KITTY_KEYBOARD_ENABLE = "\x1b[>31u"
-const KITTY_KEYBOARD_DISABLE = "\x1b[<u"
-const XTERM_FORMAT_OTHER_KEYS_ENABLE = "\x1b[>4;1f"
-const XTERM_FORMAT_OTHER_KEYS_DISABLE = "\x1b[>4f"
-const XTERM_MODIFY_OTHER_KEYS_ENABLE = "\x1b[>4;2m"
-const XTERM_MODIFY_OTHER_KEYS_DISABLE = "\x1b[>4m"
 
 export class EditorController extends EventEmitter {
   private readonly buf = new EditorBuffer()
