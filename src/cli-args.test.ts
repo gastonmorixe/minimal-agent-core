@@ -41,10 +41,9 @@ describe("normalizeArgs", () => {
   })
 
   test("--flag=value resolves long aliases on the key", () => {
-    // `--models=foo` would be nonsense (it's a list flag), but the key
-    // alias should still resolve so users get a useful error rather than
-    // a silent typo.
-    expect(normalizeArgs(["--list-sessions=ignored"])).toEqual(["--sessions", "ignored"])
+    // `--list-sessions=<query>` flows through to `--sessions <query>`,
+    // which downstream treats as a fuzzy filter.
+    expect(normalizeArgs(["--list-sessions=abc123"])).toEqual(["--sessions", "abc123"])
   })
 
   test("long aliases for list-* subcommands", () => {
@@ -73,6 +72,41 @@ describe("normalizeArgs", () => {
   test("subcommand syntax: `resume <sid>` consumes the next positional", () => {
     expect(normalizeArgs(["resume", "abc123"])).toEqual(["--resume", "abc123"])
     expect(normalizeArgs(["resume", "last"])).toEqual(["--resume", "last"])
+  })
+
+  test("`sessions <query>` consumes the next positional as a fuzzy filter", () => {
+    expect(normalizeArgs(["sessions", "abc123"])).toEqual(["--sessions", "abc123"])
+    expect(normalizeArgs(["sessions", "minimal-agent"])).toEqual(["--sessions", "minimal-agent"])
+    // Date fragments are valid queries too.
+    expect(normalizeArgs(["sessions", "2026-05"])).toEqual(["--sessions", "2026-05"])
+  })
+
+  test("`sessions list` is still the no-filter sugar (not a query)", () => {
+    // Already covered by the generic `<verb> list` test, but pin it
+    // explicitly because the parser now has a special branch for it.
+    expect(normalizeArgs(["sessions", "list"])).toEqual(["--sessions"])
+  })
+
+  test("`sessions resume <sid>` mirrors top-level `resume <sid>`", () => {
+    expect(normalizeArgs(["sessions", "resume", "abc123"])).toEqual(["--resume", "abc123"])
+    expect(normalizeArgs(["sessions", "resume", "last"])).toEqual(["--resume", "last"])
+    // Trailing flags are preserved.
+    expect(normalizeArgs(["sessions", "resume", "abc", "--debug"])).toEqual([
+      "--resume",
+      "abc",
+      "--debug",
+    ])
+    // Missing sid → bare `--resume` (parity with `resume` alone).
+    expect(normalizeArgs(["sessions", "resume"])).toEqual(["--resume"])
+    expect(normalizeArgs(["sessions", "resume", "--debug"])).toEqual(["--resume", "--debug"])
+  })
+
+  test("`sessions` followed by a flag is a bare list, not a query", () => {
+    expect(normalizeArgs(["sessions", "--debug"])).toEqual(["--sessions", "--debug"])
+  })
+
+  test("`sessions <query>` keeps subsequent flags", () => {
+    expect(normalizeArgs(["sessions", "abc", "--debug"])).toEqual(["--sessions", "abc", "--debug"])
   })
 
   test("subcommand verb followed by extra flags keeps them", () => {

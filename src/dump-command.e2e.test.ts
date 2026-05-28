@@ -110,4 +110,98 @@ describe("dump command architecture", () => {
       rmSync(home, { recursive: true, force: true })
     }
   })
+
+  it("`sessions <query>` fuzzy-filters by sid / cwd, shows a size column", async () => {
+    // Set up two sessions in distinct cwds so the filter has a real
+    // discrimination to make.
+    const home = mkdtempSync(join(tmpdir(), "ma-sessions-filter-e2e-"))
+    const sessionsDir = join(home, ".minimal-agent", "sessions")
+    const storeA = SessionStore.open({
+      sid: "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      model: "claude-opus-4-7",
+      cwd: "/tmp/project-alpha",
+      systemHash: "sys",
+      toolsHash: "tools",
+      agentVersion: "test",
+      dir: sessionsDir,
+    })
+    storeA.appendUser("alpha prompt")
+    storeA.appendAssistant([{ type: "text", text: "alpha response" }], "end_turn")
+    const storeB = SessionStore.open({
+      sid: "bbbb2222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      model: "claude-opus-4-7",
+      cwd: "/tmp/project-beta",
+      systemHash: "sys",
+      toolsHash: "tools",
+      agentVersion: "test",
+      dir: sessionsDir,
+    })
+    storeB.appendUser("beta prompt")
+    storeB.appendAssistant([{ type: "text", text: "beta response" }], "end_turn")
+
+    try {
+      // Subcommand form: `sessions alpha` (no leading flag).
+      const p = Bun.spawn(["bun", "run", "src/index.ts", "sessions", "alpha"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: home },
+      })
+      const [code, stdout, stderr] = await Promise.all([
+        p.exited,
+        readStream(p.stdout),
+        readStream(p.stderr),
+      ])
+
+      expect(code).toBe(0)
+      expect(stderr.trim()).toBe("")
+      // Header has a `size` column.
+      expect(stdout).toContain("size")
+      // Alpha matches; Beta doesn't.
+      expect(stdout).toContain("aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+      expect(stdout).not.toContain("bbbb2222-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+      // Footer reports the filtered count and the query.
+      expect(stdout).toContain("1 of 2 session(s) matching")
+      expect(stdout).toContain('"alpha"')
+      // Size column rendered (non-empty session file).
+      expect(stdout).toMatch(/\d+\s+B/)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("`sessions resume <sid>` rewrites to --resume <sid> (parser plumbing)", async () => {
+    // The cli-args unit tests pin the exact rewrite. This e2e proves
+    // the wiring downstream: when we hand the CLI `sessions resume
+    // <sid>`, it routes through the `run` command (which requires
+    // auth) rather than the `sessions` listing (which does not).
+    //
+    // Signal: a credential-less spawn should fail with the auth-not-
+    // found fatal, NOT print the sessions table header.
+    const home = mkdtempSync(join(tmpdir(), "ma-sessions-resume-e2e-"))
+    try {
+      const p = Bun.spawn(
+        ["bun", "run", "src/index.ts", "sessions", "resume", "no-such-sid", "--prompt", "noop"],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+          env: { ...process.env, HOME: home },
+        },
+      )
+      const [_code, stdout, stderr] = await Promise.all([
+        p.exited,
+        readStream(p.stdout),
+        readStream(p.stderr),
+      ])
+      // Routed to `run` (auth-required) → no-auth fatal fires.
+      // (If the parser had collapsed to `--sessions`, the listing
+      // would have printed cleanly with no auth check.)
+      const combined = `${stdout}\n${stderr}`
+      expect(combined).toMatch(/credentials|minimal-agent --login|fatal/i)
+      // Listing header MUST NOT appear.
+      expect(stdout).not.toContain("when")
+      expect(stdout).not.toContain("preview")
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
 })

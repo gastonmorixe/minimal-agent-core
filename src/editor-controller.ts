@@ -333,6 +333,32 @@ export class EditorController extends EventEmitter {
   private started = false
   private cycleForward: (() => void) | null = null
   private cycleBackward: (() => void) | null = null
+  /**
+   * Alt+M interrupt-and-apply-mode handler. Wired by the REPL.
+   *
+   * Fires only when the host opts in by calling
+   * {@link setModeInterruptHandler}. The keypress is otherwise dropped
+   * (no literal `m` inserted, no surprises) : the wiring is per-host,
+   * not always-on.
+   */
+  private modeInterrupt: (() => void) | null = null
+  /**
+   * Optional builder that returns the prompt prefix to bake into
+   * {@link submit}'s `commitLines` AT submit-time. When set, replaces
+   * the renderer's cached `this.prompt` for the commit-render call
+   * (the live prompt continues to use the cached value).
+   *
+   * Why: a mode toggle can race with Enter (Shift+Tab arrives, the
+   * subscriber repaints, BUT a stale repaint via resize / debounce
+   * could leave the cached prefix one tick behind). The mode-change
+   * attachment that ships with the turn always reflects the active
+   * mode at consume-time, so the scrollback prefix should match. The
+   * cleanest fix is to query the freshest prefix at commit-time.
+   *
+   * Pass `null` to detach. When unset, the cached
+   * `this.renderer.prompt` is used (current behavior, byte-stable).
+   */
+  private commitPromptBuilder: (() => string) | null = null
   private showHiddenChars = false
   /**
    * Sticky "preferred visual column" for wrap-aware up/down navigation.
@@ -812,6 +838,41 @@ export class EditorController extends EventEmitter {
   setModeCycleHandlers(forward: (() => void) | null, backward: (() => void) | null): void {
     this.cycleForward = forward
     this.cycleBackward = backward
+  }
+
+  /**
+   * Wire the Alt+M interrupt-and-apply-mode shortcut.
+   *
+   * Alt+M arrives as `ESC m` in raw terminal mode (no kitty protocol
+   * needed). When wired:
+   *
+   *   - If the REPL/agent is mid-turn AND a mode toggle is pending
+   *     delivery, the handler aborts the in-flight request and
+   *     immediately starts a new user turn carrying only the
+   *     `<ma::mode-change>` attachment. The model gets the new mode
+   *     without a user round-trip.
+   *   - If nothing is pending, the handler is a no-op (the caller
+   *     decides whether to flash the live area or just ignore).
+   *
+   * Pass `null` to detach. The raw `m` byte is consumed either way
+   * when this handler is wired : no literal `m` is inserted into the
+   * buffer.
+   */
+  setModeInterruptHandler(handler: (() => void) | null): void {
+    this.modeInterrupt = handler
+  }
+
+  /**
+   * Wire a fresh-prompt builder for {@link submit}'s commit-render
+   * call. Closes the prompt-prefix race where a mode toggle
+   * immediately before Enter could leave the cached
+   * `this.renderer.prompt` one repaint behind. See
+   * {@link commitPromptBuilder}.
+   *
+   * Pass `null` to detach (falls back to the cached prefix).
+   */
+  setCommitPromptBuilder(builder: (() => string) | null): void {
+    this.commitPromptBuilder = builder
   }
 
   /**
@@ -1618,6 +1679,14 @@ export class EditorController extends EventEmitter {
         return this.buf.moveWordLeft() ? "changed" : "ignore"
       case "\x1bf":
         return this.buf.moveWordRight() ? "changed" : "ignore"
+      // Alt+M / Option+M : interrupt-and-apply-mode. Cross-terminal
+      // portable (CTRL+M is byte-identical to Enter, so we use the
+      // meta-prefix path instead). The handler is opt-in via
+      // `setModeInterruptHandler`; when unset we drop the bytes
+      // silently so a stray Alt+M doesn't insert a literal `m`.
+      case "\x1bm":
+        if (this.modeInterrupt) this.modeInterrupt()
+        return "ignore"
       default:
         return "ignore"
     }
@@ -1716,6 +1785,35 @@ export class EditorController extends EventEmitter {
     if (alt) {
       if (code === 98) return this.buf.moveWordLeft() ? "changed" : "ignore"
       if (code === 102) return this.buf.moveWordRight() ? "changed" : "ignore"
+      // Alt+M / Option+M via CSI-u (kitty `\x1b[109;3u`) or xterm
+      // modifyOtherKeys=2 (`\x1b[27;3;109~`). Mirrors the bare
+      // `\x1b[1bm` branch in `parseMetaSequence` so the
+      // interrupt-and-apply-mode shortcut works regardless of how the
+      // terminal encodes meta keys :
+      //
+      //   - iTerm 3.5+ with kitty proto enabled (the agent's default
+      //     after sending `\x1b[>31u` at startup) ships modified
+      //     keys as CSI-u. Option+m arrives here as code=109, alt=true.
+      //   - iTerm with kitty disabled AND "Option as Meta" enabled
+      //     ships `\x1bm` (the legacy meta-prefix path, handled in
+      //     `parseMetaSequence`).
+      //   - iTerm with kitty disabled AND Option set to "Normal" ships
+      //     the macOS-native `µ` (UTF-8 `\xc2\xb5`). That falls into
+      //     the printable-text branch and inserts the character; the
+      //     fix on the user side is to enable either kitty proto or
+      //     "Option as Meta". Documented in editor-controller.ts
+      //     above and in the agent README.
+      //
+      // Match both lowercase `m` (109) and uppercase `M` (77, via
+      // Shift+Alt+m) so the shortcut is forgiving of the shift state.
+      // The handler is opt-in via `setModeInterruptHandler`; when
+      // unset we still consume the keystroke (return "ignore") so it
+      // doesn't fall through to the `text && !ctrl` branch below and
+      // insert a literal `m`.
+      if (code === 109 || code === 77) {
+        if (this.modeInterrupt) this.modeInterrupt()
+        return "ignore"
+      }
     }
 
     if (ctrl) {
@@ -1884,11 +1982,32 @@ export class EditorController extends EventEmitter {
     // "empty submits are silently ignored" semantics.
     let commitLines: string[] = []
     if (this.buf.lines.length > 0) {
-      const rendered = this.renderer.render(this.buf, {
-        firstRow: 0,
-        rowCount: this.buf.lines.length,
-      })
-      commitLines = rendered.lines
+      // Race-defense: if the host wired `setCommitPromptBuilder`,
+      // re-fetch the prompt prefix right now. Swap it into the
+      // renderer just for this render call, then restore the previous
+      // cached value so the live editor's next repaint paints with
+      // the same byte-stable string. This closes the case where a
+      // mode toggle's repaint subscriber raced with the Enter keypress
+      // and the cached `this.prompt` was one tick behind the
+      // `<ma::mode-change>` attachment that's about to ship.
+      let savedPrompt: string | null = null
+      if (this.commitPromptBuilder) {
+        const current = this.renderer.getPrompt()
+        const fresh = this.commitPromptBuilder()
+        if (fresh !== current) {
+          savedPrompt = current
+          this.renderer.setPrompt(fresh)
+        }
+      }
+      try {
+        const rendered = this.renderer.render(this.buf, {
+          firstRow: 0,
+          rowCount: this.buf.lines.length,
+        })
+        commitLines = rendered.lines
+      } finally {
+        if (savedPrompt !== null) this.renderer.setPrompt(savedPrompt)
+      }
     }
     this.buf.clear()
     this.viewportTop = 0

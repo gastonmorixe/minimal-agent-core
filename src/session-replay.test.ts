@@ -618,10 +618,9 @@ describe("replayToScrollback", () => {
     const sink = new CaptureSink()
     await replayToScrollback(messages, sink, { modeManager, userTimestamps: [at] })
     const plain = stripAnsi(sink.out)
-    // The chip is emitted ABOVE the prompt arrow, with the from/to labels.
-    expect(plain).toContain("mode →")
-    expect(plain).toContain("ASK")
-    expect(plain).toContain("from default")
+    // The chip is emitted ABOVE the prompt arrow with `mode <from> → <to>`.
+    expect(plain).toContain("mode")
+    expect(plain).toContain("default → ASK")
     // Timestamp from the user-record `ts`, formatted as YYYY-MM-DD HH:MM.
     expect(plain).toContain("2026-05-22 17:52")
     // The tag itself never leaks into the rendered output.
@@ -629,7 +628,7 @@ describe("replayToScrollback", () => {
     // The prompt arrow + user text still renders below the chip.
     expect(plain).toContain("ASK ❯ ask question")
     // Chip appears BEFORE the prompt arrow in the rendered output.
-    const chipIdx = plain.indexOf("mode →")
+    const chipIdx = plain.indexOf("default → ASK")
     const arrowIdx = plain.indexOf("ASK ❯")
     expect(chipIdx).toBeGreaterThanOrEqual(0)
     expect(arrowIdx).toBeGreaterThan(chipIdx)
@@ -665,7 +664,7 @@ describe("replayToScrollback", () => {
       userTimestamps: [null, null, at, null],
     })
     const plain = stripAnsi(sink.out)
-    expect(plain).toContain("mode →")
+    expect(plain).toContain("default → ASK")
     expect(plain).toContain("2026-05-22 17:52")
     expect(plain).toContain("ASK ❯ now in ask")
   })
@@ -683,7 +682,7 @@ describe("replayToScrollback", () => {
     const sink = new CaptureSink()
     await replayToScrollback(messages, sink, { userTimestamps: [null] })
     const plain = stripAnsi(sink.out)
-    expect(plain).toContain("mode →")
+    expect(plain).toContain("default → ASK")
     // 1970-01-01 is the documented "we lost the timestamp" marker.
     expect(plain).toContain("1970-01-01")
   })
@@ -703,9 +702,8 @@ describe("replayToScrollback", () => {
     await replayToScrollback(messages, sink, { userTimestamps: [at] })
     const plain = stripAnsi(sink.out)
     // No modeManager → label is uppercased id, no color, but chip still renders.
-    expect(plain).toContain("mode →")
-    expect(plain).toContain("ASK")
-    expect(plain).toContain("from default")
+    expect(plain).toContain("mode")
+    expect(plain).toContain("default → ASK")
     expect(plain).toContain("2026-05-22 17:52")
   })
 })

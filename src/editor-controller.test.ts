@@ -1830,3 +1830,126 @@ describe("EditorController — editor.buffer.changed hook", () => {
     ctrl.stop()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Alt+M / Option+M : interrupt-and-apply-mode keystroke
+//
+// Three encodings reach `EditorController` depending on terminal + config:
+//
+//   1. `\x1bm` (bare meta) : iTerm with "Option as Meta" enabled, xterm
+//      without modifyOtherKeys. Parsed by `parseMetaSequence`.
+//   2. `\x1b[109;3u` (kitty CSI-u, code=109='m', modifiers=3=alt) : iTerm
+//      3.5+ with kitty proto enabled (which the agent enables at start
+//      via `\x1b[>31u`). Parsed by `parseCsiUKey` →
+//      `parseModifiedKeySequence`.
+//   3. `\x1b[27;3;109~` (xterm modifyOtherKeys=2) : xterm-like terminals.
+//      Parsed by `parseXtermOtherKey` → `parseModifiedKeySequence`.
+//
+// All three MUST call the wired `modeInterrupt` handler AND swallow the
+// keystroke (no literal `m` insertion). When no handler is wired, all
+// three MUST still swallow the keystroke (no surprises). Regression
+// guard for the 2026-05-27 bug where iTerm-with-kitty users pressed
+// Alt+M and nothing happened : the CSI-u path silently dropped through
+// `parseModifiedKeySequence` because there was no `code === 109`
+// branch in the `if (alt)` block.
+// ---------------------------------------------------------------------------
+
+describe("EditorController — Alt+M (mode-interrupt shortcut)", () => {
+  function makeWithHandler() {
+    const calls: number[] = []
+    const ctx = make()
+    ctx.ctrl.setModeInterruptHandler(() => calls.push(Date.now()))
+    return { ...ctx, calls }
+  }
+
+  it("bare `\\x1bm` (Option-as-Meta path) fires the handler", () => {
+    const { ctrl, stdin, calls } = makeWithHandler()
+    ctrl.start()
+    stdin.send("\x1bm")
+    expect(calls.length).toBe(1)
+    // No `m` inserted into the buffer.
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("kitty CSI-u `\\x1b[109;3u` (Alt+m) fires the handler", () => {
+    const { ctrl, stdin, calls } = makeWithHandler()
+    ctrl.start()
+    stdin.send("\x1b[109;3u")
+    expect(calls.length).toBe(1)
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("xterm modifyOtherKeys `\\x1b[27;3;109~` (Alt+m) fires the handler", () => {
+    const { ctrl, stdin, calls } = makeWithHandler()
+    ctrl.start()
+    stdin.send("\x1b[27;3;109~")
+    expect(calls.length).toBe(1)
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("kitty CSI-u `\\x1b[77;4u` (Shift+Alt+M / capital M) fires the handler", () => {
+    // Some terminals report shift+alt+m as code 77 (uppercase M) plus
+    // shift+alt modifiers (=4). The handler is shift-forgiving.
+    const { ctrl, stdin, calls } = makeWithHandler()
+    ctrl.start()
+    stdin.send("\x1b[77;4u")
+    expect(calls.length).toBe(1)
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("kitty CSI-u `\\x1b[109;4u` (Shift+Alt+m, code stays lowercase) fires the handler", () => {
+    // Other terminals keep code=109 and report shift+alt via modifier=4.
+    // Both shapes should reach the handler.
+    const { ctrl, stdin, calls } = makeWithHandler()
+    ctrl.start()
+    stdin.send("\x1b[109;4u")
+    expect(calls.length).toBe(1)
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("no handler wired: keystroke is still swallowed across all encodings", () => {
+    // No `setModeInterruptHandler` call → modeInterrupt stays null. The
+    // editor MUST still consume the keystroke so a stray Option+M
+    // doesn't insert a literal `m`.
+    const { ctrl, stdin } = make()
+    ctrl.start()
+    stdin.send("\x1bm")
+    stdin.send("\x1b[109;3u")
+    stdin.send("\x1b[27;3;109~")
+    stdin.send("\x1b[77;4u")
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("detach (null handler) stops firing on subsequent presses", () => {
+    const calls: number[] = []
+    const { ctrl, stdin } = make()
+    ctrl.setModeInterruptHandler(() => calls.push(Date.now()))
+    ctrl.start()
+    stdin.send("\x1b[109;3u")
+    expect(calls.length).toBe(1)
+    ctrl.setModeInterruptHandler(null)
+    stdin.send("\x1b[109;3u")
+    expect(calls.length).toBe(1) // still 1, second press dropped
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("plain `m` (no modifier) still inserts a literal m", () => {
+    // Regression guard: the Alt+M dispatch must not swallow unmodified
+    // `m`. (Trivial because the modifier check gates the dispatch, but
+    // worth pinning so a future refactor that misuses `code === 109`
+    // outside the `if (alt)` block gets caught.)
+    const { ctrl, stdin, calls } = makeWithHandler()
+    ctrl.start()
+    stdin.send("m")
+    expect(calls.length).toBe(0)
+    expect(ctrl.buffer().toString()).toBe("m")
+    ctrl.stop()
+  })
+})

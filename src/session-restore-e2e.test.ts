@@ -104,10 +104,21 @@ describe("session restore E2E", () => {
     // ------- Run 2: resume from disk and continue with a clean turn -------
     {
       const loaded = loadSession(sid, dir)
-      // The crashed assistant(tool_use) had an unmatched tool_use → repair drops it.
+      // The crashed assistant(tool_use) had an unmatched tool_use → repair
+      // drops it. The user prompt that drove it ("go") was never replied
+      // to, so `extractPendingDraft` surfaces it as the editor-restore
+      // draft and pops it from `messages`. The conversation history is
+      // therefore EMPTY: there is no API-shippable turn pair on record,
+      // just a draft waiting for the user to retry-or-edit-or-discard.
+      //
+      // Pre-fix this test left "go" in `messages` and then the next
+      // run("hello again") produced `[user, user, assistant]` which the
+      // real Anthropic API rejects with "messages: roles must alternate".
+      // The fake `sendFn` here hid that failure; the new shape is
+      // API-clean by construction.
       expect(loaded.repaired).toBe(true)
-      expect(loaded.messages).toHaveLength(1)
-      expect(loaded.messages[0].role).toBe("user")
+      expect(loaded.messages).toHaveLength(0)
+      expect(loaded.pendingDraft).toBe("go")
 
       // Re-open store with existsOk so we keep appending.
       const store = SessionStore.open({ ...baseOpenOpts, sid, dir, existsOk: true })
@@ -130,13 +141,14 @@ describe("session restore E2E", () => {
         initialMessages: loaded.messages,
       })
 
-      // Sanity: hydrated messages preserved.
-      expect(agent.messages).toHaveLength(1)
-      // Stored as content blocks: [{type:"text", text:"go"}]
-      const firstContent = agent.messages[0].content
-      expect(Array.isArray(firstContent)).toBe(true)
-      expect((firstContent as Array<{ type: string; text?: string }>)[0].text).toBe("go")
+      // Sanity: no hydrated messages — the conversation has no completed
+      // turns yet from the agent's point of view.
+      expect(agent.messages).toHaveLength(0)
 
+      // Simulate the user discarding the restored draft and submitting a
+      // fresh prompt. (The other realistic path is "user kept the draft
+      // and pressed Enter", which would call `run("go")` instead; the
+      // shape would be identical.)
       const gen = agent.run("hello again", { onTranscriptLine: () => {} })
       const out: string[] = []
       while (true) {
@@ -146,22 +158,18 @@ describe("session restore E2E", () => {
       }
       expect(out.join("")).toBe("resumed reply")
 
-      // After resume + 1 turn, the agent's messages should be:
-      //   user "go" (from run 1) — never replied to
-      //   user "hello again"
-      //   assistant "resumed reply"
-      expect(agent.messages).toHaveLength(3)
-      expect(agent.messages[1].role).toBe("user")
-      expect(agent.messages[2].role).toBe("assistant")
+      // After resume + 1 turn, the agent's messages are a clean
+      // user/assistant pair — exactly what the API requires.
+      expect(agent.messages).toHaveLength(2)
+      expect(agent.messages[0].role).toBe("user")
+      expect(agent.messages[1].role).toBe("assistant")
     }
 
-    // ------- Final disk state: meta + user(go) + user(hello again) + assistant(resumed reply) -------
+    // ------- Final disk state -------
+    // Disk has: meta, user("go"), assistant(tool_use ghost from run 1),
+    // user("hello again"), assistant("resumed reply"). The ghost is
+    // physically present but `loadSession`/repair drops it on every load.
     const finalLines = readJsonl(join(dir, `${sid}.jsonl`)) as { kind: string }[]
-    // Note: the truncated file ends with assistant(tool_use). Resume doesn't
-    // rewrite the file (append-only) — it just appends new turn records.
-    // So the disk has: meta, user, assistant(tool_use), user(hello again),
-    // assistant(resumed reply). The "ghost" assistant(tool_use) line is
-    // physically present but `loadSession` will repair it again on next load.
     expect(finalLines.map((r) => r.kind)).toEqual([
       "meta",
       "user",
@@ -170,11 +178,22 @@ describe("session restore E2E", () => {
       "assistant",
     ])
 
-    // Round-trip once more through loadSession to confirm the repair is
-    // idempotent and the visible conversation is the clean one.
+    // Round-trip once more through loadSession to confirm idempotency.
+    // The ghost assistant(tool_use) drops via repair step 1. That leaves
+    // `[user("go"), user("hello again"), assistant("resumed reply")]`
+    // which repair step 4 collapses to a single trailing user message
+    // (dropping "go", since it was the EARLIER unreplied prompt and the
+    // user already moved on at the prior resume). `extractPendingDraft`
+    // then sees an assistant-terminated message list and returns null.
+    // Net result: API-clean `[user, assistant]` and no draft surfaces.
+    //
+    // "go" is unrecoverable at this point by design. Its retry chance
+    // was the FIRST resume, where it WAS surfaced as `pendingDraft`
+    // (see run 2 assertions above). The user discarded it and submitted
+    // "hello again" instead; resurfacing it now would be wrong.
     const reloaded = loadSession(sid, dir)
-    // Repair drops the ghost assistant(tool_use), but leaves the rest.
     expect(reloaded.repaired).toBe(true)
-    expect(reloaded.messages.map((m) => m.role)).toEqual(["user", "user", "assistant"])
+    expect(reloaded.pendingDraft).toBeNull()
+    expect(reloaded.messages.map((m) => m.role)).toEqual(["user", "assistant"])
   })
 })

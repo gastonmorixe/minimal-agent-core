@@ -757,10 +757,12 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
     expect(lines.length).toBe(1)
     const visible = stripAnsi(lines[0])
     expect(displayWidth(visible)).toBeLessThanOrEqual(80)
-    // `clampToolPreviewBodyLine` uses "..." (3 dots) as its truncation
-    // suffix : different from the body path's `truncHint("ch")`. We just
-    // assert the line was visibly clamped.
-    expect(visible).toContain("...")
+    // `clampToolPreviewBodyLine` now delegates to `clampBodyWithHint`
+    // so the display branch produces the SAME `...(+Nch)` marker the
+    // content-path body lines have. One canonical truncation idiom
+    // across both branches.
+    expect(visible).toContain("...(+")
+    expect(visible).toMatch(/\.{3}\(\+\d+ch\)/)
   })
 
   it("ignores cols=0 / NaN / negative and falls back to the 300-cell hard cap", () => {

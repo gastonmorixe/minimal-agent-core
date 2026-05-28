@@ -326,7 +326,7 @@ describe("Agent.run — memory attachments (combined order)", () => {
     const content =
       ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
     expect(content.length).toBe(4)
-    expect((content[0] as { text: string }).text).toContain("<mode-change")
+    expect((content[0] as { text: string }).text).toContain("<ma::mode-change")
     expect((content[1] as { text: string }).text).toContain("<short-term-memory>")
     expect((content[2] as { text: string }).text).toContain("<memory-saved")
     expect((content[3] as { text: string }).text).toBe("hi")

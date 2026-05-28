@@ -59,17 +59,26 @@ const PLUGIN_DIR = resolve(__dirname, "..")
 
 let tmpHome: string
 let savedHome: string | undefined
+let savedSid: string | undefined
 
 beforeEach(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "memory-test-"))
   savedHome = process.env.HOME
   process.env.HOME = tmpHome
+  // Clear inherited MINIMAL_AGENT_SESSION_ID so tests that exercise
+  // the "no sid in env" branch (no `[session:<sid>]` tag on the bullet)
+  // are deterministic when the test runner inherits a parent agent's
+  // session id. Tests that need a sid set ctx.env explicitly.
+  savedSid = process.env.MINIMAL_AGENT_SESSION_ID
+  delete process.env.MINIMAL_AGENT_SESSION_ID
   setGlobalEventBus(null)
 })
 
 afterEach(() => {
   if (savedHome === undefined) delete process.env.HOME
   else process.env.HOME = savedHome
+  if (savedSid === undefined) delete process.env.MINIMAL_AGENT_SESSION_ID
+  else process.env.MINIMAL_AGENT_SESSION_ID = savedSid
   rmSync(tmpHome, { recursive: true, force: true })
   setGlobalEventBus(null)
 })

@@ -11,9 +11,9 @@
  *     │    1  ✔  #a7b3c4   Add contextSize to SessionTokens
  *     │    2  ✔  #f8e21a   Update addSessionUsage callers
  *     │    3  ◐  #d04c91   Update src/session-tokens.test.ts
- *     │         ├  ✔  #d04c91a  Zero-state includes contextSize
- *     │         ├  ◐  #d04c91b  Replace-not-accumulate semantics
- *     │         ╰  ○  #d04c91c  Multi-turn growth pinned
+ *     │       ├  ✔  #d04c91a  Zero-state includes contextSize
+ *     │       ├  ◐  #d04c91b  Replace-not-accumulate semantics
+ *     │       ╰  ○  #d04c91c  Multi-turn growth pinned
  *     │    4  ○  #b18f73   ...
  *     │    5  ✘  #4dcff2   Wire contextSize into footer  (user pivoted)
  *     │
@@ -749,7 +749,16 @@ function renderSubtaskRowBody(
   // Trailing duration suffix — empty for todo / 0ms rows. See the
   // sibling top-level builder for the rationale.
   const durSuffix = renderDurationSuffix(durMs, t.status, ansi, v.ghost)
-  return `       ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}${durSuffix}`
+  // Leading 6 spaces (NOT 7) so the tree glyph lands at the SAME body
+  // offset as the parent's status glyph. Top-level row body is
+  // `"  ${numCol(2)}  ${stCol}  ..."` → parent's `○` sits at body
+  // offset 6 (2 + 2 + 2). Subtask body therefore needs 6 leading
+  // spaces so `├` / `╰` lines up directly under `○`. Its own
+  // `${stCol}` then lands at offset 9 (6 + 1 + 2), and the rest of
+  // the row (status / id / title) is indented one column-pair deeper.
+  // Previously this used 7 spaces, which shoved `├` one cell to the
+  // RIGHT of the parent's `○` and made the subtree feel un-anchored.
+  return `      ${treeGlyph}  ${stCol}  ${idCol}  ${titleCol}${durSuffix}`
 }
 
 function renderSubtaskRow(

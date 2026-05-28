@@ -13,12 +13,13 @@
  *   • Subcommand syntax (only when the very FIRST positional matches a
  *     known verb — to mirror `git status`, `npm run`, etc.):
  *
- *       models   [list]     → --list-models
- *       flags    [list]     → --list-flags
- *       spinners [list]     → --list-spinners
- *       sessions [list]     → --sessions
- *       resume   <sid|last> → --resume <sid|last>
- *       help                → --help
+ *       models   [list]                  → --list-models
+ *       flags    [list]                  → --list-flags
+ *       spinners [list]                  → --list-spinners
+ *       sessions [list|<query>]          → --sessions [<query>]
+ *       sessions resume <sid|last>       → --resume <sid|last>
+ *       resume   <sid|last>              → --resume <sid|last>
+ *       help                             → --help
  *
  * The bare `-` (read prompt from stdin) is preserved verbatim.
  *
@@ -84,19 +85,47 @@ export function normalizeArgs(raw: string[]): string[] {
   let start = 0
   if (raw.length > 0) {
     const head = raw[0]
-    const sub = !head.startsWith("-") ? SUBCOMMANDS[head] : undefined
-    if (sub) {
-      out.push(sub.flag)
-      start = 1
-      if (sub.takesValue) {
-        // `resume <sid>`: consume the next positional, if present and not a flag.
-        if (raw[1] !== undefined && !raw[1].startsWith("-")) {
-          out.push(raw[1])
+    // Nested `sessions <verb>` grammar:
+    //   sessions list                → --sessions          (legacy sugar)
+    //   sessions resume <sid|last>   → --resume <sid|last> (parallels top-level `resume`)
+    //   sessions <query>             → --sessions <query>  (fuzzy filter; cheap, in-memory)
+    //   sessions [flag…]             → --sessions [flag…]  (bare list)
+    //
+    // Handled inline because the spec is genuinely two-level. SUBCOMMANDS
+    // is single-token only and forcing this through it would obscure the
+    // grammar more than the special case does.
+    if (head === "sessions" && raw[1] !== undefined && !raw[1].startsWith("-")) {
+      const second = raw[1]
+      if (second === "resume") {
+        out.push("--resume")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push(raw[2])
+          start = 3
+        }
+      } else if (second === "list") {
+        out.push("--sessions")
+        start = 2
+      } else {
+        // `sessions <query>` — pass the query value through.
+        out.push("--sessions", second)
+        start = 2
+      }
+    } else {
+      const sub = !head.startsWith("-") ? SUBCOMMANDS[head] : undefined
+      if (sub) {
+        out.push(sub.flag)
+        start = 1
+        if (sub.takesValue) {
+          // `resume <sid>`: consume the next positional, if present and not a flag.
+          if (raw[1] !== undefined && !raw[1].startsWith("-")) {
+            out.push(raw[1])
+            start = 2
+          }
+        } else if (raw[1] === "list") {
+          // `models list`, `flags list`, ... — `list` is a sugar verb.
           start = 2
         }
-      } else if (raw[1] === "list") {
-        // `models list`, `sessions list`, ... — `list` is a sugar verb.
-        start = 2
       }
     }
   }

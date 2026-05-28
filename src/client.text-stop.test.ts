@@ -46,13 +46,23 @@ function fakeNetworkClient(handler: FakeHandler): NetworkClient {
 
 function sseResponse(events: unknown[]): NetworkResponse {
   const encoder = new TextEncoder()
+  // Auto-append message_stop before the [DONE] terminator so test fixtures
+  // mirror real Anthropic streams — every well-formed stream ends with
+  // message_stop. Callers that want to test truncation behavior should NOT
+  // use this helper (or pass a final {type:"message_stop"} explicitly to
+  // suppress this auto-injection? — current behavior: append unconditionally
+  // unless the caller already provided one).
+  const hasMessageStop = events.some(
+    (e) => typeof e === "object" && e !== null && (e as { type?: string }).type === "message_stop",
+  )
+  const allEvents = hasMessageStop ? events : [...events, { type: "message_stop" }]
   return new NetworkResponse({
     status: 200,
     headers: { "content-type": "text/event-stream" },
     transport: { id: "fake", protocol: "h2" },
     body: new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const event of events) {
+        for (const event of allEvents) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n`))
         }
         controller.enqueue(encoder.encode("data: [DONE]\n"))

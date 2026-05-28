@@ -300,6 +300,29 @@ describe("renderBlock — subtasks", () => {
     const out = plain(views, stats({ total: 2, done: 1, doing: 1 }))
     expect(out).toContain(`${GLYPHS.treeLast}  ${GLYPHS.done}`)
   })
+  test("subtask tree glyph aligns under parent's status glyph column", () => {
+    // Top-level body shape: `"  ${numCol(2)}  ${stCol}  …"` puts the
+    // parent's status glyph at body offset 6 (2 spaces + 2-char num
+    // col + 2 spaces). The subtask's tree glyph (├ / ╰) must land in
+    // the SAME body offset so the eye anchors the subtree on the
+    // parent's status column. Body offset 6 → 6 leading spaces before
+    // the tree glyph. Asserting on the raw line (no frame, no ansi)
+    // keeps this independent of the cli vs renderToolDisplay path.
+    const views: View[] = [topView(parent, 1), subView(child1, 0, 1)]
+    const out = plain(views, stats({ total: 2, done: 1, doing: 1 }))
+    const subLine = out
+      .split("\n")
+      .find((l) => l.includes(GLYPHS.treeLast) && l.includes("#d04c91a"))
+    expect(subLine).toBeDefined()
+    // After the frame prefix `"│ "` (2 cells) the body begins. The
+    // tree glyph should sit 6 body-cells in, i.e. at line offset 8.
+    const idx = subLine!.indexOf(GLYPHS.treeLast)
+    expect(idx).toBe(8)
+    // Same offset as the parent's status glyph on the row above.
+    const topLine = out.split("\n").find((l) => l.includes("#d04c91 "))
+    expect(topLine).toBeDefined()
+    expect(topLine!.indexOf(GLYPHS.doing)).toBe(idx)
+  })
 })
 
 // ---------------------------------------------------------------------------

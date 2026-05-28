@@ -190,6 +190,7 @@ export async function replayToScrollback(
     const toMode = modeManager?.modeById(toId) ?? null
     const fromLabel = fromMode?.label ?? (fromId ? fromId.toUpperCase() : "default")
     const toLabel = toMode?.label ?? (toId ? toId.toUpperCase() : "default")
+    const fromFgOpen = modeManager?.resolvedForId(fromId)?.label.fgOpen ?? null
     const toFgOpen = modeManager?.resolvedForId(toId)?.label.fgOpen ?? null
     // When the user-record timestamp is unknown, fall back to the Unix
     // epoch so the chip still renders with a (clearly-wrong-looking)
@@ -200,6 +201,7 @@ export async function replayToScrollback(
     const chipInput: ChipRenderInput = {
       fromLabel,
       toLabel,
+      fromFgOpen,
       toFgOpen,
       at: at ?? new Date(0),
     }
@@ -443,16 +445,25 @@ function makeFormatterOutput(
 }
 
 /**
- * Match a `<mode-change from=… to=… at=… />` activation block exactly as
- * written by `ModeManager.consumePendingAttachment`. The block is always
- * emitted as a self-contained text block (one per user turn), so an
- * exact whole-string match is sufficient — no inline parsing needed.
+ * Match the mode-change activation block as written by
+ * `ModeManager.consumePendingAttachment`. The block is always emitted
+ * as a self-contained text block (one per user turn), so an exact
+ * whole-string match is sufficient : no inline parsing needed.
+ *
+ * Accepts BOTH spellings during the tag-namespace migration
+ * (TODOS.md#T-ca2ce1):
+ *
+ *   - new: `<ma::mode-change from="…" to="…" at="…" />`
+ *   - old: `<mode-change from="…" to="…" at="…" />`
  *
  * The `at` attribute is optional in the regex so older session logs
  * (recorded before the timestamp was added) still replay cleanly.
+ *
+ * The `(?:ma::)?` non-capturing group makes the namespace prefix
+ * optional; both forms produce identical capture-group output.
  */
 const MODE_CHANGE_RE =
-  /^\s*<mode-change\s+from="([^"]*)"\s+to="([^"]*)"(?:\s+at="([^"]*)")?\s*\/>\s*$/
+  /^\s*<(?:ma::)?mode-change\s+from="([^"]*)"\s+to="([^"]*)"(?:\s+at="([^"]*)")?\s*\/>\s*$/
 
 /**
  * Build the `userTimestamps` array for {@link replayToScrollback} from
@@ -551,7 +562,10 @@ function parseDate(ts: string): Date | null {
  * the agent runtime, not the user).
  */
 const RUNTIME_ATTACHMENT_OPENERS: readonly RegExp[] = [
-  /^\s*<mode-change\b/,
+  // Mode-change attachment. Accept the new `<ma::mode-change>` and the
+  // legacy bare `<mode-change>` form during the migration window
+  // (TODOS.md#T-ca2ce1).
+  /^\s*<(?:ma::)?mode-change\b/,
   /^\s*<short-term-memory\b/,
   /^\s*<memory-saved\b/,
   /^\s*<ma::tui::[a-z][a-z0-9_-]*\b/i,

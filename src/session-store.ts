@@ -30,6 +30,8 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, hostname as osHostname } from "node:os"
@@ -350,6 +352,19 @@ export class SessionStore {
   readonly path: string
   readonly agentVersion: string
   private readonly dir: string
+  /**
+   * Has this session ever carried real conversation content?
+   *
+   * Flipped to true by any `append{User,Assistant,ToolResult,Note,Rewind}`
+   * call, and pre-seeded by `fork()` when the parent already had
+   * conversation records (so a resume-and-immediately-quit does NOT count
+   * as "unused"). `appendAttach`/`appendDetach` do NOT flip this — they're
+   * process bookkeeping, not conversation.
+   *
+   * Read by {@link cleanupIfUnused} to decide whether the on-disk artifacts
+   * for this session can be removed at shutdown.
+   */
+  private hasConversation = false
 
   private constructor(sid: string, dir: string, agentVersion: string) {
     this.sid = sid
@@ -532,6 +547,11 @@ export class SessionStore {
           continue
         default:
           lines.push(JSON.stringify(r))
+          // Any preserved record (user/assistant/tool_result/note/rewind)
+          // counts as conversation. A forked session that already carries
+          // history must NOT be eligible for cleanup-on-exit even if the
+          // resumed REPL session itself adds nothing new.
+          store.hasConversation = true
       }
     }
     // `wx` ensures we never silently overwrite a dst that appeared
@@ -651,6 +671,7 @@ export class SessionStore {
   appendUser(content: string | ContentBlock[], now: Date = new Date()): string {
     const id = randomUUID()
     this.write({ kind: "user", ts: now.toISOString(), content, id })
+    this.hasConversation = true
     return id
   }
 
@@ -662,6 +683,7 @@ export class SessionStore {
     now: Date = new Date(),
   ): void {
     this.write({ kind: "assistant", ts: now.toISOString(), content, stopReason, usage })
+    this.hasConversation = true
   }
 
   /**
@@ -689,11 +711,13 @@ export class SessionStore {
       rec.rawSha256 = rawBlob.sha256
     }
     this.write(rec)
+    this.hasConversation = true
   }
 
   /** Free-form annotation (mode change, error, manual marker). */
   appendNote(text: string, now: Date = new Date()): void {
     this.write({ kind: "note", ts: now.toISOString(), text })
+    this.hasConversation = true
   }
 
   /**
@@ -704,11 +728,98 @@ export class SessionStore {
    */
   appendRewind(toMsgId: string, droppedCount: number, now: Date = new Date()): void {
     this.write({ kind: "rewind", ts: now.toISOString(), to: toMsgId, droppedCount })
+    this.hasConversation = true
   }
 
   /** Spec alias for {@link appendRewind}. */
   recordRewind(toMsgId: string, droppedCount: number, now: Date = new Date()): void {
     this.appendRewind(toMsgId, droppedCount, now)
+  }
+
+  /**
+   * Remove the on-disk artifacts for this session iff it never carried any
+   * real conversation (user/assistant/tool_result/note/rewind). The
+   * intended caller is the process-exit handler in `src/index.ts`: an
+   * "opened-and-closed" REPL with no actual exchange leaves nothing
+   * worth listing, and stale entries clutter `--sessions` and
+   * `--resume last` resolution.
+   *
+   * Removes, in best-effort order:
+   *   1. the JSONL log at `this.path`
+   *   2. the matching line from `index.jsonl` (rewritten without the entry)
+   *   3. any sidecar files of the form `<sid>.<suffix>` in the sessions
+   *      directory (tasks plugin, memory scratch, draft buffer, …)
+   *   4. the `<sid>.blobs/` directory if present (lazy-created by the
+   *      blob store; usually absent on unused sessions)
+   *
+   * Returns `true` when the cleanup ran, `false` when this session has
+   * real conversation and was preserved. Per-step failures are swallowed:
+   * cleanup is opportunistic, not load-bearing. A subsequent
+   * `--sessions` listing tolerates stale index entries via the missing-
+   * file filter in `readSessionIndex`.
+   */
+  cleanupIfUnused(): boolean {
+    if (this.hasConversation) return false
+
+    // 1) JSONL log
+    try {
+      unlinkSync(this.path)
+    } catch {
+      // best-effort
+    }
+
+    // 2) Index entry — rewrite index.jsonl without our sid's line. We
+    // match on the parsed `sid` field rather than substring to avoid
+    // false positives if a sid prefix appears inside another record.
+    try {
+      const idxPath = indexFilePath(this.dir)
+      const raw = readFileSync(idxPath, "utf-8")
+      const kept: string[] = []
+      for (const line of raw.split("\n")) {
+        if (line.length === 0) continue
+        let parsed: IndexRecord | null = null
+        try {
+          parsed = JSON.parse(line) as IndexRecord
+        } catch {
+          // Preserve unparseable lines verbatim — we'd rather keep
+          // foreign content than silently drop it.
+          kept.push(line)
+          continue
+        }
+        if (parsed && parsed.sid === this.sid) continue
+        kept.push(line)
+      }
+      const body = kept.length > 0 ? `${kept.join("\n")}\n` : ""
+      writeFileSync(idxPath, body)
+    } catch {
+      // best-effort
+    }
+
+    // 3) Sidecars: any sibling FILE named `<sid>.<suffix>`. Skip
+    // directories here — those are handled in step 4.
+    try {
+      const prefix = `${this.sid}.`
+      for (const entry of readdirSync(this.dir, { withFileTypes: true })) {
+        if (!entry.isFile()) continue
+        if (!entry.name.startsWith(prefix)) continue
+        try {
+          unlinkSync(join(this.dir, entry.name))
+        } catch {
+          // per-sidecar best-effort
+        }
+      }
+    } catch {
+      // best-effort directory scan
+    }
+
+    // 4) `<sid>.blobs/` directory (lazy-created; usually absent here).
+    try {
+      rmSync(join(this.dir, `${this.sid}.blobs`), { recursive: true, force: true })
+    } catch {
+      // best-effort
+    }
+
+    return true
   }
 
   private write(rec: SessionRecord): void {

@@ -6,7 +6,7 @@
  *   - {@link ModeManager.isToolAllowed} as the dispatch-time gate
  *     (replaces the old `filterTools` request-shape mutation).
  *   - {@link ModeManager.consumePendingAttachment} as the activation
- *     channel (a `<mode-change>` text block emitted on the next user
+ *     channel (a `<ma::mode-change>` text block emitted on the next user
  *     turn after a toggle, idempotent thereafter).
  *   - Deprecation no-ops for {@link ModeManager.filterTools} and
  *     {@link ModeManager.systemPromptAddition}.
@@ -45,7 +45,7 @@ const DEBUG_MODE: ManifestMode = {
   // No disallowedTools — mode is purely a UX state, no dispatch refusals.
 }
 
-// Fixed wall-clock used by tests that assert on the literal `<mode-change … at="…" />`
+// Fixed wall-clock used by tests that assert on the literal `<ma::mode-change … at="…" />`
 // payload. The byte-stable timestamp lets us keep `.toEqual` instead of regex matchers.
 const FIXED_AT = new Date("2026-05-22T20:43:12.000Z")
 const FIXED_AT_ISO = FIXED_AT.toISOString()
@@ -93,7 +93,7 @@ describe("ModeManager.isToolAllowed", () => {
     expect(r.allowed).toBe(false)
     if (!r.allowed) {
       // Whole message is just the head line; no trailing space or hint.
-      expect(r.message).toBe('Tool "Bash" is not permitted in PLAN mode.')
+      expect(r.message).toBe('Tool "Bash" is denied in PLAN mode.')
     }
   })
 
@@ -129,7 +129,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     expect(block).not.toBeNull()
     expect(block).toEqual({
       type: "text",
-      text: `<mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -148,7 +148,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     const block = m.consumePendingAttachment()
     expect(block).toEqual({
       type: "text",
-      text: `<mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -182,7 +182,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     const block = m.consumePendingAttachment()
     expect(block).toEqual({
       type: "text",
-      text: `<mode-change from="default" to="plan" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::mode-change from="default" to="plan" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -209,7 +209,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     // First consume reflects the *current* (= "ask") vs lastAdvertised (= null).
     expect(m.consumePendingAttachment()).toEqual({
       type: "text",
-      text: `<mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
   })
 })
@@ -273,5 +273,311 @@ describe("ModeManager deprecated surfaces", () => {
       console.error = origConsoleError
     }
     expect(captured.join("\n")).not.toContain("systemPromptAppend")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Permissions model (allow + deny, deny wins, * wildcard, user overlay)
+// ---------------------------------------------------------------------------
+
+describe("buildEffectiveModePermissions", () => {
+  test("returns defaults when manifest is silent and no user override", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions({ id: "noop" })
+    expect(eff.allow).toEqual(["*"])
+    expect(eff.deny).toEqual([])
+    expect(eff.source.allow).toBe("default")
+    expect(eff.source.deny).toBe("default")
+  })
+
+  test("reads manifest.permissions when set", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions({
+      id: "ask",
+      permissions: { allow: ["*"], deny: ["Edit", "Write"] },
+    })
+    expect(eff.allow).toEqual(["*"])
+    expect(eff.deny).toEqual(["Edit", "Write"])
+    expect(eff.source.allow).toBe("manifest")
+    expect(eff.source.deny).toBe("manifest")
+  })
+
+  test("legacy disallowedTools becomes permissions.deny when permissions absent", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions({
+      id: "legacy",
+      disallowedTools: ["Bash"],
+    })
+    expect(eff.deny).toEqual(["Bash"])
+    expect(eff.source.deny).toBe("manifest")
+  })
+
+  test("permissions.deny wins over disallowedTools on the same manifest", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions({
+      id: "both",
+      permissions: { deny: ["Write"] },
+      disallowedTools: ["Edit"],
+    })
+    expect(eff.deny).toEqual(["Write"])
+  })
+
+  test("user override REPLACES (not merges) the deny list", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions(
+      { id: "ask", permissions: { deny: ["Edit"] } },
+      { permissions: { deny: ["Edit", "Write", "Bash"] } },
+    )
+    expect(eff.deny).toEqual(["Edit", "Write", "Bash"])
+    expect(eff.source.deny).toBe("user-config")
+    expect(eff.source.allow).toBe("default")
+  })
+
+  test("user override of allow leaves deny inherited from manifest", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions(
+      { id: "ask", permissions: { allow: ["*"], deny: ["Edit"] } },
+      { permissions: { allow: ["Read", "Glob"] } },
+    )
+    expect(eff.allow).toEqual(["Read", "Glob"])
+    expect(eff.source.allow).toBe("user-config")
+    expect(eff.deny).toEqual(["Edit"])
+    expect(eff.source.deny).toBe("manifest")
+  })
+})
+
+describe("isToolAllowedByPermissions", () => {
+  test("deny wins over wildcard allow", async () => {
+    const { isToolAllowedByPermissions } = await import("./modes.ts")
+    const perms = {
+      allow: ["*"],
+      deny: ["Edit"],
+      source: { allow: "manifest" as const, deny: "manifest" as const },
+    }
+    expect(isToolAllowedByPermissions("Edit", perms)).toBe(false)
+    expect(isToolAllowedByPermissions("Read", perms)).toBe(true)
+  })
+
+  test("wildcard in allow permits anything not denied", async () => {
+    const { isToolAllowedByPermissions } = await import("./modes.ts")
+    const perms = {
+      allow: ["*"],
+      deny: [],
+      source: { allow: "default" as const, deny: "default" as const },
+    }
+    expect(isToolAllowedByPermissions("AnythingAtAll", perms)).toBe(true)
+  })
+
+  test("whitelist mode: only listed tools pass", async () => {
+    const { isToolAllowedByPermissions } = await import("./modes.ts")
+    const perms = {
+      allow: ["Read", "Grep"],
+      deny: [],
+      source: { allow: "manifest" as const, deny: "default" as const },
+    }
+    expect(isToolAllowedByPermissions("Read", perms)).toBe(true)
+    expect(isToolAllowedByPermissions("Grep", perms)).toBe(true)
+    expect(isToolAllowedByPermissions("Bash", perms)).toBe(false)
+    expect(isToolAllowedByPermissions("Edit", perms)).toBe(false)
+  })
+
+  test("deny wins on whitelist overlap", async () => {
+    const { isToolAllowedByPermissions } = await import("./modes.ts")
+    const perms = {
+      allow: ["Read", "Bash"],
+      deny: ["Bash"],
+      source: { allow: "manifest" as const, deny: "manifest" as const },
+    }
+    expect(isToolAllowedByPermissions("Read", perms)).toBe(true)
+    expect(isToolAllowedByPermissions("Bash", perms)).toBe(false)
+  })
+})
+
+describe("ModeManager.isToolAllowed via permissions overlay", () => {
+  test("user override that adds a deny is enforced", () => {
+    const m = new ModeManager(
+      [{ id: "ask", label: "ASK", permissions: { allow: ["*"], deny: ["Edit"] } }],
+      "ask",
+      undefined,
+      undefined,
+      () => ({ permissions: { deny: ["Edit", "Bash"] } }),
+    )
+    expect(m.isToolAllowed("Edit").allowed).toBe(false)
+    expect(m.isToolAllowed("Bash").allowed).toBe(false)
+    expect(m.isToolAllowed("Read").allowed).toBe(true)
+  })
+
+  test("whitelist override blocks everything not listed", () => {
+    const m = new ModeManager([{ id: "ask", label: "ASK" }], "ask", undefined, undefined, () => ({
+      permissions: { allow: ["Read", "Grep"] },
+    }))
+    expect(m.isToolAllowed("Read").allowed).toBe(true)
+    expect(m.isToolAllowed("Bash").allowed).toBe(false)
+    const r = m.isToolAllowed("Bash")
+    if (!r.allowed) expect(r.message).toContain("not on the allow list")
+  })
+
+  test("invalidatePermissions clears the cache", () => {
+    let override: { permissions: { deny: string[] } } | null = {
+      permissions: { deny: ["Edit"] },
+    }
+    const m = new ModeManager(
+      [{ id: "ask", label: "ASK" }],
+      "ask",
+      undefined,
+      undefined,
+      () => override,
+    )
+    expect(m.isToolAllowed("Edit").allowed).toBe(false)
+    override = { permissions: { deny: [] } }
+    // Cached: still blocked.
+    expect(m.isToolAllowed("Edit").allowed).toBe(false)
+    m.invalidatePermissions("ask")
+    expect(m.isToolAllowed("Edit").allowed).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildActiveModeStamp (envelope on tool_results)
+// ---------------------------------------------------------------------------
+
+describe("ModeManager.buildActiveModeStamp", () => {
+  test("returns null when no mode active", () => {
+    const m = mkMgr([ASK_MODE])
+    expect(m.buildActiveModeStamp()).toBeNull()
+  })
+
+  test("returns the self-closing tag when a mode is active", () => {
+    const m = mkMgr([ASK_MODE], "ask")
+    const stamp = m.buildActiveModeStamp()
+    expect(stamp).toBe(`<ma::mode-active id="ask" since="${FIXED_AT_ISO}" />`)
+  })
+
+  test("since reflects the most recent transition, not the constructor time", () => {
+    let now = new Date("2026-01-01T00:00:00.000Z")
+    const m = new ModeManager([ASK_MODE], null, undefined, () => now)
+    expect(m.buildActiveModeStamp()).toBeNull()
+    now = new Date("2026-01-01T00:01:00.000Z")
+    m.setMode("ask")
+    expect(m.buildActiveModeStamp()).toBe(
+      `<ma::mode-active id="ask" since="2026-01-01T00:01:00.000Z" />`,
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// lastAdvertisedModeFromHistory (resume rehydration)
+// ---------------------------------------------------------------------------
+
+describe("lastAdvertisedModeFromHistory", () => {
+  test("returns null on empty history", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(lastAdvertisedModeFromHistory([])).toBeNull()
+  })
+
+  test("returns null when no mode-change blocks present", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(
+      lastAdvertisedModeFromHistory([
+        { role: "user", content: [{ type: "text", text: "hello" }] },
+        { role: "assistant", content: [{ type: "text", text: "hi" }] },
+      ]),
+    ).toBeNull()
+  })
+
+  test("captures `to=` from the new <ma::mode-change> tag", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(
+      lastAdvertisedModeFromHistory([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: '<ma::mode-change from="default" to="ask" at="x" />' },
+            { type: "text", text: "ask this" },
+          ],
+        },
+      ]),
+    ).toBe("ask")
+  })
+
+  test("captures `to=` from the legacy <mode-change> tag", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(
+      lastAdvertisedModeFromHistory([
+        {
+          role: "user",
+          content: [{ type: "text", text: '<mode-change from="default" to="plan" />' }],
+        },
+      ]),
+    ).toBe("plan")
+  })
+
+  test("returns null when the most recent to= is `default`", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(
+      lastAdvertisedModeFromHistory([
+        {
+          role: "user",
+          content: [{ type: "text", text: '<ma::mode-change from="ask" to="default" at="x" />' }],
+        },
+      ]),
+    ).toBeNull()
+  })
+
+  test("returns the LAST advertisement when several are present", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(
+      lastAdvertisedModeFromHistory([
+        {
+          role: "user",
+          content: [{ type: "text", text: '<ma::mode-change from="default" to="ask" at="t1" />' }],
+        },
+        { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        {
+          role: "user",
+          content: [{ type: "text", text: '<ma::mode-change from="ask" to="plan" at="t2" />' }],
+        },
+      ]),
+    ).toBe("plan")
+  })
+
+  test("ignores assistant-role text blocks", async () => {
+    const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
+    expect(
+      lastAdvertisedModeFromHistory([
+        {
+          role: "assistant",
+          content: [{ type: "text", text: '<ma::mode-change from="default" to="ask" />' }],
+        },
+      ]),
+    ).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// primeLastAdvertised
+// ---------------------------------------------------------------------------
+
+describe("ModeManager.primeLastAdvertised", () => {
+  test("prevents redundant first-consume after resume", () => {
+    // Process starts with ASK active (CLI flag, say) AND the persisted
+    // history's last `<ma::mode-change to="ask">` already informed the
+    // model. Without priming, the first consume would re-emit
+    // `from="default" to="ask"`. With priming, it returns null.
+    const m = mkMgr([ASK_MODE], "ask")
+    m.primeLastAdvertised("ask")
+    expect(m.consumePendingAttachment()).toBeNull()
+  })
+
+  test("prime to null is the explicit no-mode case", () => {
+    const m = mkMgr([ASK_MODE], "ask")
+    m.primeLastAdvertised(null)
+    // History said "default" was last announced; active is "ask"; expect a real attachment.
+    const block = m.consumePendingAttachment()
+    expect(block).not.toBeNull()
+    if (block && block.type === "text") {
+      expect(block.text).toContain('from="default"')
+      expect(block.text).toContain('to="ask"')
+    }
   })
 })
