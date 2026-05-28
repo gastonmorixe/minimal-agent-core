@@ -574,13 +574,53 @@ export interface LiveAreaHandlerContext {
 }
 
 /**
+ * Tool-permissions policy for a mode.
+ *
+ * Two complementary lists, both array-of-tool-name strings (or the
+ * wildcard `"*"`):
+ *
+ * - `allow`: only these tools may run. Default `["*"]` (everything).
+ * - `deny`:  these tools may NOT run. Default `[]` (nothing).
+ *
+ * **Deny wins** on overlap. Combined with the wildcard, three common
+ * shapes cover most real cases:
+ *
+ * | Goal                            | `allow`       | `deny`               |
+ * |---------------------------------|---------------|----------------------|
+ * | Unrestricted (same as no mode)  | `["*"]`       | `[]`                 |
+ * | Block a few tools               | `["*"]`       | `["Edit","Write"]`   |
+ * | Whitelist (only these tools)    | `["Read",...]`| `[]`                 |
+ *
+ * Per-tool argument predicates (e.g. allow `Bash` only when the command
+ * matches a regex) are NOT in this primitive. That's the future
+ * per-tool ACL work tracked in `TODOS.md#T-e7ce6f`.
+ *
+ * @see ManifestMode.permissions for usage on a mode declaration.
+ * @see buildEffectiveModePermissions for user-config overlay rules.
+ */
+export interface ModePermissions {
+  /**
+   * Whitelist of tool names that may run, or `["*"]` for "everything".
+   * Default `["*"]`.
+   */
+  allow?: string[]
+  /**
+   * Blacklist of tool names that may NOT run. Wins over `allow`.
+   * Default `[]`.
+   */
+  deny?: string[]
+}
+
+/**
  * One named operating mode.
  *
  * A mode is a lightweight UX state on top of the agent. When active it can:
  *
  * - Append a system-prompt fragment so the model knows to behave a certain way
  *   (e.g. "you are in ASK mode, refuse to call Edit/Write tools").
- * - Filter the tool list visible to the model (`disallowedTools`).
+ * - Gate the tools the harness will actually run via {@link permissions}
+ *   (`allow` whitelist + `deny` blacklist, deny wins). The tools still
+ *   appear in the request body so the prompt cache is preserved.
  * - Re-skin the REPL prompt with a colored label like `ASK > `.
  * - Re-skin the agent status spinner ("Asking..." instead of "Thinking...").
  *
@@ -645,9 +685,41 @@ export interface ManifestMode {
    */
   systemPromptAppend?: string
   /**
+   * Tool-permissions policy for the mode. Two complementary lists, both
+   * optional, both array-of-tool-name strings (or the wildcard `"*"`):
+   *
+   * - `allow`: only these tools may run. Default `["*"]` (everything).
+   * - `deny`:  these tools may NOT run. Default `[]` (nothing).
+   *
+   * **Deny wins.** If a tool appears in both, it is denied. If `allow`
+   * is `["*"]` and `deny` is `[]`, the mode is fully unrestricted (same
+   * as no mode active). If `allow` does not contain `"*"`, only tools
+   * named explicitly in `allow` pass.
+   *
+   * The harness gate (see {@link ModeManager.isToolAllowed}) evaluates
+   * the policy at dispatch time and synthesizes a structured
+   * `is_error: true` `tool_result` on refusal. Tools STAY REGISTERED in
+   * the request body either way: removing them mutates the cached
+   * `tools` array bytes and busts the prompt cache on every toggle.
+   *
+   * User config can override (replace, not merge) the manifest values
+   * at `plugins.<plugin-id>.modes.<mode-id>.permissions`. See
+   * {@link buildEffectiveModePermissions} for the resolution order.
+   *
+   * @example ASK mode (no Edit/Write):
+   *   permissions: { deny: ["Edit", "Write"] }
+   *
+   * @example read-only mode (only these tools allowed):
+   *   permissions: { allow: ["Read", "Glob", "Grep", "WebSearch"] }
+   *
+   * @since 0.3.0 (replaces {@link disallowedTools}, which still works
+   * as sugar for `permissions: { deny: [...] }`).
+   */
+  permissions?: ModePermissions
+  /**
    * Tool names the harness will refuse to execute while this mode is
-   * active. The tools STAY REGISTERED in the request — the model still
-   * sees them in its tool list — but
+   * active. The tools STAY REGISTERED in the request : the model still
+   * sees them in its tool list : but
    * {@link ModeManager.isToolAllowed} returns `allowed: false` for
    * them and the agent's tool-dispatch loop synthesizes a structured
    * `is_error: true` tool_result instead of running the tool.
@@ -660,6 +732,10 @@ export interface ManifestMode {
    * the wire shape.
    *
    * Use exact tool names (e.g. `["Edit", "Write"]`).
+   *
+   * @deprecated Use {@link permissions} instead. This field is sugar
+   * for `permissions: { deny: [...] }` and is kept for one release so
+   * existing manifests keep working. Will be removed in v0.4.
    */
   disallowedTools?: string[]
   /**

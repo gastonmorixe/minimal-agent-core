@@ -110,8 +110,8 @@ export function foldRecords(records: SessionRecord[]): Message[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Repair the message list so the Messages API accepts it. Two classes of
- * problems are removed:
+ * Repair the message list so the Messages API accepts it. Three classes
+ * of problems are removed:
  *
  * 1. Assistant messages whose `tool_use` blocks are not ALL matched by
  *    `tool_result` blocks in the IMMEDIATELY following user message.
@@ -124,8 +124,22 @@ export function foldRecords(records: SessionRecord[]): Message[] {
  *    block-by-block; if the user message becomes empty as a result, the
  *    whole message is dropped.
  *
- * Walks the list forward in a single pass. Idempotent: running repair on
- * an already-clean list is a no-op.
+ * 3. Consecutive `user` messages in the output. The Anthropic API
+ *    rejects `[user, user]` with "messages: roles must alternate". This
+ *    pattern arises in append-only logs across multiple resumes: run 1
+ *    appends `user(A) + assistant(tool_use)` then crashes; run 2 loads,
+ *    surfaces `user(A)` as `pendingDraft`, the user discards it and
+ *    types `user(B)`, which appends to the same log; run 3 loads and
+ *    repair-step-1 drops the orphan assistant, leaving `[user(A),
+ *    user(B), …]`. We drop the EARLIER user (it was never replied to,
+ *    and the later one is the conversation the user actually moved on
+ *    to). The dropped prompt is unrecoverable here — its retry chance
+ *    was at the FIRST resume via `pendingDraft`. Surfacing it at run 3
+ *    would be wrong because the user already chose to move on.
+ *
+ * Walks the list in passes (assistant drop, tool_result filter,
+ * consecutive-user collapse). Idempotent: running repair on an
+ * already-clean list is a no-op.
  *
  * Renamed from `repairTrailingTurn` (which only handled the tail). The
  * old name remains as an alias for back-compat.
@@ -204,7 +218,34 @@ export function repairMessages(input: Message[]): Message[] {
       })
     }
   }
-  return out
+
+  // Step 4: collapse consecutive `user` messages by dropping all but
+  // the LAST in each run. The latest user prompt is the one the
+  // conversation actually continued from; earlier ones in the same run
+  // were orphaned (never replied to), typically because an assistant
+  // turn between them was dropped by step 1 (the "crashed mid-tool"
+  // pattern across multiple resumes). See the function doc for the
+  // full scenario.
+  //
+  // Walks backwards so the last user in each run is naturally retained
+  // and we can drop the earlier ones in place without index juggling.
+  const collapsed: Message[] = []
+  for (let i = out.length - 1; i >= 0; i--) {
+    const cur = out[i]
+    const prev = collapsed[collapsed.length - 1] // already-pushed = NEXT in original order
+    if (cur.role === "user" && prev?.role === "user") {
+      // `cur` is an EARLIER user that's immediately followed by another
+      // user in the output. Drop `cur`. We don't merge content: tool_result
+      // blocks (load-bearing for the next API call) live in the LATER user
+      // message and would be re-ordered destructively, and plain prompts
+      // here represent abandoned-then-replaced intent that the user
+      // already chose to move past.
+      continue
+    }
+    collapsed.push(cur)
+  }
+  collapsed.reverse()
+  return collapsed
 }
 
 /** Back-compat alias for `repairMessages`. */
@@ -221,6 +262,64 @@ export interface LoadedSession {
   dropped: { line: number; reason: string }[]
   /** True when `repairTrailingTurn` removed at least one message. */
   repaired: boolean
+  /**
+   * Text the user typed into the editor and pressed Enter on, but which
+   * never got an assistant reply (the agent aborted, crashed, or was
+   * killed before any tokens streamed). Surfaced separately from
+   * `messages` so the REPL can prefill the editor with it on resume
+   * instead of sending the model a `[..., user, user]` sequence that the
+   * API would reject. Detected by `extractPendingDraft` (see below);
+   * `null` when no trailing human-authored user text exists. When set,
+   * the corresponding message is ALREADY popped from `messages` so
+   * `messages` is API-clean on its own.
+   */
+  pendingDraft: string | null
+}
+
+/**
+ * Pop the trailing user message from `messages` if it represents a
+ * "human typed something, hit Enter, and the agent never replied"
+ * situation. Returns the joined text (cursor-restorable into the
+ * editor) and mutates `messages` in place. Returns `null` and leaves
+ * `messages` untouched in every other case.
+ *
+ * The check is deliberately strict, mistakenly popping a real message
+ * would silently lose conversation history. We require ALL of:
+ *
+ * 1. `messages` is non-empty AND the last message has `role: "user"`.
+ *    (Trailing assistant means the model finished a turn cleanly.)
+ * 2. The user message's content is a block array (not a bare string).
+ *    Strings are foldRecords' historical shape for plain-text turns;
+ *    new turns always use blocks. A string trailing-user is suspicious
+ *    enough that we leave it for human inspection rather than pop.
+ * 3. NO block in the user message is a `tool_result`. A trailing user
+ *    message with tool_results is the "crashed mid-tool" case; that's
+ *    already handled by `repairMessages` (the orphan assistant gets
+ *    dropped, then the user message gets dropped via empty-content).
+ *    If repair somehow left tool_results in place, they're load-bearing,
+ *    don't touch.
+ * 4. At least one `text` block exists with non-empty text after trim.
+ *    An attachment-only user message (e.g. just a `<mode-change>` tag
+ *    with no human prose) is runtime plumbing, not a draft.
+ *
+ * When all four hold, every `text` block's text is joined with `\n\n`
+ * (matching how the agent's `appendUser` reassembles split prose) and
+ * returned trimmed.
+ */
+export function extractPendingDraft(messages: Message[]): string | null {
+  const last = messages[messages.length - 1]
+  if (!last || last.role !== "user") return null
+  if (!Array.isArray(last.content)) return null
+  const hasToolResult = last.content.some((b) => b.type === "tool_result")
+  if (hasToolResult) return null
+  const texts = last.content
+    .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+    .map((b) => b.text)
+  if (texts.length === 0) return null
+  const joined = texts.join("\n\n").trim()
+  if (joined.length === 0) return null
+  messages.pop()
+  return joined
 }
 
 export function loadSessionFromText(text: string): LoadedSession {
@@ -241,7 +340,13 @@ export function loadSessionFromText(text: string): LoadedSession {
       }
     }
   }
-  return { meta, records, messages, dropped, repaired }
+  // Extract the trailing unsent draft (mutates `messages` if found). See
+  // `extractPendingDraft` JSDoc for the four-condition guard. This must
+  // run AFTER `repairMessages` so the "crashed mid-tool" case (whose
+  // user message contains tool_results) is already filtered out and
+  // can't be mistaken for a draft.
+  const pendingDraft = extractPendingDraft(messages)
+  return { meta, records, messages, dropped, repaired, pendingDraft }
 }
 
 export function loadSession(sid: string, dir?: string): LoadedSession {

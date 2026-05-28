@@ -66,15 +66,15 @@ import { runLoginCommand } from "./commands/login.ts"
 import { runLogoutCommand } from "./commands/logout.ts"
 import { resolveSessionTarget } from "./commands/session-index.ts"
 import { runSessionsCommand } from "./commands/sessions.ts"
-import { loadDisabledPluginIds, loadUserConfig } from "./config.ts"
+import { loadDisabledPluginIds, loadModeUserOverrides, loadUserConfig } from "./config.ts"
 import { getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
-import { setGlobalEventBus } from "./global-bus.ts"
+import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { getSessionId } from "./metadata.ts"
-import { ModeManager } from "./modes.ts"
+import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
 import { PluginLoader } from "./plugins/loader.ts"
@@ -94,7 +94,7 @@ import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-prese
 import type { Spinner } from "./spinner.ts"
 import { formatStartupToolsRow } from "./startup-tools-row.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
-import { displayWidth } from "./term-width.ts"
+import { displayWidth, truncateDisplayWidth, wrapRows } from "./term-width.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 
@@ -205,10 +205,18 @@ const formatterExtraArgs: string[] = (() => {
 
 // --resume <sid>  resume a saved session (or "last" for the most recent
 // session in this cwd, falling back to the global most-recent).
-// --sessions       list saved sessions and exit.
+// --sessions [<query>]  list saved sessions (optionally fuzzy-filter on
+//                       date/sid/cwd) and exit.
 const resumeIdx = args.indexOf("--resume")
 const resumeArg = resumeIdx !== -1 && args[resumeIdx + 1] ? args[resumeIdx + 1] : undefined
-const wantListSessions = args.includes("--sessions")
+const sessionsIdx = args.indexOf("--sessions")
+const wantListSessions = sessionsIdx !== -1
+// The token after `--sessions` is an optional fuzzy query. A leading
+// dash means it's the next flag, not our value.
+const sessionsQuery =
+  sessionsIdx !== -1 && args[sessionsIdx + 1] && !args[sessionsIdx + 1].startsWith("-")
+    ? args[sessionsIdx + 1]
+    : undefined
 
 const dumpIdx = args.indexOf("--dump")
 const dumpArg = dumpIdx !== -1 && args[dumpIdx + 1] ? args[dumpIdx + 1] : undefined
@@ -269,8 +277,8 @@ function printHelp(): void {
     `    ${c.cyan("--list-models")} ${c.dim("/")} ${c.cyan("--models")}       Fetch and display available models`,
     `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
     `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
-    `    ${c.cyan("--sessions")}                  List saved sessions ${c.dim("(~/.minimal-agent/sessions/)")}`,
-    `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session`,
+    `    ${c.cyan("--sessions")} ${c.dim("[<query>]")}          List saved sessions ${c.dim("(fuzzy filter on date/sid/cwd)")}`,
+    `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session ${c.dim("(also: `sessions resume <sid>`)")}`,
     `    ${c.cyan("--dump")} ${c.dim("<sid|last>")}         Dump a full session history to stdout`,
     `    ${c.cyan("--dump-format")} ${c.dim("<md|xml>")}    Output format for --dump ${c.dim("(default: md)")}`,
     `    ${c.cyan("-h")}, ${c.cyan("--help")}                 Show this help`,
@@ -323,7 +331,11 @@ function printStartupHeader(): void {
   // entirely and rely on the first/last rounded corners to give the
   // tree a softer, more curved feel.
   const line1 = `  ${c.faintWhite("╭")} ${c.bold(c.pink("minimal-agent"))} ${c.faintWhite(`v${VERSION}`)}`
-  const line2 = `  ${c.faintWhite("│")} ${by} ${author} ${sep} ${url}`
+  // Truncate line2 to terminal width so it never wraps and leaves an
+  // unstyled continuation on narrow terminals (e.g. mobile-sized 52-col).
+  const cols = stderrCols()
+  const line2Full = `  ${c.faintWhite("│")} ${by} ${author} ${sep} ${url}`
+  const line2 = truncateDisplayWidth(line2Full, cols)
 
   // Tiny cat mascot, anchored a fixed gap after the LONGER of the two
   // header lines — not flush to the terminal's right edge. Anchoring
@@ -341,7 +353,6 @@ function printStartupHeader(): void {
   // If the terminal is too narrow to fit even the cat, drop it rather
   // than wrap. The cat's widest row is `( ^.^ )` ≈ 7 cells; require
   // anchorCol + catWidth ≤ columns, otherwise skip.
-  const cols = (process.stderr as { columns?: number }).columns ?? 80
   const catWidth = Math.max(displayWidth(ears), displayWidth(face))
   const fits = anchorCol + catWidth <= cols
 
@@ -365,31 +376,63 @@ function padTo(line: string, targetCol: number): string {
   return line + " ".repeat(targetCol - w)
 }
 
-let lastStartupRow: { label: string; value: string } | null = null
+// Visible-cell count of the fixed chrome that precedes the value in every
+// startup row: "  │ " (4) + label.padEnd(9) (9) + "  " (2) = 15 cells.
+const STARTUP_ROW_OVERHEAD = 15
+
+/** Current stderr terminal width, falling back to 80 for non-TTY / unknown. */
+function stderrCols(): number {
+  return (process.stderr as { columns?: number }).columns ?? 80
+}
+
+/**
+ * Truncate a startup-row value so the full row fits on a single terminal
+ * line. Prevents wrapped rows from confusing the cursor-up math in
+ * `closeStartupTree` and keeps the tree visually compact on narrow terminals.
+ */
+function fitRowValue(value: string): string {
+  const cols = stderrCols()
+  const maxWidth = Math.max(0, cols - STARTUP_ROW_OVERHEAD)
+  return truncateDisplayWidth(value, maxWidth)
+}
+
+let lastStartupRow: { label: string; value: string; rowWidth: number } | null = null
 
 function printStartupRow(label: string, value: string): void {
   if (!SHOW_HEADER) return
-  console.error(`  ${c.faintWhite("│")} ${c.sky(label.padEnd(9))}  ${value}`)
-  lastStartupRow = { label, value }
+  const v = fitRowValue(value)
+  const row = `  ${c.faintWhite("│")} ${c.sky(label.padEnd(9))}  ${v}`
+  console.error(row)
+  lastStartupRow = { label, value: v, rowWidth: displayWidth(row) }
 }
 
 /**
  * Close the startup tree by rewriting the last `│` row with `╰`.
  *
- * On a TTY we walk the cursor up one line and reprint the row with the
- * closing rounded corner, so the tree terminates visually on its final
- * entry (e.g. `╰ quota   ok`). On non-TTY output (pipes, redirects) we
- * just append a standalone `╰` closer line since cursor motion wouldn't
- * render.
+ * On a TTY we walk the cursor up to the start of the last row and erase
+ * everything to end-of-screen before reprinting with the closing corner,
+ * so the tree terminates visually on its final entry (e.g. `╰ quota   ok`).
+ * Using `\x1b[J` (erase to end of screen) instead of `\x1b[2K` (erase
+ * current line only) handles the edge case where the previous row wrapped
+ * to multiple physical lines — all continuation lines are cleared cleanly.
+ *
+ * On non-TTY output (pipes, redirects) we just append a standalone `╰`
+ * closer line since cursor motion wouldn't render.
  */
 function closeStartupTree(): void {
   if (!SHOW_HEADER) return
   if (!lastStartupRow) return
-  const { label, value } = lastStartupRow
+  const { label, value, rowWidth } = lastStartupRow
   lastStartupRow = null
   if (process.stderr.isTTY) {
-    // Move cursor up 1 line, clear it, carriage return, reprint with ╰.
-    process.stderr.write("\x1b[1A\x1b[2K\r")
+    const cols = stderrCols()
+    // How many physical lines did the last row occupy? With fitRowValue()
+    // applied this is always 1, but we compute it defensively so any
+    // future caller that bypasses fitRowValue still gets correct cursor math.
+    const physLines = wrapRows(rowWidth, cols)
+    // Go up physLines lines to the start of the row, then erase from
+    // cursor to end of screen (clears the row + any wrapped continuation).
+    process.stderr.write(`\x1b[${physLines}A\x1b[J`)
     console.error(`  ${c.faintWhite("╰")} ${c.sky(label.padEnd(9))}  ${value}`)
   } else {
     console.error(`  ${c.faintWhite("╰")}`)
@@ -425,12 +468,16 @@ function startStartupRowSpinner(
   if (!process.stderr.isTTY) {
     return {
       ok(value) {
-        console.error(`${prefix}${value}`)
-        lastStartupRow = { label, value }
+        const v = fitRowValue(value)
+        const row = `${prefix}${v}`
+        console.error(row)
+        lastStartupRow = { label, value: v, rowWidth: displayWidth(row) }
       },
       fail(value) {
-        console.error(`${prefix}${value}`)
-        lastStartupRow = { label, value }
+        const v = fitRowValue(value)
+        const row = `${prefix}${v}`
+        console.error(row)
+        lastStartupRow = { label, value: v, rowWidth: displayWidth(row) }
       },
     }
   }
@@ -454,8 +501,9 @@ function startStartupRowSpinner(
 
   function settle(value: string): void {
     clearInterval(timer)
-    process.stderr.write(`\r\x1b[2K${prefix}${value}\n`)
-    lastStartupRow = { label, value }
+    const v = fitRowValue(value)
+    process.stderr.write(`\r\x1b[2K${prefix}${v}\n`)
+    lastStartupRow = { label, value: v, rowWidth: displayWidth(`${prefix}${v}`) }
   }
 
   return {
@@ -640,7 +688,7 @@ async function main() {
       return
     }
     case "sessions":
-      runSessionsCommand()
+      runSessionsCommand({ query: sessionsQuery })
       return
     case "list-flags":
       runListFlagsCommand()
@@ -827,6 +875,26 @@ async function main() {
   // so they can embed it in the system prompt. Subprocess probes inherit
   // process.env, so a plain assignment is enough.
   process.env.MINIMAL_AGENT_MODEL = selectedModel
+  // Expose the resolved effort to the live-area quota-status plugin so
+  // it can surface "effort <level>" as a trailing footer segment. Same
+  // overwrite-with-resolved-value pattern as MINIMAL_AGENT_MODEL above:
+  // the env var was a user-facing INPUT during resolution (read once at
+  // module load, line 161); after this point we own it as the OUTPUT
+  // "what we'll actually send on the wire". For haiku the wire field is
+  // suppressed entirely, so we clear the env so the footer doesn't lie.
+  if (isHaiku) {
+    delete process.env.MINIMAL_AGENT_EFFORT
+  } else {
+    process.env.MINIMAL_AGENT_EFFORT = effort ?? "medium"
+  }
+  // Expose the full session id so the live-area footer can render a
+  // shortened anchor (the renderer takes the first 8 hex chars — enough
+  // to disambiguate inside `~/.minimal-agent/sessions/` for any
+  // realistic session count; collision probability ≈ N²/2^33). We
+  // forward the FULL id and let the consumer decide on truncation so
+  // other consumers (env-info prompt fragments, downstream tools) can
+  // still see the unabridged value if they need it.
+  process.env.MINIMAL_AGENT_SESSION_ID = getSessionId()
   const loader = await PluginLoader.load({
     embeddedDir,
     homeDir,
@@ -896,7 +964,21 @@ async function main() {
           loader.getDefaultModeId(),
         )
       : null
-  const modeManager = loadedModes.length > 0 ? new ModeManager(loadedModes, initialModeId) : null
+  // Per-mode user-config overlays for permissions. Snapshotted once at
+  // startup; the user can edit `~/.minimal-agent/config.jsonc` and
+  // restart to apply. (Hot-reload of permissions is future work.) The
+  // overlay map is queried on demand inside `ModeManager.effectivePermissions`.
+  const modeUserOverrides = loadedModes.length > 0 ? loadModeUserOverrides() : new Map()
+  const modeManager =
+    loadedModes.length > 0
+      ? new ModeManager(
+          loadedModes,
+          initialModeId,
+          undefined,
+          undefined,
+          (modeId) => modeUserOverrides.get(modeId) ?? null,
+        )
+      : null
   if (modeManager?.active()) {
     // Use the manifest's `label` (e.g. "ASK") rather than the lowercase
     // `id` so the startup row matches the prompt prefix the user sees a
@@ -954,6 +1036,14 @@ async function main() {
   // `<mode-change>` chip with `YYYY-MM-DD HH:MM` of the prompt that
   // shipped the toggle, instead of "(now)". Stays null when not resuming.
   let userTimestamps: (Date | null)[] | null = null
+  // Trailing user message that was typed and submitted but never got an
+  // assistant reply (aborted/crashed/killed before any tokens streamed).
+  // `loadSession` extracts it from `messages` so the API never sees a
+  // `[..., user, user]` sequence; we restore it into the editor on REPL
+  // start so the user lands on a populated input and can hit Enter (or
+  // edit / clear) instead of losing their draft to the void. See
+  // `extractPendingDraft` in `./session-restore.ts`.
+  let pendingDraft: string | null = null
   if (resumeArg) {
     try {
       resumeSid = resolveSessionTarget(resumeArg, process.cwd())
@@ -963,6 +1053,7 @@ async function main() {
       }
       const loaded = loadSession(resumeSid)
       initialMessages = loaded.messages
+      pendingDraft = loaded.pendingDraft
       // Build the tool_use_id → ts(ms) lookup for the replay time-hint.
       // We use AssistantRecord.ts because that's the moment the assistant
       // message containing the tool_use block arrived — i.e. the moment
@@ -991,8 +1082,25 @@ async function main() {
           ? ` ${c.dim(`(dropped ${loaded.dropped.length} corrupt line(s))`)}`
           : ""
       const repairNote = loaded.repaired ? ` ${c.dim("(repaired trailing turn)")}` : ""
-      resumeBanner = `resume ${c.cyan(resumeSid)} ${c.dim(`(${turns} message(s))`)}${repairNote}${droppedNote}`
+      // Surface draft restoration in the startup tree so the user sees a
+      // single-source-of-truth explanation for the prefilled editor.
+      // The hint line printed after replay (see below) gives the
+      // editor-adjacent context, but a user scanning the startup banner
+      // alone should still understand why their input is non-empty.
+      const draftNote = pendingDraft !== null ? ` ${c.dim("(unsent draft restored)")}` : ""
+      resumeBanner = `resume ${c.cyan(resumeSid)} ${c.dim(`(${turns} message(s))`)}${repairNote}${droppedNote}${draftNote}`
       printStartupRow("resume", resumeBanner)
+      // Rehydrate ModeManager's lastAdvertisedModeId from the persisted
+      // history so the first consume after resume does NOT re-emit a
+      // redundant `from="default" to="<id>"` attachment for a mode the
+      // model already saw in its conversation. The active mode in this
+      // process is still set by the normal precedence (CLI > env >
+      // config > plugin-default); only the "what the model knows"
+      // bookkeeping is rehydrated here.
+      if (modeManager) {
+        const lastTo = lastAdvertisedModeFromHistory(initialMessages)
+        modeManager.primeLastAdvertised(lastTo)
+      }
       // Hash drift: compute below once we have system+tools.
     } catch (err) {
       console.error(
@@ -1197,6 +1305,18 @@ async function main() {
     const writeDetach = (reason: "exit" | "signal" | "error", code?: number) => {
       if (detachWritten || !store) return
       detachWritten = true
+      // Skip cleanup on the error paths — a SIGINT/uncaughtException
+      // mid-turn may have committed nothing yet but the user still wants
+      // an audit trail (and the on-disk meta can be useful for debugging
+      // a crash). Only the clean "exit" path with no recorded
+      // conversation is eligible for the session to vanish.
+      if (reason === "exit") {
+        try {
+          if (store.cleanupIfUnused()) return
+        } catch {
+          // best-effort; fall through and write the detach marker
+        }
+      }
       try {
         store.appendDetach(reason, code)
       } catch {
@@ -1257,7 +1377,8 @@ async function main() {
   const promptSource = extractPromptFromArgs(args)
   const willEnterRepl = promptSource.kind === "none"
   if (willEnterRepl) {
-    process.stdout.write(buildReadyBanner(modeManager))
+    const stdoutCols = (process.stdout as { columns?: number }).columns ?? 80
+    process.stdout.write(buildReadyBanner(modeManager, stdoutCols))
   }
 
   // Replay prior conversation to scrollback when resuming. We write
@@ -1270,23 +1391,45 @@ async function main() {
   // render through mdstream (or whatever formatter the user configured),
   // matching the live REPL's markdown rendering. Without this, replayed
   // markdown shows up as raw `**bold**` / `# heading` source text.
-  if (resumeSid && initialMessages.length > 0 && !args.includes("--prompt")) {
+  //
+  // We also enter this block when `pendingDraft` is set but the
+  // conversation history is empty (a session that was aborted before any
+  // assistant turn ever completed). In that case there's nothing to
+  // replay but we still want the resume header + draft hint to paint, so
+  // the user sees a coherent "you're resuming session X, here's your
+  // unsent prompt" story instead of an unexplained populated editor.
+  const isInteractiveResume = resumeSid && !args.includes("--prompt")
+  const shouldEmitResumeBlock =
+    isInteractiveResume && (initialMessages.length > 0 || pendingDraft !== null)
+  if (shouldEmitResumeBlock) {
     const stdoutSink = { write: (s: string) => process.stdout.write(s) }
     stdoutSink.write(
       buildResumeHeader({
-        sid: resumeSid,
+        sid: resumeSid as string,
         turns: initialMessages.length,
         model: selectedModel,
       }),
     )
-    await replayToScrollback(initialMessages, stdoutSink, {
-      modeManager,
-      formatterCmd,
-      toolTimeTracker,
-      toolStartTimes,
-      userTimestamps: userTimestamps ?? undefined,
-    })
-    stdoutSink.write("\n")
+    if (initialMessages.length > 0) {
+      await replayToScrollback(initialMessages, stdoutSink, {
+        modeManager,
+        formatterCmd,
+        toolTimeTracker,
+        toolStartTimes,
+        userTimestamps: userTimestamps ?? undefined,
+      })
+      stdoutSink.write("\n")
+    }
+    if (pendingDraft !== null) {
+      // One-line dim hint directly above where the live editor will
+      // mount. The draft text itself is NOT painted here, the editor's
+      // own prefilled buffer is the visual proof. Keeping this compact
+      // avoids a heavy strikethrough echo for multi-KB drafts (the
+      // motivating session in #7548d4b2 had a 4222-char draft).
+      stdoutSink.write(
+        `  ${c.dim("──")} ${c.dim("unsent draft restored to input · press Enter to send, or edit")} ${c.dim("──")}\n\n`,
+      )
+    }
   }
 
   // Non-interactive mode: send prompt, print response, exit
@@ -1455,6 +1598,19 @@ async function main() {
       // plugins are loaded — the editor short-circuits the emit.
       ...(hasPlugins ? { hooks: loader.hooks() } : {}),
     })
+    // Restore the unsent draft (if any) into the editor buffer. This is
+    // the resume-time twin of the abort-flow's setBuffer call in
+    // `agent.ts` (search "setBuffer" in the abort branch) — same visual
+    // idiom: the user sees a populated input with their text, cursor at
+    // end, ready to edit or press Enter. The corresponding hint line
+    // above the editor was emitted as part of the resume block (see
+    // `pendingDraft` handling earlier in this function). Safe before
+    // `editor.start()` because `setBuffer` only paints when
+    // `this.started` is true; the buffer state is captured and the
+    // first repaint shows the prefilled text.
+    if (pendingDraft !== null) {
+      editor.setBuffer(pendingDraft)
+    }
     // Keep show-hidden in sync with mode changes: a mode with
     // `editorShowHidden: true` overrides the env-var/flag baseline.
     if (modeManager) {
@@ -1467,6 +1623,20 @@ async function main() {
     const onResize = () => {
       compositor.notifyResize()
       editor.notifyResize()
+      // Broadcast on the plugin event bus so live-area slots that
+      // declare `refreshOn: ["terminal.resize"]` can re-fire their
+      // handler off-cycle and reflow. We pass the new cols/rows in
+      // the payload for any plugin that wants to skip a refresh when
+      // only one dimension changed.
+      //
+      // This is the "high-level resize notification" the quota-status
+      // plugin subscribes to — it must NOT install its own
+      // `process.stdout.on("resize", ...)` listener (low-level SIGWINCH
+      // ownership lives here and only here, so the order of
+      // `notifyResize()` → bus emit stays deterministic).
+      const cols = typeof process.stdout.columns === "number" ? process.stdout.columns : 0
+      const rows = typeof process.stdout.rows === "number" ? process.stdout.rows : 0
+      getGlobalEventBus()?.emit("terminal.resize", { cols, rows })
     }
     process.stdout.on("resize", onResize)
 

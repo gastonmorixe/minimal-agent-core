@@ -39,7 +39,126 @@ import {
   type StyleEnv,
   styleFromLegacyColor,
 } from "./mode-style.ts"
-import type { ManifestMode } from "./plugins/types.ts"
+import type { ManifestMode, ModePermissions } from "./plugins/types.ts"
+
+/**
+ * Resolved (allow, deny) lists for a mode, with all defaults filled in.
+ *
+ * - `allow` is never empty: at minimum it is `["*"]` (everything).
+ * - `deny`  is `[]` when nothing is denied.
+ * - `source` records which layer the values came from. Useful for the
+ *   `Mode` tool and config diagnostics.
+ *
+ * Built by {@link buildEffectiveModePermissions}.
+ */
+export interface EffectiveModePermissions {
+  allow: string[]
+  deny: string[]
+  source: {
+    /** `"manifest"`, `"user-config"`, `"default"`. */
+    allow: "manifest" | "user-config" | "default"
+    deny: "manifest" | "user-config" | "default"
+  }
+}
+
+/**
+ * One mode's user-config override. Top-level shape:
+ *
+ *   plugins.<plugin-id>.modes.<mode-id>: ModeUserOverride
+ *
+ * The mode is identified by its `id`; the plugin namespace is just a
+ * filing cabinet, not part of the lookup key (mode ids are globally
+ * unique within a session : the loader rejects duplicates).
+ */
+export interface ModeUserOverride {
+  permissions?: ModePermissions
+}
+
+/**
+ * Resolve effective {allow, deny} for a mode by overlaying user config
+ * on top of the manifest, with hard defaults underneath.
+ *
+ * Resolution order (later wins, array-level replacement, not merge):
+ *
+ *   1. defaults: `{ allow: ["*"], deny: [] }`
+ *   2. manifest: `mode.permissions`, then back-compat `mode.disallowedTools`
+ *      (the legacy field becomes `{ deny: [...] }` when `permissions` is
+ *      absent).
+ *   3. user config: `userOverride.permissions`.
+ *
+ * Each list resolves independently: a user override that sets only
+ * `allow` inherits `deny` from the manifest (or default), and vice
+ * versa. This matches every other "tuple of overridable knobs" pattern
+ * in the agent's config surface.
+ *
+ * Pure : no I/O, no closure state. Cheap to call on every dispatch (the
+ * caller is encouraged to cache by `(modeId, configHash)`).
+ *
+ * @param mode - The mode whose permissions we want.
+ * @param userOverride - Optional user-config overlay (one mode's slice).
+ */
+export function buildEffectiveModePermissions(
+  mode: ManifestMode,
+  userOverride?: ModeUserOverride | null,
+): EffectiveModePermissions {
+  const userAllow = userOverride?.permissions?.allow
+  const userDeny = userOverride?.permissions?.deny
+  const manifestAllow = mode.permissions?.allow
+  // disallowedTools is back-compat sugar for permissions.deny.
+  // permissions.deny wins if both are set on the same manifest.
+  const manifestDeny = mode.permissions?.deny ?? mode.disallowedTools
+
+  let allow: string[]
+  let allowSource: EffectiveModePermissions["source"]["allow"]
+  if (userAllow != null) {
+    allow = [...userAllow]
+    allowSource = "user-config"
+  } else if (manifestAllow != null) {
+    allow = [...manifestAllow]
+    allowSource = "manifest"
+  } else {
+    allow = ["*"]
+    allowSource = "default"
+  }
+
+  let deny: string[]
+  let denySource: EffectiveModePermissions["source"]["deny"]
+  if (userDeny != null) {
+    deny = [...userDeny]
+    denySource = "user-config"
+  } else if (manifestDeny != null) {
+    deny = [...manifestDeny]
+    denySource = "manifest"
+  } else {
+    deny = []
+    denySource = "default"
+  }
+
+  return { allow, deny, source: { allow: allowSource, deny: denySource } }
+}
+
+/**
+ * Evaluate a tool name against an effective permissions policy.
+ *
+ * Algorithm (deny wins, wildcard supported in `allow`):
+ *
+ *   1. If `tool` is in `deny`, return `false`.
+ *   2. If `allow` contains `"*"`, return `true`.
+ *   3. If `tool` is in `allow`, return `true`.
+ *   4. Otherwise return `false`.
+ *
+ * Pure. Constant in policy size for typical (<20 entries) lists; we
+ * use `Array.includes` rather than a `Set` to keep the no-mode hot path
+ * allocation-free.
+ *
+ * @param tool - Tool name (e.g. `"Edit"`).
+ * @param perms - Effective permissions for the active mode.
+ */
+export function isToolAllowedByPermissions(tool: string, perms: EffectiveModePermissions): boolean {
+  if (perms.deny.includes(tool)) return false
+  if (perms.allow.includes("*")) return true
+  return perms.allow.includes(tool)
+}
 
 /**
  * Subscriber callback notified whenever the active mode changes.
@@ -67,6 +186,27 @@ export type ModeChangeListener = (active: ManifestMode | null, event?: ModeChang
 export interface ModeChangeEvent {
   from: ManifestMode | null
   to: ManifestMode | null
+  at: Date
+}
+
+/**
+ * Payload for a {@link ModeManager.onDeliver} listener call. Fires
+ * when {@link ModeManager.consumePendingAttachment} actually returns
+ * a non-null block (= the model has been TOLD about the change), as
+ * opposed to {@link ModeChangeEvent} which fires on any toggle.
+ *
+ * `fromId` is the id the model previously believed (`null` = default).
+ * `toId` is the id the model now believes (`null` = default).
+ * `at` is the wall-clock the underlying toggle took effect, mirroring
+ * `<ma::mode-change at="...">`.
+ *
+ * Delivery is the "model now knows" event. Listeners that paint a
+ * scrollback chip or clear a "pending" decoration should subscribe
+ * here, not to the toggle channel.
+ */
+export interface ModeDeliveryEvent {
+  fromId: string | null
+  toId: string | null
   at: Date
 }
 
@@ -147,6 +287,12 @@ export class ModeManager {
   /** Index into {@link modes}, or -1 for "no mode". */
   private idx: number
   private readonly listeners = new Set<ModeChangeListener>()
+  /**
+   * Delivery listeners (model-now-knows side effects). See
+   * {@link onDeliver}. Fires from inside `consumePendingAttachment`
+   * AFTER `lastAdvertisedModeId` is updated.
+   */
+  private readonly deliveryListeners = new Set<(event: ModeDeliveryEvent) => void>()
   private readonly env: StyleEnv
   /** Resolved style cache, one entry per mode in {@link modes}. */
   private readonly resolvedCache: (ResolvedModeStyle | null)[]
@@ -186,6 +332,31 @@ export class ModeManager {
    * when no toggle has happened in this process.
    */
   private lastEvent: ModeChangeEvent | null = null
+  /**
+   * Wall-clock the active mode was entered (set on every successful
+   * transition, including initial-default). Exposed as
+   * {@link activeSince} and stamped onto every tool_result envelope
+   * via {@link buildActiveModeStamp}.
+   *
+   * `null` when no mode has ever been active in this process.
+   */
+  private activeSinceAt: Date | null = null
+  /**
+   * Per-mode user-config override lookup. Optional. Called on every
+   * dispatch-time `isToolAllowed` (cheap, single dict lookup).
+   *
+   * Returning `null`/`undefined` means "no override; use the manifest".
+   *
+   * Injected so the manager doesn't depend on the config loader
+   * directly (cyclic-import-free, test-friendly).
+   */
+  private readonly getOverride: (modeId: string) => ModeUserOverride | null
+  /**
+   * Cache of resolved effective permissions, keyed by manifest index.
+   * Invalidated by {@link invalidatePermissions} when the user config
+   * reloads (rare; the host calls this explicitly).
+   */
+  private permissionsCache: (EffectiveModePermissions | null)[]
 
   /**
    * @param modes - The list of available modes (in cycle order).
@@ -195,25 +366,80 @@ export class ModeManager {
    * @param now - Wall-clock injection point for {@link ModeChangeEvent.at}.
    *   Defaults to `() => new Date()`. Tests use a fixed Date for byte-stable
    *   chip rendering.
+   * @param getOverride - Per-mode user-config lookup. Defaults to a no-op
+   *   that always returns `null`. Wire it to the host's config loader to
+   *   honor `plugins.<plugin-id>.modes.<mode-id>.permissions` overrides.
    */
   constructor(
     modes: ManifestMode[],
     defaultModeId?: string | null,
     env?: StyleEnv,
     now?: () => Date,
+    getOverride?: (modeId: string) => ModeUserOverride | null,
   ) {
     this.modes = [...modes]
     this.idx = -1
     this.env = env ?? detectStyleEnv()
     this.now = now ?? (() => new Date())
+    this.getOverride = getOverride ?? (() => null)
     this.resolvedCache = this.modes.map((m) => {
       const req = m.style ?? styleFromLegacyColor(m.color)
       return req ? resolveModeStyle(req, this.env) : null
     })
+    this.permissionsCache = this.modes.map(() => null)
     if (defaultModeId) {
       const i = this.modes.findIndex((m) => m.id === defaultModeId)
-      if (i !== -1) this.idx = i
+      if (i !== -1) {
+        this.idx = i
+        this.activeSinceAt = this.now()
+      }
     }
+  }
+
+  /**
+   * Drop the cached effective permissions for one mode (or all modes).
+   * Call this after the user config reloads.
+   *
+   * @param modeId - Specific mode to invalidate, or `null` for all.
+   */
+  invalidatePermissions(modeId: string | null = null): void {
+    if (modeId == null) {
+      this.permissionsCache = this.modes.map(() => null)
+      return
+    }
+    const i = this.modes.findIndex((m) => m.id === modeId)
+    if (i !== -1) this.permissionsCache[i] = null
+  }
+
+  /**
+   * Resolved effective permissions for a mode, building (and caching)
+   * on first access. Returns `null` when the id is unknown.
+   *
+   * Cache key is the manifest index. Invalidate via
+   * {@link invalidatePermissions} after a config reload.
+   */
+  effectivePermissions(modeId: string | null): EffectiveModePermissions | null {
+    if (modeId == null) return null
+    const i = this.modes.findIndex((m) => m.id === modeId)
+    if (i === -1) return null
+    const cached = this.permissionsCache[i]
+    if (cached) return cached
+    const built = buildEffectiveModePermissions(this.modes[i], this.getOverride(modeId))
+    this.permissionsCache[i] = built
+    return built
+  }
+
+  /**
+   * Wall-clock when the currently active mode took effect. `null` when
+   * no mode is (or has ever been) active in this process.
+   *
+   * Set in the constructor (if `defaultModeId` was provided) and on
+   * every successful {@link setMode} / {@link cycleNext} / {@link cyclePrev}
+   * transition that lands on a non-null mode. Cleared when the user
+   * leaves a mode for "no mode active".
+   */
+  activeSince(): Date | null {
+    return this.activeSinceAt
   }
 
   /** True if the manager has any modes available. */
@@ -253,6 +479,7 @@ export class ModeManager {
       if (this.idx === -1) return true
       this.prevModeId = this.activeId()
       this.idx = -1
+      this.activeSinceAt = null
       this.notify()
       return true
     }
@@ -261,6 +488,7 @@ export class ModeManager {
     if (this.idx === i) return true
     this.prevModeId = this.activeId()
     this.idx = i
+    this.activeSinceAt = this.now()
     this.notify()
     return true
   }
@@ -274,8 +502,10 @@ export class ModeManager {
     this.prevModeId = this.activeId()
     if (this.idx === this.modes.length - 1) {
       this.idx = -1
+      this.activeSinceAt = null
     } else {
       this.idx += 1
+      this.activeSinceAt = this.now()
     }
     this.notify()
     return this.active()
@@ -290,10 +520,13 @@ export class ModeManager {
     this.prevModeId = this.activeId()
     if (this.idx === -1) {
       this.idx = this.modes.length - 1
+      this.activeSinceAt = this.now()
     } else if (this.idx === 0) {
       this.idx = -1
+      this.activeSinceAt = null
     } else {
       this.idx -= 1
+      this.activeSinceAt = this.now()
     }
     this.notify()
     return this.active()
@@ -308,30 +541,64 @@ export class ModeManager {
   }
 
   /**
-   * Dispatch-time tool gate. Replaces the old `filterTools` (which used
-   * to delete disallowed tools from the request body — that mutated the
-   * cached prefix on every mode toggle and burned the prompt cache).
+   * Dispatch-time tool gate.
    *
-   * Tools are now ALWAYS registered in the request. The agent's tool
-   * loop calls this method right before invoking each `tool_use` block;
-   * if `allowed: false`, the loop synthesizes a structured `is_error:
-   * true` `tool_result` with the returned `message` and skips execution.
-   * The model sees the rejection in its next round and adapts.
+   * Tools are ALWAYS registered in the request body (removing them
+   * would mutate the cached `tools` array bytes and bust the prompt
+   * cache on every mode toggle). The agent's tool loop calls this
+   * method right before invoking each `tool_use` block; on `allowed:
+   * false` the loop synthesizes a structured `is_error: true`
+   * `tool_result` with the returned `message` and skips execution.
+   * The model sees the rejection on its next round and adapts.
    *
-   * Returns `{ allowed: true }` when there is no active mode, when the
-   * active mode declares no `disallowedTools`, or when the requested
-   * tool is not on the deny list.
+   * Evaluation order:
+   *   1. No active mode → allowed.
+   *   2. Effective `deny` contains the tool → denied (deny wins).
+   *   3. Effective `allow` contains `"*"` → allowed.
+   *   4. Effective `allow` contains the tool → allowed.
+   *   5. Otherwise → denied (not on the whitelist).
+   *
+   * Effective permissions are built by overlaying user config on the
+   * manifest; see {@link buildEffectiveModePermissions}.
    */
   isToolAllowed(toolName: string): { allowed: true } | { allowed: false; message: string } {
     const m = this.active()
-    if (!m?.disallowedTools || m.disallowedTools.length === 0) {
-      return { allowed: true }
-    }
-    if (!m.disallowedTools.includes(toolName)) return { allowed: true }
+    if (!m) return { allowed: true }
+    const perms = this.effectivePermissions(m.id)
+    if (!perms) return { allowed: true }
+    if (isToolAllowedByPermissions(toolName, perms)) return { allowed: true }
     const label = (m.label ?? m.id).toUpperCase()
-    const head = `Tool "${toolName}" is not permitted in ${label} mode.`
+    const denied = perms.deny.includes(toolName)
+    const head = denied
+      ? `Tool "${toolName}" is denied in ${label} mode.`
+      : `Tool "${toolName}" is not on the allow list for ${label} mode.`
     const tail = m.refusalHint ? ` ${m.refusalHint}` : ""
     return { allowed: false, message: `${head}${tail}` }
+  }
+
+  /**
+   * Build the `<ma::mode-active />` envelope text to stamp onto a
+   * tool_result. The model gets a fresh, machine-readable view of the
+   * active mode on every tool round, killing reasoning-inertia bugs
+   * where a long thinking block predates a user mode toggle.
+   *
+   * Returns `null` when no mode is active : the stamp is only emitted
+   * for non-default policy, keeping no-mode turns byte-identical to
+   * pre-permissions tool_result output.
+   *
+   * Format (single self-closing tag, no inner content):
+   *
+   *     <ma::mode-active id="ask" since="2026-05-27T15:02:19.000Z" />
+   *
+   * The tag rides on the tail of the tool_result `content` (text) so
+   * it sits in the rolling-tail cache breakpoint that's invalidated
+   * every turn anyway. Zero cache cost.
+   */
+  buildActiveModeStamp(): string | null {
+    const m = this.active()
+    if (!m) return null
+    const since = (this.activeSinceAt ?? this.now()).toISOString()
+    return `<ma::mode-active id="${m.id}" since="${since}" />`
   }
 
   /**
@@ -367,14 +634,60 @@ export class ModeManager {
   consumePendingAttachment(): ContentBlock | null {
     const currentId = this.activeId()
     if (currentId === this.lastAdvertisedModeId) return null
-    const from = this.lastAdvertisedModeId ?? "default"
+    const fromId = this.lastAdvertisedModeId
+    const from = fromId ?? "default"
     const to = currentId ?? "default"
     this.lastAdvertisedModeId = currentId
-    const at = (this.lastEvent?.at ?? this.now()).toISOString()
+    const at = this.lastEvent?.at ?? this.now()
+    // Notify delivery listeners (chip renderer, queue-decoration
+    // clearer, audit log, ...) AFTER `lastAdvertisedModeId` has been
+    // updated so peek calls inside listeners return null (they would
+    // otherwise see the same pending state and double-render).
+    const deliveryEvent: ModeDeliveryEvent = { fromId, toId: currentId, at }
+    for (const l of this.deliveryListeners) l(deliveryEvent)
+    // Tag namespace: `<ma::...>` is the convention going forward
+    // (see TODOS.md#T-ca2ce1). The session-replay parser accepts both
+    // the new `<ma::mode-change>` and the legacy bare `<mode-change>`
+    // forms for one release so resumed pre-migration sessions still
+    // render their chip history correctly.
     return {
       type: "text",
-      text: `<mode-change from="${from}" to="${to}" at="${at}" />`,
+      text: `<ma::mode-change from="${from}" to="${to}" at="${at.toISOString()}" />`,
     }
+  }
+
+  /**
+   * Subscribe to mode-change DELIVERY events. Fires synchronously
+   * from inside {@link consumePendingAttachment} right after the
+   * attachment is built and `lastAdvertisedModeId` updated.
+   *
+   * Use this for "the model now knows about the change" side effects
+   * (scrollback chip, queue-decoration clearer, audit log). DO NOT
+   * use {@link subscribe} for those : that fires on TOGGLE, not on
+   * delivery, and the model may not learn about a toggle for many
+   * tool rounds.
+   *
+   * Returns an unsubscribe handle.
+   */
+  onDeliver(listener: (event: ModeDeliveryEvent) => void): () => void {
+    this.deliveryListeners.add(listener)
+    return () => {
+      this.deliveryListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Set `lastAdvertisedModeId` from outside : used by session resume
+   * to seed the manager from the last `<ma::mode-change to="...">` in
+   * the persisted message history. Prevents the manager from re-emitting
+   * a redundant `from="default" to="<id>"` attachment on first consume
+   * after resume.
+   *
+   * Pure setter; does NOT trigger {@link notify} (no transition
+   * happened, just bookkeeping).
+   */
+  primeLastAdvertised(modeId: string | null): void {
+    this.lastAdvertisedModeId = modeId
   }
 
   /**
@@ -598,4 +911,52 @@ export class ModeManager {
     this.lastEvent = event
     for (const l of this.listeners) l(a, event)
   }
+}
+
+/**
+ * Match a `<ma::mode-change>` (or legacy `<mode-change>`) self-closing
+ * tag and capture the `to=` value. Tolerant of attribute order and
+ * stray whitespace.
+ *
+ * Pure regex. The only consumer is {@link lastAdvertisedModeFromHistory}.
+ */
+const MODE_CHANGE_TO_RE = /<(?:ma::)?mode-change\b[^>]*\bto="([^"]*)"[^>]*\/>/
+
+/**
+ * Walk a list of API-shape `Message`s and return the `to=` value of
+ * the LAST `<ma::mode-change>` advertisement found in any user-role
+ * text block. Returns `null` when no advertisement is found OR when
+ * the last one targeted `"default"`.
+ *
+ * Used by `src/index.ts` on session resume to prime
+ * {@link ModeManager.primeLastAdvertised} so the first consume after
+ * resume does not re-announce the mode the model already knows about
+ * from its persisted conversation history.
+ *
+ * Tolerates both the new `<ma::mode-change>` and legacy bare
+ * `<mode-change>` spellings during the tag-namespace migration
+ * window (TODOS.md#T-ca2ce1).
+ *
+ * Pure: no I/O, no allocations beyond the regex match. Walks
+ * messages in reverse so the typical "last turn" case is constant-time.
+ */
+export function lastAdvertisedModeFromHistory(
+  messages: ReadonlyArray<{ role: string; content: unknown }>,
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role !== "user") continue
+    if (!Array.isArray(m.content)) continue
+    for (let j = m.content.length - 1; j >= 0; j--) {
+      const block = m.content[j] as { type?: string; text?: unknown }
+      if (block?.type !== "text") continue
+      if (typeof block.text !== "string") continue
+      const match = block.text.match(MODE_CHANGE_TO_RE)
+      if (match) {
+        const to = match[1]
+        return to === "default" || to === "" ? null : to
+      }
+    }
+  }
+  return null
 }

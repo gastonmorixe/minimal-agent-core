@@ -288,7 +288,7 @@ describe("Agent.run — tasks attachment (combined order)", () => {
     const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
     const content = messages[0]?.content ?? []
     expect(content.length).toBe(5)
-    expect((content[0] as { text: string }).text).toContain("<mode-change")
+    expect((content[0] as { text: string }).text).toContain("<ma::mode-change")
     expect((content[1] as { text: string }).text).toContain("<short-term-memory>")
     expect((content[2] as { text: string }).text).toContain("<ma::tui::tasks")
     expect((content[3] as { text: string }).text).toContain("<memory-saved")

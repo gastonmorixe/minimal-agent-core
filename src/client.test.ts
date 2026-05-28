@@ -32,13 +32,34 @@ function fakeNetworkClient(handler: FakeHandler): NetworkClient {
 
 function sseResponse(events: unknown[]): NetworkResponse {
   const encoder = new TextEncoder()
+  // Auto-append message_stop before [DONE] unless the caller already
+  // provided one. Mirrors real Anthropic streams — every well-formed
+  // response ends with message_stop. The stream watchdog in
+  // sendMessageOnce throws stream_truncated if absent, so tests that
+  // forget message_stop hang indefinitely (or until the watchdog timer
+  // fires). Tests that WANT to exercise the truncation path should use
+  // a different helper (see client.stream-watchdog.test.ts).
+  const hasMessageStop = events.some(
+    (e) => typeof e === "object" && e !== null && (e as { type?: string }).type === "message_stop",
+  )
+  // Some tests pass `{ type: "error" }` to exercise the mid-stream error
+  // path — that throws before reaching the truncation check, so the
+  // absence of message_stop is fine there. We still skip injection for
+  // single-event streams whose only event is `error` so the test's wire
+  // shape stays faithful.
+  const onlyError =
+    events.length === 1 &&
+    typeof events[0] === "object" &&
+    events[0] !== null &&
+    (events[0] as { type?: string }).type === "error"
+  const allEvents = hasMessageStop || onlyError ? events : [...events, { type: "message_stop" }]
   return new NetworkResponse({
     status: 200,
     headers: { "content-type": "text/event-stream" },
     transport: { id: "fake", protocol: "h2" },
     body: new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const event of events) {
+        for (const event of allEvents) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n`))
         }
         controller.enqueue(encoder.encode("data: [DONE]\n"))
@@ -811,7 +832,13 @@ describe("client", () => {
       }
     })
 
-    it("forwards SendOptions.signal to networkClient.request", async () => {
+    it("forwards a signal to networkClient.request that aborts when SendOptions.signal aborts", async () => {
+      // Note: as of 2026-05-26 the request no longer carries the
+      // caller's `signal` UNCHANGED — sendMessageOnce composes it with
+      // an internal stream-idle/hard-timeout watchdog AbortController
+      // via `AbortSignal.any([caller, watchdog])`. The transport sees
+      // the COMPOSED signal. What matters for the harness is that an
+      // abort on the caller's signal still propagates through.
       let captured: NetworkRequest | null = null
       const networkClient = fakeNetworkClient((req) => {
         captured = req
@@ -829,11 +856,14 @@ describe("client", () => {
         signal: ac.signal,
       })
       expect(captured).not.toBeNull()
-      // The captured network request must carry the SAME signal instance
-      // we passed in — cancellation has to walk all the way through to
-      // the fetch/http2 transport for Esc/Ctrl+C abort to actually tear
-      // down the in-flight HTTP/2 stream.
-      expect((captured as unknown as NetworkRequest).signal).toBe(ac.signal)
+      const requestSignal = (captured as unknown as NetworkRequest).signal!
+      // The signal forwarded to the transport is NOT the exact same
+      // instance (it's composed via AbortSignal.any), but aborting the
+      // caller's signal still aborts the forwarded one.
+      expect(requestSignal).not.toBe(ac.signal)
+      expect(requestSignal.aborted).toBe(false)
+      ac.abort(new Error("user cancellation"))
+      expect(requestSignal.aborted).toBe(true)
     })
 
     // -----------------------------------------------------------------
@@ -1406,7 +1436,11 @@ describe("client", () => {
       expect(retryWarns.length).toBe(2)
       for (const w of retryWarns) {
         expect(w.structuredData!["error-type"]).toBe("overloaded_error")
-        expect(w.structuredData!["max-attempts"]).toBe(RETRY_MAX_ATTEMPTS)
+        // Under the new retry-forever policy we no longer emit a
+        // "max-attempts" field (there's no max). The structured data
+        // carries the attempt number + elapsed-ms instead.
+        expect(typeof w.structuredData!["attempt"]).toBe("number")
+        expect(typeof w.structuredData!["elapsed-ms"]).toBe("number")
       }
       // And the two failed attempts each fire diag.error("api.stream-error")
       const streamErrors = cap.events.filter(
@@ -1415,11 +1449,16 @@ describe("client", () => {
       expect(streamErrors.length).toBe(2)
     }, 20_000) // generous: jittered sleeps can add up to ~4s for 2 retries
 
-    it("does NOT retry once content has been yielded mid-stream", async () => {
+    it("retries EVEN AFTER yielding mid-stream (with a visible ↳ marker in the stream)", async () => {
+      // Harness principle: the agent loop must run forever. Earlier
+      // behavior gave up if content had already reached the UI to avoid
+      // "duplicated output". The new contract: we retry anyway and
+      // PAINT A MARKER (`↳ stream stalled — retrying (attempt N)…`)
+      // into the yielded text so the user sees where attempt N ended
+      // and attempt N+1 begins. Duplication is honest and visible; the
+      // alternative — giving up — leaves the harness stuck.
       const auth: AuthResult = { type: "oauth", token: "test-token" }
       const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
-      // First response: yields some text, THEN errors. Retrying would
-      // duplicate the partial output, so the wrapper must NOT retry.
       const scripted = scriptedNetworkClient([
         sseResponse([
           {
@@ -1437,7 +1476,7 @@ describe("client", () => {
             error: { type: "overloaded_error", message: "Overloaded" },
           },
         ]),
-        // Second response would succeed if reached — we assert it isn't.
+        // Second response succeeds — we expect to reach it now.
         sseResponse([
           {
             type: "content_block_start",
@@ -1447,36 +1486,52 @@ describe("client", () => {
           {
             type: "content_block_delta",
             index: 0,
-            delta: { type: "text_delta", text: "should-not-see" },
+            delta: { type: "text_delta", text: "recovered." },
           },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" } },
         ]),
       ])
 
-      let caught: unknown = null
+      // Force backoff to 0 so the test finishes fast.
+      const originalRandom = Math.random
+      Math.random = () => 0
       const yields: string[] = []
-      const gen = sendMessage({
-        auth,
-        messages,
-        model: "claude-opus-4-7",
-        stream: true,
-        networkClient: scripted.client,
-      })
       try {
-        let r: IteratorResult<string, unknown>
-        // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic drain
-        while (!(r = await gen.next()).done) yields.push(r.value)
-      } catch (err) {
-        caught = err
+        const gen = sendMessage({
+          auth,
+          messages,
+          model: "claude-opus-4-7",
+          stream: true,
+          networkClient: scripted.client,
+        })
+        for await (const chunk of gen) yields.push(chunk)
+      } finally {
+        Math.random = originalRandom
       }
 
-      expect(caught).toBeInstanceOf(Error)
-      expect((caught as Error).message).toContain("overloaded_error")
-      expect(yields.join("")).toBe("partial...")
-      // Only one POST was made — retry was blocked by hasYielded
-      expect(scripted.calls).toBe(1)
+      const joined = yields.join("")
+      expect(joined).toContain("partial...")
+      expect(joined).toContain("↳ stream stalled — retrying")
+      expect(joined).toContain("recovered.")
+      expect(joined.indexOf("partial")).toBeLessThan(joined.indexOf("↳"))
+      expect(joined.indexOf("↳")).toBeLessThan(joined.indexOf("recovered"))
+      expect(scripted.calls).toBe(2)
     }, 15_000)
 
-    it("non-retryable error types fail-fast on first attempt (e.g. invalid_request_error)", async () => {
+    it("invalid_request_error uses slow-curve retry (still retries — harness never gives up)", async () => {
+      // Harness principle (revised 2026-05-26): the agent loop NEVER
+      // gives up on a tagged stream error. Validation errors used to
+      // fail-fast, but a misconfigured request might be fixable
+      // out-of-band (a human edits a config while the harness waits),
+      // so the new policy is "everything retries, with different
+      // backoff curves". invalid_request_error gets the slow curve
+      // (RETRY_SLOW_BASE_DELAY_MS = 30_000) so we don't spam.
+      //
+      // This test verifies: when invalid_request_error fires once and
+      // the next attempt succeeds, the harness made it through. We
+      // force Math.random()→0 so the slow backoff is effectively zero
+      // (the random factor multiplies the base, not adds to it).
       const auth: AuthResult = { type: "oauth", token: "test-token" }
       const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
       const scripted = scriptedNetworkClient([
@@ -1489,7 +1544,57 @@ describe("client", () => {
             },
           },
         ]),
+        sseResponse([
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "ok" },
+          },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        ]),
       ])
+
+      const originalRandom = Math.random
+      Math.random = () => 0
+      try {
+        const yields: string[] = []
+        const gen = sendMessage({
+          auth,
+          messages,
+          model: "claude-opus-4-7",
+          stream: true,
+          networkClient: scripted.client,
+        })
+        for await (const chunk of gen) yields.push(chunk)
+        expect(yields.join("")).toContain("ok")
+      } finally {
+        Math.random = originalRandom
+      }
+
+      // Both attempts ran — the slow-curve retry kicked in.
+      expect(scripted.calls).toBe(2)
+    }, 15_000)
+
+    it("untagged errors (programmer bugs, kernel-level failures) DO propagate to caller", async () => {
+      // The retry-forever policy applies only to TAGGED stream errors
+      // (anything with streamErrorType set). Genuinely untagged
+      // throws — transport explosions, kernel-level failures, OOM —
+      // still propagate so the operator notices something is wrong.
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+      const transport: NetworkTransport = {
+        id: "broken",
+        request: async () => {
+          throw new Error("transport blew up (no streamErrorType)")
+        },
+      }
+      const client = new NetworkClient({ primary: transport })
 
       let caught: unknown = null
       try {
@@ -1499,22 +1604,19 @@ describe("client", () => {
             messages,
             model: "claude-opus-4-7",
             stream: true,
-            networkClient: scripted.client,
+            networkClient: client,
           }),
         )
       } catch (err) {
         caught = err
       }
-
       expect(caught).toBeInstanceOf(Error)
-      expect((caught as Error).message).toContain("invalid_request_error")
-      // Permanent error: no retry, single POST
-      expect(scripted.calls).toBe(1)
+      expect((caught as Error).message).toContain("transport blew up")
     }, 5_000)
   })
 })
 
-// Used by Stage B retry tests above; mirrors the constant in client.ts.
-// Updating one MUST update the other — there's a deliberate test gate
-// on the structured-data payload to catch drift.
-const RETRY_MAX_ATTEMPTS = 4
+// (Was: RETRY_MAX_ATTEMPTS = 4 mirror for the bounded-retry policy.)
+// Removed 2026-05-26 when the retry policy switched to "forever" — no
+// MAX value is meaningful anymore. The retry tests now assert on
+// attempt-number + structured-data shape instead.

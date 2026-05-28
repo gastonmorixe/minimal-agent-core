@@ -601,3 +601,154 @@ describe("MetaRecord (parentSid / forkedAt)", () => {
     expect((records[0] as MetaRecord).sid).toBe(sid)
   })
 })
+
+describe("SessionStore.cleanupIfUnused", () => {
+  it("removes the JSONL log, index entry, and sidecars on a never-used session", () => {
+    const dir = tmp()
+    const sid = "ma-unused-A"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+
+    // Plant a few sidecars + a blob directory, the way the tasks/memory
+    // plugins and blob store would create them lazily during a real run.
+    writeFileSync(join(dir, `${sid}.tasks.jsonl`), "{}\n")
+    writeFileSync(join(dir, `${sid}.scratch.md`), "scratch\n")
+    writeFileSync(join(dir, `${sid}.draft`), "draft body")
+    mkdirSync(join(dir, `${sid}.blobs`), { recursive: true })
+    writeFileSync(join(dir, `${sid}.blobs`, "toolu_x.raw"), "raw")
+
+    // Process-bookkeeping records do NOT count as conversation.
+    store.appendAttach()
+    store.appendDetach("exit", 0)
+
+    const cleaned = store.cleanupIfUnused()
+    expect(cleaned).toBe(true)
+
+    // JSONL gone.
+    expect(existsSync(store.path)).toBe(false)
+    // Sidecars gone.
+    expect(existsSync(join(dir, `${sid}.tasks.jsonl`))).toBe(false)
+    expect(existsSync(join(dir, `${sid}.scratch.md`))).toBe(false)
+    expect(existsSync(join(dir, `${sid}.draft`))).toBe(false)
+    // Blob dir gone.
+    expect(existsSync(join(dir, `${sid}.blobs`))).toBe(false)
+    // Index entry gone.
+    const idxRaw = readFileSync(indexFilePath(dir), "utf-8")
+    expect(idxRaw).toBe("")
+  })
+
+  it("preserves a session that recorded any conversation", () => {
+    const dir = tmp()
+    const sid = "ma-used"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+    store.appendUser("hello")
+
+    const cleaned = store.cleanupIfUnused()
+    expect(cleaned).toBe(false)
+    expect(existsSync(store.path)).toBe(true)
+    const idxLines = readJsonl(indexFilePath(dir))
+    expect(idxLines).toHaveLength(1)
+    expect((idxLines[0] as IndexRecord).sid).toBe(sid)
+  })
+
+  it("treats attach/detach alone as 'unused' (process bookkeeping only)", () => {
+    const dir = tmp()
+    const sid = "ma-attach-only"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+    store.appendAttach()
+    expect(store.cleanupIfUnused()).toBe(true)
+    expect(existsSync(store.path)).toBe(false)
+  })
+
+  it("each conversation-shaped append flips hasConversation", () => {
+    // One sub-case per append* method, isolated to confirm the flag is
+    // not accidentally tied to a specific method (e.g. only appendUser).
+    const cases: Array<[string, (s: SessionStore) => void]> = [
+      ["user", (s) => s.appendUser("u")],
+      ["assistant", (s) => s.appendAssistant([{ type: "text", text: "a" }], "end_turn")],
+      [
+        "tool_result",
+        (s) =>
+          s.appendToolResult({
+            type: "tool_result",
+            tool_use_id: "tu_1",
+            content: "x",
+            is_error: false,
+          }),
+      ],
+      ["note", (s) => s.appendNote("n")],
+      [
+        "rewind",
+        (s) => {
+          const id = s.appendUser("u")
+          s.appendRewind(id, 0)
+        },
+      ],
+    ]
+    for (const [label, mutate] of cases) {
+      const dir = tmp()
+      const sid = `ma-flag-${label}`
+      const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+      mutate(store)
+      expect(store.cleanupIfUnused()).toBe(false)
+      expect(existsSync(store.path)).toBe(true)
+    }
+  })
+
+  it("a fork inherits hasConversation from the parent's records", () => {
+    // Resume-and-immediately-quit must NOT delete the resumed session
+    // file. The parent had real conversation; the fork's `hasConversation`
+    // is pre-seeded from that, so cleanupIfUnused() is a no-op even with
+    // zero new appends.
+    const dir = tmp()
+    const srcSid = "ma-cleanup-src"
+    const dstSid = "ma-cleanup-dst"
+    const parent = SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    parent.appendUser("first user prompt")
+    parent.appendAssistant([{ type: "text", text: "hi" }], "end_turn")
+
+    const fork = SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    // No new appends on the fork at all — but the inherited records
+    // should still mark it as "used".
+    expect(fork.cleanupIfUnused()).toBe(false)
+    expect(existsSync(fork.path)).toBe(true)
+  })
+
+  it("an empty fork (meta-only parent) is still eligible for cleanup", () => {
+    // The complementary case: forking a parent that itself had no
+    // conversation produces a fork that also has no conversation, so
+    // cleanup runs.
+    const dir = tmp()
+    const srcSid = "ma-empty-src"
+    const dstSid = "ma-empty-dst"
+    SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    const fork = SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    expect(fork.cleanupIfUnused()).toBe(true)
+    expect(existsSync(fork.path)).toBe(false)
+  })
+
+  it("only touches the target sid's rows in index.jsonl", () => {
+    // Two sessions side by side. Cleaning up the unused one must NOT
+    // disturb the other's index entry.
+    const dir = tmp()
+    const used = SessionStore.open({ ...baseOpenOpts, sid: "ma-keep-side", dir })
+    used.appendUser("real prompt")
+    const unused = SessionStore.open({ ...baseOpenOpts, sid: "ma-drop-side", dir })
+
+    expect(unused.cleanupIfUnused()).toBe(true)
+
+    const idxLines = readJsonl(indexFilePath(dir)) as IndexRecord[]
+    expect(idxLines).toHaveLength(1)
+    expect(idxLines[0].sid).toBe("ma-keep-side")
+  })
+
+  it("is idempotent: a second call is a no-op", () => {
+    const dir = tmp()
+    const sid = "ma-idempotent"
+    const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
+
+    expect(store.cleanupIfUnused()).toBe(true)
+    // File is already gone; calling again must not throw and must still
+    // report success (the session remains unused).
+    expect(() => store.cleanupIfUnused()).not.toThrow()
+  })
+})

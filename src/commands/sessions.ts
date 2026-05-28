@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 
 import { c } from "../agent.ts"
 import { firstUserPromptSnippet } from "../session-restore.ts"
 import {
   defaultSessionsDir,
+  type IndexRecord,
   parseLines as parseSessionLines,
   sessionFilePath,
 } from "../session-store.ts"
@@ -12,6 +13,7 @@ import {
 import { readSessionIndex } from "./session-index.ts"
 
 const PATH_COL_WIDTH = 30
+const SIZE_COL_WIDTH = 9
 
 /**
  * Collapse `$HOME` to `~` and left-truncate (with `…`) so the tail of the
@@ -28,26 +30,114 @@ function formatCwd(cwd: string, width: number): string {
 }
 
 /**
- * `--sessions`: print a table of saved sessions and exit.
+ * Format a byte count as a compact, right-aligned label fitting
+ * {@link SIZE_COL_WIDTH}. Examples: `   312 B`, ` 487.4 kB`, `   2.3 MB`.
+ *
+ * Decimal kB/MB (1000-based) would be slightly more user-friendly for
+ * tiny files, but the rest of the codebase (e.g. `src/status.ts`) uses
+ * binary (1024-based). Stay consistent.
  */
-export function runSessionsCommand(): void {
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—".padStart(SIZE_COL_WIDTH)
+  if (n < 1024) return `${n} B`.padStart(SIZE_COL_WIDTH)
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`.padStart(SIZE_COL_WIDTH)
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`.padStart(SIZE_COL_WIDTH)
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`.padStart(SIZE_COL_WIDTH)
+}
+
+/**
+ * Fuzzy subsequence match (case-insensitive). Returns true if every
+ * character of `needle` appears, in order, somewhere in `haystack`.
+ * `"abc"` matches `"a-bigger-c"`. Empty needle matches anything.
+ *
+ * Cheap: O(|haystack|), no allocation beyond the lowercased copies.
+ * Good enough for the index-only filter — anything fancier (rank by
+ * proximity, score gaps, etc.) is a separate problem.
+ */
+export function fuzzyMatch(needle: string, haystack: string): boolean {
+  if (needle.length === 0) return true
+  const n = needle.toLowerCase()
+  const h = haystack.toLowerCase()
+  let i = 0
+  for (let j = 0; j < h.length && i < n.length; j++) {
+    if (h[j] === n[i]) i++
+  }
+  return i === n.length
+}
+
+/**
+ * Filter predicate for `sessions <query>`. Searches the three cheap
+ * index fields ONLY: createdAt (session date), sid (session id),
+ * and cwd (session workdir). Per-session file reads happen later —
+ * the whole point of in-index filtering is to skip them for
+ * non-matches. See {@link runSessionsCommand}.
+ *
+ * Matches per-field (OR), not against a joined haystack. Joining was
+ * too lenient: a query like `2026-05-27` was finding a subsequence
+ * across `createdAt`'s tail → sid → cwd, returning unrelated dates.
+ * A useful fuzzy filter has to honor field boundaries.
+ */
+export function matchesQuery(rec: IndexRecord, query: string): boolean {
+  if (query.length === 0) return true
+  return (
+    fuzzyMatch(query, rec.createdAt) ||
+    fuzzyMatch(query, rec.sid) ||
+    fuzzyMatch(query, rec.cwd ?? "")
+  )
+}
+
+export interface RunSessionsOptions {
+  /** Optional fuzzy filter applied to date+sid+cwd before any file I/O. */
+  query?: string
+}
+
+/**
+ * `--sessions [<query>]`: print a table of saved sessions and exit.
+ *
+ * When `query` is set, filter happens BEFORE per-session file reads so
+ * we don't pay for snippet extraction or size stats on rows the user
+ * won't see. The cheap-first ordering is the reason this lives in the
+ * agent rather than as a downstream `| grep` pipe.
+ */
+export function runSessionsCommand(opts: RunSessionsOptions = {}): void {
+  const query = opts.query?.trim() ?? ""
   const all = readSessionIndex()
   if (all.length === 0) {
     console.log(`\n  ${c.dim("no saved sessions yet")}`)
     console.log(`  ${c.dim(`(sessions are stored at ${defaultSessionsDir()})`)}`)
     return
   }
+  // Index-only filter pass. Pure in-memory string match on three small
+  // fields per record. No file reads.
+  const matched = query.length > 0 ? all.filter((rec) => matchesQuery(rec, query)) : all
+  if (matched.length === 0) {
+    console.log("")
+    console.log(`  ${c.dim(`no sessions matching ${JSON.stringify(query)}`)}`)
+    console.log(`  ${c.dim(`(${all.length} total at ${defaultSessionsDir()})`)}`)
+    return
+  }
   console.log("")
   console.log(
-    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("cwd".padEnd(PATH_COL_WIDTH))} ${c.bold("preview")}`,
+    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("size".padStart(SIZE_COL_WIDTH))} ${c.bold("cwd".padEnd(PATH_COL_WIDTH))} ${c.bold("preview")}`,
   )
-  for (const rec of all) {
+  for (const rec of matched) {
+    const path = sessionFilePath(rec.sid)
+    let bytes = Number.NaN
     let snippet = ""
+    try {
+      // Cheap stat first (no read). Lets us still show the size even
+      // if the snippet read fails for some reason.
+      bytes = statSync(path).size
+    } catch {
+      // File vanished between readSessionIndex's existsSync and now —
+      // rare race. Leave size as NaN, formatBytes renders "—".
+    }
     try {
       // Read the whole file — they're append-only JSONL, typically small.
       // For huge sessions this is still fine because we only do it on
-      // explicit `--sessions` listing (one-shot), not in any hot path.
-      const text = readFileSync(sessionFilePath(rec.sid), "utf-8")
+      // matched rows of an explicit `--sessions` listing (one-shot),
+      // not in any hot path.
+      const text = readFileSync(path, "utf-8")
       const { records: parsed } = parseSessionLines(text)
       snippet = firstUserPromptSnippet(parsed, 40)
     } catch {
@@ -56,10 +146,15 @@ export function runSessionsCommand(): void {
     const when = c.dim(rec.createdAt.replace("T", " ").slice(0, 19))
     const sid = c.cyan(rec.sid.padEnd(38))
     const model = c.dim(rec.model.padEnd(22))
+    const size = c.dim(formatBytes(bytes))
     const cwd = c.dim(formatCwd(rec.cwd ?? "", PATH_COL_WIDTH))
-    console.log(`  ${when}  ${sid} ${model} ${cwd} ${c.faintWhite(snippet)}`)
+    console.log(`  ${when}  ${sid} ${model} ${size} ${cwd} ${c.faintWhite(snippet)}`)
   }
   console.log("")
-  console.log(`  ${c.dim(`${all.length} session(s) at ${defaultSessionsDir()}`)}`)
+  const summary =
+    query.length > 0
+      ? `${matched.length} of ${all.length} session(s) matching ${JSON.stringify(query)}`
+      : `${all.length} session(s) at ${defaultSessionsDir()}`
+  console.log(`  ${c.dim(summary)}`)
   console.log(`  ${c.dim("resume with: --resume <sid>  (or --resume last)")}`)
 }

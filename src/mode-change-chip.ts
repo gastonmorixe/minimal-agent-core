@@ -18,10 +18,10 @@
  * the `Date` (live: `new Date()` at send time; replay: the parent
  * user-record's `ts`).
  *
- * ANSI is emitted via raw SGR sequences to avoid a circular import on
- * `src/agent.ts` (the `c.*` helpers live there and depend on `palette`
- * and the env-info plugin's color detection). The bytes we emit are
- * byte-for-byte identical to the helpers, see PALETTE in `palette.ts`.
+ * Named colors are pulled from `palette.ts` (no circular dep — that file
+ * has zero imports). Other SGR sequences (dim, faint-white, bold) are
+ * emitted as raw escapes to avoid a circular import on `src/agent.ts`,
+ * whose `c.*` helpers depend on palette + the env-info plugin.
  *
  * @module mode-change-chip
  */
@@ -40,8 +40,6 @@ const FG_RESET = "\x1b[39m"
 const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
 /** SGR dim + white (`c.faintWhite` byte-for-byte). */
 const faintWhite = (s: string): string => `\x1b[2;37m${s}\x1b[22;39m`
-/** SGR lime (256-color 118, matches `c.lime`). Used for the `✦` sparkle. */
-const lime = (s: string): string => `\x1b[38;5;118m${s}${FG_RESET}`
 /** Faint white (no leading space). Used for the timestamp. */
 const time = faintWhite
 
@@ -58,14 +56,16 @@ const time = faintWhite
  * conventional spelling for "no mode active". The renderer paints them
  * as-is : no clampLabel, no toUpper. Callers handle casing.
  *
- * `toFgOpen` is the SGR open sequence for the TARGET mode's foreground
- * color, used to paint the target label. `null` means "no color" : the
- * label falls back to bold faint-white. That keeps default→default-style
- * transitions readable.
+ * `fromFgOpen` / `toFgOpen` are SGR open sequences for the source /
+ * target modes' accent colors. `null` means "no color" : that side
+ * falls back to dim (source) or bold faint-white (target). This
+ * keeps `default ↔ <mode>` transitions readable.
  */
 export interface ChipRenderInput {
   fromLabel: string
   toLabel: string
+  /** SGR open string for the source mode's accent color, or `null` for none. */
+  fromFgOpen: string | null
   /** SGR open string for the target mode's accent color, or `null` for none. */
   toFgOpen: string | null
   /** Wall-clock the change took effect. */
@@ -113,28 +113,52 @@ function pad2(n: number): string {
  *
  * Chip-lead is the dim `·` middle dot, matching the established
  * `· memory saved …` chip family : same vocabulary, reader knows
- * "this is a chrome announcement, not user content". The target mode's
- * accent color lives on the LABEL itself (bold, in the mode's color),
- * which is where the eye naturally lands.
+ * "this is a chrome announcement, not user content". The transition
+ * reads left-to-right as `<from> → <to>` with each label in its own
+ * accent color (or dim for "default"), and the TARGET is bold so the
+ * eye lands on "where you ended up".
  *
- * Width estimate: `  · ✦ mode →  ASK   2026-05-22 17:52  from default`
- * is about 53 cells. Comfortably fits any terminal ≥ 60 cols.
+ * Layout:
+ *
+ *     `  · mode   default → ASK   2026-05-22 17:52`
+ *        ▲ ▲      ▲       ▲ ▲     ▲
+ *        │ │      │       │ │     └─ faint-white timestamp
+ *        │ │      │       │ └─ target label, bold, in target's accent
+ *        │ │      │       └─ dim separator
+ *        │ │      └─ source label, non-bold, in source's accent (or dim)
+ *        │ └─ dim category word
+ *        └─ dim chip-lead `·`
+ *
+ * Width estimate ≈ 41 cells, well under 60 cols.
  */
 export function buildModeChangeChip(input: ChipRenderInput): string {
   const leadDot = dim("·")
-  const sparkle = lime("✦")
-  const label = paintBold(input.toLabel, input.toFgOpen)
+  const fromLbl = paintFlat(input.fromLabel, input.fromFgOpen)
+  const toLbl = paintBold(input.toLabel, input.toFgOpen)
+  const arrow = dim("→")
   const stamp = time(formatModeTimestamp(input.at))
-  const tail = dim(`from ${input.fromLabel}`)
-  // Spaces: `  · ✦ mode →  <LABEL>   <STAMP>  <TAIL>`
-  // The double space before <STAMP> and before <TAIL> reads as natural
-  // column separation between the chip's three info groups.
-  return `  ${leadDot} ${sparkle} ${dim("mode →")}  ${label}   ${stamp}  ${tail}`
+  // Spaces: `  · mode   <FROM> → <TO>   <STAMP>`
+  // Triple space between `mode` and the transition, and between the
+  // transition and the stamp, gives natural column separation between
+  // the three info groups (category / transition / time).
+  return `  ${leadDot} ${dim("mode")}   ${fromLbl} ${arrow} ${toLbl}   ${stamp}`
 }
 
 /**
- * Paint `text` bold in `fgOpen`. Falls back to `bold + faint white` so
- * the "default" target stays visible against the rail.
+ * Paint `text` in `fgOpen` (non-bold). Falls back to dim when the mode
+ * has no accent color (e.g. `"default"`), matching the sibling
+ * pending-decoration renderer.
+ */
+function paintFlat(text: string, fgOpen: string | null): string {
+  if (fgOpen) return `${fgOpen}${text}${FG_RESET}`
+  return dim(text)
+}
+
+/**
+ * Paint `text` bold in `fgOpen`. Falls back to bold faint-white when the
+ * mode has no accent color, so "default" still reads as a label without
+ * stealing focus from a colored sibling. Matches the pending-decoration
+ * renderer byte-for-byte.
  */
 function paintBold(text: string, fgOpen: string | null): string {
   if (fgOpen) return `\x1b[1m${fgOpen}${text}${RESET}`
@@ -171,6 +195,7 @@ export function buildPendingModeChangeChip(
   return buildModeChangeChip({
     fromLabel: resolveLabel(pending.fromId),
     toLabel: resolveLabel(pending.toId),
+    fromFgOpen: resolveFgOpen(pending.fromId),
     toFgOpen: resolveFgOpen(pending.toId),
     at,
   })
@@ -200,6 +225,7 @@ export function eventToChipInput(
   return {
     fromLabel: labelFor(event.from),
     toLabel: labelFor(event.to),
+    fromFgOpen: resolveFgOpen(event.from),
     toFgOpen: resolveFgOpen(event.to),
     at: event.at,
   }

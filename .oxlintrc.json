@@ -43,7 +43,8 @@
     "jsdoc-js/require-returns": "off",
     "jsdoc-js/require-returns-description": "off",
     "jsdoc-js/check-param-names": "off",
-    "jsdoc-js/check-tag-names": "error"
+    "jsdoc-js/check-tag-names": "error",
+    "max-lines": ["warn", { "max": 800, "skipBlankLines": true, "skipComments": true }]
   },
   "overrides": [
     {
@@ -97,7 +98,8 @@
     {
       "files": ["**/*.test.ts"],
       "rules": {
-        "require-yield": "off"
+        "require-yield": "off",
+        "max-lines": "off"
       }
     }
   ],

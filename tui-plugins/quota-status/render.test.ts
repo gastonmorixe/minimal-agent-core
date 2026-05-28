@@ -333,7 +333,7 @@ describe("renderQuotaFooter", () => {
     expect(at(0.9)).toMatch(/\x1b\[(?:\d+;)?31m/)
   })
 
-  it("degrades responsively: bar drops first, then reset, then session, then 7d", () => {
+  it("wide layout: full segments, max separator, full bars", () => {
     const now = 1_700_000_000_000
     const rl = new Map([
       ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
@@ -354,15 +354,7 @@ describe("renderQuotaFooter", () => {
         contextWindow: 200_000,
       }),
     )
-    const tight = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, {
-        cols: 25,
-        now: () => now,
-        contextWindow: 200_000,
-      }),
-    )
-
-    // Wide: everything visible, including the session bar.
+    // Wide: everything visible at maximum comfort.
     expect(wide).not.toContain("✦")
     expect(wide).not.toContain("/") // no slash anywhere
     expect(wide).toContain("200k") // size label (LEFT slot)
@@ -372,11 +364,69 @@ describe("renderQuotaFooter", () => {
     expect(wide).toContain("1h30m")
     // No trailing `ctx` word.
     expect(wide).not.toMatch(/ ctx\b/)
+    // Sep=4 (max comfort): the gap between any two segments is 4 cells.
+    expect(wide).toMatch(/21% 1h30m {4}7d/)
+    // Bars are at max width (8 cells of glyphs).
+    const barRun = wide.match(/[█▏▎▍▌▋▊▉]+[░]+|[░]{8}/g)
+    expect(barRun).not.toBeNull()
+    for (const b of barRun!) expect(b.length).toBeGreaterThanOrEqual(7) // 7 or 8 (1/8th-block ramp may eat one)
+  })
 
-    // Tight: only the 5h bar.
-    expect(tight).toContain("5h")
-    expect(tight).not.toContain("7d")
-    expect(tight).not.toContain("47.5k")
+  it("compression: separator tightens 4 → 3 → 2 before any drop", () => {
+    // Three widths chosen so each triggers exactly one separator step.
+    // No effort / sid / overage to keep the math focused on sep alone.
+    // Segment costs at bar=8: 5h=15, 7d=14, 200k+47.5k=23.
+    const rl = new Map([
+      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+    ])
+    // sep=4 step cost = 15+4+14+4+23 = 60 cells.
+    const sep4 = stripAnsi(
+      renderQuotaFooter(rl, SOME_TOKENS, { cols: 200, contextWindow: 200_000 }),
+    )
+    expect(sep4).toMatch(/21% {4}7d/) // 4-space gap
+    // cols=59 forces sep=3 (step cost = 58).
+    const sep3 = stripAnsi(
+      renderQuotaFooter(rl, SOME_TOKENS, { cols: 59, contextWindow: 200_000 }),
+    )
+    expect(sep3).toMatch(/21% {3}7d/) // 3-space gap
+    // cols=57 forces sep=2 (step cost = 56). Rule 1 floor.
+    const sep2 = stripAnsi(
+      renderQuotaFooter(rl, SOME_TOKENS, { cols: 57, contextWindow: 200_000 }),
+    )
+    expect(sep2).toMatch(/21% {2}7d/) // 2-space gap (Rule 1 floor)
+  })
+
+  it("compression: bars shrink 8 → 4 cells under pressure (Rule 2.1.1)", () => {
+    const rl = new Map([
+      ["anthropic-ratelimit-unified-5h-utilization", "0.50"],
+      ["anthropic-ratelimit-unified-7d-utilization", "0.50"],
+    ])
+    // Bar=4 step cost (sep=2, all tail dropped, session bar still on):
+    // empirically 45 cells (`5h ██░░ 50%  7d ██░░ 50%  200k █░░░ 24% 47.5k`).
+    // Bar at 50% with 4 cells: eighths=round(50*4*8/100)=16, so 2 full + 0 part + 2 empty = "██░░".
+    const tight = stripAnsi(
+      renderQuotaFooter(rl, SOME_TOKENS, { cols: 45, contextWindow: 200_000 }),
+    )
+    expect(tight).toMatch(/5h ██░░ 50%/)
+    expect(tight).toMatch(/7d ██░░ 50%/)
+    // Session bar shrinks proportionally (same barCells). 24% × 4 cells
+    // = 8 eighths = exactly 1 full cell → "█░░░".
+    expect(tight).toMatch(/200k █░░░ 24%/)
+  })
+
+  it("drops 7d window only after all compressions are exhausted", () => {
+    const rl = new Map([
+      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+    ])
+    // Below the leanest compressed multi-window form, only 5h remains.
+    const veryTight = stripAnsi(
+      renderQuotaFooter(rl, SOME_TOKENS, { cols: 20, contextWindow: 200_000 }),
+    )
+    expect(veryTight).toContain("5h")
+    expect(veryTight).not.toContain("7d")
+    expect(veryTight).not.toContain("47.5k")
   })
 
   it("drops the session bar but keeps the trailing count at medium widths", () => {
@@ -385,15 +435,17 @@ describe("renderQuotaFooter", () => {
       ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
       ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
     ])
-    // Wide enough for both bars + session text, but not for the session bar.
+    // cols below the leanest "with-session-bar" candidate but above the
+    // "without-session-bar" one. With sep=2 + bar=4 the with-bar form
+    // is ~45 cells; the bar-dropped form is ~33 cells.
     const mid = stripAnsi(
       renderQuotaFooter(rl, SOME_TOKENS, {
-        cols: 55,
+        cols: 40,
         now: () => now,
         contextWindow: 200_000,
       }),
     )
-    expect(mid.length).toBeLessThanOrEqual(55 + 1)
+    expect(mid.length).toBeLessThanOrEqual(40 + 1)
     expect(mid).toContain("5h")
     expect(mid).toContain("7d")
     expect(mid).not.toContain("✦")
@@ -437,6 +489,350 @@ describe("renderQuotaFooter", () => {
     )
     // A2: no countdown clause — `<name> <bar> <pct>` with nothing trailing.
     expect(out).toMatch(/5h [█▏▎▍▌▋▊▉░]{8} 10%$/)
+  })
+
+  describe("effort segment", () => {
+    it("appends `effort <level>` as a trailing segment when opts.effort is set", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, NO_TOKENS, {
+          contextWindow: 200_000,
+          effort: "medium",
+        }),
+      )
+      // 4-space group separator before `effort`, label leads, value
+      // trails. The whole line ends with the level (no meta after).
+      expect(out).toMatch(/ {4}effort medium$/)
+    })
+
+    it("forwards arbitrary effort strings verbatim (pass-through, no validation)", () => {
+      // Mirrors src/effort-resolution.ts no-validate philosophy: any
+      // forward-compatible level the server starts accepting should
+      // appear in the footer without a client release.
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, NO_TOKENS, { effort: "ultra" }),
+      )
+      expect(out).toMatch(/effort ultra$/)
+    })
+
+    it("omits the effort segment entirely when opts.effort is undefined (haiku case)", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS))
+      expect(out).not.toContain("effort")
+    })
+
+    it("omits the effort segment when opts.effort is an empty string", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { effort: "" }))
+      expect(out).not.toContain("effort")
+    })
+
+    it("renders the label faintWhite and the value bold", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = renderQuotaFooter(rl, NO_TOKENS, { effort: "high" }) ?? ""
+      // Label sits on the same visual tier as 5h/7d (faintWhite = dim+white-fg).
+      expect(out).toContain("\x1b[2;37meffort\x1b[22;39m")
+      // Value pops at bold weight — parallel to the bold trailing
+      // session count, signalling "this is the live wire setting".
+      expect(out).toContain("\x1b[1mhigh\x1b[22m")
+    })
+
+    it("does NOT colour-grade the effort value (no green/yellow/red)", () => {
+      // Severity palette belongs to the quota bars. Carrying it onto
+      // effort would read "high effort == bad", which is wrong.
+      const rl = new Map() // no quota windows → no severity SGRs from bars
+      const out = renderQuotaFooter(rl, NO_TOKENS, {
+        showSession: false,
+        effort: "max",
+      }) ?? ""
+      // No 31/32/33 SGRs anywhere in the effort-only render.
+      expect(out).not.toMatch(/\x1b\[(?:\d+;)?3[123]m/)
+    })
+
+    it("returns the segment even when there are no quota windows AND no session", () => {
+      // Effort alone is enough signal to render — the renderer should
+      // not collapse to null just because the quota and session pieces
+      // would have been empty.
+      const out = stripAnsi(
+        renderQuotaFooter(new Map(), NO_TOKENS, {
+          showSession: false,
+          effort: "low",
+        }),
+      )
+      expect(out).toBe("effort low".replace(/^/, "")) // exact shape, no leading separator
+    })
+
+    it("appears AFTER the session block (effort is the trailing-most segment)", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, {
+          contextWindow: 200_000,
+          effort: "medium",
+        }),
+      )
+      // `47.5k` is the unambiguous session marker; `effort` must come
+      // after it in the joined string.
+      expect(out.indexOf("47.5k")).toBeLessThan(out.indexOf("effort"))
+    })
+
+    it("compresses effort `full → value → short` before dropping it (Rule 2.1.2)", () => {
+      // The label drops first (`effort medium` → `medium`), then the
+      // value shortens (`medium` → `med`), and only as a last resort
+      // does the segment go away entirely. Three widths to walk each
+      // step.
+      const rl = new Map([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      ])
+      const opts = { contextWindow: 200_000, effort: "medium" } as const
+      // Wide: full form `effort medium`.
+      const full = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, { ...opts, cols: 200 }),
+      )
+      expect(full).toContain("effort medium")
+      // cols=64: forces effortFmt:"value" (`effort medium` → `medium`,
+      // saves 7 cells). Step 4 cost = 71-7 = 64.
+      const value = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, { ...opts, cols: 64 }),
+      )
+      expect(value).not.toContain("effort medium")
+      expect(value).toMatch(/ medium$/)
+      // cols=62: forces effortFmt:"short" (`medium` → `med`, saves
+      // another 3 cells). Step 6 cost = 64-3 = 61.
+      const short = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, { ...opts, cols: 62 }),
+      )
+      expect(short).not.toMatch(/ medium$/)
+      expect(short).toMatch(/ med$/)
+    })
+
+    it("drops effort BEFORE dropping the session bar in the degradation ladder", () => {
+      // Effort is static-per-session; the session count grows in real
+      // time. When width gets tight, the live-growing piece earns its
+      // cells over the static one — but only AFTER the full
+      // compression ladder has been walked (Rule 2.1.x).
+      const rl = new Map([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      ])
+      // Compressed step "no effort, with session bar" fits ≈44 cells;
+      // the step before it ("effort=short, with session bar") is ≈49.
+      const out = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, {
+          cols: 47,
+          contextWindow: 200_000,
+          effort: "medium",
+        }),
+      )
+      // Effort got dropped first (after exhausting `full→value→short`)…
+      expect(out).not.toContain("effort")
+      expect(out).not.toContain("medium")
+      expect(out).not.toMatch(/ med$/)
+      // …but the session bar (200k label + percent) survived.
+      expect(out).toContain("200k")
+      expect(out).toContain("24%")
+    })
+  })
+
+  describe("sid (session-id anchor) segment", () => {
+    it("appends the sid as the ABSOLUTE-trailing segment", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, NO_TOKENS, {
+          contextWindow: 200_000,
+          effort: "medium",
+          sid: "b1d82846",
+        }),
+      )
+      // Line ends with the bare 8-hex sid — no trailing whitespace,
+      // no label, no separator.
+      expect(out).toMatch(/ {4}b1d82846$/)
+      // Effort segment still precedes it.
+      expect(out.indexOf("effort medium")).toBeLessThan(out.indexOf("b1d82846"))
+    })
+
+    it("renders the sid verbatim (caller pre-shortens, renderer does not slice)", () => {
+      // Renderer takes whatever the caller passes and renders it as-is.
+      // The handler is responsible for the 8-hex prefix; renderer is
+      // just a sink. This keeps the contract simple for tests and
+      // future callers that may want different truncations.
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, NO_TOKENS, { sid: "b1d82846-8ee4" }),
+      )
+      expect(out).toMatch(/ {4}b1d82846-8ee4$/)
+    })
+
+    it("omits the sid segment when opts.sid is undefined", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, NO_TOKENS, { effort: "medium" }),
+      )
+      // Line ends with the effort segment, no trailing hex blob.
+      expect(out).toMatch(/effort medium$/)
+    })
+
+    it("omits the sid segment when opts.sid is an empty string", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { sid: "" }))
+      // No trailing 4-space-then-hex pattern.
+      expect(out).not.toMatch(/ {4}[0-9a-f]{6,}$/)
+    })
+
+    it("renders the sid dim (static reference, not a live reading)", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = renderQuotaFooter(rl, NO_TOKENS, { sid: "b1d82846" }) ?? ""
+      // c.dim() is SGR 2 / 22; the value sits inside a plain dim wrap
+      // (no white-fg modifier — that's the faintWhite label tier).
+      expect(out).toContain("\x1b[2mb1d82846\x1b[22m")
+    })
+
+    it("returns the segment even when there are no other parts (sid alone)", () => {
+      // If somehow only sid is set and everything else is absent, the
+      // line is just the sid. Mirrors the effort-alone test above.
+      const out = stripAnsi(
+        renderQuotaFooter(new Map(), NO_TOKENS, {
+          showSession: false,
+          sid: "b1d82846",
+        }),
+      )
+      expect(out).toBe("b1d82846")
+    })
+
+    it("appears AFTER the effort segment when both are present", () => {
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const out = stripAnsi(
+        renderQuotaFooter(rl, NO_TOKENS, {
+          effort: "medium",
+          sid: "b1d82846",
+        }),
+      )
+      expect(out.indexOf("effort")).toBeLessThan(out.indexOf("b1d82846"))
+    })
+
+    it("drops sid BEFORE dropping effort in the degradation ladder", () => {
+      // Forensics anchor is the second-loosest priority on the tail
+      // end (after the opt-in overage). Effort, which reflects the
+      // live wire config, sticks around longer (in some compressed
+      // form — `medium` then `med` — before being dropped itself).
+      const rl = new Map([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      ])
+      // cols chosen so the ladder lands on
+      // {sep:2, effortFmt:"value", withSid:false}. The previous step
+      // (sid still on) is ~72 cells; this step is ~62 cells.
+      const out = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, {
+          cols: 65,
+          contextWindow: 200_000,
+          effort: "medium",
+          sid: "b1d82846",
+        }),
+      )
+      // Sid dropped, effort survived (in compressed form).
+      expect(out).not.toContain("b1d82846")
+      expect(out).toContain("medium")
+    })
+
+    it("drops sid AFTER dropping the opt-in overage segment", () => {
+      // When both overage and sid would be present, overage drops
+      // first (it's opt-in noise; sid is always-on forensics value).
+      const rl = new Map([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
+        ["anthropic-ratelimit-unified-overage-status", "off"],
+      ])
+      // cols chosen so the ladder picks
+      // {sep:2, effortFmt:"full", withOverage:false} — overage gone,
+      // sid + full effort label still present. The sep=2-with-overage
+      // step costs ~77 cells; the no-overage step is ~64.
+      const out = stripAnsi(
+        renderQuotaFooter(rl, SOME_TOKENS, {
+          cols: 70,
+          contextWindow: 200_000,
+          showOverage: true,
+          effort: "medium",
+          sid: "b1d82846",
+        }),
+      )
+      expect(out).not.toContain("overage")
+      expect(out).toContain("b1d82846")
+      expect(out).toContain("effort medium")
+    })
+  })
+
+  describe("Rule 3: single-line invariant", () => {
+    it("never overflows cols in `truncate` mode (default) even at comically narrow widths", () => {
+      // Every width from 1 cell up to the leanest fitting candidate
+      // must produce a string whose displayed width is <= cols. The
+      // truncation safety net (with dim `…`) handles the tail.
+      const rl = new Map([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      ])
+      // Pull stripAnsi via the same path the renderer uses internally —
+      // duplicating the helper here avoids module re-exports.
+      const stripAnsiHere = (s: string | null) =>
+        (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
+      for (let cols = 1; cols <= 60; cols++) {
+        const out = stripAnsiHere(
+          renderQuotaFooter(rl, SOME_TOKENS, {
+            cols,
+            contextWindow: 200_000,
+            effort: "medium",
+            sid: "b1d82846",
+          }),
+        )
+        // Hard invariant: NEVER exceed cols. The whole renderer exists
+        // so the live area can paint one row without wrapping the
+        // prompt up.
+        expect(out.length).toBeLessThanOrEqual(cols)
+      }
+    })
+
+    it("appends a dim `…` ellipsis when the leanest candidate would still overflow", () => {
+      // Force the safety net to fire: cols smaller than even the
+      // leanest single-window candidate (5h alone at bar=4 ≈ 11 cells).
+      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.21"]])
+      const out = renderQuotaFooter(rl, NO_TOKENS, {
+        cols: 6,
+        showSession: false,
+      }) ?? ""
+      // Dim `…` (SGR 2 / `\x1b[2m` open, `\x1b[22m` close) marks
+      // the truncation. The text content is clipped to cols-1 = 5
+      // cells.
+      expect(out).toContain("\x1b[2m…\x1b[22m")
+      const stripped = out.replace(/\x1b\[[0-9;]*m/g, "")
+      expect(stripped.length).toBeLessThanOrEqual(6)
+    })
+
+    it("`wrap` mode skips the cols guard and emits the richest form", () => {
+      // Opt-out path: caller wants overflow over clipping. Renderer
+      // returns the full baseRich form regardless of cols. Terminal
+      // natural-wraps the excess; live area grows.
+      const rl = new Map([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      ])
+      const stripped = (
+        renderQuotaFooter(rl, SOME_TOKENS, {
+          cols: 30,
+          contextWindow: 200_000,
+          effort: "medium",
+          sid: "b1d82846",
+          overflow: "wrap",
+        }) ?? ""
+      ).replace(/\x1b\[[0-9;]*m/g, "")
+      // Way wider than 30 cells — every full segment is present, full
+      // separators, full bars.
+      expect(stripped.length).toBeGreaterThan(30)
+      expect(stripped).toContain("effort medium")
+      expect(stripped).toContain("b1d82846")
+      expect(stripped).toMatch(/21% {4}7d/) // sep=4 (max)
+      // No truncation ellipsis (the safety net doesn't fire in wrap mode).
+      expect(stripped).not.toContain("…")
+    })
   })
 
   it("respects showSession: false (suppresses the block even with traffic)", () => {

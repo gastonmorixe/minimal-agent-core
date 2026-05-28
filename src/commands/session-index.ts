@@ -1,10 +1,18 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 
-import { type IndexRecord, indexFilePath } from "../session-store.ts"
+import { type IndexRecord, indexFilePath, sessionFilePath } from "../session-store.ts"
 
 /**
  * Read the global sessions index. Returns one record per saved session,
  * in append order (oldest first). Missing index file → empty array.
+ *
+ * Defensive filter: entries whose backing `<sid>.jsonl` no longer exists
+ * on disk are dropped. The graceful-exit path in `src/index.ts` keeps
+ * the index and the JSONL log in sync (cleanup of empty sessions
+ * rewrites the index), but a SIGKILL or manual `rm` can leave a stale
+ * row behind. Returning dead sids here would mean `--sessions` lists
+ * phantoms and `--resume last` resolves to a missing file. This filter
+ * is one `existsSync` per entry, cheap and read-only.
  */
 export function readSessionIndex(): IndexRecord[] {
   const path = indexFilePath()
@@ -18,7 +26,9 @@ export function readSessionIndex(): IndexRecord[] {
   for (const line of text.split("\n")) {
     if (line.length === 0) continue
     try {
-      out.push(JSON.parse(line) as IndexRecord)
+      const rec = JSON.parse(line) as IndexRecord
+      if (!existsSync(sessionFilePath(rec.sid))) continue
+      out.push(rec)
     } catch {
       // Skip malformed lines silently — index is best-effort metadata.
     }

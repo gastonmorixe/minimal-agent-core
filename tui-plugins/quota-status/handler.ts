@@ -39,6 +39,21 @@ import { renderQuotaFooter } from "./render.ts"
 const SHOW_OVERAGE = process.env.MINIMAL_AGENT_QUOTA_OVERAGE === "1"
 
 /**
+ * Rule 3 escape hatch: when set to `"wrap"`, the renderer skips its
+ * single-line clip and emits the richest still-fitting form. The
+ * terminal natural-wraps the excess onto subsequent rows and the
+ * live area grows to accommodate. Anything else (unset, `"truncate"`,
+ * or noise) keeps the default hard single-line invariant.
+ *
+ * Snapshot-once: changing the env var mid-process does not take
+ * effect until restart — same as the other quota-status snapshots
+ * above. Matches the power-user-knob philosophy of
+ * `MINIMAL_AGENT_QUOTA_OVERAGE`.
+ */
+const OVERFLOW: "truncate" | "wrap" =
+  process.env.MINIMAL_AGENT_QUOTA_OVERFLOW === "wrap" ? "wrap" : "truncate"
+
+/**
  * Resolve the model's context-window size from `MINIMAL_AGENT_MODEL`.
  *
  * The agent (src/index.ts) sets this env var before plugin load, so it's
@@ -65,6 +80,45 @@ function resolveContextWindow(): number | undefined {
   return has1mContext(model) ? 1_000_000 : 200_000
 }
 const CONTEXT_WINDOW = resolveContextWindow()
+
+/**
+ * Resolved reasoning-effort level being sent on the wire, surfaced by
+ * the agent on `process.env.MINIMAL_AGENT_EFFORT` after resolution
+ * (CLI > env > config > "medium" default for non-haiku models). For
+ * haiku the agent clears the env var entirely so the segment is
+ * suppressed. Snapshot-once at module load — matches the
+ * `MINIMAL_AGENT_MODEL` pattern above.
+ */
+function resolveEffort(): string | undefined {
+  const v = process.env.MINIMAL_AGENT_EFFORT
+  return v && v !== "" ? v : undefined
+}
+const EFFORT = resolveEffort()
+
+/**
+ * Shortened session-id anchor for the trailing footer segment.
+ *
+ * `MINIMAL_AGENT_SESSION_ID` carries the full UUIDv4 (set by the agent
+ * before plugin load, see `src/index.ts`). We take the first 8 hex
+ * chars — 32 random bits — which keeps collision risk negligible
+ * inside a single user's `~/.minimal-agent/sessions/` directory
+ * (probability ≈ N²/2^33; ~0.000012% at 1,000 sessions). A user who
+ * needs the full id still has it on the startup tree and in every
+ * filename under the sessions dir.
+ *
+ * Returns `undefined` when no env var is set (snapshot-fresh test
+ * runs, or any pre-resolution path).
+ */
+function resolveSid(): string | undefined {
+  const v = process.env.MINIMAL_AGENT_SESSION_ID
+  if (!v) return undefined
+  // The first dash is at index 8 in a canonical UUIDv4
+  // ("b1d82846-…"), so `slice(0, 8)` lifts the leading hex group
+  // verbatim without an explicit split. Robust to non-UUID inputs:
+  // any string is just truncated to its first 8 chars.
+  return v.slice(0, 8)
+}
+const SID = resolveSid()
 
 /**
  * "Fresh enough to skip a `checkQuota` probe" window. Half the declared
@@ -101,6 +155,9 @@ export default async function handle(
       cols: cols(),
       showOverage: SHOW_OVERAGE,
       contextWindow: CONTEXT_WINDOW,
+      effort: EFFORT,
+      sid: SID,
+      overflow: OVERFLOW,
     })
   }
 
@@ -125,5 +182,8 @@ export default async function handle(
     cols: cols(),
     showOverage: SHOW_OVERAGE,
     contextWindow: CONTEXT_WINDOW,
+    effort: EFFORT,
+    sid: SID,
+    overflow: OVERFLOW,
   })
 }

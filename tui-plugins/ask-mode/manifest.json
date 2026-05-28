@@ -1,7 +1,7 @@
 {
   "id": "ask-mode",
   "name": "Ask Mode",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read-only Q&A mode. The harness refuses Edit and Write at dispatch time and asks the model to present changes as diffs.",
   "modes": [
     {
@@ -13,7 +13,10 @@
         "status": { "fg": "blue" }
       },
       "statusLabel": "Asking",
-      "disallowedTools": ["Edit", "Write"],
+      "permissions": {
+        "allow": ["*"],
+        "deny": ["Edit", "Write"]
+      },
       "refusalHint": "Present the proposed change as a unified diff in a fenced code block (or via the ShowDiff tool); the user will apply it manually."
     }
   ]

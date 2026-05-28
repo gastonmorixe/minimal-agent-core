@@ -55,8 +55,9 @@ import {
 } from "./headers.ts"
 import { RawInput } from "./input.ts"
 import { type InputCaptureStack, inputCaptureStack } from "./input-capture-stack.ts"
-import { buildPendingModeChangeChip } from "./mode-change-chip.ts"
-import { ModeManager } from "./modes.ts"
+import { buildModeChangeChip } from "./mode-change-chip.ts"
+import { buildPendingModeChangeDecoration } from "./mode-change-pending-decoration.ts"
+import { type ModeDeliveryEvent, ModeManager } from "./modes.ts"
 import { PALETTE } from "./palette.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
@@ -789,6 +790,81 @@ export class Agent {
   }
 
   /**
+   * Scan the trailing assistant message for `tool_use` blocks that lack
+   * matching `tool_result` blocks in the immediately-following user
+   * message. For each orphan, build an `is_error: true` `tool_result`
+   * block whose content says the tool was aborted before completion.
+   *
+   * Returns the synthetic blocks. The caller (currently {@link run}'s
+   * initial-user-content build) is responsible for prepending them to
+   * the next user message so the `tool_use → tool_result` pairing is
+   * restored. Synthesized blocks are also persisted via
+   * `appendToolResult` so the session JSONL stays consistent (resumes
+   * cleanly without depending on `session-restore.ts`'s repair pass).
+   *
+   * Why this exists: when the user aborts a turn (Esc, Ctrl+C, Alt+M)
+   * between the moment the assistant streams its `tool_use` block and
+   * the moment the for-loop builds the matching tool_result user
+   * message, the orphan `tool_use` sits in `this.messages`. The
+   * Anthropic API then 400s on the next send with "tool_use ids were
+   * found without tool_result blocks immediately after". Repro:
+   * session `403c71fe-7cc4-…` (2026-05-27, fixed by this method
+   * alongside the ASAP-mode-change rework in the same commit).
+   *
+   * Pure side-effect-free in shape: does NOT push to `this.messages`
+   * (the caller controls placement so blocks land FIRST in the new
+   * user message). Only side effect: per-orphan
+   * `store?.appendToolResult` calls so the JSONL records the pairing
+   * the same instant the in-memory repair happens.
+   *
+   * Returns `[]` when:
+   *   - history is empty,
+   *   - trailing message is not assistant,
+   *   - trailing assistant has no `tool_use` blocks,
+   *   - all `tool_use` blocks already have matching tool_results in
+   *     the next user message (clean state).
+   */
+  repairOrphanedToolUse(): ToolResultBlock[] {
+    const last = this.messages[this.messages.length - 1]
+    if (!last || last.role !== "assistant") return []
+    if (!Array.isArray(last.content)) return []
+    const toolUses = last.content.filter((b): b is ToolUseBlock => b.type === "tool_use")
+    if (toolUses.length === 0) return []
+
+    // Defensive: if the message AFTER the assistant already has
+    // tool_results, walk those ids to identify the still-orphaned
+    // subset. In the current run() flow this branch never fires
+    // (orphans only happen when the for-loop's user message was
+    // never pushed), but we keep the check so this method is safe
+    // to call from session-restore-style repair flows later.
+    const next = this.messages[this.messages.length] // undefined by construction
+    const pairedIds = new Set<string>()
+    if (next && next.role === "user" && Array.isArray(next.content)) {
+      for (const b of next.content) {
+        if (b.type === "tool_result") pairedIds.add(b.tool_use_id)
+      }
+    }
+    const orphans = toolUses.filter((t) => !pairedIds.has(t.id))
+    if (orphans.length === 0) return []
+
+    const blocks: ToolResultBlock[] = orphans.map((tu) => ({
+      type: "tool_result" as const,
+      tool_use_id: tu.id,
+      content: "Tool execution aborted by user before completion.",
+      is_error: true,
+    }))
+    // Persist each synthetic result so the on-disk JSONL contains the
+    // same pairing the in-memory `this.messages` is about to send. On
+    // resume, `session-restore.ts`'s `repairMessages` would have done
+    // this anyway by dropping the orphan; ours is non-destructive
+    // (model sees "this was aborted" instead of the turn vanishing).
+    if (this.store) {
+      for (const b of blocks) this.store.appendToolResult(b)
+    }
+    return blocks
+  }
+
+  /**
    * Send a user message and run the full agentic tool loop.
    *
    * Runs `send → execute_tools → send_results → ...` until the model returns
@@ -924,6 +1000,18 @@ export class Agent {
     // tasks is the structured plan and reads better closer to the user
     // text it's anchored to.
     const initialUserContent: ContentBlock[] = []
+    // Orphan tool_use repair. If the previous turn aborted mid-tool
+    // (Esc / Ctrl+C / Alt+M after the assistant streamed `tool_use`
+    // but before the for-loop built the matching `tool_result` user
+    // message), the trailing assistant in `this.messages` carries
+    // orphan tool_use blocks. Anthropic's API rejects that shape with
+    // "tool_use ids were found without tool_result blocks immediately
+    // after" on the next send. Prepend synthetic `is_error: true`
+    // tool_result blocks so the pairing is restored. MUST come FIRST
+    // in this user message : the API enforces "tool_result IMMEDIATELY
+    // after tool_use" ordering. See {@link repairOrphanedToolUse}.
+    const orphanRepair = this.repairOrphanedToolUse()
+    for (const b of orphanRepair) initialUserContent.push(b)
     const initialModeAttach = this.modeManager?.consumePendingAttachment() ?? null
     if (initialModeAttach) initialUserContent.push(initialModeAttach)
     const stmAttach = this.shortTermSnapshot?.toAttachment() ?? null
@@ -932,12 +1020,39 @@ export class Agent {
     if (tasksAttach) initialUserContent.push(tasksAttach)
     const initialSaveEchoes = this.saveEcho?.consumeAll() ?? []
     for (const e of initialSaveEchoes) initialUserContent.push(e)
-    initialUserContent.push({ type: "text", text: userText })
+    // Empty userText is meaningful : it's how the Alt+M
+    // interrupt-and-apply-mode path (and other "send just the
+    // attachments" callers) signal "this turn carries no prose, just
+    // the runtime attachments above". Skip the text block in that
+    // case so the API doesn't see an empty `{type:"text", text:""}`
+    // (some providers accept it, but it reads as noise to the model).
+    // At least ONE content block is always pushed by the attachment
+    // emitters above when this is reached, so we never end up with
+    // an empty `content` array.
+    if (userText.length > 0) {
+      initialUserContent.push({ type: "text", text: userText })
+    }
     this.messages.push({
       role: "user",
       content: initialUserContent,
     })
-    this.store?.appendUser(initialUserContent)
+    // Persist to JSONL. Orphan-repair tool_result blocks were ALREADY
+    // written via per-block `appendToolResult` inside
+    // `repairOrphanedToolUse` (matching the in-loop convention where
+    // tool_results are persisted as dedicated `tool_result` records,
+    // not embedded inside a `user` record). Filter them out of the
+    // `appendUser` payload to avoid double-persistence : without this,
+    // `foldRecords` on resume would replay each synthetic
+    // tool_result twice (once from the dedicated record, once from
+    // the user-record blocks) and produce a corrupted message
+    // history.
+    const userRecordContent =
+      orphanRepair.length > 0
+        ? initialUserContent.filter((b) => b.type !== "tool_result")
+        : initialUserContent
+    if (userRecordContent.length > 0) {
+      this.store?.appendUser(userRecordContent)
+    }
 
     let rounds = 0
     // Silence is per-turn : the model has to re-ack each new user turn.
@@ -1119,10 +1234,46 @@ export class Agent {
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
 
       if (toolBlocks.length === 0) {
-        // No tool calls : model is done. Mark this as a natural exit so
-        // the post-loop wrap-up turn does NOT fire : the model already
-        // wrote its final text, we'd just be duplicating output (and
-        // wasting an API call) if we sent another request.
+        // No tool calls : model would be done. Before exiting, check
+        // for a pending mode-change attachment. If the user toggled
+        // modes during this turn and the assistant finished with text
+        // only, the attachment has no tool_result boundary to ride :
+        // we synthesize a user turn carrying ONLY the attachment and
+        // `continue` so the next loop iteration sends one more
+        // request. Two reasons to do this inside the loop instead of
+        // a post-loop one-shot:
+        //
+        //   1. The model may respond to the mode change with
+        //      `tool_use` (e.g. ASK→default + prior prompt was
+        //      "save this file" → Bash). The loop's existing
+        //      tool-execution machinery handles those tools
+        //      naturally. A post-loop one-shot leaves an orphaned
+        //      `tool_use` with no `tool_result`, and the NEXT user
+        //      submit 400s with "tool_use ids were found without
+        //      tool_result blocks immediately after".
+        //   2. The cache prefix stays warm: the synthetic user turn
+        //      is one block at the rolling-tail breakpoint, byte-
+        //      identical to what the next-submit path would build.
+        //
+        // Skipped when:
+        //   - the signal aborted (user pressed Esc; honor that),
+        //   - no ModeManager wired (no plugins/modes loaded).
+        //
+        // `consumePendingAttachment` is idempotent and net-zero-toggle
+        // safe: returns null when active === lastAdvertised, so a
+        // toggle-then-toggle-back during the same turn writes nothing.
+        const pendingMode = this.modeManager?.consumePendingAttachment() ?? null
+        if (pendingMode != null && !signal?.aborted) {
+          const userContent: ContentBlock[] = [pendingMode]
+          this.messages.push({ role: "user", content: userContent })
+          this.store?.appendUser(userContent)
+          continue
+        }
+        // No tool calls AND no pending mode change : model is done.
+        // Mark this as a natural exit so the post-loop wrap-up turn
+        // does NOT fire : the model already wrote its final text,
+        // we'd just be duplicating output (and wasting an API call)
+        // if we sent another request.
         exitedByCap = false
         break
       }
@@ -1255,6 +1406,41 @@ export class Agent {
           writeTranscript(
             `  ${c.dimCyan("╰")} ${c.dim(`(refused by ${this.modeManager?.activeId() ?? "mode"})`)}`,
           )
+        } else if (tool.name === "Mode" && this.modeManager) {
+          // Built-in `Mode` tool. Returns the live mode + effective
+          // permissions as a small JSON blob. Intercepted here (not in
+          // `executeTool`) because `tools.ts` does not (and should not)
+          // import the agent's ModeManager.
+          //
+          // The result is small, deterministic, side-effect-free, and
+          // doesn't need a spinner or the bash-streaming machinery. It
+          // ships through the same `tool_result` shape as everything
+          // else and picks up the trailing `<ma::mode-active>` stamp
+          // below.
+          writeToolHeader()
+          const mm = this.modeManager
+          const active = mm.active()
+          const since = mm.activeSince()
+          const perms = active ? mm.effectivePermissions(active.id) : null
+          const result = {
+            id: active?.id ?? null,
+            label: active?.label ?? null,
+            since: since ? since.toISOString() : null,
+            permissions: perms
+              ? {
+                  allow: perms.allow,
+                  deny: perms.deny,
+                  source: perms.source,
+                }
+              : { allow: ["*"], deny: [], source: { allow: "default", deny: "default" } },
+          }
+          content = JSON.stringify(result, null, 2)
+          isError = false
+          // Close the framed tool block. One transcript row showing the
+          // id is enough : the model gets the structured details, the
+          // user just needs to see that the model checked.
+          const labelDisplay = active ? (active.label ?? active.id) : "default"
+          writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(`active mode: ${labelDisplay}`)}`)
         } else {
           if (!pluginTool) writeToolHeader()
           const toolStartedAt = Date.now()
@@ -1586,6 +1772,26 @@ export class Agent {
           }
         }
 
+        // Active-mode stamp on EVERY tool_result. Continuously surfaces
+        // the current mode to the model so reasoning inertia from
+        // earlier in the same turn can't keep operating under a stale
+        // mode. Emitted only when a mode is active : default/no-mode
+        // turns are byte-identical to pre-stamp output, so tool_results
+        // in unrestricted sessions don't grow.
+        //
+        // Position: trailing on the tool_result content text. Sits in
+        // the rolling-tail cache breakpoint that's invalidated every
+        // turn anyway. Zero cache cost.
+        //
+        // Refusals get the stamp too : the model needs to know which
+        // mode produced the refusal so it can adapt deterministically
+        // (the refusal message already says "in <LABEL> mode", and the
+        // stamp gives the machine-readable id alongside).
+        const modeStamp = this.modeManager?.buildActiveModeStamp() ?? null
+        if (modeStamp) {
+          content = content.length > 0 ? `${content}\n\n${modeStamp}` : modeStamp
+        }
+
         const resultBlock: ToolResultBlock = {
           type: "tool_result",
           tool_use_id: tool.id,
@@ -1764,6 +1970,18 @@ export class Agent {
         }
       }
     }
+
+    // ASAP mode-change delivery is handled inside the main while loop
+    // above (see the `toolBlocks.length === 0` branch). When the
+    // assistant ends a turn with text only AND a mode toggle is
+    // pending, that branch synthesizes a user turn carrying the
+    // `<ma::mode-change>` attachment and `continue`s. This keeps the
+    // tool-execution machinery in one place: if the model responds
+    // to the new mode by calling a tool (e.g. ASK→default + "save
+    // this file" → Bash), the next loop iteration handles tools
+    // naturally instead of leaving an orphaned `tool_use`. Bug fix
+    // 2026-05-27: the original post-loop one-shot synthesizer DID
+    // leave orphans and the next user submit 400'd.
 
     return lastResponse
   }
@@ -2182,32 +2400,40 @@ const TOOL_PREVIEW_LINES: Record<string, number> = {
 const TOOL_PREVIEW_LINES_DEFAULT = 10
 
 /**
- * Three flavors of model-only annotation can ride at the end of
+ * Four flavors of model-only annotation can ride at the end of
  * `tool_result.content`:
  *
- *  - `\n\n[truncated: ...]`           : universal API-cap notice
+ *  - `\n\n[truncated: ...]`              : universal API-cap notice
  *    (see `tools/truncation.ts`).
- *  - `\n\n[note: ...]`                : streak tracker note
+ *  - `\n\n[note: ...]`                   : streak tracker note
  *    (see `tools/feedback-tracker.ts`).
- *  - `\n\n<ma::tui-preview …>…</ma::tui-preview>` : Layer 1b annotation
+ *  - `\n\n<ma::tui-preview …>…</ma::tui-preview>` : TUI elision hint
  *    (this file).
+ *  - `\n\n<ma::mode-active id="…" since="…" />`    : active-mode stamp
+ *    (this file). Always last : it's the freshest signal the model
+ *    should re-read at the very tail of each tool_result.
  *
- * Order at end of content is fixed: `[truncated:]` → `[note:]` →
- * `<ma::tui-preview>`. `findAnnotationStart` returns the index of the
- * EARLIEST true annotation (= start of the annotation region) so callers
- * can slice the body cleanly. Using per-pattern `lastIndexOf` (not a
- * single regex with `.match()`) hardens against the case where the body
- * itself legitimately contains the prefix (e.g. a `Read` of a log that
- * happens to include the string `[truncated:`) : the last occurrence
- * is the real annotation, body-internal occurrences are earlier.
+ * Order at end of content is fixed (above). `findAnnotationStart`
+ * returns the index of the EARLIEST true annotation (= start of the
+ * annotation region) so callers can slice the body cleanly. Using
+ * per-pattern `lastIndexOf` (not a single regex with `.match()`)
+ * hardens against the case where the body itself legitimately
+ * contains the prefix (e.g. a `Read` of a log that happens to
+ * include the string `[truncated:`) : the last occurrence is the
+ * real annotation, body-internal occurrences are earlier.
  *
- * Convention note: `[truncated:]` and `[note:]` are legacy bracket-string
- * shapes. New annotations use the `<ma::…>` XML-like namespace (per
- * project convention). When the legacy ones are eventually retrofitted
- * (cross-version replay-breaking change), this collapses to a single
- * `<ma::…>` test.
+ * Convention note: `[truncated:]` and `[note:]` are legacy
+ * bracket-string shapes. New annotations use the `<ma::…>` XML-like
+ * namespace (TODOS.md#T-ca2ce1). When the legacy ones are eventually
+ * retrofitted (cross-version replay-breaking change), this collapses
+ * to a single `<ma::…>` test.
  */
-const ANNOTATION_PREFIXES = ["\n\n[truncated:", "\n\n[note:", "\n\n<ma::tui-preview"] as const
+const ANNOTATION_PREFIXES = [
+  "\n\n[truncated:",
+  "\n\n[note:",
+  "\n\n<ma::tui-preview",
+  "\n\n<ma::mode-active",
+] as const
 
 function findAnnotationStart(content: string): number {
   let earliest = -1
@@ -2328,7 +2554,15 @@ function effectiveBodyLineWidth(cols?: number): number {
 
 function clampToolPreviewBodyLine(line: string, maxWidth: number | undefined): string {
   if (maxWidth === undefined || displayWidth(line) <= maxWidth) return line
-  return truncateDisplayWidth(line, maxWidth, "...")
+  // Delegate to the shared `clampBodyWithHint` so the display branch
+  // (Edit/Write diffs, tasks plugin display, etc.) gets the same
+  // `...(+Nch)` truncation marker the content path has been emitting
+  // since the May 2026 width-clamp work. Previously this used a bare
+  // `truncateDisplayWidth(line, maxWidth, "...")` which dropped the
+  // count, leaving the user unable to tell at-a-glance how much got
+  // cut off the end of a long task title (or any other plugin-rendered
+  // line). One canonical truncation idiom across all transcript rows.
+  return clampBodyWithHint(line, maxWidth)
 }
 
 /**
@@ -2806,6 +3040,35 @@ export interface ReplEditor {
    */
   setModeCycleHandlers?(forward: (() => void) | null, backward: (() => void) | null): void
   /**
+   * Optional. Wire Alt+M (interrupt-and-apply-mode). When the user
+   * toggles modes mid-turn and doesn't want to wait for the ASAP
+   * delivery boundary (next tool round / stream end), they press
+   * Alt+M and the handler:
+   *
+   *   1. Enqueues a synthetic zero-text item so the next loop
+   *      iteration runs as a mode-only continuation turn (`agent.run("")`
+   *      drains it and ships the pending `<ma::mode-change>` attachment).
+   *   2. Aborts the in-flight request via the abort bus.
+   *
+   * Orphan-tool_use cleanup is NOT handled here. If the assistant
+   * had already streamed a `tool_use` block when the abort fired,
+   * the orphan is repaired on the next `agent.run()` call by
+   * {@link Agent.repairOrphanedToolUse} (prepended synthetic
+   * "aborted by user" `tool_result` blocks). One repair site,
+   * applied uniformly to every abort path : Esc, Ctrl+C, Alt+M.
+   *
+   * Pass `null` to detach. Editors without this binding ignore Alt+M
+   * silently (no literal `m` is inserted).
+   */
+  setModeInterruptHandler?(handler: (() => void) | null): void
+  /**
+   * Optional. Wire a fresh-prompt builder for `submit`'s commit-render
+   * call. Closes the prompt-prefix race where a mode toggle
+   * immediately before Enter could leave the cached prefix one
+   * repaint behind. When unset, the editor uses its cached prompt.
+   */
+  setCommitPromptBuilder?(builder: (() => string) | null): void
+  /**
    * Optional. Update the editor's prompt prefix (e.g. when the active mode
    * changes). Repaint should happen synchronously inside the call.
    */
@@ -3279,10 +3542,70 @@ async function runReplLiveArea(
       editor.setPrompt?.(modeManager.promptPrefix(baseArrow), continuationPromptForRebuild)
     }
     modeManager.subscribe(repaintPrompt)
+    // Pending-widget refresh on every toggle. The widget peeks
+    // ModeManager state synchronously, so as long as we re-call
+    // renderDecoration the band picks up the new pending state.
+    // Only matters while a turn is in flight (renderDecoration is a
+    // no-op at idle). Cheap : peekPendingAttachment is a single
+    // pointer compare + object allocation.
+    modeManager.subscribe(() => renderDecoration())
+    // Race-defense: when the user presses Enter, EditorController.submit
+    // calls this builder to fetch the FRESHEST prompt prefix and bakes
+    // that into the scrollback commitLines. Without this, a mode
+    // toggle could race with the Enter keypress and the cached
+    // `renderer.prompt` could be one tick behind. The mode-change
+    // attachment that ships with the turn always reflects the
+    // active mode at consume-time, so the prefix MUST match.
+    editor.setCommitPromptBuilder?.(() => modeManager.promptPrefix(baseArrow))
+    // Delivery subscription : paints the scrollback chip the instant
+    // the model is told about the change (consumePendingAttachment
+    // returns a non-null block). Replaces the old send-time peek
+    // pattern, which painted optimistically and missed mid-turn ASAP
+    // deliveries and Alt+M interrupts.
+    modeManager.onDeliver(renderDeliveredModeChangeChip)
+    // Also clear the pending widget when delivery fires (peek now
+    // returns null, so renderDecoration re-renders to nothing for the
+    // mode row). Same listener for both effects keeps the wiring
+    // narrow.
+    modeManager.onDeliver(() => renderDecoration())
     editor.setModeCycleHandlers(
       () => modeManager.cycleNext(),
       () => modeManager.cyclePrev(),
     )
+    // Alt+M : interrupt-and-apply-mode. Fires only when there's a
+    // pending mode change AND a turn is in flight. Otherwise no-op
+    // (cycling and ASAP delivery already cover the other cases).
+    //
+    // The handler enqueues a zero-text item (drained as a mode-only
+    // continuation turn by the main loop : `agent.run("")` with
+    // attachments-only) and aborts the in-flight request. The next
+    // `queue.shift()` iteration picks up the zero-text item, which
+    // ships only the `<ma::mode-change>` attachment that
+    // `consumePendingAttachment` will yield. No prose, no repetition,
+    // cache-safe.
+    if (typeof editor.setModeInterruptHandler === "function") {
+      editor.setModeInterruptHandler(() => {
+        const pending = modeManager.peekPendingAttachment()
+        if (pending == null) return
+        if (!running) {
+          // Idle path: nothing to interrupt. The next user submit
+          // will carry the attachment naturally.
+          return
+        }
+        // Enqueue a synthetic zero-text item. The agent loop's
+        // `if (!text.trim()) return` filter in onSubmit is bypassed
+        // : we push directly. `commitLines` is empty so nothing is
+        // written to scrollback for this synthetic turn (the chip
+        // path in `flushPendingModeChangeChip` lands the mode-change
+        // chip itself).
+        queue.push({ text: "", commitLines: [] })
+        renderDecoration()
+        // Abort the in-flight request. The next turn iteration will
+        // call agent.run("") which becomes a mode-change-only turn.
+        abortBus.requestAbort({ kind: "programmatic", tag: "mode-interrupt" })
+        wakeWaiter()
+      })
+    }
     // Apply the current prompt immediately in case a default mode is
     // already active at startup.
     repaintPrompt()
@@ -3452,32 +3775,35 @@ async function runReplLiveArea(
     compositor.writeStream(`\n\n\n${item.commitLines.join("\n")}\n`)
   }
   /**
-   * If a mode change is pending advertisement, paint the scrollback
-   * chip for it RIGHT NOW. Called once per consume, immediately before
-   * the queue item(s) flush their `❯ <text>` line(s). The chip lands
-   * one blank line above the user prompt (capBlankLines collapses the
-   * joined `\n` runs to ≤2).
+   * Subscriber that paints the mode-change scrollback chip the
+   * instant the model is actually TOLD about the change (via
+   * `ModeManager.consumePendingAttachment`). The chip is the
+   * "model now knows" cue, not the "user toggled" cue.
    *
-   * Pairs with `agent.run()`'s `consumePendingAttachment` call: peek
-   * here, then the synchronous prefix of `agent.run` (up to the initial
-   * consume / loop-body consume) runs within the same tick. Between
-   * peek and consume the event loop never yields, so the chip's
-   * from/to and the consumed `<mode-change>` block carry identical
-   * data.
+   * Wired via `modeManager.onDeliver(...)` further up. Declared as a
+   * `function` (hoisted) so the subscription site can reference it
+   * earlier in the function body than the body itself sits.
    *
-   * No-op when no change is pending (active matches lastAdvertised):
-   * net-zero toggle sequences write nothing to scrollback.
+   * Net-zero toggles never deliver, so this writes nothing for them.
    */
-  const flushPendingModeChangeChip = (): void => {
+  function renderDeliveredModeChangeChip(event: ModeDeliveryEvent): void {
     if (modeManager == null) return
     if (typeof compositor.writeStream !== "function") return
-    const chip = buildPendingModeChangeChip(
-      modeManager.peekPendingAttachment(),
-      (id) => (id == null ? "default" : (modeManager.modeById(id)?.label ?? id.toUpperCase())),
-      (id) => modeManager.resolvedForId(id)?.label.fgOpen ?? null,
-      new Date(),
-    )
-    if (chip == null) return
+    const fromLabel =
+      event.fromId == null
+        ? "default"
+        : (modeManager.modeById(event.fromId)?.label ?? event.fromId.toUpperCase())
+    const toLabel =
+      event.toId == null
+        ? "default"
+        : (modeManager.modeById(event.toId)?.label ?? event.toId.toUpperCase())
+    const chip = buildModeChangeChip({
+      fromLabel,
+      toLabel,
+      fromFgOpen: modeManager.resolvedForId(event.fromId)?.label.fgOpen ?? null,
+      toFgOpen: modeManager.resolvedForId(event.toId)?.label.fgOpen ?? null,
+      at: event.at,
+    })
     compositor.writeStream(`\n${chip}\n`)
   }
   let cancelled = false
@@ -3506,10 +3832,35 @@ async function runReplLiveArea(
   const renderDecoration = (): void => {
     if (typeof editor.setDecorationLines !== "function") return
     if (!running) {
+      // Even when no turn is in flight, a mode toggle made WHILE no turn
+      // was running has no pending state to render : the next user submit
+      // ships the attachment and `consumePendingAttachment` clears the
+      // pending flag in the same tick. So at idle the band is always empty.
       editor.setDecorationLines([])
       return
     }
-    editor.setDecorationLines(buildQueueDecorationLines(queue.map((q) => q.text)))
+    const lines: string[] = []
+    // Pending mode-change widget (Phase 3 of the mode-system overhaul).
+    // Renders only when:
+    //   - a ModeManager is wired,
+    //   - the active mode differs from `lastAdvertisedModeId`,
+    //   - a turn is in flight (`running === true`, this branch).
+    // Cleared automatically the instant `consumePendingAttachment`
+    // delivers (the next renderDecoration call sees peek === null).
+    // Sits ABOVE the queued-user-text widget so the two stacks read
+    // top-to-bottom by "salience": mode > queued text.
+    if (modeManager != null) {
+      const row = buildPendingModeChangeDecoration(
+        modeManager.peekPendingAttachment(),
+        (id) => (id == null ? "default" : (modeManager.modeById(id)?.label ?? id.toUpperCase())),
+        (id) => modeManager.resolvedForId(id)?.label.fgOpen ?? null,
+      )
+      if (row != null) lines.push(row)
+    }
+    for (const ql of buildQueueDecorationLines(queue.map((q) => q.text))) {
+      lines.push(ql)
+    }
+    editor.setDecorationLines(lines)
   }
 
   const onSubmit = (text: string, commitLines: string[] = []): void => {
@@ -3616,10 +3967,15 @@ async function runReplLiveArea(
       // microseconds after Enter, indistinguishable from the old behavior.
       // Decoration must be re-rendered AFTER the shift so the queue widget
       // shrinks by one row in lockstep with the scrollback commit.
-      // Mode-change chip (if any) lands BEFORE the user prompt line so
-      // it reads as "this turn was sent in mode X". One emit per
-      // consume : peek+chip here, agent.run consumes synchronously.
-      flushPendingModeChangeChip()
+      // Mode-change chip is NOT painted here : it's painted by the
+      // `modeManager.onDeliver(...)` subscription (see
+      // `renderDeliveredModeChangeChip` above), which fires from inside
+      // `agent.run` when `consumePendingAttachment` actually returns a
+      // block. That makes the chip the "model now knows" cue, not the
+      // "user pressed Enter" cue. The two are usually the same instant
+      // for queue-drain turns (consume happens microseconds after
+      // queue.shift), but they diverge for ASAP mid-turn deliveries
+      // and Alt+M interrupts : we want the chip to reflect those too.
       flushQueueItemToScrollback(item)
       renderDecoration()
 
@@ -3848,10 +4204,11 @@ async function runReplLiveArea(
         // sees their queued prompts materialize in scrollback at the moment
         // they're handed to the agent (mid-turn drain at a tool boundary) :
         // mirrors what a sequence of solo turns would look like.
-        // Mode-change chip lands ONCE for the whole drained batch (the
-        // model consumes a single `<mode-change>` per loop body),
-        // positioned above the first prompt line.
-        flushPendingModeChangeChip()
+        // Mode-change chip is painted by the delivery subscription
+        // (renderDeliveredModeChangeChip), not here : the subscription
+        // fires from inside agent.run when consumePendingAttachment
+        // returns a block, which is the actual "model now knows"
+        // moment. See the onDeliver wiring further up.
         for (const item of drained) flushQueueItemToScrollback(item)
         renderDecoration()
         return drained.map((i) => i.text).join("\n\n")

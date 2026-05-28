@@ -51,6 +51,7 @@ const mockSession: LoadedSession = {
   ],
   dropped: [],
   repaired: false,
+  pendingDraft: null,
 }
 
 test("formatSessionAsMarkdown", () => {
@@ -95,6 +96,7 @@ const mockSessionRedacted: LoadedSession = {
   ],
   dropped: [],
   repaired: false,
+  pendingDraft: null,
 }
 
 test("formatSessionAsMarkdown redacted thinking", () => {

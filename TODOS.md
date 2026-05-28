@@ -88,8 +88,106 @@ The state line uses a real markdown checkbox so a quick `grep "\[ \]" TODOS.md` 
 
 **Why deferred.** No user has asked yet. Adding the knob without a use case adds API surface we'd then have to keep working. Trivial to wire once needed.
 
+### T-e7ce6f: Per-mode tool permission ACL (replaces the binary `disallowedTools` list)
+
+- [ ] state: `todo`
+- created_at: 2026-05-27T11:08:00-04:00
+- created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a, conversation about hardening mode enforcement
+- area: `src/modes.ts`, `src/plugins/types.ts` (`ManifestMode`), `src/agent.ts` (dispatch gate), `tui-plugins/ask-mode/manifest.json`
+
+**Description.** Today `ManifestMode` carries a flat `disallowedTools: string[]` list. `ModeManager.isToolAllowed` gates each `tool_use` at dispatch time against that list and synthesizes a refusal `tool_result` when blocked. This is solid for the "no Edit/Write in ASK" case but it cannot express:
+
+- per-tool input-shape constraints (e.g. allow `Bash` only when the command matches a read-only allowlist like `git status|log|diff|show|ls|cat|rg|grep`)
+- per-tool path constraints (e.g. allow `Edit` only inside `docs/`)
+- per-tool argument constraints (e.g. allow `MemoryTool` for `list`/`read`, deny `add`/`edit`/`remove`)
+- tier-graded refusals ("ask for confirmation" vs "hard deny")
+
+**What landing looks like.** Replace `disallowedTools: string[]` with `permissions: ToolPermission[]` on `ManifestMode`, where `ToolPermission` is a discriminated union along the lines of:
+
+```ts
+type ToolPermission =
+  | { tool: string; allow: true }
+  | { tool: string; allow: false; refusalHint?: string }
+  | { tool: string; allow: "match"; predicate: ToolInputPredicate; refusalHint?: string }
+
+type ToolInputPredicate =
+  | { kind: "bash-cmd-regex"; pattern: string }
+  | { kind: "path-prefix"; field: string; prefix: string }
+  | { kind: "field-in"; field: string; values: string[] }
+```
+
+Default policy is "allow" (so an empty `permissions` array means no restrictions, matching today's no-mode behavior). The dispatch gate evaluates predicates against the `tool_use.input` object and rejects with the same synthesized refusal envelope as today. Keep `disallowedTools` working for one release as sugar for `[{tool, allow: false}]`.
+
+**Why deferred.** The current binary list covers the only mode we ship (ASK = no Edit/Write). Granular ACLs are valuable but the surface area is real (schema, validation, predicate engine, test matrix). Land the foundation work for modes first (this session): hard PROMPT, reliable activation markers, model-facing query channel, in-flight propagation. Once the foundation is solid, add the ACL.
+
+**Open questions.**
+- Predicate language: ad-hoc DSL (above) vs JSONSchema vs a tiny CEL-like expression evaluator. Ad-hoc DSL is the smallest surface; JSONSchema is the most expressive but heaviest.
+- Should plugins be able to *contribute* permissions to a mode (e.g. the `git-tidy` plugin adds "Bash git:*" to a "read-only" mode)? That would need a permission-merge contract.
+- Audit-log channel for refusals: today the dispatcher writes a transcript line (`⊘ refused by ask`). With richer predicates the audit gets noisier; consider a structured `refusals.jsonl` sidecar in the session.
+
+### T-ca2ce1: Tag-namespace migration to `<ma::...>`
+
+- [ ] state: `todo`
+- created_at: 2026-05-27T11:31:00-04:00
+- created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a, conversation about mode-system overhaul
+- area: tree-wide (all places that emit or parse XML-style tags in user/assistant content and tool_result envelopes)
+
+**Description.** We use XML-style tags to carry agent-internal metadata into the LLM context (mode changes, memory saves, tool previews, reflection checkpoints, tasks, short-term memory, queue annotations, etc.). The naming is inconsistent today:
+
+- Some tags use the `ma::` prefix: `<ma::reflection-checkpoint>`, `<ma::tui-preview>`, `<ma::tui::tasks>`.
+- Others do not: `<mode-change>`, `<memory-saved>`, `<short-term-memory>`, `<ma::reflection-ack>` (model-emitted).
+
+The convention going forward: **every tag** uses `<ma::...>`. Tags emitted by core go under `<ma::<topic>...>` (e.g. `<ma::mode-change>`, `<ma::mode-active>`, `<ma::memory-saved>`). Tags emitted by a plugin go under `<ma::plugin::<plugin-name>::...>` (e.g. `<ma::plugin::tasks::list>` if tasks were a plugin).
+
+**What landing looks like.** Audit every emit/parse site; rename in lockstep (emitter + parser + tests). Update PROMPT.md fragments that reference old tag names. The session-replay parser handles BOTH the old and new names for one release so resumed sessions don't break. Then drop the old aliases.
+
+**Why deferred.** The new tags introduced by the mode-system work (session 100a7080) already follow the convention. Migrating the rest is its own focused pass.
+
+**Open questions.**
+- Resume compatibility window: 1 release or longer?
+- Should the parsers be data-driven (single tag registry) or per-tag custom (today's pattern)?
+
+### T-e945ec: Unify `tui-plugins/` and `plugins/` into a single `plugins/` tree
+
+- [ ] state: `todo`
+- created_at: 2026-05-27T11:31:00-04:00
+- created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a
+- area: `tui-plugins/`, `src/plugins/loader.ts`, all `manifest.json` references
+
+**Description.** Today plugins live in two trees with overlapping responsibilities: `tui-plugins/` (current home for most plugins: ask-mode, memory, tasks, etc.) and `src/plugins/` (loader + types + a few core integrations). The split is historical, not principled. A user installing a plugin shouldn't need to know which tree to drop it into.
+
+**What landing looks like.** Single `plugins/` tree at repo root. Loader walks one root. Manifest schema unchanged. Existing plugins move with `git mv` to preserve history.
+
+**Why deferred.** Mechanical refactor with a lot of churn (paths, imports, test fixtures). Not on the critical path of the mode-system work, but a prerequisite for cleanly extracting more core into plugins (T-c510d3).
+
+### T-c510d3: Extract `ModeManager` + dispatch gate into a core plugin
+
+- [ ] state: `todo`
+- created_at: 2026-05-27T11:31:00-04:00
+- created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a
+- area: `src/modes.ts`, `src/agent.ts` dispatch gate, future `plugins/modes/` directory
+
+**Description.** `ModeManager` and the dispatch-time `isToolAllowed` gate live in `src/`. They're "core" because the agent loop directly calls into them. But "everything is a plugin" is the project direction, and modes are a textbook plugin concern: per-feature behavior toggle + tool gating + UI styling, all already declared in plugin `manifest.json` files.
+
+**What landing looks like.** A `plugins/modes/` (built-in) plugin that owns:
+- The `ModeManager` lifecycle and the `ManifestMode` schema.
+- The `<ma::mode-change>` + `<ma::mode-active>` tag emitters.
+- The dispatch gate hook (registered as a tool-dispatch interceptor via the plugin bus).
+- The `Mode` tool.
+- The REPL keybindings (Shift+Tab, Ctrl+Shift+Tab, Alt+M).
+
+The agent core retains only the abstract "tool-dispatch interceptor" extension point. Mode plugins (ask-mode, future plan-mode, etc.) register their modes with the core plugin via a published API.
+
+**Why deferred.** The mode-system foundation work (session 100a7080) lands in the current shape (core + ask-mode plugin) to keep the diff focused. Once the foundation is stable, refactor location without changing semantics.
+
+**Open questions.**
+- Tool-dispatch interceptor API surface: synchronous gate vs async, single-callback vs ordered chain.
+- How does `Mode` tool registration coexist with the future per-mode tool-permissions ACL (T-e7ce6f)?
+
 ## Audit log
 
 History of state changes goes here as date-stamped one-liners. Helps a future agent understand why an entry's state moved.
 
 - 2026-05-26T00:15:29-04:00: file created. Seeded with 5 deferred items from the blob-store design conversation (session ca04ccf1...).
+- 2026-05-27T11:08:00-04:00: added T-e7ce6f (per-mode permission ACL) deferred from the mode-foundation work in session 100a7080.
+- 2026-05-27T11:31:00-04:00: added T-ca2ce1 / T-e945ec / T-c510d3 (tag-namespace migration, plugins tree unification, ModeManager extraction) as deferred sibling work to the mode-system overhaul in session 100a7080.

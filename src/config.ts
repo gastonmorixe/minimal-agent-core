@@ -228,3 +228,103 @@ export function loadDisabledPluginIds(): Set<string> {
   }
   return out
 }
+
+/**
+ * Per-mode user override: just the permissions slice for now (allow +
+ * deny). Mirrors `ModePermissions` from `src/plugins/types.ts` but
+ * defined here so `src/config.ts` doesn't import from the plugins
+ * layer (the dependency would point the wrong way).
+ */
+export interface ModeUserOverrideConfig {
+  permissions?: {
+    allow?: string[]
+    deny?: string[]
+  }
+}
+
+/**
+ * Walk `plugins.<plugin-id>.modes.<mode-id>` in the user config and
+ * return a `Map<mode-id, override>`.
+ *
+ * Mode ids are globally unique within a session (the plugin loader
+ * rejects duplicates), so the plugin namespace is only a filing
+ * cabinet : we collapse everything into a flat `mode-id → override`
+ * map keyed by id. If a user accidentally declares the same mode
+ * override under two different plugin namespaces, the LAST one wins
+ * (Object.entries iteration order = insertion order).
+ *
+ * Lenient: any malformed entry is silently dropped. Empty file,
+ * missing `plugins` section, missing `modes` section, missing
+ * `permissions`, wrong types : all return an empty map. Never throws.
+ *
+ * @example User config:
+ *
+ *     {
+ *       "plugins": {
+ *         "ask-mode": {
+ *           "modes": {
+ *             "ask": {
+ *               "permissions": {
+ *                 "allow": ["*"],
+ *                 "deny":  ["Edit", "Write", "Bash"]
+ *               }
+ *             }
+ *           }
+ *         }
+ *       }
+ *     }
+ *
+ * Returns `Map { "ask" => { permissions: { allow: ["*"], deny: [...] } } }`.
+ */
+export function loadModeUserOverrides(): Map<string, ModeUserOverrideConfig> {
+  const path = configPath()
+  const out = new Map<string, ModeUserOverrideConfig>()
+  if (!existsSync(path)) return out
+  let raw: string
+  try {
+    raw = readFileSync(path, "utf-8")
+  } catch {
+    return out
+  }
+  let parsed: unknown
+  try {
+    parsed = parseJsonc(raw)
+  } catch {
+    return out
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out
+  const plugins = (parsed as Record<string, unknown>).plugins
+  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) return out
+
+  for (const block of Object.values(plugins as Record<string, unknown>)) {
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue
+    const modes = (block as Record<string, unknown>).modes
+    if (!modes || typeof modes !== "object" || Array.isArray(modes)) continue
+    for (const [modeId, modeBlock] of Object.entries(modes as Record<string, unknown>)) {
+      if (typeof modeId !== "string" || modeId.length === 0) continue
+      if (!modeBlock || typeof modeBlock !== "object" || Array.isArray(modeBlock)) continue
+      const permsRaw = (modeBlock as Record<string, unknown>).permissions
+      if (!permsRaw || typeof permsRaw !== "object" || Array.isArray(permsRaw)) continue
+      const allow = sanitizeToolList((permsRaw as Record<string, unknown>).allow)
+      const deny = sanitizeToolList((permsRaw as Record<string, unknown>).deny)
+      // Skip entries that contributed nothing usable.
+      if (allow == null && deny == null) continue
+      const override: ModeUserOverrideConfig = { permissions: {} }
+      if (allow != null) override.permissions!.allow = allow
+      if (deny != null) override.permissions!.deny = deny
+      out.set(modeId, override)
+    }
+  }
+  return out
+}
+
+/** Validate one allow/deny list. Returns `null` for missing/unusable. */
+function sanitizeToolList(raw: unknown): string[] | null {
+  if (raw == null) return null
+  if (!Array.isArray(raw)) return null
+  const filtered = raw.filter((s): s is string => typeof s === "string" && s.length > 0)
+  // An explicit empty array is meaningful (e.g. `deny: []` to undo a
+  // manifest-level deny). So we return [], not null, when the user
+  // wrote an array : we only filter out non-string entries.
+  return filtered
+}

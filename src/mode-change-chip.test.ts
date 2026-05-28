@@ -94,28 +94,30 @@ describe("labelFor", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildModeChangeChip", () => {
-  test("default → ASK paints dim · lead, lime sparkle, blue bold ASK, dim 'from default'", () => {
+  test("default → ASK: dim · chip-lead, dim 'mode' category, dim 'default', dim arrow, bold blue ASK, faint-white timestamp", () => {
     const out = buildModeChangeChip({
       fromLabel: "default",
       toLabel: "ASK",
+      fromFgOpen: null, // default has no accent
       toFgOpen: "\x1b[34m",
       at: FIXED_AT,
     })
-    // Two leading spaces (margin), dim · chip-lead, lime sparkle, dim "mode →",
-    // bold blue ASK, faintWhite timestamp, dim "from default".
+    // Layout: `  · mode   default → ASK   2026-05-22 17:52`
     expect(out).toBe(
       "  " +
         "\x1b[2m·\x1b[22m" +
         " " +
-        "\x1b[38;5;118m✦\x1b[39m" +
+        "\x1b[2mmode\x1b[22m" +
+        "   " +
+        // from = "default", no accent → dim
+        "\x1b[2mdefault\x1b[22m" +
         " " +
-        "\x1b[2mmode →\x1b[22m" +
-        "  " +
+        "\x1b[2m→\x1b[22m" +
+        " " +
+        // to = "ASK", blue accent, bold
         "\x1b[1m\x1b[34mASK\x1b[0m" +
         "   " +
-        "\x1b[2;37m2026-05-22 17:52\x1b[22;39m" +
-        "  " +
-        "\x1b[2mfrom default\x1b[22m",
+        "\x1b[2;37m2026-05-22 17:52\x1b[22;39m",
     )
   })
 
@@ -123,30 +125,52 @@ describe("buildModeChangeChip", () => {
     const out = buildModeChangeChip({
       fromLabel: "default",
       toLabel: "RAW",
+      fromFgOpen: null,
       toFgOpen: null,
       at: FIXED_AT,
     })
     expect(out).toContain("\x1b[2m·\x1b[22m")
+    expect(out).toContain("\x1b[2mmode\x1b[22m")
     expect(out).toContain("\x1b[1;37mRAW\x1b[0m")
-    expect(out).toContain("\x1b[2mfrom default\x1b[22m")
-    // No `▎` rail anywhere — the chip-lead is the dim ·.
-    expect(out).not.toContain("▎")
+    // No sparkle anywhere — design dropped it.
+    expect(out).not.toContain("✦")
+    // No "from X" tail anymore.
+    expect(out).not.toContain("from")
   })
 
-  test("non-default 'from' (PLAN → ASK) renders the prior label", () => {
+  test("non-default 'from' (PLAN → ASK) paints source in its accent, non-bold", () => {
     const out = buildModeChangeChip({
       fromLabel: "PLAN",
       toLabel: "ASK",
-      toFgOpen: "\x1b[34m",
+      fromFgOpen: "\x1b[38;5;208m", // orange
+      toFgOpen: "\x1b[34m", // blue
       at: FIXED_AT,
     })
-    expect(out).toContain("from PLAN")
+    // Source: accent color, NO bold.
+    expect(out).toContain("\x1b[38;5;208mPLAN\x1b[39m")
+    // Target: accent color, WITH bold.
+    expect(out).toContain("\x1b[1m\x1b[34mASK\x1b[0m")
+  })
+
+  test("ASK → default: source bold-style, target falls back to dim faint-white bold", () => {
+    const out = buildModeChangeChip({
+      fromLabel: "ASK",
+      toLabel: "default",
+      fromFgOpen: "\x1b[34m",
+      toFgOpen: null,
+      at: FIXED_AT,
+    })
+    // Source: accent color, non-bold.
+    expect(out).toContain("\x1b[34mASK\x1b[39m")
+    // Target: bold faint-white fallback.
+    expect(out).toContain("\x1b[1;37mdefault\x1b[0m")
   })
 
   test("emits no trailing newline (caller appends \\n live, \\n\\n in replay)", () => {
     const out = buildModeChangeChip({
       fromLabel: "default",
       toLabel: "ASK",
+      fromFgOpen: null,
       toFgOpen: "\x1b[34m",
       at: FIXED_AT,
     })
@@ -184,21 +208,22 @@ describe("buildPendingModeChangeChip", () => {
     const want = buildModeChangeChip({
       fromLabel: "default",
       toLabel: "ASK",
+      fromFgOpen: null,
       toFgOpen: "\x1b[34m",
       at,
     })
     expect(got).toBe(want)
   })
 
-  test("ASK → default uses bold faintWhite for the default target", () => {
+  test("ASK → default uses bold faintWhite for the default target, source keeps its accent", () => {
     const got = buildPendingModeChangeChip(
       { fromId: "ask", toId: null },
       resolveLabel,
       resolveFgOpen,
       at,
     )
-    expect(got).toContain("\x1b[1;37mdefault\x1b[0m")
-    expect(got).toContain("from ASK")
+    expect(got).toContain("\x1b[34mASK\x1b[39m") // source non-bold accent
+    expect(got).toContain("\x1b[1;37mdefault\x1b[0m") // target bold fallback
   })
 })
 
