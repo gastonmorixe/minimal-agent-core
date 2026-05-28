@@ -285,6 +285,96 @@ describe("repairTrailingTurn", () => {
     expect(repaired).toHaveLength(4)
     expect(repaired.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"])
   })
+
+  // Regression for the orphan-tool_use API 400 the user hit in sessions
+  // 5dbabb43 + 2413e64a on 2026-05-27. Pattern on disk:
+  //
+  //   rec N    : assistant(tool_use X)
+  //   rec N+1  : tool_result(X)             ← matching pair
+  //   rec N+2  : user("new prompt text")    ← user typed while agent was working
+  //
+  // foldRecords turns rec N+1 into its own `user([tool_result X])` message
+  // (because the prior message is the assistant), then rec N+2 produces a
+  // SECOND user message. The naive consecutive-user collapse (step 4)
+  // dropped the EARLIER user — which carried the load-bearing tool_result —
+  // leaving the assistant's tool_use orphaned. Anthropic API rejects with
+  //   "tool_use ids were found without tool_result blocks immediately after".
+  // The fix: merge tool_result blocks from the earlier user into the later
+  // user (prepended, so they keep the "tool_results first" invariant).
+  it("merges tool_results from an earlier user into the later user (not drop)", () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "kick off" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "tu_x", name: "Bash", input: { command: "ls" } } as ToolUseBlock,
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_x",
+            content: "ok",
+            is_error: false,
+          } as ToolResultBlock,
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "new prompt mid-loop" }] },
+      { role: "assistant", content: [{ type: "text", text: "continuing..." }] },
+    ]
+    const repaired = repairTrailingTurn(messages)
+    // 4 messages: user(kick off), asst(tool_use), merged user, asst(continuing).
+    expect(repaired).toHaveLength(4)
+    expect(repaired.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"])
+    const mergedUser = repaired[2]
+    const blocks = mergedUser.content as ContentBlock[]
+    // tool_result MUST be present AND first.
+    expect(blocks[0].type).toBe("tool_result")
+    expect((blocks[0] as ToolResultBlock).tool_use_id).toBe("tu_x")
+    // The later user's text must also survive.
+    const textBlock = blocks.find((b) => b.type === "text") as
+      | { type: string; text: string }
+      | undefined
+    expect(textBlock?.text).toBe("new prompt mid-loop")
+  })
+
+  // Same situation, but the assistant's TRAILING turn never got a follow-up.
+  // The earlier user (with tool_result) and later user (with text) are the
+  // last two messages. Tool_result must still be preserved so the assistant
+  // turn before them stays valid.
+  it("preserves trailing tool_result even when the later user is a fresh prompt", () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "start" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_y", name: "Bash", input: {} } as ToolUseBlock],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_y",
+            content: "result",
+            is_error: false,
+          } as ToolResultBlock,
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "second prompt" }] },
+    ]
+    const repaired = repairTrailingTurn(messages)
+    expect(repaired).toHaveLength(3)
+    const trailing = repaired[2]
+    expect(trailing.role).toBe("user")
+    const blocks = trailing.content as ContentBlock[]
+    expect(blocks[0].type).toBe("tool_result")
+    expect((blocks[0] as ToolResultBlock).tool_use_id).toBe("tu_y")
+    expect(
+      blocks.some((b) => b.type === "text" && (b as { text: string }).text === "second prompt"),
+    ).toBe(true)
+  })
 })
 
 describe("extractPendingDraft", () => {

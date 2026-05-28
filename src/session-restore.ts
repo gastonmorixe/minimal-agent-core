@@ -219,27 +219,55 @@ export function repairMessages(input: Message[]): Message[] {
     }
   }
 
-  // Step 4: collapse consecutive `user` messages by dropping all but
-  // the LAST in each run. The latest user prompt is the one the
-  // conversation actually continued from; earlier ones in the same run
-  // were orphaned (never replied to), typically because an assistant
-  // turn between them was dropped by step 1 (the "crashed mid-tool"
-  // pattern across multiple resumes). See the function doc for the
-  // full scenario.
+  // Step 4: collapse consecutive `user` messages. Two distinct
+  // scenarios produce a `[user, user]` adjacency in `out`:
+  //
+  // 1. ABANDONED PROMPT across multi-resume. Run 1 appends
+  //    `user(A) + assistant(tool_use)` then crashes. Run 2 surfaces
+  //    user(A) as `pendingDraft`; the user discards it and types
+  //    `user(B)`, which appends to the same log. Run 3 loads,
+  //    step 1 drops the orphan assistant, leaving `[user(A), user(B)]`.
+  //    user(A) is pure text, never replied to. The user already chose
+  //    to move on; we drop user(A).
+  //
+  // 2. TOOL-RESULT SPLIT in a clean live turn. Sequence on disk:
+  //      asst(tool_use X) → tool_result(X) → user("new prompt")
+  //    foldRecords synthesizes a user message for the tool_result
+  //    (because the preceding message is an assistant) and ALSO pushes
+  //    a user message for the explicit user record. Result:
+  //      [asst(tool_use X), user([tool_result X]), user([text])]
+  //    The earlier user carries the load-bearing tool_result that
+  //    pairs with the assistant's tool_use. Dropping it (the original
+  //    naive policy) leaves the assistant orphaned and the next API
+  //    send 400s with "tool_use ids were found without tool_result
+  //    blocks immediately after". Instead: PREPEND any tool_result
+  //    blocks from the earlier user onto the later user (preserving
+  //    the tool_results-first invariant from step 3b), then drop the
+  //    earlier user's shell.
   //
   // Walks backwards so the last user in each run is naturally retained
-  // and we can drop the earlier ones in place without index juggling.
+  // and we can transfer/drop the earlier ones in place without index
+  // juggling.
   const collapsed: Message[] = []
   for (let i = out.length - 1; i >= 0; i--) {
     const cur = out[i]
     const prev = collapsed[collapsed.length - 1] // already-pushed = NEXT in original order
     if (cur.role === "user" && prev?.role === "user") {
-      // `cur` is an EARLIER user that's immediately followed by another
-      // user in the output. Drop `cur`. We don't merge content: tool_result
-      // blocks (load-bearing for the next API call) live in the LATER user
-      // message and would be re-ordered destructively, and plain prompts
-      // here represent abandoned-then-replaced intent that the user
-      // already chose to move past.
+      // Salvage any tool_result blocks from `cur` (the earlier user)
+      // into `prev` (the later user). Non-tool-result content from
+      // `cur` is dropped : in scenario 1 it's an abandoned prompt; in
+      // scenario 2 the earlier user only carries tool_results anyway.
+      if (Array.isArray(cur.content) && Array.isArray(prev.content)) {
+        const carriedResults = cur.content.filter((b) => b.type === "tool_result")
+        if (carriedResults.length > 0) {
+          // Prepend so tool_results stay first in the merged message.
+          // `prev.content` already has its own tool_results at the
+          // front (step 3b), so we end up with
+          //   [...cur.tool_results, ...prev.tool_results, ...prev.rest]
+          // which is the order the API requires.
+          prev.content = [...carriedResults, ...prev.content]
+        }
+      }
       continue
     }
     collapsed.push(cur)
