@@ -1,10 +1,11 @@
 /**
- * TUI inline-tag stream scanner.
+ * Plugin inline-tag stream scanner.
  *
  * Streaming state machine that sits between the SSE text-chunk pipeline and
  * the stdout writer. It watches assistant text for spans of the form
- * `<tui::NAME ...>...</tui::NAME>` (or self-closing `<tui::NAME ... />`) and
- * emits parsed tag events while passing all other text through untouched.
+ * `<ma::plugin::NAME ...>...</ma::plugin::NAME>` (or self-closing
+ * `<ma::plugin::NAME ... />`) and emits parsed tag events while passing all
+ * other text through untouched.
  *
  * **Why stream-aware:** a tag opener can be split across chunk boundaries by
  * the SSE delta granularity. Naively running a regex per chunk would miss
@@ -16,26 +17,26 @@
  * the text channel. Tags are never silently dropped. This bounds worst-case
  * memory and preserves user output.
  *
- * **Escape form:** the literal sequence `\<tui::` suppresses detection at
- * that position. The backslash is consumed on emit (the text channel sees
- * `<tui::...`). This is the only escape.
+ * **Escape form:** the literal sequence `\<ma::plugin::` suppresses
+ * detection at that position. The backslash is consumed on emit (the text
+ * channel sees `<ma::plugin::...`). This is the only escape.
  *
  * **Markdown code context:** the scanner tracks inline code spans
  * (`` `...` ``, or any backtick run `` ``...`` `` closed by the same run
  * length) and fenced code blocks (lines beginning with 3+ backticks or 3+
  * tildes, closed by a same-char fence of equal-or-greater length at line
- * start). Inside either context, `<tui::` openers are passed through as
- * plain text and no tag event fires. This prevents the model's prose --
+ * start). Inside either context, `<ma::plugin::` openers are passed through
+ * as plain text and no tag event fires. This prevents the model's prose --
  * which often references plugin tag names inside backticks or fenced
  * examples -- from accidentally triggering plugin handlers. Leading-space
  * indent on fence openers is NOT supported (zero-indent only); this covers
  * the realistic agent-emitted markdown but skips obscure CommonMark cases.
  *
- * **Nesting:** the scanner captures until the first `</tui::NAME>` matching
- * the opener name. Nested tags with different names are safe because they do
- * not match the outer close. Nested tags with the same name are ambiguous;
- * the first inner close will end the outer capture. Plugin authors should
- * avoid nesting same-name tags.
+ * **Nesting:** the scanner captures until the first `</ma::plugin::NAME>`
+ * matching the opener name. Nested tags with different names are safe
+ * because they do not match the outer close. Nested tags with the same name
+ * are ambiguous; the first inner close will end the outer capture. Plugin
+ * authors should avoid nesting same-name tags.
  *
  * **Spec:** `/Users/gaston/.claude/plans/polished-drifting-dijkstra.md`,
  * section "Inline tag trigger path".
@@ -51,13 +52,13 @@
  * writing the raw bytes if no plugin claims the tag.
  */
 export interface TagSpan {
-  /** Tag name from `<tui::NAME ...>`, lowercased per spec. */
+  /** Tag name from `<ma::plugin::NAME ...>`, lowercased per spec. */
   name: string
   /** Attribute map. Values have escape sequences decoded. */
   attrs: Record<string, string>
   /** Body bytes between opener and closer. Empty for self-closing tags. */
   body: string
-  /** True if the tag was self-closing `<tui::NAME ... />`. */
+  /** True if the tag was self-closing `<ma::plugin::NAME ... />`. */
   self_closing: boolean
   /** The original bytes of the full span (opener + body + closer). */
   raw: string
@@ -78,9 +79,10 @@ export interface TagScannerOptions {
 
 const DEFAULT_MAX_SPAN = 64 * 1024
 
-// The longest prefix that could be the start of `<tui::` — used to decide how
-// many bytes to retain in the tail when flushing plain text in default state.
-const OPENER_PROBE = "<tui::"
+// The longest prefix that could be the start of `<ma::plugin::` — used to
+// decide how many bytes to retain in the tail when flushing plain text in
+// default state.
+const OPENER_PROBE = "<ma::plugin::"
 
 /**
  * Streaming scanner. Feed chunks via {@link write}, call {@link end} when the
@@ -125,8 +127,9 @@ export class TagScanner {
    * for any in-progress capture. Idempotent after the first call.
    *
    * **Common cause of unterminated captures:** a mismatched closer. Only
-   * `</tui::NAME>` exactly matching the opener name closes a capture. A
-   * differently-named closer (e.g. `</thinking>` or `</tui::other>`) is just
+   * `</ma::plugin::NAME>` exactly matching the opener name closes a
+   * capture. A differently-named closer (e.g. `</thinking>` or
+   * `</ma::plugin::other>`) is just
    * buffered as more body content, the matching close never arrives, and the
    * span is flushed verbatim here at end-of-stream. This failure is silent
    * from the producer's perspective: the body appears in the user's terminal
@@ -166,8 +169,8 @@ export class TagScanner {
 
   /**
    * Default state: walk `buf` byte-by-byte, tracking markdown code context,
-   * and look for an unescaped `<tui::` opener at a position that is not
-   * inside an inline or fenced code span.
+   * and look for an unescaped `<ma::plugin::` opener at a position that is
+   * not inside an inline or fenced code span.
    *
    * Returns `true` if progress was made (caller should loop), `false` if the
    * scanner is waiting for more data.
@@ -248,7 +251,7 @@ export class TagScanner {
         continue
       }
 
-      // Escape form: `\<tui::` suppresses detection. The backslash is
+      // Escape form: `\<ma::plugin::` suppresses detection. The backslash is
       // collapsed by decodeEscapes on flush.
       if (ch === "\\" && i + 1 + OPENER_PROBE.length <= n && buf.startsWith(OPENER_PROBE, i + 1)) {
         this.mdAtLineStart = false
@@ -278,9 +281,9 @@ export class TagScanner {
 
   /**
    * Flush `buf[0..upto)` as text, retaining any trailing partial opener
-   * prefix (e.g. `... <tu`) so it can be completed by the next chunk. When
-   * inside a code context, no opener can fire, so the full prefix is safe
-   * to flush.
+   * prefix (e.g. `... <ma::pl`) so it can be completed by the next chunk.
+   * When inside a code context, no opener can fire, so the full prefix is
+   * safe to flush.
    */
   private flushAndHoldAt(upto: number): boolean {
     if (upto <= 0) return false
@@ -340,11 +343,11 @@ export class TagScanner {
   private pendingOpener: ParsedOpener | null = null
 
   /**
-   * Capturing state: look for matching `</tui::NAME>`. On find, emit a tag
-   * event. On size overflow, fall back to raw text.
+   * Capturing state: look for matching `</ma::plugin::NAME>`. On find, emit
+   * a tag event. On size overflow, fall back to raw text.
    */
   private driveCapturing(): boolean {
-    const close = `</tui::${this.captureName}>`
+    const close = `</ma::plugin::${this.captureName}>`
     const closeIdx = this.buf.indexOf(close, this.captureStart)
 
     if (closeIdx >= 0) {
@@ -402,25 +405,26 @@ function countRun(s: string, from: number, ch: string): number {
 }
 
 /**
- * Decode the scanner's single escape form: `\<tui::` → `<tui::`. All other
- * characters pass through unchanged. Applied to plain text flushes so the
- * escape is invisible downstream.
+ * Decode the scanner's single escape form: `\<ma::plugin::` →
+ * `<ma::plugin::`. All other characters pass through unchanged. Applied to
+ * plain text flushes so the escape is invisible downstream.
  */
 function decodeEscapes(s: string): string {
-  return s.replace(/\\<tui::/g, "<tui::")
+  return s.replace(/\\<ma::plugin::/g, "<ma::plugin::")
 }
 
 /**
  * Return the safe prefix length of `s` in default state: the longest prefix
- * that cannot possibly be the start of an unescaped `<tui::` once more data
- * arrives. Retains a short tail that could still turn into an opener.
+ * that cannot possibly be the start of an unescaped `<ma::plugin::` once
+ * more data arrives. Retains a short tail that could still turn into an
+ * opener.
  */
 function safeTextEnd(s: string): number {
   if (s.length === 0) return 0
 
-  // The largest suffix that could be a prefix of `<tui::` (including the
-  // backslash-escape form `\<tui::`) is 7 characters: `\<tui::`.
-  const maxPrefix = 7
+  // The largest suffix that could be a prefix of `<ma::plugin::` (including
+  // the backslash-escape form `\<ma::plugin::`) is 14 characters.
+  const maxPrefix = OPENER_PROBE.length + 1
   const start = Math.max(0, s.length - maxPrefix)
 
   for (let i = start; i < s.length; i++) {
@@ -446,7 +450,8 @@ interface ParsedOpener {
 type ParseResult = ParsedOpener | "incomplete" | "malformed"
 
 /**
- * Parse `<tui::NAME ... >` or `<tui::NAME ... />` at the start of `s`.
+ * Parse `<ma::plugin::NAME ... >` or `<ma::plugin::NAME ... />` at the
+ * start of `s`.
  *
  * Returns:
  * - a parsed opener, or

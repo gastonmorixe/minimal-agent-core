@@ -6,7 +6,7 @@
  *   - {@link ModeManager.isToolAllowed} as the dispatch-time gate
  *     (replaces the old `filterTools` request-shape mutation).
  *   - {@link ModeManager.consumePendingAttachment} as the activation
- *     channel (a `<ma::mode-change>` text block emitted on the next user
+ *     channel (a `<ma::agent::mode-change>` text block emitted on the next user
  *     turn after a toggle, idempotent thereafter).
  *   - Deprecation no-ops for {@link ModeManager.filterTools} and
  *     {@link ModeManager.systemPromptAddition}.
@@ -45,7 +45,7 @@ const DEBUG_MODE: ManifestMode = {
   // No disallowedTools — mode is purely a UX state, no dispatch refusals.
 }
 
-// Fixed wall-clock used by tests that assert on the literal `<ma::mode-change … at="…" />`
+// Fixed wall-clock used by tests that assert on the literal `<ma::agent::mode-change … at="…" />`
 // payload. The byte-stable timestamp lets us keep `.toEqual` instead of regex matchers.
 const FIXED_AT = new Date("2026-05-22T20:43:12.000Z")
 const FIXED_AT_ISO = FIXED_AT.toISOString()
@@ -129,7 +129,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     expect(block).not.toBeNull()
     expect(block).toEqual({
       type: "text",
-      text: `<ma::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::agent::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -148,7 +148,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     const block = m.consumePendingAttachment()
     expect(block).toEqual({
       type: "text",
-      text: `<ma::mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::agent::mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -182,7 +182,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     const block = m.consumePendingAttachment()
     expect(block).toEqual({
       type: "text",
-      text: `<ma::mode-change from="default" to="plan" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::agent::mode-change from="default" to="plan" at="${FIXED_AT_ISO}" />`,
     })
   })
 
@@ -209,7 +209,7 @@ describe("ModeManager.consumePendingAttachment", () => {
     // First consume reflects the *current* (= "ask") vs lastAdvertised (= null).
     expect(m.consumePendingAttachment()).toEqual({
       type: "text",
-      text: `<ma::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::agent::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
   })
 })
@@ -450,7 +450,7 @@ describe("ModeManager.buildActiveModeStamp", () => {
   test("returns the self-closing tag when a mode is active", () => {
     const m = mkMgr([ASK_MODE], "ask")
     const stamp = m.buildActiveModeStamp()
-    expect(stamp).toBe(`<ma::mode-active id="ask" since="${FIXED_AT_ISO}" />`)
+    expect(stamp).toBe(`<ma::agent::mode-active id="ask" since="${FIXED_AT_ISO}" />`)
   })
 
   test("since reflects the most recent transition, not the constructor time", () => {
@@ -460,7 +460,7 @@ describe("ModeManager.buildActiveModeStamp", () => {
     now = new Date("2026-01-01T00:01:00.000Z")
     m.setMode("ask")
     expect(m.buildActiveModeStamp()).toBe(
-      `<ma::mode-active id="ask" since="2026-01-01T00:01:00.000Z" />`,
+      `<ma::agent::mode-active id="ask" since="2026-01-01T00:01:00.000Z" />`,
     )
   })
 })
@@ -485,14 +485,14 @@ describe("lastAdvertisedModeFromHistory", () => {
     ).toBeNull()
   })
 
-  test("captures `to=` from the new <ma::mode-change> tag", async () => {
+  test("captures `to=` from the new <ma::agent::mode-change> tag", async () => {
     const { lastAdvertisedModeFromHistory } = await import("./modes.ts")
     expect(
       lastAdvertisedModeFromHistory([
         {
           role: "user",
           content: [
-            { type: "text", text: '<ma::mode-change from="default" to="ask" at="x" />' },
+            { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="x" />' },
             { type: "text", text: "ask this" },
           ],
         },
@@ -518,7 +518,9 @@ describe("lastAdvertisedModeFromHistory", () => {
       lastAdvertisedModeFromHistory([
         {
           role: "user",
-          content: [{ type: "text", text: '<ma::mode-change from="ask" to="default" at="x" />' }],
+          content: [
+            { type: "text", text: '<ma::agent::mode-change from="ask" to="default" at="x" />' },
+          ],
         },
       ]),
     ).toBeNull()
@@ -530,12 +532,16 @@ describe("lastAdvertisedModeFromHistory", () => {
       lastAdvertisedModeFromHistory([
         {
           role: "user",
-          content: [{ type: "text", text: '<ma::mode-change from="default" to="ask" at="t1" />' }],
+          content: [
+            { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="t1" />' },
+          ],
         },
         { role: "assistant", content: [{ type: "text", text: "ok" }] },
         {
           role: "user",
-          content: [{ type: "text", text: '<ma::mode-change from="ask" to="plan" at="t2" />' }],
+          content: [
+            { type: "text", text: '<ma::agent::mode-change from="ask" to="plan" at="t2" />' },
+          ],
         },
       ]),
     ).toBe("plan")
@@ -547,7 +553,7 @@ describe("lastAdvertisedModeFromHistory", () => {
       lastAdvertisedModeFromHistory([
         {
           role: "assistant",
-          content: [{ type: "text", text: '<ma::mode-change from="default" to="ask" />' }],
+          content: [{ type: "text", text: '<ma::agent::mode-change from="default" to="ask" />' }],
         },
       ]),
     ).toBeNull()
@@ -561,7 +567,7 @@ describe("lastAdvertisedModeFromHistory", () => {
 describe("ModeManager.primeLastAdvertised", () => {
   test("prevents redundant first-consume after resume", () => {
     // Process starts with ASK active (CLI flag, say) AND the persisted
-    // history's last `<ma::mode-change to="ask">` already informed the
+    // history's last `<ma::agent::mode-change to="ask">` already informed the
     // model. Without priming, the first consume would re-emit
     // `from="default" to="ask"`. With priming, it returns null.
     const m = mkMgr([ASK_MODE], "ask")

@@ -128,7 +128,7 @@ export async function runReplLiveArea(
     // continuation turn by the main loop : `agent.run("")` with
     // attachments-only) and aborts the in-flight request. The next
     // `queue.shift()` iteration picks up the zero-text item, which
-    // ships only the `<ma::mode-change>` attachment that
+    // ships only the `<ma::agent::mode-change>` attachment that
     // `consumePendingAttachment` will yield. No prose, no repetition,
     // cache-safe.
     if (typeof editor.setModeInterruptHandler === "function") {

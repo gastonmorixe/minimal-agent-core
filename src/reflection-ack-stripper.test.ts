@@ -34,32 +34,32 @@ describe("createReflectionAckStripper — passthrough", () => {
     expect(feedAll(["see <ma::tasks> for tracking"])).toBe("see <ma::tasks> for tracking")
   })
 
-  test("`<tui::` tags are unaffected (handled by the inline-tag scanner elsewhere)", () => {
-    expect(feedAll(["<tui::diff>--- a\n+++ b\n</tui::diff>"])).toBe(
-      "<tui::diff>--- a\n+++ b\n</tui::diff>",
+  test("`<ma::plugin::` tags are unaffected (handled by the inline-tag scanner elsewhere)", () => {
+    expect(feedAll(["<ma::plugin::diff>--- a\n+++ b\n</ma::plugin::diff>"])).toBe(
+      "<ma::plugin::diff>--- a\n+++ b\n</ma::plugin::diff>",
     )
   })
 })
 
 describe("createReflectionAckStripper — single-chunk strips", () => {
   test("bare tag with no attrs", () => {
-    expect(feedAll(["<ma::reflection-ack/>"])).toBe("")
+    expect(feedAll(["<ma::agent::reflection-ack/>"])).toBe("")
   })
 
   test("tag with silence-for only", () => {
-    expect(feedAll(['<ma::reflection-ack silence-for="3" />'])).toBe("")
+    expect(feedAll(['<ma::agent::reflection-ack silence-for="3" />'])).toBe("")
   })
 
   test("tag with reason only", () => {
-    expect(feedAll(['<ma::reflection-ack reason="batch refactor" />'])).toBe("")
+    expect(feedAll(['<ma::agent::reflection-ack reason="batch refactor" />'])).toBe("")
   })
 
   test("tag with both attrs", () => {
-    expect(feedAll(['<ma::reflection-ack silence-for="2" reason="batch ops" />'])).toBe("")
+    expect(feedAll(['<ma::agent::reflection-ack silence-for="2" reason="batch ops" />'])).toBe("")
   })
 
   test("attrs in reversed order", () => {
-    expect(feedAll(['<ma::reflection-ack reason="X" silence-for="5" />'])).toBe("")
+    expect(feedAll(['<ma::agent::reflection-ack reason="X" silence-for="5" />'])).toBe("")
   })
 
   test("tag alone on its own line — leaves surrounding newlines for capBlankLines to bound", () => {
@@ -68,7 +68,7 @@ describe("createReflectionAckStripper — single-chunk strips", () => {
     // scrollback, so the rendered result is at-most-one-extra blank row.
     // Doing better safely requires cross-chunk lookback both before and
     // after the tag (preserving `prose\n<tag>\nmore` → `prose\n\nmore`).
-    expect(feedAll(['prose\n\n<ma::reflection-ack silence-for="2" />\nmore'])).toBe(
+    expect(feedAll(['prose\n\n<ma::agent::reflection-ack silence-for="2" />\nmore'])).toBe(
       "prose\n\n\nmore",
     )
   })
@@ -77,41 +77,47 @@ describe("createReflectionAckStripper — single-chunk strips", () => {
     // Regression guard for the alternative-policy hazard: a regex with
     // `\n?` trailing consume would turn this into "prose\nmore"
     // (no blank row between paragraphs). Keep this case clean.
-    expect(feedAll(['prose\n<ma::reflection-ack silence-for="1" />\nmore'])).toBe("prose\n\nmore")
+    expect(feedAll(['prose\n<ma::agent::reflection-ack silence-for="1" />\nmore'])).toBe(
+      "prose\n\nmore",
+    )
   })
 
   test("tag inline with prose — no trailing newline to consume", () => {
-    expect(feedAll(['before <ma::reflection-ack silence-for="1" /> after'])).toBe("before  after")
+    expect(feedAll(['before <ma::agent::reflection-ack silence-for="1" /> after'])).toBe(
+      "before  after",
+    )
   })
 
   test("multiple tags in one chunk both stripped", () => {
     expect(
-      feedAll(['<ma::reflection-ack silence-for="1" />text<ma::reflection-ack silence-for="2" />']),
+      feedAll([
+        '<ma::agent::reflection-ack silence-for="1" />text<ma::agent::reflection-ack silence-for="2" />',
+      ]),
     ).toBe("text")
   })
 })
 
 describe("createReflectionAckStripper — cross-chunk splits", () => {
   test("split inside opener prefix", () => {
-    // `<ma::ref` arrives in chunk 1, rest of tag in chunk 2. The trailing
-    // `\n` passes through per the no-consume policy.
-    expect(feedAll(["prose <ma::ref", 'lection-ack silence-for="2" />\n'])).toBe("prose \n")
+    // `<ma::agent::ref` arrives in chunk 1, rest of tag in chunk 2. The
+    // trailing `\n` passes through per the no-consume policy.
+    expect(feedAll(["prose <ma::agent::ref", 'lection-ack silence-for="2" />\n'])).toBe("prose \n")
   })
 
   test("split at the very start of opener", () => {
-    expect(feedAll(["x<", 'ma::reflection-ack silence-for="2" />'])).toBe("x")
+    expect(feedAll(["x<", 'ma::agent::reflection-ack silence-for="2" />'])).toBe("x")
   })
 
   test("split between opener and attrs", () => {
-    expect(feedAll(["<ma::reflection-ack", ' silence-for="2" />\n'])).toBe("\n")
+    expect(feedAll(["<ma::agent::reflection-ack", ' silence-for="2" />\n'])).toBe("\n")
   })
 
   test("split mid-attribute", () => {
-    expect(feedAll(['<ma::reflection-ack silence-for="', '2" reason="x" />'])).toBe("")
+    expect(feedAll(['<ma::agent::reflection-ack silence-for="', '2" reason="x" />'])).toBe("")
   })
 
   test("split between attrs and self-close", () => {
-    expect(feedAll(['<ma::reflection-ack silence-for="2"', " />\n"])).toBe("\n")
+    expect(feedAll(['<ma::agent::reflection-ack silence-for="2"', " />\n"])).toBe("\n")
   })
 
   test("split right before trailing newline — trailing newline passes through", () => {
@@ -119,20 +125,20 @@ describe("createReflectionAckStripper — cross-chunk splits", () => {
     // chunk passes through unchanged. Combined with whatever leading
     // newlines preceded the tag, the compositor caps any excess at 2
     // blank rows in scrollback.
-    expect(feedAll(['<ma::reflection-ack silence-for="2" />', "\nmore"])).toBe("\nmore")
+    expect(feedAll(['<ma::agent::reflection-ack silence-for="2" />', "\nmore"])).toBe("\nmore")
   })
 
   test("split per-byte through the whole tag (worst case)", () => {
     // Simulate the most adversarial delta granularity: one byte per
     // chunk. The stripper must still correctly elide the tag and
     // preserve the surrounding newlines (no smash).
-    const full = 'prose\n<ma::reflection-ack silence-for="2" reason="x" />\nmore'
+    const full = 'prose\n<ma::agent::reflection-ack silence-for="2" reason="x" />\nmore'
     const chunks = Array.from(full, (ch) => ch)
     expect(feedAll(chunks)).toBe("prose\n\nmore")
   })
 
   test("partial opener at end of stream → flushed verbatim", () => {
-    // A model that emits `<ma::reflection-ack` and then ends the stream
+    // A model that emits `<ma::agent::reflection-ack` and then ends the stream
     // without closing the tag should not have its bytes silently dropped.
     // Flush emits whatever's held in the tail.
     const s = createReflectionAckStripper()
@@ -143,8 +149,8 @@ describe("createReflectionAckStripper — cross-chunk splits", () => {
 
   test("incomplete tag at end of stream → flushed verbatim", () => {
     // Held a full opener but no `/>` ever arrived.
-    expect(feedAll(['prose <ma::reflection-ack silence-for="2"'])).toBe(
-      'prose <ma::reflection-ack silence-for="2"',
+    expect(feedAll(['prose <ma::agent::reflection-ack silence-for="2"'])).toBe(
+      'prose <ma::agent::reflection-ack silence-for="2"',
     )
   })
 
@@ -153,7 +159,7 @@ describe("createReflectionAckStripper — cross-chunk splits", () => {
     // flush() runs one last replace pass to catch this.
     const s = createReflectionAckStripper()
     let out = s.write("hello ")
-    out += s.write('<ma::reflection-ack silence-for="2"')
+    out += s.write('<ma::agent::reflection-ack silence-for="2"')
     out += s.write(" />")
     out += s.flush()
     expect(out).toBe("hello ")
@@ -164,13 +170,13 @@ describe("createReflectionAckStripper — bounded buffer", () => {
   test("held tail beyond MAX_BUFFER flushes verbatim", () => {
     // Build a chunk that starts with an opener and then a very long
     // unclosed runaway. The stripper should give up holding and emit.
-    const runaway = "<ma::reflection-ack " + "x".repeat(8192)
+    const runaway = "<ma::agent::reflection-ack " + "x".repeat(8192)
     const out = feedAll([runaway])
     // The full runaway should appear in output (bounded-buffer fallback).
     // We don't pin the exact size; just verify it's not silently swallowed
     // and that no `<ma::` prefix is left hanging.
     expect(out.length).toBeGreaterThan(4096)
-    expect(out).toContain("<ma::reflection-ack")
+    expect(out).toContain("<ma::agent::reflection-ack")
     expect(out).toContain("xxx")
   })
 })
@@ -178,7 +184,7 @@ describe("createReflectionAckStripper — bounded buffer", () => {
 describe("createReflectionAckStripper — stateful reuse", () => {
   test("instance retains buf state across writes within one stream", () => {
     const s = createReflectionAckStripper()
-    expect(s.write("<ma::")).toBe("")
+    expect(s.write("<ma::agent::")).toBe("")
     expect(s.write("reflection-ack ")).toBe("")
     expect(s.write('silence-for="2"')).toBe("")
     // Per the no-consume policy, the trailing `\n` passes through.
@@ -209,13 +215,13 @@ describe("createReflectionAckStripper — matches the agent's parser regex", () 
   // matches should also be stripped here. If these two regexes ever drift,
   // the user will see the raw tag in scrollback.
   const samples = [
-    "<ma::reflection-ack/>",
-    '<ma::reflection-ack silence-for="0" />',
-    '<ma::reflection-ack silence-for="99" />',
-    '<ma::reflection-ack reason="" />',
-    '<ma::reflection-ack reason="a b c — d" />',
-    '<ma::reflection-ack silence-for="2" reason="hello" />',
-    '<ma::reflection-ack reason="hello" silence-for="2" />',
+    "<ma::agent::reflection-ack/>",
+    '<ma::agent::reflection-ack silence-for="0" />',
+    '<ma::agent::reflection-ack silence-for="99" />',
+    '<ma::agent::reflection-ack reason="" />',
+    '<ma::agent::reflection-ack reason="a b c — d" />',
+    '<ma::agent::reflection-ack silence-for="2" reason="hello" />',
+    '<ma::agent::reflection-ack reason="hello" silence-for="2" />',
   ]
   for (const sample of samples) {
     test(`strips ${JSON.stringify(sample)}`, () => {

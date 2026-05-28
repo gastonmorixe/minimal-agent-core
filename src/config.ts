@@ -204,29 +204,68 @@ export function loadUserConfig(): UserConfig {
  * `false` opts the plugin out — config presence alone never disables.
  */
 export function loadDisabledPluginIds(): Set<string> {
+  return loadPluginEnabledOverrides().forceDisabled
+}
+
+/**
+ * Walk `plugins.<id>.enabled` in the user config and collect the ids of
+ * any plugin that has been explicitly enabled (`enabled: true`).
+ *
+ * The loader uses this as an OVERRIDE for the manifest-level
+ * `enabled: false` opt-out: a plugin whose author shipped it disabled
+ * comes back online if the user adds `{ "plugins": { "<id>": { "enabled":
+ * true } } }` to their config.
+ *
+ * Lenient: missing file, missing `plugins` section, malformed JSON, or
+ * non-object plugin blocks → empty set. Never throws.
+ *
+ * Note: a plugin block that is *missing* `enabled`, or has any value
+ * other than literal `true`, is NOT recorded here. Only the explicit
+ * `true` is an override signal.
+ */
+export function loadEnabledPluginIds(): Set<string> {
+  return loadPluginEnabledOverrides().forceEnabled
+}
+
+/**
+ * Single config walk that returns BOTH the explicit-disable and
+ * explicit-enable sets. Cheaper than calling the two individual
+ * helpers when both are needed.
+ */
+export function loadPluginEnabledOverrides(): {
+  forceDisabled: Set<string>
+  forceEnabled: Set<string>
+} {
+  const forceDisabled = new Set<string>()
+  const forceEnabled = new Set<string>()
   const path = configPath()
-  const out = new Set<string>()
-  if (!existsSync(path)) return out
+  if (!existsSync(path)) return { forceDisabled, forceEnabled }
   let raw: string
   try {
     raw = readFileSync(path, "utf-8")
   } catch {
-    return out
+    return { forceDisabled, forceEnabled }
   }
   let parsed: unknown
   try {
     parsed = parseJsonc(raw)
   } catch {
-    return out
+    return { forceDisabled, forceEnabled }
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { forceDisabled, forceEnabled }
+  }
   const plugins = (parsed as Record<string, unknown>).plugins
-  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) return out
+  if (!plugins || typeof plugins !== "object" || Array.isArray(plugins)) {
+    return { forceDisabled, forceEnabled }
+  }
   for (const [id, block] of Object.entries(plugins as Record<string, unknown>)) {
     if (!block || typeof block !== "object" || Array.isArray(block)) continue
-    if ((block as Record<string, unknown>).enabled === false) out.add(id)
+    const enabled = (block as Record<string, unknown>).enabled
+    if (enabled === false) forceDisabled.add(id)
+    else if (enabled === true) forceEnabled.add(id)
   }
-  return out
+  return { forceDisabled, forceEnabled }
 }
 
 /**

@@ -55,9 +55,9 @@ describe("tool descriptions — output cap is documented", () => {
     expect(d).toMatch(/text reply|response|reply/i)
   })
 
-  it("Bash mentions the runtime <ma::tui-preview> annotation", () => {
+  it("Bash mentions the runtime <ma::agent::output-preview> annotation", () => {
     const d = descOf("Bash")
-    expect(d).toMatch(/<ma::tui-preview/)
+    expect(d).toMatch(/<ma::agent::output-preview/)
   })
 
   it("Read discloses the TUI-side preview cap distinct from the API cap", () => {

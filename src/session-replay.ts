@@ -114,6 +114,40 @@ export interface ReplayOptions {
    * store's UserRecord `ts` values via {@link userTimestampsFromRecords}.
    */
   userTimestamps?: readonly (Date | null)[]
+
+  /**
+   * Optional `tool_use_id → display overrides` lookup. When present,
+   * replay reproduces the LIVE transcript's plugin-driven body
+   * (`display`), header content slot (`displayHeader`), and footer row
+   * (`displayFooter`) instead of falling back to the default `content`
+   * + JSON-args path. Without this, an Edit's unified diff regresses
+   * to its model-facing `"File edited: ..."` text, and a Task tool
+   * call regresses to its raw JSON args + truncated body : both bugs
+   * the snapshot-driven repro caught.
+   *
+   * Production callers build this from `loaded.records` via
+   * {@link toolDisplaysFromRecords}.
+   */
+  toolDisplays?: Map<
+    string,
+    { display?: string; displayHeader?: string; displayFooter?: string }
+  > | null
+
+  /**
+   * Optional `tool_name → {icon, color}` map used to draw the live
+   * agent's cosmetic prefix (`» Bash`, `✦ Edit`, `✔ Task`) on the
+   * replayed `╭` header row. Both built-in tools (from
+   * `TOOL_DEFINITIONS`) and plugin tools (from
+   * `PluginLoader.getExtraTools`) populate this in the live agent;
+   * production callers (`src/index.ts`) merge the two sources and
+   * pass the result here. Without it, replay falls back to the bare
+   * bold tool name in the default orange (the historical behavior).
+   *
+   * `color` keys into the same palette `c.*` in `src/agent.ts` uses
+   * (e.g. `"orange"`, `"gold"`, `"lime"`); unknown values fall back
+   * to orange, matching the live agent.
+   */
+  toolPresentation?: Map<string, { icon?: string; color?: string }> | null
 }
 
 /**
@@ -176,6 +210,8 @@ export async function replayToScrollback(
   const toolTimeTracker = opts.toolTimeTracker ?? null
   const toolStartTimes = opts.toolStartTimes ?? null
   const userTimestamps = opts.userTimestamps ?? null
+  const toolDisplays = opts.toolDisplays ?? null
+  const toolPresentation = opts.toolPresentation ?? null
 
   /**
    * Emit a mode-change chip to the sink for the given transition. Uses
@@ -242,7 +278,7 @@ export async function replayToScrollback(
       const content = msg.content
       // Skip user messages whose content is ONLY tool_results and/or
       // runtime-injected attachment blocks (mode-change,
-      // short-term-memory, ma::tui::tasks, ma::reflection-checkpoint,
+      // <ma::plugin::*>, <ma::agent::*>, plus the legacy bare forms
       // memory-saved). None of those have a user-visible payload of
       // their own : tool_results render under the corresponding
       // assistant turn, and runtime attachments are a model-only
@@ -354,26 +390,53 @@ export async function replayToScrollback(
             ? Math.max(20, replayCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
             : replayCols
         const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
+        // Resolve icon + label color from the optional presentation map.
+        // The live agent does the same via `pres = toolPresentation.get(tool.name)`
+        // (built from TOOL_DEFINITIONS + plugin manifests). Falls back to
+        // orange + no-icon when the caller didn't supply a map, which
+        // preserves byte-identical output for old tests that don't pass it.
+        const pres = toolPresentation?.get(tu.name) ?? null
+        const labelColor =
+          pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
+            ? (c as Record<string, (s: string) => string>)[pres.color]
+            : c.orange
+        const iconText = pres?.icon ? `${labelColor(pres.icon)} ` : ""
+        const label = c.bold(labelColor(tu.name))
+        // Header content slot: prefer the persisted `displayHeader` (plugin
+        // override, e.g. the tasks plugin's `✔ ALL DONE · 39/39 · ...`)
+        // when present. Otherwise the default `formatToolInput` summary
+        // (JSON args / Bash command preview), matching live behavior.
+        // When `displayHeader` is in effect we skip the soft-split
+        // continuation rows : the plugin owns the header rendering
+        // entirely, same as the live agent (`writeToolHeader(override)`).
+        const result = toolResultById.get(tu.id)
+        const displays = toolDisplays?.get(tu.id) ?? null
+        const headerOverride = displays?.displayHeader
+        const headerContent =
+          headerOverride !== undefined ? headerOverride : c.dim(formatToolInput(tu, adjustedCols))
+        const headerLine =
+          headerContent.length === 0
+            ? `${iconText}${label}${dimTimeSuffix}`
+            : `${iconText}${label}  ${headerContent}${dimTimeSuffix}`
         // Outer-row clamp catches header overflow at narrow terminal
         // widths : see {@link clampTranscriptRow} in src/agent.ts.
-        const headerRow = `  ${c.dimCyan("╭")} ${c.bold(tu.name)}  ${c.dim(formatToolInput(tu, adjustedCols))}${dimTimeSuffix}`
-        sink.write(`\n${clampTranscriptRow(headerRow, replayCols)}\n`)
-        // Continuation rows: `> <line>` for `\n`-separated multi-line,
-        // `↳ <op> <body>` for soft-split single-line overflow. Indented
-        // so the sigil aligns directly under the start of the command
-        // body in the header (replay header has no icon, so the indent
-        // is narrower than the live agent : `toolContinuationIndentCells`
-        // accounts for that via the optional `iconText` arg).
-        const contIndent = " ".repeat(toolContinuationIndentCells(tu.name))
-        for (const cont of formatToolInputContinuation(tu, adjustedCols)) {
-          const contRow = `  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}`
-          sink.write(`${clampTranscriptRow(contRow, replayCols)}\n`)
+        sink.write(`\n${clampTranscriptRow(`  ${c.dimCyan("╭")} ${headerLine}`, replayCols)}\n`)
+        if (headerOverride === undefined) {
+          // Continuation rows: `> <line>` for `\n`-separated multi-line,
+          // `↳ <op> <body>` for soft-split single-line overflow. Indented
+          // so the sigil aligns directly under the start of the command
+          // body in the header. Pass the icon (when present) so the
+          // indent matches the live agent's wider indent on iconned rows.
+          const contIndent = " ".repeat(toolContinuationIndentCells(tu.name, pres?.icon))
+          for (const cont of formatToolInputContinuation(tu, adjustedCols)) {
+            const contRow = `  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}`
+            sink.write(`${clampTranscriptRow(contRow, replayCols)}\n`)
+          }
         }
         // Header→body separator (mirrors live agent rendering: the empty
         // `│` gutter row that sits between the tool header and the first
         // body line, giving every tool block a consistent visual shape).
         sink.write(`  ${c.dimCyan("│")}\n`)
-        const result = toolResultById.get(tu.id)
         if (result) {
           const content =
             typeof result.content === "string"
@@ -397,9 +460,17 @@ export async function replayToScrollback(
           // Captured-at-block-start (NOT live-on-each-line) is correct
           // here : replay walks the whole transcript in one pass and
           // doesn't observe mid-replay resizes.
-          for (const line of formatToolPreview(content, !!result.is_error, undefined, {
+          //
+          // `display` / `displayFooter` come from the persisted
+          // presentation overrides : when present, formatToolPreview
+          // renders the pre-built ANSI payload verbatim and uses our
+          // footer (instead of computing one from a `_truncInfo` we
+          // don't have on disk). This is what makes Edit's unified diff
+          // and the tasks plugin's tree survive `--resume` intact.
+          for (const line of formatToolPreview(content, !!result.is_error, displays?.display, {
             tool: tu.name,
             cols: replayCols,
+            footer: displays?.displayFooter,
           })) {
             sink.write(`${line}\n`)
           }
@@ -453,17 +524,19 @@ function makeFormatterOutput(
  * Accepts BOTH spellings during the tag-namespace migration
  * (TODOS.md#T-ca2ce1):
  *
- *   - new: `<ma::mode-change from="…" to="…" at="…" />`
- *   - old: `<mode-change from="…" to="…" at="…" />`
+ *   - new: `<ma::agent::mode-change from="…" to="…" at="…" />`
+ *   - intermediate: `<ma::mode-change from="…" to="…" at="…" />`
+ *   - legacy: `<mode-change from="…" to="…" at="…" />`
  *
  * The `at` attribute is optional in the regex so older session logs
  * (recorded before the timestamp was added) still replay cleanly.
  *
- * The `(?:ma::)?` non-capturing group makes the namespace prefix
- * optional; both forms produce identical capture-group output.
+ * The `(?:ma::(?:agent::)?)?` non-capturing group makes both namespace
+ * prefixes optional; all three forms produce identical capture-group
+ * output.
  */
 const MODE_CHANGE_RE =
-  /^\s*<(?:ma::)?mode-change\s+from="([^"]*)"\s+to="([^"]*)"(?:\s+at="([^"]*)")?\s*\/>\s*$/
+  /^\s*<(?:ma::(?:agent::)?)?mode-change\s+from="([^"]*)"\s+to="([^"]*)"(?:\s+at="([^"]*)")?\s*\/>\s*$/
 
 /**
  * Build the `userTimestamps` array for {@link replayToScrollback} from
@@ -488,6 +561,43 @@ const MODE_CHANGE_RE =
  * Returns a fresh array. Pure : no I/O. Safe to call before / after
  * `foldRecords` with the same `records` input.
  */
+/**
+ * Build the `toolDisplays` map for {@link replayToScrollback} from raw
+ * {@link SessionRecord}s. Walks the records once and indexes every
+ * `tool_result` record whose `display` / `displayHeader` /
+ * `displayFooter` fields were populated by the live agent (see
+ * `Store.appendToolResult` in `src/session-store.ts`).
+ *
+ * Returns an empty map when no presentation overrides were persisted
+ * (old session files, runs where every tool used the default
+ * rendering). Old logs render identically to before : the override
+ * path simply doesn't fire.
+ *
+ * Pure: no I/O. Safe to call before / after {@link foldRecords}.
+ */
+export function toolDisplaysFromRecords(
+  records: readonly SessionRecord[],
+): Map<string, { display?: string; displayHeader?: string; displayFooter?: string }> {
+  const out = new Map<
+    string,
+    { display?: string; displayHeader?: string; displayFooter?: string }
+  >()
+  for (const rec of records) {
+    if (rec.kind !== "tool_result") continue
+    const hasOverride =
+      rec.display !== undefined ||
+      rec.displayHeader !== undefined ||
+      rec.displayFooter !== undefined
+    if (!hasOverride) continue
+    const entry: { display?: string; displayHeader?: string; displayFooter?: string } = {}
+    if (rec.display !== undefined) entry.display = rec.display
+    if (rec.displayHeader !== undefined) entry.displayHeader = rec.displayHeader
+    if (rec.displayFooter !== undefined) entry.displayFooter = rec.displayFooter
+    out.set(rec.tool_use_id, entry)
+  }
+  return out
+}
+
 export function userTimestampsFromRecords(records: readonly SessionRecord[]): (Date | null)[] {
   const out: (Date | null)[] = []
   // Track which user-record ids we've already produced a message for,
@@ -562,21 +672,28 @@ function parseDate(ts: string): Date | null {
  * the agent runtime, not the user).
  */
 const RUNTIME_ATTACHMENT_OPENERS: readonly RegExp[] = [
-  // Mode-change attachment. Accept the new `<ma::mode-change>` and the
-  // legacy bare `<mode-change>` form during the migration window
-  // (TODOS.md#T-ca2ce1).
+  // New schema (canonical): every agent/plugin attachment opens with
+  // `<ma::agent::*>` or `<ma::plugin::*>`. One regex covers them all.
+  /^\s*<ma::(?:agent|plugin|plugins)::/i,
+  // Bare `<ma::plugins>` system-prompt wrapper (also a legitimate
+  // top-level emission, though it doesn't ride per-turn attachments).
+  /^\s*<ma::plugins\b/,
+  // Legacy forms accepted during the migration window so sessions
+  // started before this refactor still resume cleanly. Drop these once
+  // older session files are no longer in circulation.
   /^\s*<(?:ma::)?mode-change\b/,
+  /^\s*<ma::(?:mode-active|reflection-checkpoint|reflection-ack|emergency-cap-triggered|tui-preview|tui::[a-z][a-z0-9_-]*)\b/i,
   /^\s*<short-term-memory\b/,
   /^\s*<memory-saved\b/,
-  /^\s*<ma::tui::[a-z][a-z0-9_-]*\b/i,
-  /^\s*<ma::reflection-checkpoint\b/,
 ]
 
 /**
  * True iff `b` is a text content block that the agent runtime
- * prepended to a user message (mode-change, short-term-memory,
- * ma::tui::*, ma::reflection-checkpoint, memory-saved). These have
- * no user-visible payload and must be skipped during replay.
+ * prepended to a user message: any `<ma::agent::*>` or
+ * `<ma::plugin::*>` attachment, plus the legacy bare forms
+ * (`<mode-change>`, `<short-term-memory>`, `<memory-saved>`,
+ * `<ma::*>`) accepted during the migration window. These have no
+ * user-visible payload and must be skipped during replay.
  */
 function isRuntimeAttachmentBlock(b: ContentBlock): boolean {
   if (b.type !== "text") return false
@@ -626,8 +743,8 @@ function stringifyUserText(
     // Thread mode forward via the mode-change side effect, then drop
     // every runtime-injected attachment from the rendered text. The
     // attachment set is broader than mode-change alone : it also
-    // includes <short-term-memory>, <ma::tui::tasks>, <memory-saved>,
-    // and <ma::reflection-checkpoint>, all of which the agent prepends
+    // includes <short-term-memory>, <ma::plugin::tasks>, <memory-saved>,
+    // and <ma::agent::reflection-checkpoint>, all of which the agent prepends
     // to user content for model context and which would otherwise leak
     // into scrollback verbatim on `--resume`.
     const to = readModeChangeTo(b)

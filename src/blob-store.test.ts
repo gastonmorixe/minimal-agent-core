@@ -125,7 +125,7 @@ describe("formatRawOutputFooter", () => {
       sha256: "ab12cd34ef567890",
     })
     expect(footer).toBe(
-      "[raw-output: /tmp/x/sid.blobs/toolu_abc.raw  83.0kB · sha256=ab12cd34ef567890]",
+      '<ma::agent::raw-output path="/tmp/x/sid.blobs/toolu_abc.raw" size="83.0kB" sha256="ab12cd34ef567890" />',
     )
     // Single line, no embedded newlines.
     expect(footer.includes("\n")).toBe(false)

@@ -4,7 +4,41 @@ All notable changes to this project. Format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **`manifest.enabled` (optional, default `true`) for plugin author opt-out.** A plugin shipped with `"enabled": false` in its `manifest.json` is skipped by the loader at discovery time and emits a notice-level diagnostic (file log only, not stderr) explaining how to flip it back on. The user can override with `plugins.<id>.enabled = true` in `~/.minimal-agent/config.jsonc`. Precedence is *user-disable > user-enable > manifest-disable > default-enabled*. Spec: `src/plugins/types.ts:ManifestFile.enabled`; gate: `src/plugins/loader.ts:load`; user-config helper: `src/config.ts:loadPluginEnabledOverrides`. Tests in `src/plugins/{manifest,loader}.test.ts` and `src/config.test.ts`.
+- **`interleave-thinking` plugin now ships disabled by default.** First user of the new `manifest.enabled: false` knob. Opt in with `plugins["interleave-thinking"].enabled = true` in `~/.minimal-agent/config.jsonc`.
+- **Session-history migration script.** `private/migrations/20260528T161007-old-session-history-to-new-plugin-syntax.ts` rewrites every legacy attachment tag and the bracket-style `[raw-output: …]` footer to the new `<ma::*>` schema in `~/.minimal-agent/sessions/*.jsonl`. Dry-run by default, `--apply` to mutate, full pre-migration backup at `~/.minimal-agent/sessions-backup-<ts>/`. Tests in `private/migrations/*.test.ts`.
+
 ### Changed
+- **Renamed `tui-plugins/` → `plugins/` everywhere.** The plugin system has long since outgrown its TUI origin; the directory now matches what it actually holds (modes, hooks, prompt fragments, live-area slots, tools, …). All three loader roots are renamed in lockstep:
+  - `<repo>/tui-plugins/` → `<repo>/plugins/`.
+  - `~/.agents/tui-plugins/` → `~/.agents/plugins/`.
+  - `<cwd>/.agents/tui-plugins/` → `<cwd>/.agents/plugins/`.
+  Mirrored in `~/Projects/minimal-agent-plugins/*/README.md` (installation snippets) and in every code comment, doctring, and test fixture under `src/` and `plugins/`.
+- **Uniform `<ma::*>` schema for every attachment + bracket footer.** Every model-facing tag the agent or a plugin emits now sits under one of two namespaces:
+  - `<ma::agent::*>` for agent-runtime attachments (mode-change, mode-active, reflection-checkpoint, reflection-ack, emergency-cap-triggered, output-preview, raw-output).
+  - `<ma::plugin::<id>(::sub)?>` for plugin-contributed attachments and inline-tag triggers.
+
+  Concretely:
+
+  | Old | New |
+  | --- | --- |
+  | `<tui::diff>…</tui::diff>` | `<ma::plugin::diff>…</ma::plugin::diff>` |
+  | `<tui::memory …>…</tui::memory>` | `<ma::plugin::memory …>…</ma::plugin::memory>` |
+  | `<tui::interleave-thinking>…</tui::interleave-thinking>` | `<ma::plugin::interleave-thinking>…</ma::plugin::interleave-thinking>` |
+  | `<ma::tui::tasks …>…</ma::tui::tasks>` | `<ma::plugin::tasks …>…</ma::plugin::tasks>` |
+  | `<short-term-memory>…</short-term-memory>` | `<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>` |
+  | `<memory-saved scope="…" id="…">…</memory-saved>` | `<ma::plugin::memory::saved scope="…" id="…">…</ma::plugin::memory::saved>` |
+  | `<ma::reflection-checkpoint …/>` | `<ma::agent::reflection-checkpoint …/>` |
+  | `<ma::reflection-ack …/>` | `<ma::agent::reflection-ack …/>` |
+  | `<ma::emergency-cap-triggered …/>` | `<ma::agent::emergency-cap-triggered …/>` |
+  | `<ma::tui-preview …>…</ma::tui-preview>` | `<ma::agent::output-preview …>…</ma::agent::output-preview>` |
+  | `<ma::mode-active …/>` | `<ma::agent::mode-active …/>` |
+  | `<ma::mode-change …/>` | `<ma::agent::mode-change …/>` |
+  | `[raw-output: <path>  <size> · sha256=<hex>]` | `<ma::agent::raw-output path="…" size="…" sha256="…" />` |
+
+  The inline-tag scanner's `OPENER_PROBE` moves from `<tui::` to `<ma::plugin::`. System-prompt block wrapper goes `<tui-plugins>` → `<ma::plugins>`, the orientation paragraph `<overview>` → `<ma::plugins-overview>`, and per-plugin wrapper `<plugin id="…">` → `<ma::plugin id="…">`.
+- **`session-replay` accepts legacy AND new spellings during the migration window.** Old session files still resume cleanly: the `RUNTIME_ATTACHMENT_OPENERS` array, `MODE_CHANGE_RE`, and `MODE_CHANGE_TO_RE` all carry the legacy bare / `<ma::*>` forms alongside the canonical `<ma::agent::*>` / `<ma::plugin::*>`. Run the migration script (see Added) to rewrite history in place; legacy parsers will be dropped in a later release.
 - **Decompose six oversized source files; clear the lingering oxlint `max-lines` warnings.** `bun run check` was exiting 0 but riding six `max-lines: warn` flags at logical-line counts above the project's `{ max: 800, skipBlankLines: true, skipComments: true }` budget. Split the three files with discrete cohesive sections (`agent.ts`, `client.ts`, `plugins/loader.ts`) into sibling modules behind facade re-exports; added a `max-lines: off` override for the three files that are single cohesive classes / CLI orchestration shells (`editor-controller.ts`, `input.ts`, `index.ts`) where method extraction would just move `this`-state across module boundaries.
   - **`src/agent.ts` 2001 → 751 logical** lines. Seven new siblings under `src/agent/`:
     - `agent/ansi.ts` — `c` palette helpers, `faintThinkingChunk`, `formatAbortedEcho`.

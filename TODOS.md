@@ -93,7 +93,7 @@ The state line uses a real markdown checkbox so a quick `grep "\[ \]" TODOS.md` 
 - [ ] state: `todo`
 - created_at: 2026-05-27T11:08:00-04:00
 - created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a, conversation about hardening mode enforcement
-- area: `src/modes.ts`, `src/plugins/types.ts` (`ManifestMode`), `src/agent.ts` (dispatch gate), `tui-plugins/ask-mode/manifest.json`
+- area: `src/modes.ts`, `src/plugins/types.ts` (`ManifestMode`), `src/agent.ts` (dispatch gate), `plugins/ask-mode/manifest.json`
 
 **Description.** Today `ManifestMode` carries a flat `disallowedTools: string[]` list. `ModeManager.isToolAllowed` gates each `tool_use` at dispatch time against that list and synthesizes a refusal `tool_result` when blocked. This is solid for the "no Edit/Write in ASK" case but it cannot express:
 
@@ -125,40 +125,25 @@ Default policy is "allow" (so an empty `permissions` array means no restrictions
 - Should plugins be able to *contribute* permissions to a mode (e.g. the `git-tidy` plugin adds "Bash git:*" to a "read-only" mode)? That would need a permission-merge contract.
 - Audit-log channel for refusals: today the dispatcher writes a transcript line (`⊘ refused by ask`). With richer predicates the audit gets noisier; consider a structured `refusals.jsonl` sidecar in the session.
 
-### T-ca2ce1: Tag-namespace migration to `<ma::...>`
+### T-ca2ce1: Tag-namespace migration to `<ma::...>`  ✅ done 2026-05-28
 
-- [ ] state: `todo`
+- [x] state: `done`
 - created_at: 2026-05-27T11:31:00-04:00
+- closed_at: 2026-05-28
 - created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a, conversation about mode-system overhaul
+- closed_by: session=cb9aa802-6017-46c3-b764-385b6e476279
 - area: tree-wide (all places that emit or parse XML-style tags in user/assistant content and tool_result envelopes)
 
-**Description.** We use XML-style tags to carry agent-internal metadata into the LLM context (mode changes, memory saves, tool previews, reflection checkpoints, tasks, short-term memory, queue annotations, etc.). The naming is inconsistent today:
+**Landed.** Every model-facing tag now uses the `<ma::*>` namespace. Agent-runtime emissions are `<ma::agent::*>`, plugin-contributed emissions and inline-tag triggers are `<ma::plugin::<id>(::sub)?>`. Bracket footers (`[raw-output: …]`) are gone too: now `<ma::agent::raw-output path="…" size="…" sha256="…" />`. See `docs/changes/2026-05-28-feat-ma-schema-and-plugin-rename.md` and the CHANGELOG `[Unreleased]` entry for the full rename table. Session-replay accepts BOTH old and new spellings during a one-release migration window. Migration script for old session files at `private/migrations/20260528T161007-old-session-history-to-new-plugin-syntax.ts`.
 
-- Some tags use the `ma::` prefix: `<ma::reflection-checkpoint>`, `<ma::tui-preview>`, `<ma::tui::tasks>`.
-- Others do not: `<mode-change>`, `<memory-saved>`, `<short-term-memory>`, `<ma::reflection-ack>` (model-emitted).
+### T-e945ec: Unify `tui-plugins/` and `src/plugins/` into a single tree  ✅ partial 2026-05-28
 
-The convention going forward: **every tag** uses `<ma::...>`. Tags emitted by core go under `<ma::<topic>...>` (e.g. `<ma::mode-change>`, `<ma::mode-active>`, `<ma::memory-saved>`). Tags emitted by a plugin go under `<ma::plugin::<plugin-name>::...>` (e.g. `<ma::plugin::tasks::list>` if tasks were a plugin).
-
-**What landing looks like.** Audit every emit/parse site; rename in lockstep (emitter + parser + tests). Update PROMPT.md fragments that reference old tag names. The session-replay parser handles BOTH the old and new names for one release so resumed sessions don't break. Then drop the old aliases.
-
-**Why deferred.** The new tags introduced by the mode-system work (session 100a7080) already follow the convention. Migrating the rest is its own focused pass.
-
-**Open questions.**
-- Resume compatibility window: 1 release or longer?
-- Should the parsers be data-driven (single tag registry) or per-tag custom (today's pattern)?
-
-### T-e945ec: Unify `tui-plugins/` and `plugins/` into a single `plugins/` tree
-
-- [ ] state: `todo`
+- [x] state: `done` (tui-plugins → plugins rename); see T-c510d3 for the next step (extract more core into the plugins/ tree).
 - created_at: 2026-05-27T11:31:00-04:00
-- created_by: session=100a7080-f2fe-4d5e-8f23-0b532d7df36a
-- area: `tui-plugins/`, `src/plugins/loader.ts`, all `manifest.json` references
+- closed_at: 2026-05-28
+- area: `plugins/`, `src/plugins/loader.ts`, all `manifest.json` references
 
-**Description.** Today plugins live in two trees with overlapping responsibilities: `tui-plugins/` (current home for most plugins: ask-mode, memory, tasks, etc.) and `src/plugins/` (loader + types + a few core integrations). The split is historical, not principled. A user installing a plugin shouldn't need to know which tree to drop it into.
-
-**What landing looks like.** Single `plugins/` tree at repo root. Loader walks one root. Manifest schema unchanged. Existing plugins move with `git mv` to preserve history.
-
-**Why deferred.** Mechanical refactor with a lot of churn (paths, imports, test fixtures). Not on the critical path of the mode-system work, but a prerequisite for cleanly extracting more core into plugins (T-c510d3).
+**Landed.** `tui-plugins/` is now `plugins/`. The loader scans `plugins/` (embedded), `~/.agents/plugins/` (home), and `<cwd>/.agents/plugins/` (project). Every comment, doctring, and test fixture under `src/` and `plugins/` was renamed in lockstep. `src/plugins/` still holds the loader + types (one tree, different role: the runtime engine vs the plugin packages it loads), which the original TODO description conflated.
 
 ### T-c510d3: Extract `ModeManager` + dispatch gate into a core plugin
 

@@ -175,7 +175,7 @@ The omission is intentional. There is no sub-agent tool, skill runner, or deferr
 
 ## Plugins
 
-Plugins live under `tui-plugins/`. Each plugin has a manifest, optional prompt text, and optional handlers.
+Plugins live under `plugins/`. Each plugin has a manifest, optional prompt text, and optional handlers.
 
 Current plugins:
 
@@ -189,8 +189,8 @@ Current plugins:
 Run WebSearch directly while debugging provider config:
 
 ```sh
-bun run tui-plugins/web-search/cli.ts "typescript 6 release notes" --limit 5
-bun run tui-plugins/web-search/cli.ts "EU AI act" --type news --format json
+bun run plugins/web-search/cli.ts "typescript 6 release notes" --limit 5
+bun run plugins/web-search/cli.ts "EU AI act" --type news --format json
 ```
 
 ## Sessions
@@ -203,7 +203,7 @@ Every session is stored as append-only JSONL in:
 
 The session id is the same id sent in `x-claude-code-session-id`, printed at startup, and used for local files. Resume does not replay half-written turns. It folds saved records back into `messages[]`, repairs orphan tool pairs, warns on system or tool drift, then shows previous conversation in scrollback before accepting new input.
 
-Assistant turns are persisted as the full `ContentBlock[]` array, including thinking blocks with their cryptographic signatures. Restore is lossless: on resume those thinking blocks ride back into history unchanged, so the `redact-thinking-2026-02-12` beta keeps verifying across reloads. See `AssistantRecord` in `src/session-store.ts` for the schema-level note. The inline `<tui::interleave-thinking>` tag is NOT persisted (it is dropped by the plugin scanner before it ever reaches a text block); only native API thinking blocks are saved.
+Assistant turns are persisted as the full `ContentBlock[]` array, including thinking blocks with their cryptographic signatures. Restore is lossless: on resume those thinking blocks ride back into history unchanged, so the `redact-thinking-2026-02-12` beta keeps verifying across reloads. See `AssistantRecord` in `src/session-store.ts` for the schema-level note. The inline `<ma::plugin::interleave-thinking>` tag is NOT persisted (it is dropped by the plugin scanner before it ever reaches a text block); only native API thinking blocks are saved.
 
 Commands:
 
@@ -250,7 +250,7 @@ Start here:
 - **`src/session-store.ts`:** JSONL writer and session index.
 - **`src/session-restore.ts`:** Session folding and repair.
 - **`src/session-replay.ts`:** Resume header and scrollback replay.
-- **`tui-plugins/`:** Bundled plugin manifests, prompts, handlers, and tests.
+- **`plugins/`:** Bundled plugin manifests, prompts, handlers, and tests.
 - **`docs/internal/`:** Notes for the parts that are easiest to break by guessing.
 
 ## Design rules

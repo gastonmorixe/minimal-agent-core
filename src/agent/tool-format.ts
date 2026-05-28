@@ -359,9 +359,9 @@ export const TOOL_PREVIEW_LINES_DEFAULT = 10
  *    (see `tools/truncation.ts`).
  *  - `\n\n[note: ...]`                   : streak tracker note
  *    (see `tools/feedback-tracker.ts`).
- *  - `\n\n<ma::tui-preview …>…</ma::tui-preview>` : TUI elision hint
+ *  - `\n\n<ma::agent::output-preview …>…</ma::agent::output-preview>` : TUI elision hint
  *    (this file).
- *  - `\n\n<ma::mode-active id="…" since="…" />`    : active-mode stamp
+ *  - `\n\n<ma::agent::mode-active id="…" since="…" />`    : active-mode stamp
  *    (this file). Always last : it's the freshest signal the model
  *    should re-read at the very tail of each tool_result.
  *
@@ -383,8 +383,8 @@ export const TOOL_PREVIEW_LINES_DEFAULT = 10
 const ANNOTATION_PREFIXES = [
   "\n\n[truncated:",
   "\n\n[note:",
-  "\n\n<ma::tui-preview",
-  "\n\n<ma::mode-active",
+  "\n\n<ma::agent::output-preview",
+  "\n\n<ma::agent::mode-active",
 ] as const
 
 function findAnnotationStart(content: string): number {
@@ -397,7 +397,7 @@ function findAnnotationStart(content: string): number {
 }
 
 /**
- * Compute the TUI vs body line gap for the `<ma::tui-preview>` annotation.
+ * Compute the TUI vs body line gap for the `<ma::agent::output-preview>` annotation.
  * Returns `null` when the body fits in the per-tool budget or there's no
  * body at all.
  *
@@ -422,7 +422,7 @@ export function computeTuiElision(
 }
 
 /**
- * Per-tool hint body for `<ma::tui-preview>`. Bash is the worst offender
+ * Per-tool hint body for `<ma::agent::output-preview>`. Bash is the worst offender
  * (model often picks it as a "render visual content to the user" channel
  * even though the transcript clamps at 10 lines), so we point it at the
  * right channel explicitly. Other tools get a gentler "summarize for the
@@ -719,7 +719,7 @@ export function formatToolPreview(
 
   // 1. Strip ALL model-only trailing annotations from what we display to
   //    the human. Three flavors today : `[truncated: ...]`, `[note: ...]`,
-  //    `<ma::tui-preview ...>...</ma::tui-preview>` (see
+  //    `<ma::agent::output-preview ...>...</ma::agent::output-preview>` (see
   //    `findAnnotationStart`). They live at end-of-content separated by
   //    `\n\n` and stack in a fixed order, so the earliest of their
   //    last-occurrences is the start of the annotation region and we slice

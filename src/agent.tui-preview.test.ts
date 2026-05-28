@@ -1,7 +1,7 @@
 /**
  * Layer 1b runtime-note tests: when the TUI's per-tool preview budget
  * clamps more lines than the universal API cap does, the agent appends a
- * `<ma::tui-preview shown=N total=M tool=X>` annotation to
+ * `<ma::agent::output-preview shown=N total=M tool=X>` annotation to
  * `tool_result.content` BEFORE sending it back to the model on the next
  * turn. The annotation is model-only by construction (lives in
  * `tool_result.content`, stripped by `formatToolPreview` before render).
@@ -78,7 +78,7 @@ function makeSendFn(
 
 const AUTH: AuthResult = { type: "api-key", token: "t" }
 
-describe("<ma::tui-preview> runtime annotation", () => {
+describe("<ma::agent::output-preview> runtime annotation", () => {
   it("appends the annotation when Bash output is over the 10-line preview budget but under the API cap", async () => {
     // 20 lines of bash output : above the Bash TUI budget (10) but well
     // under the universal API cap (1000 lines / 64KB).
@@ -100,8 +100,8 @@ describe("<ma::tui-preview> runtime annotation", () => {
     expect(c).toContain("\n15\n")
     expect(c).toContain("\n20\n")
     // Annotation appended with the correct attributes.
-    expect(c).toMatch(/<ma::tui-preview shown="10" total="20" tool="Bash">/)
-    expect(c).toMatch(/<\/ma::tui-preview>$/)
+    expect(c).toMatch(/<ma::agent::output-preview shown="10" total="20" tool="Bash">/)
+    expect(c).toMatch(/<\/ma::agent::output-preview>$/)
     // Hint body specific to Bash (text-reply steering).
     expect(c).toMatch(/text reply/i)
     // No [truncated:] : API cap didn't fire.
@@ -123,15 +123,15 @@ describe("<ma::tui-preview> runtime annotation", () => {
 
     const toolResults = collectToolResultContent(records)
     expect(toolResults.length).toBe(1)
-    expect(toolResults[0]).not.toContain("<ma::tui-preview")
+    expect(toolResults[0]).not.toContain("<ma::agent::output-preview")
     expect(toolResults[0]).not.toContain("[truncated:")
   }, 30_000)
 
-  it("appends BOTH [truncated:] AND <ma::tui-preview> when API cap fires too (audiences are independent)", async () => {
+  it("appends BOTH [truncated:] AND <ma::agent::output-preview> when API cap fires too (audiences are independent)", async () => {
     // > 64KB AND > 10 lines : API cap clamps to ~1000 lines, AND the
     // TUI's 10-line budget is also exceeded. The model needs both
     // signals : `[truncated:]` says "source was bigger than what I'm
-    // showing you"; `<ma::tui-preview>` says "the user saw even less of
+    // showing you"; `<ma::agent::output-preview>` says "the user saw even less of
     // what you got".
     const records: Array<{ messages: CapturedMsg[] }> = []
     const sendFn = makeSendFn(
@@ -151,9 +151,9 @@ describe("<ma::tui-preview> runtime annotation", () => {
     // Both annotations present, with truncated FIRST (annotation order is
     // fixed and findAnnotationStart depends on it).
     expect(c).toContain("[truncated:")
-    expect(c).toMatch(/<ma::tui-preview shown="10" total="1000" tool="Bash">/)
+    expect(c).toMatch(/<ma::agent::output-preview shown="10" total="1000" tool="Bash">/)
     const tIdx = c.indexOf("[truncated:")
-    const mIdx = c.indexOf("<ma::tui-preview")
+    const mIdx = c.indexOf("<ma::agent::output-preview")
     expect(tIdx).toBeGreaterThan(0)
     expect(mIdx).toBeGreaterThan(tIdx)
   }, 30_000)
@@ -179,7 +179,7 @@ describe("<ma::tui-preview> runtime annotation", () => {
     const toolResults = collectToolResultContent(records)
     expect(toolResults.length).toBe(1)
     const c = toolResults[0]
-    expect(c).toMatch(/<ma::tui-preview shown="15" total="30" tool="Read">/)
+    expect(c).toMatch(/<ma::agent::output-preview shown="15" total="30" tool="Read">/)
     // Default (non-Bash) hint variant.
     expect(c).toMatch(/summarize/i)
   }, 30_000)
@@ -219,6 +219,6 @@ describe("<ma::tui-preview> runtime annotation", () => {
     // NOT misled by the in-body `[truncated:` substring. If the strip
     // logic mistook the in-body text for the annotation, `total` would
     // be ~10 and we'd never have appended the annotation at all.
-    expect(c).toMatch(/<ma::tui-preview shown="10" total="20" tool="Bash">/)
+    expect(c).toMatch(/<ma::agent::output-preview shown="10" total="20" tool="Bash">/)
   }, 30_000)
 })

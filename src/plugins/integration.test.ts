@@ -1,11 +1,11 @@
 /**
- * End-to-end integration test for the TUI plugin system.
+ * End-to-end integration test for the Plugin system.
  *
  * Loads the real `diff-view` example plugin from the project-root
- * `tui-plugins/` directory, then drives it through two code paths:
+ * `plugins/` directory, then drives it through two code paths:
  *
  * 1. `PluginStream`: simulates streamed assistant text that contains an
- *    inline `<tui::diff>` block across multiple chunks, and verifies the
+ *    inline `<ma::plugin::diff>` block across multiple chunks, and verifies the
  *    sink receives rendered ANSI in place of the tag span.
  *
  * 2. `PluginLoader.dispatch`: calls the `show_diff` tool directly and
@@ -56,24 +56,24 @@ describe("plugins: end-to-end integration with diff-view", () => {
   it("emits a prompt block that mentions diff-view", () => {
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    expect(block).toContain("<tui-plugins>")
-    expect(block).toContain('<plugin id="diff-view">')
+    expect(block).toContain("<ma::plugins>")
+    expect(block).toContain('<ma::plugin id="diff-view">')
     // Prompt block reflects the canonical name; alias is invisible to the model.
     expect(block).toContain("ShowDiff")
   })
 
-  it("PluginStream routes inline <tui::diff> through the handler (single chunk)", async () => {
+  it("PluginStream routes inline <ma::plugin::diff> through the handler (single chunk)", async () => {
     const out: string[] = []
     const stream = new PluginStream((s) => out.push(s), loader, process.cwd())
     const body = "--- a/x.ts\n+++ b/x.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n const z = 4;"
-    await feed(stream, `before <tui::diff>${body}</tui::diff> after`)
+    await feed(stream, `before <ma::plugin::diff>${body}</ma::plugin::diff> after`)
     await stream.end()
 
     const full = out.join("")
     expect(full.startsWith("before ")).toBe(true)
     expect(full.endsWith(" after")).toBe(true)
-    expect(full).not.toContain("<tui::diff>")
-    expect(full).not.toContain("</tui::diff>")
+    expect(full).not.toContain("<ma::plugin::diff>")
+    expect(full).not.toContain("</ma::plugin::diff>")
     expect(full).toContain("\x1b[38;5;199m-old\x1b[0m")
     expect(full).toContain("\x1b[38;5;118m+new\x1b[0m")
     expect(full).toContain("\x1b[36m@@ -1,2 +1,2 @@\x1b[0m")
@@ -82,9 +82,9 @@ describe("plugins: end-to-end integration with diff-view", () => {
   it("PluginStream handles a tag split across chunk boundaries", async () => {
     const out: string[] = []
     const stream = new PluginStream((s) => out.push(s), loader, process.cwd())
-    await feed(stream, "prefix <tui::dif")
+    await feed(stream, "prefix <ma::plugin::dif")
     await feed(stream, 'f title="hunk">--- a\n+++ b\n@@ -1 +1 @@\n-a')
-    await feed(stream, "\n+b\n</tui::diff> tail")
+    await feed(stream, "\n+b\n</ma::plugin::diff> tail")
     await stream.end()
 
     const full = out.join("")
@@ -98,10 +98,10 @@ describe("plugins: end-to-end integration with diff-view", () => {
   it("PluginStream passes unknown inline tags through as raw text", async () => {
     const out: string[] = []
     const stream = new PluginStream((s) => out.push(s), loader, process.cwd())
-    await feed(stream, "before <tui::unknown>body</tui::unknown> after")
+    await feed(stream, "before <ma::plugin::unknown>body</ma::plugin::unknown> after")
     await stream.end()
     const full = out.join("")
-    expect(full).toBe("before <tui::unknown>body</tui::unknown> after")
+    expect(full).toBe("before <ma::plugin::unknown>body</ma::plugin::unknown> after")
   })
 
   it("PluginStream passes plain text without tags verbatim", async () => {

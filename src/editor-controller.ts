@@ -629,7 +629,7 @@ export class EditorController extends EventEmitter {
    *   - If the REPL/agent is mid-turn AND a mode toggle is pending
    *     delivery, the handler aborts the in-flight request and
    *     immediately starts a new user turn carrying only the
-   *     `<ma::mode-change>` attachment. The model gets the new mode
+   *     `<ma::agent::mode-change>` attachment. The model gets the new mode
    *     without a user round-trip.
    *   - If nothing is pending, the handler is a no-op (the caller
    *     decides whether to flash the live area or just ignore).
@@ -1769,7 +1769,7 @@ export class EditorController extends EventEmitter {
       // the same byte-stable string. This closes the case where a
       // mode toggle's repaint subscriber raced with the Enter keypress
       // and the cached `this.prompt` was one tick behind the
-      // `<ma::mode-change>` attachment that's about to ship.
+      // `<ma::agent::mode-change>` attachment that's about to ship.
       let savedPrompt: string | null = null
       if (this.commitPromptBuilder) {
         const current = this.renderer.getPrompt()

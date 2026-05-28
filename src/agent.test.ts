@@ -772,7 +772,7 @@ describe("withRollingCacheBreakpoint", () => {
 //
 // Verifies the v2.1.119 cache-friendly mode contract end-to-end at the agent
 // level: tools stay registered in the request body, the harness refuses
-// disallowed tools at dispatch time, and a `<ma::mode-change>` attachment rides
+// disallowed tools at dispatch time, and a `<ma::agent::mode-change>` attachment rides
 // the next user turn after a toggle. See `src/modes.test.ts` for the unit
 // tests of ModeManager itself, and `work/2026-05-03T02:11:34-04:00-docs-plan-mode-design.md`
 // for the design rationale.
@@ -786,7 +786,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     refusalHint: "Present the proposed change as a unified diff.",
   }
 
-  // Pinned wall-clock for tests that assert on the literal `<ma::mode-change … at="…" />`
+  // Pinned wall-clock for tests that assert on the literal `<ma::agent::mode-change … at="…" />`
   // payload. Injecting `now` into ModeManager keeps the marker byte-stable.
   const FIXED_AT = new Date("2026-05-22T20:43:12.000Z")
   const FIXED_AT_ISO = FIXED_AT.toISOString()
@@ -986,7 +986,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     // model sees the activation context before the user's actual input).
     expect({ type: turn2Blocks[0].type, text: turn2Blocks[0].text }).toEqual({
       type: "text",
-      text: `<ma::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      text: `<ma::agent::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     })
     expect({ type: turn2Blocks[1].type, text: turn2Blocks[1].text }).toEqual({
       type: "text",
@@ -1056,7 +1056,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   // Repro from net log 1777796322689-... :
   //   - assistant emits tool_use
   //   - user toggles mode while the tool is running
-  //   - on the next request, the user message had `<ma::mode-change>` BEFORE
+  //   - on the next request, the user message had `<ma::agent::mode-change>` BEFORE
   //     the tool_result block, which the API rejects:
   //       "tool_use ids were found without tool_result blocks immediately
   //        after"
@@ -1125,7 +1125,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect((blocks[0] as { tool_use_id: string }).tool_use_id).toBe("call-1")
     expect(blocks[1].type).toBe("text")
     expect((blocks[1] as { text: string }).text).toBe(
-      `<ma::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
+      `<ma::agent::mode-change from="default" to="ask" at="${FIXED_AT_ISO}" />`,
     )
   })
 
@@ -1177,7 +1177,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   //   - assistant ends with text only (stopReason: end_turn), no tool_use
   //   - meanwhile user toggled ASK→default, attachment is pending
   //   - the original ASAP path (post-loop one-shot) pushed a synthetic
-  //     `<ma::mode-change>` user turn and made one more API call
+  //     `<ma::agent::mode-change>` user turn and made one more API call
   //   - the model, seeing the prior prompt was "save this file", returned
   //     `tool_use` on that follow-up call
   //   - the ASAP path did NOT loop through tool execution: orphan tool_use
@@ -1200,7 +1200,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     //           The test toggles the mode AFTER round 1's response is
     //           collected but BEFORE the loop's no-tool-blocks branch
     //           runs : simplest place to drive the pending-state.
-    //  round 2: synthetic `<ma::mode-change>` user turn was injected
+    //  round 2: synthetic `<ma::agent::mode-change>` user turn was injected
     //           by the agent. Model now responds with `tool_use` (Bash).
     //  round 3: agent has executed the tool and is asking the model
     //           for a final summary. Model returns text + end_turn.
@@ -1258,7 +1258,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(records.length).toBe(3)
 
     // Invariant 2: round 2's request body carries a user message whose
-    // ONLY block is the `<ma::mode-change>` attachment (synthetic turn).
+    // ONLY block is the `<ma::agent::mode-change>` attachment (synthetic turn).
     const round2Msgs = records[1].messages as Array<Record<string, unknown>>
     const round2LastUser = round2Msgs.at(-1) as Record<string, unknown>
     expect(round2LastUser.role).toBe("user")
@@ -1266,7 +1266,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(round2Blocks.length).toBe(1)
     expect(round2Blocks[0].type).toBe("text")
     expect((round2Blocks[0] as { text: string }).text).toBe(
-      `<ma::mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
+      `<ma::agent::mode-change from="ask" to="default" at="${FIXED_AT_ISO}" />`,
     )
 
     // Invariant 3: round 3's request body carries the matching
@@ -1311,7 +1311,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
 
     const auth: AuthResult = { type: "api-key", token: "test" }
     const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
-    // First run carries the initial `<ma::mode-change default → ask>`
+    // First run carries the initial `<ma::agent::mode-change default → ask>`
     // attachment (mode starts active). After this turn lastAdvertised
     // === active, so subsequent steady-state runs must not add another.
     const g1 = agent.run("first")

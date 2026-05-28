@@ -198,7 +198,7 @@ export interface ModeChangeEvent {
  * `fromId` is the id the model previously believed (`null` = default).
  * `toId` is the id the model now believes (`null` = default).
  * `at` is the wall-clock the underlying toggle took effect, mirroring
- * `<ma::mode-change at="...">`.
+ * `<ma::agent::mode-change at="...">`.
  *
  * Delivery is the "model now knows" event. Listeners that paint a
  * scrollback chip or clear a "pending" decoration should subscribe
@@ -577,7 +577,7 @@ export class ModeManager {
   }
 
   /**
-   * Build the `<ma::mode-active />` envelope text to stamp onto a
+   * Build the `<ma::agent::mode-active />` envelope text to stamp onto a
    * tool_result. The model gets a fresh, machine-readable view of the
    * active mode on every tool round, killing reasoning-inertia bugs
    * where a long thinking block predates a user mode toggle.
@@ -588,7 +588,7 @@ export class ModeManager {
    *
    * Format (single self-closing tag, no inner content):
    *
-   *     <ma::mode-active id="ask" since="2026-05-27T15:02:19.000Z" />
+   *     <ma::agent::mode-active id="ask" since="2026-05-27T15:02:19.000Z" />
    *
    * The tag rides on the tail of the tool_result `content` (text) so
    * it sits in the rolling-tail cache breakpoint that's invalidated
@@ -598,7 +598,7 @@ export class ModeManager {
     const m = this.active()
     if (!m) return null
     const since = (this.activeSinceAt ?? this.now()).toISOString()
-    return `<ma::mode-active id="${m.id}" since="${since}" />`
+    return `<ma::agent::mode-active id="${m.id}" since="${since}" />`
   }
 
   /**
@@ -647,12 +647,12 @@ export class ModeManager {
     for (const l of this.deliveryListeners) l(deliveryEvent)
     // Tag namespace: `<ma::...>` is the convention going forward
     // (see TODOS.md#T-ca2ce1). The session-replay parser accepts both
-    // the new `<ma::mode-change>` and the legacy bare `<mode-change>`
+    // the new `<ma::agent::mode-change>` and the legacy bare `<mode-change>`
     // forms for one release so resumed pre-migration sessions still
     // render their chip history correctly.
     return {
       type: "text",
-      text: `<ma::mode-change from="${from}" to="${to}" at="${at.toISOString()}" />`,
+      text: `<ma::agent::mode-change from="${from}" to="${to}" at="${at.toISOString()}" />`,
     }
   }
 
@@ -678,7 +678,7 @@ export class ModeManager {
 
   /**
    * Set `lastAdvertisedModeId` from outside : used by session resume
-   * to seed the manager from the last `<ma::mode-change to="...">` in
+   * to seed the manager from the last `<ma::agent::mode-change to="...">` in
    * the persisted message history. Prevents the manager from re-emitting
    * a redundant `from="default" to="<id>"` attachment on first consume
    * after resume.
@@ -914,17 +914,17 @@ export class ModeManager {
 }
 
 /**
- * Match a `<ma::mode-change>` (or legacy `<mode-change>`) self-closing
+ * Match a `<ma::agent::mode-change>` (or legacy `<mode-change>`) self-closing
  * tag and capture the `to=` value. Tolerant of attribute order and
  * stray whitespace.
  *
  * Pure regex. The only consumer is {@link lastAdvertisedModeFromHistory}.
  */
-const MODE_CHANGE_TO_RE = /<(?:ma::)?mode-change\b[^>]*\bto="([^"]*)"[^>]*\/>/
+const MODE_CHANGE_TO_RE = /<(?:ma::(?:agent::)?)?mode-change\b[^>]*\bto="([^"]*)"[^>]*\/>/
 
 /**
  * Walk a list of API-shape `Message`s and return the `to=` value of
- * the LAST `<ma::mode-change>` advertisement found in any user-role
+ * the LAST `<ma::agent::mode-change>` advertisement found in any user-role
  * text block. Returns `null` when no advertisement is found OR when
  * the last one targeted `"default"`.
  *
@@ -933,7 +933,7 @@ const MODE_CHANGE_TO_RE = /<(?:ma::)?mode-change\b[^>]*\bto="([^"]*)"[^>]*\/>/
  * resume does not re-announce the mode the model already knows about
  * from its persisted conversation history.
  *
- * Tolerates both the new `<ma::mode-change>` and legacy bare
+ * Tolerates both the new `<ma::agent::mode-change>` and legacy bare
  * `<mode-change>` spellings during the tag-namespace migration
  * window (TODOS.md#T-ca2ce1).
  *

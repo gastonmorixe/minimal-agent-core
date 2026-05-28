@@ -1,7 +1,7 @@
 /**
- * TUI plugin public types.
+ * Plugin public types.
  *
- * Author-facing surface for writing tui-plugin handler modules. These types
+ * Author-facing surface for writing plugin handler modules. These types
  * are also used internally by the loader and dispatcher. Nothing in this
  * file has runtime behavior — it's a types-only module.
  *
@@ -26,7 +26,7 @@ export type { PluginLogger } from "../diagnostic-bus.ts"
  *
  * `tool` fires when the model emits a `tool_use` block naming a tool the
  * plugin declared. `inline_tag` fires when the stream scanner detects a
- * matching `<tui::NAME ...>...</tui::NAME>` (or self-closing) span in
+ * matching `<ma::plugin::NAME ...>...</ma::plugin::NAME>` (or self-closing) span in
  * assistant text.
  */
 export type TUITrigger =
@@ -41,13 +41,13 @@ export type TUITrigger =
     }
   | {
       type: "inline_tag"
-      /** Tag name from `<tui::NAME ...>`. */
+      /** Tag name from `<ma::plugin::NAME ...>`. */
       name: string
       /** Parsed attribute map. Values are always strings. */
       attrs: Record<string, string>
       /** Raw body text between opener and closer. Empty for self-closing. */
       body: string
-      /** True if the tag was self-closing (`<tui::NAME ... />`). */
+      /** True if the tag was self-closing (`<ma::plugin::NAME ... />`). */
       self_closing: boolean
     }
 
@@ -165,7 +165,7 @@ export type TUIResult =
        * appending the time suffix. Used by the `tasks` plugin so its
        * header carries the full `· YYYY-MM-DD HH:MM:SS` chrome (date +
        * year, single-source-of-truth) without the agent's HH:MM:SS
-       * duplicating the time portion. See `tui-plugins/tasks/lib/render.ts`.
+       * duplicating the time portion. See `plugins/tasks/lib/render.ts`.
        *
        * Setting this also detaches the plugin's tool call from the
        * agent's `ToolTimeTracker` day-rollover state machine — the
@@ -190,7 +190,7 @@ export type TUIHandler = (ctx: TUIContext) => Promise<TUIResult>
 // ---------------------------------------------------------------------------
 
 /**
- * The JSON body of a `manifest.json` file at the root of a tui-plugin package.
+ * The JSON body of a `manifest.json` file at the root of a plugin package.
  *
  * Matches the schema in the spec. Every field is validated at load time; the
  * loader throws a descriptive error for malformed manifests and skips the
@@ -288,6 +288,27 @@ export interface ManifestFile {
    * Defaults to `false`.
    */
   requiresUnsafeHooks?: boolean
+  /**
+   * Author opt-out: when set to literal `false`, the plugin ships
+   * disabled and the loader skips it at discovery time. The user can
+   * still flip it back on with `plugins.<id>.enabled = true` in
+   * `~/.minimal-agent/config.jsonc` (user config wins over the manifest
+   * default, in both directions).
+   *
+   * Any value other than literal `false` (including missing, `true`,
+   * or unrelated truthy values) is treated as ENABLED. The default is
+   * "on": authors only need this field when shipping experimental or
+   * opt-in plugins.
+   *
+   * Precedence (loader perspective):
+   *   1. User config `enabled === false` → DISABLED, manifest never read further.
+   *   2. User config `enabled === true`  → ENABLED (overrides manifest opt-out).
+   *   3. Manifest `enabled === false`    → DISABLED.
+   *   4. Otherwise                       → ENABLED.
+   *
+   * Optional. Default `true` (loaded).
+   */
+  enabled?: boolean
 }
 
 /**
@@ -903,7 +924,7 @@ export type ManifestTrigger =
   | {
       type: "inline_tag"
       /**
-       * Tag name matched against `<tui::NAME ...>`.
+       * Tag name matched against `<ma::plugin::NAME ...>`.
        *
        * NAME must match `[a-z0-9][a-z0-9_-]*` (kebab/snake lowercase). The
        * loader rejects anything else.

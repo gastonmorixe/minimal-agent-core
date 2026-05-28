@@ -452,15 +452,20 @@ export class BlobStore {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the `[raw-output: …]` line appended to a tool result's `content`
- * when a blob was written. One self-contained line, regex-greppable, so
- * the model can extract the path without parsing JSON. Format is
- * deliberately stable; downstream tooling MAY rely on it.
+ * Build the `<ma::agent::raw-output … />` line appended to a tool
+ * result's `content` when a blob was written. One self-contained line,
+ * regex-greppable, so the model can extract the path without parsing
+ * JSON. Format is deliberately stable; downstream tooling MAY rely on
+ * it.
  *
- * Example: `[raw-output: /Users/.../<sid>.blobs/toolu_01abc.raw  85kB · sha256=ab12cd34ef567890]`
+ * Example:
+ *   `<ma::agent::raw-output path="/Users/.../<sid>.blobs/toolu_01abc.raw" size="85kB" sha256="ab12cd34ef567890" />`
+ *
+ * (Pre-2026-05-28 emit used the bracket form `[raw-output: <path> <size>
+ * · sha256=<hex>]`. Replay accepts both.)
  */
 export function formatRawOutputFooter(r: BlobWriteResult): string {
-  return `[raw-output: ${r.path}  ${formatBytes(r.bytes)} · sha256=${r.sha256}]`
+  return `<ma::agent::raw-output path="${r.path}" size="${formatBytes(r.bytes)}" sha256="${r.sha256}" />`
 }
 
 /** Compact byte formatter: matches the one ma-fetch already uses. */

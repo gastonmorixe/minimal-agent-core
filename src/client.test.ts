@@ -109,7 +109,7 @@ describe("client", () => {
         expect(sys2).toContain("60-second wall-clock cooldown")
         // Ack/silence opt-out is documented next to the cadence so a
         // model that skipped earlier prose still finds the syntax.
-        expect(sys2).toContain('`<ma::reflection-ack silence-for="K" reason="..." />`')
+        expect(sys2).toContain('`<ma::agent::reflection-ack silence-for="K" reason="..." />`')
         // Default cap is Infinity, so the emergency-cap paragraph MUST
         // be absent : we don't want the model to think a hard stop
         // exists when none does.
@@ -121,7 +121,7 @@ describe("client", () => {
         const blocks = buildSystemPrompt({ maxToolRounds: 200 })
         const sys2 = blocks[2].text
         expect(sys2).toContain("emergency hard cap is configured at 200 rounds")
-        expect(sys2).toContain('`<ma::emergency-cap-triggered round="200" />`')
+        expect(sys2).toContain('`<ma::agent::emergency-cap-triggered round="200" />`')
         // The reflection paragraph still leads (cap is the SECOND
         // layer; the reflection checkpoint is the primary device).
         const checkpointIdx = sys2.indexOf("reflection checkpoint")
@@ -166,14 +166,14 @@ describe("client", () => {
         const blocks = buildSystemPrompt()
         const sys2 = blocks[2].text
         expect(sys2).not.toContain("# Tool output conventions")
-        expect(sys2).not.toContain("[raw-output:")
+        expect(sys2).not.toContain("<ma::agent::raw-output")
       })
 
       it("blobStoreEnabled=true appends a one-paragraph conventions section", () => {
         const blocks = buildSystemPrompt({ blobStoreEnabled: true })
         const sys2 = blocks[2].text
         expect(sys2).toContain("# Tool output conventions")
-        expect(sys2).toContain("[raw-output: <abs-path>")
+        expect(sys2).toContain('<ma::agent::raw-output path="<abs-path>"')
         expect(sys2).toContain("`Read({file_path: ...})`")
         // The blurb mentions what triggers persistence: large OR clamped.
         expect(sys2).toMatch(/large or got clamped/i)

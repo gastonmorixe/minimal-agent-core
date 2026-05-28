@@ -1,5 +1,5 @@
 /**
- * Manifest parser for tui-plugin packages.
+ * Manifest parser for plugin packages.
  *
  * Validates the shape of a `manifest.json` file against the schema defined in
  * the spec. Returns a typed `ManifestFile` on success, or throws a
@@ -123,6 +123,9 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   if (obj.requiresUnsafeHooks != null && typeof obj.requiresUnsafeHooks !== "boolean") {
     err("requiresUnsafeHooks must be a boolean if present")
   }
+  if (obj.enabled != null && typeof obj.enabled !== "boolean") {
+    err("enabled must be a boolean if present")
+  }
 
   const seenHandlerIds = new Set<string>()
   const tuis: ManifestHandler[] = []
@@ -186,6 +189,7 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     liveAreaSlots,
     permissions: (obj.permissions as string[] | undefined) ?? [],
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
+    enabled: obj.enabled === false ? false : undefined,
   }
 }
 

@@ -151,7 +151,7 @@ export interface ReplEditor {
    *
    *   1. Enqueues a synthetic zero-text item so the next loop
    *      iteration runs as a mode-only continuation turn (`agent.run("")`
-   *      drains it and ships the pending `<ma::mode-change>` attachment).
+   *      drains it and ships the pending `<ma::agent::mode-change>` attachment).
    *   2. Aborts the in-flight request via the abort bus.
    *
    * Orphan-tool_use cleanup is NOT handled here. If the assistant

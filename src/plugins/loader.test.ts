@@ -37,7 +37,7 @@ function writePackage(
   id: string,
   manifest: unknown,
   files: Record<string, string> = {},
-  sub: string = "tui-plugins",
+  sub: string = "plugins",
 ) {
   const dir = join(root, sub, id)
   mkdirSync(dir, { recursive: true })
@@ -158,8 +158,8 @@ describe("PluginLoader", () => {
     expect(loader.hasTool("tool_a")).toBe(true)
     expect(loader.hasTool("tool_b")).toBe(false)
     const prompt = loader.getPromptBlock()
-    expect(prompt).toContain("<tui-plugins>")
-    expect(prompt).toContain('<plugin id="alpha">')
+    expect(prompt).toContain("<ma::plugins>")
+    expect(prompt).toContain('<ma::plugin id="alpha">')
     expect(prompt).toContain(PROMPT_BODY_A)
     // The wrapper provides the id; we must not also emit a markdown heading
     // for it (that was the "ask mode appears twice" bug in the debug view).
@@ -179,7 +179,7 @@ describe("PluginLoader", () => {
       {
         "h.ts": "export default async () => ({ kind: 'tool_result', content: 'PROJECT' });",
       },
-      ".agents/tui-plugins",
+      ".agents/plugins",
     )
     const loader = await PluginLoader.load({
       homeDir: HOME,
@@ -188,12 +188,12 @@ describe("PluginLoader", () => {
     })
     const tools = loader.getExtraTools()
     expect(tools.map((t) => t.name)).toEqual(["tool_project"])
-    rmSync(join(HOME, "tui-plugins", "beta"), { recursive: true })
-    rmSync(join(PROJECT, ".agents", "tui-plugins", "beta"), { recursive: true })
+    rmSync(join(HOME, "plugins", "beta"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "plugins", "beta"), { recursive: true })
   })
 
   it("skips a package whose manifest is malformed", async () => {
-    const dir = join(HOME, "tui-plugins", "broken")
+    const dir = join(HOME, "plugins", "broken")
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, "manifest.json"), "{not-json")
 
@@ -214,7 +214,7 @@ describe("PluginLoader", () => {
     expect(loader.hasTool("tool_good")).toBe(true)
 
     rmSync(dir, { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "good"), { recursive: true })
+    rmSync(join(HOME, "plugins", "good"), { recursive: true })
   })
 
   it("refuses a plugin that collides with a core tool name", async () => {
@@ -230,7 +230,7 @@ describe("PluginLoader", () => {
     })
     expect(loader.hasTool("Bash")).toBe(false)
     expect(logs.some((l) => l.includes("Bash"))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "evil"), { recursive: true })
+    rmSync(join(HOME, "plugins", "evil"), { recursive: true })
   })
 
   it("refuses cross-plugin tool name collision", async () => {
@@ -252,8 +252,8 @@ describe("PluginLoader", () => {
     expect(tools).toHaveLength(1)
     expect(tools[0].name).toBe("dup")
     expect(logs.some((l) => l.includes("dup"))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "first"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "second"), { recursive: true })
+    rmSync(join(HOME, "plugins", "first"), { recursive: true })
+    rmSync(join(HOME, "plugins", "second"), { recursive: true })
   })
 
   it("refuses cross-plugin inline tag collision", async () => {
@@ -275,8 +275,8 @@ describe("PluginLoader", () => {
     if (loader.hasInlineTag("diff")) taggedCount++
     expect(taggedCount).toBe(1)
     expect(logs.some((l) => l.includes("diff"))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "ia"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "ib"), { recursive: true })
+    rmSync(join(HOME, "plugins", "ia"), { recursive: true })
+    rmSync(join(HOME, "plugins", "ib"), { recursive: true })
   })
 
   it("dispatches a tool trigger and returns a tool_result", async () => {
@@ -299,7 +299,7 @@ describe("PluginLoader", () => {
     )
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.content).toContain("hi")
-    rmSync(join(HOME, "tui-plugins", "d1"), { recursive: true })
+    rmSync(join(HOME, "plugins", "d1"), { recursive: true })
   })
 
   it("returns is_error tool_result when the handler throws", async () => {
@@ -323,7 +323,7 @@ describe("PluginLoader", () => {
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.is_error).toBe(true)
     expect(result.content).toContain("boom")
-    rmSync(join(HOME, "tui-plugins", "d2"), { recursive: true })
+    rmSync(join(HOME, "plugins", "d2"), { recursive: true })
   })
 
   it("dispatches an inline_tag trigger and returns rendered ansi", async () => {
@@ -347,7 +347,7 @@ describe("PluginLoader", () => {
     )
     if (result.kind !== "rendered") throw new Error("wrong kind")
     expect(result.ansi).toBe("[rendered:diff:hello]")
-    rmSync(join(HOME, "tui-plugins", "d3"), { recursive: true })
+    rmSync(join(HOME, "plugins", "d3"), { recursive: true })
   })
 
   it("composes a prompt block with core preamble + plugin sections", async () => {
@@ -366,17 +366,17 @@ describe("PluginLoader", () => {
     })
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    expect(block).toContain("<tui-plugins>")
-    expect(block).toContain("</tui-plugins>")
-    expect(block).toContain("<overview>")
-    expect(block).toContain("</overview>")
-    expect(block).toContain("<tui::NAME")
-    expect(block).toContain('<plugin id="pa">')
-    expect(block).toContain('<plugin id="pb">')
+    expect(block).toContain("<ma::plugins>")
+    expect(block).toContain("</ma::plugins>")
+    expect(block).toContain("<ma::plugins-overview>")
+    expect(block).toContain("</ma::plugins-overview>")
+    expect(block).toContain("<ma::plugin::NAME")
+    expect(block).toContain('<ma::plugin id="pa">')
+    expect(block).toContain('<ma::plugin id="pb">')
     expect(block).toContain(PROMPT_BODY_A)
     expect(block).toContain(PROMPT_BODY_B)
-    rmSync(join(HOME, "tui-plugins", "pa"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "pb"), { recursive: true })
+    rmSync(join(HOME, "plugins", "pa"), { recursive: true })
+    rmSync(join(HOME, "plugins", "pb"), { recursive: true })
   })
 
   it("rejects a subprocess handler whose executable is missing", async () => {
@@ -410,7 +410,7 @@ describe("PluginLoader", () => {
     })
     expect(loader.hasTool("sp_tool")).toBe(false)
     expect(logs.some((l) => l.includes("does-not-exist") || l.includes("sp"))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "sp"), { recursive: true })
+    rmSync(join(HOME, "plugins", "sp"), { recursive: true })
   })
 
   it("accepts a subprocess handler when the executable exists", async () => {
@@ -442,7 +442,7 @@ describe("PluginLoader", () => {
     rmSync(dir, { recursive: true })
   })
 
-  it("loads embedded plugins from <embeddedDir>/tui-plugins/", async () => {
+  it("loads embedded plugins from <embeddedDir>/plugins/", async () => {
     writePackage(EMBEDDED, "emb1", toolManifest("emb1", "tool_emb", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
       "PROMPT.md": "embedded plugin prompt",
@@ -455,12 +455,12 @@ describe("PluginLoader", () => {
     })
     expect(loader.hasTool("tool_emb")).toBe(true)
     const block = loader.getPromptBlock()
-    expect(block).toContain('<plugin id="emb1">')
+    expect(block).toContain('<ma::plugin id="emb1">')
     expect(block).toContain("embedded plugin prompt")
-    rmSync(join(EMBEDDED, "tui-plugins", "emb1"), { recursive: true })
+    rmSync(join(EMBEDDED, "plugins", "emb1"), { recursive: true })
   })
 
-  it("project plugins live at <projectDir>/.agents/tui-plugins/, not <projectDir>/tui-plugins/", async () => {
+  it("project plugins live at <projectDir>/.agents/plugins/, not <projectDir>/plugins/", async () => {
     // Old (incorrect) path: should NOT be picked up.
     writePackage(PROJECT, "old_path", toolManifest("old_path", "tool_old", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
@@ -471,7 +471,7 @@ describe("PluginLoader", () => {
       "new_path",
       toolManifest("new_path", "tool_new", "./h.ts"),
       { "h.ts": TOOL_HANDLER_BODY },
-      ".agents/tui-plugins",
+      ".agents/plugins",
     )
     const loader = await PluginLoader.load({
       homeDir: join(ROOT, "nope-home"),
@@ -480,8 +480,8 @@ describe("PluginLoader", () => {
     })
     expect(loader.hasTool("tool_new")).toBe(true)
     expect(loader.hasTool("tool_old")).toBe(false)
-    rmSync(join(PROJECT, "tui-plugins", "old_path"), { recursive: true })
-    rmSync(join(PROJECT, ".agents", "tui-plugins", "new_path"), { recursive: true })
+    rmSync(join(PROJECT, "plugins", "old_path"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "plugins", "new_path"), { recursive: true })
   })
 
   it("loads non-colliding plugins from all three roots together", async () => {
@@ -496,7 +496,7 @@ describe("PluginLoader", () => {
       "p_only",
       toolManifest("p_only", "tool_p", "./h.ts"),
       { "h.ts": TOOL_HANDLER_BODY },
-      ".agents/tui-plugins",
+      ".agents/plugins",
     )
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
@@ -509,9 +509,9 @@ describe("PluginLoader", () => {
       .map((t) => t.name)
       .sort()
     expect(names).toEqual(["tool_e", "tool_h", "tool_p"])
-    rmSync(join(EMBEDDED, "tui-plugins", "e_only"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "h_only"), { recursive: true })
-    rmSync(join(PROJECT, ".agents", "tui-plugins", "p_only"), { recursive: true })
+    rmSync(join(EMBEDDED, "plugins", "e_only"), { recursive: true })
+    rmSync(join(HOME, "plugins", "h_only"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "plugins", "p_only"), { recursive: true })
   })
 
   it("on package-id collision, project shadows home shadows embedded", async () => {
@@ -526,7 +526,7 @@ describe("PluginLoader", () => {
       "shared",
       toolManifest("shared", "tool_project", "./h.ts"),
       { "h.ts": TOOL_HANDLER_BODY },
-      ".agents/tui-plugins",
+      ".agents/plugins",
     )
     const logs: string[] = []
     const loader = await PluginLoader.load({
@@ -541,9 +541,9 @@ describe("PluginLoader", () => {
     // Both home and embedded variants were skipped with a precedence note.
     expect(logs.filter((l) => l.includes('"shared"')).length).toBeGreaterThanOrEqual(2)
     expect(logs.some((l) => l.includes("project > home > embedded"))).toBe(true)
-    rmSync(join(EMBEDDED, "tui-plugins", "shared"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "shared"), { recursive: true })
-    rmSync(join(PROJECT, ".agents", "tui-plugins", "shared"), { recursive: true })
+    rmSync(join(EMBEDDED, "plugins", "shared"), { recursive: true })
+    rmSync(join(HOME, "plugins", "shared"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "plugins", "shared"), { recursive: true })
   })
 
   it("home shadows embedded when project has no entry for the id", async () => {
@@ -560,36 +560,36 @@ describe("PluginLoader", () => {
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_home"])
-    rmSync(join(EMBEDDED, "tui-plugins", "two_way"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "two_way"), { recursive: true })
+    rmSync(join(EMBEDDED, "plugins", "two_way"), { recursive: true })
+    rmSync(join(HOME, "plugins", "two_way"), { recursive: true })
   })
 
   // Reproduces the user-reported bug where running minimal-agent from
-  // `$HOME` made the loader scan `cwd/.agents/tui-plugins` (= project)
-  // AND `$HOME/.agents/tui-plugins` (= home) — the same physical
+  // `$HOME` made the loader scan `cwd/.agents/plugins` (= project)
+  // AND `$HOME/.agents/plugins` (= home) — the same physical
   // directory through two different roots. The pre-fix loader emitted a
   // spurious "already loaded" warning for every plugin inside; the
   // post-fix loader silently keeps the highest-precedence copy and the
   // warning never fires.
   it("deduplicates by realpath when project and home roots overlap (cwd=$HOME case)", async () => {
-    // PROJECT-as-cwd points at HOME, so projectDir/.agents/tui-plugins ===
-    // homeDir/tui-plugins. We don't need symlinks for this scenario; just
-    // pass homeDir=HOME and projectDir=parent(HOME-tui-plugins-prefix).
-    // Concretely: project's `.agents/tui-plugins` and home's `tui-plugins`
+    // PROJECT-as-cwd points at HOME, so projectDir/.agents/plugins ===
+    // homeDir/plugins. We don't need symlinks for this scenario; just
+    // pass homeDir=HOME and projectDir=parent(HOME-plugins-prefix).
+    // Concretely: project's `.agents/plugins` and home's `plugins`
     // are the SAME directory.
     const overlapRoot = join(ROOT, "overlap")
     rmSync(overlapRoot, { recursive: true, force: true })
     mkdirSync(overlapRoot, { recursive: true })
-    // The shared plugin dir lives at: <overlapRoot>/.agents/tui-plugins/shared
+    // The shared plugin dir lives at: <overlapRoot>/.agents/plugins/shared
     // Reachable two ways:
-    //   homeDir = <overlapRoot>/.agents  → scans .agents/tui-plugins
-    //   projectDir = <overlapRoot>       → scans .agents/tui-plugins
+    //   homeDir = <overlapRoot>/.agents  → scans .agents/plugins
+    //   projectDir = <overlapRoot>       → scans .agents/plugins
     writePackage(
       overlapRoot,
       "shared_overlap",
       toolManifest("shared_overlap", "tool_overlap", "./h.ts"),
       { "h.ts": TOOL_HANDLER_BODY },
-      ".agents/tui-plugins",
+      ".agents/plugins",
     )
     const logs: string[] = []
     const loader = await PluginLoader.load({
@@ -608,7 +608,7 @@ describe("PluginLoader", () => {
 
   // Symlink variant: a plugin author can keep their dev checkout at an
   // arbitrary location (e.g. `~/Projects/foo-plugin`) and surface it
-  // under both `~/.agents/tui-plugins/foo-plugin` AND the embedded
+  // under both `~/.agents/plugins/foo-plugin` AND the embedded
   // tree without the loader complaining about a duplicate.
   it("deduplicates by realpath across roots when symlinks point to the same target", async () => {
     const real = join(ROOT, "real-symlink-target")
@@ -619,12 +619,12 @@ describe("PluginLoader", () => {
       JSON.stringify(toolManifest("sym_pkg", "tool_sym", "./h.ts"), null, 2),
     )
     writeFileSync(join(real, "h.ts"), TOOL_HANDLER_BODY)
-    // Surface the same physical dir under both home/tui-plugins AND
-    // embedded/tui-plugins via symlinks.
-    const homeLink = join(HOME, "tui-plugins", "sym_pkg")
-    const embLink = join(EMBEDDED, "tui-plugins", "sym_pkg")
-    mkdirSync(join(HOME, "tui-plugins"), { recursive: true })
-    mkdirSync(join(EMBEDDED, "tui-plugins"), { recursive: true })
+    // Surface the same physical dir under both home/plugins AND
+    // embedded/plugins via symlinks.
+    const homeLink = join(HOME, "plugins", "sym_pkg")
+    const embLink = join(EMBEDDED, "plugins", "sym_pkg")
+    mkdirSync(join(HOME, "plugins"), { recursive: true })
+    mkdirSync(join(EMBEDDED, "plugins"), { recursive: true })
     rmSync(homeLink, { force: true, recursive: true })
     rmSync(embLink, { force: true, recursive: true })
     symlinkSync(real, homeLink, "dir")
@@ -659,8 +659,64 @@ describe("PluginLoader", () => {
     })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_kept"])
     expect(logs.some((l) => l.includes('"dropped" is disabled'))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "kept"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "dropped"), { recursive: true })
+    rmSync(join(HOME, "plugins", "kept"), { recursive: true })
+    rmSync(join(HOME, "plugins", "dropped"), { recursive: true })
+  })
+
+  it("manifest.enabled=false skips the plugin (author opt-out)", async () => {
+    const optOut = toolManifest("optout", "tool_optout", "./h.ts")
+    optOut.enabled = false
+    writePackage(HOME, "optout", optOut, { "h.ts": TOOL_HANDLER_BODY })
+    writePackage(HOME, "live", toolManifest("live", "tool_live", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+    })
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_live"])
+    expect(
+      logs.some(
+        (l) => l.includes('"optout" is disabled by its manifest') && l.includes("manifest.enabled"),
+      ),
+    ).toBe(true)
+    rmSync(join(HOME, "plugins", "optout"), { recursive: true })
+    rmSync(join(HOME, "plugins", "live"), { recursive: true })
+  })
+
+  it("enabledPluginIds overrides manifest.enabled=false (user opt-in)", async () => {
+    const optOut = toolManifest("optin", "tool_optin", "./h.ts")
+    optOut.enabled = false
+    writePackage(HOME, "optin", optOut, { "h.ts": TOOL_HANDLER_BODY })
+
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      enabledPluginIds: new Set(["optin"]),
+    })
+    expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_optin"])
+    rmSync(join(HOME, "plugins", "optin"), { recursive: true })
+  })
+
+  it("disabledPluginIds wins over enabledPluginIds (deny beats allow)", async () => {
+    const optOut = toolManifest("standoff", "tool_standoff", "./h.ts")
+    optOut.enabled = false
+    writePackage(HOME, "standoff", optOut, { "h.ts": TOOL_HANDLER_BODY })
+
+    const logs: string[] = []
+    const loader = await PluginLoader.load({
+      homeDir: HOME,
+      coreToolNames: CORE_TOOLS,
+      logger: (m) => logs.push(m),
+      enabledPluginIds: new Set(["standoff"]),
+      disabledPluginIds: new Set(["standoff"]),
+    })
+    expect(loader.getExtraTools()).toHaveLength(0)
+    expect(logs.some((l) => l.includes('"standoff" is disabled in user config'))).toBe(true)
+    rmSync(join(HOME, "plugins", "standoff"), { recursive: true })
   })
 
   it("alias map: tool dispatch resolves alias on canonical-miss", async () => {
@@ -701,7 +757,7 @@ describe("PluginLoader", () => {
       expect(a.content).toBe(b.content)
       expect(a.is_error).toBe(b.is_error)
     }
-    rmSync(join(HOME, "tui-plugins", "aliased_pkg"), { recursive: true })
+    rmSync(join(HOME, "plugins", "aliased_pkg"), { recursive: true })
   })
 
   it("alias collision: alias collides with another plugin's canonical → reject", async () => {
@@ -733,8 +789,8 @@ describe("PluginLoader", () => {
         .sort(),
     ).toEqual(["Tool_A"])
     expect(logs.some((l) => l.includes('alias "Tool_A"') && l.includes("canonical"))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "pkg_a"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "pkg_b"), { recursive: true })
+    rmSync(join(HOME, "plugins", "pkg_a"), { recursive: true })
+    rmSync(join(HOME, "plugins", "pkg_b"), { recursive: true })
   })
 
   it("alias collision: alias collides with another plugin's alias → reject", async () => {
@@ -775,8 +831,8 @@ describe("PluginLoader", () => {
     ).toEqual(["Tool_X"])
     expect(loader.getToolAliases().has("legacy")).toBe(true)
     expect(logs.some((l) => l.includes('alias "legacy"'))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "pkg_x"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "pkg_y"), { recursive: true })
+    rmSync(join(HOME, "plugins", "pkg_x"), { recursive: true })
+    rmSync(join(HOME, "plugins", "pkg_y"), { recursive: true })
   })
 
   it("alias collision: alias collides with a core tool name → reject plugin", async () => {
@@ -799,7 +855,7 @@ describe("PluginLoader", () => {
     })
     expect(loader.getExtraTools()).toEqual([])
     expect(logs.some((l) => l.includes('alias "Bash"') && l.includes("core tool"))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "alias_core"), { recursive: true })
+    rmSync(join(HOME, "plugins", "alias_core"), { recursive: true })
   })
 
   it("disabling a high-precedence copy does NOT promote the lower-precedence one", async () => {
@@ -818,7 +874,7 @@ describe("PluginLoader", () => {
       "shared2",
       toolManifest("shared2", "tool_project", "./h.ts"),
       { "h.ts": TOOL_HANDLER_BODY },
-      ".agents/tui-plugins",
+      ".agents/plugins",
     )
     const loader = await PluginLoader.load({
       embeddedDir: EMBEDDED,
@@ -828,9 +884,9 @@ describe("PluginLoader", () => {
       disabledPluginIds: new Set(["shared2"]),
     })
     expect(loader.getExtraTools()).toEqual([])
-    rmSync(join(EMBEDDED, "tui-plugins", "shared2"), { recursive: true })
-    rmSync(join(HOME, "tui-plugins", "shared2"), { recursive: true })
-    rmSync(join(PROJECT, ".agents", "tui-plugins", "shared2"), { recursive: true })
+    rmSync(join(EMBEDDED, "plugins", "shared2"), { recursive: true })
+    rmSync(join(HOME, "plugins", "shared2"), { recursive: true })
+    rmSync(join(PROJECT, ".agents", "plugins", "shared2"), { recursive: true })
   })
 })
 
@@ -870,7 +926,7 @@ describe("PluginLoader / liveAreaSlots", () => {
     expect(slots[0]!.definition.refreshMs).toBe(60_000)
     expect(slots[0]!.definition.timeoutMs).toBe(5_000)
     // packageDir points at the actual package dir on disk.
-    expect(slots[0]!.packageDir).toBe(join(HOME, "tui-plugins", "la-mod"))
+    expect(slots[0]!.packageDir).toBe(join(HOME, "plugins", "la-mod"))
     // Invoke is callable and threads the tick through.
     const out = await slots[0]!.invoke({
       packageDir: slots[0]!.packageDir,
@@ -883,7 +939,7 @@ describe("PluginLoader / liveAreaSlots", () => {
     })
     expect(out).toBe("ambient@0")
 
-    rmSync(join(HOME, "tui-plugins", "la-mod"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-mod"), { recursive: true })
   })
 
   it("logs and skips a slot whose module handler is missing", async () => {
@@ -903,7 +959,7 @@ describe("PluginLoader / liveAreaSlots", () => {
     const loader = await PluginLoader.load({ homeDir: HOME, logger: (m) => logs.push(m) })
     expect(loader.getLiveAreaSlots()).toEqual([])
     expect(logs.some((m) => /live-area slot handler module not found/.test(m))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "la-missing"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-missing"), { recursive: true })
   })
 
   it("logs and skips a slot whose module handler has no default export", async () => {
@@ -930,7 +986,7 @@ describe("PluginLoader / liveAreaSlots", () => {
     const loader = await PluginLoader.load({ homeDir: HOME, logger: (m) => logs.push(m) })
     expect(loader.getLiveAreaSlots()).toEqual([])
     expect(logs.some((m) => /no default export function/.test(m))).toBe(true)
-    rmSync(join(HOME, "tui-plugins", "la-noexport"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-noexport"), { recursive: true })
   })
 
   it("rejects a non-string return from a module handler", async () => {
@@ -967,7 +1023,7 @@ describe("PluginLoader / liveAreaSlots", () => {
         tick: 0,
       }),
     ).rejects.toThrow(/returned non-string/)
-    rmSync(join(HOME, "tui-plugins", "la-badreturn"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-badreturn"), { recursive: true })
   })
 
   it("a slot does NOT count as a tool (separate accessors)", async () => {
@@ -1009,7 +1065,7 @@ describe("PluginLoader / liveAreaSlots", () => {
     const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_x"])
     expect(loader.getLiveAreaSlots().map((s) => s.definition.id)).toEqual(["ambient"])
-    rmSync(join(HOME, "tui-plugins", "la-tool-and-slot"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-tool-and-slot"), { recursive: true })
   })
 
   it("disabledPluginIds removes the slot too", async () => {
@@ -1036,7 +1092,7 @@ describe("PluginLoader / liveAreaSlots", () => {
       disabledPluginIds: new Set(["la-disabled"]),
     })
     expect(loader.getLiveAreaSlots()).toEqual([])
-    rmSync(join(HOME, "tui-plugins", "la-disabled"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-disabled"), { recursive: true })
   })
 })
 
@@ -1064,7 +1120,7 @@ describe("PluginLoader / liveAreaSlots: placeholder + refreshOn", () => {
     const slot = loader.getLiveAreaSlots()[0]!
     expect(slot.definition.placeholder).toBe("loading…")
     expect(slot.definition.refreshOn).toEqual([])
-    rmSync(join(HOME, "tui-plugins", "la-pl"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-pl"), { recursive: true })
   })
 
   it("normalizes refreshOn", async () => {
@@ -1089,7 +1145,7 @@ describe("PluginLoader / liveAreaSlots: placeholder + refreshOn", () => {
     const loader = await PluginLoader.load({ homeDir: HOME, logger: () => {} })
     const slot = loader.getLiveAreaSlots()[0]!
     expect(slot.definition.refreshOn).toEqual(["a.b", "c.d"])
-    rmSync(join(HOME, "tui-plugins", "la-ro"), { recursive: true })
+    rmSync(join(HOME, "plugins", "la-ro"), { recursive: true })
   })
 })
 
@@ -1167,7 +1223,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     // Generous upper bound (500ms) to avoid CI flake; the bug had this
     // hang for minutes.
     expect(elapsed).toBeLessThan(500)
-    rmSync(join(HOME, "tui-plugins", "abrt1"), { recursive: true })
+    rmSync(join(HOME, "plugins", "abrt1"), { recursive: true })
   })
 
   it("does not crash when externalSignal is omitted (back-compat)", async () => {
@@ -1191,7 +1247,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     )
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.content).toContain("hi")
-    rmSync(join(HOME, "tui-plugins", "abrt2"), { recursive: true })
+    rmSync(join(HOME, "plugins", "abrt2"), { recursive: true })
   })
 
   it("aborts immediately when externalSignal is already aborted on entry", async () => {
@@ -1220,7 +1276,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.content).toBe("aborted-via-ctx")
     expect(elapsed).toBeLessThan(150)
-    rmSync(join(HOME, "tui-plugins", "abrt3"), { recursive: true })
+    rmSync(join(HOME, "plugins", "abrt3"), { recursive: true })
   })
 
   it("internal timeoutMs still works independent of externalSignal", async () => {
@@ -1249,7 +1305,7 @@ describe("PluginLoader / dispatch external AbortSignal", () => {
     expect(result.content).toBe("aborted-via-ctx")
     expect(elapsed).toBeGreaterThanOrEqual(60)
     expect(elapsed).toBeLessThan(400)
-    rmSync(join(HOME, "tui-plugins", "abrt4"), { recursive: true })
+    rmSync(join(HOME, "plugins", "abrt4"), { recursive: true })
   })
 })
 
@@ -1331,7 +1387,7 @@ describe("PluginLoader / manifest.hooks", () => {
     loader.hooks().emitSync("editor.key", { key: "Up", result: holder })
     expect(holder.handled).toBe(true)
     expect(holder.from).toBe("editor.key:50") // default plugin priority
-    rmSync(join(HOOK_HOME, "tui-plugins", "hk1"), { recursive: true })
+    rmSync(join(HOOK_HOME, "plugins", "hk1"), { recursive: true })
   })
 
   it("skips a hook subscription missing required permission", async () => {
@@ -1363,7 +1419,7 @@ describe("PluginLoader / manifest.hooks", () => {
     })
     expect(loader.getHookSubs().length).toBe(0)
     expect(logs.some((l) => l.includes("permissions doesn't grant"))).toBe(true)
-    rmSync(join(HOOK_HOME, "tui-plugins", "hk2"), { recursive: true })
+    rmSync(join(HOOK_HOME, "plugins", "hk2"), { recursive: true })
   })
 
   it("skips hooks for plugins with requiresUnsafeHooks when UNSAFE_HOOKS is unset", async () => {
@@ -1398,7 +1454,7 @@ describe("PluginLoader / manifest.hooks", () => {
     })
     expect(loader.getHookSubs().length).toBe(0)
     expect(logs.some((l) => l.includes("UNSAFE_HOOKS=1 is not set"))).toBe(true)
-    rmSync(join(HOOK_HOME, "tui-plugins", "hk3"), { recursive: true })
+    rmSync(join(HOOK_HOME, "plugins", "hk3"), { recursive: true })
     if (prior !== undefined) process.env.UNSAFE_HOOKS = prior
   })
 
@@ -1425,7 +1481,7 @@ describe("PluginLoader / manifest.hooks", () => {
     )
     // Make exe executable so the manifest parser doesn't reject it
     // for unrelated reasons.
-    chmodSync(join(HOOK_HOME, "tui-plugins", "hk4", "exe.sh"), 0o755)
+    chmodSync(join(HOOK_HOME, "plugins", "hk4", "exe.sh"), 0o755)
     const loader = await PluginLoader.load({
       homeDir: HOOK_HOME,
       projectDir: join(HOOK_ROOT, "nope-project"),
@@ -1434,7 +1490,7 @@ describe("PluginLoader / manifest.hooks", () => {
     })
     expect(loader.getHookSubs().length).toBe(0)
     expect(logs.some((l) => l.includes("subprocess handlers are not yet supported"))).toBe(true)
-    rmSync(join(HOOK_HOME, "tui-plugins", "hk4"), { recursive: true })
+    rmSync(join(HOOK_HOME, "plugins", "hk4"), { recursive: true })
   })
 })
 
@@ -1444,7 +1500,7 @@ describe("PluginLoader / manifest.hooks", () => {
 // A plugin that contributes only editor hooks, live-area slots, events, or
 // other UX-layer behavior has nothing to teach the model. It should ship
 // NO `PROMPT.md` at all (no HTML-comment placeholder, no empty file). The
-// loader recognizes this and omits the `<plugin id="...">` wrapper for
+// loader recognizes this and omits the `<ma::plugin id="...">` wrapper for
 // that plugin in the assembled system-prompt block.
 //
 // Critically, the loader must NOT fall back to `manifest.description` for
@@ -1485,7 +1541,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
       },
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
-    // A second, model-facing plugin so the outer <tui-plugins> wrapper is
+    // A second, model-facing plugin so the outer <ma::plugins> wrapper is
     // still emitted and we can assert the silent one is absent inside.
     writePackage(SILENT_HOME, "loud_a", toolManifest("loud_a", "tool_loud_a", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
@@ -1500,12 +1556,12 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    expect(block).toContain('<plugin id="loud_a">')
+    expect(block).toContain('<ma::plugin id="loud_a">')
     expect(block).toContain(PROMPT_BODY_A)
-    expect(block).not.toContain('<plugin id="silent_a">')
+    expect(block).not.toContain('<ma::plugin id="silent_a">')
     expect(block).not.toContain("this dev-doc description must NOT leak")
-    rmSync(join(SILENT_HOME, "tui-plugins", "silent_a"), { recursive: true })
-    rmSync(join(SILENT_HOME, "tui-plugins", "loud_a"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "silent_a"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "loud_a"), { recursive: true })
   })
 
   it("returns null when every loaded plugin is silent", async () => {
@@ -1537,7 +1593,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     expect(loader.getPromptBlock()).toBeNull()
     expect(await loader.getPromptBlockAsync()).toBeNull()
-    rmSync(join(SILENT_HOME, "tui-plugins", "silent_b"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "silent_b"), { recursive: true })
   })
 
   it("warns when manifest.prompt is explicitly set but the file is missing", async () => {
@@ -1573,7 +1629,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     expect(logs.some((l) => l.includes("PROMPT.md") && l.includes("missing"))).toBe(true)
     expect(loader.getPromptBlock()).toBeNull()
-    rmSync(join(SILENT_HOME, "tui-plugins", "ghost"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "ghost"), { recursive: true })
   })
 
   it("warns when a manifest declares no contributions AND ships no PROMPT.md", async () => {
@@ -1612,7 +1668,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     ).toBe(true)
     // It still loads (we don't reject), just contributes nothing.
     expect(loader.getPromptBlock()).toBeNull()
-    rmSync(join(SILENT_HOME, "tui-plugins", "deadweight"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "deadweight"), { recursive: true })
   })
 
   it("does NOT warn (dead-weight) when a plugin has hooks but no PROMPT.md", async () => {
@@ -1647,7 +1703,7 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     })
 
     expect(logs.some((l) => l.includes("declares no contributions"))).toBe(false)
-    rmSync(join(SILENT_HOME, "tui-plugins", "hooks_only"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "hooks_only"), { recursive: true })
   })
 
   it("does NOT warn when PROMPT.md is absent and manifest.prompt is unset", async () => {
@@ -1683,6 +1739,6 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     expect(logs.some((l) => l.includes("PROMPT.md") && l.includes("missing"))).toBe(false)
     expect(loader.getPromptBlock()).toBeNull()
-    rmSync(join(SILENT_HOME, "tui-plugins", "quiet"), { recursive: true })
+    rmSync(join(SILENT_HOME, "plugins", "quiet"), { recursive: true })
   })
 })
