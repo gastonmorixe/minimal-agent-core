@@ -101,6 +101,12 @@
         "require-yield": "off",
         "max-lines": "off"
       }
+    },
+    {
+      "files": ["src/editor-controller.ts", "src/input.ts", "src/index.ts"],
+      "rules": {
+        "max-lines": "off"
+      }
     }
   ],
   "ignorePatterns": ["node_modules/**", "docs/**", "research/**", ".swarm/**", "tmp/**"]

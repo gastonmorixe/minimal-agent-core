@@ -8,10 +8,15 @@
     {
       "tagName": "@yields",
       "syntaxKind": "block"
+    },
+    {
+      "tagName": "@since",
+      "syntaxKind": "block"
     }
   ],
   "supportForTags": {
     "@module": true,
-    "@yields": true
+    "@yields": true,
+    "@since": true
   }
 }
