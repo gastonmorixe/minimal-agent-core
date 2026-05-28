@@ -1,0 +1,8 @@
+{
+  "id": "openai",
+  "name": "LLM Provider: OpenAI",
+  "version": "0.1.0",
+  "description": "OpenAI Chat Completions + Responses adapter (gpt-5.x / gpt-4 / o-series) for the canonical LLM layer.",
+  "entry": "./index.ts",
+  "export": "openaiProviderPlugin"
+}
