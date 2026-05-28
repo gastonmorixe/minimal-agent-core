@@ -1,0 +1,26 @@
+HTTP/2 200 
+date: Thu, 28 May 2026 19:59:22 GMT
+content-type: text/event-stream; charset=utf-8
+cf-ray: a02fd6ce5c95aa2a-EWR
+cf-cache-status: DYNAMIC
+server: cloudflare
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+x-content-type-options: nosniff
+access-control-expose-headers: X-Request-ID
+access-control-expose-headers: CF-Ray
+access-control-expose-headers: CF-Ray
+openai-organization: gm-it-sas
+openai-processing-ms: 2402
+openai-project: proj_Amb4AKmD1a9akzbCaTl9gxkF
+openai-version: 2020-10-01
+x-openai-proxy-wasm: v0.1
+x-ratelimit-limit-requests: 10000
+x-ratelimit-limit-tokens: 10000000
+x-ratelimit-remaining-requests: 9999
+x-ratelimit-remaining-tokens: 9999989
+x-ratelimit-reset-requests: 6ms
+x-ratelimit-reset-tokens: 0s
+x-request-id: req_01e15d8426464dc1a16e8a851d41be83
+set-cookie: __cf_bm=J5QZVT0lMJOf90ILGwkB4g2vZF2cGTvtBuuyjV1AhWc-1779998358.774749-1.0.1.1-B8mKhaIP_GLXBUjQHd8DOFqtyGXO4EDwyUCcO2QPdWxyiNe4fsiRstEBWimdlKPIgvIWX7D4GVd87TCtSeewxknEB1oNFsgmKOygubIRu001g06yEgtyiVO7s3U7VM6s; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 28 May 2026 20:29:22 GMT
+alt-svc: h3=":443"; ma=86400
+
