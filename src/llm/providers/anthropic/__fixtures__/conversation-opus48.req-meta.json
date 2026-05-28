@@ -1,0 +1,27 @@
+{
+  "id": 4,
+  "timestamp": "2026-05-28T18:24:56.369Z",
+  "url": "https://api.anthropic.com/v1/messages?beta=true",
+  "method": "POST",
+  "headers": {
+    "accept": "application/json",
+    "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-version": "2023-06-01",
+    "authorization": "Bearer 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",
+    "content-type": "application/json",
+    "user-agent": "claude-cli/2.1.154 (external, cli)",
+    "x-app": "cli",
+    "x-claude-code-session-id": "cf97e168-d4f9-4831-b26f-2ec3149ea7f0",
+    "x-client-request-id": "417f161d-886c-4cde-8933-b4a1fdc228d1",
+    "x-stainless-arch": "arm64",
+    "x-stainless-lang": "js",
+    "x-stainless-os": "MacOS",
+    "x-stainless-package-version": "0.94.0",
+    "x-stainless-retry-count": "0",
+    "x-stainless-runtime": "node",
+    "x-stainless-runtime-version": "v24.3.0",
+    "x-stainless-timeout": "600"
+  },
+  "protocol": "fetch"
+}

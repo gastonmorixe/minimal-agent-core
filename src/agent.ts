@@ -128,6 +128,13 @@ export class Agent {
   /** Effort level for output_config.effort. Pass-through string; server validates. */
   private effort: string | undefined
   /**
+   * Speed-mode dispatch tier. `"fast"` adds `speed:"fast"` to the
+   * request body (Anthropic fast-mode-2026-02-01). `"normal"` omits
+   * the field entirely. Capability-gating happens at the registry
+   * level — this is just the per-Agent default.
+   */
+  private speed: "normal" | "fast"
+  /**
    * Optional `thinking.display` override, threaded onto every API call.
    * `"summarized"` opts opus-4.7 / mythos into plaintext thinking_delta
    * streaming; `"omitted"` forces redaction on models that would otherwise
@@ -285,6 +292,17 @@ export class Agent {
     auth: AuthResult
     model?: string
     effort?: string
+    /**
+     * Speed mode for the response dispatch tier. `"fast"` opts the
+     * model into the `fast-mode-2026-02-01` beta and emits
+     * `speed: "fast"` on the wire — ~2.5x output tok/s at premium
+     * pricing (Opus 4.8: $10/$50 per MTok instead of $5/$25).
+     *
+     * Capability-gated: ignored on models whose registry entry doesn't
+     * declare `speedFast: true`. Default: `"normal"` (omits the field
+     * entirely; server treats as normal).
+     */
+    speed?: "normal" | "fast"
     thinkingDisplay?: "summarized" | "omitted"
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
@@ -357,6 +375,7 @@ export class Agent {
     this.auth = opts.auth
     this.model = opts.model ?? "claude-sonnet-4-6"
     this.effort = opts.effort
+    this.speed = opts.speed ?? "normal"
     this.thinkingDisplay = opts.thinkingDisplay
     this.loader = opts.loader ?? null
     this.modeManager = opts.modeManager ?? null
@@ -438,6 +457,36 @@ export class Agent {
    *
    * @returns true if at least one message was discarded.
    */
+  /**
+   * Append a `role:"system"` mid-conversation operator message to the
+   * conversation history.
+   *
+   * This is the `mid-conversation-system-2026-04-07` beta channel —
+   * the prompt-injection-safe way to nudge the model mid-turn without
+   * editing the top-level `system` prefix (which would invalidate the
+   * prompt cache).
+   *
+   * claude-code uses three concrete patterns:
+   * 1. **User interrupt**: `"The user sent a new message while you were
+   *    working:\n<text>\n\nIMPORTANT: After completing your current
+   *    task, you MUST address the user's message above."`
+   * 2. **Tool availability**: `"The following deferred tools are now
+   *    available via ToolSearch. ..."`
+   * 3. **Task-list nudge**: `"The task tools haven't been used recently.
+   *    ..."`
+   *
+   * The system message lands as `{role:"system", content:"<text>"}`
+   * inside `messages[]`. Capability-gated by the model registry — if
+   * the resolved model declares `midConversationSystem: false`, the
+   * server would 400. (Today's haiku-4.5 and sonnet-4.5 don't support
+   * it; opus-4.6/4.7/4.8 and sonnet-4.6 do.)
+   *
+   * @param text Body of the system message.
+   */
+  pushSystemMessage(text: string): void {
+    this.messages.push({ role: "system", content: text })
+  }
+
   rollbackPendingTurn(): boolean {
     let removed = false
     while (
@@ -828,6 +877,7 @@ export class Agent {
         tools: mergedTools,
         system,
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.thinkingDisplay
           ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
           : {}),
@@ -1628,6 +1678,7 @@ export class Agent {
         // this final turn, so it MUST write text and finish.
         system,
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.thinkingDisplay
           ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
           : {}),
@@ -1707,6 +1758,7 @@ export class Agent {
       messages: withRollingCacheBreakpoint(this.messages),
       model: this.model,
       ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+      ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
       ...(this.thinkingDisplay
         ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
         : {}),

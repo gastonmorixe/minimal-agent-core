@@ -15,22 +15,28 @@ import type { AuthResult } from "./auth.ts"
 // ---------------------------------------------------------------------------
 
 /**
- * CLI version string observed in the latest captured traffic on 2026-04-25.
+ * CLI version string observed in the latest captured traffic on 2026-05-28.
  * Used in User-Agent, billing header, and debug output.
  */
-export const VERSION = "2.1.118"
+export const VERSION = "2.1.154"
 
 /**
  * Per-build hash suffix that appears in the billing header alongside VERSION
- * (`cc_version=${VERSION}.${BUILD_HASH}`). Live 2.1.118 capture sends `3a7`.
- * Rolls per-build, so bump together with VERSION.
+ * (`cc_version=${VERSION}.${BUILD_HASH}`). Source: `er_(hash)` builder at
+ * cli.patched.cjs L117040 in 2.1.154, which derives `hash` per-process via
+ * `o9q(salt, VERSION)`. Live 2.1.154 captures observed `d6e`, `1c3`, `23d` —
+ * all valid for that build. We pin one deterministic value here; the server
+ * doesn't validate the suffix, only logs it.
  */
-export const BUILD_HASH = "3a7"
+export const BUILD_HASH = "d6e"
 
 /**
- * Build timestamp. Not sent in requests, informational only.
+ * Build timestamp + git sha. Not sent in requests, informational only.
+ * Source: cli.patched.cjs L166-L212 (the build-info object literal injected
+ * by claude-code's bundler) in v2.1.154.
  */
-export const BUILD_TIME = "2026-04-25T00:00:00Z" // approximate, from v2.1.118
+export const BUILD_TIME = "2026-05-28T12:27:24Z"
+export const GIT_SHA = "b84d2da9ada13121515426fc644786a303e9ac53"
 
 /**
  * Anthropic API version header value.
@@ -106,6 +112,18 @@ export enum BetaFlagId {
   ADVANCED_TOOL_USE_20251120 = "advanced-tool-use-2025-11-20",
   EFFORT_20251124 = "effort-2025-11-24",
   STRUCTURED_OUTPUTS_20251215 = "structured-outputs-2025-12-15",
+  /** Added in v2.1.154 — accepts `role:"system"` mid-`messages[]`. */
+  MID_CONVERSATION_SYSTEM_20260407 = "mid-conversation-system-2026-04-07",
+  /** Added in v2.1.154 — allows `cache_control.ttl: "1h"` on blocks. */
+  EXTENDED_CACHE_TTL_20250411 = "extended-cache-ttl-2025-04-11",
+  /** Added in v2.1.154 — surfaces `output_tokens_details.thinking_tokens`. */
+  THINKING_TOKEN_COUNT_20260513 = "thinking-token-count-2026-05-13",
+  /** Added in v2.1.154 — fast-mode dispatch on the response (`speed:"fast"`). */
+  FAST_MODE_20260201 = "fast-mode-2026-02-01",
+  /** Added in v2.1.154 — `output_config.task_budget` agentic-loop ceiling. */
+  TASK_BUDGETS_20260313 = "task-budgets-2026-03-13",
+  /** Added in v2.1.154 — `diagnostics: {previous_message_id}` for cache debugging. */
+  CACHE_DIAGNOSIS_20260407 = "cache-diagnosis-2026-04-07",
 }
 
 export interface BetaFlag {
@@ -183,6 +201,44 @@ export const BETA_FLAGS_MAP: Record<BetaFlagId, BetaFlag> = {
     source: "Observed in v2.1.91 capture for title generation requests",
     condition: "Included when output_config.format is set (e.g. title generation)",
   },
+  [BetaFlagId.MID_CONVERSATION_SYSTEM_20260407]: {
+    id: BetaFlagId.MID_CONVERSATION_SYSTEM_20260407,
+    description:
+      'Accepts {role:"system"} entries inside messages[] (mid-conversation operator nudges)',
+    source: 'cli.patched.cjs L116093 v2.1.154: Yy = qf("mid_conversation_system", "...")',
+    condition: "Included for opus-4-6+/sonnet-4-6 conversation requests",
+  },
+  [BetaFlagId.EXTENDED_CACHE_TTL_20250411]: {
+    id: BetaFlagId.EXTENDED_CACHE_TTL_20250411,
+    description: 'Enables cache_control.ttl:"1h" (default is 5m without this flag)',
+    source: 'cli.patched.cjs L116081 v2.1.154: NGH = qf("extended_cache_ttl", "...")',
+    condition: "Included when any cache_control entry on the request requests 1h TTL",
+  },
+  [BetaFlagId.THINKING_TOKEN_COUNT_20260513]: {
+    id: BetaFlagId.THINKING_TOKEN_COUNT_20260513,
+    description: "Server populates usage.output_tokens_details.thinking_tokens on message_delta",
+    source: 'cli.patched.cjs L116084 v2.1.154: cr_ = qf("thinking_token_count", "...")',
+    condition:
+      "Currently always-on for conversation requests in CC (observed across all in capture)",
+  },
+  [BetaFlagId.FAST_MODE_20260201]: {
+    id: BetaFlagId.FAST_MODE_20260201,
+    description: 'Enables top-level speed:"fast" — ~2.5x output tok/s at premium pricing',
+    source: 'cli.patched.cjs L116082 v2.1.154: bUH = qf("speed", "fast-mode-2026-02-01")',
+    condition: "Included when speed:'fast' is set on the request body",
+  },
+  [BetaFlagId.TASK_BUDGETS_20260313]: {
+    id: BetaFlagId.TASK_BUDGETS_20260313,
+    description: "Enables output_config.task_budget — model self-moderates against a token budget",
+    source: 'cli.patched.cjs L116079 v2.1.154: dr_ = qf("task_budgets", "...")',
+    condition: "Included when output_config.task_budget is set (min 20_000 total)",
+  },
+  [BetaFlagId.CACHE_DIAGNOSIS_20260407]: {
+    id: BetaFlagId.CACHE_DIAGNOSIS_20260407,
+    description: "Enables top-level diagnostics:{previous_message_id} for prompt-cache debugging",
+    source: 'cli.patched.cjs L116087 v2.1.154: NKH = qf("cache_diagnosis", "...")',
+    condition: "Included for cache-diagnosis debugging sessions only",
+  },
 }
 
 /**
@@ -243,6 +299,7 @@ export type RequestType = "quota" | "title" | "conversation"
 export function buildBetaFlags(
   requestType: RequestType = "conversation",
   model?: string,
+  opts?: { speedFast?: boolean; taskBudget?: boolean; cacheDiagnosis?: boolean },
 ): BetaFlagId[] {
   switch (requestType) {
     case "quota":
@@ -279,7 +336,17 @@ export function buildBetaFlags(
         BetaFlagId.PROMPT_CACHING_SCOPE_20260105,
         BetaFlagId.ADVANCED_TOOL_USE_20251120,
         BetaFlagId.EFFORT_20251124,
+        // mid-conversation-system-2026-04-07: accept role:"system" inside
+        // messages[]. Opus 4.6+ / Sonnet 4.6 support it; safe to send to
+        // older models (server ignores unknown betas).
+        BetaFlagId.MID_CONVERSATION_SYSTEM_20260407,
+        // extended-cache-ttl-2025-04-11: allows ttl:"1h" on cache_control.
+        // The legacy SYSTEM_PROMPT already uses 1h TTLs, so send the flag.
+        BetaFlagId.EXTENDED_CACHE_TTL_20250411,
       )
+      if (opts?.speedFast) flags.push(BetaFlagId.FAST_MODE_20260201)
+      if (opts?.taskBudget) flags.push(BetaFlagId.TASK_BUDGETS_20260313)
+      if (opts?.cacheDiagnosis) flags.push(BetaFlagId.CACHE_DIAGNOSIS_20260407)
 
       return flags
     }
@@ -290,12 +357,15 @@ export function buildBetaFlags(
 
 /**
  * Stainless SDK package version.
- * @see cli.pretty.js L3573: `var ts = "0.74.0"`
- * This is the version of the `@anthropic-ai/sdk` package bundled into the CLI.
- * It was 0.70.0 in v2.1.29 and 0.74.0 in v2.1.87.
- * Sent as X-Stainless-Package-Version header (L3665).
+ *
+ * This is the version of the `@anthropic-ai/sdk` package bundled into the
+ * CLI. Sent as `x-stainless-package-version` header. Walk:
+ *   - 0.70.0 in v2.1.29
+ *   - 0.74.0 in v2.1.87
+ *   - 0.81.0 in v2.1.118
+ *   - 0.94.0 in v2.1.154 (observed in live 2026-05-28 capture)
  */
-export const STAINLESS_SDK_VERSION = "0.81.0"
+export const STAINLESS_SDK_VERSION = "0.94.0"
 
 /**
  * One block in the system prompt array.
@@ -645,6 +715,8 @@ export function buildHeaders(
   sessionId: string,
   requestType: RequestType = "conversation",
   model?: string,
+  /** Conditional feature-gated betas (forwarded to buildBetaFlags). */
+  betaOpts?: { speedFast?: boolean; taskBudget?: boolean; cacheDiagnosis?: boolean },
 ): Record<string, string> {
   const headers: Record<string, string> = {
     // SDK client defaults
@@ -665,7 +737,7 @@ export function buildHeaders(
     headers["x-api-key"] = auth.token
   } else {
     headers["authorization"] = `Bearer ${auth.token}`
-    headers["anthropic-beta"] = buildBetaFlags(requestType, model).join(",")
+    headers["anthropic-beta"] = buildBetaFlags(requestType, model, betaOpts).join(",")
     // Required for OAuth — see L8383-8387 in the SDK client
     headers["anthropic-dangerous-direct-browser-access"] = "true"
   }

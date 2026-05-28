@@ -177,7 +177,18 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResult
  * ```
  */
 export interface Message {
-  role: "user" | "assistant"
+  /**
+   * Conversation role.
+   *
+   * - `"user"`, `"assistant"`: the bread-and-butter pair every model
+   *   supports.
+   * - `"system"`: **mid-conversation** operator message, gated by the
+   *   `mid-conversation-system-2026-04-07` beta (opus-4-6+ / sonnet-4-6).
+   *   Distinct from the TOP-LEVEL `system` field on the request body
+   *   (which is the system prompt prefix). When the beta isn't sent,
+   *   the server 400s on a `role:"system"` entry inside `messages[]`.
+   */
+  role: "user" | "assistant" | "system"
   content: string | ContentBlock[]
 }
 
@@ -239,6 +250,20 @@ export interface SendOptions {
   tools?: Array<{ name: string; description: string; input_schema: unknown }>
   /** Temperature. Default: not sent (API uses its default). */
   temperature?: number
+  /**
+   * Speed mode. Anthropic only. `"fast"` opts into the
+   * `fast-mode-2026-02-01` beta and sends `speed: "fast"` on the wire,
+   * unlocking the premium dispatch tier (~2.5x output tok/s).
+   *
+   * Pricing implications:
+   * - Opus 4.8 fast: $10 in / $50 out per MTok (2x standard $5/$25).
+   * - Opus 4.5/4.6/4.7 fast: $30 in / $150 out per MTok (6x standard).
+   *
+   * Capability-gated: ignored on models whose registry entry doesn't
+   * declare `speedFast: true`. Default: omitted (server treats as
+   * `"normal"`).
+   */
+  speed?: "normal" | "fast"
   /**
    * Context-management edits. Live 2.1.118 conversation requests carry
    * `{edits:[{type:"clear_thinking_20251015", keep:"all"}]}` at the top level.
@@ -336,6 +361,18 @@ export interface StreamedResponse {
   text: string
   /** Stop reason from `message_delta` (e.g. `"end_turn"`, `"tool_use"`, `"max_tokens"`). */
   stopReason: string | null
+  /**
+   * Stop-reason categorization from Anthropic's `message_delta.stop_details`.
+   * Populated on `stopReason: "refusal"` (and other categorized stops the
+   * server may add later). `null` on normal end_turn/tool_use/max_tokens.
+   *
+   * Shape mirrors what the server sends: opaque `type` string the host can
+   * route on, optional `message` for display. New in opus-4-7+; ignored on
+   * older models that never populate it.
+   *
+   * @see private/research/2026-05-28-llm-providers/02-wire-snapshots.md
+   */
+  stopDetails?: { type: string; message?: string } | null
 }
 
 /**

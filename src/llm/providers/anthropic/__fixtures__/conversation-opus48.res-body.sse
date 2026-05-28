@@ -1,0 +1,30 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-opus-4-8","id":"msg_01KYqQENU4nt5kFH1r7ttpmn","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1657,"cache_creation_input_tokens":2521,"cache_read_input_tokens":14777,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":2521},"output_tokens":2,"service_tier":"standard","inference_geo":"not_available"}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: ping
+data: {"type":"ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Y"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ep — I'm Opus 4.8 (1M context), Anthropic's lat"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"est. 👋\n\nWhat are you working on? I see you've got some uncommitted changes in the session-repl"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ay and session-store area — happy to dig in whenever you're ready."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":1657,"cache_creation_input_tokens":2521,"cache_read_input_tokens":14777,"output_tokens":80,"output_tokens_details":{"thinking_tokens":0}},"context_management":{"applied_edits":[]}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

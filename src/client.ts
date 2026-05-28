@@ -215,14 +215,19 @@ export async function* sendMessageOnce(
     signal,
     streamIdleTimeoutMs = 30_000,
     attemptHardTimeoutMs = 30 * 60_000,
+    speed,
   } = opts
 
   // Strip client-side [1m] suffix : API activation is via beta flag
   const model = normalizeModelForAPI(rawModel)
 
   const sessionId = getSessionId()
-  // Pass rawModel so buildBetaFlags sees [1m] and adds context-1m flag
-  const headers = buildHeaders(auth, sessionId, requestType, rawModel)
+  // Pass rawModel so buildBetaFlags sees [1m] and adds context-1m flag.
+  // The 5th arg is the optional feature-gated beta set : right now we only
+  // surface `speed === "fast"` from the caller (fast-mode-2026-02-01 beta).
+  const headers = buildHeaders(auth, sessionId, requestType, rawModel, {
+    speedFast: speed === "fast",
+  })
   const metadata = buildMetadata(auth)
 
   const body: Record<string, unknown> = {
@@ -258,6 +263,15 @@ export async function* sendMessageOnce(
   // Temperature: only sent explicitly when set (title gen uses 1)
   if (temperature != null) {
     body.temperature = temperature
+  }
+
+  // Speed mode: opt-in `speed:"fast"` for the 2026-02-01 fast-mode beta.
+  // The beta flag itself lives in headers.ts; here we only set the body
+  // field. Capability gating ("does this model support fast?") happens
+  // upstream — the agent only forwards the option when the model entry
+  // declares `speedFast: true`.
+  if (speed === "fast") {
+    body.speed = "fast"
   }
 
   // Context management: live 2.1.118 conversation requests carry
@@ -493,6 +507,11 @@ export async function* sendMessageOnce(
     let currentBlock: Partial<ContentBlock> | null = null
     let fullText = ""
     let stopReason: string | null = null
+    // stop_details (opus-4-7+): populated on stop_reason:"refusal" and
+    // potentially other categorized stops the server may add. We
+    // preserve verbatim and surface on StreamedResponse.stopDetails so
+    // the host can route on the category without parsing prose.
+    let stopDetails: { type: string; message?: string } | null = null
     let sawStreamEvent = false
 
     // Accumulators for the current block being streamed
@@ -801,6 +820,22 @@ export async function* sendMessageOnce(
             if (event.delta?.stop_reason) {
               stopReason = event.delta.stop_reason
             }
+            // stop_details: opaque categorization the server may attach
+            // to refusal / pause / context-window-exceeded stops. We
+            // pass through verbatim — the host decides what to do with
+            // `{type, message?}`. New in opus-4-7+ (see
+            // private/research/2026-05-28-llm-providers/02-wire-snapshots.md).
+            const sd = (
+              event.delta as unknown as {
+                stop_details?: { type?: string; message?: string } | null
+              }
+            )?.stop_details
+            if (sd && typeof sd.type === "string") {
+              stopDetails =
+                sd.message !== undefined
+                  ? { type: sd.type, message: sd.message }
+                  : { type: sd.type }
+            }
             // Anthropic sometimes ships the final `output_tokens` count in a
             // `message_delta` near the end of the stream. When present, it's
             // the authoritative number — swap our chars/3.5 estimate for the
@@ -865,7 +900,7 @@ export async function* sendMessageOnce(
       throw err
     }
 
-    return { blocks, text: fullText, stopReason }
+    return { blocks, text: fullText, stopReason, stopDetails }
   } finally {
     requestStatus.clear()
     networkActivityObserver.detach(reqId)
@@ -1172,10 +1207,16 @@ export async function listModels(
   // The CLI uses a client-side [1m] suffix convention : these aren't separate
   // API model IDs. The actual 1M activation happens via the context-1m-2025-08-07
   // beta flag. See cc-03312026/src/utils/context.ts:modelSupports1M().
-  // Opus-4-7 and sonnet-4 both advertise 1M context via the context-1m beta.
-  // (Older opus-4-6 also did, but it's gone from the live catalog as of 2.1.118.)
+  //
+  // 1M-capable families (as of 2026-05-28 / claude-code 2.1.154):
+  //   - Sonnet 4 / 4.5 / 4.6  (sonnet-4 substring match)
+  //   - Opus 4.6 / 4.7 / 4.8  (each gated explicitly to avoid catching
+  //     older opus-4-0/4-1 ids which were 200k)
   const supports1M = (id: string) =>
-    id.includes("claude-sonnet-4") || id.includes("opus-4-7") || id.includes("opus-4-6")
+    id.includes("claude-sonnet-4") ||
+    id.includes("opus-4-6") ||
+    id.includes("opus-4-7") ||
+    id.includes("opus-4-8")
 
   const variants: ModelInfo[] = []
   for (const m of models) {
