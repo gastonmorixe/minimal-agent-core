@@ -7,6 +7,7 @@ interface ModelRow {
   id: string
   displayName?: string
   providerId: string
+  surface?: string
   date?: string
 }
 
@@ -24,6 +25,7 @@ export async function runListModelsCommand(
         id: m.id,
         displayName: m.display_name,
         providerId: "anthropic",
+        surface: "anthropic-messages",
         date: m.created_at?.slice(0, 10),
       })
     }
@@ -42,6 +44,7 @@ export async function runListModelsCommand(
       id: entry.id,
       displayName: entry.displayName,
       providerId: entry.providerId,
+      surface: entry.surfaceId,
       date: entry.knowledgeCutoff,
     })
   }
@@ -68,8 +71,9 @@ export async function runListModelsCommand(
     for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
       const id = c.cyan(row.id.padEnd(30))
       const name = row.displayName ? c.dim(row.displayName.padEnd(28)) : "".padEnd(28)
+      const surface = c.dim((row.surface ?? "").padEnd(18))
       const date = row.date ? c.dim(row.date) : ""
-      console.log(`    ${id} ${name} ${date}`)
+      console.log(`    ${id} ${name} ${surface} ${date}`)
       shown++
     }
     console.log("")
