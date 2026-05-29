@@ -59,7 +59,9 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
 } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
+import { selectedTransport } from "./llm/transport/select-transport.ts"
 import { ModeManager } from "./modes.ts"
+import type { NetworkClient } from "./network/index.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import type { ManifestMode } from "./plugins/types.ts"
 import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
@@ -184,6 +186,8 @@ export class Agent {
    * without making live API calls.
    */
   private sendFn: typeof sendMessage
+  /** Optional network client forwarded into every `sendFn` call. */
+  private networkClient: NetworkClient | undefined
   /**
    * Optional append-only session store. When set, the agent persists every
    * turn boundary (user submit, assistant turn complete, each tool result)
@@ -323,6 +327,13 @@ export class Agent {
      */
     tasksAttachment?: { toAttachment(): ContentBlock | null } | null
     sendFn?: typeof sendMessage
+    /**
+     * Network client forwarded to the transport (`sendFn`). Lets the host
+     * inject a configured/mocked client; defaults inside each transport to
+     * the package's `defaultNetworkClient`. Threaded so the canonical
+     * transport is offline-testable through the agent.
+     */
+    networkClient?: NetworkClient
     store?: SessionStore | null
     /**
      * Optional per-session blob store. When supplied, raw pre-clamp
@@ -382,7 +393,11 @@ export class Agent {
     this.saveEcho = opts.saveEcho ?? null
     this.shortTermSnapshot = opts.shortTermSnapshot ?? null
     this.tasksAttachment = opts.tasksAttachment ?? null
-    this.sendFn = opts.sendFn ?? sendMessage
+    // Default transport dispatches per-model: Anthropic → legacy sendMessage,
+    // others → canonical run() (so --model gpt-* actually reaches its vendor).
+    // Callers/tests can still inject any sendFn. See select-transport.ts.
+    this.sendFn = opts.sendFn ?? selectedTransport
+    this.networkClient = opts.networkClient
     this.store = opts.store ?? null
     this.blobStore = opts.blobStore ?? null
     // Resolve the skipTools list once at construction. Reads
@@ -874,6 +889,7 @@ export class Agent {
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages),
         model: this.model,
+        ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         tools: mergedTools,
         system,
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
@@ -1674,6 +1690,7 @@ export class Agent {
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages),
         model: this.model,
+        ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         // tools intentionally omitted : the model cannot call tools on
         // this final turn, so it MUST write text and finish.
         system,
@@ -1757,6 +1774,7 @@ export class Agent {
       auth: this.auth,
       messages: withRollingCacheBreakpoint(this.messages),
       model: this.model,
+      ...(this.networkClient ? { networkClient: this.networkClient } : {}),
       ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
       ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
       ...(this.thinkingDisplay
