@@ -910,9 +910,16 @@ describe("client", () => {
         const result = await checkQuota(auth, networkClient, ac.signal)
         expect(result.ok).toBe(true)
         expect(captured).not.toBeNull()
-        // SAME instance — abort propagation only works if the transport
-        // listens on the exact AbortSignal the scheduler owns.
-        expect((captured as unknown as NetworkRequest).signal).toBe(ac.signal)
+        // The probe composes the caller's signal with an internal timeout
+        // (AbortSignal.any), so it's a NEW signal — but the caller's abort
+        // still propagates through it. That propagation is what prevents the
+        // deadlock the scheduler relies on.
+        const sig = (captured as unknown as NetworkRequest).signal
+        expect(sig).toBeDefined()
+        expect(sig).not.toBe(ac.signal)
+        expect(sig?.aborted).toBe(false)
+        ac.abort()
+        expect(sig?.aborted).toBe(true)
       })
 
       it("returns {ok: false} (not a hang) when the signal is already aborted", async () => {
@@ -938,7 +945,7 @@ describe("client", () => {
         expect(result).toEqual({ ok: false })
       })
 
-      it("works without a signal (back-compat: existing callers don't break)", async () => {
+      it("is always bounded, even without a caller signal (internal timeout)", async () => {
         clearLastRateLimits()
         let captured: NetworkRequest | null = null
         const networkClient = fakeNetworkClient((req) => {
@@ -958,9 +965,12 @@ describe("client", () => {
         const auth: AuthResult = { type: "api-key", token: "tok", refresh: undefined }
         const result = await checkQuota(auth, networkClient)
         expect(result.ok).toBe(true)
-        // No signal passed → undefined forwarded to the transport, which
-        // is a no-op (every transport accepts `signal?: AbortSignal`).
-        expect((captured as unknown as NetworkRequest).signal).toBeUndefined()
+        // No caller signal, but the probe STILL forwards an (internal-timeout)
+        // signal so it can never hang. It hasn't fired (the request completed
+        // immediately), hence not aborted.
+        const sig = (captured as unknown as NetworkRequest).signal
+        expect(sig).toBeDefined()
+        expect(sig?.aborted).toBe(false)
       })
     })
 

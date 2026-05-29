@@ -215,6 +215,7 @@ export async function* sendMessageOnce(
     signal,
     streamIdleTimeoutMs = 30_000,
     attemptHardTimeoutMs = 30 * 60_000,
+    responseHeadersTimeoutMs = 120_000,
     speed,
   } = opts
 
@@ -344,20 +345,76 @@ export async function* sendMessageOnce(
     : attemptAbort.signal
 
   try {
+    // ------------------------------------------------------------------
+    // Pre-response (upload + time-to-first-byte) guard.
+    //
+    // The streaming watchdog further down only arms once we begin reading
+    // the SSE *body*. The send + wait-for-response-headers phase was
+    // unguarded: a stalled upload, or a server that accepts the POST but
+    // never returns response headers, hangs `await networkClient.request()`
+    // forever with nothing to abort it and nothing for the retry loop to
+    // catch. Root cause of the 13h hang observed 2026-05-28 (session
+    // b00e2d52): a ~2.3MB POST sat in "Sending request" with no watchdog.
+    //
+    // We arm a one-shot deadline around EACH request() call (the initial
+    // POST and the 401-refresh retry both go through `doRequest`). It is
+    // cleared the moment response headers arrive (request() resolves). On
+    // trip we fire `attemptAbort` (already wired into the transport
+    // signal; the transport rejects synchronously AND evicts the wedged
+    // HTTP/2 session) and convert the resulting AbortError into a tagged,
+    // retryable `stream_idle` so the outer `sendMessage` loop recovers on
+    // a fresh connection. A user-initiated `signal` abort is left
+    // untagged so it still propagates as a real cancel.
+    // ------------------------------------------------------------------
+    let preResponseTimedOut = false
     const doRequest = async (token: string) => {
       const h = { ...headers }
       if (h.authorization) h.authorization = `Bearer ${token}`
       else if (h["x-api-key"]) h["x-api-key"] = token
 
-      return networkClient.request({
-        id: reqId,
-        label: "messages.send",
-        method: "POST",
-        url: API_URL,
-        headers: h,
-        body: serializedBody,
-        signal: attemptSignal,
-      })
+      preResponseTimedOut = false
+      const ttfbGuard = setTimeout(() => {
+        if (attemptAbort.signal.aborted) return
+        preResponseTimedOut = true
+        attemptAbort.abort()
+      }, responseHeadersTimeoutMs)
+      if (typeof ttfbGuard.unref === "function") ttfbGuard.unref()
+
+      try {
+        return await networkClient.request({
+          id: reqId,
+          label: "messages.send",
+          method: "POST",
+          url: API_URL,
+          headers: h,
+          body: serializedBody,
+          signal: attemptSignal,
+        })
+      } catch (err) {
+        // Our deadline fired (not a user cancel): surface a tagged,
+        // retryable error so the harness retries instead of treating the
+        // transport AbortError as a terminal cancellation.
+        if (preResponseTimedOut && !signal?.aborted) {
+          const elapsedS = (responseHeadersTimeoutMs / 1000).toFixed(0)
+          diag.warn(
+            "api.stream-stalled",
+            `no response headers within ${elapsedS}s — aborting (request stalled before first byte)`,
+            {
+              "error-type": "stream_idle",
+              "elapsed-ms": responseHeadersTimeoutMs,
+              phase: "pre-response",
+            },
+          )
+          const tagged = markErrorAsDiagEmitted(
+            new Error(`Anthropic request stalled before response headers (${elapsedS}s)`),
+          ) as Error & { streamErrorType?: string }
+          tagged.streamErrorType = "stream_idle"
+          throw tagged
+        }
+        throw err
+      } finally {
+        clearTimeout(ttfbGuard)
+      }
     }
 
     let response = await doRequest(auth.token)
@@ -1323,9 +1380,21 @@ export async function sendMessageFull(opts: SendOptions): Promise<StreamedRespon
 export type QuotaResult = { ok: false } | { ok: true; rateLimits: Map<string, string> }
 
 /**
+ * Absolute upper bound on a single `checkQuota` probe (covers send + TTFB +
+ * read). The probe is low-stakes and re-driven by the live-area scheduler /
+ * startup, so a tight bound is correct: better a context-only footer for one
+ * tick than a wedged probe. Composed with any caller signal (first to fire
+ * wins).
+ */
+const QUOTA_PROBE_TIMEOUT_MS = 15_000
+
+/**
  * Probe the Anthropic API for the current quota / rate-limit state. Returns
  * `{ok: true, rateLimits}` on a 200 (with the parsed `anthropic-ratelimit-*`
  * headers), or `{ok: false}` on any error.
+ *
+ * Always bounded: an internal {@link QUOTA_PROBE_TIMEOUT_MS} deadline guarantees
+ * the probe can't hang even when `signal` is omitted (see `probeSignal` below).
  */
 export async function checkQuota(
   auth: AuthResult,
@@ -1347,6 +1416,19 @@ export async function checkQuota(
   debugKV("model", body.model)
 
   const serializedBody = JSON.stringify(body)
+  // Rock-solid bound: the probe ALWAYS has a deadline, even when the caller
+  // passes no signal (e.g. the startup-tree row). Without this, a quota probe
+  // stalled before response headers (stalled upload / black-holed socket)
+  // would hang `doRequest` forever — the same class of bug fixed for the chat
+  // path's TTFB guard. The internal timeout aborts the request at the network
+  // layer (and the transport's abort escalation evicts a wedged HTTP/2
+  // session). When the caller DOES pass a signal (the live-area slot passes
+  // `ctx.abort`, driven by `LiveAreaScheduler.timeoutMs`), whichever fires
+  // first wins. Either way `doRequest` rejects with an AbortError, `checkQuota`
+  // returns `{ ok: false }`, and the footer/startup degrade gracefully.
+  const probeSignal: AbortSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(QUOTA_PROBE_TIMEOUT_MS)])
+    : AbortSignal.timeout(QUOTA_PROBE_TIMEOUT_MS)
   const doRequest = async (token: string) => {
     const h = { ...headers }
     if (h.authorization) h.authorization = `Bearer ${token}`
@@ -1358,15 +1440,7 @@ export async function checkQuota(
       url: API_URL,
       headers: h,
       body: serializedBody,
-      // Signal forwarded to the underlying transport (fetch / http2). The
-      // live-area `quota-status` slot passes `ctx.abort`; if the
-      // `LiveAreaScheduler.timeoutMs` elapses the request is canceled at
-      // the network layer and `doRequest` rejects with `AbortError` :
-      // freeing the slot's `inFlight` gate so the next heartbeat tick
-      // (and any bus-driven `quota.headersReceived` re-fire) can run.
-      // Without this, a probe stuck on a dead TCP socket (e.g. after
-      // macOS sleep/wake) would deadlock both refresh paths permanently.
-      signal,
+      signal: probeSignal,
     })
   }
 

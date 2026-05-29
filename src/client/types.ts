@@ -328,6 +328,31 @@ export interface SendOptions {
   attemptHardTimeoutMs?: number
 
   /**
+   * Upper bound, in ms, on the request-send + wait-for-response-headers
+   * phase (i.e. everything BEFORE the first byte of the SSE body). The
+   * streaming idle watchdog (`streamIdleTimeoutMs`) only arms once we
+   * start reading the response body, so without this knob a stalled
+   * upload, or a server that accepts the POST but never returns response
+   * headers, hangs `await networkClient.request()` forever with nothing
+   * to abort it and nothing for the retry loop to catch.
+   *
+   * Observed 2026-05-28 (session b00e2d52): a ~2.3MB POST sat in
+   * "Sending request" for 13h, no watchdog, no retry. When this deadline
+   * trips, the attempt is aborted with `streamErrorType: "stream_idle"`
+   * and the outer retry loop tries again (against a fresh connection,
+   * since the transport evicts the wedged HTTP/2 session on abort).
+   *
+   * Defaults to `120_000` (2 minutes). Anthropic returns the 200 SSE
+   * headers within seconds regardless of context size (the long
+   * prompt-ingest/first-token latency happens AFTER headers, on the body
+   * stream, where `streamIdleTimeoutMs` + server `ping` events apply), so
+   * 2 minutes is generous enough to never false-trip on a healthy link.
+   *
+   * Set lower in tests for fast deterministic coverage.
+   */
+  responseHeadersTimeoutMs?: number
+
+  /**
    * Optional cancellation signal forwarded to the underlying network
    * transport. When the signal aborts mid-request the transport tears
    * down the HTTP/2 stream and the iterator throws an `AbortError`.
