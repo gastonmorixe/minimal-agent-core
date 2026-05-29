@@ -46,15 +46,15 @@ function openaiChatPong(): string {
 }
 
 describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire layer)", () => {
-  it("registers slugs on the shared openai-chat surface", () => {
+  it("registers slugs on the shared openai-chat-completions surface", () => {
     setup()
     const m = resolveModel("openai/gpt-4o-mini")
     expect(m.providerId).toBe("openrouter")
-    expect(m.surfaceId).toBe("openai-chat")
+    expect(m.surfaceId).toBe("openai-chat-completions")
     expect(m.vendorIds?.firstParty).toBe("openai/gpt-4o-mini")
 
     const adapter = resolveProvider("openrouter")
-    expect(adapter.surfaces).toContain("openai-chat")
+    expect(adapter.surfaces).toContain("openai-chat-completions")
     expect(adapter.displayName).toBe("OpenRouter")
   })
 

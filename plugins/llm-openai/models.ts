@@ -57,7 +57,7 @@ export function registerOpenAIModels(): string[] {
   registerModel({
     id: "gpt-5.5-chat",
     providerId: "openai",
-    surfaceId: "openai-chat",
+    surfaceId: "openai-chat-completions",
     displayName: "GPT-5.5 (Chat Completions)",
     knowledgeCutoff: "2025-12",
     tags: ["gpt-5", "flagship", "chat"],
@@ -104,7 +104,7 @@ export function registerOpenAIModels(): string[] {
   registerModel({
     id: "gpt-4.1",
     providerId: "openai",
-    surfaceId: "openai-chat",
+    surfaceId: "openai-chat-completions",
     displayName: "GPT-4.1",
     tags: ["gpt-4", "chat", "long-context"],
     capabilities: CAPS_GPT_41_CHAT,
@@ -114,7 +114,7 @@ export function registerOpenAIModels(): string[] {
   registerModel({
     id: "gpt-4o",
     providerId: "openai",
-    surfaceId: "openai-chat",
+    surfaceId: "openai-chat-completions",
     displayName: "GPT-4o",
     tags: ["gpt-4", "chat", "multimodal"],
     capabilities: CAPS_GPT_4O_CHAT,
@@ -124,7 +124,7 @@ export function registerOpenAIModels(): string[] {
   registerModel({
     id: "gpt-4o-mini",
     providerId: "openai",
-    surfaceId: "openai-chat",
+    surfaceId: "openai-chat-completions",
     displayName: "GPT-4o mini",
     tags: ["gpt-4", "chat", "fast", "cheap"],
     capabilities: CAPS_GPT_4O_MINI_CHAT,

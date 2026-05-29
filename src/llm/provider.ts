@@ -116,7 +116,7 @@ export interface ValidationResult {
  */
 export type SurfaceId =
   | "anthropic-messages"
-  | "openai-chat"
+  | "openai-chat-completions"
   | "openai-responses"
   | "openai-realtime"
   | "custom"

@@ -41,7 +41,7 @@ const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 export const openrouterAdapter: ProviderAdapter = {
   id: "openrouter",
   displayName: "OpenRouter",
-  surfaces: ["openai-chat"] satisfies ReadonlyArray<SurfaceId>,
+  surfaces: ["openai-chat-completions"] satisfies ReadonlyArray<SurfaceId>,
 
   validate(req, model): ValidationResult {
     return validateOpenAIRequest(req, model)
