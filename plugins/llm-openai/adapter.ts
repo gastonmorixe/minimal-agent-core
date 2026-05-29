@@ -4,7 +4,7 @@
  * One adapter, two surfaces. `adapter.run()` dispatches by
  * `ModelEntry.surfaceId`:
  *
- * - `"openai-chat"`     → POST `/v1/chat/completions`, translated by
+ * - `"openai-chat-completions"`     → POST `/v1/chat/completions`, translated by
  *                          `translateOpenAIChatStream`.
  * - `"openai-responses"`→ POST `/v1/responses`, translated by
  *                          `translateOpenAIResponsesStream`.
@@ -51,7 +51,7 @@ import { CHAT_COMPLETIONS_URL, RESPONSES_URL } from "./wire-constants.ts"
 export const openaiAdapter: ProviderAdapter = {
   id: "openai",
   displayName: "OpenAI",
-  surfaces: ["openai-chat", "openai-responses"] satisfies ReadonlyArray<SurfaceId>,
+  surfaces: ["openai-chat-completions", "openai-responses"] satisfies ReadonlyArray<SurfaceId>,
 
   validate(req, model): ValidationResult {
     return validateOpenAIRequest(req, model)
@@ -73,7 +73,7 @@ export const openaiAdapter: ProviderAdapter = {
     const headers = buildOpenAIHeaders({ auth })
     const networkClient = (ctx.networkClient as NetworkClient | undefined) ?? defaultNetworkClient
 
-    if (model.surfaceId === "openai-chat") {
+    if (model.surfaceId === "openai-chat-completions") {
       const body = buildOpenAIChatBody(req, model)
       ctx.debug?.header(`POST ${CHAT_COMPLETIONS_URL}`)
       ctx.debug?.kv("model", body.model)

@@ -118,7 +118,7 @@ describe("registerOpenAIModels", () => {
     registerOpenAIModels()
 
     const chat = resolveModel("gpt-5.5-chat")
-    expect(chat.surfaceId).toBe("openai-chat")
+    expect(chat.surfaceId).toBe("openai-chat-completions")
     // The -chat alias-id maps to the real OpenAI model id on the wire.
     expect(chat.vendorIds?.firstParty).toBe("gpt-5.5")
     // Chat surface can't stream reasoning back.
@@ -134,9 +134,9 @@ describe("bootstrapOpenAI", () => {
     bootstrapOpenAI()
 
     const adapter = resolveProvider("openai")
-    expect(adapter.surfaces).toContain("openai-chat")
+    expect(adapter.surfaces).toContain("openai-chat-completions")
     expect(adapter.surfaces).toContain("openai-responses")
-    expect(findModel("gpt-4o")?.surfaceId).toBe("openai-chat")
+    expect(findModel("gpt-4o")?.surfaceId).toBe("openai-chat-completions")
     expect(findModel("o3")?.surfaceId).toBe("openai-responses")
   })
 })

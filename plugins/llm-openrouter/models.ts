@@ -3,7 +3,7 @@
  *
  * OpenRouter ids are namespaced slugs (`openai/gpt-4o-mini`,
  * `anthropic/claude-3.5-sonnet`, …). All register on the SHARED
- * `openai-chat` surface — OpenRouter normalizes every upstream model to
+ * `openai-chat-completions` surface — OpenRouter normalizes every upstream model to
  * the OpenAI Chat Completions wire format, so the DeepSeek/OpenAI chat
  * translator handles them unchanged. Only a representative few are
  * registered; any other slug still works on the wire (the CLI doesn't
@@ -21,7 +21,7 @@ export function registerOpenRouterModels(): string[] {
   registerModel({
     id: "openai/gpt-4o-mini",
     providerId: "openrouter",
-    surfaceId: "openai-chat",
+    surfaceId: "openai-chat-completions",
     displayName: "GPT-4o mini (OpenRouter)",
     tags: ["openrouter", "openai-compatible", "cheap"],
     capabilities: CAPS_OPENROUTER_CHAT,
@@ -31,7 +31,7 @@ export function registerOpenRouterModels(): string[] {
   registerModel({
     id: "anthropic/claude-3.5-sonnet",
     providerId: "openrouter",
-    surfaceId: "openai-chat",
+    surfaceId: "openai-chat-completions",
     displayName: "Claude 3.5 Sonnet (OpenRouter)",
     tags: ["openrouter", "openai-compatible"],
     capabilities: CAPS_OPENROUTER_CHAT,
