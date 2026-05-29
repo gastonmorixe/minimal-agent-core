@@ -38,6 +38,7 @@ import {
   NetworkResponse,
   type NetworkTransport,
 } from "../../network/index.ts"
+import { clearSessionTokens, getSessionTokens } from "../../session-tokens.ts"
 
 import { canonicalSendFn } from "./canonical-send.ts"
 
@@ -240,5 +241,108 @@ describe("canonicalSendFn — OpenAI dispatch (the migration payoff)", () => {
     expect(response.text).toBe("pong")
     expect(response.stopReason).toBe("end_turn")
     expect(response.blocks).toEqual([{ type: "text", text: "pong" }])
+  }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// Middleware actually activates through the composed transport
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — resilience middleware is wired end-to-end", () => {
+  it("recovers from a truncated stream: watchdog trips → retry → fresh attempt", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0 // instant backoff
+    let calls = 0
+    const networkClient = fakeNetworkClient(() => {
+      calls++
+      if (calls === 1) {
+        // Truncated: streams a partial text block then closes WITHOUT
+        // message_stop → the watchdog throws stream_truncated.
+        return sseFromEvents([
+          {
+            type: "message_start",
+            message: { id: "m1", model: "claude-opus-4-8", usage: { input_tokens: 1 } },
+          },
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } },
+        ])
+      }
+      // Recovery: a complete stream.
+      return sseFromEvents([
+        {
+          type: "message_start",
+          message: { id: "m2", model: "claude-opus-4-8", usage: { input_tokens: 1 } },
+        },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "recovered" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        { type: "message_stop" },
+      ])
+    })
+
+    const auth: AuthResult = { type: "oauth", token: "test-token" }
+    const yields: string[] = []
+    let res: IteratorResult<string, StreamedResponse>
+    const gen = canonicalSendFn({
+      auth,
+      messages,
+      model: "claude-opus-4-8",
+      stream: true,
+      networkClient,
+    })
+    // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
+    while (!(res = await gen.next()).done) yields.push(res.value)
+    const response = res.value
+
+    Math.random = origRandom
+
+    expect(calls).toBe(2) // tripped once, recovered on retry
+    const joined = yields.join("")
+    expect(joined).toContain("partial")
+    expect(joined).toContain("↳ stream stalled — retrying")
+    expect(joined).toContain("recovered")
+    // Final structured response is from the successful attempt.
+    expect(response.text).toBe("recovered")
+    expect(response.stopReason).toBe("end_turn")
+  }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// Usage / quota broadcast on the same buses as the legacy client
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — usage broadcast", () => {
+  it("records the message_start footprint on the session-token bus", async () => {
+    clearSessionTokens()
+    const networkClient = fakeNetworkClient(() =>
+      sseFromEvents([
+        {
+          type: "message_start",
+          message: {
+            id: "mu",
+            model: "claude-opus-4-8",
+            usage: { input_tokens: 42, output_tokens: 0 },
+          },
+        },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        { type: "message_stop" },
+      ]),
+    )
+    const auth: AuthResult = { type: "oauth", token: "test-token" }
+    const gen = canonicalSendFn({
+      auth,
+      messages,
+      model: "claude-opus-4-8",
+      stream: true,
+      networkClient,
+    })
+    while (!(await gen.next()).done) {
+      // drain
+    }
+    expect(getSessionTokens().input).toBe(42)
   }, 15_000)
 })

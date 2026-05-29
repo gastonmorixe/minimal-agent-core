@@ -596,6 +596,12 @@ export interface LegacyStreamCallbacks {
   onThinkingDelta?: (text: string) => void | Promise<void>
   onThinkingStop?: () => void | Promise<void>
   onTextStop?: () => void | Promise<void>
+  /**
+   * Fired once with the message_start usage snapshot (the input/cache
+   * footprint), mirroring where the legacy client calls `addSessionUsage`.
+   * The transport wires this to the session-token + quota buses.
+   */
+  onUsage?: (usage: CanonicalUsage) => void
 }
 
 /** Best-effort JSON parse of an accumulated tool-input fragment. */
@@ -666,7 +672,10 @@ export async function* canonicalEventsToLegacyStream(
   for await (const ev of events) {
     switch (ev.type) {
       case "message_start":
-        // Usage is broadcast through RunContext.onUsage, not this bridge.
+        // Anthropic reports the input/cache footprint at message_start (cache
+        // lookup happens during prefill). Surface it on the same beat the
+        // legacy client calls addSessionUsage.
+        cb.onUsage?.(ev.initialUsage)
         break
       case "text_start":
         cur = { kind: "text", text: "" }
