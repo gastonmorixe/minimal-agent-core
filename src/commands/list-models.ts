@@ -58,6 +58,17 @@ export async function runListModelsCommand(
   }
 
   const providerIds = providerFilter ? [providerFilter] : [...byProvider.keys()].sort()
+
+  // Column widths sized to the rows actually being shown, so long ids
+  // (`claude-sonnet-4-5-20250929[1m]`), long display names
+  // (`Claude Sonnet 4.5 (1M context)`), and long surfaces
+  // (`openai-chat-completions`) stay aligned instead of overflowing a
+  // hardcoded pad. Small floors keep narrow tables from looking cramped.
+  const shownRows = providerIds.flatMap((p) => byProvider.get(p) ?? [])
+  const idW = Math.max(20, ...shownRows.map((r) => r.id.length))
+  const nameW = Math.max(12, ...shownRows.map((r) => (r.displayName ?? "").length))
+  const surfaceW = Math.max(10, ...shownRows.map((r) => (r.surface ?? "").length))
+
   let shown = 0
   console.log("")
   for (const provider of providerIds) {
@@ -69,9 +80,9 @@ export async function runListModelsCommand(
     }
     console.log(`  ${c.bold(provider)}`)
     for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
-      const id = c.cyan(row.id.padEnd(30))
-      const name = row.displayName ? c.dim(row.displayName.padEnd(28)) : "".padEnd(28)
-      const surface = c.dim((row.surface ?? "").padEnd(18))
+      const id = c.cyan(row.id.padEnd(idW))
+      const name = c.dim((row.displayName ?? "").padEnd(nameW))
+      const surface = c.dim((row.surface ?? "").padEnd(surfaceW))
       const date = row.date ? c.dim(row.date) : ""
       console.log(`    ${id} ${name} ${surface} ${date}`)
       shown++
