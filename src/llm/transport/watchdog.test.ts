@@ -12,6 +12,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { CanonicalEvent } from "../canonical-events.ts"
+
 import { type WatchdogError, withStreamWatchdog } from "./watchdog.ts"
 
 function abortError(): Error {
