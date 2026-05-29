@@ -961,16 +961,11 @@ export class PluginLoader {
     parts.push("<ma::plugins>")
     parts.push(
       "<ma::plugins-overview>\n" +
-        "You have access to the following plugins. Each plugin contributes one\n" +
-        "or more tools and/or inline rendering tags.\n" +
+        "You have access to the following plugins. Each plugin contributes one or more tools and/or inline rendering tags.\n" +
         "\n" +
-        "Inline tags are detected in your streamed output and rendered by the\n" +
-        'plugin in place. Tag shape: <ma::plugin::NAME attr="val">body</ma::plugin::NAME>,\n' +
-        'or self-closing <ma::plugin::NAME attr="val" />. Tag names must match exactly.\n' +
-        "Attribute values must be quoted.\n" +
+        'Inline tags are detected in your streamed output and rendered by the plugin in place. Tag shape: <ma::plugin::NAME attr="val">body</ma::plugin::NAME>, or self-closing <ma::plugin::NAME attr="val" />. Tag names must match exactly. Attribute values must be quoted.\n' +
         "\n" +
-        "Interactive plugin tools MUST be invoked via a tool call, not an inline tag.\n" +
-        "Inline tags are for non-interactive rendering only.\n" +
+        "Interactive plugin tools MUST be invoked via a tool call, not an inline tag. Inline tags are for non-interactive rendering only.\n" +
         "</ma::plugins-overview>",
     )
     parts.push(...pluginParts)
