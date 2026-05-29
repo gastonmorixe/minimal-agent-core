@@ -107,3 +107,31 @@ typecheck clean; touched files lint-clean (the only warning is the pre-existing
   only fires when no live quota slot exists.
 - The neutral footer path drops the niche `MINIMAL_AGENT_QUOTA_OVERAGE` "overage
   off" readout (legacy map path only). Can be added to the DTO later.
+
+## Follow-up waves (coordinated sub-agents, 2026-05-29 PM)
+
+A manager/sub-agent pass cleared part of the deferred backlog. Each unit ran as
+an isolated non-interactive `minimal-agent` process on a disjoint file set;
+the manager reviewed reports + diffs, ran the full gate, and committed.
+
+- **Overage on the neutral path** (`QuotaSnapshot.overage`): the
+  `MINIMAL_AGENT_QUOTA_OVERAGE` "overage off" readout works again on the
+  provider-session path (Anthropic populates it; render shares one
+  `overageTailText` with the legacy path, pinned byte-identical). Reverses the
+  earlier deferral note.
+- **API keys via config** (`UserConfig.apiKeys`): `OPENAI_API_KEY` /
+  `OPENROUTER_KEY` now have a `config.jsonc` fallback. Precedence env > config >
+  throw; the throw names both surfaces; Anthropic OAuth unchanged.
+- **OpenAI session metadata** (`plugins/llm-openai/session-info.ts`): the second
+  provider now implements `fetchSessionInfo`. The adapter caches `x-ratelimit-*`
+  on each 2xx response (plugin-local cache; non-throwing; no stream change) and
+  surfaces neutral `req`/`tok` quota windows, so a `gpt-5.5` footer shows real
+  rate-limit usage + context + `oai` label. No network probe.
+
+Still deferred (unchanged rationale): flip Anthropic to canonical default (bake
+OpenAI first), thread response headers through canonical events for
+Anthropic-on-canonical, `checkQuota` 401 dedup (cleanliness, touches the
+battle-tested client.ts 401 path), `statusBar.script` custom renderer, the
+OpenAI-compatible shared codec (YAGNI), and OpenRouter session metadata (mirror
+of the OpenAI work). The `http2-transport.ts` abort-escalation stays uncommitted
+(that file is mixed with a separate in-flight epic).
