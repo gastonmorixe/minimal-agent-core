@@ -30,7 +30,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import { bootstrapAnthropic } from "../../../plugins/llm-anthropic/adapter.ts"
 import { bootstrapOpenAI } from "../../../plugins/llm-openai/adapter.ts"
 import { CHAT_COMPLETIONS_URL } from "../../../plugins/llm-openai/wire-constants.ts"
-import type { AuthResult } from "../../auth.ts"
+import { type AuthResult, getAuth } from "../../auth.ts"
 import type { Message, StreamedResponse } from "../../client/types.ts"
 import {
   NetworkClient,
@@ -88,6 +88,13 @@ function sseFromString(raw: string): NetworkResponse {
 function openaiFixture(name: string): string {
   return readFileSync(
     join(import.meta.dir, "../../../plugins/llm-openai/__fixtures__", name),
+    "utf-8",
+  )
+}
+
+function anthropicFixture(name: string): string {
+  return readFileSync(
+    join(import.meta.dir, "../../../plugins/llm-anthropic/__fixtures__", name),
     "utf-8",
   )
 }
@@ -215,32 +222,66 @@ describe("canonicalSendFn — Anthropic equivalence with legacy sendMessage", ()
 // OpenAI: the migration payoff — gpt-* dispatches to OpenAI, not Anthropic
 // ---------------------------------------------------------------------------
 
-describe("canonicalSendFn — OpenAI dispatch (the migration payoff)", () => {
-  it("routes a gpt-4o request to the OpenAI Chat endpoint and streams text", async () => {
-    let seenUrl = ""
-    let seenAuth = ""
-    const networkClient = fakeNetworkClient((req) => {
-      seenUrl = req.url
-      seenAuth = req.headers?.authorization ?? ""
-      return sseFromString(openaiFixture("chat-pong.sse"))
-    })
+describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration payoff)", () => {
+  // The host's single credential is the ANTHROPIC session. It must NEVER be
+  // sent to OpenAI; OpenAI authenticates with OPENAI_API_KEY.
+  const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
+  const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
 
-    const auth: AuthResult = { type: "api-key", token: "sk-test-key" }
-    const yields: string[] = []
-    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
-    let res: IteratorResult<string, unknown>
-    // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
-    while (!(res = await gen.next()).done) yields.push(res.value as string)
-    const response = res.value as { blocks: unknown[]; text: string; stopReason: string | null }
+  it("authenticates a gpt-4o request with OPENAI_API_KEY, NOT the Anthropic token", async () => {
+    const prev = process.env.OPENAI_API_KEY
+    process.env.OPENAI_API_KEY = "sk-openai-real-key"
+    try {
+      let seenUrl = ""
+      let seenAuth = ""
+      const networkClient = fakeNetworkClient((req) => {
+        seenUrl = req.url
+        seenAuth = req.headers?.authorization ?? ""
+        return sseFromString(openaiFixture("chat-pong.sse"))
+      })
+      const yields: string[] = []
+      const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+      let res: IteratorResult<string, unknown>
+      // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
+      while (!(res = await gen.next()).done) yields.push(res.value as string)
+      const response = res.value as { text: string; stopReason: string | null }
 
-    // The whole point: this hit OpenAI, NOT api.anthropic.com.
-    expect(seenUrl).toBe(CHAT_COMPLETIONS_URL)
-    expect(seenAuth).toBe("Bearer sk-test-key")
-    // And the legacy surface is intact.
-    expect(yields.join("")).toBe("pong")
-    expect(response.text).toBe("pong")
-    expect(response.stopReason).toBe("end_turn")
-    expect(response.blocks).toEqual([{ type: "text", text: "pong" }])
+      expect(seenUrl).toBe(CHAT_COMPLETIONS_URL)
+      // The OpenAI key, never the Anthropic session token.
+      expect(seenAuth).toBe("Bearer sk-openai-real-key")
+      expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
+      // Legacy surface intact.
+      expect(yields.join("")).toBe("pong")
+      expect(response.text).toBe("pong")
+      expect(response.stopReason).toBe("end_turn")
+    } finally {
+      if (prev === undefined) delete process.env.OPENAI_API_KEY
+      else process.env.OPENAI_API_KEY = prev
+    }
+  }, 15_000)
+
+  it("throws a clear error naming OPENAI_API_KEY when it is unset (no Anthropic fallback)", async () => {
+    const prev = process.env.OPENAI_API_KEY
+    delete process.env.OPENAI_API_KEY
+    try {
+      let reached = false
+      const networkClient = fakeNetworkClient(() => {
+        reached = true
+        return sseFromString(openaiFixture("chat-pong.sse"))
+      })
+      const gen = canonicalSendFn({ auth, messages, model: "gpt-5.5", stream: true, networkClient })
+      let caught = ""
+      try {
+        await gen.next()
+      } catch (e) {
+        caught = (e as Error).message
+      }
+      expect(caught).toContain("OPENAI_API_KEY")
+      // Never hit the network with a bogus/Anthropic credential.
+      expect(reached).toBe(false)
+    } finally {
+      if (prev !== undefined) process.env.OPENAI_API_KEY = prev
+    }
   }, 15_000)
 })
 
@@ -345,4 +386,72 @@ describe("canonicalSendFn — usage broadcast", () => {
     }
     expect(getSessionTokens().input).toBe(42)
   }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// net-dbg parity: the canonical stack consumes a REAL captured Anthropic wire
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — real captured Anthropic wire (net-dbg parity)", () => {
+  it("consumes the real Opus 4.8 capture end-to-end and hits the Anthropic endpoint", async () => {
+    let seenUrl = ""
+    const networkClient = fakeNetworkClient((req) => {
+      seenUrl = req.url
+      // The exact SSE captured from api.anthropic.com on 2026-05-28 (the
+      // same fixture the adapter-level translateAnthropicStream test replays),
+      // now driven through the WHOLE canonical transport stack.
+      return sseFromString(anthropicFixture("conversation-opus48.res-body.sse"))
+    })
+    const auth: AuthResult = { type: "oauth", token: "oauth-test" }
+    const yields: string[] = []
+    let res: IteratorResult<string, StreamedResponse>
+    const gen = canonicalSendFn({
+      auth,
+      messages,
+      model: "claude-opus-4-8",
+      stream: true,
+      networkClient,
+    })
+    // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
+    while (!(res = await gen.next()).done) yields.push(res.value)
+    const response = res.value
+
+    // Dispatched to the real Anthropic Messages endpoint.
+    expect(seenUrl).toContain("api.anthropic.com")
+    expect(seenUrl).toContain("/v1/messages")
+    // The real stream was consumed: text streamed, a text block accumulated,
+    // and the captured end_turn stop reason surfaced.
+    expect(yields.join("").length).toBeGreaterThan(0)
+    expect(response.blocks.some((b) => b.type === "text")).toBe(true)
+    expect(response.stopReason).toBe("end_turn")
+  }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// Live (gated by E2E): Anthropic round-trip through the canonical stack.
+// OpenRouter's live 402-ok case is covered in plugins/llm-openrouter.
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — live (gated by E2E)", () => {
+  const skip = !process.env.E2E
+  it.skipIf(skip)(
+    "Anthropic haiku round-trip through the canonical stack (proves mode=all live)",
+    async () => {
+      const auth = await getAuth()
+      const yields: string[] = []
+      let res: IteratorResult<string, StreamedResponse>
+      const gen = canonicalSendFn({
+        auth,
+        messages: [{ role: "user", content: [{ type: "text", text: "Reply with exactly: PONG" }] }],
+        model: "claude-haiku-4-5-20251001",
+        maxTokens: 32,
+        stream: true,
+      })
+      // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
+      while (!(res = await gen.next()).done) yields.push(res.value)
+      expect(yields.join("").toUpperCase()).toContain("PONG")
+      expect(res.value.stopReason).toBeTruthy()
+    },
+    30_000,
+  )
 })

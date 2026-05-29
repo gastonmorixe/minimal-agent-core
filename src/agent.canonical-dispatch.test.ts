@@ -63,35 +63,45 @@ beforeAll(() => {
 })
 
 describe("Agent default transport — multi-provider dispatch", () => {
-  it("routes --model gpt-5.5 to the OpenAI Responses endpoint (never Anthropic)", async () => {
-    let seenUrl = ""
-    let seenAuth = ""
-    const networkClient = fakeNetworkClient((req) => {
-      seenUrl = req.url
-      seenAuth = req.headers?.authorization ?? ""
-      return sseFromString(openaiFixture("responses-pong.sse"))
-    })
+  it("routes --model gpt-5.5 to OpenAI Responses with OPENAI_API_KEY, never the Anthropic token", async () => {
+    // The agent holds the ANTHROPIC session credential (as in production).
+    // It must NOT be sent to OpenAI; OPENAI_API_KEY is used instead.
+    const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
+    const prevKey = process.env.OPENAI_API_KEY
+    process.env.OPENAI_API_KEY = "sk-openai-real-key"
+    try {
+      let seenUrl = ""
+      let seenAuth = ""
+      const networkClient = fakeNetworkClient((req) => {
+        seenUrl = req.url
+        seenAuth = req.headers?.authorization ?? ""
+        return sseFromString(openaiFixture("responses-pong.sse"))
+      })
 
-    const auth: AuthResult = { type: "api-key", token: "sk-openai-test" }
-    // NO sendFn injected → the production default (selectedTransport) runs.
-    const agent = new Agent({ auth, model: "gpt-5.5", networkClient })
+      const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
+      // NO sendFn injected → the production default (selectedTransport) runs.
+      const agent = new Agent({ auth, model: "gpt-5.5", networkClient })
 
-    const out: string[] = []
-    const gen = agent.run("ping")
-    while (true) {
-      const { done, value } = await gen.next()
-      if (done) break
-      if (typeof value === "string") out.push(value)
+      const out: string[] = []
+      const gen = agent.run("ping")
+      while (true) {
+        const { done, value } = await gen.next()
+        if (done) break
+        if (typeof value === "string") out.push(value)
+      }
+
+      // The migration payoff: a gpt-5.5 turn through the agent hit OpenAI's
+      // Responses API, authenticated with the OpenAI key (not Anthropic).
+      expect(seenUrl).toBe(RESPONSES_URL)
+      expect(seenUrl).toContain("api.openai.com")
+      expect(seenUrl).not.toContain("anthropic")
+      expect(seenAuth).toBe("Bearer sk-openai-real-key")
+      expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
+      expect(out.join("")).toContain("pong")
+    } finally {
+      if (prevKey === undefined) delete process.env.OPENAI_API_KEY
+      else process.env.OPENAI_API_KEY = prevKey
     }
-
-    // The migration payoff: a gpt-5.5 turn through the agent hit OpenAI's
-    // Responses API, not api.anthropic.com.
-    expect(seenUrl).toBe(RESPONSES_URL)
-    expect(seenUrl).toContain("api.openai.com")
-    expect(seenUrl).not.toContain("anthropic")
-    expect(seenAuth).toBe("Bearer sk-openai-test")
-    // And the turn completed with the model's text.
-    expect(out.join("")).toContain("pong")
   }, 20_000)
 
   it("still routes Anthropic models to the legacy client (api.anthropic.com)", async () => {

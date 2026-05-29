@@ -45,12 +45,64 @@ import {
   legacyAuthToProviderAuth,
   sendOptionsToCanonical,
 } from "../adapter-legacy.ts"
-import type { RunContext } from "../provider.ts"
+import { resolveModel } from "../model-registry.ts"
+import type { ProviderAuth, RunContext } from "../provider.ts"
 import { run } from "../run.ts"
 
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { withRetry } from "./retry.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
+
+/** Read an API key from the environment, or throw an actionable error. */
+function apiKeyFromEnv(envVar: string, providerId: string, modelId: string): ProviderAuth {
+  const key = process.env[envVar]
+  if (!key || key.trim().length === 0) {
+    throw new Error(
+      `canonical transport: ${envVar} is not set, but model "${modelId}" resolves to ` +
+        `provider "${providerId}", which authenticates with its own API key (NOT the ` +
+        `Anthropic session). Export ${envVar} and retry.`,
+    )
+  }
+  return { kind: "api-key", key }
+}
+
+/**
+ * Resolve the credential for the request's PROVIDER, not the host's single
+ * Anthropic session. This is the fix for the bug where every provider was
+ * handed the Anthropic OAuth token (so gpt-5.5 reached OpenAI but 401'd):
+ *
+ * - anthropic  → the legacy `AuthResult` (OAuth keychain; keeps the
+ *   keychain-first / peer-token 401 recovery wired in `canonicalSendFn`).
+ * - openai     → `OPENAI_API_KEY`.
+ * - openrouter → `OPENROUTER_KEY`.
+ * - missing key → THROW (no silent fallback to the Anthropic token).
+ *
+ * An unresolvable model id defers to the legacy credential so `run()` raises
+ * its own "unknown model" error rather than this masking it (that path never
+ * reaches a real non-Anthropic endpoint).
+ */
+function resolveProviderAuth(opts: SendOptions): ProviderAuth {
+  let providerId: string
+  try {
+    providerId = resolveModel(opts.model ?? "").providerId
+  } catch {
+    return legacyAuthToProviderAuth(opts.auth)
+  }
+  const modelId = opts.model ?? ""
+  switch (providerId) {
+    case "anthropic":
+      return legacyAuthToProviderAuth(opts.auth)
+    case "openai":
+      return apiKeyFromEnv("OPENAI_API_KEY", providerId, modelId)
+    case "openrouter":
+      return apiKeyFromEnv("OPENROUTER_KEY", providerId, modelId)
+    default:
+      throw new Error(
+        `canonical transport: no credential strategy for provider "${providerId}" ` +
+          `(model "${modelId}"). Add one in src/llm/transport/canonical-send.ts:resolveProviderAuth.`,
+      )
+  }
+}
 
 /**
  * Stream a request through the canonical layer + resilience middleware
@@ -64,9 +116,11 @@ export async function* canonicalSendFn(
   opts: SendOptions,
 ): AsyncGenerator<string, StreamedResponse, undefined> {
   const req = sendOptionsToCanonical(opts)
-  // Shared, mutable auth: auth-refresh updates `.token` in place so a
+  // Shared, mutable auth keyed by the model's PROVIDER (not the host's
+  // Anthropic session): OpenAI/OpenRouter get their own API key, Anthropic
+  // keeps the OAuth credential. auth-refresh updates `.token` in place so a
   // refreshed token is picked up by the next attempt within this send.
-  const authState: AuthRefreshState = { auth: legacyAuthToProviderAuth(opts.auth) }
+  const authState: AuthRefreshState = { auth: resolveProviderAuth(opts) }
 
   // One attempt = run() guarded by the watchdog, bridged to the legacy
   // string/StreamedResponse contract + lifecycle callbacks.
