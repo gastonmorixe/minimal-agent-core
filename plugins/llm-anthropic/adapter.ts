@@ -24,9 +24,10 @@ import {
   type SurfaceId,
   type ValidationResult,
 } from "../../src/llm/provider.ts"
-import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
+import type { ProviderPlugin, ProviderStartupContext } from "../../src/llm/provider-plugin.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
+import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
@@ -124,6 +125,25 @@ export const anthropicProviderPlugin: ProviderPlugin = {
   displayName: "Anthropic",
   shortCode: "anth",
   register: bootstrapAnthropic,
+  /**
+   * Fire-and-forget `/api/claude_cli/bootstrap` probe (v2.1.154+). Overlays
+   * any server-shipped `additional_model_costs` onto the registry so
+   * Anthropic can ship a new model id without a CLI release. Self-gates:
+   * `fetchBootstrap` returns null for non-OAuth auth, and
+   * `applyBootstrapOverrides` no-ops on null. Failures are swallowed; local
+   * pricing tables stay authoritative. Relocated here from `src/index.ts`
+   * so the entrypoint names no provider.
+   */
+  onStartupProbe(ctx: ProviderStartupContext): void {
+    void (async () => {
+      const registry = await import("../../src/llm/model-registry.ts")
+      const resp = await fetchBootstrap({ auth: ctx.auth, modelId: ctx.modelId })
+      applyBootstrapOverrides(resp, registry)
+    })().catch(() => {
+      // Tolerated: bootstrap is a UX improvement, not a correctness
+      // requirement. Local pricing tables remain authoritative.
+    })
+  },
 }
 
 export type { ProviderAuth }

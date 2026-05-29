@@ -33,8 +33,10 @@ import {
   userText,
 } from "../../src/llm/index.ts"
 
-import { bootstrapAnthropic } from "./adapter.ts"
+import * as modelRegistry from "../../src/llm/model-registry.ts"
+import { anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags, classifyRequest } from "./beta-flags.ts"
+import { applyBootstrapOverrides } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
@@ -79,6 +81,41 @@ describe("bootstrapAnthropic", () => {
     const fast = entry.pricingForRequest?.({ modelId: entry.id, messages: [], speed: "fast" })
     expect(slow?.inputUSD).toBe(5)
     expect(fast?.inputUSD).toBe(10)
+  })
+})
+
+describe("anthropicProviderPlugin.onStartupProbe + bootstrap overlay", () => {
+  it("exposes onStartupProbe and self-gates the api-key path (no network, no throw)", () => {
+    setup()
+    expect(typeof anthropicProviderPlugin.onStartupProbe).toBe("function")
+    // api-key auth short-circuits fetchBootstrap before any network I/O, so
+    // this is safe to invoke in a unit test (the oauth path would hit the
+    // real /bootstrap endpoint).
+    expect(() =>
+      anthropicProviderPlugin.onStartupProbe?.({
+        auth: { kind: "api-key", key: "sk-test" },
+        modelId: "claude-opus-4-8",
+      }),
+    ).not.toThrow()
+  })
+
+  it("applyBootstrapOverrides overlays server-shipped model costs onto the registry", () => {
+    setup()
+    const before = resolveModel("claude-opus-4-8").pricing.inputUSD
+    expect(before).not.toBe(99)
+    applyBootstrapOverrides(
+      {
+        client_data: null,
+        additional_model_options: null,
+        additional_model_costs: { "claude-opus-4-8": { inputTokens: 99 } },
+        oauth_account: null,
+      },
+      modelRegistry,
+    )
+    expect(resolveModel("claude-opus-4-8").pricing.inputUSD).toBe(99)
+    // A null bootstrap (the self-gated / failed-probe path) is a no-op.
+    applyBootstrapOverrides(null, modelRegistry)
+    expect(resolveModel("claude-opus-4-8").pricing.inputUSD).toBe(99)
   })
 })
 

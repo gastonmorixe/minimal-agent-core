@@ -14,6 +14,20 @@
  * @module llm/provider-plugin
  */
 
+import type { ProviderAuth } from "./provider.ts"
+
+/**
+ * Context handed to a plugin's optional {@link ProviderPlugin.onStartupProbe}.
+ * Provider-neutral: the composition root builds it once and passes it to
+ * every registered plugin, so the entrypoint never special-cases a provider.
+ */
+export interface ProviderStartupContext {
+  /** Resolved auth in provider-neutral form. */
+  auth: ProviderAuth
+  /** Selected model id, normalized (no `[1m]` / `[2m]` context suffix). */
+  modelId: string
+}
+
 /**
  * A provider, packaged for registration. `register()` wires the adapter
  * and models into the canonical registries (it wraps the provider's
@@ -28,6 +42,16 @@ export interface ProviderPlugin {
   shortCode: string
   /** Register this provider's adapter + model catalog. Idempotent. */
   register(): void
+  /**
+   * Optional fire-and-forget startup probe, run once after activation and
+   * before the first request. Lets a provider overlay server-shipped data
+   * onto the registry (e.g. Anthropic's `/bootstrap` model-cost overrides).
+   * MUST NOT throw and MUST self-gate (e.g. no-op for the wrong auth kind);
+   * failures are tolerated as a best-effort UX improvement. Keeping this on
+   * the plugin is what lets `src/index.ts` start providers without naming
+   * any of them.
+   */
+  onStartupProbe?(ctx: ProviderStartupContext): void
 }
 
 const plugins = new Map<string, ProviderPlugin>()
