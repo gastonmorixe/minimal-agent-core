@@ -77,7 +77,7 @@ import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
-import { activateProviderPlugins, registerDiscoveredProviders } from "./llm/index.ts"
+import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
 import { getSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -831,21 +831,33 @@ async function main() {
     `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`,
   )
 
-  // Provider startup probes (fire-and-forget). Each registered provider
-  // plugin MAY overlay server-shipped data onto the canonical registry —
-  // e.g. Anthropic's /api/claude_cli/bootstrap model-cost overrides, which
-  // let it ship a new model id without a CLI release. Provider-neutral: the
-  // entrypoint names NO provider here; each plugin self-gates (the Anthropic
-  // probe no-ops for non-OAuth auth) and swallows its own failures, so local
-  // pricing tables remain authoritative as a fallback.
-  {
+  // Resolve the SELECTED model's provider once, up front. Everything that
+  // is provider-specific (startup probe, quota) keys off this so a session
+  // started with e.g. `--model gpt-5.5` never contacts Anthropic.
+  const selectedModel = model ?? userConfig.model ?? DEFAULT_MODEL
+  const selectedModelBase = selectedModel.replace(/\[(1|2)m\]/gi, "")
+  let selectedProviderId: string | undefined
+  try {
+    selectedProviderId = resolveModel(selectedModelBase).providerId
+  } catch {
+    selectedProviderId = undefined
+  }
+
+  // Provider startup probe (fire-and-forget) for the SELECTED provider only.
+  // A plugin MAY overlay server-shipped data onto the canonical registry —
+  // e.g. Anthropic's /api/claude_cli/bootstrap model-cost overrides. We run
+  // ONLY the selected model's provider so a gpt-5.5 session does not hit
+  // api.anthropic.com just because the host holds an Anthropic OAuth session.
+  // The plugin still self-gates + swallows failures (local pricing stays
+  // authoritative).
+  if (selectedProviderId) {
     const { listProviderPlugins } = await import("./llm/provider-plugin.ts")
     const { legacyAuthToProviderAuth } = await import("./llm/adapter-legacy.ts")
-    const probeCtx = {
-      auth: legacyAuthToProviderAuth(auth),
-      modelId: (model ?? userConfig.model ?? DEFAULT_MODEL).replace(/\[(1|2)m\]/gi, ""),
+    const probeCtx = { auth: legacyAuthToProviderAuth(auth), modelId: selectedModelBase }
+    for (const plugin of listProviderPlugins()) {
+      if (plugin.id !== selectedProviderId) continue
+      plugin.onStartupProbe?.(probeCtx)
     }
-    for (const plugin of listProviderPlugins()) plugin.onStartupProbe?.(probeCtx)
   }
 
   // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
@@ -872,7 +884,6 @@ async function main() {
     formatterCmd = undefined
   }
 
-  const selectedModel = model ?? userConfig.model ?? DEFAULT_MODEL
   printStartupRow("model", c.boldCyan(selectedModel))
 
   // Thinking + effort: surface what we'll actually send on the wire.
@@ -1073,6 +1084,9 @@ async function main() {
   const hasQuotaSlot = loader.getLiveAreaSlots().some((s) => s.definition.id === "quota")
   const shouldSkipQuota =
     !commandPlan.needsQuota ||
+    // `checkQuota` polls api.anthropic.com; only meaningful for an Anthropic
+    // session. A gpt-5.5 / OpenRouter session skips it (no Anthropic quota).
+    selectedProviderId !== "anthropic" ||
     args.includes("--skip-quota") ||
     process.env.MINIMAL_AGENT_SKIP_QUOTA === "1" ||
     userConfig.skipQuota === true ||
@@ -1239,8 +1253,10 @@ async function main() {
         : modeAddition !== ""
           ? modeAddition
           : null
-  const { buildSystemPrompt, DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } =
-    await import("./headers.ts")
+  const { DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } = await import(
+    "./headers.ts"
+  )
+  const { resolveSystemPromptForModel } = await import("./llm/system-prompt.ts")
   // Mirror Agent's runtime defaults explicitly so the systemHash captured
   // at session open matches what `agent.run()` will compute on the first
   // turn. Resume drift detection compares these two hashes : if they
@@ -1248,23 +1264,24 @@ async function main() {
   // track the Agent class field defaults in src/agent.ts (reflectionInterval,
   // reflectionCooldownMs, maxToolRounds=Number.POSITIVE_INFINITY).
   //
-  // If we later add CLI flags or config-file knobs for these values, both
-  // call sites must thread the same value : the buildSystemPrompt arg here
-  // and the Agent constructor opt at the session-startup point further down.
-  // Resolve blob-store enablement BEFORE the hash so the resume drift
-  // detector treats "blob store on" vs "blob store off" as distinct
-  // prefix shapes. Cheap (config loader is memoized) and matches the
-  // "thread the same value to buildSystemPrompt and the Agent" rule
-  // documented in the comment above.
+  // Routed through the SAME provider-resolving `resolveSystemPromptForModel`
+  // the Agent uses (keyed by the selected model + auth kind), so the
+  // provider's preamble (Anthropic billing/identity, or a neutral identity)
+  // is folded into the hash identically at both call sites. If we later add
+  // CLI flags / config knobs for these values, both call sites must thread
+  // the same value. Resolve blob-store enablement BEFORE the hash so the
+  // resume drift detector treats "blob store on" vs "off" as distinct
+  // prefix shapes (cheap; config loader is memoized).
   const blobStoreEnabled = loadBlobStoreConfig().config.enabled
   const systemForHash = sessionContextForHash
     ? JSON.stringify(
-        buildSystemPrompt({
+        resolveSystemPromptForModel(selectedModelBase, {
           sessionContext: sessionContextForHash,
           reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
           reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
           maxToolRounds: Number.POSITIVE_INFINITY,
           blobStoreEnabled,
+          authKind: auth.type,
         }),
       )
     : ""

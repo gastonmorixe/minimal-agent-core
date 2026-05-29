@@ -82,3 +82,41 @@ Drop into `~/.minimal-agent/config.jsonc`:
 The synchronous startup row reappears (loader's `disabledPluginIds`
 short-circuits before `getLiveAreaSlots` sees the slot, so
 `hasQuotaSlot` is `false` and the original gate is restored).
+
+## Provider-neutral data + configurable layout
+
+The footer is provider-agnostic. The handler asks the CURRENT model's
+provider for session metadata via the core seam
+`resolveProviderSessionInfo(modelId)` (`src/llm/provider-session.ts`),
+which returns a neutral `{ contextWindow, modelLabel, quota: { windows } }`.
+The Anthropic provider implements it (`plugins/llm-anthropic/session-info.ts`):
+cache-first, then a bounded probe over the shared transport. A provider with
+no quota concept returns context-only and the footer adapts (no quota
+segment). No part of this plugin imports a provider by name.
+
+### Customizing the layout
+
+The segments and their order are declarative in
+`~/.minimal-agent/config.jsonc`:
+
+```jsonc
+{
+  "statusBar": {
+    // default order shown; reorder or omit ids to taste
+    "segments": ["quota", "context", "model", "sid"]
+  }
+}
+```
+
+- `quota`   — the provider's plan/rate-limit windows (Anthropic: 5h, 7d).
+- `context` — the session context-usage bar (`contextSize / contextWindow`).
+- `model`   — the `<provider-model>:<effort>` tag (e.g. `anth-4.8:high`).
+- `sid`     — the short session-id anchor.
+
+Omit an id to hide it; reorder freely. Unknown ids are ignored and an
+empty/all-invalid list falls back to the default order, so a typo never
+blanks the footer. A listed segment with no data for the active provider
+(e.g. `quota` on a provider that reports none) renders nothing.
+
+(Planned: a `statusBar.script` escape hatch for a fully custom renderer.
+Not implemented yet — the segment list is the supported surface today.)

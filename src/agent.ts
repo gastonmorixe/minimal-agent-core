@@ -47,18 +47,16 @@ import {
 import {
   type ContentBlock,
   type Message,
+  normalizeModelForAPI,
   type SendOptions,
   type StreamedResponse,
   sendMessage,
   type ToolResultBlock,
   type ToolUseBlock,
 } from "./client.ts"
-import {
-  buildSystemPrompt,
-  DEFAULT_REFLECTION_COOLDOWN_MS,
-  DEFAULT_REFLECTION_INTERVAL,
-} from "./headers.ts"
+import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
+import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
 import { ModeManager } from "./modes.ts"
 import type { NetworkClient } from "./network/index.ts"
@@ -826,20 +824,24 @@ export class Agent {
     // cooldown, emergency cap). Default values produce stable text, so the
     // cache key matches the corresponding systemHash computed at session
     // open in index.ts when both call sites use the same Agent defaults.
-    const system = pluginBlock
-      ? buildSystemPrompt({
-          sessionContext: pluginBlock,
-          reflectionInterval: this.reflectionInterval,
-          reflectionCooldownMs: this.reflectionCooldownMs,
-          maxToolRounds: this.maxToolRounds,
-          // Mirror the value index.ts threaded into the systemHash so the
-          // cached prefix is stable. When the agent was constructed with
-          // a non-null `blobStore`, the corresponding paragraph appears
-          // in system[2]; null disables it (and matches the pre-blob-store
-          // prompt shape exactly).
-          blobStoreEnabled: this.blobStore !== null,
-        })
-      : undefined
+    // Provider-resolved system prompt: the agent builds the neutral skeleton
+    // (instructions + session context) and the request's provider injects its
+    // preamble (Anthropic plan-auth → billing + Claude-Code identity; everyone
+    // else → neutral "You are Minimal Agent …" identity). Routed through the
+    // model registry seam, so the agent names no provider. `index.ts` computes
+    // the resume-drift systemHash through the SAME resolver with the same args,
+    // keeping the cached prefix byte-consistent.
+    const system = resolveSystemPromptForModel(normalizeModelForAPI(this.model), {
+      sessionContext: pluginBlock ?? undefined,
+      reflectionInterval: this.reflectionInterval,
+      reflectionCooldownMs: this.reflectionCooldownMs,
+      maxToolRounds: this.maxToolRounds,
+      // When the agent was constructed with a non-null `blobStore`, the
+      // tool-output-conventions paragraph appears in the instructions block;
+      // null disables it (matches the pre-blob-store prompt shape exactly).
+      blobStoreEnabled: this.blobStore !== null,
+      authKind: this.auth.type,
+    })
     const allTools: ToolDefinition[] = this.loader
       ? [...TOOL_DEFINITIONS, ...(this.loader.getExtraTools() as ToolDefinition[])]
       : [...TOOL_DEFINITIONS]

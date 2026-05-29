@@ -37,6 +37,7 @@
 
 import { readCredentials } from "../../auth.ts"
 import type { SendOptions, StreamedResponse } from "../../client/types.ts"
+import { loadUserConfig } from "../../config.ts"
 import { diag } from "../../diagnostic-bus.ts"
 import { rebroadcastQuotaForSessionUpdate } from "../../quota-broadcast.ts"
 import { addSessionUsage } from "../../session-tokens.ts"
@@ -53,17 +54,38 @@ import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { withRetry } from "./retry.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
 
-/** Read an API key from the environment, or throw an actionable error. */
-function apiKeyFromEnv(envVar: string, providerId: string, modelId: string): ProviderAuth {
-  const key = process.env[envVar]
-  if (!key || key.trim().length === 0) {
-    throw new Error(
-      `canonical transport: ${envVar} is not set, but model "${modelId}" resolves to ` +
-        `provider "${providerId}", which authenticates with its own API key (NOT the ` +
-        `Anthropic session). Export ${envVar} and retry.`,
-    )
+/**
+ * Resolve a provider API key with precedence: env var > config file > throw.
+ *
+ * - env var (e.g. `OPENAI_API_KEY`) is HIGHEST so `export` always wins and CI
+ *   keeps working unchanged.
+ * - config file (`~/.minimal-agent/config.jsonc` → `apiKeys.<configKey>`) is
+ *   the fallback for users who'd rather not export env vars every session.
+ * - both missing → throw an actionable error naming BOTH surfaces.
+ *
+ * Security: the key value is never logged; the error only names the env var and
+ * the config key, never the secret.
+ */
+function resolveProviderKey(
+  envVar: string,
+  configKey: "openai" | "openrouter",
+  providerId: string,
+  modelId: string,
+): ProviderAuth {
+  const envKey = process.env[envVar]
+  if (envKey && envKey.trim().length > 0) return { kind: "api-key", key: envKey }
+
+  const configKeyValue = loadUserConfig().apiKeys?.[configKey]
+  if (configKeyValue && configKeyValue.trim().length > 0) {
+    return { kind: "api-key", key: configKeyValue }
   }
-  return { kind: "api-key", key }
+
+  throw new Error(
+    `canonical transport: no API key for provider "${providerId}" (model "${modelId}"), ` +
+      `which authenticates with its own API key (NOT the Anthropic session). Set the ` +
+      `${envVar} environment variable, or add "apiKeys.${configKey}" to ` +
+      `~/.minimal-agent/config.jsonc, then retry.`,
+  )
 }
 
 /**
@@ -73,8 +95,8 @@ function apiKeyFromEnv(envVar: string, providerId: string, modelId: string): Pro
  *
  * - anthropic  → the legacy `AuthResult` (OAuth keychain; keeps the
  *   keychain-first / peer-token 401 recovery wired in `canonicalSendFn`).
- * - openai     → `OPENAI_API_KEY`.
- * - openrouter → `OPENROUTER_KEY`.
+ * - openai     → `OPENAI_API_KEY` env, else `apiKeys.openai` from config.
+ * - openrouter → `OPENROUTER_KEY` env, else `apiKeys.openrouter` from config.
  * - missing key → THROW (no silent fallback to the Anthropic token).
  *
  * An unresolvable model id defers to the legacy credential so `run()` raises
@@ -93,9 +115,9 @@ function resolveProviderAuth(opts: SendOptions): ProviderAuth {
     case "anthropic":
       return legacyAuthToProviderAuth(opts.auth)
     case "openai":
-      return apiKeyFromEnv("OPENAI_API_KEY", providerId, modelId)
+      return resolveProviderKey("OPENAI_API_KEY", "openai", providerId, modelId)
     case "openrouter":
-      return apiKeyFromEnv("OPENROUTER_KEY", providerId, modelId)
+      return resolveProviderKey("OPENROUTER_KEY", "openrouter", providerId, modelId)
     default:
       throw new Error(
         `canonical transport: no credential strategy for provider "${providerId}" ` +

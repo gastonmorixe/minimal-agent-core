@@ -22,10 +22,11 @@
  * @module llm/transport/canonical-send.test
  */
 
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { beforeAll, describe, expect, it } from "bun:test"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
 import { bootstrapAnthropic } from "../../../plugins/llm-anthropic/adapter.ts"
 import { bootstrapOpenAI } from "../../../plugins/llm-openai/adapter.ts"
@@ -262,7 +263,12 @@ describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration
 
   it("throws a clear error naming OPENAI_API_KEY when it is unset (no Anthropic fallback)", async () => {
     const prev = process.env.OPENAI_API_KEY
+    const prevCfg = process.env.MINIMAL_AGENT_CONFIG
     delete process.env.OPENAI_API_KEY
+    // Isolate from the developer's real config so this stays deterministic:
+    // point at a guaranteed-absent file so the config fallback can't supply a
+    // key. The case under test is BOTH env and config absent.
+    process.env.MINIMAL_AGENT_CONFIG = join(tmpdir(), "minimal-agent-no-such-config.jsonc")
     try {
       let reached = false
       const networkClient = fakeNetworkClient(() => {
@@ -281,7 +287,97 @@ describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration
       expect(reached).toBe(false)
     } finally {
       if (prev !== undefined) process.env.OPENAI_API_KEY = prev
+      if (prevCfg === undefined) delete process.env.MINIMAL_AGENT_CONFIG
+      else process.env.MINIMAL_AGENT_CONFIG = prevCfg
     }
+  }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// API key precedence: env var > config file > throw
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — API key precedence (env > config > throw)", () => {
+  const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
+  const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
+
+  let dir: string
+  let cfgPath: string
+  const prevConfig = process.env.MINIMAL_AGENT_CONFIG
+  const prevOpenAI = process.env.OPENAI_API_KEY
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "minimal-agent-apikeys-"))
+    cfgPath = join(dir, "config.jsonc")
+    process.env.MINIMAL_AGENT_CONFIG = cfgPath
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (prevConfig === undefined) delete process.env.MINIMAL_AGENT_CONFIG
+    else process.env.MINIMAL_AGENT_CONFIG = prevConfig
+    if (prevOpenAI === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = prevOpenAI
+  })
+
+  it("falls back to config apiKeys.openai when OPENAI_API_KEY is unset", async () => {
+    delete process.env.OPENAI_API_KEY
+    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
+
+    let seenAuth = ""
+    const networkClient = fakeNetworkClient((req) => {
+      seenAuth = req.headers?.authorization ?? ""
+      return sseFromString(openaiFixture("chat-pong.sse"))
+    })
+    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+    while (!(await gen.next()).done) {
+      // drain
+    }
+
+    // The config key authenticates the request — and the Anthropic token never leaks.
+    expect(seenAuth).toBe("Bearer sk-from-config")
+    expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
+  }, 15_000)
+
+  it("prefers OPENAI_API_KEY over config (env wins)", async () => {
+    process.env.OPENAI_API_KEY = "sk-from-env"
+    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
+
+    let seenAuth = ""
+    const networkClient = fakeNetworkClient((req) => {
+      seenAuth = req.headers?.authorization ?? ""
+      return sseFromString(openaiFixture("chat-pong.sse"))
+    })
+    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+    while (!(await gen.next()).done) {
+      // drain
+    }
+
+    // Env wins over config.
+    expect(seenAuth).toBe("Bearer sk-from-env")
+  }, 15_000)
+
+  it("throws naming both OPENAI_API_KEY and apiKeys.openai when neither is set", async () => {
+    delete process.env.OPENAI_API_KEY
+    writeFileSync(cfgPath, JSON.stringify({})) // config present but no apiKeys
+
+    let reached = false
+    const networkClient = fakeNetworkClient(() => {
+      reached = true
+      return sseFromString(openaiFixture("chat-pong.sse"))
+    })
+    const gen = canonicalSendFn({ auth, messages, model: "gpt-5.5", stream: true, networkClient })
+    let caught = ""
+    try {
+      await gen.next()
+    } catch (e) {
+      caught = (e as Error).message
+    }
+
+    expect(caught).toContain("OPENAI_API_KEY")
+    expect(caught).toContain("apiKeys.openai")
+    // Never hit the network with a bogus/Anthropic credential.
+    expect(reached).toBe(false)
   }, 15_000)
 })
 

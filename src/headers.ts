@@ -496,7 +496,57 @@ export function buildToolOutputConventionsParagraph(opts: { blobStoreEnabled: bo
 }
 
 /**
- * System prompt: 4 text blocks sent in the `system` array of Messages API calls.
+ * Options shared by the instructions-block text builder. Pulled out so the
+ * provider-neutral system-prompt builder (`src/llm/system-prompt.ts`) and the
+ * legacy {@link buildSystemPrompt} produce a byte-identical instructions block.
+ */
+export interface InstructionsBlockOptions {
+  instructions?: string
+  reflectionInterval?: number
+  reflectionCooldownMs?: number
+  maxToolRounds?: number
+  blobStoreEnabled?: boolean
+}
+
+/**
+ * Assemble the text of the cached instructions block (the big system[2]
+ * block): the base instructions, then the loop-safety paragraph, then the
+ * tool-output-conventions paragraph. Empty fragments are dropped so the
+ * "everything-off" case is byte-stable (the cache key depends on it).
+ *
+ * This is the provider-NEUTRAL portion of the system prompt. The leading
+ * identity/billing blocks differ per provider and are resolved separately
+ * (see `src/llm/system-prompt.ts` + each provider's `resolveSystemPrompt`).
+ */
+export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): string {
+  const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
+  const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
+  const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
+  const blobStoreEnabled = opts?.blobStoreEnabled ?? false
+  const instructionsBase = opts?.instructions ?? DEFAULT_INSTRUCTIONS
+  const safetyParagraph = buildLoopSafetyParagraph({
+    reflectionInterval,
+    reflectionCooldownMs,
+    maxToolRounds,
+  })
+  const conventionsParagraph = buildToolOutputConventionsParagraph({ blobStoreEnabled })
+  return [instructionsBase, safetyParagraph, conventionsParagraph]
+    .filter((s) => s.length > 0)
+    .join("\n\n")
+}
+
+/**
+ * LEGACY / Anthropic-shaped system prompt builder. Hardcodes the Anthropic
+ * billing header + the `"You are Claude Code, …"` identity for EVERY caller,
+ * so it is only correct for Anthropic plan-auth.
+ *
+ * @deprecated New code must use `resolveSystemPromptForModel` from
+ * `src/llm/system-prompt.ts`, which builds a provider-neutral skeleton and
+ * lets the request's provider resolve its own preamble (Anthropic billing for
+ * OAuth, neutral `"You are Minimal Agent, …"` otherwise). This function is
+ * kept only as the back-compat default for the legacy `client.ts` `sendMessage`
+ * path (`SYSTEM_PROMPT`) and its instructions block is assembled via the shared
+ * `buildInstructionsBlockText` so the neutral builder stays byte-identical.
  *
  * Verified against v2.1.118 capture (fetch-024 in
  * .node-net-dbg/1777147064608-25-APR-2026-SATURDAY--15h57m44s-EDT/):
@@ -582,33 +632,10 @@ export function buildSystemPrompt(opts?: {
 
   // system[2]: Instructions block with cache_control (the big one worth caching).
   // ttl:"1h" matches live 2.1.118 traffic; scope:"global" shares the cache
-  // across sessions for the same org.
-  //
-  // We append a "Tool-use loop safety" paragraph so the model knows about
-  // the reflection checkpoint cadence, the cooldown wall-clock penalty,
-  // the ack/silence opt-out, and the emergency cap (when one is set). The
-  // paragraph is a pure function of the three opts below : default values
-  // produce stable text, so the cache key is stable across default-config
-  // sessions and only diverges when a host overrides the defaults.
-  const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
-  const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
-  const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
-  const blobStoreEnabled = opts?.blobStoreEnabled ?? false
-  const instructionsBase = opts?.instructions ?? DEFAULT_INSTRUCTIONS
-  const safetyParagraph = buildLoopSafetyParagraph({
-    reflectionInterval,
-    reflectionCooldownMs,
-    maxToolRounds,
-  })
-  const conventionsParagraph = buildToolOutputConventionsParagraph({
-    blobStoreEnabled,
-  })
-  // Chain the optional sections, glueing each with a blank line. Skip
-  // empty fragments so the resulting text is stable for the
-  // "everything-off" case (matches the legacy cache key shape).
-  const instructions = [instructionsBase, safetyParagraph, conventionsParagraph]
-    .filter((s) => s.length > 0)
-    .join("\n\n")
+  // across sessions for the same org. Text assembled by the shared
+  // `buildInstructionsBlockText` so the provider-neutral builder
+  // (`src/llm/system-prompt.ts`) produces a byte-identical block.
+  const instructions = buildInstructionsBlockText(opts)
   blocks.push({
     type: "text",
     text: instructions,

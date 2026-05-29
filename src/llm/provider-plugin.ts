@@ -28,6 +28,121 @@ export interface ProviderStartupContext {
   modelId: string
 }
 
+// ---------------------------------------------------------------------------
+// System-prompt resolution (Strategy + Template Method)
+// ---------------------------------------------------------------------------
+
+/**
+ * One system-prompt block. Structurally identical to `headers.SystemBlock`,
+ * but declared here so the provider port carries no dependency on the
+ * Anthropic-flavored `headers.ts` module (DIP: the contract owns its types).
+ */
+export interface SystemPromptBlock {
+  type: "text"
+  text: string
+  cache_control?: {
+    type: "ephemeral"
+    ttl?: "5m" | "1h"
+    scope?: "global"
+  }
+}
+
+/**
+ * Input to {@link ProviderPlugin.resolveSystemPrompt}.
+ *
+ * The agent builds the provider-NEUTRAL skeleton (a default `identity` line +
+ * the `body` blocks: instructions, then optional session context) and hands it
+ * to the provider, which returns the FINAL wire blocks. This is the seam that
+ * lets each provider own its preamble:
+ *
+ *   - Anthropic + OAuth (plan auth) prepends its mandatory billing header and
+ *     the exact `"You are Claude Code, …"` identity (their server validates the
+ *     prefix), dropping the neutral identity.
+ *   - Anthropic + api-key / OpenAI / OpenRouter keep the neutral identity and
+ *     add nothing (or whatever they need).
+ *
+ * A provider that doesn't implement the hook gets {@link neutralSystemPrompt}.
+ */
+export interface SystemPromptContext {
+  /** The default neutral identity line (`"You are Minimal Agent, …"`). */
+  identity: string
+  /** Body blocks after the identity: `[instructions(cached), sessionContext?]`. */
+  body: SystemPromptBlock[]
+  /** Auth kind the request will use, so the provider can vary its preamble. */
+  authKind: ProviderAuth["kind"]
+  /** Normalized model id (no `[1m]`/`[2m]` suffix). */
+  modelId: string
+}
+
+/**
+ * Default resolution when a provider declares no {@link ProviderPlugin.resolveSystemPrompt}:
+ * the neutral identity followed by the agent's body blocks, unchanged.
+ */
+export function neutralSystemPrompt(ctx: SystemPromptContext): SystemPromptBlock[] {
+  return [{ type: "text", text: ctx.identity }, ...ctx.body]
+}
+
+// ---------------------------------------------------------------------------
+// Session metadata (quota / usage windows) — provider-neutral DTO
+// ---------------------------------------------------------------------------
+
+/**
+ * One usage/quota window, provider-neutral. Anthropic surfaces `"5h"` / `"7d"`
+ * plan windows; another provider might surface `"rpm"` / `"tpm"` or nothing.
+ * The renderer treats `id` as the display label and never parses it.
+ */
+export interface QuotaWindow {
+  /** Provider-defined id, also used verbatim as the short display label. */
+  id: string
+  /** Utilization fraction in `[0, 1]`. */
+  utilization: number
+  /** Epoch milliseconds when the window resets, if the provider reports it. */
+  resetAtMs?: number
+}
+
+/** A set of quota/usage windows. Empty `windows` ⇒ provider has no quota concept. */
+export interface QuotaSnapshot {
+  windows: QuotaWindow[]
+  /**
+   * Optional overage state, provider-neutral. `active: true` ⇒ the provider's
+   * overage allowance is engaged/permitted (e.g. Anthropic's `"allowed"`);
+   * `active: false` ⇒ overage is off. Absent ⇒ the provider has no overage
+   * concept (or didn't report it this tick). Overage has no utilization, so it
+   * is NOT a {@link QuotaWindow}; the footer surfaces only the "off" readout,
+   * and only when the user opts in.
+   */
+  overage?: { active: boolean }
+}
+
+/**
+ * Provider-neutral session metadata for the status bar. Every field is
+ * optional so a minimal provider can return `{}` (or core can synthesize a
+ * context-only view from the registry). The agent renders from THIS, never
+ * from a provider's wire shape.
+ */
+export interface ProviderSessionInfo {
+  /** Model context window in tokens (for the context-usage segment). */
+  contextWindow?: number
+  /** Compact provider-model label, e.g. `"anth-4.8"`, `"oai-5.5"`. */
+  modelLabel?: string
+  /** Plan / rate-limit windows. Absent or empty ⇒ no quota segment. */
+  quota?: QuotaSnapshot
+}
+
+/** Context for {@link ProviderPlugin.fetchSessionInfo}. */
+export interface ProviderSessionContext {
+  /** Normalized model id (no `[1m]`/`[2m]` suffix). */
+  modelId: string
+  /**
+   * Cancellation forwarded to any network probe. The live-area scheduler's
+   * per-slot timeout drives this, so a stuck probe is torn down (and the
+   * shared transport's abort escalation evicts a wedged session).
+   */
+  signal?: AbortSignal
+  /** Network client to reuse (defaults to the shared one). Untyped to keep this port dependency-light. */
+  networkClient?: unknown
+}
+
 /**
  * A provider, packaged for registration. `register()` wires the adapter
  * and models into the canonical registries (it wraps the provider's
@@ -52,6 +167,26 @@ export interface ProviderPlugin {
    * any of them.
    */
   onStartupProbe?(ctx: ProviderStartupContext): void
+
+  /**
+   * Optional: resolve the FINAL system-prompt blocks for this provider from
+   * the agent's neutral skeleton. See {@link SystemPromptContext}. When
+   * absent, the agent uses {@link neutralSystemPrompt}. Pure + synchronous:
+   * the agent caches the result and folds it into the resume-drift hash, so
+   * this MUST be deterministic for a given context.
+   */
+  resolveSystemPrompt?(ctx: SystemPromptContext): SystemPromptBlock[]
+
+  /**
+   * Optional: fetch provider-neutral session metadata (quota windows,
+   * context window, model label) for the status bar. MAY hit the network
+   * (through the shared, resilient transport) or read a cache; MUST honor
+   * `ctx.signal` and resolve to `null` (not throw) on failure so the footer
+   * degrades gracefully. A provider with no quota concept can still return
+   * `{ contextWindow, modelLabel }` (no `quota`). When absent, core
+   * synthesizes a context-only view from the model registry.
+   */
+  fetchSessionInfo?(ctx: ProviderSessionContext): Promise<ProviderSessionInfo | null>
 }
 
 const plugins = new Map<string, ProviderPlugin>()

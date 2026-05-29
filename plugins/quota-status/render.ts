@@ -60,14 +60,72 @@
  */
 
 import { c } from "../../src/agent.ts"
+import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
 import type { SessionTokens } from "../../src/session-tokens.ts"
 import { displayWidth, stripAnsi } from "../../src/term-width.ts"
+
+/**
+ * The user-configurable status-bar segments, in render order.
+ *
+ *   - `quota`   : the provider's plan/rate-limit windows (5h, 7d, …).
+ *   - `context` : the session context-usage bar (`contextSize / contextWindow`).
+ *   - `model`   : the `<provider-model>:<effort>` (or `effort <level>`) tag.
+ *   - `sid`     : the short session-id anchor.
+ *
+ * Order + membership are declarative (user config `statusBar.segments`).
+ * Capability-aware: a segment with no data (e.g. `quota` for a provider with
+ * no quota concept, or `model` when no effort is sent) renders nothing even
+ * when listed.
+ */
+export type StatusSegmentId = "quota" | "context" | "model" | "sid"
+
+/** Default order: `<quota> <context> <model:effort> <sid>`. */
+export const DEFAULT_SEGMENT_ORDER: readonly StatusSegmentId[] = ["quota", "context", "model", "sid"]
+
+const VALID_SEGMENTS: ReadonlySet<string> = new Set(DEFAULT_SEGMENT_ORDER)
+
+/**
+ * Resolve the effective ordered segment list from a (possibly user-supplied)
+ * list: keep only known ids, drop duplicates, and fall back to the default
+ * when nothing valid remains. Lenient by design — a typo'd config never blanks
+ * the footer.
+ */
+export function normalizeSegmentOrder(segments?: readonly string[]): StatusSegmentId[] {
+  if (!segments || segments.length === 0) return [...DEFAULT_SEGMENT_ORDER]
+  const seen = new Set<string>()
+  const out: StatusSegmentId[] = []
+  for (const s of segments) {
+    if (VALID_SEGMENTS.has(s) && !seen.has(s)) {
+      seen.add(s)
+      out.push(s as StatusSegmentId)
+    }
+  }
+  return out.length > 0 ? out : [...DEFAULT_SEGMENT_ORDER]
+}
 
 export interface RenderOpts {
   /** Terminal width in cells. When omitted, no responsive degradation. */
   cols?: number
+  /**
+   * Ordered, filtered status-bar segments (typically straight from user
+   * config, so `string[]` rather than the narrowed id type). Omit for the
+   * default order ({@link DEFAULT_SEGMENT_ORDER}). Unknown ids are dropped;
+   * an empty/all-invalid list falls back to the default (never blanks the
+   * footer).
+   */
+  segments?: readonly string[]
   /** Surface the `overage off` segment when overage is disabled. Default: false. */
   showOverage?: boolean
+  /**
+   * Provider-neutral overage state (from `QuotaSnapshot.overage`). Only
+   * consulted on the neutral {@link QuotaWindow}[] path — the legacy-map
+   * overload reads the raw `anthropic-ratelimit-unified-overage-status`
+   * header instead. When `showOverage` is on and `active === false`, the
+   * renderer appends the same dim `overage off` tail to the quota group
+   * (mirroring the legacy logic: only "off" surfaces, "allowed"/active is
+   * silent). Absent ⇒ no overage readout.
+   */
+  overage?: { active: boolean }
   /** Render the session-tokens block on the right. Default: true. */
   showSession?: boolean
   /**
@@ -331,10 +389,34 @@ function renderSessionSegment(
   )
 }
 
+/**
+ * Shared visual for the `overage off` tail (faintWhite label + red value).
+ * Extracted so the legacy-map path and the neutral DTO path render the
+ * byte-identical segment — the only difference between them is how each
+ * decides WHETHER to show it (raw header vs. neutral `overage` DTO).
+ */
+function overageTailText(): string {
+  return `${c.faintWhite("overage")} ${c.red("off")}`
+}
+
+/**
+ * Legacy-map overage tail: reads the raw Anthropic header. Surfaces
+ * `overage off` for any present status other than `"allowed"` (i.e. `"off"`).
+ */
 function overageTail(rl: ReadonlyMap<string, string>): string | null {
   const ov = rl.get("anthropic-ratelimit-unified-overage-status")
   if (!ov || ov === "allowed") return null
-  return `${c.faintWhite("overage")} ${c.red("off")}`
+  return overageTailText()
+}
+
+/**
+ * Neutral-path overage tail: driven by the provider DTO. Surfaces
+ * `overage off` only when overage is reported AND inactive (`active === false`),
+ * mirroring the legacy `"off"`-only behavior. Active/engaged overage is silent.
+ */
+function overageTailNeutral(overage: { active: boolean } | undefined): string | null {
+  if (!overage || overage.active !== false) return null
+  return overageTailText()
 }
 
 /**
@@ -507,7 +589,18 @@ function clipToWidth(s: string, maxWidth: number): string {
  * width physically can't accommodate it.
  */
 export function renderQuotaFooter(
+  windows: QuotaWindow[],
+  session: SessionTokens,
+  opts?: RenderOpts,
+): string | null
+/** @deprecated legacy Anthropic-header input; prefer the neutral {@link QuotaWindow}[] form. */
+export function renderQuotaFooter(
   rl: ReadonlyMap<string, string>,
+  session: SessionTokens,
+  opts?: RenderOpts,
+): string | null
+export function renderQuotaFooter(
+  input: QuotaWindow[] | ReadonlyMap<string, string>,
   session: SessionTokens,
   opts: RenderOpts = {},
 ): string | null {
@@ -515,13 +608,31 @@ export function renderQuotaFooter(
   const showOverage = opts.showOverage ?? false
   // No default — passing `undefined` is the renderer's "unknown
   // context window" signal (label falls back to `·`, bar+pct drop).
-  // The agent's handler always resolves a real value from
-  // `MINIMAL_AGENT_MODEL`; this `undefined` path is for dev/test
-  // callers and the brief pre-model-resolution startup window.
+  // The agent's handler always resolves a real value from the provider's
+  // session info; this `undefined` path is for dev/test callers and the
+  // brief pre-model-resolution startup window.
   const contextWindow = opts.contextWindow
-  const windows = parseWindows(rl, showOverage)
+  // Neutral path: a provider-supplied `QuotaWindow[]`. Legacy path: the raw
+  // Anthropic `anthropic-ratelimit-*` map, parsed here for back-compat (the
+  // overage tail only exists on the legacy path — it reads the raw map).
+  const isLegacyMap = !Array.isArray(input)
+  const windows: ParsedWindow[] = isLegacyMap
+    ? parseWindows(input as ReadonlyMap<string, string>, showOverage)
+    : (input as QuotaWindow[]).map((w) => ({
+        name: w.id,
+        util: w.utilization,
+        reset: w.resetAtMs,
+      }))
   const showSession = opts.showSession ?? true
-  const tail = showOverage ? overageTail(rl) : null
+  // Overage tail rides with the `quota` group on both paths. Legacy reads the
+  // raw header; neutral reads the provider's `overage` DTO. Same visual via
+  // `overageTailText`; only the "show it?" decision differs.
+  const tail = !showOverage
+    ? null
+    : isLegacyMap
+      ? overageTail(input as ReadonlyMap<string, string>)
+      : overageTailNeutral(opts.overage)
+  const order = normalizeSegmentOrder(opts.segments)
 
   if (windows.length === 0 && !showSession && !tail && !opts.effort && !opts.sid) return null
 
@@ -543,33 +654,45 @@ export function renderQuotaFooter(
     /** When set, only the first `maxWindows` quota windows render. */
     maxWindows?: number
   }
+  // Segment renderers keyed by id. The compression ladder still toggles the
+  // `cfg.with*` flags per segment KIND; only the ORDER comes from `order`.
+  // The overage tail (legacy/power-user) rides with the `quota` group.
+  const renderSegment = (id: StatusSegmentId, cfg: BuildCfg): string[] => {
+    switch (id) {
+      case "quota": {
+        const out: string[] = []
+        const wins = cfg.maxWindows != null ? windows.slice(0, cfg.maxWindows) : windows
+        for (const w of wins) out.push(renderWindowSegment(w, now, cfg.withReset, cfg.barCells))
+        if (cfg.withOverage && tail) out.push(tail)
+        return out
+      }
+      case "context":
+        return cfg.withSession && showSession
+          ? [renderSessionSegment(session, contextWindow, cfg.withSessionBar, cfg.barCells)]
+          : []
+      case "model": {
+        // Informative but static-per-session: compresses `full → value →
+        // short` and drops before the session block in the ladder.
+        if (!cfg.withEffort || !opts.effort) return []
+        const seg = renderEffortSegment(opts.effort, cfg.effortFmt, opts.modelLabel)
+        return seg ? [seg] : []
+      }
+      case "sid": {
+        // Forensics anchor: drops early in the ladder (recoverable from logs).
+        if (!cfg.withSid || !opts.sid) return []
+        const seg = renderSidSegment(opts.sid)
+        return seg ? [seg] : []
+      }
+      default:
+        // `id` is exhaustively typed; this guards a future segment id added
+        // to the type but not yet handled here (render nothing rather than crash).
+        return []
+    }
+  }
+
   const build = (cfg: BuildCfg): string => {
     const segs: string[] = []
-    const wins = cfg.maxWindows != null ? windows.slice(0, cfg.maxWindows) : windows
-    for (const w of wins) {
-      segs.push(renderWindowSegment(w, now, cfg.withReset, cfg.barCells))
-    }
-    if (cfg.withSession && showSession) {
-      segs.push(
-        renderSessionSegment(session, contextWindow, cfg.withSessionBar, cfg.barCells),
-      )
-    }
-    if (cfg.withOverage && tail) segs.push(tail)
-    // Effort sits at the trailing end of the line — informative but
-    // static-per-session. Drops before the session block in the
-    // ladder, after compressing through `full → value → short`.
-    if (cfg.withEffort && opts.effort) {
-      const seg = renderEffortSegment(opts.effort, cfg.effortFmt, opts.modelLabel)
-      if (seg) segs.push(seg)
-    }
-    // Sid is the ABSOLUTE last segment — terminal double-click /
-    // triple-click on the end of the line then selects it cleanly for
-    // copy. Drops second in the tail (after overage, before effort) —
-    // forensics reference matters less than the live-config readout.
-    if (cfg.withSid && opts.sid) {
-      const seg = renderSidSegment(opts.sid)
-      if (seg) segs.push(seg)
-    }
+    for (const id of order) segs.push(...renderSegment(id, cfg))
     return segs.join(" ".repeat(cfg.sep))
   }
 
