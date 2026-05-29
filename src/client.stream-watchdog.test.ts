@@ -126,6 +126,23 @@ function stallSseResponse(eventsBeforeStall: unknown[], signal?: AbortSignal): N
   })
 }
 
+/**
+ * A request that NEVER returns response headers : the transport Promise
+ * stays pending until the request's AbortSignal fires, then rejects (the
+ * way the real http2/fetch transports do on abort). Models the 2026-05-28
+ * 13h hang: a server that accepted the POST but never sent the 200 SSE
+ * headers, so `await networkClient.request()` blocked forever with no
+ * watchdog covering the pre-response phase.
+ */
+function hangingResponse(signal?: AbortSignal): Promise<NetworkResponse> {
+  return new Promise<NetworkResponse>((_resolve, reject) => {
+    if (!signal) return // hang forever (only used where a signal is always present)
+    const onAbort = () => reject(signal.reason ?? new Error("Network request aborted"))
+    if (signal.aborted) onAbort()
+    else signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 const auth: AuthResult = { type: "oauth", token: "test-token" }
 const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
 
@@ -227,6 +244,91 @@ describe("client.streamWatchdog", () => {
     expect(success).toBeDefined()
     expect(success?.structuredData?.retries).toBe(1)
   }, 30_000)
+
+  it("aborts + retries when response headers never arrive (pre-response TTFB guard)", async () => {
+    // 2026-05-28 regression: the streaming idle watchdog only arms once we
+    // start reading the SSE body, so a request that never gets response
+    // headers (stalled upload / black-holed socket) used to hang
+    // `await networkClient.request()` forever — no watchdog, no retry.
+    // The `responseHeadersTimeoutMs` guard must fire, tag the failure
+    // `stream_idle`, and let the harness retry to recovery.
+    let calls = 0
+    const networkClient = fakeNetworkClient((req) => {
+      calls++
+      // First attempt: never returns headers (until the guard aborts it).
+      if (calls === 1) return hangingResponse(req.signal)
+      // Second attempt: a clean, terminated stream.
+      return rawSseResponse([
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "recovered" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ])
+    })
+
+    const { events: diagEvents, dispose } = collectDiag()
+    try {
+      const result = await sendMessageFull({
+        auth,
+        messages,
+        model: "claude-opus-4-7",
+        stream: true,
+        networkClient,
+        // Tight pre-response deadline for a fast deterministic test.
+        responseHeadersTimeoutMs: 50,
+      })
+      expect(result.blocks).toEqual([{ type: "text", text: "recovered" }])
+    } finally {
+      dispose()
+    }
+
+    expect(calls).toBe(2)
+
+    const stalled = diagEvents.find(
+      (e) => e.source === "api.stream-stalled" && e.structuredData?.phase === "pre-response",
+    )
+    expect(stalled).toBeDefined()
+    expect(stalled?.structuredData?.["error-type"]).toBe("stream_idle")
+
+    const retry = diagEvents.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.["error-type"]).toBe("stream_idle")
+
+    const success = diagEvents.find((e) => e.source === "api.retry-success")
+    expect(success?.structuredData?.retries).toBe(1)
+  }, 30_000)
+
+  it("a user abort during the pre-response phase is NOT retried", async () => {
+    // The TTFB guard must not swallow a real Ctrl-C: when opts.signal
+    // (not our deadline) aborts before headers arrive, the error stays
+    // untagged and propagates instead of looping forever.
+    let calls = 0
+    const ac = new AbortController()
+    const networkClient = fakeNetworkClient((req) => {
+      calls++
+      queueMicrotask(() => ac.abort())
+      return hangingResponse(req.signal)
+    })
+
+    let caught = ""
+    try {
+      await sendMessageFull({
+        auth,
+        messages,
+        model: "claude-opus-4-7",
+        stream: true,
+        networkClient,
+        signal: ac.signal,
+        // Large so OUR guard never fires : the user signal is what stops us.
+        responseHeadersTimeoutMs: 60_000,
+      })
+    } catch (e) {
+      caught = (e as Error).message
+    }
+    expect(caught.length).toBeGreaterThan(0)
+    expect(caught).not.toContain("stalled before response headers")
+    expect(calls).toBe(1)
+  }, 10_000)
 
   it("throws stream_truncated when body closes cleanly but never sent message_stop", async () => {
     // The classic 2026-05-25 bug shape: a perfectly-formed-looking stream
