@@ -32,6 +32,8 @@ import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "./response-stream.ts"
+import { fetchAnthropicSessionInfo } from "./session-info.ts"
+import { resolveAnthropicSystemPrompt } from "./system-prompt.ts"
 import { validateAnthropicRequest } from "./validate.ts"
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,18 @@ export const anthropicProviderPlugin: ProviderPlugin = {
   displayName: "Anthropic",
   shortCode: "anth",
   register: bootstrapAnthropic,
+  /**
+   * Plan-auth (OAuth) requests get the mandatory billing + Claude-Code
+   * identity preamble the Anthropic server validates; api-key/custom auth
+   * keeps the agent's neutral identity. See `./system-prompt.ts`.
+   */
+  resolveSystemPrompt: resolveAnthropicSystemPrompt,
+  /**
+   * Provider-neutral session metadata (5h/7d quota windows, context window,
+   * model label) for the status bar. Cache-first, with a bounded probe
+   * through the shared transport. See `./session-info.ts`.
+   */
+  fetchSessionInfo: fetchAnthropicSessionInfo,
   /**
    * Fire-and-forget `/api/claude_cli/bootstrap` probe (v2.1.154+). Overlays
    * any server-shipped `additional_model_costs` onto the registry so

@@ -25,11 +25,8 @@
  * `MINIMAL_AGENT_QUOTA_OVERAGE=1` to surface it.
  */
 
-import { c } from "../../src/agent.ts"
-import { getAuth } from "../../src/auth.ts"
-import { checkQuota, has1mContext } from "../../src/client.ts"
-import { modelShortLabel } from "../../src/llm/index.ts"
-import { getLastRateLimits } from "../../src/quota-cache.ts"
+import { loadUserConfig } from "../../src/config.ts"
+import { resolveProviderSessionInfo } from "../../src/llm/provider-session.ts"
 import { getSessionTokens } from "../../src/session-tokens.ts"
 import type { LiveAreaHandlerContext } from "../../src/plugins/types.ts"
 import { renderQuotaFooter } from "./render.ts"
@@ -55,32 +52,17 @@ const OVERFLOW: "truncate" | "wrap" =
   process.env.MINIMAL_AGENT_QUOTA_OVERFLOW === "wrap" ? "wrap" : "truncate"
 
 /**
- * Resolve the model's context-window size from `MINIMAL_AGENT_MODEL`.
- *
- * The agent (src/index.ts) sets this env var before plugin load, so it's
- * reliably available here. Snapshot-once: model can be switched per call
- * via `--model`, but the live-area footer is per-process and we'd rather
- * not re-resolve on every paint.
- *
- * Returns:
- *   - `1_000_000` for `[1m]` variants (Sonnet 4.6 [1m], Opus 4.6 [1m],
- *     Opus 4.7 [1m] — the explicit 1M opt-in).
- *   - `200_000` for any other resolved model id (Anthropic's standard
- *     context window).
- *   - `undefined` when `MINIMAL_AGENT_MODEL` is missing or empty. The
- *     renderer treats this as "unknown" and falls back to the `·`
- *     placeholder for the segment's label (dropping the bar+percent,
- *     keeping the trailing count). This branch is rare in normal
- *     operation — the agent sets the env var before plugin load — but
- *     it covers dev/test runs and the brief window if the loader
- *     order ever changes.
+ * The session's model id, normalized (no `[1m]`/`[2m]` suffix). The agent
+ * (src/index.ts) sets `MINIMAL_AGENT_MODEL` before plugin load. Resolved per
+ * call (cheap) rather than snapshot-once, so a future sub-agent that swaps the
+ * model mid-session gets the right provider's metadata. The context window +
+ * model label are NO LONGER computed here — the provider supplies them via
+ * `resolveProviderSessionInfo` (which reads the model registry), so this
+ * handler is fully provider-agnostic.
  */
-function resolveContextWindow(): number | undefined {
-  const model = process.env.MINIMAL_AGENT_MODEL ?? ""
-  if (!model) return undefined
-  return has1mContext(model) ? 1_000_000 : 200_000
+function currentModelId(): string {
+  return (process.env.MINIMAL_AGENT_MODEL ?? "").replace(/\[(1|2)m\]/gi, "")
 }
-const CONTEXT_WINDOW = resolveContextWindow()
 
 /**
  * Resolved reasoning-effort level being sent on the wire, surfaced by
@@ -95,17 +77,6 @@ function resolveEffort(): string | undefined {
   return v && v !== "" ? v : undefined
 }
 const EFFORT = resolveEffort()
-
-/**
- * Compact provider-model tag (e.g. `anth-4.8`, `oai-5.5`) for the effort
- * segment, derived from `MINIMAL_AGENT_MODEL` via the canonical model
- * registry (populated at agent startup, before plugin load). Snapshot-once,
- * matching the EFFORT / MODEL patterns above. When set, the footer's effort
- * segment reads `<tag>:<level>` instead of `effort <level>`.
- */
-const MODEL_LABEL = process.env.MINIMAL_AGENT_MODEL
-  ? modelShortLabel(process.env.MINIMAL_AGENT_MODEL)
-  : undefined
 
 /**
  * Shortened session-id anchor for the trailing footer segment.
@@ -133,16 +104,12 @@ function resolveSid(): string | undefined {
 const SID = resolveSid()
 
 /**
- * "Fresh enough to skip a `checkQuota` probe" window. Half the declared
- * refresh interval — that way an event-driven invoke always uses the
- * cache (timestamp ~0 ms old), and a timer-driven invoke also uses the
- * cache iff a real response cached data within the last refreshMs/2.
- *
- * The 60_000 fallback handles slots that don't carry a refreshMs.
+ * User-configured status-bar segment order/visibility (`statusBar.segments`).
+ * Snapshot-once at module load (same philosophy as the other knobs above).
+ * `undefined` → renderer uses its default order. The renderer normalizes
+ * leniently, so a typo'd id never blanks the footer.
  */
-function freshnessWindowMs(): number {
-  return 60_000
-}
+const STATUS_SEGMENTS = loadUserConfig().statusBar?.segments
 
 function cols(): number {
   // Prefer the env COLUMNS the loader injects for plugins. Fall back to
@@ -157,46 +124,28 @@ function cols(): number {
 export default async function handle(
   ctx: LiveAreaHandlerContext,
 ): Promise<string | null> {
-  // 1) Cache-first: if the agent's last successful response left a
-  //    snapshot, prefer it. Cheaper than `checkQuota` (no API call, no
-  //    auth, no parse), and inside the freshness window we trust it
-  //    absolutely.
-  const cached = getLastRateLimits()
-  if (cached && Date.now() - cached.at < freshnessWindowMs()) {
-    return renderQuotaFooter(cached.rateLimits, getSessionTokens(), {
-      cols: cols(),
-      showOverage: SHOW_OVERAGE,
-      contextWindow: CONTEXT_WINDOW,
-      effort: EFFORT,
-      modelLabel: MODEL_LABEL,
-      sid: SID,
-      overflow: OVERFLOW,
-    })
-  }
-
-  // 2) Cache cold or stale: fall back to a dedicated probe. This runs
-  //    only at the heartbeat (no recent traffic) or the very first
-  //    invoke before any chat completion.
+  // Ask the CURRENT model's provider for session metadata (quota windows,
+  // context window, model label). Provider-agnostic: the handler names no
+  // provider. The Anthropic provider does the cache-first read + bounded
+  // probe internally (see plugins/llm-anthropic/session-info.ts); a provider
+  // with no quota concept returns context-only and the footer adapts.
   //
-  //    `ctx.abort` is forwarded all the way down to the network
-  //    transport so a stuck probe is canceled when the scheduler's
-  //    `timeoutMs` elapses — releasing the slot's `inFlight` gate so
-  //    subsequent heartbeats AND `quota.headersReceived` bus events
-  //    can refresh the footer.
-  let auth: Awaited<ReturnType<typeof getAuth>>
-  try {
-    auth = await getAuth()
-  } catch {
-    return c.dim("auth missing")
-  }
-  const result = await checkQuota(auth, undefined, ctx.abort)
-  if (!result.ok) return c.dim("—")
-  return renderQuotaFooter(result.rateLimits, getSessionTokens(), {
+  // `ctx.abort` is forwarded into any network probe, so the scheduler's
+  // per-slot `timeoutMs` tears a stuck probe down (and the shared transport's
+  // abort escalation evicts a wedged HTTP/2 session), releasing the `inFlight`
+  // gate for the next heartbeat / `quota.headersReceived` refresh. Long-
+  // running sessions never wedge the footer.
+  const info = await resolveProviderSessionInfo(currentModelId(), { signal: ctx.abort })
+  const windows = info.quota?.windows ?? []
+  return renderQuotaFooter(windows, getSessionTokens(), {
     cols: cols(),
     showOverage: SHOW_OVERAGE,
-    contextWindow: CONTEXT_WINDOW,
+    overage: info.quota?.overage,
+    contextWindow: info.contextWindow,
     effort: EFFORT,
+    modelLabel: info.modelLabel,
     sid: SID,
     overflow: OVERFLOW,
+    segments: STATUS_SEGMENTS,
   })
 }

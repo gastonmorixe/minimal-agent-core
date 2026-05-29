@@ -75,6 +75,20 @@ describe("loadUserConfig", () => {
     expect(loadUserConfig()).toEqual({ model: "x" })
   })
 
+  it("parses statusBar.segments (string[] shape)", () => {
+    writeFileSync(path, JSON.stringify({ statusBar: { segments: ["context", "quota", "sid"] } }))
+    expect(loadUserConfig()).toEqual({ statusBar: { segments: ["context", "quota", "sid"] } })
+  })
+
+  it("drops a non-array / empty statusBar.segments", () => {
+    writeFileSync(path, JSON.stringify({ statusBar: { segments: "quota" } }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ statusBar: { segments: [] } }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ statusBar: {} }))
+    expect(loadUserConfig()).toEqual({})
+  })
+
   it("returns {} on malformed JSON (does not throw)", () => {
     writeFileSync(path, "{not json")
     expect(loadUserConfig()).toEqual({})
@@ -165,6 +179,38 @@ describe("loadUserConfig", () => {
       thinkingDisplay: "summarized",
       effort: "high",
     })
+  })
+
+  it("parses apiKeys (openai + openrouter)", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } }),
+    )
+    expect(loadUserConfig()).toEqual({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } })
+  })
+
+  it("drops non-string / empty apiKeys entries, keeps the valid ones", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "", other: 42, nope: null } }),
+    )
+    expect(loadUserConfig()).toEqual({ apiKeys: { openai: "sk-openai" } })
+  })
+
+  it("omits apiKeys when the map is empty / all-invalid / not an object", () => {
+    writeFileSync(path, JSON.stringify({ apiKeys: {} }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ apiKeys: { openai: "", openrouter: 7 } }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ apiKeys: "sk-openai" }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ apiKeys: ["sk-openai"] }))
+    expect(loadUserConfig()).toEqual({})
+  })
+
+  it("omits apiKeys when the key is absent entirely", () => {
+    writeFileSync(path, JSON.stringify({ model: "x" }))
+    expect(loadUserConfig()).toEqual({ model: "x" })
   })
 })
 

@@ -100,6 +100,52 @@ export interface UserConfig {
    * `MINIMAL_AGENT_NERD_GLYPH_CELLS=1|2|auto`.
    */
   nerdGlyphCells?: 1 | 2 | "auto"
+  /**
+   * Status-bar (quota footer) customization. Declarative; provider-aware.
+   *
+   *   "statusBar": { "segments": ["context", "quota", "model", "sid"] }
+   *
+   * `segments` is the ordered list of segments to render. Valid ids:
+   *   - `"quota"`   : the provider's plan/rate-limit windows (5h, 7d, …).
+   *   - `"context"` : the session context-usage bar.
+   *   - `"model"`   : the `<provider-model>:<effort>` tag.
+   *   - `"sid"`     : the short session-id anchor.
+   *
+   * Reorder to taste; omit ids to hide them. Unknown ids are ignored; an
+   * empty/all-invalid list falls back to the default order
+   * (`["quota","context","model","sid"]`). A segment with no data for the
+   * current provider (e.g. `quota` on a provider with no quota concept)
+   * renders nothing even when listed.
+   *
+   * (Future: a `script` field for a user-supplied status-bar renderer — not
+   * yet implemented; the segment list is the supported surface today.)
+   */
+  statusBar?: {
+    segments?: string[]
+  }
+  /**
+   * Per-provider API keys, as a fallback for the environment variables the
+   * canonical transport reads. Lets a user keep keys in config instead of
+   * exporting env vars every session.
+   *
+   *   "apiKeys": {
+   *     "openai":     "sk-...",
+   *     "openrouter": "sk-or-..."
+   *   }
+   *
+   * Precedence (highest wins): env var > config file > (throw). So
+   * `export OPENAI_API_KEY=...` still wins over `apiKeys.openai`, and CI
+   * keeps working unchanged. The Anthropic path is OAuth-based and is NOT
+   * affected by this map.
+   *
+   * Parsed leniently: non-string / empty values are dropped; an empty (or
+   * all-invalid) map is omitted entirely. Keys are provider ids matching the
+   * canonical transport's resolver (`openai`, `openrouter`).
+   */
+  apiKeys?: {
+    openai?: string
+    openrouter?: string
+  }
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -182,6 +228,29 @@ export function loadUserConfig(): UserConfig {
     out.nerdGlyphCells = obj.nerdGlyphCells
   } else if (obj.nerdGlyphCells === "auto") {
     out.nerdGlyphCells = "auto"
+  }
+  // statusBar.segments: an array of segment-id strings. We only shape-check
+  // here (string[]); the renderer's `normalizeSegmentOrder` is the lenient
+  // authority on which ids are valid, so a typo never blanks the footer.
+  if (obj.statusBar && typeof obj.statusBar === "object" && !Array.isArray(obj.statusBar)) {
+    const sb = obj.statusBar as Record<string, unknown>
+    if (Array.isArray(sb.segments)) {
+      const segs = sb.segments.filter((s): s is string => typeof s === "string" && s.length > 0)
+      if (segs.length > 0) out.statusBar = { segments: segs }
+    }
+  }
+  // apiKeys: a provider-id → key map (env-var fallback for the canonical
+  // transport). Keep only string non-empty values; an empty / all-invalid
+  // map is omitted. We don't restrict the key set here — the transport's
+  // resolver only reads the providers it knows (openai, openrouter), so an
+  // unknown key is harmless and a typo never breaks parsing.
+  if (obj.apiKeys && typeof obj.apiKeys === "object" && !Array.isArray(obj.apiKeys)) {
+    const raw = obj.apiKeys as Record<string, unknown>
+    const apiKeys: Record<string, string> = {}
+    for (const [provider, key] of Object.entries(raw)) {
+      if (typeof key === "string" && key.length > 0) apiKeys[provider] = key
+    }
+    if (Object.keys(apiKeys).length > 0) out.apiKeys = apiKeys
   }
 
   return out
