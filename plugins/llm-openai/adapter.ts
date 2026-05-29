@@ -41,6 +41,7 @@ import {
   type OpenAIResponsesEvent,
   translateOpenAIResponsesStream,
 } from "./responses/response-stream.ts"
+import { fetchOpenAISessionInfo, setOpenAIRateLimits } from "./session-info.ts"
 import { validateOpenAIRequest } from "./validate.ts"
 import { CHAT_COMPLETIONS_URL, RESPONSES_URL } from "./wire-constants.ts"
 
@@ -93,6 +94,9 @@ export const openaiAdapter: ProviderAdapter = {
         const text = await response.text()
         throw new Error(`OpenAI Chat API ${response.status}: ${text}`)
       }
+      // Capture rate-limit headers for the status-bar footer. Best-effort +
+      // non-throwing; no behavior change to the stream below.
+      setOpenAIRateLimits(response.headers)
       if (!response.body) {
         throw new Error("OpenAI Chat API: empty response body for stream")
       }
@@ -120,6 +124,9 @@ export const openaiAdapter: ProviderAdapter = {
         const text = await response.text()
         throw new Error(`OpenAI Responses API ${response.status}: ${text}`)
       }
+      // Capture rate-limit headers for the status-bar footer. Best-effort +
+      // non-throwing; no behavior change to the stream below.
+      setOpenAIRateLimits(response.headers)
       if (!response.body) {
         throw new Error("OpenAI Responses API: empty response body for stream")
       }
@@ -150,6 +157,7 @@ export const openaiProviderPlugin: ProviderPlugin = {
   displayName: "OpenAI",
   shortCode: "oai",
   register: bootstrapOpenAI,
+  fetchSessionInfo: fetchOpenAISessionInfo,
 }
 
 export type { ProviderAuth }
