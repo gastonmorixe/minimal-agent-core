@@ -831,29 +831,21 @@ async function main() {
     `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`,
   )
 
-  // Fire-and-forget Anthropic bootstrap probe (v2.1.154+). Hits
-  // /api/claude_cli/bootstrap once and overlays any server-shipped
-  // model-cost overrides (`additional_model_costs`) onto the canonical
-  // registry — lets Anthropic ship a new model id without a CLI release.
-  //
-  // OAuth-only (the endpoint 4xx's API-key callers). Failures (network
-  // hiccup, server error) are absorbed silently; the local pricing
-  // tables remain authoritative as a fallback.
-  if (auth.type === "oauth") {
-    const { fetchBootstrap, applyBootstrapOverrides } = await import(
-      "../plugins/llm-anthropic/index.ts"
-    )
-    const registry = await import("./llm/model-registry.ts")
-    const selectedModelForBootstrap = model ?? userConfig.model ?? DEFAULT_MODEL
-    void fetchBootstrap({
-      auth: { kind: "oauth", token: auth.token },
-      modelId: selectedModelForBootstrap.replace(/\[(1|2)m\]/gi, ""),
-    })
-      .then((resp) => applyBootstrapOverrides(resp, registry))
-      .catch(() => {
-        // Tolerated: bootstrap is a UX improvement, not a correctness
-        // requirement. Local pricing tables stay authoritative.
-      })
+  // Provider startup probes (fire-and-forget). Each registered provider
+  // plugin MAY overlay server-shipped data onto the canonical registry —
+  // e.g. Anthropic's /api/claude_cli/bootstrap model-cost overrides, which
+  // let it ship a new model id without a CLI release. Provider-neutral: the
+  // entrypoint names NO provider here; each plugin self-gates (the Anthropic
+  // probe no-ops for non-OAuth auth) and swallows its own failures, so local
+  // pricing tables remain authoritative as a fallback.
+  {
+    const { listProviderPlugins } = await import("./llm/provider-plugin.ts")
+    const { legacyAuthToProviderAuth } = await import("./llm/adapter-legacy.ts")
+    const probeCtx = {
+      auth: legacyAuthToProviderAuth(auth),
+      modelId: (model ?? userConfig.model ?? DEFAULT_MODEL).replace(/\[(1|2)m\]/gi, ""),
+    }
+    for (const plugin of listProviderPlugins()) plugin.onStartupProbe?.(probeCtx)
   }
 
   // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
