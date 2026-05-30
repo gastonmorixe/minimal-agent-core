@@ -38,4 +38,21 @@ export {
   type AnthropicStreamEvent,
   translateAnthropicStream,
 } from "./response-stream.ts"
+export {
+  extractModelFromSignature,
+  looksLikeAnthropicModelId,
+} from "./signature-model.ts"
+export {
+  applyMismatchResolution,
+  buildMismatchIssue,
+  findThinkingMismatches,
+  ISSUE_THINKING_MODEL_MISMATCH,
+  type MismatchResolutionOutcome,
+  normalizeModelId,
+  OPTION_CANCEL,
+  OPTION_STRIP,
+  OPTION_SWITCH_PREFIX,
+  stripThinkingBlocks,
+  type ThinkingMismatch,
+} from "./thinking-preflight.ts"
 export { validateAnthropicRequest } from "./validate.ts"

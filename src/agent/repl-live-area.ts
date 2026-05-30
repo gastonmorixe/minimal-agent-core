@@ -26,6 +26,8 @@ import type { Spinner } from "../spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, type StatusSpinnerTheme } from "../status.ts"
 
 import { c, faintThinkingChunk, formatAbortedEcho } from "./ansi.ts"
+import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
+import type { AskUserFn } from "./preflight-pipeline.ts"
 import type {
   ReplAgentLike,
   ReplCompositor,
@@ -256,6 +258,38 @@ export async function runReplLiveArea(
       },
       { caller: "agent", priority: 5000, label: "agent:editor.footer.set" },
     )
+  }
+
+  // Build the askUser callback for the agent's preflight pipeline.
+  //
+  // The provider (today: Anthropic) may detect issues that need user
+  // resolution before the network call (e.g. thinking blocks signed by
+  // a different model than the current request targets, from a session
+  // fork chain that switched --model mid-conversation). When that
+  // happens, the agent opens a modal in the editor's footer overlay
+  // layer via this callback and waits for the user's choice.
+  //
+  // Wiring conditions:
+  //  - The editor must expose `setFooterLayer` / `clearFooterLayer`
+  //    (the real `EditorController` does; some fakes in tests do not).
+  //  - A plugin loader (and thus a Hooks bus) must be present so we
+  //    can subscribe to `editor.key`.
+  //
+  // When either condition fails, `askUser` stays undefined and the
+  // agent skips preflight, sending the request as-is. That preserves
+  // existing behavior in headless / test setups and surfaces any
+  // provider-side error the normal way.
+  let askUser: AskUserFn | undefined
+  const editorWithLayers = editor as unknown as Partial<AskUserHostEditor>
+  if (
+    loader &&
+    typeof editorWithLayers.setFooterLayer === "function" &&
+    typeof editorWithLayers.clearFooterLayer === "function"
+  ) {
+    askUser = createAskUserHost({
+      editor: editorWithLayers as AskUserHostEditor,
+      hooks: loader.hooks(),
+    })
   }
 
   // Initial live-area height: 1 row (the prompt). The editor will grow it
@@ -823,6 +857,7 @@ export async function runReplLiveArea(
           onTextStop,
           drainQueuedUserText,
           onQueueInject,
+          ...(askUser ? { askUser } : {}),
         })
         while (true) {
           const { done, value } = await gen.next()

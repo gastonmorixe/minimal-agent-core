@@ -32,6 +32,7 @@
 // `import { c, runReflectionCooldown, ... } from "./agent.ts"`.
 import { c, faintThinkingChunk, formatAbortedEcho } from "./agent/ansi.ts"
 import { withRollingCacheBreakpoint } from "./agent/cache.ts"
+import { type AskUserFn, runPreflightPipeline } from "./agent/preflight-pipeline.ts"
 import {
   buildReflectionCheckpointBlock,
   parseReflectionAck,
@@ -679,6 +680,20 @@ export class Agent {
        * caller's responsibility via {@link Agent.rollbackPendingTurn}).
        */
       signal?: AbortSignal
+      /**
+       * Optional. Host-provided callback the agent invokes when the
+       * provider's preflight surfaces an issue that needs user
+       * resolution. The callback opens a modal in the live area,
+       * gathers the choice, and resolves with the chosen option id
+       * (`null` to cancel).
+       *
+       * When omitted, preflight is skipped entirely : the request is
+       * sent as-is and any provider-side validation error surfaces as
+       * a normal API failure. Hosts wired into the TUI (`runRepl` +
+       * `runReplLiveArea`) supply this; scripts that want
+       * "fail-loud-on-mismatch" leave it undefined.
+       */
+      askUser?: AskUserFn
     },
   ): AsyncGenerator<string, StreamedResponse, undefined> {
     // Split transport opts from the transcript callback. sendFn must not see
@@ -692,6 +707,7 @@ export class Agent {
       drainQueuedUserText,
       onQueueInject,
       signal,
+      askUser,
       ...sendOpts
     } = opts ?? {}
     const thinkingStart = onThinkingStart
@@ -883,6 +899,40 @@ export class Agent {
         throw Object.assign(new Error("aborted"), { name: "AbortError" })
       }
       rounds++
+
+      // Preflight. The provider may surface issues that need user
+      // resolution before we hit the network (e.g. Anthropic's
+      // model-signed thinking blocks from a different model). The
+      // pipeline is a no-op when no `askUser` callback is supplied or
+      // when the provider has no `preflight()` method. On the resolved
+      // path, this.messages and/or this.model may be updated in place.
+      //
+      // Why every iteration (not just the first): once the user picks
+      // a resolution, subsequent iterations see clean messages and the
+      // preflight returns []. The detection cost is microseconds per
+      // turn, so the cache the user mentioned isn't needed here :
+      // correctness IS the cache. If detection ever gets expensive we
+      // can add a fingerprint short-circuit.
+      if (askUser) {
+        const preflightResult = await runPreflightPipeline({
+          messages: this.messages,
+          modelId: this.model,
+          askUser,
+        })
+        if (preflightResult.cancelled) {
+          throw Object.assign(new Error("aborted"), { name: "AbortError" })
+        }
+        if (preflightResult.adoptModelId) {
+          this.model = preflightResult.adoptModelId
+        }
+        if (preflightResult.messages !== this.messages) {
+          // The pipeline returned new messages. Splice in-place so any
+          // other holders of `this.messages` (tests, debugger) see the
+          // same array identity but updated contents.
+          this.messages.length = 0
+          for (const m of preflightResult.messages) this.messages.push(m)
+        }
+      }
 
       // Send messages to API. Mark the last block of the last message with a
       // rolling cache_control breakpoint so the growing transcript stays cached
