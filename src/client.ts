@@ -35,6 +35,8 @@ import {
 import type {
   BlockCacheControl,
   ContentBlock,
+  DocumentBlock,
+  ImageBlock,
   Message,
   ModelInfo,
   SendOptions,
@@ -63,6 +65,8 @@ export { checkQuota, type QuotaResult } from "./client/quota.ts"
 export type {
   BlockCacheControl,
   ContentBlock,
+  DocumentBlock,
+  ImageBlock,
   Message,
   ModelInfo,
   SendOptions,

@@ -12,6 +12,9 @@
  * @module llm/provider
  */
 
+import type { MediaLimits } from "../media/limits.ts"
+import type { MediaItem, PreparedMedia } from "../media/types.ts"
+
 import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import type { CapabilityViolation } from "./errors.ts"
@@ -80,6 +83,26 @@ export interface RunContext {
    * via the registry's pricing table.
    */
   onUsage?: (usage: CanonicalUsage, costUSD: number) => void
+  /**
+   * Fired by {@link ProviderAdapter.prepareMedia} as an async media step
+   * (upload / transcode) progresses. The agent renders a transient progress
+   * line above the input prompt. No-op by default.
+   */
+  onMediaProgress?: (progress: MediaProgress) => void
+}
+
+/**
+ * Progress event for an in-flight async media step (e.g. a Files API upload).
+ * Emitted via {@link RunContext.onMediaProgress}.
+ */
+export interface MediaProgress {
+  /** The {@link MediaItem.id} the progress refers to. */
+  mediaId: string
+  phase: "reading" | "uploading" | "processing"
+  /** Completion in `[0,1]` when known; `null` for an indeterminate spinner. */
+  fraction: number | null
+  bytesDone?: number
+  bytesTotal?: number
 }
 
 export interface DebugSink {
@@ -253,4 +276,21 @@ export interface ProviderAdapter {
 
   /** Optional cheap health probe. */
   ping?(ctx: RunContext): Promise<boolean>
+
+  /**
+   * Optional: the media byte/format/dimension budget this model accepts, as
+   * data. Returned to the agent so attach-time + submit-time validation
+   * (`checkMedia`) can reject oversize / unsupported media with a warning
+   * before the network call. Undefined ⇒ no media (text-only).
+   */
+  mediaLimits?(model: ModelEntry): MediaLimits
+
+  /**
+   * Optional async prepare for ONE attached item: probe and/or upload it to the
+   * provider's file store, returning the canonical source to embed. Reports
+   * progress via {@link RunContext.onMediaProgress}. MUST be idempotent per
+   * `(this.id, item.id)` and cache into `item.prepared[this.id]`. Adapters that
+   * inline base64 can skip uploading and just build a base64 source here.
+   */
+  prepareMedia?(item: MediaItem, model: ModelEntry, ctx: RunContext): Promise<PreparedMedia>
 }

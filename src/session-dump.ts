@@ -83,6 +83,23 @@ function formatBlockAsMarkdown(block: ContentBlock): string {
       }
       return bq
     }
+    case "image": {
+      const s = block.source
+      const detail = s.type === "base64" ? s.media_type : s.type === "url" ? s.url : s.file_id
+      return `> 🖼️ **Image**: (${s.type} ${detail})`
+    }
+    case "document": {
+      const s = block.source
+      const detail =
+        s.type === "file"
+          ? s.file_id
+          : s.type === "base64"
+            ? s.media_type
+            : s.type === "url"
+              ? s.url
+              : "text/plain"
+      return `> 📄 **Document**: (${s.type} ${detail})`
+    }
     default: {
       const _exhaustive: never = block
       return `> *(Unknown block: ${JSON.stringify(_exhaustive)})*`
@@ -156,6 +173,23 @@ function formatBlockAsXml(block: ContentBlock, indent: number): string {
         `${pad}  <content>${escapeXml(contentStr)}</content>\n` +
         `${pad}</tool_result>`
       )
+    }
+    case "image": {
+      const s = block.source
+      const ref = s.type === "base64" ? s.media_type : s.type === "url" ? s.url : s.file_id
+      return `${pad}<image source="${escapeXml(s.type)}" ref="${escapeXml(ref)}" />`
+    }
+    case "document": {
+      const s = block.source
+      const ref =
+        s.type === "file"
+          ? s.file_id
+          : s.type === "base64"
+            ? s.media_type
+            : s.type === "url"
+              ? s.url
+              : "text/plain"
+      return `${pad}<document source="${escapeXml(s.type)}" ref="${escapeXml(ref)}" />`
     }
     default: {
       const _exhaustive: never = block

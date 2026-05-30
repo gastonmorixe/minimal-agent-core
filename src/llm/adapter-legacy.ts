@@ -31,6 +31,8 @@
 import type { AuthResult } from "../auth.ts"
 import type {
   ContentBlock as LegacyContentBlock,
+  DocumentBlock as LegacyDocumentBlock,
+  ImageBlock as LegacyImageBlock,
   Message as LegacyMessage,
   SendOptions as LegacySendOptions,
   StreamedResponse as LegacyStreamedResponse,
@@ -38,7 +40,12 @@ import type {
 import type { SystemBlock } from "../headers.ts"
 
 import type { CanonicalEvent, CanonicalUsage, StopDetails, StopReason } from "./canonical-events.ts"
-import type { CanonicalBlock, CanonicalMessage } from "./canonical-messages.ts"
+import type {
+  CanonicalBlock,
+  CanonicalMessage,
+  FileSource,
+  ImageSource,
+} from "./canonical-messages.ts"
 import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
 import type { EffortLevel } from "./capabilities.ts"
@@ -278,10 +285,21 @@ function canonicalBlockToLegacy(block: CanonicalBlock): LegacyContentBlock | nul
       }
     }
     case "image":
-    case "audio":
+      return {
+        type: "image",
+        source: imageSourceToLegacy(block.source),
+        ...(block.cache && { cache_control: legacyCacheControl(block.cache) }),
+      }
     case "file":
-      // Legacy ContentBlock doesn't support these (image is server-side
-      // only via different route). Drop.
+      return {
+        type: "document",
+        source: fileSourceToLegacy(block.source),
+        ...(block.cache && { cache_control: legacyCacheControl(block.cache) }),
+      }
+    case "audio":
+      // Anthropic Messages has no audio input. `validate()` (modalityViolations)
+      // rejects an audio block before it reaches the wire, so dropping here is
+      // only a belt-and-suspenders no-op.
       return null
     default: {
       const _exhaustive: never = block
@@ -299,6 +317,41 @@ function legacyCacheControl(hint: NonNullable<CanonicalBlock["cache"]>): {
   if (hint.ttl) out.ttl = hint.ttl
   if (hint.scope) out.scope = hint.scope
   return out
+}
+
+/**
+ * canonical {@link ImageSource} -> Anthropic wire image source. The canonical
+ * `file_id` kind maps to wire `source.type:"file"` (not `"file_id"`).
+ */
+function imageSourceToLegacy(source: ImageSource): LegacyImageBlock["source"] {
+  switch (source.kind) {
+    case "base64":
+      return { type: "base64", media_type: source.mediaType, data: source.data }
+    case "url":
+      return { type: "url", url: source.url }
+    case "file_id":
+      return { type: "file", file_id: source.fileId }
+    default: {
+      const _exhaustive: never = source
+      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
+}
+
+/** canonical {@link FileSource} -> Anthropic wire document source. */
+function fileSourceToLegacy(source: FileSource): LegacyDocumentBlock["source"] {
+  switch (source.kind) {
+    case "base64":
+      return { type: "base64", media_type: source.mediaType, data: source.data }
+    case "url":
+      return { type: "url", url: source.url }
+    case "file_id":
+      return { type: "file", file_id: source.fileId }
+    default: {
+      const _exhaustive: never = source
+      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
 }
 
 function canonicalToolToLegacy(tool: CanonicalToolDefinition): {
@@ -492,9 +545,69 @@ function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | nul
       if (cache) out.cache = cache
       return out
     }
+    case "image": {
+      const out: CanonicalBlock = {
+        type: "image",
+        source: legacyImageSourceToCanonical(block.source),
+      }
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
+    case "document": {
+      // A `text` document source carries inline plain text : the faithful
+      // canonical shape is a text block, not a file reference.
+      if (block.source.type === "text") {
+        const out: CanonicalBlock = { type: "text", text: block.source.data }
+        const cache = legacyCacheToCanonical(block.cache_control)
+        if (cache) out.cache = cache
+        return out
+      }
+      const out: CanonicalBlock = {
+        type: "file",
+        source: legacyDocSourceToCanonical(block.source),
+      }
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
     default: {
       const _exhaustive: never = block
       throw new Error(`unhandled legacy block: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
+}
+
+/** Anthropic wire image source -> canonical {@link ImageSource}. */
+function legacyImageSourceToCanonical(source: LegacyImageBlock["source"]): ImageSource {
+  switch (source.type) {
+    case "base64":
+      return { kind: "base64", mediaType: source.media_type, data: source.data }
+    case "url":
+      return { kind: "url", url: source.url }
+    case "file":
+      return { kind: "file_id", fileId: source.file_id }
+    default: {
+      const _exhaustive: never = source
+      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
+}
+
+/** Anthropic wire document source (sans inline `text`) -> canonical {@link FileSource}. */
+function legacyDocSourceToCanonical(
+  source: Exclude<LegacyDocumentBlock["source"], { type: "text" }>,
+): FileSource {
+  switch (source.type) {
+    case "base64":
+      return { kind: "base64", mediaType: source.media_type, data: source.data }
+    case "url":
+      return { kind: "url", url: source.url }
+    case "file":
+      return { kind: "file_id", fileId: source.file_id }
+    default: {
+      const _exhaustive: never = source
+      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
     }
   }
 }
