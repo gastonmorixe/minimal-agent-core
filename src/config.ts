@@ -117,11 +117,15 @@ export interface UserConfig {
    * current provider (e.g. `quota` on a provider with no quota concept)
    * renders nothing even when listed.
    *
-   * (Future: a `script` field for a user-supplied status-bar renderer — not
-   * yet implemented; the segment list is the supported surface today.)
+   * For full control, `script` names an executable/command the quota-status
+   * plugin runs each refresh: it receives the session metadata as JSON on stdin
+   * and its stdout's first line becomes the footer. On any failure/timeout/empty
+   * output the built-in renderer is used, so a broken script never blanks the
+   * footer. When `script` is set it takes precedence over `segments`.
    */
   statusBar?: {
     segments?: string[]
+    script?: string
   }
   /**
    * Per-provider API keys, as a fallback for the environment variables the
@@ -229,15 +233,20 @@ export function loadUserConfig(): UserConfig {
   } else if (obj.nerdGlyphCells === "auto") {
     out.nerdGlyphCells = "auto"
   }
-  // statusBar.segments: an array of segment-id strings. We only shape-check
-  // here (string[]); the renderer's `normalizeSegmentOrder` is the lenient
-  // authority on which ids are valid, so a typo never blanks the footer.
+  // statusBar.segments: an array of segment-id strings (shape-check only; the
+  // renderer's `normalizeSegmentOrder` is the lenient authority on valid ids).
+  // statusBar.script: a non-empty command string (full-custom renderer).
   if (obj.statusBar && typeof obj.statusBar === "object" && !Array.isArray(obj.statusBar)) {
     const sb = obj.statusBar as Record<string, unknown>
+    const statusBar: { segments?: string[]; script?: string } = {}
     if (Array.isArray(sb.segments)) {
       const segs = sb.segments.filter((s): s is string => typeof s === "string" && s.length > 0)
-      if (segs.length > 0) out.statusBar = { segments: segs }
+      if (segs.length > 0) statusBar.segments = segs
     }
+    if (typeof sb.script === "string" && sb.script.trim().length > 0) {
+      statusBar.script = sb.script
+    }
+    if (statusBar.segments || statusBar.script) out.statusBar = statusBar
   }
   // apiKeys: a provider-id → key map (env-var fallback for the canonical
   // transport). Keep only string non-empty values; an empty / all-invalid

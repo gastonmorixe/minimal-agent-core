@@ -89,6 +89,18 @@ describe("loadUserConfig", () => {
     expect(loadUserConfig()).toEqual({})
   })
 
+  it("parses statusBar.script (non-empty string) and combines with segments", () => {
+    writeFileSync(path, JSON.stringify({ statusBar: { script: "/usr/local/bin/footer" } }))
+    expect(loadUserConfig()).toEqual({ statusBar: { script: "/usr/local/bin/footer" } })
+    writeFileSync(path, JSON.stringify({ statusBar: { segments: ["quota"], script: "x" } }))
+    expect(loadUserConfig()).toEqual({ statusBar: { segments: ["quota"], script: "x" } })
+    // blank / non-string script dropped
+    writeFileSync(path, JSON.stringify({ statusBar: { script: "   " } }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ statusBar: { script: 42 } }))
+    expect(loadUserConfig()).toEqual({})
+  })
+
   it("returns {} on malformed JSON (does not throw)", () => {
     writeFileSync(path, "{not json")
     expect(loadUserConfig()).toEqual({})

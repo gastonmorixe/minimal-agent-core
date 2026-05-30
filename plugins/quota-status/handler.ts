@@ -30,6 +30,7 @@ import { resolveProviderSessionInfo } from "../../src/llm/provider-session.ts"
 import { getSessionTokens } from "../../src/session-tokens.ts"
 import type { LiveAreaHandlerContext } from "../../src/plugins/types.ts"
 import { renderQuotaFooter } from "./render.ts"
+import { runStatusScript } from "./script-runner.ts"
 
 // Module-level snapshot — read once at first invoke. Setting/unsetting the
 // env var mid-session won't take effect until restart, which is fine: this
@@ -111,6 +112,14 @@ const SID = resolveSid()
  */
 const STATUS_SEGMENTS = loadUserConfig().statusBar?.segments
 
+/**
+ * User-supplied full-custom status-bar script (`statusBar.script`). When set, it
+ * takes precedence over the built-in renderer: it receives the session metadata
+ * as JSON on stdin and its first stdout line becomes the footer. Snapshot-once.
+ * Any failure falls back to the built-in renderer (see {@link runStatusScript}).
+ */
+const STATUS_SCRIPT = loadUserConfig().statusBar?.script
+
 function cols(): number {
   // Prefer the env COLUMNS the loader injects for plugins. Fall back to
   // live process.stdout.columns. Treat 0 (script-allocated PTY) as
@@ -136,8 +145,31 @@ export default async function handle(
   // gate for the next heartbeat / `quota.headersReceived` refresh. Long-
   // running sessions never wedge the footer.
   const info = await resolveProviderSessionInfo(currentModelId(), { signal: ctx.abort })
+  const sessionTokens = getSessionTokens()
+
+  // Full-custom renderer escape hatch: hand the session metadata to the user's
+  // script and use its output. On any failure/empty/timeout we fall through to
+  // the built-in renderer, so a broken script never blanks the footer.
+  if (STATUS_SCRIPT) {
+    const line = await runStatusScript(
+      STATUS_SCRIPT,
+      {
+        contextWindow: info.contextWindow,
+        modelLabel: info.modelLabel,
+        quota: info.quota,
+        sessionTokens,
+        cols: cols(),
+        sid: SID,
+        effort: EFFORT,
+        modelId: currentModelId(),
+      },
+      ctx.abort,
+    )
+    if (line) return line
+  }
+
   const windows = info.quota?.windows ?? []
-  return renderQuotaFooter(windows, getSessionTokens(), {
+  return renderQuotaFooter(windows, sessionTokens, {
     cols: cols(),
     showOverage: SHOW_OVERAGE,
     overage: info.quota?.overage,
