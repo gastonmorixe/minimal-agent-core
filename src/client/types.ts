@@ -73,6 +73,23 @@ export interface ThinkingBlock {
 }
 
 /**
+ * An encrypted ("redacted") reasoning block. The API emits these instead of a
+ * plain {@link ThinkingBlock} when its safety systems encrypt the model's
+ * reasoning. The `data` payload is opaque : we never introspect it, but we
+ * MUST round-trip it verbatim. The Messages API rejects any request whose
+ * latest assistant turn dropped or altered a `thinking`/`redacted_thinking`
+ * block ("blocks ... cannot be modified. These blocks must remain as they were
+ * in the original response."), so the SSE parser stores these blocks and the
+ * send path re-emits them unchanged. See `src/client.ts` content_block_start.
+ */
+export interface RedactedThinkingBlock {
+  type: "redacted_thinking"
+  /** Opaque encrypted reasoning payload. Re-sent verbatim, never parsed. */
+  data: string
+  cache_control?: BlockCacheControl
+}
+
+/**
  * A tool invocation requested by the assistant.
  *
  * The model emits these when it wants to call a tool. The agent should
@@ -185,6 +202,7 @@ export interface DocumentBlock {
 export type ContentBlock =
   | TextBlock
   | ThinkingBlock
+  | RedactedThinkingBlock
   | ToolUseBlock
   | ToolResultBlock
   | ImageBlock
@@ -480,6 +498,8 @@ export interface StreamEvent {
     text?: string
     thinking?: string
     signature?: string
+    /** Opaque payload for `redacted_thinking` blocks. */
+    data?: string
     id?: string
     name?: string
     input?: Record<string, unknown>

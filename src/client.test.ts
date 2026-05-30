@@ -488,6 +488,82 @@ describe("client", () => {
       ])
     })
 
+    // Regression: the SSE parser used to handle only thinking/text/tool_use in
+    // content_block_start, so a `redacted_thinking` block (encrypted reasoning
+    // the API emits under its safety systems) was silently DROPPED. That left
+    // the stored assistant turn missing a block and shifted every later block's
+    // index, so the next request (the agentic re-send after tool_results) 400'd
+    // with "`thinking` or `redacted_thinking` blocks in the latest assistant
+    // message cannot be modified. These blocks must remain as they were in the
+    // original response." The parser must now keep these blocks verbatim.
+    it("preserves redacted_thinking blocks verbatim (re-send byte-identity)", async () => {
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "go" }] }]
+      const networkClient = fakeNetworkClient(() =>
+        sseResponse([
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "thinking", thinking: "", signature: "sig-1" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "thinking_delta", thinking: "reason" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "signature_delta", signature: "SIG" },
+          },
+          { type: "content_block_stop", index: 0 },
+          // The encrypted reasoning block the parser used to drop:
+          {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "redacted_thinking", data: "ENCRYPTED_PAYLOAD" },
+          },
+          { type: "content_block_stop", index: 1 },
+          {
+            type: "content_block_start",
+            index: 2,
+            content_block: { type: "tool_use", id: "t1", name: "Bash", input: {} },
+          },
+          {
+            type: "content_block_delta",
+            index: 2,
+            delta: { type: "input_json_delta", partial_json: '{"command":"ls"}' },
+          },
+          { type: "content_block_stop", index: 2 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "tool_use", stop_sequence: null },
+          },
+        ]),
+      )
+
+      const response = await sendMessageFull({
+        auth,
+        messages,
+        model: "claude-opus-4-8",
+        stream: true,
+        networkClient,
+      })
+
+      // All three blocks survive, in order : the redacted_thinking block is NOT
+      // dropped, so its index (1) is preserved for the next-turn re-send.
+      expect(response.blocks.map((b) => b.type)).toEqual([
+        "thinking",
+        "redacted_thinking",
+        "tool_use",
+      ])
+      // And its opaque payload round-trips unchanged.
+      expect(response.blocks[1]).toEqual({
+        type: "redacted_thinking",
+        data: "ENCRYPTED_PAYLOAD",
+      })
+    })
+
     it("publishes detailed status updates for tool_use streaming with hint extraction", async () => {
       const auth: AuthResult = { type: "oauth", token: "test-token" }
       const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "edit" }] }]

@@ -53,6 +53,7 @@ export type AnthropicContentBlock =
       signature?: string
       cache_control?: AnthropicCacheControl
     }
+  | { type: "redacted_thinking"; data: string; cache_control?: AnthropicCacheControl }
   | {
       type: "tool_use"
       id: string
@@ -258,6 +259,11 @@ function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock |
         thinking: block.text,
         signature: block.signature,
       }
+      if (block.cache) out.cache_control = toAnthropicCacheControl(block.cache)
+      return out
+    }
+    case "redacted_thinking": {
+      const out: AnthropicContentBlock = { type: "redacted_thinking", data: block.data }
       if (block.cache) out.cache_control = toAnthropicCacheControl(block.cache)
       return out
     }
