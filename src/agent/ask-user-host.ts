@@ -28,7 +28,6 @@
  * @module agent/ask-user-host
  */
 
-import { FOOTER_LAYER_OVERLAY, FOOTER_PRIORITY_OVERLAY } from "../editor/types.ts"
 import type { EditorKeyPayload } from "../editor-controller.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
 import { ChoiceModal } from "../ui/choice-modal.ts"
@@ -38,15 +37,16 @@ import type { AskUserFn } from "./preflight-pipeline.ts"
 
 /**
  * Minimal slice of the editor controller the host overlay needs:
- *  - `setFooterLayer` / `clearFooterLayer` to paint the modal lines.
+ *  - `setDecorationLines` to paint the modal in the ABOVE-prompt region
+ *    (between the activity row and the input), so the modal sits at the top
+ *    of the live area rather than below the prompt as a footer overlay.
  *
  * Typed as a structural interface rather than `EditorController` so the
  * tests can substitute a fake editor without dragging in compositor
  * dependencies.
  */
 export interface AskUserHostEditor {
-  setFooterLayer(id: string, lines: string[], opts?: { priority?: number }): void
-  clearFooterLayer(id: string): void
+  setDecorationLines(lines: string[]): void
 }
 
 /** Minimal slice of `process.stdout` we need for width detection. */
@@ -61,17 +61,29 @@ export interface CreateAskUserOpts {
   hooks: Hooks
   /**
    * Output stream used to pick a render width. Defaults to
-   * `process.stdout`. The modal clamps narrow widths internally.
+   * `process.stdout`. The modal fills the full terminal width.
    */
   output?: AskUserHostOutput
   /**
-   * Hard cap on the modal's render width. Default 72 cells. Useful for
-   * tests that want to assert on byte-stable rendering.
+   * Optional hard cap on render width (cells). Default: none — the modal
+   * spans the full terminal width. Tests pass a finite value for byte-stable
+   * assertions.
    */
   maxWidth?: number
+  /**
+   * Pause the live activity row while the modal is up (so a stale
+   * "Thinking (Ns)" doesn't keep ticking above a modal that has paused the
+   * agent). Called on open; {@link resumeActivity} on close. Both optional.
+   */
+  pauseActivity?: () => void
+  /** Restore the activity row after the modal closes. */
+  resumeActivity?: () => void
 }
 
-const DEFAULT_MAX_WIDTH = 72
+/** Floor so the modal never renders narrower than this (its own minimum). */
+const MIN_WIDTH = 40
+/** Fallback width when the terminal width is unknown (non-TTY). */
+const FALLBACK_WIDTH = 80
 
 /**
  * Build an {@link AskUserFn} bound to a specific editor + hooks bus.
@@ -84,7 +96,7 @@ const DEFAULT_MAX_WIDTH = 72
 export function createAskUserHost(opts: CreateAskUserOpts): AskUserFn {
   const { editor, hooks } = opts
   const out = opts.output ?? (process.stdout as AskUserHostOutput)
-  const maxWidth = opts.maxWidth ?? DEFAULT_MAX_WIDTH
+  const cap = opts.maxWidth ?? Number.POSITIVE_INFINITY
 
   return (issue) =>
     new Promise<string | null>((resolve) => {
@@ -100,12 +112,15 @@ export function createAskUserHost(opts: CreateAskUserOpts): AskUserFn {
         defaultIndex: issue.options.findIndex((o) => o.isDefault === true),
       })
 
-      const width = (): number => Math.min(maxWidth, Math.max(40, out.columns ?? maxWidth))
+      // Full terminal width by default (capped only if a caller asked).
+      const width = (): number => Math.min(cap, Math.max(MIN_WIDTH, out.columns ?? FALLBACK_WIDTH))
       const paint = (): void => {
-        editor.setFooterLayer(FOOTER_LAYER_OVERLAY, modal.render(width()), {
-          priority: FOOTER_PRIORITY_OVERLAY,
-        })
+        // Paint into the ABOVE-prompt decoration band so the modal sits at the
+        // top of the live area, not below the prompt + over the status footer.
+        editor.setDecorationLines(modal.render(width()))
       }
+      // Pause the activity row so a stale "Thinking" doesn't tick above the modal.
+      opts.pauseActivity?.()
       paint()
 
       let disposed = false
@@ -130,7 +145,8 @@ export function createAskUserHost(opts: CreateAskUserOpts): AskUserFn {
           if (disposed) return
           disposed = true
           dispose()
-          editor.clearFooterLayer(FOOTER_LAYER_OVERLAY)
+          editor.setDecorationLines([])
+          opts.resumeActivity?.()
           const result = r.result
           resolve(typeof result === "string" || result === null ? result : null)
         },

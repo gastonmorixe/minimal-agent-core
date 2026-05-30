@@ -281,14 +281,21 @@ export async function runReplLiveArea(
   // provider-side error the normal way.
   let askUser: AskUserFn | undefined
   const editorWithLayers = editor as unknown as Partial<AskUserHostEditor>
-  if (
-    loader &&
-    typeof editorWithLayers.setFooterLayer === "function" &&
-    typeof editorWithLayers.clearFooterLayer === "function"
-  ) {
+  if (loader && typeof editorWithLayers.setDecorationLines === "function") {
+    // Pause the activity row while a modal is up (so a stale "Thinking" doesn't
+    // tick above it). The LiveAreaStatusController implements these; a custom
+    // statusRenderer that doesn't is simply skipped (optional-chained).
+    const sr = statusRenderer as
+      | (StatusController & {
+          pauseForOverlay?(label: string | null): void
+          resumeFromOverlay?(): void
+        })
+      | null
     askUser = createAskUserHost({
       editor: editorWithLayers as AskUserHostEditor,
       hooks: loader.hooks(),
+      pauseActivity: () => sr?.pauseForOverlay?.(c.dim("⏸ paused — waiting for your input")),
+      resumeActivity: () => sr?.resumeFromOverlay?.(),
     })
   }
 

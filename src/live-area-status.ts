@@ -59,6 +59,8 @@ export class LiveAreaStatusController implements StatusController {
   private label: string | null = null
   private spinnerGlyph = ""
   private suspended = false
+  /** Set while a blocking overlay (modal) owns the screen; see pauseForOverlay. */
+  private overlayPaused = false
   /**
    * Identity of the entry whose elapsed timer is currently running.
    * Reset triggers: bus.create() (new id), cleared status (null), or
@@ -139,7 +141,30 @@ export class LiveAreaStatusController implements StatusController {
     if (this.label) this.paint()
   }
 
+  /**
+   * Pause the activity row while a blocking overlay (e.g. an ask-user modal)
+   * owns the screen. Stops the spinner timer and pins `label` (or clears the
+   * row when `null`) so a stale "Thinking (Ns)" doesn't keep ticking above a
+   * modal that has paused the agent. Bus updates are ignored until
+   * {@link resumeFromOverlay}. Distinct from {@link suspend} (line-mode abort).
+   */
+  pauseForOverlay(label: string | null): void {
+    this.overlayPaused = true
+    this.stopTimer()
+    this.editor.setStatus(label)
+  }
+
+  /** Re-sync the activity row from the bus after an overlay closes. */
+  resumeFromOverlay(): void {
+    if (!this.overlayPaused) return
+    this.overlayPaused = false
+    this.onBusUpdate()
+  }
+
   private onBusUpdate(): void {
+    // While an overlay (modal) is up the agent is blocked; ignore bus churn so
+    // the pinned paused-row isn't clobbered by a late spinner/status update.
+    if (this.overlayPaused) return
     const status = this.bus.currentStatus()
     this.label = status?.label ?? null
     if (!status) {
@@ -169,6 +194,7 @@ export class LiveAreaStatusController implements StatusController {
   }
 
   private paint(): void {
+    if (this.overlayPaused) return
     if (!this.label) {
       this.editor.setStatus(null)
       return

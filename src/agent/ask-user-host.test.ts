@@ -15,6 +15,7 @@ import { FOOTER_LAYER_OVERLAY } from "../editor/types.ts"
 import type { EditorKeyPayload } from "../editor-controller.ts"
 import type { PreflightIssue } from "../llm/provider.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
+import { displayWidth, stripAnsi } from "../term-width.ts"
 
 import { type AskUserHostEditor, createAskUserHost, translateEditorKey } from "./ask-user-host.ts"
 
@@ -23,43 +24,28 @@ import { type AskUserHostEditor, createAskUserHost, translateEditorKey } from ".
 // ---------------------------------------------------------------------------
 
 class FakeEditor implements AskUserHostEditor {
-  layers: Array<
-    { id: string; lines: string[]; priority?: number } | { id: string; cleared: true }
-  > = []
+  // The modal paints into the above-prompt decoration band. A non-empty call
+  // is a "paint"; an empty array is a "clear".
+  calls: Array<{ kind: "paint" | "clear"; lines: string[] }> = []
 
-  setFooterLayer(id: string, lines: string[], opts?: { priority?: number }): void {
-    this.layers.push({
-      id,
-      lines: [...lines],
-      ...(opts?.priority !== undefined ? { priority: opts.priority } : {}),
-    })
+  setDecorationLines(lines: string[]): void {
+    this.calls.push(
+      lines.length === 0 ? { kind: "clear", lines: [] } : { kind: "paint", lines: [...lines] },
+    )
   }
-  clearFooterLayer(id: string): void {
-    this.layers.push({ id, cleared: true })
-  }
-  /** The latest painted lines for the overlay layer, or null. */
+  /** The latest painted decoration lines, or null if the last call cleared. */
   lastPainted(): string[] | null {
-    for (let i = this.layers.length - 1; i >= 0; i--) {
-      const e = this.layers[i]
-      if (!e) continue
-      if ("cleared" in e) return null
-      if (e.id === FOOTER_LAYER_OVERLAY) return e.lines
-    }
-    return null
+    const last = this.calls.at(-1)
+    if (!last) return null
+    return last.kind === "clear" ? null : last.lines
   }
-  clearedAt(layerId: string): number {
-    let n = 0
-    for (const e of this.layers) {
-      if ("cleared" in e && e.id === layerId) n++
-    }
-    return n
+  /** Clear count. `_id` is accepted+ignored for back-compat with old call sites. */
+  clearedAt(_id?: string): number {
+    return this.calls.filter((c) => c.kind === "clear").length
   }
-  paintCount(layerId: string): number {
-    let n = 0
-    for (const e of this.layers) {
-      if (!("cleared" in e) && e.id === layerId) n++
-    }
-    return n
+  /** Paint count. `_id` is accepted+ignored for back-compat with old call sites. */
+  paintCount(_id?: string): number {
+    return this.calls.filter((c) => c.kind === "paint").length
   }
 }
 
@@ -138,8 +124,48 @@ describe("createAskUserHost", () => {
     const promise = askUser(makeIssue())
     fireKey(hooks, "Enter")
     expect(await promise).toBe("first")
-    // Footer cleared.
+    // Decoration band cleared on close.
     expect(editor.clearedAt(FOOTER_LAYER_OVERLAY)).toBe(1)
+  })
+
+  test("renders at full terminal width by default (no maxWidth cap)", async () => {
+    const editor = new FakeEditor()
+    const hooks = new Hooks()
+    const askUser = createAskUserHost({ editor, hooks, output: { columns: 120 } })
+    const promise = askUser(makeIssue())
+    const painted = editor.lastPainted()
+    expect(painted).not.toBeNull()
+    expect(painted!.length).toBeGreaterThan(0)
+    for (const line of painted!) expect(displayWidth(stripAnsi(line))).toBe(120)
+    fireKey(hooks, "Escape")
+    await promise
+  })
+
+  test("respects an explicit maxWidth cap when given", async () => {
+    const editor = new FakeEditor()
+    const hooks = new Hooks()
+    const askUser = createAskUserHost({ editor, hooks, output: { columns: 200 }, maxWidth: 60 })
+    const promise = askUser(makeIssue())
+    for (const line of editor.lastPainted()!) expect(displayWidth(stripAnsi(line))).toBe(60)
+    fireKey(hooks, "Escape")
+    await promise
+  })
+
+  test("pauses the activity row on open and resumes on close", async () => {
+    const editor = new FakeEditor()
+    const hooks = new Hooks()
+    const events: string[] = []
+    const askUser = createAskUserHost({
+      editor,
+      hooks,
+      pauseActivity: () => events.push("pause"),
+      resumeActivity: () => events.push("resume"),
+    })
+    const promise = askUser(makeIssue())
+    expect(events).toEqual(["pause"]) // paused while the modal is up
+    fireKey(hooks, "Enter")
+    await promise
+    expect(events).toEqual(["pause", "resume"]) // resumed once it closes
   })
 
   test("Right + Enter resolves with second id", async () => {
@@ -237,11 +263,11 @@ describe("createAskUserHost", () => {
     const promise = askUser(makeIssue())
     fireKey(hooks, "Enter")
     await promise
-    const before = editor.layers.length
+    const before = editor.calls.length
     const p = fireKey(hooks, "ArrowRight")
     // No listener should be subscribed any more.
     expect(p.result.halt).toBeUndefined()
-    expect(editor.layers.length).toBe(before)
+    expect(editor.calls.length).toBe(before)
   })
 
   test("supports two sequential askUser calls (separate modals)", async () => {
