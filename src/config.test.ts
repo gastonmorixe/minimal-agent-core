@@ -182,10 +182,7 @@ describe("loadUserConfig", () => {
   })
 
   it("parses apiKeys (openai + openrouter)", () => {
-    writeFileSync(
-      path,
-      JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } }),
-    )
+    writeFileSync(path, JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } }))
     expect(loadUserConfig()).toEqual({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } })
   })
 
