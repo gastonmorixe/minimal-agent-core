@@ -58,6 +58,94 @@ export function stripLeadingHeading(body: string): string {
   return body.slice(match[0].length).trim()
 }
 
+/**
+ * Semantic role of a plugin's system-prompt contribution. Determines the
+ * `<ma::sys::ROLE …>` wrapper the composer emits and the ordering group the
+ * section sorts into. The role describes WHAT the content is to the model
+ * (a behavioral mandate, guidance for a tool, the syntax of an inline emit
+ * directive, mode-specific behavior, or session reference data) — never
+ * WHICH plugin produced it. The word "plugin" never reaches the model.
+ */
+export type PromptRole = "behavior" | "tool" | "emit" | "mode" | "context"
+
+/**
+ * Stable render order across roles. Behavioral mandates lead (they shape
+ * every response), then per-tool guidance, then inline-emit syntax, then
+ * mode rules, then session-context data last. Within a role, sections sort
+ * by `name` so the composed block is byte-stable for a given plugin set
+ * regardless of filesystem discovery order (the system prompt sits on a
+ * cache breakpoint and must not churn turn-to-turn).
+ */
+export const PROMPT_ROLE_ORDER: Record<PromptRole, number> = {
+  behavior: 0,
+  tool: 1,
+  emit: 2,
+  mode: 3,
+  context: 4,
+}
+
+/**
+ * Extract the text of a single leading ATX-style H1 (`# Heading`), trailing
+ * `#` run tolerated, or `null` when the body does not open with one. Used to
+ * derive a human-meaningful section `name` for `behavior`/`context` sections
+ * (which have no tool/tag/mode identifier to borrow). Pairs with
+ * {@link stripLeadingHeading}, which removes the same heading from the body.
+ */
+export function leadingHeadingText(body: string): string | null {
+  const m = body.match(/^\uFEFF?\s*#[ \t]+(.*?)[ \t]*#*[ \t]*\n/)
+  return m && m[1] ? m[1].trim() : null
+}
+
+/**
+ * Slugify a free-form label into a tag-attribute-safe token: lowercased,
+ * runs of non-alphanumerics collapsed to single hyphens, ends trimmed.
+ */
+export function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+/** Escape a value for an XML-style double-quoted attribute. */
+export function escapeTagAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+/**
+ * Infer a plugin's prompt {@link PromptRole} and section `name` from its
+ * manifest shape — no manifest field required. Precedence:
+ *
+ * 1. declares a mode            → `mode`,  name = first mode id
+ * 2. contributes a tool         → `tool`,  name = first tool name
+ * 3. contributes only inline tag→ `emit`,  name = first inline-tag name
+ * 4. PROMPT.md only (no frags)  → `behavior`, name = slug(H1 | display name)
+ * 5. PROMPT.md + prompt fragment→ `context`,  name = slug(H1 | display name)
+ *
+ * The tool/mode/emit names are the exact identifiers the model already sees
+ * elsewhere (the `tools[]` array, the mode-change signals, the emit syntax),
+ * so the section label binds the guidance to the thing it describes.
+ */
+export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; name: string } {
+  const m = pkg.manifest
+  const firstMode = m.modes?.[0]
+  if (firstMode) return { role: "mode", name: firstMode.id }
+  for (const h of m.tuis ?? []) {
+    if (h.trigger.type === "tool") return { role: "tool", name: h.trigger.tool.name }
+  }
+  for (const h of m.tuis ?? []) {
+    if (h.trigger.type === "inline_tag") return { role: "emit", name: h.trigger.tag }
+  }
+  const hasFragments = (m.promptFragments?.length ?? 0) > 0
+  const label = (pkg.prompt ? leadingHeadingText(pkg.prompt) : null) ?? m.name ?? m.id
+  const name = slugify(label) || m.id
+  return { role: hasFragments ? "context" : "behavior", name }
+}
+
 export async function resolveHandler(
   h: ManifestHandler,
   packageDir: string,

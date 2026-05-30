@@ -158,12 +158,13 @@ describe("PluginLoader", () => {
     expect(loader.hasTool("tool_a")).toBe(true)
     expect(loader.hasTool("tool_b")).toBe(false)
     const prompt = loader.getPromptBlock()
-    expect(prompt).toContain("<ma::plugins>")
-    expect(prompt).toContain('<ma::plugin id="alpha">')
+    // A tool plugin composes into a role-named <ma::sys::tool> section keyed
+    // by the TOOL name, not the plugin id. The word "plugin" never appears.
+    expect(prompt).toContain('<ma::sys::tool name="tool_a">')
+    expect(prompt).toContain("</ma::sys::tool>")
     expect(prompt).toContain(PROMPT_BODY_A)
-    // The wrapper provides the id; we must not also emit a markdown heading
-    // for it (that was the "ask mode appears twice" bug in the debug view).
-    expect(prompt).not.toContain("## alpha")
+    expect(prompt).not.toContain("ma::plugin")
+    expect(prompt).not.toContain("alpha")
     // cleanup for subsequent tests
     rmSync(dir, { recursive: true })
   })
@@ -366,15 +367,15 @@ describe("PluginLoader", () => {
     })
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    expect(block).toContain("<ma::plugins>")
-    expect(block).toContain("</ma::plugins>")
-    expect(block).toContain("<ma::plugins-overview>")
-    expect(block).toContain("</ma::plugins-overview>")
-    expect(block).toContain("<ma::plugin::NAME")
-    expect(block).toContain('<ma::plugin id="pa">')
-    expect(block).toContain('<ma::plugin id="pb">')
+    // No outer wrapper, no overview, no "plugin" framing: each contribution
+    // is a self-delimiting role-named section keyed by the tool name.
+    expect(block).not.toContain("ma::plugin")
+    expect(block).toContain('<ma::sys::tool name="tool_a">')
+    expect(block).toContain('<ma::sys::tool name="tool_b">')
     expect(block).toContain(PROMPT_BODY_A)
     expect(block).toContain(PROMPT_BODY_B)
+    // Deterministic ordering: tool_a sorts before tool_b within the role.
+    expect(block!.indexOf("tool_a")).toBeLessThan(block!.indexOf("tool_b"))
     rmSync(join(HOME, "plugins", "pa"), { recursive: true })
     rmSync(join(HOME, "plugins", "pb"), { recursive: true })
   })
@@ -455,7 +456,7 @@ describe("PluginLoader", () => {
     })
     expect(loader.hasTool("tool_emb")).toBe(true)
     const block = loader.getPromptBlock()
-    expect(block).toContain('<ma::plugin id="emb1">')
+    expect(block).toContain('<ma::sys::tool name="tool_emb">')
     expect(block).toContain("embedded plugin prompt")
     rmSync(join(EMBEDDED, "plugins", "emb1"), { recursive: true })
   })
@@ -887,6 +888,126 @@ describe("PluginLoader", () => {
     rmSync(join(EMBEDDED, "plugins", "shared2"), { recursive: true })
     rmSync(join(HOME, "plugins", "shared2"), { recursive: true })
     rmSync(join(PROJECT, ".agents", "plugins", "shared2"), { recursive: true })
+  })
+})
+
+describe("PluginLoader / AgentContext threading", () => {
+  // Handler that serializes `ctx.agent` + the four `MINIMAL_AGENT_*`
+  // env vars into the tool_result content so the test can inspect both
+  // the typed surface AND the env-var bridge.
+  const AGENT_PROBE_HANDLER_BODY = `
+export default async function handler(ctx) {
+  const env = ctx.env ?? {}
+  return {
+    kind: "tool_result",
+    content: JSON.stringify({
+      agent: ctx.agent ?? null,
+      env: {
+        MINIMAL_AGENT_SESSION_ID: env.MINIMAL_AGENT_SESSION_ID ?? null,
+        MINIMAL_AGENT_PID:        env.MINIMAL_AGENT_PID ?? null,
+        MINIMAL_AGENT_MODEL:      env.MINIMAL_AGENT_MODEL ?? null,
+        MINIMAL_AGENT_VERSION:    env.MINIMAL_AGENT_VERSION ?? null,
+      },
+    }),
+  };
+}
+`
+  const HOME_AC = join(ROOT, "home-ac")
+  const TEST_AGENT = Object.freeze({
+    sessionId: "ac-session-uuid",
+    pid: 42,
+    model: "claude-opus-4-7[1m]",
+    version: "1.2.3",
+  })
+
+  beforeAll(() => {
+    mkdirSync(HOME_AC, { recursive: true })
+  })
+  afterAll(() => {
+    rmSync(HOME_AC, { recursive: true, force: true })
+  })
+
+  it("threads AgentContext into ctx.agent on a tool dispatch", async () => {
+    writePackage(HOME_AC, "p1", toolManifest("p1", "agent_probe_1", "./h.ts"), {
+      "h.ts": AGENT_PROBE_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME_AC,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      agent: TEST_AGENT,
+    })
+    const result = await loader.dispatch(
+      { type: "tool", name: "agent_probe_1", input: {}, tool_use_id: "toolu_ac1" },
+      process.cwd(),
+    )
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    const parsed = JSON.parse(result.content)
+    expect(parsed.agent).toEqual(TEST_AGENT)
+    expect(parsed.env.MINIMAL_AGENT_SESSION_ID).toBe("ac-session-uuid")
+    expect(parsed.env.MINIMAL_AGENT_PID).toBe("42")
+    expect(parsed.env.MINIMAL_AGENT_MODEL).toBe("claude-opus-4-7[1m]")
+    expect(parsed.env.MINIMAL_AGENT_VERSION).toBe("1.2.3")
+    rmSync(join(HOME_AC, "plugins", "p1"), { recursive: true })
+  })
+
+  it("synthesizes AgentContext from the deprecated `sessionId` option when `agent` is omitted", async () => {
+    writePackage(HOME_AC, "p2", toolManifest("p2", "agent_probe_2", "./h.ts"), {
+      "h.ts": AGENT_PROBE_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME_AC,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      sessionId: "legacy-session",
+    })
+    const result = await loader.dispatch(
+      { type: "tool", name: "agent_probe_2", input: {}, tool_use_id: "toolu_ac2" },
+      process.cwd(),
+    )
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    const parsed = JSON.parse(result.content)
+    expect(parsed.agent.sessionId).toBe("legacy-session")
+    expect(parsed.agent.pid).toBe(process.pid)
+    // model and version are inherited from process.env (may be empty in tests)
+    expect(typeof parsed.agent.model).toBe("string")
+    expect(typeof parsed.agent.version).toBe("string")
+    expect(parsed.env.MINIMAL_AGENT_SESSION_ID).toBe("legacy-session")
+    expect(parsed.env.MINIMAL_AGENT_PID).toBe(String(process.pid))
+    rmSync(join(HOME_AC, "plugins", "p2"), { recursive: true })
+  })
+
+  it("leaves ctx.agent undefined when neither `agent` nor `sessionId` is supplied (back-compat)", async () => {
+    writePackage(HOME_AC, "p3", toolManifest("p3", "agent_probe_3", "./h.ts"), {
+      "h.ts": AGENT_PROBE_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME_AC,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const result = await loader.dispatch(
+      { type: "tool", name: "agent_probe_3", input: {}, tool_use_id: "toolu_ac3" },
+      process.cwd(),
+    )
+    if (result.kind !== "tool_result") throw new Error("wrong kind")
+    const parsed = JSON.parse(result.content)
+    expect(parsed.agent).toBeNull()
+    rmSync(join(HOME_AC, "plugins", "p3"), { recursive: true })
+  })
+
+  it("exposes the AgentContext via loader.agentContext() for sibling consumers", async () => {
+    writePackage(HOME_AC, "p4", toolManifest("p4", "agent_probe_4", "./h.ts"), {
+      "h.ts": AGENT_PROBE_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: HOME_AC,
+      projectDir: join(ROOT, "nope-project"),
+      coreToolNames: CORE_TOOLS,
+      agent: TEST_AGENT,
+    })
+    expect(loader.agentContext()).toEqual(TEST_AGENT)
+    rmSync(join(HOME_AC, "plugins", "p4"), { recursive: true })
   })
 })
 
@@ -1541,8 +1662,8 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
       },
       { "key.ts": SYNC_HOOK_HANDLER_BODY },
     )
-    // A second, model-facing plugin so the outer <ma::plugins> wrapper is
-    // still emitted and we can assert the silent one is absent inside.
+    // A second, model-facing plugin so the block is non-null and we can
+    // assert the silent one contributes no section.
     writePackage(SILENT_HOME, "loud_a", toolManifest("loud_a", "tool_loud_a", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
       "PROMPT.md": PROMPT_BODY_A,
@@ -1556,9 +1677,11 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
 
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    expect(block).toContain('<ma::plugin id="loud_a">')
+    expect(block).toContain('<ma::sys::tool name="tool_loud_a">')
     expect(block).toContain(PROMPT_BODY_A)
-    expect(block).not.toContain('<ma::plugin id="silent_a">')
+    // The silent plugin contributes nothing: neither its id nor its
+    // dev-doc description leaks into the composed prompt.
+    expect(block).not.toContain("silent_a")
     expect(block).not.toContain("this dev-doc description must NOT leak")
     rmSync(join(SILENT_HOME, "plugins", "silent_a"), { recursive: true })
     rmSync(join(SILENT_HOME, "plugins", "loud_a"), { recursive: true })
@@ -1740,5 +1863,125 @@ describe("PluginLoader / silent plugins (no PROMPT.md)", () => {
     expect(logs.some((l) => l.includes("PROMPT.md") && l.includes("missing"))).toBe(false)
     expect(loader.getPromptBlock()).toBeNull()
     rmSync(join(SILENT_HOME, "plugins", "quiet"), { recursive: true })
+  })
+})
+
+describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
+  const ROLE_ROOT = resolve(__dirname, "../../tmp/loader-role-tests")
+  const ROLE_HOME = join(ROLE_ROOT, "home")
+
+  beforeAll(() => {
+    rmSync(ROLE_ROOT, { recursive: true, force: true })
+    mkdirSync(ROLE_HOME, { recursive: true })
+  })
+  afterAll(() => rmSync(ROLE_ROOT, { recursive: true, force: true }))
+
+  it("composes one section per role, ordered behavior < tool < emit < mode < context", async () => {
+    // behavior: PROMPT.md only, no contributions. name = slug(H1).
+    writePackage(
+      ROLE_HOME,
+      "beh",
+      { id: "beh", name: "Beh", version: "0.1.0", description: "d" },
+      {
+        "PROMPT.md": "# My Rules\n\nAlways do the thing.",
+      },
+    )
+    // tool: name = tool name.
+    writePackage(ROLE_HOME, "too", toolManifest("too", "ZTool", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+      "PROMPT.md": "Use ZTool wisely.",
+    })
+    // emit: inline-tag only. name = tag.
+    writePackage(ROLE_HOME, "emt", inlineManifest("emt", "mytag", "./h.ts"), {
+      "h.ts": INLINE_HANDLER_BODY,
+      "PROMPT.md": "Emit mytag to do X.",
+    })
+    // mode: name = mode id.
+    writePackage(
+      ROLE_HOME,
+      "mod",
+      {
+        id: "mod",
+        name: "Mod",
+        version: "0.1.0",
+        description: "d",
+        modes: [{ id: "zen", label: "ZEN" }],
+      },
+      { "PROMPT.md": "In zen mode, breathe." },
+    )
+    // context: PROMPT.md + a prompt fragment → context. name = slug(H1).
+    writePackage(
+      ROLE_HOME,
+      "ctx",
+      {
+        id: "ctx",
+        name: "Ctx",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          { id: "f", handler: { type: "module", path: "./f.ts", export: "default" } },
+        ],
+      },
+      { "PROMPT.md": "# Ambient\n\nReference data.", "f.ts": "export default async () => ''" },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: ROLE_HOME,
+      projectDir: join(ROLE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const block = loader.getPromptBlock()!
+    expect(block).toBeString()
+
+    // Each role rendered with the right wrapper + name.
+    expect(block).toContain('<ma::sys::behavior name="my-rules">')
+    expect(block).toContain('<ma::sys::tool name="ZTool">')
+    expect(block).toContain('<ma::sys::emit name="mytag">')
+    expect(block).toContain('<ma::sys::mode name="zen">')
+    expect(block).toContain('<ma::sys::context name="ambient">')
+
+    // Ordering: behavior < tool < emit < mode < context.
+    const order = ["my-rules", "ZTool", "mytag", "zen", "ambient"].map((n) => block.indexOf(n))
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+
+    // No plugin framing leaks.
+    expect(block).not.toContain("ma::plugin")
+    expect(block).not.toContain("<ma::plugins>")
+
+    rmSync(ROLE_HOME, { recursive: true })
+    mkdirSync(ROLE_HOME, { recursive: true })
+  })
+
+  it("disambiguates a same-(role,name) collision with a numeric suffix", async () => {
+    // Two behavior plugins whose H1 slugs collide.
+    writePackage(
+      ROLE_HOME,
+      "r1",
+      { id: "r1", name: "R1", version: "0.1.0", description: "d" },
+      {
+        "PROMPT.md": "# Rules\n\nFirst set.",
+      },
+    )
+    writePackage(
+      ROLE_HOME,
+      "r2",
+      { id: "r2", name: "R2", version: "0.1.0", description: "d" },
+      {
+        "PROMPT.md": "# Rules\n\nSecond set.",
+      },
+    )
+    const loader = await PluginLoader.load({
+      homeDir: ROLE_HOME,
+      projectDir: join(ROLE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const block = loader.getPromptBlock()!
+    expect(block).toContain('<ma::sys::behavior name="rules">')
+    expect(block).toContain('<ma::sys::behavior name="rules-2">')
+    // Both bodies present, each in its own section.
+    expect(block).toContain("First set.")
+    expect(block).toContain("Second set.")
+    rmSync(ROLE_HOME, { recursive: true })
+    mkdirSync(ROLE_HOME, { recursive: true })
   })
 })

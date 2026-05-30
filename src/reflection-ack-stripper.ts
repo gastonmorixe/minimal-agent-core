@@ -11,8 +11,8 @@
  * the rendered confirmation. The tag should be hidden, the rendered line is
  * the user-visible artifact.
  *
- * **Why not the `<ma::plugin::` inline-tag scanner.** That scanner is namespaced to
- * `<ma::plugin::` openers (see `OPENER_PROBE` in `src/plugins/scanner.ts`) and only
+ * **Why not the `<ma::emit::` inline-tag scanner.** That scanner is namespaced to
+ * `<ma::emit::` openers (see `OPENER_PROBE` in `src/plugins/scanner.ts`) and only
  * matches plugin-contributed tags. The `<ma::` namespace is agent-runtime
  * protocol and intentionally not plugin-handleable — see the project memory
  * note on namespace conventions (#mp2793zz-e02e).

@@ -1,5 +1,5 @@
 /**
- * Inline-tag handler for `<ma::plugin::memory [scope="global"|"project"|"short-term"]>...</ma::plugin::memory>`.
+ * Inline-tag handler for `<ma::emit::memory [scope="global"|"project"|"short-term"]>...</ma::emit::memory>`.
  *
  * Behavior:
  *   1. Append the body as a new bullet through `lib/store.ts`. The target

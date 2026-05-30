@@ -104,6 +104,12 @@ probe() {
   # The agent (src/index.ts) sets MINIMAL_AGENT_MODEL to the resolved
   # model id (--model arg or DEFAULT_MODEL fallback) before loader.load.
   probe model          bash -c 'echo "${MINIMAL_AGENT_MODEL:-}"' &
+  # Agent process id. The loader exports MINIMAL_AGENT_PID via
+  # `agentContextToEnv`; $PPID is the bash-spawn fallback when this
+  # script is invoked outside the agent (no MINIMAL_AGENT_PID set).
+  probe pid            bash -c 'echo "${MINIMAL_AGENT_PID:-$PPID}"' &
+  # Agent semver from package.json, also via agentContextToEnv.
+  probe version        bash -c 'echo "${MINIMAL_AGENT_VERSION:-}"' &
   wait
 } > /tmp/env-info-$$.out
 
@@ -112,14 +118,15 @@ probe() {
 sort /tmp/env-info-$$.out > /tmp/env-info-$$.sorted
 rm -f /tmp/env-info-$$.out
 
-# Wrap as a fenced ini-ish block so the model sees it as structured data.
+# Emit a fenced ini-ish block so the model sees it as structured data. The
+# loader composes this fragment into a <ma::sys::context name="environment">
+# section, so we do NOT add our own wrapper tag here (a bare <env> would be
+# the lone tag in the whole prompt outside the <ma::*> namespace).
 # stderr is redirected for the whole emit so a closed pipe (test cancellation,
 # loader teardown) doesn't print "broken pipe" diagnostics.
 {
-  echo '<env snapshot="session-start">'
   echo '```ini'
   cat /tmp/env-info-$$.sorted
   echo '```'
-  echo '</env>'
 } 2>/dev/null
 rm -f /tmp/env-info-$$.sorted

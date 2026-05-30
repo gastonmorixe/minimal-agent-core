@@ -1,17 +1,17 @@
 /**
- * Per-turn `<ma::plugin::memory::short-term>` attachment producer.
+ * Per-turn `<ma::agent::short-term-memory>` attachment producer.
  *
  * The agent's session-scoped scratchpad is stored at
  * `~/.minimal-agent/sessions/<sid>.scratch.md` (see
  * {@link MemoryStore.shortTerm}). To make the contents reliably present
  * in the model's context every turn — without busting the system-prompt
- * cache — we prepend a `<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>`
+ * cache — we prepend a `<ma::agent::short-term-memory>…</ma::agent::short-term-memory>`
  * attachment to the FIRST user message of each `Agent.run` call.
  *
  * This sits behind the rolling-tail cache breakpoint (which is
  * invalidated every turn anyway by the user message changing), so the
  * snapshot costs zero extra cache invalidation. Same shape as the
- * `<mode-change>` and `<memory-saved>` attachments — the model already
+ * `<mode-change>` and `<ma::agent::memory-saved>` attachments — the model already
  * has the pattern.
  *
  * Only emitted at the INITIAL user-content seam, not at the loop seam
@@ -69,7 +69,7 @@ export class ShortTermSnapshot {
     const lines = bullets.map((b) => `[#${b.id}] ${b.body}`)
     return {
       type: "text",
-      text: `<ma::plugin::memory::short-term>\n${lines.join("\n")}\n</ma::plugin::memory::short-term>`,
+      text: `<ma::agent::short-term-memory>\n${lines.join("\n")}\n</ma::agent::short-term-memory>`,
     }
   }
 

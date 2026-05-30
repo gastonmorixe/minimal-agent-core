@@ -206,7 +206,7 @@ describe("SaveEchoCollector.enqueue", () => {
 describe("renderEcho", () => {
   it("emits scope + id + body for short bodies", () => {
     const out = renderEcho({ scope: "project", id: "abc-1234", body: "hi" })
-    expect(out).toBe('<memory-saved scope="project" id="abc-1234">hi</ma::plugin::memory::saved>')
+    expect(out).toBe('<ma::agent::memory-saved scope="project" id="abc-1234">hi</ma::agent::memory-saved>')
   })
 
   it("truncates bodies longer than 60 chars with …", () => {
@@ -281,7 +281,7 @@ describe("end-to-end shape", () => {
       {
         type: "text",
         text:
-          '<memory-saved scope="project" id="lwq8tg-a8f3">Project memory body example</ma::plugin::memory::saved>',
+          '<ma::agent::memory-saved scope="project" id="lwq8tg-a8f3">Project memory body example</ma::agent::memory-saved>',
       },
     ])
 

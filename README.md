@@ -229,7 +229,7 @@ Every session is stored as append-only JSONL in:
 
 The session id is the same id sent in `x-claude-code-session-id`, printed at startup, and used for local files. Resume does not replay half-written turns. It folds saved records back into `messages[]`, repairs orphan tool pairs, warns on system or tool drift, then shows previous conversation in scrollback before accepting new input.
 
-Assistant turns are persisted as the full `ContentBlock[]` array, including thinking blocks with their cryptographic signatures. Restore is lossless: on resume those thinking blocks ride back into history unchanged, so the `redact-thinking-2026-02-12` beta keeps verifying across reloads. See `AssistantRecord` in `src/session-store.ts` for the schema-level note. The inline `<ma::plugin::interleave-thinking>` tag is NOT persisted (it is dropped by the plugin scanner before it ever reaches a text block); only native API thinking blocks are saved.
+Assistant turns are persisted as the full `ContentBlock[]` array, including thinking blocks with their cryptographic signatures. Restore is lossless: on resume those thinking blocks ride back into history unchanged, so the `redact-thinking-2026-02-12` beta keeps verifying across reloads. See `AssistantRecord` in `src/session-store.ts` for the schema-level note. The inline `<ma::emit::interleave-thinking>` tag is NOT persisted (it is dropped by the plugin scanner before it ever reaches a text block); only native API thinking blocks are saved.
 
 Commands:
 

@@ -1,7 +1,7 @@
 /**
  * `MemoryTool`: the model-facing CRUD tool for saved memories.
  *
- * Companion to the inline-tag save path (`<ma::plugin::memory>`). The tag remains
+ * Companion to the inline-tag save path (`<ma::emit::memory>`). The tag remains
  * the preferred way for the model to save mid-response (low-friction,
  * doesn't interrupt prose); this tool handles every other operation:
  *
@@ -35,7 +35,7 @@
  *
  * Note on `add`: the tool returns the new id directly in `tool_result`, so
  * we deliberately do NOT also emit `memory.saved` on the bus: otherwise
- * the model would see the id twice (tool result + next-turn `<memory-saved>`
+ * the model would see the id twice (tool result + next-turn `<ma::agent::memory-saved>`
  * echo) which reads as "did I save twice?". The inline-tag handler emits
  * because it has no other way to surface the id. The tool doesn't need it.
  *
