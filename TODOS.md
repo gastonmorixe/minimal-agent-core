@@ -3,7 +3,7 @@ title: TODOS
 description: Deferred work, ideas, and known-but-not-yet items. One file at the repo root so any future session can find it. Append-only in spirit; entries are edited only to flip state (todo → doing → done/canceled) and to add a timestamped resolution.
 schema_version: 1
 created_at: 2026-05-26T00:15:29-04:00
-last_updated: 2026-05-26T00:15:29-04:00
+last_updated: 2026-05-30T18:59:03-04:00
 ---
 
 # TODOS
@@ -169,6 +169,140 @@ The agent core retains only the abstract "tool-dispatch interceptor" extension p
 - Tool-dispatch interceptor API surface: synchronous gate vs async, single-callback vs ordered chain.
 - How does `Mode` tool registration coexist with the future per-mode tool-permissions ACL (T-e7ce6f)?
 
+### T-5a17e0: Land the 3 entangled `<ma::emit::>`/`<ma::agent::>` comment renames
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T18:59:03-04:00
+- created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, deferred during the system-prompt role-composition refactor (commits 429f54d + 16c9c36; see `docs/changes/2026-05-30-system-prompt-role-composition.md`)
+- area: `src/agent.ts`, `src/index.ts`, `src/plugins/types.ts`
+
+**Description.** The refactor renamed model-facing tags (`<ma::plugin::*>` → `<ma::emit::*>` / `<ma::agent::*>`). The functional renames are committed. Three files carry only COSMETIC docstring/comment renames of those tags but could not be committed because they were entangled with unrelated in-flight work (a concurrent writer's prompts-as-markdown / SessionInfo workstream) in the same files. `agent.ts` (4 hunks) and `index.ts` (1 hunk) are cleanly hunk-isolatable; `types.ts` has 2 of its 4 renames buried inside a ~109-line WIP hunk, so it cannot be cleanly separated.
+
+**What landing looks like.** When that WIP commits (or is reverted), fold the comment renames in: `git add -p` the pure-mine hunks in `agent.ts`/`index.ts`, and for `types.ts` either wait for the WIP to land then sweep `ma::plugin::` → `ma::emit::` in the 4 TagSpan/trigger docstrings, or `git add -e` the two trapped lines. Verify with `grep -rn 'ma::plugin::' src/{agent,index}.ts src/plugins/types.ts` → 0.
+
+**Why deferred.** Comment-only, zero functional impact, and partial-staging on files an active concurrent writer is editing already caused one bad `--amend` (recovered). Cleanest to let them ride the WIP commit.
+
+### T-5b28f1: Update 4 plugin dev-doc READMEs to the new tag scheme
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T18:59:03-04:00
+- created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, found during post-refactor doc audit
+- area: `plugins/diff-view/README.md` (4), `plugins/interleave-thinking/README.md` (3), `plugins/memory/README.md` (3), `plugins/tasks/README.md` (2)
+
+**Description.** The MODEL-facing prompts (PROMPT.md) are fully migrated, but these four developer-facing READMEs still document the old `<ma::plugin::*>` / `<memory-saved>` / `<short-term-memory>` tags (12 refs total). Not a correctness issue (READMEs are not sent to the model), just stale dev docs.
+
+**What landing looks like.** Sweep each README: `<ma::plugin::diff>` → `<ma::emit::diff>`, `<ma::plugin::memory>` → `<ma::emit::memory>`, `<ma::plugin::interleave-thinking>` → `<ma::emit::interleave-thinking>`, `<ma::plugin::tasks>` → `<ma::agent::tasks>`, `<ma::plugin::memory::short-term>` → `<ma::agent::short-term-memory>`, `<memory-saved>` → `<ma::agent::memory-saved>`. Confirm `grep -rn '<ma::plugin::\|<memory-saved\|<short-term-memory' plugins/*/README.md` → 0.
+
+**Why deferred.** Out of the refactor's stated scope (system-prompt generation). Low urgency.
+
+### T-5c39a2: Extend the session-history migration to the new attachment/emit renames
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T18:59:03-04:00
+- created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, deferred during the role-composition refactor
+- area: `private/migrations/`, cross-check `src/session-replay.ts`, `src/session-restore.ts`
+
+**Description.** Saved sessions (`~/.minimal-agent/sessions/*.jsonl`) created before this refactor carry the OLD per-turn attachment tags (`<ma::plugin::tasks>`, `<ma::plugin::memory::short-term>`, `<memory-saved>`) and old model-emitted tags in assistant turns (`<ma::plugin::diff|memory|interleave-thinking>`). On resume these still render correctly because `session-replay.ts` / `session-restore.ts` match the legacy forms by design, but the stored bytes stay old.
+
+**What landing looks like.** A migration (sibling to `private/migrations/20260528T161007-old-session-history-to-new-plugin-syntax.ts`) that rewrites `<ma::plugin::tasks>` → `<ma::agent::tasks>`, `<ma::plugin::memory::short-term>` → `<ma::agent::short-term-memory>`, `<memory-saved …>…</ma::plugin::memory::saved>` → `<ma::agent::memory-saved>`, and `<ma::plugin::{diff,memory,interleave-thinking}>` → `<ma::emit::…>` in saved JSONL. Dry-run default, `--apply`, full backup, tests, same as the prior migration.
+
+**Why deferred.** Pure cleanliness; read-time legacy tolerance already makes old sessions resume correctly. Only worth doing if/when the legacy read-path tolerance is to be removed.
+
+### T-5d40b3: (perf, optional) move stable `<ma::sys::*>` sections to the global cache block
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T18:59:03-04:00
+- created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, deferred design alternative from the role-composition refactor
+- area: `src/agent.ts` (system-prompt assembly), `src/llm/system-prompt.ts`, `src/plugins/loader.ts`
+
+**Description.** Plugin-composed prompt text currently rides in the session-context block (system[3], per-session cache). The `behavior` / `tool` / `emit` / `mode` sections are stable across users with the same plugin set, so they are candidates for system[2] (the `scope:"global"`, cross-session-shared cache block). Only `context` sections (env snapshot, skills catalog) are genuinely per-session and must stay in system[3].
+
+**What landing looks like.** `loader.getPromptBlock*` returns the composition split by stability (global vs session), and `agent.ts` appends the global sections to the cached instructions block (system[2]) and the context sections to system[3]. The loader should reject `kind: behavior/tool/...` content containing volatile interpolation to keep the global block byte-stable across users.
+
+**Why deferred.** Cut from the refactor to keep blast radius small and avoid touching the provider seam / cache layout. The win is cross-session cold-start cache sharing; within a session the per-session breakpoint already gives turn-over-turn reuse.
+
+### T-5e51c4: (minor) per-tool section naming for multi-tool plugins
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T18:59:03-04:00
+- created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, known limitation noted during the refactor
+- area: `src/plugins/loader/helpers.ts` (`classifyPluginPrompt`), `src/plugins/loader.ts` (`buildBlock`)
+
+**Description.** `classifyPluginPrompt` names a `tool`-role section after the FIRST tool the plugin declares and composes the whole PROMPT.md under that one `<ma::sys::tool name="…">`. A plugin shipping multiple tools with one PROMPT.md would label the section after only tool #1. No bundled or sibling plugin currently ships >1 tool, so this is latent.
+
+**What landing looks like.** Either split a multi-tool plugin's PROMPT.md into one `<ma::sys::tool name="…">` per tool (needs a per-tool body convention), or name the section generically when a plugin has >1 tool. Decide only when a real multi-tool plugin appears.
+
+**Why deferred.** No current plugin triggers it; speculative until one does.
+
+### T-9c2e7a: Media Files-API upload + live upload-progress line (v1.1)
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813, multimodality ingestion build (design in `private/multimodality-ingestion/`)
+- area: `plugins/llm-anthropic/*`, `plugins/llm-openai/*`, `src/llm/provider.ts` (`prepareMedia`/`onMediaProgress` already defined), `src/media/*`, `src/agent/repl-live-area.ts`
+
+v1 inlines images as base64 (matches Claude Code; verified byte-identical to the captured wire). The upgrade: implement `ProviderAdapter.prepareMedia()` to upload large/reused media to the provider file store and reference it by id, caching into `item.prepared[providerId]`.
+
+- Anthropic: `POST /v1/files`, beta header `files-api-2025-04-14`, then image source `{type:"file", file_id}` (canonical `kind:"file_id"` is already encoded by `adapter-legacy.ts`). Threshold ~1 MB or reused-across-turns.
+- OpenAI: `/v1/files`, then Responses `input_image{file_id}` (already encoded in `responses/request-body.ts`).
+- Progress: `prepareMedia` emits `RunContext.onMediaProgress(mediaId, phase, fraction, bytesDone/total)` (hook already on the port); the agent renders a transient line ABOVE the input prompt via the live-area decoration region (`renderDecoration` in `repl-live-area.ts`), cleared on ready/failed. This satisfies the "preemptive upload starts while the user is still typing" requirement.
+
+**Why deferred.** base64 path ships first and is sufficient for the common case; the upload path is the bandwidth/latency optimization for big or repeated media.
+
+### T-4b1f08: openaiMediaLimits() for the canonical OpenAI submit path
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813
+- area: `src/media/`, `plugins/llm-openai/`
+
+`src/media/anthropic.ts` exports `anthropicMediaLimits()` (32 MB request / 5 MB item / jpeg-png-gif-webp + pdf). Today the live media submit path is Anthropic-only (`resolveUserTurnContent` in `src/media/ingest.ts`). When media submit-resolution runs for OpenAI models, add `openaiMediaLimits()` (OpenAI's size/detail rules differ) and have the agent pick limits by the active model's provider instead of hardcoding Anthropic. `MediaItem.prepared` is already keyed by `providerId` so one item can be base64 to Anthropic and file_id to OpenAI without conflict.
+
+### T-d3a6e2: "Compress to fit?" modal for oversize media
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813
+- area: `src/media/limits.ts` (verdict), `src/llm/provider.ts` (`preflight`/`applyResolution`), host modal
+
+No image resize / audio-video transcode now (explicit constraint). Over-limit media is rejected today with a transient `diag.warn` in the live area. The reject path is deliberately shaped as a single pure verdict (`checkMedia`) so the future behavior is: an over-limit item produces a `PreflightIssue{code:"media.oversize", options:[compress|drop|cancel]}` and the host modal offers to compress. A `compress()` step slots between the `validated` and `ready` lifecycle states and rewrites bytes + `bytesSent`; the verdict + registry don't change.
+
+### T-77c9b4: Real-terminal smoke test of media capture + ModelInfo tool
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813
+- area: manual / e2e
+
+The data path is unit-tested + verified byte-identical to the captured wire, but live TTY input can't be driven from a headless agent. Manually: (1) drag a Finder image onto the prompt → confirm `[Image #id WxH size]` token appears; (2) type "describe this" + Enter → opus-4-8 sees it; (3) copy an image, trigger the clipboard path (empty paste) → token appears; (4) drag a 40 MB file → live-area warning, no token; (5) ask "what can you do?" → confirm the model calls `ModelInfo` and answers correctly; (6) confirm a plain text turn is byte-identical to before. Clipboard shim platform coverage (`src/media/clipboard.ts`): macOS `pngpaste`/`osascript`, Linux `wl-paste`/`xclip` — verify on the target OS.
+
+### T-1e5fa3: Optional ModelInfo nudge prompt-fragment (belt-and-suspenders)
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813
+- area: `plugins/model-info/` (add a prompt-fragment handler)
+
+The `ModelInfo` tool's description nudges the model to consult it before claiming it lacks a capability (e.g. accepting images). If, in practice, the model still answers capability meta-questions from priors without calling the tool, add a SMALL model-INDEPENDENT system-prompt fragment (contributed by the `model-info` plugin itself, so it stays self-contained) saying capabilities can change mid-session/on-resume and to call `ModelInfo`. Model-independent text stays in the global prompt cache and adds nothing to resume drift. Gauge need after T-77c9b4.
+
+### T-a08d6c: Enable audio/video ingestion when a provider accepts it
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813
+- area: `src/media/*`, provider plugins' `capabilities.ts`
+
+`MediaKind` includes `audio`/`video` and the registry/probe handle them; they're gated off because no current model accepts them (`modalities.audio/video=false`). OpenAI Chat already has an `input_audio{data,format}` encoder in `chat/request-body.ts`. To enable audio for a capable model: flip `modalities.audio=true` on its registry entry, add accepted formats + byte limits, and the existing `AudioBlock` path carries it. Video needs a canonical video block first (none today; `resolve.ts` returns null for video).
+
+### T-b6402d: Commit the media + ModelInfo + OpenAI work once the tree is green
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T17:15:00-04:00
+- created_by: session=40d7e158-b860-4768-ac70-54f029a29813
+- area: git / repo hygiene
+
+The media-ingestion + `ModelInfo` + OpenAI-image work is complete and green in its own scope (format/lint/typecheck clean, 103 media/model-info/openai tests pass), but the shared worktree is co-occupied by session `5f286880`'s in-flight tool refactor: ~50 of their files are modified, `src/plugins/agent-context.ts` is untracked, and my wiring in `index.ts`/`loader.ts`/`agent.ts`/`plugins/types.ts`/`editor-controller.ts` is intermixed with theirs and imports their untracked `createAgentContext`. A clean isolated commit won't build; a blanket commit captures their unfinished refactor + (transient) failing tests. Once `5f286880` lands and `format:check && lint && typecheck && test` are green, commit the combined tree. My files: `src/media/*`, `src/llm/model-info.ts`(+test), `plugins/model-info/*`, `src/llm/adapter-legacy-media.test.ts`, edits to `src/client/types.ts`/`client.ts`/`llm/adapter-legacy.ts`/`llm/provider.ts`/`client/debug.ts`/`session-dump.ts`/`agent.ts`/`editor-controller.ts`/`index.ts`/`plugins/types.ts`/`plugins/loader.ts`/`plugins/llm-openai/responses/request-body.ts`(+`openai.test.ts`).
+
 ## Audit log
 
 History of state changes goes here as date-stamped one-liners. Helps a future agent understand why an entry's state moved.
@@ -176,3 +310,5 @@ History of state changes goes here as date-stamped one-liners. Helps a future ag
 - 2026-05-26T00:15:29-04:00: file created. Seeded with 5 deferred items from the blob-store design conversation (session ca04ccf1...).
 - 2026-05-27T11:08:00-04:00: added T-e7ce6f (per-mode permission ACL) deferred from the mode-foundation work in session 100a7080.
 - 2026-05-27T11:31:00-04:00: added T-ca2ce1 / T-e945ec / T-c510d3 (tag-namespace migration, plugins tree unification, ModeManager extraction) as deferred sibling work to the mode-system overhaul in session 100a7080.
+- 2026-05-30T18:59:03-04:00: added T-5a17e0 / T-5b28f1 / T-5c39a2 / T-5d40b3 / T-5e51c4, deferred follow-ups from the system-prompt role-composition refactor (commits 429f54d + 16c9c36, session 5f286880). Note T-ca2ce1 (tag-namespace migration) is closely related and partly subsumed: this refactor landed the `<ma::sys|agent|emit::>` grammar for the system-prompt + live tags; T-5c39a2 tracks the remaining saved-session migration.
+- 2026-05-30T17:15:00-04:00: added T-9c2e7a, T-4b1f08, T-d3a6e2, T-77c9b4, T-1e5fa3, T-a08d6c, T-b6402d (multimodality follow-ups: Files-API upload + progress line, OpenAI media limits, compress modal, real-terminal smoke test, ModelInfo nudge fragment, audio/video enablement, and the gated commit) from session 40d7e158 multimodal ingestion build. Design lives in `private/multimodality-ingestion/`.
