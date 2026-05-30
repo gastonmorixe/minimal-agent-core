@@ -290,7 +290,19 @@ export async function* sendMessageOnce(
   // Pass contextManagement: null to opt out; omit to use the conversation
   // default; pass a custom object to override.
   if (contextManagement === undefined) {
-    if (requestType === "conversation" && !isHaiku) {
+    // Escape hatch: `MINIMAL_AGENT_NO_CLEAR_THINKING=1` suppresses the
+    // `clear_thinking_20251015` edit. It is the prime suspect for the
+    // server-side 400 "`thinking`/`redacted_thinking` blocks in the latest
+    // assistant message cannot be modified" that surfaces only once a
+    // conversation grows past a few interleaved-thinking turns (the re-sent
+    // assistant content is byte-identical to a previously-accepted request,
+    // so the mismatch is introduced by the context-management edit, not the
+    // client). Set the env var to confirm/avoid it without a code change.
+    if (
+      requestType === "conversation" &&
+      !isHaiku &&
+      process.env.MINIMAL_AGENT_NO_CLEAR_THINKING !== "1"
+    ) {
       body.context_management = {
         edits: [{ type: "clear_thinking_20251015", keep: "all" }],
       }

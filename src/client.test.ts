@@ -315,6 +315,39 @@ describe("client", () => {
       expect(body.context_management).toBeUndefined()
     })
 
+    it("suppresses context_management when MINIMAL_AGENT_NO_CLEAR_THINKING=1", async () => {
+      // Escape hatch to bypass the server-side clear_thinking edit that is the
+      // prime suspect for the "thinking/redacted_thinking blocks cannot be
+      // modified" 400 on large interleaved-thinking conversations.
+      const prev = process.env.MINIMAL_AGENT_NO_CLEAR_THINKING
+      process.env.MINIMAL_AGENT_NO_CLEAR_THINKING = "1"
+      try {
+        const auth: AuthResult = { type: "oauth", token: "test-token" }
+        const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+        let capturedBody: string | null = null
+        const networkClient = fakeNetworkClient((req) => {
+          capturedBody = String(req.body ?? "")
+          return sseResponse([
+            { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+          ])
+        })
+        await sendMessageFull({
+          auth,
+          messages,
+          model: "claude-opus-4-8",
+          stream: true,
+          networkClient,
+        })
+        const body = JSON.parse(capturedBody!)
+        // thinking stays enabled, but the context-management edit is gone.
+        expect(body.thinking).toBeDefined()
+        expect(body.context_management).toBeUndefined()
+      } finally {
+        if (prev === undefined) delete process.env.MINIMAL_AGENT_NO_CLEAR_THINKING
+        else process.env.MINIMAL_AGENT_NO_CLEAR_THINKING = prev
+      }
+    })
+
     it("includes context_management.clear_thinking when thinking is set (opus/sonnet)", async () => {
       const auth: AuthResult = { type: "oauth", token: "test-token" }
       const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
