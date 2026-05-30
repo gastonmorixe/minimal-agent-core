@@ -64,6 +64,7 @@ import type { NetworkClient } from "./network/index.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import type { ManifestMode } from "./plugins/types.ts"
 import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
+import { appendUserTurn } from "./session-restore.ts"
 import type { SessionStore } from "./session-store.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 import { displayWidth, expandTabs } from "./term-width.ts"
@@ -775,10 +776,14 @@ export class Agent {
     if (userText.length > 0) {
       initialUserContent.push({ type: "text", text: userText })
     }
-    this.messages.push({
-      role: "user",
-      content: initialUserContent,
-    })
+    // Append the user turn. `appendUserTurn` merges into a trailing `user`
+    // message instead of creating a `[user, user]` pair the API rejects :
+    // this happens on resume when a force-quit stranded tool_results without
+    // their assistant continuation and the un-replied prompt was pulled into
+    // the editor as a pending draft (see `extractPendingDraft`), leaving
+    // `user([tool_results])` as the tail. Normal turns (last message is an
+    // assistant) just append a fresh message.
+    appendUserTurn(this.messages, initialUserContent)
     // Persist to JSONL. Orphan-repair tool_result blocks were ALREADY
     // written via per-block `appendToolResult` inside
     // `repairOrphanedToolUse` (matching the in-loop convention where

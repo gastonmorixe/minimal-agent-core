@@ -6,6 +6,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import {
+  appendUserTurn,
   extractPendingDraft,
   firstUserPromptSnippet,
   foldRecords,
@@ -442,10 +443,14 @@ describe("extractPendingDraft", () => {
     expect(messages).toHaveLength(3)
   })
 
-  // Mixed: a trailing user message with BOTH text and tool_result. We
-  // err on the side of preserving the message intact (tool_result is
-  // load-bearing for the model's next turn).
-  it("does not touch a trailing user message mixing text and tool_result", () => {
+  // Mixed: a trailing user message with BOTH text and tool_result. This is
+  // a force-quit mid-turn: the agent ran tools, results came back, but the
+  // assistant continuation never streamed and the user's next prompt got
+  // merged onto the same turn (repairMessages folds tool_results forward).
+  // The human text becomes the pending draft (prefilled into the editor);
+  // the load-bearing tool_results stay so the assistant's tool_use is still
+  // paired. Without this, the prompt was wrongly replayed into scrollback.
+  it("extracts the human text as a draft and keeps the tool_results", () => {
     const messages: Message[] = [
       { role: "user", content: "go" },
       {
@@ -466,8 +471,88 @@ describe("extractPendingDraft", () => {
       },
     ]
     const draft = extractPendingDraft(messages)
-    expect(draft).toBeNull()
+    expect(draft).toBe("and a queued prompt")
     expect(messages).toHaveLength(3)
+    // The trailing user message keeps ONLY the tool_result (text pulled out).
+    const tail = messages[2].content as Array<{ type: string }>
+    expect(tail).toHaveLength(1)
+    expect(tail[0].type).toBe("tool_result")
+  })
+
+  // The draft is human-typed prose only. Runtime attachment blocks the
+  // send-seam prepends (short-term memory, tasks, mode-change, save-echo,
+  // reflection markers) are regenerated on the next submit and must NOT
+  // leak into the prefilled editor.
+  it("strips runtime attachment blocks, keeping only the human text", () => {
+    const messages: Message[] = [
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "<ma::plugin::memory::short-term>\n[#1] note\n</ma::plugin::memory::short-term>",
+          },
+          { type: "text", text: '<ma::plugin::tasks total="2" done="1">…</ma::plugin::tasks>' },
+          { type: "text", text: "the actual instruction I typed" },
+        ],
+      },
+    ]
+    const draft = extractPendingDraft(messages)
+    expect(draft).toBe("the actual instruction I typed")
+    expect(messages).toHaveLength(1) // whole message popped (no tool_results)
+  })
+
+  // An attachment-only trailing user message (no human prose) is plumbing,
+  // not a draft. Leave it; surface nothing for the editor.
+  it("returns null for an attachment-only trailing user message", () => {
+    const messages: Message[] = [
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: '<ma::agent::mode-change from="ask" to="default" />' },
+          { type: "text", text: '<ma::plugin::tasks total="1" done="0">…</ma::plugin::tasks>' },
+        ],
+      },
+    ]
+    const draft = extractPendingDraft(messages)
+    expect(draft).toBeNull()
+    expect(messages).toHaveLength(2)
+  })
+
+  // The full force-quit shape: tool_results + attachments + the unsent
+  // prompt, all merged into the tail. Draft = the prompt only; the message
+  // is rebuilt with just the tool_results.
+  it("handles tool_results + attachments + human text together", () => {
+    const messages: Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Edit", input: {} } as ToolUseBlock],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_1",
+            content: "File edited",
+            is_error: false,
+          } as ToolResultBlock,
+          {
+            type: "text",
+            text: "<ma::plugin::memory::short-term>\nx\n</ma::plugin::memory::short-term>",
+          },
+          { type: "text", text: "ROLE LOCK — you are a manager" },
+        ],
+      },
+    ]
+    const draft = extractPendingDraft(messages)
+    expect(draft).toBe("ROLE LOCK — you are a manager")
+    expect(messages).toHaveLength(2)
+    const tail = messages[1].content as Array<{ type: string }>
+    expect(tail).toHaveLength(1)
+    expect(tail[0].type).toBe("tool_result")
   })
 
   it("returns null when the trailing message is assistant", () => {
@@ -529,6 +614,81 @@ describe("extractPendingDraft", () => {
     const draft = extractPendingDraft(messages)
     expect(draft).toBeNull()
     expect(messages).toHaveLength(2)
+  })
+})
+
+describe("appendUserTurn", () => {
+  it("appends a fresh user message when the last message is an assistant turn", () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ]
+    appendUserTurn(messages, [{ type: "text", text: "next" }])
+    expect(messages).toHaveLength(3)
+    expect(messages[2].role).toBe("user")
+    expect((messages[2].content as Array<{ text?: string }>)[0].text).toBe("next")
+  })
+
+  it("appends a fresh user message on an empty history", () => {
+    const messages: Message[] = []
+    appendUserTurn(messages, [{ type: "text", text: "first" }])
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("user")
+  })
+
+  it("coalesces into a trailing user([tool_result]) instead of [user, user]", () => {
+    const messages: Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: {} } as ToolUseBlock],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_1",
+            content: "ok",
+            is_error: false,
+          } as ToolResultBlock,
+        ],
+      },
+    ]
+    appendUserTurn(messages, [{ type: "text", text: "the resumed draft" }])
+    // No second user message was created.
+    expect(messages).toHaveLength(2)
+    const blocks = messages[1].content as Array<{ type: string; text?: string }>
+    // tool_result stays FIRST (API requires it immediately after tool_use).
+    expect(blocks[0].type).toBe("tool_result")
+    expect(blocks[1].type).toBe("text")
+    expect(blocks[1].text).toBe("the resumed draft")
+  })
+
+  it("keeps tool_results first even when merging onto a mixed trailing message", () => {
+    const messages: Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: {} } as ToolUseBlock],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_1",
+            content: "ok",
+            is_error: false,
+          } as ToolResultBlock,
+          { type: "text", text: "leftover" },
+        ],
+      },
+    ]
+    appendUserTurn(messages, [{ type: "text", text: "new" }])
+    expect(messages).toHaveLength(2)
+    const blocks = messages[1].content as Array<{ type: string; text?: string }>
+    expect(blocks.map((b) => b.type)).toEqual(["tool_result", "text", "text"])
+    expect(blocks[1].text).toBe("leftover")
+    expect(blocks[2].text).toBe("new")
   })
 })
 
