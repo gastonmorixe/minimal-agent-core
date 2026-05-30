@@ -11,10 +11,10 @@
 
 import { describe, expect, test } from "bun:test"
 
-import type { EditorKeyPayload } from "../editor-controller.ts"
 import { FOOTER_LAYER_OVERLAY } from "../editor/types.ts"
-import { Hooks } from "../plugins/hooks/hooks.ts"
+import type { EditorKeyPayload } from "../editor-controller.ts"
 import type { PreflightIssue } from "../llm/provider.ts"
+import { Hooks } from "../plugins/hooks/hooks.ts"
 
 import { type AskUserHostEditor, createAskUserHost, translateEditorKey } from "./ask-user-host.ts"
 
