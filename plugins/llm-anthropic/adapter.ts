@@ -18,6 +18,8 @@ import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import {
+  type PreflightIssue,
+  type PreflightResolution,
   type ProviderAdapter,
   type ProviderAuth,
   type RunContext,
@@ -34,6 +36,12 @@ import { buildAnthropicRequestBody } from "./request-body.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "./response-stream.ts"
 import { fetchAnthropicSessionInfo } from "./session-info.ts"
 import { resolveAnthropicSystemPrompt } from "./system-prompt.ts"
+import {
+  applyMismatchResolution,
+  buildMismatchIssue,
+  findThinkingMismatches,
+  ISSUE_THINKING_MODEL_MISMATCH,
+} from "./thinking-preflight.ts"
 import { validateAnthropicRequest } from "./validate.ts"
 
 // ---------------------------------------------------------------------------
@@ -57,6 +65,53 @@ export const anthropicAdapter: ProviderAdapter = {
 
   validate(req, model): ValidationResult {
     return validateAnthropicRequest(req, model)
+  },
+
+  /**
+   * Preflight: detect thinking-block signatures that were produced by a
+   * different model than the request's `modelId`. Returns one issue
+   * when any such mismatch is found (so the agent only opens one modal
+   * per send even if the conversation has many stale blocks). Returns
+   * `[]` when the request is clean.
+   *
+   * Why this is the only issue today: model-signed thinking is the
+   * single class of validation error we can fix BEFORE the round-trip.
+   * Everything else (overload, rate limit, auth) needs server feedback.
+   */
+  preflight(req: CanonicalRequest, _model: ModelEntry): PreflightIssue[] {
+    const mismatches = findThinkingMismatches(req.messages, req.modelId)
+    if (mismatches.length === 0) return []
+    return [buildMismatchIssue(mismatches, req.modelId)]
+  },
+
+  /**
+   * Apply the user's resolution to a {@link ISSUE_THINKING_MODEL_MISMATCH}
+   * issue. Delegates to the pure `applyMismatchResolution` helper and
+   * translates its outcome into the canonical {@link PreflightResolution}
+   * shape.
+   */
+  applyResolution(
+    req: CanonicalRequest,
+    issueCode: string,
+    optionId: string,
+  ): PreflightResolution {
+    if (issueCode !== ISSUE_THINKING_MODEL_MISMATCH) {
+      throw new Error(
+        `anthropicAdapter.applyResolution: unknown issue code "${issueCode}" (expected "${ISSUE_THINKING_MODEL_MISMATCH}")`,
+      )
+    }
+    const outcome = applyMismatchResolution(req, optionId)
+    if (outcome.kind === "cancel") return { kind: "cancel" }
+    if (outcome.kind === "unknown-option") {
+      throw new Error(
+        `anthropicAdapter.applyResolution: unknown option id "${outcome.optionId}" for ${issueCode}`,
+      )
+    }
+    return {
+      kind: "modify-request",
+      request: { ...req, messages: outcome.messages },
+      ...(outcome.adoptModelId !== undefined ? { adoptModelId: outcome.adoptModelId } : {}),
+    }
   },
 
   async *run(

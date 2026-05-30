@@ -64,6 +64,18 @@ export interface ReplAgentLike {
        * (Bash child gets SIGTERM → SIGKILL escalation).
        */
       signal?: AbortSignal
+      /**
+       * Optional host-provided callback the agent invokes when the
+       * provider's preflight surfaces an issue that needs user
+       * resolution (e.g. Anthropic detected thinking-block signatures
+       * from a different model). The host opens a modal in the live
+       * area and resolves with the chosen option id (`null` to cancel).
+       *
+       * Live-area REPL wires this when both a `setFooterLayer`-capable
+       * editor and a plugin loader (Hooks bus) are present; headless
+       * setups leave it undefined and skip preflight entirely.
+       */
+      askUser?: (issue: import("../llm/provider.ts").PreflightIssue) => Promise<string | null>
     },
   ): AsyncGenerator<string, StreamedResponse, undefined>
   /** Optional: current model id (for diagnostics/recovery prompts). */

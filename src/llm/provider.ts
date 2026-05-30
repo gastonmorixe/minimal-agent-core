@@ -105,6 +105,76 @@ export interface ValidationResult {
 }
 
 // ---------------------------------------------------------------------------
+// Preflight (pre-dispatch issues that need user decision)
+// ---------------------------------------------------------------------------
+
+/**
+ * One mutually-exclusive choice the user can pick to resolve a
+ * {@link PreflightIssue}. Provider-defined `id` values are passed back
+ * into {@link ProviderAdapter.applyResolution} verbatim, so providers
+ * are free to use any stable string (e.g. `"strip"`, `"switch:claude-opus-4-7"`).
+ *
+ * UI hints:
+ * - `label`: short button caption.
+ * - `description`: optional one-line explanation rendered beneath the label.
+ * - `isDefault`: at most one per issue, used as the initial selection.
+ * - `destructive`: true if picking this would lose state (e.g. strip context);
+ *   the modal MAY render a warning ornament.
+ */
+export interface PreflightOption {
+  id: string
+  label: string
+  description?: string
+  isDefault?: boolean
+  destructive?: boolean
+}
+
+/**
+ * One issue the provider detected that requires user resolution BEFORE
+ * the network call. Multiple issues per request are allowed; the agent
+ * asks the user about each one in declaration order.
+ *
+ * `code` is provider-defined and stable across versions, so callers can
+ * special-case telemetry or auto-resolution per issue. Example codes:
+ *
+ * - `"anthropic.thinking-model-mismatch"` — the history contains
+ *   thinking-block signatures from a different model than the one the
+ *   request is targeting (e.g. fork chain that switched models). The
+ *   Anthropic server rejects the request without intervention.
+ */
+export interface PreflightIssue {
+  code: string
+  /** One-line title shown at the top of the modal. */
+  title: string
+  /**
+   * Body paragraph(s). The host renderer is expected to wrap to the
+   * modal's available width. Use `\n` to force a paragraph break.
+   */
+  detail: string
+  /** Mutually-exclusive resolutions the user picks from. */
+  options: PreflightOption[]
+}
+
+/**
+ * Result of applying a user's resolution to a {@link PreflightIssue}.
+ *
+ * - `"modify-request"`: the provider returns a modified request to send
+ *   in place of the original. Optionally signals `adoptModelId` to ask
+ *   the agent to update its own model id for future turns too (e.g.
+ *   when the user picks "switch back to the original model").
+ * - `"cancel"`: the user declined to proceed; the agent should abort
+ *   the current send (typically by throwing an AbortError).
+ */
+export type PreflightResolution =
+  | {
+      kind: "modify-request"
+      request: CanonicalRequest
+      /** Optional model id the agent should adopt for subsequent turns. */
+      adoptModelId?: string
+    }
+  | { kind: "cancel" }
+
+// ---------------------------------------------------------------------------
 // Surface ids
 // ---------------------------------------------------------------------------
 
@@ -146,6 +216,34 @@ export interface ProviderAdapter {
    * yields `StreamErrorEvent` on retryable mid-stream errors.
    */
   run(req: CanonicalRequest, model: ModelEntry, ctx: RunContext): AsyncIterable<CanonicalEvent>
+
+  /**
+   * Optional: scan the request for issues that need user resolution
+   * BEFORE the network call. Pure : no network, no I/O. Returns an
+   * empty array (or undefined) for a clean request.
+   *
+   * The agent invokes this on every send (or once per model change,
+   * provider's choice via cheap fingerprint inside the function).
+   * When any issue is returned, the agent opens a host-provided modal
+   * (one per issue) and routes the chosen option id back to
+   * {@link applyResolution}.
+   *
+   * Provider-specific: Anthropic detects model-signature mismatches
+   * from session-fork chains so the user can pick "strip stale thinking
+   * blocks", "switch back to the original model", or "cancel" instead
+   * of hitting the API and getting a 400. Other providers have no
+   * issues to surface today and may leave this undefined.
+   */
+  preflight?(req: CanonicalRequest, model: ModelEntry): PreflightIssue[]
+
+  /**
+   * Optional: apply the user's resolution to an issue raised by
+   * {@link preflight}. Receives the original request, the issue code,
+   * and the option id chosen by the user. Returns the modified request
+   * to send, or a cancel signal. Must be defined when `preflight()`
+   * returns any issues.
+   */
+  applyResolution?(req: CanonicalRequest, issueCode: string, optionId: string): PreflightResolution
 
   /**
    * Optional: enumerate models the authenticated principal can see.

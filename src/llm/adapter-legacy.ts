@@ -201,7 +201,14 @@ export function streamedResponseToCanonicalEvents(
 // canonical message ↔ legacy message
 // ---------------------------------------------------------------------------
 
-function canonicalMessageToLegacy(msg: CanonicalMessage): LegacyMessage {
+/**
+ * canonical message -> legacy `Message`.
+ *
+ * Exported so callers that operate in the canonical layer (e.g. the
+ * preflight resolution pipeline) can translate the resolved request
+ * back into legacy shape for the legacy transport.
+ */
+export function canonicalMessageToLegacy(msg: CanonicalMessage): LegacyMessage {
   // Mid-conversation `role:"system"` collapses to a single string;
   // the legacy client doesn't support the role yet, so we approximate
   // by prepending a marker prefix on a user message. Callers that
@@ -492,8 +499,13 @@ function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | nul
   }
 }
 
-/** legacy `Message` -> canonical message. */
-function legacyMessageToCanonical(msg: LegacyMessage): CanonicalMessage {
+/**
+ * legacy `Message` -> canonical message.
+ *
+ * Exported so other layers (preflight pipeline, etc.) can convert
+ * without re-implementing the per-block translation.
+ */
+export function legacyMessageToCanonical(msg: LegacyMessage): CanonicalMessage {
   const blocks =
     typeof msg.content === "string"
       ? [{ type: "text" as const, text: msg.content }]
