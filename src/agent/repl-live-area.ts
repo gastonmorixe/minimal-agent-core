@@ -22,6 +22,7 @@ import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"
 import { buildQueueDecorationLines } from "../queue-decoration.ts"
+import { loadQueue, QueueStore } from "../queue-store.ts"
 import type { Spinner } from "../spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, type StatusSpinnerTheme } from "../status.ts"
 
@@ -149,6 +150,10 @@ export async function runReplLiveArea(
         // path in `flushPendingModeChangeChip` lands the mode-change
         // chip itself).
         queue.push({ text: "", commitLines: [] })
+        // Synthetic zero-text items get persisted too; loadQueue filters
+        // them out on restore, so they're effectively no-ops across
+        // sessions but the bookkeeping stays uniform with real submits.
+        persistQueue()
         renderDecoration()
         // Abort the in-flight request. The next turn iteration will
         // call agent.run("") which becomes a mode-change-only turn.
@@ -353,6 +358,29 @@ export async function runReplLiveArea(
   // the queue widget at the same time (Bug 393).
   type QueueItem = { text: string; commitLines: string[] }
   const queue: QueueItem[] = []
+  // Persist the queue to <sid>.queue on every mutation so submits typed
+  // during a busy turn survive process exit (clean Ctrl+C or crash). The
+  // store is a no-op when no sessionId was provided (ad-hoc runs, some
+  // tests). See src/queue-store.ts for on-disk format + crash semantics;
+  // the empty-array snapshot deletes the file, so a clean drain leaves
+  // no stale state behind.
+  const queueStore = opts.sessionId ? new QueueStore(opts.sessionId) : null
+  const persistQueue = (): void => {
+    queueStore?.save(queue)
+  }
+  // Restore any items left behind by a prior crash/exit on this sid.
+  // Items will surface visually the first time the main loop sets
+  // `running = true` (renderDecoration is a no-op at idle). Synthetic
+  // zero-text items pushed by the Alt+M mode-interrupt path are NOT
+  // restored (loadQueue filters them out); their pending-mode state from
+  // the prior session is gone too, so replaying them would be a no-op.
+  if (queueStore) {
+    for (const item of loadQueue(opts.sessionId as string)) {
+      queue.push(item)
+    }
+    // We do NOT persist here; the file we just loaded from already
+    // contains exactly these items, so a re-save is wasted I/O.
+  }
   /** Flush a queue item's pre-rendered scrollback lines, if any. */
   const flushQueueItemToScrollback = (item: QueueItem): void => {
     if (item.commitLines.length === 0) return
@@ -455,6 +483,9 @@ export async function runReplLiveArea(
   const onSubmit = (text: string, commitLines: string[] = []): void => {
     if (!text.trim()) return
     queue.push({ text, commitLines })
+    // Persist BEFORE any other side effect so a crash between push and
+    // the next instruction still recovers the submit on next resume.
+    persistQueue()
     renderDecoration()
     wakeWaiter()
     // Fan out to the plugin bus so subscribers (notably the `history`
@@ -549,6 +580,12 @@ export async function runReplLiveArea(
       }
       const item = queue.shift()
       if (item === undefined) continue
+      // Persist the now-shorter queue. The window between this save and
+      // the agent's appendUser call (in run()) is a few microseconds of
+      // synchronous code; a hard crash in that gap loses ONE item.
+      // Acceptable: the pre-store behavior lost every queued item on
+      // every exit. See queue-store.ts module doc for the full rationale.
+      persistQueue()
       const text = item.text
       // Flush the deferred scrollback commit NOW (the editor stopped
       // writing at submit time : Bug 393). For queued items this is
@@ -788,6 +825,10 @@ export async function runReplLiveArea(
       const drainQueuedUserText = (): string | null => {
         if (queue.length === 0) return null
         const drained = queue.splice(0)
+        // Persist the now-empty queue. Same micro-race-window caveat as
+        // the turn-start shift above; agent.ts's `appendUser` for the
+        // injected text follows on the same synchronous tick.
+        persistQueue()
         // Flush each drained item's pre-rendered scrollback lines IN ORDER
         // before injecting their combined text into the agent. The user
         // sees their queued prompts materialize in scrollback at the moment
