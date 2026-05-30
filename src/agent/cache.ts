@@ -34,18 +34,20 @@ import type { ContentBlock, Message } from "../client.ts"
  */
 export function withRollingCacheBreakpoint(messages: Message[]): Message[] {
   if (messages.length === 0) return messages
-  const out: Message[] = messages.map((m) => ({
-    ...m,
-    content:
-      typeof m.content === "string"
-        ? m.content
-        : m.content.map((b) => {
-            // cache_control is now declared on every ContentBlock variant, so
-            // no cast is needed to destructure it out.
-            const { cache_control: _drop, ...rest } = b
-            return rest as ContentBlock
-          }),
-  }))
+  // Drop stale thinking from older assistant turns BEFORE building the request
+  // (see stripStaleThinking). Re-sending every prior turn's thinking balloons
+  // the request and 400s once several interleaved-thinking turns accumulate.
+  const pruned = stripStaleThinking(messages)
+  const out: Message[] = pruned.map((m) => {
+    if (typeof m.content === "string") return { role: m.role, content: m.content }
+    // cache_control is declared on every ContentBlock variant, so destructure
+    // it out (no cast needed) to strip earlier breakpoints before re-marking.
+    const content = m.content.map((b) => {
+      const { cache_control: _drop, ...rest } = b
+      return rest as ContentBlock
+    })
+    return { role: m.role, content }
+  })
   const last = out[out.length - 1]
   if (typeof last.content === "string") {
     last.content = [{ type: "text", text: last.content }]
@@ -75,6 +77,54 @@ export function withRollingCacheBreakpoint(messages: Message[]): Message[] {
   }
   blocks[idx] = tail
   return out
+}
+
+/**
+ * Drop `thinking` / `redacted_thinking` blocks from every assistant message
+ * EXCEPT the most recent one. The Anthropic API only requires the LATEST
+ * assistant turn's thinking to be preserved (the interleaved-thinking tool-use
+ * loop). Re-sending full thinking from every prior turn balloons the request
+ * and, once a few interleaved-thinking turns accumulate (~200 KB+ of thinking
+ * signatures), trips a 400:
+ *
+ *   messages.<i>.content.<j>: `thinking` or `redacted_thinking` blocks in the
+ *   latest assistant message cannot be modified. These blocks must remain as
+ *   they were in the original response.
+ *
+ * Observed live on session 562e2a3f (anth-4.8, interleaved-thinking beta,
+ * display:"summarized"): 1 thinking turn / 119 KB of signatures → OK, 2 /
+ * 186 KB → OK, 3 / 223 KB → 400. The assistant content we re-send is
+ * byte-identical to what the model produced (verified against the SSE
+ * capture), so the failure is payload accumulation, not a client mutation.
+ *
+ * Stripping stale thinking client-side keeps the request small and matches
+ * what the server's `clear_thinking_20251015` edit intends (our `keep:"all"`
+ * tells the server NOT to clear, so we must). The latest assistant turn is
+ * never touched : its thinking text + signatures stay byte-identical, which
+ * the tool-use continuation requires. Tool_use blocks in older turns are
+ * preserved so tool_use/tool_result pairing stays intact. Returns a new array;
+ * the caller's `messages` (and the agent's persisted history) are not mutated.
+ */
+export function stripStaleThinking(messages: Message[]): Message[] {
+  let lastAssistant = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistant = i
+      break
+    }
+  }
+  // 0 or 1 assistant turn → nothing stale to drop.
+  if (lastAssistant <= 0) return messages
+  return messages.map((m, i) => {
+    if (i === lastAssistant || m.role !== "assistant" || typeof m.content === "string") {
+      return m
+    }
+    const kept = m.content.filter((b) => !isThinkingBlock(b))
+    // No thinking to drop, or stripping would empty the message (defensive :
+    // an all-thinking non-latest turn shouldn't exist, but never send []).
+    if (kept.length === 0 || kept.length === m.content.length) return m
+    return { ...m, content: kept }
+  })
 }
 
 /**
