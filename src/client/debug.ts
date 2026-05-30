@@ -122,6 +122,8 @@ export function previewBlock(b: ContentBlock): string {
       return JSON.stringify(b.text)
     case "thinking":
       return `thinking(${b.thinking.length}ch)`
+    case "redacted_thinking":
+      return `redacted_thinking(${b.data.length}ch)`
     case "tool_use": {
       const keys = Object.keys(b.input ?? {}).join(",")
       return `tool_use(${b.name}#${shortId(b.id)})${keys ? `{${keys}}` : ""}`

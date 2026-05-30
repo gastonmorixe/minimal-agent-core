@@ -761,6 +761,23 @@ export async function* sendMessageOnce(
               outputChars = 0
               lastTokenPublishAt = 0 // see comment above
               requestStatus.update("Writing response")
+            } else if (cb.type === "redacted_thinking") {
+              // Encrypted reasoning block. No deltas follow (it arrives whole
+              // in content_block_start). We MUST keep it verbatim: the API
+              // rejects any request whose latest assistant turn dropped or
+              // altered a thinking/redacted_thinking block. Before this branch
+              // the parser silently dropped these (no matching case), which
+              // shifted every later block's index and 400'd the next turn with
+              // "`thinking` or `redacted_thinking` blocks ... cannot be
+              // modified". See RedactedThinkingBlock in client/types.ts.
+              currentBlock = { type: "redacted_thinking", data: cb.data ?? "" }
+              requestStatus.update("Thinking")
+            } else {
+              // Unknown / future block type. Preserve the raw block verbatim so
+              // it round-trips unchanged on the next request (same byte-identity
+              // invariant as redacted_thinking above). Dropping it would corrupt
+              // block ordering in the latest assistant turn.
+              currentBlock = { ...cb } as unknown as Partial<ContentBlock>
             }
             break
           }

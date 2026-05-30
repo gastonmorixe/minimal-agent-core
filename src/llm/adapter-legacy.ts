@@ -262,6 +262,12 @@ function canonicalBlockToLegacy(block: CanonicalBlock): LegacyContentBlock | nul
         signature: block.signature ?? "",
         ...(block.cache && { cache_control: legacyCacheControl(block.cache) }),
       }
+    case "redacted_thinking":
+      return {
+        type: "redacted_thinking",
+        data: block.data,
+        ...(block.cache && { cache_control: legacyCacheControl(block.cache) }),
+      }
     case "tool_use":
       return {
         type: "tool_use",
@@ -509,6 +515,12 @@ function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | nul
     case "thinking": {
       const out: CanonicalBlock = { type: "thinking", text: block.thinking }
       if (block.signature) out.signature = block.signature
+      const cache = legacyCacheToCanonical(block.cache_control)
+      if (cache) out.cache = cache
+      return out
+    }
+    case "redacted_thinking": {
+      const out: CanonicalBlock = { type: "redacted_thinking", data: block.data }
       const cache = legacyCacheToCanonical(block.cache_control)
       if (cache) out.cache = cache
       return out

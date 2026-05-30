@@ -119,6 +119,19 @@ export interface ThinkingBlock {
   cache?: CanonicalCacheHint
 }
 
+/**
+ * Encrypted ("redacted") reasoning block. The provider emits these instead of
+ * a plain {@link ThinkingBlock} when its safety systems encrypt the model's
+ * reasoning. `data` is opaque and MUST round-trip verbatim : dropping or
+ * altering it makes the latest-assistant-turn re-send fail
+ * ("`thinking`/`redacted_thinking` blocks ... cannot be modified").
+ */
+export interface RedactedThinkingBlock {
+  type: "redacted_thinking"
+  data: string
+  cache?: CanonicalCacheHint
+}
+
 export interface ToolUseBlock {
   type: "tool_use"
   /** Pairs with `ToolResultBlock.toolUseId`. Adapter-stable id. */
@@ -178,6 +191,7 @@ export interface FileBlock {
 export type CanonicalBlock =
   | TextBlock
   | ThinkingBlock
+  | RedactedThinkingBlock
   | ToolUseBlock
   | ToolResultBlock
   | ImageBlock

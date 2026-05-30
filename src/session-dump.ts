@@ -46,6 +46,8 @@ function formatBlockAsMarkdown(block: ContentBlock): string {
       }
       return bq
     }
+    case "redacted_thinking":
+      return `> 🔒 **Redacted thinking** *(encrypted, ${block.data.length} chars)*`
     case "tool_use": {
       let bq = `> 🛠️ **Tool Use**: \`${block.name}\` (id: ${block.id})\n`
       bq += `> \`\`\`json\n`
@@ -147,6 +149,8 @@ function formatBlockAsXml(block: ContentBlock, indent: number): string {
       }
       return `${pad}<thinking signature="${escapeXml(block.signature)}"/>`
     }
+    case "redacted_thinking":
+      return `${pad}<redacted_thinking bytes="${block.data.length}"/>`
     case "tool_use": {
       const inputStr =
         typeof block.input === "object" ? JSON.stringify(block.input) : String(block.input)
