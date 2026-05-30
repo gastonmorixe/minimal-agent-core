@@ -34,9 +34,9 @@ describe("createReflectionAckStripper — passthrough", () => {
     expect(feedAll(["see <ma::tasks> for tracking"])).toBe("see <ma::tasks> for tracking")
   })
 
-  test("`<ma::plugin::` tags are unaffected (handled by the inline-tag scanner elsewhere)", () => {
-    expect(feedAll(["<ma::plugin::diff>--- a\n+++ b\n</ma::plugin::diff>"])).toBe(
-      "<ma::plugin::diff>--- a\n+++ b\n</ma::plugin::diff>",
+  test("`<ma::emit::` tags are unaffected (handled by the inline-tag scanner elsewhere)", () => {
+    expect(feedAll(["<ma::emit::diff>--- a\n+++ b\n</ma::emit::diff>"])).toBe(
+      "<ma::emit::diff>--- a\n+++ b\n</ma::emit::diff>",
     )
   })
 })

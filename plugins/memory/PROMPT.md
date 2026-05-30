@@ -1,4 +1,4 @@
-The `memory` plugin gives you a persistent, per-user memory store plus a per-session scratchpad. Two write paths (the inline `<ma::plugin::memory>` tag and `MemoryTool.add`) and one read/edit/remove path (`MemoryTool`).
+Use `MemoryTool` for durable, per-user notes that persist across sessions, plus a per-session scratchpad. Two write paths (the inline `<ma::emit::memory>` tag and `MemoryTool.add`) and one read/edit/remove path (`MemoryTool`).
 
 ## You have memories. They are NOT in your context by default.
 
@@ -8,9 +8,9 @@ What this means for you:
 
 - **The `MemoryTool` is always registered.** You can call it whenever you want, no flag, no opt-in.
 - **Bullet contents are NOT in this prompt.** Asking yourself "what do I remember about X?" should make you reach for the tool, not recite.
-- **Saves still work the same way.** The inline `<ma::plugin::memory>` tag appends to the file, and the next-turn `<memory-saved id="...">` attachment hands you the bullet's id.
+- **Saves still work the same way.** The inline `<ma::emit::memory>` tag appends to the file, and the next-turn `<ma::agent::memory-saved id="...">` attachment hands you the bullet's id.
 
-The short-term scratchpad (`short-term` scope) is the exception. It still rides every turn as a `<ma::plugin::memory::short-term>` attachment, so what you wrote there last turn is right above this paragraph in your next user message.
+The short-term scratchpad (`short-term` scope) is the exception. It still rides every turn as a `<ma::agent::short-term-memory>` attachment, so what you wrote there last turn is right above this paragraph in your next user message.
 
 ## When you should call `MemoryTool.list`
 
@@ -85,7 +85,7 @@ Per-session scratchpad. Things you're *actively* tracking and want to look at ev
 - "tried setting `LANG=C`, no change, don't loop back to it"
 - "user's intent for this work block: refactor X without touching Y"
 
-Short-term entries appear in your context as `<ma::plugin::memory::short-term>` at the top of every user turn. Free to refresh / amend frequently. There's a cap (20 entries, FIFO eviction), so consolidate as you go.
+Short-term entries appear in your context as `<ma::agent::short-term-memory>` at the top of every user turn. Free to refresh / amend frequently. There's a cap (20 entries, FIFO eviction), so consolidate as you go.
 
 ## Don't save (any scope)
 
@@ -99,22 +99,22 @@ Short-term entries appear in your context as `<ma::plugin::memory::short-term>` 
 
 Mid-response, low-friction. The body is hidden from the user (the tag is replaced with a dim confirmation line), and whitespace is collapsed to one line.
 
-    <ma::plugin::memory>
+    <ma::emit::memory>
     Project-scoped memory (default). About this codebase only.
-    </ma::plugin::memory>
+    </ma::emit::memory>
 
-    <ma::plugin::memory scope="global">
+    <ma::emit::memory scope="global">
     Cross-project memory. About working with this user, my own
     failure modes, general tooling, etc.
-    </ma::plugin::memory>
+    </ma::emit::memory>
 
-    <ma::plugin::memory scope="short-term">
+    <ma::emit::memory scope="short-term">
     Active hypothesis: the wrap bug only reproduces at width 80.
-    </ma::plugin::memory>
+    </ma::emit::memory>
 
 After every save, your **next user turn** will carry a small attachment:
 
-    <memory-saved scope="short-term" id="3">Active hypothesis: …</ma::plugin::memory::saved>
+    <ma::agent::memory-saved scope="short-term" id="3">Active hypothesis: …</ma::agent::memory-saved>
 
 Keep an eye on it. That's how you learn the bullet's id, which you'll need if you later want to edit or remove the entry. When short-term overflows the cap, the echo also reports the eviction count (`evicted="1"`).
 
@@ -137,7 +137,7 @@ Schema: `{action, scope, id?, body?, query?, limit?, offset?, format?}`. `scope`
     MemoryTool({action: "remove", scope: "short-term", id: "2"})
     MemoryTool({action: "clear",  scope: "short-term"})       # short-term only
 
-`add` exists for symmetry but **prefer the inline tag for in-flight saves**. The tag is lower-friction (no tool round-trip, no pause in prose) and you get the id back via the same `<memory-saved>` echo. Use the tool's `add` only when you're already curating (batch operations after a `list`, follow-up to a `read`, etc.).
+`add` exists for symmetry but **prefer the inline tag for in-flight saves**. The tag is lower-friction (no tool round-trip, no pause in prose) and you get the id back via the same `<ma::agent::memory-saved>` echo. Use the tool's `add` only when you're already curating (batch operations after a `list`, follow-up to a `read`, etc.).
 
 `clear` is **only** allowed for `scope="short-term"`. Wiping global/project is a footgun, so remove individual ids instead.
 
@@ -148,21 +148,9 @@ Schema: `{action, scope, id?, body?, query?, limit?, offset?, format?}`. `scope`
 - **Curation pass** when you spot overlapping bullets on one subsystem: list, read the worst, edit one to be comprehensive, remove the rest.
 - **Onboarding to a new file**. List `project` with the filename or subsystem keyword before reading the file itself.
 
-## Opt-in escape hatches (rare)
+## When memories appear in context directly
 
-If the user explicitly asks for memory contents in the system prompt, they can opt in via `~/.minimal-agent/config.jsonc`:
-
-```jsonc
-{
-  "plugins": {
-    "memory": {
-      "inject": "verbatim"   // or "summary" for the LLM-derived view
-    }
-  }
-}
-```
-
-When that's set you'll see a `## Saved memories` section appear above in your system prompt. The summary mode adds `Sources: #id1, #id2` citations next to clustered topics. You can still `MemoryTool.read` by id to get the full body when the summary's compression is lossy.
+By default persistent memories are NOT in your context; you query them with `MemoryTool.list`. If the user has opted into pre-loading, a `## Saved memories` section appears above in your system prompt (sometimes a compressed summary with `Sources: #id` citations). Even then, `MemoryTool.read` by id fetches the full body when the summary is lossy.
 
 ## Id formats
 

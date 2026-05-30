@@ -5,7 +5,7 @@
  * `plugins/` directory, then drives it through two code paths:
  *
  * 1. `PluginStream`: simulates streamed assistant text that contains an
- *    inline `<ma::plugin::diff>` block across multiple chunks, and verifies the
+ *    inline `<ma::emit::diff>` block across multiple chunks, and verifies the
  *    sink receives rendered ANSI in place of the tag span.
  *
  * 2. `PluginLoader.dispatch`: calls the `show_diff` tool directly and
@@ -53,27 +53,32 @@ describe("plugins: end-to-end integration with diff-view", () => {
     expect(loader.getToolAliases().get("show_diff")).toBe("ShowDiff")
   })
 
-  it("emits a prompt block that mentions diff-view", () => {
+  it("composes diff-view into a role-named tool section (no plugin framing)", () => {
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    expect(block).toContain("<ma::plugins>")
-    expect(block).toContain('<ma::plugin id="diff-view">')
-    // Prompt block reflects the canonical name; alias is invisible to the model.
-    expect(block).toContain("ShowDiff")
+    // diff-view contributes a tool (ShowDiff) + an inline tag (diff); the
+    // tool framing wins and the section is keyed by the tool name. The word
+    // "plugin" and the plugin id never reach the model.
+    expect(block).toContain('<ma::sys::tool name="ShowDiff">')
+    expect(block).toContain("</ma::sys::tool>")
+    // The old structural wrappers are gone: no outer <ma::plugins> envelope,
+    // no per-plugin <ma::plugin id="..."> block, no overview boilerplate.
+    expect(block).not.toContain("<ma::plugins>")
+    expect(block).not.toContain('<ma::plugin id=')
   })
 
-  it("PluginStream routes inline <ma::plugin::diff> through the handler (single chunk)", async () => {
+  it("PluginStream routes inline <ma::emit::diff> through the handler (single chunk)", async () => {
     const out: string[] = []
     const stream = new PluginStream((s) => out.push(s), loader, process.cwd())
     const body = "--- a/x.ts\n+++ b/x.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n const z = 4;"
-    await feed(stream, `before <ma::plugin::diff>${body}</ma::plugin::diff> after`)
+    await feed(stream, `before <ma::emit::diff>${body}</ma::emit::diff> after`)
     await stream.end()
 
     const full = out.join("")
     expect(full.startsWith("before ")).toBe(true)
     expect(full.endsWith(" after")).toBe(true)
-    expect(full).not.toContain("<ma::plugin::diff>")
-    expect(full).not.toContain("</ma::plugin::diff>")
+    expect(full).not.toContain("<ma::emit::diff>")
+    expect(full).not.toContain("</ma::emit::diff>")
     expect(full).toContain("\x1b[38;5;199m-old\x1b[0m")
     expect(full).toContain("\x1b[38;5;118m+new\x1b[0m")
     expect(full).toContain("\x1b[36m@@ -1,2 +1,2 @@\x1b[0m")
@@ -82,9 +87,9 @@ describe("plugins: end-to-end integration with diff-view", () => {
   it("PluginStream handles a tag split across chunk boundaries", async () => {
     const out: string[] = []
     const stream = new PluginStream((s) => out.push(s), loader, process.cwd())
-    await feed(stream, "prefix <ma::plugin::dif")
+    await feed(stream, "prefix <ma::emit::dif")
     await feed(stream, 'f title="hunk">--- a\n+++ b\n@@ -1 +1 @@\n-a')
-    await feed(stream, "\n+b\n</ma::plugin::diff> tail")
+    await feed(stream, "\n+b\n</ma::emit::diff> tail")
     await stream.end()
 
     const full = out.join("")
@@ -98,10 +103,10 @@ describe("plugins: end-to-end integration with diff-view", () => {
   it("PluginStream passes unknown inline tags through as raw text", async () => {
     const out: string[] = []
     const stream = new PluginStream((s) => out.push(s), loader, process.cwd())
-    await feed(stream, "before <ma::plugin::unknown>body</ma::plugin::unknown> after")
+    await feed(stream, "before <ma::emit::unknown>body</ma::emit::unknown> after")
     await stream.end()
     const full = out.join("")
-    expect(full).toBe("before <ma::plugin::unknown>body</ma::plugin::unknown> after")
+    expect(full).toBe("before <ma::emit::unknown>body</ma::emit::unknown> after")
   })
 
   it("PluginStream passes plain text without tags verbatim", async () => {

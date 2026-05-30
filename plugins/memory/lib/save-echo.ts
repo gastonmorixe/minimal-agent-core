@@ -14,7 +14,7 @@
  *           │                              consumeAll() ──┘
  *           │                                              ▼
  *           │                              prepended to next user turn as
- *           │                              <memory-saved scope="…" id="…">…</ma::plugin::memory::saved>
+ *           │                              <ma::agent::memory-saved scope="…" id="…">…</ma::agent::memory-saved>
  *
  * The agent owns one {@link SaveEchoCollector}. At the start of every
  * user message it constructs (initial + loop seams in `agent.ts`), it
@@ -48,7 +48,7 @@ export const MEMORY_SAVED = "memory.saved"
  * Payload shape for the `memory.saved` bus event.
  *
  * Emitted by:
- *   - the inline-tag handler (`<ma::plugin::memory …>` save)
+ *   - the inline-tag handler (`<ma::emit::memory …>` save)
  *   - the tool handler's `add` action (Phase 4)
  *   - any future plugin that mutates a memory file
  *
@@ -131,7 +131,7 @@ export class SaveEchoCollector {
    * the caller can splat into a list builder unconditionally.
    *
    * One block per queued payload, rendered as
-   * `<memory-saved scope="…" id="…"[ evicted="N"]>preview</ma::plugin::memory::saved>`.
+   * `<ma::agent::memory-saved scope="…" id="…"[ evicted="N"]>preview</ma::agent::memory-saved>`.
    * Preview is the body trimmed to 60 chars with `…` ellipsis on overflow.
    */
   consumeAll(): ContentBlock[] {
@@ -164,7 +164,7 @@ export class SaveEchoCollector {
 const PREVIEW_MAX = 60
 
 /**
- * Render a single payload to the inline `<memory-saved>` text the model
+ * Render a single payload to the inline `<ma::agent::memory-saved>` text the model
  * sees. Exported for tests; the collector uses this internally.
  */
 export function renderEcho(p: MemorySavedPayload): string {
@@ -177,12 +177,12 @@ export function renderEcho(p: MemorySavedPayload): string {
   const preview =
     oneLine.length > PREVIEW_MAX ? `${oneLine.slice(0, PREVIEW_MAX - 1)}…` : oneLine
   // Escape `<` and `>` in the preview so it can't be mis-parsed as a
-  // child tag inside `<memory-saved>…</ma::plugin::memory::saved>`. We don't bother
+  // child tag inside `<ma::agent::memory-saved>…</ma::agent::memory-saved>`. We don't bother
   // with `&` (would have to escape only those that aren't already part
   // of a valid entity, which is fiddly) — the model handles `&` in
   // body text without tag-syntax confusion.
   const safe = preview.replace(/</g, "&lt;").replace(/>/g, "&gt;")
-  return `<memory-saved scope="${p.scope}" id="${escapeAttr(p.id)}"${evicted}>${safe}</ma::plugin::memory::saved>`
+  return `<ma::agent::memory-saved scope="${p.scope}" id="${escapeAttr(p.id)}"${evicted}>${safe}</ma::agent::memory-saved>`
 }
 
 /** Escape `"` and `&` in an attribute value. */

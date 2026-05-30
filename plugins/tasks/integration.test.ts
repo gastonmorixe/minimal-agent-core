@@ -88,7 +88,7 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
     const att = new TasksAttachment(sid, { home: tmpHome })
     const text = att.toText()
     expect(text).not.toBeNull()
-    expect(text!).toContain("<ma::plugin::tasks")
+    expect(text!).toContain("<ma::agent::tasks")
     expect(text!).toContain(`total="3"`)
     expect(text!).toContain("plan step 1")
   })

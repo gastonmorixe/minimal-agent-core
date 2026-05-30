@@ -117,14 +117,14 @@ describe("TasksAttachment", () => {
     const a = new TasksAttachment(sid, { home: tmpHome })
     expect(a.toAttachment()).toBeNull()
   })
-  test("renders the full <ma::plugin::tasks> attachment when tasks exist", () => {
+  test("renders the full <ma::agent::tasks> attachment when tasks exist", () => {
     const s = withRand(["aaaaaa"])
     s.add({ title: "hello" })
     const a = new TasksAttachment(sid, { home: tmpHome })
     const text = a.toText()
     expect(text).not.toBeNull()
-    expect(text!.startsWith("<ma::plugin::tasks ")).toBe(true)
-    expect(text!.endsWith("</ma::plugin::tasks>")).toBe(true)
+    expect(text!.startsWith("<ma::agent::tasks ")).toBe(true)
+    expect(text!.endsWith("</ma::agent::tasks>")).toBe(true)
     expect(text).toContain(`total="1"`)
     expect(text).toContain(`done="0"`)
     expect(text).toContain(`todo="1"`)
@@ -149,11 +149,11 @@ describe("TasksAttachment", () => {
     expect(att).not.toBeNull()
     expect(att!.type).toBe("text")
   })
-  test("attachment uses <ma::plugin::tasks> opener", () => {
+  test("attachment uses <ma::agent::tasks> opener", () => {
     const s = withRand(["aaaaaa"])
     s.add({ title: "x" })
     const text = new TasksAttachment(sid, { home: tmpHome }).toText()
-    expect(text!.startsWith("<ma::plugin::tasks")).toBe(true)
+    expect(text!.startsWith("<ma::agent::tasks")).toBe(true)
     // Legacy `<tui::` and intermediate `<ma::tui::` forms are gone.
     expect(text!.startsWith("<tui::")).toBe(false)
     expect(text!.startsWith("<ma::tui::")).toBe(false)

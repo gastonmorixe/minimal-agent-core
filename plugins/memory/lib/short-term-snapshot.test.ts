@@ -4,7 +4,7 @@
  * Coverage:
  *   - null/empty sid → no attachment
  *   - missing/empty file → no attachment
- *   - one-or-more bullets → attachment text shape (`<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>`)
+ *   - one-or-more bullets → attachment text shape (`<ma::agent::short-term-memory>…</ma::agent::short-term-memory>`)
  *   - bullet ordering preserved (file order = insertion order)
  *   - reads fresh from disk on each call (mutation visible immediately)
  */
@@ -69,7 +69,7 @@ describe("ShortTermSnapshot — happy path", () => {
     MemoryStore.shortTerm(sid, { home: tmpHome }).add("active hypothesis: width 80")
     const snap = new ShortTermSnapshot(sid, { home: tmpHome })
     expect(snap.toText()).toBe(
-      "<ma::plugin::memory::short-term>\n[#1] active hypothesis: width 80\n</ma::plugin::memory::short-term>",
+      "<ma::agent::short-term-memory>\n[#1] active hypothesis: width 80\n</ma::agent::short-term-memory>",
     )
   })
 
@@ -81,7 +81,7 @@ describe("ShortTermSnapshot — happy path", () => {
     store.add("third")
     const snap = new ShortTermSnapshot(sid, { home: tmpHome })
     expect(snap.toText()).toBe(
-      "<ma::plugin::memory::short-term>\n[#1] first\n[#2] second\n[#3] third\n</ma::plugin::memory::short-term>",
+      "<ma::agent::short-term-memory>\n[#1] first\n[#2] second\n[#3] third\n</ma::agent::short-term-memory>",
     )
   })
 

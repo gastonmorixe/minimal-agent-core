@@ -30,19 +30,27 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
+import { parseCommandLine } from "../slash-command-parse.ts"
 import { paletteEnvJson } from "../palette.ts"
 
+import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import { ManifestError, parseManifest } from "./manifest.ts"
 import type {
+  AgentContext,
+  CommandContext,
+  CommandInfo,
+  CommandResult,
   LoadedPlugin,
   ManifestFile,
   ManifestMode,
   ManifestPromptFragment,
+  ModelInfoSnapshot,
   PromptFragmentContext,
   PromptFragmentHandler,
+  ResolvedCommand,
   ResolvedEventSub,
   ResolvedHandler,
   ResolvedHookSub,
@@ -142,14 +150,35 @@ export interface PluginLoaderOptions {
    */
   bus?: EventBus
   /**
-   * Optional agent session id. When provided, it is exposed to prompt
-   * fragments — module handlers receive it as
-   * {@link PromptFragmentContext.sessionId}, subprocess handlers see it
-   * in the `MINIMAL_AGENT_SESSION_ID` env var. Useful for env-info-style
-   * plugins that want to embed the session id in the system prompt.
+   * Main-agent identity (session id, pid, model, version). When supplied,
+   * the loader exposes it to every dispatched handler as `ctx.agent` AND
+   * publishes the same values to subprocess handlers as `MINIMAL_AGENT_*`
+   * env vars via {@link agentContextToEnv}.
    *
-   * Should be the same value `metadata.getSessionId()` returns; passed
-   * explicitly here so the loader stays decoupled from `metadata.ts`.
+   * Build once at agent boot with {@link createAgentContext}, then pass
+   * the SAME frozen object here (and to any other consumer like
+   * `LiveAreaScheduler`). The loader does not synthesize a sensible
+   * default — see {@link sessionId} for the back-compat path.
+   */
+  agent?: AgentContext
+  /**
+   * Live provider of the agent's CURRENT model snapshot. Unlike {@link agent}
+   * (frozen at boot), this is a closure the loader calls at dispatch time and
+   * exposes to module handlers as {@link TUIContext.queryModelInfo}, so a
+   * decoupled `ModelInfo` tool always sees the model the agent will send next
+   * (correct across mid-session switches + resume). The host builds it over its
+   * live model id + the shared registry; omit it to leave `queryModelInfo`
+   * undefined (back-compat).
+   */
+  modelInfoProvider?: () => ModelInfoSnapshot | undefined
+  /**
+   * Optional agent session id.
+   *
+   * @deprecated Prefer {@link agent}. Kept as a back-compat alias for
+   * test/ad-hoc callers: when `agent` is omitted but `sessionId` is
+   * provided, the loader synthesizes a minimal {@link AgentContext} with
+   * `{ sessionId, pid: process.pid, model: process.env.MINIMAL_AGENT_MODEL ?? "", version: "" }`.
+   * When both are provided, `agent` wins and `sessionId` is ignored.
    */
   sessionId?: string
   /**
@@ -230,12 +259,17 @@ export class PluginLoader {
   private readonly pendingFrags: PendingFragment[]
   private readonly logger: (msg: string) => void
   /**
-   * Agent session id (UUID v4) if one was provided to {@link load}.
-   * Forwarded to module handlers via `ctx.env.MINIMAL_AGENT_SESSION_ID`
-   * (matching the subprocess-handler contract) so handlers like the
-   * `memory` plugin can stamp their output with the originating session.
+   * Main-agent identity (session id, pid, model, version) if one was
+   * provided to {@link load}. Forwarded to every dispatched handler as
+   * `ctx.agent` and as `MINIMAL_AGENT_*` env vars for subprocesses, via
+   * {@link agentContextToEnv}.
+   *
+   * `undefined` only when neither `agent` nor the deprecated `sessionId`
+   * was supplied (ad-hoc tests).
    */
-  private readonly sessionId: string | undefined
+  private readonly agent: AgentContext | undefined
+  /** Live current-model snapshot provider; see {@link PluginLoaderOptions.modelInfoProvider}. */
+  private readonly modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
   /**
    * Cached result of {@link getPromptBlockAsync}. Populated on first call
    * (after fragments resolve or time out). Subsequent calls return this
@@ -243,6 +277,13 @@ export class PluginLoader {
    * and must be byte-stable for the rest of the session.
    */
   private asyncBlockCache: string | null | undefined = undefined
+  /**
+   * Global slash-command registry, keyed by command name (no slash).
+   * Built in the constructor from each plugin's resolved `commands` with
+   * first-wins collision handling. The host's `dispatchCommand` and the
+   * `slash-menu` overlay (via `listCommandInfo`) read it.
+   */
+  private readonly commandIndex: Map<string, ResolvedCommand>
 
   private constructor(
     plugins: LoadedPlugin[],
@@ -256,7 +297,8 @@ export class PluginLoader {
     hooksFacade: Hooks,
     pendingFrags: PendingFragment[],
     logger: (msg: string) => void,
-    sessionId: string | undefined,
+    agent: AgentContext | undefined,
+    modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
@@ -269,7 +311,27 @@ export class PluginLoader {
     this.hooksFacade = hooksFacade
     this.pendingFrags = pendingFrags
     this.logger = logger
-    this.sessionId = sessionId
+    this.agent = agent
+    this.modelInfoProvider = modelInfoProvider
+
+    // Build the global command index, first-wins on cross-plugin name
+    // collision (mirrors mode-id dedupe). A colliding command is dropped
+    // with a diagnostic; the rest of the plugin is unaffected.
+    this.commandIndex = new Map<string, ResolvedCommand>()
+    for (const pkg of plugins) {
+      for (const cmd of pkg.commands) {
+        const name = cmd.spec.name
+        const existing = this.commandIndex.get(name)
+        if (existing) {
+          logger(
+            `command "/${name}" from "${cmd.pluginId}" collides with "${existing.pluginId}"; ` +
+              `keeping the first and skipping`,
+          )
+          continue
+        }
+        this.commandIndex.set(name, cmd)
+      }
+    }
   }
 
   /**
@@ -283,6 +345,20 @@ export class PluginLoader {
    */
   bus(): EventBus {
     return this.eventBus
+  }
+
+  /**
+   * The {@link AgentContext} shared with every plugin handler dispatched
+   * by this loader. Same frozen object reference passed in via
+   * {@link PluginLoaderOptions.agent} (or synthesized from the deprecated
+   * `sessionId` option). Useful for host code that needs to construct a
+   * sibling consumer (e.g. {@link LiveAreaScheduler}) with the SAME
+   * identity, so plugins see one consistent agent across dispatch paths.
+   *
+   * Returns `undefined` when neither option was passed (ad-hoc tests).
+   */
+  agentContext(): AgentContext | undefined {
+    return this.agent
   }
 
   /**
@@ -320,7 +396,25 @@ export class PluginLoader {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const eventBus = opts.bus ?? new EventBus(logger)
     const hooksFacade = new Hooks({ eventBus, logger })
-    const sessionId = opts.sessionId
+    // Resolve the agent context. Priority:
+    //   1. opts.agent (preferred — typed value object constructed by the
+    //      agent at boot via createAgentContext).
+    //   2. opts.sessionId (deprecated alias) — synthesize a minimal
+    //      AgentContext from process.pid + ambient MINIMAL_AGENT_MODEL env
+    //      var so back-compat callers still see ctx.agent populated.
+    //   3. neither — leave `agent` undefined; existing tests preserve
+    //      historical behavior (no `ctx.agent`, no `MINIMAL_AGENT_*` env
+    //      injection beyond what's already in process.env).
+    const agent: AgentContext | undefined = opts.agent
+      ? opts.agent
+      : opts.sessionId
+        ? createAgentContext({
+            sessionId: opts.sessionId,
+            pid: process.pid,
+            model: process.env.MINIMAL_AGENT_MODEL ?? "",
+            version: process.env.MINIMAL_AGENT_VERSION ?? "",
+          })
+        : undefined
     const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
     const enabledPluginIds = opts.enabledPluginIds ?? new Set<string>()
 
@@ -508,6 +602,7 @@ export class PluginLoader {
         eventSubs: [], // filled after handler resolution
         hookSubs: [], // filled after hook permission/shape checks
         liveAreaSlots: [], // filled after handler resolution
+        commands: [], // filled after handler resolution
         prompt,
       })
       seenIds.add(manifest.id)
@@ -518,6 +613,15 @@ export class PluginLoader {
     const aliasIndex = new Map<string, string>() // alias → canonical
     const tagIndex = new Map<string, ResolvedHandler>()
     const finalPlugins: LoadedPlugin[] = []
+
+    // Forward-ref so event/hook handler contexts can expose the live
+    // command registry (`ctx.listCommands()`). Registration happens in
+    // the loop below, BEFORE `new PluginLoader(...)` builds the index, so
+    // we hand listeners a closure over `loaderRef` that is read lazily at
+    // event time — always after `load()` has returned and `loaderRef` is
+    // set. The `slash-menu` overlay consumes this.
+    let loaderRef: PluginLoader | null = null
+    const listCommandsForCtx = (): CommandInfo[] => loaderRef?.listCommandInfo() ?? []
 
     for (const pkg of parsed) {
       const accepted: ResolvedHandler[] = []
@@ -627,7 +731,16 @@ export class PluginLoader {
 
       // Subscribe each on the shared bus.
       for (const r of resolvedSubs) {
-        registerEventSub(eventBus, hooksFacade, pkg.packageDir, r, logger, pkg.manifest.id)
+        registerEventSub(
+          eventBus,
+          hooksFacade,
+          pkg.packageDir,
+          r,
+          logger,
+          pkg.manifest.id,
+          agent,
+          listCommandsForCtx,
+        )
       }
 
       // Resolve hook subscriptions. Same lenient policy as events: a broken
@@ -674,7 +787,15 @@ export class PluginLoader {
 
       // Subscribe each on the hooks facade.
       for (const r of resolvedHookSubs) {
-        registerHookSub(hooksFacade, pkg.packageDir, r, logger, pkg.manifest.id)
+        registerHookSub(
+          hooksFacade,
+          pkg.packageDir,
+          r,
+          logger,
+          pkg.manifest.id,
+          agent,
+          listCommandsForCtx,
+        )
       }
 
       // Resolve live-area slots. Same lenient policy as event subs: a
@@ -685,6 +806,17 @@ export class PluginLoader {
         if (r) resolvedSlots.push(r)
       }
       pkg.liveAreaSlots = resolvedSlots
+
+      // Resolve slash commands. Same lenient policy: a broken command
+      // handler is logged + skipped, never disqualifies the plugin.
+      // Cross-plugin name collisions are settled later (first-wins) when
+      // the constructor builds the global command index.
+      const resolvedCommands: ResolvedCommand[] = []
+      for (const cmd of pkg.manifest.commands ?? []) {
+        const r = await resolveCommand(cmd, pkg.manifest.id, pkg.packageDir, logger)
+        if (r) resolvedCommands.push(r)
+      }
+      pkg.commands = resolvedCommands
 
       finalPlugins.push(pkg)
     }
@@ -722,7 +854,7 @@ export class PluginLoader {
     for (const pkg of finalPlugins) {
       for (const frag of pkg.manifest.promptFragments ?? []) {
         const startedAt = Date.now()
-        const promise = startFragment(frag, pkg.packageDir, logger, sessionId, pkg.manifest.id)
+        const promise = startFragment(frag, pkg.packageDir, logger, agent, pkg.manifest.id)
         pendingFrags.push({
           pluginId: pkg.manifest.id,
           fragmentId: frag.id,
@@ -740,7 +872,7 @@ export class PluginLoader {
         a.fragmentId.localeCompare(b.fragmentId),
     )
 
-    return new PluginLoader(
+    const loader = new PluginLoader(
       finalPlugins,
       toolIndex,
       aliasIndex,
@@ -752,13 +884,116 @@ export class PluginLoader {
       hooksFacade,
       pendingFrags,
       logger,
-      sessionId,
+      agent,
+      opts.modelInfoProvider,
     )
+    // Resolve the forward-ref so handler contexts created earlier can
+    // read the now-built command registry via `ctx.listCommands()`.
+    loaderRef = loader
+    return loader
   }
 
   /** All loaded modes contributed by plugins (in plugin-load order). */
   getModes(): LoadedMode[] {
     return [...this.modes]
+  }
+
+  /**
+   * All registered slash commands (post collision-dedupe), sorted by
+   * name for stable display. The host's command dispatcher and the
+   * `slash-menu` overlay both read this.
+   */
+  getCommands(): ReadonlyArray<ResolvedCommand> {
+    return [...this.commandIndex.values()].sort((a, b) => a.spec.name.localeCompare(b.spec.name))
+  }
+
+  /**
+   * O(1) check whether a command name is registered. The REPL uses this
+   * to decide, synchronously at submit time, whether a `/<name>` line is
+   * a command (dispatch it) or just text (queue it as a prompt).
+   *
+   * @param name Command name without the leading slash.
+   */
+  hasCommand(name: string): boolean {
+    return this.commandIndex.has(name)
+  }
+
+  /**
+   * Read-only metadata view of every registered command. This is the
+   * shape exposed to plugin handler contexts via `listCommands()` so the
+   * `slash-menu` overlay can render/filter without importing the loader.
+   */
+  listCommandInfo(): CommandInfo[] {
+    return this.getCommands().map((c) => ({
+      name: c.spec.name,
+      summary: c.spec.summary,
+      ...(c.spec.argHint != null ? { argHint: c.spec.argHint } : {}),
+      pluginId: c.pluginId,
+    }))
+  }
+
+  /**
+   * Dispatch a submitted line as a slash command.
+   *
+   * Returns `null` when `line` is not a command line OR names an
+   * unregistered command — in both cases the host treats the text as an
+   * ordinary prompt (so pasted paths like `/usr/bin` and unknown `/foo`
+   * fall through untouched). Returns a {@link CommandResult} otherwise;
+   * a handler throw (or malformed return) is caught and surfaced as
+   * `{kind:"error"}` so a buggy command never crashes the REPL.
+   *
+   * @param line Raw submitted text.
+   * @param opts `cwd` (defaults to `process.cwd()`) + optional external
+   *   abort signal composed with the per-call timeout.
+   */
+  async dispatchCommand(
+    line: string,
+    opts: { cwd?: string; signal?: AbortSignal } = {},
+  ): Promise<CommandResult | null> {
+    const parsed = parseCommandLine(line)
+    if (!parsed) return null
+    const cmd = this.commandIndex.get(parsed.name)
+    if (!cmd) return null
+
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs)
+    timer.unref?.()
+    let externalAbortListener: (() => void) | undefined
+    if (opts.signal) {
+      if (opts.signal.aborted) ctrl.abort()
+      else {
+        externalAbortListener = () => ctrl.abort()
+        opts.signal.addEventListener("abort", externalAbortListener, { once: true })
+      }
+    }
+
+    const ctx: CommandContext = {
+      name: parsed.name,
+      argv: parsed.argv,
+      rawLine: line,
+      cwd: opts.cwd ?? process.cwd(),
+      env: {
+        ...process.env,
+        TUI_PLUGIN_PROTOCOL: "1",
+        ...(this.agent ? agentContextToEnv(this.agent) : {}),
+      } as Record<string, string>,
+      abort: ctrl.signal,
+      log: createPluginLogger(cmd.pluginId),
+      emit: (channel: string, payload?: unknown) => this.eventBus.emit(channel, payload),
+      agent: this.agent,
+    }
+
+    try {
+      return await cmd.invoke(ctx)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { kind: "error", message: `/${parsed.name} failed: ${msg}` }
+    } finally {
+      clearTimeout(timer)
+      if (opts.signal && externalAbortListener) {
+        opts.signal.removeEventListener("abort", externalAbortListener)
+      }
+    }
   }
 
   /** Mode id flagged `default: true`, or `null` if none. */
@@ -826,26 +1061,29 @@ export class PluginLoader {
   }
 
   /**
-   * Prompt fragment to append to the system prompt, or `null` if no plugins
-   * are loaded.
+   * Plugin-contributed system-prompt text, or `null` if nothing contributes.
    *
-   * The block is structured with XML-style tags rather than Markdown headings
-   * so it composes cleanly into a larger system prompt without colliding with
-   * the host document's heading hierarchy:
+   * The model never learns the word "plugin". Each contribution is composed
+   * into a semantic, role-named section so it reads as a first-class part of
+   * the agent's own instructions, not as documentation about a third-party
+   * package:
    *
    * ```
-   * <ma::plugins>
-   *   <ma::plugins-overview>...</ma::plugins-overview>
-   *   <ma::plugin id="...">...PROMPT.md body...</ma::plugin>
-   *   ...
-   * </ma::plugins>
+   * <ma::sys::behavior name="writing-style">...</ma::sys::behavior>
+   * <ma::sys::tool name="WebSearch">...</ma::sys::tool>
+   * <ma::sys::emit name="diff">...</ma::sys::emit>
+   * <ma::sys::mode name="ask">...</ma::sys::mode>
+   * <ma::sys::context name="environment">...</ma::sys::context>
    * ```
    *
-   * Every element sits in the `<ma::*>` namespace so plugin-contributed
-   * text never collides with the host document's tags. Each plugin's
-   * `PROMPT.md` is embedded verbatim except that a single leading
-   * top-level heading (e.g. `# ask-mode`) is stripped if present — the
-   * surrounding `<ma::plugin id="...">` already names the plugin.
+   * The `<ma::sys::*>` namespace is read-only to the model: it is composed
+   * here into the system prompt and is never scanned from model output (that
+   * is `<ma::emit::*>`) nor injected as a runtime signal (that is
+   * `<ma::agent::*>`). The role and `name` are inferred from each plugin's
+   * manifest shape by {@link classifyPluginPrompt}; a single leading H1 is
+   * stripped from each `PROMPT.md` body (its text seeds the section `name`
+   * for behavior/context sections). Sections sort by role then name so the
+   * composed block is byte-stable for a given plugin set.
    */
   getPromptBlock(): string | null {
     return this.buildBlock(null)
@@ -935,18 +1173,25 @@ export class PluginLoader {
    * Common path for {@link getPromptBlock} and {@link getPromptBlockAsync}.
    * If `fragmentTexts` is `null`, fragments are omitted entirely (sync
    * path used for the session hash). Otherwise resolved fragment text is
-   * appended inside each plugin's `<plugin>` block.
+   * folded into the same plugin's section body.
+   *
+   * Each contributing plugin yields exactly ONE `<ma::sys::ROLE name="…">`
+   * section: its `PROMPT.md` body (leading H1 stripped) followed by any
+   * resolved prompt-fragment text. The role + name come from
+   * {@link classifyPluginPrompt} (manifest-shape inference, no manifest
+   * field, no plugin id leaked to the model). Sections sort by
+   * {@link PROMPT_ROLE_ORDER} then by name so the composed block is
+   * byte-stable for a given plugin set (the system prompt is cached).
    *
    * A plugin with NO `PROMPT.md` AND NO resolved prompt fragments is
-   * silent: its `<ma::plugin id="...">` wrapper is omitted entirely.
-   * We do NOT fall back to `manifest.description` (that would leak
-   * per-plugin dev docs into the cached system prompt). If every loaded
-   * plugin is silent, the whole `<ma::plugins>` block is omitted and
-   * this returns `null`, same as having no plugins at all.
+   * silent: it contributes no section. We do NOT fall back to
+   * `manifest.description` (that would leak per-plugin dev docs into the
+   * cached system prompt). If every loaded plugin is silent, this returns
+   * `null`, same as having no plugins at all.
    */
   private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
     if (this.plugins.length === 0) return null
-    const pluginParts: string[] = []
+    const sections: { role: PromptRole; name: string; body: string }[] = []
     for (const pkg of this.plugins) {
       const promptBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
       const frags = fragmentTexts?.get(pkg.manifest.id) ?? []
@@ -954,23 +1199,38 @@ export class PluginLoader {
       if (!promptBody && !fragSection) continue
       const body =
         promptBody && fragSection ? `${promptBody}\n\n${fragSection}` : promptBody || fragSection
-      pluginParts.push(`<ma::plugin id="${pkg.manifest.id}">\n${body}\n</ma::plugin>`)
+      const { role, name } = classifyPluginPrompt(pkg)
+      sections.push({ role, name, body })
     }
-    if (pluginParts.length === 0) return null
-    const parts: string[] = []
-    parts.push("<ma::plugins>")
-    parts.push(
-      "<ma::plugins-overview>\n" +
-        "You have access to the following plugins. Each plugin contributes one or more tools and/or inline rendering tags.\n" +
-        "\n" +
-        'Inline tags are detected in your streamed output and rendered by the plugin in place. Tag shape: <ma::plugin::NAME attr="val">body</ma::plugin::NAME>, or self-closing <ma::plugin::NAME attr="val" />. Tag names must match exactly. Attribute values must be quoted.\n' +
-        "\n" +
-        "Interactive plugin tools MUST be invoked via a tool call, not an inline tag. Inline tags are for non-interactive rendering only.\n" +
-        "</ma::plugins-overview>",
+    if (sections.length === 0) return null
+    // Deterministic order: role group, then name (alpha), then body as a
+    // final tiebreak so two same-role same-name sections (unusual) stay
+    // stable. Keeps the cached prefix byte-identical across discovery orders.
+    sections.sort(
+      (a, b) =>
+        PROMPT_ROLE_ORDER[a.role] - PROMPT_ROLE_ORDER[b.role] ||
+        a.name.localeCompare(b.name) ||
+        (a.body < b.body ? -1 : a.body > b.body ? 1 : 0),
     )
-    parts.push(...pluginParts)
-    parts.push("</ma::plugins>")
-    return parts.join("\n\n")
+    // Disambiguate same-(role,name) collisions deterministically. tool/emit/
+    // mode names are already globally unique (the loader rejects colliding
+    // tool/tag/mode ids before we get here), so this only ever fires for
+    // behavior/context sections whose H1/display-name slugs happen to match.
+    // Suffixing keeps every section addressable by a distinct name rather
+    // than emitting two identical `name="…"` wrappers.
+    const seen = new Map<string, number>()
+    for (const s of sections) {
+      const key = `${s.role}\u0000${s.name}`
+      const n = (seen.get(key) ?? 0) + 1
+      seen.set(key, n)
+      if (n > 1) s.name = `${s.name}-${n}`
+    }
+    return sections
+      .map(
+        (s) =>
+          `<ma::sys::${s.role} name="${escapeTagAttr(s.name)}">\n${s.body}\n</ma::sys::${s.role}>`,
+      )
+      .join("\n\n")
   }
 
   /**
@@ -1076,13 +1336,15 @@ export class PluginLoader {
         ...process.env,
         TUI_PLUGIN_PROTOCOL: "1",
         MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-        ...(this.sessionId ? { MINIMAL_AGENT_SESSION_ID: this.sessionId } : {}),
+        ...(this.agent ? agentContextToEnv(this.agent) : {}),
       } as Record<string, string>,
       abort: ctrl.signal,
       stdout: process.stdout,
       stdin: process.stdin,
       stderr: process.stderr,
       log: createPluginLogger(findPluginIdFor(this.plugins, handler)),
+      agent: this.agent,
+      ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
     }
 
     try {
@@ -1114,6 +1376,7 @@ export class PluginLoader {
 import {
   registerEventSub,
   registerHookSub,
+  resolveCommand,
   resolveEventSub,
   resolveHookSub,
   resolveLiveAreaSlot,
@@ -1125,9 +1388,13 @@ import {
 // `PluginLoader` class's internal use and are NOT re-exported (no
 // external consumer of this module touched those names).
 import {
+  classifyPluginPrompt,
   discoverPackageDirs,
+  escapeTagAttr,
   findPackageDirFor,
   findPluginIdFor,
+  PROMPT_ROLE_ORDER,
+  type PromptRole,
   resolveHandler,
   resolvePath,
   stripLeadingHeading,
@@ -1172,10 +1439,10 @@ function startFragment(
   frag: ManifestPromptFragment,
   packageDir: string,
   logger: (msg: string) => void,
-  sessionId: string | undefined,
+  agent: AgentContext | undefined,
   pluginId: string,
 ): Promise<string | null> {
-  return runFragment(frag, packageDir, sessionId, pluginId).catch((e) => {
+  return runFragment(frag, packageDir, agent, pluginId).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
     )
@@ -1186,7 +1453,7 @@ function startFragment(
 async function runFragment(
   frag: ManifestPromptFragment,
   packageDir: string,
-  sessionId: string | undefined,
+  agent: AgentContext | undefined,
   pluginId: string,
 ): Promise<string | null> {
   const ctrl = new AbortController()
@@ -1200,7 +1467,7 @@ async function runFragment(
     ...process.env,
     TUI_PLUGIN_PROTOCOL: "1",
     MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-    ...(sessionId ? { MINIMAL_AGENT_SESSION_ID: sessionId } : {}),
+    ...(agent ? agentContextToEnv(agent) : {}),
   } as Record<string, string>
 
   if (frag.handler.type === "module") {
@@ -1217,10 +1484,12 @@ async function runFragment(
       packageDir,
       cwd: process.cwd(),
       env,
-      sessionId,
+      // Deprecated mirror of `agent.sessionId` for back-compat readers.
+      sessionId: agent?.sessionId,
       abort: ctrl.signal,
       stderr: process.stderr,
       log: createPluginLogger(pluginId),
+      agent,
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null

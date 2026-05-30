@@ -766,14 +766,14 @@ describe("memory: integration with PluginLoader", () => {
     )
   })
 
-  it("end-to-end: SaveEchoCollector attached to loader.bus() picks up dispatched save and renders <memory-saved>", async () => {
+  it("end-to-end: SaveEchoCollector attached to loader.bus() picks up dispatched save and renders <ma::agent::memory-saved>", async () => {
     // The full closing-the-loop flow as wired in `src/index.ts`:
     //
     //   1. Loader is constructed.
     //   2. setGlobalEventBus(loader.bus()): so `getGlobalEventBus()` from
     //      inside the handler resolves to the same bus.
     //   3. SaveEchoCollector.attach(loader.bus()): subscribes to MEMORY_SAVED.
-    //   4. A `<ma::plugin::memory>` tag is dispatched through the loader.
+    //   4. A `<ma::emit::memory>` tag is dispatched through the loader.
     //   5. The collector should now have a queued ContentBlock the agent
     //      would prepend to the next user turn.
     const sid = "11111111-2222-3333-4444-555555555555"
@@ -801,7 +801,7 @@ describe("memory: integration with PluginLoader", () => {
     // Bus dispatches via queueMicrotask: wait one tick.
     await Promise.resolve()
 
-    // Drain: exactly one block, with the expected <memory-saved> shape.
+    // Drain: exactly one block, with the expected <ma::agent::memory-saved> shape.
     const blocks = collector.consumeAll()
     expect(blocks.length).toBe(1)
     expect(blocks[0]?.type).toBe("text")

@@ -4,10 +4,10 @@
  * Covers two new optional injectables on the Agent constructor:
  *
  *   - `saveEcho`            — `{consumeAll(): ContentBlock[]}` drained at
- *     the start of each user message; produces `<memory-saved …>` blocks.
+ *     the start of each user message; produces `<ma::agent::memory-saved …>` blocks.
  *   - `shortTermSnapshot`   — `{toAttachment(): ContentBlock | null}`
  *     called once at the INITIAL user-message seam only; produces a
- *     `<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>` block.
+ *     `<ma::agent::short-term-memory>…</ma::agent::short-term-memory>` block.
  *
  * Both are structural types (no hard dep on the memory plugin) so the
  * agent can be tested in isolation with hand-rolled stubs.
@@ -182,7 +182,7 @@ describe("Agent.run — memory attachments (initial seam)", () => {
     const sendFn = makeTextSendFn(records)
     const snapshot = new FakeSnapshot({
       type: "text",
-      text: "<ma::plugin::memory::short-term>\n[#1] active\n</ma::plugin::memory::short-term>",
+      text: "<ma::agent::short-term-memory>\n[#1] active\n</ma::agent::short-term-memory>",
     })
     const agent = new Agent({ auth, model: "test", sendFn, shortTermSnapshot: snapshot })
 
@@ -196,7 +196,7 @@ describe("Agent.run — memory attachments (initial seam)", () => {
       ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
     expect(content.length).toBe(2)
     expect(content[0]?.type).toBe("text")
-    expect((content[0] as { text: string }).text).toContain("<ma::plugin::memory::short-term>")
+    expect((content[0] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
     expect((content[1] as { text: string }).text).toBe("hi")
   })
 
@@ -206,7 +206,7 @@ describe("Agent.run — memory attachments (initial seam)", () => {
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="abc-1234">prev</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="project" id="abc-1234">prev</ma::agent::memory-saved>',
     })
     const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
 
@@ -219,7 +219,7 @@ describe("Agent.run — memory attachments (initial seam)", () => {
     const content =
       ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
     expect(content.length).toBe(2)
-    expect((content[0] as { text: string }).text).toContain("<memory-saved")
+    expect((content[0] as { text: string }).text).toContain("<ma::agent::memory-saved")
     expect((content[1] as { text: string }).text).toBe("hi")
   })
 
@@ -229,15 +229,15 @@ describe("Agent.run — memory attachments (initial seam)", () => {
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="a">A</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="project" id="a">A</ma::agent::memory-saved>',
     })
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="short-term" id="1">B</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="short-term" id="1">B</ma::agent::memory-saved>',
     })
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="global" id="g">C</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="global" id="g">C</ma::agent::memory-saved>',
     })
     const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
 
@@ -267,12 +267,12 @@ describe("Agent.run — memory attachments (combined order)", () => {
     const sendFn = makeTextSendFn(records)
     const snapshot = new FakeSnapshot({
       type: "text",
-      text: "<ma::plugin::memory::short-term>\n[#1] X\n</ma::plugin::memory::short-term>",
+      text: "<ma::agent::short-term-memory>\n[#1] X\n</ma::agent::short-term-memory>",
     })
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="abc">P</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="project" id="abc">P</ma::agent::memory-saved>',
     })
     const agent = new Agent({
       auth,
@@ -291,8 +291,8 @@ describe("Agent.run — memory attachments (combined order)", () => {
     const content =
       ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
     expect(content.length).toBe(3)
-    expect((content[0] as { text: string }).text).toContain("<ma::plugin::memory::short-term>")
-    expect((content[1] as { text: string }).text).toContain("<memory-saved")
+    expect((content[0] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
+    expect((content[1] as { text: string }).text).toContain("<ma::agent::memory-saved")
     expect((content[2] as { text: string }).text).toBe("hi")
   })
 
@@ -307,12 +307,12 @@ describe("Agent.run — memory attachments (combined order)", () => {
     const sendFn = makeTextSendFn(records)
     const snapshot = new FakeSnapshot({
       type: "text",
-      text: "<ma::plugin::memory::short-term>\n[#1] x\n</ma::plugin::memory::short-term>",
+      text: "<ma::agent::short-term-memory>\n[#1] x\n</ma::agent::short-term-memory>",
     })
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="abc">p</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="project" id="abc">p</ma::agent::memory-saved>',
     })
     const agent = new Agent({
       auth,
@@ -333,8 +333,8 @@ describe("Agent.run — memory attachments (combined order)", () => {
       ((records[0]?.messages ?? []) as Array<{ content: ContentBlock[] }>)[0]?.content ?? []
     expect(content.length).toBe(4)
     expect((content[0] as { text: string }).text).toContain("<ma::agent::mode-change")
-    expect((content[1] as { text: string }).text).toContain("<ma::plugin::memory::short-term>")
-    expect((content[2] as { text: string }).text).toContain("<memory-saved")
+    expect((content[1] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
+    expect((content[2] as { text: string }).text).toContain("<ma::agent::memory-saved")
     expect((content[3] as { text: string }).text).toBe("hi")
   })
 })
@@ -345,7 +345,7 @@ describe("Agent.run — memory attachments (combined order)", () => {
 // ---------------------------------------------------------------------------
 
 describe("Agent.run — memory attachments (loop seam ordering)", () => {
-  it("places tool_result FIRST and <memory-saved> AFTER on the loop seam (snapshot NOT re-emitted)", async () => {
+  it("places tool_result FIRST and <ma::agent::memory-saved> AFTER on the loop seam (snapshot NOT re-emitted)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
 
@@ -353,7 +353,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
     // ONCE (initial seam). Counting checks that.
     const snapshot = new CountingSnapshot({
       type: "text",
-      text: "<ma::plugin::memory::short-term>\n[#1] X\n</ma::plugin::memory::short-term>",
+      text: "<ma::agent::short-term-memory>\n[#1] X\n</ma::agent::short-term-memory>",
     })
     const echoes = new FakeSaveEcho()
 
@@ -361,7 +361,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
     // mid-stream we'll seed another echo to land at the loop seam.
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="initial">i</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="project" id="initial">i</ma::agent::memory-saved>',
     })
 
     const agent = new Agent({
@@ -382,7 +382,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
     // collect-all-then-iterate.
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="short-term" id="3">l</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="short-term" id="3">l</ma::agent::memory-saved>',
     })
 
     const gen = agent.run("hi")
@@ -401,7 +401,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
     // NOTE: we seeded BOTH echoes before run() started, so both land
     // at the initial seam — that's the expected behavior of consumeAll.
     expect(r1User.length).toBe(4)
-    expect((r1User[0] as { text: string }).text).toContain("<ma::plugin::memory::short-term>")
+    expect((r1User[0] as { text: string }).text).toContain("<ma::agent::short-term-memory>")
     expect((r1User[1] as { text: string }).text).toContain('id="initial"')
     expect((r1User[2] as { text: string }).text).toContain('id="3"')
     expect((r1User[3] as { text: string }).text).toBe("hi")
@@ -416,7 +416,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
     // No snapshot at loop seam.
     const allTexts = r2User.map((b) => (b.type === "text" ? (b as { text: string }).text : ""))
     for (const t of allTexts) {
-      expect(t).not.toContain("<ma::plugin::memory::short-term>")
+      expect(t).not.toContain("<ma::agent::short-term-memory>")
     }
 
     // Snapshot must have been queried EXACTLY ONCE (initial seam only).
@@ -447,7 +447,7 @@ describe("Agent.run — memory attachments (loop seam ordering)", () => {
         // seam (after round 1's tool_use, before round 2's request).
         echoes.enqueue({
           type: "text",
-          text: '<memory-saved scope="project" id="late">L</ma::plugin::memory::saved>',
+          text: '<ma::agent::memory-saved scope="project" id="late">L</ma::agent::memory-saved>',
         })
         return {
           blocks: [
@@ -509,7 +509,7 @@ describe("Agent.run — memory attachments (queue exhaustion)", () => {
     const echoes = new FakeSaveEcho()
     echoes.enqueue({
       type: "text",
-      text: '<memory-saved scope="project" id="once">O</ma::plugin::memory::saved>',
+      text: '<ma::agent::memory-saved scope="project" id="once">O</ma::agent::memory-saved>',
     })
     const agent = new Agent({ auth, model: "test", sendFn, saveEcho: echoes })
 

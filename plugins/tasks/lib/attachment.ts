@@ -1,10 +1,10 @@
 /**
- * Per-turn `<ma::plugin::tasks>` attachment producer.
+ * Per-turn `<ma::agent::tasks>` attachment producer.
  *
  * The agent's task list is stored at `~/.minimal-agent/sessions/<sid>.tasks.jsonl`
  * (one task per line, see `lib/parse.ts`). To make the live state reliably
  * present in the model's context every turn — without busting the
- * system-prompt cache — we prepend a `<ma::plugin::tasks>…</ma::plugin::tasks>`
+ * system-prompt cache — we prepend a `<ma::agent::tasks>…</ma::agent::tasks>`
  * attachment to the FIRST user message of each `Agent.run` call.
  *
  * Same mechanism as the memory plugin's `ShortTermSnapshot` (see
@@ -13,17 +13,21 @@
  * turn anyway by the new user message), so the snapshot costs zero
  * extra cache invalidation.
  *
- * # The `<ma::plugin::tasks>` namespace
+ * # The `<ma::agent::*>` namespace
  *
- * All model-facing attachments use the `<ma::*>` schema:
+ * Every model-facing tag is `<ma::OWNER::leaf>`, partitioned by who
+ * produces it:
  *
- * - `<ma::plugin::NAME>` — emitted by the MODEL, scanned and extracted
- *   from assistant output by `src/plugins/scanner.ts` to invoke a plugin
- *   handler inline.
- * - `<ma::plugin::tasks>` — emitted by the AGENT runtime here as a
- *   user-message attachment. Same namespace; the scanner only runs on
- *   the assistant stream, so an agent-side attachment is unambiguously
- *   "data the model reads" rather than "trigger fired by the model".
+ * - `<ma::sys::*>`   — composed into the system prompt (the model reads it).
+ * - `<ma::agent::*>` — emitted by the AGENT runtime as a per-turn signal the
+ *   model reads. `<ma::agent::tasks>` is one of these: live task state
+ *   prepended to the user message here.
+ * - `<ma::emit::*>`  — emitted by the MODEL and scanned out of assistant
+ *   output by `src/plugins/scanner.ts` to fire an inline handler.
+ *
+ * The output scanner only watches for `<ma::emit::*>`, so an
+ * `<ma::agent::tasks>` attachment is unambiguously "data the model reads",
+ * never "a trigger the model fired".
  *
  * # When the attachment is omitted
  *
@@ -52,7 +56,7 @@ import { TaskStore, type StoreDeps } from "./store.ts"
 // ---------------------------------------------------------------------------
 
 /**
- * Render the tasks list as the body of a `<ma::plugin::tasks>` attachment.
+ * Render the tasks list as the body of a `<ma::agent::tasks>` attachment.
  *
  * Compact ASCII, no ANSI, parseable. Each top-level task is one line
  * with `N  #hash  status  title`; subtasks use `Na`/`Nb`/... in the
@@ -166,12 +170,12 @@ export class TasksAttachment {
    *
    * Output shape:
    *
-   *     <ma::plugin::tasks total="5" done="2" doing="1" todo="2" canceled="0">
+   *     <ma::agent::tasks total="5" done="2" doing="1" todo="2" canceled="0">
    *     1   #a7b3c4   done      Add contextSize to SessionTokens
    *     2   #f8e21a   doing     Update src/session-tokens.test.ts
    *     2a  #f8e21aa  done      Zero-state includes contextSize
    *     ...
-   *     </ma::plugin::tasks>
+   *     </ma::agent::tasks>
    */
   toAttachment(): ContentBlock | null {
     if (this.sid === null || this.sid.trim().length === 0) return null
@@ -184,7 +188,7 @@ export class TasksAttachment {
     const body = renderAttachmentBody(tasks)
     return {
       type: "text",
-      text: `<ma::plugin::tasks total="${s.total}" done="${s.done}" doing="${s.doing}" todo="${s.todo}" canceled="${s.canceled}">\n${body}\n</ma::plugin::tasks>`,
+      text: `<ma::agent::tasks total="${s.total}" done="${s.done}" doing="${s.doing}" todo="${s.todo}" canceled="${s.canceled}">\n${body}\n</ma::agent::tasks>`,
     }
   }
 

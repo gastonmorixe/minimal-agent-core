@@ -6,7 +6,7 @@
  *   1. Real `PluginLoader` loads the embedded memory plugin.
  *   2. `setGlobalEventBus(loader.bus())` wires the global bus pointer.
  *   3. `SaveEchoCollector.attach(loader.bus())` subscribes to MEMORY_SAVED.
- *   4. A `<ma::plugin::memory>` inline-tag save dispatched through the loader
+ *   4. A `<ma::emit::memory>` inline-tag save dispatched through the loader
  *      → handler appends to disk via `MemoryStore` → emits on bus →
  *      collector buffers.
  *   5. The collector's drained block carries the bullet's id.
@@ -82,7 +82,7 @@ describe("memory plugin v0.3 — closing-the-loop integration", () => {
     if (echoes[0]?.type !== "text") return
     const echoText = echoes[0].text
 
-    // Extract the id from the <memory-saved scope="project" id="…">
+    // Extract the id from the <ma::agent::memory-saved scope="project" id="…">
     const idMatch = /id="([^"]+)"/.exec(echoText)
     expect(idMatch).not.toBeNull()
     const id = idMatch![1]
@@ -155,9 +155,9 @@ describe("memory plugin v0.3 — closing-the-loop integration", () => {
     const att = snapshot.toAttachment()
     expect(att).not.toBeNull()
     if (att?.type !== "text") return
-    expect(att.text).toContain("<ma::plugin::memory::short-term>")
+    expect(att.text).toContain("<ma::agent::short-term-memory>")
     expect(att.text).toContain("[#1] active hypothesis: width 80")
-    expect(att.text).toContain("</ma::plugin::memory::short-term>")
+    expect(att.text).toContain("</ma::agent::short-term-memory>")
   })
 
   it("short-term overflow surfaces evicted count in save-echo", async () => {

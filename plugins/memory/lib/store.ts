@@ -92,7 +92,7 @@ const NAMESPACE_RE = /^[A-Za-z0-9_.-]+$/
  * Cap on short-term entries. When `add` would push the count above this,
  * the oldest entry (by file order, which is also insertion order modulo
  * edits — see {@link MemoryStore.edit} for the bump-to-bottom rule) is
- * evicted. Surfaced to the model via the save-echo `<memory-saved …
+ * evicted. Surfaced to the model via the save-echo `<ma::agent::memory-saved …
  * evicted="N">` block (Phase 2).
  *
  * Picked at 20 deliberately: large enough for "active hypotheses + key

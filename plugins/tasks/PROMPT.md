@@ -1,4 +1,4 @@
-The `tasks` plugin gives you a structured, mutable, per-session TODO list the user can see in real time. State lives at `~/.minimal-agent/sessions/<sid>.tasks.jsonl` and is auto-injected into every user turn as a `<ma::plugin::tasks …>…</ma::plugin::tasks>` attachment so you always know the current plan.
+Use `Task` to plan and track multi-step work the user can watch in real time. The live list is auto-injected into every user turn as a `<ma::agent::tasks …>` block, so you always see the current plan without re-querying.
 
 ## When to use
 
@@ -122,4 +122,4 @@ Task({action: "status", id: 6, status: "canceled", reason: "user wants to keep t
 - Don't `remove` a task as a way of "cleaning up". That erases the audit trail. Use `status: "canceled"` for anything that materially existed but was later abandoned. Only `remove` tasks you accidentally added or that the user explicitly asks to drop.
 - Don't reach for `canceled` when you mean `done`. If a phase header, parent task, or planning placeholder has no direct work of its own but the work it represents finished, mark it `done`. See "`canceled` is 'abandoned', not 'done'" above.
 - Don't fight the single-doing discipline with `parallel: true` unless you genuinely have parallel work. The discipline is the point. The user reads the meter as "where is the agent right now".
-- Don't try to nest beyond depth 2 (subtask of a subtask). The plugin refuses. Flatten the deepest layer into the parent's title or split into a sibling top-level task.
+- Don't try to nest beyond depth 2 (subtask of a subtask). `Task` refuses it. Flatten the deepest layer into the parent's title or split into a sibling top-level task.
