@@ -6,7 +6,7 @@ import { describe, expect, it } from "bun:test"
 
 import { Agent, type ReplAgentLike, runRepl, withRollingCacheBreakpoint } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
-import type { Message, SendOptions, StreamedResponse } from "./client.ts"
+import type { ContentBlock, Message, SendOptions, StreamedResponse } from "./client.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { StatusBus } from "./status.ts"
 
@@ -764,6 +764,107 @@ describe("withRollingCacheBreakpoint", () => {
     withRollingCacheBreakpoint(original)
     const block = original[0].content as Array<{ cache_control?: unknown }>
     expect(block[0].cache_control).toBeUndefined()
+  })
+
+  // Regression: 400 "`thinking` or `redacted_thinking` blocks in the latest
+  // assistant message cannot be modified". When the conversation ends on an
+  // assistant turn whose tail is a thinking block (assistant prefill, or a
+  // forked/resumed long interleaved-thinking turn re-sent verbatim), the
+  // rolling breakpoint must NOT land on the thinking block: adding
+  // cache_control to it is a modification the API rejects.
+  it("never stamps cache_control on a trailing thinking block of the last message", () => {
+    const out = withRollingCacheBreakpoint([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "ponder A", signature: "sigA" },
+          { type: "text", text: "partial answer" },
+          { type: "thinking", thinking: "ponder B", signature: "sigB" },
+        ],
+      },
+    ])
+    const lastBlocks = out[out.length - 1].content as Array<{
+      type: string
+      cache_control?: unknown
+    }>
+    // The trailing thinking block stays untouched...
+    expect(lastBlocks[2].type).toBe("thinking")
+    expect(lastBlocks[2].cache_control).toBeUndefined()
+    // ...and the breakpoint moves to the last NON-thinking block.
+    expect(lastBlocks[1].type).toBe("text")
+    expect(lastBlocks[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    // The earlier thinking block is also left alone.
+    expect(lastBlocks[0].cache_control).toBeUndefined()
+  })
+
+  it("sends the latest assistant message's thinking blocks byte-identical (text + signature)", () => {
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "step 1", signature: "AAA==" },
+          { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } },
+          { type: "thinking", thinking: "step 2", signature: "BBB==" },
+        ],
+      },
+    ]
+    const out = withRollingCacheBreakpoint(messages)
+    const sent = out[out.length - 1].content as Array<{
+      type: string
+      thinking?: string
+      signature?: string
+      cache_control?: unknown
+    }>
+    const thinking = sent.filter((b) => b.type === "thinking")
+    // Both thinking blocks survive verbatim: same text, same signature, and
+    // crucially NO cache_control was added or stripped onto them.
+    expect(thinking).toEqual([
+      { type: "thinking", thinking: "step 1", signature: "AAA==" },
+      { type: "thinking", thinking: "step 2", signature: "BBB==" },
+    ])
+    // The breakpoint landed on the only non-thinking block (the tool_use).
+    const toolUse = sent.find((b) => b.type === "tool_use") as { cache_control?: unknown }
+    expect(toolUse.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+  })
+
+  it("skips the breakpoint entirely when the last message is all thinking", () => {
+    const out = withRollingCacheBreakpoint([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "only thought A", signature: "s1" },
+          { type: "thinking", thinking: "only thought B", signature: "s2" },
+        ],
+      },
+    ])
+    const lastBlocks = out[out.length - 1].content as Array<{ cache_control?: unknown }>
+    // No block gets a breakpoint (a thinking-only tail is left untouched), so
+    // the request stays API-valid even though the rolling cache skips a turn.
+    expect(lastBlocks.every((b) => b.cache_control === undefined)).toBe(true)
+  })
+
+  it("also guards a literal redacted_thinking tail block", () => {
+    const out = withRollingCacheBreakpoint([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "here" },
+          // The wire type a restored/forked session can carry.
+          { type: "redacted_thinking", data: "abc" } as unknown as ContentBlock,
+        ],
+      },
+    ])
+    const lastBlocks = out[out.length - 1].content as Array<{
+      type: string
+      cache_control?: unknown
+    }>
+    expect(lastBlocks[1].type).toBe("redacted_thinking")
+    expect(lastBlocks[1].cache_control).toBeUndefined()
+    expect(lastBlocks[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 })
 
