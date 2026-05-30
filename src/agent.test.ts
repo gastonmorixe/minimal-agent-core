@@ -846,6 +846,56 @@ describe("withRollingCacheBreakpoint", () => {
     expect(lastBlocks.every((b) => b.cache_control === undefined)).toBe(true)
   })
 
+  // Regression: long interleaved-thinking conversations 400 with "`thinking`
+  // or `redacted_thinking` blocks in the latest assistant message cannot be
+  // modified" once several prior assistant turns' thinking accumulates (~200KB
+  // of signatures). The API only needs the LATEST assistant turn's thinking,
+  // so older turns' thinking must be stripped before sending. The latest
+  // turn's thinking stays byte-identical; tool_use pairing is preserved.
+  it("strips thinking from older assistant turns but keeps the latest turn's verbatim", () => {
+    const out = withRollingCacheBreakpoint([
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "old reasoning A", signature: "sigA" },
+          { type: "text", text: "doing A" },
+          { type: "tool_use", id: "t1", name: "Bash", input: { command: "a" } },
+        ],
+      },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ra" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "old reasoning B", signature: "sigB" },
+          { type: "tool_use", id: "t2", name: "Bash", input: { command: "b" } },
+        ],
+      },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t2", content: "rb" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "latest reasoning", signature: "sigZ" },
+          { type: "tool_use", id: "t3", name: "Bash", input: { command: "c" } },
+        ],
+      },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t3", content: "rc" }] },
+    ])
+    // Older assistant turns (indices 1, 3): thinking dropped, tool_use kept.
+    for (const i of [1, 3]) {
+      const blocks = out[i].content as Array<{ type: string }>
+      expect(blocks.some((b) => b.type === "thinking")).toBe(false)
+      expect(blocks.some((b) => b.type === "tool_use")).toBe(true)
+    }
+    // Latest assistant turn (index 5): thinking PRESERVED byte-identical.
+    const latest = out[5].content as Array<{ type: string; thinking?: string; signature?: string }>
+    expect(latest.find((b) => b.type === "thinking")).toEqual({
+      type: "thinking",
+      thinking: "latest reasoning",
+      signature: "sigZ",
+    })
+  })
+
   it("also guards a literal redacted_thinking tail block", () => {
     const out = withRollingCacheBreakpoint([
       { role: "user", content: [{ type: "text", text: "hi" }] },
