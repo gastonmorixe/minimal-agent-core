@@ -178,15 +178,47 @@ export interface ProviderPlugin {
   resolveSystemPrompt?(ctx: SystemPromptContext): SystemPromptBlock[]
 
   /**
-   * Optional: fetch provider-neutral session metadata (quota windows,
-   * context window, model label) for the status bar. MAY hit the network
-   * (through the shared, resilient transport) or read a cache; MUST honor
-   * `ctx.signal` and resolve to `null` (not throw) on failure so the footer
-   * degrades gracefully. A provider with no quota concept can still return
+   * Optional: read provider-neutral session metadata (quota windows,
+   * context window, model label) for the status bar.
+   *
+   * **MUST be cache-only / non-blocking.** The status-bar slot calls this
+   * on every refresh tick and on every `quota.headersReceived` bus event;
+   * a network round-trip here blocks the live-area scheduler's per-slot
+   * `timeoutMs` and starves other refreshes. Population of the cache is
+   * the provider's separate concern: either piggyback on real chat
+   * responses (OpenAI / OpenRouter: capture `x-ratelimit-*` headers in
+   * the adapter) OR implement {@link primeSessionInfo} for a cold-start
+   * probe.
+   *
+   * MUST honor `ctx.signal` (trivially — no I/O to cancel) and resolve to
+   * `null` (not throw) on failure so the footer degrades gracefully. A
+   * provider with no quota concept can still return
    * `{ contextWindow, modelLabel }` (no `quota`). When absent, core
    * synthesizes a context-only view from the model registry.
    */
   fetchSessionInfo?(ctx: ProviderSessionContext): Promise<ProviderSessionInfo | null>
+
+  /**
+   * Optional: warm whatever cache {@link fetchSessionInfo} reads from.
+   * Called fire-and-forget by the agent boot for the selected provider,
+   * AFTER {@link onStartupProbe} and BEFORE the REPL paints.
+   *
+   * The intended shape is "kick off a bounded probe in the background,
+   * populate the cache on success" — for Anthropic, that's a 1-token
+   * Haiku POST whose response headers carry `anthropic-ratelimit-*`
+   * (see `plugins/llm-anthropic/session-info.ts`). When the probe lands,
+   * it broadcasts via `quota.headersReceived`, which refires the
+   * status-bar slot with a fresh cache.
+   *
+   * Providers whose cache fills from real chat traffic (OpenAI,
+   * OpenRouter capture headers in the adapter) typically omit this hook.
+   *
+   * MUST NOT throw and SHOULD self-deduplicate (a second prime call
+   * while the first is in flight should join the same promise, not
+   * spawn a second probe). Failures are tolerated — the slot just keeps
+   * showing the manifest placeholder until real traffic fills the cache.
+   */
+  primeSessionInfo?(ctx: ProviderSessionContext): Promise<void>
 }
 
 const plugins = new Map<string, ProviderPlugin>()

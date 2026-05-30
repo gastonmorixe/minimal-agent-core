@@ -34,7 +34,7 @@ import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "./response-stream.ts"
-import { fetchAnthropicSessionInfo } from "./session-info.ts"
+import { fetchAnthropicSessionInfo, primeAnthropicSessionInfo } from "./session-info.ts"
 import { resolveAnthropicSystemPrompt } from "./system-prompt.ts"
 import {
   applyMismatchResolution,
@@ -190,10 +190,18 @@ export const anthropicProviderPlugin: ProviderPlugin = {
   resolveSystemPrompt: resolveAnthropicSystemPrompt,
   /**
    * Provider-neutral session metadata (5h/7d quota windows, context window,
-   * model label) for the status bar. Cache-first, with a bounded probe
-   * through the shared transport. See `./session-info.ts`.
+   * model label) for the status bar. **Cache-only** — non-blocking. The
+   * cold-start probe lives in {@link primeSessionInfo}. See `./session-info.ts`.
    */
   fetchSessionInfo: fetchAnthropicSessionInfo,
+  /**
+   * Cold-start quota cache warmup, issued fire-and-forget by the agent boot.
+   * A bounded 1-token Haiku POST whose response headers populate the cache
+   * AND emit `quota.headersReceived`, so the status-bar slot's first tick
+   * (which is cache-only) finds fresh data without ever blocking on the
+   * network. Self-deduplicating. See `./session-info.ts`.
+   */
+  primeSessionInfo: primeAnthropicSessionInfo,
   /**
    * Fire-and-forget `/api/claude_cli/bootstrap` probe (v2.1.154+). Overlays
    * any server-shipped `additional_model_costs` onto the registry so

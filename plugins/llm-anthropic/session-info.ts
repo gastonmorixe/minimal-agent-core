@@ -1,19 +1,31 @@
 /**
  * Anthropic session metadata (quota windows + context window + label).
  *
- * Implements the provider-neutral `ProviderPlugin.fetchSessionInfo` seam. The
- * status bar / startup call the CORE resolver (`src/llm/provider-session.ts`),
- * which routes here for Anthropic models — so the quota footer no longer
- * imports Anthropic internals directly.
+ * Implements TWO seams on `ProviderPlugin`:
  *
- * Data path (mirrors the old `quota-status` handler, now owned by the provider):
- *   1. Cache-first: the in-process `quota-cache` is written by every successful
- *      Anthropic response (chat + this probe), so within a freshness window we
- *      return it with NO network call.
- *   2. Cold/stale: a bounded `checkQuota` probe through the SHARED, resilient
- *      network client (so the TTFB guard + abort escalation apply, and a stuck
- *      probe is torn down by the live-area scheduler's per-slot timeout via
- *      `ctx.signal`).
+ *   - {@link fetchAnthropicSessionInfo} → `ProviderPlugin.fetchSessionInfo`.
+ *     **Cache-only.** Read the in-process `quota-cache` (populated by every
+ *     successful Anthropic response and by {@link primeAnthropicSessionInfo})
+ *     and return neutral metadata. No network I/O, no `await getAuth()`,
+ *     no blocking. The status-bar slot calls this on every tick + every
+ *     `quota.headersReceived` event, so it MUST stay synchronous-ish to
+ *     fit inside the scheduler's per-slot `timeoutMs`.
+ *
+ *   - {@link primeAnthropicSessionInfo} → `ProviderPlugin.primeSessionInfo`.
+ *     **Cold-start cache warmup.** A bounded `checkQuota` probe through the
+ *     shared transport. Called fire-and-forget by the agent boot for the
+ *     selected provider so the slot's first tick already finds a fresh
+ *     cache. Self-deduplicates: a second prime while the first is in
+ *     flight joins the same promise (no double probe).
+ *
+ * The split matters because, before, `fetchSessionInfo` itself ran the cold
+ * probe inline. The slot's 8s `timeoutMs` (designed to detect *stuck*
+ * handlers, not to bound network) repeatedly tripped on a cold-start
+ * checkQuota POST and the footer never populated until the user typed their
+ * first prompt — at which point the chat path's broadcast filled the cache
+ * via `quota.headersReceived` and the slot caught up. Splitting prime from
+ * fetch matches OpenAI / OpenRouter (already cache-only) and keeps the slot
+ * non-blocking.
  *
  * The Anthropic `anthropic-ratelimit-unified-*` header shape is parsed HERE
  * (the provider owns its wire format); the renderer only ever sees neutral
@@ -34,7 +46,7 @@ import type {
 import type { NetworkClient } from "../../src/network/index.ts"
 import { getLastRateLimits } from "../../src/quota-cache.ts"
 
-/** Trust a cached snapshot newer than this without re-probing. */
+/** Trust a cached snapshot newer than this without treating it as stale. */
 const FRESHNESS_MS = 60_000
 
 /**
@@ -87,9 +99,12 @@ function contextWindowFor(modelId: string): number | undefined {
 }
 
 /**
- * Resolve Anthropic session metadata. Returns `null` only if even the context
- * window is unknowable; otherwise returns at least context + label so the
- * footer keeps the context bar when quota can't be fetched.
+ * Read Anthropic session metadata from the in-process cache. **Cache-only:**
+ * no network, no `await getAuth()`, no blocking. Returns at least context +
+ * label so the footer keeps the model identity even when the cache is cold;
+ * `quota` is omitted on a cold/stale cache (the footer degrades to a
+ * context-only view and refreshes on the next `quota.headersReceived`
+ * broadcast). Cold-start cache population is {@link primeAnthropicSessionInfo}.
  */
 export async function fetchAnthropicSessionInfo(
   ctx: ProviderSessionContext,
@@ -97,27 +112,9 @@ export async function fetchAnthropicSessionInfo(
   const contextWindow = contextWindowFor(ctx.modelId)
   const modelLabel = modelShortLabel(ctx.modelId)
 
-  // 1) Cache-first.
-  let rl: ReadonlyMap<string, string> | null = null
   const cached = getLastRateLimits()
-  if (cached && Date.now() - cached.at < FRESHNESS_MS) {
-    rl = cached.rateLimits
-  } else {
-    // 2) Cold/stale: bounded probe through the shared transport. `getAuth`
-    //    failure (no creds) just means no quota this tick — the footer falls
-    //    back to context-only. `checkQuota` already swallows its own errors
-    //    and returns `{ ok: false }`, and honors `ctx.signal`.
-    let auth: Awaited<ReturnType<typeof getAuth>> | null = null
-    try {
-      auth = await getAuth()
-    } catch {
-      auth = null
-    }
-    if (auth) {
-      const res = await checkQuota(auth, ctx.networkClient as NetworkClient | undefined, ctx.signal)
-      if (res.ok) rl = res.rateLimits
-    }
-  }
+  const rl =
+    cached && Date.now() - cached.at < FRESHNESS_MS ? cached.rateLimits : null
 
   const windows = rl ? parseAnthropicQuotaWindows(rl) : []
   const overage = rl ? parseAnthropicOverage(rl) : undefined
@@ -130,4 +127,91 @@ export async function fetchAnthropicSessionInfo(
     modelLabel,
     quota,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Prime (cold-start cache warmup)
+// ---------------------------------------------------------------------------
+
+/**
+ * Single in-flight prime promise. A concurrent {@link primeAnthropicSessionInfo}
+ * call joins this rather than starting a second probe. Reset to `null` once the
+ * probe settles, so a later cold tick (e.g. after the agent has been idle past
+ * the freshness window) can prime again.
+ */
+let inFlightPrime: Promise<void> | null = null
+
+/** Reset the in-flight latch. Tests only. */
+export function _resetAnthropicPrimeInFlight(): void {
+  inFlightPrime = null
+}
+
+/**
+ * Warm the Anthropic quota cache so the status-bar slot's first tick finds
+ * fresh data. Issues a bounded 1-token Haiku POST through the shared transport
+ * (`src/client/quota.ts::checkQuota`), whose response headers carry the
+ * `anthropic-ratelimit-*` map that `broadcastResponseRateLimits` copies into
+ * the in-process cache AND emits on `quota.headersReceived`. The status-bar
+ * slot's `refreshOn: ["quota.headersReceived"]` then refires it and the
+ * footer populates.
+ *
+ * Never throws. Self-gates on missing auth (no creds → just return; the
+ * footer keeps the context-only view). Self-deduplicates a concurrent caller
+ * via {@link inFlightPrime}.
+ *
+ * NOTE: declared as a regular (non-`async`) function returning a `Promise`
+ * so the returned reference IS the shared in-flight promise. An `async`
+ * wrapper would mint a fresh Promise on every call (wrapping the same
+ * inner one), making the dedupe invisible to `===` consumers and to tests
+ * pinning the contract via reference identity.
+ */
+export function primeAnthropicSessionInfo(
+  ctx: ProviderSessionContext,
+): Promise<void> {
+  // A previous prime is still racing — join it instead of doubling the POST.
+  if (inFlightPrime) return inFlightPrime
+
+  // The async IIFE may complete SYNCHRONOUSLY on the cache-fresh fast path
+  // (no `await` taken). If we cleared `inFlightPrime` from inside a `try
+  // / finally`, the clear would run BEFORE the outer `inFlightPrime = work`
+  // assignment landed, leaving the latch permanently pinned to this
+  // promise and breaking dedupe-after-settle. Attaching `.finally` on the
+  // OUTSIDE always defers the clear to a microtask after the assignment,
+  // which matches both fast-path and slow-path semantics.
+  const work = (async () => {
+    // Cache-first: a fresh snapshot (typically populated by a prior chat
+    // response or a same-process prime) makes the probe unnecessary.
+    const cached = getLastRateLimits()
+    if (cached && Date.now() - cached.at < FRESHNESS_MS) return
+
+    let auth: Awaited<ReturnType<typeof getAuth>> | null = null
+    try {
+      auth = await getAuth()
+    } catch {
+      auth = null
+    }
+    if (!auth) return
+
+    // `checkQuota` already broadcasts on success (cache write + bus emit
+    // via `broadcastResponseRateLimits`), so we don't need its return.
+    // It also swallows its own errors and honors `ctx.signal` composed
+    // with its internal 15s deadline.
+    await checkQuota(
+      auth,
+      ctx.networkClient as NetworkClient | undefined,
+      ctx.signal,
+    )
+  })()
+
+  inFlightPrime = work
+  // Identity-guarded clear: a later prime() may have replaced the latch
+  // by the time this resolves (after `_resetAnthropicPrimeInFlight` from
+  // tests, for example); never blow away a successor's latch. `void`
+  // marks the .finally() chain as intentionally fire-and-forget — the
+  // body cannot throw (single assignment to a module local).
+  void work.finally(() => {
+    if (inFlightPrime === work) inFlightPrime = null
+  })
+
+  return work
 }
