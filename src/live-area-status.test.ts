@@ -47,6 +47,38 @@ describe("LiveAreaStatusController", () => {
     ctrl.stop()
   })
 
+  it("pauseForOverlay pins a label and ignores bus churn; resumeFromOverlay re-syncs", () => {
+    const bus = new StatusBus()
+    const editor = new FakeEditor()
+    const ctrl = new LiveAreaStatusController(bus, editor, { spinner: fakeSpinner, maxFps: 0 })
+    ctrl.start()
+    bus.create("Thinking", { notificationId: "x", category: "agent" })
+    expect(editor.statuses.at(-1)).toBe("* Thinking")
+
+    ctrl.pauseForOverlay("PAUSED")
+    expect(editor.statuses.at(-1)).toBe("PAUSED")
+    // A bus update while a modal is up must NOT clobber the pinned paused row.
+    bus.create("Running tool", { notificationId: "z", category: "agent" })
+    expect(editor.statuses.at(-1)).toBe("PAUSED")
+
+    ctrl.resumeFromOverlay()
+    // Re-synced to a real bus status (no longer the paused pin).
+    expect(editor.statuses.at(-1)).not.toBe("PAUSED")
+    expect(editor.statuses.at(-1)).toMatch(/^\* /)
+    ctrl.stop()
+  })
+
+  it("pauseForOverlay(null) hides the activity row entirely", () => {
+    const bus = new StatusBus()
+    const editor = new FakeEditor()
+    const ctrl = new LiveAreaStatusController(bus, editor, { spinner: fakeSpinner, maxFps: 0 })
+    ctrl.start()
+    bus.create("Thinking", { notificationId: "x", category: "agent" })
+    ctrl.pauseForOverlay(null)
+    expect(editor.statuses.at(-1)).toBe(null)
+    ctrl.stop()
+  })
+
   it("clears the status row on stop()", () => {
     const bus = new StatusBus()
     const editor = new FakeEditor()
