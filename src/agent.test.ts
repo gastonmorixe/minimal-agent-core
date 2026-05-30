@@ -633,6 +633,107 @@ describe("Agent.run transcript", () => {
   })
 })
 
+describe("Agent.run coalesces onto a trailing user message (resume after force-quit)", () => {
+  // Resume state: the prior turn ran a tool, the result came back, but the
+  // assistant continuation never streamed (force-quit). extractPendingDraft
+  // pulled the un-replied prompt into the editor, leaving the history ending
+  // in `assistant(tool_use) → user([tool_result])`. Submitting the draft must
+  // NOT produce a `[user, user]` pair (the API rejects "roles must alternate").
+  it("merges the new turn into a trailing user([tool_result]) instead of appending [user, user]", async () => {
+    const initialMessages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "kick off" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } } as ContentBlock,
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_1",
+            content: "ok",
+            is_error: false,
+          } as ContentBlock,
+        ],
+      },
+    ]
+
+    let captured: SendOptions | null = null
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      captured = JSON.parse(JSON.stringify({ messages: opts.messages })) as SendOptions
+      yield "ok"
+      return {
+        blocks: [{ type: "text", text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+
+    const auth: AuthResult = { type: "api-key", token: "test-token" }
+    const agent = new Agent({ auth, model: "test-model", sendFn, initialMessages })
+
+    const gen = agent.run("the resumed draft")
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    const sent = (captured as unknown as { messages: Message[] }).messages
+    // No two consecutive user messages anywhere.
+    for (let i = 1; i < sent.length; i++) {
+      expect(sent[i].role === "user" && sent[i - 1].role === "user").toBe(false)
+    }
+    // The trailing user message carries BOTH the tool_result (preserved) and
+    // the resumed draft text, tool_result first.
+    const tail = sent[sent.length - 1]
+    expect(tail.role).toBe("user")
+    const blocks = tail.content as Array<{ type: string; text?: string }>
+    expect(blocks[0].type).toBe("tool_result")
+    expect(blocks.some((b) => b.type === "text" && b.text === "the resumed draft")).toBe(true)
+    // And the live messages array on the agent matches what was sent (no
+    // dangling consecutive users left behind).
+    expect(agent.messages.filter((m) => m.role === "user").length).toBeLessThan(sent.length)
+  })
+
+  // The ordinary case is unaffected: when the prior turn ended on an
+  // assistant message, a new submit appends a fresh user message.
+  it("appends a fresh user message when the last message is an assistant turn", async () => {
+    const initialMessages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ]
+    let captured: SendOptions | null = null
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      captured = JSON.parse(JSON.stringify({ messages: opts.messages })) as SendOptions
+      yield "ok"
+      return {
+        blocks: [{ type: "text", text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const auth: AuthResult = { type: "api-key", token: "test-token" }
+    const agent = new Agent({ auth, model: "test-model", sendFn, initialMessages })
+    const gen = agent.run("next question")
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+    const sent = (captured as unknown as { messages: Message[] }).messages
+    expect(sent).toHaveLength(3)
+    expect(sent[2].role).toBe("user")
+    const blocks = sent[2].content as Array<{ type: string; text?: string }>
+    expect(blocks.some((b) => b.type === "text" && b.text === "next question")).toBe(true)
+  })
+})
+
 describe("Agent + SessionStore", () => {
   it("persists user, assistant, and tool_result records across a full run", async () => {
     const { mkdtempSync } = await import("node:fs")

@@ -279,6 +279,36 @@ export function repairMessages(input: Message[]): Message[] {
 /** Back-compat alias for `repairMessages`. */
 export const repairTrailingTurn = repairMessages
 
+/**
+ * Append a fresh user turn to `messages`, coalescing into a trailing `user`
+ * message instead of producing a `[user, user]` adjacency (which the
+ * Anthropic API rejects with "roles must alternate"). Mutates in place.
+ *
+ * This is the live-append counterpart to `repairMessages`' consecutive-user
+ * collapse. It matters on resume after a force-quit that stranded tool_results
+ * without their assistant continuation: `extractPendingDraft` pulls the
+ * un-replied prompt into the editor, leaving `user([tool_results])` as the
+ * tail. The next submit must merge into that message rather than appending a
+ * second user message, keeping tool_results FIRST (the API requires them
+ * immediately after the assistant's `tool_use`). The merged shape
+ * `[...tool_results, ...text]` also matches the live queued-submit layout, so
+ * a later resume folds the on-disk records back to the identical history.
+ *
+ * In the steady state the last message is an assistant turn (or the history
+ * is empty), so a fresh user message is pushed : byte-identical to the old
+ * unconditional `messages.push`.
+ */
+export function appendUserTurn(messages: Message[], content: ContentBlock[]): void {
+  const last = messages[messages.length - 1]
+  if (last?.role === "user" && Array.isArray(last.content)) {
+    const toolResults = last.content.filter((b) => b.type === "tool_result")
+    const rest = last.content.filter((b) => b.type !== "tool_result")
+    last.content = [...toolResults, ...rest, ...content]
+  } else {
+    messages.push({ role: "user", content })
+  }
+}
+
 // ---------------------------------------------------------------------------
 // loadSession — top-level convenience: path → { meta, messages, dropped }
 // ---------------------------------------------------------------------------
@@ -305,48 +335,70 @@ export interface LoadedSession {
 }
 
 /**
- * Pop the trailing user message from `messages` if it represents a
- * "human typed something, hit Enter, and the agent never replied"
- * situation. Returns the joined text (cursor-restorable into the
- * editor) and mutates `messages` in place. Returns `null` and leaves
- * `messages` untouched in every other case.
+ * Recognize a `text` block that is runtime plumbing the agent's send-seam
+ * prepends to a user turn (short-term-memory snapshot, tasks attachment,
+ * mode-change chip, memory save-echo, reflection / emergency markers) rather
+ * than human-typed prose. These are regenerated on the next submit, so they
+ * must never leak into the prefilled editor draft.
+ */
+function isAttachmentText(text: string): boolean {
+  const s = text.trimStart()
+  return (
+    s.startsWith("<ma::plugin::") ||
+    s.startsWith("<ma::agent::") ||
+    s.startsWith("<mode-change") ||
+    s.startsWith("<memory-saved")
+  )
+}
+
+/**
+ * Extract the trailing "human typed something, hit Enter, and the agent never
+ * replied" prompt so the REPL can prefill it back into the editor on resume
+ * instead of replaying it into scrollback as a sent-but-unanswered turn.
+ * Returns the joined human text (cursor-restorable) and mutates `messages` in
+ * place; returns `null` and leaves `messages` untouched in every other case.
  *
- * The check is deliberately strict, mistakenly popping a real message
- * would silently lose conversation history. We require ALL of:
+ * Requirements:
  *
  * 1. `messages` is non-empty AND the last message has `role: "user"`.
  *    (Trailing assistant means the model finished a turn cleanly.)
  * 2. The user message's content is a block array (not a bare string).
- *    Strings are foldRecords' historical shape for plain-text turns;
- *    new turns always use blocks. A string trailing-user is suspicious
- *    enough that we leave it for human inspection rather than pop.
- * 3. NO block in the user message is a `tool_result`. A trailing user
- *    message with tool_results is the "crashed mid-tool" case; that's
- *    already handled by `repairMessages` (the orphan assistant gets
- *    dropped, then the user message gets dropped via empty-content).
- *    If repair somehow left tool_results in place, they're load-bearing,
- *    don't touch.
- * 4. At least one `text` block exists with non-empty text after trim.
- *    An attachment-only user message (e.g. just a `<mode-change>` tag
- *    with no human prose) is runtime plumbing, not a draft.
+ *    Strings are foldRecords' historical shape for plain-text turns; a string
+ *    trailing-user is suspicious enough that we leave it for inspection.
+ * 3. At least one `text` block carries non-empty HUMAN text after trim, where
+ *    "human" excludes the attachment blocks {@link isAttachmentText} matches.
+ *    An attachment-only message is plumbing, not a draft.
  *
- * When all four hold, every `text` block's text is joined with `\n\n`
- * (matching how the agent's `appendUser` reassembles split prose) and
- * returned trimmed.
+ * Tool-result handling: the message may ALSO carry `tool_result` blocks. That
+ * happens when a queued submit landed in the same on-disk turn as a tool round
+ * (`repairMessages` merges the tool_results forward onto the surviving last
+ * user message). Those blocks are load-bearing : they pair with the preceding
+ * assistant's `tool_use`, so we KEEP them (rebuild the message with only the
+ * tool_results) rather than dropping the whole message and orphaning the
+ * assistant. The human text is still pulled out as the draft. When there are
+ * no tool_results, the whole message is popped.
+ *
+ * The human `text` blocks are joined with `\n\n` (matching how `appendUser`
+ * reassembles split prose) and returned trimmed.
  */
 export function extractPendingDraft(messages: Message[]): string | null {
   const last = messages[messages.length - 1]
   if (!last || last.role !== "user") return null
   if (!Array.isArray(last.content)) return null
-  const hasToolResult = last.content.some((b) => b.type === "tool_result")
-  if (hasToolResult) return null
-  const texts = last.content
+  const humanTexts = last.content
     .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
     .map((b) => b.text)
-  if (texts.length === 0) return null
-  const joined = texts.join("\n\n").trim()
+    .filter((t) => !isAttachmentText(t))
+  const joined = humanTexts.join("\n\n").trim()
   if (joined.length === 0) return null
-  messages.pop()
+  // Preserve any load-bearing tool_results so the preceding assistant turn
+  // stays valid; otherwise pop the whole message.
+  const toolResults = last.content.filter((b) => b.type === "tool_result")
+  if (toolResults.length > 0) {
+    last.content = toolResults
+  } else {
+    messages.pop()
+  }
   return joined
 }
 
