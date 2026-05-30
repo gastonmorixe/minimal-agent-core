@@ -34,6 +34,7 @@ import {
   validateOpenAIRequest,
 } from "../llm-openai/index.ts"
 import { registerOpenRouterModels } from "./models.ts"
+import { fetchOpenRouterSessionInfo, setOpenRouterRateLimits } from "./session-info.ts"
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -80,6 +81,9 @@ export const openrouterAdapter: ProviderAdapter = {
       const text = await response.text()
       throw new Error(`OpenRouter API ${response.status}: ${text}`)
     }
+    // Capture rate-limit headers for the status-bar footer. Best-effort +
+    // non-throwing; no behavior change to the stream below.
+    setOpenRouterRateLimits(response.headers)
     if (!response.body) {
       throw new Error("OpenRouter API: empty response body for stream")
     }
@@ -99,4 +103,5 @@ export const openrouterProviderPlugin: ProviderPlugin = {
   displayName: "OpenRouter",
   shortCode: "or",
   register: bootstrapOpenRouter,
+  fetchSessionInfo: fetchOpenRouterSessionInfo,
 }
