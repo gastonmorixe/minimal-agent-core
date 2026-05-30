@@ -15,7 +15,6 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import type { Message } from "../client.ts"
 import {
   bootstrapAnthropic,
   ISSUE_THINKING_MODEL_MISMATCH,
@@ -23,6 +22,7 @@ import {
   OPTION_STRIP,
   OPTION_SWITCH_PREFIX,
 } from "../../plugins/llm-anthropic/index.ts"
+import type { Message } from "../client.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 
 import { runPreflightPipeline } from "./preflight-pipeline.ts"

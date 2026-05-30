@@ -28,8 +28,8 @@
  * @module agent/ask-user-host
  */
 
-import type { EditorKeyPayload } from "../editor-controller.ts"
 import { FOOTER_LAYER_OVERLAY, FOOTER_PRIORITY_OVERLAY } from "../editor/types.ts"
+import type { EditorKeyPayload } from "../editor-controller.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
 import { ChoiceModal } from "../ui/choice-modal.ts"
 import type { OverlayKey } from "../ui/overlay.ts"

@@ -15,8 +15,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import type { CanonicalEvent } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
-import { ANTHROPIC_OPUS_4X_STANDARD } from "./pricing.ts"
-import { applyPreflightResolution, runPreflight } from "./preflight.ts"
+import { defaultCapabilities } from "./capabilities.ts"
 import {
   clearModelRegistry,
   clearProviderRegistry,
@@ -24,13 +23,14 @@ import {
   registerModel,
   registerProvider,
 } from "./model-registry.ts"
+import { applyPreflightResolution, runPreflight } from "./preflight.ts"
+import { ANTHROPIC_OPUS_4X_STANDARD } from "./pricing.ts"
 import {
   type PreflightIssue,
   type PreflightResolution,
   type ProviderAdapter,
   type RunContext,
 } from "./provider.ts"
-import { defaultCapabilities } from "./capabilities.ts"
 
 function makeModel(): ModelEntry {
   return {

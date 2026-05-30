@@ -23,6 +23,7 @@ import {
   OPTION_STRIP,
   OPTION_SWITCH_PREFIX,
 } from "../plugins/llm-anthropic/index.ts"
+
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
 import type { Message, SendOptions, StreamedResponse } from "./client.ts"

@@ -3,8 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { ChoiceModal, type ChoiceOption, wrapText } from "./choice-modal.ts"
 
 function strip(s: string): string {
-  // Strip ANSI for content-based assertions.
-  // eslint-disable-next-line no-control-regex
+  // Strip ANSI SGR for content-based assertions.
   return s.replace(/\x1b\[[0-9;]*m/g, "")
 }
 
