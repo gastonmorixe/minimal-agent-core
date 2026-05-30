@@ -12,8 +12,8 @@
 
 import { randomUUID } from "node:crypto"
 
-import { type AuthResult, readCredentials } from "./auth.ts"
 import { type CacheUsage, formatCacheLine, getCacheDetector, snapshotRequest } from "./cache.ts"
+import { recoverFrom401ViaKeychain } from "./client/auth-401.ts"
 import {
   c,
   debugBody,
@@ -49,16 +49,17 @@ import { has1mContext, normalizeModelForAPI } from "./client/types.ts"
 import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"
 import { API_URL, buildHeaders, DEFAULT_MODEL, SYSTEM_PROMPT } from "./headers.ts"
 import { buildMetadata, getSessionId } from "./metadata.ts"
-import {
-  defaultNetworkClient,
-  type NetworkClient,
-  networkActivityObserver,
-} from "./network/index.ts"
+import { defaultNetworkClient, networkActivityObserver } from "./network/index.ts"
 import { broadcastResponseRateLimits, rebroadcastQuotaForSessionUpdate } from "./quota-broadcast.ts"
 import { abortableSleep } from "./retry.ts"
 import { addSessionUsage } from "./session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 
+// Re-exported from the extracted `src/client/*` modules so existing
+// importers (`import { checkQuota, listModels } from "./client.ts"`) keep
+// resolving after the decomposition.
+export { listModels } from "./client/list-models.ts"
+export { checkQuota, type QuotaResult } from "./client/quota.ts"
 export type {
   BlockCacheControl,
   ContentBlock,
@@ -450,11 +451,13 @@ export async function* sendMessageOnce(
       // Step 1: keychain-first. Cheap (`security find-generic-password`),
       // synchronous, no network. Fail-quiet on any read error : fall
       // through to the refresh path.
-      let recovered = false
-      try {
-        const fresh = readCredentials()
-        const freshToken = fresh?.claudeAiOauth?.accessToken
-        if (freshToken && freshToken !== auth.token) {
+      // The keychain-first decision is shared with checkQuota via
+      // `recoverFrom401ViaKeychain` (single source of truth). The status /
+      // diag UI below stays here as caller-specific nuance.
+      const probe = await recoverFrom401ViaKeychain({
+        auth,
+        doRequest,
+        onPeerRotated: () => {
           requestStatus.update("Auth refreshed elsewhere, retrying...", {
             notificationId: "auth.refresh",
             category: "auth",
@@ -463,23 +466,19 @@ export async function* sendMessageOnce(
             "auth.refresh",
             "peer-process rotated token; retrying with fresh keychain value",
           )
-          auth.token = freshToken
-          response = await doRequest(freshToken)
-          if (response.ok) {
-            recovered = true
-            diag.notice("auth.refresh", "recovered via peer-process token refresh", {
-              recovery: "true",
-            })
-            requestStatus.update(stream ? "Waiting for response" : "Reading response", {
-              notificationId: "network.request",
-              category: "network",
-            })
-          }
-        }
-      } catch {
-        // Keychain read failures are non-fatal; the refresh path below
-        // is the authoritative recovery anyway.
-      }
+        },
+        onPeerRecovered: () => {
+          diag.notice("auth.refresh", "recovered via peer-process token refresh", {
+            recovery: "true",
+          })
+          requestStatus.update(stream ? "Waiting for response" : "Reading response", {
+            notificationId: "network.request",
+            category: "network",
+          })
+        },
+      })
+      if (probe.response) response = probe.response
+      const recovered = probe.recovered
 
       // Step 2: still 401 (or keychain had no fresher token) → do our
       // own refresh.
@@ -1211,85 +1210,6 @@ function formatElapsedLong(ms: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// listModels : fetch available models for this user
-// ---------------------------------------------------------------------------
-
-/** Endpoint for listing available models. */
-const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true"
-
-/**
- * List models available to the authenticated user, plus synthesized
- * `[1m]` context-window variants.
- *
- * Calls `GET /v1/models?beta=true` (matching the Anthropic SDK's `list()`
- * method) to fetch the real model list, then appends `[1m]`-suffixed copies
- * for any model that supports the 1M context window. The suffix is a
- * client-side convention : the API itself doesn't know about it. The
- * `--list-models` CLI flag uses this expanded list so users can pick
- * `claude-opus-4-7[1m]` from the menu and get 1M context automatically.
- *
- * @param auth Authenticated credentials
- * @param networkClient Network client used for the models request.
- * @returns Array of {@link ModelInfo}, with `[1m]` variants appended
- *
- * @see cc-03312026/src/utils/context.ts:modelSupports1M()
- */
-export async function listModels(
-  auth: AuthResult,
-  networkClient: NetworkClient = defaultNetworkClient,
-): Promise<ModelInfo[]> {
-  const sessionId = getSessionId()
-  const headers = buildHeaders(auth, sessionId)
-
-  debugHeader(`GET ${MODELS_URL}`)
-
-  const response = await networkClient.request({
-    label: "models.list",
-    method: "GET",
-    url: MODELS_URL,
-    headers,
-  })
-
-  debugResponse(response.status, response.headers)
-
-  if (!response.ok) {
-    const errorBody = await response.text()
-    throw new Error(`Models API ${response.status}: ${errorBody}`)
-  }
-
-  const data = await response.json<{ data: ModelInfo[] }>()
-  const models = data.data
-
-  // Synthesize 1M context variants for models that support it.
-  // The CLI uses a client-side [1m] suffix convention : these aren't separate
-  // API model IDs. The actual 1M activation happens via the context-1m-2025-08-07
-  // beta flag. See cc-03312026/src/utils/context.ts:modelSupports1M().
-  //
-  // 1M-capable families (as of 2026-05-28 / claude-code 2.1.154):
-  //   - Sonnet 4 / 4.5 / 4.6  (sonnet-4 substring match)
-  //   - Opus 4.6 / 4.7 / 4.8  (each gated explicitly to avoid catching
-  //     older opus-4-0/4-1 ids which were 200k)
-  const supports1M = (id: string) =>
-    id.includes("claude-sonnet-4") ||
-    id.includes("opus-4-6") ||
-    id.includes("opus-4-7") ||
-    id.includes("opus-4-8")
-
-  const variants: ModelInfo[] = []
-  for (const m of models) {
-    if (supports1M(m.id)) {
-      variants.push({
-        ...m,
-        id: `${m.id}[1m]`,
-        display_name: m.display_name ? `${m.display_name} (1M context)` : `${m.id} (1M context)`,
-      })
-    }
-  }
-
-  return [...models, ...variants]
-}
-
-// ---------------------------------------------------------------------------
 // sendMessageSync : convenience, collects full response
 // ---------------------------------------------------------------------------
 
@@ -1351,150 +1271,4 @@ export async function sendMessageFull(opts: SendOptions): Promise<StreamedRespon
     }
   }
   return lastReturn ?? { blocks: [], text: "", stopReason: null }
-}
-
-// ---------------------------------------------------------------------------
-// Quota check : cheap haiku request to verify account has quota
-// ---------------------------------------------------------------------------
-
-/**
- * Send a minimal quota-check request to verify the account has quota.
- *
- * Mirrors the real CLI's startup behavior (capture: fetch-002): a cheap
- * haiku request with `max_tokens: 1` and the literal string `"quota"` as
- * the user message. No system prompt, no tools, no thinking, no
- * output_config : just the bare minimum to round-trip the API and surface
- * a 429/auth error early before the user types anything.
- *
- * Uses the `"quota"` request type which sends only 5 beta flags (no
- * `claude-code-20250219`, no conversation-specific flags).
- *
- * **Catches all errors** and returns false on any failure (including
- * network errors). Use {@link sendMessage} directly if you need the actual
- * error message.
- *
- * @param auth Authenticated credentials
- * @param networkClient Network client used for the quota request.
- * @returns True if the request succeeded (200 OK), false on any error
- */
-export type QuotaResult = { ok: false } | { ok: true; rateLimits: Map<string, string> }
-
-/**
- * Absolute upper bound on a single `checkQuota` probe (covers send + TTFB +
- * read). The probe is low-stakes and re-driven by the live-area scheduler /
- * startup, so a tight bound is correct: better a context-only footer for one
- * tick than a wedged probe. Composed with any caller signal (first to fire
- * wins).
- */
-const QUOTA_PROBE_TIMEOUT_MS = 15_000
-
-/**
- * Probe the Anthropic API for the current quota / rate-limit state. Returns
- * `{ok: true, rateLimits}` on a 200 (with the parsed `anthropic-ratelimit-*`
- * headers), or `{ok: false}` on any error.
- *
- * Always bounded: an internal {@link QUOTA_PROBE_TIMEOUT_MS} deadline guarantees
- * the probe can't hang even when `signal` is omitted (see `probeSignal` below).
- */
-export async function checkQuota(
-  auth: AuthResult,
-  networkClient: NetworkClient = defaultNetworkClient,
-  signal?: AbortSignal,
-): Promise<QuotaResult> {
-  const sessionId = getSessionId()
-  const headers = buildHeaders(auth, sessionId, "quota")
-  const metadata = buildMetadata(auth)
-
-  const body = {
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1,
-    messages: [{ role: "user", content: "quota" }],
-    metadata,
-  }
-
-  debugHeader("POST (quota check)")
-  debugKV("model", body.model)
-
-  const serializedBody = JSON.stringify(body)
-  // Rock-solid bound: the probe ALWAYS has a deadline, even when the caller
-  // passes no signal (e.g. the startup-tree row). Without this, a quota probe
-  // stalled before response headers (stalled upload / black-holed socket)
-  // would hang `doRequest` forever — the same class of bug fixed for the chat
-  // path's TTFB guard. The internal timeout aborts the request at the network
-  // layer (and the transport's abort escalation evicts a wedged HTTP/2
-  // session). When the caller DOES pass a signal (the live-area slot passes
-  // `ctx.abort`, driven by `LiveAreaScheduler.timeoutMs`), whichever fires
-  // first wins. Either way `doRequest` rejects with an AbortError, `checkQuota`
-  // returns `{ ok: false }`, and the footer/startup degrade gracefully.
-  const probeSignal: AbortSignal = signal
-    ? AbortSignal.any([signal, AbortSignal.timeout(QUOTA_PROBE_TIMEOUT_MS)])
-    : AbortSignal.timeout(QUOTA_PROBE_TIMEOUT_MS)
-  const doRequest = async (token: string) => {
-    const h = { ...headers }
-    if (h.authorization) h.authorization = `Bearer ${token}`
-    else if (h["x-api-key"]) h["x-api-key"] = token
-
-    return networkClient.request({
-      label: "quota.check",
-      method: "POST",
-      url: API_URL,
-      headers: h,
-      body: serializedBody,
-      signal: probeSignal,
-    })
-  }
-
-  try {
-    let response = await doRequest(auth.token)
-
-    // 401 retry : same multi-process keychain-first mitigation as in
-    // `sendMessage` above (see the long comment at the main 401 site).
-    // checkQuota fires from the live-area `quota-status` plugin's
-    // heartbeat AND on every `quota.headersReceived` event; with 100s of
-    // agents, this path is one of the biggest contributors to refresh
-    // contention if we don't deduplicate.
-    if (response.status === 401 && auth.refresh) {
-      let recovered = false
-      try {
-        const fresh = readCredentials()
-        const freshToken = fresh?.claudeAiOauth?.accessToken
-        if (freshToken && freshToken !== auth.token) {
-          auth.token = freshToken
-          response = await doRequest(freshToken)
-          if (response.ok) recovered = true
-        }
-      } catch {
-        // best-effort; fall through to refresh
-      }
-      if (!recovered && response.status === 401) {
-        const refreshed = await auth.refresh()
-        response = await doRequest(refreshed.token)
-        auth.token = refreshed.token
-      }
-    }
-
-    debugResponse(response.status, response.headers)
-
-    if (!response.ok) {
-      const errorBody = await response.text()
-      if (isDebug()) {
-        debugHeader(c.red(`Quota check failed: ${response.status}`))
-        console.error(`  ${errorBody.slice(0, 200)}`)
-      }
-      return { ok: false }
-    }
-
-    // Same broadcast as the main completion path : cache + bus emit.
-    // `checkQuota` is called both at startup (when the plugin is
-    // disabled) and as the live-area slot's cold-cache fallback, so
-    // populating the cache here closes the loop if a later request
-    // arrives before any chat completion happens.
-    const rateLimits = broadcastResponseRateLimits(response.headers)
-    return { ok: true, rateLimits }
-  } catch (e) {
-    if (isDebug()) {
-      console.error(`  quota check error: ${e instanceof Error ? e.message : String(e)}`)
-    }
-    return { ok: false }
-  }
 }
