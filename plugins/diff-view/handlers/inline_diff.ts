@@ -1,5 +1,5 @@
 /**
- * Inline-tag handler for `<ma::plugin::diff>...</ma::plugin::diff>`.
+ * Inline-tag handler for `<ma::emit::diff>...</ma::emit::diff>`.
  *
  * Takes the body of the tag (which should be a unified diff), optionally
  * honors a `title` attribute for a heading, and returns an ANSI-rendered

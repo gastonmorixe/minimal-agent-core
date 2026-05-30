@@ -1,5 +1,5 @@
 /**
- * Inline-tag handler for `<ma::plugin::interleave-thinking>...</ma::plugin::interleave-thinking>`.
+ * Inline-tag handler for `<ma::emit::interleave-thinking>...</ma::emit::interleave-thinking>`.
  *
  * Behavior:
  *   1. Drop the tag body from the user-visible output stream by returning
