@@ -1,0 +1,4 @@
+{
+  "_provenance": "Sanitized excerpt of `metadata.user_id` from a real CLI v2.1.87 Messages API request body captured under ~/Projects/claude-cli-versions/.node-net-dbg/. The wire shape (JSON-stringified object with keys device_id, account_uuid, session_id in that exact order) is preserved verbatim; the real device_id (sha256), account_uuid, and session_id are replaced with synthetic-but-shape-valid stand-ins so this fixture is safe to commit. Refresh when the CLI's user_id schema changes; see src/metadata.ts for the spec.",
+  "user_id": "{\"device_id\":\"dead0000beef1111cafe2222face3333dead0000beef1111cafe2222face3333\",\"account_uuid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"11111111-2222-4333-8444-555555555555\"}"
+}

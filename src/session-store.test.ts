@@ -142,6 +142,77 @@ describe("SessionStore.append*", () => {
     expect(typeof t.content).toBe("string")
     expect((t.content as string).length).toBe(100_000)
   })
+
+  // Regression: --resume used to drop plugin-driven `display` /
+  // `displayHeader` / `displayFooter` because the store never persisted
+  // them. With the fix, all three round-trip when supplied via the
+  // optional `presentation` arg.
+  it("persists display/displayHeader/displayFooter on tool_result when supplied", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-display", dir })
+    store.appendToolResult(
+      {
+        type: "tool_result",
+        tool_use_id: "tu_edit",
+        content: "File edited: /x.json (1 replacement(s))",
+        is_error: false,
+      },
+      undefined,
+      undefined,
+      {
+        display: "--- a\n+++ b\n-old\n+new",
+        displayHeader: "✦ summary",
+        displayFooter: "1 hunk",
+      },
+    )
+    const lines = readJsonl(store.path)
+    const t = lines[1] as ToolResultRecord
+    expect(t.kind).toBe("tool_result")
+    expect(t.display).toBe("--- a\n+++ b\n-old\n+new")
+    expect(t.displayHeader).toBe("✦ summary")
+    expect(t.displayFooter).toBe("1 hunk")
+  })
+
+  it("omits display fields entirely when the presentation arg is not supplied (back-compat)", () => {
+    // Old-style call (no presentation arg). The JSONL line must NOT
+    // grow new keys, so existing session readers see byte-identical
+    // records.
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-no-display", dir })
+    store.appendToolResult({
+      type: "tool_result",
+      tool_use_id: "tu_1",
+      content: "ok",
+      is_error: false,
+    })
+    const lines = readJsonl(store.path)
+    const t = lines[1] as ToolResultRecord
+    expect(t.display).toBeUndefined()
+    expect(t.displayHeader).toBeUndefined()
+    expect(t.displayFooter).toBeUndefined()
+    // The serialized JSON must not contain the keys at all (so resume
+    // of an OLD session file produces the same JSON byte-for-byte).
+    const raw = readFileSync(store.path, "utf-8")
+    expect(raw).not.toContain('"display"')
+    expect(raw).not.toContain('"displayHeader"')
+    expect(raw).not.toContain('"displayFooter"')
+  })
+
+  it("partial presentation (just `display`) only emits the populated key", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-partial", dir })
+    store.appendToolResult(
+      { type: "tool_result", tool_use_id: "tu_1", content: "ok", is_error: false },
+      undefined,
+      undefined,
+      { display: "rendered" },
+    )
+    const lines = readJsonl(store.path)
+    const t = lines[1] as ToolResultRecord
+    expect(t.display).toBe("rendered")
+    expect(t.displayHeader).toBeUndefined()
+    expect(t.displayFooter).toBeUndefined()
+  })
 })
 
 describe("parseLines", () => {

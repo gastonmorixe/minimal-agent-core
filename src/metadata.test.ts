@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
@@ -8,8 +8,20 @@ import { buildUserId, getDeviceId } from "./metadata.ts"
 /** Path to the real CLI config */
 const CLI_CONFIG = join(process.env.HOME ?? "", ".claude.json")
 
-/** Path to captured network traffic */
-const NET_DBG_DIR = join(process.env.HOME ?? "", "Projects/claude-cli-versions/.node-net-dbg")
+/**
+ * Sanitized excerpt of a real captured Messages API request body. The
+ * wire shape of `metadata.user_id` is preserved verbatim; the real
+ * device_id / account_uuid / session_id are replaced with synthetic
+ * stand-ins so the fixture is safe to check in. See
+ * `src/test-utils/fixtures/metadata-user-id-capture.json` for the
+ * provenance note and refresh instructions.
+ */
+const USER_ID_FIXTURE = join(
+  import.meta.dir,
+  "test-utils",
+  "fixtures",
+  "metadata-user-id-capture.json",
+)
 
 describe("metadata", () => {
   describe("buildUserId", () => {
@@ -68,100 +80,24 @@ describe("metadata", () => {
   })
 
   describe("verify against captured traffic", () => {
-    it("user_id matches a real request from .node-net-dbg", () => {
-      // Walk every captured session under `.node-net-dbg` looking for
-      // a `metadata.user_id` whose `device_id` matches the current
-      // `~/.claude.json` (so we're comparing apples to apples). The
-      // previous implementation only looked at the LATEST capture; that
-      // broke as soon as the user re-logged in, deleted the CLI config,
-      // or ran the test on a machine where the captures predate the
-      // current login. We now search ALL captures and skip gracefully
-      // when none of them match the current userID.
-      let sessions: string[]
-      try {
-        sessions = readdirSync(NET_DBG_DIR).sort()
-      } catch {
-        console.warn("SKIP: .node-net-dbg not found")
-        return
+    it("buildUserId emits the exact wire shape the real CLI produces", () => {
+      // Load a sanitized excerpt of a real Messages API request body.
+      // Using a fixture instead of walking ~/Projects/claude-cli-versions/
+      // .node-net-dbg/ (which has 700k+ files and only lives on the dev
+      // machine where the captures were taken). The fixture preserves
+      // the on-the-wire shape of `metadata.user_id` byte-for-byte;
+      // values are synthetic but shape-valid. Refresh the fixture if
+      // the CLI's user_id schema ever changes.
+      const fixture = JSON.parse(readFileSync(USER_ID_FIXTURE, "utf-8")) as {
+        user_id: string
       }
-      if (sessions.length === 0) {
-        console.warn("SKIP: no sessions in .node-net-dbg")
-        return
+      const parsed = JSON.parse(fixture.user_id) as {
+        device_id: string
+        account_uuid: string
+        session_id: string
       }
 
-      // We need the current `claude.json` userID to know which capture
-      // is "comparable to now". If `claude.json` itself is missing,
-      // there's nothing to compare against; skip.
-      let ourDeviceId: string
-      try {
-        ourDeviceId = getDeviceId(CLI_CONFIG)
-      } catch {
-        console.warn("SKIP: ~/.claude.json missing or userID unreadable")
-        return
-      }
-
-      // Walk newest-first so a recently-captured run wins. Inside each
-      // session, the first req-body whose `metadata.user_id` parses
-      // into a real object is the candidate. A session is "ours" iff
-      // that candidate's `device_id` equals `ourDeviceId`.
-      let parsed: { device_id: string; account_uuid: string; session_id: string } | null = null
-      for (const session of [...sessions].reverse()) {
-        const sessionDir = join(NET_DBG_DIR, session)
-        let files: string[]
-        try {
-          files = readdirSync(sessionDir)
-            .filter((f) => f.includes("req-body") && f.includes("fetch"))
-            .sort()
-        } catch {
-          continue
-        }
-        for (const file of files) {
-          let body: { metadata?: { user_id?: string } }
-          try {
-            body = JSON.parse(readFileSync(join(sessionDir, file), "utf-8"))
-          } catch {
-            continue
-          }
-          const userId = body.metadata?.user_id
-          if (typeof userId !== "string") continue
-          let candidate: { device_id?: string; account_uuid?: string; session_id?: string }
-          try {
-            candidate = JSON.parse(userId)
-          } catch {
-            continue
-          }
-          if (candidate.device_id !== ourDeviceId) continue
-          if (
-            typeof candidate.device_id !== "string" ||
-            typeof candidate.account_uuid !== "string" ||
-            typeof candidate.session_id !== "string"
-          ) {
-            continue
-          }
-          parsed = {
-            device_id: candidate.device_id,
-            account_uuid: candidate.account_uuid,
-            session_id: candidate.session_id,
-          }
-          break
-        }
-        if (parsed) break
-      }
-
-      if (!parsed) {
-        // Every capture on disk predates the current `~/.claude.json`
-        // login. Common reasons: machine reimaged, user re-logged in,
-        // running the suite on a fresh checkout. The test loses its
-        // grip but no bug is implied; skip cleanly.
-        console.warn(
-          "SKIP: no captured request matches the current ~/.claude.json device_id " +
-            "(captures predate the current login)",
-        )
-        return
-      }
-
-      // Format checks: catches schema drift in the real CLI's user_id
-      // shape even if we eventually rotate the captures.
+      // Shape: catches schema drift in the CLI's user_id format.
       expect(parsed.device_id).toHaveLength(64)
       expect(parsed.device_id).toMatch(/^[0-9a-f]{64}$/)
       expect(parsed.account_uuid).toMatch(
@@ -171,18 +107,16 @@ describe("metadata", () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       )
 
-      // Already verified inside the loop; re-stated here so a failure
-      // surfaces with the assertion's name, not a generic "no match".
-      expect(ourDeviceId).toBe(parsed.device_id)
-
-      // Round-trip through `buildUserId` to catch format drift.
+      // Round-trip: buildUserId fed the captured fields must produce
+      // the captured string byte-for-byte. This catches key-order drift
+      // (the CLI emits device_id, account_uuid, session_id in that
+      // exact order) and accidental whitespace.
       const rebuilt = buildUserId({
         deviceId: parsed.device_id,
         accountUuid: parsed.account_uuid,
         sessionId: parsed.session_id,
       })
-      const reparsed = JSON.parse(rebuilt)
-      expect(reparsed).toEqual(parsed)
+      expect(rebuilt).toBe(fixture.user_id)
     })
   })
 })
