@@ -20,6 +20,8 @@
  * transcripts) before the resumed REPL prompt.
  */
 
+import type { Task as TaskSidecarTask } from "../plugins/tasks/lib/parse.ts"
+
 import {
   c,
   clampTranscriptRow,
@@ -33,6 +35,7 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./cli
 import { Formatter } from "./formatter.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./mode-change-chip.ts"
 import type { ModeManager } from "./modes.ts"
+import { deriveDisplayFallback } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
 import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
@@ -563,37 +566,109 @@ const MODE_CHANGE_RE =
  */
 /**
  * Build the `toolDisplays` map for {@link replayToScrollback} from raw
- * {@link SessionRecord}s. Walks the records once and indexes every
- * `tool_result` record whose `display` / `displayHeader` /
- * `displayFooter` fields were populated by the live agent (see
- * `Store.appendToolResult` in `src/session-store.ts`).
+ * {@link SessionRecord}s. Two-source merge:
  *
- * Returns an empty map when no presentation overrides were persisted
- * (old session files, runs where every tool used the default
- * rendering). Old logs render identically to before : the override
- * path simply doesn't fire.
+ *  1. **Persisted overrides** (new sessions): each `tool_result` row
+ *     carries `display` / `displayHeader` / `displayFooter` written
+ *     by the live agent at `Store.appendToolResult` time. We index
+ *     those verbatim by `tool_use_id`.
+ *
+ *  2. **Re-derived fallback** (pre-fix / unsupported sessions): for
+ *     every `tool_result` row WITHOUT persisted overrides, we look up
+ *     the matching `tool_use` block's input via `assistantToolUseIndex`
+ *     and run {@link deriveDisplayFallback}. Today this covers `Task`
+ *     (split content into header/body/footer), `Edit` (synthesize a
+ *     unified diff from `old_string` / `new_string`), and `Write`
+ *     (new-file diff from the content arg). Other tools land
+ *     unchanged.
+ *
+ * Returns an empty map when no overrides were persisted AND no
+ * re-derivable tools fired (e.g. a Bash-only session). Old logs render
+ * the rich displays anyway because the deriver path picks them up.
  *
  * Pure: no I/O. Safe to call before / after {@link foldRecords}.
  */
 export function toolDisplaysFromRecords(
   records: readonly SessionRecord[],
+  opts?: {
+    /**
+     * Pre-parsed task list from the per-session `<sid>.tasks.jsonl`
+     * sidecar. Threaded into the Task deriver so it can render the
+     * historical body via the plugin's `renderToolDisplay({ansi: true})`
+     * for byte-identical coloring with the live agent.
+     *
+     * When `null` / `undefined` (the test path), the Task deriver
+     * falls back to the structural content-split path which preserves
+     * the tree shape but loses body colors.
+     */
+    sidecarTasks?: readonly TaskSidecarTask[] | null
+  },
 ): Map<string, { display?: string; displayHeader?: string; displayFooter?: string }> {
   const out = new Map<
     string,
     { display?: string; displayHeader?: string; displayFooter?: string }
   >()
+  const sidecarTasks = opts?.sidecarTasks ?? null
+  // Pass 1: index every assistant tool_use block so the fallback path
+  // can look up its `name`, `input`, and `ts` by `tool_use_id`. The
+  // persisted tool_result row only carries `content` + `isError`,
+  // never the tool-name (the API's tool_result block shape is
+  // name-less) or the historical wall-clock. The assistant `ts` is
+  // the moment the model's tool_use arrived, which is the cutoff the
+  // Task deriver needs for status snapshot reconstruction.
+  const toolUseIndex = new Map<
+    string,
+    { name: string; input: Record<string, unknown>; ts: Date | null }
+  >()
+  for (const rec of records) {
+    if (rec.kind !== "assistant") continue
+    const ts = parseDate(rec.ts)
+    for (const b of rec.content) {
+      if (b.type !== "tool_use") continue
+      const tu = b as ToolUseBlock
+      toolUseIndex.set(tu.id, {
+        name: tu.name,
+        input: (tu.input ?? {}) as Record<string, unknown>,
+        ts,
+      })
+    }
+  }
+  // Pass 2: walk tool_results, prefer persisted overrides, fall back
+  // to the deriver. The two paths are mutually exclusive per row :
+  // a row with even ONE persisted field bypasses the fallback (the
+  // live agent owned that render, we don't try to second-guess).
   for (const rec of records) {
     if (rec.kind !== "tool_result") continue
     const hasOverride =
       rec.display !== undefined ||
       rec.displayHeader !== undefined ||
       rec.displayFooter !== undefined
-    if (!hasOverride) continue
-    const entry: { display?: string; displayHeader?: string; displayFooter?: string } = {}
-    if (rec.display !== undefined) entry.display = rec.display
-    if (rec.displayHeader !== undefined) entry.displayHeader = rec.displayHeader
-    if (rec.displayFooter !== undefined) entry.displayFooter = rec.displayFooter
-    out.set(rec.tool_use_id, entry)
+    if (hasOverride) {
+      const entry: { display?: string; displayHeader?: string; displayFooter?: string } = {}
+      if (rec.display !== undefined) entry.display = rec.display
+      if (rec.displayHeader !== undefined) entry.displayHeader = rec.displayHeader
+      if (rec.displayFooter !== undefined) entry.displayFooter = rec.displayFooter
+      out.set(rec.tool_use_id, entry)
+      continue
+    }
+    const tu = toolUseIndex.get(rec.tool_use_id)
+    if (!tu) continue
+    const contentStr =
+      typeof rec.content === "string"
+        ? rec.content
+        : rec.content
+            .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+            .map((b) => b.text)
+            .join("")
+    const derived = deriveDisplayFallback({
+      toolName: tu.name,
+      input: tu.input,
+      content: contentStr,
+      isError: rec.isError,
+      callTs: tu.ts,
+      sidecarTasks,
+    })
+    if (derived !== undefined) out.set(rec.tool_use_id, derived)
   }
   return out
 }
