@@ -53,7 +53,20 @@ export class Http2Transport implements NetworkTransport {
         }
       }
 
-      const cleanupAbort = attachAbort(req, stream, fail)
+      // Evict + tear down this session so the NEXT request dials a fresh
+      // connection instead of reusing a wedged one. Called when an abort
+      // can't be honored gracefully (see attachAbort escalation): on a
+      // black-holed socket the RST_STREAM never flushes and the session
+      // would otherwise sit pooled and be handed to the next retry, which
+      // stalls identically — the livelock behind the 13h hang.
+      const poisonSession = () => {
+        if (this.sessions.get(origin)?.session === entry.session) {
+          this.sessions.delete(origin)
+        }
+        if (!entry.session.destroyed) entry.session.destroy()
+      }
+
+      const cleanupAbort = attachAbort(req, stream, fail, poisonSession)
 
       stream.once("response", (rawHeaders) => {
         const status = rawHeaders[":status"] ?? 0
@@ -104,14 +117,56 @@ export class Http2Transport implements NetworkTransport {
     const existing = this.sessions.get(origin)
     if (existing && isUsable(existing.session)) return existing
 
-    const session = connect(origin)
+    // `node:http2.connect()` forwards extra options to the underlying
+    // `net.Socket`. Turn on TCP keepalive so the OS probes the connection
+    // after a sleep/wake cycle (macOS suspends TCP I/O while sleeping; on
+    // wake, peer-side FIN/RST may have been queued for minutes).
+    //
+    // Without this, dead sessions sit "ESTABLISHED" indefinitely from
+    // node:http2's POV and accumulate as CLOSE_WAIT on the kernel side,
+    // which used to trip a Bun event-loop bug (~70% CPU busy-loop on
+    // `accept(2)` for the dead fds). See
+    // ./private/research/2026-05-28/high-cpu/REPORT.md.
+    const session = connect(origin, {
+      // @ts-expect-error node:http2 forwards these to net.Socket but its
+      // TS surface doesn't declare them.
+      keepAlive: true,
+      keepAliveInitialDelay: 30_000,
+    })
+
+    // Application-layer liveness probe. node:http2 emits "error" / "goaway"
+    // when a PING fails or the peer sends GOAWAY, both of which trigger the
+    // tear-down path below. 30s matches our streamIdleTimeout heuristic.
+    const pingTimer = setInterval(() => {
+      if (session.closed || session.destroyed) return
+      try {
+        // A failed PING means the peer is gone or the socket is wedged.
+        // Destroy the session so it's evicted from the pool (via the
+        // `remove` handlers below) and the next request dials fresh.
+        // Previously the callback was ignored, so a half-dead session
+        // could linger indefinitely and keep getting reused. node:http2
+        // also surfaces hard failures via "error"/"goaway", but the ping
+        // callback is the earliest signal for a silently wedged peer.
+        session.ping((err: Error | null) => {
+          if (err && !session.destroyed) session.destroy(err)
+        })
+      } catch {}
+    }, 30_000)
+    if (typeof pingTimer.unref === "function") pingTimer.unref()
+
     const entry: SessionEntry = { session, origin, requestCount: 0 }
     this.sessions.set(origin, entry)
 
     const remove = () => {
+      clearInterval(pingTimer)
       if (this.sessions.get(origin)?.session === session) {
         this.sessions.delete(origin)
       }
+      // Critical: tear down the underlying TCP socket. Without this, the
+      // remote-half-closed connection sits as orphan CLOSE_WAIT, holding
+      // an FD in the libuv/uSockets watchlist forever. Calling destroy()
+      // is a no-op when the session is already destroyed (idempotent).
+      if (!session.destroyed) session.destroy()
     }
     session.once("close", remove)
     session.once("error", remove)
@@ -121,7 +176,6 @@ export class Http2Transport implements NetworkTransport {
       await waitForSession(session, origin, this.connectTimeoutMs)
     } catch (err) {
       remove()
-      session.destroy()
       throw err
     }
     return entry
@@ -187,16 +241,46 @@ function nodeStreamToWeb(
   })
 }
 
+/**
+ * Grace period between a graceful HTTP/2 stream cancel and the forced
+ * teardown. A healthy stream emits 'close' well within this window, so a
+ * normal abort (user Ctrl-C, watchdog on a live socket) keeps the session
+ * reusable. A wedged socket can't flush the RST_STREAM, so after the grace
+ * we destroy the stream AND evict the session.
+ */
+const ABORT_ESCALATE_MS = 2_000
+
 function attachAbort(
   req: NetworkRequest,
   stream: ClientHttp2Stream,
   reject: (err: unknown) => void,
+  poisonSession: () => void,
 ): () => void {
   const signal = req.signal
   if (!signal) return () => {}
 
   const onAbort = () => {
-    stream.close(constants.NGHTTP2_CANCEL)
+    // 1. Graceful: ask the peer to cancel the stream.
+    try {
+      stream.close(constants.NGHTTP2_CANCEL)
+    } catch {}
+
+    // 2. Escalate: on a black-holed socket the RST_STREAM frame can't be
+    //    written (TCP send buffer full, peer not ACKing), so `close()`
+    //    never lands and neither the stream nor the session would ever
+    //    tear down — the request "aborts" in name only and the next retry
+    //    reuses the same dead session. If the stream hasn't closed within
+    //    the grace window, force it down and evict the session so the
+    //    retry dials a fresh connection.
+    const escalate = setTimeout(() => {
+      try {
+        stream.destroy(new Error("aborted: HTTP/2 stream did not close after cancel"))
+      } catch {}
+      poisonSession()
+    }, ABORT_ESCALATE_MS)
+    if (typeof escalate.unref === "function") escalate.unref()
+    stream.once("close", () => clearTimeout(escalate))
+
     reject(signal.reason ?? new Error("Network request aborted"))
   }
 
@@ -210,7 +294,21 @@ function attachAbort(
 }
 
 function isUsable(session: ClientHttp2Session): boolean {
-  return !session.closed && !session.destroyed
+  if (session.closed || session.destroyed) return false
+  // The underlying net.Socket may be half-closed (peer FIN received, our
+  // side hasn't called destroy yet) without ClientHttp2Session emitting
+  // 'close'. `socket.readable` goes false on FIN, and `socket.writable`
+  // goes false on local shutdown / ENOTCONN. Reject either case so we
+  // open a fresh session instead of issuing a request on a dead pipe.
+  //
+  // This catches the post-sleep/wake case where node:http2 hasn't yet
+  // surfaced a 'close' event on a session whose TCP layer transitioned
+  // to CLOSE_WAIT during sleep.
+  const sock = session.socket as undefined | { readable?: boolean; writable?: boolean }
+  if (!sock) return true
+  if (sock.readable === false) return false
+  if (sock.writable === false) return false
+  return true
 }
 
 async function waitForSession(
