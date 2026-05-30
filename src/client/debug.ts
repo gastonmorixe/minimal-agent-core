@@ -134,6 +134,24 @@ export function previewBlock(b: ContentBlock): string {
       const err = b.is_error ? "!" : ""
       return `tool_result${err}(${shortId(b.tool_use_id)}) ${inner}`
     }
+    case "image": {
+      // Never log the base64 payload : just the source kind + a short descriptor.
+      const s = b.source
+      const detail = s.type === "base64" ? s.media_type : s.type === "url" ? s.url : s.file_id
+      return `image(${s.type} ${detail})`
+    }
+    case "document": {
+      const s = b.source
+      const detail =
+        s.type === "base64"
+          ? s.media_type
+          : s.type === "url"
+            ? s.url
+            : s.type === "file"
+              ? s.file_id
+              : "text/plain"
+      return `document(${s.type} ${detail})`
+    }
     default: {
       // Compile-time exhaustiveness. If ContentBlock gains a member, tsc
       // errors here ("Type 'XBlock' is not assignable to type 'never'").

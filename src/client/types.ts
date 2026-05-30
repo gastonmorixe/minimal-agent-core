@@ -136,13 +136,59 @@ export interface ToolResultBlock {
 }
 
 /**
+ * An image input block (Anthropic `vision`). One of three mutually-exclusive
+ * `source` shapes:
+ *
+ * - `base64`: inline bytes + `media_type` (e.g. `image/jpeg`). What the CLI
+ *   sends today; verified on the wire.
+ * - `url`: Anthropic fetches the image (not available on Bedrock/Vertex).
+ * - `file`: a Files API `file_id` (beta `files-api-2025-04-14`). Note the wire
+ *   `source.type` is `"file"`, not `"file_id"`.
+ *
+ * Accepted formats: JPEG, PNG, GIF, WebP. See
+ * `private/multimodality-ingestion/anthropic/10-anthropic-image-ingestion.md`.
+ */
+export interface ImageBlock {
+  type: "image"
+  source:
+    | { type: "base64"; media_type: string; data: string }
+    | { type: "url"; url: string }
+    | { type: "file"; file_id: string }
+  cache_control?: BlockCacheControl
+}
+
+/**
+ * A document input block (Anthropic PDF / plain-text support). Same `source`
+ * trichotomy as {@link ImageBlock} plus an inline `text` source for plain text.
+ * Optional `title` / `context` / `citations` mirror the Files API doc.
+ */
+export interface DocumentBlock {
+  type: "document"
+  source:
+    | { type: "base64"; media_type: string; data: string }
+    | { type: "url"; url: string }
+    | { type: "file"; file_id: string }
+    | { type: "text"; media_type: "text/plain"; data: string }
+  title?: string
+  context?: string
+  citations?: { enabled: boolean }
+  cache_control?: BlockCacheControl
+}
+
+/**
  * Union of all content block types observed in v2.1.91 traffic.
  *
  * Used as the element type of {@link Message.content} when content is an
  * array (block-based mode). Plain string content is also still supported
  * for simple user messages but the API normalizes it to a single text block.
  */
-export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock
+export type ContentBlock =
+  | TextBlock
+  | ThinkingBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ImageBlock
+  | DocumentBlock
 
 // ---------------------------------------------------------------------------
 // Message and options types
