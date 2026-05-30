@@ -1217,6 +1217,13 @@ export class EditorController extends EventEmitter {
           continue
         }
         if (this.buf.isBlank()) {
+          // Even on a blank buffer, an overlay (ask-user modal / slash-menu)
+          // gets first crack at Enter — otherwise a confirm-modal can't be
+          // confirmed on an empty prompt (the keystroke would be eaten by the
+          // blank no-op below before reaching the hook chain at submit-time).
+          if (this.dispatchKeyHook("Enter")) {
+            continue
+          }
           this.buf.clear()
           dirty = true
           continue
@@ -1407,8 +1414,12 @@ export class EditorController extends EventEmitter {
         case "\x1b[3~":
           return this.buf.deleteForward() ? "changed" : "ignore"
         case "\x1b[D":
+          // Overlays (ask-user modal) capture ←/→ for option navigation; only
+          // move the buffer cursor when no listener claims the key.
+          if (this.dispatchKeyHook("ArrowLeft")) return "changed"
           return this.buf.moveLeft() ? "changed" : "ignore"
         case "\x1b[C":
+          if (this.dispatchKeyHook("ArrowRight")) return "changed"
           return this.buf.moveRight() ? "changed" : "ignore"
         case "\x1b[A":
           // Plugins (notably `history`) can intercept ↑. The hook may
