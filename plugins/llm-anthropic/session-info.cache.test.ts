@@ -1,0 +1,126 @@
+/**
+ * Anthropic `fetchAnthropicSessionInfo` cache-only contract +
+ * `primeAnthropicSessionInfo` in-flight dedupe.
+ *
+ * These are the two halves of the post-2026-05-30 refactor that moved the
+ * cold-start network probe OUT of `fetch` (cache-only, non-blocking, called
+ * by the status-bar slot every tick) and INTO `prime` (fire-and-forget, owns
+ * the bounded `checkQuota` call). The split kills the slot-timeout warning
+ * observed at boot: the slot's per-tick `timeoutMs` (8s, designed to detect
+ * stuck handlers) was tripping on a cold checkQuota POST that legitimately
+ * needed 5–15s on a cold TCP/TLS handshake.
+ *
+ * @module llm/providers/anthropic/session-info.cache.test
+ */
+
+import { afterEach, describe, expect, it } from "bun:test"
+
+import { clearLastRateLimits, setLastRateLimits } from "../../src/quota-cache.ts"
+
+import {
+  _resetAnthropicPrimeInFlight,
+  fetchAnthropicSessionInfo,
+  primeAnthropicSessionInfo,
+} from "./session-info.ts"
+
+afterEach(() => {
+  clearLastRateLimits()
+  _resetAnthropicPrimeInFlight()
+})
+
+// ---------------------------------------------------------------------------
+// fetchAnthropicSessionInfo : cache-only
+// ---------------------------------------------------------------------------
+
+describe("fetchAnthropicSessionInfo (cache-only)", () => {
+  it("returns context + label with no quota when the cache is cold", async () => {
+    // Sanity: no cache populated.
+    const info = await fetchAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
+    expect(info).not.toBeNull()
+    expect(info!.modelLabel).toBeDefined() // computed locally, no network
+    expect(info!.quota).toBeUndefined()
+  })
+
+  it("returns parsed quota windows when the cache has fresh headers", async () => {
+    setLastRateLimits(
+      new Map<string, string>([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
+      ]),
+    )
+    const info = await fetchAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
+    expect(info!.quota?.windows.map((w) => w.id)).toEqual(["5h", "7d"])
+    expect(info!.quota?.windows[0]?.utilization).toBeCloseTo(0.21)
+  })
+
+  it("surfaces overage even when no quota windows are present", async () => {
+    setLastRateLimits(
+      new Map<string, string>([
+        ["anthropic-ratelimit-unified-overage-status", "allowed"],
+      ]),
+    )
+    const info = await fetchAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
+    expect(info!.quota?.overage).toEqual({ active: true })
+    expect(info!.quota?.windows).toEqual([])
+  })
+
+  it("does NOT block on an aborted signal — cache-only, no I/O to cancel", async () => {
+    // Pre-aborted signal: the cache-only fetch must resolve, not throw, because
+    // there is no in-flight I/O to honor the cancellation.
+    const ac = new AbortController()
+    ac.abort()
+    const info = await fetchAnthropicSessionInfo({
+      modelId: "claude-opus-4-8",
+      signal: ac.signal,
+    })
+    expect(info).not.toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// primeAnthropicSessionInfo : dedupe + cache-fresh skip
+// ---------------------------------------------------------------------------
+
+describe("primeAnthropicSessionInfo", () => {
+  it("no-ops without touching the network when the cache is already fresh", async () => {
+    // Pre-populate the cache so the prime sees fresh data and skips the
+    // `getAuth`/`checkQuota` path entirely. We use an empty-ish but non-empty
+    // map (an overage entry) so `setLastRateLimits` accepts it and writes the
+    // `at` timestamp.
+    setLastRateLimits(
+      new Map<string, string>([
+        ["anthropic-ratelimit-unified-overage-status", "off"],
+      ]),
+    )
+    // No transport configured; if the prime tried to talk to the network it
+    // would surface here. `setLastRateLimits` populated `at = Date.now()`
+    // which is inside the freshness window, so the prime's cache-first check
+    // returns before any I/O.
+    await expect(primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })).resolves.toBeUndefined()
+  })
+
+  it("dedupes concurrent calls into a single in-flight promise", async () => {
+    // Pre-populate the cache so the inner IIFE hits the cache-fresh fast path
+    // and resolves synchronously through a microtask. This isolates the
+    // dedupe contract (reference identity of the in-flight Promise) from
+    // any network I/O — the prime function is a non-`async` function so
+    // both concurrent callers see the SAME promise instance synchronously
+    // (call A sets `inFlightPrime`, call B reads it on the early-return).
+    setLastRateLimits(
+      new Map<string, string>([
+        ["anthropic-ratelimit-unified-overage-status", "off"],
+      ]),
+    )
+    const a = primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
+    const b = primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
+    // Reference identity is the dedupe contract. An `async`-wrapped
+    // implementation would mint a fresh wrapper per call and break this.
+    expect(a).toBe(b)
+    await Promise.all([a, b])
+    // After settle, the latch resets so a later prime is a NEW attempt
+    // (different Promise instance).
+    const c = primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
+    expect(c).not.toBe(a)
+    await c
+  })
+})

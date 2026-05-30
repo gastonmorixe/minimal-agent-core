@@ -51,6 +51,10 @@ export interface ResolveSessionInfoOptions {
 /**
  * Resolve provider-neutral session metadata for `modelId`. Delegates to the
  * model's provider plugin; falls back to a context-only view. Never throws.
+ *
+ * The provider's {@link ProviderPlugin.fetchSessionInfo} is expected to be
+ * cache-only (no network) — cold-start cache population lives in
+ * {@link primeProviderSessionInfo}.
  */
 export async function resolveProviderSessionInfo(
   modelId: string,
@@ -83,5 +87,39 @@ export async function resolveProviderSessionInfo(
     }
   } catch {
     return contextOnly(modelId)
+  }
+}
+
+/**
+ * Warm the selected provider's session-metadata cache. Routes to the
+ * model's plugin's {@link ProviderPlugin.primeSessionInfo} (or no-ops
+ * when the plugin doesn't declare one — providers whose cache fills from
+ * chat traffic don't need a separate prime).
+ *
+ * Called fire-and-forget by the agent boot. Never throws — failures
+ * degrade to "the status bar shows the manifest placeholder until real
+ * traffic fills the cache", which is the same fallback as before the
+ * prime hook existed.
+ */
+export async function primeProviderSessionInfo(
+  modelId: string,
+  opts: ResolveSessionInfoOptions = {},
+): Promise<void> {
+  let providerId: string | undefined
+  try {
+    providerId = resolveModel(modelId).providerId
+  } catch {
+    return
+  }
+  const plugin = findProviderPlugin(providerId)
+  if (!plugin?.primeSessionInfo) return
+  try {
+    await plugin.primeSessionInfo({
+      modelId,
+      signal: opts.signal,
+      networkClient: opts.networkClient,
+    })
+  } catch {
+    // best-effort; prime is a UX warm-up, not a correctness step.
   }
 }

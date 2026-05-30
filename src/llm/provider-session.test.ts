@@ -17,7 +17,11 @@ import {
   type ProviderSessionInfo,
   registerProviderPlugin,
 } from "./provider-plugin.ts"
-import { contextWindowForModel, resolveProviderSessionInfo } from "./provider-session.ts"
+import {
+  contextWindowForModel,
+  primeProviderSessionInfo,
+  resolveProviderSessionInfo,
+} from "./provider-session.ts"
 
 const CAPS = {
   contextWindow: 222_000,
@@ -117,6 +121,63 @@ describe("resolveProviderSessionInfo", () => {
   it("unknown model id → context-only with undefined window (no throw)", async () => {
     const info = await resolveProviderSessionInfo("nope")
     expect(info.contextWindow).toBeUndefined()
+  })
+})
+
+describe("primeProviderSessionInfo", () => {
+  it("routes to the provider plugin's primeSessionInfo and forwards modelId + signal", async () => {
+    registerFakeModel("m-prime", "provp")
+    const ac = new AbortController()
+    let calls = 0
+    let sawModelId: string | undefined
+    let sawSignal: AbortSignal | undefined
+    registerProviderPlugin({
+      id: "provp",
+      displayName: "P",
+      shortCode: "p",
+      register() {},
+      async primeSessionInfo(ctx) {
+        calls++
+        sawModelId = ctx.modelId
+        sawSignal = ctx.signal
+      },
+    })
+
+    await primeProviderSessionInfo("m-prime", { signal: ac.signal })
+    expect(calls).toBe(1)
+    expect(sawModelId).toBe("m-prime")
+    expect(sawSignal).toBe(ac.signal)
+  })
+
+  it("no-ops when the provider declares no primeSessionInfo", async () => {
+    registerFakeModel("m-nohook", "provnh")
+    registerProviderPlugin({
+      id: "provnh",
+      displayName: "NH",
+      shortCode: "nh",
+      register() {},
+    })
+    // Must resolve, not throw, even with no hook.
+    await expect(primeProviderSessionInfo("m-nohook")).resolves.toBeUndefined()
+  })
+
+  it("never throws when primeSessionInfo rejects", async () => {
+    registerFakeModel("m-throws", "provx")
+    registerProviderPlugin({
+      id: "provx",
+      displayName: "X",
+      shortCode: "x",
+      register() {},
+      async primeSessionInfo() {
+        throw new Error("boom")
+      },
+    })
+    await expect(primeProviderSessionInfo("m-throws")).resolves.toBeUndefined()
+  })
+
+  it("no-ops on an unknown model id", async () => {
+    // No plugin registered, no model registered — must not throw.
+    await expect(primeProviderSessionInfo("nope")).resolves.toBeUndefined()
   })
 })
 
