@@ -1953,3 +1953,61 @@ describe("EditorController — Alt+M (mode-interrupt shortcut)", () => {
     ctrl.stop()
   })
 })
+
+describe("EditorController — overlay key dispatch (editor.key hook)", () => {
+  // Regression: a blocking overlay (ask-user modal) subscribes to `editor.key`
+  // and halts. The editor must dispatch its navigation/confirm keys to the hook
+  // chain. Pre-fix, ArrowLeft/ArrowRight bypassed the hook (cursor-move only)
+  // and Enter on a BLANK buffer was eaten by the no-op before the hook fired —
+  // so a modal could not be navigated or confirmed.
+  it("dispatches ArrowLeft/ArrowRight/Enter-on-blank to the editor.key hook chain", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on(
+      "editor.key",
+      (payload: { key: string; result: { halt?: boolean } }) => {
+        seen.push(payload.key)
+        payload.result.halt = true // claim the key, as a modal does
+      },
+      { caller: "agent", priority: 9999, label: "test:modal" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("\x1b[D") // ArrowLeft
+    stdin.send("\x1b[C") // ArrowRight
+    stdin.send("\r") // Enter on a blank buffer
+    expect(seen).toEqual(["ArrowLeft", "ArrowRight", "Enter"])
+    ctrl.stop()
+  })
+
+  it("does NOT submit a blank buffer when a listener claims Enter", () => {
+    const hooks = new Hooks()
+    hooks.on(
+      "editor.key",
+      (p: { key: string; result: { halt?: boolean } }) => {
+        if (p.key === "Enter") p.result.halt = true
+      },
+      { caller: "agent", priority: 9999, label: "test:modal" },
+    )
+    const submits: string[] = []
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.on("submit", (t) => submits.push(t))
+    ctrl.start()
+    stdin.send("\r")
+    expect(submits).toEqual([]) // claimed by the overlay, not submitted
+    ctrl.stop()
+  })
+
+  it("with no listener, ←/→ still move the buffer cursor (default preserved)", () => {
+    const submits: string[] = []
+    const { ctrl, stdin } = make()
+    ctrl.on("submit", (t) => submits.push(t))
+    ctrl.start()
+    stdin.send("ac") // "ac", cursor at end
+    stdin.send("\x1b[D") // left → between a and c
+    stdin.send("b") // insert → "abc"
+    stdin.send("\r") // submit (non-blank)
+    expect(submits).toEqual(["abc"])
+    ctrl.stop()
+  })
+})
