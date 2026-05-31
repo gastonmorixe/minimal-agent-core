@@ -1003,7 +1003,7 @@ async function main() {
   const saveEcho = SaveEchoCollector.attach(loader.bus())
   const shortTermSnapshot = new ShortTermSnapshot(getSessionId())
   // Tasks plugin attachment producer. Reads the per-session JSONL on
-  // every initial-seam call and renders `<ma::plugin::tasks …>…</ma::plugin::tasks>`
+  // every initial-seam call and renders `<ma::agent::tasks …>…</ma::agent::tasks>`
   // for the model. Unconditional construction (mirrors ShortTermSnapshot):
   // if the user disables the `tasks` plugin in config, the Task tool is
   // skipped at loader time and the file stays empty, so this attachment

@@ -148,7 +148,7 @@ export class Agent {
   /** Optional mode manager (mode-aware system prompt + tool filter). */
   private modeManager: ModeManager | null
   /**
-   * Optional save-echo collector. When set, every `<memory-saved …>`
+   * Optional save-echo collector. When set, every `<ma::agent::memory-saved …>`
    * event the inline-tag handler (or the `MemoryTool` add action)
    * emits on the global bus is buffered here, and drained as
    * ContentBlock(s) prepended to the next user message. The model
@@ -161,7 +161,7 @@ export class Agent {
   private saveEcho: { consumeAll(): ContentBlock[] } | null
   /**
    * Optional short-term snapshot producer. When set, the per-session
-   * `<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>` attachment is prepended
+   * `<ma::agent::short-term-memory>…</ma::agent::short-term-memory>` attachment is prepended
    * to the FIRST user message of each `run()` call.
    *
    * Only emitted at the initial seam (not at the loop seam after
@@ -171,7 +171,7 @@ export class Agent {
   private shortTermSnapshot: { toAttachment(): ContentBlock | null } | null
   /**
    * Optional tasks-list attachment producer. When set, the per-session
-   * `<ma::plugin::tasks …>…</ma::plugin::tasks>` attachment is prepended to
+   * `<ma::agent::tasks …>…</ma::agent::tasks>` attachment is prepended to
    * the FIRST user message of each `run()` call. Mirrors
    * {@link Agent.shortTermSnapshot} exactly : same structural-type
    * pattern, same initial-seam-only emission rule, same null-on-empty
@@ -729,9 +729,9 @@ export class Agent {
     // Initial user message. Prepended attachments (in this order):
     //
     //   1. <mode-change from="…" to="…" at="…" />     : pending mode toggle.
-    //   2. <ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>    : session scratchpad.
-    //   3. <ma::plugin::tasks …>…</ma::plugin::tasks>        : active task list.
-    //   4. <memory-saved scope="…" id="…">…</…>+      : id echo for any
+    //   2. <ma::agent::short-term-memory>…</ma::agent::short-term-memory>    : session scratchpad.
+    //   3. <ma::agent::tasks …>…</ma::agent::tasks>        : active task list.
+    //   4. <ma::agent::memory-saved scope="…" id="…">…</…>+      : id echo for any
     //      memory(ies) the model saved on the previous turn.
     //   5. user text                                   : the actual user input.
     //
