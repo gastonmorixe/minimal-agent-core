@@ -158,3 +158,101 @@ export function categorizeError(err: unknown): {
   }
   return { category: "unknown", retryable: false }
 }
+
+// ---------------------------------------------------------------------------
+// Upstream → canonical stream-error tag classifier
+// ---------------------------------------------------------------------------
+
+/** Canonical `StreamErrorEvent.category` values. */
+export type StreamErrorCategory =
+  | "overloaded"
+  | "api"
+  | "timeout"
+  | "rate_limit"
+  | "canceled"
+  | "auth"
+  | "unknown"
+
+/**
+ * The single source of truth for mapping a provider's error surface (an
+ * upstream error code and/or a non-2xx HTTP status) onto the canonical
+ * `streamErrorType` tag the retry coordinator keys on, plus the
+ * observer-facing `category` and a `retryable` hint.
+ *
+ * Every provider adapter funnels its rate-limit / overload / transient
+ * failures through here so they retry on the SAME curves regardless of
+ * vendor wire shape. The retry loops in `client.ts` and
+ * `transport/retry.ts` own the curve selection (fast vs slow); this only
+ * decides the TAG. A tag those loops don't know about (or `undefined` here)
+ * means "propagate" — a genuine, non-transient failure.
+ *
+ * Recognized normalized tags:
+ *   - `rate_limit_error` — 429 / `rate_limit_*` / `*_quota_*` (slow curve).
+ *   - `overloaded_error` — 5xx / `overloaded` / `server_error` (fast curve).
+ *   - `api_error`        — 408 / `timeout` (fast curve).
+ *   - `invalid_request_error` — 400 / `invalid_request_*` (slow curve).
+ *   - `not_found_error`  — 404 (slow curve).
+ *   - `permission_error` — 403 (slow curve).
+ * 401 is intentionally NOT mapped: the auth-refresh layer owns it, and a
+ * retry tag would mask a real auth failure.
+ */
+export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode?: string }): {
+  streamErrorType?: string
+  category: StreamErrorCategory
+  retryable: boolean
+} {
+  const code = input.upstreamCode?.toLowerCase()
+  const status = input.httpStatus
+
+  // Rate limits: explicit code OR HTTP 429. OpenAI uses
+  // `rate_limit_exceeded` / `insufficient_quota`; Anthropic `rate_limit_error`.
+  if (
+    status === 429 ||
+    (code &&
+      (code.includes("rate_limit") ||
+        code.includes("rate-limit") ||
+        code === "insufficient_quota" ||
+        code.includes("quota_exceeded")))
+  ) {
+    return { streamErrorType: "rate_limit_error", category: "rate_limit", retryable: true }
+  }
+
+  // Server overload / transient 5xx.
+  if (
+    (status !== undefined && status >= 500) ||
+    code === "overloaded_error" ||
+    code === "overloaded" ||
+    code === "server_error" ||
+    code === "service_unavailable"
+  ) {
+    return { streamErrorType: "overloaded_error", category: "overloaded", retryable: true }
+  }
+
+  // Request timeout.
+  if (status === 408 || code === "timeout" || code === "api_error") {
+    return { streamErrorType: "api_error", category: "api", retryable: true }
+  }
+
+  // 401 is owned by the auth-refresh layer; never tag it here.
+  if (status === 401 || code === "authentication_error" || code === "invalid_api_key") {
+    return { streamErrorType: undefined, category: "auth", retryable: false }
+  }
+
+  // Slow-curve hard errors: retried (a human may fix the config) but on the
+  // patient curve so a code-level bug doesn't blast the API.
+  if (status === 400 || code === "invalid_request_error" || code?.startsWith("invalid_request")) {
+    return {
+      streamErrorType: "invalid_request_error",
+      category: "api",
+      retryable: true,
+    }
+  }
+  if (status === 404 || code === "not_found_error") {
+    return { streamErrorType: "not_found_error", category: "api", retryable: true }
+  }
+  if (status === 403 || code === "permission_error") {
+    return { streamErrorType: "permission_error", category: "api", retryable: true }
+  }
+
+  return { streamErrorType: undefined, category: "unknown", retryable: false }
+}

@@ -269,6 +269,34 @@ describe("translateOpenAIResponsesStream (fixtures)", () => {
   })
 })
 
+describe("translateOpenAIResponsesStream — error events are retryable & tagged", () => {
+  async function replayRaw(raw: string): Promise<CanonicalEvent[]> {
+    return collect(translateOpenAIResponsesStream(parseSse<OpenAIResponsesEvent>(sseStream(raw))))
+  }
+
+  it("a `rate_limit_exceeded` error event surfaces a retryable stream_error tagged rate_limit_error", async () => {
+    const raw =
+      'data: {"type":"error","error":{"code":"rate_limit_exceeded","message":"Rate limit reached"}}\n\n'
+    const events = await replayRaw(raw)
+    const err = firstOf(events, "stream_error")
+    expect(err).toBeDefined()
+    // The fix: NOT retryable:false anymore — it retries on the slow curve.
+    expect(err?.retryable).toBe(true)
+    expect(err?.category).toBe("rate_limit")
+    expect(err?.upstreamType).toBe("rate_limit_error")
+  })
+
+  it("a `response.failed` with a server_error surfaces a retryable overloaded stream_error", async () => {
+    const raw =
+      'data: {"type":"response.failed","response":{"id":"r1","status":"failed","error":{"code":"server_error","message":"upstream"}}}\n\n'
+    const events = await replayRaw(raw)
+    const err = firstOf(events, "stream_error")
+    expect(err?.retryable).toBe(true)
+    expect(err?.category).toBe("overloaded")
+    expect(err?.upstreamType).toBe("overloaded_error")
+  })
+})
+
 describe("validateOpenAIRequest — modality gating", () => {
   function bootstrap() {
     clearModelRegistry()

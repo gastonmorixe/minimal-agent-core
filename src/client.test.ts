@@ -1784,6 +1784,137 @@ describe("client", () => {
       expect(scripted.calls).toBe(2)
     }, 15_000)
 
+    it("rate_limit_error retries on the slow curve and recovers (does NOT stop the agent)", async () => {
+      // Regression for 2026-05-30: a `rate_limit_error` SSE error frame
+      // (HTTP 200, `event: error`, "Rate limited") matched NEITHER the
+      // fast nor the slow retry set, so it propagated and stopped the
+      // agent mid-task. The fix puts rate_limit_error on the SLOW curve so
+      // the harness waits the limit window out and recovers automatically.
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+      const scripted = scriptedNetworkClient([
+        sseResponse([
+          {
+            type: "error",
+            error: { type: "rate_limit_error", message: "Rate limited" },
+            request_id: "req_test_ratelimit_001",
+          },
+        ]),
+        sseResponse([
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "recovered" },
+          },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        ]),
+      ])
+
+      const cap = captureDiagEvents()
+      const originalRandom = Math.random
+      Math.random = () => 0 // collapse the slow backoff to ~0ms
+      try {
+        const yields: string[] = []
+        const gen = sendMessage({
+          auth,
+          messages,
+          model: "claude-opus-4-7",
+          stream: true,
+          networkClient: scripted.client,
+        })
+        for await (const chunk of gen) yields.push(chunk)
+        expect(yields.join("")).toContain("recovered")
+      } finally {
+        Math.random = originalRandom
+        cap.dispose()
+      }
+
+      // Both attempts ran — it retried instead of throwing.
+      expect(scripted.calls).toBe(2)
+      const retryWarn = cap.events.find(
+        (e) => e.severity === Severity.Warning && e.source === "api.retry",
+      )
+      expect(retryWarn?.structuredData?.["error-type"]).toBe("rate_limit_error")
+      expect(retryWarn?.structuredData?.curve).toBe("slow")
+    }, 15_000)
+
+    it("pre-stream HTTP 429 is tagged rate_limit_error and retries (does NOT stop the agent)", async () => {
+      // A rate limit can also arrive as a non-2xx HTTP status BEFORE the
+      // SSE stream opens (no `event: error` frame). That path used to
+      // throw an untagged `API 429: …` error → no retry → agent stops.
+      // The fix maps the status to the same tag so it retries on the slow
+      // curve like its in-stream twin.
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+      const rateLimited = new NetworkResponse({
+        status: 429,
+        headers: { "content-type": "application/json" },
+        transport: { id: "fake", protocol: "h2" },
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                JSON.stringify({
+                  type: "error",
+                  error: { type: "rate_limit_error", message: "Rate limited" },
+                }),
+              ),
+            )
+            controller.close()
+          },
+        }),
+      })
+      const scripted = scriptedNetworkClient([
+        rateLimited,
+        sseResponse([
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "after-limit" },
+          },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        ]),
+      ])
+
+      const cap = captureDiagEvents()
+      const originalRandom = Math.random
+      Math.random = () => 0
+      try {
+        const yields: string[] = []
+        const gen = sendMessage({
+          auth,
+          messages,
+          model: "claude-opus-4-7",
+          stream: true,
+          networkClient: scripted.client,
+        })
+        for await (const chunk of gen) yields.push(chunk)
+        expect(yields.join("")).toContain("after-limit")
+      } finally {
+        Math.random = originalRandom
+        cap.dispose()
+      }
+
+      expect(scripted.calls).toBe(2)
+      const retryWarn = cap.events.find(
+        (e) => e.severity === Severity.Warning && e.source === "api.retry",
+      )
+      expect(retryWarn?.structuredData?.["error-type"]).toBe("rate_limit_error")
+      expect(retryWarn?.structuredData?.curve).toBe("slow")
+    }, 15_000)
+
     it("untagged errors (programmer bugs, kernel-level failures) DO propagate to caller", async () => {
       // The retry-forever policy applies only to TAGGED stream errors
       // (anything with streamErrorType set). Genuinely untagged

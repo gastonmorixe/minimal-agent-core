@@ -21,6 +21,7 @@
 import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import { classifyUpstreamError } from "../../src/llm/errors.ts"
 import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import type {
   ProviderAdapter,
@@ -92,7 +93,7 @@ export const openaiAdapter: ProviderAdapter = {
       })
       if (!response.ok) {
         const text = await response.text()
-        throw new Error(`OpenAI Chat API ${response.status}: ${text}`)
+        throw taggedHttpError("OpenAI Chat API", response.status, text)
       }
       // Capture rate-limit headers for the status-bar footer. Best-effort +
       // non-throwing; no behavior change to the stream below.
@@ -122,7 +123,7 @@ export const openaiAdapter: ProviderAdapter = {
       })
       if (!response.ok) {
         const text = await response.text()
-        throw new Error(`OpenAI Responses API ${response.status}: ${text}`)
+        throw taggedHttpError("OpenAI Responses API", response.status, text)
       }
       // Capture rate-limit headers for the status-bar footer. Best-effort +
       // non-throwing; no behavior change to the stream below.
@@ -138,6 +139,40 @@ export const openaiAdapter: ProviderAdapter = {
       `OpenAI adapter: model ${model.id} has unsupported surface "${model.surfaceId}"`,
     )
   },
+}
+
+/**
+ * Best-effort pull of the OpenAI error `code`/`type` out of a non-2xx body.
+ * OpenAI error bodies are `{"error":{"message":"…","type":"…","code":"…"}}`.
+ * Returns the `code` (or `type` fallback), lowercased by the classifier.
+ */
+function parseOpenAIErrorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: string; type?: string } }
+    return parsed?.error?.code ?? parsed?.error?.type ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Build a tagged HTTP error so the provider-neutral retry coordinator can
+ * recover from a pre-stream rejection (429 rate limit, 5xx overload, …)
+ * instead of stopping the agent. Mirrors the Anthropic `client.ts` path:
+ * map the status (+ body error code) to a `streamErrorType` the retry loop
+ * understands; leave it untagged for non-transient failures so they
+ * propagate.
+ */
+function taggedHttpError(
+  label: string,
+  status: number,
+  body: string,
+): Error & { streamErrorType?: string } {
+  const upstreamCode = parseOpenAIErrorCode(body)
+  const { streamErrorType } = classifyUpstreamError({ httpStatus: status, upstreamCode })
+  const err = new Error(`${label} ${status}: ${body}`) as Error & { streamErrorType?: string }
+  if (streamErrorType) err.streamErrorType = streamErrorType
+  return err
 }
 
 /**

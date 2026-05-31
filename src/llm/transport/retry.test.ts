@@ -126,6 +126,33 @@ describe("withRetry", () => {
     expect(events.find((e) => e.source === "api.retry")?.structuredData?.curve).toBe("slow")
   })
 
+  it("retries rate_limit_error on the SLOW curve and recovers (does not stop the agent)", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0 // backoff → 0ms so the test runs instantly
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) throw tagged("rate_limit_error")
+          yield "back"
+          return resp("back")
+        }),
+      )
+      expect(result.text).toBe("back")
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    // It recovered rather than propagating the rate-limit error.
+    expect(calls).toBe(2)
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.["error-type"]).toBe("rate_limit_error")
+    expect(retry?.structuredData?.curve).toBe("slow")
+    expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
+  })
+
   it("propagates an untagged error without retrying", async () => {
     let calls = 0
     let caught = ""

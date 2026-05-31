@@ -763,11 +763,15 @@ function taggedStreamError(ev: Extract<CanonicalEvent, { type: "stream_error" }>
     overloaded: "overloaded_error",
     api: "api_error",
     timeout: "stream_idle",
+    rate_limit: "rate_limit_error",
     auth: "authentication_error",
     canceled: "request_canceled",
     unknown: "unknown_error",
   }
-  const streamErrorType = byCategory[ev.category ?? "unknown"] ?? "unknown_error"
+  // Prefer the verbatim upstream type so the retry classifier sees the exact
+  // provider code (e.g. `rate_limit_error`) rather than a lossy category
+  // remap. Fall back to the category map for synthetic / category-only errors.
+  const streamErrorType = ev.upstreamType ?? byCategory[ev.category ?? "unknown"] ?? "unknown_error"
   const err = (
     ev.cause instanceof Error
       ? ev.cause

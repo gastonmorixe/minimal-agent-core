@@ -29,6 +29,7 @@
  */
 
 import type { CanonicalEvent, CanonicalUsage, StopReason } from "../../../src/llm/canonical-events.ts"
+import { classifyUpstreamError } from "../../../src/llm/errors.ts"
 
 // ---------------------------------------------------------------------------
 // Wire types (subset we consume)
@@ -384,12 +385,17 @@ export async function* translateOpenAIResponsesStream(
       case "response.failed": {
         const f = ev as ResponseFailed
         stopReason = "error"
+        const code = f.response.error?.code
+        const { streamErrorType, category, retryable } = classifyUpstreamError({
+          upstreamCode: code,
+        })
         yield {
           type: "stream_error",
-          retryable: false,
-          category: "api",
+          retryable,
+          category,
+          upstreamType: streamErrorType,
           cause: new Error(
-            `OpenAI Responses failed: ${f.response.error?.code ?? "unknown"} — ${f.response.error?.message ?? ""}`,
+            `OpenAI Responses failed: ${code ?? "unknown"} — ${f.response.error?.message ?? ""}`,
           ),
         }
         break
@@ -408,12 +414,17 @@ export async function* translateOpenAIResponsesStream(
       }
       case "error": {
         const e = ev as ErrorEvent
+        const code = e.error?.code
+        const { streamErrorType, category, retryable } = classifyUpstreamError({
+          upstreamCode: code,
+        })
         yield {
           type: "stream_error",
-          retryable: false,
-          category: "api",
+          retryable,
+          category,
+          upstreamType: streamErrorType,
           cause: new Error(
-            `OpenAI Responses error: ${e.error?.code ?? "unknown"} — ${e.error?.message ?? ""}`,
+            `OpenAI Responses error: ${code ?? "unknown"} — ${e.error?.message ?? ""}`,
           ),
         }
         break
