@@ -1,11 +1,11 @@
 # diff-view plugin
 
 Renders unified diffs with ANSI colors. Surfaces a `ShowDiff` tool and a
-`<ma::plugin::diff>` inline tag, so the model can either:
+`<ma::emit::diff>` inline tag, so the model can either:
 
 1. **Tool call** when the diff IS the reply (`ShowDiff { patch }`).
 2. **Inline tag** when the diff is embedded inside an explanation
-   (`<ma::plugin::diff>...</ma::plugin::diff>`).
+   (`<ma::emit::diff>...</ma::emit::diff>`).
 
 Both paths share the same renderer.
 
@@ -14,7 +14,7 @@ Both paths share the same renderer.
 | Surface | Trigger | Handler |
 |---|---|---|
 | Tool | `ShowDiff` (alias: `show_diff`) | `handlers/show_diff.ts` |
-| Inline tag | `<ma::plugin::diff>` | `handlers/inline_diff.ts` |
+| Inline tag | `<ma::emit::diff>` | `handlers/inline_diff.ts` |
 
 ## Files
 
@@ -33,7 +33,7 @@ codes.
 
 ## Cross-chunk safety
 
-The inline tag works correctly when a `<ma::plugin::diff>` opens in one streamed
+The inline tag works correctly when a `<ma::emit::diff>` opens in one streamed
 chunk and closes in another. That's the scanner's tail-retention
 behavior, owned by the agent's plugin streaming layer; this plugin
 just receives the assembled tag body.
