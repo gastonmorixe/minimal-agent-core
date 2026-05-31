@@ -81,6 +81,8 @@ function make(
     /** Inject a clock for the abort-quit FSM. */
     nowFn?: () => number
     hooks?: Hooks
+    /** Resize coalescing window; default 0 (synchronous) for tests. */
+    resizeDebounceMs?: number
   } = {},
 ) {
   const stdin = new FakeTTYInput()
@@ -93,6 +95,10 @@ function make(
     compositor: compositor as any,
     stdin: stdin as any,
     output: output as any,
+    // Unit tests assert immediate reflow on notifyResize(); keep it
+    // synchronous by default. The drag-coalescing path is covered by a
+    // dedicated test that opts into a non-zero window.
+    resizeDebounceMs: opts.resizeDebounceMs ?? 0,
     ...(opts.bareEscapeMs !== undefined ? { bareEscapeMs: opts.bareEscapeMs } : {}),
     ...(opts.abortBus ? { abortBus: opts.abortBus } : {}),
     ...(opts.armedTickMs !== undefined ? { armedTickMs: opts.armedTickMs } : {}),
@@ -472,6 +478,60 @@ describe("EditorController — resize", () => {
     }
     ctrl.stop()
   })
+
+  it("coalesces a burst of resizes into a single repaint (drag-leak guard)", async () => {
+    // A window-edge DRAG fires one SIGWINCH per column. Repainting on each
+    // step stacks a reflow residue into scrollback per step (the bug). With
+    // resizeDebounceMs > 0, a burst must collapse to exactly ONE repaint.
+    const { ctrl, stdin, output, compositor } = make({
+      columns: 40,
+      resizeDebounceMs: 20,
+    })
+    ctrl.start()
+    stdin.send("some buffer text that will reflow when narrowed")
+
+    const callsBeforeBurst = compositor.liveAreaCalls.length
+    // Simulate a 12-step drag, no awaiting between steps.
+    for (let w = 40; w >= 28; w--) {
+      output.columns = w
+      ctrl.notifyResize()
+    }
+    // Synchronously, the burst must NOT have repainted yet (all coalesced).
+    expect(compositor.liveAreaCalls.length).toBe(callsBeforeBurst)
+
+    // After the debounce window, exactly ONE repaint lands.
+    await new Promise((r) => setTimeout(r, 40))
+    expect(compositor.liveAreaCalls.length).toBe(callsBeforeBurst + 1)
+    // And it reflowed to the FINAL width (every line fits in 28 cols).
+    for (const line of compositor.last().lines) {
+      expect(displayWidth(line)).toBeLessThanOrEqual(28)
+    }
+    ctrl.stop()
+  })
+
+  it("resizeDebounceMs=0 keeps the legacy synchronous repaint-per-resize", () => {
+    const { ctrl, output, compositor } = make({ columns: 40, resizeDebounceMs: 0 })
+    ctrl.start()
+    const before = compositor.liveAreaCalls.length
+    output.columns = 30
+    ctrl.notifyResize()
+    // Synchronous: the repaint already happened (a width change is a genuine
+    // visual change, so it is not deduped).
+    expect(compositor.liveAreaCalls.length).toBeGreaterThan(before)
+    ctrl.stop()
+  })
+
+  it("a pending coalesced repaint does not fire after stop()", async () => {
+    const { ctrl, output, compositor } = make({ columns: 40, resizeDebounceMs: 20 })
+    ctrl.start()
+    output.columns = 30
+    ctrl.notifyResize()
+    const atStop = compositor.liveAreaCalls.length
+    ctrl.stop()
+    await new Promise((r) => setTimeout(r, 40))
+    // The timer was cleared by stop(); no post-teardown repaint.
+    expect(compositor.liveAreaCalls.length).toBe(atStop)
+  })
 })
 
 describe("EditorController — bracketed paste", () => {
@@ -640,6 +700,8 @@ describe("EditorController — scroll indicator carries the prompt prefix", () =
       stdin: stdin as any,
       output: output as any,
       maxLiveHeight: 3,
+      // Indicator-reflow assertions check the post-resize frame synchronously.
+      resizeDebounceMs: 0,
     })
     ctrl.start()
     // Push 5 logical lines so the cursor is on row 4 and vTop > 0.

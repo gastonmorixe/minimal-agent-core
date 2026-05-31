@@ -470,12 +470,26 @@ export class Compositor {
     //    (end of editor row, col N) → first byte of new "status"
     //    overstrikes the old `❯` → "❯ ❯" cursor duplication.
     //
-    // Trade-off accepted: in the cols-change worst case, one row of
-    // stale old-live-area content may remain visible ABOVE the new
-    // live area until the next stream write or natural scroll moves
-    // it. That residue is bounded (1 row per resize, never accumulates
-    // because the NEXT eraseLiveSeq+drawLiveSeq covers it under the
-    // new cols). It is NOT scrollback loss.
+    // Residue, honestly: on a NARROWING resize the terminal reflows our
+    // pre-wrapped full-width live-area lines, growing their physical
+    // height. If the live area was near the viewport floor, its TOP rows
+    // scroll ABOVE the viewport into permanent scrollback at reflow time —
+    // before this handler even runs. The next `setLiveArea`'s relative
+    // `eraseLiveSeq` (walk-up + `\x1b[J`) can only reach rows still inside
+    // the viewport, so those scrolled-off rows remain as a frozen copy.
+    // This is inherent to inline (non-alt-screen) redraw: `\x1b[J` cannot
+    // erase above the viewport top, and DEC 2026 sync does not prevent the
+    // reflow scroll (fish/zsh/prompt_toolkit hit the same wall — only an
+    // alternate-screen full-screen app avoids it).
+    //
+    // The damaging case was a window-edge DRAG: one SIGWINCH per column ×
+    // one residue each = dozens of stacked `❯ … ^ N more lines` copies in
+    // scrollback (user-reported May 2026). That accumulation is killed in
+    // `EditorController.notifyResize`, which now COALESCES the burst into a
+    // single trailing-edge repaint (`resizeDebounceMs`), so a whole drag
+    // produces at most one residue instead of one per column. A single
+    // deliberate resize may still leave one transient stranded row; that is
+    // the accepted inline-mode limit, NOT scrollback loss.
   }
 
   /**
