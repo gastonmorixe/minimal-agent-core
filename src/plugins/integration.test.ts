@@ -64,7 +64,7 @@ describe("plugins: end-to-end integration with diff-view", () => {
     // The old structural wrappers are gone: no outer <ma::plugins> envelope,
     // no per-plugin <ma::plugin id="..."> block, no overview boilerplate.
     expect(block).not.toContain("<ma::plugins>")
-    expect(block).not.toContain('<ma::plugin id=')
+    expect(block).not.toContain("<ma::plugin id=")
   })
 
   it("PluginStream routes inline <ma::emit::diff> through the handler (single chunk)", async () => {
