@@ -57,9 +57,25 @@ describe("classifyPluginPrompt", () => {
     expect(classifyPluginPrompt(p)).toEqual({ role: "mode", name: "ask" })
   })
 
-  it("a tool tui → tool role, name = tool name", () => {
+  it("a single tool tui → tool role, name = tool name", () => {
     const p = mkPlugin({ tuis: [toolTui("WebSearch")] as never }, "body")
     expect(classifyPluginPrompt(p)).toEqual({ role: "tool", name: "WebSearch" })
+  })
+
+  it("a MULTI-tool plugin → tool role, name = slug(H1) (not just tool #1)", () => {
+    const p = mkPlugin(
+      { id: "schedule", name: "Schedule", tuis: [toolTui("CronCreate"), toolTui("CronList"), toolTui("CronDelete")] as never },
+      "# Scheduling\n\nUse CronCreate / CronList / CronDelete.",
+    )
+    expect(classifyPluginPrompt(p)).toEqual({ role: "tool", name: "scheduling" })
+  })
+
+  it("a MULTI-tool plugin with no H1 → tool role, name = slug(display name)", () => {
+    const p = mkPlugin(
+      { id: "sub-agents", name: "Sub-agents", tuis: [toolTui("SpawnAgent"), toolTui("StopAgent")] as never },
+      "You can delegate work to sub-agents.",
+    )
+    expect(classifyPluginPrompt(p)).toEqual({ role: "tool", name: "sub-agents" })
   })
 
   it("inline-tag-only → emit role, name = tag", () => {
