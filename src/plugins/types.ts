@@ -26,7 +26,7 @@ export type { PluginLogger } from "../diagnostic-bus.ts"
  *
  * `tool` fires when the model emits a `tool_use` block naming a tool the
  * plugin declared. `inline_tag` fires when the stream scanner detects a
- * matching `<ma::plugin::NAME ...>...</ma::plugin::NAME>` (or self-closing) span in
+ * matching `<ma::emit::NAME ...>...</ma::emit::NAME>` (or self-closing) span in
  * assistant text.
  */
 export type TUITrigger =
@@ -41,13 +41,13 @@ export type TUITrigger =
     }
   | {
       type: "inline_tag"
-      /** Tag name from `<ma::plugin::NAME ...>`. */
+      /** Tag name from `<ma::emit::NAME ...>`. */
       name: string
       /** Parsed attribute map. Values are always strings. */
       attrs: Record<string, string>
       /** Raw body text between opener and closer. Empty for self-closing. */
       body: string
-      /** True if the tag was self-closing (`<ma::plugin::NAME ... />`). */
+      /** True if the tag was self-closing (`<ma::emit::NAME ... />`). */
       self_closing: boolean
     }
 
@@ -924,7 +924,7 @@ export type ManifestTrigger =
   | {
       type: "inline_tag"
       /**
-       * Tag name matched against `<ma::plugin::NAME ...>`.
+       * Tag name matched against `<ma::emit::NAME ...>`.
        *
        * NAME must match `[a-z0-9][a-z0-9_-]*` (kebab/snake lowercase). The
        * loader rejects anything else.
