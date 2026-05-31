@@ -16,6 +16,7 @@ import { diag } from "../diagnostic-bus.ts"
 
 import type {
   ColorRequest,
+  ManifestCommand,
   ManifestEventSubscription,
   ManifestFile,
   ManifestHandler,
@@ -112,6 +113,9 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
   if (obj.liveAreaSlots != null && !Array.isArray(obj.liveAreaSlots)) {
     err("liveAreaSlots must be an array if present")
   }
+  if (obj.commands != null && !Array.isArray(obj.commands)) {
+    err("commands must be an array if present")
+  }
   if (obj.permissions != null) {
     if (!Array.isArray(obj.permissions)) err("permissions must be an array if present")
     for (const p of obj.permissions as unknown[]) {
@@ -169,6 +173,13 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     liveAreaSlots.push(parseLiveAreaSlot(slotsRaw[i], i, manifestPath, seenSlotIds))
   }
 
+  const seenCommandNames = new Set<string>()
+  const commands: ManifestCommand[] = []
+  const commandsRaw = (obj.commands ?? []) as unknown[]
+  for (let i = 0; i < commandsRaw.length; i++) {
+    commands.push(parseCommand(commandsRaw[i], i, manifestPath, seenCommandNames))
+  }
+
   // No "at least one contribution" gate here. PROMPT.md is implicit:
   // looked up by the loader on disk, and the manifest doesn't get to
   // see the filesystem. If a manifest declares zero contribution fields
@@ -187,10 +198,54 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     events,
     hooks,
     liveAreaSlots,
+    commands,
     permissions: (obj.permissions as string[] | undefined) ?? [],
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
   }
+}
+
+/**
+ * Validate a single `commands[i]` entry.
+ *
+ * Names are lowercase ids, unique within the package (cross-plugin
+ * uniqueness is enforced later by the loader, first-wins). Handlers must
+ * be `module` type for now — a command returns a structured result the
+ * host acts on synchronously, and subprocess JSON round-tripping isn't
+ * wired yet.
+ */
+function parseCommand(
+  raw: unknown,
+  index: number,
+  manifestPath: string,
+  seenNames: Set<string>,
+): ManifestCommand {
+  const at = `commands[${index}]`
+  const err = (msg: string) => {
+    throw new ManifestError(`${at}: ${msg}`, manifestPath)
+  }
+  if (!isObject(raw)) err("command must be an object")
+  const obj = raw as Record<string, unknown>
+
+  const name = requireString(obj, "name", err)
+  if (!ID_RE.test(name)) err(`command name must match ${ID_RE} (got: ${JSON.stringify(name)})`)
+  if (seenNames.has(name)) err(`duplicate command name: ${name}`)
+  seenNames.add(name)
+
+  const summary = requireString(obj, "summary", err)
+
+  let argHint: string | undefined
+  if (obj.argHint != null) {
+    if (typeof obj.argHint !== "string") err("argHint must be a string if present")
+    argHint = obj.argHint as string
+  }
+
+  const handler = parseHandlerEntry(obj.handler, at, manifestPath)
+  if (handler.type !== "module") {
+    err('command handler must be type "module" (subprocess commands are not supported yet)')
+  }
+
+  return argHint != null ? { name, summary, argHint, handler } : { name, summary, handler }
 }
 
 /**

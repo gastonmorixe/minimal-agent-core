@@ -52,6 +52,115 @@ export type TUITrigger =
     }
 
 // ---------------------------------------------------------------------------
+// Agent context (shared identity)
+// ---------------------------------------------------------------------------
+
+/**
+ * Immutable snapshot of the main agent's per-process identity, shared
+ * with every plugin handler regardless of trigger shape.
+ *
+ * The agent constructs ONE `AgentContext` at boot (in `src/index.ts` via
+ * {@link createAgentContext}) and threads the same object through every
+ * dispatch path: tool handlers (`TUIContext.agent`), prompt fragments
+ * (`PromptFragmentContext.agent`), event subscribers
+ * (`EventHandlerContext.agent`), hook subscribers (`HookHandlerContext.agent`),
+ * and live-area slots (`LiveAreaHandlerContext.agent`).
+ *
+ * For subprocess handlers the same values arrive as environment variables
+ * produced by {@link agentContextToEnv}: `MINIMAL_AGENT_SESSION_ID`,
+ * `MINIMAL_AGENT_PID`, `MINIMAL_AGENT_MODEL`, `MINIMAL_AGENT_VERSION`.
+ * The two surfaces are kept in lockstep by the loader and are never
+ * constructed independently.
+ *
+ * Every field is declared `readonly` AND the factory output is
+ * `Object.freeze`-d so a misbehaving plugin cannot mutate the shared
+ * object and bleed state into a sibling handler.
+ *
+ * @see createAgentContext for the validating factory.
+ * @see agentContextToEnv / agentContextFromEnv for the env-var bridge.
+ */
+export interface AgentContext {
+  /**
+   * Per-process UUID v4 — the same value `metadata.getSessionId()`
+   * returns. Stable identity of "this run". Plugins like `tasks` and
+   * `memory` use it to namespace per-session storage.
+   */
+  readonly sessionId: string
+  /**
+   * Agent process id (the Bun process running the agent). Stable for
+   * the session. Useful for `ps`, `kill`, log correlation, and
+   * cooperative file locking (the lock holder records the pid).
+   */
+  readonly pid: number
+  /**
+   * Resolved model id the agent will send on the wire, e.g.
+   * `"claude-opus-4-7[1m]"`. Plugins like `quota-status` use this to
+   * pick the right context-window label.
+   */
+  readonly model: string
+  /**
+   * Agent semver from `package.json` (e.g. `"0.1.0"`). Plugins can
+   * include it in diagnostics or gate on minimum agent versions.
+   */
+  readonly version: string
+}
+
+// ---------------------------------------------------------------------------
+// Live model capability snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * A point-in-time, serializable description of the agent's CURRENT model and
+ * what it can do. Returned by {@link TUIContext.queryModelInfo}.
+ *
+ * Unlike {@link AgentContext} (frozen at boot), this is computed by the host
+ * at the moment a handler calls `queryModelInfo()`, so it always reflects the
+ * model the agent will send on the NEXT request : correct across mid-session
+ * model/provider switches and after a resume. The host fills it from the shared
+ * model registry that provider plugins populate, so a plugin reading it stays
+ * fully decoupled from any specific provider.
+ */
+export interface ModelInfoSnapshot {
+  /** Resolved model id the agent will send next, e.g. `"claude-opus-4-8[1m]"`. */
+  modelId: string
+  /** Human-friendly model name, or the id when unknown. */
+  displayName: string
+  /** Owning provider id, e.g. `"anthropic"`, `"openai"`. */
+  providerId: string
+  /** API surface, e.g. `"anthropic-messages"`, `"openai-responses"`. */
+  surfaceId: string
+  /** Training knowledge cutoff (ISO date / `YYYY-MM`), when known. */
+  knowledgeCutoff?: string
+  /** Max input tokens. */
+  contextWindow: number
+  /** Max output tokens per response. */
+  maxOutputTokens: number
+  /** Input modalities the model accepts (beyond text). */
+  modalities: { image: boolean; audio: boolean; pdf: boolean; video: boolean }
+  /** Accepted input file types per kind, when that modality is supported. */
+  acceptedInput: { images?: string[]; documents?: string[] }
+  /** Reasoning support. */
+  thinking: { adaptive: boolean; extended: boolean; visible: boolean; interleaved: boolean }
+  /** Effort levels the model accepts + the default. */
+  effort: { levels: string[]; default: string }
+  /** Prompt-caching support. */
+  caching: { explicit: boolean; automatic: boolean; ttls: string[]; reportsCacheHits: boolean }
+  /** Tool/function-calling support headline. */
+  tools: { userDefined: boolean; parallel: boolean }
+  /** Server-hosted tool ids the provider exposes (web_search, …). */
+  serverTools: string[]
+  /** Per-million-token USD pricing. */
+  pricing: {
+    inputPerMTok: number
+    outputPerMTok: number
+    cacheWritePerMTok: number
+    cacheReadPerMTok: number
+  }
+  /** True when the id resolved in the registry; false = unknown (defaults used). */
+  resolved: boolean
+}
+
+// ---------------------------------------------------------------------------
 // Handler context
 // ---------------------------------------------------------------------------
 
@@ -94,6 +203,26 @@ export interface TUIContext {
    * pollutes scrollback.
    */
   log: PluginLogger
+  /**
+   * Main-agent identity (session id, pid, model, version). Frozen at
+   * agent boot, shared across every plugin context. See {@link AgentContext}.
+   *
+   * Optional only for the legacy back-compat path (tests that construct
+   * a `PluginLoader` without supplying `agent`); production calls always
+   * carry it. Plugins that depend on it should narrow with `if (!ctx.agent)
+   * return …` rather than the non-null assertion.
+   */
+  agent?: AgentContext
+  /**
+   * Query the agent's CURRENT model + capabilities, computed live at call
+   * time (see {@link ModelInfoSnapshot}). Unlike {@link agent} (frozen at
+   * boot), this reflects mid-session model/provider switches and resume.
+   *
+   * Optional + in-process only: present for module handlers when the host
+   * wired a provider; `undefined` for subprocess handlers and back-compat
+   * callers. Consumers MUST narrow (`const info = ctx.queryModelInfo?.()`).
+   */
+  queryModelInfo?: () => ModelInfoSnapshot | undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +400,22 @@ export interface ManifestFile {
    */
   liveAreaSlots?: ManifestLiveAreaSlot[]
   /**
+   * Slash commands contributed by this plugin. Each entry registers a
+   * `/<name>` the user can type at the prompt; on submit the host parses
+   * the leading `/<name>`, invokes the command's handler with the rest of
+   * the line as `argv`, and acts on the returned {@link CommandResult}
+   * (expand into a model turn, print a scrollback notice, or nothing).
+   *
+   * The registry is host-owned (collected here, exposed via the loader)
+   * so commands work headlessly even when the `slash-menu` overlay plugin
+   * is disabled — the overlay only adds discoverability/autocomplete by
+   * reading the same registry through `ctx.listCommands()`. See
+   * {@link ManifestCommand}.
+   *
+   * Optional; may be empty.
+   */
+  commands?: ManifestCommand[]
+  /**
    * Permission grants this plugin requires. Each entry follows the form
    * `hooks:CHANNEL` or `hooks:CHANNEL.*` (wildcard). The loader denies
    * any hook subscription whose channel isn't covered by an entry here.
@@ -363,6 +508,10 @@ export interface PromptFragmentContext {
    * always called before {@link PluginLoader.load} in the agent boot
    * path. May be `undefined` only when the loader is invoked outside
    * the agent (tests, ad-hoc tooling) without a session id passed.
+   *
+   * @deprecated Prefer `ctx.agent.sessionId`. This field is kept as a
+   * back-compat mirror; future cuts will remove it. New code should
+   * read `agent` and tolerate `agent === undefined` the same way.
    */
   sessionId?: string
   /** Aborts when the fragment's timeout fires. */
@@ -375,6 +524,14 @@ export interface PromptFragmentContext {
   stderr: NodeJS.WriteStream
   /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
   log: PluginLogger
+  /**
+   * Main-agent identity (session id, pid, model, version). Frozen at
+   * agent boot, shared across every plugin context. See {@link AgentContext}.
+   *
+   * Optional only for the legacy back-compat path; production calls
+   * always carry it.
+   */
+  agent?: AgentContext
 }
 
 /**
@@ -435,6 +592,14 @@ export interface EventHandlerContext<TPayload = unknown> {
   env: Record<string, string>
   /** Re-emit on the same bus. */
   emit: (event: string, payload?: unknown) => void
+  /**
+   * Read-only snapshot of every registered slash command (host-populated).
+   * The `slash-menu` overlay calls this from its `editor.buffer.changed`
+   * handler to render/filter the menu without importing the loader.
+   * `undefined` on hosts that predate the command registry — consumers
+   * MUST narrow (`ctx.listCommands?.() ?? []`).
+   */
+  listCommands?: () => CommandInfo[]
   /** Aborts when the agent is shutting down. */
   abort: AbortSignal
   /**
@@ -445,6 +610,14 @@ export interface EventHandlerContext<TPayload = unknown> {
   stderr: NodeJS.WriteStream
   /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
   log: PluginLogger
+  /**
+   * Main-agent identity (session id, pid, model, version). Frozen at
+   * agent boot, shared across every plugin context. See {@link AgentContext}.
+   *
+   * Optional only for the legacy back-compat path; production calls
+   * always carry it.
+   */
+  agent?: AgentContext
 }
 
 /**
@@ -592,6 +765,167 @@ export interface LiveAreaHandlerContext {
    * stagger heavy work (e.g. only refresh "real" data every N ticks).
    */
   tick: number
+  /**
+   * Fire-and-forget emit onto the shared plugin event bus (the same
+   * instance the loader exposes via `bus()` and the REPL listens on).
+   *
+   * A slot is the only handler shape the host invokes on a fixed timer,
+   * so it doubles as the natural place for a plugin to run periodic,
+   * out-of-band work — e.g. the `schedule` plugin's heartbeat ticks once
+   * a second, checks its cron store, and `emit("prompt.inject", {text})`
+   * for each due task. The status string the handler returns still paints
+   * the footer row; `emit` is the side-channel for "do something" beyond
+   * "show something".
+   *
+   * Optional + best-effort: `undefined` (or a no-op) when the scheduler
+   * was constructed without a bus (some tests). Never throws; the bus
+   * absorbs listener errors. Payloads ride the bus as-is and reach
+   * listeners as `ctx.payload`.
+   */
+  emit?: (channel: string, payload?: unknown) => void
+  /**
+   * Main-agent identity (session id, pid, model, version). Frozen at
+   * agent boot, shared across every plugin context. See {@link AgentContext}.
+   *
+   * Optional only for the legacy back-compat path (the live-area
+   * scheduler can be constructed without it in tests); production calls
+   * always carry it.
+   */
+  agent?: AgentContext
+}
+
+// ---------------------------------------------------------------------------
+// Slash commands
+// ---------------------------------------------------------------------------
+
+/**
+ * One slash command contributed by a plugin via `manifest.commands[]`.
+ *
+ * A command is the Command pattern (a request encapsulated as data): the
+ * user types `/<name> <argv>`, the host looks the name up in the
+ * host-owned registry, invokes {@link CommandHandler}, and acts on the
+ * returned {@link CommandResult}. The plugin never touches the queue or
+ * the editor — it only computes "what should happen" and returns it.
+ */
+export interface ManifestCommand {
+  /**
+   * Command name without the leading slash. Matches `[a-z0-9][a-z0-9_-]*`
+   * and must be unique across ALL loaded plugins (first-wins on collision,
+   * with a loader diagnostic, like modes). The user invokes it as
+   * `/<name>`.
+   */
+  name: string
+  /** One-line description shown in the slash-menu overlay and help. */
+  summary: string
+  /**
+   * Optional argument hint rendered after the name in the overlay, e.g.
+   * `"[interval] <prompt>"` for `/loop`. Purely cosmetic; the handler
+   * parses `argv` itself.
+   */
+  argHint?: string
+  /**
+   * Producer of the {@link CommandHandler}. Module handlers only for now
+   * (a command must return a structured {@link CommandResult} the host
+   * acts on synchronously; subprocess JSON round-tripping is deferred).
+   */
+  handler: ManifestHandlerEntry
+}
+
+/**
+ * Outcome of invoking a {@link CommandHandler}. A discriminated union so
+ * the host can react exhaustively (make illegal states unrepresentable).
+ */
+export type CommandResult =
+  | {
+      /** Submit `prompt` as a normal user turn (the model sees it). */
+      kind: "expand"
+      prompt: string
+    }
+  | {
+      /**
+       * Print these lines to scrollback with NO model turn. Use for
+       * deterministic side-effects (e.g. `/loop` created a cron entry —
+       * confirm the cadence without spending a round-trip).
+       */
+      kind: "notice"
+      lines: string[]
+    }
+  | {
+      /** Print an error notice (styled), no model turn. */
+      kind: "error"
+      message: string
+    }
+  | {
+      /** Swallow: do nothing, produce no turn and no scrollback. */
+      kind: "none"
+    }
+
+/**
+ * Runtime context passed to a command handler's default export.
+ */
+export interface CommandContext {
+  /** Command name invoked, without the slash (e.g. `"loop"`). */
+  name: string
+  /**
+   * Everything after the name, trimmed. For `/loop 5m check deploy` this
+   * is `"5m check deploy"`. Empty string when no args were given. The
+   * handler owns argv parsing.
+   */
+  argv: string
+  /** The full original submitted line including the slash. */
+  rawLine: string
+  /** The agent's current working directory. */
+  cwd: string
+  /** Plugin-scoped environment. */
+  env: Record<string, string>
+  /** Aborts when the turn is canceled or the per-call timeout fires. */
+  abort: AbortSignal
+  /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
+  log: PluginLogger
+  /**
+   * Fire-and-forget emit onto the shared plugin bus. A command may use it
+   * for side-channels beyond its `CommandResult` (e.g. emitting
+   * `prompt.inject` directly), but the normal path is to RETURN a result
+   * and let the host act. Payloads reach listeners as `ctx.payload`.
+   *
+   * Shape-aware (like the event/hook handler `emit`): a channel declared
+   * `broadcast-sync` / `chain` / `stream` in the channel catalog routes
+   * through the Hooks facade onto the HookBus; `broadcast-async` and
+   * undeclared (ad-hoc) names go to the EventBus. This lets an
+   * interactive command paint an overlay via `editor.footer.set` (a
+   * broadcast-sync channel whose host listener lives on the HookBus).
+   */
+  emit: (channel: string, payload?: unknown) => void
+  /**
+   * Main-agent identity (session id, pid, model, version). See
+   * {@link AgentContext}. Optional only for back-compat test callers.
+   */
+  agent?: AgentContext
+}
+
+/**
+ * Module-handler default export signature for a slash command.
+ *
+ * A handler file must `export default` a function of this type. It may be
+ * sync or async.
+ */
+export type CommandHandler = (ctx: CommandContext) => CommandResult | Promise<CommandResult>
+
+/**
+ * Read-only view of one registered command, returned by
+ * {@link TUIContext}-adjacent `listCommands()` read-APIs the host injects
+ * into hook + event handler contexts. The `slash-menu` overlay consumes
+ * this to render/filter the menu without importing the loader.
+ */
+export interface CommandInfo {
+  /** Command name without the slash. */
+  name: string
+  /** One-line description. */
+  summary: string
+  /** Optional argument hint. */
+  argHint?: string
+  /** Owning plugin id (for grouping / diagnostics). */
+  pluginId: string
 }
 
 /**
@@ -981,8 +1315,35 @@ export interface LoadedPlugin {
    * manifest's `liveAreaSlots` order. Empty when none declared.
    */
   liveAreaSlots: ResolvedLiveAreaSlot[]
+  /**
+   * Slash commands resolved to invocable form. Order matches the
+   * manifest's `commands` order. Empty when none declared. Cross-plugin
+   * name collisions are resolved (first-wins) when the loader builds its
+   * global command index, not here.
+   */
+  commands: ResolvedCommand[]
   /** Contents of the plugin's PROMPT.md, or null if absent. */
   prompt: string | null
+}
+
+/**
+ * A manifest slash command paired with its resolved (imported) handler.
+ *
+ * Produced by the loader at load time; the host's `dispatchCommand`
+ * invokes `invoke` with a {@link CommandContext} when the user submits a
+ * matching `/<name>` line.
+ */
+export interface ResolvedCommand {
+  /** The original manifest entry. */
+  spec: ManifestCommand
+  /** Plugin id this command belongs to (for grouping / diagnostics). */
+  pluginId: string
+  /** Absolute path to the package directory (the command's `cwd`). */
+  packageDir: string
+  /** Absolute path to the handler module. */
+  entryAbsolute: string
+  /** Invokes the command handler once, normalizing its return. */
+  invoke: (ctx: CommandContext) => Promise<CommandResult>
 }
 
 /**
@@ -1069,6 +1430,21 @@ export interface HookHandlerContext {
   stderr: NodeJS.WriteStream
   /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
   log: PluginLogger
+  /**
+   * Read-only snapshot of every registered slash command (host-populated).
+   * The `slash-menu` overlay calls this to render/filter the command menu
+   * without importing the loader. `undefined` on hosts that predate the
+   * command registry — consumers MUST narrow (`ctx.listCommands?.() ?? []`).
+   */
+  listCommands?: () => CommandInfo[]
+  /**
+   * Main-agent identity (session id, pid, model, version). Frozen at
+   * agent boot, shared across every plugin context. See {@link AgentContext}.
+   *
+   * Optional only for the legacy back-compat path; production calls
+   * always carry it.
+   */
+  agent?: AgentContext
 }
 
 /**

@@ -14,18 +14,26 @@ import { isAbsolute, resolve } from "node:path"
 
 import { createPluginLogger } from "../../diagnostic-bus.ts"
 import { paletteEnvJson } from "../../palette.ts"
+import { agentContextToEnv } from "../agent-context.ts"
 import { EventBus, type EventContext } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
 import type {
+  AgentContext,
+  CommandContext,
+  CommandHandler,
+  CommandInfo,
+  CommandResult,
   EventHandler,
   EventHandlerContext,
   HookHandlerContext,
   LiveAreaHandler,
   LiveAreaHandlerContext,
+  ManifestCommand,
   ManifestEventSubscription,
   ManifestHookSubscription,
   ManifestLiveAreaSlot,
+  ResolvedCommand,
   ResolvedEventSub,
   ResolvedHookSub,
   ResolvedLiveAreaSlot,
@@ -108,6 +116,8 @@ export function registerEventSub(
   sub: ResolvedEventSub,
   logger: (msg: string) => void,
   pluginId: string,
+  agent: AgentContext | undefined,
+  listCommands?: () => CommandInfo[],
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const listener = (ctx: EventContext): void | Promise<void> => {
@@ -120,6 +130,7 @@ export function registerEventSub(
         ...process.env,
         TUI_PLUGIN_PROTOCOL: "1",
         MINIMAL_AGENT_PALETTE: paletteEnvJson(),
+        ...(agent ? agentContextToEnv(agent) : {}),
       } as Record<string, string>,
       // Shape-aware emit:
       //
@@ -151,6 +162,8 @@ export function registerEventSub(
       abort: ctx.abort,
       stderr: process.stderr,
       log: createPluginLogger(pluginId),
+      ...(listCommands ? { listCommands } : {}),
+      agent,
     }
     try {
       return sub.invoke(handlerCtx)
@@ -230,6 +243,8 @@ export function registerHookSub(
   sub: ResolvedHookSub,
   logger: (msg: string) => void,
   pluginId: string,
+  agent: AgentContext | undefined,
+  listCommands?: () => CommandInfo[],
 ): void {
   const label = `${packageDir}:${sub.definition.id}`
   const channel = sub.definition.channel
@@ -242,6 +257,7 @@ export function registerHookSub(
         ...process.env,
         TUI_PLUGIN_PROTOCOL: "1",
         MINIMAL_AGENT_PALETTE: paletteEnvJson(),
+        ...(agent ? agentContextToEnv(agent) : {}),
       } as Record<string, string>,
       abort: ctx.abort,
       priority: ctx.priority,
@@ -263,6 +279,8 @@ export function registerHookSub(
       },
       stderr: process.stderr,
       log: createPluginLogger(pluginId),
+      ...(listCommands ? { listCommands } : {}),
+      agent,
     }
     try {
       return sub.invoke(payload, handlerCtx)
@@ -439,6 +457,112 @@ export async function resolveLiveAreaSlot(
       await proc.exited
       const trimmed = out.replace(/\n+$/, "")
       return trimmed.length === 0 ? null : trimmed
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Slash command resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate + normalize a command handler's return value at the trust
+ * boundary (a plugin may return anything). Throws a descriptive error on
+ * a malformed shape; the loader's `invoke` wrapper turns the throw into a
+ * `{kind:"error"}` the host can render.
+ *
+ * @param out Raw value the handler returned.
+ * @param name Command name, for error messages.
+ * @returns A well-formed {@link CommandResult}.
+ */
+function normalizeCommandResult(out: unknown, name: string): CommandResult {
+  if (out == null || typeof out !== "object") {
+    throw new Error(
+      `command "/${name}" returned ${out === null ? "null" : typeof out}; expected a CommandResult object`,
+    )
+  }
+  const kind = (out as { kind?: unknown }).kind
+  switch (kind) {
+    case "expand": {
+      const prompt = (out as { prompt?: unknown }).prompt
+      if (typeof prompt !== "string") {
+        throw new Error(`command "/${name}" expand result needs a string "prompt"`)
+      }
+      return { kind: "expand", prompt }
+    }
+    case "notice": {
+      const lines = (out as { lines?: unknown }).lines
+      if (!Array.isArray(lines) || lines.some((l) => typeof l !== "string")) {
+        throw new Error(`command "/${name}" notice result needs a string[] "lines"`)
+      }
+      return { kind: "notice", lines: lines as string[] }
+    }
+    case "error": {
+      const message = (out as { message?: unknown }).message
+      if (typeof message !== "string") {
+        throw new Error(`command "/${name}" error result needs a string "message"`)
+      }
+      return { kind: "error", message }
+    }
+    case "none":
+      return { kind: "none" }
+    default:
+      throw new Error(`command "/${name}" returned unknown result kind ${JSON.stringify(kind)}`)
+  }
+}
+
+/**
+ * Resolve a manifest slash command to an invocable form by importing its
+ * module handler's default export. Module handlers only (the manifest
+ * validator already enforces this). Returns `null` (with a logged
+ * diagnostic) on any resolution failure, so one broken command never
+ * disqualifies the rest of the plugin.
+ *
+ * @param spec Validated manifest command entry.
+ * @param pluginId Owning plugin id.
+ * @param packageDir Absolute package dir (the command's cwd).
+ * @param logger Diagnostic sink.
+ * @returns The resolved command, or `null` when it could not be loaded.
+ */
+export async function resolveCommand(
+  spec: ManifestCommand,
+  pluginId: string,
+  packageDir: string,
+  logger: (msg: string) => void,
+): Promise<ResolvedCommand | null> {
+  if (spec.handler.type !== "module") {
+    logger(`${packageDir}: command "/${spec.name}" handler must be module type; skipping`)
+    return null
+  }
+  const abs = resolvePath(packageDir, spec.handler.path)
+  if (!existsSync(abs)) {
+    logger(`${packageDir}: command "/${spec.name}" handler module not found: ${abs}`)
+    return null
+  }
+  let mod: { default?: CommandHandler }
+  try {
+    mod = await import(abs)
+  } catch (e) {
+    logger(
+      `${packageDir}: failed to import command handler ${abs}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+    return null
+  }
+  const fn = mod.default
+  if (typeof fn !== "function") {
+    logger(`${packageDir}: command handler ${abs} has no default export function`)
+    return null
+  }
+  return {
+    spec,
+    pluginId,
+    packageDir,
+    entryAbsolute: abs,
+    invoke: async (ctx: CommandContext): Promise<CommandResult> => {
+      const out = await fn(ctx)
+      return normalizeCommandResult(out, spec.name)
     },
   }
 }
