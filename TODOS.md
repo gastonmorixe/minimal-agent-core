@@ -171,9 +171,11 @@ The agent core retains only the abstract "tool-dispatch interceptor" extension p
 
 ### T-5a17e0: Land the 3 entangled `<ma::emit::>`/`<ma::agent::>` comment renames
 
-- [ ] state: `todo`
+- [x] state: `done`
 - created_at: 2026-05-30T18:59:03-04:00
 - created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, deferred during the system-prompt role-composition refactor (commits 429f54d + 16c9c36; see `docs/changes/2026-05-30-system-prompt-role-composition.md`)
+- done_at: 2026-05-30T20:34:00-04:00
+- outcome: commit 7cb912b (session 2dae6456). All 11 comment renames landed via a filtered zero-context patch (`git apply --cached --unidiff-zero`) so only my lines committed; the concurrent writer's WIP in the same 3 files stayed in the tree untouched. `grep -rn 'ma::plugin::' src/agent.ts src/index.ts src/plugins/types.ts` → 0; wip preserved (30/232/376 lines); typecheck green.
 - area: `src/agent.ts`, `src/index.ts`, `src/plugins/types.ts`
 
 **Description.** The refactor renamed model-facing tags (`<ma::plugin::*>` → `<ma::emit::*>` / `<ma::agent::*>`). The functional renames are committed. Three files carry only COSMETIC docstring/comment renames of those tags but could not be committed because they were entangled with unrelated in-flight work (a concurrent writer's prompts-as-markdown / SessionInfo workstream) in the same files. `agent.ts` (4 hunks) and `index.ts` (1 hunk) are cleanly hunk-isolatable; `types.ts` has 2 of its 4 renames buried inside a ~109-line WIP hunk, so it cannot be cleanly separated.
@@ -184,9 +186,11 @@ The agent core retains only the abstract "tool-dispatch interceptor" extension p
 
 ### T-5b28f1: Update 4 plugin dev-doc READMEs to the new tag scheme
 
-- [ ] state: `todo`
+- [x] state: `done`
 - created_at: 2026-05-30T18:59:03-04:00
 - created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, found during post-refactor doc audit
+- done_at: 2026-05-30T20:32:00-04:00
+- outcome: commit 26b0174 (session 2dae6456). All 12 refs across the 4 READMEs renamed; `grep -rn '<ma::plugin::\|<memory-saved\|<short-term-memory' plugins/*/README.md` → 0.
 - area: `plugins/diff-view/README.md` (4), `plugins/interleave-thinking/README.md` (3), `plugins/memory/README.md` (3), `plugins/tasks/README.md` (2)
 
 **Description.** The MODEL-facing prompts (PROMPT.md) are fully migrated, but these four developer-facing READMEs still document the old `<ma::plugin::*>` / `<memory-saved>` / `<short-term-memory>` tags (12 refs total). Not a correctness issue (READMEs are not sent to the model), just stale dev docs.
@@ -206,7 +210,7 @@ The agent core retains only the abstract "tool-dispatch interceptor" extension p
 
 **What landing looks like.** A migration (sibling to `private/migrations/20260528T161007-old-session-history-to-new-plugin-syntax.ts`) that rewrites `<ma::plugin::tasks>` → `<ma::agent::tasks>`, `<ma::plugin::memory::short-term>` → `<ma::agent::short-term-memory>`, `<memory-saved …>…</ma::plugin::memory::saved>` → `<ma::agent::memory-saved>`, and `<ma::plugin::{diff,memory,interleave-thinking}>` → `<ma::emit::…>` in saved JSONL. Dry-run default, `--apply`, full backup, tests, same as the prior migration.
 
-**Why deferred.** Pure cleanliness; read-time legacy tolerance already makes old sessions resume correctly. Only worth doing if/when the legacy read-path tolerance is to be removed.
+**Why deferred (evidence, session 2dae6456).** Measured 381 of 2459 saved sessions carry old tags. They resume CORRECTLY today: `session-replay.ts` matches `<ma::plugin::*>` + legacy bare forms, `session-restore.ts` likewise. A migration is a destructive batch rewrite of 381 user-data files for zero functional gain while read-tolerance stands, so it stays deferred and must not run unprompted (irreversible-ish even with backup). Do it only as the deliberate companion to removing the legacy read-path tolerance, on the user's call.
 
 ### T-5d40b3: (perf, optional) move stable `<ma::sys::*>` sections to the global cache block
 
@@ -219,18 +223,20 @@ The agent core retains only the abstract "tool-dispatch interceptor" extension p
 
 **What landing looks like.** `loader.getPromptBlock*` returns the composition split by stability (global vs session), and `agent.ts` appends the global sections to the cached instructions block (system[2]) and the context sections to system[3]. The loader should reject `kind: behavior/tool/...` content containing volatile interpolation to keep the global block byte-stable across users.
 
-**Why deferred.** Cut from the refactor to keep blast radius small and avoid touching the provider seam / cache layout. The win is cross-session cold-start cache sharing; within a session the per-session breakpoint already gives turn-over-turn reuse.
+**Why deferred (reaffirmed, session 2dae6456).** This is the one remaining item I am deliberately NOT doing: it moves plugin content across cache breakpoints (system[3] → system[2] `scope:"global"`), which is exactly the cache layout + provider-seam area the refactor was scoped to leave untouched (`src/llm/system-prompt.ts:buildAgentSystemBody`). Perf-only upside (cross-session cold-start cache sharing); within a session the per-session breakpoint already gives turn-over-turn reuse. Wants explicit sign-off + its own before/after cache-hit measurement before touching.
 
 ### T-5e51c4: (minor) per-tool section naming for multi-tool plugins
 
-- [ ] state: `todo`
+- [x] state: `done`
 - created_at: 2026-05-30T18:59:03-04:00
 - created_by: session=5f286880-03b8-4fb6-a2d5-b079a0f0bd2b, known limitation noted during the refactor
+- done_at: 2026-05-30T20:34:30-04:00
+- outcome: commit de76b9f (session 2dae6456). Promoted from latent to live: the concurrent writer's `schedule` (3 Cron tools) and `sub-agents` (7 tools) plugins both ship one PROMPT.md and WERE mis-composing as `<ma::sys::tool name="CronCreate">` / `name="SpawnAgent">`. Fix: a >1-tool plugin names its tool section after the plugin's H1/display-name slug (schedule → "schedule", sub-agents → "sub-agents"); single-tool plugins keep the tool name. 2 new unit tests cover the multi-tool branch.
 - area: `src/plugins/loader/helpers.ts` (`classifyPluginPrompt`), `src/plugins/loader.ts` (`buildBlock`)
 
-**Description.** `classifyPluginPrompt` names a `tool`-role section after the FIRST tool the plugin declares and composes the whole PROMPT.md under that one `<ma::sys::tool name="…">`. A plugin shipping multiple tools with one PROMPT.md would label the section after only tool #1. No bundled or sibling plugin currently ships >1 tool, so this is latent.
+**Description.** `classifyPluginPrompt` named a `tool`-role section after the FIRST tool the plugin declares and composed the whole PROMPT.md under that one `<ma::sys::tool name="…">`. A multi-tool plugin shipping one PROMPT.md would mislabel the section after only tool #1.
 
-**What landing looks like.** Either split a multi-tool plugin's PROMPT.md into one `<ma::sys::tool name="…">` per tool (needs a per-tool body convention), or name the section generically when a plugin has >1 tool. Decide only when a real multi-tool plugin appears.
+**What landed.** Multi-tool plugins (`> 1` tool handler) now name the section after the plugin's H1/display-name slug, same fallback a behavior section uses; single-tool plugins keep the bound tool name. (The richer alternative — splitting one PROMPT.md into a per-tool section via a body convention — was considered and rejected as overkill: a multi-tool pack's doc is written as one narrative covering the tool family.)
 
 **Why deferred.** No current plugin triggers it; speculative until one does.
 
