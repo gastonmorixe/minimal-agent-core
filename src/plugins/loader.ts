@@ -30,8 +30,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
-import { parseCommandLine } from "../slash-command-parse.ts"
 import { paletteEnvJson } from "../palette.ts"
+import { parseCommandLine } from "../slash-command-parse.ts"
 
 import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
@@ -979,7 +979,33 @@ export class PluginLoader {
       } as Record<string, string>,
       abort: ctrl.signal,
       log: createPluginLogger(cmd.pluginId),
-      emit: (channel: string, payload?: unknown) => this.eventBus.emit(channel, payload),
+      // Shape-aware emit so a command can fan out to ANY channel
+      // regardless of bus. Declared channels route via the channel
+      // catalog's shape: `broadcast-async` (and ad-hoc, undeclared
+      // names) go straight to the EventBus; `broadcast-sync` / `chain`
+      // / `stream` route through the Hooks facade onto the HookBus.
+      // Without this an interactive command (e.g. `/config` painting
+      // its overlay via `editor.footer.set`, a broadcast-sync channel)
+      // would silently emit into the void — the host listener lives on
+      // the HookBus, not the EventBus. Mirrors the event-sub / hook-sub
+      // emit in `src/plugins/loader/event-subs.ts`.
+      emit: (channel: string, payload?: unknown) => {
+        const shape = CHANNEL_BY_NAME.get(channel)?.shape
+        try {
+          if (shape === "broadcast-async" || shape === undefined) {
+            this.eventBus.emit(channel, payload)
+            return
+          }
+          this.hooksFacade.emitSync(channel, payload)
+        } catch (e) {
+          diag.warn(
+            "plugins",
+            `command "/${parsed.name}" emit("${channel}") failed: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          )
+        }
+      },
       agent: this.agent,
     }
 

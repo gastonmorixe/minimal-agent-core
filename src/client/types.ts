@@ -462,6 +462,26 @@ export interface StreamedResponse {
    * @see private/research/2026-05-28-llm-providers/02-wire-snapshots.md
    */
   stopDetails?: { type: string; message?: string } | null
+  /**
+   * Billed token usage for THIS turn, as reported by the provider.
+   *
+   * Anthropic ships `input_tokens` + cache counters at `message_start`
+   * (cache lookup happens during prefill) and the final `output_tokens`
+   * in the closing `message_delta`. We merge both into this single
+   * snapshot so the caller (the agent loop) can persist the turn's exact
+   * footprint to the session log via `appendAssistant`. Absent when the
+   * stream never reported usage (e.g. an empty/aborted turn).
+   *
+   * Field names mirror the Anthropic wire (`input_tokens`, etc.) so this
+   * threads unchanged into `AssistantRecord.usage` and the session-tokens
+   * accumulator. See `src/session-usage.ts`.
+   */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
 }
 
 /**
