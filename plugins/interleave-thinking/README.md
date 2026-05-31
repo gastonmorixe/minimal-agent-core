@@ -1,6 +1,6 @@
 # interleave-thinking plugin
 
-Captures `<ma::plugin::interleave-thinking>...</ma::plugin::interleave-thinking>`
+Captures `<ma::emit::interleave-thinking>...</ma::emit::interleave-thinking>`
 spans in assistant text and drops them from the user-visible output
 stream. The model uses these spans as mid-response reasoning blocks
 ("wait, that claim is wrong, let me reconsider") that get scrubbed
@@ -13,7 +13,7 @@ that comes up while generating the answer.
 
 | Surface | Trigger | Handler |
 |---|---|---|
-| Inline tag | `<ma::plugin::interleave-thinking>` | `handlers/interleave.ts` |
+| Inline tag | `<ma::emit::interleave-thinking>` | `handlers/interleave.ts` |
 
 The handler returns empty bytes, so the tag body never reaches the
 sink. Cross-chunk tag boundaries are handled by the agent's plugin
@@ -39,5 +39,5 @@ on the corrected thinking.
 
 `plugins["interleave-thinking"].enabled = false` in
 `~/.minimal-agent/config.jsonc`. With the plugin disabled, any
-`<ma::plugin::interleave-thinking>` the model emits will fall through to the
+`<ma::emit::interleave-thinking>` the model emits will fall through to the
 scanner's unknown-tag path and render as raw text to the user.

@@ -45,7 +45,7 @@ plugins/tasks/
 │   ├── parse.ts                # id gen, JSONL serialize/parse, types
 │   ├── store.ts                # TaskStore class (CRUD + ordering + rollup)
 │   ├── render.ts               # ANSI / plain renderer
-│   └── attachment.ts           # <ma::plugin::tasks> per-turn producer
+│   └── attachment.ts           # <ma::agent::tasks> per-turn producer
 └── handlers/
     └── task_tool.ts            # the Task tool dispatch
 ```
@@ -92,7 +92,7 @@ Reads the same session id (`MINIMAL_AGENT_SESSION_ID` env or
 
 ## Auto-injection
 
-A `<ma::plugin::tasks total="…" done="…" doing="…" todo="…" canceled="…">…</ma::plugin::tasks>`
+A `<ma::agent::tasks total="…" done="…" doing="…" todo="…" canceled="…">…</ma::agent::tasks>`
 attachment is prepended to the first user message of every `Agent.run`,
 so the model always knows the current plan. Omitted when zero tasks
 exist. No token cost unless tasks are in play.

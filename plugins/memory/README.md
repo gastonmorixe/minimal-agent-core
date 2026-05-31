@@ -17,7 +17,7 @@ with collaborators.
 | Surface | Trigger | Handler |
 |---|---|---|
 | Tool | `MemoryTool` | `handlers/memory_tool.ts` |
-| Inline tag | `<ma::plugin::memory>` | `handlers/memory.ts` |
+| Inline tag | `<ma::emit::memory>` | `handlers/memory.ts` |
 | Prompt fragment | `id: memory_load` | `handlers/load.ts` |
 
 The inline tag is the zero-friction save path (mid-response). The tool
@@ -29,7 +29,7 @@ memories too.
 ## Files
 
 - `manifest.json`: tool + tag + fragment declarations.
-- `handlers/memory.ts`: `<ma::plugin::memory>` inline save.
+- `handlers/memory.ts`: `<ma::emit::memory>` inline save.
 - `handlers/memory_tool.ts`: `MemoryTool` actions.
 - `handlers/load.ts`: prompt-fragment producer (reads the scratchpad
   + optionally the persistent files).
@@ -40,7 +40,7 @@ memories too.
 
 ## Save echo
 
-Saves via the inline tag emit a `<memory-saved scope="..." id="...">`
+Saves via the inline tag emit a `<ma::agent::memory-saved scope="..." id="...">`
 attachment on the next user turn. That's how the model learns the
 bullet id without round-tripping through `MemoryTool list`.
 
