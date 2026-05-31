@@ -262,6 +262,7 @@ export async function* translateAnthropicStream(
           type: "stream_error",
           retryable: isRetryableErrorCategory(errType),
           category: categorizeUpstream(errType),
+          upstreamType: errType,
           cause: new Error(`Anthropic stream error: ${errType} — ${errMessage}`),
         }
         break
@@ -342,13 +343,20 @@ function mapStopReason(raw: string | null): StopReason | null {
 
 function categorizeUpstream(
   errType: string,
-): "overloaded" | "api" | "timeout" | "canceled" | "auth" | "unknown" {
+): "overloaded" | "api" | "timeout" | "rate_limit" | "canceled" | "auth" | "unknown" {
   if (errType === "overloaded_error") return "overloaded"
   if (errType === "api_error") return "api"
+  if (errType === "rate_limit_error") return "rate_limit"
   if (errType === "authentication_error" || errType === "invalid_api_key") return "auth"
   return "unknown"
 }
 
 function isRetryableErrorCategory(errType: string): boolean {
-  return errType === "overloaded_error" || errType === "api_error"
+  // rate_limit_error is retryable: the outer coordinator waits the window
+  // out on the slow curve rather than stopping the agent.
+  return (
+    errType === "overloaded_error" ||
+    errType === "api_error" ||
+    errType === "rate_limit_error"
+  )
 }

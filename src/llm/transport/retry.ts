@@ -46,11 +46,19 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   "attempt_too_long",
 ])
 
-/** Hard-error types that retry on the SLOW curve. Mirrors `client.ts`. */
+/**
+ * Hard-error types that retry on the SLOW curve. Mirrors `client.ts`.
+ *
+ * `rate_limit_error` is here (not in the fast set) so a 429 waits the
+ * limit window out on the 30s→5min curve instead of hammering a closed
+ * window sub-second. Like every entry, it retries forever — the curve
+ * only sets the backoff. Keep in sync with `client.ts`'s `SLOW_RETRY_TYPES`.
+ */
 const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set([
   "invalid_request_error",
   "permission_error",
   "not_found_error",
+  "rate_limit_error",
 ])
 
 const RETRY_FAST_BASE_DELAY_MS = 200

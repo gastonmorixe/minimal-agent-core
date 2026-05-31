@@ -547,7 +547,21 @@ export async function* sendMessageOnce(
         debugHeader(c.red(`Error ${response.status}`))
         console.error(`  ${truncate(errorBody, 500)}`)
       }
-      throw new Error(`API ${response.status}: ${errorBody}`)
+      // Tag transient HTTP failures so the outer `sendMessage` retry loop
+      // recovers instead of stopping the agent. A pre-stream 429 (rate
+      // limit) or 5xx (server overloaded / transient) arrives here when the
+      // server rejects BEFORE opening the SSE stream — the in-stream
+      // `event: error` path (handled below) never fires for these. Without
+      // a `streamErrorType` tag the retry loop treats them as a genuine bug
+      // and re-throws. Map the status (and the Anthropic error body's
+      // `error.type` when present) to the same tags the in-stream path uses.
+      const upstreamType = parseUpstreamErrorType(errorBody)
+      const streamErrType = httpStatusToStreamErrorType(response.status, upstreamType)
+      const httpErr = new Error(`API ${response.status}: ${errorBody}`) as Error & {
+        streamErrorType?: string
+      }
+      if (streamErrType) httpErr.streamErrorType = streamErrType
+      throw httpErr
     }
 
     // Cache + broadcast the rate-limit snapshot from THIS response.
@@ -584,6 +598,12 @@ export async function* sendMessageOnce(
     // preserve verbatim and surface on StreamedResponse.stopDetails so
     // the host can route on the category without parsing prose.
     let stopDetails: { type: string; message?: string } | null = null
+    // Billed usage for this turn. Anthropic reports input/cache counts at
+    // message_start (during prefill) and the final output_tokens in the
+    // closing message_delta. We capture both into one snapshot so the agent
+    // loop can persist the exact footprint via appendAssistant. Surfaced on
+    // StreamedResponse.usage. See src/session-usage.ts.
+    let turnUsage: CacheUsage | undefined
     let sawStreamEvent = false
 
     // Accumulators for the current block being streamed
@@ -711,6 +731,9 @@ export async function* sendMessageOnce(
               if (isDebug()) console.error(formatCacheLine(usage))
               detector.observe(usage, reqSnapshot)
               addSessionUsage(usage)
+              // Seed the per-turn usage snapshot with the prefill counts
+              // (input + cache). output_tokens lands later in message_delta.
+              turnUsage = { ...usage }
               // The earlier broadcast (right after response headers
               // arrived) updated the rate-limit cache and re-fired the
               // `quota-status` slot — but `addSessionUsage` had not run
@@ -935,6 +958,10 @@ export async function* sendMessageOnce(
             const finalOut = (event as { usage?: { output_tokens?: number } }).usage?.output_tokens
             if (typeof finalOut === "number" && finalOut > 0) {
               requestStatus.updateActivity({ recvTokens: finalOut })
+              // Fold the authoritative output count into the turn usage
+              // snapshot so the persisted record carries the real billed
+              // output_tokens (not the chars/3.5 live estimate).
+              turnUsage = { ...(turnUsage ?? {}), output_tokens: finalOut }
             }
             break
           }
@@ -989,11 +1016,58 @@ export async function* sendMessageOnce(
       throw err
     }
 
-    return { blocks, text: fullText, stopReason, stopDetails }
+    return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage }
   } finally {
     requestStatus.clear()
     networkActivityObserver.detach(reqId)
   }
+}
+
+/**
+ * Best-effort pull of the Anthropic `error.type` out of a non-2xx response
+ * body. Anthropic error bodies are `{"type":"error","error":{"type":"…",
+ * "message":"…"}}`. Returns `undefined` if the body isn't JSON or lacks the
+ * field, so the caller can fall back to status-code mapping.
+ */
+function parseUpstreamErrorType(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { error?: { type?: string } }
+    const t = parsed?.error?.type
+    return typeof t === "string" && t.length > 0 ? t : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Map a failed HTTP status (+ optional upstream `error.type`) to the
+ * `streamErrorType` tag the retry coordinator understands, so a pre-stream
+ * rejection retries on the SAME curves as its in-stream twin. Returns
+ * `undefined` for statuses we deliberately do NOT retry (e.g. 401, which the
+ * auth-refresh path owns).
+ *
+ *   - 429 → `rate_limit_error` (slow curve: wait the window out, forever).
+ *   - 5xx → `overloaded_error` (fast curve: transient server capacity).
+ *   - 408 → `api_error` (fast curve: request timeout, retry).
+ *   - else → the upstream `error.type` if it's one the loop already knows,
+ *     otherwise `undefined` (untagged → propagate as a real failure).
+ */
+function httpStatusToStreamErrorType(
+  status: number,
+  upstreamType: string | undefined,
+): string | undefined {
+  if (status === 429 || upstreamType === "rate_limit_error") return "rate_limit_error"
+  if (status >= 500) return "overloaded_error"
+  if (status === 408) return "api_error"
+  // 401 is intentionally NOT tagged here: the auth-refresh path handles it
+  // upstream, and a tag would make the retry loop swallow a real auth failure.
+  if (
+    upstreamType &&
+    (RETRYABLE_STREAM_ERROR_TYPES.has(upstreamType) || SLOW_RETRY_TYPES.has(upstreamType))
+  ) {
+    return upstreamType
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,11 +1106,20 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
  * up unprompted), but the per-attempt backoff starts at 30s instead of
  * 200ms because a single attempt is unlikely to flip these without an
  * out-of-band fix (rotating a token, fixing a config, etc).
+ *
+ * `rate_limit_error` lives here too: a 429 / `event: error` of type
+ * `rate_limit_error` clears on its own once the window resets, but only
+ * after wall-clock passes — retrying on the fast curve (sub-second) would
+ * just burn attempts against a closed window. The slow curve (30s → 60 →
+ * 120 → 300s cap, forever) waits the limit out and recovers automatically
+ * instead of stopping the agent. Observed 2026-05-30 as a hard stop
+ * (`rate_limit_error: Rate limited`) because it matched neither set.
  */
 const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set([
   "invalid_request_error",
   "permission_error",
   "not_found_error",
+  "rate_limit_error",
 ])
 
 /**
