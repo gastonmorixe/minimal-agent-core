@@ -110,6 +110,13 @@ export class EditorController extends EventEmitter {
   private viewportTop = 0
   private pending = ""
   private bracketedPaste = false
+  /**
+   * Coalescing window (ms) for resize-driven repaints; see
+   * {@link EditorControllerOptions.resizeDebounceMs}. 0 = synchronous.
+   */
+  private readonly resizeDebounceMs: number
+  /** Trailing-edge timer that fires the single coalesced resize repaint. */
+  private resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null
   private started = false
   private cycleForward: (() => void) | null = null
   private cycleBackward: (() => void) | null = null
@@ -246,6 +253,7 @@ export class EditorController extends EventEmitter {
     this.maxLiveHeight = typeof cap === "function" ? cap : () => cap
     this.bareEscapeMs = opts.bareEscapeMs ?? 20
     this.inputDebounceMs = opts.inputDebounceMs ?? 120
+    this.resizeDebounceMs = opts.resizeDebounceMs ?? 150
     this.abortBus = opts.abortBus ?? abortBus
     this.fsmOptions = opts.quitFsm ?? {}
     this.nowFn = opts.nowFn ?? (() => Date.now())
@@ -561,6 +569,10 @@ export class EditorController extends EventEmitter {
       clearTimeout(this.inputDebounce)
       this.inputDebounce = null
     }
+    if (this.resizeDebounceTimer) {
+      clearTimeout(this.resizeDebounceTimer)
+      this.resizeDebounceTimer = null
+    }
     // Tear down the abort-quit FSM's recurring painter + expiry timer.
     this.stopArmedTimers()
     this.stdin.off("data", this.onDataBound)
@@ -584,6 +596,10 @@ export class EditorController extends EventEmitter {
   emergencyRestore(): void {
     if (!activeControllers.has(this)) return
     activeControllers.delete(this)
+    if (this.resizeDebounceTimer) {
+      clearTimeout(this.resizeDebounceTimer)
+      this.resizeDebounceTimer = null
+    }
     try {
       this.output.write(
         XTERM_MODIFY_OTHER_KEYS_DISABLE +
@@ -697,8 +713,41 @@ export class EditorController extends EventEmitter {
     this.repaint()
   }
 
+  /**
+   * Handle a terminal resize (SIGWINCH).
+   *
+   * A window-edge DRAG fires one SIGWINCH per intermediate column, and each
+   * synchronous repaint of a near-viewport-tall live area can leave a
+   * reflow residue frozen in scrollback: when the terminal reflows our
+   * pre-wrapped full-width lines at a narrower width, the live area's
+   * physical height grows and its top rows scroll ABOVE the viewport into
+   * permanent scrollback before we are even notified. The compositor's
+   * relative erase (`ESC[nA` + `ESC[J`) cannot reach above the viewport
+   * top, so those rows remain. Repainting on every step of a drag stacks
+   * one such residue per column = dozens of duplicate live areas.
+   *
+   * Fix: coalesce. Arm a trailing timer and repaint ONCE, `resizeDebounceMs`
+   * after the LAST resize, so a continuous drag collapses to a single
+   * repaint at the final geometry (measured on a 120→48 drag: 25 leaked
+   * copies at 0ms, 10 at 80ms, 0 at the 150ms default). The compositor
+   * already emits nothing on each
+   * intermediate SIGWINCH (its own HARD RULE), so the only cost of waiting
+   * is that the live area visually settles a few ms after the drag stops.
+   *
+   * `resizeDebounceMs === 0` keeps the legacy synchronous behavior (one
+   * repaint per resize), used by tests that assert that contract.
+   */
   notifyResize(): void {
-    if (this.started) this.repaint()
+    if (!this.started) return
+    if (this.resizeDebounceMs <= 0) {
+      this.repaint()
+      return
+    }
+    if (this.resizeDebounceTimer) clearTimeout(this.resizeDebounceTimer)
+    this.resizeDebounceTimer = setTimeout(() => {
+      this.resizeDebounceTimer = null
+      if (this.started) this.repaint()
+    }, this.resizeDebounceMs)
   }
 
   private statusLine: string | null = null

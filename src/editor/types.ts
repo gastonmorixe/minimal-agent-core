@@ -173,6 +173,28 @@ export interface EditorControllerOptions {
    */
   inputDebounceMs?: number
   /**
+   * Coalescing window (ms) for resize-driven repaints. A terminal-edge
+   * DRAG fires one SIGWINCH per column step; each repaint of a near-
+   * viewport-tall live area can leave a reflow residue in scrollback
+   * (the terminal scrolls the live area's top rows above the viewport
+   * before we can erase them - see compositor `notifyResize` doc). Without
+   * coalescing, a single drag stacks dozens of duplicate live areas into
+   * permanent scrollback.
+   *
+   * With this set, {@link EditorController.notifyResize} debounces: it
+   * arms a trailing timer and repaints ONCE, `resizeDebounceMs` after the
+   * LAST resize event, so a continuous drag collapses to a single repaint
+   * at the final geometry. The compositor still emits nothing on each
+   * intermediate SIGWINCH (its HARD RULE), so no per-step bytes are sent.
+   *
+   * Default: 150ms - long enough to fully swallow a drag's SIGWINCH burst
+   * (measured: a 120→48 drag leaks 25 duplicate live areas at 0ms, 10 at
+   * 80ms, and 0 at >=150ms), short enough that a deliberate single resize
+   * still feels instant. Set to 0 to repaint synchronously on every resize
+   * (legacy behavior; used by tests that assert a repaint-per-resize).
+   */
+  resizeDebounceMs?: number
+  /**
    * Inject the {@link AbortBus} singleton (or a fresh one for tests). When
    * a turn is in flight (`abortBus.isTurnInFlight()`) and the user presses
    * bare Esc or Ctrl+C, this controller calls

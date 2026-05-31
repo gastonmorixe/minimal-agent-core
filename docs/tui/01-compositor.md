@@ -251,7 +251,7 @@ Why nothing else works (regression history is in the source comment):
 | `\n × (rows - liveHeight)` | assumed live area is sticky-to-bottom of viewport. It isn't. |
 | reset counters | walk-up math drops, `drawLiveSeq` starts at current cursor → first byte of new "status" overstrikes old `❯` → "❯ ❯" cursor duplication |
 
-**Trade-off accepted**: in the cols-change worst case, one row of stale old-live-area content may remain visible ABOVE the new live area until the next stream write covers it. Bounded (1 row per resize, never accumulates), NOT scrollback loss.
+**Trade-off, honestly stated (corrected May 2026):** on a *narrowing* resize the terminal reflows the pre-wrapped full-width live-area lines, growing their physical height. If the live area sat near the viewport floor, its TOP rows scroll ABOVE the viewport into permanent scrollback *at reflow time*, before this handler runs. The next paint's relative `ESC[J` can't reach above the viewport top, so those rows remain as a frozen copy. This is inherent to inline (non-alt-screen) redraw and is NOT scrollback loss. The earlier claim here ("bounded 1 row, never accumulates") was wrong on both counts: the residue can be several rows, and a window-edge *drag* (one SIGWINCH per column) used to leave one residue per column = dozens stacked. The accumulation is now killed upstream by coalescing resize repaints in `EditorController.notifyResize` (`resizeDebounceMs`, default 150ms — see chapter 03), so a whole drag yields at most one residue. A single deliberate resize may still strand one transient row.
 
 `maybeRecoverFromColsDrift()` runs the same policy at paint time. Triggered when `effectiveColumns() !== lastDrawColumns`. Same regression history applies.
 
