@@ -121,21 +121,35 @@ export function escapeTagAttr(s: string): string {
  * manifest shape — no manifest field required. Precedence:
  *
  * 1. declares a mode            → `mode`,  name = first mode id
- * 2. contributes a tool         → `tool`,  name = first tool name
+ * 2. contributes ONE tool       → `tool`,  name = that tool's name
+ *    contributes >1 tool        → `tool`,  name = slug(H1 | display name)
  * 3. contributes only inline tag→ `emit`,  name = first inline-tag name
  * 4. PROMPT.md only (no frags)  → `behavior`, name = slug(H1 | display name)
  * 5. PROMPT.md + prompt fragment→ `context`,  name = slug(H1 | display name)
  *
- * The tool/mode/emit names are the exact identifiers the model already sees
- * elsewhere (the `tools[]` array, the mode-change signals, the emit syntax),
- * so the section label binds the guidance to the thing it describes.
+ * For a single-tool plugin the tool name is the exact identifier the model
+ * already sees in the `tools[]` array, so the section label binds the
+ * guidance to the thing it describes. A multi-tool plugin ships ONE PROMPT.md
+ * covering several tools (e.g. schedule = CronCreate/CronList/CronDelete,
+ * sub-agents = SpawnAgent/…/StopAgent); naming the section after only the
+ * first tool would understate its coverage, so it falls back to the plugin's
+ * H1/display-name slug, same as a behavior section. Mode/emit names likewise
+ * mirror identifiers the model sees elsewhere (mode-change signals, emit
+ * syntax).
  */
 export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; name: string } {
   const m = pkg.manifest
   const firstMode = m.modes?.[0]
   if (firstMode) return { role: "mode", name: firstMode.id }
-  for (const h of m.tuis ?? []) {
+  const toolHandlers = (m.tuis ?? []).filter((h) => h.trigger.type === "tool")
+  if (toolHandlers.length === 1) {
+    const h = toolHandlers[0]
+    // Narrow the union; this branch only runs for tool-trigger handlers.
     if (h.trigger.type === "tool") return { role: "tool", name: h.trigger.tool.name }
+  }
+  if (toolHandlers.length > 1) {
+    const label = (pkg.prompt ? leadingHeadingText(pkg.prompt) : null) ?? m.name ?? m.id
+    return { role: "tool", name: slugify(label) || m.id }
   }
   for (const h of m.tuis ?? []) {
     if (h.trigger.type === "inline_tag") return { role: "emit", name: h.trigger.tag }
