@@ -1016,6 +1016,42 @@ export async function* sendMessageOnce(
       throw err
     }
 
+    // Salvage a block left open at stream end. When the server stops the
+    // response mid-block (`stop_reason: "max_tokens"` is the common case:
+    // the model ran out of output budget while still streaming a block),
+    // it sends `message_stop` WITHOUT a closing `content_block_stop` for
+    // the in-flight block. Before this, that block was dropped: `blocks`
+    // held only the finalized ones, so a truncated `tool_use` vanished and
+    // the agent loop saw zero tool calls and treated the turn as a clean
+    // `end_turn` — the turn died silently with an unexecuted command. Now
+    // we finalize the dangling block exactly as `content_block_stop` would
+    // (parse accumulated tool JSON; keep `_raw` on parse failure) so a
+    // tool_use whose arguments finished streaming still dispatches, and the
+    // agent loop can act on `stopReason === "max_tokens"`.
+    if (currentBlock) {
+      // A `thinking` block truncated before its `signature_delta` arrived is
+      // unusable: the API requires latest-turn thinking blocks to be the
+      // byte-identical, signed block from the original response, so re-sending
+      // an unsigned one on the max_tokens continuation 400s. Drop it (it's
+      // always the trailing block, unpaired, so dropping is order-safe). A
+      // signed thinking block, text, or tool_use is salvaged as-is.
+      const isUnsignedThinking =
+        currentBlock.type === "thinking" && !(currentBlock as ThinkingBlock).signature
+      if (isUnsignedThinking) {
+        currentBlock = null
+      } else {
+        if (currentBlock.type === "tool_use" && toolJsonParts) {
+          try {
+            ;(currentBlock as ToolUseBlock).input = JSON.parse(toolJsonParts)
+          } catch {
+            ;(currentBlock as ToolUseBlock).input = { _raw: toolJsonParts }
+          }
+        }
+        blocks.push(currentBlock as ContentBlock)
+        currentBlock = null
+      }
+    }
+
     return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage }
   } finally {
     requestStatus.clear()

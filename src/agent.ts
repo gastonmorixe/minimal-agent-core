@@ -61,6 +61,7 @@ import {
 } from "./client.ts"
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
+import { findModel } from "./llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
 import { resolveUserTurnContent } from "./media/ingest.ts"
@@ -92,6 +93,21 @@ type MaybePromise<T> = T | Promise<T>
 // ---------------------------------------------------------------------------
 // Agent class
 // ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of CONSECUTIVE `max_tokens` auto-continuations within a
+ * single `run()`. When a response hits the output-token ceiling, the loop
+ * transparently asks the model to continue (see the max_tokens branch in
+ * the agentic loop) instead of dumping a half-finished turn back on the
+ * user. This cap stops a pathological turn (one that hits the ceiling every
+ * single time) from auto-continuing forever and burning quota: after this
+ * many back-to-back truncations the loop stops and hands control back with
+ * a visible note. A salvaged tool_use that executes resets the streak (real
+ * progress was made), so this only trips on genuinely stuck "thinking until
+ * the wall, every time" turns. Five is generous: a legitimate long
+ * deliverable rarely needs more than one or two continuations.
+ */
+const MAX_TOKENS_CONTINUATION_CAP = 5
 
 /**
  * Conversational agent with append-only history and an agentic tool loop.
@@ -479,6 +495,24 @@ export class Agent {
   }
 
   /**
+   * Resolve the output-token ceiling to request for the current model.
+   *
+   * The transports default `max_tokens` to 64000 (a conservative floor from
+   * when 64k WAS the ceiling). But modern models go higher: opus-4-8 supports
+   * 128000. Capping every request at 64k means a long turn hits the wall at
+   * HALF the model's real budget, and a turn whose hidden adaptive reasoning
+   * is large can exhaust 64k before finishing a single tool call (the
+   * 2026-05-31 incident). We resolve the model's registered `maxOutputTokens`
+   * and request that, so the model gets its full budget. Falls back to
+   * `undefined` (let the transport apply its own default) for an unregistered
+   * model id, so a bad/aliased id never throws here.
+   */
+  private resolveMaxOutputTokens(): number | undefined {
+    const entry = findModel(normalizeModelForAPI(this.model))
+    return entry?.capabilities.maxOutputTokens
+  }
+
+  /**
    * Replace the active model id. Takes effect on the next `run()` / `send()`.
    * The conversation history is preserved so subsequent turns continue with
    * the new model.
@@ -812,6 +846,13 @@ export class Agent {
     }
 
     let rounds = 0
+    // Consecutive `max_tokens` truncations in this run, capped by
+    // MAX_TOKENS_CONTINUATION_CAP. Incremented when a response hits the
+    // output ceiling and we auto-continue; reset to 0 whenever a turn makes
+    // real progress (executed a tool / finished cleanly), so it only counts
+    // BACK-TO-BACK truncations. Guards against a turn that hits the wall
+    // every time auto-continuing forever.
+    let maxTokensStreak = 0
     // Silence is per-turn : the model has to re-ack each new user turn.
     // Reset here at the seam between turns so a stale silence counter
     // from the previous `run()` can't suppress checkpoints in this one.
@@ -951,6 +992,7 @@ export class Agent {
       // Send messages to API. Mark the last block of the last message with a
       // rolling cache_control breakpoint so the growing transcript stays cached
       // across turns (see withRollingCacheBreakpoint).
+      const maxOutputTokens = this.resolveMaxOutputTokens()
       const gen = this.sendFn({
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages),
@@ -958,6 +1000,10 @@ export class Agent {
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         tools: mergedTools,
         system,
+        // Request the model's FULL output budget (e.g. 128k for opus-4-8)
+        // rather than the transport's conservative 64k default. Placed before
+        // `...sendOpts` so an explicit caller override still wins.
+        ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.thinkingDisplay
@@ -1031,6 +1077,75 @@ export class Agent {
 
       // Check for tool use blocks
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
+
+      // max_tokens handling (Fix B + D). The response hit the output-token
+      // ceiling. Two shapes:
+      //
+      //   1. A tool_use was salvaged (its args finished streaming before the
+      //      wall : see the stream-end salvage in client.ts / adapter-legacy
+      //      .ts). The normal tool-execution path below runs it and the loop
+      //      continues with the tool_result, so the turn recovers on its own.
+      //      We just surface a visible note and reset the streak : executing
+      //      a tool is real progress, not a stuck loop.
+      //
+      //   2. Nothing actionable was produced (truncated mid text / thinking).
+      //      Before this branch the loop fell through to the
+      //      `toolBlocks.length === 0` exit and treated a budget-capped turn
+      //      as a clean finish : the turn died silently and the user had to
+      //      re-prompt ("go"). Now we transparently ask the model to continue
+      //      from where it stopped, bounded by MAX_TOKENS_CONTINUATION_CAP so
+      //      a turn that hits the wall every time can't auto-continue forever.
+      if (lastResponse.stopReason === "max_tokens") {
+        if (toolBlocks.length > 0) {
+          maxTokensStreak = 0
+          writeTranscript(
+            `\n  ${c.boldYellow("!")} ${c.yellow("Response hit the max_tokens ceiling mid tool-call — salvaged the in-flight call and continuing")}`,
+          )
+        } else {
+          maxTokensStreak++
+          if (maxTokensStreak <= MAX_TOKENS_CONTINUATION_CAP) {
+            writeTranscript(
+              `\n  ${c.boldYellow("!")} ${c.yellow(`Response hit the max_tokens ceiling — auto-continuing (${maxTokensStreak}/${MAX_TOKENS_CONTINUATION_CAP})`)}`,
+            )
+            // Keep the assistant→user alternation valid even in the degenerate
+            // case where the whole budget went to (now-dropped) unsigned
+            // thinking and no block was appended at all.
+            if (lastResponse.blocks.length === 0) {
+              const placeholder: ContentBlock[] = [
+                {
+                  type: "text",
+                  text: "[response truncated at the output-token limit before any content was produced]",
+                },
+              ]
+              this.messages.push({ role: "assistant", content: placeholder })
+              this.store?.appendAssistant(placeholder, lastResponse.stopReason, lastResponse.usage)
+            }
+            const cont: ContentBlock[] = [
+              {
+                type: "text",
+                text:
+                  "<ma::agent::output-truncated />\n" +
+                  "Your previous response was cut off at the max_tokens output ceiling. Continue exactly from where you stopped. Do not repeat what you already wrote. If you were about to call a tool, issue that tool call now.",
+              },
+            ]
+            this.messages.push({ role: "user", content: cont })
+            this.store?.appendUser(cont)
+            continue
+          }
+          // Streak cap hit: stop auto-continuing and hand back cleanly rather
+          // than loop on a turn that truncates every time. Surfaced loudly so
+          // the user knows why we stopped and can raise the budget / re-scope.
+          writeTranscript(
+            `\n  ${c.boldYellow("!")} ${c.yellow(`Response hit the max_tokens ceiling ${MAX_TOKENS_CONTINUATION_CAP} times in a row — stopping. Consider narrowing the request or raising max_tokens.`)}`,
+          )
+          exitedByCap = false
+          break
+        }
+      } else {
+        // Any non-truncated turn means the streak of back-to-back
+        // truncations is broken.
+        maxTokensStreak = 0
+      }
 
       if (toolBlocks.length === 0) {
         // No tool calls : model would be done. Before exiting, check
@@ -1765,6 +1880,9 @@ export class Agent {
         // tools intentionally omitted : the model cannot call tools on
         // this final turn, so it MUST write text and finish.
         system,
+        ...(this.resolveMaxOutputTokens() !== undefined
+          ? { maxTokens: this.resolveMaxOutputTokens() }
+          : {}),
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.thinkingDisplay
@@ -1845,11 +1963,13 @@ export class Agent {
     // SSE layer the same way they do for `run()`. Previously this called
     // `sendMessage` directly, which left `send()` un-testable without
     // hitting the real API.
+    const sendMaxTokens = this.resolveMaxOutputTokens()
     const gen = this.sendFn({
       auth: this.auth,
       messages: withRollingCacheBreakpoint(this.messages),
       model: this.model,
       ...(this.networkClient ? { networkClient: this.networkClient } : {}),
+      ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),
       ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
       ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
       ...(this.thinkingDisplay

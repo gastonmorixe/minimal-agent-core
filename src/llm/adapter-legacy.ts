@@ -911,6 +911,34 @@ export async function* canonicalEventsToLegacyStream(
     }
   }
 
+  // Salvage a block left open when the stream ends without its closing
+  // event. Mirrors the legacy client.ts fix: on `stop_reason: "max_tokens"`
+  // the provider stops mid-block and never sends the matching `*_stop`, so
+  // `cur` is still set here. Without this, a truncated tool_use (or text /
+  // thinking) block was silently dropped and the agent loop mistook a
+  // budget-capped turn for a clean finish. Finalize it the same way the
+  // stop events do so the partial tool call still reaches the loop.
+  if (cur) {
+    if (cur.kind === "text") {
+      blocks.push({ type: "text", text: cur.text })
+    } else if (cur.kind === "thinking") {
+      // Skip a thinking block truncated before its signature arrived: the API
+      // rejects an unsigned latest-turn thinking block on the continuation
+      // request. It's the trailing, unpaired block, so dropping is order-safe.
+      if (cur.signature) {
+        blocks.push({ type: "thinking", thinking: cur.thinking, signature: cur.signature })
+      }
+    } else if (cur.kind === "tool_use") {
+      blocks.push({
+        type: "tool_use",
+        id: cur.id,
+        name: cur.name,
+        input: safeParseToolInput(cur.json),
+      })
+    }
+    cur = null
+  }
+
   return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage }
 }
 
