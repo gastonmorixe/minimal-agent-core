@@ -104,6 +104,7 @@
     },
     {
       "files": [
+        "src/agent.ts",
         "src/editor-controller.ts",
         "src/input.ts",
         "src/index.ts",
