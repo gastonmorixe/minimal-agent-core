@@ -31,12 +31,36 @@ import {
 export interface WorkerDefinition {
   readonly name: string
   readonly systemPrompt?: string
+  /**
+   * Abstract capability tier for this specialist, NOT a vendor SKU. The host
+   * (via a provider's recommendation, see Phase G) or the lead maps a role to a
+   * concrete model. Built-in specialists set this and leave {@link model}
+   * unset so the plugin stays model-agnostic.
+   */
+  readonly role?: SubagentRole
+  /**
+   * Concrete model id. Normally UNSET for built-in specialists (they carry a
+   * {@link role} instead). Present only when a definition genuinely must pin a
+   * model. An unset model falls back to the lead's model (see `handler-deps`).
+   */
   readonly model?: string
+  /** Optional reasoning effort. Normally unset: the resolved model's own default applies. */
   readonly effort?: string
   readonly isolation?: Isolation
   readonly color?: string
   readonly budget?: SubagentRecord["budget"]
 }
+
+/**
+ * Abstract worker capability tiers, decoupled from any provider/model. A
+ * provider (Phase G) maps these to concrete models + settings; until then they
+ * are descriptive and the worker inherits the lead's model.
+ *
+ * - `scout`: fast, cheap-leaning, bounded read/search work.
+ * - `balanced`: general implementation / planning.
+ * - `deep`: heavier reasoning — review, forensic log mining, hard problems.
+ */
+export type SubagentRole = "scout" | "balanced" | "deep"
 
 /** What the model asked for (already shape-validated by the handler). */
 export interface SpawnRequest {
@@ -52,6 +76,14 @@ export interface SpawnRequest {
   readonly budget?: SubagentRecord["budget"]
   /** Link this worker to a tasks-plugin todo; the supervisor ticks it on finish. */
   readonly taskId?: string
+  /**
+   * Absolute paths this worker MUST produce to count as `done`. When set, the
+   * supervisor refuses to mark the worker done unless every path exists and is
+   * non-empty; any missing one forces `incomplete` (FIX 4). Lets the lead make
+   * "this delegation must produce findings.md" a system-enforced contract rather
+   * than a thing it has to remember to check.
+   */
+  readonly expectArtifacts?: readonly string[]
 }
 
 /** Everything the service needs, injected for testability. */
@@ -74,6 +106,15 @@ export interface ServiceDeps {
   readonly now: () => Date
   /** Resolve a named definition, or undefined. Injected (library discovery). */
   readonly resolveDefinition?: (name: string) => WorkerDefinition | undefined
+  /**
+   * Resolve the ACTIVE provider's recommended model + settings for an abstract
+   * role (`scout`/`balanced`/`deep`), or `undefined` when the provider offers
+   * none. Injected from `ctx.recommendSubagentModels` so the plugin maps a
+   * specialist's role → concrete model WITHOUT importing the registry or any
+   * provider. When absent/undefined the worker falls back to `defaultModel`
+   * (the lead's own model).
+   */
+  readonly recommendForRole?: (role: string) => { modelId: string; effort?: string } | undefined
   readonly policy?: GuardPolicy
 }
 
@@ -97,11 +138,21 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
 
   const type = req.agent ?? "inline"
   const label = (req.label ?? def?.name ?? type).trim()
-  const model = (req.model ?? def?.model ?? deps.defaultModel).trim()
-  const effort = req.effort ?? def?.effort
+  // Model precedence (model/provider-agnostic): explicit per-spawn `model` →
+  // a definition's explicit `model` → the ACTIVE provider's recommendation for
+  // the definition's abstract ROLE → the lead's own model (`defaultModel`). The
+  // role recommendation comes through `deps.recommendForRole`, which the host
+  // fills from the active provider; the plugin never names a vendor SKU.
+  const rec = !req.model && !def?.model && def?.role ? deps.recommendForRole?.(def.role) : undefined
+  const model = (req.model ?? def?.model ?? rec?.modelId ?? deps.defaultModel).trim()
+  // Effort follows the same source as the model: an explicit request/def effort
+  // wins, else the role recommendation's effort (only when we actually took the
+  // recommended model), else unset (the model's own default applies).
+  const effort = req.effort ?? def?.effort ?? (rec && !req.model && !def?.model ? rec.effort : undefined)
   const isolation: Isolation = req.isolation ?? def?.isolation ?? "fresh"
   const systemPreamble = req.system ?? def?.systemPrompt
   const budget = req.budget ?? def?.budget
+  const expectArtifacts = req.expectArtifacts && req.expectArtifacts.length > 0 ? req.expectArtifacts : undefined
 
   // Guard (self-enforced). External veto can still ride `tool.willInvoke`.
   const records = deps.store.all()
@@ -129,6 +180,7 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
     mode: "none",
     isolation,
     ...(systemPreamble ? { systemPreamble } : {}),
+    resultPath,
     depth: childDepth,
     cwd: deps.cwd,
     extraEnv: { [ENV_RESULT_PATH]: resultPath },
@@ -152,6 +204,7 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
     status: { kind: "running", pid: launched.value, startedAt: nowIso, progress: ZERO_PROGRESS },
     ...(budget ? { budget } : {}),
     ...(req.taskId ? { taskId: req.taskId } : {}),
+    ...(expectArtifacts ? { expectArtifacts } : {}),
     depth: childDepth,
     leadSid: deps.leadSid,
   }

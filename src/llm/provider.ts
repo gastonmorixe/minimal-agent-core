@@ -14,6 +14,7 @@
 
 import type { MediaLimits } from "../media/limits.ts"
 import type { MediaItem, PreparedMedia } from "../media/types.ts"
+import type { SubagentModelRecommendation } from "../plugins/types.ts"
 
 import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
@@ -273,6 +274,23 @@ export interface ProviderAdapter {
    * Returns `ModelEntry` records ready to register.
    */
   listModels?(ctx: RunContext): Promise<ModelEntry[]>
+
+  /**
+   * Optional: recommend which of THIS provider's models + settings suit each
+   * abstract sub-agent role (`"scout" | "balanced" | "deep"`, an open
+   * vocabulary). The delegation layer speaks only in roles and never names a
+   * vendor SKU; the provider owns the role→model mapping and the model-specific
+   * knobs (effort, thinking). Pure: no network, reads the provider's own
+   * registered models. The host calls this for the ACTIVE provider only and
+   * surfaces it to plugins via `ctx.recommendSubagentModels` (a plugin never
+   * imports a provider). Omit it (or return `[]`) to let callers fall back to
+   * the lead's own model.
+   *
+   * Implementations MUST recommend only models this provider actually serves
+   * (never another vendor's SKU), so a worker spawned from a recommendation
+   * stays on the user's current provider + account.
+   */
+  recommendSubagentModels?(): SubagentModelRecommendation[]
 
   /** Optional cheap health probe. */
   ping?(ctx: RunContext): Promise<boolean>

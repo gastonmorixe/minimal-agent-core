@@ -55,6 +55,7 @@ import type {
   ResolvedHandler,
   ResolvedHookSub,
   ResolvedLiveAreaSlot,
+  SubagentModelRecommendation,
   TUIContext,
   TUIResult,
   TUITrigger,
@@ -184,6 +185,15 @@ export interface PluginLoaderOptions {
    */
   modelInfoProvider?: () => ModelInfoSnapshot | undefined
   /**
+   * Live provider of the ACTIVE model's sub-agent model recommendations,
+   * exposed to module handlers as {@link TUIContext.recommendSubagentModels}.
+   * Same pattern as {@link modelInfoProvider}: the host builds it over its live
+   * model id + the shared registry + the active provider's optional port, so a
+   * delegation plugin stays decoupled from any provider. Omit it to leave
+   * `recommendSubagentModels` undefined (back-compat).
+   */
+  recommendSubagentModels?: () => SubagentModelRecommendation[]
+  /**
    * Optional agent session id.
    *
    * @deprecated Prefer {@link agent}. Kept as a back-compat alias for
@@ -282,6 +292,8 @@ export class PluginLoader {
   private readonly agent: AgentContext | undefined
   /** Live current-model snapshot provider; see {@link PluginLoaderOptions.modelInfoProvider}. */
   private readonly modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
+  /** Live sub-agent model recommendations provider; see {@link PluginLoaderOptions.recommendSubagentModels}. */
+  private readonly recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /**
    * Cached result of {@link getPromptBlockAsync}. Populated on first call
    * (after fragments resolve or time out). Subsequent calls return this
@@ -311,6 +323,7 @@ export class PluginLoader {
     logger: (msg: string) => void,
     agent: AgentContext | undefined,
     modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
+    recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined,
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
@@ -325,6 +338,7 @@ export class PluginLoader {
     this.logger = logger
     this.agent = agent
     this.modelInfoProvider = modelInfoProvider
+    this.recommendSubagentModels = recommendSubagentModels
 
     // Build the global command index, first-wins on cross-plugin name
     // collision (mirrors mode-id dedupe). A colliding command is dropped
@@ -924,6 +938,7 @@ export class PluginLoader {
       logger,
       agent,
       opts.modelInfoProvider,
+      opts.recommendSubagentModels,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -1412,6 +1427,9 @@ export class PluginLoader {
       log: createPluginLogger(findPluginIdFor(this.plugins, handler)),
       agent: this.agent,
       ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
+      ...(this.recommendSubagentModels
+        ? { recommendSubagentModels: this.recommendSubagentModels }
+        : {}),
     }
 
     try {

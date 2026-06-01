@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs"
 import { dirname } from "node:path"
 
-import { parseProgress } from "./progress.ts"
+import { parseFinalText, parseProgress } from "./progress.ts"
 import type { SpawnPlan } from "./spawn-plan.ts"
 import type { WorkerProbe } from "./supervisor.ts"
 import { err, ok, type Progress, type Result, type ResultDigest } from "./types.ts"
@@ -45,6 +45,16 @@ export interface ProbeDeps {
   readonly readResult: (path: string) => ResultDigest | undefined
   /** Derive live progress from the worker's transcript, or `undefined` if unreadable. */
   readonly readProgress?: (transcriptPath: string) => Progress | undefined
+  /**
+   * Distill the worker's FINAL assistant message from its transcript, or
+   * `undefined` when there is none. The fallback when no sentinel was written.
+   */
+  readonly readFinalText?: (transcriptPath: string) => string | undefined
+  /**
+   * Of the given paths, return those that DON'T exist or are empty. Used to
+   * enforce the `expectArtifacts` contract (FIX 4). Pure list in, list out.
+   */
+  readonly missingArtifacts?: (paths: readonly string[]) => string[]
   /** Exit code of an exited pid, if known (best-effort; `undefined` when unknowable). */
   readonly exitCode?: (pid: number) => number | undefined
 }
@@ -77,6 +87,8 @@ export interface ProbeTarget {
   readonly pid: number
   readonly resultPath: string
   readonly transcriptPath: string
+  /** Paths the worker was contracted to produce (the `expectArtifacts` set). */
+  readonly expectArtifacts?: readonly string[]
 }
 
 /**
@@ -90,13 +102,45 @@ export function probeWorker(target: ProbeTarget, deps: ProbeDeps): WorkerProbe {
     const progress = deps.readProgress?.(target.transcriptPath)
     return { alive: true, ...(progress ? { progress } : {}) }
   }
-  const result = deps.readResult(target.resultPath)
+  const rawResult = deps.readResult(target.resultPath)
+  // FIX 3: a worker can CLAIM artifacts in its sentinel without writing them.
+  // Cross-check the sentinel's own `artifacts[]` and prepend a loud warning to
+  // the summary for any that are missing/empty, so a forgetful/lying worker is
+  // caught automatically. The worker still counts as `done` (it reported), but
+  // the lead reads the discrepancy.
+  const result = rawResult ? warnMissingDeclared(rawResult, deps) : undefined
   const exitCode = deps.exitCode?.(target.pid)
+  // Distillation fallback: only bother reading the final message when the worker
+  // left NO structured sentinel — the sentinel always wins (see supervisorTick
+  // precedence). This keeps a sentinel-writing worker's probe cheap.
+  const distilled = result ? undefined : deps.readFinalText?.(target.transcriptPath)
+  // Enforce the deliverable contract: which expected artifacts are missing/empty?
+  const missingArtifacts =
+    target.expectArtifacts && target.expectArtifacts.length > 0
+      ? deps.missingArtifacts?.(target.expectArtifacts)
+      : undefined
   return {
     alive: false,
     ...(result ? { result } : {}),
+    ...(distilled ? { distilled } : {}),
+    ...(missingArtifacts && missingArtifacts.length > 0 ? { missingArtifacts } : {}),
     ...(exitCode !== undefined ? { exitCode } : {}),
   }
+}
+
+/**
+ * FIX 3: cross-check a sentinel's self-declared `artifacts[]` against disk and
+ * prepend a `⚠ N/M artifacts missing: …` note to `short` for any that don't
+ * exist or are empty. Pure given `deps.missingArtifacts`; a no-op when the
+ * sentinel declared no artifacts or the dep is absent.
+ */
+export function warnMissingDeclared(result: ResultDigest, deps: ProbeDeps): ResultDigest {
+  const declared = result.artifacts
+  if (!declared || declared.length === 0 || !deps.missingArtifacts) return result
+  const missing = deps.missingArtifacts(declared)
+  if (missing.length === 0) return result
+  const warn = `⚠ ${missing.length}/${declared.length} declared artifact(s) missing: ${missing.join(", ")}. `
+  return { ...result, short: warn + result.short }
 }
 
 // ---------------------------------------------------------------------------
@@ -191,5 +235,21 @@ export function realProbeDeps(): ProbeDeps {
       }
     },
     readProgress,
+    readFinalText: (path) => {
+      try {
+        return parseFinalText(readFileSync(path, "utf-8"))
+      } catch {
+        return undefined
+      }
+    },
+    missingArtifacts: (paths) =>
+      paths.filter((p) => {
+        try {
+          // missing if it doesn't exist OR exists but is empty (0 bytes)
+          return statSync(p).size === 0
+        } catch {
+          return true
+        }
+      }),
   }
 }

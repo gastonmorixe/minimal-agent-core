@@ -72,6 +72,19 @@ When a worker finishes, you get a one-line digest automatically between turns; t
 
 - Review, don't trust. Read a worker's `AgentResult` (and, for code, the actual diff) before
   acting on it.
+- **Verify the deliverable exists before you mark a todo done.** When a worker's job was to
+  produce a file, `stat`/`ls` it (or grep its content) first. A worker reporting `done` with a
+  placeholder or distilled summary may not have produced the artifact at all.
+- **Treat `incomplete` as a red flag, never a pass.** An `incomplete` worker exited cleanly but
+  produced no deliverable; the system has already refused to tick its todo green. Pull
+  `AgentResult <id>`, read why, and re-spawn with a sharper task (and `expectArtifacts`) if you
+  still need the work. Do not paper over it.
+- **Make file-producing delegations enforce themselves.** Pass `expectArtifacts: ["/abs/path"]`
+  on any spawn whose whole point is to produce a file. The supervisor then refuses to call the
+  worker `done` unless the path exists and is non-empty, so a forgetful or lying worker becomes
+  `incomplete` automatically instead of relying on your vigilance.
+- A digest that reads "distilled from the worker's final message" means the worker wrote no
+  structured sentinel; its summary is best-effort and lists no artifacts. Trust it less.
 - You own git and the full gate. Workers default to no-commit and targeted tests; only an
   `integrator` (or you) stages and commits, with explicit paths.
 - Workers cannot spawn workers (the nesting ban). Decompose from here.

@@ -55,13 +55,23 @@ export function resolveSessionsDir(env: NodeJS.ProcessEnv = process.env): string
 }
 
 /**
- * Default model for a worker when neither the request nor a definition picks
- * one. Workers default to Haiku: cheap, fast, ideal for the bounded
- * delegated tasks (search, review, focused edits) that delegation is for.
- * Override per-spawn with `model`, or via `MINIMAL_AGENT_SUBAGENT_MODEL`.
+ * Explicit env-level model override for workers, or `""` when unset.
+ *
+ * The sub-agents plugin is provider/model-AGNOSTIC: it never names a vendor
+ * SKU. There is intentionally NO hardcoded fallback here. The real default is
+ * resolved one layer up (`handler-deps`) from the LEAD's own live model via
+ * `ctx.queryModelInfo()`, so a worker inherits whatever model+provider the user
+ * is actually running. When nothing is knowable, the empty string flows through
+ * and the spawn plan OMITS `--model` entirely, letting the spawned child
+ * self-resolve through its own `userConfig.model ?? DEFAULT_MODEL` path (the
+ * same resolution the lead used). Guessing "cheapest" would be wrong: a worker
+ * may be free, or smarter than or equal to the parent.
+ *
+ * Precedence (highest first): per-spawn `model` → `MINIMAL_AGENT_SUBAGENT_MODEL`
+ * (this fn) → lead's live model → omit the flag.
  */
-export function resolveDefaultModel(env: NodeJS.ProcessEnv = process.env): string {
-  return env.MINIMAL_AGENT_SUBAGENT_MODEL?.trim() || "claude-haiku-4-5"
+export function resolveModelOverride(env: NodeJS.ProcessEnv = process.env): string {
+  return env.MINIMAL_AGENT_SUBAGENT_MODEL?.trim() || ""
 }
 
 /**

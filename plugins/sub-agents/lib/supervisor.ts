@@ -30,8 +30,18 @@ export interface WorkerProbe {
   readonly alive: boolean
   /** The worker's exit code, when it has exited. */
   readonly exitCode?: number
-  /** A parsed result digest, when the worker finished and the shell read it. */
+  /** A parsed result digest from the structured sentinel, when present. */
   readonly result?: ResultDigest
+  /**
+   * The worker's distilled FINAL assistant message, used ONLY as a fallback when
+   * no structured `result` sentinel was written. Lower precedence than `result`.
+   */
+  readonly distilled?: string
+  /**
+   * Of the worker's contracted `expectArtifacts`, the paths that are missing or
+   * empty. Non-empty ⇒ the deliverable contract was not met (FIX 4).
+   */
+  readonly missingArtifacts?: readonly string[]
   /** Live progress (tools/tokens/last activity), when the worker is running. */
   readonly progress?: Progress
 }
@@ -68,6 +78,8 @@ export function completionDigest(r: SubagentRecord): string {
       const short = clip(r.status.result.short, 220)
       return `Sub-agent ${r.id} (${r.label}) finished: ${short} — pull the full result with AgentResult ${r.id}.`
     }
+    case "incomplete":
+      return `Sub-agent ${r.id} (${r.label}) finished ⚠ INCOMPLETE — NO DELIVERABLE (${clip(r.status.reason, 120)}). Not a success: inspect it with AgentResult ${r.id} and re-spawn if you still need the work.`
     case "failed":
       return `Sub-agent ${r.id} (${r.label}) failed: ${clip(r.status.error, 160)}.`
     case "stopped":
@@ -126,6 +138,11 @@ function step(
     return { status: s, effects: [] }
   }
 
+  // From here only `running` is possible (terminal states returned via the
+  // `isTerminal` guard above; `queued` returned just now). This explicit check
+  // also narrows `s` to the running variant for the type system.
+  if (s.kind !== "running") return { status: s, effects: [] }
+
   // running: the interesting transitions.
   // 1. Budget tripped → ask the shell to kill, mark failed(timeout).
   if (deadlineExceeded(r, s.startedAt, nowMs)) {
@@ -145,20 +162,61 @@ function step(
     if (!probe.progress) return { status: s, effects: [] }
     return { status: { ...s, progress: probe.progress }, effects: [] }
   }
-  // 4. Exited. Result present → done. Non-zero exit and no result → failed.
-  //    Clean exit but no parsed result → done with a placeholder summary.
-  if (probe.result) {
-    const status: SubagentStatus = { kind: "done", endedAt: now, result: probe.result }
-    return { status, effects: terminalEffects(r, status, now) }
-  }
+  // 4. Exited. Decide the terminal status.
+  //    a. A non-zero exit → failed (it crashed), regardless of any artifacts.
   if (probe.exitCode !== undefined && probe.exitCode !== 0) {
     const status: SubagentStatus = { kind: "failed", endedAt: now, error: `exited with code ${probe.exitCode}`, exitCode: probe.exitCode }
     return { status, effects: terminalEffects(r, status, now) }
   }
+  //    b. CONTRACT CHECK (FIX 4): the worker declared `expectArtifacts` and some
+  //       are missing/empty → INCOMPLETE, even if it wrote a sentinel or a final
+  //       message. A claimed-but-absent deliverable is the strongest failure
+  //       signal; never launder it into done.
+  const missing = probe.missingArtifacts
+  if (missing && missing.length > 0) {
+    const total = r.expectArtifacts?.length ?? missing.length
+    const status: SubagentStatus = {
+      kind: "incomplete",
+      endedAt: now,
+      reason: `missing ${missing.length}/${total} required artifact(s): ${missing.join(", ")}`,
+      tokens: s.progress.tokens,
+      tools: s.progress.tools,
+    }
+    return { status, effects: terminalEffects(r, status, now) }
+  }
+  //    c. A parsed result sentinel → done. (FIX 3: when the sentinel's OWN
+  //       declared `artifacts[]` are missing on disk, the shell probe has already
+  //       prepended a "⚠ N/M artifacts missing" warning to `result.short`, so the
+  //       lead is told without the reducer needing filesystem access.)
+  if (probe.result) {
+    const status: SubagentStatus = { kind: "done", endedAt: now, result: probe.result }
+    return { status, effects: terminalEffects(r, status, now) }
+  }
+  //    d. Clean exit, no sentinel, BUT a distillable final message → done. The
+  //       worker said something useful as its last turn; surface it rather than
+  //       lose it. Marked `distilled` so the lead can tell it apart from a real
+  //       structured sentinel.
+  if (probe.distilled && probe.distilled.trim().length > 0) {
+    const status: SubagentStatus = {
+      kind: "done",
+      endedAt: now,
+      result: {
+        short: probe.distilled.trim(),
+        tokens: s.progress.tokens,
+        tools: s.progress.tools,
+        distilled: true,
+      },
+    }
+    return { status, effects: terminalEffects(r, status, now) }
+  }
+  //    e. Clean exit but NO deliverable AND no final text → INCOMPLETE. The
+  //       critical fix: a missing deliverable is NOT laundered into `done`.
   const status: SubagentStatus = {
-    kind: "done",
+    kind: "incomplete",
     endedAt: now,
-    result: { short: "(finished; no summary captured)", tokens: s.progress.tokens, tools: s.progress.tools },
+    reason: "exited without a result sentinel or any final message",
+    tokens: s.progress.tokens,
+    tools: s.progress.tools,
   }
   return { status, effects: terminalEffects(r, status, now) }
 }
@@ -175,9 +233,18 @@ function terminalEffects(r: SubagentRecord, next: SubagentStatus, _now: string):
   // tick it green on a clean finish, or cancel it (with a reason) otherwise.
   // The `tasks` plugin subscribes to `subagent.taskUpdate` and applies it.
   if (r.taskId) {
+    // Only a real `done` ticks the linked todo green. `incomplete` (no
+    // deliverable) is a FAILURE signal, so it cancels the todo with the reason
+    // rather than laundering it into success.
     const status = next.kind === "done" ? "done" : "canceled"
     const reason =
-      next.kind === "failed" ? next.error : next.kind === "stopped" ? next.reason : undefined
+      next.kind === "failed"
+        ? next.error
+        : next.kind === "incomplete"
+          ? `no deliverable: ${next.reason}`
+          : next.kind === "stopped"
+            ? next.reason
+            : undefined
     effects.push({
       type: "emit",
       channel: "subagent.taskUpdate",

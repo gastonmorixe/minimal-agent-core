@@ -17,7 +17,7 @@
 import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
-import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
+import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
 import type {
   ProviderAdapter,
@@ -26,6 +26,7 @@ import type {
   ValidationResult,
 } from "../../src/llm/provider.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
+import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import {
   buildOpenAIChatBody,
   buildOpenAIHeaders,
@@ -88,6 +89,24 @@ export const openrouterAdapter: ProviderAdapter = {
       throw new Error("OpenRouter API: empty response body for stream")
     }
     yield* translateOpenAIChatStream(parseSse<OpenAIChatChunk>(response.body))
+  },
+
+  /**
+   * Recommend OpenRouter models per abstract sub-agent role, from THIS
+   * provider's own (representative) catalog by tag. scout → a `cheap` model;
+   * balanced → an openai-compatible non-cheap model. `deep` is intentionally
+   * left unmapped here (the thin built-in catalog has no clear flagship), so
+   * the caller falls back to the lead's own model for deep work.
+   */
+  recommendSubagentModels(): SubagentModelRecommendation[] {
+    const recs: SubagentModelRecommendation[] = []
+    const scout = findModelByTags("openrouter", ["cheap"])
+    if (scout) recs.push({ role: "scout", modelId: scout.id })
+    const balanced = findModelByTags("openrouter", ["openai-compatible"])
+    // prefer a DIFFERENT model than scout for balanced when possible
+    const balancedPick = balanced && balanced.id !== scout?.id ? balanced : undefined
+    if (balancedPick) recs.push({ role: "balanced", modelId: balancedPick.id })
+    return recs
   },
 }
 

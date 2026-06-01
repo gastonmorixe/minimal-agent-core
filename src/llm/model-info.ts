@@ -10,9 +10,9 @@
  * @module llm/model-info
  */
 
-import type { ModelInfoSnapshot } from "../plugins/types.ts"
+import type { ModelInfoSnapshot, SubagentModelRecommendation } from "../plugins/types.ts"
 
-import { resolveModel } from "./model-registry.ts"
+import { findModel, findProvider, resolveModel } from "./model-registry.ts"
 
 /** Standard image input formats accepted by current vision models. */
 const IMAGE_FORMATS = ["jpeg", "png", "gif", "webp"]
@@ -84,5 +84,28 @@ export function buildModelInfoSnapshot(modelId: string): ModelInfoSnapshot {
       cacheReadPerMTok: entry.pricing.cacheReadUSD,
     },
     resolved: true,
+  }
+}
+
+/**
+ * Ask the provider that owns `modelId` which of ITS models suit each abstract
+ * sub-agent role. Provider-agnostic: resolves the model's provider from the
+ * shared registry and delegates to that provider's optional
+ * `recommendSubagentModels` port. The host hands a closure over this to the
+ * plugin loader as `ctx.recommendSubagentModels`, so the delegation plugin maps
+ * a worker role → concrete model without importing the registry or any provider.
+ *
+ * Returns `[]` when the model/provider isn't resolvable or the provider offers
+ * no recommendations (the caller then falls back to the lead's own model).
+ */
+export function buildSubagentModelRecommendations(modelId: string): SubagentModelRecommendation[] {
+  const entry = findModel(modelId)
+  if (!entry) return []
+  const provider = findProvider(entry.providerId)
+  if (!provider?.recommendSubagentModels) return []
+  try {
+    return provider.recommendSubagentModels()
+  } catch {
+    return []
   }
 }

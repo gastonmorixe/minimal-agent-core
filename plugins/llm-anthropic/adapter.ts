@@ -16,7 +16,7 @@
 import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
-import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
+import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import {
   type PreflightIssue,
   type PreflightResolution,
@@ -26,6 +26,7 @@ import {
   type SurfaceId,
   type ValidationResult,
 } from "../../src/llm/provider.ts"
+import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import type { ProviderPlugin, ProviderStartupContext } from "../../src/llm/provider-plugin.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
@@ -163,6 +164,29 @@ export const anthropicAdapter: ProviderAdapter = {
     }
 
     yield* translateAnthropicStream(parseSse<AnthropicStreamEvent>(response.body))
+  },
+
+  /**
+   * Recommend Anthropic models for each abstract sub-agent role, picked from
+   * THIS provider's own registered catalog by tier tag (never a hardcoded SKU,
+   * so a model rename can't strand it). scout → Haiku, balanced → Sonnet,
+   * deep → Opus, each restricted to a `production` model. A role with no
+   * matching production model is omitted (the caller falls back to the lead's
+   * model). Anthropic's models use adaptive thinking, so we leave `thinking`
+   * unset and let effort default per the model.
+   */
+  recommendSubagentModels(): SubagentModelRecommendation[] {
+    const byTier: Array<{ role: string; tag: string }> = [
+      { role: "scout", tag: "haiku" },
+      { role: "balanced", tag: "sonnet" },
+      { role: "deep", tag: "opus" },
+    ]
+    const recs: SubagentModelRecommendation[] = []
+    for (const { role, tag } of byTier) {
+      const model = findModelByTags("anthropic", [tag, "production"])
+      if (model) recs.push({ role, modelId: model.id })
+    }
+    return recs
   },
 }
 

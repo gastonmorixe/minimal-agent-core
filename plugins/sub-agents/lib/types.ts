@@ -119,6 +119,14 @@ export interface ResultDigest {
   readonly tools: number
   /** Paths/refs to artifacts the worker wrote (passed by reference, not value). */
   readonly artifacts?: readonly string[]
+  /**
+   * True when `short` was DISTILLED from the worker's final assistant message
+   * rather than read from a structured result sentinel the worker wrote on
+   * purpose. The work still counts as `done`, but the lead should know the
+   * summary is best-effort (no explicit `artifacts`, counts inferred from
+   * progress). Absent/false ⇒ a real sentinel.
+   */
+  readonly distilled?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -130,10 +138,18 @@ export interface ResultDigest {
  * the data valid in that state.
  *
  * ```
- * queued ──▶ running ──┬─▶ done     (clean finish, has a result)
- *                      ├─▶ failed   (crash / non-zero exit / timeout)
- *                      └─▶ stopped  (lead canceled it)
+ * queued ──▶ running ──┬─▶ done        (clean finish WITH a real deliverable)
+ *                      ├─▶ incomplete  (clean exit but NO deliverable captured)
+ *                      ├─▶ failed      (crash / non-zero exit / timeout)
+ *                      └─▶ stopped     (lead canceled it)
  * ```
+ *
+ * `incomplete` is the honest middle ground between `done` and `failed`: the
+ * process exited 0 but produced neither a result sentinel nor any distillable
+ * final message (or its declared artifacts are missing). It MUST NOT be laundered
+ * into `done` — a missing deliverable is a signal the lead has to act on, not a
+ * silent success. It carries the counts so the widget can still show effort
+ * spent, and a `reason` the lead can read.
  */
 export type SubagentStatus =
   | { readonly kind: "queued" }
@@ -145,6 +161,16 @@ export type SubagentStatus =
     }
   | { readonly kind: "done"; readonly endedAt: string; readonly result: ResultDigest }
   | {
+      readonly kind: "incomplete"
+      readonly endedAt: string
+      /** Why no deliverable was captured (e.g. "exited without result sentinel"). */
+      readonly reason: string
+      /** Tokens spent before the worker exited (from live progress). */
+      readonly tokens: number
+      /** Tool calls made before the worker exited. */
+      readonly tools: number
+    }
+  | {
       readonly kind: "failed"
       readonly endedAt: string
       readonly error: string
@@ -153,12 +179,13 @@ export type SubagentStatus =
   | { readonly kind: "stopped"; readonly endedAt: string; readonly reason?: string }
 
 /** All terminal status kinds (no further transitions). */
-export type TerminalKind = "done" | "failed" | "stopped"
+export type TerminalKind = "done" | "incomplete" | "failed" | "stopped"
 
 /** True when a status is terminal (worker finished, one way or another). */
 export function isTerminal(s: SubagentStatus): boolean {
   switch (s.kind) {
     case "done":
+    case "incomplete":
     case "failed":
     case "stopped":
       return true
@@ -211,6 +238,12 @@ export interface SubagentRecord {
   readonly budget?: Budget
   /** Linked tasks-plugin task hash, when the worker owns a task. */
   readonly taskId?: string
+  /**
+   * Absolute paths this worker MUST produce to count as `done` (FIX 4).
+   * Persisted on the handle so the supervisor's async probe (a later tick than
+   * the spawn) can stat them at terminal time. Empty/absent ⇒ no contract.
+   */
+  readonly expectArtifacts?: readonly string[]
   /** Nesting depth (the lead is depth 0; its direct workers are depth 1). */
   readonly depth: number
   /** The lead session that spawned this worker (lineage). */
@@ -223,6 +256,7 @@ export interface FleetStats {
   readonly queued: number
   readonly running: number
   readonly done: number
+  readonly incomplete: number
   readonly failed: number
   readonly stopped: number
   /** Sum of tokens across all workers (running progress + finished results). */
@@ -234,6 +268,7 @@ export function fleetStats(records: readonly SubagentRecord[]): FleetStats {
   let queued = 0
   let running = 0
   let done = 0
+  let incomplete = 0
   let failed = 0
   let stopped = 0
   let tokens = 0
@@ -250,6 +285,10 @@ export function fleetStats(records: readonly SubagentRecord[]): FleetStats {
         done++
         tokens += r.status.result.tokens
         break
+      case "incomplete":
+        incomplete++
+        tokens += r.status.tokens
+        break
       case "failed":
         failed++
         break
@@ -262,5 +301,5 @@ export function fleetStats(records: readonly SubagentRecord[]): FleetStats {
       }
     }
   }
-  return { total: records.length, queued, running, done, failed, stopped, tokens }
+  return { total: records.length, queued, running, done, incomplete, failed, stopped, tokens }
 }

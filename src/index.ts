@@ -82,7 +82,7 @@ import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
-import { buildModelInfoSnapshot } from "./llm/model-info.ts"
+import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { mediaPasteInterceptor } from "./media/paste-intercept.ts"
 import { getSessionId, setSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
@@ -1215,6 +1215,9 @@ async function main() {
     // agent's CURRENT model (via the late-bound getter) + the shared registry,
     // so it stays correct across mid-session switches and resume.
     modelInfoProvider: () => buildModelInfoSnapshot(getLiveModelId()),
+    // Active-provider sub-agent model recommendations (role → concrete model),
+    // read live so a delegation plugin maps roles without importing a provider.
+    recommendSubagentModels: () => buildSubagentModelRecommendations(getLiveModelId()),
     // Universal opt-out: any plugin with `plugins.<id>.enabled === false`
     // in ~/.minimal-agent/config.jsonc is dropped before validation.
     // The matching `enabled === true` set overrides a manifest-level

@@ -34,7 +34,7 @@ import {
 } from "../../src/llm/index.ts"
 
 import * as modelRegistry from "../../src/llm/model-registry.ts"
-import { anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
+import { anthropicAdapter, anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags, classifyRequest } from "./beta-flags.ts"
 import { applyBootstrapOverrides } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
@@ -81,6 +81,18 @@ describe("bootstrapAnthropic", () => {
     const fast = entry.pricingForRequest?.({ modelId: entry.id, messages: [], speed: "fast" })
     expect(slow?.inputUSD).toBe(5)
     expect(fast?.inputUSD).toBe(10)
+  })
+
+  it("recommendSubagentModels maps roles to its OWN registered models by tier (no foreign SKUs)", () => {
+    setup()
+    const recs = anthropicAdapter.recommendSubagentModels?.() ?? []
+    const byRole = new Map(recs.map((r) => [r.role, r.modelId]))
+    // scout → a Haiku, balanced → a Sonnet, deep → an Opus (production tier)
+    expect(byRole.get("scout")).toBe("claude-haiku-4-5-20251001")
+    expect(byRole.get("balanced")).toBe("claude-sonnet-4-6")
+    expect(byRole.get("deep")).toBe("claude-opus-4-8")
+    // every recommended model is actually an Anthropic model in the registry
+    for (const r of recs) expect(resolveModel(r.modelId).providerId).toBe("anthropic")
   })
 })
 

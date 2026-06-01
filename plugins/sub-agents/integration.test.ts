@@ -29,14 +29,17 @@ let childScript: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "subagents-e2e-"))
-  // A fake "worker": read the sentinel path from env, write a ResultDigest, exit 0.
+  // A fake "worker": write its declared artifact, THEN write a ResultDigest
+  // sentinel pointing at it (an honest worker — the artifact really exists), exit 0.
   childScript = join(dir, "fake-worker.ts")
+  const artifactPath = join(dir, "out.txt")
   writeFileSync(
     childScript,
     [
       "import { writeFileSync } from 'node:fs'",
+      `writeFileSync(${JSON.stringify(artifactPath)}, 'the deliverable')`,
       "const p = process.env." + ENV_RESULT_PATH,
-      "if (p) writeFileSync(p, JSON.stringify({ short: 'fake worker did the thing', tokens: 1234, tools: 5, artifacts: ['out.txt'] }))",
+      `if (p) writeFileSync(p, JSON.stringify({ short: 'fake worker did the thing', tokens: 1234, tools: 5, artifacts: [${JSON.stringify(artifactPath)}] }))`,
       "process.exit(0)",
     ].join("\n"),
   )
@@ -106,10 +109,11 @@ describe("sub-agents end-to-end (real process, no network)", () => {
     const rec = store.get(sp.value.id)
     expect(rec?.status.kind).toBe("done")
     if (rec?.status.kind === "done") {
+      // the declared artifact really exists, so NO ⚠ warning is prepended
       expect(rec.status.result.short).toBe("fake worker did the thing")
       expect(rec.status.result.tokens).toBe(1234)
       expect(rec.status.result.tools).toBe(5)
-      expect(rec.status.result.artifacts).toEqual(["out.txt"])
+      expect(rec.status.result.artifacts).toEqual([join(dir, "out.txt")])
     }
 
     // 4. The lead gets a between-turns digest + lifecycle signals.
@@ -135,7 +139,86 @@ describe("sub-agents end-to-end (real process, no network)", () => {
 
     runSupervisor(supDeps(store, []))
     const rec = store.get(sp.value.id)
+    // A clean exit with NO sentinel and NO distillable final text is INCOMPLETE,
+    // never laundered into done. (A worker that writes a final message instead
+    // is covered by the distillation test below.)
+    expect(rec?.status.kind).toBe("incomplete")
+    if (rec?.status.kind === "incomplete") expect(rec.status.reason).toMatch(/sentinel/i)
+  })
+
+  it("distills the final assistant message when a worker exits with NO sentinel but real output", async () => {
+    // This worker writes NO result sentinel. Instead it appends an assistant
+    // message to its own session transcript (like a real agent does) and exits.
+    // The supervisor must distill that final text into a `done` result, NOT
+    // mark it incomplete — this is the core Phase B behavior (the A3 case).
+    const childSid = "9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"
+    const transcriptPath = join(dir, `${childSid}.jsonl`)
+    const distillScript = join(dir, "distill-worker.ts")
+    writeFileSync(
+      distillScript,
+      [
+        "import { writeFileSync } from 'node:fs'",
+        // a minimal transcript with a final assistant text block, no sentinel
+        `const line = ${JSON.stringify(
+          JSON.stringify({
+            kind: "assistant",
+            content: [{ type: "text", text: "SUMMARY: scanned the logs, found the smoking gun in session X." }],
+            usage: { input_tokens: 800, output_tokens: 60 },
+          }),
+        )}`,
+        `writeFileSync(${JSON.stringify(transcriptPath)}, line + "\\n")`,
+        "process.exit(0)",
+      ].join("\n"),
+    )
+    const store = new SubagentStore(LEAD, { dir })
+    const deps = { ...svcDeps(store), agentBin: [process.execPath, distillScript] }
+
+    const sp = spawnAgent({ task: "mine the logs" }, deps)
+    expect(sp.ok).toBe(true)
+    if (!sp.ok) return
+    await waitForExit(sp.value.status.kind === "running" ? sp.value.status.pid : 0)
+
+    runSupervisor(supDeps(store, []))
+    const rec = store.get(sp.value.id)
     expect(rec?.status.kind).toBe("done")
-    if (rec?.status.kind === "done") expect(rec.status.result.short).toMatch(/no summary captured/i)
+    if (rec?.status.kind === "done") {
+      expect(rec.status.result.short).toMatch(/smoking gun/i)
+      // flagged as distilled (no structured sentinel was written)
+      expect(rec.status.result.distilled).toBe(true)
+    }
+  })
+
+  it("enforces expectArtifacts: a worker that writes a sentinel but NOT the file is INCOMPLETE", async () => {
+    // This worker writes a perfectly good result sentinel but never produces the
+    // file the lead contracted for. The supervisor must override the sentinel and
+    // mark it incomplete — the A3 case where a worker CLAIMS success with no file.
+    const liarScript = join(dir, "liar-worker.ts")
+    writeFileSync(
+      liarScript,
+      [
+        "import { writeFileSync } from 'node:fs'",
+        "const p = process.env." + ENV_RESULT_PATH,
+        "if (p) writeFileSync(p, JSON.stringify({ short: 'all done!', tokens: 10, tools: 1 }))",
+        "process.exit(0)",
+      ].join("\n"),
+    )
+    const store = new SubagentStore(LEAD, { dir })
+    const deps = { ...svcDeps(store), agentBin: [process.execPath, liarScript] }
+
+    const missingPath = join(dir, "promised-findings.md")
+    const sp = spawnAgent({ task: "produce findings", expectArtifacts: [missingPath] }, deps)
+    expect(sp.ok).toBe(true)
+    if (!sp.ok) return
+    // the contract is persisted on the handle for the async probe
+    expect(sp.value.expectArtifacts).toEqual([missingPath])
+    await waitForExit(sp.value.status.kind === "running" ? sp.value.status.pid : 0)
+
+    runSupervisor(supDeps(store, []))
+    const rec = store.get(sp.value.id)
+    expect(rec?.status.kind).toBe("incomplete")
+    if (rec?.status.kind === "incomplete") {
+      expect(rec.status.reason).toMatch(/required artifact/i)
+      expect(rec.status.reason).toContain("promised-findings.md")
+    }
   })
 })

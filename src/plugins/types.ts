@@ -161,6 +161,37 @@ export interface ModelInfoSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Sub-agent model recommendations (provider-owned, model/provider-agnostic)
+// ---------------------------------------------------------------------------
+
+/**
+ * One provider-owned recommendation of which model + settings suit an abstract
+ * sub-agent ROLE. The delegation plugin speaks only in roles (it never names a
+ * vendor SKU); the ACTIVE provider maps a role to a concrete model it actually
+ * serves, and decides the model-specific knobs (effort, thinking). Returned by
+ * {@link TUIContext.recommendSubagentModels}, which the host fills from the
+ * shared registry + the active provider's optional port, so a plugin reading it
+ * stays fully decoupled from any specific provider.
+ *
+ * Roles are an open, documented vocabulary (not an enum, to avoid coupling):
+ * - `"scout"`: fast/cheap-leaning, bounded read/search work.
+ * - `"balanced"`: general implementation / planning.
+ * - `"deep"`: heavier reasoning — review, forensic mining, hard problems.
+ * A provider MAY map several roles to the same model, or omit roles it has no
+ * good fit for (the plugin then falls back to the lead's own model).
+ */
+export interface SubagentModelRecommendation {
+  /** Abstract capability tier this recommendation is for (e.g. `"scout"`). */
+  role: string
+  /** A concrete model id the active provider serves for this role. */
+  modelId: string
+  /** Provider-chosen reasoning effort for this role, when applicable. */
+  effort?: string
+  /** Provider-chosen thinking toggle for this role, when applicable. */
+  thinking?: boolean
+}
+
+// ---------------------------------------------------------------------------
 // Handler context
 // ---------------------------------------------------------------------------
 
@@ -223,6 +254,20 @@ export interface TUIContext {
    * callers. Consumers MUST narrow (`const info = ctx.queryModelInfo?.()`).
    */
   queryModelInfo?: () => ModelInfoSnapshot | undefined
+  /**
+   * The ACTIVE provider's recommendations of which model + settings suit each
+   * abstract sub-agent role (see {@link SubagentModelRecommendation}). The host
+   * fills this from the live model's provider + the shared registry, so a
+   * delegation plugin can map a worker's role to a concrete model WITHOUT
+   * importing the registry or any provider (full decoupling, same pattern as
+   * {@link queryModelInfo}).
+   *
+   * Returns `[]` when the active provider offers no recommendations (the caller
+   * then falls back to the lead's own model). Optional + in-process only;
+   * `undefined` for subprocess handlers and back-compat callers. Consumers MUST
+   * narrow (`const recs = ctx.recommendSubagentModels?.() ?? []`).
+   */
+  recommendSubagentModels?: () => SubagentModelRecommendation[]
 }
 
 // ---------------------------------------------------------------------------

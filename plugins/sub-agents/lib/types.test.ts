@@ -50,7 +50,7 @@ describe("isTerminal / isActive", () => {
 })
 
 describe("fleetStats", () => {
-  it("tallies per-kind counts and sums tokens (running progress + done result)", () => {
+  it("tallies per-kind counts and sums tokens (running progress + done result + incomplete)", () => {
     const records: SubagentRecord[] = [
       rec("A1", { kind: "queued" }),
       rec("A2", { kind: "running", pid: 10, startedAt: "t", progress: { tools: 5, tokens: 2000 } }),
@@ -58,16 +58,18 @@ describe("fleetStats", () => {
       rec("A4", { kind: "done", endedAt: "t", result: { short: "ok", tokens: 3000, tools: 9 } }),
       rec("A5", { kind: "failed", endedAt: "t", error: "crash" }),
       rec("A6", { kind: "stopped", endedAt: "t", reason: "superseded" }),
+      rec("A7", { kind: "incomplete", endedAt: "t", reason: "no sentinel", tokens: 700, tools: 4 }),
     ]
     const s = fleetStats(records)
     expect(s).toEqual({
-      total: 6,
+      total: 7,
       queued: 1,
       running: 2,
       done: 1,
+      incomplete: 1,
       failed: 1,
       stopped: 1,
-      tokens: 2000 + 500 + 3000,
+      tokens: 2000 + 500 + 3000 + 700,
     })
   })
 
@@ -77,6 +79,7 @@ describe("fleetStats", () => {
       queued: 0,
       running: 0,
       done: 0,
+      incomplete: 0,
       failed: 0,
       stopped: 0,
       tokens: 0,

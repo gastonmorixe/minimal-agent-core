@@ -48,6 +48,8 @@ function rowDetail(r: SubagentRecord, ansi: boolean): string {
       const arrow = color(ansi, ANSI.DGRAY, "→")
       return `${color(ansi, ANSI.DIM, clip(s.result.short, 38))} ${arrow} ${color(ansi, ANSI.LGRAY, `AgentResult ${r.id}`)}`
     }
+    case "incomplete":
+      return color(ansi, ANSI.GOLD, `⚠ no deliverable · ${clip(s.reason, 34)}`)
     case "failed":
       return color(ansi, ANSI.RED, clip(s.error, 48))
     case "stopped":
@@ -71,6 +73,7 @@ function elapsedFor(r: SubagentRecord, nowMs: number): string {
 function spinFor(s: SubagentStatus, tick: number, ansi: boolean): string {
   if (s.kind === "running") return color(ansi, ANSI.SKY, SPINNER[tick % SPINNER.length] ?? GLYPHS.running)
   if (s.kind === "done") return color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)
+  if (s.kind === "incomplete") return color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)
   if (s.kind === "queued") return color(ansi, ANSI.DIM, GLYPHS.queued)
   return color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.failed)
 }
@@ -89,10 +92,12 @@ function rowRank(s: SubagentStatus): number {
       return 1
     case "failed":
       return 2
-    case "done":
+    case "incomplete":
       return 3
-    case "stopped":
+    case "done":
       return 4
+    case "stopped":
+      return 5
     default: {
       const _exhaustive: never = s
       throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
@@ -113,15 +118,20 @@ export function renderWidget(records: readonly SubagentRecord[], opts: WidgetOpt
   const maxRows = opts.maxRows ?? 6
   const dot = color(ansi, ANSI.DGRAY, GLYPHS.bullet)
 
-  // Header: ◈ fleet <sid> · ◐ R · ✔ D · ✘ F · <tok> tok
+  // Header: ◈ fleet <sid> · ◐ R · ✔ D · ⚠ I · ✘ F · <tok> tok
   const brand = color(ansi, `${ANSI.SKY}${ANSI.BOLD}`, GLYPHS.brand)
   const fleetLabel = color(ansi, ANSI.LGRAY, `fleet ${shortSid(opts.leadSid)}`)
   const run = `${color(ansi, ANSI.SKY, GLYPHS.running)} ${color(ansi, ANSI.SKY, String(stats.running))}`
   const done = `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, String(stats.done))}`
   const fail = `${color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.failed)} ${color(ansi, ANSI.RED, String(stats.failed))}`
+  // Incomplete count: shown only when non-zero so a clean fleet stays uncluttered.
+  const inc =
+    stats.incomplete > 0
+      ? ` ${dot} ${color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)} ${color(ansi, ANSI.GOLD, String(stats.incomplete))}`
+      : ""
   const overBudget = opts.tokenBudget !== undefined && stats.tokens > opts.tokenBudget
   const tok = color(ansi, overBudget ? ANSI.GOLD : ANSI.DGRAY, `${fmtTokens(stats.tokens)} tok`)
-  const header = ` ${brand} ${fleetLabel} ${dot} ${run} ${dot} ${done} ${dot} ${fail} ${dot} ${tok}`
+  const header = ` ${brand} ${fleetLabel} ${dot} ${run} ${dot} ${done}${inc} ${dot} ${fail} ${dot} ${tok}`
 
   // Rows, ranked; cap at maxRows.
   const ordered = [...records].sort((a, b) => rowRank(a.status) - rowRank(b.status))

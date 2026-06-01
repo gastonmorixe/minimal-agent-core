@@ -76,11 +76,93 @@ describe("supervisorTick — running transitions", () => {
     if (st?.kind === "failed") expect(st.exitCode).toBe(1)
   })
 
-  it("transitions running → done (placeholder) on clean exit with no parsed result", () => {
-    const out = tick([rec("A1", running())], { A1: { alive: false, exitCode: 0 } })
+  it("transitions running → INCOMPLETE on clean exit with no result (NOT laundered into done)", () => {
+    const prog: Progress = { tools: 9, tokens: 4242 }
+    const out = tick([rec("A1", { kind: "running", pid: 4242, startedAt: NOW, progress: prog })], {
+      A1: { alive: false, exitCode: 0 },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") {
+      expect(st.reason).toMatch(/without a result sentinel/i)
+      // carries the effort spent so the widget can still show it
+      expect(st.tokens).toBe(4242)
+      expect(st.tools).toBe(9)
+    }
+    // still emits the lifecycle signals + a (loud) digest
+    const inject = out.effects.find((e) => e.type === "inject")
+    expect(inject?.type === "inject" && inject.text).toMatch(/INCOMPLETE/i)
+  })
+})
+
+describe("supervisorTick — distilled-final-text fallback (precedence)", () => {
+  it("a clean exit with a distilled final message → done, marked distilled", () => {
+    const prog: Progress = { tools: 6, tokens: 3300 }
+    const out = tick([rec("A1", { kind: "running", pid: 7, startedAt: NOW, progress: prog })], {
+      A1: { alive: false, exitCode: 0, distilled: "I analyzed the parser; 3 callers in foo.ts." },
+    })
     const st = out.records[0]?.status
     expect(st?.kind).toBe("done")
-    if (st?.kind === "done") expect(st.result.short).toMatch(/no summary/i)
+    if (st?.kind === "done") {
+      expect(st.result.short).toBe("I analyzed the parser; 3 callers in foo.ts.")
+      expect(st.result.distilled).toBe(true)
+      // counts inferred from live progress
+      expect(st.result.tokens).toBe(3300)
+      expect(st.result.tools).toBe(6)
+    }
+  })
+
+  it("a real sentinel WINS over distilled text (precedence)", () => {
+    const out = tick([rec("A1", running())], {
+      A1: { alive: false, exitCode: 0, result: RESULT, distilled: "ignored fallback" },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("done")
+    if (st?.kind === "done") {
+      expect(st.result).toEqual(RESULT) // the structured sentinel, untouched
+      expect(st.result.distilled).toBeUndefined()
+    }
+  })
+
+  it("nothing at all (no sentinel, no distilled) → incomplete", () => {
+    const out = tick([rec("A1", running())], { A1: { alive: false, exitCode: 0 } })
+    expect(out.records[0]?.status.kind).toBe("incomplete")
+  })
+
+  it("a non-zero exit still fails even if a final message was distilled", () => {
+    const out = tick([rec("A1", running())], {
+      A1: { alive: false, exitCode: 1, distilled: "I think I crashed" },
+    })
+    expect(out.records[0]?.status.kind).toBe("failed")
+  })
+})
+
+describe("supervisorTick — expectArtifacts contract (FIX 4)", () => {
+  it("forces INCOMPLETE when required artifacts are missing, even WITH a sentinel", () => {
+    const r = { ...rec("A1", running()), expectArtifacts: ["/findings.md"] }
+    const out = tick([r], {
+      A1: { alive: false, exitCode: 0, result: RESULT, missingArtifacts: ["/findings.md"] },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") {
+      expect(st.reason).toMatch(/missing 1\/1 required artifact/i)
+      expect(st.reason).toContain("/findings.md")
+    }
+  })
+
+  it("forces INCOMPLETE over a distilled message too when artifacts are missing", () => {
+    const r = { ...rec("A1", running()), expectArtifacts: ["/out.md"] }
+    const out = tick([r], {
+      A1: { alive: false, exitCode: 0, distilled: "I tried", missingArtifacts: ["/out.md"] },
+    })
+    expect(out.records[0]?.status.kind).toBe("incomplete")
+  })
+
+  it("stays done when the contract is met (no missingArtifacts)", () => {
+    const r = { ...rec("A1", running()), expectArtifacts: ["/out.md"] }
+    const out = tick([r], { A1: { alive: false, exitCode: 0, result: RESULT } })
+    expect(out.records[0]?.status.kind).toBe("done")
   })
 })
 
@@ -105,6 +187,24 @@ describe("supervisorTick — tasks linkage", () => {
   it("emits NO taskUpdate for an unlinked worker", () => {
     const out = tick([rec("A1", running())], { A1: { alive: false, exitCode: 0, result: RESULT } })
     expect(out.effects.some((e) => e.type === "emit" && e.channel === "subagent.taskUpdate")).toBe(false)
+  })
+
+  it("CANCELS a linked todo (not done) when the worker finishes INCOMPLETE", () => {
+    const r = { ...rec("A1", running()), taskId: "a7b3c4" }
+    const out = tick([r], { A1: { alive: false, exitCode: 0 } })
+    // worker itself is incomplete, not done
+    expect(out.records[0]?.status.kind).toBe("incomplete")
+    const update = out.effects.find((e) => e.type === "emit" && e.channel === "subagent.taskUpdate")
+    expect(update?.type === "emit" && update.payload).toMatchObject({
+      taskId: "a7b3c4",
+      status: "canceled",
+      bySubagent: "A1",
+    })
+    // the cancel reason carries the no-deliverable explanation
+    if (update?.type === "emit") {
+      const payload = update.payload as { reason?: string }
+      expect(payload.reason).toMatch(/no deliverable/i)
+    }
   })
 })
 

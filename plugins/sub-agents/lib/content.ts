@@ -19,6 +19,8 @@ function statusText(s: SubagentStatus, nowMs: number): string {
     }
     case "done":
       return `done · ${fmtTokens(s.result.tokens)} tok · ${s.result.tools} tools`
+    case "incomplete":
+      return `incomplete · no deliverable (${s.reason}) · ${fmtTokens(s.tokens)} tok · ${s.tools} tools`
     case "failed":
       return `failed · ${s.error}`
     case "stopped":
@@ -68,8 +70,13 @@ export function resultText(r: SubagentRecord): string {
     case "done": {
       const res = r.status.result
       const arts = res.artifacts && res.artifacts.length > 0 ? `\nartifacts: ${res.artifacts.join(", ")}` : ""
-      return `Sub-agent ${r.id} (${r.type}) result:\n\n${res.short}${arts}\n\n(${fmtTokens(res.tokens)} tokens · ${res.tools} tool calls)`
+      const note = res.distilled
+        ? "\n\n(note: distilled from the worker's final message — it wrote no structured result sentinel, so this summary is best-effort and lists no artifacts)"
+        : ""
+      return `Sub-agent ${r.id} (${r.type}) result:\n\n${res.short}${arts}\n\n(${fmtTokens(res.tokens)} tokens · ${res.tools} tool calls)${note}`
     }
+    case "incomplete":
+      return `⚠ Sub-agent ${r.id} (${r.type}) finished WITHOUT a deliverable: ${r.status.reason}. This is NOT a success — the worker exited cleanly but produced no result summary${r.status.tokens ? ` (spent ${fmtTokens(r.status.tokens)} tokens · ${r.status.tools} tool calls)` : ""}. Treat the work as unverified: inspect its log/transcript, and re-spawn with a clearer task (and, if it was a file-producing job, set expectArtifacts) if you still need it.`
     case "failed":
       return `Sub-agent ${r.id} failed: ${r.status.error}. No result. Consider re-spawning with a clearer task or a different model.`
     case "stopped":
