@@ -32,6 +32,10 @@
 // `import { c, runReflectionCooldown, ... } from "./agent.ts"`.
 import { c, faintThinkingChunk, formatAbortedEcho } from "./agent/ansi.ts"
 import { withRollingCacheBreakpoint } from "./agent/cache.ts"
+import {
+  repairOrphanedToolUse as repairOrphanedToolUseImpl,
+  rollbackPendingTurn as rollbackPendingTurnImpl,
+} from "./agent/history-repair.ts"
 import { type AskUserFn, runPreflightPipeline } from "./agent/preflight-pipeline.ts"
 import {
   buildReflectionCheckpointBlock,
@@ -59,6 +63,7 @@ import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "./h
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
+import { resolveUserTurnContent } from "./media/ingest.ts"
 import { ModeManager } from "./modes.ts"
 import type { NetworkClient } from "./network/index.ts"
 import { PluginLoader } from "./plugins/loader.ts"
@@ -181,6 +186,16 @@ export class Agent {
    */
   private tasksAttachment: { toAttachment(): ContentBlock | null } | null
   /**
+   * Generic per-turn attachment producers, prepended to the FIRST user
+   * message of each `run()` call AFTER {@link Agent.tasksAttachment}, in
+   * array order. Same structural-type contract as the two named producers
+   * above; this is the open extension point so a plugin (e.g. `sub-agents`
+   * with its `<ma::agent::subagents>` fleet digest) can surface live per-turn
+   * state without the agent core knowing the producer's identity. Each is
+   * null-on-empty (zero token cost when there is nothing to show).
+   */
+  private turnAttachments: Array<{ toAttachment(): ContentBlock | null }>
+  /**
    * Injectable transport. Defaults to the real {@link sendMessage} function.
    * Primary purpose is a testing seam so suites can drive tool_use flows
    * without making live API calls.
@@ -282,6 +297,16 @@ export class Agent {
   private toolTimeTracker: ToolTimeTracker | null = null
 
   /**
+   * When true, the next `run()` call will prepend a model-visible
+   * `<ma::agent::turn-aborted />` text block to the user message so the
+   * model knows its prior plan was interrupted (not failed).
+   *
+   * Set by {@link notePreviousTurnAborted}. Consumed (and cleared) exactly
+   * once at the start of the next `run()`.
+   */
+  private previousTurnAborted = false
+
+  /**
    * Create an agent with auth, model, plugin, mode, and transport settings.
    *
    * @param opts.auth - Authenticated credentials from {@link getAuth}
@@ -326,6 +351,11 @@ export class Agent {
      * {@link Agent.tasksAttachment}). Same structural-type pattern.
      */
     tasksAttachment?: { toAttachment(): ContentBlock | null } | null
+    /**
+     * Generic per-turn attachment producers (see {@link Agent.turnAttachments}).
+     * Open extension point for plugins beyond the two named producers.
+     */
+    turnAttachments?: Array<{ toAttachment(): ContentBlock | null }>
     sendFn?: typeof sendMessage
     /**
      * Network client forwarded to the transport (`sendFn`). Lets the host
@@ -393,6 +423,7 @@ export class Agent {
     this.saveEcho = opts.saveEcho ?? null
     this.shortTermSnapshot = opts.shortTermSnapshot ?? null
     this.tasksAttachment = opts.tasksAttachment ?? null
+    this.turnAttachments = opts.turnAttachments ?? []
     // Default transport dispatches per-model: Anthropic → legacy sendMessage,
     // others → canonical run() (so --model gpt-* actually reaches its vendor).
     // Callers/tests can still inject any sendFn. See select-transport.ts.
@@ -503,19 +534,16 @@ export class Agent {
   }
 
   rollbackPendingTurn(): boolean {
-    let removed = false
-    while (
-      this.messages.length > 0 &&
-      this.messages[this.messages.length - 1].role !== "assistant"
-    ) {
-      const last = this.messages[this.messages.length - 1]
-      const hasToolResult =
-        Array.isArray(last.content) && last.content.some((b) => b.type === "tool_result")
-      if (hasToolResult) break
-      this.messages.pop()
-      removed = true
-    }
-    return removed
+    return rollbackPendingTurnImpl(this.messages)
+  }
+
+  /**
+   * Host calls this after a USER-initiated abort (Esc/Ctrl+C), NOT after a
+   * programmatic mode-interrupt. The next run() emits a model-visible marker
+   * so the model knows its prior plan was interrupted (not failed).
+   */
+  notePreviousTurnAborted(): void {
+    this.previousTurnAborted = true
   }
 
   /**
@@ -554,43 +582,7 @@ export class Agent {
    *     the next user message (clean state).
    */
   repairOrphanedToolUse(): ToolResultBlock[] {
-    const last = this.messages[this.messages.length - 1]
-    if (!last || last.role !== "assistant") return []
-    if (!Array.isArray(last.content)) return []
-    const toolUses = last.content.filter((b): b is ToolUseBlock => b.type === "tool_use")
-    if (toolUses.length === 0) return []
-
-    // Defensive: if the message AFTER the assistant already has
-    // tool_results, walk those ids to identify the still-orphaned
-    // subset. In the current run() flow this branch never fires
-    // (orphans only happen when the for-loop's user message was
-    // never pushed), but we keep the check so this method is safe
-    // to call from session-restore-style repair flows later.
-    const next = this.messages[this.messages.length] // undefined by construction
-    const pairedIds = new Set<string>()
-    if (next && next.role === "user" && Array.isArray(next.content)) {
-      for (const b of next.content) {
-        if (b.type === "tool_result") pairedIds.add(b.tool_use_id)
-      }
-    }
-    const orphans = toolUses.filter((t) => !pairedIds.has(t.id))
-    if (orphans.length === 0) return []
-
-    const blocks: ToolResultBlock[] = orphans.map((tu) => ({
-      type: "tool_result" as const,
-      tool_use_id: tu.id,
-      content: "Tool execution aborted by user before completion.",
-      is_error: true,
-    }))
-    // Persist each synthetic result so the on-disk JSONL contains the
-    // same pairing the in-memory `this.messages` is about to send. On
-    // resume, `session-restore.ts`'s `repairMessages` would have done
-    // this anyway by dropping the orphan; ours is non-destructive
-    // (model sees "this was aborted" instead of the turn vanishing).
-    if (this.store) {
-      for (const b of blocks) this.store.appendToolResult(b)
-    }
-    return blocks
+    return repairOrphanedToolUseImpl(this.messages, this.store)
   }
 
   /**
@@ -756,14 +748,28 @@ export class Agent {
     // after tool_use" ordering. See {@link repairOrphanedToolUse}.
     const orphanRepair = this.repairOrphanedToolUse()
     for (const b of orphanRepair) initialUserContent.push(b)
+    // Abort marker: must come AFTER orphan-repair tool_results (the API
+    // requires tool_result blocks to appear immediately after their tool_use).
+    if (this.previousTurnAborted) {
+      this.previousTurnAborted = false
+      initialUserContent.push({
+        type: "text",
+        text: "<ma::agent::turn-aborted />\nThe previous turn was interrupted by the user before it finished. Everything already completed above is preserved (this is not an error). Treat the earlier plan as paused: address the new instruction below, and do not silently resume the prior plan unless the user asks you to continue it.",
+      })
+    }
     const initialModeAttach = this.modeManager?.consumePendingAttachment() ?? null
     if (initialModeAttach) initialUserContent.push(initialModeAttach)
     const stmAttach = this.shortTermSnapshot?.toAttachment() ?? null
     if (stmAttach) initialUserContent.push(stmAttach)
     const tasksAttach = this.tasksAttachment?.toAttachment() ?? null
     if (tasksAttach) initialUserContent.push(tasksAttach)
-    const initialSaveEchoes = this.saveEcho?.consumeAll() ?? []
-    for (const e of initialSaveEchoes) initialUserContent.push(e)
+    // Generic per-turn producers (e.g. the sub-agents fleet digest). Same
+    // initial-seam-only rule + null-on-empty contract as the two named ones.
+    for (const producer of this.turnAttachments) {
+      const block = producer.toAttachment()
+      if (block) initialUserContent.push(block)
+    }
+    for (const e of this.saveEcho?.consumeAll() ?? []) initialUserContent.push(e)
     // Empty userText is meaningful : it's how the Alt+M
     // interrupt-and-apply-mode path (and other "send just the
     // attachments" callers) signal "this turn carries no prose, just
@@ -774,7 +780,10 @@ export class Agent {
     // emitters above when this is reached, so we never end up with
     // an empty `content` array.
     if (userText.length > 0) {
-      initialUserContent.push({ type: "text", text: userText })
+      // Resolve referenced media (dropped/clipboard tokens or typed image
+      // paths) into image blocks; plain text returns one text block, so
+      // non-media turns are byte-identical to before.
+      initialUserContent.push(...(await resolveUserTurnContent(userText, { modelId: this.model })))
     }
     // Append the user turn. `appendUserTurn` merges into a trailing `user`
     // message instead of creating a `[user, user]` pair the API rejects :
@@ -991,9 +1000,11 @@ export class Agent {
         this.store?.appendAssistant(
           lastResponse.blocks,
           lastResponse.stopReason,
-          // usage isn't surfaced on StreamedResponse yet : leave undefined
-          // and add it later when the client exposes it.
-          undefined,
+          // Persist the turn's billed usage (input/output/cache) so the
+          // session log carries an exact token footprint. The transport
+          // (legacy client + canonical bridge) merges message_start +
+          // message_delta into StreamedResponse.usage. See src/session-usage.ts.
+          lastResponse.usage,
         )
       }
 
@@ -1091,7 +1102,10 @@ export class Agent {
             pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
               ? (c as Record<string, (s: string) => string>)[pres.color]
               : c.orange
-          const icon = pres?.icon ? `${labelColor(pres.icon)} ` : ""
+          // Icon is bold + colored (matches the bold name). Bold gives thin
+          // monochrome glyphs (⧗, ◈, ✦) real presence; without it they read
+          // as faint specks at terminal size.
+          const icon = pres?.icon ? `${c.bold(labelColor(pres.icon))} ` : ""
           const label = c.bold(labelColor(tool.name))
           // Capture the time-hint BEFORE formatting the content so
           // soft-split (and continuation rows) can be told to leave room
@@ -1782,7 +1796,11 @@ export class Agent {
         lastResponse = wrapResponse
         if (wrapResponse.blocks.length > 0) {
           this.messages.push({ role: "assistant", content: wrapResponse.blocks })
-          this.store?.appendAssistant(wrapResponse.blocks, wrapResponse.stopReason, undefined)
+          this.store?.appendAssistant(
+            wrapResponse.blocks,
+            wrapResponse.stopReason,
+            wrapResponse.usage,
+          )
         }
       }
     }

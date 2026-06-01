@@ -1,0 +1,105 @@
+{
+  "id": "schedule",
+  "name": "Schedule",
+  "version": "0.1.0",
+  "description": "Run prompts on a schedule. Adds the CronCreate/CronList/CronDelete tools (the model schedules tasks from natural language like 'remind me at 3pm' or 'every 5 minutes check the deploy'), a 1-second heartbeat that injects each due task's prompt between turns via the prompt.inject port, and the /loop and /schedule commands. Tasks are session-scoped at ~/.minimal-agent/sessions/<sid>.cron.json and restored (unexpired) on --resume. Disable with MINIMAL_AGENT_DISABLE_CRON=1.",
+  "tuis": [
+    {
+      "id": "cron_create",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "CronCreate",
+          "description": "Schedule a prompt to run on a cron schedule or interval. The prompt is injected as a user turn BETWEEN turns each time the task is due (never mid-response). Use for polling a deploy, babysitting a PR, or one-time reminders ('remind me at 3pm to push'). Provide EITHER `cron` (a 5-field expression, local time) OR `every` (a human interval like '5m', '2h', '1d'). Set `recurs:false` for a one-shot that deletes itself after firing. Times are local. Max 50 tasks/session; recurring tasks auto-expire after 7 days. Cancel with CronDelete.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "The prompt to run each time the task fires. Required."
+              },
+              "cron": {
+                "type": "string",
+                "description": "A standard 5-field cron expression (minute hour day-of-month month day-of-week), interpreted in LOCAL time. Supports *, ranges (1-5), steps (*/15), and lists (1,15,30). Example: '0 9 * * 1-5' = weekdays at 9am. Provide this OR `every`."
+              },
+              "every": {
+                "type": "string",
+                "description": "A human interval, converted to a clean cron cadence. Examples: '5m', '30m', '2h', '1d', 'every 2 hours'. Intervals that don't map to a clean cron step are rounded. Provide this OR `cron`."
+              },
+              "recurs": {
+                "type": "boolean",
+                "description": "Whether the task repeats. Default true. Set false for a one-shot reminder that deletes itself after it fires once."
+              }
+            },
+            "required": ["prompt"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/cron_create.ts", "export": "default" },
+      "interactive": false,
+      "icon": "⧗",
+      "color": "gold"
+    },
+    {
+      "id": "cron_list",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "CronList",
+          "description": "List all scheduled tasks for this session with their ids, schedules, next fire time, and prompts. Use to answer 'what scheduled tasks do I have?' before canceling one.",
+          "input_schema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/cron_list.ts", "export": "default" },
+      "interactive": false,
+      "icon": "⧗",
+      "color": "gold"
+    },
+    {
+      "id": "cron_delete",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "CronDelete",
+          "description": "Cancel a scheduled task by its 8-character id (from CronList or the CronCreate confirmation).",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "The 8-char task id to cancel." }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/cron_delete.ts", "export": "default" },
+      "interactive": false,
+      "icon": "⧗",
+      "color": "gold"
+    }
+  ],
+  "liveAreaSlots": [
+    {
+      "id": "cron_heartbeat",
+      "handler": { "type": "module", "path": "./handlers/heartbeat.ts", "export": "default" },
+      "position": "footer",
+      "refreshMs": 1000,
+      "timeoutMs": 4000
+    }
+  ],
+  "commands": [
+    {
+      "name": "loop",
+      "summary": "Run a prompt on repeat while the session is open",
+      "argHint": "[interval] [prompt]",
+      "handler": { "type": "module", "path": "./handlers/cmd_loop.ts", "export": "default" }
+    },
+    {
+      "name": "schedule",
+      "summary": "Schedule a prompt by cron, or list/cancel tasks",
+      "argHint": "\"<cron>\" <prompt> | list | cancel <id>",
+      "handler": { "type": "module", "path": "./handlers/cmd_schedule.ts", "export": "default" }
+    }
+  ]
+}

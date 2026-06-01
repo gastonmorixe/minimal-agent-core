@@ -34,6 +34,18 @@ INI-style `key=value` lines, one per attribute, wrapped in a markdown
 code fence with `ini` syntax. Keys are stable; new attributes append
 to the end.
 
+## Agent identity fields
+
+The snapshot includes the agent-process identity via the
+`MINIMAL_AGENT_*` env vars the loader injects via
+`agentContextToEnv` (see `src/plugins/agent-context.ts`):
+
+- `session_id` ← `MINIMAL_AGENT_SESSION_ID` (UUID v4, per-process)
+- `pid`        ← `MINIMAL_AGENT_PID` (agent's Bun process id;
+  falls back to `$PPID` when run outside the agent)
+- `model`      ← `MINIMAL_AGENT_MODEL` (resolved model id)
+- `version`    ← `MINIMAL_AGENT_VERSION` (agent semver)
+
 ## Disabling
 
 `plugins["env-info"].enabled = false` in `~/.minimal-agent/config.jsonc`.

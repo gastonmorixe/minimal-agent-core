@@ -1,0 +1,1 @@
+To suppress the next K checkpoints during sustained autonomous work (skipping both the cooldown and the attachment), emit `<ma::agent::reflection-ack silence-for="K" reason="..." />` anywhere in your assistant response. The `reason` appears in the user-visible transcript so the human running you can see why you opted out.

@@ -57,6 +57,58 @@ export function codePointWidth(cp: number): number {
   // PUA never matter for layout stability. Falls through to the
   // generic "1 cell" return below.
 
+  // Emoji-presentation code points that live in the BMP *below* the
+  // 0x1F300 pictograph planes handled later. These default to emoji
+  // (double-width) presentation per Unicode `Emoji_Presentation=Yes`, so
+  // every modern terminal paints them 2 cells wide even though they sit
+  // among otherwise-narrow symbol blocks. Without this, glyphs like ⏰
+  // (U+23F0 alarm clock), ⌚ (U+231A watch), ⚡ (U+26A1), ✅ (U+2705), or
+  // ⭐ (U+2B50) get measured as 1 cell, which drifts every layout that
+  // contains one (e.g. the startup `tools` row's `⏰ CronCreate` chunks).
+  //
+  // Scope note: this is the `Emoji_Presentation=Yes` subset, NOT the
+  // larger "has an emoji variation sequence" set. Glyphs that are
+  // text-default (e.g. ✔ U+2714, ✦ U+2726, ❯ U+276F, ● U+25CF) only go
+  // wide when followed by VS16 (U+FE0F), so they stay width 1 here and the
+  // VS16 itself contributes 0 — matching the terminal's text presentation.
+  if (
+    (cp >= 0x231a && cp <= 0x231b) || // ⌚⌛
+    (cp >= 0x23e9 && cp <= 0x23ec) || // ⏩⏪⏫⏬
+    cp === 0x23f0 || // ⏰
+    cp === 0x23f3 || // ⏳
+    (cp >= 0x25fd && cp <= 0x25fe) || // ◽◾
+    (cp >= 0x2614 && cp <= 0x2615) || // ☔☕
+    (cp >= 0x2648 && cp <= 0x2653) || // zodiac ♈..♓
+    cp === 0x267f || // ♿
+    cp === 0x2693 || // ⚓
+    cp === 0x26a1 || // ⚡
+    (cp >= 0x26aa && cp <= 0x26ab) || // ⚪⚫
+    (cp >= 0x26bd && cp <= 0x26be) || // ⚽⚾
+    (cp >= 0x26c4 && cp <= 0x26c5) || // ⛄⛅
+    cp === 0x26ce || // ⛎
+    cp === 0x26d4 || // ⛔
+    cp === 0x26ea || // ⛪
+    (cp >= 0x26f2 && cp <= 0x26f3) || // ⛲⛳
+    cp === 0x26f5 || // ⛵
+    cp === 0x26fa || // ⛺
+    cp === 0x26fd || // ⛽
+    cp === 0x2705 || // ✅
+    (cp >= 0x270a && cp <= 0x270b) || // ✊✋
+    cp === 0x2728 || // ✨
+    cp === 0x274c || // ❌
+    cp === 0x274e || // ❎
+    (cp >= 0x2753 && cp <= 0x2755) || // ❓❔❕
+    cp === 0x2757 || // ❗
+    (cp >= 0x2795 && cp <= 0x2797) || // ➕➖➗
+    cp === 0x27b0 || // ➰
+    cp === 0x27bf || // ➿
+    (cp >= 0x2b1b && cp <= 0x2b1c) || // ⬛⬜
+    cp === 0x2b50 || // ⭐
+    cp === 0x2b55 // ⭕
+  ) {
+    return 2
+  }
+
   // Wide / Fullwidth ranges (subset of UAX #11 W/F).
   if (
     (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo

@@ -56,6 +56,17 @@ export interface ModelEntry {
    * `cx1` rate). Called per-request by the cost calculator.
    */
   pricingForRequest?: (req: import("./canonical-request.ts").CanonicalRequest) => MTokRate
+  /**
+   * Optional token estimator for this model's tokenizer family. Returns the
+   * approximate token count of a piece of text. Used when no billed `usage`
+   * was persisted (old sessions, crashes, providers that don't report
+   * usage) so a listing can still show a "tokens this session" magnitude,
+   * marked as estimated. Built via
+   * {@link import("./token-estimate.ts").makeCharRatioEstimator} in each
+   * provider's `models.ts`. When absent, callers fall back to the default
+   * chars-per-token ratio (see `estimateTokensForModel`).
+   */
+  estimateTokens?: import("./token-estimate.ts").TokenEstimator
 }
 
 /**

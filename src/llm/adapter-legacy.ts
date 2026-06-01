@@ -764,6 +764,10 @@ function taggedStreamError(ev: Extract<CanonicalEvent, { type: "stream_error" }>
     api: "api_error",
     timeout: "stream_idle",
     rate_limit: "rate_limit_error",
+    // `insufficient_quota` is in neither retryable set, so even without the
+    // retryable:false override below it would propagate — but the precise tag
+    // keeps the diag line honest ("insufficient_quota", not "unknown_error").
+    billing: "insufficient_quota",
     auth: "authentication_error",
     canceled: "request_canceled",
     unknown: "unknown_error",
@@ -776,8 +780,14 @@ function taggedStreamError(ev: Extract<CanonicalEvent, { type: "stream_error" }>
     ev.cause instanceof Error
       ? ev.cause
       : new Error(`canonical stream error: ${ev.category ?? "unknown"}`)
-  ) as Error & { streamErrorType?: string }
+  ) as Error & { streamErrorType?: string; retryable?: boolean }
   if (err.streamErrorType === undefined) err.streamErrorType = streamErrorType
+  // Carry the provider's explicit non-retryable verdict onto the thrown
+  // error. The category→streamErrorType fallback above can map a terminal
+  // failure (e.g. a billing error with category "billing") onto a tag that
+  // happens to live in a retryable set; `retryable: false` is the
+  // authoritative override the retry classifier honors so it propagates.
+  if (ev.retryable === false) err.retryable = false
   return err
 }
 
@@ -802,6 +812,11 @@ export async function* canonicalEventsToLegacyStream(
   let fullText = ""
   let stopReason: string | null = null
   let stopDetails: { type: string; message?: string } | null = null
+  // Billed usage for this turn, merged from the canonical usage snapshots
+  // (initial at message_start, final at message_delta). Surfaced on the
+  // returned StreamedResponse.usage so the agent loop persists the turn's
+  // exact footprint via appendAssistant. Mirrors the legacy client path.
+  let turnUsage: LegacyStreamedResponse["usage"]
 
   type Cur =
     | { kind: "text"; text: string }
@@ -817,6 +832,7 @@ export async function* canonicalEventsToLegacyStream(
         // lookup happens during prefill). Surface it on the same beat the
         // legacy client calls addSessionUsage.
         cb.onUsage?.(ev.initialUsage)
+        turnUsage = canonicalUsageToWire(ev.initialUsage)
         break
       case "text_start":
         cur = { kind: "text", text: "" }
@@ -877,6 +893,10 @@ export async function* canonicalEventsToLegacyStream(
       case "message_delta":
         stopReason = ev.stopReason
         stopDetails = ev.stopDetails ?? null
+        // The closing delta carries the merged usage (incl. the final
+        // output_tokens). Overwrite so the persisted record holds the
+        // authoritative billed footprint, not just the prefill counts.
+        if (ev.usage) turnUsage = canonicalUsageToWire(ev.usage)
         break
       case "message_stop":
         break
@@ -891,7 +911,25 @@ export async function* canonicalEventsToLegacyStream(
     }
   }
 
-  return { blocks, text: fullText, stopReason, stopDetails }
+  return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage }
+}
+
+/**
+ * Map a {@link CanonicalUsage} snapshot to the Anthropic-wire field names
+ * used by `StreamedResponse.usage` / `AssistantRecord.usage`. Only the four
+ * counters the session log persists are carried over; reasoning / web-search
+ * counts are out of scope for the per-turn footprint. Returns `undefined`
+ * when the snapshot is absent.
+ */
+function canonicalUsageToWire(u: CanonicalUsage | undefined): LegacyStreamedResponse["usage"] {
+  if (!u) return undefined
+  const wire: NonNullable<LegacyStreamedResponse["usage"]> = {
+    input_tokens: u.inputTokens,
+    output_tokens: u.outputTokens,
+  }
+  if (u.cacheReadTokens !== undefined) wire.cache_read_input_tokens = u.cacheReadTokens
+  if (u.cacheCreationTokens !== undefined) wire.cache_creation_input_tokens = u.cacheCreationTokens
+  return wire
 }
 
 // ---------------------------------------------------------------------------

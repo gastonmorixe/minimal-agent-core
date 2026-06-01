@@ -1,0 +1,85 @@
+/**
+ * Model-facing plain-text for the tool results (the `content` field). Distinct
+ * from the ANSI `display` chrome: this is what the LEAD model reads, so it is
+ * compact, parseable, and bounded — never a worker's full transcript.
+ *
+ * @module sub-agents/lib/content
+ */
+
+import { fmtElapsed, fmtTokens } from "./style.ts"
+import { fleetStats, type SubagentRecord, type SubagentStatus } from "./types.ts"
+
+function statusText(s: SubagentStatus, nowMs: number): string {
+  switch (s.kind) {
+    case "queued":
+      return "queued"
+    case "running": {
+      const el = fmtElapsed(nowMs - Date.parse(s.startedAt))
+      return `running ${el} · ${s.progress.tools} tools · ${fmtTokens(s.progress.tokens)} tok${s.progress.lastTool ? ` · ${s.progress.lastTool}` : ""}`
+    }
+    case "done":
+      return `done · ${fmtTokens(s.result.tokens)} tok · ${s.result.tools} tools`
+    case "failed":
+      return `failed · ${s.error}`
+    case "stopped":
+      return `stopped${s.reason ? ` · ${s.reason}` : ""}`
+    default: {
+      const _exhaustive: never = s
+      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+    }
+  }
+}
+
+/** One-line summary for a worker (for ListAgents / AgentStatus content). */
+export function recordLine(r: SubagentRecord, nowMs: number): string {
+  return `${r.id}  ${r.type.padEnd(10)}  ${statusText(r.status, nowMs)}`
+}
+
+/** The full fleet, as model-facing text. */
+export function fleetText(records: readonly SubagentRecord[], nowMs: number): string {
+  if (records.length === 0) {
+    return "No sub-agents in this session. Use SpawnAgent to delegate a unit of work."
+  }
+  const s = fleetStats(records)
+  const head = `Fleet: ${s.running} running · ${s.queued} queued · ${s.done} done · ${s.failed} failed · ${s.stopped} stopped · ${fmtTokens(s.tokens)} tok total`
+  const rows = records.map((r) => recordLine(r, nowMs))
+  const tail =
+    s.done > 0
+      ? "\nPull a finished worker's deliverable with AgentResult <id>."
+      : ""
+  return `${head}\n\n${rows.join("\n")}${tail}`
+}
+
+/** One worker's detail (AgentStatus). */
+export function statusDetail(r: SubagentRecord, nowMs: number): string {
+  const lines = [
+    `${r.id} (${r.type}) · model ${r.model} · isolation ${r.isolation} · depth ${r.depth}`,
+    `status: ${statusText(r.status, nowMs)}`,
+    `session: ${r.sid}`,
+    `task: ${r.task}`,
+  ]
+  if (r.status.kind === "done") lines.push(`result: ${r.status.result.short}`)
+  return lines.join("\n")
+}
+
+/** A finished worker's distilled deliverable (AgentResult). */
+export function resultText(r: SubagentRecord): string {
+  switch (r.status.kind) {
+    case "done": {
+      const res = r.status.result
+      const arts = res.artifacts && res.artifacts.length > 0 ? `\nartifacts: ${res.artifacts.join(", ")}` : ""
+      return `Sub-agent ${r.id} (${r.type}) result:\n\n${res.short}${arts}\n\n(${fmtTokens(res.tokens)} tokens · ${res.tools} tool calls)`
+    }
+    case "failed":
+      return `Sub-agent ${r.id} failed: ${r.status.error}. No result. Consider re-spawning with a clearer task or a different model.`
+    case "stopped":
+      return `Sub-agent ${r.id} was stopped${r.status.reason ? `: ${r.status.reason}` : ""}. No result.`
+    case "queued":
+    case "running":
+      return `Sub-agent ${r.id} is still ${r.status.kind}; no final result yet. Check AgentStatus ${r.id} or wait for the digest that arrives between turns when it finishes.`
+    default: {
+      const _exhaustive: never = r.status
+      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+    }
+  }
+}

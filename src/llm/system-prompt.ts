@@ -33,6 +33,7 @@ import {
   type InstructionsBlockOptions,
   type SystemBlock,
 } from "../headers.ts"
+import { promptPath, renderPrompt } from "../prompts.ts"
 
 import { resolveModel } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
@@ -48,8 +49,9 @@ import {
  * NOT "You are Claude Code …" — that string is Anthropic-plan-auth specific
  * and is injected by the Anthropic provider only when the auth kind warrants.
  */
-export const NEUTRAL_IDENTITY =
-  "You are Minimal Agent, a minimalistic AI agent CLI harness for the terminal."
+export const NEUTRAL_IDENTITY: string = renderPrompt(
+  promptPath(import.meta, "..", "prompts", "identity.neutral.md"),
+)
 
 /** Options for building the agent's provider-neutral system-prompt body. */
 export interface AgentSystemPromptOptions extends InstructionsBlockOptions {

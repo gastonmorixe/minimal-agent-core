@@ -34,6 +34,15 @@ write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
 - **Generators carry a JSDoc `@yields`** (oxlint's jsdoc `require-yields` is on).
 - **Capabilities are data, not branching.** Code asks "does this model support
   X?" by reading a `Capabilities` record, never "is this opus-4-7?".
+- **Prompts live in markdown, not string literals.** Every model-facing prompt
+  (system prompt, tool descriptions, sub-prompts) is a `.md`/`.tmpl.md` file
+  loaded through [`src/prompts.ts`](src/prompts.ts). Core prompts are under
+  [`src/prompts/`](src/prompts/README.md); plugin prompts sit next to the plugin
+  (`PROMPT.md`, or `plugins/<id>/prompts/*`). Templates use `%%name%%` (required,
+  throws if unwired) and `%%name?%%` (optional). The rule: prose in markdown,
+  control flow (which fragment, what order) in TypeScript. See
+  `buildLoopSafetyParagraph` in `src/headers.ts` for the worked example, and
+  `docs/changes/2026-05-30-prompts-as-markdown.md` for the rationale.
 
 ## How the LLM layer is structured
 
@@ -132,3 +141,24 @@ side-effect of provider work.**
   does not validate
   `--model` against the registry (the server is the source of truth), so
   forward-compat ids pass through.
+
+## Slash commands + scheduling (the `commands[]` port)
+
+Plugins contribute slash commands declaratively via a manifest `commands[]`
+array (`{name, summary, argHint?, handler}`), mirroring `tuis`/`modes`/
+`liveAreaSlots`. The loader collects them into a host-owned registry
+(`getCommands` / `hasCommand` / `listCommandInfo` / `dispatchCommand`,
+first-wins on cross-plugin name collision). `runReplLiveArea.onSubmit`
+intercepts a registered `/<name>` (parsed by the pure `src/slash-command-parse.ts`)
+and acts on the handler's `CommandResult` union (`expand` → model turn,
+`notice`/`error` → scrollback, `none` → nothing). Commands work headlessly; the
+`slash-menu` plugin is just an autocomplete overlay over the registry (it reads
+`ctx.listCommands()`, injected into hook/event contexts).
+
+Out-of-band prompt injection rides the `prompt.inject` bus channel
+(`{text, source?}`): the REPL turns it into a normal queued submit that fires
+BETWEEN turns. The live-area handler context gained `emit` so a periodic slot can
+use it. The `schedule` plugin (cron engine + `CronCreate/List/Delete` + `/loop`
++ `/schedule` + a 1s heartbeat) is built entirely on these ports — it imports no
+harness runtime, only `import type` from `src/plugins/types.ts`. See
+`docs/changes/2026-05-30-schedule-plugin.md`.

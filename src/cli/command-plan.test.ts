@@ -39,6 +39,23 @@ describe("planCommand", () => {
     expect(plan.supportsPromptInput).toBe(false)
   })
 
+  test("routes usage as a read-only command (no auth/network/quota)", () => {
+    const u = planCommand({ ...base, wantUsage: true })
+    expect(u.command).toBe("usage")
+    expect(u.needsAuth).toBe(false)
+    expect(u.needsNetwork).toBe(false)
+    expect(u.needsStartupUi).toBe(false)
+    expect(u.needsFormatter).toBe(false)
+    expect(u.needsQuota).toBe(false)
+    expect(u.supportsPromptInput).toBe(false)
+  })
+
+  test("sessions takes precedence over usage when both set", () => {
+    expect(planCommand({ ...base, wantListSessions: true, wantUsage: true }).command).toBe(
+      "sessions",
+    )
+  })
+
   test("routes sessions/list-flags/list-spinners/list-models with expected profiles", () => {
     expect(planCommand({ ...base, wantListSessions: true }).command).toBe("sessions")
     expect(planCommand({ ...base, wantListFlags: true }).command).toBe("list-flags")

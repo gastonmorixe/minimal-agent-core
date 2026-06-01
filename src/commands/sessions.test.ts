@@ -1,8 +1,29 @@
 import { describe, expect, test } from "bun:test"
 
 import type { IndexRecord } from "../session-store.ts"
+import type { SessionUsage } from "../session-usage.ts"
 
-import { formatBytes, fuzzyMatch, matchesQuery } from "./sessions.ts"
+import {
+  formatBytes,
+  formatTokenCell,
+  formatTokenCount,
+  fuzzyMatch,
+  matchesQuery,
+} from "./sessions.ts"
+
+function usage(over: Partial<SessionUsage> = {}): SessionUsage {
+  return {
+    tokens: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreate: 0,
+    estimated: false,
+    turns: 0,
+    realTurns: 0,
+    ...over,
+  }
+}
 
 describe("formatBytes", () => {
   test("formats sub-kB sizes in plain bytes", () => {
@@ -35,6 +56,55 @@ describe("formatBytes", () => {
       formatBytes(1024 * 1024),
       formatBytes(2.5 * 1024 * 1024 * 1024),
       formatBytes(Number.NaN),
+    ]
+    const widths = new Set(samples.map((s) => s.length))
+    expect(widths.size).toBe(1)
+  })
+})
+
+describe("formatTokenCount", () => {
+  test("renders plain counts under 1000", () => {
+    expect(formatTokenCount(0)).toBe("0")
+    expect(formatTokenCount(847)).toBe("847")
+    expect(formatTokenCount(999)).toBe("999")
+  })
+
+  test("renders k / M with a dropped trailing .0", () => {
+    expect(formatTokenCount(1000)).toBe("1k")
+    expect(formatTokenCount(12_300)).toBe("12.3k")
+    expect(formatTokenCount(1_000_000)).toBe("1M")
+    expect(formatTokenCount(1_200_000)).toBe("1.2M")
+  })
+
+  test("returns a sentinel for non-finite / negative", () => {
+    expect(formatTokenCount(Number.NaN)).toBe("—")
+    expect(formatTokenCount(-5)).toBe("—")
+  })
+})
+
+describe("formatTokenCell", () => {
+  test("marks real (saved) counts with [R]", () => {
+    const cell = formatTokenCell(
+      usage({ tokens: 12_300, estimated: false, turns: 3, realTurns: 3 }),
+    )
+    expect(cell.trim()).toBe("12.3k [R]")
+  })
+
+  test("marks estimated counts with [E]", () => {
+    const cell = formatTokenCell(usage({ tokens: 5_000, estimated: true, turns: 2, realTurns: 0 }))
+    expect(cell.trim()).toBe("5k [E]")
+  })
+
+  test("shows an em-dash for a session with no assistant turns", () => {
+    expect(formatTokenCell(usage({ turns: 0 })).trim()).toBe("—")
+  })
+
+  test("cells are fixed width for column alignment", () => {
+    const samples = [
+      formatTokenCell(usage({ tokens: 12_300, estimated: false, turns: 1, realTurns: 1 })),
+      formatTokenCell(usage({ tokens: 5_000, estimated: true, turns: 1 })),
+      formatTokenCell(usage({ tokens: 1_200_000, estimated: false, turns: 1, realTurns: 1 })),
+      formatTokenCell(usage({ turns: 0 })),
     ]
     const widths = new Set(samples.map((s) => s.length))
     expect(widths.size).toBe(1)

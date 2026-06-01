@@ -204,7 +204,15 @@ export interface StreamErrorEvent {
   /** Whether the outer retry loop should re-attempt. */
   retryable: boolean
   /** Provider-mapped category for log/metrics. */
-  category?: "overloaded" | "api" | "timeout" | "rate_limit" | "canceled" | "auth" | "unknown"
+  category?:
+    | "overloaded"
+    | "api"
+    | "timeout"
+    | "rate_limit"
+    | "billing"
+    | "canceled"
+    | "auth"
+    | "unknown"
   /**
    * Raw provider error type (e.g. `"rate_limit_error"`, `"overloaded_error"`),
    * preserved verbatim so the retry coordinator can classify on the exact

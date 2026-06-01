@@ -88,5 +88,12 @@
       "icon": "✔",
       "color": "lime"
     }
+  ],
+  "events": [
+    {
+      "id": "subagent_task_link",
+      "on": "subagent.taskUpdate",
+      "handler": { "type": "module", "path": "./handlers/task_link.ts", "export": "default" }
+    }
   ]
 }

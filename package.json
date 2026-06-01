@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "A tiny, beautiful, composable terminal agent harness that runs straight from source on Bun.",
+  "homepage": "https://github.com/gastonmorixe/minimal-agent",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gastonmorixe/minimal-agent.git"
+  },
+  "bin": {
+    "minimal-agent": "src/index.ts"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",

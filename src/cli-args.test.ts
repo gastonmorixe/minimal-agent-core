@@ -59,7 +59,18 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs(["flags"])).toEqual(["--list-flags"])
     expect(normalizeArgs(["spinners"])).toEqual(["--list-spinners"])
     expect(normalizeArgs(["sessions"])).toEqual(["--sessions"])
+    expect(normalizeArgs(["usage"])).toEqual(["--usage"])
     expect(normalizeArgs(["help"])).toEqual(["--help"])
+  })
+
+  test("usage subcommand: optional period value + alias", () => {
+    expect(normalizeArgs(["usage", "month"])).toEqual(["--usage", "month"])
+    expect(normalizeArgs(["usage", "ytd", "--debug"])).toEqual(["--usage", "ytd", "--debug"])
+    // No value, next token is a flag → just the bare flag.
+    expect(normalizeArgs(["usage", "--debug"])).toEqual(["--usage", "--debug"])
+    // --flag=value form via alias.
+    expect(normalizeArgs(["--usage=year"])).toEqual(["--usage", "year"])
+    expect(normalizeArgs(["--usage-stats"])).toEqual(["--usage"])
   })
 
   test("subcommand syntax: `<verb> list` sugar", () => {

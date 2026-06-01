@@ -48,6 +48,7 @@ import { fileURLToPath } from "node:url"
 
 import { SaveEchoCollector } from "../plugins/memory/lib/save-echo.ts"
 import { ShortTermSnapshot } from "../plugins/memory/lib/short-term-snapshot.ts"
+import { SubagentsAttachment } from "../plugins/sub-agents/lib/attachment.ts"
 import { TasksAttachment } from "../plugins/tasks/lib/attachment.ts"
 import { parseFile as parseTasksFile } from "../plugins/tasks/lib/parse.ts"
 
@@ -55,6 +56,7 @@ import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
 import { AutoAskController } from "./auto-ask.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
+import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { planCommand } from "./cli/command-plan.ts"
@@ -70,18 +72,23 @@ import { runLoginCommand } from "./commands/login.ts"
 import { runLogoutCommand } from "./commands/logout.ts"
 import { resolveSessionTarget } from "./commands/session-index.ts"
 import { runSessionsCommand } from "./commands/sessions.ts"
+import { runUsageCommand } from "./commands/usage.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
-import { getDiagnosticBus } from "./diagnostic-bus.ts"
+import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
+import { isColdStart, maybeShowFirstRunWelcome } from "./first-run.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
-import { getSessionId } from "./metadata.ts"
+import { buildModelInfoSnapshot } from "./llm/model-info.ts"
+import { mediaPasteInterceptor } from "./media/paste-intercept.ts"
+import { getSessionId, setSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
+import { createAgentContext } from "./plugins/agent-context.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaSummary } from "./quota-format.ts"
@@ -98,7 +105,7 @@ import { BREATHING_DOT } from "./spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
 import type { Spinner } from "./spinner.ts"
-import { formatStartupToolsRow } from "./startup-tools-row.ts"
+import { wrapStartupToolsRows } from "./startup-tools-row.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
 import { displayWidth, truncateDisplayWidth, wrapRows } from "./term-width.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
@@ -194,6 +201,30 @@ function readFlagValue(name: string): string | undefined {
   if (idx !== -1 && args[idx + 1]) return args[idx + 1]
   return undefined
 }
+
+/**
+ * Read the agent's semver from the embedded `<repo>/package.json` next
+ * to the source tree. Returns `"0.0.0"` on any failure (missing file,
+ * malformed JSON, missing `version` field) so the AgentContext factory
+ * never throws on a dev tree with a broken manifest. Called once at boot.
+ */
+function readEmbeddedPackageVersion(embeddedDir: string): string {
+  try {
+    const raw = readFileSync(join(embeddedDir, "package.json"), "utf8")
+    const parsed: unknown = JSON.parse(raw)
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "version" in parsed &&
+      typeof (parsed as { version: unknown }).version === "string"
+    ) {
+      return (parsed as { version: string }).version
+    }
+  } catch {
+    // Best-effort. Fall through to default below.
+  }
+  return "0.0.0"
+}
 const thinkingDisplayRaw =
   readFlagValue("--thinking-display") ??
   process.env.MINIMAL_AGENT_THINKING_DISPLAY ??
@@ -236,6 +267,24 @@ const formatterExtraArgs: string[] = (() => {
 //                       date/sid/cwd) and exit.
 const resumeIdx = args.indexOf("--resume")
 const resumeArg = resumeIdx !== -1 && args[resumeIdx + 1] ? args[resumeIdx + 1] : undefined
+
+// --session-id <uuid>  pin this run's session id instead of minting a random
+// one. Used by a supervising agent that spawns a headless child and needs to
+// know the child's sid up front (to locate its session files / lineage).
+// Seed it BEFORE any getSessionId() call below. Invalid ids exit non-zero.
+const sessionIdIdx = args.indexOf("--session-id")
+const sessionIdArg =
+  sessionIdIdx !== -1 && args[sessionIdIdx + 1] && !args[sessionIdIdx + 1].startsWith("-")
+    ? args[sessionIdIdx + 1]
+    : undefined
+if (sessionIdArg !== undefined) {
+  try {
+    setSessionId(sessionIdArg)
+  } catch (e) {
+    process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`)
+    process.exit(2)
+  }
+}
 const sessionsIdx = args.indexOf("--sessions")
 const wantListSessions = sessionsIdx !== -1
 // The token after `--sessions` is an optional fuzzy query. A leading
@@ -243,6 +292,16 @@ const wantListSessions = sessionsIdx !== -1
 const sessionsQuery =
   sessionsIdx !== -1 && args[sessionsIdx + 1] && !args[sessionsIdx + 1].startsWith("-")
     ? args[sessionsIdx + 1]
+    : undefined
+
+// --usage [<period>]  token-usage stats across all saved sessions. The token
+// after --usage is an optional period (today/last-day/last-month/ytd/year/all);
+// a leading dash means it's the next flag, not our value.
+const usageIdx = args.indexOf("--usage")
+const wantUsage = usageIdx !== -1
+const usagePeriod =
+  usageIdx !== -1 && args[usageIdx + 1] && !args[usageIdx + 1].startsWith("-")
+    ? args[usageIdx + 1]
     : undefined
 
 const dumpIdx = args.indexOf("--dump")
@@ -262,6 +321,7 @@ const wantAuthStatus = args.includes("--auth-status")
 const commandPlan = planCommand({
   dumpArg,
   wantListSessions,
+  wantUsage,
   wantListFlags,
   wantListSpinners,
   wantListModels,
@@ -292,6 +352,7 @@ function printHelp(): void {
     `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
     `    ${c.cyan("--mode")} ${c.dim("<id|none>")}         Initial mode ${c.dim("(default: ask in non-interactive, plugin default otherwise)")}`,
     `    ${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}      Force startup tree on/off ${c.dim("(default: hidden in non-interactive)")}`,
+    `    ${c.cyan("--session-id")} ${c.dim("<uuid>")}      Pin this run's session id ${c.dim("(else MINIMAL_AGENT_SESSION_ID, else random)")}`,
     `    ${c.cyan("-d")}, ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
     `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
     `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
@@ -308,6 +369,7 @@ function printHelp(): void {
     `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
     `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
     `    ${c.cyan("--sessions")} ${c.dim("[<query>]")}          List saved sessions ${c.dim("(fuzzy filter on date/sid/cwd)")}`,
+    `    ${c.cyan("usage")} ${c.dim("[<period>]")}             Token-usage stats ${c.dim("(today|last-day|last-month|ytd|year|all; interactive on a TTY)")}`,
     `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session ${c.dim("(also: `sessions resume <sid>`)")}`,
     `    ${c.cyan("--dump")} ${c.dim("<sid|last>")}         Dump a full session history to stdout`,
     `    ${c.cyan("--dump-format")} ${c.dim("<md|xml>")}    Output format for --dump ${c.dim("(default: md)")}`,
@@ -333,6 +395,9 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
     `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
     `    ${c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1")}       Skip startup quota check`,
+    `    ${c.cyan("MINIMAL_AGENT_NO_PLUGIN_SYNC=1")}   Skip the first-run extended-plugins clone`,
+    `    ${c.cyan("MINIMAL_AGENT_PLUGINS_REPO")}  Git URL for the extended plugins repo ${c.dim("(fork/mirror)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_GITHUB_TOKEN")}  Token to clone a ${c.dim("private")} plugins repo ${c.dim("(else GITHUB_TOKEN / GH_TOKEN / gh)")}`,
     `    ${c.cyan("MINIMAL_AGENT_NO_HISTORY=1")}       Disable ↑/↓ prompt history ${c.dim("(history plugin)")}`,
     `    ${c.cyan("MINIMAL_AGENT_FILE_LOCK_DISABLED=1")}  Disable cooperative file locking ${c.dim("(file-lock plugin)")}`,
     `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
@@ -417,6 +482,10 @@ function padTo(line: string, targetCol: number): string {
 // startup row: "  │ " (4) + label.padEnd(9) (9) + "  " (2) = 15 cells.
 const STARTUP_ROW_OVERHEAD = 15
 
+/** Styled tree gutter glyphs. Body rows use `│`; the tree closes with `╰`. */
+const TREE_BODY_GUTTER = c.faintWhite("│")
+const TREE_CLOSE_GUTTER = c.faintWhite("╰")
+
 /** Current stderr terminal width, falling back to 80 for non-TTY / unknown. */
 function stderrCols(): number {
   return (process.stderr as { columns?: number }).columns ?? 80
@@ -433,14 +502,54 @@ function fitRowValue(value: string): string {
   return truncateDisplayWidth(value, maxWidth)
 }
 
-let lastStartupRow: { label: string; value: string; rowWidth: number } | null = null
+/**
+ * The last logical startup row, stored as the exact physical line strings
+ * that were printed (each already includes the `│` gutter + label column).
+ * A row is usually one physical line, but the `tools` row can span several
+ * (it wraps instead of truncating). {@link closeStartupTree} rewrites this
+ * block in place to swap the final line's `│` gutter for the closing `╰`.
+ */
+let lastStartupRow: { lines: string[] } | null = null
 
 function printStartupRow(label: string, value: string): void {
   if (!SHOW_HEADER) return
   const v = fitRowValue(value)
-  const row = `  ${c.faintWhite("│")} ${c.sky(label.padEnd(9))}  ${v}`
+  const row = `  ${TREE_BODY_GUTTER} ${c.sky(label.padEnd(9))}  ${v}`
   console.error(row)
-  lastStartupRow = { label, value: v, rowWidth: displayWidth(row) }
+  lastStartupRow = { lines: [row] }
+}
+
+/**
+ * Print the `tools` row, wrapping the tool list across as many physical
+ * lines as the terminal width needs instead of truncating it with `…`.
+ * Continuation lines repeat the `│` gutter and leave the label column
+ * blank so the names line up under the first row's value column.
+ *
+ * Why this is its own function: the generic {@link printStartupRow}
+ * truncates to a single line (fine for `model`, `session`, etc.), but the
+ * tools row is the one place users want the full inventory visible. The
+ * wrap also keeps {@link closeStartupTree}'s cursor math honest — every
+ * emitted line fits within the terminal width, so the "one logical row =
+ * one physical line" assumption that used to break on the over-long,
+ * emoji-containing tools row holds again.
+ */
+function printStartupToolsRow(
+  tools: ReadonlyArray<{ name: string; icon?: string; color?: string }>,
+): void {
+  if (!SHOW_HEADER) return
+  const cols = stderrCols()
+  const maxWidth = Math.max(1, cols - STARTUP_ROW_OVERHEAD)
+  const valueLines = wrapStartupToolsRows(tools, maxWidth)
+  if (valueLines.length === 0) return
+  const blankLabel = " ".repeat(9)
+  const printed: string[] = []
+  valueLines.forEach((value, i) => {
+    const label = i === 0 ? c.sky("tools".padEnd(9)) : blankLabel
+    const row = `  ${TREE_BODY_GUTTER} ${label}  ${value}`
+    console.error(row)
+    printed.push(row)
+  })
+  lastStartupRow = { lines: printed }
 }
 
 /**
@@ -459,20 +568,28 @@ function printStartupRow(label: string, value: string): void {
 function closeStartupTree(): void {
   if (!SHOW_HEADER) return
   if (!lastStartupRow) return
-  const { label, value, rowWidth } = lastStartupRow
+  const { lines } = lastStartupRow
   lastStartupRow = null
+  if (lines.length === 0) return
+  // The closer swaps the body gutter (`│`) for the rounded corner (`╰`) on
+  // the FINAL physical line of the last logical row. Continuation lines of
+  // a wrapped tools row keep their `│` so the tree stays connected.
+  const closedLines = lines.slice()
+  const lastIdx = closedLines.length - 1
+  closedLines[lastIdx] = closedLines[lastIdx]!.replace(TREE_BODY_GUTTER, TREE_CLOSE_GUTTER)
   if (process.stderr.isTTY) {
     const cols = stderrCols()
-    // How many physical lines did the last row occupy? With fitRowValue()
-    // applied this is always 1, but we compute it defensively so any
-    // future caller that bypasses fitRowValue still gets correct cursor math.
-    const physLines = wrapRows(rowWidth, cols)
-    // Go up physLines lines to the start of the row, then erase from
-    // cursor to end of screen (clears the row + any wrapped continuation).
+    // How many physical lines did the last logical row occupy? Each stored
+    // line is pre-wrapped to fit the terminal width, so this is almost
+    // always `lines.length`, but we sum wrapRows() defensively in case a
+    // future caller bypasses the width-fitting helpers.
+    const physLines = lines.reduce((sum, line) => sum + wrapRows(displayWidth(line), cols), 0)
+    // Go up to the start of the first stored line, then erase from cursor to
+    // end of screen (clears every physical line of the row + any wrap).
     process.stderr.write(`\x1b[${physLines}A\x1b[J`)
-    console.error(`  ${c.faintWhite("╰")} ${c.sky(label.padEnd(9))}  ${value}`)
+    for (const line of closedLines) console.error(line)
   } else {
-    console.error(`  ${c.faintWhite("╰")}`)
+    console.error(`  ${TREE_CLOSE_GUTTER}`)
   }
 }
 
@@ -508,13 +625,13 @@ function startStartupRowSpinner(
         const v = fitRowValue(value)
         const row = `${prefix}${v}`
         console.error(row)
-        lastStartupRow = { label, value: v, rowWidth: displayWidth(row) }
+        lastStartupRow = { lines: [row] }
       },
       fail(value) {
         const v = fitRowValue(value)
         const row = `${prefix}${v}`
         console.error(row)
-        lastStartupRow = { label, value: v, rowWidth: displayWidth(row) }
+        lastStartupRow = { lines: [row] }
       },
     }
   }
@@ -540,7 +657,7 @@ function startStartupRowSpinner(
     clearInterval(timer)
     const v = fitRowValue(value)
     process.stderr.write(`\r\x1b[2K${prefix}${v}\n`)
-    lastStartupRow = { label, value: v, rowWidth: displayWidth(`${prefix}${v}`) }
+    lastStartupRow = { lines: [`${prefix}${v}`] }
   }
 
   return {
@@ -736,6 +853,9 @@ async function main() {
     case "sessions":
       runSessionsCommand({ query: sessionsQuery })
       return
+    case "usage":
+      await runUsageCommand({ period: usagePeriod })
+      return
     case "list-flags":
       runListFlagsCommand()
       return
@@ -775,6 +895,28 @@ async function main() {
     }
     case "run":
       break
+  }
+
+  // Cold-start detection must happen BEFORE any subsystem creates
+  // `~/.minimal-agent` (the file-log sink below does, on its first write).
+  // Capture it here so the welcome card and the post-setup hint can both key
+  // off a single honest "is this the very first run on this machine" signal.
+  const coldStart = isColdStart()
+
+  // First-run welcome card. Interactive cold starts only — a scripted
+  // `--prompt` run stays silent. Frames the one-time auto-setup (sign-in,
+  // mdstream, plugins) so the spinners that follow read as expected setup.
+  // The steps listed mirror exactly what the boot flow does next.
+  const firstRunInteractive = process.stdin.isTTY === true && process.stdout.isTTY === true
+  if (coldStart && firstRunInteractive && SHOW_HEADER) {
+    maybeShowFirstRunWelcome({
+      isInteractive: true,
+      steps: [
+        { label: "sign in to your Anthropic (Claude) account" },
+        { label: `fetch ${c.bold("mdstream")}, the Markdown renderer` },
+        { label: `fetch the extended plugins ${c.dim("(Fetch, Skill, slash-menu, …)")}` },
+      ],
+    })
   }
 
   printStartupHeader()
@@ -860,6 +1002,24 @@ async function main() {
     }
   }
 
+  // Warm the SELECTED provider's session-metadata cache so the status-bar
+  // slot's first tick finds fresh data without ever issuing a network call
+  // of its own. Fire-and-forget — by the time the prime probe lands, the
+  // provider broadcasts `quota.headersReceived`, which refires the slot
+  // and the footer populates with no blocking on the REPL boot path. A
+  // provider with no `primeSessionInfo` (OpenAI / OpenRouter, whose cache
+  // fills from real chat traffic) silently no-ops here.
+  if (selectedProviderId) {
+    void (async () => {
+      const { primeProviderSessionInfo } = await import("./llm/provider-session.ts")
+      await primeProviderSessionInfo(selectedModelBase)
+    })().catch(() => {
+      // Tolerated: prime is a UX warm-up. The slot stays on its placeholder
+      // until real chat traffic broadcasts the headers — same fallback as
+      // before the prime hook existed.
+    })
+  }
+
   // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
   let formatterCmd: string[] | undefined
   if (commandPlan.needsFormatter) {
@@ -943,16 +1103,87 @@ async function main() {
   // Core tool names must always win over plugin names.
   const coreToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name))
   const homeDir = process.env.HOME ? join(process.env.HOME, ".agents") : undefined
+  // minimal-agent's own per-user plugins root. The first-run bootstrap
+  // clones `minimal-agent-plugins` here, so this is where the extended
+  // first-party plugins (Fetch, Skill, slash-menu, …) live on an installed
+  // box. Sits above embedded built-ins but below the user's hand-curated
+  // ~/.agents/plugins and <cwd>/.agents/plugins roots. See `userDir` in
+  // PluginLoaderOptions for the precedence rationale.
+  const userDir = process.env.HOME ? join(process.env.HOME, ".minimal-agent") : undefined
+
+  // First-run plugin bootstrap. On a freshly-installed box the extended
+  // first-party plugins (Fetch, Skill, slash-menu, …) aren't present; clone
+  // them ONCE into `<userDir>/plugins` so the loader (which scans that as the
+  // `user` root) picks them up on THIS boot. Best-effort and fully gated:
+  //   - skipped entirely in non-interactive runs (--prompt / `-` / piped):
+  //     a one-shot scripted call shouldn't reach out to the network or grow
+  //     the toolset under the user's feet.
+  //   - opt-out via MINIMAL_AGENT_NO_PLUGIN_SYNC=1 or config `pluginSync:false`.
+  //   - never throws; a private-repo / offline / no-git box degrades to the
+  //     embedded plugins with a quiet startup row.
+  if (userDir && SHOW_HEADER) {
+    const pluginSyncEnabled =
+      process.env.MINIMAL_AGENT_NO_PLUGIN_SYNC === "1" ? false : (userConfig.pluginSync ?? true)
+    const pluginsRepo =
+      process.env.MINIMAL_AGENT_PLUGINS_REPO?.trim() || userConfig.pluginsRepo || undefined
+    const sync = await bootstrapUserPlugins({
+      targetDir: join(userDir, "plugins"),
+      enabled: pluginSyncEnabled,
+      repoUrl: pluginsRepo,
+      showSpinner: true,
+    })
+    // Only surface a startup row when something meaningful happened: a fresh
+    // clone, or a failed/skipped attempt the operator may want to know about.
+    // The common steady-state (`present`) and the opt-out (`disabled`) stay
+    // silent so the tree doesn't gain a permanent noise row.
+    if (sync.status === "cloned") {
+      printStartupRow("plugins", `${c.dim("+")} ${c.dim(sync.label)}`)
+    } else if (sync.status === "failed" || sync.status === "skipped") {
+      // Quiet, non-fatal. Detail lands in the file log via the diagnostic bus
+      // (the loader still runs with embedded plugins only).
+      diag.notice("plugin-sync", sync.detail ?? sync.label)
+    }
+  }
+
   // Embedded plugins ship inside the agent's own checkout: `<repo>/plugins/`.
   // `import.meta.dirname` (Bun + Node 20+) of this file is `<repo>/src`, so
   // climb one level. This makes ask-mode/diff-view/env-info/memory work
   // regardless of the user's cwd, not just when cwd === <repo>.
   const thisFileDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
   const embeddedDir = dirname(thisFileDir)
-  // Expose the resolved model id to plugin prompt fragments (e.g. env-info)
-  // so they can embed it in the system prompt. Subprocess probes inherit
-  // process.env, so a plain assignment is enough.
+
+  // Construct the single AgentContext shared across every plugin
+  // dispatch path (tool handlers, prompt fragments, event subs, hook
+  // subs, live-area slots, plus their subprocess counterparts). The
+  // loader and the live-area scheduler both receive THIS object so
+  // plugins see one consistent identity regardless of dispatch path.
+  //
+  // Source of each field:
+  //   - sessionId : metadata.getSessionId() (cached UUIDv4)
+  //   - pid       : process.pid (Bun process)
+  //   - model     : selectedModel (resolved above by resolveModelId)
+  //   - version   : <embeddedDir>/package.json#version, "0.0.0" if missing
+  //
+  // The object is frozen by createAgentContext, so it can be passed
+  // around without defensive copies.
+  const agentVersion = readEmbeddedPackageVersion(embeddedDir)
+  const agentContext = createAgentContext({
+    sessionId: getSessionId(),
+    pid: process.pid,
+    model: selectedModel,
+    version: agentVersion,
+  })
+
+  // Mirror MINIMAL_AGENT_MODEL into process.env for legacy direct readers
+  // (notably `plugins/quota-status/handler.ts`, which reads
+  // `process.env.MINIMAL_AGENT_MODEL`, not `ctx.env`). The loader will
+  // also emit MINIMAL_AGENT_* via `agentContextToEnv` into every dispatched
+  // ctx.env, but those values are scoped to one handler call and don't
+  // reach a `process.env`-only reader.
   process.env.MINIMAL_AGENT_MODEL = selectedModel
+  process.env.MINIMAL_AGENT_SESSION_ID = agentContext.sessionId
+  process.env.MINIMAL_AGENT_PID = String(agentContext.pid)
+  process.env.MINIMAL_AGENT_VERSION = agentContext.version
   // Expose the resolved effort to the live-area quota-status plugin so
   // it can surface "effort <level>" as a trailing footer segment. Same
   // overwrite-with-resolved-value pattern as MINIMAL_AGENT_MODEL above:
@@ -965,24 +1196,25 @@ async function main() {
   } else {
     process.env.MINIMAL_AGENT_EFFORT = effort ?? "medium"
   }
-  // Expose the full session id so the live-area footer can render a
-  // shortened anchor (the renderer takes the first 8 hex chars — enough
-  // to disambiguate inside `~/.minimal-agent/sessions/` for any
-  // realistic session count; collision probability ≈ N²/2^33). We
-  // forward the FULL id and let the consumer decide on truncation so
-  // other consumers (env-info prompt fragments, downstream tools) can
-  // still see the unabridged value if they need it.
-  process.env.MINIMAL_AGENT_SESSION_ID = getSessionId()
   const pluginOverrides = loadPluginEnabledOverrides()
+  // Late-bound getter for the agent's LIVE model id. The loader loads before
+  // the Agent is constructed, and the model can change mid-session (/model,
+  // preflight switch) or differ on resume, so the ModelInfo tool must read the
+  // current value, never the boot value. Rebound to `agent.getModel()` below.
+  let getLiveModelId: () => string = () => selectedModel
   const loader = await PluginLoader.load({
     embeddedDir,
+    userDir,
     homeDir,
     projectDir: process.cwd(),
     coreToolNames,
-    // getSessionId() was already called above (printStartupRow "session"),
-    // so it's safely cached; passing it lets prompt fragments embed the
-    // id (e.g. env-info ships it in the <env> block).
-    sessionId: getSessionId(),
+    // Single AgentContext shared with every plugin dispatch path.
+    // Frozen value object; see createAgentContext + AgentContext docs.
+    agent: agentContext,
+    // Live current-model snapshot for the decoupled `ModelInfo` tool. Reads the
+    // agent's CURRENT model (via the late-bound getter) + the shared registry,
+    // so it stays correct across mid-session switches and resume.
+    modelInfoProvider: () => buildModelInfoSnapshot(getLiveModelId()),
     // Universal opt-out: any plugin with `plugins.<id>.enabled === false`
     // in ~/.minimal-agent/config.jsonc is dropped before validation.
     // The matching `enabled === true` set overrides a manifest-level
@@ -1010,6 +1242,11 @@ async function main() {
   // returns null and costs nothing. See
   // `plugins/tasks/lib/attachment.ts`.
   const tasksAttachment = new TasksAttachment(getSessionId())
+  // Sub-agents plugin fleet digest. Same null-on-empty contract: when the
+  // session has no active workers (or the plugin is disabled), it returns
+  // null and costs nothing. Rides the generic `turnAttachments` extension
+  // point so the agent core stays sub-agent-agnostic.
+  const subagentsAttachment = new SubagentsAttachment(getSessionId())
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
   const hasPromptBlock = loader.getPromptBlock() !== null
@@ -1023,9 +1260,12 @@ async function main() {
   // gets its own row below at the `printStartupRow("mode", …)` site, so
   // we don't duplicate it here. Modes that exist but aren't active are
   // intentionally not surfaced — discoverable via Shift+Tab.
-  const toolsValue = formatStartupToolsRow(loadedTools)
-  if (toolsValue !== null) {
-    printStartupRow("tools", toolsValue)
+  //
+  // The tools row is the one row that WRAPS rather than truncates: the
+  // full inventory stays visible, flowing onto continuation lines under
+  // the value column when it overruns the terminal width.
+  if (loadedTools.length > 0) {
+    printStartupToolsRow(loadedTools)
   } else if (hasPromptBlock || loadedModes.length > 0) {
     // Plugins ran but contribute only prompt fragments / live-area
     // slots / modes — keep a quiet row so it's visible the layer is
@@ -1480,11 +1720,14 @@ async function main() {
     saveEcho,
     shortTermSnapshot,
     tasksAttachment,
+    turnAttachments: [subagentsAttachment],
     store,
     blobStore,
     initialMessages,
     toolTimeTracker,
   })
+  // Point the ModelInfo provider at the agent's live model from here on.
+  getLiveModelId = () => agent.getModel()
 
   // Ready banner : emitted ONCE here so it lands in scrollback right
   // under the startup header, BEFORE any resume replay. Previously the
@@ -1743,6 +1986,11 @@ async function main() {
       // plugins are loaded — the editor short-circuits the emit.
       ...(hasPlugins ? { hooks: loader.hooks() } : {}),
     })
+    // Media ingestion: a dropped image path (or an empty paste while an image
+    // sits on the clipboard) becomes a `[Image #id WxH size]` token instead of
+    // literal text. The submit path (agent.run) resolves the token to an image
+    // block. See src/media/paste-intercept.ts.
+    editor.setPasteInterceptor((pasted) => mediaPasteInterceptor(pasted))
     // Restore the unsent draft (if any) into the editor buffer. This is
     // the resume-time twin of the abort-flow's setBuffer call in
     // `agent.ts` (search "setBuffer" in the abort branch) — same visual

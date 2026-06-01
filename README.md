@@ -15,18 +15,74 @@ It is built for people who want to see the wire shape, tool loop, terminal rende
 
 ## Requirements
 
-- Bun.
-- macOS if you want first-party Claude Code OAuth reuse through Keychain.
-- A working Claude Code login. Run the official `claude` CLI and sign in first.
-- Optional: `mdstream` for Markdown rendering. The agent can resolve it automatically when configured as the formatter.
+- [Bun](https://bun.com) 1.1+. That's the only hard dependency. The agent runs
+  the TypeScript source directly, so there is no build step and no compiled
+  release to install.
+- `git`, if you want the first-run bootstrap to fetch the extended plugins.
+- macOS or Linux. Credentials live in a plain `~/.minimal-agent/auth.jsonc`
+  (mode 0600), not the system keychain, so the same login works on a server,
+  a container, or your laptop.
+- Optional: `mdstream` for Markdown rendering. The agent auto-downloads it on
+  first run.
 - Optional: `BRAVE_API_KEY` for the WebSearch plugin.
 
-## Quick start
+## Install & run
+
+There is no install step in the usual sense. You need Bun and the source; Bun
+does the rest at first run (auth, Markdown renderer, plugins). Pick one:
+
+### Run from a clone (works today)
 
 ```sh
-bun install
+git clone https://github.com/gastonmorixe/minimal-agent.git
+cd minimal-agent
+./minimal-agent           # first run walks you through sign-in + setup
+```
+
+### Run straight from GitHub with bunx (no clone)
+
+The package declares a `bin`, so once the repo is reachable you can run it
+without cloning. Bun fetches the source, runs the TypeScript, done:
+
+```sh
+bunx github:gastonmorixe/minimal-agent
+```
+
+This works as-is when the repo is **public**. While the repo is **private**,
+`bunx github:` can't authenticate (it hits GitHub's tarball API anonymously),
+so use a token-authenticated install instead:
+
+```sh
+# one-off, with a GitHub token that can read the repo
+bun add -g "git+https://x-access-token:$(gh auth token)@github.com/gastonmorixe/minimal-agent.git"
+minimal-agent
+```
+
+`bun add -g` honors the token embedded in the git URL. The bare
+`bunx <git-url>` form is not supported by Bun.
+
+### First run
+
+On a clean machine the first interactive launch shows a short setup card and
+then, in order:
+
+1. **Signs you in.** OAuth against your Anthropic (Claude) account via the
+   manual-paste PKCE flow. Credentials are written to
+   `~/.minimal-agent/auth.jsonc`.
+2. **Fetches `mdstream`** (the Markdown renderer) into `~/.minimal-agent/bin/`.
+3. **Fetches the extended plugins** (`Fetch`, `Skill`, slash-menu, …) into
+   `~/.minimal-agent/plugins/`.
+
+Every step is best-effort and degrades cleanly: no network, no `git`, or a
+declined sign-in just means fewer features, never a crash. After the first run
+none of this repeats.
+
+### Dev entry point
+
+```sh
+bun install                 # dev deps only (biome, oxlint, typecheck)
+bun run src/index.ts        # raw entry point
 ./minimal-agent --help
-./minimal-agent
 ```
 
 Run a prompt without entering the REPL:
@@ -184,6 +240,11 @@ Common environment variables:
 - **`MINIMAL_AGENT_AUTO_ASK=0`:** Disable automatic ASK mode detection.
 - **`MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1`:** Show spaces, tabs, and newlines in the editor.
 - **`MINIMAL_AGENT_SKIP_QUOTA=1`:** Skip startup quota check.
+- **`MINIMAL_AGENT_NO_PLUGIN_SYNC=1`:** Skip the first-run plugin clone.
+- **`MINIMAL_AGENT_PLUGINS_REPO`:** Git URL for the extended plugins repo (fork/mirror).
+- **`MINIMAL_AGENT_GITHUB_TOKEN`:** Token for cloning a private plugins repo (falls back to `GITHUB_TOKEN` / `GH_TOKEN` / `gh auth token`).
+- **`MINIMAL_AGENT_DISABLE_CRON=1`:** Disable the schedule plugin (heartbeat inert, cron tools refuse).
+- **`MINIMAL_AGENT_CRON_DIR`:** Relocate the schedule store (default `~/.minimal-agent/sessions`).
 - **`CLAUDE_CODE_EXTRA_METADATA`:** JSON object merged into `metadata.user_id`.
 
 ## Built-in tools
@@ -197,11 +258,42 @@ The model sees a small Claude Code-like tool set:
 - **`Glob`:** Match files by pattern.
 - **`Grep`:** Search content with ripgrep.
 
-The omission is intentional. There is no sub-agent tool, skill runner, or deferred tool loader in the core agent. Those are larger surfaces than this repo needs for its main job: make the agent loop plain.
+The omission is intentional. The core agent ships no sub-agent tool, skill runner, or deferred tool loader. Those are larger surfaces than the loop itself needs. Where one earns its place (delegation), it lands as a *plugin* the core knows nothing about: the `sub-agents` plugin adds `SpawnAgent` and friends on top of generic seams, and the agent loop never learns the word "sub-agent". See `plugins/sub-agents/` and `docs/changes/2026-05-30-sub-agents.md`.
 
 ## Plugins
 
-Plugins live under `plugins/`. Each plugin has a manifest, optional prompt text, and optional handlers.
+Plugins are discovered from four roots, closest-to-user wins on a package-id
+collision:
+
+```txt
+<cwd>/.agents/plugins/      project-local (highest precedence)
+~/.agents/plugins/          your hand-curated home plugins
+~/.minimal-agent/plugins/   extended first-party plugins (auto-cloned on first run)
+<install>/plugins/          embedded built-ins (lowest precedence)
+```
+
+The embedded built-ins ship inside the agent. The extended first-party plugins
+(`Fetch`, `Skill`, slash-menu, agent-writing-style) live in a separate repo,
+[`minimal-agent-plugins`][map], and are cloned once into
+`~/.minimal-agent/plugins/` on the first interactive run. The clone is one-shot:
+once that directory has plugins it is never auto-pulled, so you stay in control.
+Update them yourself with `git -C ~/.minimal-agent/plugins pull`.
+
+[map]: https://github.com/gastonmorixe/minimal-agent-plugins
+
+Controls:
+
+- **Disable the bootstrap:** `MINIMAL_AGENT_NO_PLUGIN_SYNC=1` (or
+  `"pluginSync": false` in config).
+- **Point at a fork / mirror:** `MINIMAL_AGENT_PLUGINS_REPO=<git-url>` (or
+  `"pluginsRepo"` in config).
+- **Private plugins repo:** the bootstrap authenticates with the first token it
+  finds: `MINIMAL_AGENT_GITHUB_TOKEN`, then `GITHUB_TOKEN`, then `GH_TOKEN`,
+  then `gh auth token`. The token is passed to `git` through an inline
+  credential helper, so it never lands in `ps`, the clone URL, or the cloned
+  `.git/config`.
+
+Each plugin has a manifest, optional prompt text, and optional handlers.
 
 Current plugins:
 
@@ -211,6 +303,9 @@ Current plugins:
 - **Interleave Thinking:** Captures and hides tagged interleaved thinking spans from visible output.
 - **Memory:** Saves and reloads cross-session memory from `~/.minimal-agent`.
 - **Web Search:** Adds `WebSearch` with a provider chain. Brave is the shipped provider.
+- **Sub-agents:** Delegation. Spawn background `minimal-agent` workers (`SpawnAgent`), watch them in a live fleet widget, and fold their distilled results back. A 1s supervisor reaps exits and reports between turns. Disable with `MINIMAL_AGENT_DISABLE_SUBAGENTS=1`.
+- **Schedule:** Run prompts on a schedule. Adds the `CronCreate`/`CronList`/`CronDelete` tools (the model schedules from natural language like "remind me at 3pm" or "every 5 minutes check the deploy") plus the `/loop` and `/schedule` commands. A 1-second heartbeat injects each due task's prompt *between* turns. Tasks live at `~/.minimal-agent/sessions/<sid>.cron.json` and restore (unexpired) on `--resume`. Disable with `MINIMAL_AGENT_DISABLE_CRON=1`. See `docs/changes/2026-05-30-schedule-plugin.md`.
+- **Slash Menu:** Autocomplete overlay for slash commands. Type a bare `/<fragment>` and matching commands (from any plugin's manifest `commands[]`) appear in the editor footer; `↑/↓` select, `Tab`/`Enter` complete, `Esc` closes. Pure discoverability over the host command registry.
 
 Run WebSearch directly while debugging provider config:
 

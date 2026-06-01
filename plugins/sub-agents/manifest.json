@@ -1,0 +1,209 @@
+{
+  "id": "sub-agents",
+  "name": "Sub-agents",
+  "version": "0.1.0",
+  "description": "Delegation: spawn background minimal-agent workers, steer them, review their work, fold results back. A worker is a real headless agent process with its own session id, supervised by a 1s heartbeat that reaps exits, paints a live fleet widget, and injects each finished worker's distilled result between turns. State lives at ~/.minimal-agent/sessions/<leadSid>.subagents.jsonl. Disable with MINIMAL_AGENT_DISABLE_SUBAGENTS=1.",
+  "tuis": [
+    {
+      "id": "spawn_agent",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "SpawnAgent",
+          "description": "Delegate a self-contained unit of work to a background sub-agent and get an immediate handle (it runs concurrently; you are NOT blocked). Use it to keep verbose work (searching, running tests, fetching docs, a focused refactor) out of your own context: the worker does it in its own window and returns only a distilled summary. Give a DETAILED task: the objective, the exact file/scope boundaries, and the output you want back. Match worker count to complexity (1 for a simple lookup, 2-4 for a comparison, more only for genuinely independent breadth-first work) — every worker costs tokens. Pick a named `agent` specialist when one fits, else describe an inline `system`. The worker reports a one-line digest between turns when it finishes; pull its full deliverable with AgentResult.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "The delegation prompt: a clear objective, the scope/file boundaries the worker must stay inside, and the exact output you want back. The single biggest lever on whether delegation succeeds. Required."
+              },
+              "agent": {
+                "type": "string",
+                "description": "A named specialist to use: explorer (fast read-only search), planner (read-only research+plan), worker (general implementer), reviewer (read-only diff review), integrator (gate + commit). Omit to describe an inline worker via `system`."
+              },
+              "system": {
+                "type": "string",
+                "description": "Inline system prompt defining the worker's role, used when `agent` is omitted. Folded above the task."
+              },
+              "model": {
+                "type": "string",
+                "description": "Model id for the worker (e.g. claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8). Defaults to the specialist's model, else Haiku (cheap + fast for bounded delegated work)."
+              },
+              "effort": {
+                "type": "string",
+                "description": "Reasoning effort for the worker (low|medium|high|xhigh|max), if the model supports it."
+              },
+              "isolation": {
+                "type": "string",
+                "enum": ["fresh", "fork"],
+                "description": "Context tier. `fresh` (default): a clean context with only the task + the worker's system prompt — maximum context compression. `fork`: inherit this conversation's full history (shares the prompt cache, sees your context) for a side task that needs the background without re-explaining."
+              },
+              "label": {
+                "type": "string",
+                "description": "Short display name for the worker in the fleet widget. Defaults to the agent type."
+              },
+              "taskId": {
+                "type": "string",
+                "description": "Link this worker to a task from the Task tool (its #hash). When the worker finishes the linked todo is ticked done automatically (or canceled with a reason if the worker fails). Use it to make a worker own one of your todos."
+              },
+              "budget": {
+                "type": "object",
+                "description": "Optional runtime budget. The supervisor stops a worker that exceeds it.",
+                "properties": {
+                  "maxTurns": { "type": "number", "description": "Max agentic turns." },
+                  "deadlineSec": { "type": "number", "description": "Wall-clock deadline in seconds." },
+                  "maxTokens": { "type": "number", "description": "Soft token ceiling (advisory)." }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": ["task"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/spawn_agent.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "gold"
+    },
+    {
+      "id": "list_agents",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "ListAgents",
+          "description": "List this session's sub-agents at a glance: id, type, status, elapsed, tokens, and what each is doing. Cheap and bounded — pulls no worker transcript. Use it to see the fleet before pulling a result or stopping a worker.",
+          "input_schema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/list_agents.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "sky"
+    },
+    {
+      "id": "agent_status",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "AgentStatus",
+          "description": "Detail for one sub-agent (status, progress, model, isolation, linked session), or the whole fleet when no id is given. No transcript.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "The sub-agent handle (e.g. A2). Omit for the whole fleet." }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/agent_status.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "sky"
+    },
+    {
+      "id": "agent_result",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "AgentResult",
+          "description": "Pull a finished sub-agent's distilled deliverable into your context (its result summary + any artifact references — NOT its full transcript). This is the only sub-agent tool that carries real worker content back, and it is bounded. Call it after a worker reaches `done`.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "The sub-agent handle (e.g. A2). Required." }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/agent_result.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "lime"
+    },
+    {
+      "id": "agent_output",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "AgentOutput",
+          "description": "Tail a sub-agent's recent activity (its latest tool calls and notes with timestamps), for 'what is A2 doing right now' beyond the one-line fleet widget. Bounded — never the whole transcript. Use sparingly; the widget and the between-turns digest usually suffice.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "The sub-agent handle (e.g. A2). Required." }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/agent_output.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "sky"
+    },
+    {
+      "id": "mailbox",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "Mailbox",
+          "description": "Coordinate with sibling sub-agents (and the lead) over a shared, durable message board. `post` a short message to a specific worker id (`to`) or broadcast to all (`to:\"*\"`); `read` messages addressed to you or broadcast. Opt-in and bounded: use ONLY when your task tells you to coordinate (e.g. claim a file before editing it, flag a blocker, hand off a finding). Do not chatter — excessive cross-talk is a known failure mode.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "action": { "type": "string", "enum": ["post", "read"], "description": "post a message, or read your messages. Default read." },
+              "to": { "type": "string", "description": "Recipient: a worker id (e.g. A3) or \"*\" for broadcast. Default broadcast. (post only)" },
+              "kind": { "type": "string", "description": "Short category: note | claim | blocker | handoff. Default note. (post only)" },
+              "body": { "type": "string", "description": "The message text. Required for post." },
+              "since": { "type": "string", "description": "ISO timestamp cursor: read only messages newer than this. (read only)" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/mailbox.ts", "export": "default" },
+      "interactive": false,
+      "icon": "✉",
+      "color": "violet"
+    },
+    {
+      "id": "stop_agent",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "StopAgent",
+          "description": "Cancel a running sub-agent by id (signals its process, marks it stopped). Use when a worker is no longer needed, was superseded, or is going off track.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "The sub-agent handle (e.g. A2). Required." },
+              "reason": { "type": "string", "description": "Optional short reason, recorded on the handle." }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/stop_agent.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "red"
+    }
+  ],
+  "liveAreaSlots": [
+    {
+      "id": "fleet_supervisor",
+      "handler": { "type": "module", "path": "./handlers/heartbeat.ts", "export": "default" },
+      "position": "footer",
+      "refreshMs": 1000,
+      "timeoutMs": 4000
+    }
+  ]
+}

@@ -43,6 +43,35 @@ describe("term-width", () => {
     expect(displayWidth("🙂")).toBe(2)
   })
 
+  it("treats BMP Emoji_Presentation glyphs as width 2", () => {
+    // Regression: these sit BELOW the 0x1F300 pictograph planes among
+    // otherwise-narrow symbol blocks, so the old code measured them as 1
+    // cell while every terminal paints them 2 wide. The startup `tools`
+    // row's `⏰ CronCreate` chunks drifted because of this (BUG 1).
+    expect(codePointWidth(0x23f0)).toBe(2) // ⏰ alarm clock
+    expect(displayWidth("⏰")).toBe(2)
+    expect(codePointWidth(0x231a)).toBe(2) // ⌚ watch
+    expect(codePointWidth(0x26a1)).toBe(2) // ⚡ high voltage
+    expect(codePointWidth(0x2705)).toBe(2) // ✅ check mark button
+    expect(codePointWidth(0x2b50)).toBe(2) // ⭐ star
+    expect(codePointWidth(0x274c)).toBe(2) // ❌ cross mark
+    // `⏰ CronList` chunk: 2 (⏰) + 1 (space) + 8 (CronList) = 11.
+    expect(displayWidth("⏰ CronList")).toBe(11)
+  })
+
+  it("keeps text-default symbols at width 1 (no VS16)", () => {
+    // These have an emoji variation sequence but default to TEXT
+    // presentation, so a bare code point stays 1 cell. They only go wide
+    // when followed by VS16 (which itself contributes 0). Matches the
+    // terminal's text-presentation rendering for the startup tree glyphs.
+    expect(codePointWidth(0x2714)).toBe(1) // ✔ heavy check mark
+    expect(codePointWidth(0x2726)).toBe(1) // ✦ black four pointed star
+    expect(codePointWidth(0x276f)).toBe(1) // ❯ prompt chevron
+    expect(codePointWidth(0x25cf)).toBe(1) // ● black circle
+    expect(codePointWidth(0x00b1)).toBe(1) // ± plus-minus (ShowDiff icon)
+    expect(codePointWidth(0x2913)).toBe(1) // ⤓ downwards arrow to bar (Fetch icon)
+  })
+
   it("treats Private Use Area codepoints as width 1 (font-config dependent)", () => {
     // PUA cell width is NOT hard-coded to 2: a patched Nerd Font
     // renders these as 2 cells, but iTerm + an unpatched fallback

@@ -403,7 +403,7 @@ export async function replayToScrollback(
           pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
             ? (c as Record<string, (s: string) => string>)[pres.color]
             : c.orange
-        const iconText = pres?.icon ? `${labelColor(pres.icon)} ` : ""
+        const iconText = pres?.icon ? `${c.bold(labelColor(pres.icon))} ` : ""
         const label = c.bold(labelColor(tu.name))
         // Header content slot: prefer the persisted `displayHeader` (plugin
         // override, e.g. the tasks plugin's `✔ ALL DONE · 39/39 · ...`)

@@ -71,6 +71,23 @@ export interface UserConfig {
    */
   skipQuota?: boolean
   /**
+   * First-run plugin bootstrap. When `true` (or unset = default), the agent
+   * clones the extended first-party plugins repo
+   * (`gastonmorixe/minimal-agent-plugins`) into `~/.minimal-agent/plugins` the
+   * first time it boots without that directory populated. Set `false` to never
+   * fetch (an offline / locked-down box, or you manage plugins yourself).
+   * Override at runtime via `MINIMAL_AGENT_NO_PLUGIN_SYNC=1`. The clone is
+   * one-shot: once the directory has plugins it is never auto-pulled.
+   */
+  pluginSync?: boolean
+  /**
+   * Override the git remote used by the first-run plugin bootstrap. Defaults
+   * to the public `minimal-agent-plugins` repo. Accepts anything `git clone`
+   * understands (https URL, ssh URL, local path, `file://`). Override at
+   * runtime via `MINIMAL_AGENT_PLUGINS_REPO`.
+   */
+  pluginsRepo?: string
+  /**
    * Show the startup tree (banner + rows + closer). When unset, the
    * default is `true` for interactive sessions and `false` for
    * non-interactive ones (`--prompt`, `-`, bare-positional prompt).
@@ -224,6 +241,10 @@ export function loadUserConfig(): UserConfig {
   }
   if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
   if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
+  if (typeof obj.pluginSync === "boolean") out.pluginSync = obj.pluginSync
+  if (typeof obj.pluginsRepo === "string" && obj.pluginsRepo.length > 0) {
+    out.pluginsRepo = obj.pluginsRepo
+  }
   if (typeof obj.header === "boolean") out.header = obj.header
   if (typeof obj.mode === "string" && obj.mode.length > 0) out.mode = obj.mode
   // nerdGlyphCells: literal 1 or 2 numbers, or string "auto". Anything else

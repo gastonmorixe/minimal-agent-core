@@ -34,7 +34,20 @@ import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
 import { acquireLock, LockAbortedError, type LockHandle, LockTimeoutError } from "./file-lock.ts"
 import { parseJsonc } from "./jsonc.ts"
 import { getSessionId } from "./metadata.ts"
+import { promptPath, renderPrompt } from "./prompts.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
+
+/**
+ * Load a built-in tool's description from `src/prompts/tools/<name>.md`. Tool
+ * descriptions are model-facing prompts, so they live in markdown rather than
+ * inline string literals (see `src/prompts/README.md`).
+ *
+ * @param name - The markdown basename (e.g. `"bash"`).
+ * @returns The rendered description text.
+ */
+function toolDescription(name: string): string {
+  return renderPrompt(promptPath(import.meta, "prompts", "tools", `${name}.md`))
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,22 +231,7 @@ const BASH_TOOL: ToolDefinition = {
   name: "Bash",
   icon: "»",
   color: "orange",
-  description:
-    "Executes a given bash command and returns its output.\n\n" +
-    "Output you (the model) receive is capped at ~64KB / 1000 lines (whichever " +
-    "first). For commands that may produce more, bound the output yourself with " +
-    "`head -c`, `head -n`, `tail`, `sed -n '1,200p'`, or `grep` : pre-bounding " +
-    "gives usable signal: the post-hoc cap is lossy and includes a structured " +
-    "truncation notice for resume.\n\n" +
-    "Separately, the user's transcript previews ONLY THE FIRST ~10 LINES of body " +
-    "and summarizes the rest as `shown N/M L`. Do NOT use Bash to render visual " +
-    "content for the user (ASCII art, banners, ANSI TUI previews, formatted " +
-    "tables, generated reports) : they will only see a fraction. To show visual " +
-    "content, put it in your text reply instead, which the user reads in full. " +
-    "When the TUI preview clamped more lines than the API cap did, you will " +
-    "receive a `<ma::agent::output-preview shown=N total=M>` annotation on the tool_result " +
-    "so the divergence is visible to you on the next turn.\n\n" +
-    "The working directory persists between commands, but shell state does not.",
+  description: toolDescription("bash"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -254,13 +252,7 @@ const READ_TOOL: ToolDefinition = {
   name: "Read",
   icon: "•",
   color: "sky",
-  description:
-    "Reads a file from the local filesystem. Returns content with line numbers.\n\n" +
-    "Output you (the model) receive is capped at ~64KB / 1000 lines per call. The " +
-    "user's transcript previews only the first ~15 lines and summarizes the rest. " +
-    "For larger files, page with `offset` (zero-based start line) and `limit` " +
-    "(max lines). The truncation notice reports both the cut line and total file " +
-    "size so you can pick the next offset.",
+  description: toolDescription("read"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -278,7 +270,7 @@ const WRITE_TOOL: ToolDefinition = {
   name: "Write",
   icon: "✚",
   color: "lime",
-  description: "Writes a file to the local filesystem. Overwrites existing files.",
+  description: toolDescription("write"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -295,7 +287,7 @@ const EDIT_TOOL: ToolDefinition = {
   name: "Edit",
   icon: "✦",
   color: "gold",
-  description: "Performs exact string replacements in files.",
+  description: toolDescription("edit"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -318,8 +310,7 @@ const GLOB_TOOL: ToolDefinition = {
   name: "Glob",
   icon: "✱",
   color: "violet",
-  description:
-    "Fast file pattern matching. Returns matching file paths sorted by modification time.",
+  description: toolDescription("glob"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -336,14 +327,7 @@ const GREP_TOOL: ToolDefinition = {
   name: "Grep",
   icon: "⌕",
   color: "pink",
-  description:
-    "Search file contents with regex using ripgrep.\n\n" +
-    "Output you (the model) receive is capped at ~64KB / 1000 lines. The user's " +
-    "transcript previews only the first ~12 lines and summarizes the rest. For " +
-    'broad searches, prefer `output_mode: "files_with_matches"` (paths only : ' +
-    'densest) or `"count"`. Narrow with `glob` (e.g. "*.ts"), `path` ' +
-    "(subdirectory), `-A/-B/-C` for context lines, or `head_limit` rather than " +
-    "relying on the cap to fire.",
+  description: toolDescription("grep"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -398,18 +382,7 @@ const MODE_TOOL: ToolDefinition = {
   name: "Mode",
   icon: "◐",
   color: "sky",
-  description:
-    "Returns the currently active operating mode (e.g. ASK) and its tool-permission " +
-    "policy. Call when you are uncertain whether a mode is active (e.g. after long " +
-    "thinking or many tool rounds) and you want a deterministic answer instead of " +
-    "guessing from earlier reasoning.\n\n" +
-    "The result is a JSON object: " +
-    "`{ id, label, since, permissions: { allow, deny } }`. " +
-    '`id: null` means no mode is active (fully unrestricted). `allow: ["*"]` means ' +
-    "every tool is allowed except those in `deny` (deny wins on overlap).\n\n" +
-    "You do NOT need to call this routinely : every tool_result you receive carries " +
-    "a trailing `<ma::agent::mode-active id=... since=... />` stamp with the same id. Use " +
-    "this tool when no recent tool round has fired and you want to confirm.",
+  description: toolDescription("mode"),
   input_schema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",

@@ -2073,3 +2073,310 @@ describe("EditorController — overlay key dispatch (editor.key hook)", () => {
     ctrl.stop()
   })
 })
+
+describe("EditorController — submit-queue navigation hook (setQueueKeyHandler)", () => {
+  type Call = { key: string; buffer: string; atTop: boolean }
+  /** Install a recording handler returning a per-key canned result. */
+  function withHandler(
+    ctrl: EditorController,
+    results: Record<string, { handled: boolean; buffer?: string }>,
+  ): Call[] {
+    const calls: Call[] = []
+    ctrl.setQueueKeyHandler((key, ctx) => {
+      calls.push({ key, buffer: ctx.buffer, atTop: ctx.atTop })
+      return results[key] ?? { handled: false }
+    })
+    return calls
+  }
+
+  it("routes ArrowUp to the handler and applies the returned buffer", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, { ArrowUp: { handled: true, buffer: "dequeued text" } })
+    ctrl.start()
+    stdin.send("\x1b[A")
+    // buffer replaced by the handler's text (queue dequeued back to prompt)
+    stdin.send("!") // append to prove the buffer is "dequeued text"
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual(["dequeued text!"])
+    ctrl.stop()
+  })
+
+  it("passes buffer + atTop context (empty prompt → atTop true)", () => {
+    const { ctrl, stdin } = make()
+    const calls = withHandler(ctrl, {})
+    ctrl.start()
+    stdin.send("\x1b[A")
+    expect(calls).toEqual([{ key: "ArrowUp", buffer: "", atTop: true }])
+    ctrl.stop()
+  })
+
+  it("atTop is false when the cursor sits below the first visual row", () => {
+    const { ctrl, stdin } = make()
+    const calls = withHandler(ctrl, {})
+    ctrl.start()
+    stdin.send("a")
+    stdin.send("\x1b\r") // Alt+Enter → newline, cursor now on row 1
+    stdin.send("b")
+    stdin.send("\x1b[A")
+    const up = calls.find((c) => c.key === "ArrowUp")
+    expect(up?.atTop).toBe(false)
+    expect(up?.buffer).toBe("a\nb")
+    ctrl.stop()
+  })
+
+  it("ArrowUp pass-through (handled:false) does not alter the buffer", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, { ArrowUp: { handled: false } })
+    ctrl.start()
+    stdin.send("hello")
+    stdin.send("\x1b[A") // not claimed → cursor-up no-op on single line
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual(["hello"])
+    ctrl.stop()
+  })
+
+  it("printable 'd' claimed by the handler is NOT inserted", () => {
+    const { ctrl, stdin } = make()
+    const calls = withHandler(ctrl, { d: { handled: true } })
+    ctrl.start()
+    stdin.send("d")
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r") // blank buffer → no submit
+    expect(submits).toEqual([])
+    expect(calls.some((c) => c.key === "d")).toBe(true)
+    ctrl.stop()
+  })
+
+  it("printable pass-through still inserts (incl. the greedy run)", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, {}) // everything pass-through
+    ctrl.start()
+    stdin.send("dxk") // a greedy printable run
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual(["dxk"])
+    ctrl.stop()
+  })
+
+  it("'k' returning a multi-line buffer sets a multi-line prompt", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, { k: { handled: true, buffer: "1. a\n2. b" } })
+    ctrl.start()
+    stdin.send("k")
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual(["1. a\n2. b"])
+    ctrl.stop()
+  })
+
+  it("Enter claimed by the handler does NOT submit (dequeue selection)", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, { Enter: { handled: true, buffer: "picked" } })
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    ctrl.start()
+    stdin.send("\r")
+    expect(submits).toEqual([]) // consumed by the overlay
+    stdin.send("!")
+    ctrl.setQueueKeyHandler(null) // let the next Enter submit
+    stdin.send("\r")
+    expect(submits).toEqual(["picked!"])
+    ctrl.stop()
+  })
+
+  it("Enter pass-through still submits a non-blank buffer", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, {}) // Enter not claimed
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    ctrl.start()
+    stdin.send("hi")
+    stdin.send("\r")
+    expect(submits).toEqual(["hi"])
+    ctrl.stop()
+  })
+
+  it("kitty CSI-u Esc claimed by the handler does NOT abort the turn", () => {
+    const bus = new AbortBus()
+    const { ctrl, stdin } = make({ abortBus: bus, armedTickMs: 0 })
+    withHandler(ctrl, { Escape: { handled: true } })
+    ctrl.start()
+    bus.beginTurn()
+    ctrl.notifyTurnStart()
+    stdin.send("\x1b[27u") // kitty CSI-u Esc
+    expect(bus.isTurnInFlight()).toBe(true) // overlay ate it, no abort
+    ctrl.stop()
+  })
+
+  it("kitty CSI-u Esc pass-through (handled:false) still aborts the turn", () => {
+    const bus = new AbortBus()
+    const aborts: unknown[] = []
+    bus.on("abort", (r) => aborts.push(r))
+    const { ctrl, stdin } = make({ abortBus: bus, armedTickMs: 0 })
+    withHandler(ctrl, { Escape: { handled: false } })
+    ctrl.start()
+    bus.beginTurn()
+    ctrl.notifyTurnStart()
+    stdin.send("\x1b[27u")
+    expect(aborts.length).toBe(1)
+    expect(bus.isTurnInFlight()).toBe(false)
+    ctrl.stop()
+  })
+
+  it("kitty CSI-u 'd' (\\x1b[100u) routes to the handler", () => {
+    const { ctrl, stdin } = make()
+    const calls = withHandler(ctrl, { d: { handled: true } })
+    ctrl.start()
+    stdin.send("\x1b[100u")
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual([]) // 'd' swallowed, buffer still blank
+    expect(calls.some((c) => c.key === "d")).toBe(true)
+    ctrl.stop()
+  })
+
+  it("a throwing handler is swallowed → key falls through to default", () => {
+    const { ctrl, stdin } = make()
+    ctrl.setQueueKeyHandler(() => {
+      throw new Error("boom")
+    })
+    ctrl.start()
+    stdin.send("d") // handler throws → default insert
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual(["d"]) // inserted despite the throw
+    ctrl.stop()
+  })
+
+  it("detach (null handler) restores plain key handling", () => {
+    const { ctrl, stdin } = make()
+    withHandler(ctrl, { d: { handled: true } })
+    ctrl.setQueueKeyHandler(null)
+    ctrl.start()
+    stdin.send("d")
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    stdin.send("\r")
+    expect(submits).toEqual(["d"]) // 'd' inserted normally
+    ctrl.stop()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Modal overlay ownership (editor.overlay.open / close)
+// ---------------------------------------------------------------------------
+//
+// A command TUI (/config, /usage) takes modal ownership of the input line.
+// While owned the editor: hides the prompt row + cursor, blocks submit (so a
+// typed `/cmd` can't leak to scrollback), and routes every key — including
+// printable chars + Backspace — through the editor.key hook so the overlay
+// drives its own draft instead of the shared prompt buffer.
+
+describe("EditorController — modal overlay ownership", () => {
+  it("hides the prompt row + parks the cursor while owned", () => {
+    const { ctrl, compositor } = make()
+    ctrl.start()
+    expect(compositor.last().lines).toEqual(["> "])
+    ctrl.openOverlay("config")
+    // Prompt row is gone; the overlay paints via its own footer (none here).
+    expect(compositor.last().lines).toEqual([])
+    expect(compositor.last().cursor).toEqual({ row: 0, col: 0 })
+    expect(ctrl.isOverlayOwned()).toBe(true)
+    ctrl.stop()
+  })
+
+  it("blocks submit while owned (no scrollback leak) and restores on close", () => {
+    const { ctrl, stdin, compositor } = make()
+    const submits: string[] = []
+    ctrl.on("submit", (t) => submits.push(t))
+    ctrl.start()
+    ctrl.openOverlay("config")
+    // Even an Enter (or any pending buffer) must not produce a submit.
+    stdin.send("\r")
+    expect(submits).toEqual([])
+    ctrl.closeOverlay("config")
+    expect(ctrl.isOverlayOwned()).toBe(false)
+    // Prompt is back.
+    expect(compositor.last().lines).toEqual(["> "])
+    // And submit works again.
+    stdin.send("hi")
+    stdin.send("\r")
+    expect(submits).toEqual(["hi"])
+    ctrl.stop()
+  })
+
+  it("routes printable chars through editor.key (not the prompt buffer) while owned", () => {
+    const hooks = new Hooks()
+    const keys: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        keys.push(payload.key)
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    ctrl.openOverlay("config")
+    stdin.send("abc")
+    // Each printable arrived as its own editor.key event.
+    expect(keys).toEqual(["a", "b", "c"])
+    // The prompt buffer was NOT mutated.
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("routes Backspace as an editor.key 'Backspace' while owned", () => {
+    const hooks = new Hooks()
+    const keys: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        keys.push(payload.key)
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    ctrl.openOverlay("config")
+    stdin.send("\x7f")
+    expect(keys).toEqual(["Backspace"])
+    ctrl.stop()
+  })
+
+  it("close is owner-checked: a non-owner close is ignored", () => {
+    const { ctrl } = make()
+    ctrl.start()
+    ctrl.openOverlay("config")
+    ctrl.closeOverlay("usage") // different owner → ignored
+    expect(ctrl.isOverlayOwned()).toBe(true)
+    ctrl.closeOverlay("config") // the owner closes
+    expect(ctrl.isOverlayOwned()).toBe(false)
+    ctrl.stop()
+  })
+
+  it("a non-printable control key (Ctrl+A) can't edit the hidden prompt while owned", () => {
+    const { ctrl, stdin } = make()
+    ctrl.start()
+    stdin.send("seed") // buffer has content before opening
+    ctrl.openOverlay("config")
+    // Ctrl+A (move-line-start) and friends are swallowed while owned.
+    stdin.send("\x01")
+    stdin.send("x") // printable → routed to editor.key, not the buffer
+    // The buffer is whatever openOverlay cleared it to (empty) — unchanged by
+    // the swallowed control byte or the routed printable.
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+})

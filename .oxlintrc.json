@@ -103,7 +103,12 @@
       }
     },
     {
-      "files": ["src/editor-controller.ts", "src/input.ts", "src/index.ts"],
+      "files": [
+        "src/editor-controller.ts",
+        "src/input.ts",
+        "src/index.ts",
+        "src/plugins/loader.ts"
+      ],
       "rules": {
         "max-lines": "off"
       }

@@ -95,3 +95,32 @@ describe("tool descriptions — output cap is documented", () => {
     expect(MAX_TOOL_OUTPUT_LINES).toBe(1_000)
   })
 })
+
+describe("tool descriptions — search routing directives", () => {
+  // These directives were measured to cut Bash-`find`/`grep` mis-routing from
+  // ~30-41% to ~0% on opus-4-8 with no over-routing of real shell work. See
+  // private/work/tool-routing-study/ and docs/changes/
+  // 2026-05-30-tool-routing-search-directives.md. Keep them so a future prompt
+  // edit can't silently drop the steer.
+  it("Grep tells the model to never invoke grep/rg via Bash", () => {
+    const d = descOf("Grep")
+    expect(d).toMatch(/NEVER/i)
+    expect(d).toMatch(/\bgrep\b/)
+    expect(d).toMatch(/\brg\b/)
+  })
+
+  it("Glob tells the model to never use find/fd/ls via Bash", () => {
+    const d = descOf("Glob")
+    expect(d).toMatch(/NEVER/i)
+    expect(d).toMatch(/\bfind\b/)
+  })
+
+  it("Bash steers search/read/count to the dedicated tools", () => {
+    const d = descOf("Bash")
+    // Names the dedicated tools as the right call for search/read.
+    expect(d).toMatch(/Grep/)
+    expect(d).toMatch(/Glob/)
+    // And no longer suggests bounding output with `grep`.
+    expect(d).not.toMatch(/or `grep`/)
+  })
+})
