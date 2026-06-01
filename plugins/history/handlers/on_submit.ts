@@ -51,7 +51,7 @@ const handler: EventHandler<SubmittedPayload> = async (
   if (isDisabled()) return
   const payload = ctx.payload as unknown
   if (!isPayload(payload)) {
-    ctx.log.warn(`history.on_submit: ignoring malformed payload ${JSON.stringify(payload)}`)
+    ctx.log.warn("on_submit", `ignoring malformed payload ${JSON.stringify(payload)}`)
     return
   }
   const { text, sid, exit } = payload
@@ -75,7 +75,7 @@ const handler: EventHandler<SubmittedPayload> = async (
     // ROW still carries payload.cwd as a metadata field — see the
     // `recordCwd` variable above.
     projectCwd: ctx.cwd,
-    logger: (m) => ctx.log.warn(m),
+    logger: (m) => ctx.log.warn("on_submit", m),
   })
   // Notify the in-memory recall so ↑ on the next turn surfaces the
   // entry. Best-effort — if the recall was never built (e.g. ↑ never
@@ -84,7 +84,7 @@ const handler: EventHandler<SubmittedPayload> = async (
   try {
     recallFor(ctx.cwd).push(text)
   } catch (e) {
-    ctx.log.warn(`history.on_submit: recall.push failed: ${e instanceof Error ? e.message : e}`)
+    ctx.log.warn("on_submit", `recall.push failed: ${e instanceof Error ? e.message : e}`)
   }
 }
 
