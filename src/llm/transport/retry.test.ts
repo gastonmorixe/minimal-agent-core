@@ -170,6 +170,33 @@ describe("withRetry", () => {
     expect(calls).toBe(1)
   })
 
+  it("propagates a retryable:false error WITHOUT retrying, even when its tag is in a retryable set", async () => {
+    // Regression for 2026-05-30 session 50efb996: a terminal billing failure
+    // (insufficient_quota) reached the retry loop and spun for an hour. The
+    // provider's explicit retryable:false verdict must win over the tag-based
+    // classifier — here the error even carries `api_error` (a retryable tag),
+    // yet must propagate on the first attempt.
+    let calls = 0
+    let caught = ""
+    try {
+      await drain(
+        withRetry(async function* () {
+          calls++
+          throw Object.assign(new Error("out of quota"), {
+            streamErrorType: "api_error",
+            retryable: false,
+          })
+          // biome-ignore lint/correctness/useYield: throw-only attempt
+          yield ""
+        }),
+      )
+    } catch (e) {
+      caught = (e as Error).message
+    }
+    expect(caught).toContain("out of quota")
+    expect(calls).toBe(1)
+  })
+
   it("respects signal: an abort during backoff stops the loop", async () => {
     const ac = new AbortController()
     let calls = 0

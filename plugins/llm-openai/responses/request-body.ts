@@ -65,6 +65,7 @@ export interface OpenAIResponsesMessageItem {
     | { type: "input_text"; text: string }
     | { type: "output_text"; text: string }
     | { type: "input_image"; image_url: string; detail?: "low" | "high" | "auto" }
+    | { type: "input_image"; file_id: string; detail?: "low" | "high" | "auto" }
     | { type: "input_file"; file_id: string }
   >
 }
@@ -231,6 +232,13 @@ function appendCanonicalMessage(items: OpenAIResponsesInputItem[], msg: Canonica
           parts.push({
             type: "input_image",
             image_url: `data:${block.source.mediaType};base64,${block.source.data}`,
+            detail: block.source.detail,
+          })
+        } else if (block.source.kind === "file_id") {
+          // OpenAI Responses accepts an uploaded image by file id.
+          parts.push({
+            type: "input_image",
+            file_id: block.source.fileId,
             detail: block.source.detail,
           })
         }

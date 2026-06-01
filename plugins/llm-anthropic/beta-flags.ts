@@ -118,7 +118,18 @@ export function buildBetaFlags(opts: {
 
   const isOAuth = authKind === "oauth"
   if (isOAuth) flags.add(ANTHROPIC_BETA_FLAGS.OAUTH)
-  flags.add(ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING)
+  // Interleaved thinking is OMITTED for opus-4-8: under this beta it emits huge
+  // parallel tool batches whose interleaved thinking hallucinates same-turn
+  // tool results, spiraling into ever-larger batches. Wire-proven, and absent
+  // on opus-4.7 under the same flag (model-behavior change, not transport). See
+  // TODOS.md T-7c3f02 + private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md.
+  // Kept for every other model (they sequence tool use correctly). Escape
+  // hatch: MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1. Mirrors the legacy
+  // src/headers.ts gate so both transports agree.
+  const forceInterleaved = process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING === "1"
+  if (forceInterleaved || !model.id.includes("opus-4-8")) {
+    flags.add(ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING)
+  }
   flags.add(ANTHROPIC_BETA_FLAGS.REDACT_THINKING)
   flags.add(ANTHROPIC_BETA_FLAGS.CONTEXT_MANAGEMENT)
   if (isOAuth) flags.add(ANTHROPIC_BETA_FLAGS.PROMPT_CACHING_SCOPE)

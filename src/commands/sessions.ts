@@ -9,11 +9,17 @@ import {
   parseLines as parseSessionLines,
   sessionFilePath,
 } from "../session-store.ts"
+import { computeSessionUsage, type SessionUsage, ZERO_SESSION_USAGE } from "../session-usage.ts"
 
 import { readSessionIndex } from "./session-index.ts"
 
 const PATH_COL_WIDTH = 30
 const SIZE_COL_WIDTH = 9
+/**
+ * Width of the tokens column: a compact count (`232.4k`) plus a trailing
+ * `[R]`/`[E]` provenance marker. Wide enough for `1.2M [E]`.
+ */
+const TOKENS_COL_WIDTH = 11
 
 /**
  * Collapse `$HOME` to `~` and left-truncate (with `…`) so the tail of the
@@ -43,6 +49,30 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`.padStart(SIZE_COL_WIDTH)
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`.padStart(SIZE_COL_WIDTH)
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`.padStart(SIZE_COL_WIDTH)
+}
+
+/**
+ * Compact token count: `0`, `847`, `12.3k`, `1.2M`. Drops a trailing `.0`
+ * so round thousands read `12k`, not `12.0k`. Mirrors the `fmtTokens`
+ * formatter in the quota-status footer so the two surfaces agree.
+ */
+export function formatTokenCount(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—"
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}k`
+  return String(n)
+}
+
+/**
+ * Render the tokens column cell: a right-aligned compact count plus a
+ * provenance marker — `[R]` (real, summed from saved billed usage) or
+ * `[E]` (estimated from transcript text). A session with no assistant
+ * turns shows a dim em-dash. Padded to {@link TOKENS_COL_WIDTH}.
+ */
+export function formatTokenCell(usage: SessionUsage): string {
+  if (usage.turns === 0) return "—".padStart(TOKENS_COL_WIDTH)
+  const marker = usage.estimated ? "[E]" : "[R]"
+  return `${formatTokenCount(usage.tokens)} ${marker}`.padStart(TOKENS_COL_WIDTH)
 }
 
 /**
@@ -118,12 +148,13 @@ export function runSessionsCommand(opts: RunSessionsOptions = {}): void {
   }
   console.log("")
   console.log(
-    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("size".padStart(SIZE_COL_WIDTH))} ${c.bold("cwd".padEnd(PATH_COL_WIDTH))} ${c.bold("preview")}`,
+    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("size".padStart(SIZE_COL_WIDTH))} ${c.bold("tokens".padStart(TOKENS_COL_WIDTH))} ${c.bold("cwd".padEnd(PATH_COL_WIDTH))} ${c.bold("preview")}`,
   )
   for (const rec of matched) {
     const path = sessionFilePath(rec.sid)
     let bytes = Number.NaN
     let snippet = ""
+    let usage: SessionUsage = { ...ZERO_SESSION_USAGE }
     try {
       // Cheap stat first (no read). Lets us still show the size even
       // if the snippet read fails for some reason.
@@ -136,10 +167,12 @@ export function runSessionsCommand(opts: RunSessionsOptions = {}): void {
       // Read the whole file — they're append-only JSONL, typically small.
       // For huge sessions this is still fine because we only do it on
       // matched rows of an explicit `--sessions` listing (one-shot),
-      // not in any hot path.
+      // not in any hot path. One parse feeds both the snippet AND the
+      // token-usage aggregation (real-from-saved-usage or estimated).
       const text = readFileSync(path, "utf-8")
       const { records: parsed } = parseSessionLines(text)
       snippet = firstUserPromptSnippet(parsed, 40)
+      usage = computeSessionUsage(parsed, { modelId: rec.model })
     } catch {
       // ignore — session file may have been deleted
     }
@@ -147,8 +180,16 @@ export function runSessionsCommand(opts: RunSessionsOptions = {}): void {
     const sid = c.cyan(rec.sid.padEnd(38))
     const model = c.dim(rec.model.padEnd(22))
     const size = c.dim(formatBytes(bytes))
+    // Estimated counts read dim (less trustworthy); real counts read in a
+    // brighter faint-white so the [R] rows stand out at a glance.
+    const tokens =
+      usage.turns === 0
+        ? c.dim(formatTokenCell(usage))
+        : usage.estimated
+          ? c.dim(formatTokenCell(usage))
+          : c.faintWhite(formatTokenCell(usage))
     const cwd = c.dim(formatCwd(rec.cwd ?? "", PATH_COL_WIDTH))
-    console.log(`  ${when}  ${sid} ${model} ${size} ${cwd} ${c.faintWhite(snippet)}`)
+    console.log(`  ${when}  ${sid} ${model} ${size} ${tokens} ${cwd} ${c.faintWhite(snippet)}`)
   }
   console.log("")
   const summary =

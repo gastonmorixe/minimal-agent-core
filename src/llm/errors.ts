@@ -169,6 +169,7 @@ export type StreamErrorCategory =
   | "api"
   | "timeout"
   | "rate_limit"
+  | "billing"
   | "canceled"
   | "auth"
   | "unknown"
@@ -204,16 +205,29 @@ export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode
   const code = input.upstreamCode?.toLowerCase()
   const status = input.httpStatus
 
-  // Rate limits: explicit code OR HTTP 429. OpenAI uses
-  // `rate_limit_exceeded` / `insufficient_quota`; Anthropic `rate_limit_error`.
+  // Billing / quota exhaustion is TERMINAL, not a rate limit. OpenAI returns
+  // `insufficient_quota` ("You exceeded your current quota, check your plan
+  // and billing details") over a 200 SSE error frame, and it repeats every
+  // request until the account is topped up — waiting does NOT clear it. A
+  // prior fix lumped this into `rate_limit_error` (slow-curve retry), so a
+  // dead-broke account spun the forever-retry loop for an hour instead of
+  // stopping the turn (session 50efb996, 2026-05-30: 36 identical
+  // insufficient_quota failures). Tag it untagged + retryable:false so it
+  // propagates and the user sees the real "out of quota" error.
   if (
-    status === 429 ||
-    (code &&
-      (code.includes("rate_limit") ||
-        code.includes("rate-limit") ||
-        code === "insufficient_quota" ||
-        code.includes("quota_exceeded")))
+    code === "insufficient_quota" ||
+    code === "billing_hard_limit_reached" ||
+    code?.includes("billing") ||
+    code?.includes("quota_exceeded")
   ) {
+    return { streamErrorType: undefined, category: "billing", retryable: false }
+  }
+
+  // Rate limits: explicit code OR HTTP 429. OpenAI uses
+  // `rate_limit_exceeded`; Anthropic `rate_limit_error`. Unlike billing
+  // exhaustion above, these clear once the window rolls, so they retry on
+  // the slow curve.
+  if (status === 429 || (code && (code.includes("rate_limit") || code.includes("rate-limit")))) {
     return { streamErrorType: "rate_limit_error", category: "rate_limit", retryable: true }
   }
 

@@ -214,6 +214,47 @@ describe("LiveAreaScheduler — repaint dedup & routing", () => {
     sched.stop()
   })
 
+  it("expands a multi-line slot value into one footer line per row", async () => {
+    // A widget (e.g. the sub-agent fleet panel) returns several rows as a
+    // single "\n"-joined string; the scheduler must paint each as its own
+    // footer line so the editor counts live-area height correctly.
+    const slot = makeSlot({
+      id: "fleet",
+      refreshMs: 1_000,
+      invoke: async () => "◈ fleet · 2 running\n  ◐ A2 worker\n  ◐ A3 explorer",
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual([
+      "◈ fleet · 2 running",
+      "  ◐ A2 worker",
+      "  ◐ A3 explorer",
+    ])
+    sched.stop()
+  })
+
+  it("leaves a single-line slot value as exactly one footer line", async () => {
+    const slot = makeSlot({ id: "a", refreshMs: 1_000, invoke: async () => "one row" })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual(["one row"])
+    sched.stop()
+  })
+
   it("clears the slot when handler returns null", async () => {
     let returnNull = false
     const slot = makeSlot({
@@ -967,5 +1008,65 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
     // Legacy logger fired, bus did NOT.
     expect(logs.length).toBeGreaterThan(0)
     expect(busEvents).toHaveLength(0)
+  })
+})
+
+describe("LiveAreaScheduler — ctx.emit side-channel (prompt.inject port)", () => {
+  it("slot ctx.emit fans out onto the shared bus", async () => {
+    const { EventBus } = await import("./plugins/event-bus.ts")
+    const bus = new EventBus(() => {})
+    const received: unknown[] = []
+    bus.on("prompt.inject", (ctx) => {
+      received.push(ctx.payload)
+    })
+    const slot = makeSlot({
+      id: "heartbeat",
+      refreshMs: 1_000,
+      invoke: async (ctx) => {
+        ctx.emit?.("prompt.inject", { text: `fire-${ctx.tick}` })
+        return `tick ${ctx.tick}`
+      },
+    })
+    const clock = new FakeClock()
+    const sched = new LiveAreaScheduler([slot], makeSink(), {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      bus,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    await clock.tick(1_000)
+    // Let the bus microtask fanout settle.
+    await new Promise((r) => setTimeout(r, 10))
+    sched.stop()
+
+    expect(received).toEqual([{ text: "fire-0" }, { text: "fire-1" }])
+  })
+
+  it("ctx.emit is a no-op (never throws) when no bus is wired", async () => {
+    let threw = false
+    const slot = makeSlot({
+      id: "heartbeat",
+      invoke: async (ctx) => {
+        try {
+          ctx.emit?.("prompt.inject", { text: "x" })
+        } catch {
+          threw = true
+        }
+        return "ok"
+      },
+    })
+    const clock = new FakeClock()
+    const sched = new LiveAreaScheduler([slot], makeSink(), {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+      // no bus
+    })
+    sched.start()
+    await clock.tick(0)
+    sched.stop()
+    expect(threw).toBe(false)
   })
 })

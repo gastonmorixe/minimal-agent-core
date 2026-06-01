@@ -1,6 +1,7 @@
 export type CommandName =
   | "dump"
   | "sessions"
+  | "usage"
   | "list-flags"
   | "list-spinners"
   | "list-models"
@@ -26,6 +27,8 @@ export interface CommandPlan extends CommandCapabilities {
 export interface PlanCommandInput {
   dumpArg?: string
   wantListSessions: boolean
+  /** `usage [<period>]`: token-usage stats across all sessions. */
+  wantUsage?: boolean
   wantListFlags: boolean
   wantListSpinners: boolean
   wantListModels: boolean
@@ -45,12 +48,16 @@ function capabilities(command: CommandName): CommandCapabilities {
   switch (command) {
     case "dump":
     case "sessions":
+    case "usage":
     case "list-flags":
     case "list-spinners":
     case "list-providers":
     case "logout":
     case "auth-status":
-      // list-providers reads the in-process canonical registry only.
+      // usage scans session JSONL on disk + the in-process model registry
+      // for pricing/provider; like list-providers it needs no auth/network.
+      // (Provider plugins ARE registered before dispatch so pricing + model
+      // labels resolve.)
       return {
         needsStartupUi: false,
         needsAuth: false,
@@ -101,32 +108,34 @@ function capabilities(command: CommandName): CommandCapabilities {
  * Decide which top-level command should run, then expose an explicit
  * capability profile so startup dependencies are only initialized when needed.
  *
- * Precedence: dump > sessions > list-flags > list-spinners > list-models >
- * login > logout > auth-status > run. Auth subcommands sit ahead of `run`
- * but after the read-only inspection commands so a `--sessions --logout`
- * combo still falls through to sessions (whoever wrote that flag combo
- * almost certainly meant the read).
+ * Precedence: dump > sessions > usage > list-flags > list-spinners >
+ * list-models > login > logout > auth-status > run. Auth subcommands sit
+ * ahead of `run` but after the read-only inspection commands so a
+ * `--sessions --logout` combo still falls through to sessions (whoever wrote
+ * that flag combo almost certainly meant the read).
  */
 export function planCommand(input: PlanCommandInput): CommandPlan {
   const command: CommandName = input.dumpArg
     ? "dump"
     : input.wantListSessions
       ? "sessions"
-      : input.wantListFlags
-        ? "list-flags"
-        : input.wantListSpinners
-          ? "list-spinners"
-          : input.wantListModels
-            ? "list-models"
-            : input.wantListProviders
-              ? "list-providers"
-              : input.wantLogin
-                ? "login"
-                : input.wantLogout
-                  ? "logout"
-                  : input.wantAuthStatus
-                    ? "auth-status"
-                    : "run"
+      : input.wantUsage
+        ? "usage"
+        : input.wantListFlags
+          ? "list-flags"
+          : input.wantListSpinners
+            ? "list-spinners"
+            : input.wantListModels
+              ? "list-models"
+              : input.wantListProviders
+                ? "list-providers"
+                : input.wantLogin
+                  ? "login"
+                  : input.wantLogout
+                    ? "logout"
+                    : input.wantAuthStatus
+                      ? "auth-status"
+                      : "run"
 
   return {
     command,

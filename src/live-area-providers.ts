@@ -25,8 +25,9 @@ import {
   getDiagnosticBus,
   Severity,
 } from "./diagnostic-bus.ts"
+import { agentContextToEnv } from "./plugins/agent-context.ts"
 import type { EventBus } from "./plugins/event-bus.ts"
-import type { ResolvedLiveAreaSlot } from "./plugins/types.ts"
+import type { AgentContext, ResolvedLiveAreaSlot } from "./plugins/types.ts"
 
 /** Sink the scheduler writes into. Mirrors the `ReplEditor` shape. */
 export interface LiveAreaSink {
@@ -82,6 +83,19 @@ export interface LiveAreaSchedulerDeps {
    * inject a fresh `EventBus` so they can `.emit()` directly.
    */
   bus?: EventBus
+  /**
+   * Main-agent identity (session id, pid, model, version). Same value
+   * as {@link PluginLoaderOptions.agent}; the agent constructs it once
+   * at boot and passes the SAME frozen object to both the loader and
+   * this scheduler so plugins see a consistent identity regardless of
+   * dispatch path.
+   *
+   * When set, slot handler contexts gain `ctx.agent` and slot
+   * subprocesses inherit the `MINIMAL_AGENT_*` env vars produced by
+   * {@link agentContextToEnv}. Omit in legacy tests; back-compat
+   * preserves the historical "env is just process.env" behaviour.
+   */
+  agent?: AgentContext
 }
 
 interface SlotState {
@@ -117,6 +131,7 @@ export class LiveAreaScheduler {
   private readonly diagnosticBus: DiagnosticBus
   private readonly legacyLogger: ((msg: string) => void) | null
   private readonly bus: EventBus | null
+  private readonly agent: AgentContext | undefined
   /** Listener disposers (one per `(slot, event)` pair). Walked at `stop()`. */
   private readonly busDisposers: Array<() => void> = []
   private stopped = false
@@ -146,6 +161,7 @@ export class LiveAreaScheduler {
       deps.clearTimeout ?? ((h) => clearTimeout(h as Parameters<typeof clearTimeout>[0]))
     this.diagnosticBus = deps.diagnosticBus ?? getDiagnosticBus()
     this.legacyLogger = deps.logger ?? null
+    this.agent = deps.agent
   }
 
   // ---------- diagnostic emit helpers ------------------------------------
@@ -316,7 +332,10 @@ export class LiveAreaScheduler {
     const ctx = {
       packageDir: s.slot.packageDir,
       cwd: process.cwd(),
-      env: { ...process.env } as Record<string, string>,
+      env: {
+        ...process.env,
+        ...(this.agent ? agentContextToEnv(this.agent) : {}),
+      } as Record<string, string>,
       abort: ac.signal,
       stderr: process.stderr,
       // Plugin-scoped logger auto-prefixes source with this slot's
@@ -324,6 +343,11 @@ export class LiveAreaScheduler {
       // get the emitted source `<pluginId>.api-fail` on the diag bus.
       log: createPluginLogger(s.slot.pluginId, this.diagnosticBus),
       tick,
+      // Side-channel for periodic slots to fan out onto the shared bus
+      // (e.g. `schedule` emits `prompt.inject` for due tasks). No-op when
+      // the scheduler was built without a bus (back-compat tests).
+      emit: (channel: string, payload?: unknown) => this.bus?.emit(channel, payload),
+      agent: this.agent,
     }
 
     // Single-fire latch shared between the timeout path and the
@@ -478,7 +502,13 @@ export class LiveAreaScheduler {
         }
         s.warnedHeader = true
       }
-      footer.push(line)
+      // A slot may return a MULTI-LINE value: one logical widget that paints
+      // several rows (e.g. a sub-agent fleet panel — a header row plus one row
+      // per running worker). Split on "\n" so each row becomes a distinct
+      // footer line the editor counts toward live-area height. A single-line
+      // value yields exactly one element, so existing slots are byte-for-byte
+      // unaffected. The slot owns its own row budget (cap rows + "+N more").
+      for (const row of line.split("\n")) footer.push(row)
     }
     // Dedup at the scheduler layer: skip the sink push when nothing
     // changed since the last paint. This keeps the initial

@@ -1,0 +1,28 @@
+{
+  "id": "usage",
+  "name": "Usage",
+  "version": "0.1.0",
+  "description": "Token-usage stats overlay. The /usage command opens an interactive footer overlay showing total tokens + cost across all saved sessions, broken down by provider and model, as ASCII bar charts. ← / → switch the time window (Today, Last 24h, Last 30d, YTD, Last year, All time); 1-6 jump; Esc closes. Real billed usage is marked [R], transcript-estimated [E]. Same data + renderer as the `usage` CLI command. Headless: /usage <period> prints once to scrollback.",
+  "commands": [
+    {
+      "name": "usage",
+      "summary": "Show token-usage stats (interactive period switcher)",
+      "argHint": "[today|last-day|last-month|ytd|year|all]",
+      "handler": { "type": "module", "path": "./handlers/cmd_usage.ts", "export": "default" }
+    }
+  ],
+  "hooks": [
+    {
+      "id": "on_key",
+      "channel": "editor.key",
+      "handler": { "type": "module", "path": "./handlers/on_key.ts", "export": "default" },
+      "priority": 80
+    }
+  ],
+  "permissions": [
+    "hooks:editor.key",
+    "hooks:editor.footer.set",
+    "hooks:editor.overlay.open",
+    "hooks:editor.overlay.close"
+  ]
+}

@@ -295,6 +295,30 @@ describe("translateOpenAIResponsesStream — error events are retryable & tagged
     expect(err?.category).toBe("overloaded")
     expect(err?.upstreamType).toBe("overloaded_error")
   })
+
+  it("an `insufficient_quota` error event surfaces a TERMINAL (non-retryable) stream_error", async () => {
+    // Regression for 2026-05-30 session 50efb996: out-of-credit account got
+    // `insufficient_quota` on every request (HTTP 200 SSE error frame) and the
+    // agent retried it 36 times over an hour. Billing exhaustion is terminal:
+    // retryable:false, no upstream retry tag, so it propagates and stops.
+    const raw =
+      'data: {"type":"error","error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}\n\n'
+    const events = await replayRaw(raw)
+    const err = firstOf(events, "stream_error")
+    expect(err).toBeDefined()
+    expect(err?.retryable).toBe(false)
+    expect(err?.category).toBe("billing")
+    expect(err?.upstreamType).toBeUndefined()
+  })
+
+  it("a `response.failed` with insufficient_quota is also terminal", async () => {
+    const raw =
+      'data: {"type":"response.failed","response":{"id":"r1","status":"failed","error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}}\n\n'
+    const events = await replayRaw(raw)
+    const err = firstOf(events, "stream_error")
+    expect(err?.retryable).toBe(false)
+    expect(err?.category).toBe("billing")
+  })
 })
 
 describe("validateOpenAIRequest — modality gating", () => {
@@ -375,5 +399,92 @@ describe("multimodal request encoding", () => {
     expect(j).toContain("https://x/y.png")
     expect(j).toContain('"type":"input_file"')
     expect(j).toContain('"file_id":"file_123"')
+  })
+
+  it("Responses: base64 image → input_image data URL; file_id image → input_image file_id", () => {
+    bootstrap()
+    const b64: CanonicalRequest = {
+      modelId: "gpt-5.5",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { kind: "base64", mediaType: "image/jpeg", data: "QUJD" } },
+          ],
+        },
+      ],
+    }
+    const jb = JSON.stringify(buildOpenAIResponsesBody(b64, resolveModel("gpt-5.5")))
+    expect(jb).toContain('"type":"input_image"')
+    expect(jb).toContain("data:image/jpeg;base64,QUJD")
+
+    const fid: CanonicalRequest = {
+      modelId: "gpt-5.5",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "image", source: { kind: "file_id", fileId: "file_img_9" } }],
+        },
+      ],
+    }
+    const jf = JSON.stringify(buildOpenAIResponsesBody(fid, resolveModel("gpt-5.5")))
+    // image-by-file-id is input_image (NOT input_file, which is for documents)
+    expect(jf).toContain('"type":"input_image"')
+    expect(jf).toContain('"file_id":"file_img_9"')
+    expect(jf).not.toContain('"type":"input_file"')
+  })
+})
+
+describe("translateOpenAIResponsesStream — truncated stream (no terminal event)", () => {
+  async function replayRaw(raw: string): Promise<CanonicalEvent[]> {
+    return collect(translateOpenAIResponsesStream(parseSse<OpenAIResponsesEvent>(sseStream(raw))))
+  }
+
+  // Regression: session 50efb996 (2026-05-30, gpt-5.5, turn 036). The server
+  // sent created → in_progress → output_item.added(reasoning) → keepalive, then
+  // closed the connection with NO response.completed / failed / incomplete.
+  // The old translator fell through to a stopReason=null end_turn, the agent
+  // loop saw zero tool_use blocks, and the turn silently ended mid-task.
+  it("a stream that closes without a terminal event yields a RETRYABLE stream_error", async () => {
+    const raw = [
+      'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_x","model":"gpt-5.5"}}\n\n',
+      'event: response.in_progress\ndata: {"type":"response.in_progress","response":{"id":"resp_x","model":"gpt-5.5"}}\n\n',
+      'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}\n\n',
+      'event: keepalive\ndata: {"type":"keepalive","sequence_number":3}\n\n',
+    ].join("")
+    const events = await replayRaw(raw)
+    const err = firstOf(events, "stream_error")
+    expect(err).toBeDefined()
+    expect(err?.retryable).toBe(true)
+    // Must NOT emit a clean end_turn message_delta : that's what made the loop
+    // exit silently. The truncation guard returns before the message_delta.
+    expect(finalDelta(events)).toBeUndefined()
+    expect(events.some((e) => isEvent(e, "message_stop"))).toBe(false)
+  })
+
+  it("a normal completed stream still ends cleanly (no spurious truncation error)", async () => {
+    const raw = [
+      'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_x","model":"gpt-5.5"}}\n\n',
+      'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_x","status":"completed"}}\n\n',
+    ].join("")
+    const events = await replayRaw(raw)
+    expect(firstOf(events, "stream_error")).toBeUndefined()
+    expect(finalDelta(events)?.stopReason).toBe("end_turn")
+  })
+
+  // The cosmetic stopReason latch: a completed stream that carried a
+  // function_call must report stopReason="tool_use", even though each call's
+  // output_item.done already cleared its functionBlocks entry by completion.
+  it("a completed stream with a function_call reports stopReason=tool_use", async () => {
+    const raw = [
+      'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_x","model":"gpt-5.5"}}\n\n',
+      'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"Bash"}}\n\n',
+      'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\\"command\\":\\"ls\\"}"}\n\n',
+      'event: response.output_item.done\ndata: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"Bash","arguments":"{\\"command\\":\\"ls\\"}"}}\n\n',
+      'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_x","status":"completed"}}\n\n',
+    ].join("")
+    const events = await replayRaw(raw)
+    expect(firstOf(events, "tool_use_stop")).toBeDefined()
+    expect(finalDelta(events)?.stopReason).toBe("tool_use")
   })
 })

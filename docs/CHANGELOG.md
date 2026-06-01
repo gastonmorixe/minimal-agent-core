@@ -1,122 +1,132 @@
 # Changelog
 
-All notable changes to this project. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions track the upstream Claude Code wire protocol that the agent reproduces.
+All notable changes to this project are documented here.
+
+The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
+and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
-### Added
-- **Provider preflight + `askUser` live-area modal: fix the recurring Anthropic 400 on session resume with a different `--model`.** When a session is forked/resumed with a different model than the one that originally produced its thinking blocks, the Anthropic server rejects the next send with `messages.<i>.content.<j>: 'thinking' or 'redacted_thinking' blocks in the latest assistant message cannot be modified`. The previous three patches (`22b50d0`, `6fff370`, `252cb7d`) addressed adjacent symptoms but missed the root cause: thinking-block signatures bind to the model that produced them, and the bound model id is recoverable from the base64 payload. New provider-neutral preflight contract on `ProviderAdapter` (`preflight()` + `applyResolution()`); Anthropic implementation decodes the model id from the signature, compares it to `req.modelId`, and surfaces a `PreflightIssue` when they differ. The agent's `run()` loop calls a host-provided `askUser` callback before each send; the live-area REPL implements that callback as a `ChoiceModal` painted into the editor's footer overlay layer (Strip / Switch back / Cancel). Provider/model-free: nothing in `src/agent.ts` mentions thinking blocks or Anthropic. Full breakdown in `docs/changes/2026-05-30-preflight-thinking-model-mismatch.md`. 87 new tests (62 unit + 18 integration + 7 e2e against a real cc53c9fe fixture).
-- **`manifest.enabled` (optional, default `true`) for plugin author opt-out.** A plugin shipped with `"enabled": false` in its `manifest.json` is skipped by the loader at discovery time and emits a notice-level diagnostic (file log only, not stderr) explaining how to flip it back on. The user can override with `plugins.<id>.enabled = true` in `~/.minimal-agent/config.jsonc`. Precedence is *user-disable > user-enable > manifest-disable > default-enabled*. Spec: `src/plugins/types.ts:ManifestFile.enabled`; gate: `src/plugins/loader.ts:load`; user-config helper: `src/config.ts:loadPluginEnabledOverrides`. Tests in `src/plugins/{manifest,loader}.test.ts` and `src/config.test.ts`.
-- **`interleave-thinking` plugin now ships disabled by default.** First user of the new `manifest.enabled: false` knob. Opt in with `plugins["interleave-thinking"].enabled = true` in `~/.minimal-agent/config.jsonc`.
-- **Session-history migration script.** `private/migrations/20260528T161007-old-session-history-to-new-plugin-syntax.ts` rewrites every legacy attachment tag and the bracket-style `[raw-output: …]` footer to the new `<ma::*>` schema in `~/.minimal-agent/sessions/*.jsonl`. Dry-run by default, `--apply` to mutate, full pre-migration backup at `~/.minimal-agent/sessions-backup-<ts>/`. Tests in `private/migrations/*.test.ts`.
+- (placeholder for the next change)
 
-### Changed
-- **System prompt composes plugin contributions as role-named `<ma::sys::*>` sections; the model never sees the word "plugin".** The old `<ma::plugins><ma::plugins-overview>…</ma::plugins-overview><ma::plugin id="…">…</ma::plugin>…</ma::plugins>` envelope is gone. Each contributing plugin now composes into one self-delimiting section whose tag names WHAT the content is, not which package produced it: `<ma::sys::behavior name="…">` (prose mandates like writing-style), `<ma::sys::tool name="ToolName">` (per-tool guidance), `<ma::sys::emit name="tag">` (inline-emit syntax), `<ma::sys::mode name="id">` (mode behavior), `<ma::sys::context name="…">` (session data like the env snapshot). The role + name are inferred from each plugin's manifest shape by `classifyPluginPrompt` (`src/plugins/loader/helpers.ts`) — no manifest field added, no plugin id leaked. Sections sort by role then name so the cached prefix is byte-stable. The false "each plugin contributes one or more tools and/or inline rendering tags" overview line (wrong for mode-only, fragment-only, and silent plugins) is deleted. Provider seam (`resolveSystemPrompt`, identity, billing) and cache-block layout are untouched: plugin text still rides in the same session-context block. The three-namespace grammar is now uniform `<ma::OWNER::leaf>`: `sys` (system-prompt sections, model reads), `agent` (harness→model runtime signals), `emit` (model→harness inline directives). Rationale + full mapping in `docs/changes/2026-05-30-system-prompt-role-composition.md`.
-- **Model-emitted inline tags moved `<ma::plugin::NAME>` → `<ma::emit::NAME>`; per-turn attachments moved off the `plugin` namespace.** The inline-tag scanner (`src/plugins/scanner.ts`) now probes `<ma::emit::`; handlers dispatch by bare name, unchanged. Attachment renames: `<ma::plugin::tasks>` → `<ma::agent::tasks>`, `<ma::plugin::memory::short-term>` → `<ma::agent::short-term-memory>`, `<memory-saved …>…</ma::plugin::memory::saved>` → `<ma::agent::memory-saved …>…</ma::agent::memory-saved>` (open/close now match), and the env snapshot drops its bare `<env>` wrapper (the lone non-`<ma::>` tag) since it composes inside `<ma::sys::context name="environment">`. The model is always taught the new scheme only; legacy `<ma::plugin::*>`/`<memory-saved>`/`<short-term-memory>` forms are still recognized internally by `session-replay.ts` and `session-restore.ts` so resumed older sessions don't choke. `ma-agent-writing-style` dropped its vestigial no-op prompt fragment (the validator already accepts prompt-only manifests).
-- **Renamed `tui-plugins/` → `plugins/` everywhere.** The plugin system has long since outgrown its TUI origin; the directory now matches what it actually holds (modes, hooks, prompt fragments, live-area slots, tools, …). All three loader roots are renamed in lockstep:
-  - `<repo>/tui-plugins/` → `<repo>/plugins/`.
-  - `~/.agents/tui-plugins/` → `~/.agents/plugins/`.
-  - `<cwd>/.agents/tui-plugins/` → `<cwd>/.agents/plugins/`.
-  Mirrored in `~/Projects/minimal-agent-plugins/*/README.md` (installation snippets) and in every code comment, doctring, and test fixture under `src/` and `plugins/`.
-- **Uniform `<ma::*>` schema for every attachment + bracket footer.** Every model-facing tag the agent or a plugin emits now sits under one of two namespaces:
-  - `<ma::agent::*>` for agent-runtime attachments (mode-change, mode-active, reflection-checkpoint, reflection-ack, emergency-cap-triggered, output-preview, raw-output).
-  - `<ma::plugin::<id>(::sub)?>` for plugin-contributed attachments and inline-tag triggers.
+## 2026-05-31
 
-  Concretely:
+### Chore: clear the `bun run check` gate (lint, biome, refactor)
 
-  | Old | New |
-  | --- | --- |
-  | `<tui::diff>…</tui::diff>` | `<ma::plugin::diff>…</ma::plugin::diff>` |
-  | `<tui::memory …>…</tui::memory>` | `<ma::plugin::memory …>…</ma::plugin::memory>` |
-  | `<tui::interleave-thinking>…</tui::interleave-thinking>` | `<ma::plugin::interleave-thinking>…</ma::plugin::interleave-thinking>` |
-  | `<ma::tui::tasks …>…</ma::tui::tasks>` | `<ma::plugin::tasks …>…</ma::plugin::tasks>` |
-  | `<short-term-memory>…</short-term-memory>` | `<ma::plugin::memory::short-term>…</ma::plugin::memory::short-term>` |
-  | `<memory-saved scope="…" id="…">…</memory-saved>` | `<ma::plugin::memory::saved scope="…" id="…">…</ma::plugin::memory::saved>` |
-  | `<ma::reflection-checkpoint …/>` | `<ma::agent::reflection-checkpoint …/>` |
-  | `<ma::reflection-ack …/>` | `<ma::agent::reflection-ack …/>` |
-  | `<ma::emergency-cap-triggered …/>` | `<ma::agent::emergency-cap-triggered …/>` |
-  | `<ma::tui-preview …>…</ma::tui-preview>` | `<ma::agent::output-preview …>…</ma::agent::output-preview>` |
-  | `<ma::mode-active …/>` | `<ma::agent::mode-active …/>` |
-  | `<ma::mode-change …/>` | `<ma::agent::mode-change …/>` |
-  | `[raw-output: <path>  <size> · sha256=<hex>]` | `<ma::agent::raw-output path="…" size="…" sha256="…" />` |
+Drove the full gate back to green with zero warnings on the uncommitted feature
+drop (sub-agents, schedule, config/usage/model-info plugins, prompt
+markdownization, first-run onboarding, usage tracking).
 
-  The inline-tag scanner's `OPENER_PROBE` moves from `<tui::` to `<ma::plugin::`. System-prompt block wrapper goes `<tui-plugins>` → `<ma::plugins>`, the orientation paragraph `<overview>` → `<ma::plugins-overview>`, and per-plugin wrapper `<plugin id="…">` → `<ma::plugin id="…">`.
-- **`session-replay` accepts legacy AND new spellings during the migration window.** Old session files still resume cleanly: the `RUNTIME_ATTACHMENT_OPENERS` array, `MODE_CHANGE_RE`, and `MODE_CHANGE_TO_RE` all carry the legacy bare / `<ma::*>` forms alongside the canonical `<ma::agent::*>` / `<ma::plugin::*>`. Run the migration script (see Added) to rewrite history in place; legacy parsers will be dropped in a later release.
-- **Decompose six oversized source files; clear the lingering oxlint `max-lines` warnings.** `bun run check` was exiting 0 but riding six `max-lines: warn` flags at logical-line counts above the project's `{ max: 800, skipBlankLines: true, skipComments: true }` budget. Split the three files with discrete cohesive sections (`agent.ts`, `client.ts`, `plugins/loader.ts`) into sibling modules behind facade re-exports; added a `max-lines: off` override for the three files that are single cohesive classes / CLI orchestration shells (`editor-controller.ts`, `input.ts`, `index.ts`) where method extraction would just move `this`-state across module boundaries.
-  - **`src/agent.ts` 2001 → 751 logical** lines. Seven new siblings under `src/agent/`:
-    - `agent/ansi.ts` — `c` palette helpers, `faintThinkingChunk`, `formatAbortedEcho`.
-    - `agent/cache.ts` — `withRollingCacheBreakpoint` (rolling-tail breakpoint stamping).
-    - `agent/reflection.ts` — `parseReflectionAck`, `runReflectionCooldown`, `buildReflectionCheckpointBlock`.
-    - `agent/tool-format.ts` — all tool input/output formatting and preview helpers (`formatToolInput`, `formatToolPreview`, `clampTranscriptRow`, `isOuterFrameClose`, `renderStreamedTail`, …).
-    - `agent/repl.ts` — `ReplAgentLike`, `StatusController`, `ReplCompositor`, `ReplEditor` interfaces + `runRepl` orchestration shell.
-    - `agent/repl-live-area.ts` — `runReplLiveArea` (the live-area compositor pump).
-    - `agent/model-picker.ts` — `parseModelNotFoundError`, `parseModelUnavailableError`, `promptModelPicker`.
-  - **`src/client.ts` 1135 → 750 logical** lines. Two new siblings under `src/client/`:
-    - `client/types.ts` — wire-format types (`ContentBlock` variants, `Message`, `SendOptions`, `StreamedResponse`, `StreamEvent`, `ModelInfo`) plus the per-model metadata helpers `normalizeModelForAPI` / `has1mContext`.
-    - `client/debug.ts` — `c` palette + `isDebug`/`isVerbose`/`isShowHiddenChars`, debug body/headers/response printers, ratelimit humanization (`humanizeRatelimitValue`, `formatRatelimitSummary`), streaming status helpers (`formatBytes`, `extractToolHint`, etc.).
-  - **`src/plugins/loader.ts` 1113 → 714 logical** lines. Two new siblings under `src/plugins/loader/`:
-    - `loader/helpers.ts` — pure filesystem + handler-resolution helpers (`discoverPackageDirs`, `resolvePath`, `stripLeadingHeading`, `resolveHandler`, `invokeSubprocess`, `findPackageDirFor`, `findPluginIdFor`).
-    - `loader/event-subs.ts` — async resolution + registration for event subs, hook subs, and live-area slots (`resolveEventSub`/`registerEventSub`, `resolveHookSub`/`registerHookSub`, `invokeEventSubprocess`, `resolveLiveAreaSlot`).
-  - **`src/editor-controller.ts` 1183 → 1154 logical** lines. Extracted the public types surface to `src/editor/types.ts` (footer-layer constants, `EditorControllerOptions`/`EditorKeyResult`/`EditorKeyPayload`, terminal escape sequences, `ParsedKey`, `CompositorLike`); the remaining file is one cohesive `EditorController` class with six >50-line methods all carrying `this`-state, so it gets the override.
-  - **`src/input.ts` (1100, unchanged)** and **`src/index.ts` (1019, unchanged)** also get the override: a single `RawInput` event-emitting state machine and the CLI entrypoint with load-order-dependent top-level constants respectively.
-  - Override block in `.oxlintrc.json` sits alongside the existing test-file override and the jsdoc per-file allow-list (pattern-consistent with the established lint config).
-  - **Zero behavior change.** Every extracted symbol is byte-identical to its pre-refactor form. Public surface preserved: `agent.ts` still re-exports `Agent`, `c`, `runRepl`, `ReplAgentLike`, `StatusController`, `withRollingCacheBreakpoint`, `runReflectionCooldown`, `formatAbortedEcho`, `formatToolPreview`, `isOuterFrameClose`, `clampTranscriptRow`, `faintThinkingChunk`, `formatToolInput`, `formatToolInputContinuation`, `toolContinuationIndentCells`, `parseModelNotFoundError`, `parseModelUnavailableError`; `client.ts` still re-exports the wire-format types and `isDebug`/`isVerbose`/`isShowHiddenChars`/`has1mContext`/`normalizeModelForAPI`; `editor-controller.ts` still re-exports the full footer-layer surface and editor types. The 37+ external importers across `src/`, `tui-plugins/`, and `scripts/` need no update.
-  - **Verified**: `bun run check` exits 0 with 0 warnings + 0 errors across all six gates (typecheck, lint, format:check, biome:check, docs:check, test). Test suite: 3259 pass / 7 skip / 0 fail (~33 s).
-  - Decision doc: `docs/changes/2026-05-28-refactor-max-lines-decomposition.md`.
+- **oxlint** (1 error + 3 warnings → 0/0): removed an unnecessary template
+  expression in `plugins/schedule/lib/box.ts`; replaced a spread-in-`map` with a
+  conditional property assign in `PluginLoader.listCommandInfo`
+  (`no-map-spread`); classified `src/plugins/loader.ts` into the existing
+  `max-lines` override alongside the other large coordinator files.
+- **agent.ts back under the line budget by extraction, not exemption.** The
+  per-turn attachment / abort-marker / media-ingest / usage-persistence work
+  pushed `src/agent.ts` from passing to 820 counted lines. Following the
+  documented split pattern, moved `rollbackPendingTurn` and
+  `repairOrphanedToolUse` into a new `src/agent/history-repair.ts` (pure
+  functions; the `Agent` methods now delegate), with a focused
+  `history-repair.test.ts`.
+- **biome import-sort**: fixed the `import { abortBus, type AbortReason }`
+  ordering in `src/agent/repl-live-area.ts`.
+- Gate result: typecheck, lint (0/0), `format:check`, `biome:check`,
+  `docs:check`, and `bun test` (4443 pass / 0 fail) all green.
 
-### Fixed
-- **TypeDoc `@since` unknown-block-tag warning at `src/plugins/types.ts:715`.** Root cause: `tsdoc.json` configures the project for strict TSDoc validation with a curated `tagDefinitions` list. `@module` and `@yields` were already declared as block tags; `@since` was not, so TypeDoc warned on the one usage (`@since 0.3.0 (replaces {@link disallowedTools}, …)`). With `treatValidationWarningsAsErrors: true` in `typedoc.json`, the warning would have become an error at any tightening of validation. Fix: register `@since` as a block tag in `tsdoc.json` alongside the existing two. Preserves the documentation; doesn't strip the tag. Verified by `bun run docs:check` (`Found 0 errors and 0 warnings`).
+### Fix: opus-4-8 tool-batch hallucination (gate interleaved-thinking off)
 
-### Added
-- **Per-session raw tool output blob store + universal plugin-tool clamp.** Every tool call now persists its full pre-clamp body to `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw` when the body is large enough or got clamped by the universal 64 KB / 1000-line cap. The model receives a single-line `[raw-output: <abs-path>  <size> · sha256=<hex>]` footer appended to `tool_result.content` whenever the file was written; `Read({file_path: ...})` or `Bash({command: "..."})` on that path retrieves the full bytes. The blob survives session resume, so a later turn can inspect or analyze the original output without re-running the tool. Two coordinated layers:
-  - **Built-in tools (`src/tools.ts`):** `executeTool`'s universal clamp branch now ferries the pre-clamp body to `ToolExecResult._raw` whenever it fires. The agent reads `_raw` and writes it to the blob store. No behavior change to the model-facing `content` beyond the new footer.
-  - **Plugin tools (`src/agent.ts`):** plugin output (Fetch, WebSearch, …) previously bypassed the universal clamp entirely; now it gets the same 64 KB / 1000-line ceiling with the raw recoverable via the blob store. Skipped when the plugin sets `display` (tasks, ShowDiff, LockStatus own their audience-split and would be mangled by a post-hoc clamp).
-  - **Storage:** `BlobStore` in `src/blob-store.ts` writes one file per tool call, keyed by `tool_use_id` under `<sid>.blobs/`. Sibling-of-JSONL layout matches the on-disk pattern session-store already follows. Per-session LRU eviction (`maxBlobsPerSession`, `maxBytesPerSession`) keeps disk bounded. The just-written id is protected from eviction even when it alone exceeds the byte cap.
-  - **Schema:** `ToolResultRecord` (in `src/session-store.ts`) gains optional `rawPath` / `rawBytes` / `rawSha256` fields. Additive; older JSONL files load unchanged.
-  - **Footer ordering:** `[truncated: …]` (existing, inside content when clamp fires) → `[raw-output: …]` (new, when blob written) → `<ma::tui-preview …>` (existing, when TUI elided more than the API cap).
-  - **System-prompt blurb:** `src/headers.ts:buildToolOutputConventionsParagraph` adds one paragraph to `system[2]` so the model learns the footer convention once instead of per-tool. Gated on `blobStoreEnabled`; empty when the store is disabled (cache-key-stable).
-  - **Config:** `~/.minimal-agent/config.jsonc :: plugins["blob-store"]` with `enabled`, `minBytesToPersist` (default 4096), `maxBlobsPerSession` (default 1000), `maxBytesPerSession` (default 256 MiB), `skipTools` (default `["Task", "MemoryTool", "ShowDiff", "LockStatus"]`). Hard env opt-out `MINIMAL_AGENT_BLOB_STORE_DISABLED=1`. When disabled, the prompt and behavior are byte-identical to the pre-feature shape.
-  - **Tests:** 41 in `src/blob-store.test.ts`, 5 new in `src/tools.test.ts` for `_raw`, 8 in `src/agent.blob-store.integration.test.ts` end-to-end (built-in clamp, built-in below-cap-above-minBytes, built-in below-minBytes, plugin clamp, plugin display-set bypass, plugin medium body, store-disabled, Edit/Write display-set).
-  - Decision doc: `docs/changes/2026-05-26-feat-blob-store.md`. Future work tracked in `TODOS.md` (entries `T-a4f8c1` GC, `T-b8c2d3` fork-hardlink, `T-c91d4e` obscura fix, `T-d72f5a` blob-store diag log, `T-e83g6b` always-persist mode).
-- **ma-fetch markdown noise normalizer (separate plugin repo).** `handlers/fetch.ts` in `ma-fetch-plugin` now runs a small `normalizeMarkdown` pass on `markdown` and `text` formats before building the model-facing `content`: rstrip per line, collapse 2+ blank lines into one, trim leading/trailing blanks. Pure pass-through for `html`, `links`, `original`. Stopgap for the upstream obscura HTML→markdown converter, which emits massive runs of whitespace-only lines for empty container elements (Wikipedia: 651 → 175 lines after normalization, GitHub: 1160 → 539). 10 new tests in `handlers/fetch.test.ts`. The upstream fix is tracked in `TODOS.md:T-c91d4e`.
-- **Bug fixed in `src/tools-bash-cd.test.ts`.** The test's `beforeAll` ran real `executeTool("Bash", { command: "cd <tmpdir>" })` calls that mutated the module-level `bashCwd` in `src/tools.ts`. Its `afterAll` deleted the tmp dir without restoring `bashCwd`, leaving the next test that actually spawned bash with `ENOENT … posix_spawn 'bash'`. Silent before this change set because no downstream test was spawning real bash; surfaced by `agent.blob-store.integration.test.ts`. Fixed by restoring `bashCwd` to `realpathSync(process.cwd())` in `afterAll`.
-- **Independent credential store (`~/.minimal-agent/auth.jsonc`).** minimal-agent now owns its credentials instead of piggy-backing on the official `claude` CLI's macOS Keychain entry (`Claude Code-credentials`) and `~/.claude.json`. New `src/auth-store.ts` is a provider-agnostic key/value vault: each entry is keyed by a normalized dash-case slug `id` plus a display `name` (the `(id, name)` pair is unique; a slug may repeat with different names for multi-account providers), and carries an opaque `secrets` object the store never interprets. Built for the upcoming auth-plugin surface (many providers, each with its own credential mechanics). Atomic writes (temp + `rename`, mode 0600), `parseJsonc` reads, hard-error (not silent reset) on corruption. The one provider shipped today is hard-coded in `src/auth.ts` as slug `anthropic-plan-oauth` / name "Anthropic Plan (OAuth)". 19 new tests in `src/auth-store.test.ts`. Decision doc: `docs/changes/2026-05-25-feat-independent-auth-store.md`.
-- **Tool output TUI preview disclosure (`<ma::tui-preview>` annotation).** The agent has two independent caps on tool output: the API cap (`MAX_TOOL_OUTPUT_BYTES = 64_000` / `MAX_TOOL_OUTPUT_LINES = 1_000` in `src/tools/truncation.ts`) and a per-tool TUI preview cap (`TOOL_PREVIEW_LINES` in `src/agent.ts`: Bash=10, Read=15, Grep=12, Glob=25). Previously the model was told about only the first cap, so a 65-line Bash result let the model write "as you can see above..." text referring to lines the user never saw. Two coordinated layers close the gap:
-  - **Static disclosure** (`src/tools.ts`): each capped tool's `description` now declares BOTH caps explicitly. Bash gets extra steering: "Do NOT use Bash to render visual content for the user (ASCII art, banners, ANSI TUI previews, formatted tables, generated reports). Put it in your text reply instead, which the user reads in full."
-  - **Runtime annotation** (`src/agent.ts:978`): when the body exceeds the per-tool TUI budget, an annotation is appended to `tool_result.content` before the API request: `<ma::tui-preview shown="N" total="M" tool="X">hint</ma::tui-preview>`. Bash gets the "use your text reply for visual content" hint, everything else gets a generic "summarize for the user" nudge. Skipped when the tool was refused / had a `display` override / was aborted / the body fits the budget.
-  - **Audience split preserved**: `formatToolPreview` and `src/session-replay.ts` both strip the annotation via the new `findAnnotationStart` helper, which takes the EARLIEST of last-occurrences across `["\n\n[truncated:", "\n\n[note:", "\n\n<ma::tui-preview"]`. Hardens against the body legitimately containing the prefix mid-stream. New `<ma::...>` namespace reserved for agent-runtime attachments (legacy `[truncated:]` and `[note:]` bracket forms grandfather in).
-  - Tests: 5 new cases in `src/agent.tui-preview.test.ts` driving `Agent.run()` end-to-end, 5 new cases in `src/tools-descriptions.test.ts` asserting the disclosure (with a drift guard binding doc text to `MAX_TOOL_OUTPUT_*`).
-  - `docs/changes/2026-05-11-feat-tui-preview-disclosure.md` (decision doc with options A/B/C considered).
-  - `docs/internal/tool-output-audience-split.md` (architecture reference: three-layer size feedback, where things live, how to add a new tool, what NOT to do).
-- **Session restore (v1).** Conversations are now persisted as append-only JSONL at `~/.minimal-agent/sessions/<sid>.jsonl` and can be resumed with `--resume <sid>` or `--resume last`. `--sessions` lists saved sessions with a one-line preview of the first user prompt.
-  - `src/session-store.ts` — `SessionStore` writer (FORMAT v1: `meta`/`user`/`assistant`/`tool_result`/`note` records), `parseLines` torn-line-tolerant reader, FNV-1a `shortHash` for system/tool drift detection, `~/.minimal-agent/sessions/index.jsonl` for fast listing.
-  - `src/session-restore.ts` — `foldRecords` (records → `Message[]`), `repairMessages` (drops orphan `tool_use`/`tool_result` blocks anywhere in the list, not just at the tail), `loadSession`, `firstUserPromptSnippet`.
-  - `src/session-replay.ts` — `buildResumeHeader`, `replayToScrollback`: renders prior conversation (text + tool blocks + their results) above the resumed prompt using the same formatters as live turns, dimmed so the user can tell history from new.
-  - `src/agent.ts` — `Agent` accepts an optional `store?: SessionStore` and `initialMessages?: Message[]`. The run loop calls `appendUser` after the user push, `appendAssistant` after each assistant turn (with `stopReason`), and `appendToolResult` after every tool execution.
-  - `src/index.ts` — sid is the existing `getSessionId()` UUID (already in the startup banner and `x-claude-code-session-id` header), keeping file id, API id, and `.net-dbg/` capture id aligned. New CLI: `--resume <sid|last>`, `--sessions`. Drift warning prints when system/tools hashes don't match.
-  - Tests: 30 new tests across `session-store.test.ts`, `session-restore.test.ts`, `session-restore-e2e.test.ts`, `session-replay.test.ts`. End-to-end verified in tmux via `scripts/session-restore-tmux-demo.ts`.
-  - `docs/session-restore.md` — format spec, CLI usage, crash-safety rules, repair semantics, and explicit out-of-scope list.
-- Cache observability (`src/cache.ts`):
-  - Per-turn `cache` line printed to stderr in `--debug` mode the moment `message_start` arrives. Format: `cache  read 38,789  write 419 (1h)  new 1  out 47`. Collapses to `cache  cold` when neither read nor write happened.
-  - `[cached]` annotation on messages in the `--debug` body dump when their tail block carries a `cache_control` marker (matches the existing system-block annotation).
-  - Always-on `CacheAnomalyDetector` that warns to stderr (no `--debug` required) when the cache misbehaves: `markers_ignored_cold`, `below_min_block_size`, `no_read_after_write`, `cache_evicted`. Each anomaly emits at most one warning per process.
-- Rolling cache breakpoint helper `withRollingCacheBreakpoint` (`src/agent.ts:96`). Stamps `cache_control: { type: "ephemeral", ttl: "1h" }` on the last block of the last message and strips earlier message-level markers, keeping ≤4 active breakpoints per request.
-- `cache_control: { type: "ephemeral", ttl: "1h" }` on `system[3]` (session guidance) when present (`src/headers.ts:418`). Combined with the existing `system[2]` marker and the rolling tail, this matches Claude Code 2.1.118's three-breakpoint scheme byte-for-byte.
-- On-disk request/response logger `src/net-dbg.ts`. Enable with `MINIMAL_AGENT_NET_DBG=1`; mirrors raw HTTP traffic to `./.net-dbg/<epoch>-<human-date>-minimal-agent/` using the same four-file scheme as Claude Code's `~/.node-net-dbg/`.
-- `docs/caching.md` — prompt caching guide: mental model, breakpoint placement in this codebase, verification recipe, worked example showing `cache_read` climbing across turns, and known failure modes.
-- Unit tests for `withRollingCacheBreakpoint` (strip-then-stamp invariant, string-content normalization, empty-input handling, defensive copy) in `src/agent.test.ts`.
-- Unit tests for the haiku `context_management` gating in `src/client.test.ts`.
-- `--help` now lists relevant environment variables (`DEBUG`, `MINIMAL_AGENT_NET_DBG`, `CLAUDE_CODE_EXTRA_METADATA`) and points to `docs/caching.md`.
-- **Docs: thinking-block persistence is now spelled out.** The session JSONL has always persisted assistant turns as the full `ContentBlock[]` (so `thinking` blocks and their cryptographic `signature` fields survived resume losslessly, which is what the `redact-thinking-2026-02-12` beta needs), but that round-trip was only implicit in the type signature. Added explicit notes on `AssistantRecord` in `src/session-store.ts`, on `foldRecords` in `src/session-restore.ts`, and in the `Sessions` section of `README.md`. The README also clarifies that the inline `<tui::interleave-thinking>` tag is dropped by the plugin scanner and is NOT persisted — only native API thinking blocks are saved. No behavior change.
+opus-4-8 under the `interleaved-thinking-2025-05-14` beta emitted huge parallel
+tool batches whose interleaved thinking reasoned about same-turn tool results
+that cannot exist yet (every tool in a turn runs after the turn ends), producing
+a self-inflicted "results are stalling / batching" spiral and many duplicate
+tool calls. Wire-proven against `.net-dbg` captures; absent on opus-4.7 under the
+same beta, so it is a model-behavior change (4.7 -> 4.8), NOT the provider
+refactor (the harness delivers every tool result correctly). Fix omits the
+interleaved-thinking beta for opus-4-8 only (4.6/4.7 + sonnet keep it); escape
+hatch `MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1`. See
+`docs/changes/2026-05-31-fix-opus48-interleaved-thinking-tool-batching.md` and
+TODOS.md `T-7c3f02`.
 
-### Changed
-- **Credential storage is now fully independent of the official `claude` CLI.** `auth.ts` no longer reads/writes the macOS Keychain (`Claude Code-credentials`) or `~/.claude.json`; login installs into `~/.minimal-agent/auth.jsonc`, `--logout` clears that store (it no longer deletes the shared Keychain entry or strips `~/.claude.json`), `--auth-status` reads it, and the client's 401 peer-refresh reads it. Consumers (`oauth-login.ts`, `client.ts`, `commands/{login,logout,auth-status}.ts`, `index.ts`) updated; error/help copy no longer references `claude`. Migration is non-destructive — existing shared credentials are left intact, so the official CLI keeps working; minimal-agent starts logged-out until the next `--login`. (`src/metadata.ts` still reads `~/.claude.json` for the anonymous request `device_id` — request fingerprinting, not credentials.)
+### First-run onboarding: `bunx`-runnable, plugin auto-clone, welcome card
 
-### Fixed
-- **`--login` paste prompt dropped the pasted code ("no code pasted").** The readline reader in `src/commands/login.ts` (and `readSingleLineFromStdin` in `src/index.ts`) called `rl.close()` before `resolve(line)`; since `close()` emits `'close'` synchronously, the close handler's `resolve("")` won the race and the captured line was discarded, so a valid `code#state` paste was reported as empty. Now resolves the line before closing, guarded by a `settled` flag (matching `readFallback` in `src/input.ts`). Also fixed `terminal: process.stderr.isTTY` → keys off the input stream. Regression test in `src/commands/login.test.ts` (reproduces the empty-result race over a `PassThrough`).
-- **Bash header soft-split now fires for structured 2+ operator pipelines regardless of terminal width.** Previously `shouldSoftSplit` (`src/bash-split.ts`) gated activation on width-overflow only, so commands like `cd /Users/.../inditex-supplier-management && cat Makefile 2>/dev/null | head -80` (~119 cells: 105 chars + 14-cell `╭ » Bash  $ ` prefix) stayed unsplit at typical iTerm windows ≥ 119 cells. The user saw `╭ » Bash $ <full pipeline>` with no `↳ &&` / `↳ |` continuation rows. New rule: split if `splitBashSegments(cmd).rest.length >= MULTI_OP_SOFT_SPLIT_MIN` (= 2) OR width-overflow. Single-operator commands (`ls | wc -l`, `cd /tmp && ls`) still stay inline. Non-finite `cols` (the renderer's "non-TTY caller" sentinel) keeps single-line headers so `bun test` and piped output are unaffected. Tests in `src/bash-split.test.ts` ("multi-operator pipeline rule", 7 cases) and `src/agent-tool-render.test.ts` ("2+ operator split at wide cols", 10 cases including both user-reported commands at cols ∈ {120, 140, 160, 200}). See `docs/changes/2026-05-10-bugfix-bash-soft-split-multi-op.md` for design rationale.
-- `context_management.edits = [{ type: "clear_thinking_20251015", keep: "all" }]` was sent for every `requestType === "conversation"` request, including Haiku where `thinking` is disabled. The API rejected those with `400: clear_thinking_20251015 strategy requires thinking to be enabled or adaptive`. Now gated on `body.thinking` being set (`src/client.ts:798`).
+Makes the agent usable on a clean device with no manual install.
 
-## [2.1.118] - 2026-04-25
+- **`bin` field** so it runs through `bunx github:gastonmorixe/minimal-agent`
+  (public repos) or `bun add -g "git+https://x-access-token:<TOKEN>@github.com/…"`
+  (private). Bun runs the TypeScript source directly: no build step.
+- **First-run plugin bootstrap** clones the extended first-party plugins
+  (`Fetch`, `Skill`, slash-menu, …) into `~/.minimal-agent/plugins` once. The
+  loader gained a fourth root, `user`, with precedence
+  `project > home > user > embedded`.
+- **Token-aware + safe:** resolves `MINIMAL_AGENT_GITHUB_TOKEN` →
+  `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token`, injected via an inline git
+  credential helper so the token never reaches argv, the clone URL, or the
+  cloned `.git/config`. Best-effort: no git / offline / no token degrades to
+  the embedded plugins, never crashes.
+- **Welcome card** on a cold interactive start frames the one-time setup
+  (sign in, fetch mdstream, fetch plugins).
+- Controls: `MINIMAL_AGENT_NO_PLUGIN_SYNC=1`, `MINIMAL_AGENT_PLUGINS_REPO`,
+  config `pluginSync` / `pluginsRepo`. Verified end-to-end in a clean
+  `oven/bun:1.3-debian` container.
 
-Initial published version. Reproduces the Claude Code 2.1.118 wire protocol: header set, beta flags, system prompt shape, metadata payload, SSE response handling, and tool-loop semantics.
+See `docs/changes/2026-05-31-first-run-onboarding.md`.
+
+### Schedule plugin: TUI redesign + sub-minute intervals
+
+- **New icons.** Replaced the `⏰` color-emoji (which ignored color) and the
+  faint `◷` with monochrome, SGR-colorable glyphs: `⧗` (a point in time /
+  one-shot) and `⟳` (a recurring loop). Tool-header icons now render bold so
+  thin glyphs read at terminal size.
+- **Colored boxed output.** `/loop` and `/schedule` confirmations, and the
+  `Cron*` tool results, render in the same rounded `╭─ │ ╰─` box the host draws
+  around tool calls (header glyph + cadence + timestamp, prompt in the body,
+  id + expiry + cancel hint in the footer).
+- **Width-aware live-bar footer.** Leads with the soonest task (`⧗` + short id +
+  countdown), then lists the other task ids with a `+K` overflow marker;
+  degrades to `⧗ next in 26s · N tasks`, then `⧗ N tasks`, then bare `⧗` as the
+  terminal narrows. Glyph is gold normally, lime when the soonest task is due
+  within a minute.
+- **Sub-minute intervals fixed.** `/loop 10s` (and `CronCreate every:"10s"`) no
+  longer round up to 1 minute. Cron is minute-granular, so sub-minute cadences
+  now run on the dynamic pace with a new `CronEntry.intervalMs` that re-arms
+  after each fire (floored at 1s). With the 1-second heartbeat a `10s` loop
+  fires about every 10 seconds (a fire still waits for any in-flight turn).
+- Model-facing tool-result `content` stays plain text; all color lives in the
+  TUI-only surfaces.
+
+## 2026-05-30
+
+### Schedule plugin (`/loop`, `/schedule`, `Cron*` tools)
+
+Run prompts on a schedule, ported from Claude Code's scheduled tasks.
+
+- **Three tools** (`CronCreate`, `CronList`, `CronDelete`) the model drives from
+  natural language ("remind me at 3pm", "every 5 minutes check the deploy").
+- **Two commands** (`/loop`, `/schedule`) for direct user control.
+- **1-second heartbeat** that injects due prompts between turns.
+- Tasks persist at `~/.minimal-agent/sessions/<sid>.cron.json` and restore on
+  `--resume` (unexpired tasks only).
+- Disable with `MINIMAL_AGENT_DISABLE_CRON=1`.
+
+See `docs/changes/2026-05-30-schedule-plugin.md`.
+
+### Sub-agents plugin
+
+Delegate work to background `minimal-agent` workers (`SpawnAgent` and friends),
+watch them in a live fleet widget, and fold their distilled results back. Built
+on generic seams; the core agent loop never learns the word "sub-agent". Disable
+with `MINIMAL_AGENT_DISABLE_SUBAGENTS=1`.
+
+See `docs/changes/2026-05-30-sub-agents.md`.
+
+### Prompts as markdown
+
+Plugin system-prompt fragments and tool descriptions move to markdown, composed
+under role-typed `<ma::sys::*>` wrappers.
+
+See `docs/changes/2026-05-30-prompts-as-markdown.md`.
+
+### Tool routing + search directives
+
+See `docs/changes/2026-05-30-tool-routing-search-directives.md`.

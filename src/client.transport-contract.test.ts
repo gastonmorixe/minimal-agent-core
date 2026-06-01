@@ -299,5 +299,10 @@ describe("client transport contract (canonical-migration baseline)", () => {
       { type: "text", text: "Hello world" },
       { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
     ])
+
+    // (d) Per-turn usage: captured from message_start (input/cache counts).
+    //     This message_delta carried no usage, so output_tokens stays absent.
+    //     The agent loop persists this onto AssistantRecord.usage.
+    expect(response.usage).toEqual({ input_tokens: 5 })
   }, 15_000)
 })

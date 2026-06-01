@@ -1295,7 +1295,7 @@ export interface LoadedPlugin {
   /** Absolute path to the package directory. */
   packageDir: string
   /** Which root the package came from. */
-  root: "embedded" | "home" | "project"
+  root: "embedded" | "user" | "home" | "project"
   /** Parsed manifest (validated). */
   manifest: ManifestFile
   /** Handlers resolved to invocable form. Order matches manifest `tuis` order. */

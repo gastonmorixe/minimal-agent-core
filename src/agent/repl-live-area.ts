@@ -10,10 +10,11 @@
  * @module agent/repl-live-area
  */
 
-import { abortBus } from "../abort-bus.ts"
+import { type AbortReason, abortBus } from "../abort-bus.ts"
 import type { AuthResult } from "../auth.ts"
 import type { ModelInfo } from "../client.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
+import type { QueueKeyHandler } from "../editor/types.ts"
 import { Formatter } from "../formatter.ts"
 import { printGoodbye } from "../goodbye-banner.ts"
 import { buildModeChangeChip } from "../mode-change-chip.ts"
@@ -22,7 +23,9 @@ import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"
 import { buildQueueDecorationLines } from "../queue-decoration.ts"
+import { formatRestoredMessages } from "../queue-restore.ts"
 import { loadQueue, QueueStore } from "../queue-store.ts"
+import { parseCommandLine } from "../slash-command-parse.ts"
 import type { Spinner } from "../spinner.ts"
 import { GLOBAL_STATUS_BUS, StatusBus, type StatusSpinnerTheme } from "../status.ts"
 
@@ -263,6 +266,39 @@ export async function runReplLiveArea(
       },
       { caller: "agent", priority: 5000, label: "agent:editor.footer.set" },
     )
+
+    // Host-side listeners for `editor.overlay.open` / `editor.overlay.close`
+    // — interactive command TUIs (/config, /usage) take MODAL ownership of
+    // the input line. While owned the editor hides the prompt row + cursor,
+    // blocks submit (so the typed `/cmd` can't leak to scrollback), and
+    // routes every key to the overlay's `editor.key` handler. Payload
+    // `{owner}` is the opening plugin's id; close is owner-checked so a stale
+    // handler can't tear down a different overlay. No-op on editors without
+    // the methods (older host / non-live REPL).
+    const overlayCapable = editor as unknown as {
+      openOverlay?: (owner: string) => void
+      closeOverlay?: (owner: string) => void
+    }
+    loader.hooks().on(
+      "editor.overlay.open",
+      (payload: unknown) => {
+        if (!payload || typeof payload !== "object") return
+        const owner = (payload as { owner?: unknown }).owner
+        if (typeof owner !== "string" || owner.length === 0) return
+        overlayCapable.openOverlay?.(owner)
+      },
+      { caller: "agent", priority: 5000, label: "agent:editor.overlay.open" },
+    )
+    loader.hooks().on(
+      "editor.overlay.close",
+      (payload: unknown) => {
+        if (!payload || typeof payload !== "object") return
+        const owner = (payload as { owner?: unknown }).owner
+        if (typeof owner !== "string" || owner.length === 0) return
+        overlayCapable.closeOverlay?.(owner)
+      },
+      { caller: "agent", priority: 5000, label: "agent:editor.overlay.close" },
+    )
   }
 
   // Build the askUser callback for the agent's preflight pipeline.
@@ -439,6 +475,13 @@ export async function runReplLiveArea(
   // surfaced visually above the editor prompt via setDecorationLines.
   let running = false
 
+  // Selected row in the submit-queue navigation overlay, or null when the
+  // overlay is closed. Driven by `queueKeyHandler` (↑ opens it / moves the
+  // selection); read by `renderDecoration` to paint the highlight bar +
+  // action hints. Always reset to null when a turn ends so a new turn's
+  // queue starts in the plain (non-interactive) display.
+  let queueNavIndex: number | null = null
+
   /**
    * Paint the queued-message decoration block between the live-area
    * status row and the editor prompt. Only rendered while a turn is in
@@ -474,14 +517,128 @@ export async function runReplLiveArea(
       )
       if (row != null) lines.push(row)
     }
-    for (const ql of buildQueueDecorationLines(queue.map((q) => q.text))) {
+    // Clamp / clear the nav selection against the LIVE queue so a
+    // mid-turn drain (drainQueuedUserText) or any out-of-band mutation
+    // can't leave a stale or out-of-range highlight.
+    if (queueNavIndex !== null) {
+      if (queue.length === 0) queueNavIndex = null
+      else queueNavIndex = Math.max(0, Math.min(queue.length - 1, queueNavIndex))
+    }
+    const cols = opts.output?.columns ?? process.stdout.columns
+    for (const ql of buildQueueDecorationLines(
+      queue.map((q) => q.text),
+      {
+        selectedIndex: queueNavIndex,
+        cols,
+      },
+    )) {
       lines.push(ql)
     }
     editor.setDecorationLines(lines)
   }
 
-  const onSubmit = (text: string, commitLines: string[] = []): void => {
-    if (!text.trim()) return
+  // Submit-queue navigation overlay. Wired into the editor via
+  // `setQueueKeyHandler`; the editor consults this BEFORE its default
+  // handling of ↑ / ↓ / Enter / Esc / printable keys. The handler is the
+  // single source of truth for "is the overlay open" (`queueNavIndex`),
+  // so when it's closed every key but an opening ↑ passes straight
+  // through (`handled: false`).
+  //
+  // Gestures (all only meaningful while a turn is in flight, which is the
+  // only time items sit queued):
+  //   ↑ on an empty prompt      → 1 item: dequeue it back to the input;
+  //                                >1 items: open the overlay (select last)
+  //   ↑ / ↓ (overlay open)      → move the selection
+  //   d / Enter (overlay open)  → dequeue the selected item to the input
+  //   x (overlay open)          → remove (discard) the selected item
+  //   k (overlay open)          → dequeue ALL to the input (numbered)
+  //   Esc (overlay open)        → close the overlay, queue untouched
+  //
+  // Every queue mutation calls persistQueue() so the on-disk <sid>.queue
+  // snapshot stays in lockstep (a dequeue clears it from persistence).
+  const queueKeyHandler: QueueKeyHandler = (key, ctx) => {
+    if (key === "ArrowUp") {
+      if (queueNavIndex === null) {
+        // Opening gesture: only from an empty prompt with the cursor at
+        // the top, so ↑ inside a draft still moves the cursor / recalls
+        // history.
+        if (!ctx.atTop || ctx.buffer.length > 0) return { handled: false }
+        if (queue.length === 0) return { handled: false }
+        if (queue.length === 1) {
+          const item = queue.shift()
+          persistQueue()
+          renderDecoration()
+          return { handled: true, buffer: item ? item.text : "" }
+        }
+        // >1: open the overlay on the most-recently-queued (bottom) row,
+        // matching the "↑ = reach back" mental model.
+        queueNavIndex = queue.length - 1
+        renderDecoration()
+        return { handled: true }
+      }
+      queueNavIndex = Math.max(0, queueNavIndex - 1)
+      renderDecoration()
+      return { handled: true }
+    }
+    // Everything below is overlay-only.
+    if (queueNavIndex === null) return { handled: false }
+    const idx = Math.max(0, Math.min(queue.length - 1, queueNavIndex))
+    switch (key) {
+      case "ArrowDown":
+        queueNavIndex = Math.min(queue.length - 1, queueNavIndex + 1)
+        renderDecoration()
+        return { handled: true }
+      case "Enter":
+      case "d": {
+        const item = queue.splice(idx, 1)[0]
+        queueNavIndex = null
+        persistQueue()
+        renderDecoration()
+        return { handled: true, buffer: item ? item.text : "" }
+      }
+      case "x": {
+        queue.splice(idx, 1)
+        persistQueue()
+        if (queue.length === 0) queueNavIndex = null
+        else queueNavIndex = Math.min(idx, queue.length - 1)
+        renderDecoration()
+        return { handled: true }
+      }
+      case "k": {
+        const texts = queue.splice(0).map((q) => q.text)
+        queueNavIndex = null
+        persistQueue()
+        renderDecoration()
+        return { handled: true, buffer: formatRestoredMessages(texts) }
+      }
+      case "Escape":
+        queueNavIndex = null
+        renderDecoration()
+        return { handled: true }
+      default:
+        // Any other printable while open: swallow so the overlay stays
+        // modal (the hint row teaches the real keys). Control keys never
+        // reach this handler.
+        return { handled: true }
+    }
+  }
+  if (typeof editor.setQueueKeyHandler === "function") {
+    editor.setQueueKeyHandler(queueKeyHandler)
+  }
+
+  /**
+   * Write a block of pre-formatted notice lines to scrollback (no model
+   * turn). Used for deterministic slash-command results. Mirrors the
+   * blank-row breathing room `flushQueueItemToScrollback` uses.
+   */
+  const writeNoticeLines = (lines: string[]): void => {
+    if (lines.length === 0) return
+    if (typeof compositor.writeStream !== "function") return
+    compositor.writeStream(`\n\n${lines.join("\n")}\n`)
+  }
+
+  /** The normal "queue this text as a user prompt" path. */
+  const enqueuePrompt = (text: string, commitLines: string[]): void => {
     queue.push({ text, commitLines })
     // Persist BEFORE any other side effect so a crash between push and
     // the next instruction still recovers the submit on next resume.
@@ -503,6 +660,67 @@ export async function runReplLiveArea(
       })
     }
   }
+
+  /**
+   * Dispatch a registered slash command out-of-band and apply its result.
+   * The user's typed line is committed to scrollback first (so they see
+   * `❯ /loop …`), then: `expand` re-enters the prompt queue as a turn,
+   * `notice`/`error` print to scrollback with no turn, `none` is silent.
+   * A null result (shouldn't happen — we pre-checked `hasCommand`) falls
+   * back to treating the text as a normal prompt.
+   */
+  const dispatchCommandAndApply = async (text: string, commitLines: string[]): Promise<void> => {
+    if (!loader) return
+    flushQueueItemToScrollback({ text, commitLines })
+    let result: Awaited<ReturnType<typeof loader.dispatchCommand>>
+    try {
+      result = await loader.dispatchCommand(text, { cwd: process.cwd() })
+    } catch (e) {
+      writeNoticeLines([`✗ command failed: ${e instanceof Error ? e.message : String(e)}`])
+      return
+    }
+    if (!result) {
+      enqueuePrompt(text, commitLines)
+      return
+    }
+    switch (result.kind) {
+      case "expand":
+        // The typed `/cmd` line is already in scrollback; the expanded
+        // prompt drives the turn with no extra commit lines.
+        enqueuePrompt(result.prompt, [])
+        break
+      case "notice":
+        writeNoticeLines(result.lines)
+        break
+      case "error":
+        writeNoticeLines([`✗ ${result.message}`])
+        break
+      case "none":
+        break
+      default: {
+        const _exhaustive: never = result
+        throw new Error(`unhandled command result: ${JSON.stringify(_exhaustive)}`)
+      }
+    }
+  }
+
+  const onSubmit = (text: string, commitLines: string[] = []): void => {
+    if (!text.trim()) return
+    // Slash-command interception (REPL-scoped). A submitted line that
+    // parses as `/<name>` AND names a registered command is dispatched
+    // out-of-band; everything else (unknown `/foo`, pasted `/usr/bin`,
+    // ordinary prose) falls through to the normal prompt queue. The
+    // dispatch is async + fire-and-forget so the editor's sync submit
+    // event never blocks.
+    if (loader) {
+      const parsed = parseCommandLine(text)
+      if (parsed && loader.hasCommand(parsed.name)) {
+        void dispatchCommandAndApply(text, commitLines)
+        return
+      }
+    }
+    enqueuePrompt(text, commitLines)
+  }
   const onCancel = (reason?: string): void => {
     cancelled = true
     if (reason === "confirmed" || reason === "escape-hatch") {
@@ -513,6 +731,44 @@ export async function runReplLiveArea(
 
   editor.on("submit", onSubmit)
   editor.on("cancel", onCancel)
+
+  // Out-of-band prompt injection. Any plugin (notably `schedule`'s
+  // heartbeat) can emit `prompt.inject` on the shared bus to enqueue a
+  // prompt as if the user had typed it. We route it through the SAME
+  // `onSubmit` path, so an injected prompt: (a) is blank-guarded,
+  // (b) lands in the persisted queue (crash/resume safe), (c) wakes an
+  // idle waiter, and (d) drains only at a turn boundary — i.e. it fires
+  // BETWEEN turns, never mid-response, matching the scheduled-tasks
+  // contract. The host is the sole queue owner (Mediator); injectors
+  // never touch the queue directly. Disposed in the `finally` below.
+  let disposePromptInject: (() => void) | null = null
+  let disposeCommandRun: (() => void) | null = null
+  if (loader) {
+    disposePromptInject = loader
+      .bus()
+      .on<{ text?: unknown; source?: unknown }>("prompt.inject", (ctx) => {
+        const text = typeof ctx.payload?.text === "string" ? ctx.payload.text : ""
+        // onSubmit already drops blank/whitespace-only text.
+        onSubmit(text)
+      })
+
+    // Direct command dispatch from an overlay (the slash-menu picks a
+    // command row). Routes through the registry path WITHOUT the editor
+    // buffer / submit, so one Enter dispatches the command (opening its TUI)
+    // instead of the fragile rewrite-buffer-then-submit dance that raced the
+    // async menu re-open. A registered `/cmd` line dispatches; anything else
+    // is ignored (the menu only emits this for command rows). The typed line
+    // is NOT committed to scrollback here — interactive commands paint their
+    // own overlay; the leak the user reported was exactly that scrollback
+    // commit firing for `/config`.
+    disposeCommandRun = loader.bus().on<{ line?: unknown }>("command.run", (ctx) => {
+      const line = typeof ctx.payload?.line === "string" ? ctx.payload.line.trim() : ""
+      if (line.length === 0) return
+      const parsed = parseCommandLine(line)
+      if (!parsed || !loader.hasCommand(parsed.name)) return
+      void dispatchCommandAndApply(line, [])
+    })
+  }
 
   // Footer band: two producers share the editor's `setFooterLines` —
   // (1) plugin-contributed slots driven by `LiveAreaScheduler` (the
@@ -560,6 +816,10 @@ export async function runReplLiveArea(
           // Loader's event bus drives `refreshOn` slot events
           // (e.g. `quota.headersReceived` from `client.ts`).
           bus: loader?.bus(),
+          // Same frozen AgentContext the loader threads through every
+          // other plugin context. Live-area slots see `ctx.agent` with
+          // the SAME values as a TUI handler in the same session.
+          agent: loader?.agentContext(),
           // Singleton diagnostic bus picks up the scheduler's own
           // timeout / failure / recovery events. Tests inject an
           // isolated bus; production defaults to the singleton.
@@ -865,8 +1125,14 @@ export async function runReplLiveArea(
       editor.notifyTurnStart?.()
       const ctrl = abortBus.beginTurn()
       let aborted = false
-      const onBusAbort = (): void => {
+      // Whether the abort was a programmatic mode-interrupt (Alt+M) rather
+      // than a genuine user "stop". Computed inside the listener where the
+      // reason is concretely typed : avoids union flow-narrowing issues on
+      // a closure-captured `let`.
+      let abortWasModeInterrupt = false
+      const onBusAbort = (reason: AbortReason): void => {
         aborted = true
+        abortWasModeInterrupt = reason.kind === "programmatic" && reason.tag === "mode-interrupt"
       }
       abortBus.once("abort", onBusAbort)
       // Per-text-block formatter boundary. See the `spawnMainFormatter`
@@ -932,6 +1198,9 @@ export async function runReplLiveArea(
         // turn-end transition while armed is a no-op).
         editor.notifyTurnEnd?.()
         running = false
+        // Close any open queue-nav overlay : the next turn's queue (if
+        // any) starts in the plain display, never with a stale selection.
+        queueNavIndex = null
         renderDecoration()
         turnStatus.clear()
         await endThinkingFormatter()
@@ -954,13 +1223,36 @@ export async function runReplLiveArea(
       // Abort path: distinguish user-initiated cancellation from a real
       // error. `agent.run` throws `Error("aborted")` with `name === "AbortError"`
       // when the signal trips. We swallow it, emit a single dim footer,
-      // restore the in-flight prompt to the editor (so the user can edit
-      // and resubmit), and rollback the orphan user turn.
+      // restore the in-flight prompt (PLUS any still-queued submits) to
+      // the editor so the user can edit and resubmit, and rollback the
+      // orphan user turn.
       const isAbortError =
         aborted || (turnError instanceof Error && (turnError as Error).name === "AbortError")
       if (isAbortError) {
-        // Make sure the abort echo starts on a fresh line.
-        if (wroteOutput && !lastChunkEndedWithNewline) compositor.writeStream("\n")
+        // Clear the stale `api.retry` / `api.stream-stalled` banner left by
+        // the aborted attempt. An aborted retry never reaches its
+        // `api.retry-success` recovery Notice, so the TuiDiagnosticSurface
+        // warn slot would otherwise stay pinned across this abort and every
+        // following turn (the stale-banner bug from the abort recording).
+        tuiDiagnosticSurface?.clear()
+        // Tell the agent the turn was cancelled by the USER (not a
+        // programmatic mode-interrupt) so the NEXT run() emits a
+        // model-visible `<ma::agent::turn-aborted />` marker. Without this the
+        // model has no trace it was interrupted and may silently resume the
+        // old plan (the "model can't tell it was aborted" gap from the
+        // abort recording). Alt+M mode-interrupt is excluded: that abort is
+        // an internal delivery mechanism, not a user "stop".
+        if (!abortWasModeInterrupt) agent.notePreviousTurnAborted?.()
+        // Make sure the abort echo starts on its own line. We separate
+        // whenever ANY response text was written this turn, not only when
+        // `lastChunkEndedWithNewline` is false: on an abort the plugin
+        // stream is never flushed (`ps.end()` runs only on the success
+        // path), so the trailing-newline flag can be stale and the old
+        // guard let the echo collide with the last streamed line — e.g.
+        // `↳ stream stalled — retrying …  ✘ ABORTED …` sharing one row in
+        // the abort recording. A redundant blank line is harmless; a
+        // collision is not.
+        if (wroteOutput) compositor.writeStream("\n")
         // Render the faint+strikethrough echo of the rolled-back submission.
         // The visual semantics are unambiguous: the struck-through block
         // shows what got aborted; the next bold `❯ ` prompt (which appears
@@ -972,7 +1264,17 @@ export async function runReplLiveArea(
         const modeLabel = activeMode?.label ?? activeMode?.id ?? null
         compositor.writeStream(`${formatAbortedEcho(text, { activeModeLabel: modeLabel })}\n`)
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
-        if (typeof editor.setBuffer === "function") editor.setBuffer(text)
+        // Dequeue EVERYTHING back to the prompt: the in-flight text first,
+        // then any messages still queued behind it, so an abort never
+        // silently drops queued submits. Numbered when there's more than
+        // one (see formatRestoredMessages); a lone item restores verbatim,
+        // so the no-queue case is byte-identical to the old setBuffer(text).
+        // splice(0) empties the queue and persistQueue() clears the on-disk
+        // snapshot in the same tick.
+        const queuedTexts = queue.splice(0).map((q) => q.text)
+        persistQueue()
+        const restored = formatRestoredMessages([text, ...queuedTexts])
+        if (typeof editor.setBuffer === "function") editor.setBuffer(restored)
       } else if (turnError) {
         const msg = turnError instanceof Error ? turnError.message : String(turnError)
         // When the throw already routed through `diag.error(...)` the
@@ -996,6 +1298,8 @@ export async function runReplLiveArea(
       }
     }
   } finally {
+    disposePromptInject?.()
+    disposeCommandRun?.()
     liveAreaScheduler?.stop()
     tuiDiagnosticSurface?.detach()
     statusRenderer?.stop()

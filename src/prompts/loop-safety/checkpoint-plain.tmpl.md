@@ -1,0 +1,1 @@
+A reflection checkpoint fires every %%interval%% tool rounds. The harness injects a `<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="0" />` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.

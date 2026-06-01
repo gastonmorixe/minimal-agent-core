@@ -3,6 +3,8 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { getDiagnosticBus, type LogEvent, Severity } from "../diagnostic-bus.ts"
+
 import { PluginLoader } from "./loader.ts"
 import type { ManifestFile } from "./types.ts"
 
@@ -541,7 +543,7 @@ describe("PluginLoader", () => {
     expect(names).toEqual(["tool_project"])
     // Both home and embedded variants were skipped with a precedence note.
     expect(logs.filter((l) => l.includes('"shared"')).length).toBeGreaterThanOrEqual(2)
-    expect(logs.some((l) => l.includes("project > home > embedded"))).toBe(true)
+    expect(logs.some((l) => l.includes("project > home > user > embedded"))).toBe(true)
     rmSync(join(EMBEDDED, "plugins", "shared"), { recursive: true })
     rmSync(join(HOME, "plugins", "shared"), { recursive: true })
     rmSync(join(PROJECT, ".agents", "plugins", "shared"), { recursive: true })
@@ -642,6 +644,64 @@ describe("PluginLoader", () => {
     rmSync(homeLink, { force: true })
     rmSync(embLink, { force: true })
     rmSync(real, { recursive: true, force: true })
+  })
+
+  // Reproduces the EXACT user-reported startup-banner noise: the same
+  // plugins repo present under TWO roots with DISTINCT realpaths (home
+  // root symlinked into one checkout, user root a second independent
+  // checkout of the same repo). The realpath dedup can't collapse them
+  // (different files on disk), so the lower-precedence copy correctly
+  // falls through to the id-shadow skip. The bug was that skip shouted
+  // through `diag.warn` — Severity.Warning — which renders the gold ⚠
+  // chrome straight into the startup banner box on every launch.
+  //
+  // This test exercises the PRODUCTION path (no injected `logger`, so the
+  // loader's default falls back to the singleton diagnostic bus) and
+  // asserts the shadow is announced at Notice severity (file log only),
+  // never at Warning. The two precedence tests above still cover the
+  // injected-logger contract; this one guards the bus severity that the
+  // banner sink actually filters on.
+  it("id-shadow skip emits Notice (not Warning) on the default bus path", async () => {
+    // Two physically distinct dirs, same manifest id, surfaced through
+    // home (precedence 3) and user (precedence 2). Home wins; the user
+    // copy hits the seenIds shadow gate. Their realpaths differ, so the
+    // realpath dedup above leaves both in play and the shadow branch runs.
+    const USER = join(ROOT, "user-shadow")
+    rmSync(USER, { recursive: true, force: true })
+    writePackage(HOME, "dup_shadow", toolManifest("dup_shadow", "tool_dup", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    writePackage(USER, "dup_shadow", toolManifest("dup_shadow", "tool_dup", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+
+    const events: LogEvent[] = []
+    const unsubscribe = getDiagnosticBus().on("*", (e) => events.push(e))
+    try {
+      const loader = await PluginLoader.load({
+        homeDir: HOME,
+        userDir: USER,
+        projectDir: join(ROOT, "nope-project"),
+        coreToolNames: CORE_TOOLS,
+        // No `logger` — exercise the real production default (diag bus).
+      })
+      // Loaded exactly once (home wins on precedence).
+      expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_dup"])
+    } finally {
+      unsubscribe()
+    }
+
+    const shadow = events.filter(
+      (e) => e.source === "plugin-loader" && e.message.includes("already loaded"),
+    )
+    // The shadow WAS announced...
+    expect(shadow.length).toBeGreaterThanOrEqual(1)
+    // ...as a Notice, and NEVER as a Warning (the banner-box noise).
+    expect(shadow.every((e) => e.severity === Severity.Notice)).toBe(true)
+    expect(shadow.some((e) => e.severity === Severity.Warning)).toBe(false)
+
+    rmSync(join(HOME, "plugins", "dup_shadow"), { recursive: true, force: true })
+    rmSync(USER, { recursive: true, force: true })
   })
 
   it("disabledPluginIds skips matching packages with a diagnostic", async () => {

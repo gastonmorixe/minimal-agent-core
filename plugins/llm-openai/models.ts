@@ -15,6 +15,7 @@
  */
 
 import { registerModel } from "../../src/llm/model-registry.ts"
+import { makeCharRatioEstimator } from "../../src/llm/token-estimate.ts"
 
 import {
   CAPS_GPT_4O_CHAT,
@@ -37,6 +38,13 @@ import {
 } from "./pricing.ts"
 
 /**
+ * Token estimator for OpenAI's tokenizer families (cl100k / o200k). ~4
+ * chars/token is the well-known rule of thumb for English text on these
+ * encoders. Shared by every OpenAI model entry.
+ */
+const estimateOpenAITokens = makeCharRatioEstimator(4)
+
+/**
  * Populate the canonical model registry with the OpenAI catalog.
  * Idempotent (last-write-wins). Returns the registered ids for tests.
  */
@@ -51,6 +59,7 @@ export function registerOpenAIModels(): string[] {
     knowledgeCutoff: "2025-12",
     tags: ["gpt-5", "flagship", "reasoning", "production"],
     capabilities: CAPS_GPT_5_5_RESPONSES,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_GPT_5_5,
     vendorIds: { firstParty: "gpt-5.5" },
   })
@@ -62,6 +71,7 @@ export function registerOpenAIModels(): string[] {
     knowledgeCutoff: "2025-12",
     tags: ["gpt-5", "flagship", "chat"],
     capabilities: CAPS_GPT_5_5_CHAT,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_GPT_5_5,
     vendorIds: { firstParty: "gpt-5.5" },
   })
@@ -74,6 +84,7 @@ export function registerOpenAIModels(): string[] {
     displayName: "GPT-5",
     tags: ["gpt-5", "reasoning"],
     capabilities: CAPS_GPT_5_RESPONSES,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_GPT_5,
     vendorIds: { firstParty: "gpt-5" },
   })
@@ -86,6 +97,7 @@ export function registerOpenAIModels(): string[] {
     displayName: "OpenAI o3",
     tags: ["o-series", "reasoning"],
     capabilities: CAPS_O3_RESPONSES,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_O3,
     vendorIds: { firstParty: "o3" },
   })
@@ -96,6 +108,7 @@ export function registerOpenAIModels(): string[] {
     displayName: "OpenAI o4-mini",
     tags: ["o-series", "reasoning", "fast"],
     capabilities: CAPS_O4_MINI_RESPONSES,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_O4_MINI,
     vendorIds: { firstParty: "o4-mini" },
   })
@@ -108,6 +121,7 @@ export function registerOpenAIModels(): string[] {
     displayName: "GPT-4.1",
     tags: ["gpt-4", "chat", "long-context"],
     capabilities: CAPS_GPT_41_CHAT,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_GPT_41,
     vendorIds: { firstParty: "gpt-4.1" },
   })
@@ -118,6 +132,7 @@ export function registerOpenAIModels(): string[] {
     displayName: "GPT-4o",
     tags: ["gpt-4", "chat", "multimodal"],
     capabilities: CAPS_GPT_4O_CHAT,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_GPT_4O,
     vendorIds: { firstParty: "gpt-4o" },
   })
@@ -128,6 +143,7 @@ export function registerOpenAIModels(): string[] {
     displayName: "GPT-4o mini",
     tags: ["gpt-4", "chat", "fast", "cheap"],
     capabilities: CAPS_GPT_4O_MINI_CHAT,
+    estimateTokens: estimateOpenAITokens,
     pricing: PRICING_GPT_4O_MINI,
     vendorIds: { firstParty: "gpt-4o-mini" },
   })

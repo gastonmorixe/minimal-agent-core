@@ -87,6 +87,12 @@ function formatElapsedLong(ms: number): string {
 
 /** True iff the thrown error is a tagged, retryable stream error. */
 function retryableStreamErrorType(err: unknown): string | undefined {
+  // An explicit `retryable: false` verdict from the provider wins over
+  // tag-based classification. Billing exhaustion (insufficient_quota) and
+  // other terminal failures set this so they propagate instead of feeding
+  // the forever-retry loop, even if a category→tag remap would otherwise
+  // land them in a retryable bucket.
+  if ((err as { retryable?: boolean } | null)?.retryable === false) return undefined
   const t = (err as { streamErrorType?: string } | null)?.streamErrorType
   if (t !== undefined && (RETRYABLE_STREAM_ERROR_TYPES.has(t) || SLOW_RETRY_TYPES.has(t))) {
     return t

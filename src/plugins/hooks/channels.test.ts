@@ -26,6 +26,23 @@ describe("channels registry", () => {
     expect(CHANNEL_BY_NAME.size).toBe(CHANNELS.length)
     for (const c of CHANNELS) expect(CHANNEL_BY_NAME.get(c.name)).toBe(c)
   })
+
+  test("sub-agent lifecycle channels are registered with the right shapes", () => {
+    const willSpawn = CHANNEL_BY_NAME.get("subagent.willSpawn")
+    expect(willSpawn?.shape).toBe("chain") // guardrail veto/rewrite seam
+    expect(willSpawn?.permission).toBe("hooks:subagent.willSpawn")
+    for (const name of ["subagent.didSpawn", "subagent.didReport", "subagent.didExit"]) {
+      const c = CHANNEL_BY_NAME.get(name)
+      expect(c?.shape).toBe("broadcast-async")
+      expect(c?.permission).toBe(`hooks:${name}`)
+    }
+    // A `hooks:subagent.*` wildcard grant should cover every subagent channel.
+    for (const c of CHANNELS) {
+      if (c.name.startsWith("subagent.")) {
+        expect(hasPermission(["hooks:subagent.*"], c.permission)).toBe(true)
+      }
+    }
+  })
 })
 
 describe("permissionMatches", () => {

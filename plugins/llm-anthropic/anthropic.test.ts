@@ -177,7 +177,12 @@ describe("classifyRequest", () => {
 })
 
 describe("buildBetaFlags", () => {
-  it("matches the live capture for an Opus 4.8 conversation", () => {
+  // NB: deliberately deviates from the live CLI capture for opus-4-8 — we OMIT
+  // interleaved-thinking for this model (TODOS.md T-7c3f02; root cause in
+  // private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md). The live CLI
+  // sends it; we don't, because opus-4-8 hallucinates same-turn tool results
+  // under it. Every other flag still matches the capture, in order.
+  it("matches the live capture for an Opus 4.8 conversation (minus interleaved-thinking; T-7c3f02)", () => {
     setup()
     const model = resolveModel("claude-opus-4-8")
     const req: CanonicalRequest = {
@@ -203,10 +208,11 @@ describe("buildBetaFlags", () => {
       model,
       authKind: "oauth",
     })
+    // interleaved-thinking intentionally absent for opus-4-8 (T-7c3f02).
+    expect(flags).not.toContain(ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING)
     expect(flags).toEqual([
       ANTHROPIC_BETA_FLAGS.CLAUDE_CODE,
       ANTHROPIC_BETA_FLAGS.OAUTH,
-      ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING,
       ANTHROPIC_BETA_FLAGS.CONTEXT_1M,
       ANTHROPIC_BETA_FLAGS.CONTEXT_MANAGEMENT,
       ANTHROPIC_BETA_FLAGS.ADVANCED_TOOL_USE,
@@ -475,7 +481,9 @@ describe("buildAnthropicHeaders", () => {
     expect(headers["x-app"]).toBe("cli")
     expect(headers["user-agent"]).toMatch(/^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/)
     expect(headers["x-stainless-package-version"]).toBe("0.94.0")
-    expect(betaFlags.length).toBe(11)
+    // 10, not 11: interleaved-thinking is omitted for opus-4-8 (T-7c3f02).
+    expect(headers["anthropic-beta"]).not.toContain("interleaved-thinking-2025-05-14")
+    expect(betaFlags.length).toBe(10)
   })
 
   it("uses x-api-key auth when api-key provided", () => {

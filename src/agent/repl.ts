@@ -22,6 +22,7 @@ import {
   type StreamedResponse,
 } from "../client.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
+import type { QueueKeyHandler } from "../editor/types.ts"
 import { Formatter } from "../formatter.ts"
 import { RawInput } from "../input.ts"
 import { ModeManager } from "../modes.ts"
@@ -84,6 +85,13 @@ export interface ReplAgentLike {
   setModel?(model: string): void
   /** Optional: discard trailing user turn after a failed send. */
   rollbackPendingTurn?(): boolean
+  /**
+   * Optional: record that the just-settled turn was aborted by the USER
+   * (Esc / Ctrl+C), so the agent's NEXT run() emits a model-visible
+   * `<ma::agent::turn-aborted />` marker. Not called for programmatic
+   * mode-interrupt aborts (Alt+M).
+   */
+  notePreviousTurnAborted?(): void
 }
 
 export type ReplOutput = Pick<NodeJS.WriteStream, "write"> & {
@@ -178,6 +186,23 @@ export interface ReplEditor {
    */
   setModeInterruptHandler?(handler: (() => void) | null): void
   /**
+   * Optional. Wire the submit-queue navigation hook. The live-area REPL
+   * passes a handler that owns the dequeue / remove / dequeue-all
+   * overlay driven from the prompt:
+   *
+   *   - `↑` at an empty prompt dequeues the sole queued item back to the
+   *     input, or (with >1 queued) opens a selection overlay.
+   *   - In the overlay: `↑`/`↓` move the selection, `d`/`Enter` dequeue
+   *     the selected item to the input, `x` removes it, `k` dequeues all
+   *     (numbered), `Esc` closes the overlay.
+   *
+   * The handler returns `{handled, buffer?}`; the editor applies
+   * `buffer` via `setBuffer` and skips its default key handling when
+   * `handled`. Pass `null` to detach. Editors without this binding (the
+   * legacy REPL, test fakes) simply never offer queue navigation.
+   */
+  setQueueKeyHandler?(handler: QueueKeyHandler | null): void
+  /**
    * Optional. Wire a fresh-prompt builder for `submit`'s commit-render
    * call. Closes the prompt-prefix race where a mode toggle
    * immediately before Enter could leave the cached prefix one
@@ -215,6 +240,22 @@ export interface ReplEditor {
    * text.
    */
   setBuffer?(text: string): void
+  /**
+   * Optional. Take MODAL ownership of the input line for an interactive
+   * command overlay (/config, /usage). While owned, the editor hides the
+   * prompt row + cursor, blocks `submit()`, and routes every key (including
+   * printables + Backspace) through the `editor.key` hook so the overlay
+   * drives its own draft instead of the shared prompt buffer. Host wiring
+   * for the `editor.overlay.open` bus channel. `owner` is a stable id (the
+   * opening plugin's id); a different owner replaces the current one.
+   */
+  openOverlay?(owner: string): void
+  /**
+   * Optional. Release modal ownership held by `owner` (host wiring for
+   * `editor.overlay.close`). Owner-checked + idempotent: a close from a
+   * non-owner is ignored. Restores the prompt + cursor.
+   */
+  closeOverlay?(owner: string): void
   /**
    * Optional. Notify the editor's abort-quit FSM that a turn has started.
    * The FSM transitions idle/armed → working and dismisses any armed

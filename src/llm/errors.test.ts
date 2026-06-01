@@ -28,13 +28,28 @@ describe("classifyUpstreamError", () => {
     )
   })
 
-  it("maps OpenAI `rate_limit_exceeded` and `insufficient_quota` to rate_limit_error", () => {
-    expect(classifyUpstreamError({ upstreamCode: "rate_limit_exceeded" }).streamErrorType).toBe(
-      "rate_limit_error",
-    )
-    expect(classifyUpstreamError({ upstreamCode: "insufficient_quota" }).streamErrorType).toBe(
-      "rate_limit_error",
-    )
+  it("maps OpenAI `rate_limit_exceeded` to the retryable rate_limit_error", () => {
+    const r = classifyUpstreamError({ upstreamCode: "rate_limit_exceeded" })
+    expect(r.streamErrorType).toBe("rate_limit_error")
+    expect(r.category).toBe("rate_limit")
+    expect(r.retryable).toBe(true)
+  })
+
+  it("treats `insufficient_quota` / billing exhaustion as TERMINAL (untagged, retryable:false)", () => {
+    // Regression for 2026-05-30 (session 50efb996): OpenAI returns
+    // `insufficient_quota` over a 200 SSE error frame when the account is out
+    // of credit. It repeats on every request and waiting never clears it, so
+    // it must NOT retry — neither on the fast nor the slow curve. A prior fix
+    // lumped it into rate_limit_error and the agent spun for an hour.
+    const quota = classifyUpstreamError({ upstreamCode: "insufficient_quota" })
+    expect(quota.streamErrorType).toBeUndefined()
+    expect(quota.category).toBe("billing")
+    expect(quota.retryable).toBe(false)
+
+    const billing = classifyUpstreamError({ upstreamCode: "billing_hard_limit_reached" })
+    expect(billing.streamErrorType).toBeUndefined()
+    expect(billing.category).toBe("billing")
+    expect(billing.retryable).toBe(false)
   })
 
   it("maps 5xx and overloaded/server_error codes to overloaded_error", () => {

@@ -3,7 +3,7 @@ title: TODOS
 description: Deferred work, ideas, and known-but-not-yet items. One file at the repo root so any future session can find it. Append-only in spirit; entries are edited only to flip state (todo → doing → done/canceled) and to add a timestamped resolution.
 schema_version: 1
 created_at: 2026-05-26T00:15:29-04:00
-last_updated: 2026-05-30T18:59:03-04:00
+last_updated: 2026-05-31T20:36:00-04:00
 ---
 
 # TODOS
@@ -21,6 +21,35 @@ Future work that we explicitly punted on. Each entry has a short random id (six 
 The state line uses a real markdown checkbox so a quick `grep "\[ \]" TODOS.md` finds open items.
 
 ## Entries
+
+### T-7c3f02: opus-4-8 tool-batch hallucination under interleaved-thinking
+
+- [x] state: `done`
+- created_at: 2026-05-31T15:12:00-04:00
+- created_by: session=4eae09c7-9529-404c-9fba-8aef47abce73, surfaced live while answering a question about raw-tool-output persistence
+- done_at: 2026-05-31T20:36:00-04:00
+- done_by: session=38a5e964-bc9a-430b-b5a1-0abe0dd737a1 (fresh session, clean transport)
+- outcome: Fixed by gating `interleaved-thinking-2025-05-14` OFF for opus-4-8 in `src/headers.ts` + `plugins/llm-anthropic/beta-flags.ts` (escape hatch `MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1`). +3 regression tests in `src/headers.test.ts`; 2 opus-4-8 fixture-parity tests updated. Full suite 4436 pass / 0 fail. Change-doc: `docs/changes/2026-05-31-fix-opus48-interleaved-thinking-tool-batching.md`. Corrected root cause: `private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md`.
+- area: `src/headers.ts`, `plugins/llm-anthropic/beta-flags.ts`
+
+**Description (corrected).** The original framing — "provider-refactor delivery regression, tool results stall then flush" — was WRONG, diagnosed from a degraded transport. Wire captures (`.net-dbg`) prove the harness delivers every tool result correctly (cumulative `tool_use`->`tool_result` counts match exactly across 20 round-trips). The real defect is model behavior: opus-4-8 under `interleaved-thinking-2025-05-14` emits many `tool_use` blocks in ONE turn (observed 44) with `thinking` blocks between them that reason about same-turn tool results that cannot exist yet, inducing a self-inflicted "results are batching/stalling" spiral + duplicate calls. Differential proof: pre-refactor opus-4.7 with the SAME beta is clean, so the change tracks the MODEL (4.7->4.8), not the refactor.
+
+**Self-evidence.** A single read-only question produced 33 blobs, 21 (64%) byte-identical re-reads. Blob-dir `dupes > 0` after a no-re-read session was the oracle. The model's own interleaved thinking literally narrated the false "batching/flushing" story mid-turn (quoted in doc 08).
+
+**Resolution.** Omit interleaved-thinking for opus-4-8 only; 4.6/4.7 + sonnet keep it (they sequence tool use correctly). Removes the mechanism at its source: standard adaptive thinking means the model thinks once, emits its batch, gets ALL results, then thinks again next turn — no thinking block sits between same-turn tool_use blocks.
+
+**Full writeup.** `private/tool-bugs-and-improvements/` docs 01-08 (08 is the corrected root cause; 05-07 preserve the wrong path on purpose). Tracked live as tasks `#73dafa` (superseded) then the Phase 0-5 tree, and project memories `mpu5q1np-b8b4`, `mpu6wm1f-5814`.
+
+### T-9d2e44: Content-dedup blobs by sha256 (standalone, deferred from T-7c3f02)
+
+- [ ] state: `todo`
+- created_at: 2026-05-31T20:36:00-04:00
+- created_by: session=38a5e964, split out of T-7c3f02 when its retry-storm justification was removed by the fix
+- area: `src/blob-store.ts`
+
+**Description.** Two tool calls with byte-identical output currently write two separate `<tool_use_id>.raw` blobs (no dedup, by design — see `docs/changes/2026-05-26-feat-blob-store.md` Option A). Legitimate identical re-reads (same file read twice across a session) still duplicate on disk. A content-dedup would collapse them.
+
+**Why deferred / why non-trivial.** The original driver (cap a retry storm's disk/context bloat) is gone now that T-7c3f02 is fixed. A SAFE implementation cannot just point two ids at one file: that breaks the per-`tool_use_id` blob invariant and the LRU byte accounting in `evictIfOverCap`. It needs either ref-counting (evict only when the last referencing id is gone) or a content-addressed store (`<sha256>.raw` + an id->sha index). Low priority; only worth it if disk growth from honest duplicate reads becomes a real problem.
 
 ### T-a4f8c1: Garbage-collect orphan blob directories
 
@@ -309,6 +338,63 @@ The `ModelInfo` tool's description nudges the model to consult it before claimin
 
 The media-ingestion + `ModelInfo` + OpenAI-image work is complete and green in its own scope (format/lint/typecheck clean, 103 media/model-info/openai tests pass), but the shared worktree is co-occupied by session `5f286880`'s in-flight tool refactor: ~50 of their files are modified, `src/plugins/agent-context.ts` is untracked, and my wiring in `index.ts`/`loader.ts`/`agent.ts`/`plugins/types.ts`/`editor-controller.ts` is intermixed with theirs and imports their untracked `createAgentContext`. A clean isolated commit won't build; a blanket commit captures their unfinished refactor + (transient) failing tests. Once `5f286880` lands and `format:check && lint && typecheck && test` are green, commit the combined tree. My files: `src/media/*`, `src/llm/model-info.ts`(+test), `plugins/model-info/*`, `src/llm/adapter-legacy-media.test.ts`, edits to `src/client/types.ts`/`client.ts`/`llm/adapter-legacy.ts`/`llm/provider.ts`/`client/debug.ts`/`session-dump.ts`/`agent.ts`/`editor-controller.ts`/`index.ts`/`plugins/types.ts`/`plugins/loader.ts`/`plugins/llm-openai/responses/request-body.ts`(+`openai.test.ts`).
 
+### T-5c4d10: Self-paced `/loop` — let the model choose the next interval
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T19:00:33-04:00
+- created_by: session=38cfcafc-1a28-4aaa-af15-908130bc7eea, schedule-plugin work (see `docs/changes/2026-05-30-schedule-plugin.md`)
+- area: `plugins/schedule/lib/scheduler.ts`, `plugins/schedule/handlers/cmd_loop.ts`, a new `CronReschedule`/`CronUpdate` tool
+
+**Description.** The scheduled-tasks doc's "let Claude choose the interval" mode picks a fresh delay (1 min–1 h) after EACH iteration based on what it observed. v1 approximates this: a `pace:"dynamic"` task fires, then auto-advances `nextAtMs` by a fixed `DEFAULT_DYNAMIC_MS` (5 min). The model cannot actually adjust the cadence — `CronCreate` would mint a NEW task, and there is no update path.
+
+**What landing looks like.** A `CronReschedule({id, every|nextAtMs})` (or `CronUpdate`) tool the model calls at the end of a dynamic iteration to set the next wakeup, plus a one-line "next wakeup in Nm because …" echo (the doc prints the chosen delay + reason). `cmd_loop` keeps creating the dynamic task; the heartbeat respects the model-set `nextAtMs` instead of the fixed default. Optionally surface the chosen delay in the footer status row.
+
+**Open questions.** Where does the "after each iteration, pick a delay" instruction live — a PROMPT.md addition that fires only for dynamic loops, or an attachment injected alongside the loop prompt? The doc's Monitor-tool streaming path (a background script whose lines re-trigger the loop) is a separate, larger follow-up and explicitly out of scope here.
+
+### T-6e8a22: Esc stops the active `/loop`
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T19:00:33-04:00
+- created_by: session=38cfcafc-1a28-4aaa-af15-908130bc7eea, schedule-plugin work
+- area: `src/agent/repl-live-area.ts` (or an `editor.key`/abort hook), `plugins/schedule`
+
+**Description.** The doc says pressing Esc while a `/loop` waits for its next iteration clears the pending wakeup so it does not fire again. In this port, Esc aborts the current turn but the cron task keeps firing; cancellation is only via `/schedule cancel <id>` or `CronDelete`. There is no "stop the loop I just started" gesture.
+
+**What landing looks like.** Esc at idle (no turn running) cancels the most-recently-created `source:"loop"` task (or all loop tasks), with a one-line scrollback confirmation. Needs a decoupled signal: either the schedule plugin subscribes to an existing abort/idle channel, or a small `loop.stop` convention. Must not interfere with Esc's existing turn-abort and reflection-cooldown-skip semantics. Non-loop scheduled tasks (created by NL/tool) stay put, matching the doc.
+
+### T-7f9b33: Commands + scheduler in non-REPL / `--print` / headless-resume runs
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T19:00:33-04:00
+- created_by: session=38cfcafc-1a28-4aaa-af15-908130bc7eea, schedule-plugin work
+- area: `src/agent.ts` (`runRepl` vs the print/agent path), `plugins/schedule`, `plugins/slash-menu`
+
+**Description.** Slash-command dispatch (`onSubmit` interception) and the schedule heartbeat (a live-area slot) are REPL-scoped. A `--print` one-shot, a piped invocation, or a resumed non-interactive run won't dispatch `/loop` and won't tick the heartbeat. That's acceptable for v1 (the feature is inherently interactive) but undocumented at the code level and surprising if someone scripts `/schedule …`.
+
+**What landing looks like.** Decide + document the boundary. Either (a) explicitly no-op commands/scheduling outside the live-area REPL with a clear message, or (b) move command dispatch to a shared seam both paths call (the agent loop's user-input boundary) and gate the heartbeat on a non-REPL timer when a session is attached. The cron TOOLS already work in any path (they're normal tool calls); only the `/command` sugar + the firing loop are REPL-bound.
+
+### T-8a0c44: Extract command registry/dispatch into `loader/commands.ts`
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T19:00:33-04:00
+- created_by: session=38cfcafc-1a28-4aaa-af15-908130bc7eea, schedule-plugin work
+- area: `src/plugins/loader.ts`, new `src/plugins/loader/commands.ts`
+
+**Description.** The `commands[]` host port added the registry + `dispatchCommand` + `getCommands`/`hasCommand`/`listCommandInfo` directly to `loader.ts`, which was already over the oxlint `max-lines` (800) soft warning. The repo already splits loader internals into `loader/helpers.ts` and `loader/event-subs.ts`; the command bits should follow.
+
+**What landing looks like.** Move `resolveCommand` (already in `event-subs.ts`), the `commandIndex` build, dispatch context construction, and the parse seam into `loader/commands.ts`, leaving thin delegating methods on `PluginLoader`. Pure refactor, no behavior change; the existing `src/plugins/commands.test.ts` is the guard.
+
+### T-9b1d55: `/loop` arg + slash-menu UX polish
+
+- [ ] state: `todo`
+- created_at: 2026-05-30T19:00:33-04:00
+- created_by: session=38cfcafc-1a28-4aaa-af15-908130bc7eea, schedule-plugin work
+- area: `plugins/schedule/lib/loop-parse.ts`, `plugins/slash-menu/*`, `src/plugins/manifest.ts`
+
+**Description.** A cluster of small, deferred niceties: (1) `/loop` only parses a LEADING interval (`5m …`, `every 2 hours …`); the doc also allows a trailing clause (`/loop check CI every 2 hours`). (2) slash-menu `Tab`/`Enter` always complete to `/<name> ` (trailing space), so a bare command like `/loop` needs two Enters to submit — Enter on an exact full-name match could submit directly. (3) The menu filter is prefix + substring; a real subsequence/fuzzy ranking would help once there are many commands. (4) Command handlers are module-only; subprocess command handlers (JSON stdout round-trip) are unimplemented.
+
+**What landing looks like.** Pick off independently. (1) extend `parseLoopArgs` to detect a trailing duration token/clause; (2) add an exact-name Enter-submits branch to `on_key`; (3) swap `filterCommands` substring pass for a scored subsequence matcher; (4) extend `parseCommand` + `resolveCommand` to accept `subprocess` and add an envelope protocol. None are blocking; all have unit-test homes already.
+
 ## Audit log
 
 History of state changes goes here as date-stamped one-liners. Helps a future agent understand why an entry's state moved.
@@ -318,3 +404,5 @@ History of state changes goes here as date-stamped one-liners. Helps a future ag
 - 2026-05-27T11:31:00-04:00: added T-ca2ce1 / T-e945ec / T-c510d3 (tag-namespace migration, plugins tree unification, ModeManager extraction) as deferred sibling work to the mode-system overhaul in session 100a7080.
 - 2026-05-30T18:59:03-04:00: added T-5a17e0 / T-5b28f1 / T-5c39a2 / T-5d40b3 / T-5e51c4, deferred follow-ups from the system-prompt role-composition refactor (commits 429f54d + 16c9c36, session 5f286880). Note T-ca2ce1 (tag-namespace migration) is closely related and partly subsumed: this refactor landed the `<ma::sys|agent|emit::>` grammar for the system-prompt + live tags; T-5c39a2 tracks the remaining saved-session migration.
 - 2026-05-30T17:15:00-04:00: added T-9c2e7a, T-4b1f08, T-d3a6e2, T-77c9b4, T-1e5fa3, T-a08d6c, T-b6402d (multimodality follow-ups: Files-API upload + progress line, OpenAI media limits, compress modal, real-terminal smoke test, ModelInfo nudge fragment, audio/video enablement, and the gated commit) from session 40d7e158 multimodal ingestion build. Design lives in `private/multimodality-ingestion/`.
+- 2026-05-30T19:00:33-04:00: added T-5c4d10 / T-6e8a22 / T-7f9b33 / T-8a0c44 / T-9b1d55, deferred follow-ups from the scheduled-tasks port (schedule + slash-menu plugins + the prompt.inject / commands[] / live-area-emit host ports, session 38cfcafc; see `docs/changes/2026-05-30-schedule-plugin.md`). The feature shipped green; these are the intentional v1 cuts: model-driven self-paced loop intervals, Esc-to-stop-loop, non-REPL command/scheduler scope, a loader.ts split, and assorted /loop + slash-menu UX polish.
+- 2026-05-30T20:35:00-04:00: session 2dae6456 resumed the role-composition refactor and CLOSED 3 of its 5 follow-ups: T-5a17e0 done (commit 7cb912b, surgical filtered-patch commit of the 3 entangled comment files), T-5b28f1 done (26b0174, 4 dev-doc READMEs), T-5e51c4 done (de76b9f) — the latter promoted from latent to live because session 38cfcafc's `schedule`/`sub-agents` plugins are the first real multi-tool packs and were mis-composing. T-5c39a2 (saved-session migration) and T-5d40b3 (global-cache-block move) remain `todo` by deliberate decision — see their sharpened "Why deferred" notes (381/2459 sessions resume fine via read-tolerance; the cache move needs sign-off + measurement).

@@ -303,6 +303,54 @@ export type ParsedKey = {
   text: string | null
 }
 
+/**
+ * Context the editor hands to a {@link QueueKeyHandler} on every
+ * queue-navigation-eligible keystroke. Lets the host decide whether to
+ * claim the key without the host having to track editor buffer state.
+ */
+export interface QueueKeyContext {
+  /** Current full editor buffer text (with `\n` line separators). */
+  buffer: string
+  /**
+   * True when the cursor sits on the FIRST visual row of the buffer
+   * (logical row 0 AND visual wrap-chunk 0). The host uses this to gate
+   * "↑ at the top opens queue navigation" so an ↑ that should move the
+   * cursor up within a multi-line draft is left to the editor.
+   */
+  atTop: boolean
+}
+
+/**
+ * Result a {@link QueueKeyHandler} returns for a single keystroke.
+ *
+ * `handled === false` is pure pass-through: the editor runs its normal
+ * default for the key (insert the char, submit, cursor-up, abort, …) as
+ * if no handler were wired. `handled === true` consumes the key; when
+ * `buffer` is also set the editor replaces its buffer with that text and
+ * parks the cursor at the end (same semantics as `setBuffer`).
+ */
+export interface QueueKeyResult {
+  handled: boolean
+  buffer?: string
+}
+
+/**
+ * Host hook for the submit-queue navigation UI (dequeue / remove /
+ * dequeue-all driven from the prompt). Wired via
+ * `EditorController.setQueueKeyHandler`. Invoked synchronously BEFORE
+ * the editor's default handling for the keys it cares about: `ArrowUp`,
+ * `ArrowDown`, `Enter`, `Escape`, and single printable characters
+ * (`d` / `x` / `k`, plus any other printable while the nav overlay is
+ * open, which it swallows to stay modal).
+ *
+ * The handler is the single source of truth for "is the nav overlay
+ * open" — the editor never tracks that state. When the overlay is
+ * closed the handler returns `{handled:false}` for everything except an
+ * `ArrowUp` that should open it (or single-item dequeue). Cheap to call
+ * on every eligible keystroke: one boolean check in the common path.
+ */
+export type QueueKeyHandler = (key: string, ctx: QueueKeyContext) => QueueKeyResult
+
 export const BRACKETED_PASTE_START = "\x1b[200~"
 export const BRACKETED_PASTE_END = "\x1b[201~"
 export const KITTY_KEYBOARD_ENABLE = "\x1b[>31u"

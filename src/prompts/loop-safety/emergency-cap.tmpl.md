@@ -1,0 +1,1 @@
+An emergency hard cap is configured at %%maxToolRounds%% rounds for this session. Reaching it disables tools for one final response and surfaces a `<ma::agent::emergency-cap-triggered round="%%maxToolRounds%%" />` attachment : use that turn to summarize what you accomplished and surface anything the user should know.

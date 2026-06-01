@@ -153,6 +153,43 @@ describe("headers", () => {
         ].join(","),
       )
     })
+
+    // Regression guard for TODOS.md T-7c3f02 (root cause:
+    // private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md).
+    // opus-4-8 with interleaved-thinking emits huge parallel tool batches whose
+    // mid-turn thinking hallucinates same-turn tool results. We OMIT the
+    // interleaved-thinking beta for opus-4-8 only; opus-4.6/4.7 + sonnet keep
+    // it (they sequence tool use correctly).
+    it("omits interleaved-thinking for opus-4-8 (T-7c3f02)", () => {
+      const flags = buildBetaFlags("conversation", "claude-opus-4-8")
+      expect(flags).not.toContain(BetaFlagId.INTERLEAVED_THINKING_20250514)
+      // Still a normal conversation request otherwise.
+      expect(flags).toContain(BetaFlagId.CLAUDE_CODE_20250219)
+      expect(flags).toContain(BetaFlagId.CONTEXT_MANAGEMENT_20250627)
+      expect(flags).toContain(BetaFlagId.CONTEXT_1M_20250807)
+    })
+
+    it("keeps interleaved-thinking for opus-4-7 and sonnet-4-6 (T-7c3f02 scope)", () => {
+      expect(buildBetaFlags("conversation", "claude-opus-4-7")).toContain(
+        BetaFlagId.INTERLEAVED_THINKING_20250514,
+      )
+      expect(buildBetaFlags("conversation", "claude-sonnet-4-6")).toContain(
+        BetaFlagId.INTERLEAVED_THINKING_20250514,
+      )
+    })
+
+    it("MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1 restores it for opus-4-8", () => {
+      const prev = process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING
+      process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING = "1"
+      try {
+        expect(buildBetaFlags("conversation", "claude-opus-4-8")).toContain(
+          BetaFlagId.INTERLEAVED_THINKING_20250514,
+        )
+      } finally {
+        if (prev === undefined) delete process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING
+        else process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING = prev
+      }
+    })
   })
 
   describe("verify against captured traffic", () => {

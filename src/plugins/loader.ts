@@ -120,6 +120,18 @@ export interface PluginLoaderOptions {
    */
   homeDir?: string
   /**
+   * Absolute path to minimal-agent's OWN per-user plugins root (the loader
+   * looks for a `plugins/` subdirectory under this path). Wired in
+   * `src/index.ts` to `~/.minimal-agent`, which is where the first-run
+   * bootstrap clones the `minimal-agent-plugins` repo. These are the
+   * "extended first-party" plugins (Fetch, Skill, slash-menu, …): they sit
+   * ABOVE embedded built-ins but BELOW the user's hand-curated home
+   * (`~/.agents/plugins`) and project (`.agents/plugins`) roots on
+   * package-id collision, so a developer who symlinks a working copy into
+   * either of those always shadows the auto-cloned one.
+   */
+  userDir?: string
+  /**
    * Absolute path to the project root (typically the agent's cwd). The
    * loader looks for a `.agents/plugins/` subdirectory under this
    * path. Highest precedence — project plugins shadow home and embedded
@@ -418,12 +430,18 @@ export class PluginLoader {
     const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
     const enabledPluginIds = opts.enabledPluginIds ?? new Set<string>()
 
-    // Discover packages in all three roots. Precedence on package-id
-    // collision: project > home > embedded (closer-to-user wins).
-    const packages: { dir: string; root: "embedded" | "home" | "project" }[] = []
+    // Discover packages in all four roots. Precedence on package-id
+    // collision: project > home > user > embedded (closer-to-user wins).
+    type PkgRoot = "embedded" | "user" | "home" | "project"
+    const packages: { dir: string; root: PkgRoot }[] = []
     if (opts.embeddedDir) {
       for (const d of discoverPackageDirs(opts.embeddedDir, "plugins")) {
         packages.push({ dir: d, root: "embedded" })
+      }
+    }
+    if (opts.userDir) {
+      for (const d of discoverPackageDirs(opts.userDir, "plugins")) {
+        packages.push({ dir: d, root: "user" })
       }
     }
     if (opts.homeDir) {
@@ -443,11 +461,11 @@ export class PluginLoader {
     //   - homeDir = $HOME/.agents       → scans $HOME/.agents/plugins (same dir!)
     //   - symlinks under ~/.agents/plugins pointing into a shared
     //     dev checkout that also lives under projectDir
-    // Keep only the highest-precedence root (project > home > embedded)
+    // Keep only the highest-precedence root (project > home > user > embedded)
     // for each physical package. This is not a user-actionable warning —
     // emit a Notice that lands in the file log only, not the scrollback.
-    const ROOT_PRECEDENCE = { project: 3, home: 2, embedded: 1 } as const
-    const byRealPath = new Map<string, { dir: string; root: "embedded" | "home" | "project" }>()
+    const ROOT_PRECEDENCE = { project: 4, home: 3, user: 2, embedded: 1 } as const
+    const byRealPath = new Map<string, { dir: string; root: PkgRoot }>()
     for (const pkg of packages) {
       let real: string
       try {
@@ -477,10 +495,11 @@ export class PluginLoader {
     // Parse manifests.
     const parsed: LoadedPlugin[] = []
     const seenIds = new Set<string>()
-    // Walk in precedence order: project > home > embedded.
+    // Walk in precedence order: project > home > user > embedded.
     const ordered = [
       ...dedupedPackages.filter((p) => p.root === "project"),
       ...dedupedPackages.filter((p) => p.root === "home"),
+      ...dedupedPackages.filter((p) => p.root === "user"),
       ...dedupedPackages.filter((p) => p.root === "embedded"),
     ]
     for (const { dir, root } of ordered) {
@@ -501,10 +520,29 @@ export class PluginLoader {
       }
 
       if (seenIds.has(manifest.id)) {
-        logger(
+        // A higher-precedence copy of this id already won, so this copy is
+        // skipped. That part is correct and intentional. But this is routine
+        // precedence resolution, NOT a user-actionable error: the common
+        // trigger is the same plugins repo present under two roots with
+        // DISTINCT realpaths (e.g. ~/.agents/plugins/* symlinked into one
+        // checkout while ~/.minimal-agent/plugins/* is a second checkout of
+        // the same repo — same manifest id, different files on disk, so the
+        // realpath dedup above can't collapse them). Emitting a loud ⚠ warn
+        // for that on every startup just races the banner box with noise.
+        //
+        // Route through the injected logger when a test supplies one (so the
+        // shadow stays observable in tests) and otherwise emit a Notice that
+        // lands in the file log only, never the scrollback — matching the
+        // realpath-dedup and disabled-by-manifest branches that bracket this
+        // one.
+        const msg =
           `skipping ${dir}: package id "${manifest.id}" already loaded ` +
-            `(precedence: project > home > embedded)`,
-        )
+          `(precedence: project > home > user > embedded)`
+        if (opts.logger) {
+          opts.logger(msg)
+        } else {
+          diag.notice("plugin-loader", msg)
+        }
         continue
       }
 
@@ -924,12 +962,15 @@ export class PluginLoader {
    * `slash-menu` overlay can render/filter without importing the loader.
    */
   listCommandInfo(): CommandInfo[] {
-    return this.getCommands().map((c) => ({
-      name: c.spec.name,
-      summary: c.spec.summary,
-      ...(c.spec.argHint != null ? { argHint: c.spec.argHint } : {}),
-      pluginId: c.pluginId,
-    }))
+    return this.getCommands().map((c) => {
+      const info: CommandInfo = {
+        name: c.spec.name,
+        summary: c.spec.summary,
+        pluginId: c.pluginId,
+      }
+      if (c.spec.argHint != null) info.argHint = c.spec.argHint
+      return info
+    })
   }
 
   /**

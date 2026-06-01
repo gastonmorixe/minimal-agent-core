@@ -32,14 +32,14 @@ describe("buildQueueDecorationLines", () => {
   it("single entry: header + closing ╰ on the one item row", () => {
     const lines = buildQueueDecorationLines(["only one"])
     expect(lines.length).toBe(2)
-    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 1")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 1  ·  ↑ edit")
     expect(noAnsi(lines[1])).toBe("  ╰  1 ▸ only one")
   })
 
   it("two entries: first row ┊, second row ╰ (last item closes)", () => {
     const lines = buildQueueDecorationLines(["first", "second"])
     expect(lines.length).toBe(3)
-    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 2")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 2  ·  ↑ edit")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ first")
     expect(noAnsi(lines[2])).toBe("  ╰  2 ▸ second")
   })
@@ -47,7 +47,7 @@ describe("buildQueueDecorationLines", () => {
   it("three entries: three numbered rows, last is ╰ (well within cap)", () => {
     const lines = buildQueueDecorationLines(["a", "b", "c"])
     expect(lines.length).toBe(4)
-    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 3")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 3  ·  ↑ edit")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ a")
     expect(noAnsi(lines[2])).toBe("  ┊  2 ▸ b")
     expect(noAnsi(lines[3])).toBe("  ╰  3 ▸ c")
@@ -57,7 +57,7 @@ describe("buildQueueDecorationLines", () => {
     const queue = Array.from({ length: 10 }, (_, i) => `item-${i + 1}`)
     const lines = buildQueueDecorationLines(queue)
     expect(lines.length).toBe(11) // header + 10 items, no overflow tail
-    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 10")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 10  ·  ↑ edit")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ item-1")
     expect(noAnsi(lines[9])).toBe("  ┊  9 ▸ item-9")
     expect(noAnsi(lines[10])).toBe("  ╰  10 ▸ item-10")
@@ -67,7 +67,7 @@ describe("buildQueueDecorationLines", () => {
     const queue = Array.from({ length: 12 }, (_, i) => `item-${i + 1}`)
     const lines = buildQueueDecorationLines(queue)
     expect(lines.length).toBe(12) // header + 10 items + elision tail
-    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 12")
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 12  ·  ↑ edit")
     expect(noAnsi(lines[1])).toBe("  ┊  1 ▸ item-1")
     expect(noAnsi(lines[10])).toBe("  ┊  10 ▸ item-10")
     expect(noAnsi(lines[11])).toBe("  ╰  ... and 2 more")
@@ -164,5 +164,109 @@ describe("buildQueueDecorationLines", () => {
 
   it("preview cap constant matches truncation behavior", () => {
     expect(QUEUE_PREVIEW_W).toBe(70)
+  })
+})
+
+describe("buildQueueDecorationLines — ↑ edit affordance", () => {
+  it("plain header carries a faint '↑ edit' discoverability hint", () => {
+    const lines = buildQueueDecorationLines(["a", "b"])
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 2  ·  ↑ edit")
+    // The affordance is dim, not a fresh accent color.
+    expect(lines[0]).toContain("\x1b[2m")
+  })
+
+  it("nav header omits the affordance (the hint row covers actions)", () => {
+    const lines = buildQueueDecorationLines(["a", "b"], { selectedIndex: 0 })
+    expect(noAnsi(lines[0])).toBe("  ⏳ queued · 2")
+    expect(noAnsi(lines[0])).not.toContain("↑ edit")
+  })
+})
+
+describe("buildQueueDecorationLines — navigation mode (selectedIndex)", () => {
+  it("selectedIndex null behaves exactly like the plain block", () => {
+    const plain = buildQueueDecorationLines(["a", "b"])
+    const explicitNull = buildQueueDecorationLines(["a", "b"], { selectedIndex: null })
+    expect(explicitNull).toEqual(plain)
+  })
+
+  it("renders a hint row (carrying ╰) with the d / x / k / esc actions", () => {
+    const lines = buildQueueDecorationLines(["a", "b", "c"], { selectedIndex: 1 })
+    const hint = noAnsi(lines[lines.length - 1])
+    expect(hint).toContain("╰")
+    expect(hint).toContain("↑↓ select")
+    expect(hint).toContain("d dequeue")
+    expect(hint).toContain("x remove")
+    expect(hint).toContain("k dequeue all")
+    expect(hint).toContain("esc cancel")
+  })
+
+  it("item rows use ┊ (hint row closes the block, not the last item)", () => {
+    const lines = buildQueueDecorationLines(["a", "b", "c"], { selectedIndex: 0 })
+    // header + 3 items + hint
+    expect(lines.length).toBe(5)
+    expect(noAnsi(lines[1]).includes("╰")).toBe(false)
+    expect(noAnsi(lines[2]).includes("╰")).toBe(false)
+    expect(noAnsi(lines[3]).includes("╰")).toBe(false)
+    expect(noAnsi(lines[4]).includes("╰")).toBe(true) // hint row
+  })
+
+  it("selected row uses the ▌ marker and a violet background bar", () => {
+    const lines = buildQueueDecorationLines(["a", "b"], { selectedIndex: 1 })
+    const selected = lines[2] // header(0) + item-1(1) + item-2 selected(2)
+    expect(noAnsi(selected)).toContain("▌  2 ▸ b")
+    expect(selected).toContain("\x1b[48;2;55;45;85m") // bg open
+    expect(selected).toContain("\x1b[49m") // bg close (background-only reset)
+    // Non-selected rows keep the plain ┊ marker, no background.
+    expect(noAnsi(lines[1])).toContain("┊  1 ▸ a")
+    expect(lines[1]).not.toContain("\x1b[48;2;55;45;85m")
+  })
+
+  it("with cols, the selected row is right-padded to a full-width bar", () => {
+    const cols = 50
+    const lines = buildQueueDecorationLines(["short", "x"], { selectedIndex: 0, cols })
+    const selected = lines[1]
+    // Visible width of the bar equals the terminal width.
+    expect(displayWidth(noAnsi(selected))).toBe(cols)
+    // The trailing pad sits INSIDE the background (bg-close is the last SGR).
+    expect(selected.endsWith("\x1b[49m")).toBe(true)
+  })
+
+  it("without cols, the selected row carries the bar but is not padded", () => {
+    const lines = buildQueueDecorationLines(["short", "x"], { selectedIndex: 0 })
+    const selected = lines[1]
+    expect(selected).toContain("\x1b[48;2;55;45;85m")
+    // No giant pad run : visible width is just the content, well under 80.
+    expect(displayWidth(noAnsi(selected))).toBeLessThan(20)
+  })
+
+  it("clamps an out-of-range selectedIndex into the queue", () => {
+    const lines = buildQueueDecorationLines(["a", "b"], { selectedIndex: 99 })
+    // Last item (index 1) ends up selected.
+    expect(noAnsi(lines[2])).toContain("▌  2 ▸ b")
+  })
+
+  it("windows a deep queue around the selection with ↑/↓ more elisions", () => {
+    const queue = Array.from({ length: 14 }, (_, i) => `item-${i + 1}`)
+    const lines = buildQueueDecorationLines(queue, { selectedIndex: 12 })
+    const plain = lines.map(noAnsi)
+    // header + (↑ more) + 10 rows + hint  (selection near the bottom, so
+    // the window clips the top and the bottom edge reaches the last item)
+    expect(plain[0]).toBe("  ⏳ queued · 14")
+    expect(plain[1]).toContain("↑ 4 more")
+    expect(plain.some((l) => l.includes("▌  13 ▸ item-13"))).toBe(true)
+    expect(plain[plain.length - 1]).toContain("↑↓ select")
+    // No "↓ N more" elision : the window already reaches item-14. (The
+    // hint row's "↑↓ select" contains ↓, so match the elision shape.)
+    expect(plain.some((l) => /↓ \d+ more/.test(l))).toBe(false)
+    expect(plain.some((l) => /↑ \d+ more/.test(l))).toBe(true)
+  })
+
+  it("windowing keeps the selection visible with BOTH elisions mid-queue", () => {
+    const queue = Array.from({ length: 30 }, (_, i) => `item-${i + 1}`)
+    const lines = buildQueueDecorationLines(queue, { selectedIndex: 15 })
+    const plain = lines.map(noAnsi)
+    expect(plain.some((l) => /↑ \d+ more/.test(l))).toBe(true)
+    expect(plain.some((l) => /↓ \d+ more/.test(l))).toBe(true)
+    expect(plain.some((l) => l.includes("▌  16 ▸ item-16"))).toBe(true)
   })
 })

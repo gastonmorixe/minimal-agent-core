@@ -214,6 +214,14 @@ export async function* translateOpenAIResponsesStream(
   let messageStartEmitted = false
   let lastUsage: CanonicalUsage = { inputTokens: 0, outputTokens: 0 }
   let stopReason: StopReason | null = null
+  // True once we've seen ANY terminal event (completed / failed / incomplete).
+  // If the upstream closes the SSE stream without one, we must NOT treat it as
+  // a clean end_turn -- see the post-loop truncation guard below.
+  let sawTerminal = false
+  // Latched when the first function_call item is added. We can't rely on
+  // `functionBlocks.size` at `response.completed` time because each call's
+  // `output_item.done` already deleted its entry, leaving size 0.
+  let sawToolCall = false
   let nextBlockIndex = 0
   // (item_id + part-suffix) → canonical block index
   const textBlocks = new Map<string, number>()
@@ -240,6 +248,7 @@ export async function* translateOpenAIResponsesStream(
       case "response.output_item.added": {
         const added = ev as OutputItemAdded
         if (added.item.type === "function_call") {
+          sawToolCall = true
           const key = `${added.output_index}:${added.item.id ?? added.item.call_id ?? ""}`
           const idx = nextBlockIndex++
           functionBlocks.set(key, idx)
@@ -373,16 +382,19 @@ export async function* translateOpenAIResponsesStream(
         break
       }
       case "response.completed": {
+        sawTerminal = true
         const c = ev as ResponseCompleted
         if (c.response.usage) lastUsage = mergeUsageMax(lastUsage, mapUsage(c.response.usage))
         // Default to end_turn unless we saw function_calls — but Responses
         // doesn't fire a separate `finish_reason`; the items themselves
-        // tell us. If any function calls remain in `functionBlocks`, infer
-        // tool_use.
-        stopReason = functionBlocks.size > 0 ? "tool_use" : "end_turn"
+        // tell us. Use the latched `sawToolCall` flag: by the time
+        // `response.completed` arrives, each call's `output_item.done` has
+        // already deleted its `functionBlocks` entry, so `.size` is 0 here.
+        stopReason = sawToolCall ? "tool_use" : "end_turn"
         break
       }
       case "response.failed": {
+        sawTerminal = true
         const f = ev as ResponseFailed
         stopReason = "error"
         const code = f.response.error?.code
@@ -401,6 +413,7 @@ export async function* translateOpenAIResponsesStream(
         break
       }
       case "response.incomplete": {
+        sawTerminal = true
         const i = ev as ResponseIncomplete
         if (i.response.usage) lastUsage = mergeUsageMax(lastUsage, mapUsage(i.response.usage))
         const reason = i.response.incomplete_details?.reason
@@ -433,6 +446,27 @@ export async function* translateOpenAIResponsesStream(
       default:
         break
     }
+  }
+
+  // The upstream closed the SSE stream without ANY terminal event (no
+  // response.completed / failed / incomplete). Observed on gpt-5.5: the
+  // server sends response.created → output_item.added(reasoning) → keepalive,
+  // then closes the connection. HTTP 200, ~2.3s, no error frame. Falling
+  // through here with stopReason=null yields an empty response, which the
+  // agent loop reads as "no tool calls ⇒ model is done" and silently drops
+  // to the prompt mid-task (session 50efb996, 2026-05-30, turn 036). Treat a
+  // terminal-event-less close as a retryable truncation so the retry /
+  // watchdog path handles it instead of the loop exiting clean.
+  if (!sawTerminal) {
+    yield {
+      type: "stream_error",
+      retryable: true,
+      category: "api",
+      cause: new Error(
+        "OpenAI Responses stream closed without a terminal event (truncated)",
+      ),
+    }
+    return
   }
 
   yield {

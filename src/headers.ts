@@ -9,6 +9,41 @@
 import { randomUUID } from "node:crypto"
 
 import type { AuthResult } from "./auth.ts"
+import { promptPath, renderPrompt } from "./prompts.ts"
+
+/**
+ * Resolve a core prompt file under `src/prompts/`. Prose for the system
+ * prompt lives in markdown; see `src/prompts/README.md`.
+ *
+ * @param segments - Path segments under `src/prompts/`.
+ * @returns Absolute path to the prompt file.
+ */
+function corePrompt(...segments: string[]): string {
+  return promptPath(import.meta, "prompts", ...segments)
+}
+
+/**
+ * The exact Claude-Code identity line Anthropic's server validates for
+ * plan/OAuth auth (system[1]). Single source of truth, shared with the
+ * `llm-anthropic` provider; rendered from `prompts/anthropic/`.
+ */
+export const CLAUDE_CODE_IDENTITY: string = renderPrompt(
+  corePrompt("anthropic", "identity.claude-code.md"),
+)
+
+/**
+ * Build the billing-attribution block text (system[0] on Anthropic plan
+ * auth). Rendered from `prompts/anthropic/billing.tmpl.md` with the live CLI
+ * version + build hash. The server parses this for billing/attribution.
+ *
+ * @returns The `x-anthropic-billing-header: …` line, byte-exact.
+ */
+export function buildBillingHeaderText(): string {
+  return renderPrompt(corePrompt("anthropic", "billing.tmpl.md"), {
+    version: VERSION,
+    buildHash: BUILD_HASH,
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Constants (from cli.pretty.js)
@@ -327,8 +362,27 @@ export function buildBetaFlags(
       if (wants1m) {
         flags.push(BetaFlagId.CONTEXT_1M_20250807)
       }
+      // Interleaved thinking (interleaved-thinking-2025-05-14): OMITTED for
+      // opus-4-8. With this beta active, opus-4-8 emits many parallel
+      // `tool_use` blocks in ONE assistant turn with `thinking` blocks
+      // interleaved between them, and those mid-turn thinking blocks reason as
+      // if earlier same-turn tool results already exist. They do not: every
+      // tool in a turn executes only AFTER the turn ends. The model then
+      // narrates a false "tool results are stalling / batching / flushing"
+      // story and spirals into ever-larger tool batches (observed: 44 calls in
+      // one turn). Wire-proven against this repo's `.net-dbg` captures, and
+      // ABSENT on opus-4.7 under the SAME beta flag, so the behavior tracks the
+      // MODEL (4.7 -> 4.8), not the harness/transport. Full evidence:
+      // private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md ; tracked
+      // as TODOS.md T-7c3f02. opus-4.6/4.7 and sonnet keep interleaved thinking
+      // (they sequence tool use correctly). Escape hatch to restore the old
+      // behavior for experiments: MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1.
+      const forceInterleaved = process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING === "1"
+      const omitInterleaved = !forceInterleaved && !!model && model.includes("opus-4-8")
+      if (!omitInterleaved) {
+        flags.push(BetaFlagId.INTERLEAVED_THINKING_20250514)
+      }
       flags.push(
-        BetaFlagId.INTERLEAVED_THINKING_20250514,
         // REDACT_THINKING_20260212: Explicitly excluded to ensure thinking steps are visible in normal chat conversations
         // This flag causes thinking to be redacted with cryptographic signatures, but we want to see the thinking process
         // BetaFlagId.REDACT_THINKING_20260212,
@@ -439,33 +493,27 @@ export function buildLoopSafetyParagraph(opts: {
   if (!hasReflection && !hasEmergencyCap) return ""
 
   const cooldownSec = Math.round(reflectionCooldownMs / 1000)
-  const parts: string[] = ["# Tool-use loop safety", ""]
+  // Prose lives in `prompts/loop-safety/*`; the conditional assembly (which
+  // fragment, in what order) stays here. The structure mirrors the original
+  // string-literal build 1:1 so the rendered output is byte-identical.
+  const lp = (file: string): string => corePrompt("loop-safety", file)
+  const parts: string[] = [renderPrompt(lp("heading.md")), ""]
 
   if (hasReflection) {
+    parts.push(renderPrompt(lp("intro.md")), "")
     parts.push(
-      "The agentic tool-use loop has no fixed turn cap by default. Long autonomous tasks (multi-file refactors, audits, sustained research) can run for many rounds without interruption.",
-      "",
+      hasCooldown
+        ? renderPrompt(lp("checkpoint-cooldown.tmpl.md"), {
+            interval: reflectionInterval,
+            cooldownSec,
+          })
+        : renderPrompt(lp("checkpoint-plain.tmpl.md"), { interval: reflectionInterval }),
     )
-    if (hasCooldown) {
-      parts.push(
-        `A reflection checkpoint fires every ${reflectionInterval} tool rounds: the harness applies a ${cooldownSec}-second wall-clock cooldown (a human watching can press Esc to interrupt during the countdown), then injects a \`<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="${cooldownSec}" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
-      )
-    } else {
-      parts.push(
-        `A reflection checkpoint fires every ${reflectionInterval} tool rounds. The harness injects a \`<ma::agent::reflection-checkpoint round="N" cooldown-applied-seconds="0" />\` attachment in the next user content. It is a soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user.`,
-      )
-    }
-    parts.push(
-      "",
-      'To suppress the next K checkpoints during sustained autonomous work (skipping both the cooldown and the attachment), emit `<ma::agent::reflection-ack silence-for="K" reason="..." />` anywhere in your assistant response. The `reason` appears in the user-visible transcript so the human running you can see why you opted out.',
-    )
+    parts.push("", renderPrompt(lp("ack.md")))
   }
 
   if (hasEmergencyCap) {
-    parts.push(
-      "",
-      `An emergency hard cap is configured at ${maxToolRounds} rounds for this session. Reaching it disables tools for one final response and surfaces a \`<ma::agent::emergency-cap-triggered round="${maxToolRounds}" />\` attachment : use that turn to summarize what you accomplished and surface anything the user should know.`,
-    )
+    parts.push("", renderPrompt(lp("emergency-cap.tmpl.md"), { maxToolRounds }))
   }
 
   return parts.join("\n")
@@ -488,11 +536,7 @@ export function buildLoopSafetyParagraph(opts: {
  */
 export function buildToolOutputConventionsParagraph(opts: { blobStoreEnabled: boolean }): string {
   if (!opts.blobStoreEnabled) return ""
-  return [
-    "# Tool output conventions",
-    "",
-    'Every tool result whose body is large or got clamped by the universal 64KB / 1000-line cap also lands intact at `~/.minimal-agent/sessions/<sid>.blobs/<tool_use_id>.raw`. The agent appends a single line `<ma::agent::raw-output path="<abs-path>" size="<size>" sha256="<hex>" />` to the `tool_result.content` whenever that file was written. Use `Read({file_path: ...})` or `Bash({command: "wc -l \'...\'"})` on that path when the inline body isn\'t enough : the file is the FULL pre-clamp, pre-annotation output. The blob also survives session resume, so a later turn can analyze the original bytes without re-running the tool. Small bodies (under the configured `minBytesToPersist`, default 4096 B) are NOT persisted and emit no footer : the `content` IS the full output in that case.',
-  ].join("\n")
+  return renderPrompt(corePrompt("tool-output-conventions.md"))
 }
 
 /**
@@ -620,14 +664,8 @@ export function buildSystemPrompt(opts?: {
   blobStoreEnabled?: boolean
 }): SystemBlock[] {
   const blocks: SystemBlock[] = [
-    {
-      type: "text",
-      text: `x-anthropic-billing-header: cc_version=${VERSION}.${BUILD_HASH}; cc_entrypoint=cli; cch=00000;`,
-    },
-    {
-      type: "text",
-      text: "You are Claude Code, Anthropic's official CLI for Claude.",
-    },
+    { type: "text", text: buildBillingHeaderText() },
+    { type: "text", text: CLAUDE_CODE_IDENTITY },
   ]
 
   // system[2]: Instructions block with cache_control (the big one worth caching).
@@ -658,18 +696,12 @@ export function buildSystemPrompt(opts?: {
 }
 
 /**
- * Minimal instructions block for system[2].
- * The real CLI sends ~11K chars of detailed behavioral instructions.
- * This is a minimal version for research use. Override via buildSystemPrompt({instructions:...}).
+ * Minimal instructions block for system[2], rendered from
+ * `src/prompts/instructions.md`. The real CLI sends ~11K chars of detailed
+ * behavioral instructions; this is a minimal version for research use.
+ * Override via `buildSystemPrompt({ instructions: … })`.
  */
-const DEFAULT_INSTRUCTIONS = `
-You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
-
-# Instructions
-- Be concise and direct in responses.
-- When given a task, do it without unnecessary explanation.
-- If you need to use tools, use them efficiently.
-`.trim()
+const DEFAULT_INSTRUCTIONS = renderPrompt(corePrompt("instructions.md"))
 
 /**
  * Legacy: flat system prompt for backward compatibility.

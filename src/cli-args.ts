@@ -18,6 +18,7 @@
  *       spinners [list]                  → --list-spinners
  *       sessions [list|<query>]          → --sessions [<query>]
  *       sessions resume <sid|last>       → --resume <sid|last>
+ *       usage    [<period>]              → --usage [<period>]
  *       resume   <sid|last>              → --resume <sid|last>
  *       help                             → --help
  *
@@ -51,6 +52,7 @@ const LONG_ALIAS: Record<string, string> = {
   "--list-spinner": "--list-spinners",
   "--session": "--sessions",
   "--list-sessions": "--sessions",
+  "--usage-stats": "--usage",
 }
 
 interface SubcommandSpec {
@@ -65,6 +67,9 @@ const SUBCOMMANDS: Record<string, SubcommandSpec> = {
   flags: { flag: "--list-flags" },
   spinners: { flag: "--list-spinners" },
   sessions: { flag: "--sessions" },
+  // `usage [<period>]` — optional period token (today/last-day/last-month/
+  // ytd/year/all). takesValue consumes the next positional when present.
+  usage: { flag: "--usage", takesValue: true },
   resume: { flag: "--resume", takesValue: true },
   login: { flag: "--login" },
   logout: { flag: "--logout" },

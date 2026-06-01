@@ -21,6 +21,7 @@ import {
   ANTHROPIC_SONNET_STANDARD,
   type MTokRate,
 } from "../../src/llm/pricing.ts"
+import { makeCharRatioEstimator } from "../../src/llm/token-estimate.ts"
 
 import {
   CAPS_HAIKU_45,
@@ -40,6 +41,14 @@ const opus48PricingFor = (req: CanonicalRequest): MTokRate =>
 
 const legacyOpusFastPricingFor = (req: CanonicalRequest): MTokRate =>
   req.speed === "fast" ? ANTHROPIC_OPUS_4X_FAST_LEGACY : ANTHROPIC_OPUS_4X_STANDARD
+
+/**
+ * Token estimator for Anthropic's tokenizer family. ~3.5 chars/token is the
+ * ratio the live output-token estimate in `src/client.ts` already uses, so
+ * estimated session totals stay consistent with the live footer. Shared by
+ * every Anthropic model entry.
+ */
+const estimateAnthropicTokens = makeCharRatioEstimator(3.5)
 
 // ---------------------------------------------------------------------------
 // Register
@@ -62,6 +71,7 @@ export function registerAnthropicModels(): string[] {
     knowledgeCutoff: "2026-01",
     tags: ["opus", "1m-context", "flagship", "production"],
     capabilities: CAPS_OPUS_48,
+    estimateTokens: estimateAnthropicTokens,
     pricing: ANTHROPIC_OPUS_4X_STANDARD,
     pricingForRequest: opus48PricingFor,
     vendorIds: {
@@ -84,6 +94,7 @@ export function registerAnthropicModels(): string[] {
     knowledgeCutoff: "2026-01",
     tags: ["opus", "1m-context", "production"],
     capabilities: CAPS_OPUS_47,
+    estimateTokens: estimateAnthropicTokens,
     pricing: ANTHROPIC_OPUS_4X_STANDARD,
     pricingForRequest: legacyOpusFastPricingFor,
     vendorIds: {
@@ -106,6 +117,7 @@ export function registerAnthropicModels(): string[] {
     knowledgeCutoff: "2025-05",
     tags: ["opus", "1m-context", "legacy"],
     capabilities: CAPS_OPUS_46,
+    estimateTokens: estimateAnthropicTokens,
     pricing: ANTHROPIC_OPUS_4X_STANDARD,
     pricingForRequest: legacyOpusFastPricingFor,
     vendorIds: {
@@ -127,6 +139,7 @@ export function registerAnthropicModels(): string[] {
     knowledgeCutoff: "2025-08",
     tags: ["sonnet", "1m-context", "production"],
     capabilities: CAPS_SONNET_46,
+    estimateTokens: estimateAnthropicTokens,
     pricing: ANTHROPIC_SONNET_STANDARD,
     vendorIds: {
       firstParty: "claude-sonnet-4-6",
@@ -147,6 +160,7 @@ export function registerAnthropicModels(): string[] {
     knowledgeCutoff: "2025-01",
     tags: ["sonnet", "legacy"],
     capabilities: CAPS_SONNET_45,
+    estimateTokens: estimateAnthropicTokens,
     pricing: ANTHROPIC_SONNET_STANDARD,
     vendorIds: {
       firstParty: "claude-sonnet-4-5-20250929",
@@ -167,6 +181,7 @@ export function registerAnthropicModels(): string[] {
     knowledgeCutoff: "2025-02",
     tags: ["haiku", "fast", "production"],
     capabilities: CAPS_HAIKU_45,
+    estimateTokens: estimateAnthropicTokens,
     pricing: ANTHROPIC_HAIKU_45,
     vendorIds: {
       firstParty: "claude-haiku-4-5-20251001",

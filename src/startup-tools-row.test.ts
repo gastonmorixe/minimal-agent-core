@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import { c } from "./agent.ts"
-import { formatStartupToolsRow } from "./startup-tools-row.ts"
+import { formatStartupToolsRow, wrapStartupToolsRows } from "./startup-tools-row.ts"
+import { displayWidth, stripAnsi } from "./term-width.ts"
 
 describe("formatStartupToolsRow", () => {
   test("empty input returns null", () => {
@@ -54,5 +55,64 @@ describe("formatStartupToolsRow", () => {
     // than its content. The current contract is "no icon → no space".
     expect(formatStartupToolsRow([{ name: "Foo" }])).toBe("Foo")
     expect(formatStartupToolsRow([{ name: "Foo" }, { name: "Bar" }])).toBe(`Foo${c.dim(" · ")}Bar`)
+  })
+})
+
+describe("wrapStartupToolsRows", () => {
+  test("empty input returns no lines", () => {
+    expect(wrapStartupToolsRows([], 80)).toEqual([])
+  })
+
+  test("everything on one line when it fits", () => {
+    const lines = wrapStartupToolsRows([{ name: "A" }, { name: "B" }, { name: "C" }], 80)
+    expect(lines).toHaveLength(1)
+    expect(stripAnsi(lines[0]!)).toBe("A · B · C")
+  })
+
+  test("wraps to multiple lines, never splitting a chunk, each ≤ maxWidth", () => {
+    const tools = [
+      { name: "Alpha" },
+      { name: "Bravo" },
+      { name: "Charlie" },
+      { name: "Delta" },
+      { name: "Echo" },
+    ]
+    // Width 14 fits ~"Alpha · Bravo" (13) but not a third chunk.
+    const lines = wrapStartupToolsRows(tools, 14)
+    expect(lines.length).toBeGreaterThan(1)
+    for (const line of lines) {
+      expect(displayWidth(line)).toBeLessThanOrEqual(14)
+    }
+    // Re-joining the visible text recovers the full inventory in order
+    // (nothing dropped, nothing truncated).
+    const rejoined = lines.map((l) => stripAnsi(l)).join(" · ")
+    expect(rejoined).toBe("Alpha · Bravo · Charlie · Delta · Echo")
+  })
+
+  test("a single chunk wider than maxWidth gets its own line (no truncation)", () => {
+    const lines = wrapStartupToolsRows([{ name: "SupercalifragilisticTool" }], 8)
+    expect(lines).toHaveLength(1)
+    expect(stripAnsi(lines[0]!)).toBe("SupercalifragilisticTool")
+  })
+
+  test("emoji-presentation icon width is accounted for when wrapping", () => {
+    // ⏰ is 2 cells. "⏰ CronCreate" = 13 cells; with a budget of 13 it
+    // must sit alone on its line (adding " · " + anything overflows).
+    const lines = wrapStartupToolsRows(
+      [
+        { name: "CronCreate", icon: "⏰", color: "gold" },
+        { name: "CronList", icon: "⏰", color: "gold" },
+      ],
+      13,
+    )
+    expect(lines).toHaveLength(2)
+    expect(displayWidth(lines[0]!)).toBeLessThanOrEqual(13)
+    expect(stripAnsi(lines[0]!)).toBe("⏰ CronCreate")
+  })
+
+  test("non-positive maxWidth degrades to a single joined line", () => {
+    const lines = wrapStartupToolsRows([{ name: "A" }, { name: "B" }], 0)
+    expect(lines).toHaveLength(1)
+    expect(stripAnsi(lines[0]!)).toBe("A · B")
   })
 })

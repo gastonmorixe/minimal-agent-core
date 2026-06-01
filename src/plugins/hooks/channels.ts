@@ -173,12 +173,115 @@ export const CHANNELS = [
       "that want to draw without grabbing the EditorController directly.",
   },
   {
+    name: "editor.overlay.open",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.overlay.open",
+    description:
+      "Plugin → host signal to open a MODAL overlay that OWNS the input line. " +
+      "Payload `{owner: string}` — a stable id for the opening overlay (its " +
+      "plugin id). While owned, the host: (a) hides the prompt row + cursor so " +
+      "the user can't type into a phantom buffer underneath the overlay, " +
+      "(b) blocks `submit()` so the typed `/cmd` line can never leak to " +
+      "scrollback, and (c) routes EVERY key — including printable characters " +
+      "and Backspace — through the `editor.key` hook (printables arrive as " +
+      'single-char `key` values, Backspace as `"Backspace"`) so the owner ' +
+      "drives its own text input via an internal draft instead of the shared " +
+      "prompt buffer. Used by interactive command TUIs (/config, /usage). " +
+      "Distinct from `editor.footer.set`, which only paints and leaves the " +
+      "prompt live underneath. The owner MUST emit `editor.overlay.close` when " +
+      "it dismisses, or pass an empty `{lines:[]}` footer is NOT enough.",
+  },
+  {
+    name: "editor.overlay.close",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.overlay.close",
+    description:
+      "Plugin → host signal to release a modal overlay opened with " +
+      "`editor.overlay.open`. Payload `{owner: string}` (same id). The host " +
+      "restores the prompt row + cursor and resumes normal key handling. " +
+      "Idempotent + owner-checked: a close from a non-owner is ignored, so a " +
+      "stale handler can't tear down a different overlay.",
+  },
+  {
     name: "prompt.submitted",
     shape: "broadcast-async",
     permission: "hooks:prompt.submitted",
     description:
       "Emitted after the user submits a non-empty prompt (queued for the agent). " +
       "Payload `{text, cwd, sid, exit, queuePos}`. `exit ∈ {submitted, canceled}`.",
+  },
+  {
+    name: "command.run",
+    shape: "broadcast-async",
+    permission: "hooks:command.run",
+    description:
+      "Plugin → host request to dispatch a registered slash command by line, " +
+      'e.g. `{line: "/config"}`. The host runs it through the SAME registry ' +
+      "path as a typed `/cmd` submit (`dispatchCommand` → act on the " +
+      "CommandResult), WITHOUT routing through the editor buffer / submit. " +
+      "This is what the slash-menu uses when the user picks a command row: one " +
+      "Enter dispatches the command (opening its TUI) instead of the fragile " +
+      "'rewrite the buffer then fake a submit' path, which raced the async " +
+      "editor.buffer.changed re-open. Unknown / non-command lines are ignored. " +
+      "For skills (model-routed) the menu still rewrites the buffer + submits; " +
+      "only registered commands use this channel.",
+  },
+  {
+    name: "prompt.inject",
+    shape: "broadcast-async",
+    permission: "hooks:prompt.inject",
+    description:
+      "Plugin → host request to enqueue a prompt as if the user had submitted it. " +
+      "Payload `{text, source?}`. The REPL listens and routes the text through the " +
+      "same queue/persist/wake/fan-out path as a real submit, so an injected prompt " +
+      "fires BETWEEN turns (never mid-response) and survives crash/resume like any " +
+      "queued submit. Blank text is ignored. Used by the `schedule` plugin's " +
+      "heartbeat to run a scheduled prompt; reusable by any out-of-band injector " +
+      "(CI push, channels, a watcher). `source` is a free-form origin tag for " +
+      'diagnostics (e.g. `"cron:a1b2c3d4"`).',
+  },
+
+  // -- Sub-agent lifecycle (delegation plugins) ------------------------------
+  // Generic delegation signals. The agent core never emits or consumes these;
+  // a delegation plugin (e.g. `sub-agents`) emits them around spawning a
+  // background worker, and any plugin may listen. Report-back to the PARENT
+  // rides the existing `prompt.inject` channel, not a new one.
+  {
+    name: "subagent.willSpawn",
+    shape: "chain",
+    permission: "hooks:subagent.willSpawn",
+    description:
+      "Chain hook fired BEFORE a delegation plugin spawns a worker. Payload carries " +
+      "the proposed spawn `{task, agent?, model, isolation, depth, leadSid, ...}`. " +
+      "Listeners may rewrite it (e.g. clamp model/effort) or `{halt:true, reason}` to " +
+      "veto — the guardrail seam for depth/nesting caps, concurrency limits, budget, " +
+      "and spawnable-type allowlists. Observation-only listeners just watch.",
+  },
+  {
+    name: "subagent.didSpawn",
+    shape: "broadcast-async",
+    permission: "hooks:subagent.didSpawn",
+    description:
+      "Emitted after a worker process is launched. Payload `{id, sid, label, type, " +
+      "model, pid, leadSid}`. For dashboards / presence / task-linkage reactions.",
+  },
+  {
+    name: "subagent.didReport",
+    shape: "broadcast-async",
+    permission: "hooks:subagent.didReport",
+    description:
+      "Emitted when a worker produces a result or progress checkpoint. Payload " +
+      "`{id, sid, status, resultShort?, tokens?}`. The supervisor typically follows " +
+      "this with a `prompt.inject` so the lead folds the result in between turns.",
+  },
+  {
+    name: "subagent.didExit",
+    shape: "broadcast-async",
+    permission: "hooks:subagent.didExit",
+    description:
+      "Emitted when a worker process terminates (clean, error, stopped, or timed " +
+      "out). Payload `{id, sid, exit, status}`. Distinct from didReport: a worker can " +
+      "report then exit, or exit without reporting (crash).",
   },
 ] as const satisfies readonly ChannelSpec[]
 

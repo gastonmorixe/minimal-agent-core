@@ -13,8 +13,17 @@
  */
 
 import { registerModel } from "../../src/llm/model-registry.ts"
+import { makeCharRatioEstimator } from "../../src/llm/token-estimate.ts"
 import { CAPS_OPENROUTER_CHAT } from "./capabilities.ts"
 import { PRICING_OR_CLAUDE_35_SONNET, PRICING_OR_GPT_4O_MINI } from "./pricing.ts"
+
+/**
+ * Token estimator for OpenRouter. OpenRouter proxies many upstream models
+ * (OpenAI, Anthropic, others) on the OpenAI Chat wire, so no single
+ * tokenizer applies. ~3.8 chars/token splits the difference between the
+ * Anthropic (~3.5) and OpenAI (~4) families for a defensible estimate.
+ */
+const estimateOpenRouterTokens = makeCharRatioEstimator(3.8)
 
 /** Populate the registry with a representative OpenRouter catalog. */
 export function registerOpenRouterModels(): string[] {
@@ -25,6 +34,7 @@ export function registerOpenRouterModels(): string[] {
     displayName: "GPT-4o mini (OpenRouter)",
     tags: ["openrouter", "openai-compatible", "cheap"],
     capabilities: CAPS_OPENROUTER_CHAT,
+    estimateTokens: estimateOpenRouterTokens,
     pricing: PRICING_OR_GPT_4O_MINI,
     vendorIds: { firstParty: "openai/gpt-4o-mini" },
   })
@@ -35,6 +45,7 @@ export function registerOpenRouterModels(): string[] {
     displayName: "Claude 3.5 Sonnet (OpenRouter)",
     tags: ["openrouter", "openai-compatible"],
     capabilities: CAPS_OPENROUTER_CHAT,
+    estimateTokens: estimateOpenRouterTokens,
     pricing: PRICING_OR_CLAUDE_35_SONNET,
     vendorIds: { firstParty: "anthropic/claude-3.5-sonnet" },
   })

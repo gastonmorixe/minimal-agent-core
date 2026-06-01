@@ -41,6 +41,9 @@ import {
   KITTY_KEYBOARD_DISABLE,
   KITTY_KEYBOARD_ENABLE,
   type ParsedKey,
+  type QueueKeyContext,
+  type QueueKeyHandler,
+  type QueueKeyResult,
   type SetFooterLayerOptions,
   XTERM_FORMAT_OTHER_KEYS_DISABLE,
   XTERM_FORMAT_OTHER_KEYS_ENABLE,
@@ -63,6 +66,9 @@ export type {
   EditorKeyResult,
   FooterLayer,
   FooterLayerId,
+  QueueKeyContext,
+  QueueKeyHandler,
+  QueueKeyResult,
   SetFooterLayerOptions,
 }
 export {
@@ -117,6 +123,14 @@ export class EditorController extends EventEmitter {
   private readonly resizeDebounceMs: number
   /** Trailing-edge timer that fires the single coalesced resize repaint. */
   private resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Optional synchronous transform applied to bracketed-paste text before it
+   * is inserted. Returns a replacement string (e.g. a media token for a dropped
+   * image) to insert instead, or `null` to insert the paste literally. Set by
+   * the host via {@link setPasteInterceptor}; unset by default (no behavior
+   * change). Must not throw : a throw is caught and the paste inserts literally.
+   */
+  private pasteInterceptor?: (pasted: string) => string | null
   private started = false
   private cycleForward: (() => void) | null = null
   private cycleBackward: (() => void) | null = null
@@ -129,6 +143,15 @@ export class EditorController extends EventEmitter {
    * not always-on.
    */
   private modeInterrupt: (() => void) | null = null
+  /**
+   * Submit-queue navigation hook. Wired by the REPL via
+   * {@link setQueueKeyHandler}. Consulted BEFORE default handling for
+   * ArrowUp / ArrowDown / Enter / Escape / printable keys so the host
+   * can run the dequeue / remove / dequeue-all overlay. Null (the
+   * default, and in tests / no-queue runs) means "no queue nav" and the
+   * editor behaves exactly as before. See {@link tryQueueNav}.
+   */
+  private queueKeyHandler: QueueKeyHandler | null = null
   /**
    * Optional builder that returns the prompt prefix to bake into
    * {@link submit}'s `commitLines` AT submit-time. When set, replaces
@@ -659,6 +682,59 @@ export class EditorController extends EventEmitter {
   }
 
   /**
+   * Wire the submit-queue navigation hook (see {@link queueKeyHandler}).
+   * The REPL passes a handler that owns the dequeue / remove /
+   * dequeue-all overlay; the editor consults it before its default
+   * handling of ArrowUp / ArrowDown / Enter / Escape / printable keys.
+   *
+   * Pass `null` to detach (queue nav off, default key handling restored).
+   */
+  setQueueKeyHandler(handler: QueueKeyHandler | null): void {
+    this.queueKeyHandler = handler
+  }
+
+  /**
+   * Offer a single canonical key to the {@link queueKeyHandler}. Returns
+   * `true` when the host claimed it (caller skips its default handling).
+   * When the host returns a replacement `buffer`, it is applied via
+   * {@link setBuffer} (cursor parks at end). Safe to call on every
+   * eligible keystroke: a no-op (returns false) when no handler is wired.
+   */
+  private tryQueueNav(key: string): boolean {
+    if (!this.queueKeyHandler) return false
+    const ctx: QueueKeyContext = { buffer: this.buf.toString(), atTop: this.cursorAtTop() }
+    let r: QueueKeyResult
+    try {
+      r = this.queueKeyHandler(key, ctx)
+    } catch (e) {
+      process.stderr.write(
+        `[editor-controller] queueKeyHandler threw on key "${key}": ${
+          e instanceof Error ? e.message : String(e)
+        }\n`,
+      )
+      return false
+    }
+    if (!r.handled) return false
+    if (r.buffer !== undefined) this.setBuffer(r.buffer)
+    return true
+  }
+
+  /**
+   * True when the cursor is on the FIRST visual row of the buffer
+   * (logical row 0 AND wrap-chunk 0). Mirrors the `isAtTop` test the
+   * history plugin runs on the `editor.key` payload, computed here so
+   * {@link tryQueueNav} can pass it in {@link QueueKeyContext}.
+   */
+  private cursorAtTop(): boolean {
+    if (this.buf.row !== 0) return false
+    const cols = (this.output as { columns?: number }).columns
+    if (!cols || cols <= 0) return true
+    const line = this.buf.lines[0] ?? ""
+    const promptW = this.renderer.promptDisplayWidthForRow(0)
+    return computeCursorVisualPos(line, this.buf.col, promptW, cols).visualRow === 0
+  }
+
+  /**
    * Wire a fresh-prompt builder for {@link submit}'s commit-render
    * call. Closes the prompt-prefix race where a mode toggle
    * immediately before Enter could leave the cached
@@ -763,6 +839,67 @@ export class EditorController extends EventEmitter {
   private decorationLines: string[] = []
 
   /**
+   * Active modal-overlay owner id, or `null` when the prompt is live.
+   *
+   * Set via {@link openOverlay} (host wiring for the `editor.overlay.open`
+   * channel) and cleared via {@link closeOverlay}. While non-null the editor
+   * is in MODAL-OWNED mode:
+   *
+   *  - the prompt row + cursor are NOT rendered (the overlay owns the screen
+   *    via its footer paint), so the user never sees a phantom blinking
+   *    prompt underneath the overlay;
+   *  - {@link submit} is a no-op, so a stray Enter can't flush the typed
+   *    `/cmd` line to scrollback;
+   *  - every printable char + Backspace is dispatched through the
+   *    `editor.key` hook (instead of mutating `buf`), so the overlay drives
+   *    its own text input from an internal draft rather than the shared
+   *    prompt buffer.
+   *
+   * This is the capability the host's ask-user modal already had (priority
+   * key capture + prompt suppression), now exposed to plugin command TUIs
+   * over the bus. See `src/plugins/hooks/channels.ts` `editor.overlay.*`.
+   */
+  private overlayOwner: string | null = null
+
+  /** True while a modal overlay owns the input line. */
+  isOverlayOwned(): boolean {
+    return this.overlayOwner !== null
+  }
+
+  /**
+   * Take modal ownership of the input line for `owner`. Hides the prompt,
+   * blocks submit, and routes all keys to the overlay. No-op if the same
+   * owner is already active; a different owner REPLACES the current one
+   * (last-open-wins, matching the single-active-overlay invariant). Clears
+   * the prompt buffer so a half-typed `/cmd` fragment doesn't resurface when
+   * the overlay later closes.
+   */
+  openOverlay(owner: string): void {
+    if (this.overlayOwner === owner) return
+    this.overlayOwner = owner
+    // Drop whatever the user typed to trigger the command (`/config`). The
+    // overlay owns the screen now; the prompt is hidden, so leaving stale
+    // bytes in `buf` would only resurface on close.
+    this.buf.clear()
+    this.viewportTop = 0
+    if (this.started) this.repaint()
+  }
+
+  /**
+   * Release modal ownership held by `owner`. Owner-checked + idempotent: a
+   * close from a non-owner (or when nothing is owned) is ignored, so a stale
+   * handler can't tear down a different overlay. Restores the prompt row +
+   * cursor on the next repaint.
+   */
+  closeOverlay(owner: string): void {
+    if (this.overlayOwner === null || this.overlayOwner !== owner) return
+    this.overlayOwner = null
+    this.buf.clear()
+    this.viewportTop = 0
+    if (this.started) this.repaint()
+  }
+
+  /**
    * Set decoration rows to be drawn between the status row and the prompt.
    * Pass `[]` to clear. Triggers a repaint when the array contents change
    * (shallow string compare); a no-op otherwise so the live area doesn't
@@ -794,6 +931,16 @@ export class EditorController extends EventEmitter {
       }
     }
     if (this.started) this.repaint()
+  }
+
+  /**
+   * Install a synchronous paste interceptor (see {@link pasteInterceptor}).
+   * Pass `undefined` to remove it. The host wires media drop/clipboard capture
+   * through this so a dropped image becomes a `[Image #id …]` token instead of
+   * a literal path.
+   */
+  setPasteInterceptor(fn: ((pasted: string) => string | null) | undefined): void {
+    this.pasteInterceptor = fn
   }
 
   setDecorationLines(lines: string[]): void {
@@ -1146,6 +1293,14 @@ export class EditorController extends EventEmitter {
     if (this.dispatchKeyHook("Escape")) {
       return
     }
+    // Submit-queue nav: Esc closes the dequeue overlay (queue left
+    // intact) and must NOT abort the turn. Only claims when the overlay
+    // is open; otherwise falls through to the abort-quit FSM below so a
+    // plain Esc still aborts an in-flight turn (which itself dequeues
+    // everything back to the prompt — see runReplLiveArea's abort path).
+    if (this.tryQueueNav("Escape")) {
+      return
+    }
     // Esc breaks the escape-hatch run too - otherwise (Ctrl+C, Esc,
     // Ctrl+C) would force-quit even though the user said "cancel that".
     this.escapeHatch.reset()
@@ -1239,7 +1394,52 @@ export class EditorController extends EventEmitter {
       const char = String.fromCodePoint(codePoint)
       this.pending = this.pending.slice(char.length)
 
+      // Modal-owned routing: while a command overlay owns the input line,
+      // printable characters and Backspace must NOT mutate the (hidden)
+      // prompt buffer. Dispatch them through the `editor.key` hook so the
+      // overlay drives its own internal draft. Printables arrive as their
+      // single-char `key`; Backspace as `"Backspace"`. Enter / Escape / Tab
+      // / arrows are intentionally left to fall through to their existing
+      // handlers below, which already route through `dispatchKeyHook`.
+      if (this.overlayOwner !== null) {
+        if (char === "\x7f" || char === "\x08") {
+          this.dispatchKeyHook("Backspace")
+          continue
+        }
+        if (this.isPrintable(char)) {
+          // Greedy run so a paste burst is one dispatch per char (cheap; the
+          // overlay's draft append is O(1)). Each char is its own key event.
+          this.dispatchKeyHook(char)
+          while (this.pending.length > 0 && !this.pending.startsWith("\x1b")) {
+            const cp = this.pending.codePointAt(0)
+            if (cp === undefined) break
+            const ch = String.fromCodePoint(cp)
+            if (!this.isPrintable(ch)) break
+            this.pending = this.pending.slice(ch.length)
+            this.dispatchKeyHook(ch)
+          }
+          continue
+        }
+        // Other control bytes (Ctrl+A/E/K/U/W, etc.) are swallowed while a
+        // modal overlay is up so they can't edit the hidden prompt buffer.
+        if (char !== "\r" && char !== "\n" && char !== "\x03" && !char.startsWith("\x1b")) {
+          continue
+        }
+      }
+
       if (char === "\r" || char === "\n") {
+        // Submit-queue nav: Enter confirms the highlighted selection
+        // (dequeue → input) when the overlay is open. Claims before any
+        // CRLF coalescing / submit so a bare Enter inside the overlay
+        // never falls through to `submit()`.
+        if (this.tryQueueNav("Enter")) {
+          // Eat a coalesced CR/LF partner if present so it doesn't
+          // re-enter the loop as a second keystroke.
+          const other = char === "\r" ? "\n" : "\r"
+          if (this.pending.startsWith(other)) this.pending = this.pending.slice(other.length)
+          dirty = true
+          continue
+        }
         // Coalesce CRLF / LFCR. Track whether we ate the partner byte -
         // a coalesced CRLF is unambiguously "plain Enter" regardless of
         // which half arrived first; a *bare* LF (no CR partner) is what
@@ -1374,6 +1574,17 @@ export class EditorController extends EventEmitter {
         continue
       }
       if (this.isPrintable(char)) {
+        // Submit-queue nav: while the overlay is open, single printables
+        // are commands (`d` dequeue, `x` remove, `k` dequeue all) and
+        // every other printable is swallowed to keep the overlay modal.
+        // When the overlay is closed the handler returns false instantly
+        // and we fall through to the normal greedy-insert path. Checked
+        // per printable RUN (not per char), so normal typing pays at
+        // most one cheap handler call per burst.
+        if (this.tryQueueNav(char)) {
+          dirty = true
+          continue
+        }
         // Greedy run of printables.
         let run = char
         while (this.pending.length > 0 && !this.pending.startsWith("\x1b")) {
@@ -1471,12 +1682,18 @@ export class EditorController extends EventEmitter {
           if (this.dispatchKeyHook("ArrowRight")) return "changed"
           return this.buf.moveRight() ? "changed" : "ignore"
         case "\x1b[A":
+          // Submit-queue nav gets first crack at ↑ (open the dequeue
+          // overlay / single-item dequeue / move selection up). It only
+          // claims when a turn has a queue and the cursor is at the top
+          // of an empty prompt; otherwise it passes through.
+          if (this.tryQueueNav("ArrowUp")) return "changed"
           // Plugins (notably `history`) can intercept ↑. The hook may
           // halt + replace the buffer; otherwise we fall through to the
           // wrap-aware in-buffer cursor-up.
           if (this.dispatchKeyHook("ArrowUp")) return "changed"
           return this.moveUpVisual() ? "changed" : "ignore"
         case "\x1b[B":
+          if (this.tryQueueNav("ArrowDown")) return "changed"
           if (this.dispatchKeyHook("ArrowDown")) return "changed"
           return this.moveDownVisual() ? "changed" : "ignore"
         case "\x1b[1;3D":
@@ -1541,6 +1758,29 @@ export class EditorController extends EventEmitter {
     const shift = this.hasModifier(modifiers, 0)
     const alt = this.hasModifier(modifiers, 1)
     const ctrl = this.hasModifier(modifiers, 2)
+
+    // ── Submit-queue nav (CSI-u / xterm encodings) ──────────────────────
+    // iTerm kitty proto (the agent's default) ships Esc / Enter / plain
+    // letters as CSI-u sequences, so mirror the bare-byte queue-nav
+    // hooks here. Only unmodified keys are eligible (Ctrl+C / Alt+… are
+    // never queue-nav commands). When the overlay is closed every call
+    // returns false and falls through to the normal handling below.
+    if (!alt && !ctrl) {
+      let navKey: string | null = null
+      if (code === 27) navKey = "Escape"
+      else if (code === 10 || code === 13) navKey = "Enter"
+      // Associated text (kitty flag 16) is the typed character(s) for
+      // this key event; for the nav commands (d/x/k) it's a single char.
+      // The handler only matches exact command keys, so passing the raw
+      // text is safe even in the (rare) multi-codepoint case.
+      else if (text !== null) navKey = text
+      else if (this.isPrintableCodePoint(code)) navKey = String.fromCodePoint(code)
+      if (navKey !== null && this.tryQueueNav(navKey)) {
+        // Esc consumed → "ignore" (no buffer churn); everything else may
+        // have replaced the buffer, so report "changed" for a repaint.
+        return navKey === "Escape" ? "ignore" : "changed"
+      }
+    }
 
     // ── Abort-quit FSM routing (May 2026, fixes Bug A + Bug B) ───────────
     // iTerm 3.5+ with kitty proto, and xterm with modifyOtherKeys=2, send
@@ -1769,6 +2009,14 @@ export class EditorController extends EventEmitter {
   }
 
   private insertPasted(text: string): boolean {
+    if (this.pasteInterceptor) {
+      try {
+        const replaced = this.pasteInterceptor(text)
+        if (replaced != null) text = replaced
+      } catch {
+        // interceptor failed -> fall through and insert the paste literally
+      }
+    }
     let changed = false
     let run = ""
     const flush = () => {
@@ -1809,6 +2057,11 @@ export class EditorController extends EventEmitter {
   }
 
   private submit(): void {
+    // While a modal overlay owns the input line, Enter belongs to the
+    // overlay, not the prompt. Block submit so a stray Enter can never flush
+    // the typed `/cmd` line (or anything else) to scrollback as a user turn.
+    // The overlay's `editor.key` handler is what acts on Enter.
+    if (this.overlayOwner !== null) return
     const text = this.buf.toString()
     // Render the FULL buffer (not the viewport window) so multiline
     // submissions are preserved verbatim in scrollback. The HOST decides
@@ -1888,6 +2141,30 @@ export class EditorController extends EventEmitter {
     const footerRows = composedFooter.length + footerSpacerRows
     const cap = Math.max(1, this.maxLiveHeight())
     const editorBudget = Math.max(1, cap - statusRows - statusGapRows - footerRows)
+
+    // Modal-owned short-circuit: a command overlay (/config, /usage) owns the
+    // input line. Render ONLY the status band, decoration, and the overlay's
+    // footer paint — NO prompt row, NO editor content, NO cursor in a phantom
+    // prompt. The overlay's own UI lives entirely in `composedFooter` (it
+    // emitted it via `editor.footer.set`). Park the cursor at the top-left so
+    // the terminal doesn't blink it inside the hidden prompt.
+    if (this.overlayOwner !== null) {
+      const rawStatusOwned = this.statusLine ?? ""
+      const statusLineOwned =
+        !rawStatusOwned || !cols || cols <= 0
+          ? rawStatusOwned
+          : truncateDisplayWidth(rawStatusOwned, cols)
+      const ownedHead: string[] = statusReserved ? [statusLineOwned] : []
+      const ownedGap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
+      const ownedFooter = composedFooter.length > 0 ? [...composedFooter] : []
+      const ownedLines = [...ownedHead, ...this.decorationLines, ...ownedGap, ...ownedFooter]
+      const ownedTarget = ownedLines.length
+      if (ownedTarget !== this.compositor.liveHeight) {
+        this.compositor.setLiveHeight(Math.max(1, ownedTarget))
+      }
+      this.compositor.setLiveArea(ownedLines, { row: 0, col: 0 })
+      return
+    }
 
     // Run the viewport/window calculation for a given physical-row content
     // budget. Does not mutate any state; returns the computed values.

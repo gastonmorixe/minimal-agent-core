@@ -22,22 +22,29 @@
  * @module llm/providers/anthropic/system-prompt
  */
 
-import { BUILD_HASH, VERSION } from "../../src/headers.ts"
+import { buildBillingHeaderText, CLAUDE_CODE_IDENTITY } from "../../src/headers.ts"
 import {
   neutralSystemPrompt,
   type SystemPromptBlock,
   type SystemPromptContext,
 } from "../../src/llm/provider-plugin.ts"
 
-/** The exact Claude-Code identity line the server validates (plan auth). */
-export const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
+/**
+ * The exact Claude-Code identity line the server validates (plan auth).
+ * Single source of truth lives in core (`src/headers.ts`, rendered from
+ * `src/prompts/anthropic/identity.claude-code.md`); re-exported here so the
+ * provider and existing importers keep one canonical value.
+ */
+export { CLAUDE_CODE_IDENTITY }
 
-/** Build the billing attribution block (system[0] on plan auth). */
+/**
+ * Build the billing attribution block (system[0] on plan auth). The text is
+ * rendered by core from `src/prompts/anthropic/billing.tmpl.md`.
+ *
+ * @returns The billing system block.
+ */
 export function buildBillingBlock(): SystemPromptBlock {
-  return {
-    type: "text",
-    text: `x-anthropic-billing-header: cc_version=${VERSION}.${BUILD_HASH}; cc_entrypoint=cli; cch=00000;`,
-  }
+  return { type: "text", text: buildBillingHeaderText() }
 }
 
 /**
