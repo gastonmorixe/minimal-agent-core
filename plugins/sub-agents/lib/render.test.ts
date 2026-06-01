@@ -98,6 +98,34 @@ describe("renderResultDisplay", () => {
     const d = renderResultDisplay(r, false)
     expect(d.body).toContain("is running")
   })
+
+  it("surfaces INCOMPLETE loudly as a terminal no-deliverable state (FIX 7)", () => {
+    const r = rec("A3", "log-miner", {
+      kind: "incomplete",
+      endedAt: "t",
+      reason: "exited without a result sentinel or any final message",
+      tokens: 4200,
+      tools: 9,
+    })
+    const d = renderResultDisplay(r, false)
+    expect(d.header).toContain("incomplete")
+    expect(d.body).toContain("NO DELIVERABLE")
+    expect(d.body).toContain("Not a success")
+    expect(d.footer).toContain("4.2k tok")
+  })
+})
+
+describe("renderFleetDisplay — incomplete", () => {
+  it("counts incomplete in the header + footer and renders a gold no-deliverable row", () => {
+    const recs = [
+      rec("A1", "explorer", { kind: "done", endedAt: "t", result: RESULT }),
+      rec("A2", "log-miner", { kind: "incomplete", endedAt: "t", reason: "no sentinel", tokens: 100, tools: 2 }),
+    ]
+    const d = renderFleetDisplay(recs, false, NOW)
+    expect(d.header).toContain("1 incomplete")
+    expect(d.footer).toContain("1 incomplete")
+    expect(d.body).toContain("no deliverable")
+  })
 })
 
 describe("renderStopDisplay", () => {

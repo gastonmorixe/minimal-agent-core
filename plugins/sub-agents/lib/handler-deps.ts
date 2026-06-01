@@ -15,8 +15,8 @@ import { resolveDefinition } from "./library.ts"
 import { presenceDir } from "./presence.ts"
 import {
   resolveAgentBin,
-  resolveDefaultModel,
   resolveDepth,
+  resolveModelOverride,
   resolvePolicy,
   resolveSessionsDir,
   resolveTokenBudget,
@@ -27,11 +27,58 @@ import { SubagentStore } from "./store.ts"
 import { type SupervisorDeps } from "./supervisor-shell.ts"
 import { sessionId } from "./types.ts"
 
+/**
+ * Resolve the default worker model, model/provider-AGNOSTICALLY.
+ *
+ * Precedence (highest first):
+ *   1. `MINIMAL_AGENT_SUBAGENT_MODEL` env override.
+ *   2. The LEAD's CURRENT live model via `ctx.queryModelInfo()` — the host fills
+ *      this from the shared registry that provider plugins populate, so we stay
+ *      decoupled from any specific provider and pick up mid-session model
+ *      switches.
+ *   3. The lead identity's frozen-at-boot model (`ctx.agent.model`) as a
+ *      fallback when the live query isn't wired (subprocess/back-compat).
+ *   4. `""` — nothing knowable: the spawn plan OMITS `--model` and the child
+ *      self-resolves through its own `userConfig.model ?? DEFAULT_MODEL`.
+ *
+ * A per-spawn `model` (handled in the service) overrides all of these.
+ */
+function resolveLeadModel(ctx: TUIContext): string {
+  const override = resolveModelOverride(ctx.env)
+  if (override) return override
+  const live = ctx.queryModelInfo?.()?.modelId?.trim()
+  if (live) return live
+  return ctx.agent?.model?.trim() || ""
+}
+
+/**
+ * Map an abstract role → the ACTIVE provider's recommended model + settings,
+ * via `ctx.recommendSubagentModels` ONLY (no registry/provider import — the
+ * plugin stays decoupled). Returns `undefined` when the host wired no provider
+ * or the provider recommends nothing for the role, so the caller falls back to
+ * the lead's own model. An explicit env model override short-circuits this
+ * entirely (the user's choice wins over a provider suggestion).
+ */
+function makeRecommendForRole(ctx: TUIContext): ((role: string) => { modelId: string; effort?: string } | undefined) | undefined {
+  if (resolveModelOverride(ctx.env)) return undefined
+  const query = ctx.recommendSubagentModels
+  if (!query) return undefined
+  return (role: string) => {
+    for (const r of query()) {
+      if (r.role === role && r.modelId.trim().length > 0) {
+        return { modelId: r.modelId, ...(r.effort ? { effort: r.effort } : {}) }
+      }
+    }
+    return undefined
+  }
+}
+
 /** Build {@link ServiceDeps} for a tool handler, or `null` when no session id is plumbed. */
 export function serviceDepsFromCtx(ctx: TUIContext): ServiceDeps | null {
   const leadSid = ctx.agent?.sessionId
   if (!leadSid) return null
   const sessionsDir = resolveSessionsDir(ctx.env)
+  const recommendForRole = makeRecommendForRole(ctx)
   return {
     store: new SubagentStore(leadSid, { dir: sessionsDir }),
     spawnDeps: realSpawnDeps(),
@@ -40,10 +87,11 @@ export function serviceDepsFromCtx(ctx: TUIContext): ServiceDeps | null {
     depth: resolveDepth(ctx.env),
     cwd: ctx.cwd,
     sessionsDir,
-    defaultModel: resolveDefaultModel(ctx.env),
+    defaultModel: resolveLeadModel(ctx),
     newSid: () => randomUUID(),
     now: () => new Date(),
     resolveDefinition,
+    ...(recommendForRole ? { recommendForRole } : {}),
     policy: resolvePolicy(ctx.env),
   }
 }

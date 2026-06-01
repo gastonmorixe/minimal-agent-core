@@ -15,6 +15,7 @@ export const GLYPHS = {
   queued: "○", // U+25CB
   running: "◐", // U+25D0  (the widget cycles ◐◓◑◒ for a pulse)
   done: "✔", // U+2714
+  incomplete: "⚠", // U+26A0  clean exit but no deliverable captured
   failed: "✘", // U+2718
   spawn: "↗", // U+2197  delegation arrow
   report: "↘", // U+2198  result-came-back arrow
@@ -53,6 +54,8 @@ export function statusGlyph(s: SubagentStatus, ansi: boolean): string {
       return color(ansi, ANSI.SKY, GLYPHS.running)
     case "done":
       return color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)
+    case "incomplete":
+      return color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)
     case "failed":
       return color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.failed)
     case "stopped":
@@ -73,6 +76,8 @@ export function statusLabel(s: SubagentStatus, ansi: boolean): string {
       return color(ansi, ANSI.SKY, "running")
     case "done":
       return color(ansi, ANSI.LIME, "done")
+    case "incomplete":
+      return color(ansi, ANSI.GOLD, "incomplete")
     case "failed":
       return color(ansi, ANSI.RED, "failed")
     case "stopped":

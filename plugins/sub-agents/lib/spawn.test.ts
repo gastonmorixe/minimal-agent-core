@@ -81,11 +81,74 @@ describe("probeWorker", () => {
     const probe = probeWorker(target(99), {
       pidAlive: () => false,
       readResult: () => ({ short: "done it", tokens: 100, tools: 3 }),
+      readFinalText: () => "should be ignored when a sentinel exists",
       exitCode: () => 0,
     })
     expect(probe.alive).toBe(false)
     expect(probe.result?.short).toBe("done it")
     expect(probe.exitCode).toBe(0)
+    // sentinel wins: distillation is not even surfaced
+    expect(probe.distilled).toBeUndefined()
+  })
+
+  it("falls back to distilled final text when there is NO sentinel", () => {
+    const probe = probeWorker(target(99), {
+      pidAlive: () => false,
+      readResult: () => undefined,
+      readFinalText: () => "my final synthesis",
+      exitCode: () => 0,
+    })
+    expect(probe.alive).toBe(false)
+    expect(probe.result).toBeUndefined()
+    expect(probe.distilled).toBe("my final synthesis")
+  })
+
+  it("leaves distilled undefined when neither sentinel nor final text exists", () => {
+    const probe = probeWorker(target(99), {
+      pidAlive: () => false,
+      readResult: () => undefined,
+      readFinalText: () => undefined,
+      exitCode: () => 0,
+    })
+    expect(probe.result).toBeUndefined()
+    expect(probe.distilled).toBeUndefined()
+  })
+
+  it("reports missingArtifacts for an unmet expectArtifacts contract (FIX 4)", () => {
+    const probe = probeWorker(
+      { pid: 1, resultPath: "/r.json", transcriptPath: "/t.jsonl", expectArtifacts: ["/a.md", "/b.md"] },
+      {
+        pidAlive: () => false,
+        readResult: () => undefined,
+        missingArtifacts: (paths) => paths.filter((p) => p === "/b.md"),
+        exitCode: () => 0,
+      },
+    )
+    expect(probe.missingArtifacts).toEqual(["/b.md"])
+  })
+
+  it("omits missingArtifacts when the contract is met", () => {
+    const probe = probeWorker(
+      { pid: 1, resultPath: "/r.json", transcriptPath: "/t.jsonl", expectArtifacts: ["/a.md"] },
+      {
+        pidAlive: () => false,
+        readResult: () => undefined,
+        missingArtifacts: () => [],
+        exitCode: () => 0,
+      },
+    )
+    expect(probe.missingArtifacts).toBeUndefined()
+  })
+
+  it("prepends a ⚠ warning when a sentinel's OWN declared artifacts are missing (FIX 3)", () => {
+    const probe = probeWorker(target(1), {
+      pidAlive: () => false,
+      readResult: () => ({ short: "did the thing", tokens: 9, tools: 2, artifacts: ["/x.md", "/y.md"] }),
+      missingArtifacts: (paths) => paths.filter((p) => p === "/y.md"),
+      exitCode: () => 0,
+    })
+    expect(probe.result?.short).toMatch(/⚠ 1\/2 declared artifact\(s\) missing: \/y\.md/)
+    expect(probe.result?.short).toContain("did the thing")
   })
 })
 

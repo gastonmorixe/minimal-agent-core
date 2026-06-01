@@ -84,6 +84,8 @@ function fleetRow(r: SubagentRecord, ansi: boolean, nowMs: number): string {
     trail = `${el}  ${color(ansi, ANSI.DGRAY, `${s.progress.tools} tools ${GLYPHS.bullet} ${fmtTokens(s.progress.tokens)}`)}`
   } else if (s.kind === "done") {
     trail = `${color(ansi, ANSI.DIM, clip(s.result.short, 28))} ${color(ansi, ANSI.DGRAY, "→")} ${color(ansi, ANSI.LGRAY, `AgentResult ${r.id}`)}`
+  } else if (s.kind === "incomplete") {
+    trail = color(ansi, ANSI.GOLD, `⚠ no deliverable · ${clip(s.reason, 30)}`)
   } else if (s.kind === "failed") {
     trail = color(ansi, ANSI.RED, clip(s.error, 36))
   } else if (s.kind === "stopped") {
@@ -99,6 +101,9 @@ export function renderFleetFooter(records: readonly SubagentRecord[], ansi: bool
   const parts = [
     `${color(ansi, ANSI.SKY, GLYPHS.running)} ${color(ansi, ANSI.SKY, `${s.running} running`)}`,
     `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, `${s.done} done`)}`,
+    ...(s.incomplete > 0
+      ? [`${color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)} ${color(ansi, ANSI.GOLD, `${s.incomplete} incomplete`)}`]
+      : []),
     `${color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.failed)} ${color(ansi, ANSI.RED, `${s.failed} failed`)}`,
     color(ansi, ANSI.DGRAY, `${fmtTokens(s.tokens)} tok`),
   ]
@@ -120,7 +125,9 @@ export function renderFleetDisplay(
       footer: "",
     }
   }
-  const header = `${color(ansi, ANSI.LGRAY, "fleet")} ${dot} ${color(ansi, ANSI.SKY, `${s.running} running`)} ${dot} ${color(ansi, ANSI.LIME, `${s.done} done`)} ${dot} ${color(ansi, ANSI.DGRAY, `${fmtTokens(s.tokens)} tok`)}`
+  const incSeg =
+    s.incomplete > 0 ? ` ${dot} ${color(ansi, ANSI.GOLD, `${s.incomplete} incomplete`)}` : ""
+  const header = `${color(ansi, ANSI.LGRAY, "fleet")} ${dot} ${color(ansi, ANSI.SKY, `${s.running} running`)} ${dot} ${color(ansi, ANSI.LIME, `${s.done} done`)}${incSeg} ${dot} ${color(ansi, ANSI.DGRAY, `${fmtTokens(s.tokens)} tok`)}`
   const body = records.map((r) => fleetRow(r, ansi, nowMs)).join("\n")
   return { header, body, footer: renderFleetFooter(records, ansi) }
 }
@@ -145,6 +152,16 @@ export function renderResultDisplay(r: SubagentRecord, ansi: boolean): DisplayPa
       header: `${arrow} ${id} ${dot} ${type} ${dot} ${statusLabel(r.status, ansi)}`,
       body: `${res.short}${artifacts}`,
       footer: ` ${color(ansi, ANSI.LIME, "done")} ${dot} ${color(ansi, ANSI.DGRAY, `${fmtTokens(res.tokens)} tok ${GLYPHS.bullet} ${res.tools} tools`)}`,
+    }
+  }
+  // Incomplete is TERMINAL (not "yet"): the worker finished with no deliverable.
+  // Surface it loudly in gold so the lead treats it as a red flag, not a pass.
+  if (r.status.kind === "incomplete") {
+    const warnArrow = color(ansi, ANSI.GOLD, GLYPHS.incomplete)
+    return {
+      header: `${warnArrow} ${color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, r.id)} ${dot} ${type} ${dot} ${statusLabel(r.status, ansi)}`,
+      body: color(ansi, ANSI.GOLD, `NO DELIVERABLE — ${r.status.reason}. Not a success; re-spawn if still needed.`),
+      footer: ` ${color(ansi, ANSI.DGRAY, `${fmtTokens(r.status.tokens)} tok ${GLYPHS.bullet} ${r.status.tools} tools`)}`,
     }
   }
   // Not done yet (or failed): report state honestly.

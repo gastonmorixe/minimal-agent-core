@@ -22,7 +22,7 @@ import { defaultNetworkClient, type NetworkClient } from "../../src/network/inde
 import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { classifyUpstreamError } from "../../src/llm/errors.ts"
-import { type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
+import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import type {
   ProviderAdapter,
   ProviderAuth,
@@ -32,6 +32,7 @@ import type {
 } from "../../src/llm/provider.ts"
 import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
+import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
@@ -138,6 +139,27 @@ export const openaiAdapter: ProviderAdapter = {
     throw new Error(
       `OpenAI adapter: model ${model.id} has unsupported surface "${model.surfaceId}"`,
     )
+  },
+
+  /**
+   * Recommend OpenAI models per abstract sub-agent role, from THIS provider's
+   * own catalog by tag (never a hardcoded SKU). scout → a fast gpt-4-class
+   * chat model, balanced → the flagship chat model, deep → the flagship
+   * reasoning model. A role with no matching model is omitted (caller falls
+   * back to the lead's model).
+   */
+  recommendSubagentModels(): SubagentModelRecommendation[] {
+    const byTier: Array<{ role: string; tags: string[] }> = [
+      { role: "scout", tags: ["chat", "fast"] },
+      { role: "balanced", tags: ["flagship", "chat"] },
+      { role: "deep", tags: ["flagship", "reasoning"] },
+    ]
+    const recs: SubagentModelRecommendation[] = []
+    for (const { role, tags } of byTier) {
+      const model = findModelByTags("openai", tags)
+      if (model) recs.push({ role, modelId: model.id })
+    }
+    return recs
   },
 }
 

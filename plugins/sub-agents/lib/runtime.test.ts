@@ -3,8 +3,8 @@ import { describe, expect, it } from "bun:test"
 import { DEFAULT_POLICY } from "./guard.ts"
 import {
   resolveAgentBin,
-  resolveDefaultModel,
   resolveDepth,
+  resolveModelOverride,
   resolvePolicy,
   resolveTokenBudget,
 } from "./runtime.ts"
@@ -33,10 +33,18 @@ describe("resolveDepth", () => {
   })
 })
 
-describe("resolveDefaultModel", () => {
-  it("defaults to haiku; honors override", () => {
-    expect(resolveDefaultModel({})).toBe("claude-haiku-4-5")
-    expect(resolveDefaultModel({ MINIMAL_AGENT_SUBAGENT_MODEL: "claude-opus-4-8" })).toBe("claude-opus-4-8")
+describe("resolveModelOverride", () => {
+  it("is empty by default (model-agnostic: NO hardcoded SKU fallback)", () => {
+    expect(resolveModelOverride({})).toBe("")
+  })
+  it("honors the explicit env override", () => {
+    expect(resolveModelOverride({ MINIMAL_AGENT_SUBAGENT_MODEL: "gpt-5.5" })).toBe("gpt-5.5")
+    expect(resolveModelOverride({ MINIMAL_AGENT_SUBAGENT_MODEL: "claude-opus-4-8" })).toBe(
+      "claude-opus-4-8",
+    )
+  })
+  it("treats whitespace-only as unset", () => {
+    expect(resolveModelOverride({ MINIMAL_AGENT_SUBAGENT_MODEL: "   " })).toBe("")
   })
 })
 

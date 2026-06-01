@@ -17,6 +17,13 @@ function posInt(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined
 }
 
+/** Parse a bounded array of non-empty strings (e.g. `expectArtifacts`). */
+function strArray(v: unknown, max = 32): string[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out = v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim())
+  return out.length > 0 ? out.slice(0, max) : undefined
+}
+
 function parseBudget(v: unknown): Budget | undefined {
   if (!v || typeof v !== "object") return undefined
   const o = v as Record<string, unknown>
@@ -50,6 +57,7 @@ export function parseSpawnRequest(input: Record<string, unknown>): Result<SpawnR
     ...(str(input.label) ? { label: str(input.label) } : {}),
     ...(budget ? { budget } : {}),
     ...(str(input.taskId) ? { taskId: str(input.taskId) } : {}),
+    ...(strArray(input.expectArtifacts) ? { expectArtifacts: strArray(input.expectArtifacts) } : {}),
   }
   return ok(req)
 }

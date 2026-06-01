@@ -28,7 +28,7 @@
               },
               "model": {
                 "type": "string",
-                "description": "Model id for the worker (e.g. claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8). Defaults to the specialist's model, else Haiku (cheap + fast for bounded delegated work)."
+                "description": "Optional model id for the worker. Defaults to the model YOU (the lead) are currently running, so a worker inherits your provider and model unless you choose otherwise. Pass any model id your provider exposes to override per-spawn. Omit to inherit."
               },
               "effort": {
                 "type": "string",
@@ -46,6 +46,11 @@
               "taskId": {
                 "type": "string",
                 "description": "Link this worker to a task from the Task tool (its #hash). When the worker finishes the linked todo is ticked done automatically (or canceled with a reason if the worker fails). Use it to make a worker own one of your todos."
+              },
+              "expectArtifacts": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Absolute paths this worker MUST produce to count as done. When set, the supervisor refuses to mark the worker done unless every path exists and is non-empty; a missing one flips it to 'incomplete' with a warning. Use for delegations whose whole point is to produce a file (e.g. ['/abs/findings.md']) so the system enforces the deliverable instead of you having to check."
               },
               "budget": {
                 "type": "object",

@@ -21,7 +21,7 @@ import { join } from "node:path"
 import { type SubagentRecord, type SubagentStatus } from "./types.ts"
 
 /** Liveness flavor of a presence row. `active` = the agent is running. */
-export type PresenceStatus = "active" | "queued" | "done" | "failed" | "stopped"
+export type PresenceStatus = "active" | "queued" | "done" | "incomplete" | "failed" | "stopped"
 
 /** One mesh row. Latest `ts` per `sid` wins on merge. */
 export interface PresenceRow {
@@ -56,6 +56,8 @@ function statusOf(s: SubagentStatus): PresenceStatus {
       return "queued"
     case "done":
       return "done"
+    case "incomplete":
+      return "incomplete"
     case "failed":
       return "failed"
     case "stopped":

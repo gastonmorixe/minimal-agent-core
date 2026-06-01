@@ -53,9 +53,14 @@ describe("spawnAgent", () => {
     if (r.value.status.kind === "running") expect(r.value.status.pid).toBe(5001)
     // persisted
     expect(deps.store.get("A1")?.sid).toBe(FIXED_SID)
-    // launched with the pinned sid + the task
+    // launched with the pinned sid + the task (now followed by the REQUIRED
+    // deliverable protocol, so the prompt CONTAINS the task rather than equals it)
     expect(deps.launched[0]).toContain("--session-id")
-    expect(deps.launched[0]?.at(-1)).toBe("refactor parser")
+    const prompt = deps.launched[0]?.at(-1) ?? ""
+    expect(prompt).toContain("refactor parser")
+    expect(prompt).toContain("Your deliverable (REQUIRED")
+    // the protocol points at this worker's own result.json sentinel path
+    expect(prompt).toContain(".result.json")
   })
 
   it("rejects an empty task without launching", () => {
@@ -88,6 +93,72 @@ describe("spawnAgent", () => {
     expect(r.value.model).toBe("claude-opus-4-8")
     // the system preamble is folded into the launched prompt
     expect(deps.launched[0]?.at(-1)).toContain("You are a strict reviewer.")
+  })
+
+  it("inherits deps.defaultModel (the lead's model) when the request omits one", () => {
+    const deps = makeDeps(dir, { defaultModel: "gpt-5.5" })
+    const r = spawnAgent({ task: "inherit my model" }, deps)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.model).toBe("gpt-5.5")
+    const argv = deps.launched[0] ?? []
+    expect(argv[argv.indexOf("--model") + 1]).toBe("gpt-5.5")
+  })
+
+  it("OMITS --model when no model is knowable (model-agnostic; child self-resolves)", () => {
+    const deps = makeDeps(dir, { defaultModel: "" })
+    const r = spawnAgent({ task: "no model anywhere" }, deps)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.model).toBe("")
+    const argv = deps.launched[0] ?? []
+    expect(argv).not.toContain("--model")
+  })
+
+  it("a per-spawn model overrides the inherited default", () => {
+    const deps = makeDeps(dir, { defaultModel: "gpt-5.5" })
+    const r = spawnAgent({ task: "override", model: "claude-opus-4-8" }, deps)
+    expect(r.ok && r.value.model).toBe("claude-opus-4-8")
+  })
+
+  it("uses the provider's role recommendation for a role-bearing specialist (Phase G)", () => {
+    const scout: WorkerDefinition = { name: "explorer", role: "scout", systemPrompt: "scout" }
+    const deps = makeDeps(dir, {
+      defaultModel: "lead-model-x",
+      resolveDefinition: (n) => (n === "explorer" ? scout : undefined),
+      recommendForRole: (role) =>
+        role === "scout" ? { modelId: "provider-scout-model", effort: "low" } : undefined,
+    })
+    const r = spawnAgent({ task: "scan", agent: "explorer" }, deps)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // the role recommendation beat the lead default
+    expect(r.value.model).toBe("provider-scout-model")
+    // and the recommended effort rode along on the launch
+    const argv = deps.launched[0] ?? []
+    expect(argv[argv.indexOf("--effort") + 1]).toBe("low")
+  })
+
+  it("falls back to the lead model when the provider recommends nothing for the role", () => {
+    const deep: WorkerDefinition = { name: "reviewer", role: "deep", systemPrompt: "review" }
+    const deps = makeDeps(dir, {
+      defaultModel: "lead-model-x",
+      resolveDefinition: (n) => (n === "reviewer" ? deep : undefined),
+      recommendForRole: () => undefined, // provider has no rec for this role
+    })
+    const r = spawnAgent({ task: "review", agent: "reviewer" }, deps)
+    expect(r.ok && r.value.model).toBe("lead-model-x")
+  })
+
+  it("an explicit per-spawn model still wins over a role recommendation", () => {
+    const scout: WorkerDefinition = { name: "explorer", role: "scout", systemPrompt: "scout" }
+    const deps = makeDeps(dir, {
+      defaultModel: "lead-model-x",
+      resolveDefinition: (n) => (n === "explorer" ? scout : undefined),
+      recommendForRole: () => ({ modelId: "provider-scout-model" }),
+    })
+    const r = spawnAgent({ task: "scan", agent: "explorer", model: "user-pick" }, deps)
+    expect(r.ok && r.value.model).toBe("user-pick")
   })
 
   it("threads isolation=fork through to a --resume <leadSid> launch", () => {

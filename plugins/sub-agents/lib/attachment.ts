@@ -37,6 +37,9 @@ function row(r: SubagentRecord, nowMs: number): string {
     case "done":
       state = `done · AgentResult ${r.id}`
       break
+    case "incomplete":
+      state = `⚠ INCOMPLETE · no deliverable (${s.reason}) · AgentResult ${r.id}`
+      break
     case "failed":
       state = `failed · ${s.error}`
       break
@@ -76,8 +79,9 @@ export class SubagentsAttachment {
     const shown = [...active, ...terminal].slice(0, MAX_ROWS)
     const body = shown.map((r) => row(r, nowMs)).join("\n")
     const overflow = records.length > shown.length ? `\n… +${records.length - shown.length} more (ListAgents)` : ""
+    const incompleteAttr = s.incomplete > 0 ? ` incomplete="${s.incomplete}"` : ""
     const text =
-      `<ma::agent::subagents active="${s.running + s.queued}" done="${s.done}" failed="${s.failed}" tokens="${fmtTokens(s.tokens)}">\n` +
+      `<ma::agent::subagents active="${s.running + s.queued}" done="${s.done}"${incompleteAttr} failed="${s.failed}" tokens="${fmtTokens(s.tokens)}">\n` +
       `${body}${overflow}\n</ma::agent::subagents>`
     return { type: "text", text }
   }

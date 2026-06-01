@@ -62,6 +62,9 @@ export function runSupervisor(deps: SupervisorDeps): string | null {
             pid: r.status.pid,
             resultPath: `${deps.sessionsDir}/${r.sid}.result.json`,
             transcriptPath: `${deps.sessionsDir}/${r.sid}.jsonl`,
+            ...(r.expectArtifacts && r.expectArtifacts.length > 0
+              ? { expectArtifacts: r.expectArtifacts }
+              : {}),
           },
           deps.probeDeps,
         ),

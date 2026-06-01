@@ -76,6 +76,18 @@ describe("renderWidget", () => {
     expect(lines[3]).toContain("AgentResult A1") // done row points at the result
   })
 
+  it("shows the incomplete count in the header and a ⚠ no-deliverable row (FIX 7)", () => {
+    const records = [
+      rec("A1", "worker", running({ tools: 2, tokens: 500 })),
+      rec("A2", "log-miner", { kind: "incomplete", endedAt: "t", reason: "no sentinel", tokens: 700, tools: 4 }),
+    ]
+    const out = renderWidget(records, { ansi: false, tick: 0, nowMs: NOW, leadSid: LEAD }) as string
+    expect(out).not.toBeNull()
+    const lines = out.split("\n")
+    expect(lines[0]).toContain("⚠ 1") // incomplete count in the header
+    expect(out).toContain("no deliverable")
+  })
+
   it("breathes: the running glyph cycles with tick", () => {
     const records = [rec("A2", "worker", running({ tools: 1, tokens: 100 }))]
     const at = (t: number) =>

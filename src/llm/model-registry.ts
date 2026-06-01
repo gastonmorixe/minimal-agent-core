@@ -141,6 +141,25 @@ export function listRegisteredModels(): ModelEntry[] {
   return [...models.values()]
 }
 
+/**
+ * Find the first registered model for `providerId` whose `tags` include EVERY
+ * tag in `mustHave`. Insertion order wins (so a provider lists its preferred
+ * model first). Returns `undefined` when none match. Used by a provider's
+ * `recommendSubagentModels` to pick a role's model from its OWN catalog by tier
+ * tag, instead of hardcoding a SKU that could drift on a rename.
+ */
+export function findModelByTags(
+  providerId: string,
+  mustHave: readonly string[],
+): ModelEntry | undefined {
+  for (const m of models.values()) {
+    if (m.providerId !== providerId) continue
+    const tags = m.tags ?? []
+    if (mustHave.every((t) => tags.includes(t))) return m
+  }
+  return undefined
+}
+
 /** Clear all registrations. Tests only. */
 export function clearModelRegistry(): void {
   models.clear()

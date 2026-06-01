@@ -103,3 +103,46 @@ export function parseProgress(jsonlText: string): Progress {
     ...(lastActivity ? { lastActivity } : {}),
   }
 }
+
+/**
+ * Distill a worker's transcript into its FINAL synthesis: the concatenated text
+ * blocks of the LAST assistant message that contains any non-empty text.
+ *
+ * This is the robust fallback when a worker exits WITHOUT writing a result
+ * sentinel. Every agent produces a final assistant message (its closing
+ * summary), and the supervisor already reads this same `.jsonl` every tick for
+ * progress, so distilling the last text costs nothing extra and does not depend
+ * on the model remembering to perform an explicit final action under context
+ * pressure. Trailing tool-only turns are skipped (we want the prose, not a tool
+ * echo). Returns `undefined` when there is no assistant text at all (a truly
+ * silent worker → the supervisor marks it `incomplete`).
+ *
+ * @param maxChars Clip the result to this many characters (default 2000) so a
+ *   runaway final message can't blow the lead's context. Clipping is marked.
+ */
+export function parseFinalText(jsonlText: string, maxChars = 2000): string | undefined {
+  let last: string | undefined
+  for (const line of jsonlText.split("\n")) {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) continue
+    let rec: MaybeRecord
+    try {
+      rec = JSON.parse(trimmed) as MaybeRecord
+    } catch {
+      continue
+    }
+    if (rec.kind !== "assistant") continue
+    const blocks: MaybeBlock[] = Array.isArray(rec.content) ? (rec.content as MaybeBlock[]) : []
+    const text = blocks
+      .filter((b) => b?.type === "text" && typeof b.text === "string")
+      .map((b) => (b.text as string).trim())
+      .filter((t) => t.length > 0)
+      .join("\n\n")
+      .trim()
+    // Keep the most recent assistant message that actually said something.
+    if (text.length > 0) last = text
+  }
+  if (!last) return undefined
+  if (last.length <= maxChars) return last
+  return `${last.slice(0, maxChars - 1).trimEnd()}…`
+}
