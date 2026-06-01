@@ -102,8 +102,8 @@ export default async function cmdSchedule(ctx: CommandContext): Promise<CommandR
       return { kind: "error", message: action.message ?? "invalid /schedule usage" }
 
     default: {
-      const _exhaustive: never = action.kind
-      return { kind: "error", message: `unhandled: ${String(_exhaustive)}` }
+      const _exhaustive: never = action
+      return { kind: "error", message: `unhandled: ${JSON.stringify(_exhaustive)}` }
     }
   }
 }

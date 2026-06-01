@@ -51,7 +51,7 @@ export async function runStatusScript(
       signal: ac.signal,
     })
     try {
-      proc.stdin.write(typeof payload === "string" ? payload : JSON.stringify(payload))
+      await proc.stdin.write(typeof payload === "string" ? payload : JSON.stringify(payload))
       await proc.stdin.end()
     } catch {
       // Script may not read stdin; ignore a broken-pipe on write.

@@ -214,7 +214,7 @@ function validateInput(raw: Record<string, unknown>): Validation {
   // Per-action required-field check.
   const need = REQUIRED_FIELDS[action]
   for (const f of need) {
-    if ((out as Record<string, unknown>)[f] === undefined) {
+    if (out[f] === undefined) {
       return { ok: false, error: `\`${f}\` is required for action="${action}"` }
     }
   }
