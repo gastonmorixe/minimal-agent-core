@@ -414,6 +414,18 @@ export interface ManifestFile {
   /** Optional relative path to a PROMPT.md file (default: `./PROMPT.md`). */
   prompt?: string
   /**
+   * Optional one-time/per-run setup hook. A module handler whose default
+   * export is a {@link SetupHandler}: the loader invokes it AFTER load and
+   * BEFORE the REPL paints, handing it the managed-binary inventory (see
+   * {@link SetupContext.binaries}). The handler returns {@link SetupResult}
+   * as DATA (binary install/update requests and/or a halt signal). The host
+   * performs every side effect (download with TUI progress, syslog audit,
+   * halting boot). A plugin NEVER downloads or installs by itself, and NEVER
+   * probes arbitrary filesystem paths. Module handlers only (setup must
+   * return structured data the host acts on synchronously). Optional.
+   */
+  setup?: ManifestHandlerEntry
+  /**
    * Async prompt fragments. Each fragment is a producer (subprocess or
    * module) that returns a string to inject into the system prompt. They
    * run in parallel during {@link PluginLoader.load} and are awaited the
@@ -1376,6 +1388,144 @@ export type ManifestHandlerEntry =
       /** argv. First element is the executable (relative or absolute). */
       command: string[]
     }
+
+// ---------------------------------------------------------------------------
+// Plugin setup lifecycle (binary provisioning)
+// ---------------------------------------------------------------------------
+
+/**
+ * One required external binary, declared by a plugin's `setup()`. The plugin
+ * HARDCODES these fields per release (a public download URL, the sha256 of the
+ * bytes, and a comparable version token). The host compares it against the
+ * managed-binary inventory and, when needed, downloads + verifies + installs
+ * into `~/.minimal-agent/bin/`. The plugin never touches the filesystem.
+ *
+ * Structurally identical to `binaries/types.ts:BinarySpec`, re-declared here so
+ * the plugin-author surface carries no dependency on the host's internal
+ * `binaries` module. The loader maps between the two.
+ */
+/**
+ * Where a {@link SetupBinarySpec}'s bytes come from. Mirror of
+ * `binaries/types.ts:BinarySource` (the plugin surface carries no dep on the
+ * host's `binaries` module). A public URL or a token-gated private GitHub
+ * release; the host supplies the token, the plugin never holds one.
+ */
+export type SetupBinarySource =
+  | { kind: "url"; url: string; archive?: boolean }
+  | {
+      kind: "github-release"
+      repo: string
+      tag: string
+      asset: string
+      /**
+       * Embedded read-only credential baked into the plugin so any copy (incl.
+       * an account-less friend's) can pull. Use a fine-grained PAT scoped to
+       * only this repo with Contents: read-only. Omit to fall back to the
+       * user's own token (host-resolved).
+       */
+      token?: string
+      archive?: boolean
+    }
+
+export interface SetupBinarySpec {
+  /** Logical id, stable across versions. Matches the pattern `[a-z0-9][a-z0-9_-]*`, e.g. `obscura`. */
+  name: string
+  /** Comparable version token: a bare epoch integer or dotted numeric. Higher is newer. */
+  version: string
+  /**
+   * Where to fetch the bytes. `{ kind: "url" }` for a public download, or
+   * `{ kind: "github-release", repo, tag, asset }` for a (possibly private)
+   * release the host fetches with the user's GitHub token (the plugin never
+   * holds a token). Raw binary or `.tar.gz` / `.tgz` / `.zip`.
+   */
+  source: SetupBinarySource
+  /** Lowercase hex sha256 of the bytes the source yields. Verified before install. */
+  sha256: string
+  /** For archives: member filename to extract. Defaults to {@link name}. */
+  archiveMember?: string
+  /** For archives: extra sibling files to install alongside the binary (e.g. a worker). */
+  archiveExtraMembers?: string[]
+}
+
+/** Read-only view of one installed managed binary, as seen by `setup()`. */
+export interface SetupInstalledBinary {
+  name: string
+  path: string
+  version: string | null
+  sha256: string | null
+  installedAt: string
+  sourceUrl: string | null
+}
+
+/**
+ * Classification of a {@link SetupBinarySpec} against the inventory.
+ * `satisfied` (present and current), `missing` (not installed), `outdated`
+ * (older than the spec), `unknown-version` (present but no comparable version
+ * record, so the host reinstalls).
+ */
+export type SetupRequirementStatus = "satisfied" | "missing" | "outdated" | "unknown-version"
+
+/**
+ * The managed-binary inventory handed to `setup()`. Read-only: the plugin
+ * inspects it and returns requests; the host owns all side effects.
+ */
+export interface SetupBinaryInventory {
+  /** Absolute managed bin dir (`~/.minimal-agent/bin`). */
+  readonly dir: string
+  /** Is `name` installed (recorded AND present on disk)? */
+  has(name: string): boolean
+  /** The installed record for `name`, if any. */
+  get(name: string): SetupInstalledBinary | undefined
+  /** Classify a spec against what's installed. */
+  status(spec: SetupBinarySpec): SetupRequirementStatus
+}
+
+/**
+ * Runtime context passed to a plugin's `setup()` default export. A small
+ * ambient-facts slice plus the managed-binary inventory. No `trigger`, no
+ * stdio: setup computes "what the host should provision" and returns it.
+ */
+export interface SetupContext {
+  /** Plugin package directory (absolute). */
+  packageDir: string
+  /** The agent's current working directory. */
+  cwd: string
+  /** Plugin-scoped environment. */
+  env: Record<string, string>
+  /** Aborts if the host's setup phase is torn down. */
+  abort: AbortSignal
+  /** Plugin-scoped diagnostic logger. See {@link TUIContext.log}. */
+  log: PluginLogger
+  /** Boot-time agent identity. See {@link AgentContext}. */
+  agent?: AgentContext
+  /** Managed-binary inventory the plugin inspects to decide what to request. */
+  binaries: SetupBinaryInventory
+}
+
+/**
+ * What a plugin's `setup()` returns. Pure data; the host performs the work.
+ *
+ * - `requireBinaries`: specs the host must ensure are installed/current. The
+ *   host classifies each, installs/updates those that need it (with TUI
+ *   progress + syslog audit), and skips the satisfied ones.
+ * - `haltIfMissing`: logical names that are MANDATORY. If any is still absent
+ *   after provisioning, the host halts startup with `haltMessage` instead of
+ *   letting the user hit a broken tool at first call.
+ * - `haltMessage`: shown to the user on a halt. Should say what's missing and
+ *   how to fix it.
+ */
+export interface SetupResult {
+  requireBinaries?: SetupBinarySpec[]
+  haltIfMissing?: string[]
+  haltMessage?: string
+}
+
+/**
+ * Module-handler default-export signature for a plugin `setup()`. Inspect the
+ * inventory, return requests. Side effects (download, install, halt) are the
+ * host's job. May be sync or async.
+ */
+export type SetupHandler = (ctx: SetupContext) => SetupResult | Promise<SetupResult>
 
 // ---------------------------------------------------------------------------
 // Loaded plugin (internal runtime form)

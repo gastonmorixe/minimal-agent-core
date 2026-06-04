@@ -55,6 +55,9 @@ import type {
   ResolvedHandler,
   ResolvedHookSub,
   ResolvedLiveAreaSlot,
+  SetupBinaryInventory,
+  SetupHandler,
+  SetupResult,
   SubagentModelRecommendation,
   ToolAvailabilityContext,
   TUIContext,
@@ -1512,6 +1515,68 @@ export class PluginLoader {
         externalSignal.removeEventListener("abort", externalAbortListener)
       }
     }
+  }
+
+  /**
+   * Run every loaded plugin's optional `setup()` handler, in declaration
+   * order, handing each the shared binary inventory. Returns the structured
+   * {@link SetupResult}s (one per plugin that declares `setup`) WITHOUT
+   * performing any side effect: the host (src/index.ts) owns downloads, TUI
+   * progress, syslog audit, and halting boot.
+   *
+   * A plugin whose `setup()` throws is logged and skipped (its result is
+   * dropped) so one broken setup can't poison boot. The handler is given a
+   * per-call timeout via {@link timeoutMs}.
+   *
+   * @param inventory - The managed-binary inventory adapter the host builds
+   *   from its {@link import("../binaries/store.ts").BinaryStore}.
+   */
+  async runSetups(
+    inventory: SetupBinaryInventory,
+  ): Promise<Array<{ pluginId: string; result: SetupResult }>> {
+    const out: Array<{ pluginId: string; result: SetupResult }> = []
+    for (const pkg of this.plugins) {
+      const entry = pkg.manifest.setup
+      if (!entry || entry.type !== "module") continue
+      const pluginId = pkg.manifest.id
+      const abs = resolvePath(pkg.packageDir, entry.path)
+      if (!existsSync(abs)) {
+        this.logger(`${pkg.packageDir}: setup module not found: ${abs}`)
+        continue
+      }
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), this.timeoutMs)
+      ;(timer as unknown as { unref?: () => void }).unref?.()
+      try {
+        const mod = (await import(abs)) as { default?: SetupHandler }
+        const fn = mod.default
+        if (typeof fn !== "function") {
+          this.logger(`${abs}: setup has no default export function`)
+          continue
+        }
+        const result = await fn({
+          packageDir: pkg.packageDir,
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            TUI_PLUGIN_PROTOCOL: "1",
+            ...(this.agent ? agentContextToEnv(this.agent) : {}),
+          } as Record<string, string>,
+          abort: ctrl.signal,
+          log: createPluginLogger(pluginId),
+          agent: this.agent,
+          binaries: inventory,
+        })
+        if (result && typeof result === "object") out.push({ pluginId, result })
+      } catch (e) {
+        this.logger(
+          `${pkg.packageDir}: setup failed: ${e instanceof Error ? e.message : String(e)}`,
+        )
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    return out
   }
 }
 
