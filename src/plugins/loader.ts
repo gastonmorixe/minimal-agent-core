@@ -56,6 +56,7 @@ import type {
   ResolvedHookSub,
   ResolvedLiveAreaSlot,
   SubagentModelRecommendation,
+  ToolAvailabilityContext,
   TUIContext,
   TUIResult,
   TUITrigger,
@@ -906,7 +907,14 @@ export class PluginLoader {
     for (const pkg of finalPlugins) {
       for (const frag of pkg.manifest.promptFragments ?? []) {
         const startedAt = Date.now()
-        const promise = startFragment(frag, pkg.packageDir, logger, agent, pkg.manifest.id)
+        const promise = startFragment(
+          frag,
+          pkg.packageDir,
+          logger,
+          agent,
+          pkg.manifest.id,
+          opts.modelInfoProvider,
+        )
         pendingFrags.push({
           pluginId: pkg.manifest.id,
           fragmentId: frag.id,
@@ -1123,12 +1131,56 @@ export class PluginLoader {
     return out
   }
 
-  /** Tool definitions contributed by loaded plugins. Safe to concat to core. */
+  /**
+   * Build the read-only context a tool's `available` predicate sees. Keyed on
+   * process-lifetime-stable facts (env, cwd, boot agent identity) so a tool's
+   * advertisement decision is byte-stable across a session and the cached
+   * system-prompt prefix doesn't churn turn-to-turn.
+   */
+  private availabilityContext(): ToolAvailabilityContext {
+    return {
+      env: process.env,
+      cwd: process.cwd(),
+      ...(this.agent ? { agent: this.agent } : {}),
+    }
+  }
+
+  /**
+   * Is this tool handler advertised to the model right now? A handler with no
+   * `available` predicate is always advertised; otherwise the predicate
+   * decides. A throwing predicate fails OPEN (the tool stays visible) and is
+   * logged, so a buggy gate never silently strips a tool.
+   */
+  private isToolAvailable(h: ResolvedHandler, ctx: ToolAvailabilityContext): boolean {
+    if (!h.available) return true
+    try {
+      return h.available(ctx) !== false
+    } catch (e) {
+      this.logger(
+        `tool availability predicate threw for "${h.definition.trigger.type === "tool" ? h.definition.trigger.tool.name : h.definition.id}"; ` +
+          `keeping the tool visible: ${e instanceof Error ? e.message : String(e)}`,
+      )
+      return true
+    }
+  }
+
+  /**
+   * Tool definitions contributed by loaded plugins. Safe to concat to core.
+   *
+   * Tools whose handler exports an `available` predicate that returns `false`
+   * for the current context are OMITTED: hidden from the model's tool list, and
+   * `buildBlock` separately drops the prompt section of a plugin whose entire
+   * tool surface is hidden, so a context-irrelevant tool costs no tokens and
+   * can't be called by mistake. Evaluated fresh on every call (once per turn)
+   * so the gate is dynamic. Dispatch is never gated this way; a hidden tool
+   * still refuses defensively if somehow invoked.
+   */
   getExtraTools(): PluginToolDefinition[] {
+    const actx = this.availabilityContext()
     const out: PluginToolDefinition[] = []
     for (const pkg of this.plugins) {
       for (const h of pkg.handlers) {
-        if (h.definition.trigger.type === "tool") {
+        if (h.definition.trigger.type === "tool" && this.isToolAvailable(h, actx)) {
           out.push({
             name: h.definition.trigger.tool.name,
             description: h.definition.trigger.tool.description,
@@ -1273,8 +1325,18 @@ export class PluginLoader {
    */
   private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
     if (this.plugins.length === 0) return null
+    const actx = this.availabilityContext()
     const sections: { role: PromptRole; name: string; body: string }[] = []
     for (const pkg of this.plugins) {
+      // Drop the prompt section for a plugin whose ENTIRE tool surface is
+      // currently hidden by availability predicates. A multi-tool plugin keeps
+      // its section as long as at least one tool is advertised (its shared
+      // PROMPT.md still describes the visible tools). A plugin contributing no
+      // tools at all (behavior/context) is never affected.
+      const toolHandlers = pkg.handlers.filter((h) => h.definition.trigger.type === "tool")
+      if (toolHandlers.length > 0 && !toolHandlers.some((h) => this.isToolAvailable(h, actx))) {
+        continue
+      }
       const promptBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
       const frags = fragmentTexts?.get(pkg.manifest.id) ?? []
       const fragSection = frags.length > 0 ? frags.map((t) => t.trimEnd()).join("\n\n") : ""
@@ -1526,8 +1588,9 @@ function startFragment(
   logger: (msg: string) => void,
   agent: AgentContext | undefined,
   pluginId: string,
+  modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
 ): Promise<string | null> {
-  return runFragment(frag, packageDir, agent, pluginId).catch((e) => {
+  return runFragment(frag, packageDir, agent, pluginId, modelInfoProvider).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
     )
@@ -1540,6 +1603,7 @@ async function runFragment(
   packageDir: string,
   agent: AgentContext | undefined,
   pluginId: string,
+  modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -1575,6 +1639,11 @@ async function runFragment(
       stderr: process.stderr,
       log: createPluginLogger(pluginId),
       agent,
+      // Live model snapshot so a module fragment can gate its text on what the
+      // active model supports (e.g. only emit tool-centric guidance when
+      // `tools.userDefined`). Subprocess fragments don't get this (no JSON
+      // round-trip wired); they remain `queryModelInfo`-less.
+      ...(modelInfoProvider ? { queryModelInfo: modelInfoProvider } : {}),
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null

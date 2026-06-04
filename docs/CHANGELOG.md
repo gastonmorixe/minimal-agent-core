@@ -7,7 +7,120 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
-- (placeholder for the next change)
+### Build: scope the test gate to first-party source
+
+`bun test` scanned from the repo root, so it descended into the gitignored,
+vendored research clones under `private/` (a copy of `gemini-cli` and others)
+that ship their own vitest suites and unresolvable dependencies. The gate
+counted ~1300 of those as failures even though every first-party test passed.
+New `bunfig.toml` sets `test.pathIgnorePatterns` to exclude `private/`,
+`research/`, `work/`, `docs/internal/`, `.swarm/`, and `tmp/`, so the gate now
+sees only `src/` and `plugins/` (4588 pass, 10 skip). `private/` is also added
+explicitly to oxlint's `ignorePatterns`. No first-party code changed.
+
+Also fixed a flaky assertion in `plugins/memory/cli.test.ts`: the `--limit`
+test checked the raw list output with `not.toContain("e1")`, but bullet ids are
+base36+hex, so `e1` could land inside a randomly generated id and fail the run
+only under full-suite timing. The test now asserts on the body column.
+
+### Feature: oversize images auto-fit instead of being rejected
+
+A 4K screenshot used to bounce with a 400 (`image exceeds 5 MB`). Oversize
+images are now downscaled and re-encoded to fit the wire budget before sending:
+the long edge is capped at 1568px and a quality/scale ladder brings the encoded
+bytes under the cap. New `src/media/transform.ts` (`fitImageToBudget`,
+`canTransformImages`, `VISION_LONG_EDGE_PX`). `src/media/limits.ts` now measures
+the base64-encoded size (`base64EncodedSize`), the real wire weight, for both
+the per-item and per-request caps, and `src/media/resolve.ts` runs the fit pass
+(`maybeFit`) and reports what it shrank.
+
+### Feature: native clipboard paste (text and image) on Ctrl+V
+
+`src/media/clipboard.ts` was rebuilt on Bun's native clipboard pipeline
+(`Bun.Image.fromClipboard`, plus `clipboardText` / `clipboardImageSync` /
+`hasClipboardImage`). The editor (`src/editor-controller.ts`) gained a Ctrl+V
+handler that pulls system clipboard text, or a clipboard image routed through
+the media interceptor into an `[Image #id]` token, even in terminals where
+Cmd+V never reaches the process. When no handler is wired, Ctrl+V inserts no raw
+control byte.
+
+### Fix: macOS screenshot paths with Unicode spaces no longer shatter
+
+Dropped or pasted screenshot paths like `Screenshot 2026-05-49.35␏PM.png` carry
+a narrow no-break space (U+202F) or no-break space (U+00A0). The media
+tokenizer and path detection (`src/media/detect.ts`, `ingest.ts`) now preserve
+those code points instead of splitting on them. As a backstop, `src/tools.ts`
+self-heals a path whose Unicode space was normalized to a plain space
+(`resolveWhitespaceConfusablePath`): Read and Edit resolve the real file instead
+of returning ENOENT, and Read notes that it resolved the path.
+
+### Fix: connect-phase network failures retry instead of killing the turn
+
+A failure before the first response byte (TCP connect timeout, ECONNRESET, DNS
+EAI_AGAIN, HTTP/2 GOAWAY, "socket hang up") used to stop the agent. New
+`src/network/transient-error.ts` classifies these as `network_error` and
+`withRetry` (`src/llm/transport/retry.ts`) retries them on the fast curve. User
+aborts (Ctrl-C) still propagate untouched. `src/client.ts` also now honors
+`x-should-retry: false`, so a deterministic 400 (bad request, oversize image)
+propagates at once instead of retry-storming.
+
+### Feature: planning guidance in the system prompt
+
+The `tasks` plugin injects a planning fragment (`prompts/planning.md`) that
+tells the model to plan and work in phases with tasks and subtasks. It is
+self-gated on `tools.userDefined`, so a model without tool support does not get
+the guidance. New `plugins/tasks/handlers/planning_fragment.ts`, wired through a
+`promptFragments` entry in the manifest.
+
+### Feature: sub-agent result protocol via a tool, plus context-gated tools
+
+A worker now finishes by calling `ReportResult({summary, artifacts?,
+incomplete?})` as its final action. The handler (running in the worker process)
+writes the result sentinel deterministically with an atomic temp-then-rename, so
+the model never hand-rolls a path or JSON. The completion transport is layered,
+best to worst: the `ReportResult` tool call, a manual sentinel write, a
+distilled final message, then the `incomplete` floor, so a provider without tool
+calling still works. When a worker reports findings but a contracted
+`expectArtifacts` file is missing, the supervisor keeps the `incomplete` verdict
+but salvages the summary onto the status, so `AgentResult` shows the findings
+instead of forcing a transcript dive.
+
+This rides a new general loader feature: a tool handler may export
+`available(ctx)` to hide itself from the model's tool list for a turn (and drop
+its system-prompt section when its whole tool surface is hidden). Dispatch is
+not gated, a hidden tool's handler still runs if invoked, so availability
+controls advertisement, not execution. `ReportResult` uses it to stay invisible
+to the lead (which has no result path) while workers carry it. New
+`plugins/sub-agents/lib/report.ts` + `handlers/report_result.ts`,
+`available` plumbing in `src/plugins/loader.ts` and `types.ts`. See
+`docs/changes/2026-06-01-subagent-result-protocol-and-tool-availability.md`.
+
+## 2026-06-04
+
+### Fix: sub-agent workers inherit the lead's model (no silent downgrade)
+
+Delegating to a built-in specialist silently ran the worker on a cheaper model:
+`explorer` dropped to Haiku, `worker`/`planner`/`integrator` dropped to Sonnet,
+even while the lead was on Opus. The model-precedence order in
+`plugins/sub-agents/lib/service.ts` put the provider's per-role recommendation
+(scout→Haiku, balanced→Sonnet, deep→Opus) AHEAD of the lead's own model, so the
+"inherit the lead's model" path was dead for the specialists, which is most
+spawns. The downgrade also made `incomplete · no deliverable` outcomes more
+likely, since a weaker worker drowns on deep work.
+
+Fix makes the role-recommendation rung opt-in. New `resolveAutoTier` reads
+`MINIMAL_AGENT_SUBAGENT_AUTO_TIER`; `makeRecommendForRole` returns undefined
+unless it is `1`, so workers now inherit the lead's model by default. Precedence
+(default): per-spawn `model` → `MINIMAL_AGENT_SUBAGENT_MODEL` → lead's live model
+→ omit `--model`. With `MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1` the provider role
+recommendation slots back in just below the env override. An explicit per-spawn
+model and the env override always win.
+
+Also corrected the model-facing docs that described the cheap default as
+intended (`manifest.json` `model` param description, `PROMPT.md`, library/service
+comments) and unwrapped the hard-wrapped worker result-protocol template to save
+wire tokens. New tests in `runtime.test.ts` and `handler-deps.test.ts`. See
+`docs/changes/2026-06-04-subagent-model-inheritance.md`.
 
 ## 2026-05-31
 

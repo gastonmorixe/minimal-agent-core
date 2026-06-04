@@ -22,6 +22,11 @@ export {
   http3OpportunisticPolicy,
 } from "./policies/h3-opportunistic.ts"
 export { TestTransport } from "./test-transport.ts"
+export {
+  isTransientNetworkError,
+  TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
+  tagTransientNetworkError,
+} from "./transient-error.ts"
 export type {
   NetworkCaptureOptions,
   NetworkMethod,

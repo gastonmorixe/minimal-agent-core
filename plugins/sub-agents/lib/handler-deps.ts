@@ -15,6 +15,7 @@ import { resolveDefinition } from "./library.ts"
 import { presenceDir } from "./presence.ts"
 import {
   resolveAgentBin,
+  resolveAutoTier,
   resolveDepth,
   resolveModelOverride,
   resolvePolicy,
@@ -53,13 +54,22 @@ function resolveLeadModel(ctx: TUIContext): string {
 
 /**
  * Map an abstract role → the ACTIVE provider's recommended model + settings,
- * via `ctx.recommendSubagentModels` ONLY (no registry/provider import — the
- * plugin stays decoupled). Returns `undefined` when the host wired no provider
- * or the provider recommends nothing for the role, so the caller falls back to
- * the lead's own model. An explicit env model override short-circuits this
- * entirely (the user's choice wins over a provider suggestion).
+ * via `ctx.recommendSubagentModels` ONLY (no registry/provider import, so the
+ * plugin stays decoupled). Returns `undefined` (so the caller inherits the
+ * lead's own model) in three cases:
+ *
+ *   1. Auto-tiering is OFF. This is the DEFAULT. Without an explicit opt-in we
+ *      never let a role recommendation override the lead's model, because that
+ *      is exactly the silent downgrade users hit: spawn `explorer` on Opus and
+ *      land on Haiku, spawn `worker` and land on Sonnet. A worker inherits the
+ *      model the user is paying for. Opt in with
+ *      `MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1` to restore cheap-scout behavior.
+ *   2. An explicit env model override is set (the user's pick wins over a
+ *      provider suggestion).
+ *   3. The host wired no provider recommendation port.
  */
 function makeRecommendForRole(ctx: TUIContext): ((role: string) => { modelId: string; effort?: string } | undefined) | undefined {
+  if (!resolveAutoTier(ctx.env)) return undefined
   if (resolveModelOverride(ctx.env)) return undefined
   const query = ctx.recommendSubagentModels
   if (!query) return undefined

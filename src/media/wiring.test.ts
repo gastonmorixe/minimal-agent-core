@@ -53,6 +53,30 @@ describe("materializeInlineImagePaths", () => {
     const text = `read ${p}`
     expect(await materializeInlineImagePaths(text, reg)).toBe(text)
   })
+
+  it("materializes a path whose name contains a U+202F narrow no-break space", async () => {
+    const reg = createMediaRegistry()
+    // U+202F is the only unusual char (no raw ASCII spaces): the regex must
+    // not treat the narrow no-break space as a token boundary.
+    const p = await tmpFile("shot5.49.35\u202fPM.png", png(4, 2))
+    const out = await materializeInlineImagePaths(`look at ${p} please`, reg)
+    const refs = parseMediaTokens(out)
+    expect(refs).toHaveLength(1)
+    expect(reg.get(refs[0]!.id)?.path).toBe(p)
+  })
+
+  it("materializes a drag-escaped screenshot path (ASCII spaces escaped, U+202F raw)", async () => {
+    const reg = createMediaRegistry()
+    // The realistic macOS screenshot: ASCII spaces between words AND a U+202F
+    // before "PM". A Finder drag backslash-escapes the ASCII spaces but leaves
+    // the U+202F raw — this is the exact shape that was failing.
+    const p = await tmpFile("Screenshot at 5.49.35\u202fPM.png", png(4, 2))
+    const escaped = p.replace(/ /g, "\\ ")
+    const out = await materializeInlineImagePaths(`see ${escaped} ok`, reg)
+    const refs = parseMediaTokens(out)
+    expect(refs).toHaveLength(1)
+    expect(reg.get(refs[0]!.id)?.path).toBe(p)
+  })
 })
 
 describe("ingestUserText", () => {

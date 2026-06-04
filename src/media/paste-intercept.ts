@@ -11,7 +11,7 @@
  *   joined `[Image #id …]` tokens.
  * - **Clipboard image**: the paste is empty/blank but the system clipboard
  *   holds an image (terminals deliver no text for an image paste). Capture it
- *   via {@link clipboardImage} and return a single token.
+ *   via {@link clipboardImageSync} and return a single token.
  *
  * Everything here is synchronous (the editor FSM is) : it uses the registry's
  * sync registration + a sync clipboard subprocess. Unreadable / oversize media
@@ -26,7 +26,7 @@ import { existsSync } from "node:fs"
 import { diag } from "../diagnostic-bus.ts"
 
 import { anthropicMediaLimits } from "./anthropic.ts"
-import { clipboardImage } from "./clipboard.ts"
+import { clipboardImageSync } from "./clipboard.ts"
 import { looksLikeMediaDrop, parseDroppedPaths } from "./detect.ts"
 import { ANTHROPIC_MODALITIES } from "./ingest.ts"
 import { checkMedia } from "./limits.ts"
@@ -76,7 +76,7 @@ export function mediaPasteInterceptor(
 
   // Case 2: empty/blank paste + an image on the clipboard.
   if (pasted.trim() === "") {
-    const bytes = clipboardImage()
+    const bytes = clipboardImageSync()
     if (!bytes) return null
     const item = registry.registerBytesSync(bytes, "clipboard", "image/png")
     if (!acceptOrWarn(item)) return null

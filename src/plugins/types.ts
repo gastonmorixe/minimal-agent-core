@@ -359,6 +359,42 @@ export type TUIResult =
  */
 export type TUIHandler = (ctx: TUIContext) => Promise<TUIResult>
 
+/**
+ * The read-only context a tool's {@link ToolAvailability} predicate sees when
+ * the loader decides whether to advertise that tool to the model THIS turn. A
+ * deliberately small slice of the full {@link TUIContext}: only the ambient
+ * facts a tool needs to gate itself (the process env, the cwd, and the boot
+ * {@link AgentContext}). No `trigger` (the tool isn't being invoked yet), no
+ * stdio, no abort.
+ */
+export interface ToolAvailabilityContext {
+  /** Process env (includes `MINIMAL_AGENT_*` lineage like sub-agent depth/result-path). */
+  env: Record<string, string | undefined>
+  /** The agent's working directory. */
+  cwd: string
+  /** Boot-time agent identity (session id, pid, model). See {@link AgentContext}. */
+  agent?: AgentContext
+}
+
+/**
+ * Optional named export a tool handler module may provide to gate whether the
+ * tool is advertised to the model. Returning `false` hides the tool from BOTH
+ * the model's tool list AND its system-prompt section for that turn, so a tool
+ * that is irrelevant in the current context costs zero tokens and can't be
+ * called by mistake. The predicate is evaluated by the loader on every
+ * `getExtraTools()` call (once per turn), so it must be cheap and side-effect
+ * free; it should key only on process-lifetime-stable facts (env, cwd) to keep
+ * the cached system-prompt prefix byte-stable across a session.
+ *
+ * Dispatch is NOT gated by this: a hidden tool's handler still runs if somehow
+ * called (a resumed transcript, a hallucinated name), so the handler keeps its
+ * own defensive check. Availability controls ADVERTISEMENT, not execution.
+ *
+ * A handler module declares it as `export const available: ToolAvailability`.
+ * Absent ⇒ the tool is always advertised (the default).
+ */
+export type ToolAvailability = (ctx: ToolAvailabilityContext) => boolean
+
 // ---------------------------------------------------------------------------
 // Manifest types
 // ---------------------------------------------------------------------------
@@ -577,6 +613,21 @@ export interface PromptFragmentContext {
    * always carry it.
    */
   agent?: AgentContext
+  /**
+   * Query the agent's model + capabilities at fragment-resolution time (see
+   * {@link ModelInfoSnapshot}). Mirrors {@link TUIContext.queryModelInfo} so a
+   * fragment can gate its text on what the active model supports (e.g. only
+   * emit tool-centric guidance when `tools.userDefined` is true), staying fully
+   * decoupled from any provider.
+   *
+   * Fragments run once at boot and their result is memoized for the session
+   * (the system prompt sits on a cache breakpoint and must be byte-stable), so
+   * this reflects the boot-time model. Optional + in-process only: present when
+   * the host wired a provider; `undefined` for subprocess fragments and
+   * back-compat callers. Consumers MUST narrow (`const info =
+   * ctx.queryModelInfo?.()`).
+   */
+  queryModelInfo?: () => ModelInfoSnapshot | undefined
 }
 
 /**
@@ -1525,4 +1576,12 @@ export interface ResolvedHandler {
    * this call; handlers themselves just await whatever the user wrote.
    */
   invoke: (ctx: TUIContext) => Promise<TUIResult>
+  /**
+   * Optional availability predicate, captured from the handler module's
+   * `available` named export (tool triggers only). When present and it returns
+   * `false`, the loader hides this tool from `getExtraTools()` (and thus from
+   * the model's tool list and its prompt section) for that turn. Absent ⇒
+   * always advertised. See {@link ToolAvailability}.
+   */
+  available?: ToolAvailability
 }

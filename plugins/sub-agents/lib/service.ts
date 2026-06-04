@@ -12,6 +12,7 @@
  */
 
 import { DEFAULT_POLICY, evaluateSpawnGuard, type GuardPolicy } from "./guard.ts"
+import { renderResultProtocol } from "./prompts.ts"
 import { buildSpawnPlan } from "./spawn-plan.ts"
 import { ENV_RESULT_PATH, launchWorker, type SpawnDeps } from "./spawn.ts"
 import { type SubagentStore } from "./store.ts"
@@ -140,9 +141,14 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
   const label = (req.label ?? def?.name ?? type).trim()
   // Model precedence (model/provider-agnostic): explicit per-spawn `model` →
   // a definition's explicit `model` → the ACTIVE provider's recommendation for
-  // the definition's abstract ROLE → the lead's own model (`defaultModel`). The
-  // role recommendation comes through `deps.recommendForRole`, which the host
-  // fills from the active provider; the plugin never names a vendor SKU.
+  // the definition's abstract ROLE → the lead's own model (`defaultModel`).
+  //
+  // The role-recommendation rung is GATED: `deps.recommendForRole` is wired by
+  // the host ONLY when `MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1` (see handler-deps).
+  // By default it is undefined, so a role-bearing specialist (`explorer`,
+  // `worker`, …) inherits the lead's own model instead of being silently
+  // downgraded to a cheaper tier. A worker runs on the model the user is paying
+  // for unless the user opts into auto-tiering or names a model per spawn.
   const rec = !req.model && !def?.model && def?.role ? deps.recommendForRole?.(def.role) : undefined
   const model = (req.model ?? def?.model ?? rec?.modelId ?? deps.defaultModel).trim()
   // Effort follows the same source as the model: an explicit request/def effort
@@ -169,6 +175,10 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
   const resultPath = `${deps.sessionsDir}/${childSid}.result.json`
   const logPath = `${deps.sessionsDir}/${childSid}.log`
 
+  // Render the deliverable protocol from its markdown template (the prose lives
+  // on disk, never in code — repo convention). The worker reads how to finish:
+  // write any required file itself, then call `ReportResult`.
+  const resultProtocol = renderResultProtocol(resultPath)
   const planResult = buildSpawnPlan({
     agentBin: deps.agentBin,
     childSid,
@@ -180,7 +190,7 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
     mode: "none",
     isolation,
     ...(systemPreamble ? { systemPreamble } : {}),
-    resultPath,
+    resultProtocol,
     depth: childDepth,
     cwd: deps.cwd,
     extraEnv: { [ENV_RESULT_PATH]: resultPath },

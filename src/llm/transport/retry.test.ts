@@ -153,6 +153,62 @@ describe("withRetry", () => {
     expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
   })
 
+  it("retries an UNTAGGED connection-level failure (the 2026-06-01 connect-timeout hard stop)", async () => {
+    // Regression: a bare `HTTP/2 connect timeout` thrown out of the transport
+    // carries no streamErrorType, so the loop used to treat it as a genuine
+    // bug and stop the agent. It must now be tagged `network_error` and
+    // retried on the fast curve.
+    const origRandom = Math.random
+    Math.random = () => 0 // backoff → 0ms
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            // No streamErrorType — exactly what http2-transport throws.
+            throw new Error("HTTP/2 connect timeout for https://api.anthropic.com")
+          }
+          yield "back"
+          return resp("back")
+        }),
+      )
+      expect(result.text).toBe("back")
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(2)
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.["error-type"]).toBe("network_error")
+    expect(retry?.structuredData?.curve).toBe("fast")
+    expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
+  })
+
+  it("retries an errno-coded connection failure carried under a cause chain", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            const cause = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })
+            throw Object.assign(new TypeError("fetch failed"), { cause })
+          }
+          yield "ok"
+          return resp("ok")
+        }),
+      )
+      expect(result.text).toBe("ok")
+    } finally {
+      Math.random = origRandom
+    }
+    expect(calls).toBe(2)
+  })
+
   it("propagates an untagged error without retrying", async () => {
     let calls = 0
     let caught = ""

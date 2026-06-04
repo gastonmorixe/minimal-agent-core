@@ -221,4 +221,80 @@ describe("sub-agents end-to-end (real process, no network)", () => {
       expect(rec.status.reason).toContain("promised-findings.md")
     }
   })
+
+  it("a worker that finishes via the ReportResult handler is reaped to done", async () => {
+    // Instead of hand-writing the sentinel JSON, this fake worker calls the REAL
+    // ReportResult handler (the completion tool), proving the tool-based path
+    // writes a sentinel the supervisor reads. This is the real-enforcement fix:
+    // the model only supplies findings; our handler writes the bytes.
+    const handlerPath = join(import.meta.dir, "handlers", "report_result.ts")
+    const toolWorker = join(dir, "tool-worker.ts")
+    writeFileSync(
+      toolWorker,
+      [
+        `import reportResult from ${JSON.stringify(handlerPath)}`,
+        "const res = await reportResult({",
+        "  trigger: { type: 'tool', name: 'ReportResult', input: { summary: 'handler-written result', artifacts: [] }, tool_use_id: 't' },",
+        "  packageDir: '.', cwd: '.', env: process.env,",
+        "  abort: new AbortController().signal,",
+        "  stdout: process.stdout, stdin: process.stdin, stderr: process.stderr,",
+        "} as never)",
+        "process.exit(res && res.is_error ? 1 : 0)",
+      ].join("\n"),
+    )
+    const store = new SubagentStore(LEAD, { dir })
+    const deps = { ...svcDeps(store), agentBin: [process.execPath, toolWorker] }
+
+    const sp = spawnAgent({ task: "use the tool" }, deps)
+    expect(sp.ok).toBe(true)
+    if (!sp.ok) return
+    await waitForExit(sp.value.status.kind === "running" ? sp.value.status.pid : 0)
+
+    runSupervisor(supDeps(store, []))
+    const rec = store.get(sp.value.id)
+    expect(rec?.status.kind).toBe("done")
+    if (rec?.status.kind === "done") {
+      expect(rec.status.result.short).toBe("handler-written result")
+      // a real structured sentinel, NOT a distilled fallback
+      expect(rec.status.result.distilled).toBeUndefined()
+    }
+  })
+
+  it("salvages a ReportResult summary onto incomplete when a required file is missing", async () => {
+    // The worker reports real findings via ReportResult but never writes the
+    // contracted file. The supervisor marks it incomplete (the file gate), yet
+    // the findings survive as `salvage` so the lead need not mine the transcript.
+    const handlerPath = join(import.meta.dir, "handlers", "report_result.ts")
+    const partialWorker = join(dir, "partial-worker.ts")
+    writeFileSync(
+      partialWorker,
+      [
+        `import reportResult from ${JSON.stringify(handlerPath)}`,
+        "await reportResult({",
+        "  trigger: { type: 'tool', name: 'ReportResult', input: { summary: 'the codec ceiling is 4K60 on this chip' }, tool_use_id: 't' },",
+        "  packageDir: '.', cwd: '.', env: process.env,",
+        "  abort: new AbortController().signal,",
+        "  stdout: process.stdout, stdin: process.stdin, stderr: process.stderr,",
+        "} as never)",
+        "process.exit(0)",
+      ].join("\n"),
+    )
+    const store = new SubagentStore(LEAD, { dir })
+    const deps = { ...svcDeps(store), agentBin: [process.execPath, partialWorker] }
+
+    const missingPath = join(dir, "RESEARCH.md")
+    const sp = spawnAgent({ task: "research the ceiling", expectArtifacts: [missingPath] }, deps)
+    expect(sp.ok).toBe(true)
+    if (!sp.ok) return
+    await waitForExit(sp.value.status.kind === "running" ? sp.value.status.pid : 0)
+
+    runSupervisor(supDeps(store, []))
+    const rec = store.get(sp.value.id)
+    expect(rec?.status.kind).toBe("incomplete")
+    if (rec?.status.kind === "incomplete") {
+      expect(rec.status.reason).toContain("RESEARCH.md")
+      // the findings the worker reported survive the contract miss
+      expect(rec.status.salvage).toMatch(/codec ceiling/i)
+    }
+  })
 })

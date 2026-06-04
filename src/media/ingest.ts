@@ -58,6 +58,8 @@ export interface UserContentResult {
   rejected: Array<{ item: MediaItem; rejection: MediaRejection }>
   /** Token ids with no registry entry (stale pointers). */
   missing: string[]
+  /** Oversize images auto-shrunk to fit, with a human summary : caller should note these. */
+  fitted: Array<{ item: MediaItem; strategy: string }>
   /** True when at least one media block was attached. */
   hadMedia: boolean
 }
@@ -91,6 +93,7 @@ export async function buildAnthropicUserContent(
     content,
     rejected: resolved.rejected,
     missing: resolved.missing,
+    fitted: resolved.fitted,
     hadMedia: resolved.attached.length > 0,
   }
 }
@@ -99,8 +102,15 @@ export async function buildAnthropicUserContent(
 // "just type a path to an image and I'll read it"). Documents (.pdf/.txt) are
 // NOT auto-attached inline : they need an explicit drag-drop or token, so a
 // prose mention of a doc path is not silently turned into an attachment.
+// The path atom accepts a backslash-escape (`\.` for a drag-escaped space), a
+// Unicode space that legitimately sits inside the name (U+00A0 NBSP, U+202F
+// NARROW NO-BREAK SPACE — the macOS screenshot "5.49.35␏PM.png" case), or any
+// non-whitespace/non-quote/non-backslash char. Matching these means a typed or
+// drag-escaped screenshot path no longer dies at the first space before
+// reaching its `.png`. The matched run is backslash-unescaped before the
+// filesystem check (see below).
 const INLINE_IMAGE_PATH_RE =
-  /(?<![\w/~.])(?:\/|~\/)[^\s'"]*\.(?:jpe?g|png|gif|webp)(?=$|[\s'".,;:!?])/gi
+  /(?<![\w/~.])(?:\/|~\/)(?:\\.|[\u00a0\u202f]|[^\s'"\\])*\.(?:jpe?g|png|gif|webp)(?=$|[\s'".,;:!?])/gi
 
 /**
  * Replace bare on-disk image paths in `text` with their media tokens,
@@ -117,7 +127,9 @@ export async function materializeInlineImagePaths(
   let out = text
   for (const m of matches.reverse()) {
     const raw = m[0]
-    const abs = raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw
+    // Unescape drag-style `\ ` (and any other `\x`) to get the on-disk name.
+    const unescaped = raw.replace(/\\(.)/g, "$1")
+    const abs = unescaped.startsWith("~/") ? join(homedir(), unescaped.slice(2)) : unescaped
     if (!existsSync(abs)) continue
     try {
       const item = await registry.registerPath(abs, "path")
@@ -157,6 +169,12 @@ export async function resolveUserTurnContent(
   const ingested = await ingestUserText(userText, getSessionMediaRegistry(), {
     modelId: opts.modelId,
   })
+  for (const f of ingested.fitted) {
+    diag.info("media.fitted", `shrank an oversize image to fit (${f.strategy})`, {
+      id: f.item.id,
+      strategy: f.strategy,
+    })
+  }
   for (const r of ingested.rejected) {
     diag.warn("media.rejected", r.rejection.message, { id: r.item.id, code: r.rejection.code })
   }

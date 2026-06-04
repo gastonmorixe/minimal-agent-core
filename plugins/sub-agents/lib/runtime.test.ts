@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test"
 import { DEFAULT_POLICY } from "./guard.ts"
 import {
   resolveAgentBin,
+  resolveAutoTier,
   resolveDepth,
   resolveModelOverride,
   resolvePolicy,
@@ -45,6 +46,17 @@ describe("resolveModelOverride", () => {
   })
   it("treats whitespace-only as unset", () => {
     expect(resolveModelOverride({ MINIMAL_AGENT_SUBAGENT_MODEL: "   " })).toBe("")
+  })
+})
+
+describe("resolveAutoTier", () => {
+  it("is OFF by default (workers inherit the lead's model, no downgrade)", () => {
+    expect(resolveAutoTier({})).toBe(false)
+  })
+  it("is ON only for the exact opt-in value", () => {
+    expect(resolveAutoTier({ MINIMAL_AGENT_SUBAGENT_AUTO_TIER: "1" })).toBe(true)
+    expect(resolveAutoTier({ MINIMAL_AGENT_SUBAGENT_AUTO_TIER: "0" })).toBe(false)
+    expect(resolveAutoTier({ MINIMAL_AGENT_SUBAGENT_AUTO_TIER: "true" })).toBe(false)
   })
 })
 

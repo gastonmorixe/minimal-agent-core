@@ -1,7 +1,14 @@
 import { describe, expect, it } from "bun:test"
 
 import { buildSpawnPlan, type SpawnInput } from "./spawn-plan.ts"
-import { cachedProgressReader, launchWorker, parseResultDigest, probeWorker, type SpawnDeps } from "./spawn.ts"
+import {
+  cachedProgressReader,
+  extractCrashSignature,
+  launchWorker,
+  parseResultDigest,
+  probeWorker,
+  type SpawnDeps,
+} from "./spawn.ts"
 import { type Progress, sessionId, subagentId } from "./types.ts"
 
 function plan(isolation: "fresh" | "fork" = "fresh") {
@@ -150,6 +157,87 @@ describe("probeWorker", () => {
     expect(probe.result?.short).toMatch(/⚠ 1\/2 declared artifact\(s\) missing: \/y\.md/)
     expect(probe.result?.short).toContain("did the thing")
   })
+
+  // FIX A: when a worker exited producing nothing, the probe mines the log.
+  it("reads a crash signature when the worker exited with NO sentinel and NO final text (FIX A)", () => {
+    const probe = probeWorker(
+      { pid: 1, resultPath: "/r.json", transcriptPath: "/t.jsonl", logPath: "/w.log" },
+      {
+        pidAlive: () => false,
+        readResult: () => undefined,
+        readFinalText: () => undefined,
+        readCrash: () => "fatal: API 400: long context beta not available",
+        exitCode: () => undefined,
+      },
+    )
+    expect(probe.crash).toMatch(/long context beta/i)
+  })
+
+  it("does NOT read the crash log when a sentinel exists (cheap path preserved)", () => {
+    const probe = probeWorker(
+      { pid: 1, resultPath: "/r.json", transcriptPath: "/t.jsonl", logPath: "/w.log" },
+      {
+        pidAlive: () => false,
+        readResult: () => ({ short: "ok", tokens: 1, tools: 1 }),
+        readCrash: () => {
+          throw new Error("should not read the crash log when a sentinel exists")
+        },
+        exitCode: () => 0,
+      },
+    )
+    expect(probe.crash).toBeUndefined()
+    expect(probe.result?.short).toBe("ok")
+  })
+
+  it("does NOT read the crash log when a final message was distilled", () => {
+    const probe = probeWorker(
+      { pid: 1, resultPath: "/r.json", transcriptPath: "/t.jsonl", logPath: "/w.log" },
+      {
+        pidAlive: () => false,
+        readResult: () => undefined,
+        readFinalText: () => "my synthesis",
+        readCrash: () => {
+          throw new Error("should not read the crash log when there is a final message")
+        },
+        exitCode: () => 0,
+      },
+    )
+    expect(probe.crash).toBeUndefined()
+    expect(probe.distilled).toBe("my synthesis")
+  })
+})
+
+describe("extractCrashSignature", () => {
+  it("pulls the real cause from the A1-class boot crash", () => {
+    const log =
+      'fatal: API 400: {"type":"error","error":{"type":"invalid_request_error",' +
+      '"message":"The long context beta is not yet available for this subscription."}}'
+    expect(extractCrashSignature(log)).toMatch(/long context beta/i)
+    expect(extractCrashSignature(log)?.startsWith("fatal:")).toBe(true)
+  })
+
+  it("matches an unknown-model complaint", () => {
+    expect(extractCrashSignature("error: unknown model 'claude-opus-4-1'")).toMatch(/unknown model/i)
+  })
+
+  it("matches a Node spawn ENOENT", () => {
+    expect(extractCrashSignature("Error: spawn minimal-agent ENOENT")).toMatch(/ENOENT/)
+  })
+
+  it("strips ANSI before scanning", () => {
+    const log = "\x1b[31mfatal:\x1b[39m boom"
+    expect(extractCrashSignature(log)).toBe("fatal: boom")
+  })
+
+  it("returns undefined for a benign / empty log (no false positive)", () => {
+    expect(extractCrashSignature("")).toBeUndefined()
+    expect(extractCrashSignature("starting up\nWebSearch ok\ndone")).toBeUndefined()
+  })
+
+  it("returns the FIRST fatal line, clipped", () => {
+    const log = "noise\nfatal: first cause\nfatal: second cause"
+    expect(extractCrashSignature(log)).toBe("fatal: first cause")
+  })
 })
 
 describe("cachedProgressReader", () => {
@@ -210,5 +298,16 @@ describe("parseResultDigest", () => {
     expect(parseResultDigest(null)).toBeUndefined()
     expect(parseResultDigest({ tokens: 1 })).toBeUndefined() // no short
     expect(parseResultDigest("nope")).toBeUndefined()
+  })
+  it("honors a structured incomplete flag", () => {
+    expect(parseResultDigest({ short: "partial", incomplete: true })?.incomplete).toBe(true)
+  })
+  it("recognizes a legacy hand-written INCOMPLETE: prefix as incomplete", () => {
+    // The documented manual-sentinel fallback has no structured field, just the
+    // prefix. The supervisor must still route it to incomplete, not done.
+    expect(parseResultDigest({ short: "INCOMPLETE: ran out of time" })?.incomplete).toBe(true)
+  })
+  it("leaves incomplete unset for an ordinary finished sentinel", () => {
+    expect(parseResultDigest({ short: "found 3 callers" })?.incomplete).toBeUndefined()
   })
 })

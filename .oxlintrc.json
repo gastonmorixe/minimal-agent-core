@@ -115,5 +115,13 @@
       }
     }
   ],
-  "ignorePatterns": ["node_modules/**", "docs/**", "research/**", ".swarm/**", "tmp/**"]
+  "ignorePatterns": [
+    "node_modules/**",
+    "docs/**",
+    "private/**",
+    "research/**",
+    "work/**",
+    ".swarm/**",
+    "tmp/**"
+  ]
 }

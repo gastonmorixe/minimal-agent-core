@@ -5,7 +5,12 @@ import type { ModalitySupport } from "../llm/capabilities.ts"
 import { mediaId, mediaIdFromSha, randomMediaId, sha256Hex } from "./id.ts"
 import { checkMedia, checkMediaSet, kindModality, type MediaLimits } from "./limits.ts"
 import { imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
-import { formatMediaToken, parseMediaTokens, stripMediaTokens } from "./token.ts"
+import {
+  formatMediaToken,
+  parseMediaTokens,
+  replaceMediaTokens,
+  stripMediaTokens,
+} from "./token.ts"
 import { formatBytes, formatDuration, type MediaItem, mediaDescriptor } from "./types.ts"
 
 // ---------------------------------------------------------------------------
@@ -175,6 +180,26 @@ describe("checkMedia", () => {
     const v = checkMedia({ ...base, sizeBytes: 9 * 1024 * 1024 }, ANTHROPIC_LIMITS, ALL_MODALITIES)
     expect(v).toMatchObject({ ok: false, code: "too-large" })
   })
+  it("rejects a raw size under the cap whose base64 encoding exceeds it", () => {
+    // Regression: a 4.2 MB macOS screenshot is < 5 MB raw but ~5.6 MB once
+    // base64-encoded, which is what the API actually weighs. A raw-only check
+    // passed it and the server returned a 400. The encoded check must reject.
+    const v = checkMedia(
+      { ...base, sizeBytes: 4.2 * 1024 * 1024 },
+      ANTHROPIC_LIMITS,
+      ALL_MODALITIES,
+    )
+    expect(v).toMatchObject({ ok: false, code: "too-large" })
+  })
+  it("accepts a raw size that stays under the cap after encoding", () => {
+    // 3.5 MB raw → ~4.67 MB encoded, still under 5 MB.
+    const v = checkMedia(
+      { ...base, sizeBytes: 3.5 * 1024 * 1024 },
+      ANTHROPIC_LIMITS,
+      ALL_MODALITIES,
+    )
+    expect(v.ok).toBe(true)
+  })
   it("rejects oversize dimensions", () => {
     const v = checkMedia(
       { ...base, dimensions: { width: 9000, height: 100 } },
@@ -196,7 +221,8 @@ describe("checkMediaSet", () => {
   it("rejects the items that overflow the request byte budget", () => {
     const big = { sizeBytes: 20 * 1024 * 1024 }
     const verdicts = checkMediaSet([big, big, big], ANTHROPIC_LIMITS)
-    // 20MB fits; 20+20 = 40MB > 32MB so the 2nd and 3rd overflow.
+    // Encoded: 20MB → ~26.7MB. First fits under 32MB; running total ~53.3MB on
+    // the 2nd and ~80MB on the 3rd both overflow the request budget.
     expect(verdicts[0]!.ok).toBe(true)
     expect(verdicts[1]).toMatchObject({ ok: false, code: "request-too-large" })
     expect(verdicts[2]).toMatchObject({ ok: false, code: "request-too-large" })
@@ -279,5 +305,18 @@ describe("media token", () => {
   })
   it("ignores malformed ids", () => {
     expect(parseMediaTokens("[Image #xyz] [Image #a1b2c3]")).toHaveLength(0)
+  })
+  it("replaceMediaTokens drops some tokens and substitutes others", () => {
+    const out = replaceMediaTokens(
+      "a [Image #a1b2c3d4 1x1] b [File #deadbeef PDF] c",
+      (_kind, id) => (id === "deadbeef" ? `[file not sent: too large]` : ""),
+    )
+    // The image token is dropped (whitespace collapsed); the file token becomes
+    // a marker in place.
+    expect(out).toBe("a b [file not sent: too large] c")
+  })
+  it("replaceMediaTokens leaves a non-empty replacement verbatim", () => {
+    const out = replaceMediaTokens("x [Image #a1b2c3d4 1x1]", () => "[image not sent: oops]")
+    expect(out).toBe("x [image not sent: oops]")
   })
 })

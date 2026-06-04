@@ -39,7 +39,7 @@ async function loadSubAgents(): Promise<{ loader: PluginLoader; warnings: string
 }
 
 describe("sub-agents manifest loads", () => {
-  it("registers all five tools", async () => {
+  it("advertises the lead-facing sub-agent tools", async () => {
     const { loader } = await loadSubAgents()
     const names = loader.getExtraTools().map((t) => t.name)
     expect(names).toContain("SpawnAgent")
@@ -49,6 +49,32 @@ describe("sub-agents manifest loads", () => {
     expect(names).toContain("AgentOutput")
     expect(names).toContain("Mailbox")
     expect(names).toContain("StopAgent")
+  })
+
+  it("HIDES ReportResult from a lead (no result-path env) but keeps it dispatchable", async () => {
+    const prev = process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
+    delete process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
+    try {
+      const { loader } = await loadSubAgents()
+      // not advertised to the model...
+      expect(loader.getExtraTools().map((t) => t.name)).not.toContain("ReportResult")
+      // ...but still registered, so a stray/forced call can still be dispatched.
+      expect(loader.hasTool("ReportResult")).toBe(true)
+    } finally {
+      if (prev !== undefined) process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH = prev
+    }
+  })
+
+  it("ADVERTISES ReportResult inside a worker (result-path env present)", async () => {
+    const prev = process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
+    process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH = "/tmp/worker.result.json"
+    try {
+      const { loader } = await loadSubAgents()
+      expect(loader.getExtraTools().map((t) => t.name)).toContain("ReportResult")
+    } finally {
+      if (prev === undefined) delete process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
+      else process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH = prev
+    }
   })
 
   it("registers the supervisor live-area slot at 1s", async () => {

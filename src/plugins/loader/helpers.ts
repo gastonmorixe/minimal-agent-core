@@ -13,6 +13,7 @@ import type {
   LoadedPlugin,
   ManifestHandler,
   ResolvedHandler,
+  ToolAvailability,
   TUIContext,
   TUIHandler,
   TUIResult,
@@ -171,7 +172,7 @@ export async function resolveHandler(
       logger(`${packageDir}: module handler not found: ${abs}`)
       return null
     }
-    let mod: { default?: TUIHandler }
+    let mod: { default?: TUIHandler; available?: ToolAvailability }
     try {
       mod = await import(abs)
     } catch (e) {
@@ -185,10 +186,16 @@ export async function resolveHandler(
       logger(`${packageDir}: ${abs} has no default export function`)
       return null
     }
+    // Capture an optional `available` predicate (tool triggers only). It gates
+    // whether the loader ADVERTISES this tool to the model each turn; it never
+    // gates dispatch. A non-function export is ignored (defensive).
+    const available =
+      h.trigger.type === "tool" && typeof mod.available === "function" ? mod.available : undefined
     return {
       definition: h,
       entryAbsolute: abs,
       invoke: async (ctx) => fn(ctx),
+      ...(available ? { available } : {}),
     }
   }
 

@@ -128,12 +128,106 @@ describe("supervisorTick — distilled-final-text fallback (precedence)", () => 
     const out = tick([rec("A1", running())], { A1: { alive: false, exitCode: 0 } })
     expect(out.records[0]?.status.kind).toBe("incomplete")
   })
+})
+
+describe("supervisorTick — self-reported incompletion is NOT laundered into done", () => {
+  it("a sentinel with incomplete:true → incomplete, NOT done, with the summary salvaged", () => {
+    const out = tick([rec("A1", running())], {
+      A1: {
+        alive: false,
+        exitCode: 0,
+        result: {
+          short: "INCOMPLETE: ran out of budget before reading the parser.",
+          tokens: 60_000,
+          tools: 40,
+          incomplete: true,
+        },
+      },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") {
+      // The INCOMPLETE: marker is stripped from the salvaged findings.
+      expect(st.salvage).toBe("ran out of budget before reading the parser.")
+      expect(st.reason).toMatch(/could not finish/i)
+    }
+  })
+
+  it("a clean exit code does NOT override a self-reported incompletion", () => {
+    const out = tick([rec("A1", running())], {
+      A1: { alive: false, exitCode: 0, result: { short: "partial", tokens: 1, tools: 1, incomplete: true } },
+    })
+    expect(out.records[0]?.status.kind).toBe("incomplete")
+  })
+
+  it("a linked todo is CANCELED (not ticked done) when the worker self-reports incomplete", () => {
+    const r = { ...rec("A1", running()), taskId: "#a7b3c4" }
+    const out = tick([r], {
+      A1: { alive: false, exitCode: 0, result: { short: "INCOMPLETE: blocked", tokens: 1, tools: 1, incomplete: true } },
+    })
+    const taskUpdate = out.effects.find(
+      (e) => e.type === "emit" && e.channel === "subagent.taskUpdate",
+    )
+    expect(taskUpdate?.type === "emit" && taskUpdate.payload).toMatchObject({
+      taskId: "#a7b3c4",
+      status: "canceled",
+    })
+  })
+
+  it("claimed artifacts are surfaced even on a self-reported incompletion", () => {
+    const out = tick([rec("A1", running())], {
+      A1: {
+        alive: false,
+        exitCode: 0,
+        result: { short: "INCOMPLETE: wrote a draft", tokens: 1, tools: 1, artifacts: ["/draft.md"], incomplete: true },
+      },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") expect(st.artifacts).toEqual(["/draft.md"])
+  })
 
   it("a non-zero exit still fails even if a final message was distilled", () => {
     const out = tick([rec("A1", running())], {
       A1: { alive: false, exitCode: 1, distilled: "I think I crashed" },
     })
     expect(out.records[0]?.status.kind).toBe("failed")
+  })
+
+  // FIX A: a boot crash arrives with exitCode UNDEFINED (Bun.spawn is detached,
+  // so production has no wait status) but a crash signature mined from the log.
+  // It must report `failed` with the real cause, not a generic incomplete.
+  it("a crash signature with NO exit code → failed with the real cause (FIX A)", () => {
+    const out = tick([rec("A1", running())], {
+      A1: { alive: false, crash: 'fatal: API 400: "long context beta is not available"' },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("failed")
+    if (st?.kind === "failed") expect(st.error).toMatch(/long context beta/i)
+    // the digest the lead sees says "failed", not "incomplete"
+    const inject = out.effects.find((e) => e.type === "inject")
+    expect(inject?.type === "inject" && inject.text).toMatch(/failed/i)
+  })
+
+  it("prefers the crash signature over a bare exit code on non-zero exit (FIX A)", () => {
+    const out = tick([rec("A1", running())], {
+      A1: { alive: false, exitCode: 1, crash: "fatal: unknown model 'claude-opus-4-1'" },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("failed")
+    if (st?.kind === "failed") {
+      expect(st.error).toMatch(/unknown model/i)
+      expect(st.error).toContain("exit 1")
+      expect(st.exitCode).toBe(1)
+    }
+  })
+
+  it("does NOT escalate to failed when the worker produced a real result, even if a crash line exists", () => {
+    const out = tick([rec("A1", running())], {
+      A1: { alive: false, exitCode: 0, result: RESULT, crash: "Error: noisy but non-fatal" },
+    })
+    // a real deliverable wins; the crash signal is only for empty exits
+    expect(out.records[0]?.status.kind).toBe("done")
   })
 })
 
@@ -163,6 +257,49 @@ describe("supervisorTick — expectArtifacts contract (FIX 4)", () => {
     const r = { ...rec("A1", running()), expectArtifacts: ["/out.md"] }
     const out = tick([r], { A1: { alive: false, exitCode: 0, result: RESULT } })
     expect(out.records[0]?.status.kind).toBe("done")
+  })
+
+  it("SALVAGES the sentinel synthesis onto incomplete when the file is missing (FIX 5, the A2/A3 data-loss bug)", () => {
+    const r = { ...rec("A1", running()), expectArtifacts: ["/findings.md"] }
+    const out = tick([r], {
+      A1: {
+        alive: false,
+        exitCode: 0,
+        result: { short: "AVFragmentedAsset is the right API for a growing fMP4.", tokens: 58_500, tools: 63, artifacts: ["/findings.md"] },
+        missingArtifacts: ["/findings.md"],
+      },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") {
+      // The findings survive even though the contracted file does not.
+      expect(st.salvage).toContain("AVFragmentedAsset")
+      // The claimed-but-absent artifact is carried for the lead to verify.
+      expect(st.artifacts).toEqual(["/findings.md"])
+      // Still a contract miss — the reason names the missing file.
+      expect(st.reason).toContain("/findings.md")
+    }
+    // The between-turns digest tells the lead the findings were salvaged.
+    const inject = out.effects.find((e) => e.type === "inject")
+    expect(inject?.type === "inject" && inject.text).toMatch(/salvaged/i)
+  })
+
+  it("SALVAGES a distilled final message too when there is no sentinel but the file is missing", () => {
+    const r = { ...rec("A1", running()), expectArtifacts: ["/out.md"] }
+    const out = tick([r], {
+      A1: { alive: false, exitCode: 0, distilled: "Here is what I found about the codec.", missingArtifacts: ["/out.md"] },
+    })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") expect(st.salvage).toContain("codec")
+  })
+
+  it("leaves salvage undefined when the worker was truly silent AND the file is missing", () => {
+    const r = { ...rec("A1", running()), expectArtifacts: ["/out.md"] }
+    const out = tick([r], { A1: { alive: false, exitCode: 0, missingArtifacts: ["/out.md"] } })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("incomplete")
+    if (st?.kind === "incomplete") expect(st.salvage).toBeUndefined()
   })
 })
 

@@ -83,6 +83,7 @@ import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
+import { clipboardText } from "./media/clipboard.ts"
 import { mediaPasteInterceptor } from "./media/paste-intercept.ts"
 import { getSessionId, setSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
@@ -344,10 +345,10 @@ function printHelp(): void {
     `  ${c.bold("Options")}`,
     `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
     `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, xhigh, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
-    `    ${c.cyan("--fast")}                    Fast-mode dispatch ${c.dim('(speed:"fast"; opus-4-8 only; ~2.5x tok/s, ~2x cost; or MINIMAL_AGENT_FAST=1)')}`,
+    `    ${c.cyan("--fast")}                    Fast-mode dispatch ${c.dim('(speed:"fast", opus-4-8 only, ~2.5x tok/s, ~2x cost, or MINIMAL_AGENT_FAST=1)')}`,
     `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
     `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
-    `    ${c.cyan("--formatter-args")} ${c.dim("<args>")}   Extra args appended to the formatter ${c.dim('(e.g. "--table-fit"; or MINIMAL_AGENT_FORMATTER_ARGS)')}`,
+    `    ${c.cyan("--formatter-args")} ${c.dim("<args>")}   Extra args appended to the formatter ${c.dim('(e.g. "--table-fit", or MINIMAL_AGENT_FORMATTER_ARGS)')}`,
     `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
     `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
     `    ${c.cyan("--mode")} ${c.dim("<id|none>")}         Initial mode ${c.dim("(default: ask in non-interactive, plugin default otherwise)")}`,
@@ -369,7 +370,7 @@ function printHelp(): void {
     `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
     `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
     `    ${c.cyan("--sessions")} ${c.dim("[<query>]")}          List saved sessions ${c.dim("(fuzzy filter on date/sid/cwd)")}`,
-    `    ${c.cyan("usage")} ${c.dim("[<period>]")}             Token-usage stats ${c.dim("(today|last-day|last-month|ytd|year|all; interactive on a TTY)")}`,
+    `    ${c.cyan("usage")} ${c.dim("[<period>]")}             Token-usage stats ${c.dim("(today|last-day|last-month|ytd|year|all, interactive on a TTY)")}`,
     `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session ${c.dim("(also: `sessions resume <sid>`)")}`,
     `    ${c.cyan("--dump")} ${c.dim("<sid|last>")}         Dump a full session history to stdout`,
     `    ${c.cyan("--dump-format")} ${c.dim("<md|xml>")}    Output format for --dump ${c.dim("(default: md)")}`,
@@ -400,24 +401,25 @@ function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_GITHUB_TOKEN")}  Token to clone a ${c.dim("private")} plugins repo ${c.dim("(else GITHUB_TOKEN / GH_TOKEN / gh)")}`,
     `    ${c.cyan("MINIMAL_AGENT_NO_HISTORY=1")}       Disable ↑/↓ prompt history ${c.dim("(history plugin)")}`,
     `    ${c.cyan("MINIMAL_AGENT_FILE_LOCK_DISABLED=1")}  Disable cooperative file locking ${c.dim("(file-lock plugin)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_SUBAGENT_MODEL")}  Force a model for spawned workers ${c.dim("(else they inherit your model, sub-agents plugin)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1")}  Let specialists pick a per-role model ${c.dim("(cheap scout / flagship deep, default off, workers inherit your model)")}`,
     `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
     "",
     `  ${c.bold("Plugins")} ${c.dim("(toggle via ~/.minimal-agent/config.jsonc)")}`,
     `    ${c.dim("Opt out  :")} ${c.dim('{ "plugins": { "<id>": { "enabled": false } } }')}`,
     `    ${c.dim("Opt in   :")} ${c.dim('{ "plugins": { "<id>": { "enabled": true } } }')}  ${c.dim("(for plugins shipped disabled)")}`,
     "",
-    `    ${c.dim("Built-in :")} ask-mode, diff-view, env-info, file-lock, history,`,
-    `    ${c.dim("           ")} memory, quota-status, tasks, web-search`,
-    `    ${c.dim("Disabled :")} interleave-thinking ${c.dim("(opt in to use; see Opt in above)")}`,
+    `    ${c.dim("Built-in :")} ask-mode, config, diff-view, env-info, file-lock,`,
+    `    ${c.dim("           ")} history, memory, model-info, quota-status, schedule,`,
+    `    ${c.dim("           ")} session-info, sub-agents, tasks, usage, web-search`,
+    `    ${c.dim("Disabled :")} interleave-thinking ${c.dim("(opt in to use, see Opt in above)")}`,
     "",
     `  ${c.bold("Docs")}`,
-    `    ${c.dim("docs/CHANGELOG.md")}                Release notes`,
-    `    ${c.dim("docs/caching.md")}                  Prompt caching: breakpoints, TTL, verification`,
-    `    ${c.dim("docs/tool-icons-and-colors.md")}    Tool transcript icons and color scheme`,
-    `    ${c.dim("docs/plugin-prompt-block-structure.md")}  How plugin PROMPT.md blocks compose`,
-    `    ${c.dim("docs/repl-prompt-response-separator.md")}  REPL prompt↔response separator rules`,
-    `    ${c.dim("docs/repl-text-transcript-separators.md")}  REPL text↔transcript separator rules`,
-    `    ${c.dim("docs/input/multiline-prompt-fixes.md")}  Multiline-prompt input notes`,
+    `    ${c.dim("docs/CHANGELOG.md")}          Release notes, newest first`,
+    `    ${c.dim("docs/tui/")}                  Terminal renderer architecture (compositor, live area, editor)`,
+    `    ${c.dim("docs/network/")}              HTTP transport, retry, and wire-capture notes`,
+    `    ${c.dim("docs/sub-agents-prompt.md")}  How the sub-agents system prompt composes`,
+    `    ${c.dim("docs/changes/")}              Per-change write-ups, dated`,
   ]
   console.log(lines.join("\n"))
 }
@@ -1994,6 +1996,11 @@ async function main() {
     // literal text. The submit path (agent.run) resolves the token to an image
     // block. See src/media/paste-intercept.ts.
     editor.setPasteInterceptor((pasted) => mediaPasteInterceptor(pasted))
+    // Ctrl+V: pull the system clipboard ourselves. Prefer an image (the
+    // interceptor's empty-paste branch captures a clipboard image and returns
+    // an `[Image #id …]` token); else paste clipboard text. This covers
+    // terminals/OSes where Cmd+V is swallowed and never reaches us.
+    editor.setClipboardPasteHandler(() => mediaPasteInterceptor("") ?? clipboardText())
     // Restore the unsent draft (if any) into the editor buffer. This is
     // the resume-time twin of the abort-flow's setBuffer call in
     // `agent.ts` (search "setBuffer" in the abort branch) — same visual

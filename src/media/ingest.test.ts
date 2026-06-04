@@ -47,6 +47,10 @@ describe("buildAnthropicUserContent", () => {
     })
     expect(r.hadMedia).toBe(false)
     expect(r.rejected[0]?.rejection.code).toBe("unsupported-modality")
-    expect(r.content).toEqual([{ type: "text", text: "hear" }])
+    // The rejected attachment leaves an inline marker so the turn keeps a
+    // reference to it rather than silently dropping the subject.
+    expect(r.content).toHaveLength(1)
+    expect((r.content[0] as { text: string }).text).toContain("hear")
+    expect((r.content[0] as { text: string }).text).toContain("[audio not sent:")
   })
 })

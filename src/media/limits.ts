@@ -41,6 +41,25 @@ export type Verdict = { ok: true } | ({ ok: false } & MediaRejection)
 
 const OK: Verdict = { ok: true }
 
+/**
+ * Byte length of `rawBytes` once base64-encoded (4 ASCII chars per 3 raw
+ * bytes, rounded up to the 4-char quantum).
+ *
+ * Inline media is sent as a base64 string, and Anthropic (and OpenAI) enforce
+ * their per-item and per-request byte caps on that ENCODED payload, not the
+ * raw file. A 4.2 MB PNG becomes ~5.6 MB on the wire and blows the 5 MB cap —
+ * so a raw-byte check passes an image the API then rejects with a 400
+ * `invalid_request_error: image exceeds 5 MB maximum`. Checking the encoded
+ * size lets us drop the item with a friendly warning before it is ever sent.
+ *
+ * For non-inline sources (URL / file_id) there is no expansion, so this is
+ * mildly conservative there — but local drops/pastes are always inlined, so
+ * the conservative bound only ever prevents a real 400, never a valid send.
+ */
+export function base64EncodedSize(rawBytes: number): number {
+  return Math.ceil(rawBytes / 3) * 4
+}
+
 /** Map a media kind to the capability modality flag that gates it. */
 export function kindModality(kind: MediaKind): keyof ModalitySupport {
   switch (kind) {
@@ -86,13 +105,19 @@ export function checkMedia(
       message: `${item.mimeType} isn't a supported type for ${modelId}`,
     }
   }
-  if (item.sizeBytes > limits.maxBytesPerItem) {
+  // The API enforces its byte cap on the base64-encoded payload (inline media
+  // is sent as base64, ~4/3 the raw size), so check the encoded size — a raw
+  // check passes a 4.2 MB PNG that becomes 5.6 MB on the wire and the server
+  // rejects with a 400. The message reports the encoded size so "4.2 MB
+  // exceeds 5 MB" doesn't look like a math error.
+  const encodedBytes = base64EncodedSize(item.sizeBytes)
+  if (encodedBytes > limits.maxBytesPerItem) {
     return {
       ok: false,
       code: "too-large",
-      message: `${formatBytes(item.sizeBytes)} exceeds the ${formatBytes(
-        limits.maxBytesPerItem,
-      )} limit for ${modelId}`,
+      message: `${formatBytes(item.sizeBytes)} (${formatBytes(
+        encodedBytes,
+      )} encoded) exceeds the ${formatBytes(limits.maxBytesPerItem)} limit for ${modelId}`,
     }
   }
   if (limits.maxDimension != null && item.dimensions) {
@@ -129,7 +154,9 @@ export function checkMediaSet(
         message: `more than ${limits.maxItemsPerRequest} attachments for ${modelId}`,
       }
     }
-    runningBytes += it.sizeBytes
+    // Aggregate the ENCODED sizes: the request budget is spent on the base64
+    // payload, same reasoning as the per-item check in checkMedia.
+    runningBytes += base64EncodedSize(it.sizeBytes)
     if (runningBytes > limits.maxRequestBytes) {
       return {
         ok: false,

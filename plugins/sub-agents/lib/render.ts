@@ -158,9 +158,22 @@ export function renderResultDisplay(r: SubagentRecord, ansi: boolean): DisplayPa
   // Surface it loudly in gold so the lead treats it as a red flag, not a pass.
   if (r.status.kind === "incomplete") {
     const warnArrow = color(ansi, ANSI.GOLD, GLYPHS.incomplete)
+    // When findings were salvaged despite the contract miss, show them — a gold
+    // warning line on top, then the recovered synthesis, so the lead sees the
+    // work isn't lost (the A2/A3 data-loss fix is visible here, not just in the
+    // model-facing content). With no salvage we keep the recognizable
+    // "NO DELIVERABLE" wording (also correct for a truly-silent worker).
+    const warnLine = color(
+      ansi,
+      ANSI.GOLD,
+      r.status.salvage
+        ? `FILE MISSING — ${r.status.reason}. Findings salvaged below (verify; re-spawn only if needed):`
+        : `NO DELIVERABLE — ${r.status.reason}. Not a success; re-spawn if still needed.`,
+    )
+    const body = r.status.salvage ? `${warnLine}\n\n${r.status.salvage}` : warnLine
     return {
       header: `${warnArrow} ${color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, r.id)} ${dot} ${type} ${dot} ${statusLabel(r.status, ansi)}`,
-      body: color(ansi, ANSI.GOLD, `NO DELIVERABLE — ${r.status.reason}. Not a success; re-spawn if still needed.`),
+      body,
       footer: ` ${color(ansi, ANSI.DGRAY, `${fmtTokens(r.status.tokens)} tok ${GLYPHS.bullet} ${r.status.tools} tools`)}`,
     }
   }

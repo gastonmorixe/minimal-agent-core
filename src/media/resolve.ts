@@ -19,8 +19,9 @@ import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import { checkMedia, checkMediaSet, type MediaLimits } from "./limits.ts"
 import type { MediaRegistry } from "./registry.ts"
-import { parseMediaTokens, stripMediaTokens } from "./token.ts"
-import type { MediaItem, MediaRejection, PreparedMedia } from "./types.ts"
+import { parseMediaTokens, replaceMediaTokens } from "./token.ts"
+import { fitImageToBudget } from "./transform.ts"
+import { kindToken, type MediaItem, type MediaRejection, type PreparedMedia } from "./types.ts"
 
 /** Turn one prepared item into its embeddable canonical source. */
 export type MediaPreparer = (item: MediaItem) => Promise<PreparedMedia>
@@ -34,6 +35,8 @@ export interface ResolvedTurn {
   rejected: Array<{ item: MediaItem; rejection: MediaRejection }>
   /** Token ids with no registry entry (stale pointers). */
   missing: string[]
+  /** Oversize images that were auto-shrunk to fit, with a human summary (info-warn these). */
+  fitted: Array<{ item: MediaItem; strategy: string }>
 }
 
 /** Build the base64 source appropriate to an item's kind. */
@@ -122,8 +125,11 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
 
   const rejected: Array<{ item: MediaItem; rejection: MediaRejection }> = []
   const missing: string[] = []
+  const fitted: Array<{ item: MediaItem; strategy: string }> = []
 
-  // Per-item validation against the current model.
+  // Per-item validation against the current model. An oversize IMAGE gets one
+  // chance to be auto-shrunk under the cap before we give up on it (see
+  // maybeFit) — the rest of the turn proceeds with the fitted bytes.
   const candidates: MediaItem[] = []
   for (const id of orderedIds) {
     const item = registry.get(id)
@@ -135,6 +141,13 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
     if (v.ok) {
       item.state = "validated"
       candidates.push(item)
+      continue
+    }
+    const refit = await maybeFit(item, v.code, limits)
+    if (refit) {
+      refit.item.state = "validated"
+      candidates.push(refit.item)
+      fitted.push({ item: refit.item, strategy: refit.strategy })
     } else {
       reject(item, { code: v.code, message: v.message }, rejected)
     }
@@ -161,9 +174,64 @@ export async function resolveMediaTurn(opts: ResolveOptions): Promise<ResolvedTu
     }
   }
 
-  const residualText = stripMediaTokens(text)
+  // Residual text: a successfully-attached token is dropped (its bytes ride as
+  // a real block), but a rejected/missing one leaves an inline marker so a
+  // long-running agent still has a reference to what was meant to be there
+  // instead of silently losing the turn's subject. See replaceMediaTokens.
+  const markers = buildMarkers(rejected, missing)
+  const residualText = replaceMediaTokens(text, (_kind, id) => markers.get(id) ?? "")
   const content: CanonicalBlock[] = [...mediaBlocks]
   if (residualText) content.push({ type: "text", text: residualText })
 
-  return { content, attached, rejected, missing }
+  return { content, attached, rejected, missing, fitted }
+}
+
+/**
+ * Try to shrink an oversize image under the per-item budget. Returns a derived
+ * {@link MediaItem} carrying the fitted bytes (so the rest of the pipeline is
+ * oblivious), or `null` when the item is not a size-fixable image, the runtime
+ * has no image backend, or even the most aggressive attempt won't fit.
+ */
+async function maybeFit(
+  item: MediaItem,
+  code: MediaRejection["code"],
+  limits: MediaLimits,
+): Promise<{ item: MediaItem; strategy: string } | null> {
+  // Only size/dimension failures on images are fixable by resize+re-encode.
+  if (item.kind !== "image") return null
+  if (code !== "too-large" && code !== "dimensions") return null
+  let original: Uint8Array
+  try {
+    original = await item.bytes()
+  } catch {
+    return null
+  }
+  const fit = await fitImageToBudget(original, { maxEncodedBytes: limits.maxBytesPerItem })
+  if (!fit) return null
+  const bytes = fit.bytes
+  const derived: MediaItem = {
+    ...item,
+    mimeType: fit.mimeType,
+    sizeBytes: bytes.length,
+    dimensions: { width: fit.width, height: fit.height },
+    bytes: async () => bytes,
+    // A fresh prepared cache: the fitted bytes are a different payload.
+    prepared: {},
+  }
+  return { item: derived, strategy: fit.strategy }
+}
+
+/** Build an id→marker map for the tokens that did NOT become real blocks. */
+function buildMarkers(
+  rejected: Array<{ item: MediaItem; rejection: MediaRejection }>,
+  missing: string[],
+): Map<string, string> {
+  const markers = new Map<string, string>()
+  for (const { item, rejection } of rejected) {
+    markers.set(item.id, `[${kindToken(item.kind).toLowerCase()} not sent: ${rejection.message}]`)
+  }
+  for (const id of missing) {
+    markers.set(id, `[attachment #${id} unavailable]`)
+  }
+  return markers
 }

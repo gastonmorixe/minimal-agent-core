@@ -131,6 +131,15 @@ export class EditorController extends EventEmitter {
    * change). Must not throw : a throw is caught and the paste inserts literally.
    */
   private pasteInterceptor?: (pasted: string) => string | null
+  /**
+   * Optional Ctrl+V handler. Returns the text to insert (clipboard text, or a
+   * media token for a clipboard image), or `null` for "nothing to paste".
+   * Wired by the host via {@link setClipboardPasteHandler}. The returned text
+   * is run through {@link insertPasted}, so a returned drop-path still gets the
+   * normal {@link pasteInterceptor} media treatment. Must not throw : a throw
+   * is caught and the keystroke becomes a no-op (no literal `\x16` inserted).
+   */
+  private clipboardPaste?: () => string | null
   private started = false
   private cycleForward: (() => void) | null = null
   private cycleBackward: (() => void) | null = null
@@ -943,6 +952,17 @@ export class EditorController extends EventEmitter {
     this.pasteInterceptor = fn
   }
 
+  /**
+   * Install a Ctrl+V clipboard-paste handler (see {@link clipboardPaste}).
+   * Pass `undefined` to remove it. The host wires this so Ctrl+V pulls the
+   * system clipboard (text or image) even on terminals/OSes where the native
+   * paste shortcut (Cmd+V) never reaches the process. Returned text is routed
+   * through the same insert path as a bracketed paste.
+   */
+  setClipboardPasteHandler(fn: (() => string | null) | undefined): void {
+    this.clipboardPaste = fn
+  }
+
   setDecorationLines(lines: string[]): void {
     if (
       lines.length === this.decorationLines.length &&
@@ -1552,6 +1572,28 @@ export class EditorController extends EventEmitter {
         // a control byte; readline-style "Ctrl+R but no history" is
         // a no-op everywhere we've ever seen.
         if (this.dispatchKeyHook("Ctrl+R")) dirty = true
+        continue
+      }
+      if (char === "\x16") {
+        // Ctrl+V — explicit clipboard paste. Cmd+V is intercepted by the
+        // terminal/OS and may never reach us (and when it does it arrives as
+        // a bracketed paste, handled elsewhere); Ctrl+V is the in-process
+        // shortcut. The host wires `clipboardPaste` to pull text or a
+        // clipboard image. The result is routed through `insertPasted`, so a
+        // pasted image path still becomes an `[Image #id …]` token via the
+        // media interceptor. When no handler is wired, swallow silently
+        // rather than inserting a raw `\x16` control byte.
+        if (this.clipboardPaste) {
+          let replacement: string | null = null
+          try {
+            replacement = this.clipboardPaste()
+          } catch {
+            replacement = null
+          }
+          if (replacement != null && replacement.length > 0) {
+            if (this.insertPasted(replacement)) dirty = true
+          }
+        }
         continue
       }
       if (char === "\x1c") {

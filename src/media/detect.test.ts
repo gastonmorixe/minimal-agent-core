@@ -21,6 +21,15 @@ describe("parseDroppedPaths", () => {
   it("ignores prose", () => {
     expect(parseDroppedPaths("hello world")).toEqual([])
   })
+  it("keeps a U+202F (narrow no-break space) inside a drag-escaped path", () => {
+    // macOS screenshot: ASCII spaces are backslash-escaped by Finder drag, but
+    // the U+202F before "PM" is left raw. It must stay in ONE token.
+    const p = "/Users/x/Screenshot\\ at\\ 5.49.35\u202fPM.png"
+    expect(parseDroppedPaths(p)).toEqual(["/Users/x/Screenshot at 5.49.35\u202fPM.png"])
+  })
+  it("keeps a U+00A0 (no-break space) inside a path", () => {
+    expect(parseDroppedPaths("/a/b\u00a0c.png")).toEqual(["/a/b\u00a0c.png"])
+  })
 })
 
 describe("looksLikeMediaDrop", () => {
@@ -38,5 +47,9 @@ describe("looksLikeMediaDrop", () => {
   })
   it("is false for plain text", () => {
     expect(looksLikeMediaDrop("just typing")).toBe(false)
+  })
+  it("is true for a macOS screenshot path with a U+202F before PM", () => {
+    const p = "/Users/x/Screenshot\\ 2026-05-31\\ at\\ 5.49.35\u202fPM.png"
+    expect(looksLikeMediaDrop(p)).toBe(true)
   })
 })

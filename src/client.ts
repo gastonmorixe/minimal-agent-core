@@ -51,7 +51,12 @@ import { has1mContext, normalizeModelForAPI } from "./client/types.ts"
 import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"
 import { API_URL, buildHeaders, DEFAULT_MODEL, SYSTEM_PROMPT } from "./headers.ts"
 import { buildMetadata, getSessionId } from "./metadata.ts"
-import { defaultNetworkClient, networkActivityObserver } from "./network/index.ts"
+import {
+  defaultNetworkClient,
+  networkActivityObserver,
+  TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
+  tagTransientNetworkError,
+} from "./network/index.ts"
 import { broadcastResponseRateLimits, rebroadcastQuotaForSessionUpdate } from "./quota-broadcast.ts"
 import { abortableSleep } from "./retry.ts"
 import { addSessionUsage } from "./session-tokens.ts"
@@ -559,8 +564,21 @@ export async function* sendMessageOnce(
       const streamErrType = httpStatusToStreamErrorType(response.status, upstreamType)
       const httpErr = new Error(`API ${response.status}: ${errorBody}`) as Error & {
         streamErrorType?: string
+        retryable?: boolean
       }
-      if (streamErrType) httpErr.streamErrorType = streamErrType
+      // Honor the server's explicit verdict. Anthropic sends
+      // `x-should-retry: false` on deterministic failures (a malformed
+      // request, an oversize image: 400s that will fail identically on every
+      // resend). Without this, a tagged-but-deterministic error like
+      // `invalid_request_error` matched SLOW_RETRY_TYPES and the harness
+      // retry-stormed a 400 on the 30s→5min curve forever. `retryable:false`
+      // is checked first by the retry coordinator and wins over tag-based
+      // classification, so the error propagates instead of looping.
+      if (response.headers.get("x-should-retry") === "false") {
+        httpErr.retryable = false
+      } else if (streamErrType) {
+        httpErr.streamErrorType = streamErrType
+      }
       throw httpErr
     }
 
@@ -1135,6 +1153,13 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   "stream_idle",
   "stream_truncated",
   "attempt_too_long",
+  // Connection-level transient failures (TCP connect timeout, reset socket,
+  // DNS blip, HTTP/2 GOAWAY mid-dial). These throw out of the transport
+  // BEFORE any response exists, so they carry no in-stream tag; the
+  // transient-network classifier tags them `network_error` in the catch
+  // below so the harness retries instead of stopping the agent. Root cause
+  // of the 2026-06-01 `HTTP/2 connect timeout` hard stop.
+  TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
 ])
 
 /**
@@ -1262,13 +1287,28 @@ export async function* sendMessage(
       }
       return result.value
     } catch (err) {
-      const streamErrType = (err as Error & { streamErrorType?: string }).streamErrorType
+      // Tag connection-level transient failures (connect timeout, reset
+      // socket, DNS blip, GOAWAY) that the transport threw with no
+      // `streamErrorType`. A user abort is excluded by the classifier, so a
+      // real Ctrl-C still propagates. No-op for already-tagged errors.
+      const errObj = tagTransientNetworkError(err) as Error & {
+        streamErrorType?: string
+        retryable?: boolean
+      }
+      const streamErrType = errObj.streamErrorType
       const elapsedMs = Date.now() - startedAt
-      // Harness principle: every tagged stream error is retryable
-      // forever. Untagged errors (programmer bugs, kernel panics, OOM)
-      // re-throw — those are not "the network is slow today", they're
-      // genuine failures that should propagate.
+      // An explicit `retryable: false` from the provider wins over tag-based
+      // classification. The server sets it (via `x-should-retry: false`) on
+      // deterministic failures — a malformed request, an oversize image — that
+      // will fail identically on every resend. Without this, a 400
+      // `invalid_request_error` matched SLOW_RETRY_TYPES and the harness
+      // retry-stormed it forever instead of surfacing it. Mirrors the
+      // canonical coordinator in llm/transport/retry.ts.
+      //
+      // Otherwise: every tagged stream error is retryable forever (untagged
+      // errors — programmer bugs, kernel panics, OOM — re-throw).
       const retryable =
+        errObj.retryable !== false &&
         streamErrType !== undefined &&
         (RETRYABLE_STREAM_ERROR_TYPES.has(streamErrType) || SLOW_RETRY_TYPES.has(streamErrType))
 

@@ -45,12 +45,14 @@ export interface SpawnInput {
   /** Specialization preamble (the worker definition body), folded into the prompt. */
   readonly systemPreamble?: string
   /**
-   * Absolute path of this worker's result sentinel. When set, the REQUIRED
-   * deliverable-protocol block is appended to the prompt so the worker knows
-   * exactly where + in what shape to write its result. (The same path is also
-   * passed via `extraEnv` as `MINIMAL_AGENT_SUBAGENT_RESULT_PATH`.)
+   * The REQUIRED deliverable-protocol text, ALREADY RENDERED from its markdown
+   * template (see `lib/prompts.ts`), appended last so the worker knows how to
+   * finish: write any required file itself, then call `ReportResult`. When set,
+   * the same sentinel path is also passed via `extraEnv` as
+   * `MINIMAL_AGENT_SUBAGENT_RESULT_PATH` so the `ReportResult` handler (and the
+   * documented manual fallback) know where to write.
    */
-  readonly resultPath?: string
+  readonly resultProtocol?: string
   /** This child's nesting depth (lead = 0 → its workers = 1). */
   readonly depth: number
   /** Working directory the child runs in. */
@@ -72,47 +74,26 @@ export interface SpawnPlan {
 }
 
 /**
- * The REQUIRED deliverable-protocol block, appended to a worker's prompt when a
- * result-sentinel path is known. This is FIX 1: previously the worker was told
- * to "write your result sentinel (see the runtime instructions)" but those
- * instructions were never delivered, so no worker ever wrote one and the
- * transport was dead. Here we state the exact path + JSON schema inline.
- *
- * Distillation (Phase B) is the safety net when this is skipped; this block is
- * the high-signal path that also captures structured `artifacts`.
- */
-export function resultProtocolBlock(resultPath: string): string {
-  return [
-    "## Your deliverable (REQUIRED — how you finish)",
-    "Your work is NOT complete until you do BOTH:",
-    "1. Produce the artifact the task asked for (e.g. write the file at the path given).",
-    "2. As your FINAL action, write your result sentinel to EXACTLY this path:",
-    `   ${resultPath}`,
-    "   with exactly this JSON shape (a single line is fine):",
-    '   {"short": "<2-4 sentence summary of what you produced + where>",',
-    '    "tokens": <approx tokens you spent>, "tools": <approx tool calls>,',
-    '    "artifacts": ["<absolute path of each file you created/changed>"]}',
-    "If you could not finish, STILL write the sentinel with \"short\" starting",
-    '"INCOMPLETE: <reason>". Do not end your turn without writing this file.',
-  ].join("\n")
-}
-
-/**
  * Compose the child prompt. Layering, top to bottom:
  *   1. the specialization preamble (the worker reads its role first),
  *   2. the concrete task,
- *   3. the REQUIRED result protocol (when a `resultPath` is known).
+ *   3. the REQUIRED result protocol (when supplied).
  *
- * (A dedicated `--append-system-prompt` flag would be cleaner; this works today
- * without a core change.)
+ * Pure: the `resultProtocol` text is passed in ALREADY RENDERED from its
+ * markdown template (see `lib/prompts.ts`), so this module reads no files and
+ * holds no prose. The protocol tells the worker how to finish: write any
+ * required file itself, then call `ReportResult` to hand the work back (the
+ * handler writes the sentinel deterministically). A dedicated
+ * `--append-system-prompt` flag would be cleaner; this works today without a
+ * core change.
  */
-export function composePrompt(task: string, systemPreamble?: string, resultPath?: string): string {
+export function composePrompt(task: string, systemPreamble?: string, resultProtocol?: string): string {
   const t = task.trim()
   const p = systemPreamble?.trim()
   const base = p ? `${p}\n\n---\n\nYour task:\n\n${t}` : t
-  const rp = resultPath?.trim()
+  const rp = resultProtocol?.trim()
   if (!rp) return base
-  return `${base}\n\n---\n\n${resultProtocolBlock(rp)}`
+  return `${base}\n\n---\n\n${rp}`
 }
 
 /**
@@ -131,7 +112,7 @@ export function buildSpawnPlan(input: SpawnInput): Result<SpawnPlan> {
     return err(`depth must be a positive integer, got ${input.depth}`)
   }
 
-  const prompt = composePrompt(input.task, input.systemPreamble, input.resultPath)
+  const prompt = composePrompt(input.task, input.systemPreamble, input.resultProtocol)
 
   const flags: string[] = []
   // `fork`: resume the LEAD's session so its history forks into the child's
