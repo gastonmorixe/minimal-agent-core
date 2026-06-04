@@ -180,6 +180,17 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     commands.push(parseCommand(commandsRaw[i], i, manifestPath, seenCommandNames))
   }
 
+  // Optional `setup` lifecycle handler. Module-only: setup must return
+  // structured data the host acts on synchronously (binary provisioning),
+  // so a subprocess JSON round-trip isn't wired.
+  let setup: ManifestHandlerEntry | undefined
+  if (obj.setup != null) {
+    setup = parseHandlerEntry(obj.setup, "setup", manifestPath)
+    if (setup.type !== "module") {
+      err("setup handler must be type 'module' (subprocess setup is not supported)")
+    }
+  }
+
   // No "at least one contribution" gate here. PROMPT.md is implicit:
   // looked up by the loader on disk, and the manifest doesn't get to
   // see the filesystem. If a manifest declares zero contribution fields
@@ -192,6 +203,7 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     version: obj.version as string,
     description: obj.description as string,
     prompt: typeof obj.prompt === "string" ? obj.prompt : undefined,
+    setup,
     promptFragments,
     tuis,
     modes,
