@@ -127,6 +127,14 @@ export interface ResultDigest {
    * progress). Absent/false ⇒ a real sentinel.
    */
   readonly distilled?: boolean
+  /**
+   * True when the worker itself reported it could NOT finish (via
+   * `ReportResult({incomplete:true})`, or a hand-written `INCOMPLETE:` sentinel
+   * prefix). The supervisor must route this to an `incomplete` status, never
+   * launder it into `done`: the summary is still salvaged for the lead, but the
+   * work is unverified and any linked todo is canceled, not ticked green.
+   */
+  readonly incomplete?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -145,11 +153,14 @@ export interface ResultDigest {
  * ```
  *
  * `incomplete` is the honest middle ground between `done` and `failed`: the
- * process exited 0 but produced neither a result sentinel nor any distillable
- * final message (or its declared artifacts are missing). It MUST NOT be laundered
- * into `done` — a missing deliverable is a signal the lead has to act on, not a
- * silent success. It carries the counts so the widget can still show effort
- * spent, and a `reason` the lead can read.
+ * process exited 0 but the deliverable contract was not met — either it produced
+ * no result sentinel and no distillable final message, OR a contracted
+ * `expectArtifacts` path is missing/empty. It MUST NOT be laundered into `done`:
+ * a missing deliverable is a signal the lead has to act on, not a silent success.
+ * It carries the counts so the widget can show effort spent, a `reason` the lead
+ * can read, and — crucially — any `salvage` synthesis the worker DID produce
+ * (its sentinel text or distilled final message) so a contract miss never throws
+ * away the work. The lead still re-spawns/verifies, but reads the findings first.
  */
 export type SubagentStatus =
   | { readonly kind: "queued" }
@@ -169,6 +180,19 @@ export type SubagentStatus =
       readonly tokens: number
       /** Tool calls made before the worker exited. */
       readonly tools: number
+      /**
+       * Best-effort synthesis SALVAGED from the worker even though the
+       * deliverable contract was not met — the text of its result sentinel or,
+       * failing that, its distilled final assistant message. Present when the
+       * worker DID produce findings but failed to materialize a contracted
+       * `expectArtifacts` path: the status is still `incomplete` (the file
+       * contract is a hard gate), but the lead gets the work back via
+       * `AgentResult` instead of being forced to mine the worker's transcript.
+       * Absent when the worker was truly silent (no sentinel, no final text).
+       */
+      readonly salvage?: string
+      /** Artifact paths the worker's sentinel CLAIMED, if any (for the lead to verify/locate). */
+      readonly artifacts?: readonly string[]
     }
   | {
       readonly kind: "failed"

@@ -70,3 +70,27 @@ export function stripMediaTokens(text: string): string {
     .replace(/ +\n/g, "\n")
     .trim()
 }
+
+/**
+ * Rewrite each media token via `replace(kind, id)`. Returning `""` drops the
+ * token (the attached-media case: its bytes ride as a real content block);
+ * returning a string substitutes it in place (the rejected/missing case: leave
+ * a human- and agent-readable marker like `[image omitted: too large]` so the
+ * turn still references what was meant to be there). Whitespace left by a
+ * dropped token is collapsed exactly as {@link stripMediaTokens} does, so an
+ * all-attached prompt is byte-identical to the old strip behavior.
+ */
+export function replaceMediaTokens(
+  text: string,
+  replace: (kind: MediaKind, id: string) => string,
+): string {
+  const re = new RegExp(MEDIA_TOKEN_RE.source, "g")
+  return text
+    .replace(re, (whole, word: string, id: string) => {
+      const kind = WORD_TO_KIND[word]
+      return kind ? replace(kind, id) : whole
+    })
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +\n/g, "\n")
+    .trim()
+}

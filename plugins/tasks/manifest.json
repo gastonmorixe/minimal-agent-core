@@ -3,6 +3,17 @@
   "name": "Tasks",
   "version": "0.1.0",
   "description": "Per-session task list. Plan multi-step work, mark progress as you go, the user sees a live TODO. Single Task tool with action switch (add, add_many, update, status, start, done, remove, reorder, list, clear). State lives at ~/.minimal-agent/sessions/<sid>.tasks.jsonl. Current task list is auto-injected into every user turn as <ma::tui::tasks>.",
+  "promptFragments": [
+    {
+      "id": "planning",
+      "handler": {
+        "type": "module",
+        "path": "./handlers/planning_fragment.ts",
+        "export": "default"
+      },
+      "order": 100
+    }
+  ],
   "tuis": [
     {
       "id": "task_tool",

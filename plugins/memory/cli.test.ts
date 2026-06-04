@@ -210,9 +210,18 @@ describe("main — list", () => {
     await main(["list", "--no-color", "-L", "2"], io)
     const text = io.out.join("")
     expect(text).toContain("(showing 2 of 4 entries, offset 0)")
-    expect(text).toContain("e3")
-    expect(text).toContain("e4")
-    expect(text).not.toContain("e1")
+    // Bullet rows render as `  #<id>  <ts>  <body>`. Assert on the body
+    // column (the last whitespace-delimited field) rather than the raw
+    // blob: ids are base36+hex, so a substring like "e1" can land inside
+    // a randomly-generated id and make a naive `toContain` check flaky.
+    const bodies = text
+      .split("\n")
+      .filter((l) => l.trimStart().startsWith("#"))
+      .map((l) => l.trim().split(/\s+/).at(-1))
+    expect(bodies).toContain("e3")
+    expect(bodies).toContain("e4")
+    expect(bodies).not.toContain("e1")
+    expect(bodies).not.toContain("e2")
   })
 
   it("format=json returns parseable output", async () => {

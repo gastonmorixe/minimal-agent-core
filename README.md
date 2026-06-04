@@ -378,6 +378,7 @@ Start here:
 
 The repo works best when changes stay small and observable:
 
+- **Zero runtime dependencies.** `package.json` ships an empty `dependencies` block and stays that way. The agent runs on Bun's standard library and the TypeScript source alone, no npm packages pulled at runtime. The only entries are `devDependencies`: the toolchain (Bun, Biome, oxlint, typedoc, TypeScript) that lint, format, type-check, and test the source. Nothing it installs ends up in the running agent. New features add a file you can read, not a transitive dependency tree you can't. Optional external binaries (`mdstream` for Markdown, `git` for plugin bootstrap) are fetched on demand and degrade gracefully when absent, they are not package dependencies.
 - Preserve the wire shape unless you have a capture or test proving the change.
 - Keep terminal rendering behavior under tests. ANSI output bugs are visual bugs.
 - Treat formatter lifecycle and rendered output as separate checks.
@@ -387,14 +388,11 @@ The repo works best when changes stay small and observable:
 
 ## Docs worth reading
 
-- `docs/internal/caching.md`
-- `docs/internal/session-restore.md`
-- `docs/internal/oauth-token-refresh.md`
-- `docs/internal/plugin-prompt-block-structure.md`
-- `docs/internal/repl-prompt-response-separator.md`
-- `docs/internal/repl-text-transcript-separators.md`
-- `docs/internal/input/multiline-prompt-fixes.md`
-- `docs/CHANGELOG.md`
+- `docs/CHANGELOG.md` : release notes, newest first.
+- `docs/tui/` : terminal renderer architecture, the compositor, live area, and editor controller, one file per layer.
+- `docs/network/README.md` : HTTP transport, retry, and wire-capture notes.
+- `docs/sub-agents-prompt.md` : how the sub-agents system prompt composes.
+- `docs/changes/` : per-change write-ups, dated, the design rationale behind each landed change.
 
 ## Status
 

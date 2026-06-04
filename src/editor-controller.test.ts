@@ -564,6 +564,57 @@ describe("EditorController — bracketed paste", () => {
   })
 })
 
+describe("EditorController — Ctrl+V clipboard paste", () => {
+  it("inserts clipboard text returned by the handler on \\x16", () => {
+    const { ctrl, stdin } = make()
+    ctrl.setClipboardPasteHandler(() => "pasted text")
+    ctrl.start()
+    stdin.send("\x16")
+    expect(ctrl.buffer().toString()).toBe("pasted text")
+    ctrl.stop()
+  })
+
+  it("routes the handler result through the paste interceptor (drop-path → token)", () => {
+    const { ctrl, stdin } = make()
+    // Interceptor turns a recognized payload into a media token, exactly as
+    // the media wiring does for a dropped image path.
+    ctrl.setPasteInterceptor((p) => (p === "/x/a.png" ? "[Image #abc123 1x1 1B]" : null))
+    ctrl.setClipboardPasteHandler(() => "/x/a.png")
+    ctrl.start()
+    stdin.send("\x16")
+    expect(ctrl.buffer().toString()).toBe("[Image #abc123 1x1 1B]")
+    ctrl.stop()
+  })
+
+  it("is a silent no-op when no handler is wired (no raw \\x16 inserted)", () => {
+    const { ctrl, stdin } = make()
+    ctrl.start()
+    stdin.send("\x16")
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("is a no-op when the handler returns null", () => {
+    const { ctrl, stdin } = make()
+    ctrl.setClipboardPasteHandler(() => null)
+    ctrl.start()
+    stdin.send("\x16")
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+
+  it("swallows a handler that throws (keystroke stays a no-op)", () => {
+    const { ctrl, stdin } = make()
+    ctrl.setClipboardPasteHandler(() => {
+      throw new Error("clipboard unavailable")
+    })
+    ctrl.start()
+    stdin.send("\x16")
+    expect(ctrl.buffer().toString()).toBe("")
+    ctrl.stop()
+  })
+})
+
 describe("EditorController — viewport cap & internal scroll", () => {
   it("caps liveHeight at maxLiveHeight and scrolls a window onto the buffer", () => {
     const stdin = new FakeTTYInput()

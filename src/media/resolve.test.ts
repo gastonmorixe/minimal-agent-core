@@ -69,10 +69,15 @@ describe("resolveMediaTurn", () => {
     })
     expect(res.attached).toHaveLength(0)
     expect(res.rejected[0]?.rejection.code).toBe("unsupported-modality")
-    expect(res.content).toEqual([{ type: "text", text: "listen" }])
+    // A rejected attachment leaves an inline marker (not a silent strip) so the
+    // turn still references it. The marker carries the rejection reason.
+    expect(res.content).toHaveLength(1)
+    expect(res.content[0]).toMatchObject({ type: "text" })
+    expect((res.content[0] as { text: string }).text).toContain("listen")
+    expect((res.content[0] as { text: string }).text).toContain("[audio not sent:")
   })
 
-  it("reports a missing (stale) token id", async () => {
+  it("reports a missing (stale) token id and leaves a reference marker", async () => {
     const reg = createMediaRegistry()
     const res = await resolveMediaTurn({
       text: "ghost [Image #deadbeef 1x1 1B]",
@@ -81,7 +86,9 @@ describe("resolveMediaTurn", () => {
       modalities: IMG_ONLY,
     })
     expect(res.missing).toEqual(["deadbeef"])
-    expect(res.content).toEqual([{ type: "text", text: "ghost" }])
+    expect(res.content).toEqual([
+      { type: "text", text: "ghost [attachment #deadbeef unavailable]" },
+    ])
   })
 
   it("produces a media-only turn when the prompt is just a token", async () => {

@@ -30,6 +30,10 @@
 
 import type { StreamedResponse } from "../../client/types.ts"
 import { diag } from "../../diagnostic-bus.ts"
+import {
+  TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
+  tagTransientNetworkError,
+} from "../../network/index.ts"
 import { abortableSleep } from "../../retry.ts"
 import { GLOBAL_STATUS_BUS } from "../../status.ts"
 
@@ -44,6 +48,11 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   "stream_idle",
   "stream_truncated",
   "attempt_too_long",
+  // Connection-level transient failures thrown out of the transport before
+  // any response exists (connect timeout, reset socket, DNS blip, GOAWAY).
+  // Tagged `network_error` by the transient-network classifier in the catch
+  // below. Mirrors client.ts. See network/transient-error.ts.
+  TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
 ])
 
 /**
@@ -145,7 +154,11 @@ export async function* withRetry(
       }
       return result.value
     } catch (err) {
-      const streamErrType = retryableStreamErrorType(err)
+      // Tag connection-level transient failures (connect timeout, reset
+      // socket, DNS blip, GOAWAY) the transport threw with no
+      // `streamErrorType`. The classifier excludes user aborts, so a real
+      // Ctrl-C still propagates. No-op for already-tagged errors.
+      const streamErrType = retryableStreamErrorType(tagTransientNetworkError(err))
       const elapsedMs = Date.now() - startedAt
       // Untagged / non-retryable errors (programmer bugs, auth-final,
       // cancellation) propagate. Only tagged transient/hard errors retry.

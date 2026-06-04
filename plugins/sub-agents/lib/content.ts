@@ -75,8 +75,23 @@ export function resultText(r: SubagentRecord): string {
         : ""
       return `Sub-agent ${r.id} (${r.type}) result:\n\n${res.short}${arts}\n\n(${fmtTokens(res.tokens)} tokens · ${res.tools} tool calls)${note}`
     }
-    case "incomplete":
-      return `⚠ Sub-agent ${r.id} (${r.type}) finished WITHOUT a deliverable: ${r.status.reason}. This is NOT a success — the worker exited cleanly but produced no result summary${r.status.tokens ? ` (spent ${fmtTokens(r.status.tokens)} tokens · ${r.status.tools} tool calls)` : ""}. Treat the work as unverified: inspect its log/transcript, and re-spawn with a clearer task (and, if it was a file-producing job, set expectArtifacts) if you still need it.`
+    case "incomplete": {
+      const spent = r.status.tokens
+        ? ` (spent ${fmtTokens(r.status.tokens)} tokens · ${r.status.tools} tool calls)`
+        : ""
+      if (r.status.salvage) {
+        // The contract was not met (a required file is missing/empty), but the
+        // worker DID produce a synthesis. Surface it so the lead can act on the
+        // work without mining the transcript — while making clear it's unverified
+        // and the file the lead asked for does NOT exist.
+        const arts =
+          r.status.artifacts && r.status.artifacts.length > 0
+            ? `\nclaimed artifacts (VERIFY — at least one is missing/empty): ${r.status.artifacts.join(", ")}`
+            : ""
+        return `⚠ Sub-agent ${r.id} (${r.type}) finished INCOMPLETE — deliverable contract not met: ${r.status.reason}${spent}. The required file does NOT exist, so this is NOT a clean success. BUT its findings were salvaged from the worker's summary below — read them before deciding whether a re-run is even needed; often you can use this directly or just write the file yourself from it.\n\n--- salvaged findings ---\n${r.status.salvage}${arts}`
+      }
+      return `⚠ Sub-agent ${r.id} (${r.type}) finished WITHOUT a deliverable: ${r.status.reason}. This is NOT a success — the worker exited cleanly but produced no result summary${spent}. Treat the work as unverified: inspect its log/transcript, and re-spawn with a clearer task (and, if it was a file-producing job, set expectArtifacts) if you still need it.`
+    }
     case "failed":
       return `Sub-agent ${r.id} failed: ${r.status.error}. No result. Consider re-spawning with a clearer task or a different model.`
     case "stopped":

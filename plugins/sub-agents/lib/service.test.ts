@@ -58,8 +58,9 @@ describe("spawnAgent", () => {
     expect(deps.launched[0]).toContain("--session-id")
     const prompt = deps.launched[0]?.at(-1) ?? ""
     expect(prompt).toContain("refactor parser")
-    expect(prompt).toContain("Your deliverable (REQUIRED")
-    // the protocol points at this worker's own result.json sentinel path
+    // the deliverable protocol tells the worker to hand back via ReportResult
+    expect(prompt).toMatch(/ReportResult/)
+    // and the manual-fallback path points at this worker's own result.json sentinel
     expect(prompt).toContain(".result.json")
   })
 

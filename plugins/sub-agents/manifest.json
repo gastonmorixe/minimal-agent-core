@@ -10,7 +10,7 @@
         "type": "tool",
         "tool": {
           "name": "SpawnAgent",
-          "description": "Delegate a self-contained unit of work to a background sub-agent and get an immediate handle (it runs concurrently; you are NOT blocked). Use it to keep verbose work (searching, running tests, fetching docs, a focused refactor) out of your own context: the worker does it in its own window and returns only a distilled summary. Give a DETAILED task: the objective, the exact file/scope boundaries, and the output you want back. Match worker count to complexity (1 for a simple lookup, 2-4 for a comparison, more only for genuinely independent breadth-first work) — every worker costs tokens. Pick a named `agent` specialist when one fits, else describe an inline `system`. The worker reports a one-line digest between turns when it finishes; pull its full deliverable with AgentResult.",
+          "description": "Delegate a self-contained unit of work to a background sub-agent and get an immediate handle (it runs concurrently; you are NOT blocked). Use it to keep verbose work (searching, running tests, fetching docs, a focused refactor) out of your own context: the worker does it in its own window and returns only a distilled summary. Give a DETAILED task: the objective, the exact file/scope boundaries, and the output you want back. Match worker count to complexity (1 for a simple lookup, 2-4 for a comparison, more only for genuinely independent breadth-first work). Every worker costs tokens. Pick a named `agent` specialist when one fits, else describe an inline `system`. The worker reports a one-line digest between turns when it finishes; pull its full deliverable with AgentResult.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -28,7 +28,7 @@
               },
               "model": {
                 "type": "string",
-                "description": "Optional model id for the worker. Defaults to the model YOU (the lead) are currently running, so a worker inherits your provider and model unless you choose otherwise. Pass any model id your provider exposes to override per-spawn. Omit to inherit."
+                "description": "Optional model id for the worker. When omitted, the worker inherits the model YOU the lead are running, for both named specialists and inline workers. Delegating does not downgrade your model. (Opt into per-role models, cheap scout and flagship deep, by setting MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1; even then an explicit model here still wins.) Pass `model` when you want a specific model for one spawn. Accepts any model id your provider exposes; an unknown id makes the worker crash at startup, which surfaces as a `failed` handle with the real error."
               },
               "effort": {
                 "type": "string",
@@ -37,7 +37,7 @@
               "isolation": {
                 "type": "string",
                 "enum": ["fresh", "fork"],
-                "description": "Context tier. `fresh` (default): a clean context with only the task + the worker's system prompt — maximum context compression. `fork`: inherit this conversation's full history (shares the prompt cache, sees your context) for a side task that needs the background without re-explaining."
+                "description": "Context tier. `fresh` (default): a clean context with only the task plus the worker's system prompt, for maximum context compression. `fork`: inherit this conversation's full history (shares the prompt cache, sees your context) for a side task that needs the background without re-explaining."
               },
               "label": {
                 "type": "string",
@@ -74,12 +74,46 @@
       "color": "gold"
     },
     {
+      "id": "report_result",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "ReportResult",
+          "description": "Sub-agent completion: a worker calls this as its FINAL action to hand its result back to the lead. The tool records the result for you, so you never write a status file by hand or worry about its format or path. Put your real findings in `summary` (a dense, self-contained paragraph or two, not a pointer). List any files you created or changed in `artifacts`. Set `incomplete: true` if you could not finish. Only sub-agents use this; if the lead calls it there is nothing to report.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "Your findings: a dense, self-contained synthesis the lead will read. Not a pointer to a file, the actual content."
+              },
+              "artifacts": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Absolute paths of files you created or changed, if any."
+              },
+              "incomplete": {
+                "type": "boolean",
+                "description": "Set true if you could NOT finish the task. The lead will treat the work as unverified and may re-spawn. Default false."
+              }
+            },
+            "required": ["summary"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/report_result.ts", "export": "default" },
+      "interactive": false,
+      "icon": "◈",
+      "color": "lime"
+    },
+    {
       "id": "list_agents",
       "trigger": {
         "type": "tool",
         "tool": {
           "name": "ListAgents",
-          "description": "List this session's sub-agents at a glance: id, type, status, elapsed, tokens, and what each is doing. Cheap and bounded — pulls no worker transcript. Use it to see the fleet before pulling a result or stopping a worker.",
+          "description": "List this session's sub-agents at a glance: id, type, status, elapsed, tokens, and what each is doing. Cheap and bounded, pulls no worker transcript. Use it to see the fleet before pulling a result or stopping a worker.",
           "input_schema": { "type": "object", "properties": {}, "additionalProperties": false }
         }
       },
@@ -115,7 +149,7 @@
         "type": "tool",
         "tool": {
           "name": "AgentResult",
-          "description": "Pull a finished sub-agent's distilled deliverable into your context (its result summary + any artifact references — NOT its full transcript). This is the only sub-agent tool that carries real worker content back, and it is bounded. Call it after a worker reaches `done`.",
+          "description": "Pull a finished sub-agent's distilled deliverable into your context (its result summary plus any artifact references, NOT its full transcript). This is the only sub-agent tool that carries real worker content back, and it is bounded. Call it after a worker reaches `done`.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -137,7 +171,7 @@
         "type": "tool",
         "tool": {
           "name": "AgentOutput",
-          "description": "Tail a sub-agent's recent activity (its latest tool calls and notes with timestamps), for 'what is A2 doing right now' beyond the one-line fleet widget. Bounded — never the whole transcript. Use sparingly; the widget and the between-turns digest usually suffice.",
+          "description": "Tail a sub-agent's recent activity (its latest tool calls and notes with timestamps), for 'what is A2 doing right now' beyond the one-line fleet widget. Bounded, never the whole transcript. Use sparingly; the widget and the between-turns digest usually suffice.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -159,7 +193,7 @@
         "type": "tool",
         "tool": {
           "name": "Mailbox",
-          "description": "Coordinate with sibling sub-agents (and the lead) over a shared, durable message board. `post` a short message to a specific worker id (`to`) or broadcast to all (`to:\"*\"`); `read` messages addressed to you or broadcast. Opt-in and bounded: use ONLY when your task tells you to coordinate (e.g. claim a file before editing it, flag a blocker, hand off a finding). Do not chatter — excessive cross-talk is a known failure mode.",
+          "description": "Coordinate with sibling sub-agents (and the lead) over a shared, durable message board. `post` a short message to a specific worker id (`to`) or broadcast to all (`to:\"*\"`); `read` messages addressed to you or broadcast. Opt-in and bounded: use ONLY when your task tells you to coordinate (e.g. claim a file before editing it, flag a blocker, hand off a finding). Do not chatter, excessive cross-talk is a known failure mode.",
           "input_schema": {
             "type": "object",
             "properties": {

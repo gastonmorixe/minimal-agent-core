@@ -42,10 +42,19 @@ export default async function agentResult(ctx: TUIContext): Promise<TUIResult> {
   if (!rec) return { kind: "tool_result", content: `AgentResult: unknown sub-agent "${id}".`, is_error: true }
 
   let content = resultText(rec)
-  // Placeholder-result fallback: surface the log tail so the lead isn't blind.
-  if (rec.status.kind === "done" && rec.status.result.short.includes("no summary captured")) {
+  // Surface the worker's log tail whenever the lead would otherwise be blind:
+  //   - a `done` worker whose summary is the legacy "no summary captured"
+  //     placeholder, OR
+  //   - any `failed`/`incomplete` worker (FIX B). A crashed or silent worker's
+  //     only forensic trail is its stdout/stderr; without this the lead has to
+  //     know to go read `<sid>.log` by hand (exactly the trap that hid the boot
+  //     crash). The tail is bounded and stripped of ANSI.
+  const blindDone =
+    rec.status.kind === "done" && rec.status.result.short.includes("no summary captured")
+  const blindTerminal = rec.status.kind === "failed" || rec.status.kind === "incomplete"
+  if (blindDone || blindTerminal) {
     const tail = tailLog(`${sessionsDirFromCtx(ctx)}/${rec.sid}.log`, 20)
-    if (tail) content += `\n\nLast output (log tail):\n${tail}`
+    if (tail) content += `\n\nLast output (log tail — the worker's stdout/stderr):\n${tail}`
   }
   const disp = renderResultDisplay(rec, true)
   return {

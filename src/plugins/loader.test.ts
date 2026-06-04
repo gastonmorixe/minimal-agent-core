@@ -2045,3 +2045,92 @@ describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
     mkdirSync(ROLE_HOME, { recursive: true })
   })
 })
+
+describe("PluginLoader — tool availability (context-gated advertisement)", () => {
+  const AROOT = resolve(__dirname, "../../tmp/loader-avail-tests")
+  const AHOME = join(AROOT, "home")
+
+  beforeAll(() => {
+    rmSync(AROOT, { recursive: true, force: true })
+    mkdirSync(AHOME, { recursive: true })
+  })
+  afterAll(() => rmSync(AROOT, { recursive: true, force: true }))
+
+  // A handler module that exports an `available` predicate gated on an env flag.
+  const GATED_HANDLER = `
+export default async function handler() {
+  return { kind: "tool_result", content: "ran" };
+}
+export const available = (ctx) => ctx.env.SHOW_GATED === "1";
+`
+
+  async function loadGated() {
+    rmSync(join(AHOME, "plugins"), { recursive: true, force: true })
+    writePackage(AHOME, "gated", toolManifest("gated", "gated_tool", "./h.ts"), {
+      "h.ts": GATED_HANDLER,
+      "PROMPT.md": "Use gated_tool when available.",
+    })
+    return PluginLoader.load({
+      homeDir: AHOME,
+      projectDir: join(AROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+  }
+
+  it("hides the tool from getExtraTools when available() returns false", async () => {
+    const prev = process.env.SHOW_GATED
+    delete process.env.SHOW_GATED
+    try {
+      const loader = await loadGated()
+      expect(loader.getExtraTools().map((t) => t.name)).not.toContain("gated_tool")
+      // dispatchable regardless of advertisement
+      expect(loader.hasTool("gated_tool")).toBe(true)
+      // and the single-tool plugin's prompt section is dropped too
+      expect(loader.getPromptBlock() ?? "").not.toContain("Use gated_tool")
+    } finally {
+      if (prev !== undefined) process.env.SHOW_GATED = prev
+    }
+  })
+
+  it("advertises the tool (and its prompt) when available() returns true", async () => {
+    const prev = process.env.SHOW_GATED
+    process.env.SHOW_GATED = "1"
+    try {
+      const loader = await loadGated()
+      expect(loader.getExtraTools().map((t) => t.name)).toContain("gated_tool")
+      expect(loader.getPromptBlock() ?? "").toContain("Use gated_tool")
+    } finally {
+      if (prev === undefined) delete process.env.SHOW_GATED
+      else process.env.SHOW_GATED = prev
+    }
+  })
+
+  it("still DISPATCHES a hidden tool (availability gates advertisement, not execution)", async () => {
+    const prev = process.env.SHOW_GATED
+    delete process.env.SHOW_GATED
+    try {
+      const loader = await loadGated()
+      const res = await loader.dispatch(
+        { type: "tool", name: "gated_tool", input: {}, tool_use_id: "t1" },
+        process.cwd(),
+      )
+      expect(res.kind).toBe("tool_result")
+      if (res.kind === "tool_result") expect(res.content).toContain("ran")
+    } finally {
+      if (prev !== undefined) process.env.SHOW_GATED = prev
+    }
+  })
+
+  it("a tool with NO available export is always advertised (back-compat)", async () => {
+    rmSync(join(AHOME, "plugins"), { recursive: true, force: true })
+    writePackage(AHOME, "plain", toolManifest("plain", "plain_tool", "./h.ts"), {
+      "h.ts": TOOL_HANDLER_BODY,
+    })
+    const loader = await PluginLoader.load({
+      homeDir: AHOME,
+      projectDir: join(AROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    expect(loader.getExtraTools().map((t) => t.name)).toContain("plain_tool")
+  })
+})

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -160,5 +160,45 @@ describe("executeTool — _raw pre-clamp surface (for blob store)", () => {
     expect(r._raw).toBeUndefined()
     expect(r._truncInfo).toBeUndefined()
     expect(r._aborted).toBeUndefined()
+  })
+})
+
+describe("executeTool — whitespace-confusable path self-heal", () => {
+  it("Read heals a plain space requested against a U+202F on-disk name", async () => {
+    // On-disk name carries U+202F (macOS screenshot); the request uses a
+    // plain ASCII space (the confusable normalization that causes ENOENT).
+    const onDisk = join(dir, "Screenshot at 5.49.35\u202fPM.png")
+    writeFileSync(onDisk, "pixels\n")
+    const requested = join(dir, "Screenshot at 5.49.35 PM.png") // plain space
+    const r = await executeTool("Read", { file_path: requested })
+    expect(r.is_error).toBeFalsy()
+    expect(r.content).toContain("whitespace mismatch")
+    expect(r.content).toContain("pixels")
+  })
+
+  it("Read still errors when no confusable sibling exists", async () => {
+    const r = await executeTool("Read", { file_path: join(dir, "truly-absent.png") })
+    expect(r.is_error).toBe(true)
+    expect(r.content).toContain("Read error")
+  })
+
+  it("Read does not heal when two siblings fold to the same name (ambiguous)", async () => {
+    const sub = mkdtempSync(join(dir, "ambig-"))
+    writeFileSync(join(sub, "a\u202fb.png"), "one\n")
+    writeFileSync(join(sub, "a\u00a0b.png"), "two\n")
+    const r = await executeTool("Read", { file_path: join(sub, "a b.png") })
+    expect(r.is_error).toBe(true)
+  })
+
+  it("Edit heals a U+202F on-disk name addressed with a plain space", async () => {
+    const onDisk = join(dir, "edit 1.23\u202fPM.txt")
+    writeFileSync(onDisk, "alpha\n")
+    const r = await executeTool("Edit", {
+      file_path: join(dir, "edit 1.23 PM.txt"), // plain space
+      old_string: "alpha",
+      new_string: "beta",
+    })
+    expect(r.is_error).toBeFalsy()
+    expect(readFileSync(onDisk, "utf-8")).toContain("beta")
   })
 })

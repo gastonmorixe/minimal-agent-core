@@ -12,12 +12,23 @@
 
 const IMAGE_DOC_EXT = /\.(jpe?g|png|gif|webp|pdf|txt)$/i
 
-/** Split a pasted chunk into tokens, respecting quotes + backslash escapes. */
+/**
+ * Split a pasted chunk into tokens, respecting quotes + backslash escapes.
+ *
+ * The unquoted-token class splits on ASCII whitespace only (space, tab, CR,
+ * LF, FF, VT) — NOT on the Unicode spaces that legitimately appear *inside* a
+ * path. macOS names screenshots with a NARROW NO-BREAK SPACE (U+202F) before
+ * "AM"/"PM" and the Finder drag escapes ASCII spaces with a backslash but
+ * leaves U+202F (and U+00A0) raw. Splitting on `\s` there would shatter one
+ * dropped path into several non-path tokens, so `looksLikeMediaDrop` would
+ * reject the drop and the editor would insert the raw path as literal text.
+ */
 function tokenize(text: string): string[] {
   const t = text.trim()
   if (!t) return []
   const out: string[] = []
-  const re = /'([^']*)'|"([^"]*)"|((?:\\.|[^\s\\])+)/g
+  // `[^ \t\r\n\f\v\\]` instead of `[^\s\\]`: keep Unicode spaces in the token.
+  const re = /'([^']*)'|"([^"]*)"|((?:\\.|[^ \t\r\n\f\v\\])+)/g
   let m: RegExpExecArray | null
   while ((m = re.exec(t)) !== null) {
     let tok = m[1] ?? m[2] ?? m[3] ?? ""

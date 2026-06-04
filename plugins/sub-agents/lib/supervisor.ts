@@ -42,6 +42,15 @@ export interface WorkerProbe {
    * empty. Non-empty ⇒ the deliverable contract was not met (FIX 4).
    */
   readonly missingArtifacts?: readonly string[]
+  /**
+   * A crash signature mined from the worker's stdout/stderr log (FIX A): the
+   * real cause of a startup/runtime death (bad model, missing beta, ENOENT, …).
+   * Present ONLY when the worker exited producing no sentinel and no distillable
+   * final message AND the log showed a fatal error. When set, the reducer reports
+   * `failed` with this cause instead of laundering a crash into a generic
+   * `incomplete · exited without a result`.
+   */
+  readonly crash?: string
   /** Live progress (tools/tokens/last activity), when the worker is running. */
   readonly progress?: Progress
 }
@@ -78,8 +87,12 @@ export function completionDigest(r: SubagentRecord): string {
       const short = clip(r.status.result.short, 220)
       return `Sub-agent ${r.id} (${r.label}) finished: ${short} — pull the full result with AgentResult ${r.id}.`
     }
-    case "incomplete":
-      return `Sub-agent ${r.id} (${r.label}) finished ⚠ INCOMPLETE — NO DELIVERABLE (${clip(r.status.reason, 120)}). Not a success: inspect it with AgentResult ${r.id} and re-spawn if you still need the work.`
+    case "incomplete": {
+      const salvaged = r.status.salvage
+        ? ` Its findings WERE salvaged (it produced a summary but not the required file) — read them with AgentResult ${r.id} before deciding, you may not need a full re-run.`
+        : ` Inspect it with AgentResult ${r.id} and re-spawn if you still need the work.`
+      return `Sub-agent ${r.id} (${r.label}) finished ⚠ INCOMPLETE — deliverable contract not met (${clip(r.status.reason, 120)}). Not a clean success.${salvaged}`
+    }
     case "failed":
       return `Sub-agent ${r.id} (${r.label}) failed: ${clip(r.status.error, 160)}.`
     case "stopped":
@@ -97,6 +110,17 @@ export function completionDigest(r: SubagentRecord): string {
 function clip(s: string, max: number): string {
   const one = s.replace(/\s+/g, " ").trim()
   return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`
+}
+
+/**
+ * Strip a leading `INCOMPLETE:` marker (and surrounding whitespace) from a
+ * salvaged summary so the lead reads the findings, not the routing marker. The
+ * status kind already carries the "incomplete" signal. Returns undefined when
+ * nothing useful is left.
+ */
+function stripIncompleteMarker(short: string): string | undefined {
+  const out = short.replace(/^\s*INCOMPLETE:\s*/, "").trim()
+  return out.length > 0 ? out : undefined
 }
 
 /** Deadline check: has a running worker blown its `budget.deadlineSec`? */
@@ -164,23 +188,74 @@ function step(
   }
   // 4. Exited. Decide the terminal status.
   //    a. A non-zero exit → failed (it crashed), regardless of any artifacts.
+  //       Prefer the log's crash signature (the REAL cause: bad model, missing
+  //       beta, ENOENT) over the bare exit code, so the lead reads "why" not
+  //       just "code 1".
   if (probe.exitCode !== undefined && probe.exitCode !== 0) {
-    const status: SubagentStatus = { kind: "failed", endedAt: now, error: `exited with code ${probe.exitCode}`, exitCode: probe.exitCode }
+    const error = probe.crash
+      ? `${probe.crash} (exit ${probe.exitCode})`
+      : `exited with code ${probe.exitCode}`
+    const status: SubagentStatus = { kind: "failed", endedAt: now, error, exitCode: probe.exitCode }
+    return { status, effects: terminalEffects(r, status, now) }
+  }
+  //    a'. FIX A: the exit code is UNKNOWABLE in production (Bun.spawn is
+  //        detached; the supervisor only has pid-liveness, not a wait status).
+  //        So a boot crash arrives here with exitCode `undefined` but a crash
+  //        signature in the log. Treat a found signature as a failure with the
+  //        real cause — this is the fix for the "incomplete · exited without a
+  //        result" mislabel that hid the `long context beta` 400 behind a
+  //        generic message. Only fires when the worker produced nothing usable
+  //        (the probe only reads the log in that case).
+  if (probe.crash && !probe.result && !(probe.distilled && probe.distilled.trim().length > 0)) {
+    const status: SubagentStatus = { kind: "failed", endedAt: now, error: probe.crash }
     return { status, effects: terminalEffects(r, status, now) }
   }
   //    b. CONTRACT CHECK (FIX 4): the worker declared `expectArtifacts` and some
   //       are missing/empty → INCOMPLETE, even if it wrote a sentinel or a final
   //       message. A claimed-but-absent deliverable is the strongest failure
   //       signal; never launder it into done.
+  //
+  //       FIX 5 (the A2/A3 data-loss bug): the contract miss is a HARD gate, but
+  //       it must NOT throw away the synthesis the worker actually produced. If
+  //       the worker wrote a result sentinel (or left a distillable final
+  //       message), SALVAGE that text onto the `incomplete` status so the lead
+  //       reads the findings via AgentResult instead of being forced to mine the
+  //       worker's raw transcript. Sentinel text wins over distilled (same
+  //       precedence as the done path). We still report `incomplete` and still
+  //       cancel any linked todo — the deliverable genuinely wasn't met.
   const missing = probe.missingArtifacts
   if (missing && missing.length > 0) {
     const total = r.expectArtifacts?.length ?? missing.length
+    const salvage = (probe.result?.short ?? probe.distilled)?.trim() || undefined
+    const claimed = probe.result?.artifacts
     const status: SubagentStatus = {
       kind: "incomplete",
       endedAt: now,
       reason: `missing ${missing.length}/${total} required artifact(s): ${missing.join(", ")}`,
       tokens: s.progress.tokens,
       tools: s.progress.tools,
+      ...(salvage ? { salvage } : {}),
+      ...(claimed && claimed.length > 0 ? { artifacts: claimed } : {}),
+    }
+    return { status, effects: terminalEffects(r, status, now) }
+  }
+  //    c0. The worker SELF-REPORTED incompletion (ReportResult({incomplete:true})
+  //        or a hand-written `INCOMPLETE:` sentinel). Honor it: route to
+  //        `incomplete`, never launder an honest "I could not finish" into
+  //        `done`. We still salvage the worker's summary (minus the marker
+  //        prefix) so the lead reads the findings, and surface any claimed
+  //        artifacts. A linked todo is canceled, not ticked green.
+  if (probe.result?.incomplete) {
+    const salvage = stripIncompleteMarker(probe.result.short)
+    const claimed = probe.result.artifacts
+    const status: SubagentStatus = {
+      kind: "incomplete",
+      endedAt: now,
+      reason: "worker reported it could not finish",
+      tokens: s.progress.tokens,
+      tools: s.progress.tools,
+      ...(salvage ? { salvage } : {}),
+      ...(claimed && claimed.length > 0 ? { artifacts: claimed } : {}),
     }
     return { status, effects: terminalEffects(r, status, now) }
   }

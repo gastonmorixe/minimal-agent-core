@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
+import { renderResultProtocol } from "./prompts.ts"
 import {
   buildSpawnPlan,
   composePrompt,
@@ -37,29 +38,40 @@ describe("composePrompt", () => {
     expect(out.endsWith("do X")).toBe(true)
   })
 
-  it("appends the REQUIRED deliverable protocol with the exact path + schema when resultPath is set", () => {
-    const out = composePrompt("do X", "You are Explorer.", "/sessions/abc.result.json")
-    expect(out).toContain("Your deliverable (REQUIRED")
-    // the exact absolute path the worker must write
-    expect(out).toContain("/sessions/abc.result.json")
-    // the JSON schema fields
-    expect(out).toContain('"short"')
-    expect(out).toContain('"artifacts"')
-    // the INCOMPLETE fallback clause
-    expect(out).toContain("INCOMPLETE:")
+  it("appends the pre-rendered deliverable protocol AFTER the task", () => {
+    const protocol = "## How you finish\nCall ReportResult."
+    const out = composePrompt("do X", "You are Explorer.", protocol)
+    expect(out).toContain("How you finish")
+    expect(out).toContain("ReportResult")
     // task still present, protocol comes AFTER it
-    expect(out.indexOf("do X")).toBeLessThan(out.indexOf("Your deliverable (REQUIRED"))
+    expect(out.indexOf("do X")).toBeLessThan(out.indexOf("How you finish"))
   })
 
-  it("works with resultPath but no preamble (protocol still appended)", () => {
-    const out = composePrompt("do X", undefined, "/s/r.json")
+  it("appends the protocol with no preamble too", () => {
+    const out = composePrompt("do X", undefined, "PROTOCOL-TEXT")
     expect(out.startsWith("do X")).toBe(true)
-    expect(out).toContain("/s/r.json")
-    expect(out).toContain("Your deliverable (REQUIRED")
+    expect(out).toContain("PROTOCOL-TEXT")
   })
 
-  it("omits the protocol entirely when no resultPath", () => {
-    expect(composePrompt("do X", "You are Explorer.")).not.toContain("Your deliverable")
+  it("omits the protocol entirely when none is given", () => {
+    expect(composePrompt("do X", "You are Explorer.")).not.toContain("How you finish")
+    expect(composePrompt("do X", "You are Explorer.")).toBe(
+      composePrompt("do X", "You are Explorer.", undefined),
+    )
+  })
+})
+
+describe("renderResultProtocol (the markdown template)", () => {
+  it("teaches: leaf worker, no delegation, write the file, then call ReportResult; with the fallback path", () => {
+    const out = renderResultProtocol("/sessions/abc.result.json")
+    expect(out).toMatch(/leaf worker/i)
+    expect(out).toMatch(/cannot delegate/i)
+    expect(out).toMatch(/SpawnAgent/)
+    expect(out).toMatch(/ReportResult/)
+    expect(out).toMatch(/write it yourself/i)
+    // the manual-sentinel fallback carries the exact path
+    expect(out).toContain("/sessions/abc.result.json")
+    expect(out).toContain('"short"')
   })
 })
 
@@ -105,13 +117,13 @@ describe("buildSpawnPlan — fresh", () => {
     expect(r.ok && r.value.argv.slice(0, 3)).toEqual(["bun", "run", "/x/src/index.ts"])
   })
 
-  it("threads resultPath into the composed --prompt as the deliverable protocol", () => {
-    const r = buildSpawnPlan(input({ resultPath: "/sessions/9c.result.json" }))
+  it("threads the rendered protocol into the composed --prompt", () => {
+    const r = buildSpawnPlan(input({ resultProtocol: renderResultProtocol("/sessions/9c.result.json") }))
     expect(r.ok).toBe(true)
     if (!r.ok) return
     const prompt = r.value.argv[r.value.argv.length - 1]
     expect(prompt).toContain("/sessions/9c.result.json")
-    expect(prompt).toContain("Your deliverable (REQUIRED")
+    expect(prompt).toMatch(/ReportResult/)
   })
 })
 

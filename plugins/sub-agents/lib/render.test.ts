@@ -113,6 +113,24 @@ describe("renderResultDisplay", () => {
     expect(d.body).toContain("Not a success")
     expect(d.footer).toContain("4.2k tok")
   })
+
+  it("renders SALVAGED findings in the body when a contract-miss worker still produced a summary (FIX 5)", () => {
+    const r = rec("A3", "log-miner", {
+      kind: "incomplete",
+      endedAt: "t",
+      reason: "missing 1/1 required artifact(s): /findings.md",
+      tokens: 58_500,
+      tools: 63,
+      salvage: "AVFragmentedAsset/AVFragmentedAssetMinder is the right Apple API for a growing single fMP4.",
+      artifacts: ["/findings.md"],
+    })
+    const d = renderResultDisplay(r, false)
+    expect(d.header).toContain("incomplete")
+    // The recovered synthesis is shown, not just a "no deliverable" stub.
+    expect(d.body).toContain("AVFragmentedAsset")
+    expect(d.body).toContain("FILE MISSING")
+    expect(d.body).toContain("salvaged")
+  })
 })
 
 describe("renderFleetDisplay — incomplete", () => {

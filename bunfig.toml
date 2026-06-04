@@ -1,0 +1,15 @@
+# `bun test` scans from the project root by default, which would descend into
+# gitignored, vendored trees (research clones under private/, scratch dirs)
+# that ship their own test suites and dependencies. Those are not our code and
+# must never run in our gate. Exclude them so `bun test` (and the `check`
+# pipeline) only sees first-party source under src/ and plugins/.
+[test]
+pathIgnorePatterns = [
+  "**/node_modules/**",
+  "private/**",
+  "research/**",
+  "work/**",
+  "docs/internal/**",
+  ".swarm/**",
+  "tmp/**",
+]

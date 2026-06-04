@@ -11,12 +11,27 @@ write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
   typecheck, lint (oxlint), `format:check`, `biome:check` (format + import
   sort), `docs:check` (typedoc), then `bun test`. It stops at the first
   failure.
-- `bun test` runs the suite (currently 3392 pass / 9 skip; the skips are live
-  -network E2E behind `E2E=1`).
+- `bun test` runs the suite (currently 4588 pass / 10 skip; the skips are
+  live-network E2E behind `E2E=1`). `bunfig.toml` scopes test discovery to
+  first-party source: `pathIgnorePatterns` excludes the gitignored, vendored
+  trees under `private/` (research clones that ship their own suites and
+  dependencies), so the gate never runs third-party tests.
 - Lint is `oxlint` (config in `.oxlintrc.json`). Biome owns formatting and
   import-sort only; its linter is off. `bun run format` does NOT sort imports,
   so run `bun run biome:fix` (or `bun run check`) before assuming a tree is
   clean.
+
+## Zero runtime dependencies
+
+`package.json` ships an empty `dependencies` block, by policy, and stays that
+way. The agent runs on Bun's standard library plus the TypeScript source in this
+repo, with no npm packages resolved at runtime. The only `devDependencies` are
+the toolchain (Bun types, Biome, oxlint, typedoc, TypeScript); none of it ships
+in the running agent. Before reaching for a package, write the small piece you
+need as a readable file with a test. Optional external binaries (`mdstream`,
+`git`) are fetched on demand and must degrade gracefully when missing, they are
+never package dependencies. The extended-plugins repo follows the same policy:
+every plugin is zero-dependency.
 
 ## Conventions worth knowing
 
@@ -159,6 +174,6 @@ Out-of-band prompt injection rides the `prompt.inject` bus channel
 (`{text, source?}`): the REPL turns it into a normal queued submit that fires
 BETWEEN turns. The live-area handler context gained `emit` so a periodic slot can
 use it. The `schedule` plugin (cron engine + `CronCreate/List/Delete` + `/loop`
-+ `/schedule` + a 1s heartbeat) is built entirely on these ports — it imports no
++ `/schedule` + a 1s heartbeat) is built entirely on these ports. It imports no
 harness runtime, only `import type` from `src/plugins/types.ts`. See
 `docs/changes/2026-05-30-schedule-plugin.md`.

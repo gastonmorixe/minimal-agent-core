@@ -63,8 +63,10 @@ export function evaluateSpawnGuard(input: GuardInput, policy: GuardPolicy = DEFA
       allowed: false,
       reason:
         `nesting limit reached (depth ${input.childDepth} > max ${policy.maxDepth}). ` +
-        `Workers cannot spawn workers; delegate from the lead session instead, ` +
-        `or chain workers sequentially.`,
+        `You are a leaf worker and cannot spawn or delegate. Do not try to hand off ` +
+        `this work. Do it yourself in this session with your own tools (Write, Edit, ` +
+        `Bash, Read), then call ReportResult to hand back the result. If a unit is ` +
+        `genuinely too big for one worker, that is the lead's call to decompose, not yours.`,
     }
   }
   if (input.activeCount >= policy.maxConcurrent) {

@@ -75,6 +75,26 @@ export function resolveModelOverride(env: NodeJS.ProcessEnv = process.env): stri
 }
 
 /**
+ * Whether to let the active provider auto-pick a per-role model for built-in
+ * specialists (scout/balanced/deep tiers), instead of inheriting the lead's
+ * model. OFF by default, and that default is deliberate.
+ *
+ * The old behavior silently downgraded: spawn `explorer` while running Opus and
+ * the worker launched on Haiku, spawn `worker` and it launched on Sonnet,
+ * because the role recommendation sat AHEAD of the lead's model in precedence.
+ * Nobody asked for that. The user is paying for the model they chose; a
+ * delegated unit of work runs on that same model unless the user says
+ * otherwise. Cost is the user's call to make, not ours to guess.
+ *
+ * Set `MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1` to opt back into provider role
+ * recommendations (cheap scouts, flagship for deep work). Even then, an
+ * explicit per-spawn `model` and `MINIMAL_AGENT_SUBAGENT_MODEL` still win.
+ */
+export function resolveAutoTier(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.MINIMAL_AGENT_SUBAGENT_AUTO_TIER === "1"
+}
+
+/**
  * The guard policy, with env overrides over {@link DEFAULT_POLICY}. Lets a user
  * who wants to run fleets in the extreme (tens-to-hundreds of workers) raise
  * the caps, or a cautious user lower them:

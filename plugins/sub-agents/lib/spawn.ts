@@ -57,6 +57,16 @@ export interface ProbeDeps {
   readonly missingArtifacts?: (paths: readonly string[]) => string[]
   /** Exit code of an exited pid, if known (best-effort; `undefined` when unknowable). */
   readonly exitCode?: (pid: number) => number | undefined
+  /**
+   * Read a short, actionable crash signature from the worker's stdout/stderr
+   * log, or `undefined` when the log shows no fatal error (FIX A). This is what
+   * turns a startup crash (bad model, missing beta, ENOENT) from a generic
+   * "incomplete · exited without a result" into a `failed` carrying the real
+   * cause. Only consulted for a worker that exited producing NOTHING (no
+   * sentinel, no distillable final message), so its false-positive surface is
+   * limited to genuinely silent exits.
+   */
+  readonly readCrash?: (logPath: string) => string | undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +97,8 @@ export interface ProbeTarget {
   readonly pid: number
   readonly resultPath: string
   readonly transcriptPath: string
+  /** The worker's stdout/stderr capture, mined for a crash signature (FIX A). */
+  readonly logPath?: string
   /** Paths the worker was contracted to produce (the `expectArtifacts` set). */
   readonly expectArtifacts?: readonly string[]
 }
@@ -119,12 +131,23 @@ export function probeWorker(target: ProbeTarget, deps: ProbeDeps): WorkerProbe {
     target.expectArtifacts && target.expectArtifacts.length > 0
       ? deps.missingArtifacts?.(target.expectArtifacts)
       : undefined
+  // FIX A: a worker that exited producing NOTHING — no sentinel AND no
+  // distillable final message — is the case where a startup/runtime crash hides.
+  // ONLY then do we mine the log for a fatal signature, so a worker that simply
+  // forgot to summarize is never mislabeled `failed`. A found signature lets the
+  // reducer report `failed` with the real cause instead of a generic
+  // "incomplete · exited without a result".
+  const crash =
+    !result && !(distilled && distilled.trim().length > 0) && target.logPath
+      ? deps.readCrash?.(target.logPath)
+      : undefined
   return {
     alive: false,
     ...(result ? { result } : {}),
     ...(distilled ? { distilled } : {}),
     ...(missingArtifacts && missingArtifacts.length > 0 ? { missingArtifacts } : {}),
     ...(exitCode !== undefined ? { exitCode } : {}),
+    ...(crash ? { crash } : {}),
   }
 }
 
@@ -147,6 +170,48 @@ export function warnMissingDeclared(result: ResultDigest, deps: ProbeDeps): Resu
 // Real implementations
 // ---------------------------------------------------------------------------
 
+/**
+ * FIX A: extract a short, actionable crash signature from a worker's
+ * stdout/stderr log, or `undefined` when nothing fatal is present. Pure (string
+ * in, string out) so it is unit-testable without a filesystem.
+ *
+ * Strategy: strip ANSI, scan for the first line that looks like a hard failure
+ * (`fatal:`, an uncaught `Error:`, an API `4xx/5xx`, a Node `ENOENT`/`EACCES`,
+ * or an `unknown model`/`--model` complaint), and return a clipped one-liner.
+ * The signature is intentionally the FIRST such line — a boot crash prints its
+ * cause before any downstream noise. Returns `undefined` for an empty/benign log
+ * so the caller only escalates to `failed` when there is a real cause to report.
+ */
+export function extractCrashSignature(logText: string): string | undefined {
+  const clean = logText.replace(/\x1b\[[0-9;]*m/g, "")
+  const lines = clean.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)
+  // Patterns ordered by specificity; the first match on any line wins.
+  const patterns: RegExp[] = [
+    /^fatal:/i,
+    /\bAPI\s+\d{3}\b/, // "API 400: ..."
+    /"type"\s*:\s*"[a-z_]*error"/i, // anthropic/openai error envelope
+    /\b(unknown|unsupported|invalid)\s+model\b/i,
+    /\bmodel\b.*\b(not\s+found|does\s+not\s+exist|unavailable)\b/i,
+    /\bbeta\b.*\b(not|unavailable|unsupported)\b/i,
+    /\b(ENOENT|EACCES|EPERM|ECONNREFUSED|ETIMEDOUT)\b/,
+    /^(Uncaught|Unhandled)\b/i,
+    /^[A-Za-z.]*Error:/, // "TypeError: ...", "Error: ..."
+    /\bcommand not found\b/i,
+  ]
+  for (const line of lines) {
+    for (const re of patterns) {
+      if (re.test(line)) return clip1(line, 240)
+    }
+  }
+  return undefined
+}
+
+/** Clip to one bounded line (collapse whitespace, ellipsize). */
+function clip1(s: string, max: number): string {
+  const one = s.replace(/\s+/g, " ").trim()
+  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`
+}
+
 /** Validate an untrusted parsed object as a {@link ResultDigest}. */
 export function parseResultDigest(raw: unknown): ResultDigest | undefined {
   if (!raw || typeof raw !== "object") return undefined
@@ -155,7 +220,18 @@ export function parseResultDigest(raw: unknown): ResultDigest | undefined {
   const tokens = typeof o.tokens === "number" && Number.isFinite(o.tokens) ? o.tokens : 0
   const tools = typeof o.tools === "number" && Number.isFinite(o.tools) ? o.tools : 0
   const artifacts = Array.isArray(o.artifacts) ? o.artifacts.filter((a): a is string => typeof a === "string") : undefined
-  return { short: o.short, tokens, tools, ...(artifacts && artifacts.length > 0 ? { artifacts } : {}) }
+  // A worker reports incompletion either structurally (`incomplete: true`, what
+  // buildDigest now writes) or by the legacy hand-written `INCOMPLETE:` summary
+  // prefix (the documented manual-sentinel fallback). Honor both so the
+  // supervisor never launders a self-flagged incompletion into `done`.
+  const incomplete = o.incomplete === true || /^\s*INCOMPLETE:/.test(o.short)
+  return {
+    short: o.short,
+    tokens,
+    tools,
+    ...(artifacts && artifacts.length > 0 ? { artifacts } : {}),
+    ...(incomplete ? { incomplete: true } : {}),
+  }
 }
 
 /** Production spawn deps: detached `Bun.spawn` with stdout/stderr → a log file. */
@@ -251,5 +327,16 @@ export function realProbeDeps(): ProbeDeps {
           return true
         }
       }),
+    readCrash: (logPath) => {
+      try {
+        if (!existsSync(logPath)) return undefined
+        // Logs are tiny for a boot crash (a line or two). Cap the read so a
+        // chatty worker's multi-MB log never blocks the 1s supervisor tick.
+        const text = readFileSync(logPath, "utf-8")
+        return extractCrashSignature(text.length > 64_000 ? text.slice(0, 64_000) : text)
+      } catch {
+        return undefined
+      }
+    },
   }
 }
