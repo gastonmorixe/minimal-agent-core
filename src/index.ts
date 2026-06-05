@@ -57,6 +57,7 @@ import { getAuth } from "./auth.ts"
 import { AutoAskController } from "./auto-ask.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
+import { defaultBinDir } from "./binaries/store.ts"
 import { BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { catRows, DEFAULT_CAT } from "./cats.ts"
 import { planCommand } from "./cli/command-plan.ts"
@@ -1194,6 +1195,17 @@ async function main() {
   process.env.MINIMAL_AGENT_SESSION_ID = agentContext.sessionId
   process.env.MINIMAL_AGENT_PID = String(agentContext.pid)
   process.env.MINIMAL_AGENT_VERSION = agentContext.version
+  // Advertise the managed-binary directory (`~/.minimal-agent/bin`) to every
+  // plugin, every session. The host OWNS this dir and provisions binaries into
+  // it (see `binaries/store.ts`); plugins must NOT scan the filesystem or
+  // hard-code a home path of their own, because the home dir differs per
+  // install and the agent is the single party that knows where it put things.
+  // The loader already spreads `process.env` into every dispatched `ctx.env`,
+  // so setting it here makes `MINIMAL_AGENT_BIN_DIR` reach module handlers and
+  // any subprocess they spawn. Set UNCONDITIONALLY (not gated on header /
+  // provisioning): a previously-installed binary must still resolve on a
+  // scripted `--prompt` run where the provisioning phase is skipped.
+  process.env.MINIMAL_AGENT_BIN_DIR = defaultBinDir()
   // Expose the resolved effort to the live-area quota-status plugin so
   // it can surface "effort <level>" as a trailing footer segment. Same
   // overwrite-with-resolved-value pattern as MINIMAL_AGENT_MODEL above:
