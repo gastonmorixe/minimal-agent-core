@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto"
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { BinaryStore, classify, isArchive } from "./store.ts"
+import { BinaryStore, classify, defaultBinDir, isArchive } from "./store.ts"
 import type { BinarySpec, InstalledBinary, InstallProgress } from "./types.ts"
 
 function sha256(bytes: Uint8Array | string): string {
@@ -27,6 +27,20 @@ function fakeFetch(bytes: Uint8Array, status = 200): typeof fetch {
     })
   }) as unknown as typeof fetch
 }
+
+describe("defaultBinDir", () => {
+  // This is the value the host advertises to plugins as MINIMAL_AGENT_BIN_DIR
+  // (see src/index.ts). Plugins resolve `<binDir>/<backend>` from it and must
+  // never hard-code a home path of their own. Pinning the shape here guards the
+  // host/plugin contract that fixed the ma-fetch "obscura on PATH" regression.
+  it("is <home>/.minimal-agent/bin", () => {
+    expect(defaultBinDir()).toBe(join(homedir(), ".minimal-agent", "bin"))
+  })
+
+  it("is an absolute path (plugins reject a relative bin dir)", () => {
+    expect(defaultBinDir().startsWith("/")).toBe(true)
+  })
+})
 
 describe("classify (pure)", () => {
   const spec: BinarySpec = {
