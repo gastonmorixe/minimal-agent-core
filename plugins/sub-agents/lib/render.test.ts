@@ -66,10 +66,13 @@ describe("renderFleetDisplay", () => {
     expect(d.header).toContain("1 running")
     expect(d.header).toContain("1 done")
     const rows = d.body.split("\n")
-    expect(rows).toHaveLength(2)
+    // 2 worker rows + a trailing blank spacer row (so the host paints a `│`
+    // line between the last worker and the `╰` footer).
+    expect(rows).toHaveLength(3)
     expect(rows[0]).toContain("A1")
     expect(rows[0]).toContain("AgentResult A1")
     expect(rows[1]).toContain("A2")
+    expect(rows[2]).toBe("")
     expect(d.footer).toContain("1 running")
     expect(d.footer).toContain("0 failed")
   })
