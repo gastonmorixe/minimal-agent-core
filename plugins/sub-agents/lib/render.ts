@@ -128,7 +128,11 @@ export function renderFleetDisplay(
   const incSeg =
     s.incomplete > 0 ? ` ${dot} ${color(ansi, ANSI.GOLD, `${s.incomplete} incomplete`)}` : ""
   const header = `${color(ansi, ANSI.LGRAY, "fleet")} ${dot} ${color(ansi, ANSI.SKY, `${s.running} running`)} ${dot} ${color(ansi, ANSI.LIME, `${s.done} done`)}${incSeg} ${dot} ${color(ansi, ANSI.DGRAY, `${fmtTokens(s.tokens)} tok`)}`
-  const body = records.map((r) => fleetRow(r, ansi, nowMs)).join("\n")
+  const rows = records.map((r) => fleetRow(r, ansi, nowMs))
+  // Trailing blank row → the host renders a bare `│` spacer before the
+  // `╰ <footer>` summary, mirroring the blank `│` line the header already
+  // gets. Without it the last worker row butts straight against the footer.
+  const body = [...rows, ""].join("\n")
   return { header, body, footer: renderFleetFooter(records, ansi) }
 }
 
