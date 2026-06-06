@@ -45,6 +45,7 @@ import type {
   CanonicalMessage,
   FileSource,
   ImageSource,
+  ToolResultContentBlock,
 } from "./canonical-messages.ts"
 import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
@@ -538,15 +539,21 @@ function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | nul
     }
     case "tool_result": {
       // Legacy tool_result content is `string | ContentBlock[]`. Canonical
-      // wants `ToolResultContentBlock[]` (text/image). Coerce: a bare string
-      // becomes one text block; an array keeps only its text blocks (the
-      // only shape the legacy agent ever emits in a tool_result).
-      const content =
+      // wants `ToolResultContentBlock[]` (text | image). Coerce: a bare string
+      // becomes one text block; an array keeps its text AND image blocks (a
+      // media-aware tool like `Read` emits an image block inside a tool_result
+      // for a vision model : dropping it here would silently strip the
+      // screenshot on the canonical transport). Any other inner block type is
+      // dropped (none are valid tool_result content on the wire).
+      const content: ToolResultContentBlock[] =
         typeof block.content === "string"
-          ? [{ type: "text" as const, text: block.content }]
-          : block.content
-              .filter((b): b is Extract<LegacyContentBlock, { type: "text" }> => b.type === "text")
-              .map((b) => ({ type: "text" as const, text: b.text }))
+          ? [{ type: "text", text: block.content }]
+          : block.content.flatMap((b): ToolResultContentBlock[] => {
+              if (b.type === "text") return [{ type: "text", text: b.text }]
+              if (b.type === "image")
+                return [{ type: "image", source: legacyImageSourceToCanonical(b.source) }]
+              return []
+            })
       const out: CanonicalBlock = {
         type: "tool_result",
         toolUseId: block.tool_use_id,

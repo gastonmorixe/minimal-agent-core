@@ -28,6 +28,13 @@ export {
   type Verdict,
 } from "./limits.ts"
 export { type Dimensions, imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
+export {
+  decideReadFile,
+  type ImageFitter,
+  imageSummary,
+  type ReadFileDecision,
+  type ReadFileMediaContext,
+} from "./read-file.ts"
 export { createMediaRegistry, fileSize, type MediaRegistry } from "./registry.ts"
 export {
   inlineBase64Preparer,

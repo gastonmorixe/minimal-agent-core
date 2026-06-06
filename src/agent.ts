@@ -65,6 +65,7 @@ import { findModel } from "./llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
 import { resolveUserTurnContent } from "./media/ingest.ts"
+import { resolveToolMediaContext } from "./media/tool-context.ts"
 import { ModeManager } from "./modes.ts"
 import type { NetworkClient } from "./network/index.ts"
 import { PluginLoader } from "./plugins/loader.ts"
@@ -77,7 +78,12 @@ import { displayWidth, expandTabs } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import { type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
-import { executeTool, TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
+import {
+  executeTool,
+  TOOL_DEFINITIONS,
+  type ToolDefinition,
+  type ToolResultMediaBlock,
+} from "./tools.ts"
 
 export {
   c,
@@ -108,6 +114,32 @@ type MaybePromise<T> = T | Promise<T>
  * deliverable rarely needs more than one or two continuations.
  */
 const MAX_TOKENS_CONTINUATION_CAP = 5
+
+/**
+ * Convert a canonical media block (currently an image) returned by a
+ * media-aware tool into the legacy wire {@link ContentBlock} the agent's
+ * message history speaks. Kept tiny + local so the agent doesn't reach into the
+ * adapter's private encoders; the canonical→wire image source mapping is the
+ * same trichotomy (`base64`/`url`/`file_id`→`file`) the adapter uses.
+ */
+function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
+  const src = block.source
+  switch (src.kind) {
+    case "base64":
+      return {
+        type: "image",
+        source: { type: "base64", media_type: src.mediaType, data: src.data },
+      }
+    case "url":
+      return { type: "image", source: { type: "url", url: src.url } }
+    case "file_id":
+      return { type: "image", source: { type: "file", file_id: src.fileId } }
+    default: {
+      const _exhaustive: never = src
+      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+    }
+  }
+}
 
 /**
  * Conversational agent with append-only history and an agentic tool loop.
@@ -1281,6 +1313,16 @@ export class Agent {
         let streamedRendered = false
         let aborted = false
         /**
+         * Non-text content blocks (currently images) a media-aware tool
+         * attached to its result : e.g. `Read` on a screenshot for a vision
+         * model. They ride into the `tool_result` content alongside the text
+         * caption (converted to legacy wire blocks below) so the model
+         * actually sees the pixels. Empty for the overwhelming majority of
+         * tool calls. See `src/tools.ts` :: `ToolExecResult.blocks` and
+         * `src/media/read-file.ts`.
+         */
+        let mediaBlocks: ToolResultMediaBlock[] | undefined
+        /**
          * Pre-clamp body the agent should persist via {@link Agent.blobStore}.
          * Set from `executeTool` result's `_raw` field when the universal
          * truncation clamp fired (built-in path). Left undefined for the
@@ -1526,6 +1568,12 @@ export class Agent {
 
               const result = await executeTool(tool.name, tool.input, {
                 signal,
+                // Active-model media capability context : lets `Read` hand back
+                // an image block for a screenshot the model can actually see
+                // instead of UTF-8 mojibake. Provider-neutral; resolved from
+                // the registry. `undefined` for unknown models keeps the
+                // legacy text-only behavior.
+                media: resolveToolMediaContext(this.model),
                 onStdout: isBash ? onChunk : undefined,
                 onStderr: isBash ? onChunk : undefined,
               })
@@ -1533,6 +1581,7 @@ export class Agent {
               isError = result.is_error
               display = result.display
               truncInfo = result._truncInfo
+              mediaBlocks = result.blocks
               // Pre-clamp body, present only when the universal clamp
               // fired (see `src/tools.ts` :: `executeTool`). The agent's
               // blob-store hook below prefers this over the clamped
@@ -1709,10 +1758,25 @@ export class Agent {
           content = content.length > 0 ? `${content}\n\n${modeStamp}` : modeStamp
         }
 
+        // When a media-aware tool attached image blocks (Read on a screenshot
+        // for a vision model), the tool_result content becomes a BLOCK ARRAY:
+        // the text caption first, then the image block(s). The wire layer
+        // (Anthropic Messages, and the canonical adapter) accepts
+        // text+image inside a tool_result. Without media blocks, content stays
+        // a plain string : byte-identical to every prior tool_result. The
+        // mode stamp / blob footers already folded into `content` above ride
+        // along as that leading text block.
+        const resultContent: string | ContentBlock[] =
+          mediaBlocks && mediaBlocks.length > 0
+            ? [
+                ...(content.length > 0 ? [{ type: "text" as const, text: content }] : []),
+                ...mediaBlocks.map(mediaBlockToLegacy),
+              ]
+            : content
         const resultBlock: ToolResultBlock = {
           type: "tool_result",
           tool_use_id: tool.id,
-          content,
+          content: resultContent,
           is_error: isError,
         }
         toolResults.push(resultBlock)
