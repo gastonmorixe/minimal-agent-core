@@ -79,6 +79,16 @@ describe("tool descriptions — output cap is documented", () => {
     expect(d).toMatch(/limit/)
   })
 
+  it("Read tells the model it can view images (not decode them as text)", () => {
+    const d = descOf("Read")
+    // The whole point of the multimodal Read fix: the model must KNOW that
+    // reading an image path shows it the pixels, so it stops concluding it
+    // "can't read images" and stops trying to decode PNG bytes as text.
+    expect(d).toMatch(/image/i)
+    expect(d).toMatch(/PNG|JPEG|screenshot/i)
+    expect(d).toMatch(/downscal|resiz|fit/i)
+  })
+
   it("Grep mentions the cap and dense-output alternatives", () => {
     const d = descOf("Grep")
     expect(d).toMatch(/64\s*KB/i)

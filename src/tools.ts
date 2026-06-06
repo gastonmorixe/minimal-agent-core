@@ -34,9 +34,29 @@ import { configPath as userConfigPath } from "./config.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
 import { acquireLock, LockAbortedError, type LockHandle, LockTimeoutError } from "./file-lock.ts"
 import { parseJsonc } from "./jsonc.ts"
+import type { ImageBlock } from "./llm/canonical-messages.ts"
+import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
 import { getSessionId } from "./metadata.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
+
+/**
+ * A non-text block a tool may attach to its `tool_result`. Today only canonical
+ * {@link ImageBlock} (an inline-base64 image) : Anthropic tool results carry
+ * text + image content, not documents. Provider-neutral by construction; the
+ * agent converts it to the wire shape when assembling the `tool_result`.
+ */
+export type ToolResultMediaBlock = ImageBlock
+
+/**
+ * Per-call media capability context. Threaded into {@link executeTool} so a
+ * media-aware tool (currently `Read`) can decide, for the ACTIVE model, whether
+ * a file is an image worth embedding, must be shrunk first, or can't be shown.
+ * Provider-neutral: the host fills it from the resolved model's capabilities +
+ * the active provider's media limits. Absent → tools behave text-only (the
+ * pre-multimodal behavior), so this is a safe additive option.
+ */
+export type ToolMediaContext = ReadFileMediaContext
 
 /**
  * Load a built-in tool's description from `src/prompts/tools/<name>.md`. Tool
@@ -178,6 +198,21 @@ export interface ToolDefinition {
 export interface ToolExecResult {
   /** Tool output as a string (multi-line allowed). */
   content: string
+  /**
+   * Optional non-text content blocks (currently images) to attach to the
+   * `tool_result` ALONGSIDE `content`. Set by media-aware tools like `Read`
+   * when a file is an image the active model accepts: the bytes ride as a
+   * real {@link ToolResultContentBlock} so a vision model actually sees the
+   * pixels instead of UTF-8 mojibake. `content` stays the model-facing text
+   * caption (a one-line summary), so a non-multimodal transport still has
+   * something coherent. Absent for the overwhelming majority of tool calls.
+   *
+   * The universal output clamp in {@link executeTool} never touches these
+   * blocks (they are already byte-bounded by the media limits / fit-to-budget
+   * step that produced them). The blob-store hook also skips them.
+   * @see src/media/read-file.ts
+   */
+  blocks?: ToolResultMediaBlock[]
   /** True if the tool failed; the model uses this to decide whether to retry. */
   is_error?: boolean
   /**
@@ -234,6 +269,13 @@ export interface ToolExecResult {
  */
 export interface ToolExecOpts {
   signal?: AbortSignal
+  /**
+   * Active-model media capability context. When present, media-aware tools
+   * (`Read`) may return image content blocks for files the model accepts.
+   * When absent, those tools fall back to text-only behavior. See
+   * {@link ToolMediaContext}.
+   */
+  media?: ToolMediaContext
   /**
    * Optional stdout-chunk callback. Currently only honored by `Bash` : chunks
    * are decoded UTF-8 strings forwarded as the child writes them, so the
@@ -956,11 +998,23 @@ async function execBash(
 }
 
 /**
- * Read a file with cat -n style line numbers.
+ * Read a file with cat -n style line numbers : OR, when the file is an image
+ * and the active model accepts image input, hand the pixels back as a real
+ * image content block on the `tool_result` (auto-shrunk to fit the wire cap).
  *
- * Output format: `<line_number>\t<line_content>` per line. Matches the format
- * the model expects from the real CLI's Read tool, so it can reference line
- * numbers in subsequent Edit calls.
+ * Text output format: `<line_number>\t<line_content>` per line, matching the
+ * real CLI's Read tool so the model can cite line numbers in later Edit calls.
+ *
+ * Media behavior (only when `opts.media` is supplied : a multimodal host):
+ * - recognized image the model accepts → `{ content: "<caption>", blocks:
+ *   [image] }`, resized first if it would blow the per-item byte cap. This is
+ *   what makes "Read the screenshot" actually work instead of decoding PNG
+ *   bytes as UTF-8 mojibake.
+ * - recognized media the model/limits reject → an honest, actionable message.
+ * - everything else (source, logs, JSON, unknown bytes) → the text path below,
+ *   byte-identical to the pre-multimodal behavior. The decision is
+ *   content-addressed (magic bytes), so a `.png` that actually holds text is
+ *   still read as text.
  *
  * @param input.file_path - Absolute path to read
  * @param input.offset - Zero-based line offset to start at (default: 0)
@@ -981,28 +1035,72 @@ async function execRead(
   const healedNote =
     filePath !== requestedPath ? `Note: resolved to "${filePath}" (whitespace mismatch).\n` : ""
 
+  // Media-aware branch. Read the raw bytes ONCE, let the (pure, provider-
+  // neutral) policy decide image-vs-text-vs-reject, and reuse the decoded
+  // bytes for the text path so there is no double read. Only engaged when the
+  // host threaded a media context (a multimodal model); otherwise we skip
+  // straight to the text path so text-only hosts and existing tests are
+  // unaffected.
+  if (opts.media) {
+    let bytes: Buffer
+    try {
+      bytes = readFileSync(filePath)
+    } catch (e) {
+      return {
+        content: `Read error: ${e instanceof Error ? e.message : String(e)}`,
+        is_error: true,
+      }
+    }
+    const decision = await decideReadFile(new Uint8Array(bytes), opts.media)
+    if (decision.kind === "image") {
+      return { content: healedNote + decision.summary, blocks: [decision.block] }
+    }
+    if (decision.kind === "rejected") {
+      // Informational, not a hard error: a clear message + next step beats
+      // is_error:true (which nudges the model to pointlessly retry Read).
+      return { content: healedNote + decision.message }
+    }
+    // decision.kind === "text": fall through, decoding the bytes we already
+    // hold instead of re-reading from disk.
+    return renderTextRead(bytes.toString("utf-8"), offset, limit, healedNote)
+  }
+
   try {
     const content = readFileSync(filePath, "utf-8")
-    const allLines = content.split("\n")
-    const start = offset
-    const end = limit ? start + limit : allLines.length
-    const slice = allLines.slice(start, end)
-
-    // Return with line numbers (cat -n style)
-    const numbered = slice.map((line, i) => `${start + i + 1}\t${line}`).join("\n")
-    return {
-      content: healedNote + numbered,
-      _truncCtx: {
-        totalBytes: Buffer.byteLength(content, "utf8"),
-        totalLines: allLines.length,
-        startLine: start,
-      },
-    }
+    return renderTextRead(content, offset, limit, healedNote)
   } catch (e) {
     return {
       content: `Read error: ${e instanceof Error ? e.message : String(e)}`,
       is_error: true,
     }
+  }
+}
+
+/**
+ * Render the cat -n text body for a fully-read file. Extracted so the
+ * media-aware and text-only branches of {@link execRead} share one
+ * implementation (and the offset/limit/_truncCtx contract stays in one place).
+ */
+function renderTextRead(
+  content: string,
+  offset: number,
+  limit: number | undefined,
+  healedNote: string,
+): ToolExecResult {
+  const allLines = content.split("\n")
+  const start = offset
+  const end = limit ? start + limit : allLines.length
+  const slice = allLines.slice(start, end)
+
+  // Return with line numbers (cat -n style)
+  const numbered = slice.map((line, i) => `${start + i + 1}\t${line}`).join("\n")
+  return {
+    content: healedNote + numbered,
+    _truncCtx: {
+      totalBytes: Buffer.byteLength(content, "utf8"),
+      totalLines: allLines.length,
+      startLine: start,
+    },
   }
 }
 

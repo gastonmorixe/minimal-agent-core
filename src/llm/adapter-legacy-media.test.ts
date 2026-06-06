@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { canonicalMessageToLegacy } from "./adapter-legacy.ts"
+import type { Message as LegacyMessage } from "../client.ts"
+
+import { canonicalMessageToLegacy, legacyMessageToCanonical } from "./adapter-legacy.ts"
 import type { CanonicalMessage } from "./canonical-messages.ts"
 
 describe("canonical media block -> legacy wire", () => {
@@ -78,5 +80,69 @@ describe("canonical media block -> legacy wire", () => {
     }
     // audio is filtered; only the text survives.
     expect(canonicalMessageToLegacy(msg).content).toEqual([{ type: "text", text: "transcribe" }])
+  })
+})
+
+describe("tool_result image content round-trips (legacy <-> canonical)", () => {
+  it("preserves an image block inside a tool_result on legacy -> canonical", () => {
+    // This is the bug Phase 4 fixes: a media-aware Read returns an image inside
+    // a tool_result; the canonical transport must NOT strip it to text-only.
+    const legacy: LegacyMessage = {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_1",
+          content: [
+            { type: "text", text: "[PNG image 12x12 shown below]" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+          ],
+        },
+      ],
+    }
+    const canonical = legacyMessageToCanonical(legacy)
+    const tr = canonical.content[0]
+    expect(tr?.type).toBe("tool_result")
+    if (tr?.type !== "tool_result") throw new Error("expected tool_result")
+    expect(tr.content).toEqual([
+      { type: "text", text: "[PNG image 12x12 shown below]" },
+      { type: "image", source: { kind: "base64", mediaType: "image/png", data: "AAAA" } },
+    ])
+  })
+
+  it("encodes a canonical tool_result image back to the legacy wire shape", () => {
+    const canonical: CanonicalMessage = {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          toolUseId: "toolu_2",
+          content: [
+            { type: "text", text: "caption" },
+            { type: "image", source: { kind: "base64", mediaType: "image/jpeg", data: "QUJD" } },
+          ],
+        },
+      ],
+    }
+    const legacy = canonicalMessageToLegacy(canonical)
+    const content = legacy.content
+    if (typeof content === "string") throw new Error("expected block array")
+    const tr = content[0]
+    expect(tr?.type).toBe("tool_result")
+    if (tr?.type !== "tool_result") throw new Error("expected tool_result")
+    expect(tr.content).toEqual([
+      { type: "text", text: "caption" },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJD" } },
+    ])
+  })
+
+  it("a string tool_result still maps to a single text block", () => {
+    const legacy: LegacyMessage = {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "toolu_3", content: "plain output" }],
+    }
+    const tr = legacyMessageToCanonical(legacy).content[0]
+    if (tr?.type !== "tool_result") throw new Error("expected tool_result")
+    expect(tr.content).toEqual([{ type: "text", text: "plain output" }])
   })
 })
