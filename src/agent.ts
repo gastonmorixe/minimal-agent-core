@@ -68,6 +68,11 @@ import { resolveUserTurnContent } from "./media/ingest.ts"
 import { resolveToolMediaContext } from "./media/tool-context.ts"
 import { ModeManager } from "./modes.ts"
 import type { NetworkClient } from "./network/index.ts"
+import {
+  type Finding,
+  makeToolDidInvokePayload,
+  type ToolDidInvokePayload,
+} from "./plugins/hooks/tool-lifecycle.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import type { ManifestMode } from "./plugins/types.ts"
 import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
@@ -509,6 +514,70 @@ export class Agent {
   /** Access the plugin loader, if one was attached. */
   pluginLoader(): PluginLoader | null {
     return this.loader
+  }
+
+  /**
+   * Fire the `tool.didInvoke` chain so plugins can augment a just-finished
+   * tool result, then fold the union back into renderable + model-facing
+   * forms. Returns `null` when there's no loader, no subscriber, or the
+   * plugins added nothing (the common, zero-cost path).
+   *
+   * - `panel`: transcript lines (the agent's own gutter/palette chrome) built
+   *   from the plugins' structured `findings`.
+   * - `annotation`: the `<ma::agent::diagnostics>` block (or `""`) built from
+   *   the plugins' model-facing `notes`, to append to `tool_result.content`.
+   *
+   * This is the ONLY agent-side coupling to the diagnostics feature, and even
+   * it is generic: the agent knows about `findings`/`notes`, not about LSP,
+   * linters, or formatters. All failure modes are contained by the HookBus.
+   */
+  private async runToolDidInvokeChain(
+    tool: ToolUseBlock,
+    content: string,
+    isError: boolean | undefined,
+  ): Promise<{ panel: string[]; annotation: string } | null> {
+    // Defensive resolution: a loader may be a partial/mock without the hooks
+    // facade (several tests inject a minimal loader exposing only hasTool /
+    // dispatch). Treat any missing piece as "no subscribers" and bail quietly.
+    const loader = this.loader
+    if (!loader || typeof loader.hooks !== "function") return null
+    let hooks: ReturnType<PluginLoader["hooks"]>
+    try {
+      hooks = loader.hooks()
+    } catch {
+      return null
+    }
+    if (!hooks?.hookBus || typeof hooks.hookBus.listenerCount !== "function") return null
+    // Cheap guard: skip the whole dance when nothing subscribed.
+    if (hooks.hookBus.listenerCount("tool.didInvoke") === 0) return null
+
+    const filePath = typeof tool.input.file_path === "string" ? tool.input.file_path : undefined
+    const payload = makeToolDidInvokePayload({
+      tool: tool.name,
+      input: tool.input,
+      cwd: process.cwd(),
+      ok: !isError,
+      ...(filePath !== undefined ? { filePath } : {}),
+    })
+
+    let result: ToolDidInvokePayload
+    try {
+      const emitted = await hooks.emitChain<ToolDidInvokePayload>("tool.didInvoke", payload)
+      result = emitted.payload
+    } catch {
+      // The bus already absorbs listener errors; this guards the emit itself.
+      return null
+    }
+
+    const findings: Finding[] = Array.isArray(result.findings) ? result.findings : []
+    const notes: string[] = Array.isArray(result.notes) ? result.notes : []
+    if (findings.length === 0 && notes.length === 0) return null
+
+    const renderCols = process.stdout.columns
+    return {
+      panel: renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
+      annotation: formatDiagnosticsAnnotation(notes),
+    }
   }
 
   /** Access the mode manager, if one was attached. */
@@ -1642,16 +1711,46 @@ export class Agent {
             toolStatus.clear()
           }
 
+          // Tool-lifecycle extension point (generic seam, NOT diagnostics-
+          // specific). Fire the `tool.didInvoke` CHAIN so any plugin can
+          // augment a just-finished tool result: a plugin pushes structured
+          // `findings` (the AGENT renders them, below) and model-facing
+          // `notes` (folded into a `<ma::agent::diagnostics>` annotation on
+          // `content`). The `diagnostics` plugin (LSP/linter/formatter
+          // feedback) is the first consumer; the shape is tool-agnostic.
+          //
+          // Decoupled by construction: the agent never imports the plugin,
+          // the plugin never imports the agent — they meet only at the
+          // `ToolDidInvokePayload` shape. Listener errors/timeouts are
+          // absorbed by the HookBus, so a misbehaving plugin can never break
+          // the tool loop. Skipped when no plugin subscribes (zero cost) and
+          // for aborted runs (no completed work to react to).
+          let diagnosticsPanel: string[] = []
+          if (!aborted) {
+            const augmented = await this.runToolDidInvokeChain(tool, content, isError)
+            if (augmented) {
+              if (augmented.annotation) content = `${content}${augmented.annotation}`
+              diagnosticsPanel = augmented.panel
+            }
+          }
+
           if (!streamedRendered) {
             if (!headerWritten) writeToolHeader(displayHeader)
-            for (const line of formatToolPreview(content, isError, display, {
+            const previewLines = formatToolPreview(content, isError, display, {
               tool: tool.name,
               info: truncInfo,
               footer: displayFooter,
               cols: renderCols,
-            })) {
-              writeTranscript(line)
+            })
+            // When a plugin attached a diagnostics panel, the panel owns the
+            // final `╰`; re-open the preview's own closer to a `│` so the two
+            // blocks fuse into one frame instead of double-closing.
+            if (diagnosticsPanel.length > 0 && previewLines.length > 0) {
+              const lastIdx = previewLines.length - 1
+              previewLines[lastIdx] = reopenFrameCloser(previewLines[lastIdx])
             }
+            for (const line of previewLines) writeTranscript(line)
+            for (const line of diagnosticsPanel) writeTranscript(line)
           }
 
           // Raw-output blob capture (NEW, design 2026-05-26). The model's
@@ -2096,11 +2195,14 @@ import {
   clampTranscriptRow,
   computeTuiElision,
   effectiveBodyLineWidth,
+  formatDiagnosticsAnnotation,
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
   isOuterFrameClose,
+  renderFindingsPanel,
   renderStreamedTail,
+  reopenFrameCloser,
   TOOL_PREVIEW_GUTTER_WIDTH,
   TOOL_PREVIEW_LINES,
   TOOL_PREVIEW_LINES_DEFAULT,
