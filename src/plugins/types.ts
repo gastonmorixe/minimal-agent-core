@@ -1328,6 +1328,20 @@ export interface ManifestHandler {
    * visual — never sent to the model.
    */
   color?: string
+  /**
+   * Optional name of the input field to surface in the transcript header,
+   * rendered synchronously from the tool_use input the moment the call
+   * starts (BEFORE the handler runs). Lets a long-running plugin tool show
+   * a clean, identifying header (e.g. the URL for `Fetch`) immediately,
+   * instead of the raw `{"url":"…"}` JSON fallback or — worse — no header
+   * at all until the handler resolves. Only meaningful when
+   * `trigger.type === "tool"`. When unset, the header uses the generic
+   * `formatToolInput` summary. Purely visual — never sent to the model.
+   *
+   * Declarative on purpose: core stays closed to per-plugin special-casing
+   * (OCP) while each plugin opens up the one field worth showing.
+   */
+  headerKey?: string
 }
 
 /** Trigger variant tag. */

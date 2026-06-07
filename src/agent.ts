@@ -950,9 +950,13 @@ export class Agent {
       : [...TOOL_DEFINITIONS]
     // Build a presentation map (icon + color) keyed by tool name for transcript
     // rendering, then strip those cosmetic fields before sending to the API.
-    const toolPresentation = new Map<string, { icon?: string; color?: string }>()
+    const toolPresentation = new Map<
+      string,
+      { icon?: string; color?: string; headerKey?: string }
+    >()
     for (const t of allTools) {
-      if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
+      if (t.icon || t.color || t.headerKey)
+        toolPresentation.set(t.name, { icon: t.icon, color: t.color, headerKey: t.headerKey })
     }
     // Mirror canonical presentation into alias slots so a tool_use the model
     // emits with an old/legacy name still renders with the canonical icon
@@ -1229,7 +1233,6 @@ export class Agent {
       for (const tool of toolBlocks) {
         const pres = toolPresentation.get(tool.name)
         const renderCols = process.stdout.columns
-        const pluginTool = this.loader?.hasTool(tool.name) ?? false
         let headerWritten = false
         const writeToolHeader = (override?: string): void => {
           if (headerWritten) return
@@ -1277,7 +1280,7 @@ export class Agent {
               ? Math.max(20, renderCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
               : renderCols
           const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
-          const content = override ?? c.dim(formatToolInput(tool, adjustedCols))
+          const content = override ?? c.dim(formatToolInput(tool, adjustedCols, pres?.headerKey))
           const headerLine =
             content.length === 0
               ? `${icon}${label}${dimTimeSuffix}`
@@ -1401,29 +1404,58 @@ export class Agent {
           const labelDisplay = active ? (active.label ?? active.id) : "default"
           writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(`active mode: ${labelDisplay}`)}`)
         } else {
-          if (!pluginTool) writeToolHeader()
+          // Header-timing is a per-tool STRATEGY, because scrollback is
+          // append-only: a tool can either paint its header NOW (from data
+          // we have synchronously) or DEFER it until the handler returns a
+          // richer `displayHeader` — never both on the same line.
+          //
+          //   - Built-in tools: always paint early (they format their own
+          //     header from input; no plugin handler runs).
+          //   - Plugin tools that declare `headerKey`: paint early using
+          //     that input field. This is the opt-in for LONG-RUNNING tools
+          //     (Fetch → url, WebSearch → query) that must show feedback
+          //     immediately instead of a frozen 120s gap. The reported bug.
+          //   - Plugin tools WITHOUT `headerKey`: defer to `displayHeader`,
+          //     exactly as before. These are the instant tools (Task,
+          //     ShowDiff, MemoryTool, LockStatus) whose `displayHeader` IS
+          //     the header (e.g. Task's `+ added 2 tasks · 0/2`) and which
+          //     have no perceptible delay to bridge.
+          //
+          // `displayHeader` is captured for session-replay fidelity in the
+          // `presentation` block below regardless. When we paint early the
+          // later `writeToolHeader(displayHeader)` is a no-op (headerWritten
+          // guard); when we defer, that later call is what paints the frame.
+          const pluginTool = this.loader?.hasTool(tool.name) ?? false
+          const paintHeaderEarly = !pluginTool || pres?.headerKey != null
+          if (paintHeaderEarly) writeToolHeader()
           const toolStartedAt = Date.now()
+          // Stall detection is for tools that STREAM chunks (Bash). The
+          // amber `⋯ stalled · last byte Ns ago` infix is driven by
+          // `direction:"down"` + `lastChunkAt` going quiet for >2s (see
+          // STALL_THRESHOLD_MS in status.ts → formatActivityInfix). Seeding
+          // that for a NON-streaming tool (every plugin tool: Fetch,
+          // WebSearch, …) was a bug: those tools never call `onChunk`, so
+          // the row was GUARANTEED to flip to "stalled" after 2s on a
+          // perfectly healthy call. Only seed the stall machinery for tools
+          // that actually feed chunks; everything else gets a neutral
+          // `idle` activity (spinner + elapsed clock keep ticking, no
+          // false "stalled"). `toolStreamsOutput` is the single source of
+          // truth shared with the `onStdout`/`onStderr` wiring below.
+          const toolStreamsOutput = tool.name === "Bash"
           const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
             notificationId: "tool.running",
             category: "tool",
-            // Seed `direction:"down"` AND `lastChunkAt: toolStartedAt` so
-            // the activity infix auto-flips to the amber
-            //   `⋯ stalled · last byte Ns ago`
-            // form after 2s of no chunks (see STALL_THRESHOLD_MS in
-            // status.ts → formatActivityInfix). This is the visible
-            // signal that distinguishes a subprocess that's working
-            // silently from one that's piping into a buffering filter
-            // like `tail -N` / `head -N` / `sort` (which holds all stdout
-            // until EOF — the user observes this as "Bash is frozen").
             // When chunks DO start arriving (onChunk below), `lastChunkAt`
             // is bumped and the stalled state clears, giving way to
             // `↓ 1.2 KB · 12 B/s` etc.
-            activity: {
-              direction: "down",
-              startedAt: toolStartedAt,
-              recvBytes: 0,
-              lastChunkAt: toolStartedAt,
-            },
+            activity: toolStreamsOutput
+              ? {
+                  direction: "down",
+                  startedAt: toolStartedAt,
+                  recvBytes: 0,
+                  lastChunkAt: toolStartedAt,
+                }
+              : { direction: "idle", startedAt: toolStartedAt },
           })
 
           try {
@@ -1505,7 +1537,12 @@ export class Agent {
               // body fits in budget). Scrollback is permanent so this
               // last-line trick is the only way to keep the close glyph
               // attached to the body in the no-footer case.
-              const isBash = tool.name === "Bash"
+              // Reuse the same streaming predicate that seeded the stall
+              // activity above, so "seeds stall" and "wires onChunk" can
+              // never drift apart (the original bug was exactly that
+              // divergence: stall was seeded for all tools, onChunk only for
+              // Bash).
+              const isBash = toolStreamsOutput
               const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
               let streamedLineCount = 0
               let bufferedLastLine: string | null = null
@@ -1688,7 +1725,13 @@ export class Agent {
           // See `src/blob-store.ts`.
           if (this.blobStore !== null && !this.blobSkipTools.has(tool.name) && !aborted) {
             const rawBody = rawForBlob ?? content
-            blobWrite = this.blobStore.write(tool.id, rawBody)
+            // Async write: keeps the (potentially multi-MB) body's fs write
+            // off the synchronous critical section so the TUI/input loop
+            // doesn't freeze while a big Fetch body is persisted (Bug 4).
+            // We're already inside the async `run` generator here, so the
+            // await is free; the tool_result it produces is pushed below
+            // either way.
+            blobWrite = await this.blobStore.writeAsync(tool.id, rawBody)
             if (blobWrite) {
               // Footer order: existing `[truncated: …]` notice is already
               // inside `content` (appended by truncation.ts when the clamp

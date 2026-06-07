@@ -102,6 +102,12 @@ export interface PluginToolDefinition {
   icon?: string
   /** Optional cosmetic color name (palette key) for the tool label. Not sent to API. */
   color?: string
+  /**
+   * Optional input field name to surface synchronously in the transcript
+   * header (e.g. `"url"`). Lets a long-running plugin tool show a clean,
+   * identifying header the moment the call starts. Not sent to API.
+   */
+  headerKey?: string
 }
 
 /** Options for {@link PluginLoader.load}. */
@@ -1190,6 +1196,7 @@ export class PluginLoader {
             input_schema: h.definition.trigger.tool.input_schema,
             ...(h.definition.icon ? { icon: h.definition.icon } : {}),
             ...(h.definition.color ? { color: h.definition.color } : {}),
+            ...(h.definition.headerKey ? { headerKey: h.definition.headerKey } : {}),
           })
         }
       }

@@ -71,12 +71,34 @@ export interface TruncationInfo {
  * `info` carries the same numbers in machine-readable form (TUI-facing,
  * no hints).
  */
+/**
+ * Count newline-delimited segments WITHOUT allocating an array, matching
+ * `s.split("\n").length` exactly (`""` → 1). The hot-path caller
+ * ({@link truncateToolOutput}) runs this on the full, possibly multi-MB
+ * tool body on the synchronous critical section; `split("\n").length`
+ * there allocates one string per line just to read `.length` and discards
+ * it in the common under-budget case, which shows up as a UI stall on a
+ * big body (Bug 4). Scanning for `\n` allocates nothing.
+ */
+export function countLines(s: string): number {
+  let n = 1
+  let i = s.indexOf("\n")
+  while (i !== -1) {
+    n++
+    i = s.indexOf("\n", i + 1)
+  }
+  return n
+}
+
 export function truncateToolOutput(
   output: string,
   ctx: TruncateCtx = {},
 ): { content: string; info: TruncationInfo } {
   const bytes = Buffer.byteLength(output, "utf8")
-  const lines = output.length === 0 ? 0 : output.split("\n").length
+  // Allocation-free count (see countLines). Keeps the empty-string guard:
+  // `"".split("\n").length` is 1, but truncation has always reported 0
+  // lines for an empty body, so preserve that exactly.
+  const lines = output.length === 0 ? 0 : countLines(output)
   const overBytes = bytes > MAX_TOOL_OUTPUT_BYTES
   const overLines = lines > MAX_TOOL_OUTPUT_LINES
   if (!overBytes && !overLines) {
@@ -110,7 +132,7 @@ export function truncateToolOutput(
   }
 
   const shownBytes = Buffer.byteLength(kept, "utf8")
-  const shownLines = kept.length === 0 ? 0 : kept.split("\n").length
+  const shownLines = kept.length === 0 ? 0 : countLines(kept)
   const cutLine = (ctx.startLine ?? 0) + shownLines
   const totalB = ctx.totalBytes != null ? String(ctx.totalBytes) : "unknown"
   const totalL = ctx.totalLines != null ? String(ctx.totalLines) : "unknown"

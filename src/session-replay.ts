@@ -150,7 +150,7 @@ export interface ReplayOptions {
    * (e.g. `"orange"`, `"gold"`, `"lime"`); unknown values fall back
    * to orange, matching the live agent.
    */
-  toolPresentation?: Map<string, { icon?: string; color?: string }> | null
+  toolPresentation?: Map<string, { icon?: string; color?: string; headerKey?: string }> | null
 }
 
 /**
@@ -416,7 +416,9 @@ export async function replayToScrollback(
         const displays = toolDisplays?.get(tu.id) ?? null
         const headerOverride = displays?.displayHeader
         const headerContent =
-          headerOverride !== undefined ? headerOverride : c.dim(formatToolInput(tu, adjustedCols))
+          headerOverride !== undefined
+            ? headerOverride
+            : c.dim(formatToolInput(tu, adjustedCols, pres?.headerKey))
         const headerLine =
           headerContent.length === 0
             ? `${iconText}${label}${dimTimeSuffix}`

@@ -36,6 +36,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs"
+import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -334,6 +335,42 @@ export class BlobStore {
       return { path, bytes, sha256 }
     } catch (err) {
       this.onError?.(err, `BlobStore.write(${toolUseId}, ${bytes}B)`)
+      return null
+    }
+  }
+
+  /**
+   * Async sibling of {@link write}. Same eligibility gates, same
+   * {@link BlobWriteResult} shape, same on-disk bytes — but the directory
+   * create and the file write go through `fs/promises` so they don't block
+   * the event loop. This matters on the plugin result path, where the
+   * agent persists the FULL (potentially multi-MB) tool body: a synchronous
+   * `writeFileSync` there stalls the single thread that paints the TUI and
+   * reads keystrokes (Bug 4). The hash is still computed synchronously
+   * (cheap relative to fs, and Node has no async hash without streaming),
+   * but it runs AFTER the `await` yields, so the first thing this method
+   * does on the hot path is hand control back to the loop.
+   *
+   * Eligibility is decided BEFORE any await so a skipped write costs nothing
+   * and the file is never created. Eviction stays synchronous (it only
+   * stats + unlinks small directory entries, never the big body) and runs
+   * after the write lands. Never throws.
+   */
+  async writeAsync(toolUseId: string, raw: string | Uint8Array): Promise<BlobWriteResult | null> {
+    if (!this.config.enabled) return null
+    const bytes = typeof raw === "string" ? Buffer.byteLength(raw, "utf-8") : raw.byteLength
+    if (bytes === 0) return null
+    if (bytes < this.config.minBytesToPersist) return null
+
+    try {
+      const path = this.pathFor(toolUseId)
+      await mkdir(this.dir, { recursive: true })
+      await writeFile(path, raw)
+      const sha256 = shortSha256(raw)
+      this.evictIfOverCap(toolUseId)
+      return { path, bytes, sha256 }
+    } catch (err) {
+      this.onError?.(err, `BlobStore.writeAsync(${toolUseId}, ${bytes}B)`)
       return null
     }
   }

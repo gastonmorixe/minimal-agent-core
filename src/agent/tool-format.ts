@@ -13,7 +13,7 @@
 import { shouldSoftSplit, splitBashSegments } from "../bash-split.ts"
 import type { ToolUseBlock } from "../client.ts"
 import { displayWidth, expandTabs, truncateDisplayWidth } from "../term-width.ts"
-import type { TruncationInfo } from "../tools/truncation.ts"
+import { countLines, type TruncationInfo } from "../tools/truncation.ts"
 import { truncHint } from "../truncate-hint.ts"
 
 import { c } from "./ansi.ts"
@@ -104,8 +104,21 @@ const BASH_CONT_MAX_LINES = 8
  *  - **Unknown**: JSON.stringify, hard slice at 200 chars (unknown tools
  *    have unknown shape, so word boundaries aren't meaningful).
  */
-export function formatToolInput(tool: ToolUseBlock, cols?: number): string {
+export function formatToolInput(tool: ToolUseBlock, cols?: number, headerKey?: string): string {
   const input = tool.input
+  // Declarative header field (plugin tools): when the manifest names a
+  // `headerKey` AND the input carries a non-empty string there, surface
+  // exactly that value instead of the raw `{"k":"v"}` JSON fallback. This
+  // is what lets a plugin tool paint a clean identifying header (the URL
+  // for Fetch) synchronously, the instant the call starts — before the
+  // handler has produced its richer `displayHeader`. Checked first so it
+  // wins over the generic per-tool branches below for plugin tools (which
+  // never match the built-in names anyway), but the guard keeps it inert
+  // for built-ins and for malformed/absent fields.
+  if (headerKey) {
+    const v = input[headerKey]
+    if (typeof v === "string" && v.length > 0) return v
+  }
   if (tool.name === "Bash" && input.command) {
     const cmd = String(input.command)
     const firstNl = cmd.indexOf("\n")
@@ -415,7 +428,10 @@ export function computeTuiElision(
   const idx = findAnnotationStart(content)
   const body = idx >= 0 ? content.slice(0, idx) : content
   if (!body) return null
-  const total = body.split("\n").length
+  // Allocation-free line count (see countLines). This runs on the model's
+  // full tool_result content; counting by scanning avoids materializing a
+  // per-line array we'd immediately discard (Bug 4).
+  const total = countLines(body)
   const budget = TOOL_PREVIEW_LINES[tool] ?? TOOL_PREVIEW_LINES_DEFAULT
   if (total <= budget) return null
   return { shown: budget, total }
