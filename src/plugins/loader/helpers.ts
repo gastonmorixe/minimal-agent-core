@@ -228,13 +228,48 @@ export async function invokeSubprocess(
   args: string[],
   ctx: TUIContext,
 ): Promise<TUIResult> {
+  const signal = ctx.abort
+  const isTool = ctx.trigger.type === "tool"
+  const abortedResult = (): TUIResult =>
+    isTool
+      ? { kind: "tool_result", content: "Plugin tool canceled.", is_error: true }
+      : // Inline handlers render their output; an aborted one renders nothing.
+        { kind: "rendered", ansi: "" }
+
+  // Fail closed if the signal already fired before we spawned anything:
+  // don't launch a child only to immediately kill it.
+  if (signal?.aborted) return abortedResult()
+
   const proc = Bun.spawn([exe, ...args], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",
     cwd: ctx.packageDir,
     env: ctx.env,
+    // Own process group so an abort can group-kill any descendants the
+    // handler forked (mirrors core's execBash in src/tools.ts). Without
+    // this, a double-forked grandchild keeps the stdout pipe open and the
+    // drain below blocks forever even after we SIGTERM the direct child.
+    detached: true,
   })
+
+  // Group-kill helper + SIGTERM→SIGKILL escalation, same shape as execBash.
+  const killTree = (sig: "SIGTERM" | "SIGKILL") => {
+    try {
+      if (typeof proc.pid === "number" && proc.pid > 0) {
+        process.kill(-proc.pid, sig)
+        return
+      }
+    } catch {
+      // group lookup failed (already reaped, or non-POSIX) — fall through
+    }
+    try {
+      proc.kill(sig)
+    } catch {
+      /* already exited */
+    }
+  }
+
   const envelope = JSON.stringify({
     trigger: ctx.trigger,
     cwd: ctx.cwd,
@@ -242,12 +277,43 @@ export async function invokeSubprocess(
   })
   void proc.stdin.write(envelope + "\n")
   void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  const code = await proc.exited
-  if (ctx.trigger.type === "tool") {
-    return { kind: "tool_result", content: out, is_error: code !== 0 }
+
+  // Race the normal completion (drain stdout + wait for exit) against the
+  // abort signal. Whichever settles first wins. Before this fix the call
+  // awaited the child unconditionally, so an ignored abort meant the turn
+  // never ended and the REPL froze. See helpers.abort.test.ts.
+  let onAbort: (() => void) | undefined
+  let killTimer: ReturnType<typeof setTimeout> | undefined
+  const abortPromise = new Promise<"aborted">((resolve) => {
+    if (!signal) return // never settles; the completion path drives the result
+    onAbort = () => {
+      // SIGTERM now, escalate to SIGKILL after a short grace so a handler
+      // that traps SIGTERM still dies and can't pin the event loop.
+      killTree("SIGTERM")
+      killTimer = setTimeout(() => {
+        if (proc.exitCode == null && proc.signalCode == null) killTree("SIGKILL")
+      }, 2000)
+      killTimer.unref?.()
+      resolve("aborted")
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+
+  const completion = (async (): Promise<TUIResult> => {
+    const out = await new Response(proc.stdout).text()
+    const code = await proc.exited
+    if (isTool) return { kind: "tool_result", content: out, is_error: code !== 0 }
+    return { kind: "rendered", ansi: out }
+  })()
+
+  try {
+    const winner = await Promise.race([completion, abortPromise])
+    if (winner === "aborted") return abortedResult()
+    return winner
+  } finally {
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort)
+    if (killTimer) clearTimeout(killTimer)
   }
-  return { kind: "rendered", ansi: out }
 }
 
 export function findPackageDirFor(plugins: LoadedPlugin[], handler: ResolvedHandler): string {

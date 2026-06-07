@@ -1893,13 +1893,17 @@ async function main() {
       // their canonical's presentation. Without this map the replayed
       // `╭` header drops the icon (`» Bash`, `✦ Edit`, `✔ Task`) and
       // falls back to the bare bold tool name in orange.
-      const toolPresentation = new Map<string, { icon?: string; color?: string }>()
+      const toolPresentation = new Map<
+        string,
+        { icon?: string; color?: string; headerKey?: string }
+      >()
       for (const t of TOOL_DEFINITIONS) {
         if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
       }
       if (loader) {
         for (const t of loader.getExtraTools()) {
-          if (t.icon || t.color) toolPresentation.set(t.name, { icon: t.icon, color: t.color })
+          if (t.icon || t.color || t.headerKey)
+            toolPresentation.set(t.name, { icon: t.icon, color: t.color, headerKey: t.headerKey })
         }
         for (const [alias, canonical] of loader.getToolAliases()) {
           const pres = toolPresentation.get(canonical)

@@ -180,6 +180,14 @@ export interface ToolDefinition {
    * Purely cosmetic : never sent to the API.
    */
   color?: ToolColor
+  /**
+   * Optional name of the input field to surface in the transcript header
+   * (e.g. `"url"` for Fetch). Read synchronously by `formatToolInput` so a
+   * plugin tool shows a clean identifying header the instant the call
+   * starts. Purely cosmetic : never sent to the API. Only set for
+   * plugin-contributed tools (built-ins format their own headers).
+   */
+  headerKey?: string
 }
 
 /**

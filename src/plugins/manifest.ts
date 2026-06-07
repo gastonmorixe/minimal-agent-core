@@ -791,6 +791,7 @@ function parseHandler(
   // forwards them anyway, and the agent only wires them for tool tools.
   let icon: string | undefined
   let color: string | undefined
+  let headerKey: string | undefined
   if (obj.icon != null) {
     if (typeof obj.icon !== "string" || obj.icon.length === 0) {
       err("icon must be a non-empty string")
@@ -803,6 +804,12 @@ function parseHandler(
     }
     color = obj.color as string
   }
+  if (obj.headerKey != null) {
+    if (typeof obj.headerKey !== "string" || obj.headerKey.length === 0) {
+      err("headerKey must be a non-empty string")
+    }
+    headerKey = obj.headerKey as string
+  }
 
   return {
     id,
@@ -811,6 +818,7 @@ function parseHandler(
     interactive: obj.interactive as boolean,
     ...(icon ? { icon } : {}),
     ...(color ? { color } : {}),
+    ...(headerKey ? { headerKey } : {}),
   }
 }
 

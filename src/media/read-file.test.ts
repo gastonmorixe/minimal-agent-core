@@ -3,8 +3,8 @@ import { describe, expect, it } from "bun:test"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import { anthropicMediaLimits } from "./anthropic.ts"
-import { decideReadFile, type ImageFitter } from "./read-file.ts"
 import type { MediaLimits } from "./limits.ts"
+import { decideReadFile, type ImageFitter } from "./read-file.ts"
 import type { FitResult } from "./transform.ts"
 
 const IMG: ModalitySupport = { image: true, audio: false, pdf: true, video: false }
