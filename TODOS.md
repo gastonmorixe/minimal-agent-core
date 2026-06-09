@@ -411,6 +411,21 @@ History of state changes goes here as date-stamped one-liners. Helps a future ag
 
 - [ ] state: `todo`
 - created_by: session=552407ed (fable-5 audit, 2026-06-09)
+- evidence (2026-06-09, session=552407ed): probed THIS account (Max plan) twice,
+  65s apart, with a ~220k-token non-streaming sonnet-4-6 request carrying
+  context-1m-2025-08-07 on the legacy transport. Both: HTTP 429
+  `rate_limit_error` with generic message "Error" in ~1.7s, no retry-after, no
+  ratelimit headers, request_id req_011CbtJ6hBWxvF18Cipi4jFU /
+  req_011CbtJDd5Qg6a54HMrjT8xc. NOT the "Extra usage is required" shape and
+  NOT "prompt is too long" — the request dies at a rate/size pre-check before
+  long-context entitlement is even evaluated (1.7s for a 770KB body = rejected
+  on declared size, not after token counting). CONCLUSION: this account cannot
+  exercise >200k single requests at all, so the B1 question (does the
+  pre-overage 429 still gate sonnet long context?) remains UNANSWERED here;
+  the unified gate produced no NEW failure mode (the request would have been
+  rejected with or without the beta). Next step needs an account with higher
+  ITPM or overage credits; keep the soft-failure path
+  (`parseModelUnavailableError`) as the runtime guard either way.
 
 **What.** Commit `97c0191` made the legacy transport send `context-1m-2025-08-07`
 for sonnet-4-6 (1M-native per its capabilities, matching the canonical
