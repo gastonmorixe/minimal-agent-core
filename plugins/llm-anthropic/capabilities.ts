@@ -123,6 +123,23 @@ export const CAPS_OPUS_48: Capabilities = {
 /** Opus 4.7 — identical request surface to 4.8 (the announcement). */
 export const CAPS_OPUS_47: Capabilities = { ...CAPS_OPUS_48 }
 
+/**
+ * Claude Fable 5 (`claude-fable-5`) — public Mythos-class model, launched
+ * 2026-06-09. Request surface is identical to Opus 4.8 per the live
+ * `GET /v1/models?beta=true` capability record:
+ *   - max_input_tokens 1_000_000, max_tokens 128_000
+ *   - effort low/medium/high/xhigh/max
+ *   - thinking: adaptive supported, enabled(extended) NOT supported
+ *   - image_input + pdf_input, structured_outputs, code_execution, batch
+ * The one deliberate difference from Opus 4.8: Fable ships a single flat
+ * rate with no `speed:"fast"` tier, so `speedFast` is false (no fast
+ * pricing picker in `models.ts`).
+ */
+export const CAPS_FABLE_5: Capabilities = {
+  ...CAPS_OPUS_48,
+  speedFast: false,
+}
+
 // ---------------------------------------------------------------------------
 // Opus 4.6 (transition tier — extended thinking still functional)
 // ---------------------------------------------------------------------------

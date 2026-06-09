@@ -72,7 +72,8 @@ export async function listModels(
     id.includes("claude-sonnet-4") ||
     id.includes("opus-4-6") ||
     id.includes("opus-4-7") ||
-    id.includes("opus-4-8")
+    id.includes("opus-4-8") ||
+    id.includes("claude-fable-5")
 
   const variants: ModelInfo[] = []
   for (const m of models) {
