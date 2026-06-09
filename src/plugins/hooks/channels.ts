@@ -102,9 +102,20 @@ export const CHANNELS = [
   },
   {
     name: "tool.didInvoke",
-    shape: "broadcast-async",
+    shape: "chain",
     permission: "hooks:tool.didInvoke",
-    description: "Emitted after a tool returns (success or failure).",
+    description:
+      "Chain hook fired AFTER a tool returns (success or failure), BEFORE the " +
+      "agent renders the result and pushes it to the model. Payload is a " +
+      "ToolDidInvokePayload (see plugins/hooks/tool-lifecycle.ts) carrying the " +
+      "tool name/input/cwd/ok/filePath plus two accumulators: `findings` " +
+      "(structured results the AGENT renders into its own gutter/palette " +
+      "chrome) and `notes` (model-facing one-liners the agent wraps in a " +
+      "`<ma::agent::diagnostics>` annotation). Listeners push into the " +
+      "accumulators and `return {payload}`; the agent reads the union back. " +
+      "The diagnostics plugin (LSP/linter/formatter feedback) is the first " +
+      "consumer, but the shape is tool-agnostic. Observation-only listeners " +
+      "just watch.",
   },
 
   // -- REPL lifecycle ---------------------------------------------------------
