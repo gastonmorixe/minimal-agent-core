@@ -16,6 +16,8 @@
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 
+import { omitsInterleavedThinking, wants1mContext } from "./beta-gates.ts"
+
 /** Every known beta header value, in declaration order. */
 export const ANTHROPIC_BETA_FLAGS = {
   CLAUDE_CODE: "claude-code-20250219",
@@ -118,16 +120,10 @@ export function buildBetaFlags(opts: {
 
   const isOAuth = authKind === "oauth"
   if (isOAuth) flags.add(ANTHROPIC_BETA_FLAGS.OAUTH)
-  // Interleaved thinking is OMITTED for opus-4-8: under this beta it emits huge
-  // parallel tool batches whose interleaved thinking hallucinates same-turn
-  // tool results, spiraling into ever-larger batches. Wire-proven, and absent
-  // on opus-4.7 under the same flag (model-behavior change, not transport). See
-  // TODOS.md T-7c3f02 + private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md.
-  // Kept for every other model (they sequence tool use correctly). Escape
-  // hatch: MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1. Mirrors the legacy
-  // src/headers.ts gate so both transports agree.
-  const forceInterleaved = process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING === "1"
-  if (forceInterleaved || !model.id.includes("opus-4-8")) {
+  // Interleaved thinking: omitted only for the tool-batch-spiral models
+  // (opus-4-8, T-7c3f02). Decision shared with the legacy builder via
+  // src/llm/anthropic-beta-gates.ts so the transports cannot drift.
+  if (!omitsInterleavedThinking(model.id)) {
     flags.add(ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING)
   }
   flags.add(ANTHROPIC_BETA_FLAGS.REDACT_THINKING)
@@ -143,15 +139,11 @@ export function buildBetaFlags(opts: {
     case "subtask":
     case "conversation":
       flags.add(ANTHROPIC_BETA_FLAGS.CLAUDE_CODE)
-      // 1M context: opt-in via [1m] alias OR if model supports it natively.
-      // Live capture shows opus-4-8 sends it by default.
-      if (
-        req.modelId.includes("[1m]") ||
-        model.id === "claude-opus-4-8" ||
-        model.id === "claude-opus-4-7" ||
-        model.id === "claude-opus-4-6" ||
-        model.capabilities.contextWindow >= 1_000_000
-      ) {
+      // 1M context: shared gate (src/llm/anthropic-beta-gates.ts). The
+      // request's id carries any [1m] opt-in; the registered model's
+      // capabilities decide the native case. Same predicate as the legacy
+      // builder, pinned by the cross-transport agreement walk.
+      if (wants1mContext(req.modelId) || wants1mContext(model.id)) {
         flags.add(ANTHROPIC_BETA_FLAGS.CONTEXT_1M)
       }
       if (model.capabilities.midConversationSystem) {

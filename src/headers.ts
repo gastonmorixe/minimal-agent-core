@@ -8,6 +8,12 @@
 
 import { randomUUID } from "node:crypto"
 
+// Anthropic model-gate decisions live in the PROVIDER PLUGIN. This legacy
+// module is itself misplaced Anthropic wire code (Wave-4 dissolution
+// target), so it reaches into the plugin rather than duplicating the
+// logic in core a second time. See plugins/llm-anthropic/beta-gates.ts.
+import { omitsInterleavedThinking, wants1mContext } from "../plugins/llm-anthropic/beta-gates.ts"
+
 import type { AuthResult } from "./auth.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
 
@@ -366,46 +372,22 @@ export function buildBetaFlags(
       ]
     case "conversation": {
       const flags: BetaFlagId[] = [BetaFlagId.CLAUDE_CODE_20250219, BetaFlagId.OAUTH_20250420]
-      // context-1m: enabled when the model has the [1m] suffix (client-side
-      // convention) OR is a 1M-native family. This MUST mirror the canonical
-      // transport's capability test (`capabilities.contextWindow >= 1_000_000`
-      // in plugins/llm-anthropic/beta-flags.ts) so both transports agree. We
-      // can't read the registry here (low-level module + late plugin
-      // activation), so the 1M families are enumerated explicitly: opus 4.6/
-      // 4.7/4.8, sonnet 4.6, and fable-5. Deliberately NOT a bare "opus" /
-      // "sonnet-4" substring: that would wrongly flag the 200k sonnet-4-5 /
-      // sonnet-4 and legacy 200k opus ids. Add new 1M models here when they
-      // register. Without this, plain `claude-fable-5` on the legacy transport
-      // never sends the 1M beta and long sessions 400 past ~200k.
-      const wants1m = model
-        ? /\[1m\]/i.test(model) ||
-          model.includes("opus-4-6") ||
-          model.includes("opus-4-7") ||
-          model.includes("opus-4-8") ||
-          model.includes("sonnet-4-6") ||
-          model.includes("fable-5")
-        : false
-      if (wants1m) {
+      // context-1m: decided by the SHARED model-gate module
+      // (src/llm/anthropic-beta-gates.ts), the same predicate the canonical
+      // transport uses — registry capabilities first, conservative substring
+      // fallback for unregistered ids. Wave 2a replaced the hand-mirrored
+      // family list that produced the fable-5 context-1m P0; the
+      // characterization suites pin per-model membership AND cross-transport
+      // agreement.
+      if (wants1mContext(model)) {
         flags.push(BetaFlagId.CONTEXT_1M_20250807)
       }
-      // Interleaved thinking (interleaved-thinking-2025-05-14): OMITTED for
-      // opus-4-8. With this beta active, opus-4-8 emits many parallel
-      // `tool_use` blocks in ONE assistant turn with `thinking` blocks
-      // interleaved between them, and those mid-turn thinking blocks reason as
-      // if earlier same-turn tool results already exist. They do not: every
-      // tool in a turn executes only AFTER the turn ends. The model then
-      // narrates a false "tool results are stalling / batching / flushing"
-      // story and spirals into ever-larger tool batches (observed: 44 calls in
-      // one turn). Wire-proven against this repo's `.net-dbg` captures, and
-      // ABSENT on opus-4.7 under the SAME beta flag, so the behavior tracks the
-      // MODEL (4.7 -> 4.8), not the harness/transport. Full evidence:
-      // private/tool-bugs-and-improvements/08-ROOT-CAUSE-corrected.md ; tracked
-      // as TODOS.md T-7c3f02. opus-4.6/4.7 and sonnet keep interleaved thinking
-      // (they sequence tool use correctly). Escape hatch to restore the old
-      // behavior for experiments: MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1.
-      const forceInterleaved = process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING === "1"
-      const omitInterleaved = !forceInterleaved && !!model && model.includes("opus-4-8")
-      if (!omitInterleaved) {
+      // Interleaved thinking: omitted only where the model exhibits the
+      // tool-batch spiral pathology (opus-4-8; see T-7c3f02 and the full
+      // wire evidence cited in src/llm/anthropic-beta-gates.ts). The
+      // decision lives in the shared gate module so both transports stay
+      // in lockstep; MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1 overrides.
+      if (!omitsInterleavedThinking(model)) {
         flags.push(BetaFlagId.INTERLEAVED_THINKING_20250514)
       }
       flags.push(
