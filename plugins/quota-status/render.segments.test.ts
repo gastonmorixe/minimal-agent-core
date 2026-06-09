@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test"
 import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
 import type { SessionTokens } from "../../src/session-tokens.ts"
 import { stripAnsi } from "../../src/term-width.ts"
+
 import { DEFAULT_SEGMENT_ORDER, normalizeSegmentOrder, renderQuotaFooter } from "./render.ts"
 
 const TOKENS: SessionTokens = {

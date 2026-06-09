@@ -27,8 +27,9 @@
 
 import { loadUserConfig } from "../../src/config.ts"
 import { resolveProviderSessionInfo } from "../../src/llm/provider-session.ts"
-import { getSessionTokens } from "../../src/session-tokens.ts"
 import type { LiveAreaHandlerContext } from "../../src/plugins/types.ts"
+import { getSessionTokens } from "../../src/session-tokens.ts"
+
 import { renderQuotaFooter } from "./render.ts"
 import { runStatusScript } from "./script-runner.ts"
 
@@ -130,9 +131,7 @@ function cols(): number {
   return Number.isFinite(v) && v > 0 ? v : Number.POSITIVE_INFINITY
 }
 
-export default async function handle(
-  ctx: LiveAreaHandlerContext,
-): Promise<string | null> {
+export default async function handle(ctx: LiveAreaHandlerContext): Promise<string | null> {
   // Ask the CURRENT model's provider for session metadata (quota windows,
   // context window, model label). Provider-agnostic: the handler names no
   // provider. The Anthropic provider does the cache-first read + bounded

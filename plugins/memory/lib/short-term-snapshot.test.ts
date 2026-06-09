@@ -9,13 +9,14 @@
  *   - reads fresh from disk on each call (mutation visible immediately)
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { MemoryStore } from "./store.ts"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import { ShortTermSnapshot } from "./short-term-snapshot.ts"
+import { MemoryStore } from "./store.ts"
 
 let tmpHome: string
 

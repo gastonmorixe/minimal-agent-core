@@ -35,8 +35,6 @@ import { existsSync, unlinkSync } from "node:fs"
 import { hostname } from "node:os"
 import { isAbsolute, resolve } from "node:path"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
-
 import {
   DEFAULT_STALE_AFTER_MS,
   defaultPidAlive,
@@ -45,6 +43,7 @@ import {
   lockPathFor,
   readLockFile,
 } from "../../../src/file-lock.ts"
+import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
 // ---------------------------------------------------------------------------
 // Input shape
@@ -252,7 +251,13 @@ export function runClearStale(input: ParsedInput, deps: RunDeps): RunResult {
   if (input.format === "json") {
     return {
       content: JSON.stringify(
-        { root, removed: removed.length, kept: kept.length, removedLocks: removed, keptLocks: kept },
+        {
+          root,
+          removed: removed.length,
+          kept: kept.length,
+          removedLocks: removed,
+          keptLocks: kept,
+        },
         null,
         2,
       ),

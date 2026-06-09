@@ -15,25 +15,20 @@
  *     (so the agent's SaveEchoCollector can echo the id to the model).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import { setGlobalEventBus } from "../../../src/global-bus.ts"
 import { EventBus } from "../../../src/plugins/event-bus.ts"
 import { PluginLoader } from "../../../src/plugins/loader.ts"
-import type {
-  PromptFragmentContext,
-  TUIContext,
-} from "../../../src/plugins/types.ts"
-
+import type { PromptFragmentContext, TUIContext } from "../../../src/plugins/types.ts"
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "../lib/memory-config.ts"
-import {
-  MEMORY_SAVED,
-  type MemorySavedPayload,
-} from "../lib/save-echo.ts"
+import { MEMORY_SAVED, type MemorySavedPayload } from "../lib/save-echo.ts"
 import { shortTermMemoryPath } from "../lib/store.ts"
+
 import loadMemories, { globalMemoryPath, projectMemoryPath } from "./load.ts"
 import memoryHandler, { localIsoSeconds } from "./memory.ts"
 
@@ -90,9 +85,7 @@ afterEach(() => {
 describe("memory: localIsoSeconds (re-exported from lib/parse.ts)", () => {
   it("formats a fixed date as local ISO 8601 with seconds and offset", () => {
     const out = localIsoSeconds(new Date(2026, 4, 5, 21, 6, 20))
-    expect(out).toMatch(
-      new RegExp("^2026-05-05T21:06:20[+-]\\d{2}:\\d{2}$"),
-    )
+    expect(out).toMatch(new RegExp("^2026-05-05T21:06:20[+-]\\d{2}:\\d{2}$"))
   })
 })
 
@@ -108,9 +101,7 @@ describe("memory: path helpers", () => {
   })
 
   it("projectMemoryPath handles already-relative-looking cwd defensively", () => {
-    expect(projectMemoryPath("///abc", "/h")).toBe(
-      "/h/.minimal-agent/projects/abc/memory.md",
-    )
+    expect(projectMemoryPath("///abc", "/h")).toBe("/h/.minimal-agent/projects/abc/memory.md")
   })
 })
 
@@ -150,7 +141,11 @@ function makeSaveCtx(opts: {
  * exactly.
  */
 function makeNoopLogger() {
-  const noop = (_s: string, _m: string, _sd?: Readonly<Record<string, string | number | boolean>>) => {}
+  const noop = (
+    _s: string,
+    _m: string,
+    _sd?: Readonly<Record<string, string | number | boolean>>,
+  ) => {}
   return {
     emergency: noop,
     alert: noop,
@@ -172,9 +167,7 @@ describe("memory: save handler: project / global / short-term", () => {
     expect(res.ansi).toContain("[project#")
 
     const path = projectMemoryPath(cwd, tmpHome)
-    expect(readFileSync(path, "utf-8")).toMatch(
-      new RegExp("^" + PREFIX + "hello\\n$"),
-    )
+    expect(readFileSync(path, "utf-8")).toMatch(new RegExp("^" + PREFIX + "hello\\n$"))
   })
 
   it("scope='global' writes to ~/.minimal-agent/memory.md", async () => {
@@ -208,9 +201,7 @@ describe("memory: save handler: project / global / short-term", () => {
     // Short-term doesn't carry a [session:…] field on the line (the FILE
     // is per-session, redundant on every line).
     expect(content).not.toContain("[session:")
-    expect(content).toMatch(
-      new RegExp("^- \\[#1\\] \\[" + TS_RE + "\\] short scratch\\n$"),
-    )
+    expect(content).toMatch(new RegExp("^- \\[#1\\] \\[" + TS_RE + "\\] short scratch\\n$"))
   })
 
   it("scope='short' is treated as 'short-term'", async () => {
@@ -265,13 +256,7 @@ describe("memory: save handler: file IO and back-compat", () => {
     const out = readFileSync(path, "utf-8")
     expect(out.startsWith("- legacy one\n- legacy two\n")).toBe(true)
     // New bullet has the v0.3 format (id-prefixed).
-    expect(out).toMatch(
-      new RegExp(
-        "^- legacy one\\n" +
-          "- legacy two\\n" +
-          PREFIX + "fresh\\n$",
-      ),
-    )
+    expect(out).toMatch(new RegExp(`^- legacy one\\n- legacy two\\n${PREFIX}fresh\\n$`))
   })
 
   it("appends across multiple calls (does not overwrite); ids differ", async () => {
@@ -305,9 +290,7 @@ describe("memory: save handler: file IO and back-compat", () => {
   })
 
   it("unknown scope value falls back to project (does not throw)", async () => {
-    await memoryHandler(
-      makeSaveCtx({ body: "x", attrs: { scope: "weird" }, cwd: "/p" }),
-    )
+    await memoryHandler(makeSaveCtx({ body: "x", attrs: { scope: "weird" }, cwd: "/p" }))
     expect(existsSync(projectMemoryPath("/p", tmpHome))).toBe(true)
     expect(existsSync(globalMemoryPath(tmpHome))).toBe(false)
   })
@@ -339,8 +322,7 @@ describe("memory: save handler: file IO and back-compat", () => {
     // Persistent format with session: `- [#<id>] [<ts>] [session:<sid>] body\n`
     expect(out).toMatch(
       new RegExp(
-        "^- \\[#" + ID_RE + "\\] \\[" + TS_RE + "\\] \\[session:" + sid +
-          "\\] with sid\\n$",
+        "^- \\[#" + ID_RE + "\\] \\[" + TS_RE + "\\] \\[session:" + sid + "\\] with sid\\n$",
       ),
     )
   })
@@ -433,18 +415,14 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
     const { SHORT_TERM_CAP } = await import("../lib/store.ts")
 
     for (let i = 1; i <= SHORT_TERM_CAP; i++) {
-      await memoryHandler(
-        makeSaveCtx({ body: `e${i}`, attrs: { scope: "short-term" }, env }),
-      )
+      await memoryHandler(makeSaveCtx({ body: `e${i}`, attrs: { scope: "short-term" }, env }))
     }
     await Promise.resolve()
     // Up to the cap, no eviction.
     expect(events.every((e) => !e.evicted)).toBe(true)
 
     // One more: triggers eviction.
-    await memoryHandler(
-      makeSaveCtx({ body: "overflow", attrs: { scope: "short-term" }, env }),
-    )
+    await memoryHandler(makeSaveCtx({ body: "overflow", attrs: { scope: "short-term" }, env }))
     await Promise.resolve()
     const last = events[events.length - 1]
     expect(last?.evicted).toBe(1)
@@ -590,8 +568,7 @@ describe("memory: load fragment (inject='verbatim' opt-in)", () => {
     })
     writeFileSync(
       gp,
-      "- legacy bullet, no timestamp\n" +
-        "- [#abc-1234] [2026-05-05T21:06:20-04:00] new bullet\n",
+      "- legacy bullet, no timestamp\n- [#abc-1234] [2026-05-05T21:06:20-04:00] new bullet\n",
     )
 
     const out = await loadMemories(makeLoadCtx("/p"), { loadConfig: () => verbatimCfg })
@@ -642,15 +619,9 @@ describe("memory: integration with PluginLoader", () => {
    * override `MINIMAL_AGENT_CONFIG` since the integration test uses the
    * REAL handler (no DI shortcut available through the loader API).
    */
-  async function withInjectMode<T>(
-    mode: MemoryConfig["inject"],
-    fn: () => Promise<T>,
-  ): Promise<T> {
+  async function withInjectMode<T>(mode: MemoryConfig["inject"], fn: () => Promise<T>): Promise<T> {
     const configPath = join(tmpHome, "config.jsonc")
-    writeFileSync(
-      configPath,
-      JSON.stringify({ plugins: { memory: { inject: mode } } }),
-    )
+    writeFileSync(configPath, JSON.stringify({ plugins: { memory: { inject: mode } } }))
     const prev = process.env.MINIMAL_AGENT_CONFIG
     process.env.MINIMAL_AGENT_CONFIG = configPath
     try {
@@ -733,7 +704,12 @@ describe("memory: integration with PluginLoader", () => {
     const path = projectMemoryPath(cwd, tmpHome)
     expect(readFileSync(path, "utf-8")).toMatch(
       new RegExp(
-        "^- \\[#" + ID_RE + "\\] \\[" + TS_RE + "\\] \\[session:" + sid +
+        "^- \\[#" +
+          ID_RE +
+          "\\] \\[" +
+          TS_RE +
+          "\\] \\[session:" +
+          sid +
           "\\] stamped from loader\\n$",
       ),
     )
@@ -827,9 +803,7 @@ describe("memory: integration with PluginLoader", () => {
     setGlobalEventBus(loader.bus())
 
     const events: MemorySavedPayload[] = []
-    loader.bus().on(MEMORY_SAVED, (ctx) =>
-      events.push(ctx.payload as MemorySavedPayload),
-    )
+    loader.bus().on(MEMORY_SAVED, (ctx) => events.push(ctx.payload as MemorySavedPayload))
 
     await loader.dispatch(
       {

@@ -49,7 +49,9 @@ describe("setKeyPath — rewrite existing", () => {
     const out = setKeyPath(src, ["plugins", "ma-fetch", "enabled"], false)
     expect(out).toContain("// fetch backend config")
     expect(out).toContain('"backend": "obscura"')
-    expect(parseJsonc(out)).toEqual({ plugins: { "ma-fetch": { enabled: false, backend: "obscura" } } })
+    expect(parseJsonc(out)).toEqual({
+      plugins: { "ma-fetch": { enabled: false, backend: "obscura" } },
+    })
   })
 
   it("replaces an object value wholesale", () => {

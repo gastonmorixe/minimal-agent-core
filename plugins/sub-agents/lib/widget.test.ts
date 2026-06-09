@@ -4,9 +4,9 @@ import { fmtElapsed, fmtTokens } from "./style.ts"
 import {
   type Progress,
   type ResultDigest,
-  sessionId,
   type SubagentRecord,
   type SubagentStatus,
+  sessionId,
   subagentId,
 } from "./types.ts"
 import { renderWidget } from "./widget.ts"
@@ -60,8 +60,16 @@ describe("renderWidget", () => {
   it("renders a header + one row per worker when active", () => {
     const records = [
       rec("A1", "reviewer", { kind: "done", endedAt: "t", result: RESULT }),
-      rec("A2", "worker", running({ tools: 14, tokens: 9100, lastActivity: "editing src/parser.ts" })),
-      rec("A3", "explorer", running({ tools: 6, tokens: 2000, lastActivity: "grep callers of fork()" })),
+      rec(
+        "A2",
+        "worker",
+        running({ tools: 14, tokens: 9100, lastActivity: "editing src/parser.ts" }),
+      ),
+      rec(
+        "A3",
+        "explorer",
+        running({ tools: 6, tokens: 2000, lastActivity: "grep callers of fork()" }),
+      ),
     ]
     const out = renderWidget(records, { ansi: false, tick: 0, nowMs: NOW, leadSid: LEAD })
     expect(out).not.toBeNull()
@@ -79,7 +87,13 @@ describe("renderWidget", () => {
   it("shows the incomplete count in the header and a ⚠ no-deliverable row (FIX 7)", () => {
     const records = [
       rec("A1", "worker", running({ tools: 2, tokens: 500 })),
-      rec("A2", "log-miner", { kind: "incomplete", endedAt: "t", reason: "no sentinel", tokens: 700, tools: 4 }),
+      rec("A2", "log-miner", {
+        kind: "incomplete",
+        endedAt: "t",
+        reason: "no sentinel",
+        tokens: 700,
+        tools: 4,
+      }),
     ]
     const out = renderWidget(records, { ansi: false, tick: 0, nowMs: NOW, leadSid: LEAD }) as string
     expect(out).not.toBeNull()
@@ -91,7 +105,9 @@ describe("renderWidget", () => {
   it("breathes: the running glyph cycles with tick", () => {
     const records = [rec("A2", "worker", running({ tools: 1, tokens: 100 }))]
     const at = (t: number) =>
-      (renderWidget(records, { ansi: false, tick: t, nowMs: NOW, leadSid: LEAD }) as string).split("\n")[1]
+      (renderWidget(records, { ansi: false, tick: t, nowMs: NOW, leadSid: LEAD }) as string).split(
+        "\n",
+      )[1]
     // tick 0 → ◐, tick 1 → ◓ (distinct frames)
     expect(at(0)).not.toBe(at(1))
   })
@@ -100,7 +116,13 @@ describe("renderWidget", () => {
     const records = Array.from({ length: 9 }, (_, i) =>
       rec(`A${i + 1}`, "worker", running({ tools: 1, tokens: 100 })),
     )
-    const out = renderWidget(records, { ansi: false, tick: 0, nowMs: NOW, leadSid: LEAD, maxRows: 4 })
+    const out = renderWidget(records, {
+      ansi: false,
+      tick: 0,
+      nowMs: NOW,
+      leadSid: LEAD,
+      maxRows: 4,
+    })
     const lines = (out as string).split("\n")
     expect(lines).toHaveLength(1 + 4 + 1) // header + 4 rows + overflow
     expect(lines.at(-1)).toContain("+5 more")

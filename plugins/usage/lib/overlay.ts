@@ -11,11 +11,7 @@
  */
 
 import { renderUsageOverlay } from "../../../src/usage-render.ts"
-import {
-  type UsagePeriod,
-  USAGE_PERIODS,
-  type UsageReport,
-} from "../../../src/usage-stats.ts"
+import { USAGE_PERIODS, type UsagePeriod, type UsageReport } from "../../../src/usage-stats.ts"
 
 /** Default selected index: "All time" (last in the catalog). */
 export const DEFAULT_PERIOD_INDEX = USAGE_PERIODS.length - 1

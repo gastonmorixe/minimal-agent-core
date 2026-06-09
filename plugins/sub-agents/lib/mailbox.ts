@@ -36,8 +36,19 @@ export function parseMailbox(text: string): MailMessage[] {
     if (!t) continue
     try {
       const o = JSON.parse(t)
-      if (o && typeof o.from === "string" && typeof o.to === "string" && typeof o.body === "string") {
-        out.push({ ts: String(o.ts ?? ""), from: o.from, to: o.to, kind: String(o.kind ?? "note"), body: o.body })
+      if (
+        o &&
+        typeof o.from === "string" &&
+        typeof o.to === "string" &&
+        typeof o.body === "string"
+      ) {
+        out.push({
+          ts: String(o.ts ?? ""),
+          from: o.from,
+          to: o.to,
+          kind: String(o.kind ?? "note"),
+          body: o.body,
+        })
       }
     } catch {
       // skip
@@ -51,7 +62,11 @@ export function parseMailbox(text: string): MailMessage[] {
  * own posts (so a reader sees its own thread). Optionally only those strictly
  * after `sinceIso`. Pure.
  */
-export function visibleTo(messages: readonly MailMessage[], me: string, sinceIso?: string): MailMessage[] {
+export function visibleTo(
+  messages: readonly MailMessage[],
+  me: string,
+  sinceIso?: string,
+): MailMessage[] {
   return messages.filter((m) => {
     if (sinceIso && !(m.ts > sinceIso)) return false
     return m.to === "*" || m.to === me || m.from === me

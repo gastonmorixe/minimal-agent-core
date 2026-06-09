@@ -54,6 +54,9 @@ describe("post + read round-trip", () => {
     postMessage(path, msg({ from: "A3", to: "*", body: "done with tests" }))
     const all = readMailbox(path)
     expect(all).toHaveLength(2)
-    expect(visibleTo(all, "A3").map((m) => m.body)).toEqual(["claiming parser.ts", "done with tests"])
+    expect(visibleTo(all, "A3").map((m) => m.body)).toEqual([
+      "claiming parser.ts",
+      "done with tests",
+    ])
   })
 })

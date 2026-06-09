@@ -11,6 +11,7 @@
  */
 
 import type { UsagePeriod, UsageReport } from "../../../src/usage-stats.ts"
+
 import { DEFAULT_PERIOD_INDEX } from "./overlay.ts"
 
 /**

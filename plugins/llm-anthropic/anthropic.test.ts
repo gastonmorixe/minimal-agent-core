@@ -32,8 +32,8 @@ import {
   systemMessage,
   userText,
 } from "../../src/llm/index.ts"
-
 import * as modelRegistry from "../../src/llm/model-registry.ts"
+
 import { anthropicAdapter, anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags, classifyRequest } from "./beta-flags.ts"
 import { applyBootstrapOverrides } from "./bootstrap.ts"
@@ -739,14 +739,19 @@ describe("validateAnthropicRequest — modality gating", () => {
     messages: [
       {
         role: "user",
-        content: [{ type: "image", source: { kind: "base64", mediaType: "image/png", data: "AA" } }],
+        content: [
+          { type: "image", source: { kind: "base64", mediaType: "image/png", data: "AA" } },
+        ],
       },
     ],
   })
   const audioReq = (id: string): CanonicalRequest => ({
     modelId: id,
     messages: [
-      { role: "user", content: [{ type: "audio", source: { kind: "base64", format: "wav", data: "AA" } }] },
+      {
+        role: "user",
+        content: [{ type: "audio", source: { kind: "base64", format: "wav", data: "AA" } }],
+      },
     ],
   })
   const fileReq = (id: string): CanonicalRequest => ({
@@ -808,7 +813,10 @@ describe("buildAnthropicRequestBody — image encoding", () => {
     const req: CanonicalRequest = {
       modelId: "claude-opus-4-8",
       messages: [
-        { role: "user", content: [{ type: "image", source: { kind: "url", url: "https://x/y.png" } }] },
+        {
+          role: "user",
+          content: [{ type: "image", source: { kind: "url", url: "https://x/y.png" } }],
+        },
       ],
     }
     const j = JSON.stringify(buildAnthropicRequestBody(req, resolveModel("claude-opus-4-8")))

@@ -49,7 +49,7 @@
 import type { ContentBlock } from "../../../src/client.ts"
 
 import type { Task } from "./parse.ts"
-import { TaskStore, type StoreDeps } from "./store.ts"
+import { type StoreDeps, TaskStore } from "./store.ts"
 
 // ---------------------------------------------------------------------------
 // Rendering

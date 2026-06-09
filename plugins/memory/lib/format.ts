@@ -115,10 +115,7 @@ export interface FormatListOptions {
  * Always emits a trailing newline so callers can `.write()` the output
  * directly without ad-hoc spacing.
  */
-export function formatList(
-  bullets: readonly Bullet[],
-  opts: FormatListOptions,
-): string {
+export function formatList(bullets: readonly Bullet[], opts: FormatListOptions): string {
   const max = opts.bodyMax ?? LIST_PREVIEW_MAX
   const total = opts.total ?? bullets.length
   const cnt = bullets.length

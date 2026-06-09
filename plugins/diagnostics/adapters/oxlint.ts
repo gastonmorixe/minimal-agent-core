@@ -32,9 +32,10 @@ export function adaptOxlint(stdout: string): Finding[] {
     const rec = d as Record<string, unknown>
     const message = typeof rec.message === "string" ? rec.message.split("\n")[0] : ""
     if (!message) continue
-    const span = Array.isArray(rec.labels) && rec.labels[0] && typeof rec.labels[0] === "object"
-      ? ((rec.labels[0] as Record<string, unknown>).span as Record<string, unknown> | undefined)
-      : undefined
+    const span =
+      Array.isArray(rec.labels) && rec.labels[0] && typeof rec.labels[0] === "object"
+        ? ((rec.labels[0] as Record<string, unknown>).span as Record<string, unknown> | undefined)
+        : undefined
     const finding: Finding = {
       source: "oxlint",
       severity: severityOf(rec.severity),

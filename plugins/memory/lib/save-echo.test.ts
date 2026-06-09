@@ -16,6 +16,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { EventBus } from "../../../src/plugins/event-bus.ts"
+
 import {
   isMemorySavedPayload,
   MEMORY_SAVED,
@@ -30,15 +31,11 @@ import {
 
 describe("isMemorySavedPayload", () => {
   it("accepts a well-formed payload", () => {
-    expect(
-      isMemorySavedPayload({ scope: "project", id: "abc", body: "hi" }),
-    ).toBe(true)
+    expect(isMemorySavedPayload({ scope: "project", id: "abc", body: "hi" })).toBe(true)
   })
 
   it("accepts evicted as number", () => {
-    expect(
-      isMemorySavedPayload({ scope: "short-term", id: "1", body: "x", evicted: 1 }),
-    ).toBe(true)
+    expect(isMemorySavedPayload({ scope: "short-term", id: "1", body: "x", evicted: 1 })).toBe(true)
   })
 
   it("accepts all three scopes", () => {
@@ -69,9 +66,7 @@ describe("isMemorySavedPayload", () => {
   })
 
   it("rejects non-number evicted", () => {
-    expect(
-      isMemorySavedPayload({ scope: "project", id: "x", body: "y", evicted: "1" }),
-    ).toBe(false)
+    expect(isMemorySavedPayload({ scope: "project", id: "x", body: "y", evicted: "1" })).toBe(false)
   })
 })
 
@@ -206,7 +201,9 @@ describe("SaveEchoCollector.enqueue", () => {
 describe("renderEcho", () => {
   it("emits scope + id + body for short bodies", () => {
     const out = renderEcho({ scope: "project", id: "abc-1234", body: "hi" })
-    expect(out).toBe('<ma::agent::memory-saved scope="project" id="abc-1234">hi</ma::agent::memory-saved>')
+    expect(out).toBe(
+      '<ma::agent::memory-saved scope="project" id="abc-1234">hi</ma::agent::memory-saved>',
+    )
   })
 
   it("truncates bodies longer than 60 chars with …", () => {
@@ -230,12 +227,10 @@ describe("renderEcho", () => {
   })
 
   it("omits evicted attribute when 0 or absent", () => {
-    expect(
-      renderEcho({ scope: "short-term", id: "1", body: "x", evicted: 0 }),
-    ).not.toContain("evicted")
-    expect(
-      renderEcho({ scope: "short-term", id: "1", body: "x" }),
-    ).not.toContain("evicted")
+    expect(renderEcho({ scope: "short-term", id: "1", body: "x", evicted: 0 })).not.toContain(
+      "evicted",
+    )
+    expect(renderEcho({ scope: "short-term", id: "1", body: "x" })).not.toContain("evicted")
   })
 
   it("escapes < in body to prevent tag confusion", () => {
@@ -280,8 +275,7 @@ describe("end-to-end shape", () => {
     expect(blocks).toEqual([
       {
         type: "text",
-        text:
-          '<ma::agent::memory-saved scope="project" id="lwq8tg-a8f3">Project memory body example</ma::agent::memory-saved>',
+        text: '<ma::agent::memory-saved scope="project" id="lwq8tg-a8f3">Project memory body example</ma::agent::memory-saved>',
       },
     ])
 

@@ -21,7 +21,10 @@ function tailLog(path: string, n: number): string | null {
   if (!existsSync(path)) return null
   try {
     const text = readFileSync(path, "utf-8").replace(/\x1b\[[0-9;]*m/g, "")
-    const lines = text.split("\n").map((l) => l.trimEnd()).filter((l) => l.length > 0)
+    const lines = text
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.length > 0)
     if (lines.length === 0) return null
     return lines.slice(-n).join("\n")
   } catch {
@@ -34,12 +37,19 @@ export default async function agentResult(ctx: TUIContext): Promise<TUIResult> {
     return { kind: "tool_result", content: "AgentResult: unexpected trigger", is_error: true }
   }
   const id = parseIdArg(ctx.trigger.input)
-  if (!id) return { kind: "tool_result", content: "AgentResult: an `id` is required.", is_error: true }
+  if (!id)
+    return { kind: "tool_result", content: "AgentResult: an `id` is required.", is_error: true }
 
   const store = storeFromCtx(ctx)
-  if (!store) return { kind: "tool_result", content: "AgentResult: no session id available.", is_error: true }
+  if (!store)
+    return { kind: "tool_result", content: "AgentResult: no session id available.", is_error: true }
   const rec = store.get(id)
-  if (!rec) return { kind: "tool_result", content: `AgentResult: unknown sub-agent "${id}".`, is_error: true }
+  if (!rec)
+    return {
+      kind: "tool_result",
+      content: `AgentResult: unknown sub-agent "${id}".`,
+      is_error: true,
+    }
 
   let content = resultText(rec)
   // Surface the worker's log tail whenever the lead would otherwise be blind:

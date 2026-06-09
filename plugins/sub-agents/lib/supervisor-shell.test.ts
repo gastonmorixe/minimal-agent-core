@@ -8,7 +8,7 @@ import { readMesh } from "./presence.ts"
 import { type ProbeDeps } from "./spawn.ts"
 import { SubagentStore } from "./store.ts"
 import { runSupervisor, type SupervisorDeps } from "./supervisor-shell.ts"
-import { type ResultDigest, sessionId, type SubagentRecord, subagentId } from "./types.ts"
+import { type ResultDigest, type SubagentRecord, sessionId, subagentId } from "./types.ts"
 
 const LEAD = "11111111-1111-4111-8111-111111111111"
 const RESULT: ResultDigest = { short: "found it", tokens: 4000, tools: 9 }
@@ -24,7 +24,12 @@ function running(id: string, pid: number): SubagentRecord {
     isolation: "fresh",
     workspace: "inherit-cwd",
     spawnedAt: "2026-05-30T11:59:00.000Z",
-    status: { kind: "running", pid, startedAt: "2026-05-30T11:59:00.000Z", progress: { tools: 0, tokens: 0 } },
+    status: {
+      kind: "running",
+      pid,
+      startedAt: "2026-05-30T11:59:00.000Z",
+      progress: { tools: 0, tokens: 0 },
+    },
     depth: 1,
     leadSid: sessionId(LEAD),
   }
@@ -77,7 +82,12 @@ describe("runSupervisor", () => {
     const deps = makeDeps(store, {
       pidAlive: () => true,
       readResult: () => undefined,
-      readProgress: () => ({ tools: 9, tokens: 8200, lastTool: "Edit", lastActivity: "Edit: src/x.ts" }),
+      readProgress: () => ({
+        tools: 9,
+        tokens: 8200,
+        lastTool: "Edit",
+        lastActivity: "Edit: src/x.ts",
+      }),
     })
     runSupervisor(deps)
     const st = store.get("A1")?.status
@@ -92,7 +102,11 @@ describe("runSupervisor", () => {
   it("reaps a finished worker: persists done, emits report+exit, injects a digest", () => {
     const store = new SubagentStore(LEAD, { dir })
     store.upsert(running("A1", 4242))
-    const deps = makeDeps(store, { pidAlive: () => false, readResult: () => RESULT, exitCode: () => 0 })
+    const deps = makeDeps(store, {
+      pidAlive: () => false,
+      readResult: () => RESULT,
+      exitCode: () => 0,
+    })
     const widget = runSupervisor(deps)
     expect(store.get("A1")?.status.kind).toBe("done")
     const channels = deps.emitted.map((e) => e.channel)
@@ -110,12 +124,16 @@ describe("runSupervisor", () => {
     const store = new SubagentStore(LEAD, { dir })
     store.upsert(running("A1", 4242))
     const presenceDir = `${dir}/presence`
-    const deps = makeDeps(store, { pidAlive: () => true, readResult: () => undefined }, {
-      presenceDir,
-      leadPid: 999,
-      leadModel: "claude-opus-4-8",
-      leadCwd: "/repo",
-    })
+    const deps = makeDeps(
+      store,
+      { pidAlive: () => true, readResult: () => undefined },
+      {
+        presenceDir,
+        leadPid: 999,
+        leadModel: "claude-opus-4-8",
+        leadCwd: "/repo",
+      },
+    )
     runSupervisor(deps)
     const mesh = readMesh(presenceDir)
     expect(mesh.get(LEAD)?.role).toBe("lead")
@@ -128,7 +146,11 @@ describe("runSupervisor", () => {
   it("kills a budget-tripped worker (deadline) and marks it failed", () => {
     const store = new SubagentStore(LEAD, { dir })
     const r = running("A1", 4242)
-    store.upsert({ ...r, status: { ...r.status, startedAt: "2026-05-30T11:58:00.000Z" }, budget: { deadlineSec: 60 } })
+    store.upsert({
+      ...r,
+      status: { ...r.status, startedAt: "2026-05-30T11:58:00.000Z" },
+      budget: { deadlineSec: 60 },
+    })
     const deps = makeDeps(store, { pidAlive: () => true, readResult: () => undefined })
     runSupervisor(deps)
     expect(store.get("A1")?.status.kind).toBe("failed")

@@ -13,6 +13,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { TUIContext } from "../../../src/plugins/types.ts"
+
 import { serviceDepsFromCtx } from "./handler-deps.ts"
 
 const LEAD = "11111111-1111-4111-8111-111111111111"
@@ -51,7 +52,10 @@ describe("serviceDepsFromCtx model gating", () => {
 
   it("an explicit env model override still wins over auto-tiering", () => {
     const deps = serviceDepsFromCtx(
-      makeCtx({ MINIMAL_AGENT_SUBAGENT_AUTO_TIER: "1", MINIMAL_AGENT_SUBAGENT_MODEL: "claude-opus-4-8" }),
+      makeCtx({
+        MINIMAL_AGENT_SUBAGENT_AUTO_TIER: "1",
+        MINIMAL_AGENT_SUBAGENT_MODEL: "claude-opus-4-8",
+      }),
     )
     // Override short-circuits the role mapper so nothing can downgrade the pick.
     expect(deps?.recommendForRole).toBeUndefined()

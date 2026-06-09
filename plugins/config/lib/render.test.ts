@@ -7,12 +7,26 @@
 import { describe, expect, it } from "bun:test"
 
 import { stripSgr } from "./palette.ts"
-import { render, type RenderModel, type RenderRow } from "./render.ts"
+import { type RenderModel, type RenderRow, render } from "./render.ts"
 
 const rows: RenderRow[] = [
   { type: "section", label: "Model & reasoning" },
-  { type: "field", label: "model", valueText: "(cli/env/default)", dirty: false, unset: true, affordance: "⏎ edit" },
-  { type: "field", label: "effort", valueText: "high", dirty: true, unset: false, affordance: "←/→" },
+  {
+    type: "field",
+    label: "model",
+    valueText: "(cli/env/default)",
+    dirty: false,
+    unset: true,
+    affordance: "⏎ edit",
+  },
+  {
+    type: "field",
+    label: "effort",
+    valueText: "high",
+    dirty: true,
+    unset: false,
+    affordance: "←/→",
+  },
   { type: "action", label: "Save", tone: "save" },
   { type: "action", label: "Close", tone: "close" },
 ]
@@ -99,7 +113,14 @@ describe("render — error + width", () => {
   it("windows long row lists and shows a 'more' affordance", () => {
     const many: RenderRow[] = [{ type: "section", label: "S" }]
     for (let i = 0; i < 20; i++) {
-      many.push({ type: "field", label: `f${i}`, valueText: "x", dirty: false, unset: false, affordance: "" })
+      many.push({
+        type: "field",
+        label: `f${i}`,
+        valueText: "x",
+        dirty: false,
+        unset: false,
+        affordance: "",
+      })
     }
     const out = plain(render(model({ rows: many, maxRows: 5, selectedSelectableIndex: 0 })))
     expect(out).toMatch(/↓ \d+ more/)

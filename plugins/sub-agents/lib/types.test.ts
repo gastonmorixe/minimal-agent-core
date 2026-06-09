@@ -7,10 +7,10 @@ import {
   isTerminal,
   ok,
   type Progress,
-  sessionId,
-  subagentId,
   type SubagentRecord,
   type SubagentStatus,
+  sessionId,
+  subagentId,
 } from "./types.ts"
 
 const PROG: Progress = { tools: 3, tokens: 1000, lastTool: "Grep" }
@@ -43,7 +43,9 @@ describe("isTerminal / isActive", () => {
   it("queued and running are active, the rest terminal", () => {
     expect(isActive({ kind: "queued" })).toBe(true)
     expect(isActive({ kind: "running", pid: 1, startedAt: "t", progress: PROG })).toBe(true)
-    expect(isTerminal({ kind: "done", endedAt: "t", result: { short: "", tokens: 0, tools: 0 } })).toBe(true)
+    expect(
+      isTerminal({ kind: "done", endedAt: "t", result: { short: "", tokens: 0, tools: 0 } }),
+    ).toBe(true)
     expect(isTerminal({ kind: "failed", endedAt: "t", error: "x" })).toBe(true)
     expect(isTerminal({ kind: "stopped", endedAt: "t" })).toBe(true)
   })

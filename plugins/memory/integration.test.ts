@@ -20,17 +20,18 @@
  * tool. If any seam breaks, this test catches it.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { setGlobalEventBus } from "../../src/global-bus.ts"
 import { PluginLoader } from "../../src/plugins/loader.ts"
 
 import { SaveEchoCollector } from "./lib/save-echo.ts"
-import { MemoryStore, projectMemoryPath, shortTermMemoryPath } from "./lib/store.ts"
 import { ShortTermSnapshot } from "./lib/short-term-snapshot.ts"
+import { MemoryStore, projectMemoryPath, shortTermMemoryPath } from "./lib/store.ts"
 
 const PROJECT_ROOT = resolve(__dirname, "../..")
 

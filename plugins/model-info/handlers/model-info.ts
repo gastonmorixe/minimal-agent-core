@@ -57,7 +57,9 @@ function report(info: ModelInfoSnapshot, ctx: TUIContext): string {
       : null,
     `Tools: user-defined=${info.tools.userDefined}, parallel=${info.tools.parallel}${info.serverTools.length ? `, server=[${info.serverTools.join(", ")}]` : ""}`,
     `Pricing /Mtok (USD): in $${p.inputPerMTok}, out $${p.outputPerMTok}, cache-write $${p.cacheWritePerMTok}, cache-read $${p.cacheReadPerMTok}`,
-    info.resolved ? null : "(note: this model id is not registered; values are conservative defaults)",
+    info.resolved
+      ? null
+      : "(note: this model id is not registered; values are conservative defaults)",
     ctx.agent ? `Session: ${ctx.agent.sessionId} · agent v${ctx.agent.version}` : null,
     `Working directory: ${ctx.cwd}`,
   ].filter(Boolean) as string[]

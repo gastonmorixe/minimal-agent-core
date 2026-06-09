@@ -8,12 +8,15 @@
  * load config, build chain, run, format, then return TUIResult.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import handler from "./web_search.ts"
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+
+import handler from "./web_search.ts"
 
 let tmpDir: string
 let prevConfigEnv: string | undefined
@@ -140,8 +143,12 @@ describe("WebSearch handler — input validation", () => {
 describe("WebSearch handler — happy path", () => {
   test("text format (default) — content is plain, display has ANSI", async () => {
     writeConfig()
-    const restore = patchFetch(() =>
-      new Response(JSON.stringify(fakeBraveResp), { status: 200, headers: { "content-type": "application/json" } }),
+    const restore = patchFetch(
+      () =>
+        new Response(JSON.stringify(fakeBraveResp), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     )
     try {
       const r = (await handler(makeCtx({ query: "rust async runtime" }))) as Extract<
@@ -162,14 +169,17 @@ describe("WebSearch handler — happy path", () => {
 
   test("json format — content is parseable JSON, display still ANSI", async () => {
     writeConfig()
-    const restore = patchFetch(() =>
-      new Response(JSON.stringify(fakeBraveResp), { status: 200, headers: { "content-type": "application/json" } }),
+    const restore = patchFetch(
+      () =>
+        new Response(JSON.stringify(fakeBraveResp), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     )
     try {
-      const r = (await handler(makeCtx({ query: "rust async runtime", format: "json" }))) as Extract<
-        TUIResult,
-        { kind: "tool_result" }
-      >
+      const r = (await handler(
+        makeCtx({ query: "rust async runtime", format: "json" }),
+      )) as Extract<TUIResult, { kind: "tool_result" }>
       expect(r.is_error).toBeUndefined()
       const j = JSON.parse(r.content)
       expect(j.provider).toBe("brave")
@@ -187,7 +197,9 @@ describe("WebSearch handler — happy path", () => {
     let observedUrl = ""
     const restore = patchFetch((url) => {
       observedUrl = url
-      return new Response(JSON.stringify({ results: [], query: { original: "x" } }), { status: 200 })
+      return new Response(JSON.stringify({ results: [], query: { original: "x" } }), {
+        status: 200,
+      })
     })
     try {
       const r = (await handler(makeCtx({ query: "x", type: "news" }))) as Extract<
@@ -214,7 +226,10 @@ describe("WebSearch handler — error path", () => {
     process.env.MINIMAL_AGENT_CONFIG = cfgPath
     delete process.env.BRAVE_API_KEY
 
-    const r = (await handler(makeCtx({ query: "x" }))) as Extract<TUIResult, { kind: "tool_result" }>
+    const r = (await handler(makeCtx({ query: "x" }))) as Extract<
+      TUIResult,
+      { kind: "tool_result" }
+    >
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("brave: not configured")
     expect(r.content).toContain("BRAVE_API_KEY")
@@ -222,9 +237,14 @@ describe("WebSearch handler — error path", () => {
 
   test("HTTP 500 from provider → all-failed", async () => {
     writeConfig()
-    const restore = patchFetch(() => new Response("boom", { status: 500, statusText: "Server Error" }))
+    const restore = patchFetch(
+      () => new Response("boom", { status: 500, statusText: "Server Error" }),
+    )
     try {
-      const r = (await handler(makeCtx({ query: "x" }))) as Extract<TUIResult, { kind: "tool_result" }>
+      const r = (await handler(makeCtx({ query: "x" }))) as Extract<
+        TUIResult,
+        { kind: "tool_result" }
+      >
       expect(r.is_error).toBe(true)
       expect(r.content).toMatch(/HTTP 500/)
     } finally {
@@ -239,7 +259,10 @@ describe("WebSearch handler — error path", () => {
       JSON.stringify({ plugins: { "web-search": { providers: ["nonexistent"] } } }),
     )
     process.env.MINIMAL_AGENT_CONFIG = cfgPath
-    const r = (await handler(makeCtx({ query: "x" }))) as Extract<TUIResult, { kind: "tool_result" }>
+    const r = (await handler(makeCtx({ query: "x" }))) as Extract<
+      TUIResult,
+      { kind: "tool_result" }
+    >
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("no providers configured")
   })

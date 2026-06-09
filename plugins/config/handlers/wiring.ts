@@ -21,7 +21,9 @@ import type { FsDeps } from "../lib/model.ts"
  * `env` is the plugin-scoped env (handlers pass `ctx.env`); falls back to
  * `process.env` for the home dir.
  */
-export function resolveConfigPath(env: Record<string, string> = process.env as Record<string, string>): string {
+export function resolveConfigPath(
+  env: Record<string, string> = process.env as Record<string, string>,
+): string {
   const override = env.MINIMAL_AGENT_CONFIG
   if (override) return override
   const home = env.HOME || homedir()

@@ -174,8 +174,7 @@ export function renderEcho(p: MemorySavedPayload): string {
   // here too in case a tool emits an event without round-tripping
   // through the store.
   const oneLine = p.body.replace(/\s+/g, " ").trim()
-  const preview =
-    oneLine.length > PREVIEW_MAX ? `${oneLine.slice(0, PREVIEW_MAX - 1)}…` : oneLine
+  const preview = oneLine.length > PREVIEW_MAX ? `${oneLine.slice(0, PREVIEW_MAX - 1)}…` : oneLine
   // Escape `<` and `>` in the preview so it can't be mis-parsed as a
   // child tag inside `<ma::agent::memory-saved>…</ma::agent::memory-saved>`. We don't bother
   // with `&` (would have to escape only those that aren't already part

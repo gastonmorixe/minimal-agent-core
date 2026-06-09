@@ -43,7 +43,6 @@
  */
 
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
-
 import {
   bulletsToJson,
   bulletToJson,
@@ -229,9 +228,7 @@ function makeStore(
 // Default export: tool dispatch
 // ---------------------------------------------------------------------------
 
-export default async function memoryToolHandler(
-  ctx: TUIContext,
-): Promise<TUIResult> {
+export default async function memoryToolHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return {
       kind: "tool_result",
@@ -515,11 +512,7 @@ function doRemove(
   }
 }
 
-function doClear(
-  store: MemoryStore,
-  scope: StoreKind,
-  format: "text" | "json",
-): TUIResult {
+function doClear(store: MemoryStore, scope: StoreKind, format: "text" | "json"): TUIResult {
   // Store.clear() throws for global/project. Convert to a clean error.
   if (scope !== "short-term") {
     return {

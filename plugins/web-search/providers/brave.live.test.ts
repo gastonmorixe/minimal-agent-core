@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+
 import { braveFactory } from "./brave.ts"
 import type { SearchOptions } from "./types.ts"
 

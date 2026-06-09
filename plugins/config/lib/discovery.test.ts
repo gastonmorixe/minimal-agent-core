@@ -32,41 +32,40 @@ function fakeFs(roots: string[], tree: Record<string, string>): DiscoverDeps {
 
 describe("discoverPlugins", () => {
   it("finds plugins with a valid manifest id across roots", () => {
-    const deps = fakeFs(
-      ["/proj/.agents/plugins", "/home/.agents/plugins"],
-      {
-        "/proj/.agents/plugins/alpha/manifest.json": JSON.stringify({ id: "alpha", name: "Alpha", description: "Does A." }),
-        "/home/.agents/plugins/beta/manifest.json": JSON.stringify({ id: "beta", name: "Beta", description: "Does B. More." }),
-      },
-    )
+    const deps = fakeFs(["/proj/.agents/plugins", "/home/.agents/plugins"], {
+      "/proj/.agents/plugins/alpha/manifest.json": JSON.stringify({
+        id: "alpha",
+        name: "Alpha",
+        description: "Does A.",
+      }),
+      "/home/.agents/plugins/beta/manifest.json": JSON.stringify({
+        id: "beta",
+        name: "Beta",
+        description: "Does B. More.",
+      }),
+    })
     const found = discoverPlugins(deps)
     expect(found.map((p) => p.id)).toEqual(["alpha", "beta"])
     expect(found[0]).toMatchObject({ id: "alpha", name: "Alpha" })
   })
 
   it("first-seen id wins across roots (precedence by root order)", () => {
-    const deps = fakeFs(
-      ["/proj/.agents/plugins", "/home/.agents/plugins"],
-      {
-        "/proj/.agents/plugins/dup/manifest.json": JSON.stringify({ id: "dup", name: "Project" }),
-        "/home/.agents/plugins/dup/manifest.json": JSON.stringify({ id: "dup", name: "Home" }),
-      },
-    )
+    const deps = fakeFs(["/proj/.agents/plugins", "/home/.agents/plugins"], {
+      "/proj/.agents/plugins/dup/manifest.json": JSON.stringify({ id: "dup", name: "Project" }),
+      "/home/.agents/plugins/dup/manifest.json": JSON.stringify({ id: "dup", name: "Home" }),
+    })
     const found = discoverPlugins(deps)
     expect(found).toHaveLength(1)
     expect(found[0]!.name).toBe("Project")
   })
 
   it("skips dirs without a manifest, with bad JSON, or without an id", () => {
-    const deps = fakeFs(
-      ["/r"],
-      {
-        "/r/nomani/readme.md": "x",
-        "/r/badjson/manifest.json": "{ not json",
-        "/r/noid/manifest.json": JSON.stringify({ name: "x" }),
-        "/r/ok/manifest.json": JSON.stringify({ id: "ok" }),
-      },
-    )
+    const deps = fakeFs(["/r"], {
+      "/r/nomani/readme.md": "x",
+      "/r/badjson/manifest.json": "{ not json",
+      "/r/noid/manifest.json": JSON.stringify({ name: "x" }),
+      "/r/ok/manifest.json": JSON.stringify({ id: "ok" }),
+    })
     expect(discoverPlugins(deps).map((p) => p.id)).toEqual(["ok"])
   })
 
@@ -81,7 +80,14 @@ describe("discoverPlugins", () => {
 describe("pluginFields", () => {
   it("emits a boolean field bound to plugins.<id>.enabled", () => {
     const fields = pluginFields([
-      { id: "alpha", name: "Alpha", description: "Does A. Detail.", dir: "/d", root: "/r", manifestDisabled: false },
+      {
+        id: "alpha",
+        name: "Alpha",
+        description: "Does A. Detail.",
+        dir: "/d",
+        root: "/r",
+        manifestDisabled: false,
+      },
     ])
     expect(fields).toHaveLength(1)
     expect(fields[0]).toMatchObject({

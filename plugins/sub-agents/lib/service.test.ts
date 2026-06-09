@@ -12,7 +12,10 @@ import { sessionId } from "./types.ts"
 const LEAD = sessionId("11111111-1111-4111-8111-111111111111")
 const FIXED_SID = "9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"
 
-function makeDeps(dir: string, over: Partial<ServiceDeps> = {}): ServiceDeps & { launched: string[][] } {
+function makeDeps(
+  dir: string,
+  over: Partial<ServiceDeps> = {},
+): ServiceDeps & { launched: string[][] } {
   const launched: string[][] = []
   const spawnDeps: SpawnDeps = {
     launch: (argv) => {
@@ -86,7 +89,9 @@ describe("spawnAgent", () => {
       systemPrompt: "You are a strict reviewer.",
       isolation: "fresh",
     }
-    const deps = makeDeps(dir, { resolveDefinition: (n) => (n === "reviewer" ? reviewer : undefined) })
+    const deps = makeDeps(dir, {
+      resolveDefinition: (n) => (n === "reviewer" ? reviewer : undefined),
+    })
     const r = spawnAgent({ task: "review the diff", agent: "reviewer" }, deps)
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -206,7 +211,11 @@ describe("stopAgent", () => {
 
   it("is a no-op on an unknown id (err) and idempotent on a terminal worker", () => {
     const deps = makeDeps(dir)
-    const miss = stopAgent("ZZ", undefined, { store: deps.store, kill: () => {}, now: () => new Date() })
+    const miss = stopAgent("ZZ", undefined, {
+      store: deps.store,
+      kill: () => {},
+      now: () => new Date(),
+    })
     expect(miss.ok).toBe(false)
   })
 })

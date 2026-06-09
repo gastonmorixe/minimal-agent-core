@@ -7,6 +7,7 @@
  * the user would actually produce.
  */
 import { describe, expect, it } from "bun:test"
+
 import { createRecall } from "./recall.ts"
 
 const seed = (...texts: string[]) => texts.map((text) => ({ text }))

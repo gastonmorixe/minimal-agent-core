@@ -26,6 +26,7 @@
 
 import { PALETTE } from "../../../src/palette.ts"
 import { displayWidth } from "../../../src/term-width.ts"
+
 import { GLYPH_TIME, relativeTime } from "./format.ts"
 import { nextFireMs } from "./scheduler.ts"
 import type { CronEntry } from "./store.ts"
@@ -52,7 +53,9 @@ export function formatStatusRow(
   if (entries.length === 0) return null
 
   const sorted = [...entries].sort(
-    (a, b) => (nextFireMs(a, now) ?? Number.POSITIVE_INFINITY) - (nextFireMs(b, now) ?? Number.POSITIVE_INFINITY),
+    (a, b) =>
+      (nextFireMs(a, now) ?? Number.POSITIVE_INFINITY) -
+      (nextFireMs(b, now) ?? Number.POSITIVE_INFINITY),
   )
   const soonest = sorted[0]!
   const soonestMs = nextFireMs(soonest, now)

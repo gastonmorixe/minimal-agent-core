@@ -32,7 +32,9 @@ function messageOf(rec: Record<string, unknown>): string {
   if (typeof m === "string" && m.length > 0) return m
   if (Array.isArray(m)) {
     const joined = m
-      .map((seg) => (seg && typeof seg === "object" ? String((seg as { content?: unknown }).content ?? "") : ""))
+      .map((seg) =>
+        seg && typeof seg === "object" ? String((seg as { content?: unknown }).content ?? "") : "",
+      )
       .join("")
     if (joined.length > 0) return joined
   }
@@ -66,7 +68,9 @@ export function adaptBiome(stdout: string): Finding[] {
       // biome reports whole-file findings (e.g. `format`) at 0:0, which isn't a
       // valid 1-based position : omit the location so it doesn't render as 0:0.
       ...(start && typeof start.line === "number" && start.line > 0 ? { line: start.line } : {}),
-      ...(start && typeof start.column === "number" && start.column > 0 ? { col: start.column } : {}),
+      ...(start && typeof start.column === "number" && start.column > 0
+        ? { col: start.column }
+        : {}),
       ...(loc && typeof loc.path === "string" ? { path: loc.path } : {}),
     }
     out.push(finding)

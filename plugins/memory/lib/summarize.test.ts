@@ -16,8 +16,8 @@ import {
   DEFAULT_TIMEOUT_MS,
   MAX_OUTPUT_RATIO,
   MIN_OUTPUT_RATIO,
-  summarize,
   SummarizeError,
+  summarize,
 } from "./summarize.ts"
 
 const FAKE_AUTH: AuthResult = { type: "oauth", token: "test-token", accountUuid: "test-account" }
@@ -48,10 +48,14 @@ const LONG_ENOUGH_RESPONSE =
 describe("summarize — happy path", () => {
   it("sends a single user message with the memoryMd as text", async () => {
     const { sendFn, calls } = captureSendArgs(LONG_ENOUGH_RESPONSE)
-    await summarize(INPUT_600, { model: "claude-haiku-test", scope: "project" }, {
-      authProvider: async () => FAKE_AUTH,
-      sendFn,
-    })
+    await summarize(
+      INPUT_600,
+      { model: "claude-haiku-test", scope: "project" },
+      {
+        authProvider: async () => FAKE_AUTH,
+        sendFn,
+      },
+    )
     expect(calls.length).toBe(1)
     const sent = calls[0]
     expect(sent.messages.length).toBe(1)
@@ -63,26 +67,35 @@ describe("summarize — happy path", () => {
 
   it("uses the configured model", async () => {
     const { sendFn, calls } = captureSendArgs(LONG_ENOUGH_RESPONSE)
-    await summarize(INPUT_600, { model: "claude-custom", scope: "project" }, {
-      authProvider: async () => FAKE_AUTH,
-      sendFn,
-    })
+    await summarize(
+      INPUT_600,
+      { model: "claude-custom", scope: "project" },
+      {
+        authProvider: async () => FAKE_AUTH,
+        sendFn,
+      },
+    )
     expect(calls[0].model).toBe("claude-custom")
   })
 
   it("sends thinking:false and requestType:title for cheap calls", async () => {
     const { sendFn, calls } = captureSendArgs(LONG_ENOUGH_RESPONSE)
-    await summarize(INPUT_600, { model: "claude-haiku-test", scope: "project" }, {
-      authProvider: async () => FAKE_AUTH,
-      sendFn,
-    })
+    await summarize(
+      INPUT_600,
+      { model: "claude-haiku-test", scope: "project" },
+      {
+        authProvider: async () => FAKE_AUTH,
+        sendFn,
+      },
+    )
     expect(calls[0].thinking).toBe(false)
     expect(calls[0].requestType).toBe("title")
     expect(calls[0].stream).toBe(false)
   })
 
   it("returns the trimmed LLM output", async () => {
-    const body = "## Cluster A\n- takeaway. Sources: #a, #b\n## Cluster B\n- another. Sources: #c, #d\n## Cluster C\n- third. Sources: #e, #f, #g"
+    const body =
+      "## Cluster A\n- takeaway. Sources: #a, #b\n## Cluster B\n- another. Sources: #c, #d\n## Cluster C\n- third. Sources: #e, #f, #g"
     const response = "  \n" + body + "\n  \n"
     const { sendFn } = captureSendArgs(response)
     const out = await summarize(

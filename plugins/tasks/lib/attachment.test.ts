@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { TasksAttachment, renderAttachmentBody } from "./attachment.ts"
+import { renderAttachmentBody, TasksAttachment } from "./attachment.ts"
 import { TaskStore } from "./store.ts"
 
 // ---------------------------------------------------------------------------

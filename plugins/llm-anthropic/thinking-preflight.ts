@@ -189,10 +189,7 @@ export function buildMismatchIssue(
   }
 }
 
-function buildDetailParagraph(
-  targetBase: string,
-  signers: Array<[string, number]>,
-): string {
+function buildDetailParagraph(targetBase: string, signers: Array<[string, number]>): string {
   const signerSummary =
     signers.length === 1
       ? `${signers[0]?.[0]} (${signers[0]?.[1]} blocks)`

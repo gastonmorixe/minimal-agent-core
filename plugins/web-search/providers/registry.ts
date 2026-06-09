@@ -19,13 +19,9 @@
  */
 
 import type { WebSearchConfig } from "../config.ts"
+
 import { braveFactory } from "./brave.ts"
-import type {
-  ProviderFactory,
-  SearchOptions,
-  SearchResponse,
-  WebSearchProvider,
-} from "./types.ts"
+import type { ProviderFactory, SearchOptions, SearchResponse, WebSearchProvider } from "./types.ts"
 import { WebSearchProviderError } from "./types.ts"
 
 /**

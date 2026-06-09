@@ -4,10 +4,13 @@
  * Black-box: drive `run()` with argv arrays and assert exit codes +
  * stdout/stderr output. Reuses the namespace env to sandbox files.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
 import { existsSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
 import { parseArgs, run, UsageError } from "./cli.ts"
 import {
   _clearAll,

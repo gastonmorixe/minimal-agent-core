@@ -64,9 +64,11 @@ interface ModelBits {
 }
 
 function reasoningOf(t: { adaptive: boolean; extended: boolean; interleaved: boolean }): string[] {
-  return [t.adaptive && "adaptive", t.extended && "extended", t.interleaved && "interleaved"].filter(
-    Boolean,
-  ) as string[]
+  return [
+    t.adaptive && "adaptive",
+    t.extended && "extended",
+    t.interleaved && "interleaved",
+  ].filter(Boolean) as string[]
 }
 
 /**

@@ -35,7 +35,9 @@ const taskLink: EventHandler = (ctx) => {
     if (p.status === "done") {
       store.done(p.taskId)
     } else {
-      const why = p.reason ? `${p.reason}${p.bySubagent ? ` (${p.bySubagent})` : ""}` : `stopped by ${p.bySubagent ?? "sub-agent"}`
+      const why = p.reason
+        ? `${p.reason}${p.bySubagent ? ` (${p.bySubagent})` : ""}`
+        : `stopped by ${p.bySubagent ?? "sub-agent"}`
       store.setStatus(p.taskId, "canceled", why)
     }
   } catch {

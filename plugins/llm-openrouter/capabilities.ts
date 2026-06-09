@@ -27,7 +27,13 @@ export const CAPS_OPENROUTER_CHAT: Capabilities = {
   acceptsSeed: true,
   acceptsStopSequences: true,
   speedFast: false,
-  caching: { explicit: false, automatic: true, ttls: [], minPrefixTokens: 1024, reportsCacheHits: true },
+  caching: {
+    explicit: false,
+    automatic: true,
+    ttls: [],
+    minPrefixTokens: 1024,
+    reportsCacheHits: true,
+  },
   tools: {
     userDefined: true,
     parallel: true,

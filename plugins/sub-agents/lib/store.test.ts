@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { nextId, parseRecords, serializeRecords, SubagentStore } from "./store.ts"
-import { sessionId, type SubagentRecord, subagentId } from "./types.ts"
+import { nextId, parseRecords, SubagentStore, serializeRecords } from "./store.ts"
+import { type SubagentRecord, sessionId, subagentId } from "./types.ts"
 
 function rec(id: string): SubagentRecord {
   return {

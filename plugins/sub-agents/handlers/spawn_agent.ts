@@ -21,7 +21,11 @@ export default async function spawn(ctx: TUIContext): Promise<TUIResult> {
 
   const deps = serviceDepsFromCtx(ctx)
   if (!deps) {
-    return { kind: "tool_result", content: "SpawnAgent: no session id available; cannot spawn.", is_error: true }
+    return {
+      kind: "tool_result",
+      content: "SpawnAgent: no session id available; cannot spawn.",
+      is_error: true,
+    }
   }
 
   const r = spawnAgent(parsed.value, deps)

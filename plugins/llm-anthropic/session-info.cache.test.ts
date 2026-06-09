@@ -55,9 +55,7 @@ describe("fetchAnthropicSessionInfo (cache-only)", () => {
 
   it("surfaces overage even when no quota windows are present", async () => {
     setLastRateLimits(
-      new Map<string, string>([
-        ["anthropic-ratelimit-unified-overage-status", "allowed"],
-      ]),
+      new Map<string, string>([["anthropic-ratelimit-unified-overage-status", "allowed"]]),
     )
     const info = await fetchAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
     expect(info!.quota?.overage).toEqual({ active: true })
@@ -88,9 +86,7 @@ describe("primeAnthropicSessionInfo", () => {
     // map (an overage entry) so `setLastRateLimits` accepts it and writes the
     // `at` timestamp.
     setLastRateLimits(
-      new Map<string, string>([
-        ["anthropic-ratelimit-unified-overage-status", "off"],
-      ]),
+      new Map<string, string>([["anthropic-ratelimit-unified-overage-status", "off"]]),
     )
     // No transport configured; if the prime tried to talk to the network it
     // would surface here. `setLastRateLimits` populated `at = Date.now()`
@@ -107,9 +103,7 @@ describe("primeAnthropicSessionInfo", () => {
     // both concurrent callers see the SAME promise instance synchronously
     // (call A sets `inFlightPrime`, call B reads it on the early-return).
     setLastRateLimits(
-      new Map<string, string>([
-        ["anthropic-ratelimit-unified-overage-status", "off"],
-      ]),
+      new Map<string, string>([["anthropic-ratelimit-unified-overage-status", "off"]]),
     )
     const a = primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })
     const b = primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })

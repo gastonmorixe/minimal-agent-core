@@ -35,7 +35,11 @@
  * @module llm/providers/openai/chat/response-stream
  */
 
-import type { CanonicalEvent, CanonicalUsage, StopReason } from "../../../src/llm/canonical-events.ts"
+import type {
+  CanonicalEvent,
+  CanonicalUsage,
+  StopReason,
+} from "../../../src/llm/canonical-events.ts"
 
 // ---------------------------------------------------------------------------
 // Wire types

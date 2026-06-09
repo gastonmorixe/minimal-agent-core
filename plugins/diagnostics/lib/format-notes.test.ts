@@ -8,7 +8,12 @@ import { describe, expect, it } from "bun:test"
 import { filterFindings, formatNote } from "./format-notes.ts"
 import type { Finding } from "./types.ts"
 
-const f = (over: Partial<Finding>): Finding => ({ source: "tsgo", severity: "error", message: "m", ...over })
+const f = (over: Partial<Finding>): Finding => ({
+  source: "tsgo",
+  severity: "error",
+  message: "m",
+  ...over,
+})
 
 describe("formatNote", () => {
   it("produces a compact `line:col severity code message` line", () => {

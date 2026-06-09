@@ -43,8 +43,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { findModelByTags } from "../../../src/llm/model-registry.ts"
 import { parseJsonc } from "../../../src/jsonc.ts"
+import { findModelByTags } from "../../../src/llm/model-registry.ts"
 
 /**
  * Default summarizer model: the cheap/fast Anthropic tier, resolved from
@@ -69,11 +69,7 @@ export function defaultSummaryModel(): string {
 export type MemoryInjectMode = "none" | "verbatim" | "summary"
 
 /** Whitelist of accepted string values for {@link MemoryInjectMode}. */
-const VALID_INJECT_MODES: ReadonlySet<MemoryInjectMode> = new Set([
-  "none",
-  "verbatim",
-  "summary",
-])
+const VALID_INJECT_MODES: ReadonlySet<MemoryInjectMode> = new Set(["none", "verbatim", "summary"])
 
 /**
  * Parameters used by the optional LLM-summary pipeline. Only consulted
@@ -212,11 +208,7 @@ export function resolveMemoryConfig(raw: RawMemorySlice | null): MemoryConfig {
     if (typeof s.model === "string" && s.model.length > 0) {
       cfg.summary.model = s.model
     }
-    if (
-      typeof s.minBullets === "number" &&
-      Number.isFinite(s.minBullets) &&
-      s.minBullets >= 0
-    ) {
+    if (typeof s.minBullets === "number" && Number.isFinite(s.minBullets) && s.minBullets >= 0) {
       cfg.summary.minBullets = Math.floor(s.minBullets)
     }
     if (typeof s.minBytes === "number" && Number.isFinite(s.minBytes) && s.minBytes >= 0) {

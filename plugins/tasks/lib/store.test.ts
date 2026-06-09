@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import { applyStatusTransition, TaskStore, TaskStoreError } from "./store.ts"
 import type { Task } from "./parse.ts"
+import { applyStatusTransition, TaskStore, TaskStoreError } from "./store.ts"
 
 // ---------------------------------------------------------------------------
 // Test scaffolding
@@ -98,8 +98,8 @@ describe("add()", () => {
   })
   test("can insert after another top-level task", () => {
     const s = withRand(["aaaaaa", "bbbbbb", "cccccc"])
-    s.add({ title: "first" })   // aaaaaa
-    s.add({ title: "second" })  // bbbbbb
+    s.add({ title: "first" }) // aaaaaa
+    s.add({ title: "second" }) // bbbbbb
     s.add({ title: "middle" }, /* after */ 1) // cccccc — inserted after position 1
     const ids = s.list().map((t) => t.id)
     expect(ids).toEqual(["aaaaaa", "cccccc", "bbbbbb"])

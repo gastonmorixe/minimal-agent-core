@@ -126,8 +126,7 @@ export async function fetchAnthropicSessionInfo(
   const modelLabel = modelShortLabel(ctx.modelId)
 
   const cached = getLastRateLimits()
-  const rl =
-    cached && Date.now() - cached.at < FRESHNESS_MS ? cached.rateLimits : null
+  const rl = cached && Date.now() - cached.at < FRESHNESS_MS ? cached.rateLimits : null
 
   const windows = rl ? parseAnthropicQuotaWindows(rl) : []
   const overage = rl ? parseAnthropicOverage(rl) : undefined
@@ -178,9 +177,7 @@ export function _resetAnthropicPrimeInFlight(): void {
  * inner one), making the dedupe invisible to `===` consumers and to tests
  * pinning the contract via reference identity.
  */
-export function primeAnthropicSessionInfo(
-  ctx: ProviderSessionContext,
-): Promise<void> {
+export function primeAnthropicSessionInfo(ctx: ProviderSessionContext): Promise<void> {
   // A previous prime is still racing — join it instead of doubling the POST.
   if (inFlightPrime) return inFlightPrime
 
@@ -209,11 +206,7 @@ export function primeAnthropicSessionInfo(
     // via `broadcastResponseRateLimits`), so we don't need its return.
     // It also swallows its own errors and honors `ctx.signal` composed
     // with its internal 15s deadline.
-    await checkQuota(
-      auth,
-      ctx.networkClient as NetworkClient | undefined,
-      ctx.signal,
-    )
+    await checkQuota(auth, ctx.networkClient as NetworkClient | undefined, ctx.signal)
   })()
 
   inFlightPrime = work

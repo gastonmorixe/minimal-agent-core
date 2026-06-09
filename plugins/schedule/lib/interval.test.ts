@@ -54,8 +54,16 @@ describe("durationToCron — clean cadences", () => {
 
 describe("durationToCron — rounding", () => {
   it("rounds sub-minute up to one minute", () => {
-    expect(durationToCron(45)).toMatchObject({ cron: "*/1 * * * *", chosenSeconds: 60, rounded: true })
-    expect(durationToCron(90)).toMatchObject({ cron: "*/2 * * * *", chosenSeconds: 120, rounded: true })
+    expect(durationToCron(45)).toMatchObject({
+      cron: "*/1 * * * *",
+      chosenSeconds: 60,
+      rounded: true,
+    })
+    expect(durationToCron(90)).toMatchObject({
+      cron: "*/2 * * * *",
+      chosenSeconds: 120,
+      rounded: true,
+    })
   })
 
   it("rounds 7m to the nearest minute divisor (6m)", () => {

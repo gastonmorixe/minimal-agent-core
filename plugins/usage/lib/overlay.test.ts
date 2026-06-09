@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import { stripAnsi } from "../../../src/term-width.ts"
 import { aggregateAllPeriods } from "../../../src/usage-stats.ts"
+
 import {
   DEFAULT_PERIOD_INDEX,
   jumpIndex,

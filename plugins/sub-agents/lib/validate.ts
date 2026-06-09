@@ -20,7 +20,9 @@ function posInt(v: unknown): number | undefined {
 /** Parse a bounded array of non-empty strings (e.g. `expectArtifacts`). */
 function strArray(v: unknown, max = 32): string[] | undefined {
   if (!Array.isArray(v)) return undefined
-  const out = v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim())
+  const out = v
+    .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    .map((x) => x.trim())
   return out.length > 0 ? out.slice(0, max) : undefined
 }
 
@@ -38,7 +40,10 @@ function parseBudget(v: unknown): Budget | undefined {
 /** Parse + validate a `SpawnAgent` tool input. */
 export function parseSpawnRequest(input: Record<string, unknown>): Result<SpawnRequest> {
   const task = str(input.task)
-  if (!task) return err("`task` is required (a clear objective with boundaries and the output you want back).")
+  if (!task)
+    return err(
+      "`task` is required (a clear objective with boundaries and the output you want back).",
+    )
 
   const isoRaw = str(input.isolation)
   if (isoRaw && isoRaw !== "fresh" && isoRaw !== "fork") {
@@ -57,7 +62,9 @@ export function parseSpawnRequest(input: Record<string, unknown>): Result<SpawnR
     ...(str(input.label) ? { label: str(input.label) } : {}),
     ...(budget ? { budget } : {}),
     ...(str(input.taskId) ? { taskId: str(input.taskId) } : {}),
-    ...(strArray(input.expectArtifacts) ? { expectArtifacts: strArray(input.expectArtifacts) } : {}),
+    ...(strArray(input.expectArtifacts)
+      ? { expectArtifacts: strArray(input.expectArtifacts) }
+      : {}),
   }
   return ok(req)
 }

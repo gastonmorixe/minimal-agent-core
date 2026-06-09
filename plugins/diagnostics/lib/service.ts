@@ -12,11 +12,12 @@
  *
  * @module plugins/diagnostics/lib/service
  */
+
+import type { DiagnosticsConfig } from "./config.ts"
 import { detectTools } from "./detect.ts"
 import { filterFindings, formatNote } from "./format-notes.ts"
 import type { DiagnosticProvider } from "./provider.ts"
 import { DiagnosticsRunner } from "./runner.ts"
-import type { DiagnosticsConfig } from "./config.ts"
 import type { Finding } from "./types.ts"
 
 /** Factory hooks injected for testability (real impls spawn processes). */
@@ -60,7 +61,10 @@ export class DiagnosticsService {
         providers.push(this.factories.makeOxlint(t.bin, this.root))
       }
     }
-    this.runner = providers.length > 0 ? new DiagnosticsRunner(providers, { timeoutMs: this.config.timeoutMs }) : null
+    this.runner =
+      providers.length > 0
+        ? new DiagnosticsRunner(providers, { timeoutMs: this.config.timeoutMs })
+        : null
     return this.runner
   }
 

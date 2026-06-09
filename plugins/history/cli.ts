@@ -32,6 +32,7 @@
  */
 
 import { existsSync, rmSync } from "node:fs"
+
 import {
   globalHistoryPath,
   type HistoryEntry,
@@ -266,9 +267,7 @@ export async function run(argv: string[], io: RunIO): Promise<number> {
       try {
         rmSync(path)
       } catch (e) {
-        io.stderr.write(
-          `error: rm failed: ${e instanceof Error ? e.message : String(e)}\n`,
-        )
+        io.stderr.write(`error: rm failed: ${e instanceof Error ? e.message : String(e)}\n`)
         return 2
       }
       io.stdout.write(`cleared ${path}\n`)

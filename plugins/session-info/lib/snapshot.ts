@@ -113,11 +113,7 @@ function pct(frac: number): number {
 export function formatSessionInfo(s: SessionInfoSnapshot): string {
   const lines: string[] = []
 
-  const idTail = [
-    `pid ${s.pid}`,
-    s.hostname,
-    s.agentVersion ? `agent v${s.agentVersion}` : null,
-  ]
+  const idTail = [`pid ${s.pid}`, s.hostname, s.agentVersion ? `agent v${s.agentVersion}` : null]
     .filter(Boolean)
     .join(" · ")
   lines.push(`Session: ${s.sessionId} · ${idTail}`)
@@ -148,7 +144,8 @@ export function formatSessionInfo(s: SessionInfoSnapshot): string {
   if (s.quota.length) {
     const q = s.quota
       .map((w) => {
-        const reset = w.resetInMs !== undefined ? ` (resets in ${humanizeDuration(w.resetInMs)})` : ""
+        const reset =
+          w.resetInMs !== undefined ? ` (resets in ${humanizeDuration(w.resetInMs)})` : ""
         return `${w.label} ${w.utilizationPct}%${reset}`
       })
       .join(" · ")

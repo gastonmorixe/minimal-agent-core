@@ -16,10 +16,11 @@
  * write/read, attachment file read), this test catches it.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { PluginLoader } from "../../src/plugins/loader.ts"
 

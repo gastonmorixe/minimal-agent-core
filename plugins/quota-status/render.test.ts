@@ -11,12 +11,13 @@
  */
 
 import { describe, expect, it } from "bun:test"
+
 import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
 import type { SessionTokens } from "../../src/session-tokens.ts"
+
 import { renderQuotaFooter } from "./render.ts"
 
-const stripAnsi = (s: string | null): string =>
-  (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
+const stripAnsi = (s: string | null): string => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
 
 const NO_TOKENS: SessionTokens = {
   input: 0,
@@ -47,9 +48,7 @@ describe("renderQuotaFooter", () => {
   it("renders the session block even when there are no quota windows (known window)", () => {
     // Pre-traffic, before the first response arrives, we still want users
     // to see their context-budget signpost (`200k ░░░░░░░░ 0% 0`).
-    const out = stripAnsi(
-      renderQuotaFooter([], NO_TOKENS, { contextWindow: 200_000 }),
-    )
+    const out = stripAnsi(renderQuotaFooter([], NO_TOKENS, { contextWindow: 200_000 }))
     // `✦` was retired — the size label is the session marker.
     expect(out).not.toContain("✦")
     // Context window is the LEFT label (parallel slot to 5h/7d).
@@ -85,9 +84,7 @@ describe("renderQuotaFooter", () => {
 
   it("uses an 8-cell bar (fill + empty glyphs sum to 8 per window)", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.5 }]
-    const out = stripAnsi(
-      renderQuotaFooter(windows, NO_TOKENS, { showSession: false }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { showSession: false }))
     // The bar follows the window-name label (`5h `) — extract by matching
     // the first run of bar glyphs anywhere in the line.
     const m = out.match(/[█▏▎▍▌▋▊▉░]+/)
@@ -100,9 +97,7 @@ describe("renderQuotaFooter", () => {
       { id: "5h", utilization: 0.21 },
       { id: "7d", utilization: 0.08 },
     ]
-    const out = stripAnsi(
-      renderQuotaFooter(windows, NO_TOKENS, { showSession: false }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { showSession: false }))
     // A2 layout: `<name> <bar> <pct>` — name leads.
     expect(out).toMatch(/5h [█▏▎▍▌▋▊▉░]{8} 21%/)
     expect(out).toMatch(/7d [█▏▎▍▌▋▊▉░]{8} 8%/)
@@ -112,9 +107,7 @@ describe("renderQuotaFooter", () => {
 
   it("appends the reset countdown as a trailing dim duration (no · separator, no ↻ icon)", () => {
     const now = 1_700_000_000_000
-    const windows: QuotaWindow[] = [
-      { id: "5h", utilization: 0.21, resetAtMs: now + 90 * 60_000 },
-    ]
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.21, resetAtMs: now + 90 * 60_000 }]
     // `showSession: false` so the session block (which can carry a `·`
     // placeholder when context window is unknown) doesn't leak into
     // this assertion.
@@ -131,9 +124,7 @@ describe("renderQuotaFooter", () => {
 
   it("appends the session block as `<size> <bar> <pct> <used>` (structurally identical to quota)", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-    const out = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }))
     expect(out).not.toContain("✦")
     expect(out).toContain("47.5k")
     // 47.5k / 200k = 23.75% → rounds to 24%
@@ -154,9 +145,7 @@ describe("renderQuotaFooter", () => {
 
   it("uses contextSize (not the inflated cumulative `total`) for the displayed number", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-    const out = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }))
     // `total` is 58_500 in SOME_TOKENS but contextSize is 47_500.
     expect(out).toContain("47.5k")
     expect(out).not.toContain("58.5k")
@@ -166,9 +155,7 @@ describe("renderQuotaFooter", () => {
     // User-facing requirement: from the very first paint (before any API
     // response), the context-budget signpost should be visible.
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-    const out = stripAnsi(
-      renderQuotaFooter(windows, NO_TOKENS, { contextWindow: 200_000 }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { contextWindow: 200_000 }))
     expect(out).not.toContain("✦")
     expect(out).toContain("0%")
     // Bar at 0% is all-empty cells. Size label leads, trailing `0` count.
@@ -217,15 +204,9 @@ describe("renderQuotaFooter", () => {
     // the model's context window magnitude, formatted compactly so the
     // user can see at a glance whether they're on 200k or 1M.
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-    const out200k = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
-    )
-    const out1m = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 1_000_000 }),
-    )
-    const out500k = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 500_000 }),
-    )
+    const out200k = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }))
+    const out1m = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 1_000_000 }))
+    const out500k = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 500_000 }))
     // Size label precedes the session bar (after the 4-space group separator).
     expect(out200k).toMatch(/ {4}200k [█▏▎▍▌▋▊▉░]{8}/)
     expect(out1m).toMatch(/ {4}1M [█▏▎▍▌▋▊▉░]{8}/)
@@ -248,12 +229,8 @@ describe("renderQuotaFooter", () => {
 
   it("honors contextWindow opt (1M model context → smaller fill % for the same tokens)", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-    const out200k = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
-    )
-    const out1m = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 1_000_000 }),
-    )
+    const out200k = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }))
+    const out1m = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 1_000_000 }))
     expect(out200k).toContain("24%") // 47.5k / 200k
     expect(out1m).toContain("5%") //   47.5k / 1M
     // The displayed token count is identical — only the % changes.
@@ -267,9 +244,7 @@ describe("renderQuotaFooter", () => {
   it("clamps the session bar % at 100 when contextSize overshoots the window", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const huge: SessionTokens = { ...NO_TOKENS, contextSize: 250_000, turns: 1 }
-    const out = stripAnsi(
-      renderQuotaFooter(windows, huge, { contextWindow: 200_000 }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, huge, { contextWindow: 200_000 }))
     expect(out).toContain("100%")
   })
 
@@ -289,9 +264,7 @@ describe("renderQuotaFooter", () => {
   it("hides 'overage' by default", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     expect(
-      stripAnsi(
-        renderQuotaFooter(windows, NO_TOKENS, { overage: { active: false } }),
-      ),
+      stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { overage: { active: false } })),
     ).not.toContain("overage")
   })
 
@@ -458,17 +431,13 @@ describe("renderQuotaFooter", () => {
   it("fmtTokens uses M suffix at >=1M", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const sess: SessionTokens = { ...NO_TOKENS, contextSize: 2_500_000, turns: 1 }
-    const out = stripAnsi(
-      renderQuotaFooter(windows, sess, { contextWindow: 1_000_000 }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, sess, { contextWindow: 1_000_000 }))
     expect(out).toContain("2.5M")
   })
 
   it("omits reset clause when reset is in the past", () => {
     const now = 1_700_000_000_000
-    const windows: QuotaWindow[] = [
-      { id: "5h", utilization: 0.1, resetAtMs: now - 60_000 },
-    ]
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1, resetAtMs: now - 60_000 }]
     const out = stripAnsi(
       renderQuotaFooter(windows, NO_TOKENS, { now: () => now, showSession: false }),
     )
@@ -495,9 +464,7 @@ describe("renderQuotaFooter", () => {
       // forward-compatible level the server starts accepting should
       // appear in the footer without a client release.
       const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-      const out = stripAnsi(
-        renderQuotaFooter(windows, NO_TOKENS, { effort: "ultra" }),
-      )
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { effort: "ultra" }))
       expect(out).toMatch(/effort ultra$/)
     })
 
@@ -584,22 +551,16 @@ describe("renderQuotaFooter", () => {
       ]
       const opts = { contextWindow: 200_000, effort: "medium" } as const
       // Wide: full form `effort medium`.
-      const full = stripAnsi(
-        renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 200 }),
-      )
+      const full = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 200 }))
       expect(full).toContain("effort medium")
       // cols=64: forces effortFmt:"value" (`effort medium` → `medium`,
       // saves 7 cells). Step 4 cost = 71-7 = 64.
-      const value = stripAnsi(
-        renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 64 }),
-      )
+      const value = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 64 }))
       expect(value).not.toContain("effort medium")
       expect(value).toMatch(/ medium$/)
       // cols=62: forces effortFmt:"short" (`medium` → `med`, saves
       // another 3 cells). Step 6 cost = 64-3 = 61.
-      const short = stripAnsi(
-        renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 62 }),
-      )
+      const short = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 62 }))
       expect(short).not.toMatch(/ medium$/)
       expect(short).toMatch(/ med$/)
     })
@@ -655,17 +616,13 @@ describe("renderQuotaFooter", () => {
       // just a sink. This keeps the contract simple for tests and
       // future callers that may want different truncations.
       const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-      const out = stripAnsi(
-        renderQuotaFooter(windows, NO_TOKENS, { sid: "b1d82846-8ee4" }),
-      )
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { sid: "b1d82846-8ee4" }))
       expect(out).toMatch(/ {4}b1d82846-8ee4$/)
     })
 
     it("omits the sid segment when opts.sid is undefined", () => {
       const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-      const out = stripAnsi(
-        renderQuotaFooter(windows, NO_TOKENS, { effort: "medium" }),
-      )
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { effort: "medium" }))
       // Line ends with the effort segment, no trailing hex blob.
       expect(out).toMatch(/effort medium$/)
     })
@@ -768,8 +725,7 @@ describe("renderQuotaFooter", () => {
       ]
       // Pull stripAnsi via the same path the renderer uses internally —
       // duplicating the helper here avoids module re-exports.
-      const stripAnsiHere = (s: string | null) =>
-        (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
+      const stripAnsiHere = (s: string | null) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
       for (let cols = 1; cols <= 60; cols++) {
         const out = stripAnsiHere(
           renderQuotaFooter(windows, SOME_TOKENS, {
@@ -833,9 +789,7 @@ describe("renderQuotaFooter", () => {
 
   it("respects showSession: false (suppresses the block even with traffic)", () => {
     const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
-    const out = stripAnsi(
-      renderQuotaFooter(windows, SOME_TOKENS, { showSession: false }),
-    )
+    const out = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS, { showSession: false }))
     expect(out).not.toContain("✦")
     // The live count `47.5k` is the unambiguous session marker. Its
     // absence confirms the block was suppressed. (The `·` label alone

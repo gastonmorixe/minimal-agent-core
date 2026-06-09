@@ -38,7 +38,9 @@ function rowDetail(r: SubagentRecord, ansi: boolean): string {
   const s = r.status
   switch (s.kind) {
     case "running": {
-      const act = (s.progress.lastActivity ?? s.progress.lastTool ?? "working").replace(/\s+/g, " ").trim()
+      const act = (s.progress.lastActivity ?? s.progress.lastTool ?? "working")
+        .replace(/\s+/g, " ")
+        .trim()
       const tools = color(ansi, ANSI.DGRAY, `${s.progress.tools} tools`)
       const tok = color(ansi, ANSI.DGRAY, fmtTokens(s.progress.tokens))
       const dot = color(ansi, ANSI.DGRAY, GLYPHS.bullet)
@@ -66,12 +68,14 @@ function rowDetail(r: SubagentRecord, ansi: boolean): string {
 function elapsedFor(r: SubagentRecord, nowMs: number): string {
   const s = r.status
   if (s.kind === "running") return fmtElapsed(nowMs - Date.parse(s.startedAt))
-  if (s.kind === "done" || s.kind === "failed" || s.kind === "stopped") return s.kind === "done" ? "done" : ""
+  if (s.kind === "done" || s.kind === "failed" || s.kind === "stopped")
+    return s.kind === "done" ? "done" : ""
   return ""
 }
 
 function spinFor(s: SubagentStatus, tick: number, ansi: boolean): string {
-  if (s.kind === "running") return color(ansi, ANSI.SKY, SPINNER[tick % SPINNER.length] ?? GLYPHS.running)
+  if (s.kind === "running")
+    return color(ansi, ANSI.SKY, SPINNER[tick % SPINNER.length] ?? GLYPHS.running)
   if (s.kind === "done") return color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)
   if (s.kind === "incomplete") return color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)
   if (s.kind === "queued") return color(ansi, ANSI.DIM, GLYPHS.queued)
@@ -109,7 +113,10 @@ function rowRank(s: SubagentStatus): number {
  * Render the fleet widget, or `null` when no worker is active (queued or
  * running) — the fleet is done, so the sticky area collapses to nothing.
  */
-export function renderWidget(records: readonly SubagentRecord[], opts: WidgetOptions): string | null {
+export function renderWidget(
+  records: readonly SubagentRecord[],
+  opts: WidgetOptions,
+): string | null {
   const stats = fleetStats(records)
   const active = stats.queued + stats.running
   if (active === 0) return null

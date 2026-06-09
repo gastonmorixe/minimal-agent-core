@@ -33,24 +33,20 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { loadSessionFromText } from "../../src/session-restore.ts"
+import { runPreflightPipeline } from "../../src/agent/preflight-pipeline.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../../src/llm/model-registry.ts"
+import { loadSessionFromText } from "../../src/session-restore.ts"
 
 import { bootstrapAnthropic } from "./adapter.ts"
-import { runPreflightPipeline } from "../../src/agent/preflight-pipeline.ts"
+import { extractModelFromSignature } from "./signature-model.ts"
 import {
   ISSUE_THINKING_MODEL_MISMATCH,
   OPTION_CANCEL,
   OPTION_STRIP,
   OPTION_SWITCH_PREFIX,
 } from "./thinking-preflight.ts"
-import { extractModelFromSignature } from "./signature-model.ts"
 
-const FIXTURE_PATH = join(
-  import.meta.dir,
-  "__fixtures__",
-  "forked-session-mixed-models.jsonl",
-)
+const FIXTURE_PATH = join(import.meta.dir, "__fixtures__", "forked-session-mixed-models.jsonl")
 
 function loadFixtureSession() {
   const text = readFileSync(FIXTURE_PATH, "utf-8")

@@ -80,7 +80,12 @@ import { displayWidth, stripAnsi } from "../../src/term-width.ts"
 export type StatusSegmentId = "quota" | "context" | "model" | "sid"
 
 /** Default order: `<quota> <context> <model:effort> <sid>`. */
-export const DEFAULT_SEGMENT_ORDER: readonly StatusSegmentId[] = ["quota", "context", "model", "sid"]
+export const DEFAULT_SEGMENT_ORDER: readonly StatusSegmentId[] = [
+  "quota",
+  "context",
+  "model",
+  "sid",
+]
 
 const VALID_SEGMENTS: ReadonlySet<string> = new Set(DEFAULT_SEGMENT_ORDER)
 
@@ -346,10 +351,7 @@ function renderSessionSegment(
   // doesn't earn its space without the bar+pct context. Show only the count.
   if (!withBar) return used
 
-  const pct = Math.max(
-    0,
-    Math.min(100, Math.round((s.contextSize / contextWindow) * 100)),
-  )
+  const pct = Math.max(0, Math.min(100, Math.round((s.contextSize / contextWindow) * 100)))
   const { full, empty } = bar(pct, barCells)
   // Shape: <size> <bar> <pct> <used> — structurally identical to the
   // quota segments (label + bar + pct + dim trailing). The size label
@@ -681,10 +683,38 @@ export function renderQuotaFooter(
     { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "value" },
     { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "value", withSid: false },
     { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "short", withSid: false },
-    { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "short", withSid: false, barCells: 7 },
-    { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "short", withSid: false, barCells: 6 },
-    { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "short", withSid: false, barCells: 5 },
-    { ...baseRich, sep: SEP_MIN, withOverage: false, effortFmt: "short", withSid: false, barCells: BAR_CELLS_MIN },
+    {
+      ...baseRich,
+      sep: SEP_MIN,
+      withOverage: false,
+      effortFmt: "short",
+      withSid: false,
+      barCells: 7,
+    },
+    {
+      ...baseRich,
+      sep: SEP_MIN,
+      withOverage: false,
+      effortFmt: "short",
+      withSid: false,
+      barCells: 6,
+    },
+    {
+      ...baseRich,
+      sep: SEP_MIN,
+      withOverage: false,
+      effortFmt: "short",
+      withSid: false,
+      barCells: 5,
+    },
+    {
+      ...baseRich,
+      sep: SEP_MIN,
+      withOverage: false,
+      effortFmt: "short",
+      withSid: false,
+      barCells: BAR_CELLS_MIN,
+    },
     {
       ...baseRich,
       sep: SEP_MIN,

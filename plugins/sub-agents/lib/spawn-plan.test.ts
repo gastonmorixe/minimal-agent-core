@@ -118,7 +118,9 @@ describe("buildSpawnPlan — fresh", () => {
   })
 
   it("threads the rendered protocol into the composed --prompt", () => {
-    const r = buildSpawnPlan(input({ resultProtocol: renderResultProtocol("/sessions/9c.result.json") }))
+    const r = buildSpawnPlan(
+      input({ resultProtocol: renderResultProtocol("/sessions/9c.result.json") }),
+    )
     expect(r.ok).toBe(true)
     if (!r.ok) return
     const prompt = r.value.argv[r.value.argv.length - 1]

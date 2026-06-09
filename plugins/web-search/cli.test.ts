@@ -3,10 +3,12 @@
  * global fetch (the same trick the handler tests use).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+
 import { main, parseArgs } from "./cli.ts"
 
 describe("parseArgs", () => {
@@ -101,8 +103,12 @@ describe("main (e2e via stub fetch)", () => {
       out,
       err,
       io: {
-        stdout: { write: (chunk: string) => (out.push(chunk), true) } as unknown as NodeJS.WriteStream,
-        stderr: { write: (chunk: string) => (err.push(chunk), true) } as unknown as NodeJS.WriteStream,
+        stdout: {
+          write: (chunk: string) => (out.push(chunk), true),
+        } as unknown as NodeJS.WriteStream,
+        stderr: {
+          write: (chunk: string) => (err.push(chunk), true),
+        } as unknown as NodeJS.WriteStream,
       },
     }
   }

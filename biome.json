@@ -4,6 +4,7 @@
     "ignoreUnknown": true,
     "includes": [
       "src/**",
+      "plugins/**",
       "scripts/**",
       "package.json",
       "tsconfig.json",

@@ -107,11 +107,7 @@ export interface WebSearchProvider {
    * `WebSearchProviderError` on failure; returns a normalized
    * `SearchResponse` on success (even when hits are empty).
    */
-  search(
-    query: string,
-    opts: SearchOptions,
-    signal: AbortSignal,
-  ): Promise<SearchResponse>
+  search(query: string, opts: SearchOptions, signal: AbortSignal): Promise<SearchResponse>
 }
 
 /** A provider factory: takes its config block and returns an instance. */

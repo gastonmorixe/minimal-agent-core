@@ -57,7 +57,10 @@
                 "description": "Optional runtime budget. The supervisor stops a worker that exceeds it.",
                 "properties": {
                   "maxTurns": { "type": "number", "description": "Max agentic turns." },
-                  "deadlineSec": { "type": "number", "description": "Wall-clock deadline in seconds." },
+                  "deadlineSec": {
+                    "type": "number",
+                    "description": "Wall-clock deadline in seconds."
+                  },
                   "maxTokens": { "type": "number", "description": "Soft token ceiling (advisory)." }
                 },
                 "additionalProperties": false
@@ -132,7 +135,10 @@
           "input_schema": {
             "type": "object",
             "properties": {
-              "id": { "type": "string", "description": "The sub-agent handle (e.g. A2). Omit for the whole fleet." }
+              "id": {
+                "type": "string",
+                "description": "The sub-agent handle (e.g. A2). Omit for the whole fleet."
+              }
             },
             "additionalProperties": false
           }
@@ -197,11 +203,24 @@
           "input_schema": {
             "type": "object",
             "properties": {
-              "action": { "type": "string", "enum": ["post", "read"], "description": "post a message, or read your messages. Default read." },
-              "to": { "type": "string", "description": "Recipient: a worker id (e.g. A3) or \"*\" for broadcast. Default broadcast. (post only)" },
-              "kind": { "type": "string", "description": "Short category: note | claim | blocker | handoff. Default note. (post only)" },
+              "action": {
+                "type": "string",
+                "enum": ["post", "read"],
+                "description": "post a message, or read your messages. Default read."
+              },
+              "to": {
+                "type": "string",
+                "description": "Recipient: a worker id (e.g. A3) or \"*\" for broadcast. Default broadcast. (post only)"
+              },
+              "kind": {
+                "type": "string",
+                "description": "Short category: note | claim | blocker | handoff. Default note. (post only)"
+              },
               "body": { "type": "string", "description": "The message text. Required for post." },
-              "since": { "type": "string", "description": "ISO timestamp cursor: read only messages newer than this. (read only)" }
+              "since": {
+                "type": "string",
+                "description": "ISO timestamp cursor: read only messages newer than this. (read only)"
+              }
             },
             "additionalProperties": false
           }
@@ -222,8 +241,14 @@
           "input_schema": {
             "type": "object",
             "properties": {
-              "id": { "type": "string", "description": "The sub-agent handle (e.g. A2). Required." },
-              "reason": { "type": "string", "description": "Optional short reason, recorded on the handle." }
+              "id": {
+                "type": "string",
+                "description": "The sub-agent handle (e.g. A2). Required."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Optional short reason, recorded on the handle."
+              }
             },
             "required": ["id"],
             "additionalProperties": false

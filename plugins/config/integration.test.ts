@@ -15,12 +15,11 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import cmdConfig from "./handlers/cmd_config.ts"
+import onKey from "./handlers/on_key.ts"
 import { parseJsonc } from "./lib/mini-jsonc.ts"
 import { stripSgr } from "./lib/palette.ts"
 import { _resetForTests, getState } from "./lib/state.ts"
-
-import cmdConfig from "./handlers/cmd_config.ts"
-import onKey from "./handlers/on_key.ts"
 
 let DIR: string
 let CONFIG: string
@@ -47,13 +46,14 @@ function makeBus(emits: Emit[]) {
   }
 }
 
-const baseEnv = (): Record<string, string> => ({
-  ...process.env,
-  MINIMAL_AGENT_CONFIG: CONFIG,
-  // Point discovery at an empty dir so we don't pick up the repo's plugins
-  // (keeps the field list deterministic = just the static schema).
-  HOME: "/nonexistent-home-for-test",
-}) as Record<string, string>
+const baseEnv = (): Record<string, string> =>
+  ({
+    ...process.env,
+    MINIMAL_AGENT_CONFIG: CONFIG,
+    // Point discovery at an empty dir so we don't pick up the repo's plugins
+    // (keeps the field list deterministic = just the static schema).
+    HOME: "/nonexistent-home-for-test",
+  }) as Record<string, string>
 
 function cmdCtx(emits: Emit[], argv = ""): Parameters<typeof cmdConfig>[0] {
   return {
@@ -132,10 +132,13 @@ describe("config overlay — open", () => {
 
 describe("config overlay — cycle enum + save", () => {
   it("ArrowRight cycles effort, save writes it preserving comments", () => {
-    writeFileSync(CONFIG, `{
+    writeFileSync(
+      CONFIG,
+      `{
   // my note
   "effort": "high"
-}`)
+}`,
+    )
     const emits: Emit[] = []
     cmdConfig(cmdCtx(emits)) // open; selection at index 0 = "model" (first schema field)
 

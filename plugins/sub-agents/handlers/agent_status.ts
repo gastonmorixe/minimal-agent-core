@@ -16,7 +16,8 @@ export default async function agentStatus(ctx: TUIContext): Promise<TUIResult> {
     return { kind: "tool_result", content: "AgentStatus: unexpected trigger", is_error: true }
   }
   const store = storeFromCtx(ctx)
-  if (!store) return { kind: "tool_result", content: "AgentStatus: no session id available.", is_error: true }
+  if (!store)
+    return { kind: "tool_result", content: "AgentStatus: no session id available.", is_error: true }
 
   const id = parseIdArg(ctx.trigger.input)
   const now = Date.now()
@@ -35,7 +36,12 @@ export default async function agentStatus(ctx: TUIContext): Promise<TUIResult> {
   }
 
   const rec = store.get(id)
-  if (!rec) return { kind: "tool_result", content: `AgentStatus: unknown sub-agent "${id}".`, is_error: true }
+  if (!rec)
+    return {
+      kind: "tool_result",
+      content: `AgentStatus: unknown sub-agent "${id}".`,
+      is_error: true,
+    }
   const disp = renderFleetDisplay([rec], true, now)
   return {
     kind: "tool_result",

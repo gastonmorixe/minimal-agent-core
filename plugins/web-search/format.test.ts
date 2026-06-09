@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { formatJson, formatText } from "./format.ts"
 import type { SearchResponse } from "./providers/types.ts"
 

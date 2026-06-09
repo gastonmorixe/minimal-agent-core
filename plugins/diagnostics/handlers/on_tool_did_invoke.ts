@@ -22,10 +22,10 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { loadConfig } from "../lib/config.ts"
-import { TsgoLspProvider } from "../providers/tsgo-provider.ts"
+import { DiagnosticsService, type ProviderFactories } from "../lib/service.ts"
 import { BiomeProvider } from "../providers/biome-provider.ts"
 import { OxlintProvider } from "../providers/oxlint-provider.ts"
-import { DiagnosticsService, type ProviderFactories } from "../lib/service.ts"
+import { TsgoLspProvider } from "../providers/tsgo-provider.ts"
 
 /** Minimal payload view (structural mirror of the agent's ToolDidInvokePayload). */
 interface ToolDidInvokePayload {
@@ -57,9 +57,7 @@ let exitHookInstalled = false
 
 /** Tolerant JSONC-ish parse (strip // and /* *​/ comments) without a dependency. */
 function parseJsoncish(raw: string): unknown {
-  const noComments = raw
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+  const noComments = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
   try {
     return JSON.parse(noComments)
   } catch {
@@ -115,7 +113,9 @@ export default async function onToolDidInvoke(
     if (!FILE_MUTATING_TOOLS.has(payload.tool)) return
     const filePath =
       payload.filePath ??
-      (typeof payload.input?.file_path === "string" ? (payload.input.file_path as string) : undefined)
+      (typeof payload.input?.file_path === "string"
+        ? (payload.input.file_path as string)
+        : undefined)
     if (!filePath || !existsSync(filePath)) return
 
     const root = ctx.cwd || payload.cwd || process.cwd()

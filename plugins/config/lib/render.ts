@@ -209,17 +209,8 @@ function renderHint(model: RenderModel, cols: number): string {
   const sep = `${SGR.dim} · ${SGR.reset}`
   const chips: string[] =
     model.phase.kind === "edit"
-      ? [
-          fw("type to edit"),
-          fw("⏎ confirm"),
-          fw("esc cancel"),
-        ]
-      : [
-          fw("↑↓ move"),
-          fw("←/→ change"),
-          fw("⏎ edit/run"),
-          fw("esc close"),
-        ]
+      ? [fw("type to edit"), fw("⏎ confirm"), fw("esc cancel")]
+      : [fw("↑↓ move"), fw("←/→ change"), fw("⏎ edit/run"), fw("esc close")]
   const line = INDENT + chips.join(sep)
   return clamp(line, cols)
 }

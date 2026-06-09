@@ -13,8 +13,8 @@
 
 import { DEFAULT_POLICY, evaluateSpawnGuard, type GuardPolicy } from "./guard.ts"
 import { renderResultProtocol } from "./prompts.ts"
-import { buildSpawnPlan } from "./spawn-plan.ts"
 import { ENV_RESULT_PATH, launchWorker, type SpawnDeps } from "./spawn.ts"
+import { buildSpawnPlan } from "./spawn-plan.ts"
 import { type SubagentStore } from "./store.ts"
 import {
   err,
@@ -23,8 +23,8 @@ import {
   ok,
   type Result,
   type SessionId,
-  sessionId,
   type SubagentRecord,
+  sessionId,
   ZERO_PROGRESS,
 } from "./types.ts"
 
@@ -154,11 +154,13 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
   // Effort follows the same source as the model: an explicit request/def effort
   // wins, else the role recommendation's effort (only when we actually took the
   // recommended model), else unset (the model's own default applies).
-  const effort = req.effort ?? def?.effort ?? (rec && !req.model && !def?.model ? rec.effort : undefined)
+  const effort =
+    req.effort ?? def?.effort ?? (rec && !req.model && !def?.model ? rec.effort : undefined)
   const isolation: Isolation = req.isolation ?? def?.isolation ?? "fresh"
   const systemPreamble = req.system ?? def?.systemPrompt
   const budget = req.budget ?? def?.budget
-  const expectArtifacts = req.expectArtifacts && req.expectArtifacts.length > 0 ? req.expectArtifacts : undefined
+  const expectArtifacts =
+    req.expectArtifacts && req.expectArtifacts.length > 0 ? req.expectArtifacts : undefined
 
   // Guard (self-enforced). External veto can still ride `tool.willInvoke`.
   const records = deps.store.all()

@@ -236,21 +236,11 @@ export class MemoryStore {
   ) {}
 
   static global(deps?: StoreDeps & { sid?: string | null }): MemoryStore {
-    return new MemoryStore(
-      globalMemoryPath(deps),
-      "global",
-      deps?.sid ?? null,
-      deps,
-    )
+    return new MemoryStore(globalMemoryPath(deps), "global", deps?.sid ?? null, deps)
   }
 
   static project(cwd: string, deps?: StoreDeps & { sid?: string | null }): MemoryStore {
-    return new MemoryStore(
-      projectMemoryPath(cwd, deps),
-      "project",
-      deps?.sid ?? null,
-      deps,
-    )
+    return new MemoryStore(projectMemoryPath(cwd, deps), "project", deps?.sid ?? null, deps)
   }
 
   static shortTerm(sid: string, deps?: StoreDeps): MemoryStore {
@@ -260,12 +250,7 @@ export class MemoryStore {
     // Short-term bullets don't carry a [session:<sid>] field — the
     // entire FILE is per-session, so the field would be redundant on
     // every line. Pass `null` for sid here.
-    return new MemoryStore(
-      shortTermMemoryPath(sid, deps),
-      "short-term",
-      null,
-      deps,
-    )
+    return new MemoryStore(shortTermMemoryPath(sid, deps), "short-term", null, deps)
   }
 
   // -------------------------------------------------------------------------
@@ -359,7 +344,11 @@ export class MemoryStore {
     // Insert the new bullet IN PLACE of the trailing empty "other"
     // entry, then add a fresh trailing empty entry so the file ends
     // with `\n`.
-    if (next.length > 0 && next[next.length - 1]?.kind === "other" && next[next.length - 1]?.raw === "") {
+    if (
+      next.length > 0 &&
+      next[next.length - 1]?.kind === "other" &&
+      next[next.length - 1]?.raw === ""
+    ) {
       next[next.length - 1] = { kind: "bullet", bullet: newBullet, raw: newRaw }
       next.push({ kind: "other", raw: "" })
     } else {

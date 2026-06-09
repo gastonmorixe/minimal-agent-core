@@ -4,9 +4,11 @@
  * warm per-edit type diagnostics with correct TS codes. Skipped when tsgo is
  * absent so the suite stays green elsewhere.
  */
-import { describe, expect, it } from "bun:test"
+
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
 
 import { TsgoLspProvider } from "./tsgo-provider.ts"
 

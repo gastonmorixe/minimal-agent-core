@@ -14,7 +14,10 @@ import { cronStoreForSession } from "../lib/store.ts"
 
 export default async function cronList(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") {
-    return { kind: "tool_result", content: "Scheduling is disabled (MINIMAL_AGENT_DISABLE_CRON=1)." }
+    return {
+      kind: "tool_result",
+      content: "Scheduling is disabled (MINIMAL_AGENT_DISABLE_CRON=1).",
+    }
   }
   const sid = ctx.agent?.sessionId
   if (!sid) return { kind: "tool_result", content: "Scheduling requires an active session id." }

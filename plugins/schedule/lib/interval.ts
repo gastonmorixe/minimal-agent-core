@@ -67,7 +67,10 @@ export interface IntervalCron {
  * @param input Raw duration text.
  */
 export function parseDuration(input: string): number | null {
-  const cleaned = input.trim().toLowerCase().replace(/^every\s+/, "")
+  const cleaned = input
+    .trim()
+    .toLowerCase()
+    .replace(/^every\s+/, "")
   const m = /^(\d+)\s*([a-z]+)$/.exec(cleaned)
   if (!m) return null
   const n = Number(m[1])

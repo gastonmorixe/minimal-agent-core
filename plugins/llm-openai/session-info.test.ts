@@ -129,9 +129,7 @@ describe("parseOpenAIQuotaWindows", () => {
       ),
     ).toEqual([])
     // limit present, remaining absent ⇒ skip.
-    expect(
-      parseOpenAIQuotaWindows(rl({ "x-ratelimit-limit-tokens": "100" })),
-    ).toEqual([])
+    expect(parseOpenAIQuotaWindows(rl({ "x-ratelimit-limit-tokens": "100" }))).toEqual([])
   })
 
   it("returns [] for an empty map", () => {

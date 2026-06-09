@@ -20,33 +20,31 @@
  * never takes down the output stream.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 
-import { getSessionId } from "../../../src/metadata.ts";
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts";
+import { getSessionId } from "../../../src/metadata.ts"
+import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
-export default async function interleaveThinkingHandler(
-  ctx: TUIContext,
-): Promise<TUIResult> {
+export default async function interleaveThinkingHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "inline_tag") {
-    return { kind: "rendered", ansi: "" };
+    return { kind: "rendered", ansi: "" }
   }
 
-  const body = ctx.trigger.body;
+  const body = ctx.trigger.body
   if (body.length > 0) {
     try {
-      const sessionId = getSessionId();
-      const dir = join(ctx.cwd, ".logs", sessionId);
-      mkdirSync(dir, { recursive: true });
-      const timestamp = new Date().toISOString();
-      const file = join(dir, `interleave-${timestamp}.log`);
-      writeFileSync(file, body);
+      const sessionId = getSessionId()
+      const dir = join(ctx.cwd, ".logs", sessionId)
+      mkdirSync(dir, { recursive: true })
+      const timestamp = new Date().toISOString()
+      const file = join(dir, `interleave-${timestamp}.log`)
+      writeFileSync(file, body)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      ctx.stderr.write(`[interleave-thinking] log write failed: ${msg}\n`);
+      const msg = e instanceof Error ? e.message : String(e)
+      ctx.stderr.write(`[interleave-thinking] log write failed: ${msg}\n`)
     }
   }
 
-  return { kind: "rendered", ansi: "" };
+  return { kind: "rendered", ansi: "" }
 }

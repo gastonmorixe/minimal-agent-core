@@ -16,6 +16,7 @@ import { describe, expect, it } from "bun:test"
 import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
 import type { SessionTokens } from "../../src/session-tokens.ts"
 import { stripAnsi } from "../../src/term-width.ts"
+
 import { renderQuotaFooter } from "./render.ts"
 
 const TOKENS: SessionTokens = {
@@ -86,9 +87,7 @@ describe("renderQuotaFooter — overage on the neutral path", () => {
       showSession: false,
       overage: { active: false },
     })!
-    expect(out).toContain(
-      "\x1b[2;37moverage\x1b[22;39m \x1b[31moff\x1b[39m",
-    )
+    expect(out).toContain("\x1b[2;37moverage\x1b[22;39m \x1b[31moff\x1b[39m")
   })
 
   it("the neutral default-order output is unchanged when showOverage is off", () => {

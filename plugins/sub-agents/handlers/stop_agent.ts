@@ -19,11 +19,13 @@ export default async function stop(ctx: TUIContext): Promise<TUIResult> {
     return { kind: "tool_result", content: "StopAgent: unexpected trigger", is_error: true }
   }
   const id = parseIdArg(ctx.trigger.input)
-  if (!id) return { kind: "tool_result", content: "StopAgent: an `id` is required.", is_error: true }
+  if (!id)
+    return { kind: "tool_result", content: "StopAgent: an `id` is required.", is_error: true }
   const reason = str(ctx.trigger.input.reason)
 
   const store = storeFromCtx(ctx)
-  if (!store) return { kind: "tool_result", content: "StopAgent: no session id available.", is_error: true }
+  if (!store)
+    return { kind: "tool_result", content: "StopAgent: no session id available.", is_error: true }
 
   const r = stopAgent(id, reason, {
     store,

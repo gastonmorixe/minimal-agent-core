@@ -11,7 +11,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { resultText } from "./content.ts"
-import { sessionId, type SubagentRecord, type SubagentStatus, subagentId } from "./types.ts"
+import { type SubagentRecord, type SubagentStatus, sessionId, subagentId } from "./types.ts"
 
 function rec(status: SubagentStatus): SubagentRecord {
   return {
@@ -72,7 +72,11 @@ describe("resultText — incomplete with salvage (FIX 5)", () => {
 describe("resultText — done still carries its result", () => {
   it("prints the short synthesis and token/tool counts", () => {
     const text = resultText(
-      rec({ kind: "done", endedAt: "t", result: { short: "found 3 callers", tokens: 5000, tools: 12 } }),
+      rec({
+        kind: "done",
+        endedAt: "t",
+        result: { short: "found 3 callers", tokens: 5000, tools: 12 },
+      }),
     )
     expect(text).toContain("found 3 callers")
     expect(text).toContain("12 tool calls")

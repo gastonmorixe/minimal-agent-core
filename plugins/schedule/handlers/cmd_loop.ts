@@ -90,7 +90,8 @@ export default async function cmdLoop(ctx: CommandContext): Promise<CommandResul
   const e = res.value
   const info = rounded ? `${taskInfo(e, now)} · rounded to ${e.label}` : taskInfo(e, now)
   const body = wrapText(effectivePrompt, 72)
-  if (usingDefault) body.push("\x1b[2mmaintenance prompt — edit .claude/loop.md to customize\x1b[0m")
+  if (usingDefault)
+    body.push("\x1b[2mmaintenance prompt — edit .claude/loop.md to customize\x1b[0m")
 
   return {
     kind: "notice",

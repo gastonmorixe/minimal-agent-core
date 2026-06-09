@@ -6,10 +6,12 @@
  * `plugins["web-search"].<id>`, missing file → defaults.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+
 import { defaultConfig, loadWebSearchConfig, parseWebSearchConfig } from "./config.ts"
 
 describe("parseWebSearchConfig", () => {
@@ -19,7 +21,7 @@ describe("parseWebSearchConfig", () => {
     expect(parseWebSearchConfig([])).toEqual(defaultConfig())
   })
 
-  test("missing plugins[\"web-search\"] → defaults", () => {
+  test('missing plugins["web-search"] → defaults', () => {
     expect(parseWebSearchConfig({})).toEqual(defaultConfig())
     expect(parseWebSearchConfig({ plugins: {} })).toEqual(defaultConfig())
     expect(parseWebSearchConfig({ plugins: { other: {} } })).toEqual(defaultConfig())

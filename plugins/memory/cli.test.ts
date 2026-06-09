@@ -16,10 +16,11 @@
  *   - Exit codes: 0 success, 1 usage, 2 domain.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { main, parseArgs } from "./cli.ts"
 import {
@@ -105,7 +106,7 @@ describe("parseArgs", () => {
     expect(parseArgs(["list", "--namespace", "scratch"]).namespace).toBe("scratch")
   })
 
-  it("--namespace \"\" maps to null (force-reset to default paths)", () => {
+  it('--namespace "" maps to null (force-reset to default paths)', () => {
     const f = parseArgs(["list", "--namespace", ""])
     expect(f.namespace).toBeNull()
   })
@@ -311,10 +312,7 @@ describe("main — add", () => {
   it("short-term: with --sid, persists and reports id=1", async () => {
     const io = makeIO()
     const sid = "11111111-2222-3333-4444-555555555555"
-    const code = await main(
-      ["add", "scratch", "-s", "short-term", "--sid", sid, "--no-color"],
-      io,
-    )
+    const code = await main(["add", "scratch", "-s", "short-term", "--sid", sid, "--no-color"], io)
     expect(code).toBe(0)
     expect(io.out.join("")).toContain("saved [short-term#1]")
   })
@@ -392,10 +390,7 @@ describe("main — clear", () => {
     MemoryStore.shortTerm(sid, { home: tmpHome }).add("e2")
 
     const io = makeIO()
-    const code = await main(
-      ["clear", "-s", "short-term", "--sid", sid, "--no-color"],
-      io,
-    )
+    const code = await main(["clear", "-s", "short-term", "--sid", sid, "--no-color"], io)
     expect(code).toBe(0)
     expect(io.out.join("")).toContain("cleared 2 short-term entries")
   })
