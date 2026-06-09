@@ -7,6 +7,27 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
+### Feature: Claude Fable 5 in the model catalog
+
+`claude-fable-5` (the public Mythos-class flagship launched 2026-06-09) is now
+registered end-to-end: capabilities (Opus-4.8 twin, 1M context, 128K output,
+adaptive thinking, effort up to `max`, no fast tier), flat $10 / $50 pricing,
+`[1m]` alias, and the `context-1m-2025-08-07` beta on both transports. The
+original symptom was a 429 on every OAuth request because the unregistered id
+dropped the Claude Code preamble.
+
+### Fix: fast-mode is capability-gated on the legacy transport
+
+`speed:"fast"` (sticky `--fast` / `MINIMAL_AGENT_FAST=1`) used to reach the
+wire for models with no fast tier (Fable 5, Sonnet, Haiku), which the server
+rejects with 429 "Usage credits are required for fast mode". The legacy client
+now consults the model registry's `speedFast` capability and drops both the
+body field and the `fast-mode-2026-02-01` beta header (with a diagnostic
+warning) when unsupported, matching the canonical transport. SessionInfo's
+`fast` line now reflects the CLI flag too (the host mirrors the resolved state
+into `MINIMAL_AGENT_FAST`) and cross-checks the capability so it never claims
+a fast tier the model lacks.
+
 ### Build: scope the test gate to first-party source
 
 `bun test` scanned from the repo root, so it descended into the gitignored,

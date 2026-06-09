@@ -146,10 +146,12 @@ Useful flags:
 Pick a model with `--model <id>` (or set `MINIMAL_AGENT_MODEL` / `model` in
 config). The default is `claude-sonnet-4-6`. `--list-models` prints the full
 live catalog, including the `[1m]` 1M-context aliases and older tiers
-(`claude-opus-4-6`, `claude-sonnet-4-5`).
+(`claude-opus-4-6`, `claude-sonnet-4-5`). `claude-fable-5` is the current
+flagship (Mythos-class, launched 2026-06-09).
 
 | Model | `--model` id | Context | Max output | Effort levels | Fast | Price /MTok (in / out) |
 | --- | --- | --- | --- | --- | --- | --- |
+| Fable 5 | `claude-fable-5` | 1M | 128K | low · medium · high · xhigh · max | no³ | $10 / $50 |
 | Opus 4.8 | `claude-opus-4-8` | 1M | 128K | low · medium · high · xhigh · max | yes | $5 / $25 (fast $10 / $50) |
 | Opus 4.7 | `claude-opus-4-7` | 1M | 128K | low · medium · high · xhigh · max | yes¹ | $5 / $25 |
 | Sonnet 4.6 | `claude-sonnet-4-6` | 1M | 64K | low · medium · high | no | $3 / $15 |
@@ -160,9 +162,10 @@ live catalog, including the `[1m]` 1M-context aliases and older tiers
   `high` for Opus, `medium` for Sonnet.
 - **Fast mode** (`--fast` / `-F`, or `MINIMAL_AGENT_FAST=1`): sends `speed:"fast"`
   for roughly 2.5× throughput. It is capability-gated: only the Opus tier honors
-  it, and on Sonnet/Haiku the flag is silently dropped. For Opus 4.8 fast mode
-  bills at ~2× ($10 / $50). ¹Opus 4.7 fast uses the older 6× rate ($30 / $150), so
-  `--fast` is meant for Opus 4.8. ²Haiku has no thinking or effort.
+  it, and on Fable/Sonnet/Haiku the flag is dropped with a diagnostic warning.
+  For Opus 4.8 fast mode bills at ~2× ($10 / $50). ¹Opus 4.7 fast uses the older
+  6× rate ($30 / $150), so `--fast` is meant for Opus 4.8. ²Haiku has no thinking
+  or effort. ³Fable 5 ships a single flat rate with no fast tier.
 
 ## Config
 

@@ -70,6 +70,24 @@ function reasoningOf(t: { adaptive: boolean; extended: boolean; interleaved: boo
 }
 
 /**
+ * Fast-mode truth for the snapshot. The host mirrors the RESOLVED fast
+ * state (CLI `--fast` OR env) into `MINIMAL_AGENT_FAST` at boot, so the
+ * env var is authoritative for "was fast requested". Cross-check the
+ * model's `speedFast` capability so the footer never claims a fast tier
+ * the model doesn't have (the client gates the wire the same way):
+ * requested + unsupported renders as not-fast, matching what is sent.
+ */
+function resolveFastState(modelId: string): boolean {
+  if (process.env.MINIMAL_AGENT_FAST !== "1") return false
+  try {
+    return resolveModel(modelId).capabilities.speedFast
+  } catch {
+    // Unregistered model: report the request as-is (server decides).
+    return true
+  }
+}
+
+/**
  * Resolve the current model's display/pricing/reasoning. Prefers the host's
  * live model-info seam (read defensively, no type coupling); falls back to the
  * boot model env + the registry.
@@ -158,7 +176,7 @@ export async function gatherSessionInfo(ctx: TUIContext): Promise<SessionInfoSna
     modelLabel: bits.modelLabel,
     providerId: bits.providerId,
     effort: process.env.MINIMAL_AGENT_EFFORT || undefined,
-    fast: process.env.MINIMAL_AGENT_FAST === "1",
+    fast: resolveFastState(bits.modelId),
     reasoning: bits.reasoning,
     contextSize: tok.contextSize,
     contextWindow,

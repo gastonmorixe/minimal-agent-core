@@ -315,6 +315,99 @@ describe("client", () => {
       expect(body.context_management).toBeUndefined()
     })
 
+    it("drops speed:fast (body + beta header) when the model has no fast tier", async () => {
+      // Capability gate regression test (fable-5 class of bug): a sticky
+      // --fast / MINIMAL_AGENT_FAST=1 must NOT reach the wire for a model
+      // whose registry entry says speedFast:false — the server 429s
+      // ("Usage credits are required for fast mode."). Uses a synthetic
+      // registry entry so this test doesn't depend on plugin bootstrap.
+      const { registerModel } = await import("./llm/model-registry.ts")
+      const { defaultCapabilities } = await import("./llm/capabilities.ts")
+      registerModel({
+        id: "test-model-no-fast",
+        providerId: "anthropic",
+        surfaceId: "anthropic-messages",
+        displayName: "Test (no fast tier)",
+        capabilities: { ...defaultCapabilities(), speedFast: false },
+        pricing: {
+          inputUSD: 1,
+          outputUSD: 5,
+          cacheWriteUSD: 1.25,
+          cacheReadUSD: 0.1,
+          webSearchPerCallUSD: 0.01,
+        },
+      })
+
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+      let capturedBody: string | null = null
+      let capturedHeaders: Record<string, string> | null = null
+      const networkClient = fakeNetworkClient((req) => {
+        capturedBody = String(req.body ?? "")
+        capturedHeaders = (req.headers ?? {}) as Record<string, string>
+        return sseResponse([
+          { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        ])
+      })
+
+      await sendMessageFull({
+        auth,
+        messages,
+        model: "test-model-no-fast",
+        speed: "fast",
+        stream: true,
+        networkClient,
+      })
+
+      const body = JSON.parse(capturedBody!)
+      expect(body.speed).toBeUndefined()
+      expect(capturedHeaders!["anthropic-beta"] ?? "").not.toContain("fast-mode-2026-02-01")
+    })
+
+    it("keeps speed:fast (body + beta header) for a speedFast-capable model", async () => {
+      const { registerModel } = await import("./llm/model-registry.ts")
+      const { defaultCapabilities } = await import("./llm/capabilities.ts")
+      registerModel({
+        id: "test-model-fast-ok",
+        providerId: "anthropic",
+        surfaceId: "anthropic-messages",
+        displayName: "Test (fast tier)",
+        capabilities: { ...defaultCapabilities(), speedFast: true },
+        pricing: {
+          inputUSD: 5,
+          outputUSD: 25,
+          cacheWriteUSD: 6.25,
+          cacheReadUSD: 0.5,
+          webSearchPerCallUSD: 0.01,
+        },
+      })
+
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+      let capturedBody: string | null = null
+      let capturedHeaders: Record<string, string> | null = null
+      const networkClient = fakeNetworkClient((req) => {
+        capturedBody = String(req.body ?? "")
+        capturedHeaders = (req.headers ?? {}) as Record<string, string>
+        return sseResponse([
+          { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        ])
+      })
+
+      await sendMessageFull({
+        auth,
+        messages,
+        model: "test-model-fast-ok",
+        speed: "fast",
+        stream: true,
+        networkClient,
+      })
+
+      const body = JSON.parse(capturedBody!)
+      expect(body.speed).toBe("fast")
+      expect(capturedHeaders!["anthropic-beta"] ?? "").toContain("fast-mode-2026-02-01")
+    })
+
     it("suppresses context_management when MINIMAL_AGENT_NO_CLEAR_THINKING=1", async () => {
       // Escape hatch to bypass the server-side clear_thinking edit that is the
       // prime suspect for the "thinking/redacted_thinking blocks cannot be

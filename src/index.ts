@@ -1218,6 +1218,16 @@ async function main() {
   } else {
     process.env.MINIMAL_AGENT_EFFORT = effort ?? "medium"
   }
+  // Mirror the RESOLVED fast-mode state the same way (output, not input):
+  // `--fast` on the CLI never wrote the env var, so `process.env`-only
+  // readers (session-info's `fast:` line) reported "not fast" for CLI-flag
+  // sessions. One source of truth after this point: env reflects what the
+  // request path will actually attempt.
+  if (speedFast) {
+    process.env.MINIMAL_AGENT_FAST = "1"
+  } else {
+    delete process.env.MINIMAL_AGENT_FAST
+  }
   const pluginOverrides = loadPluginEnabledOverrides()
   // Late-bound getter for the agent's LIVE model id. The loader loads before
   // the Agent is constructed, and the model can change mid-session (/model,
