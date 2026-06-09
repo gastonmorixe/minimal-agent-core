@@ -4,13 +4,14 @@
  *
  * Provider-neutral: it reads the resolved {@link ModelEntry}'s
  * {@link ModalitySupport} from the shared registry and the active provider's
- * `mediaLimits(model)` hook when it exposes one, falling back to the Anthropic
- * defaults (the only concrete limits shipped today). Returning a context even
- * for a non-vision model is deliberate : the tool then explains "this model
- * doesn't accept images" instead of decoding a screenshot as UTF-8 mojibake.
- * An unresolved model id yields `undefined`, which keeps the tool on its
- * legacy text-only path (no behavior change for unknown models / older
- * sessions).
+ * `mediaLimits(model)` hook when it exposes one, falling back to the NEUTRAL
+ * conservative floor in `./default-limits.ts` (DIP: providers supply their
+ * real walls through the hook; core never imports provider modules).
+ * Returning a context even for a non-vision model is deliberate : the tool
+ * then explains "this model doesn't accept images" instead of decoding a
+ * screenshot as UTF-8 mojibake. An unresolved model id yields `undefined`,
+ * which keeps the tool on its legacy text-only path (no behavior change for
+ * unknown models / older sessions).
  *
  * @module media/tool-context
  */
@@ -18,7 +19,7 @@
 import { normalizeModelForAPI } from "../client/types.ts"
 import { findModel, findProvider } from "../llm/model-registry.ts"
 
-import { anthropicMediaLimits } from "./anthropic.ts"
+import { defaultMediaLimits } from "./default-limits.ts"
 import type { ReadFileMediaContext } from "./read-file.ts"
 
 /**
@@ -33,7 +34,6 @@ export function resolveToolMediaContext(
   if (!entry) return undefined
   const caps = entry.capabilities
   const provider = findProvider(entry.providerId)
-  const limits =
-    provider?.mediaLimits?.(entry) ?? anthropicMediaLimits({ contextWindow: caps.contextWindow })
+  const limits = provider?.mediaLimits?.(entry) ?? defaultMediaLimits()
   return { modalities: caps.modalities, limits, modelId: entry.id }
 }

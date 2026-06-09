@@ -1,13 +1,15 @@
 /**
- * Anthropic-specific media limits, as data. Used by the agent's submit path
- * (legacy transport) and, later, by the Anthropic `ProviderAdapter.mediaLimits`
- * hook (canonical transport). Numbers come from the reconciled spec
+ * Anthropic-specific media limits, as data. Implements the
+ * `ProviderAdapter.mediaLimits(model)` hook (see the adapter); core never
+ * imports this module — it reaches limits ONLY through the hook, falling
+ * back to the neutral `src/media/default-limits.ts` floor. Numbers come
+ * from the reconciled spec
  * `private/multimodality-ingestion/anthropic/10-anthropic-image-ingestion.md`.
  *
- * @module media/anthropic
+ * @module llm/providers/anthropic/media-limits
  */
 
-import type { MediaLimits } from "./limits.ts"
+import type { MediaLimits } from "../../src/media/limits.ts"
 
 /** Image formats Anthropic vision accepts (no animation). */
 export const ANTHROPIC_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([

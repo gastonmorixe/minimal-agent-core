@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { buildAnthropicUserContent } from "./ingest.ts"
+import { buildUserContent } from "./ingest.ts"
 import { createMediaRegistry } from "./registry.ts"
 import { formatMediaToken } from "./token.ts"
 
@@ -13,10 +13,10 @@ function png(w: number, h: number): Uint8Array {
   return b
 }
 
-describe("buildAnthropicUserContent", () => {
+describe("buildUserContent", () => {
   it("passes plain text straight through (no media)", async () => {
     const reg = createMediaRegistry()
-    const r = await buildAnthropicUserContent("hello there", reg)
+    const r = await buildUserContent("hello there", reg)
     expect(r.content).toEqual([{ type: "text", text: "hello there" }])
     expect(r.hadMedia).toBe(false)
   })
@@ -24,7 +24,7 @@ describe("buildAnthropicUserContent", () => {
   it("attaches a referenced image as a legacy image block, image-then-text", async () => {
     const reg = createMediaRegistry()
     const item = await reg.registerBytes(png(4, 2), "drop", "image/png")
-    const r = await buildAnthropicUserContent(`${formatMediaToken(item)} describe`, reg)
+    const r = await buildUserContent(`${formatMediaToken(item)} describe`, reg)
     expect(r.hadMedia).toBe(true)
     expect(r.content[0]).toMatchObject({
       type: "image",
@@ -33,10 +33,10 @@ describe("buildAnthropicUserContent", () => {
     expect(r.content[1]).toEqual({ type: "text", text: "describe" })
   })
 
-  it("rejects audio for Anthropic and reports it", async () => {
+  it("rejects audio when the modality is unsupported and reports it", async () => {
     const reg = createMediaRegistry()
     const item = await reg.registerBytes(Uint8Array.from([1, 2, 3]), "clipboard", "audio/wav")
-    const r = await buildAnthropicUserContent(`hear ${formatMediaToken(item)}`, reg, {
+    const r = await buildUserContent(`hear ${formatMediaToken(item)}`, reg, {
       limits: {
         acceptedMimeTypes: new Set(["audio/wav"]),
         maxBytesPerItem: 1024,

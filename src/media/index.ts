@@ -4,7 +4,6 @@
  * @module media
  */
 
-export { ANTHROPIC_IMAGE_MIME_TYPES, anthropicMediaLimits } from "./anthropic.ts"
 export {
   clipboardChangeCount,
   clipboardImage,
@@ -12,12 +11,18 @@ export {
   clipboardText,
   hasClipboardImage,
 } from "./clipboard.ts"
+export {
+  DEFAULT_DOCUMENT_MIME_TYPES,
+  DEFAULT_IMAGE_MIME_TYPES,
+  defaultMediaLimits,
+} from "./default-limits.ts"
 export { looksLikeMediaDrop, parseDroppedPaths } from "./detect.ts"
 export { mediaId, mediaIdFromSha, randomMediaId, sha256Hex } from "./id.ts"
 export {
-  ANTHROPIC_MODALITIES,
   type BuildUserContentOptions,
   buildAnthropicUserContent,
+  buildUserContent,
+  DEFAULT_VISION_MODALITIES,
   type UserContentResult,
 } from "./ingest.ts"
 export {

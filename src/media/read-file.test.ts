@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
-import { anthropicMediaLimits } from "./anthropic.ts"
+import { defaultMediaLimits } from "./default-limits.ts"
 import type { MediaLimits } from "./limits.ts"
 import { decideReadFile, type ImageFitter } from "./read-file.ts"
 import type { FitResult } from "./transform.ts"
@@ -25,7 +25,7 @@ function pdf(): Uint8Array {
 }
 
 const limits = (over?: Partial<MediaLimits>): MediaLimits => ({
-  ...anthropicMediaLimits({ contextWindow: 200_000 }),
+  ...defaultMediaLimits(),
   ...over,
 })
 

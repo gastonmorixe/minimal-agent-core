@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterAll, describe, expect, it } from "bun:test"
 
 import type { ModalitySupport } from "./llm/capabilities.ts"
-import { anthropicMediaLimits } from "./media/anthropic.ts"
+import { defaultMediaLimits } from "./media/default-limits.ts"
 import type { ToolMediaContext } from "./tools.ts"
 import { executeTool } from "./tools.ts"
 
@@ -24,7 +24,7 @@ const NO_IMG: ModalitySupport = { image: false, audio: false, pdf: false, video:
 function mediaCtx(modalities: ModalitySupport): ToolMediaContext {
   return {
     modalities,
-    limits: anthropicMediaLimits({ contextWindow: 200_000 }),
+    limits: defaultMediaLimits(),
     modelId: "test-model",
   }
 }
