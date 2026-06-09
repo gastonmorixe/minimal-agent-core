@@ -194,6 +194,15 @@ export interface ProviderPlugin {
   listLiveModels?(auth: ProviderAuth): Promise<LiveModelRow[]>
 
   /**
+   * Optional: parse a compact VERSION token from one of this provider's
+   * model ids for dense UI labels (`<shortCode>-<token>`, e.g. a footer
+   * label built from the id). Return `undefined` when the id doesn't
+   * match the provider's naming scheme — core then falls back to a
+   * generic date-suffix strip. Pure; no I/O.
+   */
+  modelVersionToken?(modelId: string): string | undefined
+
+  /**
    * Optional: resolve the FINAL system-prompt blocks for this provider from
    * the agent's neutral skeleton. See {@link SystemPromptContext}. When
    * absent, the agent uses {@link neutralSystemPrompt}. Pure + synchronous:

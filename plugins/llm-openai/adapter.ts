@@ -215,6 +215,17 @@ export const openaiProviderPlugin: ProviderPlugin = {
   shortCode: "oai",
   register: bootstrapOpenAI,
   fetchSessionInfo: fetchOpenAISessionInfo,
+  /**
+   * Version token for dense labels: "gpt-<rest>" → rest minus trailing
+   * date / "-chat" alias (gpt-5.5-chat → 5.5); o-series ("o3", "o4-mini")
+   * pass through minus date suffixes. Undefined for foreign schemes.
+   */
+  modelVersionToken(modelId: string): string | undefined {
+    const gpt = modelId.match(/^gpt-(.+)$/)
+    if (gpt) return gpt[1].replace(/-\d{6,}.*$/, "").replace(/-chat$/, "")
+    if (/^o\d/.test(modelId)) return modelId.replace(/-\d{6,}.*$/, "")
+    return undefined
+  },
 }
 
 export type { ProviderAuth }
