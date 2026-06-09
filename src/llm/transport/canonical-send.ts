@@ -154,7 +154,13 @@ export async function* canonicalSendFn(
           sessionId: "",
           networkClient: opts.networkClient,
         }
-        return run({ ...req, signal }, { context: ctx })
+        // acceptDegrade: when the adapter can offer a cheaper-but-valid
+        // variant (e.g. fast-mode requested on a model with no fast tier →
+        // same request without `speed`), take it instead of dying. The
+        // degrade path yields a non-retryable StreamErrorEvent describing
+        // the downgrade first, which the agent surfaces as a notice. This
+        // matches the legacy transport's behavior for the same combos.
+        return run({ ...req, signal }, { context: ctx, acceptDegrade: true })
       },
       {
         streamIdleTimeoutMs: opts.streamIdleTimeoutMs,

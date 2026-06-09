@@ -151,5 +151,18 @@ export function validateAnthropicRequest(
   // Multimodal input gating (image/audio/file) — shared across providers.
   errors.push(...modalityViolations(req.messages, caps, model.id))
 
-  return { ok: errors.length === 0, errors }
+  if (errors.length === 0) return { ok: true, errors }
+
+  // Degrade offer: when the ONLY violation is a fast-mode request against a
+  // model with no fast tier, the same request without `speed` is valid.
+  // Mirrors the legacy transport's behavior (client.ts drops the field +
+  // beta with a diag.warn) so flipping transports never turns a sticky
+  // --fast into a hard failure. Single-violation guard on purpose: a
+  // request that is broken in other ways should still fail loudly.
+  if (errors.length === 1 && errors[0]?.capability === "speedFast") {
+    const { speed: _dropped, ...rest } = req
+    return { ok: false, errors, degrade: rest }
+  }
+
+  return { ok: false, errors }
 }
