@@ -203,7 +203,11 @@ export const BETA_FLAGS_MAP: Record<BetaFlagId, BetaFlag> = {
     description:
       "Redacts thinking block content, returns empty thinking with cryptographic signature",
     source: "Observed in v2.1.91 capture — present in ALL request types",
-    condition: "Always included for OAuth (replaces visible thinking content with signatures)",
+    condition:
+      "CC sends it everywhere. WE deliberately exclude it from conversations " +
+      "(thinking stays visible in the TUI) and keep it only in the quota/title " +
+      "probe sets — see buildBetaFlags. The canonical transport differs (always " +
+      "adds it); pinned in the characterization suites.",
   },
   [BetaFlagId.CONTEXT_MANAGEMENT_20250627]: {
     id: BetaFlagId.CONTEXT_MANAGEMENT_20250627,
@@ -254,7 +258,9 @@ export const BETA_FLAGS_MAP: Record<BetaFlagId, BetaFlag> = {
     description: "Server populates usage.output_tokens_details.thinking_tokens on message_delta",
     source: 'cli.patched.cjs L116084 v2.1.154: cr_ = qf("thinking_token_count", "...")',
     condition:
-      "Currently always-on for conversation requests in CC (observed across all in capture)",
+      "Always-on in CC's captures, but NOT currently sent by either of our " +
+      "transports (declared here for the taxonomy/--list-flags only). Add it " +
+      "to buildBetaFlags when thinking-token accounting lands.",
   },
   [BetaFlagId.FAST_MODE_20260201]: {
     id: BetaFlagId.FAST_MODE_20260201,
