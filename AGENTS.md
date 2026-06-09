@@ -1,5 +1,3 @@
-# CLAUDE.md
-
 Orientation for agents working in this repo. User-facing usage lives in
 [`README.md`](README.md); deferred work in [`TODOS.md`](TODOS.md); per-change
 write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
