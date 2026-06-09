@@ -12,6 +12,7 @@
 
 import { shouldSoftSplit, splitBashSegments } from "../bash-split.ts"
 import type { ToolUseBlock } from "../client.ts"
+import type { Finding, FindingSeverity } from "../plugins/hooks/tool-lifecycle.ts"
 import { displayWidth, expandTabs, truncateDisplayWidth } from "../term-width.ts"
 import { countLines, type TruncationInfo } from "../tools/truncation.ts"
 import { truncHint } from "../truncate-hint.ts"
@@ -397,6 +398,7 @@ const ANNOTATION_PREFIXES = [
   "\n\n[truncated:",
   "\n\n[note:",
   "\n\n<ma::agent::output-preview",
+  "\n\n<ma::agent::diagnostics",
   "\n\n<ma::agent::mode-active",
 ] as const
 
@@ -664,6 +666,21 @@ export function isOuterFrameClose(line: string): boolean {
 }
 
 /**
+ * Turn a tool-block's trailing `╰` closer back into a `│` continuation, so an
+ * appended block (the diagnostics panel) can own the final `╰` and the two
+ * read as one fused frame instead of producing a double-closer.
+ *
+ * Only the outer-gutter `╰` is rewritten (same anchor as {@link
+ * isOuterFrameClose}); a line that isn't an outer-frame close is returned
+ * unchanged. The color treatment is preserved : we swap only the glyph inside
+ * whatever SGR envelope the caller used.
+ */
+export function reopenFrameCloser(line: string): string {
+  if (!isOuterFrameClose(line)) return line
+  return line.replace("╰", "│")
+}
+
+/**
  * Render a tool's result block for the transcript: the rows between
  * `╭ <header>` (written separately by the caller) and the closing `╰`.
  * Inserts the `│ ` gutter on each row, applies the per-tool body line
@@ -902,4 +919,112 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics rendering (LSP / linter / formatter feedback)
+//
+// The AGENT owns the TUI; a plugin (`diagnostics`) provides structured
+// {@link Finding}s on the `tool.didInvoke` chain. These pure helpers turn that
+// data into the agent's own chrome:
+//
+//  - {@link renderFindingsPanel}: colored transcript rows inside the tool-block
+//    gutter (`│ ┊ ╰`), severity dots, dim codes/locations, `·`-joined summary.
+//  - {@link formatDiagnosticsAnnotation}: the model-facing
+//    `<ma::agent::diagnostics>` block appended to the tool_result content (and
+//    stripped from the human preview by `findAnnotationStart`).
+//
+// Both are deliberately pure (no IO) so they unit-test without a TTY.
+// ---------------------------------------------------------------------------
+
+/** Severity sort weight: errors first, then warnings, then info. */
+const SEVERITY_RANK: Record<FindingSeverity, number> = { error: 0, warning: 1, info: 2 }
+
+/** Default max diagnostic rows rendered in the panel before collapsing. */
+export const DIAGNOSTICS_PANEL_MAX_ROWS = 6
+
+/** The severity dot, colored per severity (red error / gold warning / sky info). */
+function severityDot(sev: FindingSeverity): string {
+  if (sev === "error") return c.red("●")
+  if (sev === "warning") return c.gold("●")
+  return c.sky("●")
+}
+
+/** `12:5` location fragment, dim. Empty when the finding has no location. */
+function locationFragment(f: Finding): string {
+  if (typeof f.line !== "number") return ""
+  return typeof f.col === "number" ? `${f.line}:${f.col}` : `${f.line}`
+}
+
+/**
+ * Render plugin-provided {@link Finding}s into bordered tool-block rows.
+ *
+ * Returns `[]` for an empty list (the caller then emits nothing : a clean edit
+ * stays calm). Otherwise: one `│ ● <loc> <code> <message>` row per finding
+ * (errors first, capped at `maxRows` with a `┊ +N more` overflow row), then a
+ * closing `╰ <summary>` row with `·`-joined counts.
+ *
+ * The rows reuse the exact gutter glyphs + palette of {@link formatToolPreview}
+ * so diagnostics read as part of the same tool block, not a new widget.
+ */
+export function renderFindingsPanel(
+  findings: Finding[],
+  opts: { cols?: number; maxRows?: number } = {},
+): string[] {
+  if (findings.length === 0) return []
+  const maxRows = opts.maxRows ?? DIAGNOSTICS_PANEL_MAX_ROWS
+  const bodyWidth = toolPreviewBodyWidth(opts.cols)
+
+  const sorted = [...findings].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+  const errors = sorted.filter((f) => f.severity === "error").length
+  const warnings = sorted.filter((f) => f.severity === "warning").length
+  const infos = sorted.filter((f) => f.severity === "info").length
+
+  const shown = sorted.slice(0, maxRows)
+  const hidden = sorted.length - shown.length
+
+  const out: string[] = []
+  for (const f of shown) {
+    const dot = severityDot(f.severity)
+    const loc = locationFragment(f)
+    const locPart = loc ? `${c.dim(loc)} ` : ""
+    const codePart = f.code ? `${c.dim(f.code)} ` : ""
+    const body = `${dot} ${locPart}${codePart}${f.message}`
+    const line = clampToolPreviewBodyLine(body, bodyWidth)
+    out.push(`  ${c.dimCyan("│")} ${line}`)
+  }
+  if (hidden > 0) {
+    out.push(`  ${c.dimCyan("┊")} ${c.dim(`+${hidden} more`)}`)
+  }
+
+  // Summary line. Badge by worst severity present.
+  const parts: string[] = []
+  if (errors > 0) parts.push(c.red(`${errors} ${errors === 1 ? "error" : "errors"}`))
+  if (warnings > 0) parts.push(c.gold(`${warnings} ${warnings === 1 ? "warning" : "warnings"}`))
+  if (infos > 0) parts.push(c.dim(`${infos} info`))
+  const badge = errors > 0 ? c.boldRed("✘") : warnings > 0 ? c.gold("▲") : c.sky("●")
+  const summary = `${badge} ${parts.join(` ${c.dim("·")} `)}`
+  out.push(`  ${c.dimCyan("╰")} ${summary}`)
+  return out
+}
+
+/**
+ * Build the model-facing `<ma::agent::diagnostics>` annotation from the
+ * plugin's `notes`. Returns `""` when there are no notes (so the caller appends
+ * nothing). The block rides at the tail of `tool_result.content`, separated by
+ * `\n\n`, and is stripped from the human transcript by `findAnnotationStart`
+ * (the prefix is registered in `ANNOTATION_PREFIXES`).
+ *
+ * Shape (one note per line, `count` attribute for a quick scan):
+ *
+ *     <ma::agent::diagnostics count="2">
+ *     12:5 error TS2322 Type 'string' is not assignable to type 'number'.
+ *     7:1 warning no-unused-vars 'x' is never used.
+ *     </ma::agent::diagnostics>
+ */
+export function formatDiagnosticsAnnotation(notes: string[]): string {
+  const clean = notes.filter((n) => typeof n === "string" && n.trim().length > 0)
+  if (clean.length === 0) return ""
+  const inner = clean.join("\n")
+  return `\n\n<ma::agent::diagnostics count="${clean.length}">\n${inner}\n</ma::agent::diagnostics>`
 }
