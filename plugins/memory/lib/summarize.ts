@@ -24,8 +24,9 @@
 import type { AuthResult } from "../../../src/auth.ts"
 import { getAuth } from "../../../src/auth.ts"
 import { type SendOptions, sendMessageSync } from "../../../src/client.ts"
-import { MODELS } from "../../../src/headers.ts"
 import { promptPath, renderPrompt } from "../../../src/prompts.ts"
+
+import { defaultSummaryModel } from "./memory-config.ts"
 
 /** Configuration for one summarize() call. */
 export interface SummarizeOptions {
@@ -155,7 +156,7 @@ export async function summarize(
 
   const sendOpts: SendOptions = {
     auth,
-    model: opts.model ?? MODELS.HAIKU,
+    model: opts.model ?? defaultSummaryModel(),
     messages: [
       {
         role: "user",

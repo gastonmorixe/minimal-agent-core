@@ -43,8 +43,20 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { MODELS } from "../../../src/headers.ts"
+import { findModelByTags } from "../../../src/llm/model-registry.ts"
 import { parseJsonc } from "../../../src/jsonc.ts"
+
+/**
+ * Default summarizer model: the cheap/fast Anthropic tier, resolved from
+ * the model registry by tags so this plugin no longer hardcodes a model
+ * id via `src/headers.ts` (refactor Wave 1: plugins must not reach into
+ * the legacy wire module for catalog data). The literal fallback covers
+ * early-boot callers that read the config before the provider plugin
+ * registered its models; it matches the registry's current haiku id.
+ */
+export function defaultSummaryModel(): string {
+  return findModelByTags("anthropic", ["haiku", "production"])?.id ?? "claude-haiku-4-5-20251001"
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -108,7 +120,7 @@ export interface MemoryConfig {
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   inject: "none",
   summary: {
-    model: MODELS.HAIKU,
+    model: defaultSummaryModel(),
     minBullets: 30,
     minBytes: 15_000,
     dirtyBullets: 3,
