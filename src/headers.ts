@@ -462,27 +462,17 @@ export interface SystemBlock {
 }
 
 /**
- * Default interval (in tool-execution rounds) between reflection checkpoints
- * within a single `run()` call. Mirrored by `Agent.reflectionInterval` and
- * referenced from {@link buildSystemPrompt} when generating the loop-safety
- * paragraph appended to `system[2]`. Set to 50 because empirically a real
- * agentic session can hit 30+ rounds for a single complex task : 50 is the
- * point past which "still on track?" is a reasonable question for the model.
- * Configurable per-Agent; pass 0 to disable checkpoints entirely.
+ * Reflection-checkpoint defaults moved to `src/agent/reflection.ts`
+ * (agent-loop config, not wire constants) in refactor Wave 1. Re-exported
+ * here so existing importers keep resolving until the legacy module
+ * dissolves (Wave 4). New code: import from `./agent/reflection.ts`.
  */
-export const DEFAULT_REFLECTION_INTERVAL = 50
+export {
+  DEFAULT_REFLECTION_COOLDOWN_MS,
+  DEFAULT_REFLECTION_INTERVAL,
+} from "./agent/reflection.ts"
 
-/**
- * Default wall-clock cooldown (in milliseconds) applied at each reflection
- * checkpoint before the next API request is sent. Mirrored by
- * `Agent.reflectionCooldownMs`. Serves two purposes: (1) gives a human
- * watching the agent a window to press Esc and interrupt, (2) surfaces the
- * elapsed wall time to the model via the `cooldown-applied-seconds`
- * attribute on the injected `<ma::agent::reflection-checkpoint>` tag, so the model
- * has a concrete signal that wall-clock time has passed. Configurable
- * per-Agent; pass 0 to keep the checkpoint attachment but skip the pause.
- */
-export const DEFAULT_REFLECTION_COOLDOWN_MS = 60_000
+import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "./agent/reflection.ts"
 
 /**
  * Build the harness-safety paragraph appended to `system[2]` so the model

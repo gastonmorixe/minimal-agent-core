@@ -23,6 +23,28 @@ import type { InputCaptureStack } from "../input-capture-stack.ts"
 import type { StatusBus } from "../status.ts"
 
 /**
+ * Default interval (in tool-execution rounds) between reflection
+ * checkpoints within a single `run()` call. 50 because a real agentic
+ * session can hit 30+ rounds on one complex task; past 50, "still on
+ * track?" is a fair question. Configurable per-Agent; 0 disables.
+ *
+ * Owned here (agent-loop config) as of refactor Wave 1; `src/headers.ts`
+ * re-exports for back-compat until the legacy module dissolves.
+ */
+export const DEFAULT_REFLECTION_INTERVAL = 50
+
+/**
+ * Default wall-clock cooldown (ms) applied at each reflection checkpoint
+ * before the next API request: (1) gives a watching human an Esc window,
+ * (2) surfaces elapsed wall time to the model via the
+ * `cooldown-applied-seconds` attribute. Configurable per-Agent; 0 keeps
+ * the checkpoint attachment but skips the pause.
+ *
+ * Owned here (agent-loop config) as of refactor Wave 1.
+ */
+export const DEFAULT_REFLECTION_COOLDOWN_MS = 60_000
+
+/**
  * Regex matching a `<ma::agent::reflection-ack silence-for="K" reason="..." />`
  * tag in assistant response text. Both attributes are optional in either
  * order. Anchored to `\b` boundaries on the attribute names so a typo

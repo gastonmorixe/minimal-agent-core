@@ -39,6 +39,8 @@ import {
 import { type AskUserFn, runPreflightPipeline } from "./agent/preflight-pipeline.ts"
 import {
   buildReflectionCheckpointBlock,
+  DEFAULT_REFLECTION_COOLDOWN_MS,
+  DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
   runReflectionCooldown,
 } from "./agent/reflection.ts"
@@ -59,7 +61,6 @@ import {
   type ToolResultBlock,
   type ToolUseBlock,
 } from "./client.ts"
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import { findModel } from "./llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
