@@ -22,6 +22,25 @@ import type { Finding } from "../lib/types.ts"
 
 const EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
 
+/**
+ * Per-pull ceiling. Slightly under the runner's 2s budget so a wedged
+ * server surfaces HERE (recording a breaker failure + disposing the
+ * client) rather than timing out invisibly in the runner where the
+ * breaker can't see it.
+ */
+const PULL_TIMEOUT_MS = 1800
+
+/** Race `p` against a deadline. Rejects with `lsp pull timeout` on expiry. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_res, rej) => {
+    timer = setTimeout(() => rej(new Error("lsp pull timeout")), ms)
+  })
+  return Promise.race([p, deadline]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  }) as Promise<T>
+}
+
 export class TsgoLspProvider implements DiagnosticProvider {
   readonly id = "tsgo"
   readonly kind = "type" as const
@@ -52,7 +71,19 @@ export class TsgoLspProvider implements DiagnosticProvider {
         // to the breaker). The breaker failure is recorded by `check`.
         if (this.client === client) this.client = null
       })
-      await client.whenReady()
+      try {
+        await client.whenReady()
+      } catch (err) {
+        // Init failed (timeout / spawn error): DISPOSE so the spawned child
+        // doesn't orphan. Without this, repeated half-open trials would
+        // accumulate zombie tsgo processes.
+        try {
+          client.dispose()
+        } catch {
+          /* already gone */
+        }
+        throw err
+      }
       this.client = client
       return client
     })()
@@ -77,7 +108,10 @@ export class TsgoLspProvider implements DiagnosticProvider {
 
     try {
       client.sync(path, text)
-      const items = await client.pullDiagnostics(path)
+      // Bound the pull so a wedged-but-alive server records a breaker
+      // failure instead of leaving the promise pending past the runner's
+      // own timeout (which can't reach in here to cancel us).
+      const items = await withTimeout(client.pullDiagnostics(path), PULL_TIMEOUT_MS)
       this.breaker.recordSuccess()
       return adaptLspDiagnostics(items, this.id)
     } catch {
