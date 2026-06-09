@@ -14,18 +14,18 @@
  * @module llm/providers/openrouter/adapter
  */
 
-import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
-import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
 import type {
   ProviderAdapter,
   RunContext,
   SurfaceId,
   ValidationResult,
 } from "../../src/llm/provider.ts"
+import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
+import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import {
   buildOpenAIChatBody,
@@ -34,6 +34,7 @@ import {
   translateOpenAIChatStream,
   validateOpenAIRequest,
 } from "../llm-openai/index.ts"
+
 import { registerOpenRouterModels } from "./models.ts"
 import { fetchOpenRouterSessionInfo, setOpenRouterRateLimits } from "./session-info.ts"
 

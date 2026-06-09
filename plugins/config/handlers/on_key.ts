@@ -24,7 +24,7 @@
 import type { HookHandlerContext } from "../../../src/plugins/types.ts"
 import { type Event, type KeyName, transition } from "../lib/fsm.ts"
 import type { EditorKeyPayload } from "../lib/host-types.ts"
-import { applyEffects, type ApplyDeps } from "../lib/runtime.ts"
+import { type ApplyDeps, applyEffects } from "../lib/runtime.ts"
 import { getModel, getState, setModel, setState } from "../lib/state.ts"
 import { fsmRows } from "../lib/view.ts"
 

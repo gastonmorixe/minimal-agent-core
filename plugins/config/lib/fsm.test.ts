@@ -19,7 +19,13 @@ import {
 } from "./fsm.ts"
 
 const rows: Row[] = [
-  { type: "field", fieldId: "effort", fieldKind: "enum", choices: ["low", "high"], effective: undefined },
+  {
+    type: "field",
+    fieldId: "effort",
+    fieldKind: "enum",
+    choices: ["low", "high"],
+    effective: undefined,
+  },
   { type: "field", fieldId: "autoAsk", fieldKind: "boolean", effective: undefined },
   { type: "field", fieldId: "model", fieldKind: "string", effective: "claude" },
   { type: "action", action: "save" },
@@ -96,13 +102,25 @@ describe("enum + boolean cycling in browse", () => {
   })
 
   it("cycleEnum walks unset → choices → back to unset", () => {
-    expect(cycleEnum("f", ["a", "b"], undefined, 1)).toEqual({ kind: "stage-set", fieldId: "f", value: "a" })
-    expect(cycleEnum("f", ["a", "b"], "a", 1)).toEqual({ kind: "stage-set", fieldId: "f", value: "b" })
+    expect(cycleEnum("f", ["a", "b"], undefined, 1)).toEqual({
+      kind: "stage-set",
+      fieldId: "f",
+      value: "a",
+    })
+    expect(cycleEnum("f", ["a", "b"], "a", 1)).toEqual({
+      kind: "stage-set",
+      fieldId: "f",
+      value: "b",
+    })
     expect(cycleEnum("f", ["a", "b"], "b", 1)).toEqual({ kind: "stage-clear", fieldId: "f" })
   })
 
   it("cycleBoolean walks unset → true → false → unset", () => {
-    expect(cycleBoolean("f", undefined, 1)).toEqual({ kind: "stage-set", fieldId: "f", value: true })
+    expect(cycleBoolean("f", undefined, 1)).toEqual({
+      kind: "stage-set",
+      fieldId: "f",
+      value: true,
+    })
     expect(cycleBoolean("f", true, 1)).toEqual({ kind: "stage-set", fieldId: "f", value: false })
     expect(cycleBoolean("f", false, 1)).toEqual({ kind: "stage-clear", fieldId: "f" })
   })
@@ -112,8 +130,14 @@ describe("entering + leaving edit mode", () => {
   it("Enter on a string field enters edit, primes buffer with current value", () => {
     let s = open()
     // move to the model row (index 2)
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     const r = transition(s, { kind: "key", name: "Enter" }, ctx)
     const st = r.state as Extract<State, { kind: "open" }>
     expect(st.phase.kind).toBe("edit")
@@ -127,8 +151,14 @@ describe("entering + leaving edit mode", () => {
 
   it("char events append to the draft while editing", () => {
     let s = open()
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     // Enter edit on `model`; current value is "claude" (from CONFIG below).
     s = transition(s, { kind: "key", name: "Enter" }, ctx).state as Extract<State, { kind: "open" }>
     s = transition(s, { kind: "char", ch: "-" }, ctx).state as Extract<State, { kind: "open" }>
@@ -140,8 +170,14 @@ describe("entering + leaving edit mode", () => {
 
   it("Backspace trims the draft while editing", () => {
     let s = open()
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     s = transition(s, { kind: "key", name: "Enter" }, ctx).state as Extract<State, { kind: "open" }>
     const r = transition(s, { kind: "key", name: "Backspace" }, ctx)
     const st = (r.state as Extract<State, { kind: "open" }>).phase
@@ -152,8 +188,14 @@ describe("entering + leaving edit mode", () => {
 
   it("legacy buffer events still set the draft whole (back-compat)", () => {
     let s = open()
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     s = transition(s, { kind: "key", name: "Enter" }, ctx).state as Extract<State, { kind: "open" }>
     const r = transition(s, { kind: "buffer", text: "gpt-5.5" }, ctx)
     const st = r.state as Extract<State, { kind: "open" }>
@@ -163,10 +205,19 @@ describe("entering + leaving edit mode", () => {
 
   it("Enter commits the draft as a stage-set and returns to browse", () => {
     let s = open()
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     s = transition(s, { kind: "key", name: "Enter" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "buffer", text: "gpt-5.5" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "buffer", text: "gpt-5.5" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     const r = transition(s, { kind: "key", name: "Enter" }, ctx)
     expect(r.effects).toContainEqual({ kind: "stage-set", fieldId: "model", value: "gpt-5.5" })
     expect(kinds(r.effects)).not.toContain("set-buffer")
@@ -175,8 +226,14 @@ describe("entering + leaving edit mode", () => {
 
   it("Escape in edit cancels without staging", () => {
     let s = open()
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
-    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
+    s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+      State,
+      { kind: "open" }
+    >
     s = transition(s, { kind: "key", name: "Enter" }, ctx).state as Extract<State, { kind: "open" }>
     const r = transition(s, { kind: "key", name: "Escape" }, ctx)
     expect(kinds(r.effects)).not.toContain("stage-set")
@@ -185,7 +242,10 @@ describe("entering + leaving edit mode", () => {
   })
 
   it("empty committed draft clears the key", () => {
-    expect(draftToEffect("model", "string", "   ")).toEqual({ kind: "stage-clear", fieldId: "model" })
+    expect(draftToEffect("model", "string", "   ")).toEqual({
+      kind: "stage-clear",
+      fieldId: "model",
+    })
   })
 
   it("string-list draft parses on space/comma", () => {
@@ -202,7 +262,10 @@ describe("action rows", () => {
     let s = open()
     const idx = rows.findIndex((r) => r.type === "action" && r.action === action)
     for (let i = 0; i < idx; i++) {
-      s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<State, { kind: "open" }>
+      s = transition(s, { kind: "key", name: "ArrowDown" }, ctx).state as Extract<
+        State,
+        { kind: "open" }
+      >
     }
     return s
   }

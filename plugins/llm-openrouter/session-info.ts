@@ -76,7 +76,7 @@ export function parseOpenRouterResetMs(s: string): number | undefined {
   const unitMs: Record<string, number> = {
     ns: 1e-6,
     us: 1e-3,
-    "µs": 1e-3,
+    µs: 1e-3,
     ms: 1,
     s: 1000,
     m: 60_000,
@@ -124,7 +124,12 @@ export function parseOpenRouterQuotaWindows(rl: ReadonlyMap<string, string>): Qu
     "x-ratelimit-remaining-requests",
     "x-ratelimit-reset-requests",
   )
-  build("tok", "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens")
+  build(
+    "tok",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-tokens",
+  )
   return out
 }
 

@@ -50,9 +50,9 @@ describe("parseOpenRouterQuotaWindows", () => {
   })
   it("skips a window with missing/zero limit; empty map -> []", () => {
     expect(parseOpenRouterQuotaWindows(new Map())).toEqual([])
-    expect(
-      parseOpenRouterQuotaWindows(new Map([["x-ratelimit-remaining-requests", "5"]])),
-    ).toEqual([])
+    expect(parseOpenRouterQuotaWindows(new Map([["x-ratelimit-remaining-requests", "5"]]))).toEqual(
+      [],
+    )
   })
 })
 

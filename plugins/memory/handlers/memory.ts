@@ -65,9 +65,7 @@ function parseScope(attrs: Record<string, string>): Scope {
   return "project"
 }
 
-export default async function memoryHandler(
-  ctx: TUIContext,
-): Promise<TUIResult> {
+export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "inline_tag") {
     return { kind: "rendered", ansi: "" }
   }
@@ -86,9 +84,13 @@ export default async function memoryHandler(
   if (scope === "short-term" && !sid) {
     const ansi =
       "\x1b[31m· memory save refused: short-term scope requires a session id (none plumbed through)\x1b[0m\n"
-    ctx.log.warn("short-term-no-sid", "refused short-term write: MINIMAL_AGENT_SESSION_ID is empty", {
-      scope,
-    })
+    ctx.log.warn(
+      "short-term-no-sid",
+      "refused short-term write: MINIMAL_AGENT_SESSION_ID is empty",
+      {
+        scope,
+      },
+    )
     return { kind: "rendered", ansi }
   }
 

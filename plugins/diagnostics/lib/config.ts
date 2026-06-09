@@ -89,7 +89,9 @@ export function loadConfig(
     if (!existsSync(configFilePath)) return { ...DEFAULT_CONFIG }
     const parsed = parse(readFileSync(configFilePath, "utf8"))
     if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CONFIG }
-    const plugins = (parsed as Record<string, unknown>).plugins as Record<string, unknown> | undefined
+    const plugins = (parsed as Record<string, unknown>).plugins as
+      | Record<string, unknown>
+      | undefined
     return resolveConfig(plugins?.diagnostics)
   } catch {
     return { ...DEFAULT_CONFIG }

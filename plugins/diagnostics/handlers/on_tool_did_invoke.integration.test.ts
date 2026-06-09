@@ -4,9 +4,11 @@
  * actual `tool.didInvoke` handler, and asserts the payload gets findings +
  * notes. Skipped when tsgo is absent.
  */
-import { describe, expect, it } from "bun:test"
+
 import { existsSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
 
 import onToolDidInvoke from "./on_tool_did_invoke.ts"
 
@@ -24,7 +26,15 @@ interface Payload {
 }
 
 function payloadFor(filePath: string): Payload {
-  return { tool: "Edit", input: { file_path: filePath }, cwd: REPO, ok: true, filePath, findings: [], notes: [] }
+  return {
+    tool: "Edit",
+    input: { file_path: filePath },
+    cwd: REPO,
+    ok: true,
+    filePath,
+    findings: [],
+    notes: [],
+  }
 }
 
 describe("on_tool_did_invoke handler (real tools)", () => {
@@ -61,7 +71,14 @@ describe("on_tool_did_invoke handler (real tools)", () => {
   })
 
   it("ignores non-file tools (e.g. Bash)", async () => {
-    const payload: Payload = { tool: "Bash", input: { command: "ls" }, cwd: REPO, ok: true, findings: [], notes: [] }
+    const payload: Payload = {
+      tool: "Bash",
+      input: { command: "ls" },
+      cwd: REPO,
+      ok: true,
+      findings: [],
+      notes: [],
+    }
     const res = await onToolDidInvoke(payload, { cwd: REPO, env: {} })
     expect(res).toBeUndefined()
     expect(payload.findings).toEqual([])

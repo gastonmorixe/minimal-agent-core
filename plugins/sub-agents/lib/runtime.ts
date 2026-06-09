@@ -105,7 +105,11 @@ export function resolveAutoTier(env: NodeJS.ProcessEnv = process.env): boolean {
 export function resolvePolicy(env: NodeJS.ProcessEnv = process.env): GuardPolicy {
   return {
     maxDepth: intEnv(env, "MINIMAL_AGENT_SUBAGENT_MAX_DEPTH", DEFAULT_POLICY.maxDepth),
-    maxConcurrent: intEnv(env, "MINIMAL_AGENT_SUBAGENT_MAX_CONCURRENT", DEFAULT_POLICY.maxConcurrent),
+    maxConcurrent: intEnv(
+      env,
+      "MINIMAL_AGENT_SUBAGENT_MAX_CONCURRENT",
+      DEFAULT_POLICY.maxConcurrent,
+    ),
     maxTotal: intEnv(env, "MINIMAL_AGENT_SUBAGENT_MAX_TOTAL", DEFAULT_POLICY.maxTotal),
   }
 }

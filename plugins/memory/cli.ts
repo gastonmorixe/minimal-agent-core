@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Standalone CLI for the memory plugin.
  *
@@ -42,6 +43,8 @@
  * @module memory/cli
  */
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
+
 import {
   bulletsToJson,
   bulletToJson,
@@ -52,36 +55,21 @@ import {
   formatRead,
   formatRemoved,
 } from "./lib/format.ts"
-import {
-  formatBullet,
-  newPersistentId,
-  parseFileWithLines,
-  serializeFile,
-} from "./lib/parse.ts"
+import { formatBullet, newPersistentId, parseFileWithLines, serializeFile } from "./lib/parse.ts"
 import {
   globalMemoryPath,
   MemoryStore,
   projectMemoryPath,
-  shortTermMemoryPath,
   type StoreKind,
+  shortTermMemoryPath,
 } from "./lib/store.ts"
-
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
 
 // ---------------------------------------------------------------------------
 // Argv parsing
 // ---------------------------------------------------------------------------
 
 interface Flags {
-  command?:
-    | "list"
-    | "read"
-    | "add"
-    | "edit"
-    | "remove"
-    | "clear"
-    | "rewrite-ids"
-    | "path"
+  command?: "list" | "read" | "add" | "edit" | "remove" | "clear" | "rewrite-ids" | "path"
   positional: string[]
   scope: StoreKind
   cwd: string
@@ -265,9 +253,7 @@ export function parseArgs(argv: string[]): Flags {
     // Positional.
     if (flags.command === undefined) {
       if (!VALID_COMMANDS.has(a!)) {
-        throw new UsageError(
-          `unknown command: ${a} (valid: ${[...VALID_COMMANDS].join(", ")})`,
-        )
+        throw new UsageError(`unknown command: ${a} (valid: ${[...VALID_COMMANDS].join(", ")})`)
       }
       flags.command = a as Flags["command"]
     } else {
@@ -290,9 +276,7 @@ export function parseArgs(argv: string[]): Flags {
  * of force-clearing it).
  */
 function namespaceDeps(flags: Flags): { namespace?: string | null } {
-  return "namespace" in flags && flags.namespace !== undefined
-    ? { namespace: flags.namespace }
-    : {}
+  return "namespace" in flags && flags.namespace !== undefined ? { namespace: flags.namespace } : {}
 }
 
 function makeStore(flags: Flags): MemoryStore {
@@ -302,9 +286,7 @@ function makeStore(flags: Flags): MemoryStore {
   }
   if (flags.scope === "short-term") {
     if (!flags.sid) {
-      throw new UsageError(
-        "scope=short-term requires --sid (or $MINIMAL_AGENT_SESSION_ID)",
-      )
+      throw new UsageError("scope=short-term requires --sid (or $MINIMAL_AGENT_SESSION_ID)")
     }
     return MemoryStore.shortTerm(flags.sid, ns)
   }
@@ -316,9 +298,7 @@ function pathForScope(flags: Flags): string {
   if (flags.scope === "global") return globalMemoryPath(ns)
   if (flags.scope === "short-term") {
     if (!flags.sid) {
-      throw new UsageError(
-        "scope=short-term requires --sid (or $MINIMAL_AGENT_SESSION_ID)",
-      )
+      throw new UsageError("scope=short-term requires --sid (or $MINIMAL_AGENT_SESSION_ID)")
     }
     return shortTermMemoryPath(flags.sid, ns)
   }
@@ -340,20 +320,26 @@ function cmdList(flags: Flags, io: IO): number {
   const filtered = flags.query
     ? all.filter((b) => b.body.toLowerCase().includes(flags.query!.toLowerCase()))
     : all
-  const sliced = flags.limit && filtered.length > flags.limit
-    ? filtered.slice(-flags.limit)
-    : filtered
+  const sliced =
+    flags.limit && filtered.length > flags.limit ? filtered.slice(-flags.limit) : filtered
 
   if (flags.format === "json") {
     io.stdout.write(
       `${JSON.stringify(
-        { scope: flags.scope, total: filtered.length, shown: sliced.length, bullets: bulletsToJson(sliced) },
+        {
+          scope: flags.scope,
+          total: filtered.length,
+          shown: sliced.length,
+          bullets: bulletsToJson(sliced),
+        },
         null,
         2,
       )}\n`,
     )
   } else {
-    io.stdout.write(formatList(sliced, { scope: flags.scope, ansi: flags.color, total: filtered.length }))
+    io.stdout.write(
+      formatList(sliced, { scope: flags.scope, ansi: flags.color, total: filtered.length }),
+    )
   }
   return 0
 }
@@ -410,7 +396,9 @@ function cmdEdit(flags: Flags, io: IO): number {
     return 2
   }
   if (flags.format === "json") {
-    io.stdout.write(`${JSON.stringify({ scope: flags.scope, bullet: bulletToJson(updated) }, null, 2)}\n`)
+    io.stdout.write(
+      `${JSON.stringify({ scope: flags.scope, bullet: bulletToJson(updated) }, null, 2)}\n`,
+    )
   } else {
     io.stdout.write(formatEdited(updated, flags.scope, flags.color))
   }
@@ -430,7 +418,9 @@ function cmdRemove(flags: Flags, io: IO): number {
     return 2
   }
   if (flags.format === "json") {
-    io.stdout.write(`${JSON.stringify({ scope: flags.scope, removed: bulletToJson(removed) }, null, 2)}\n`)
+    io.stdout.write(
+      `${JSON.stringify({ scope: flags.scope, removed: bulletToJson(removed) }, null, 2)}\n`,
+    )
   } else {
     io.stdout.write(formatRemoved(removed, flags.scope, flags.color))
   }

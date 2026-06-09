@@ -11,26 +11,27 @@
  * + content shape.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
 import {
   buildHolder,
+  type LockHolder,
   lockPathFor,
   serializeHolder,
-  type LockHolder,
 } from "../../../src/file-lock.ts"
 import type { TUIContext } from "../../../src/plugins/types.ts"
 
 import lockStatusHandler, {
   annotate,
+  type RunDeps,
   runClear,
   runClearStale,
   runInspect,
   runList,
-  type RunDeps,
 } from "./lock_status.ts"
 
 let dir: string
@@ -352,10 +353,7 @@ describe("runClear", () => {
   it("clearing a HELD lock reports WARNING verdict (lock still removed)", () => {
     const f = join(dir, "y.txt")
     writeLock(f, { pid: 1, host: "ourhost", acquiredAtMs: 1_999_000 })
-    const r = runClear(
-      { action: "clear", path: f, format: "json" },
-      deps({ pidAlive: () => true }),
-    )
+    const r = runClear({ action: "clear", path: f, format: "json" }, deps({ pidAlive: () => true }))
     expect(r.is_error).toBeFalsy()
     expect(existsSync(lockPathFor(f))).toBe(false)
     const parsed = JSON.parse(r.content) as { verdict: string }

@@ -11,14 +11,11 @@
  */
 
 import { describe, expect, test } from "bun:test"
+
 import { defaultConfig, type WebSearchConfig } from "../config.ts"
+
 import { buildChain, runChain, WebSearchAllFailedError } from "./registry.ts"
-import type {
-  ProviderFactory,
-  SearchHit,
-  SearchOptions,
-  WebSearchProvider,
-} from "./types.ts"
+import type { ProviderFactory, SearchHit, SearchOptions, WebSearchProvider } from "./types.ts"
 import { WebSearchProviderError } from "./types.ts"
 
 const opts: SearchOptions = { type: "web", count: 5 }

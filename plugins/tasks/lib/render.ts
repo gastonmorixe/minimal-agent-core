@@ -44,8 +44,8 @@
  * @module tasks/lib/render
  */
 
-import type { Stats, View } from "./store.ts"
 import { localIsoDateTime, type Task, type TaskStatus } from "./parse.ts"
+import type { Stats, View } from "./store.ts"
 
 // ---------------------------------------------------------------------------
 // Glyphs (pure unicode, no nerd-font, no emoji)
@@ -249,7 +249,7 @@ export function listTotalElapsedMs(tasks: readonly Task[], nowEpochMs: number): 
   // the latest done_at (the moment the list "finished"). When neither
   // applies (e.g. tasks started but all canceled with no done_at), fall
   // back to now for an honest mid-flight reading.
-  const upper = anyDoing ? nowEpochMs : latestEnd ?? nowEpochMs
+  const upper = anyDoing ? nowEpochMs : (latestEnd ?? nowEpochMs)
   if (upper < earliestStart) return 0
   return upper - earliestStart
 }
@@ -376,9 +376,7 @@ function styleTitleByStatus(t: Task, title: string, ansi: boolean, targeted = fa
     case "done":
       return color(
         ansi,
-        targeted
-          ? `${ANSI.LIME}${ANSI.BOLD}${ANSI.STRIKE}`
-          : `${ANSI.DIM}${ANSI.STRIKE}`,
+        targeted ? `${ANSI.LIME}${ANSI.BOLD}${ANSI.STRIKE}` : `${ANSI.DIM}${ANSI.STRIKE}`,
         title,
       )
     case "doing":
@@ -400,9 +398,7 @@ function styleTitleByStatus(t: Task, title: string, ansi: boolean, targeted = fa
       // + dim white title" (which made the title look done, not gone).
       return color(
         ansi,
-        targeted
-          ? `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}`
-          : `${ANSI.RED}${ANSI.STRIKE}`,
+        targeted ? `${ANSI.RED}${ANSI.BOLD}${ANSI.STRIKE}` : `${ANSI.RED}${ANSI.STRIKE}`,
         title,
       )
     default: {
@@ -414,7 +410,10 @@ function styleTitleByStatus(t: Task, title: string, ansi: boolean, targeted = fa
 }
 
 function singleLineText(s: string): string {
-  return s.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim()
+  return s
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/ {2,}/g, " ")
+    .trim()
 }
 
 function truncate(s: string, max?: number): string {
@@ -454,9 +453,10 @@ function renderHeaderText(
   // Common N/M trailer. The leading ` ${dot} ` separates the action verb
   // from the stats (e.g. `+ added 7 tasks · 0/7`); when stats are empty
   // (zero-total) the separator goes with it.
-  const trail = stats.total === 0
-    ? ""
-    : ` ${dot} ${color(ansi, ANSI.BOLD, String(stats.done))}${color(ansi, ANSI.DIM, `/${stats.total}`)}`
+  const trail =
+    stats.total === 0
+      ? ""
+      : ` ${dot} ${color(ansi, ANSI.BOLD, String(stats.done))}${color(ansi, ANSI.DIM, `/${stats.total}`)}`
 
   // The plugin owns the "header content" slot only — agent chrome
   // (`╭ [icon] [label]  …`) is drawn around this string. Don't lead with
@@ -637,11 +637,7 @@ function styleIdCol(v: View, ansi: boolean, targeted: boolean): string {
       `#${t.id}`,
     )
   }
-  return color(
-    ansi,
-    targeted ? `${ANSI.LGRAY}${ANSI.BOLD}` : ANSI.DGRAY,
-    `#${t.id}`,
-  )
+  return color(ansi, targeted ? `${ANSI.LGRAY}${ANSI.BOLD}` : ANSI.DGRAY, `#${t.id}`)
 }
 
 /**
@@ -859,11 +855,7 @@ function targetHashFromAction(action: RenderAction): string | null {
 // Closer rendering
 // ---------------------------------------------------------------------------
 
-function renderCloserText(
-  stats: Stats,
-  ansi: boolean,
-  elapsedMs: number,
-): string {
+function renderCloserText(stats: Stats, ansi: boolean, elapsedMs: number): string {
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   const parts: string[] = []
   const allDone = isAllDone(stats)
@@ -937,7 +929,9 @@ export function renderToolDisplay(
     if (opts.action.kind === "list" || opts.action.kind === "cleared") {
       const dim = opts.ansi ? `${ANSI.DIM}\x1b[3m` : ""
       const reset = opts.ansi ? ANSI.RESET : ""
-      bodyLines.push(`  ${dim}Task({action: "add_many", titles: [...]}) to plan a multi-step change${reset}`)
+      bodyLines.push(
+        `  ${dim}Task({action: "add_many", titles: [...]}) to plan a multi-step change${reset}`,
+      )
     }
   } else {
     const targetHash = targetHashFromAction(opts.action)
@@ -978,11 +972,7 @@ export function renderToolDisplay(
  * Output: a complete block with trailing newline. Lines are joined with
  * `\n` (no `\r`) — the agent's compositor handles `\n` → `\r\n` on output.
  */
-export function renderBlock(
-  views: readonly View[],
-  stats: Stats,
-  opts: RenderOptions,
-): string {
+export function renderBlock(views: readonly View[], stats: Stats, opts: RenderOptions): string {
   const nowEpochMs = (opts.now ?? Date.now)()
   const allTasks = views.map((v) => v.task)
   const lines: string[] = []

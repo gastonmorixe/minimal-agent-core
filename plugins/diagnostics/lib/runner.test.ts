@@ -74,10 +74,7 @@ describe("DiagnosticsRunner", () => {
 
   it("times out a hanging provider and degrades it", async () => {
     const runner = new DiagnosticsRunner(
-      [
-        fakeProvider("fast", "type", [f({ source: "fast" })]),
-        fakeProvider("slow", "lint", "hang"),
-      ],
+      [fakeProvider("fast", "type", [f({ source: "fast" })]), fakeProvider("slow", "lint", "hang")],
       { timeoutMs: 50 },
     )
     const report = await runner.check("/x.ts", "code")

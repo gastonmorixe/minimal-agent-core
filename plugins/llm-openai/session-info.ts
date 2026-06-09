@@ -87,7 +87,7 @@ export function parseOpenAIResetMs(s: string): number | undefined {
   const unitMs: Record<string, number> = {
     ns: 1e-6,
     us: 1e-3,
-    "µs": 1e-3,
+    µs: 1e-3,
     ms: 1,
     s: 1000,
     m: 60_000,

@@ -4,9 +4,11 @@
  * with the actual tools, not mocks. Skipped automatically when a binary is
  * absent so the suite stays green in minimal environments.
  */
-import { describe, expect, it } from "bun:test"
+
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
 
 import { BiomeProvider } from "./biome-provider.ts"
 import { OxlintProvider } from "./oxlint-provider.ts"

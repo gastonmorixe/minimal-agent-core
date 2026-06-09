@@ -21,9 +21,9 @@
  * @module llm/providers/anthropic/bootstrap
  */
 
-import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { MTokRate } from "../../src/llm/pricing.ts"
 import type { ProviderAuth } from "../../src/llm/provider.ts"
+import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 
 import { BOOTSTRAP_URL_BASE, USER_AGENT_OAUTH } from "./wire-constants.ts"
 

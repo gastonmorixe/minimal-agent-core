@@ -42,7 +42,8 @@ export default async function mailbox(ctx: TUIContext): Promise<TUIResult> {
 
   if (action === "post") {
     const body = str(input.body)
-    if (!body) return { kind: "tool_result", content: "Mailbox post: `body` is required.", is_error: true }
+    if (!body)
+      return { kind: "tool_result", content: "Mailbox post: `body` is required.", is_error: true }
     const to = str(input.to) ?? "*"
     const kind = str(input.kind) ?? "note"
     const msg: MailMessage = { ts: new Date().toISOString(), from: me, to, kind, body }
@@ -65,6 +66,7 @@ export default async function mailbox(ctx: TUIContext): Promise<TUIResult> {
     kind: "tool_result",
     content,
     displayHeader: `${headerIcon} ${color(true, ANSI.BOLD, me)} ${color(true, ANSI.DIM, GLYPHS.bullet)} ${color(true, ANSI.LGRAY, `read (${mine.length})`)}`,
-    display: mine.length > 0 ? mine.map((m) => color(true, ANSI.DGRAY, fmt(m))).join("\n") : undefined,
+    display:
+      mine.length > 0 ? mine.map((m) => color(true, ANSI.DGRAY, fmt(m))).join("\n") : undefined,
   }
 }

@@ -19,8 +19,8 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
 import type { ToolAvailability, TUIContext, TUIResult } from "../../../src/plugins/types.ts"
-import { ENV_RESULT_PATH } from "../lib/spawn.ts"
 import { buildDigest, parseReportRequest, serializeDigest } from "../lib/report.ts"
+import { ENV_RESULT_PATH } from "../lib/spawn.ts"
 
 /**
  * Availability gate: `ReportResult` is the SUB-AGENT completion tool, so it is

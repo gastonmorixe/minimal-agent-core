@@ -250,7 +250,10 @@ export function formatBullet(b: BulletInput): string {
  * ms), and gives the id an opaque feel so the model doesn't try to
  * decompose it.
  */
-export function newPersistentId(now: () => number = Date.now, rand: () => Buffer = () => randomBytes(2)): string {
+export function newPersistentId(
+  now: () => number = Date.now,
+  rand: () => Buffer = () => randomBytes(2),
+): string {
   const millis = now().toString(36)
   const tail = rand().toString("hex")
   return `${millis}-${tail}`

@@ -354,9 +354,5 @@ function categorizeUpstream(
 function isRetryableErrorCategory(errType: string): boolean {
   // rate_limit_error is retryable: the outer coordinator waits the window
   // out on the slow curve rather than stopping the agent.
-  return (
-    errType === "overloaded_error" ||
-    errType === "api_error" ||
-    errType === "rate_limit_error"
-  )
+  return errType === "overloaded_error" || errType === "api_error" || errType === "rate_limit_error"
 }

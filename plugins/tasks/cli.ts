@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Standalone CLI for the tasks plugin.
  *
@@ -42,9 +43,9 @@
  * @module tasks/cli
  */
 
-import { renderBlock, type RenderAction } from "./lib/render.ts"
-import { TaskStore, TaskStoreError } from "./lib/store.ts"
 import { isTaskStatus, type TaskStatus } from "./lib/parse.ts"
+import { type RenderAction, renderBlock } from "./lib/render.ts"
+import { TaskStore, TaskStoreError } from "./lib/store.ts"
 
 // ---------------------------------------------------------------------------
 // Argv parsing
@@ -196,12 +197,14 @@ function run(flags: Flags): { code: number; output: string } {
 
   if (flags.command === "path") {
     const sid = getSid(flags)
-    if (sid === null) return { code: 1, output: "tasks: --sid or MINIMAL_AGENT_SESSION_ID required\n" }
+    if (sid === null)
+      return { code: 1, output: "tasks: --sid or MINIMAL_AGENT_SESSION_ID required\n" }
     return { code: 0, output: `${new TaskStore(sid, storeDeps).path}\n` }
   }
 
   const sid = getSid(flags)
-  if (sid === null) return { code: 1, output: "tasks: --sid or MINIMAL_AGENT_SESSION_ID required\n" }
+  if (sid === null)
+    return { code: 1, output: "tasks: --sid or MINIMAL_AGENT_SESSION_ID required\n" }
   const store = new TaskStore(sid, storeDeps)
   const useAnsi = !flags.noColor && process.stdout.isTTY === true
 
@@ -274,10 +277,10 @@ function run(flags: Flags): { code: number; output: string } {
           statusRaw === "done"
             ? { kind: "marked_done", hash: target.id }
             : statusRaw === "doing"
-            ? { kind: "marked_doing", hash: target.id }
-            : statusRaw === "canceled"
-            ? { kind: "marked_canceled", hash: target.id }
-            : { kind: "marked_todo", hash: target.id }
+              ? { kind: "marked_doing", hash: target.id }
+              : statusRaw === "canceled"
+                ? { kind: "marked_canceled", hash: target.id }
+                : { kind: "marked_todo", hash: target.id }
         return { code: 0, output: render(store, verb, useAnsi) }
       }
       case "update": {

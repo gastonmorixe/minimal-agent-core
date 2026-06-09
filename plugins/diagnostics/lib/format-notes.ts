@@ -48,7 +48,12 @@ export function filterFindings(findings: Finding[], opts: FilterOptions): Findin
 
 /** Render one finding as `[line:col] severity [code] message`. */
 export function formatNote(f: Finding): string {
-  const loc = typeof f.line === "number" ? (typeof f.col === "number" ? `${f.line}:${f.col} ` : `${f.line} `) : ""
+  const loc =
+    typeof f.line === "number"
+      ? typeof f.col === "number"
+        ? `${f.line}:${f.col} `
+        : `${f.line} `
+      : ""
   const code = f.code ? `${f.code} ` : ""
   return `${loc}${f.severity} ${code}${f.message}`
 }

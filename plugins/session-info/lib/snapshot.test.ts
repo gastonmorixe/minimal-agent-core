@@ -50,11 +50,15 @@ describe("formatSessionInfo", () => {
   it("renders the full report with context %, headroom, quota, cost, uptime", () => {
     const out = formatSessionInfo(base())
     expect(out).toContain("Session: abc123 · pid 4242 · box.local · agent v0.1.0")
-    expect(out).toContain("Model: Opus 4.8 (claude-opus-4-8[1m]) · anthropic · effort max · reasoning adaptive")
+    expect(out).toContain(
+      "Model: Opus 4.8 (claude-opus-4-8[1m]) · anthropic · effort max · reasoning adaptive",
+    )
     // 50k / 200k = 25% full, 150k free
     expect(out).toContain("Context: 50,000 / 200,000 tokens (25% full · 150,000 free) · 12 turns")
     expect(out).toContain("Quota: 5h 37% (resets in 3h) · 7d 4%")
-    expect(out).toContain("Usage so far: in 100,000, out 20,000, cache-read 800,000, cache-write 60,000 · ~$1.23")
+    expect(out).toContain(
+      "Usage so far: in 100,000, out 20,000, cache-read 800,000, cache-write 60,000 · ~$1.23",
+    )
     expect(out).toContain("Working dir: /work/here")
     expect(out).toContain("Uptime: 2h 13m (started ")
   })

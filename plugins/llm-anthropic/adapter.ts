@@ -13,7 +13,7 @@
  * @module llm/providers/anthropic/adapter
  */
 
-import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
+import { listModels } from "../../src/client/list-models.ts"
 import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
@@ -26,11 +26,10 @@ import {
   type SurfaceId,
   type ValidationResult,
 } from "../../src/llm/provider.ts"
-import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import type { ProviderPlugin, ProviderStartupContext } from "../../src/llm/provider-plugin.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
-
-import { listModels } from "../../src/client/list-models.ts"
+import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
+import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
@@ -104,11 +103,7 @@ export const anthropicAdapter: ProviderAdapter = {
    * translates its outcome into the canonical {@link PreflightResolution}
    * shape.
    */
-  applyResolution(
-    req: CanonicalRequest,
-    issueCode: string,
-    optionId: string,
-  ): PreflightResolution {
+  applyResolution(req: CanonicalRequest, issueCode: string, optionId: string): PreflightResolution {
     if (issueCode !== ISSUE_THINKING_MODEL_MISMATCH) {
       throw new Error(
         `anthropicAdapter.applyResolution: unknown issue code "${issueCode}" (expected "${ISSUE_THINKING_MODEL_MISMATCH}")`,

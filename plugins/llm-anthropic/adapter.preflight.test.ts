@@ -12,13 +12,10 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 
+import { clearModelRegistry, clearProviderRegistry } from "../../src/llm/model-registry.ts"
 import { applyPreflightResolution, runPreflight } from "../../src/llm/preflight.ts"
-import {
-  clearModelRegistry,
-  clearProviderRegistry,
-} from "../../src/llm/model-registry.ts"
 
-import { bootstrapAnthropic, anthropicAdapter } from "./adapter.ts"
+import { anthropicAdapter, bootstrapAnthropic } from "./adapter.ts"
 import {
   ISSUE_THINKING_MODEL_MISMATCH,
   OPTION_CANCEL,
@@ -49,19 +46,14 @@ describe("anthropicAdapter.preflight", () => {
   test("returns [] when no thinking mismatches", () => {
     const req = {
       modelId: "claude-opus-4-8",
-      messages: [
-        { role: "user" as const, content: [{ type: "text" as const, text: "hi" }] },
-      ],
+      messages: [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }],
     }
-    expect(
-      anthropicAdapter.preflight?.(req, { id: "claude-opus-4-8" } as never) ?? [],
-    ).toEqual([])
+    expect(anthropicAdapter.preflight?.(req, { id: "claude-opus-4-8" } as never) ?? []).toEqual([])
   })
 
   test("returns one mismatch issue when stale signatures are present", () => {
     const req = buildReq("claude-opus-4-8")
-    const issues =
-      anthropicAdapter.preflight?.(req, { id: "claude-opus-4-8" } as never) ?? []
+    const issues = anthropicAdapter.preflight?.(req, { id: "claude-opus-4-8" } as never) ?? []
     expect(issues).toHaveLength(1)
     const issue = issues[0]
     expect(issue?.code).toBe(ISSUE_THINKING_MODEL_MISMATCH)
@@ -76,11 +68,7 @@ describe("anthropicAdapter.preflight", () => {
 describe("anthropicAdapter.applyResolution", () => {
   test("STRIP option returns modify-request with stripped messages", () => {
     const req = buildReq()
-    const res = anthropicAdapter.applyResolution!(
-      req,
-      ISSUE_THINKING_MODEL_MISMATCH,
-      OPTION_STRIP,
-    )
+    const res = anthropicAdapter.applyResolution!(req, ISSUE_THINKING_MODEL_MISMATCH, OPTION_STRIP)
     expect(res.kind).toBe("modify-request")
     if (res.kind !== "modify-request") return
     expect(res.request.messages).toHaveLength(2)
@@ -107,19 +95,15 @@ describe("anthropicAdapter.applyResolution", () => {
 
   test("CANCEL option returns cancel", () => {
     const req = buildReq()
-    const res = anthropicAdapter.applyResolution!(
-      req,
-      ISSUE_THINKING_MODEL_MISMATCH,
-      OPTION_CANCEL,
-    )
+    const res = anthropicAdapter.applyResolution!(req, ISSUE_THINKING_MODEL_MISMATCH, OPTION_CANCEL)
     expect(res.kind).toBe("cancel")
   })
 
   test("unknown issue code throws", () => {
     const req = buildReq()
-    expect(() =>
-      anthropicAdapter.applyResolution!(req, "x.unrelated", OPTION_STRIP),
-    ).toThrow(/unknown issue code/)
+    expect(() => anthropicAdapter.applyResolution!(req, "x.unrelated", OPTION_STRIP)).toThrow(
+      /unknown issue code/,
+    )
   })
 
   test("unknown option id throws", () => {

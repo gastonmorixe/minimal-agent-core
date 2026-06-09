@@ -27,7 +27,18 @@
             "properties": {
               "action": {
                 "type": "string",
-                "enum": ["add", "add_many", "update", "status", "start", "done", "remove", "reorder", "list", "clear"],
+                "enum": [
+                  "add",
+                  "add_many",
+                  "update",
+                  "status",
+                  "start",
+                  "done",
+                  "remove",
+                  "reorder",
+                  "list",
+                  "clear"
+                ],
                 "description": "What to do."
               },
               "id": {

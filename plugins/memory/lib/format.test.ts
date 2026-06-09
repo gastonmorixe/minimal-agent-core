@@ -25,7 +25,12 @@ import {
 } from "./format.ts"
 import type { Bullet } from "./parse.ts"
 
-function mkBullet(id: string, body: string, ts: string | null = null, sid: string | null = null): Bullet {
+function mkBullet(
+  id: string,
+  body: string,
+  ts: string | null = null,
+  sid: string | null = null,
+): Bullet {
   return { id, body, ts, sid, isLegacy: false, raw: "" }
 }
 
@@ -40,39 +45,33 @@ function stripAnsi(s: string): string {
 
 describe("buildListHeader", () => {
   it("renders 'no entries' for empty stores", () => {
-    expect(buildListHeader({ scope: "project", shown: 0, total: 0 })).toBe(
-      "project (no entries)",
-    )
+    expect(buildListHeader({ scope: "project", shown: 0, total: 0 })).toBe("project (no entries)")
   })
 
   it("renders 'no entries matching X' when a query was applied", () => {
-    expect(
-      buildListHeader({ scope: "project", shown: 0, total: 0, query: "wrap" }),
-    ).toBe('project (no entries matching "wrap")')
+    expect(buildListHeader({ scope: "project", shown: 0, total: 0, query: "wrap" })).toBe(
+      'project (no entries matching "wrap")',
+    )
   })
 
   it("uses singular 'entry' for exactly 1 result", () => {
-    expect(buildListHeader({ scope: "project", shown: 1, total: 1 })).toBe(
-      "project (1 entry)",
-    )
+    expect(buildListHeader({ scope: "project", shown: 1, total: 1 })).toBe("project (1 entry)")
   })
 
   it("uses plural 'entries' for >1 result", () => {
-    expect(buildListHeader({ scope: "project", shown: 3, total: 3 })).toBe(
-      "project (3 entries)",
-    )
+    expect(buildListHeader({ scope: "project", shown: 3, total: 3 })).toBe("project (3 entries)")
   })
 
   it("renders 'showing N of M entries, offset O' when paginated", () => {
-    expect(
-      buildListHeader({ scope: "project", shown: 20, total: 122, offset: 0 }),
-    ).toBe("project (showing 20 of 122 entries, offset 0)")
+    expect(buildListHeader({ scope: "project", shown: 20, total: 122, offset: 0 })).toBe(
+      "project (showing 20 of 122 entries, offset 0)",
+    )
   })
 
   it("includes the offset on later pages", () => {
-    expect(
-      buildListHeader({ scope: "project", shown: 22, total: 122, offset: 100 }),
-    ).toBe("project (showing 22 of 122 entries, offset 100)")
+    expect(buildListHeader({ scope: "project", shown: 22, total: 122, offset: 100 })).toBe(
+      "project (showing 22 of 122 entries, offset 100)",
+    )
   })
 
   it("includes 'matching X' when query and pagination both apply", () => {
@@ -158,10 +157,7 @@ describe("buildNextPageHint", () => {
 describe("formatList", () => {
   it("renders header + per-bullet rows + trailing newline (no ANSI)", () => {
     const out = formatList(
-      [
-        mkBullet("aaa-1111", "first", "2026-05-08T16:57:30-04:00"),
-        mkBullet("bbb-2222", "second"),
-      ],
+      [mkBullet("aaa-1111", "first", "2026-05-08T16:57:30-04:00"), mkBullet("bbb-2222", "second")],
       { scope: "project", ansi: false },
     )
     expect(out.endsWith("\n")).toBe(true)
@@ -177,10 +173,7 @@ describe("formatList", () => {
 
   it("clips long bodies to LIST_PREVIEW_MAX by default", () => {
     const longBody = "x".repeat(LIST_PREVIEW_MAX + 50)
-    const out = formatList(
-      [mkBullet("a", longBody)],
-      { scope: "project", ansi: false },
-    )
+    const out = formatList([mkBullet("a", longBody)], { scope: "project", ansi: false })
     expect(out).toContain("…")
     // Pulling the rendered body length out via a regex on the row.
     const row = out.split("\n").find((l) => l.includes("#a")) ?? ""
@@ -191,10 +184,11 @@ describe("formatList", () => {
 
   it("respects an explicit bodyMax override", () => {
     const longBody = "x".repeat(100)
-    const out = formatList(
-      [mkBullet("a", longBody)],
-      { scope: "project", ansi: false, bodyMax: 20 },
-    )
+    const out = formatList([mkBullet("a", longBody)], {
+      scope: "project",
+      ansi: false,
+      bodyMax: 20,
+    })
     expect(out).toContain("…")
     const row = out.split("\n").find((l) => l.includes("#a")) ?? ""
     const xs = row.match(/x+/)?.[0] ?? ""
@@ -202,14 +196,8 @@ describe("formatList", () => {
   })
 
   it("uses ANSI codes when ansi=true and omits them when ansi=false", () => {
-    const ansiOut = formatList(
-      [mkBullet("a", "body")],
-      { scope: "project", ansi: true },
-    )
-    const plainOut = formatList(
-      [mkBullet("a", "body")],
-      { scope: "project", ansi: false },
-    )
+    const ansiOut = formatList([mkBullet("a", "body")], { scope: "project", ansi: true })
+    const plainOut = formatList([mkBullet("a", "body")], { scope: "project", ansi: false })
     expect(ansiOut).toContain("\x1b[")
     expect(plainOut).not.toContain("\x1b[")
     // Plain form should be the ANSI form stripped (modulo column padding).
@@ -217,65 +205,53 @@ describe("formatList", () => {
   })
 
   it("renders next-page hint when nextOffset + limit are provided", () => {
-    const out = formatList(
-      [mkBullet("a", "body"), mkBullet("b", "body")],
-      {
-        scope: "project",
-        ansi: false,
-        total: 100,
-        offset: 0,
-        limit: 2,
-        nextOffset: 2,
-      },
-    )
+    const out = formatList([mkBullet("a", "body"), mkBullet("b", "body")], {
+      scope: "project",
+      ansi: false,
+      total: 100,
+      offset: 0,
+      limit: 2,
+      nextOffset: 2,
+    })
     expect(out).toContain('next: MemoryTool({action: "list"')
     expect(out).toContain("offset: 2")
     expect(out).toContain("limit: 2")
   })
 
   it("omits next-page hint on the last page (nextOffset=null)", () => {
-    const out = formatList(
-      [mkBullet("a", "body")],
-      {
-        scope: "project",
-        ansi: false,
-        total: 21,
-        offset: 20,
-        limit: 20,
-        nextOffset: null,
-      },
-    )
+    const out = formatList([mkBullet("a", "body")], {
+      scope: "project",
+      ansi: false,
+      total: 21,
+      offset: 20,
+      limit: 20,
+      nextOffset: null,
+    })
     expect(out).not.toContain("next:")
   })
 
   it("paginated header reflects shown vs total", () => {
-    const out = formatList(
-      [mkBullet("a", "body"), mkBullet("b", "body")],
-      {
-        scope: "project",
-        ansi: false,
-        total: 122,
-        offset: 0,
-        limit: 2,
-        nextOffset: 2,
-      },
-    )
+    const out = formatList([mkBullet("a", "body"), mkBullet("b", "body")], {
+      scope: "project",
+      ansi: false,
+      total: 122,
+      offset: 0,
+      limit: 2,
+      nextOffset: 2,
+    })
     expect(out.split("\n")[0]).toBe("project (showing 2 of 122 entries, offset 0)")
   })
 
   it("threads query string into both header and hint", () => {
-    const out = formatList(
-      [mkBullet("a", "body")],
-      {
-        scope: "project",
-        ansi: false,
-        total: 5,
-        offset: 0,
-        limit: 1,
-        nextOffset: 1,
-        query: "wrap",
-      },
-    )
+    const out = formatList([mkBullet("a", "body")], {
+      scope: "project",
+      ansi: false,
+      total: 5,
+      offset: 0,
+      limit: 1,
+      nextOffset: 1,
+      query: "wrap",
+    })
     expect(out).toContain('matching "wrap"')
     expect(out).toContain(`query: "wrap"`)
   })

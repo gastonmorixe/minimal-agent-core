@@ -34,7 +34,10 @@ export const ENV_RESULT_PATH = "MINIMAL_AGENT_SUBAGENT_RESULT_PATH"
 /** Side-effects needed to launch a worker. */
 export interface SpawnDeps {
   /** Launch a detached process; return its pid. Throws on failure. */
-  readonly launch: (argv: readonly string[], opts: { cwd: string; env: Record<string, string>; logPath: string }) => number
+  readonly launch: (
+    argv: readonly string[],
+    opts: { cwd: string; env: Record<string, string>; logPath: string },
+  ) => number
 }
 
 /** Side-effects needed to probe a worker. */
@@ -184,7 +187,10 @@ export function warnMissingDeclared(result: ResultDigest, deps: ProbeDeps): Resu
  */
 export function extractCrashSignature(logText: string): string | undefined {
   const clean = logText.replace(/\x1b\[[0-9;]*m/g, "")
-  const lines = clean.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)
+  const lines = clean
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
   // Patterns ordered by specificity; the first match on any line wins.
   const patterns: RegExp[] = [
     /^fatal:/i,
@@ -219,7 +225,9 @@ export function parseResultDigest(raw: unknown): ResultDigest | undefined {
   if (typeof o.short !== "string") return undefined
   const tokens = typeof o.tokens === "number" && Number.isFinite(o.tokens) ? o.tokens : 0
   const tools = typeof o.tools === "number" && Number.isFinite(o.tools) ? o.tools : 0
-  const artifacts = Array.isArray(o.artifacts) ? o.artifacts.filter((a): a is string => typeof a === "string") : undefined
+  const artifacts = Array.isArray(o.artifacts)
+    ? o.artifacts.filter((a): a is string => typeof a === "string")
+    : undefined
   // A worker reports incompletion either structurally (`incomplete: true`, what
   // buildDigest now writes) or by the legacy hand-written `INCOMPLETE:` summary
   // prefix (the documented manual-sentinel fallback). Honor both so the
@@ -242,11 +250,19 @@ export function realSpawnDeps(): SpawnDeps {
       const fd = openSync(opts.logPath, "a")
       // `Bun.spawn` is available in the agent runtime. Detach so the worker
       // outlives a lead crash; pipe stdio to the log; no stdin.
-      const proc = (globalThis as unknown as { Bun: { spawn: (cmd: string[], o: object) => { pid: number } } }).Bun.spawn(
+      const proc = (
+        globalThis as unknown as { Bun: { spawn: (cmd: string[], o: object) => { pid: number } } }
+      ).Bun.spawn(
         [...argv],
         // The plan env is an OVERLAY: a real worker still needs the parent's
         // PATH / HOME / credentials, so merge process.env underneath it.
-        { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdin: "ignore", stdout: fd, stderr: fd },
+        {
+          cwd: opts.cwd,
+          env: { ...process.env, ...opts.env },
+          stdin: "ignore",
+          stdout: fd,
+          stderr: fd,
+        },
       )
       return proc.pid
     },
@@ -267,7 +283,9 @@ export interface ProgressReaderDeps {
  * every second; without this it would re-parse 100 transcripts/s even when
  * idle. The cache is keyed by path; bounded by the number of distinct workers.
  */
-export function cachedProgressReader(deps: ProgressReaderDeps): (path: string) => Progress | undefined {
+export function cachedProgressReader(
+  deps: ProgressReaderDeps,
+): (path: string) => Progress | undefined {
   const cache = new Map<string, { mtimeMs: number; progress: Progress }>()
   return (path: string) => {
     const mtimeMs = deps.stat(path)

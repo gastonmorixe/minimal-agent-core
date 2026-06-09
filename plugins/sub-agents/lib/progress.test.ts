@@ -11,9 +11,9 @@ function jsonl(...records: object[]): string {
 describe("parseProgress", () => {
   it("returns zero for an empty / meta-only transcript", () => {
     expect(parseProgress("")).toEqual(ZERO_PROGRESS)
-    expect(parseProgress(jsonl({ kind: "meta", sid: "x" }, { kind: "user", content: "hi" }))).toEqual(
-      ZERO_PROGRESS,
-    )
+    expect(
+      parseProgress(jsonl({ kind: "meta", sid: "x" }, { kind: "user", content: "hi" })),
+    ).toEqual(ZERO_PROGRESS)
   })
 
   it("counts tool_use blocks and sums billed tokens across assistant turns", () => {
@@ -43,7 +43,9 @@ describe("parseProgress", () => {
   it("uses a text snippet as lastActivity when the latest block is prose", () => {
     const text = jsonl({
       kind: "assistant",
-      content: [{ type: "text", text: "I have finished analyzing the parser and here is the summary" }],
+      content: [
+        { type: "text", text: "I have finished analyzing the parser and here is the summary" },
+      ],
       usage: { input_tokens: 10, output_tokens: 5 },
     })
     const p = parseProgress(text)
@@ -79,7 +81,10 @@ describe("parseFinalText", () => {
     const text = jsonl(
       { kind: "assistant", content: [{ type: "text", text: "first thoughts" }] },
       { kind: "tool_result", content: "..." },
-      { kind: "assistant", content: [{ type: "text", text: "FINAL: I found 3 callers in foo.ts" }] },
+      {
+        kind: "assistant",
+        content: [{ type: "text", text: "FINAL: I found 3 callers in foo.ts" }],
+      },
     )
     expect(parseFinalText(text)).toBe("FINAL: I found 3 callers in foo.ts")
   })
@@ -87,7 +92,10 @@ describe("parseFinalText", () => {
   it("skips a trailing tool-only turn and uses the last PROSE turn", () => {
     const text = jsonl(
       { kind: "assistant", content: [{ type: "text", text: "my summary is here" }] },
-      { kind: "assistant", content: [{ type: "tool_use", name: "Read", input: { file_path: "x" } }] },
+      {
+        kind: "assistant",
+        content: [{ type: "tool_use", name: "Read", input: { file_path: "x" } }],
+      },
     )
     expect(parseFinalText(text)).toBe("my summary is here")
   })
@@ -106,7 +114,10 @@ describe("parseFinalText", () => {
 
   it("clips a runaway final message and marks the cut", () => {
     const huge = "x".repeat(5000)
-    const out = parseFinalText(jsonl({ kind: "assistant", content: [{ type: "text", text: huge }] }), 100)
+    const out = parseFinalText(
+      jsonl({ kind: "assistant", content: [{ type: "text", text: huge }] }),
+      100,
+    )
     expect(out?.length).toBe(100)
     expect(out?.endsWith("…")).toBe(true)
   })

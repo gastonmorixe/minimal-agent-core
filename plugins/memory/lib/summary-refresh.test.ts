@@ -6,12 +6,14 @@
  * the final injection text + side effects on summary.md.
  */
 
-import { afterEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { afterEach, describe, expect, it } from "bun:test"
+
 import { DEFAULT_MEMORY_CONFIG, type MemorySummaryParams } from "./memory-config.ts"
+import { SummarizeError } from "./summarize.ts"
 import {
   headlineOf,
   parseCutoff,
@@ -22,7 +24,6 @@ import {
   summaryPathFor,
   withCutoffHeader,
 } from "./summary-refresh.ts"
-import { SummarizeError } from "./summarize.ts"
 
 const tempDirs: string[] = []
 function makeTempDir(): string {
@@ -249,9 +250,9 @@ describe("summaryPathFor", () => {
     expect(summaryPathFor("/home/x/.minimal-agent/memory.md")).toBe(
       "/home/x/.minimal-agent/memory.summary.md",
     )
-    expect(
-      summaryPathFor("/home/x/.minimal-agent/projects/Users/foo/proj/memory.md"),
-    ).toBe("/home/x/.minimal-agent/projects/Users/foo/proj/memory.summary.md")
+    expect(summaryPathFor("/home/x/.minimal-agent/projects/Users/foo/proj/memory.md")).toBe(
+      "/home/x/.minimal-agent/projects/Users/foo/proj/memory.summary.md",
+    )
   })
 })
 
@@ -398,8 +399,10 @@ describe("refreshAndRender: regen triggers", () => {
     const dir = makeTempDir()
     // 20 bullets total; first 15 dated before cutoff, last 5 after.
     const old = manyBullets(15, "2026-05-01T00:00:00-04:00")
-    const newPart = manyBullets(5, "2026-05-13T00:00:00-04:00")
-      .replace(/#b(\d+)/g, (_m, n) => `#n${n}`)
+    const newPart = manyBullets(5, "2026-05-13T00:00:00-04:00").replace(
+      /#b(\d+)/g,
+      (_m, n) => `#n${n}`,
+    )
     writeFileSync(join(dir, "memory.md"), `${old}\n${newPart}`)
     const oldSummary = withCutoffHeader(
       "## Old cluster\n- old takeaway. Sources: #b0",
@@ -407,9 +410,7 @@ describe("refreshAndRender: regen triggers", () => {
     )
     writeFileSync(join(dir, "memory.summary.md"), oldSummary)
 
-    const fake = makeFakeSummarize(
-      "## Fresh\n- new takeaway. Sources: #n0, #n1, #n2, #n3, #n4\n",
-    )
+    const fake = makeFakeSummarize("## Fresh\n- new takeaway. Sources: #n0, #n1, #n2, #n3, #n4\n")
     const r = await refreshAndRender(
       {
         scope: "project",

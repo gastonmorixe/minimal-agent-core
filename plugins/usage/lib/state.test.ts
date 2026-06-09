@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { aggregateAllPeriods } from "../../../src/usage-stats.ts"
+
 import { DEFAULT_PERIOD_INDEX } from "./overlay.ts"
 import { _resetForTests, closeOverlay, getOverlayState, openOverlay } from "./state.ts"
 

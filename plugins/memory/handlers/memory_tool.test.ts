@@ -20,20 +20,21 @@
  *   - packageDir refusal.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
-import type { TUIContext } from "../../../src/plugins/types.ts"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import type { TUIContext } from "../../../src/plugins/types.ts"
 import {
   globalMemoryPath,
   MemoryStore,
   projectMemoryPath,
-  shortTermMemoryPath,
   SHORT_TERM_CAP,
+  shortTermMemoryPath,
 } from "../lib/store.ts"
+
 import memoryToolHandler, {
   DEFAULT_LIST_LIMIT,
   LIST_PREVIEW_MAX,
@@ -132,17 +133,13 @@ describe("MemoryTool: input validation", () => {
   })
 
   it("rejects unknown scope", async () => {
-    const r = await memoryToolHandler(
-      makeToolCtx({ input: { action: "list", scope: "user" } }),
-    )
+    const r = await memoryToolHandler(makeToolCtx({ input: { action: "list", scope: "user" } }))
     if (r.kind !== "tool_result") return
     expect(r.is_error).toBe(true)
   })
 
   it("rejects read without id", async () => {
-    const r = await memoryToolHandler(
-      makeToolCtx({ input: { action: "read", scope: "project" } }),
-    )
+    const r = await memoryToolHandler(makeToolCtx({ input: { action: "read", scope: "project" } }))
     if (r.kind !== "tool_result") return
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("`id` is required")
@@ -162,9 +159,7 @@ describe("MemoryTool: input validation", () => {
   })
 
   it("rejects add without body", async () => {
-    const r = await memoryToolHandler(
-      makeToolCtx({ input: { action: "add", scope: "project" } }),
-    )
+    const r = await memoryToolHandler(makeToolCtx({ input: { action: "add", scope: "project" } }))
     if (r.kind !== "tool_result") return
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("`body` is required")
@@ -242,9 +237,7 @@ describe("MemoryTool: input validation", () => {
 
 describe("MemoryTool.list", () => {
   it("returns empty header when store is empty", async () => {
-    const r = await memoryToolHandler(
-      makeToolCtx({ input: { action: "list", scope: "project" } }),
-    )
+    const r = await memoryToolHandler(makeToolCtx({ input: { action: "list", scope: "project" } }))
     expect(r.kind).toBe("tool_result")
     if (r.kind !== "tool_result") return
     expect(r.is_error).toBeFalsy()
@@ -455,7 +448,7 @@ describe("MemoryTool.list: pagination", () => {
     )
     if (r.kind !== "tool_result") return
     expect(r.is_error).toBe(true)
-    expect(r.content).toContain("`offset` is only valid for action=\"list\"")
+    expect(r.content).toContain('`offset` is only valid for action="list"')
   })
 
   it("query + pagination compose: filter first, then page", async () => {
@@ -813,9 +806,7 @@ describe("MemoryTool.clear", () => {
   })
 
   it("refuses to clear a global store", async () => {
-    const r = await memoryToolHandler(
-      makeToolCtx({ input: { action: "clear", scope: "global" } }),
-    )
+    const r = await memoryToolHandler(makeToolCtx({ input: { action: "clear", scope: "global" } }))
     if (r.kind !== "tool_result") return
     expect(r.is_error).toBe(true)
   })

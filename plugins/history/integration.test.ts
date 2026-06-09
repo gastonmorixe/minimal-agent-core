@@ -14,11 +14,15 @@
  * Tests are isolated via `MINIMAL_AGENT_HISTORY_NAMESPACE`. Recall
  * cache is reset between tests so each starts fresh.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
 import { existsSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
 import { PluginLoader } from "../../src/plugins/loader.ts"
+
 import { _resetSessionCache } from "./lib/session.ts"
 import {
   _clearAll,
@@ -220,7 +224,9 @@ describe("history plugin / end-to-end", () => {
     const loader = await load()
     const cwd = TEST_CWD
     // Seed an entry so a recall would succeed if it got past the gate.
-    loader.bus().emit("prompt.submitted", { text: "would-be-recalled", cwd, sid: null, exit: "submitted" })
+    loader
+      .bus()
+      .emit("prompt.submitted", { text: "would-be-recalled", cwd, sid: null, exit: "submitted" })
     await new Promise<void>((resolve) => setTimeout(resolve, 10))
     // Simulate the upstream listener having already halted.
     const p = keyPayload({ key: "ArrowUp" })
@@ -235,7 +241,9 @@ describe("history plugin / end-to-end", () => {
   it("polite-listener: ArrowDown with result.halt already set also bails", async () => {
     const loader = await load()
     const cwd = TEST_CWD
-    loader.bus().emit("prompt.submitted", { text: "would-be-recalled", cwd, sid: null, exit: "submitted" })
+    loader
+      .bus()
+      .emit("prompt.submitted", { text: "would-be-recalled", cwd, sid: null, exit: "submitted" })
     await new Promise<void>((resolve) => setTimeout(resolve, 10))
     const p = keyPayload({
       key: "ArrowDown",

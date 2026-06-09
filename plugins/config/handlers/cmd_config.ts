@@ -24,16 +24,12 @@ import type { CommandContext, CommandResult } from "../../../src/plugins/types.t
 import { discoverPlugins, pluginFields } from "../lib/discovery.ts"
 import { transition } from "../lib/fsm.ts"
 import { ConfigModel } from "../lib/model.ts"
-import { applyEffects, type ApplyDeps } from "../lib/runtime.ts"
+import { type ApplyDeps, applyEffects } from "../lib/runtime.ts"
 import { fieldById, SCHEMA } from "../lib/schema.ts"
 import { CONFIG_OVERLAY_OWNER, getState, setModel, setState } from "../lib/state.ts"
 import { effectiveValue } from "../lib/view.ts"
-import {
-  discoveryRoots,
-  realDiscoverDeps,
-  realFsDeps,
-  resolveConfigPath,
-} from "./wiring.ts"
+
+import { discoveryRoots, realDiscoverDeps, realFsDeps, resolveConfigPath } from "./wiring.ts"
 
 const MAX_ROWS = 9
 

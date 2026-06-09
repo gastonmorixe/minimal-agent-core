@@ -328,9 +328,7 @@ function insertMember(
       // comment on that line we keep the comment attached to the prior line).
       const commaRel = between.indexOf(",")
       const commaAbs = last.valueEnd + commaRel
-      return (
-        s.slice(0, commaAbs + 1) + `\n${indent}${member},` + s.slice(commaAbs + 1)
-      )
+      return s.slice(0, commaAbs + 1) + `\n${indent}${member},` + s.slice(commaAbs + 1)
     }
     return s.slice(0, last.valueEnd) + `,\n${indent}${member}` + s.slice(last.valueEnd)
   }
@@ -411,7 +409,10 @@ function removeKeyPathInObject(s: string, objOpen: number, path: string[]): stri
   // back over whitespace only; if a comment intervenes we simply leave the
   // comma (a trailing comma is valid JSONC, stripped on parse).
   let back = indentStart - 1
-  while (back >= 0 && (s[back] === " " || s[back] === "\t" || s[back] === "\n" || s[back] === "\r")) {
+  while (
+    back >= 0 &&
+    (s[back] === " " || s[back] === "\t" || s[back] === "\n" || s[back] === "\r")
+  ) {
     back--
   }
   let delEnd = tailAfter(valueEnd)

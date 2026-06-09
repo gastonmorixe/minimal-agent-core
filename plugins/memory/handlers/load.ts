@@ -48,11 +48,7 @@
 import { existsSync, readFileSync } from "node:fs"
 
 import type { PromptFragmentContext } from "../../../src/plugins/types.ts"
-import {
-  loadMemoryConfig,
-  type MemoryConfig,
-  type MemoryInjectMode,
-} from "../lib/memory-config.ts"
+import { loadMemoryConfig, type MemoryConfig, type MemoryInjectMode } from "../lib/memory-config.ts"
 import {
   globalMemoryPath as storeGlobalMemoryPath,
   projectMemoryPath as storeProjectMemoryPath,
@@ -127,13 +123,7 @@ const verbatimStrategy: InjectStrategy = async ({ label, memoryPath }) => {
 }
 
 /** Strategy: invoke the LLM-derived summary pipeline. Opt-in. */
-const summaryStrategy: InjectStrategy = async ({
-  label,
-  memoryPath,
-  scope,
-  cfg,
-  refresh,
-}) => {
+const summaryStrategy: InjectStrategy = async ({ label, memoryPath, scope, cfg, refresh }) => {
   // refreshAndRender reads the file itself, so we don't pre-read here.
   // It also already short-circuits if the file is missing/empty.
   const result = await refresh({

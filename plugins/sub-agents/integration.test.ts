@@ -16,8 +16,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { ENV_RESULT_PATH, realProbeDeps, realSpawnDeps } from "./lib/spawn.ts"
 import { type ServiceDeps, spawnAgent } from "./lib/service.ts"
+import { ENV_RESULT_PATH, realProbeDeps, realSpawnDeps } from "./lib/spawn.ts"
 import { SubagentStore } from "./lib/store.ts"
 import { runSupervisor, type SupervisorDeps } from "./lib/supervisor-shell.ts"
 import { sessionId } from "./lib/types.ts"
@@ -82,7 +82,8 @@ async function waitForExit(pid: number, timeoutMs = 5000): Promise<void> {
   const probe = realProbeDeps()
   const start = Date.now()
   while (probe.pidAlive(pid)) {
-    if (Date.now() - start > timeoutMs) throw new Error(`child ${pid} did not exit in ${timeoutMs}ms`)
+    if (Date.now() - start > timeoutMs)
+      throw new Error(`child ${pid} did not exit in ${timeoutMs}ms`)
     await Bun.sleep(15)
   }
 }
@@ -162,7 +163,12 @@ describe("sub-agents end-to-end (real process, no network)", () => {
         `const line = ${JSON.stringify(
           JSON.stringify({
             kind: "assistant",
-            content: [{ type: "text", text: "SUMMARY: scanned the logs, found the smoking gun in session X." }],
+            content: [
+              {
+                type: "text",
+                text: "SUMMARY: scanned the logs, found the smoking gun in session X.",
+              },
+            ],
             usage: { input_tokens: 800, output_tokens: 60 },
           }),
         )}`,

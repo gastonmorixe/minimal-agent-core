@@ -9,16 +9,26 @@ import {
 } from "./render.ts"
 import {
   type ResultDigest,
-  sessionId,
   type SubagentRecord,
   type SubagentStatus,
+  sessionId,
   subagentId,
 } from "./types.ts"
 
 const NOW = Date.parse("2026-05-30T12:00:00.000Z")
-const RESULT: ResultDigest = { short: "2 critical, 3 warnings", tokens: 5200, tools: 18, artifacts: ["a/RESULT.md"] }
+const RESULT: ResultDigest = {
+  short: "2 critical, 3 warnings",
+  tokens: 5200,
+  tools: 18,
+  artifacts: ["a/RESULT.md"],
+}
 
-function rec(id: string, label: string, status: SubagentStatus, model = "claude-sonnet-4-6"): SubagentRecord {
+function rec(
+  id: string,
+  label: string,
+  status: SubagentStatus,
+  model = "claude-sonnet-4-6",
+): SubagentRecord {
   return {
     id: subagentId(id),
     sid: sessionId("9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"),
@@ -46,7 +56,12 @@ describe("shortModel", () => {
 
 describe("renderSpawnDisplay", () => {
   it("shows id · type · model · isolation and a background handle footer", () => {
-    const r = rec("A2", "worker", { kind: "running", pid: 48213, startedAt: "t", progress: { tools: 0, tokens: 0 } })
+    const r = rec("A2", "worker", {
+      kind: "running",
+      pid: 48213,
+      startedAt: "t",
+      progress: { tools: 0, tokens: 0 },
+    })
     const d = renderSpawnDisplay(r, false)
     expect(d.header).toBe("↗ A2 · worker · sonnet · fork")
     expect(d.body).toContain("refactor src/parser.ts")
@@ -60,7 +75,12 @@ describe("renderFleetDisplay", () => {
   it("renders a row per worker + a summary footer", () => {
     const records = [
       rec("A1", "reviewer", { kind: "done", endedAt: "t", result: RESULT }),
-      rec("A2", "worker", { kind: "running", pid: 1, startedAt: "2026-05-30T11:58:38.000Z", progress: { tools: 14, tokens: 9100, lastTool: "Edit" } }),
+      rec("A2", "worker", {
+        kind: "running",
+        pid: 1,
+        startedAt: "2026-05-30T11:58:38.000Z",
+        progress: { tools: 14, tokens: 9100, lastTool: "Edit" },
+      }),
     ]
     const d = renderFleetDisplay(records, false, NOW)
     expect(d.header).toContain("1 running")
@@ -97,7 +117,12 @@ describe("renderResultDisplay", () => {
   })
 
   it("reports honestly when the worker is not done", () => {
-    const r = rec("A2", "worker", { kind: "running", pid: 1, startedAt: "t", progress: { tools: 0, tokens: 0 } })
+    const r = rec("A2", "worker", {
+      kind: "running",
+      pid: 1,
+      startedAt: "t",
+      progress: { tools: 0, tokens: 0 },
+    })
     const d = renderResultDisplay(r, false)
     expect(d.body).toContain("is running")
   })
@@ -124,7 +149,8 @@ describe("renderResultDisplay", () => {
       reason: "missing 1/1 required artifact(s): /findings.md",
       tokens: 58_500,
       tools: 63,
-      salvage: "AVFragmentedAsset/AVFragmentedAssetMinder is the right Apple API for a growing single fMP4.",
+      salvage:
+        "AVFragmentedAsset/AVFragmentedAssetMinder is the right Apple API for a growing single fMP4.",
       artifacts: ["/findings.md"],
     })
     const d = renderResultDisplay(r, false)
@@ -140,7 +166,13 @@ describe("renderFleetDisplay — incomplete", () => {
   it("counts incomplete in the header + footer and renders a gold no-deliverable row", () => {
     const recs = [
       rec("A1", "explorer", { kind: "done", endedAt: "t", result: RESULT }),
-      rec("A2", "log-miner", { kind: "incomplete", endedAt: "t", reason: "no sentinel", tokens: 100, tools: 2 }),
+      rec("A2", "log-miner", {
+        kind: "incomplete",
+        endedAt: "t",
+        reason: "no sentinel",
+        tokens: 100,
+        tools: 2,
+      }),
     ]
     const d = renderFleetDisplay(recs, false, NOW)
     expect(d.header).toContain("1 incomplete")
@@ -161,7 +193,12 @@ describe("renderStopDisplay", () => {
 
 describe("ansi rendering", () => {
   it("emits color codes when ansi=true", () => {
-    const r = rec("A2", "worker", { kind: "running", pid: 1, startedAt: "t", progress: { tools: 0, tokens: 0 } })
+    const r = rec("A2", "worker", {
+      kind: "running",
+      pid: 1,
+      startedAt: "t",
+      progress: { tools: 0, tokens: 0 },
+    })
     expect(renderSpawnDisplay(r, true).header).toContain("\x1b[")
   })
 })

@@ -102,7 +102,9 @@ export function renderFleetFooter(records: readonly SubagentRecord[], ansi: bool
     `${color(ansi, ANSI.SKY, GLYPHS.running)} ${color(ansi, ANSI.SKY, `${s.running} running`)}`,
     `${color(ansi, `${ANSI.LIME}${ANSI.BOLD}`, GLYPHS.done)} ${color(ansi, ANSI.LIME, `${s.done} done`)}`,
     ...(s.incomplete > 0
-      ? [`${color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)} ${color(ansi, ANSI.GOLD, `${s.incomplete} incomplete`)}`]
+      ? [
+          `${color(ansi, `${ANSI.GOLD}${ANSI.BOLD}`, GLYPHS.incomplete)} ${color(ansi, ANSI.GOLD, `${s.incomplete} incomplete`)}`,
+        ]
       : []),
     `${color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.failed)} ${color(ansi, ANSI.RED, `${s.failed} failed`)}`,
     color(ansi, ANSI.DGRAY, `${fmtTokens(s.tokens)} tok`),

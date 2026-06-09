@@ -18,9 +18,5 @@
       "priority": 60
     }
   ],
-  "permissions": [
-    "hooks:editor.key",
-    "hooks:editor.buffer.set",
-    "hooks:prompt.submitted"
-  ]
+  "permissions": ["hooks:editor.key", "hooks:editor.buffer.set", "hooks:prompt.submitted"]
 }

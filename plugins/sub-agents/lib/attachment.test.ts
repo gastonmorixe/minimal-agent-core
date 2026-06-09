@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { SubagentsAttachment } from "./attachment.ts"
 import { SubagentStore } from "./store.ts"
-import { sessionId, type SubagentRecord, type SubagentStatus, subagentId } from "./types.ts"
+import { type SubagentRecord, type SubagentStatus, sessionId, subagentId } from "./types.ts"
 
 const NOW = Date.parse("2026-05-30T12:00:00.000Z")
 
@@ -41,15 +41,24 @@ describe("SubagentsAttachment", () => {
 
   it("returns null when no worker is active (idle session pays no tokens)", () => {
     const store = new SubagentStore("lead", { dir })
-    store.upsert(rec("A1", { kind: "done", endedAt: "t", result: { short: "x", tokens: 1, tools: 1 } }))
+    store.upsert(
+      rec("A1", { kind: "done", endedAt: "t", result: { short: "x", tokens: 1, tools: 1 } }),
+    )
     expect(new SubagentsAttachment("lead", { dir }).toAttachment()).toBeNull()
   })
 
   it("emits a bounded <ma::agent::subagents> block when workers are active", () => {
     const store = new SubagentStore("lead", { dir })
-    store.upsert(rec("A1", { kind: "done", endedAt: "t", result: { short: "x", tokens: 5000, tools: 9 } }))
     store.upsert(
-      rec("A2", { kind: "running", pid: 1, startedAt: "2026-05-30T11:58:38.000Z", progress: { tools: 14, tokens: 9100, lastActivity: "editing parser.ts" } }),
+      rec("A1", { kind: "done", endedAt: "t", result: { short: "x", tokens: 5000, tools: 9 } }),
+    )
+    store.upsert(
+      rec("A2", {
+        kind: "running",
+        pid: 1,
+        startedAt: "2026-05-30T11:58:38.000Z",
+        progress: { tools: 14, tokens: 9100, lastActivity: "editing parser.ts" },
+      }),
     )
     const text = new SubagentsAttachment("lead", { dir }, () => NOW).toText()
     expect(text).not.toBeNull()
@@ -65,7 +74,14 @@ describe("SubagentsAttachment", () => {
   it("caps rows with a +N more overflow", () => {
     const store = new SubagentStore("lead", { dir })
     for (let i = 1; i <= 12; i++) {
-      store.upsert(rec(`A${i}`, { kind: "running", pid: i, startedAt: "2026-05-30T11:59:00.000Z", progress: { tools: 0, tokens: 0 } }))
+      store.upsert(
+        rec(`A${i}`, {
+          kind: "running",
+          pid: i,
+          startedAt: "2026-05-30T11:59:00.000Z",
+          progress: { tools: 0, tokens: 0 },
+        }),
+      )
     }
     const t = new SubagentsAttachment("lead", { dir }, () => NOW).toText() as string
     expect(t).toContain("more (ListAgents)")

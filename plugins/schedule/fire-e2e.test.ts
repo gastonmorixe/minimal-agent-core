@@ -22,8 +22,9 @@ import { type ReplAgentLike, runRepl } from "../../src/agent.ts"
 import { EditorController } from "../../src/editor-controller.ts"
 import { EventBus } from "../../src/plugins/event-bus.ts"
 import { PluginLoader } from "../../src/plugins/loader.ts"
-import { Compositor } from "../../src/ui/compositor.ts"
 import { StatusBus } from "../../src/status.ts"
+import { Compositor } from "../../src/ui/compositor.ts"
+
 import { CronStore } from "./lib/store.ts"
 
 class FakeTTYInput extends EventEmitter {

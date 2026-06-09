@@ -20,8 +20,8 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 
 import { buildBetaFlags as legacyBuildBetaFlags } from "../../src/headers.ts"
-import { resolveModel } from "../../src/llm/model-registry.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import { resolveModel } from "../../src/llm/model-registry.ts"
 
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags, classifyRequest } from "./beta-flags.ts"
 import { registerAnthropicModels } from "./models.ts"
@@ -34,9 +34,7 @@ beforeAll(() => {
 function conversationReq(modelId: string, extra?: Partial<CanonicalRequest>): CanonicalRequest {
   return {
     modelId,
-    messages: [
-      { role: "user", content: [{ type: "text", text: "hi" }], cache: { ttl: "1h" } },
-    ],
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }], cache: { ttl: "1h" } }],
     system: [{ type: "text", text: "sys", cache: { ttl: "1h" } }],
     tools: [
       { name: "a", description: "", inputSchema: { type: "object" } },

@@ -26,8 +26,8 @@
  */
 
 import { PALETTE } from "../../../src/palette.ts"
-import { cadenceLabel, clipPrompt, kindGlyph } from "./format.ts"
-import { relativeTime } from "./format.ts"
+
+import { cadenceLabel, clipPrompt, kindGlyph, relativeTime } from "./format.ts"
 import { nextFireMs } from "./scheduler.ts"
 import type { CronEntry } from "./store.ts"
 

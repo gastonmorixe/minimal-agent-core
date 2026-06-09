@@ -6,8 +6,8 @@
  * @module schedule/lib/format
  */
 
-import type { CronEntry } from "./store.ts"
 import { nextFireMs } from "./scheduler.ts"
+import type { CronEntry } from "./store.ts"
 
 /**
  * Schedule glyphs. All monochrome, width-1, and SGR-colorable (unlike the

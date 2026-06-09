@@ -11,16 +11,14 @@
  * focuses on the strategy dispatch + summary branch.
  */
 
-import { afterEach, describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { afterEach, describe, expect, it } from "bun:test"
+
 import type { PromptFragmentContext } from "../../../src/plugins/types.ts"
-import {
-  DEFAULT_MEMORY_CONFIG,
-  type MemoryConfig,
-} from "../lib/memory-config.ts"
+import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "../lib/memory-config.ts"
 import type { refreshAndRender } from "../lib/summary-refresh.ts"
 
 import loadMemories from "./load.ts"

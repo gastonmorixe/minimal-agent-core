@@ -37,7 +37,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import { parseJsonc } from "../../src/jsonc.ts"
+
 import type { ProviderConfig, SearchType } from "./providers/types.ts"
 
 export interface WebSearchDefaults {
@@ -113,9 +115,7 @@ export function parseWebSearchConfig(raw: unknown): WebSearchConfig {
   if (typeof ws.enabled === "boolean") out.enabled = ws.enabled
 
   if (Array.isArray(ws.providers)) {
-    const ids = ws.providers.filter(
-      (x): x is string => typeof x === "string" && x.length > 0,
-    )
+    const ids = ws.providers.filter((x): x is string => typeof x === "string" && x.length > 0)
     if (ids.length > 0) out.providers = ids
   }
 
@@ -163,9 +163,7 @@ export function loadWebSearchConfig(): WebSearchConfig {
     parsed = parseJsonc(raw)
   } catch (err) {
     if (process.env.DEBUG === "1") {
-      process.stderr.write(
-        `[web-search] ${path}: parse error: ${(err as Error).message}\n`,
-      )
+      process.stderr.write(`[web-search] ${path}: parse error: ${(err as Error).message}\n`)
     }
     return defaultConfig()
   }

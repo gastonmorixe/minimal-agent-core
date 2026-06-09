@@ -12,7 +12,7 @@
  */
 
 import { buildPresenceRows, writeLeadPresence } from "./presence.ts"
-import { probeWorker, type ProbeDeps } from "./spawn.ts"
+import { type ProbeDeps, probeWorker } from "./spawn.ts"
 import { type SubagentStore } from "./store.ts"
 import { type Effect, supervisorTick, type WorkerProbe } from "./supervisor.ts"
 import { isActive } from "./types.ts"

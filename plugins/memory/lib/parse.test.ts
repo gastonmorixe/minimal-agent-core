@@ -273,7 +273,10 @@ describe("newPersistentId", () => {
 
   it("is sortable by time when called with a controlled clock", () => {
     let t = 1_000_000_000_000
-    const fixed = (_n: number): (() => Buffer) => () => Buffer.from([0xab, 0xcd])
+    const fixed =
+      (_n: number): (() => Buffer) =>
+      () =>
+        Buffer.from([0xab, 0xcd])
     const a = newPersistentId(() => t, fixed(0))
     t += 1
     const b = newPersistentId(() => t, fixed(0))

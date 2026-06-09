@@ -87,7 +87,11 @@ export interface SpawnPlan {
  * `--append-system-prompt` flag would be cleaner; this works today without a
  * core change.
  */
-export function composePrompt(task: string, systemPreamble?: string, resultProtocol?: string): string {
+export function composePrompt(
+  task: string,
+  systemPreamble?: string,
+  resultProtocol?: string,
+): string {
   const t = task.trim()
   const p = systemPreamble?.trim()
   const base = p ? `${p}\n\n---\n\nYour task:\n\n${t}` : t

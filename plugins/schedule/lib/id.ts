@@ -19,7 +19,10 @@ const ID_LEN = 8
  * @param rand Injectable [0,1) source (default `Math.random`) for tests.
  * @returns A fresh id not currently in use.
  */
-export function generateId(exists: (id: string) => boolean, rand: () => number = Math.random): string {
+export function generateId(
+  exists: (id: string) => boolean,
+  rand: () => number = Math.random,
+): string {
   for (let attempt = 0; attempt < 10_000; attempt++) {
     let id = ""
     for (let i = 0; i < ID_LEN; i++) {

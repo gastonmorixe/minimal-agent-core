@@ -3,10 +3,12 @@
  * factories so detection/wiring/filtering are tested without spawning. Runs
  * detection against a temp project fixture.
  */
-import { describe, expect, it } from "bun:test"
+
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
 
 import { DEFAULT_CONFIG, type DiagnosticsConfig } from "./config.ts"
 import type { DiagnosticProvider } from "./provider.ts"
@@ -27,8 +29,20 @@ function project(tools: string[]): string {
   return root
 }
 
-function fakeProvider(id: string, kind: "type" | "lint" | "format", out: Finding[]): DiagnosticProvider {
-  return { id, kind, handles: (p) => p.endsWith(".ts"), async check() { return out }, dispose() {} }
+function fakeProvider(
+  id: string,
+  kind: "type" | "lint" | "format",
+  out: Finding[],
+): DiagnosticProvider {
+  return {
+    id,
+    kind,
+    handles: (p) => p.endsWith(".ts"),
+    async check() {
+      return out
+    },
+    dispose() {},
+  }
 }
 
 function factories(map: Record<string, Finding[]>): ProviderFactories {
@@ -39,18 +53,27 @@ function factories(map: Record<string, Finding[]>): ProviderFactories {
   }
 }
 
-const f = (over: Partial<Finding>): Finding => ({ source: "tsgo", severity: "error", message: "m", ...over })
+const f = (over: Partial<Finding>): Finding => ({
+  source: "tsgo",
+  severity: "error",
+  message: "m",
+  ...over,
+})
 
 describe("DiagnosticsService", () => {
   it("wires only detected + config-enabled providers", async () => {
     const root = project(["tsgo", "biome", "oxlint"])
     try {
       // lint disabled by default → oxlint provider not built even though detected
-      const svc = new DiagnosticsService(root, DEFAULT_CONFIG, factories({
-        tsgo: [f({ source: "tsgo", code: "TS1", line: 1, col: 1 })],
-        biome: [f({ source: "biome", severity: "warning", code: "format", message: "fmt" })],
-        oxlint: [f({ source: "oxlint", code: "no-x", message: "should not appear" })],
-      }))
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({
+          tsgo: [f({ source: "tsgo", code: "TS1", line: 1, col: 1 })],
+          biome: [f({ source: "biome", severity: "warning", code: "format", message: "fmt" })],
+          oxlint: [f({ source: "oxlint", code: "no-x", message: "should not appear" })],
+        }),
+      )
       const res = await svc.check(join(root, "x.ts"), "code")
       const sources = res.findings.map((d) => d.source).sort()
       expect(sources).toEqual(["biome", "tsgo"])
@@ -64,7 +87,11 @@ describe("DiagnosticsService", () => {
     const root = project(["oxlint"])
     try {
       const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, lint: true }
-      const svc = new DiagnosticsService(root, cfg, factories({ oxlint: [f({ source: "oxlint", code: "no-x", message: "x" })] }))
+      const svc = new DiagnosticsService(
+        root,
+        cfg,
+        factories({ oxlint: [f({ source: "oxlint", code: "no-x", message: "x" })] }),
+      )
       const res = await svc.check(join(root, "x.ts"), "code")
       expect(res.findings.map((d) => d.source)).toEqual(["oxlint"])
     } finally {
@@ -87,7 +114,11 @@ describe("DiagnosticsService", () => {
   it("returns empty when disabled", async () => {
     const root = project(["tsgo"])
     try {
-      const svc = new DiagnosticsService(root, { ...DEFAULT_CONFIG, enabled: false }, factories({ tsgo: [f({})] }))
+      const svc = new DiagnosticsService(
+        root,
+        { ...DEFAULT_CONFIG, enabled: false },
+        factories({ tsgo: [f({})] }),
+      )
       const res = await svc.check(join(root, "x.ts"), "code")
       expect(res.findings).toEqual([])
     } finally {
@@ -99,13 +130,17 @@ describe("DiagnosticsService", () => {
     const root = project(["tsgo"])
     try {
       const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, severityFloor: "error", maxInline: 1 }
-      const svc = new DiagnosticsService(root, cfg, factories({
-        tsgo: [
-          f({ severity: "warning", message: "w" }),
-          f({ severity: "error", message: "e1", line: 1 }),
-          f({ severity: "error", message: "e2", line: 2 }),
-        ],
-      }))
+      const svc = new DiagnosticsService(
+        root,
+        cfg,
+        factories({
+          tsgo: [
+            f({ severity: "warning", message: "w" }),
+            f({ severity: "error", message: "e1", line: 1 }),
+            f({ severity: "error", message: "e2", line: 2 }),
+          ],
+        }),
+      )
       const res = await svc.check(join(root, "x.ts"), "code")
       expect(res.findings).toHaveLength(1)
       expect(res.findings[0]?.severity).toBe("error")

@@ -5,10 +5,13 @@
  * we never touch the user's real history files. Each test clears
  * before/after to keep cases independent.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
 import {
   _clearAll,
   appendBoth,
@@ -135,7 +138,7 @@ describe("history store / buildEntry", () => {
     expect(e.id).toMatch(/^[0-9a-z]+-1234$/)
   })
 
-  it("accepts exit=\"canceled\"", () => {
+  it('accepts exit="canceled"', () => {
     const e = buildEntry({ text: "x", cwd: "/x", sid: null, exit: "canceled" })
     expect(e.exit).toBe("canceled")
     expect(e.sid).toBeNull()
@@ -163,10 +166,7 @@ describe("history store / append + load round-trip", () => {
   it("preserves order across multiple appends (oldest-first)", () => {
     const p = projectHistoryPath("/test/cwd-A")
     for (let i = 0; i < 5; i++) {
-      appendOne(
-        p,
-        buildEntry({ text: `entry-${i}`, cwd: "/test/cwd-A", sid: null }),
-      )
+      appendOne(p, buildEntry({ text: `entry-${i}`, cwd: "/test/cwd-A", sid: null }))
     }
     const loaded = loadEntries(p)
     expect(loaded.map((e) => e.text)).toEqual([
@@ -188,16 +188,10 @@ describe("history store / append + load round-trip", () => {
 
   it("loadEntries skips malformed lines without poisoning the rest", () => {
     const p = projectHistoryPath("/test/cwd-A")
-    appendOne(
-      p,
-      buildEntry({ text: "good-1", cwd: "/test/cwd-A", sid: null }),
-    )
+    appendOne(p, buildEntry({ text: "good-1", cwd: "/test/cwd-A", sid: null }))
     // Inject a corrupted line manually
     writeFileSync(p, `${readFileSync(p, "utf-8")}not-json\n`)
-    appendOne(
-      p,
-      buildEntry({ text: "good-2", cwd: "/test/cwd-A", sid: null }),
-    )
+    appendOne(p, buildEntry({ text: "good-2", cwd: "/test/cwd-A", sid: null }))
     const loaded = loadEntries(p)
     expect(loaded.map((e) => e.text)).toEqual(["good-1", "good-2"])
   })
@@ -227,11 +221,10 @@ describe("history store / cap rotation", () => {
   it("does NOT rotate while under the cap", () => {
     const p = projectHistoryPath("/test/cwd-A")
     for (let i = 0; i < 3; i++) {
-      appendOne(
-        p,
-        buildEntry({ text: `entry-${i}`, cwd: "/test/cwd-A", sid: null }),
-        { maxBytes: 1024, rotateFraction: 0.25 },
-      )
+      appendOne(p, buildEntry({ text: `entry-${i}`, cwd: "/test/cwd-A", sid: null }), {
+        maxBytes: 1024,
+        rotateFraction: 0.25,
+      })
     }
     expect(loadEntries(p).length).toBe(3)
   })
@@ -269,11 +262,10 @@ describe("history store / cap rotation", () => {
   it("rotation leaves valid JSONL (every surviving line parses)", () => {
     const p = projectHistoryPath("/test/cwd-A")
     for (let i = 0; i < 100; i++) {
-      appendOne(
-        p,
-        buildEntry({ text: `entry-${i}`, cwd: "/test/cwd-A", sid: null }),
-        { maxBytes: 2 * 1024, rotateFraction: 0.5 },
-      )
+      appendOne(p, buildEntry({ text: `entry-${i}`, cwd: "/test/cwd-A", sid: null }), {
+        maxBytes: 2 * 1024,
+        rotateFraction: 0.5,
+      })
     }
     // Raw file scan — every non-empty line must JSON-parse.
     const raw = readFileSync(p, "utf-8")

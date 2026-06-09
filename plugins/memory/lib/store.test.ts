@@ -19,17 +19,11 @@
  *   - Round-trip with legacy bullets in the same file (preserve verbatim).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import {
   globalMemoryPath,
@@ -113,9 +107,7 @@ describe("namespace (env-driven)", () => {
 
   it("path helpers route under namespaces/<ns>/ when env is set", () => {
     process.env[MEMORY_NAMESPACE_ENV] = "scratch"
-    expect(globalMemoryPath({ home: "/h" })).toBe(
-      "/h/.minimal-agent/namespaces/scratch/memory.md",
-    )
+    expect(globalMemoryPath({ home: "/h" })).toBe("/h/.minimal-agent/namespaces/scratch/memory.md")
     expect(projectMemoryPath("/Users/a/proj", { home: "/h" })).toBe(
       "/h/.minimal-agent/namespaces/scratch/projects/Users/a/proj/memory.md",
     )
@@ -133,9 +125,7 @@ describe("namespace (env-driven)", () => {
 
   it("deps.namespace=null forces default paths even when env is set", () => {
     process.env[MEMORY_NAMESPACE_ENV] = "envns"
-    expect(globalMemoryPath({ home: "/h", namespace: null })).toBe(
-      "/h/.minimal-agent/memory.md",
-    )
+    expect(globalMemoryPath({ home: "/h", namespace: null })).toBe("/h/.minimal-agent/memory.md")
     expect(projectMemoryPath("/p", { home: "/h", namespace: null })).toBe(
       "/h/.minimal-agent/projects/p/memory.md",
     )
@@ -147,21 +137,17 @@ describe("namespace (env-driven)", () => {
   })
 
   it("rejects the bare traversal token `..`", () => {
-    expect(() => resolveNamespace({ home: "/h", namespace: ".." })).toThrow(
-      /traversal/,
-    )
+    expect(() => resolveNamespace({ home: "/h", namespace: ".." })).toThrow(/traversal/)
   })
 
   it("rejects whitespace inside namespace", () => {
-    expect(() =>
-      resolveNamespace({ home: "/h", namespace: "has space" }),
-    ).toThrow(/invalid namespace/)
+    expect(() => resolveNamespace({ home: "/h", namespace: "has space" })).toThrow(
+      /invalid namespace/,
+    )
   })
 
   it("accepts dots and dashes (semver-style namespaces)", () => {
-    expect(resolveNamespace({ home: "/h", namespace: "v1.2.3-rc1" })).toBe(
-      "v1.2.3-rc1",
-    )
+    expect(resolveNamespace({ home: "/h", namespace: "v1.2.3-rc1" })).toBe("v1.2.3-rc1")
   })
 
   it("MemoryStore.add writes under the namespaced path when env is set", () => {
@@ -565,10 +551,7 @@ describe("MemoryStore — non-bullet content preservation", () => {
   it("preserves headers and prose lines on edit", () => {
     const s = MemoryStore.project("/mixed", { home: tmpHome })
     mkdirSync(dirname(s.path), { recursive: true })
-    writeFileSync(
-      s.path,
-      "# Heading\n\n- one\nsome prose between bullets\n- two\n",
-    )
+    writeFileSync(s.path, "# Heading\n\n- one\nsome prose between bullets\n- two\n")
     const ids = s.list().map((b) => b.id)
     s.edit(ids[0]!, "one-revised")
     const after = readFileSync(s.path, "utf-8")
@@ -580,10 +563,7 @@ describe("MemoryStore — non-bullet content preservation", () => {
   it("preserves headers and prose lines on remove", () => {
     const s = MemoryStore.project("/mixed2", { home: tmpHome })
     mkdirSync(dirname(s.path), { recursive: true })
-    writeFileSync(
-      s.path,
-      "# Heading\n\n- one\nsome prose\n- two\n",
-    )
+    writeFileSync(s.path, "# Heading\n\n- one\nsome prose\n- two\n")
     const ids = s.list().map((b) => b.id)
     s.remove(ids[1]!)
     const after = readFileSync(s.path, "utf-8")

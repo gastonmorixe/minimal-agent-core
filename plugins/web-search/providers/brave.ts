@@ -21,7 +21,8 @@
  * @module web-search/providers/brave
  */
 
-import { retry, type RetryOptions } from "../../../src/retry.ts"
+import { type RetryOptions, retry } from "../../../src/retry.ts"
+
 import type {
   ProviderConfig,
   ProviderFactory,
@@ -159,8 +160,7 @@ interface BraveConfig {
 function readBraveConfig(raw: ProviderConfig): BraveConfig {
   const out: BraveConfig = {}
   if (typeof raw.apiKey === "string" && raw.apiKey.length > 0) out.apiKey = raw.apiKey
-  if (typeof raw.apiKeyEnv === "string" && raw.apiKeyEnv.length > 0)
-    out.apiKeyEnv = raw.apiKeyEnv
+  if (typeof raw.apiKeyEnv === "string" && raw.apiKeyEnv.length > 0) out.apiKeyEnv = raw.apiKeyEnv
   if (typeof raw.baseUrl === "string" && raw.baseUrl.length > 0) out.baseUrl = raw.baseUrl
   if (typeof raw.fetch === "function") out.fetch = raw.fetch as typeof fetch
   if (typeof raw.retry === "object" && raw.retry !== null) {
@@ -249,11 +249,7 @@ class BraveProvider implements WebSearchProvider {
     return !!this.apiKey(env)
   }
 
-  async search(
-    query: string,
-    opts: SearchOptions,
-    signal: AbortSignal,
-  ): Promise<SearchResponse> {
+  async search(query: string, opts: SearchOptions, signal: AbortSignal): Promise<SearchResponse> {
     if (!this.capabilities.has(opts.type)) {
       throw new WebSearchProviderError(
         this.id,
@@ -268,16 +264,10 @@ class BraveProvider implements WebSearchProvider {
       throw new WebSearchProviderError(this.id, "query is empty")
     }
     if (query.length > MAX_QUERY_LENGTH) {
-      throw new WebSearchProviderError(
-        this.id,
-        `query exceeds ${MAX_QUERY_LENGTH} characters`,
-      )
+      throw new WebSearchProviderError(this.id, `query exceeds ${MAX_QUERY_LENGTH} characters`)
     }
     if (query.split(/\s+/).filter(Boolean).length > MAX_QUERY_TERMS) {
-      throw new WebSearchProviderError(
-        this.id,
-        `query exceeds ${MAX_QUERY_TERMS} terms`,
-      )
+      throw new WebSearchProviderError(this.id, `query exceeds ${MAX_QUERY_TERMS} terms`)
     }
 
     const params = buildQueryParams(query, opts)

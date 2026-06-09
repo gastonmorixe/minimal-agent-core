@@ -46,7 +46,9 @@ interface ParsedInput {
 }
 
 /** Validate tool input. Returns either parsed values or an error message. */
-function validateInput(raw: Record<string, unknown>): { ok: true; value: ParsedInput } | { ok: false; error: string } {
+function validateInput(
+  raw: Record<string, unknown>,
+): { ok: true; value: ParsedInput } | { ok: false; error: string } {
   if (typeof raw.query !== "string" || raw.query.trim().length === 0) {
     return { ok: false, error: "`query` is required and must be a non-empty string" }
   }
@@ -65,7 +67,12 @@ function validateInput(raw: Record<string, unknown>): { ok: true; value: ParsedI
 
   let count: number | undefined
   if (raw.count !== undefined) {
-    if (typeof raw.count !== "number" || !Number.isFinite(raw.count) || raw.count < 1 || raw.count > 20) {
+    if (
+      typeof raw.count !== "number" ||
+      !Number.isFinite(raw.count) ||
+      raw.count < 1 ||
+      raw.count > 20
+    ) {
       return { ok: false, error: "`count` must be an integer between 1 and 20" }
     }
     count = Math.floor(raw.count)
@@ -88,7 +95,10 @@ function validateInput(raw: Record<string, unknown>): { ok: true; value: ParsedI
   let safesearch: ParsedInput["safesearch"]
   if (raw.safesearch !== undefined) {
     if (typeof raw.safesearch !== "string" || !VALID_SAFESEARCH.has(raw.safesearch)) {
-      return { ok: false, error: `\`safesearch\` must be one of: ${[...VALID_SAFESEARCH].join(", ")}` }
+      return {
+        ok: false,
+        error: `\`safesearch\` must be one of: ${[...VALID_SAFESEARCH].join(", ")}`,
+      }
     }
     safesearch = raw.safesearch as ParsedInput["safesearch"]
   }
@@ -134,7 +144,7 @@ function mergeOptions(input: ParsedInput, config: WebSearchConfig): SearchOption
 /** Render an actionable error from `WebSearchAllFailedError`. */
 function renderAllFailed(err: WebSearchAllFailedError): string {
   if (err.failures.length === 0) {
-    return "WebSearch: no providers configured. Set `plugins[\"web-search\"].providers` in ~/.minimal-agent/config.jsonc."
+    return 'WebSearch: no providers configured. Set `plugins["web-search"].providers` in ~/.minimal-agent/config.jsonc.'
   }
   const lines = ["WebSearch: all providers failed:"]
   let onlyMissingKey = true
@@ -145,7 +155,7 @@ function renderAllFailed(err: WebSearchAllFailedError): string {
   if (onlyMissingKey) {
     lines.push("")
     lines.push("Hint: set BRAVE_API_KEY in your environment, or add an `apiKey` to")
-    lines.push("plugins[\"web-search\"].brave in ~/.minimal-agent/config.jsonc.")
+    lines.push('plugins["web-search"].brave in ~/.minimal-agent/config.jsonc.')
   }
   return lines.join("\n")
 }

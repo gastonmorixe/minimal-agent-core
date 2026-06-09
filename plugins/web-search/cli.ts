@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Standalone debug CLI for the WebSearch plugin.
  *

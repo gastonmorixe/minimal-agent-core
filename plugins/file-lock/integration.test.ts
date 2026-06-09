@@ -8,16 +8,13 @@
  * `handlers/lock_status.test.ts`.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
-import {
-  buildHolder,
-  lockPathFor,
-  serializeHolder,
-} from "../../src/file-lock.ts"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
+import { buildHolder, lockPathFor, serializeHolder } from "../../src/file-lock.ts"
 import { PluginLoader } from "../../src/plugins/loader.ts"
 
 const PROJECT_ROOT = resolve(__dirname, "../..")

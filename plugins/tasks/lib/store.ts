@@ -35,14 +35,14 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
 import {
-  isTaskId,
   isSubtaskId,
+  isTaskId,
   localIsoSeconds,
+  type NewTaskInput,
   newTopLevelId,
   parseFile,
   serializeFile,
   subtaskId,
-  type NewTaskInput,
   type Task,
   type TaskStatus,
 } from "./parse.ts"
@@ -110,8 +110,8 @@ export function applyStatusTransition(
   return {
     ...prev,
     status: next,
-    done_at: next === "done" ? prev.done_at ?? nowIso : null,
-    reason: next === "canceled" ? (reason?.trim() || prev.reason || null) : null,
+    done_at: next === "done" ? (prev.done_at ?? nowIso) : null,
+    reason: next === "canceled" ? reason?.trim() || prev.reason || null : null,
     started_at,
     last_resumed_at,
     active_ms,
@@ -406,7 +406,9 @@ export class TaskStore {
         throw new TaskStoreError(`TaskStore.addMany: parent "${opts.parent}" not found`)
       }
       if (parent.parent !== null) {
-        throw new TaskStoreError(`TaskStore.addMany: parent "${opts.parent}" is itself a subtask (no nesting beyond depth 1)`)
+        throw new TaskStoreError(
+          `TaskStore.addMany: parent "${opts.parent}" is itself a subtask (no nesting beyond depth 1)`,
+        )
       }
       parentId = parent.id
     }
@@ -540,7 +542,9 @@ export class TaskStore {
         throw new TaskStoreError(`TaskStore.reorder: id "${ref}" not found`)
       }
       if (t.parent !== null) {
-        throw new TaskStoreError(`TaskStore.reorder: id "${ref}" is a subtask; reorder operates on top-level tasks only`)
+        throw new TaskStoreError(
+          `TaskStore.reorder: id "${ref}" is a subtask; reorder operates on top-level tasks only`,
+        )
       }
       if (seen.has(t.id)) {
         throw new TaskStoreError(`TaskStore.reorder: duplicate id "${ref}" in order`)
@@ -588,7 +592,9 @@ export class TaskStore {
   clear(force: boolean = false): number {
     const tasks = this.list()
     if (!force && tasks.some((t) => t.status === "doing")) {
-      throw new TaskStoreError(`TaskStore.clear: refusing to clear with tasks in "doing" state; pass force: true to override`)
+      throw new TaskStoreError(
+        `TaskStore.clear: refusing to clear with tasks in "doing" state; pass force: true to override`,
+      )
     }
     this.writeAll([])
     return tasks.length
@@ -604,7 +610,9 @@ export class TaskStore {
       throw new TaskStoreError(`TaskStore: parent "${ref}" not found`)
     }
     if (parent.parent !== null) {
-      throw new TaskStoreError(`TaskStore: "${ref}" is itself a subtask; depth-2 nesting is not allowed`)
+      throw new TaskStoreError(
+        `TaskStore: "${ref}" is itself a subtask; depth-2 nesting is not allowed`,
+      )
     }
     return parent
   }

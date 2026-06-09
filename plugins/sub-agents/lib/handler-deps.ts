@@ -68,7 +68,9 @@ function resolveLeadModel(ctx: TUIContext): string {
  *      provider suggestion).
  *   3. The host wired no provider recommendation port.
  */
-function makeRecommendForRole(ctx: TUIContext): ((role: string) => { modelId: string; effort?: string } | undefined) | undefined {
+function makeRecommendForRole(
+  ctx: TUIContext,
+): ((role: string) => { modelId: string; effort?: string } | undefined) | undefined {
   if (!resolveAutoTier(ctx.env)) return undefined
   if (resolveModelOverride(ctx.env)) return undefined
   const query = ctx.recommendSubagentModels

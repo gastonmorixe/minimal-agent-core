@@ -58,10 +58,7 @@ describe("extractModelFromSignature", () => {
     //   "claude-sonnet-4-6"
     // ↑ NB: the length includes only the model bytes, NOT the tag.
     const modelId = "claude-sonnet-4-6"
-    const buf = Buffer.concat([
-      Buffer.from([0x32, modelId.length]),
-      Buffer.from(modelId, "utf8"),
-    ])
+    const buf = Buffer.concat([Buffer.from([0x32, modelId.length]), Buffer.from(modelId, "utf8")])
     expect(extractModelFromSignature(buf.toString("base64"))).toBe(modelId)
   })
 

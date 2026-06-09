@@ -15,8 +15,8 @@
 
 import type { ContentBlock } from "../../../src/client.ts"
 
+import { type StoreDeps, SubagentStore } from "./store.ts"
 import { fmtElapsed, fmtTokens } from "./style.ts"
-import { SubagentStore, type StoreDeps } from "./store.ts"
 import { fleetStats, isActive, type SubagentRecord } from "./types.ts"
 
 const MAX_ROWS = 8
@@ -78,7 +78,8 @@ export class SubagentsAttachment {
     const terminal = records.filter((r) => !isActive(r.status))
     const shown = [...active, ...terminal].slice(0, MAX_ROWS)
     const body = shown.map((r) => row(r, nowMs)).join("\n")
-    const overflow = records.length > shown.length ? `\n… +${records.length - shown.length} more (ListAgents)` : ""
+    const overflow =
+      records.length > shown.length ? `\n… +${records.length - shown.length} more (ListAgents)` : ""
     const incompleteAttr = s.incomplete > 0 ? ` incomplete="${s.incomplete}"` : ""
     const text =
       `<ma::agent::subagents active="${s.running + s.queued}" done="${s.done}"${incompleteAttr} failed="${s.failed}" tokens="${fmtTokens(s.tokens)}">\n` +

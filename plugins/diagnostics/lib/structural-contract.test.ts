@@ -12,6 +12,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { Finding as AgentFinding } from "../../../src/plugins/hooks/tool-lifecycle.ts"
+
 import type { Finding as PluginFinding } from "./types.ts"
 
 // Compile-time assignability both ways. `satisfies` forces the check; the

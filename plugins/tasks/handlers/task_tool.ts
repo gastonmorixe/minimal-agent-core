@@ -30,10 +30,9 @@
  */
 
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
-
-import { renderToolDisplay, type RenderAction } from "../lib/render.ts"
-import { buildViews, TaskStore, TaskStoreError, type View } from "../lib/store.ts"
 import { isTaskStatus, type Task, type TaskStatus } from "../lib/parse.ts"
+import { type RenderAction, renderToolDisplay } from "../lib/render.ts"
+import { buildViews, TaskStore, TaskStoreError, type View } from "../lib/store.ts"
 
 // ---------------------------------------------------------------------------
 // Input validation
@@ -166,7 +165,10 @@ function validateInput(raw: Record<string, unknown>): Validation {
       return { ok: false, error: "`order` must be a non-empty array of ids" }
     }
     if (!raw.order.every((r) => isIdRef(r))) {
-      return { ok: false, error: "every entry in `order` must be a non-empty string or positive integer" }
+      return {
+        ok: false,
+        error: "every entry in `order` must be a non-empty string or positive integer",
+      }
     }
     out.order = raw.order as (string | number)[]
   }
@@ -443,9 +445,7 @@ function doUpdate(store: TaskStore, input: ParsedInput): TUIResult {
   // edit, or update to the same string) — showing `x  →  x` is noise.
   const augmented: readonly View[] =
     oldTitle !== null && oldTitle !== updated.title
-      ? views.map((v) =>
-          v.task.id === updated.id ? { ...v, diff: { oldTitle } } : v,
-        )
+      ? views.map((v) => (v.task.id === updated.id ? { ...v, diff: { oldTitle } } : v))
       : views
   return ok(store, { kind: "updated", hash: updated.id }, input.format, augmented)
 }
@@ -467,10 +467,10 @@ function doStatus(store: TaskStore, input: ParsedInput): TUIResult {
     input.status === "done"
       ? { kind: "marked_done", hash: updated.id }
       : input.status === "doing"
-      ? { kind: "marked_doing", hash: updated.id }
-      : input.status === "canceled"
-      ? { kind: "marked_canceled", hash: updated.id }
-      : { kind: "marked_todo", hash: updated.id }
+        ? { kind: "marked_doing", hash: updated.id }
+        : input.status === "canceled"
+          ? { kind: "marked_canceled", hash: updated.id }
+          : { kind: "marked_todo", hash: updated.id }
   return ok(store, action, input.format)
 }
 

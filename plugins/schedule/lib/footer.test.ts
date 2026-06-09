@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test"
 
 import { PALETTE } from "../../../src/palette.ts"
 import { displayWidth } from "../../../src/term-width.ts"
+
 import { formatStatusRow } from "./footer.ts"
 import type { CronEntry } from "./store.ts"
 
@@ -42,7 +43,9 @@ describe("formatStatusRow (footer)", () => {
   })
 
   it("gold when the next fire is far, lime when imminent", () => {
-    expect(formatStatusRow([mk({ nextAtMs: NOW + 30 * 60_000 })], NOW, WIDE)!).toContain(PALETTE.gold)
+    expect(formatStatusRow([mk({ nextAtMs: NOW + 30 * 60_000 })], NOW, WIDE)!).toContain(
+      PALETTE.gold,
+    )
     const soon = formatStatusRow([mk({ nextAtMs: NOW + 10_000 })], NOW, WIDE)!
     expect(soon).toContain(PALETTE.lime)
     expect(soon).not.toContain(PALETTE.gold)

@@ -50,14 +50,19 @@ export interface GuardInput {
 }
 
 /** A guard verdict. Discriminated so callers handle both arms exhaustively. */
-export type GuardDecision = { readonly allowed: true } | { readonly allowed: false; readonly reason: string }
+export type GuardDecision =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly reason: string }
 
 /**
  * Evaluate the policy against a proposed spawn. Order matters: the most
  * structural violation (nesting) is reported first, then runtime caps, then
  * the type allowlist, so the model gets the most actionable reason.
  */
-export function evaluateSpawnGuard(input: GuardInput, policy: GuardPolicy = DEFAULT_POLICY): GuardDecision {
+export function evaluateSpawnGuard(
+  input: GuardInput,
+  policy: GuardPolicy = DEFAULT_POLICY,
+): GuardDecision {
   if (input.childDepth > policy.maxDepth) {
     return {
       allowed: false,

@@ -74,7 +74,9 @@ describe("CronCreate", () => {
   })
 
   it("honors the disable gate", async () => {
-    const r = await cronCreate(ctx({ every: "5m", prompt: "p" }, { MINIMAL_AGENT_DISABLE_CRON: "1" }))
+    const r = await cronCreate(
+      ctx({ every: "5m", prompt: "p" }, { MINIMAL_AGENT_DISABLE_CRON: "1" }),
+    )
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("disabled")
   })

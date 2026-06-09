@@ -145,7 +145,12 @@ export function mergeLatest(rows: readonly PresenceRow[]): Map<string, PresenceR
 
 /** A liveness verdict for one sid. */
 export type Liveness =
-  | { readonly status: "live"; readonly pid: number; readonly since: string; readonly role: "lead" | "worker" }
+  | {
+      readonly status: "live"
+      readonly pid: number
+      readonly since: string
+      readonly role: "lead" | "worker"
+    }
   | { readonly status: "dead"; readonly reason: string }
   | { readonly status: "unknown"; readonly reason: string }
 
@@ -178,7 +183,11 @@ export function liveness(
 // ---------------------------------------------------------------------------
 
 /** Rewrite a lead's presence file (small; cheap to rewrite each tick). */
-export function writeLeadPresence(dir: string, leadSid: string, rows: readonly PresenceRow[]): void {
+export function writeLeadPresence(
+  dir: string,
+  leadSid: string,
+  rows: readonly PresenceRow[],
+): void {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, `${leadSid}.jsonl`), serializeRows(rows))
 }

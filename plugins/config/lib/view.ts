@@ -9,8 +9,7 @@
  * @module config/lib/view
  */
 
-import type { Row } from "./fsm.ts"
-import type { State } from "./fsm.ts"
+import type { Row, State } from "./fsm.ts"
 import type { ConfigModel, FieldValue } from "./model.ts"
 import { UNSET } from "./model.ts"
 import type { RenderModel, RenderRow } from "./render.ts"

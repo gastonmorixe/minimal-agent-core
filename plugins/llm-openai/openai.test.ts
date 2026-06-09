@@ -27,9 +27,9 @@ import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
 import { bootstrapOpenAI } from "./adapter.ts"
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
-import { buildOpenAIResponsesBody } from "./responses/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
 import { registerOpenAIModels } from "./models.ts"
+import { buildOpenAIResponsesBody } from "./responses/request-body.ts"
 import {
   type OpenAIResponsesEvent,
   translateOpenAIResponsesStream,
@@ -330,18 +330,26 @@ describe("validateOpenAIRequest — modality gating", () => {
   const audioReq = (id: string): CanonicalRequest => ({
     modelId: id,
     messages: [
-      { role: "user", content: [{ type: "audio", source: { kind: "base64", format: "wav", data: "AA" } }] },
+      {
+        role: "user",
+        content: [{ type: "audio", source: { kind: "base64", format: "wav", data: "AA" } }],
+      },
     ],
   })
 
   it("gpt-4o accepts audio input (text+image+audio modality)", () => {
     bootstrap()
-    expect(resolveProvider("openai").validate(audioReq("gpt-4o"), resolveModel("gpt-4o")).ok).toBe(true)
+    expect(resolveProvider("openai").validate(audioReq("gpt-4o"), resolveModel("gpt-4o")).ok).toBe(
+      true,
+    )
   })
 
   it("gpt-4o-mini rejects audio input (no audio modality)", () => {
     bootstrap()
-    const res = resolveProvider("openai").validate(audioReq("gpt-4o-mini"), resolveModel("gpt-4o-mini"))
+    const res = resolveProvider("openai").validate(
+      audioReq("gpt-4o-mini"),
+      resolveModel("gpt-4o-mini"),
+    )
     expect(res.ok).toBe(false)
     expect(res.errors.some((e) => e.capability === "modalities")).toBe(true)
   })
@@ -361,7 +369,9 @@ describe("multimodal request encoding", () => {
       messages: [
         {
           role: "user",
-          content: [{ type: "image", source: { kind: "base64", mediaType: "image/png", data: "AAAA" } }],
+          content: [
+            { type: "image", source: { kind: "base64", mediaType: "image/png", data: "AAAA" } },
+          ],
         },
       ],
     }
@@ -372,7 +382,10 @@ describe("multimodal request encoding", () => {
     const url: CanonicalRequest = {
       modelId: "gpt-4o",
       messages: [
-        { role: "user", content: [{ type: "image", source: { kind: "url", url: "https://x/y.png" } }] },
+        {
+          role: "user",
+          content: [{ type: "image", source: { kind: "url", url: "https://x/y.png" } }],
+        },
       ],
     }
     expect(JSON.stringify(buildOpenAIChatBody(url, resolveModel("gpt-4o")))).toContain(

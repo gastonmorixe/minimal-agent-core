@@ -6,8 +6,8 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { ConfigModel, type FsDeps, UNSET } from "./model.ts"
 import { parseJsonc } from "./mini-jsonc.ts"
+import { ConfigModel, type FsDeps, UNSET } from "./model.ts"
 import { fieldById } from "./schema.ts"
 
 /** In-memory fs fake. */

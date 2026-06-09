@@ -53,9 +53,7 @@ describe("findThinkingMismatches", () => {
   })
 
   test("user-only messages → no mismatches", () => {
-    const msgs: CanonicalMessage[] = [
-      { role: "user", content: [{ type: "text", text: "hi" }] },
-    ]
+    const msgs: CanonicalMessage[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
     expect(findThinkingMismatches(msgs, "claude-opus-4-8")).toEqual([])
   })
 
@@ -237,9 +235,7 @@ describe("buildMismatchIssue", () => {
 
 describe("stripThinkingBlocks", () => {
   test("removes thinking blocks from assistant messages", () => {
-    const msgs: CanonicalMessage[] = [
-      assistantWithThinking([SIG_OPUS_4_7, SIG_OPUS_4_8]),
-    ]
+    const msgs: CanonicalMessage[] = [assistantWithThinking([SIG_OPUS_4_7, SIG_OPUS_4_8])]
     const out = stripThinkingBlocks(msgs)
     const first = out[0]
     expect(first?.role).toBe("assistant")

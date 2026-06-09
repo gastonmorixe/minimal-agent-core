@@ -8,13 +8,13 @@ import {
   buildPresenceRows,
   liveness,
   mergeLatest,
-  parseRows,
   type PresenceRow,
+  parseRows,
   readMesh,
   serializeRows,
   writeLeadPresence,
 } from "./presence.ts"
-import { sessionId, type SubagentRecord, type SubagentStatus, subagentId } from "./types.ts"
+import { type SubagentRecord, type SubagentStatus, sessionId, subagentId } from "./types.ts"
 
 const NOW = "2026-05-30T12:00:00.000Z"
 const NOW_MS = Date.parse(NOW)
@@ -54,8 +54,20 @@ describe("buildPresenceRows", () => {
 
 describe("parse / serialize / mergeLatest", () => {
   it("round-trips and keeps the latest row per sid", () => {
-    const a: PresenceRow = { sid: "x", role: "worker", status: "active", pid: 1, ts: "2026-05-30T12:00:00.000Z" }
-    const b: PresenceRow = { sid: "x", role: "worker", status: "done", pid: 0, ts: "2026-05-30T12:05:00.000Z" }
+    const a: PresenceRow = {
+      sid: "x",
+      role: "worker",
+      status: "active",
+      pid: 1,
+      ts: "2026-05-30T12:00:00.000Z",
+    }
+    const b: PresenceRow = {
+      sid: "x",
+      role: "worker",
+      status: "done",
+      pid: 0,
+      ts: "2026-05-30T12:05:00.000Z",
+    }
     const parsed = parseRows(serializeRows([a, b]))
     expect(parsed).toHaveLength(2)
     const merged = mergeLatest(parsed)
@@ -93,7 +105,15 @@ describe("write + read mesh (per-lead files merged)", () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
   it("merges rows across multiple leads' files", () => {
-    writeLeadPresence(dir, "lead-1", buildPresenceRows({ sid: "lead-1", pid: 1 }, [rec("A1", { kind: "running", pid: 9, startedAt: NOW, progress: { tools: 0, tokens: 0 } })], NOW))
+    writeLeadPresence(
+      dir,
+      "lead-1",
+      buildPresenceRows(
+        { sid: "lead-1", pid: 1 },
+        [rec("A1", { kind: "running", pid: 9, startedAt: NOW, progress: { tools: 0, tokens: 0 } })],
+        NOW,
+      ),
+    )
     writeLeadPresence(dir, "lead-2", buildPresenceRows({ sid: "lead-2", pid: 2 }, [], NOW))
     const mesh = readMesh(dir)
     expect(mesh.get("lead-1")?.role).toBe("lead")

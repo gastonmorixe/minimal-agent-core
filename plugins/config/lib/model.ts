@@ -15,7 +15,7 @@
  * @module config/lib/model
  */
 
-import { setKeyPath, removeKeyPath } from "./jsonc-edit.ts"
+import { removeKeyPath, setKeyPath } from "./jsonc-edit.ts"
 import { parseJsonc } from "./mini-jsonc.ts"
 import { type Field, SCHEMA } from "./schema.ts"
 

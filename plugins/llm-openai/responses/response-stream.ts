@@ -28,7 +28,11 @@
  * @module llm/providers/openai/responses/response-stream
  */
 
-import type { CanonicalEvent, CanonicalUsage, StopReason } from "../../../src/llm/canonical-events.ts"
+import type {
+  CanonicalEvent,
+  CanonicalUsage,
+  StopReason,
+} from "../../../src/llm/canonical-events.ts"
 import { classifyUpstreamError } from "../../../src/llm/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -462,9 +466,7 @@ export async function* translateOpenAIResponsesStream(
       type: "stream_error",
       retryable: true,
       category: "api",
-      cause: new Error(
-        "OpenAI Responses stream closed without a terminal event (truncated)",
-      ),
+      cause: new Error("OpenAI Responses stream closed without a terminal event (truncated)"),
     }
     return
   }

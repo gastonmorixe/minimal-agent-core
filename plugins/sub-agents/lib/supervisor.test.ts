@@ -4,9 +4,9 @@ import { type Effect, supervisorTick, type WorkerProbe } from "./supervisor.ts"
 import {
   type Progress,
   type ResultDigest,
-  sessionId,
   type SubagentRecord,
   type SubagentStatus,
+  sessionId,
   subagentId,
 } from "./types.ts"
 
@@ -155,7 +155,11 @@ describe("supervisorTick — self-reported incompletion is NOT laundered into do
 
   it("a clean exit code does NOT override a self-reported incompletion", () => {
     const out = tick([rec("A1", running())], {
-      A1: { alive: false, exitCode: 0, result: { short: "partial", tokens: 1, tools: 1, incomplete: true } },
+      A1: {
+        alive: false,
+        exitCode: 0,
+        result: { short: "partial", tokens: 1, tools: 1, incomplete: true },
+      },
     })
     expect(out.records[0]?.status.kind).toBe("incomplete")
   })
@@ -163,7 +167,11 @@ describe("supervisorTick — self-reported incompletion is NOT laundered into do
   it("a linked todo is CANCELED (not ticked done) when the worker self-reports incomplete", () => {
     const r = { ...rec("A1", running()), taskId: "#a7b3c4" }
     const out = tick([r], {
-      A1: { alive: false, exitCode: 0, result: { short: "INCOMPLETE: blocked", tokens: 1, tools: 1, incomplete: true } },
+      A1: {
+        alive: false,
+        exitCode: 0,
+        result: { short: "INCOMPLETE: blocked", tokens: 1, tools: 1, incomplete: true },
+      },
     })
     const taskUpdate = out.effects.find(
       (e) => e.type === "emit" && e.channel === "subagent.taskUpdate",
@@ -179,7 +187,13 @@ describe("supervisorTick — self-reported incompletion is NOT laundered into do
       A1: {
         alive: false,
         exitCode: 0,
-        result: { short: "INCOMPLETE: wrote a draft", tokens: 1, tools: 1, artifacts: ["/draft.md"], incomplete: true },
+        result: {
+          short: "INCOMPLETE: wrote a draft",
+          tokens: 1,
+          tools: 1,
+          artifacts: ["/draft.md"],
+          incomplete: true,
+        },
       },
     })
     const st = out.records[0]?.status
@@ -265,7 +279,12 @@ describe("supervisorTick — expectArtifacts contract (FIX 4)", () => {
       A1: {
         alive: false,
         exitCode: 0,
-        result: { short: "AVFragmentedAsset is the right API for a growing fMP4.", tokens: 58_500, tools: 63, artifacts: ["/findings.md"] },
+        result: {
+          short: "AVFragmentedAsset is the right API for a growing fMP4.",
+          tokens: 58_500,
+          tools: 63,
+          artifacts: ["/findings.md"],
+        },
         missingArtifacts: ["/findings.md"],
       },
     })
@@ -287,7 +306,12 @@ describe("supervisorTick — expectArtifacts contract (FIX 4)", () => {
   it("SALVAGES a distilled final message too when there is no sentinel but the file is missing", () => {
     const r = { ...rec("A1", running()), expectArtifacts: ["/out.md"] }
     const out = tick([r], {
-      A1: { alive: false, exitCode: 0, distilled: "Here is what I found about the codec.", missingArtifacts: ["/out.md"] },
+      A1: {
+        alive: false,
+        exitCode: 0,
+        distilled: "Here is what I found about the codec.",
+        missingArtifacts: ["/out.md"],
+      },
     })
     const st = out.records[0]?.status
     expect(st?.kind).toBe("incomplete")
@@ -318,12 +342,17 @@ describe("supervisorTick — tasks linkage", () => {
     const r = { ...rec("A1", running()), taskId: "a7b3c4" }
     const out = tick([r], { A1: { alive: false, exitCode: 1 } })
     const update = out.effects.find((e) => e.type === "emit" && e.channel === "subagent.taskUpdate")
-    expect(update?.type === "emit" && update.payload).toMatchObject({ taskId: "a7b3c4", status: "canceled" })
+    expect(update?.type === "emit" && update.payload).toMatchObject({
+      taskId: "a7b3c4",
+      status: "canceled",
+    })
   })
 
   it("emits NO taskUpdate for an unlinked worker", () => {
     const out = tick([rec("A1", running())], { A1: { alive: false, exitCode: 0, result: RESULT } })
-    expect(out.effects.some((e) => e.type === "emit" && e.channel === "subagent.taskUpdate")).toBe(false)
+    expect(out.effects.some((e) => e.type === "emit" && e.channel === "subagent.taskUpdate")).toBe(
+      false,
+    )
   })
 
   it("CANCELS a linked todo (not done) when the worker finishes INCOMPLETE", () => {

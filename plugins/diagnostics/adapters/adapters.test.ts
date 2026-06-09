@@ -7,8 +7,8 @@
 import { describe, expect, it } from "bun:test"
 
 import { adaptBiome } from "./biome.ts"
-import { adaptOxlint } from "./oxlint.ts"
 import { adaptLspDiagnostics } from "./lsp.ts"
+import { adaptOxlint } from "./oxlint.ts"
 
 describe("adaptOxlint", () => {
   it("maps oxlint diagnostics to Findings (code, severity, line/col)", () => {
@@ -59,7 +59,11 @@ describe("adaptBiome", () => {
           severity: "error",
           category: "assist/source/organizeImports",
           description: "The imports and exports are not sorted.",
-          location: { path: "src/x.ts", start: { line: 5, column: 1 }, end: { line: 5, column: 10 } },
+          location: {
+            path: "src/x.ts",
+            start: { line: 5, column: 1 },
+            end: { line: 5, column: 10 },
+          },
         },
       ],
     })
@@ -98,7 +102,11 @@ describe("adaptBiome", () => {
           severity: "error",
           category: "format",
           message: "Formatter would have printed the following content:",
-          location: { path: "src/x.ts", start: { line: 0, column: 0 }, end: { line: 0, column: 0 } },
+          location: {
+            path: "src/x.ts",
+            start: { line: 0, column: 0 },
+            end: { line: 0, column: 0 },
+          },
         },
       ],
     })

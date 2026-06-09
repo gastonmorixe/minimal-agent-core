@@ -6,11 +6,13 @@
  * exercised against actual server output, not a hand-written ideal.
  */
 
-import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, test } from "bun:test"
+
 import { braveFactory, buildQueryParams, MAX_QUERY_LENGTH } from "./brave.ts"
-import { WebSearchProviderError, type SearchOptions } from "./types.ts"
+import { type SearchOptions, WebSearchProviderError } from "./types.ts"
 
 const FIX_DIR = join(import.meta.dirname ?? __dirname, "__fixtures__")
 const fix = (name: string): unknown => JSON.parse(readFileSync(join(FIX_DIR, name), "utf-8"))
@@ -23,13 +25,18 @@ const baseOpts: SearchOptions = {
   safesearch: "moderate",
 }
 
-function makeFetch(impl: (url: string, init: RequestInit) => Response | Promise<Response>): typeof fetch {
+function makeFetch(
+  impl: (url: string, init: RequestInit) => Response | Promise<Response>,
+): typeof fetch {
   return ((url: string | URL | Request, init?: RequestInit) => {
     return Promise.resolve(impl(String(url), init ?? {}))
   }) as typeof fetch
 }
 
-function jsonResponse(body: unknown, init: { status?: number; statusText?: string } = {}): Response {
+function jsonResponse(
+  body: unknown,
+  init: { status?: number; statusText?: string } = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status: init.status ?? 200,
     statusText: init.statusText ?? "OK",
@@ -114,7 +121,9 @@ describe("BraveProvider.search (web)", () => {
     expect(first.title).toBe("Tokio - An asynchronous Rust runtime")
     expect(first.url).toBe("https://tokio.rs/")
     // <strong> markers stripped from description even when text_decorations=false (defense-in-depth)
-    expect(first.snippet).toBe("Tokio is an asynchronous runtime for the Rust programming language.")
+    expect(first.snippet).toBe(
+      "Tokio is an asynchronous runtime for the Rust programming language.",
+    )
     expect(first.age).toBe("3 days ago")
     expect(first.source).toBe("tokio.rs")
     expect(first.thumbnail).toBe("https://example.com/tokio.png")
@@ -175,7 +184,9 @@ describe("BraveProvider.search errors", () => {
       apiKey: "k",
       fetch: makeFetch(() => new Response("not json", { status: 200 })),
     })
-    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(/invalid JSON/)
+    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(
+      /invalid JSON/,
+    )
   })
 
   test("network failure throws fetch failed", async () => {
@@ -188,13 +199,17 @@ describe("BraveProvider.search errors", () => {
       // this test take ~1s due to backoff sleeps.
       retry: { maxAttempts: 1 },
     })
-    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(/fetch failed/)
+    await expect(p.search("q", baseOpts, new AbortController().signal)).rejects.toThrow(
+      /fetch failed/,
+    )
   })
 
   test("oversized query rejected client-side", async () => {
     const p = braveFactory({ apiKey: "k", fetch: makeFetch(() => jsonResponse({})) })
     const long = "x".repeat(MAX_QUERY_LENGTH + 1)
-    await expect(p.search(long, baseOpts, new AbortController().signal)).rejects.toThrow(/exceeds 400/)
+    await expect(p.search(long, baseOpts, new AbortController().signal)).rejects.toThrow(
+      /exceeds 400/,
+    )
   })
 
   test("aborts via signal", async () => {
@@ -285,7 +300,11 @@ describe("BraveProvider.search — retry behavior", () => {
     const onRetryDelays: number[] = []
     const p = braveFactory({
       apiKey: "k",
-      retry: { baseDelayMs: 5, maxDelayMs: 50, onRetry: ({ delayMs }) => onRetryDelays.push(delayMs) },
+      retry: {
+        baseDelayMs: 5,
+        maxDelayMs: 50,
+        onRetry: ({ delayMs }) => onRetryDelays.push(delayMs),
+      },
       fetch: makeFetch(() => {
         attempts++
         if (attempts === 1) {

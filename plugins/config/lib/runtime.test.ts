@@ -7,13 +7,21 @@
 import { describe, expect, it } from "bun:test"
 
 import type { Effect, State } from "./fsm.ts"
-import { ConfigModel, type FsDeps } from "./model.ts"
-import { applyEffects, type ApplyDeps } from "./runtime.ts"
-import type { Field } from "./schema.ts"
 import { parseJsonc } from "./mini-jsonc.ts"
+import { ConfigModel, type FsDeps } from "./model.ts"
+import { type ApplyDeps, applyEffects } from "./runtime.ts"
+import type { Field } from "./schema.ts"
 
 const FIELDS: Field[] = [
-  { id: "effort", label: "effort", help: "h", kind: "enum", path: ["effort"], choices: ["low", "high"], section: "A" },
+  {
+    id: "effort",
+    label: "effort",
+    help: "h",
+    kind: "enum",
+    path: ["effort"],
+    choices: ["low", "high"],
+    section: "A",
+  },
   { id: "model", label: "model", help: "h", kind: "string", path: ["model"], section: "A" },
 ]
 
@@ -29,7 +37,11 @@ function mk(json: string | null): { model: ConfigModel; fs: { current: string | 
   return { model: ConfigModel.load(fs, { fields: FIELDS }), fs: box }
 }
 
-function deps(model: ConfigModel, state: State, emits: Array<{ ch: string; p: unknown }>): ApplyDeps {
+function deps(
+  model: ConfigModel,
+  state: State,
+  emits: Array<{ ch: string; p: unknown }>,
+): ApplyDeps {
   return {
     emit: (ch, p) => emits.push({ ch, p }),
     cols: 100,
@@ -110,7 +122,10 @@ describe("applyEffects", () => {
     const { model } = mk(`{ "effort": "high" }`)
     model.set("effort", "low")
     expect(model.dirtyCount()).toBe(1)
-    applyEffects([{ kind: "revert-all" }], deps(model, open, [] as Array<{ ch: string; p: unknown }>))
+    applyEffects(
+      [{ kind: "revert-all" }],
+      deps(model, open, [] as Array<{ ch: string; p: unknown }>),
+    )
     expect(model.dirtyCount()).toBe(0)
   })
 })

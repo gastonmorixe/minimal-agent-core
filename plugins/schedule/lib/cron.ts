@@ -102,7 +102,8 @@ function parseField(token: string, spec: FieldSpec): CronField {
       }
     } else {
       const v = Number(rangePart)
-      if (!Number.isInteger(v)) throw new CronError(`non-numeric value "${rangePart}" in ${spec.name}`)
+      if (!Number.isInteger(v))
+        throw new CronError(`non-numeric value "${rangePart}" in ${spec.name}`)
       lo = v
       // A bare single value with a step (`5/15`) means "from 5 to max step".
       hi = stepPart !== undefined ? spec.max : v

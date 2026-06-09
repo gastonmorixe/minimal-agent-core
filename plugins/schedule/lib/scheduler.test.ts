@@ -6,8 +6,8 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { CronEntry } from "./store.ts"
 import { due, jitterSecondsFor, nextFireMs, pruneOnLoad } from "./scheduler.ts"
+import type { CronEntry } from "./store.ts"
 
 function entry(over: Partial<CronEntry> & Pick<CronEntry, "id">): CronEntry {
   return {

@@ -2,10 +2,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import type {
-  ModelInfoSnapshot,
-  PromptFragmentContext,
-} from "../../../src/plugins/types.ts"
+import type { ModelInfoSnapshot, PromptFragmentContext } from "../../../src/plugins/types.ts"
 
 import planningFragment from "./planning_fragment.ts"
 

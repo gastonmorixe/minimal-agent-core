@@ -4,12 +4,14 @@
  * use whatever is already there. Detection is a pure function over a root dir
  * so it tests against temp fixtures with no spawning.
  */
-import { describe, expect, it } from "bun:test"
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs"
+
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { detectTools, type DetectedTool } from "./detect.ts"
+import { describe, expect, it } from "bun:test"
+
+import { type DetectedTool, detectTools } from "./detect.ts"
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "diag-detect-"))

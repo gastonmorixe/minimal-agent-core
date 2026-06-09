@@ -197,7 +197,9 @@ export function subtaskId(parentId: string, counter: number): string {
     throw new Error(`subtaskId: counter must be a non-negative integer (got ${counter})`)
   }
   if (counter >= 26) {
-    throw new Error(`subtaskId: too many children of #${parentId} (max 26, requested index ${counter})`)
+    throw new Error(
+      `subtaskId: too many children of #${parentId} (max 26, requested index ${counter})`,
+    )
   }
   if (!/^[0-9a-f]{6}$/.test(parentId)) {
     throw new Error(`subtaskId: parent must be a six-hex top-level id (got "${parentId}")`)
@@ -339,11 +341,7 @@ export function parseTask(line: string): Task | null {
   if (o.reason !== null && o.reason !== undefined && typeof o.reason !== "string") return null
 
   // v2+ fields (optional for forward-compat with v1 lines).
-  if (
-    o.started_at !== null &&
-    o.started_at !== undefined &&
-    typeof o.started_at !== "string"
-  ) {
+  if (o.started_at !== null && o.started_at !== undefined && typeof o.started_at !== "string") {
     return null
   }
   if (

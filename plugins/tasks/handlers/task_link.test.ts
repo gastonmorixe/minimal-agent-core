@@ -23,7 +23,13 @@ function ctx(payload: unknown, home: string): EventHandlerContext {
     emit: () => {},
     abort: new AbortController().signal,
     stderr: process.stderr,
-    log: { debug() {}, info() {}, notice() {}, warn() {}, error() {} } as unknown as EventHandlerContext["log"],
+    log: {
+      debug() {},
+      info() {},
+      notice() {},
+      warn() {},
+      error() {},
+    } as unknown as EventHandlerContext["log"],
     agent: { sessionId: SID, pid: 1, model: "m", version: "0" },
   }
 }
@@ -50,7 +56,9 @@ describe("task_link", () => {
   it("cancels a linked task with a reason on worker failure", async () => {
     const store = new TaskStore(SID, { home })
     const t = store.add({ title: "delegated unit" })
-    await taskLink(ctx({ taskId: t.id, status: "canceled", reason: "exited code 1", bySubagent: "A2" }, home))
+    await taskLink(
+      ctx({ taskId: t.id, status: "canceled", reason: "exited code 1", bySubagent: "A2" }, home),
+    )
     const after = new TaskStore(SID, { home }).resolve(t.id)
     expect(after?.status).toBe("canceled")
     expect(after?.reason).toContain("exited code 1")

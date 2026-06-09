@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import { resolveConfig, DEFAULT_CONFIG } from "./config.ts"
+import { DEFAULT_CONFIG, resolveConfig } from "./config.ts"
 
 describe("resolveConfig", () => {
   it("returns defaults for an empty / missing block", () => {

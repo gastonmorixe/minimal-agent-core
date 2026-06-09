@@ -59,7 +59,12 @@ export interface WorkerProbe {
 export type Effect =
   | { readonly type: "inject"; readonly text: string; readonly source: string }
   | { readonly type: "emit"; readonly channel: string; readonly payload: unknown }
-  | { readonly type: "stop"; readonly id: SubagentId; readonly pid: number; readonly reason: string }
+  | {
+      readonly type: "stop"
+      readonly id: SubagentId
+      readonly pid: number
+      readonly reason: string
+    }
 
 /** Input to {@link supervisorTick}. */
 export interface TickInput {
@@ -170,7 +175,11 @@ function step(
   // running: the interesting transitions.
   // 1. Budget tripped → ask the shell to kill, mark failed(timeout).
   if (deadlineExceeded(r, s.startedAt, nowMs)) {
-    const status: SubagentStatus = { kind: "failed", endedAt: now, error: "timed out (budget deadline exceeded)" }
+    const status: SubagentStatus = {
+      kind: "failed",
+      endedAt: now,
+      error: "timed out (budget deadline exceeded)",
+    }
     return {
       status,
       effects: [
@@ -300,8 +309,16 @@ function step(
 function terminalEffects(r: SubagentRecord, next: SubagentStatus, _now: string): Effect[] {
   const withStatus: SubagentRecord = { ...r, status: next }
   const effects: Effect[] = [
-    { type: "emit", channel: "subagent.didReport", payload: { id: r.id, sid: r.sid, status: next.kind } },
-    { type: "emit", channel: "subagent.didExit", payload: { id: r.id, sid: r.sid, status: next.kind } },
+    {
+      type: "emit",
+      channel: "subagent.didReport",
+      payload: { id: r.id, sid: r.sid, status: next.kind },
+    },
+    {
+      type: "emit",
+      channel: "subagent.didExit",
+      payload: { id: r.id, sid: r.sid, status: next.kind },
+    },
     { type: "inject", text: completionDigest(withStatus), source: `subagent:${r.id}` },
   ]
   // Tasks-plugin linkage (decoupled, via the bus): if this worker owns a todo,

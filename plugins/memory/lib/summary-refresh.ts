@@ -334,10 +334,7 @@ export async function refreshAndRender(
   let regenerated = false
   if (needRegen) {
     try {
-      const newSummaryBody = await summarize(
-        memoryContent,
-        { model: cfg.model, scope },
-      )
+      const newSummaryBody = await summarize(memoryContent, { model: cfg.model, scope })
       const newCutoff = now().toISOString()
       summaryContent = withCutoffHeader(newSummaryBody, newCutoff)
       atomicWrite(summaryPath, summaryContent)

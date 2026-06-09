@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test"
 
-import { buildSpawnPlan, type SpawnInput } from "./spawn-plan.ts"
 import {
   cachedProgressReader,
   extractCrashSignature,
@@ -9,6 +8,7 @@ import {
   probeWorker,
   type SpawnDeps,
 } from "./spawn.ts"
+import { buildSpawnPlan, type SpawnInput } from "./spawn-plan.ts"
 import { type Progress, sessionId, subagentId } from "./types.ts"
 
 function plan(isolation: "fresh" | "fork" = "fresh") {
@@ -123,7 +123,12 @@ describe("probeWorker", () => {
 
   it("reports missingArtifacts for an unmet expectArtifacts contract (FIX 4)", () => {
     const probe = probeWorker(
-      { pid: 1, resultPath: "/r.json", transcriptPath: "/t.jsonl", expectArtifacts: ["/a.md", "/b.md"] },
+      {
+        pid: 1,
+        resultPath: "/r.json",
+        transcriptPath: "/t.jsonl",
+        expectArtifacts: ["/a.md", "/b.md"],
+      },
       {
         pidAlive: () => false,
         readResult: () => undefined,
@@ -150,7 +155,12 @@ describe("probeWorker", () => {
   it("prepends a ⚠ warning when a sentinel's OWN declared artifacts are missing (FIX 3)", () => {
     const probe = probeWorker(target(1), {
       pidAlive: () => false,
-      readResult: () => ({ short: "did the thing", tokens: 9, tools: 2, artifacts: ["/x.md", "/y.md"] }),
+      readResult: () => ({
+        short: "did the thing",
+        tokens: 9,
+        tools: 2,
+        artifacts: ["/x.md", "/y.md"],
+      }),
       missingArtifacts: (paths) => paths.filter((p) => p === "/y.md"),
       exitCode: () => 0,
     })
@@ -217,7 +227,9 @@ describe("extractCrashSignature", () => {
   })
 
   it("matches an unknown-model complaint", () => {
-    expect(extractCrashSignature("error: unknown model 'claude-opus-4-1'")).toMatch(/unknown model/i)
+    expect(extractCrashSignature("error: unknown model 'claude-opus-4-1'")).toMatch(
+      /unknown model/i,
+    )
   })
 
   it("matches a Node spawn ENOENT", () => {

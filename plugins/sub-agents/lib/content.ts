@@ -45,10 +45,7 @@ export function fleetText(records: readonly SubagentRecord[], nowMs: number): st
   const s = fleetStats(records)
   const head = `Fleet: ${s.running} running · ${s.queued} queued · ${s.done} done · ${s.failed} failed · ${s.stopped} stopped · ${fmtTokens(s.tokens)} tok total`
   const rows = records.map((r) => recordLine(r, nowMs))
-  const tail =
-    s.done > 0
-      ? "\nPull a finished worker's deliverable with AgentResult <id>."
-      : ""
+  const tail = s.done > 0 ? "\nPull a finished worker's deliverable with AgentResult <id>." : ""
   return `${head}\n\n${rows.join("\n")}${tail}`
 }
 
@@ -69,7 +66,8 @@ export function resultText(r: SubagentRecord): string {
   switch (r.status.kind) {
     case "done": {
       const res = r.status.result
-      const arts = res.artifacts && res.artifacts.length > 0 ? `\nartifacts: ${res.artifacts.join(", ")}` : ""
+      const arts =
+        res.artifacts && res.artifacts.length > 0 ? `\nartifacts: ${res.artifacts.join(", ")}` : ""
       const note = res.distilled
         ? "\n\n(note: distilled from the worker's final message — it wrote no structured result sentinel, so this summary is best-effort and lists no artifacts)"
         : ""

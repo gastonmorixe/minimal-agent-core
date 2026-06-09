@@ -12,9 +12,34 @@ import type { Field } from "./schema.ts"
 import { effectiveValue, formatValue, fsmRows, renderModel } from "./view.ts"
 
 const FIELDS: Field[] = [
-  { id: "effort", label: "effort", help: "h", kind: "enum", path: ["effort"], choices: ["low", "high"], section: "A", defaultHint: "high" },
-  { id: "autoAsk", label: "autoAsk", help: "h", kind: "boolean", path: ["autoAsk"], section: "A", defaultHint: "on" },
-  { id: "model", label: "model", help: "h", kind: "string", path: ["model"], section: "B", defaultHint: "(default)" },
+  {
+    id: "effort",
+    label: "effort",
+    help: "h",
+    kind: "enum",
+    path: ["effort"],
+    choices: ["low", "high"],
+    section: "A",
+    defaultHint: "high",
+  },
+  {
+    id: "autoAsk",
+    label: "autoAsk",
+    help: "h",
+    kind: "boolean",
+    path: ["autoAsk"],
+    section: "A",
+    defaultHint: "on",
+  },
+  {
+    id: "model",
+    label: "model",
+    help: "h",
+    kind: "string",
+    path: ["model"],
+    section: "B",
+    defaultHint: "(default)",
+  },
 ]
 
 function fakeFs(initial: string | null): FsDeps {
@@ -32,7 +57,9 @@ function loadModel(json: string | null): ConfigModel {
   return ConfigModel.load(fakeFs(json), { fields: FIELDS })
 }
 
-function openState(over: Partial<Extract<State, { kind: "open" }>> = {}): Extract<State, { kind: "open" }> {
+function openState(
+  over: Partial<Extract<State, { kind: "open" }>> = {},
+): Extract<State, { kind: "open" }> {
   return { kind: "open", selectedIndex: 0, scrollOffset: 0, phase: { kind: "browse" }, ...over }
 }
 
@@ -56,13 +83,23 @@ describe("fsmRows", () => {
     const rows = fsmRows(m)
     expect(rows.filter((r) => r.type === "field")).toHaveLength(3)
     const actions = rows.filter((r) => r.type === "action")
-    expect(actions.map((a) => (a as { action: string }).action)).toEqual(["save", "revert", "close"])
+    expect(actions.map((a) => (a as { action: string }).action)).toEqual([
+      "save",
+      "revert",
+      "close",
+    ])
   })
 
   it("carries fieldKind, choices, and effective value", () => {
     const m = loadModel(`{ "effort": "high" }`)
     const first = fsmRows(m)[0]!
-    expect(first).toMatchObject({ type: "field", fieldId: "effort", fieldKind: "enum", choices: ["low", "high"], effective: "high" })
+    expect(first).toMatchObject({
+      type: "field",
+      fieldId: "effort",
+      fieldKind: "enum",
+      choices: ["low", "high"],
+      effective: "high",
+    })
   })
 })
 
@@ -83,7 +120,9 @@ describe("renderModel", () => {
     const m = loadModel(`{ "effort": "high" }`)
     m.set("effort", "low")
     const rm = renderModel(m, openState(), 100, 8)
-    const sections = rm.rows.filter((r) => r.type === "section").map((r) => (r as { label: string }).label)
+    const sections = rm.rows
+      .filter((r) => r.type === "section")
+      .map((r) => (r as { label: string }).label)
     expect(sections).toEqual(["A", "B"])
     expect(rm.dirtyCount).toBe(1)
     expect(rm.path).toBe("/fake/config.jsonc")

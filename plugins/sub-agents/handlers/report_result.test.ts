@@ -14,8 +14,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
-import { ENV_RESULT_PATH } from "../lib/spawn.ts"
-import { parseResultDigest } from "../lib/spawn.ts"
+import { ENV_RESULT_PATH, parseResultDigest } from "../lib/spawn.ts"
 
 import reportResult, { available } from "./report_result.ts"
 
@@ -41,7 +40,10 @@ function ctx(input: Record<string, unknown>, env: Record<string, string>): TUICo
   }
 }
 
-async function call(input: Record<string, unknown>, env: Record<string, string>): Promise<TUIResult> {
+async function call(
+  input: Record<string, unknown>,
+  env: Record<string, string>,
+): Promise<TUIResult> {
   return reportResult(ctx(input, env))
 }
 

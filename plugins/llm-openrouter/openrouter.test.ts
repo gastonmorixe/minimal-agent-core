@@ -6,9 +6,10 @@
  * restart the session with it exported to exercise the real round-trip.
  */
 
-import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
 
 import {
   type CanonicalEvent,
@@ -16,13 +17,14 @@ import {
   clearModelRegistry,
   clearProviderRegistry,
   isEvent,
+  type RunContext,
   resolveModel,
   resolveProvider,
-  type RunContext,
   userText,
 } from "../../src/llm/index.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "../llm-openai/index.ts"
+
 import { bootstrapOpenRouter } from "./adapter.ts"
 
 function setup() {

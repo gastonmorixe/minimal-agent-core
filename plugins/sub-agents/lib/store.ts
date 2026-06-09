@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { type SubagentId, subagentId, type SubagentRecord } from "./types.ts"
+import { type SubagentId, type SubagentRecord, subagentId } from "./types.ts"
 
 // ---------------------------------------------------------------------------
 // Pure parse / serialize
