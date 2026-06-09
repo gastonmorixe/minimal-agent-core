@@ -28,6 +28,19 @@ export interface ProviderStartupContext {
   modelId: string
 }
 
+/**
+ * One live-catalog row returned by {@link ProviderPlugin.listLiveModels}.
+ * Provider-neutral projection of "what the server says exists right now".
+ */
+export interface LiveModelRow {
+  /** Wire model id (plus any client-side variant suffix the plugin adds). */
+  id: string
+  /** Human-friendly name, when the server provides one. */
+  displayName?: string
+  /** ISO date (YYYY-MM-DD) the server reports for the model, if any. */
+  createdAt?: string
+}
+
 // ---------------------------------------------------------------------------
 // System-prompt resolution (Strategy + Template Method)
 // ---------------------------------------------------------------------------
@@ -167,6 +180,18 @@ export interface ProviderPlugin {
    * any of them.
    */
   onStartupProbe?(ctx: ProviderStartupContext): void
+
+  /**
+   * Optional: fetch this provider's LIVE model catalog (the authoritative
+   * server-side list, including ids the static registry may not know yet).
+   * Used by `--list-models` / the model picker to merge real-time rows
+   * over the registry. Implementations own their endpoint, auth headers,
+   * and any client-side variant synthesis (e.g. context-window aliases).
+   * Must REJECT or resolve `[]` on failure — callers treat errors as
+   * "live list unavailable" and fall back to the registry (OCP: adding a
+   * provider never edits the listing command).
+   */
+  listLiveModels?(auth: ProviderAuth): Promise<LiveModelRow[]>
 
   /**
    * Optional: resolve the FINAL system-prompt blocks for this provider from

@@ -30,6 +30,8 @@ import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import type { ProviderPlugin, ProviderStartupContext } from "../../src/llm/provider-plugin.ts"
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
+import { listModels } from "../../src/client/list-models.ts"
+
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { anthropicMediaLimits } from "./media-limits.ts"
@@ -223,6 +225,28 @@ export const anthropicProviderPlugin: ProviderPlugin = {
    * keeps the agent's neutral identity. See `./system-prompt.ts`.
    */
   resolveSystemPrompt: resolveAnthropicSystemPrompt,
+  /**
+   * Live catalog via GET /v1/models?beta=true (incl. the synthesized
+   * `[1m]` context-window variants). Implements the neutral
+   * `ProviderPlugin.listLiveModels` hook so `--list-models`/the picker
+   * never import Anthropic code. Auth kinds map 1:1 onto the legacy
+   * AuthResult shape this plugin's HTTP layer still speaks.
+   */
+  async listLiveModels(auth) {
+    // Custom-header auth has no single credential to forward to the legacy
+    // HTTP layer; report "no live list" and let the registry fallback serve.
+    if (auth.kind === "custom") return []
+    const legacyAuth =
+      auth.kind === "oauth"
+        ? ({ type: "oauth", token: auth.token } as const)
+        : ({ type: "api-key", token: auth.key } as const)
+    const models = await listModels(legacyAuth)
+    return models.map((m) => ({
+      id: m.id,
+      displayName: m.display_name,
+      createdAt: m.created_at?.slice(0, 10),
+    }))
+  },
   /**
    * Provider-neutral session metadata (5h/7d quota windows, context window,
    * model label) for the status bar. **Cache-only** — non-blocking. The

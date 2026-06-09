@@ -98,7 +98,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   "agent.ts",
   "index.ts",
   "cache.ts",
-  "commands/list-models.ts",
   // Tests of all of the above (fixtures use real model ids/headers).
   "agent.canonical-dispatch.test.ts",
   "agent.max-tokens-budget.test.ts",
