@@ -32,6 +32,7 @@ import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
+import { anthropicMediaLimits } from "./media-limits.ts"
 import { registerAnthropicModels } from "./models.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "./response-stream.ts"
@@ -66,6 +67,16 @@ export const anthropicAdapter: ProviderAdapter = {
 
   validate(req, model): ValidationResult {
     return validateAnthropicRequest(req, model)
+  },
+
+  /**
+   * Anthropic media walls (32 MB request, 5 MB/item, format set, item
+   * count by context tier). This hook is how CORE learns the limits —
+   * core's fallback is the neutral conservative floor in
+   * `src/media/default-limits.ts`, never an Anthropic import.
+   */
+  mediaLimits(model: ModelEntry) {
+    return anthropicMediaLimits({ contextWindow: model.capabilities.contextWindow })
   },
 
   /**

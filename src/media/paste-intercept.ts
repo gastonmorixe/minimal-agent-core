@@ -25,16 +25,19 @@ import { existsSync } from "node:fs"
 
 import { diag } from "../diagnostic-bus.ts"
 
-import { anthropicMediaLimits } from "./anthropic.ts"
 import { clipboardImageSync } from "./clipboard.ts"
+import { defaultMediaLimits } from "./default-limits.ts"
 import { looksLikeMediaDrop, parseDroppedPaths } from "./detect.ts"
-import { ANTHROPIC_MODALITIES } from "./ingest.ts"
+import { DEFAULT_VISION_MODALITIES } from "./ingest.ts"
 import { checkMedia } from "./limits.ts"
 import type { MediaRegistry } from "./registry.ts"
 import { getSessionMediaRegistry } from "./session-registry.ts"
 import { formatMediaToken } from "./token.ts"
 
-const LIMITS = anthropicMediaLimits({ contextWindow: 200_000 })
+// Attach-time screen uses the neutral conservative floor: paste happens
+// before a model is necessarily resolved, and the submit path re-validates
+// against the ACTIVE model's provider limits anyway.
+const LIMITS = defaultMediaLimits()
 
 /** Validate an item at attach-time; warn + return false when it must be dropped. */
 function acceptOrWarn(item: {
@@ -44,7 +47,7 @@ function acceptOrWarn(item: {
   dimensions: { width: number; height: number } | null
   id: string
 }): boolean {
-  const v = checkMedia(item, LIMITS, ANTHROPIC_MODALITIES)
+  const v = checkMedia(item, LIMITS, DEFAULT_VISION_MODALITIES)
   if (v.ok) return true
   diag.warn("media.rejected", v.message, { id: item.id, code: v.code })
   return false

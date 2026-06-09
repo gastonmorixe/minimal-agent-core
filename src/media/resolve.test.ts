@@ -2,13 +2,13 @@ import { describe, expect, it } from "bun:test"
 
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
-import { anthropicMediaLimits } from "./anthropic.ts"
+import { defaultMediaLimits } from "./default-limits.ts"
 import { createMediaRegistry } from "./registry.ts"
 import { resolveMediaTurn } from "./resolve.ts"
 import { formatMediaToken } from "./token.ts"
 
 const IMG_ONLY: ModalitySupport = { image: true, audio: false, pdf: false, video: false }
-const LIMITS = anthropicMediaLimits({ contextWindow: 1_000_000 })
+const LIMITS = defaultMediaLimits()
 
 // 24-byte PNG declaring WxH (matches probe.ts pngDimensions).
 function png(w: number, h: number): Uint8Array {

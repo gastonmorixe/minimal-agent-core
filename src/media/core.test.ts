@@ -20,7 +20,7 @@ import { formatBytes, formatDuration, type MediaItem, mediaDescriptor } from "./
 const ALL_MODALITIES: ModalitySupport = { image: true, audio: true, pdf: true, video: true }
 const IMG_ONLY: ModalitySupport = { image: true, audio: false, pdf: false, video: false }
 
-const ANTHROPIC_LIMITS: MediaLimits = {
+const TEST_LIMITS: MediaLimits = {
   acceptedMimeTypes: new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]),
   maxBytesPerItem: 5 * 1024 * 1024,
   maxRequestBytes: 32 * 1024 * 1024,
@@ -162,48 +162,36 @@ describe("checkMedia", () => {
   const base = { kind: "image" as const, mimeType: "image/jpeg", sizeBytes: 1000, dimensions: null }
 
   it("accepts a valid image", () => {
-    expect(checkMedia(base, ANTHROPIC_LIMITS, ALL_MODALITIES).ok).toBe(true)
+    expect(checkMedia(base, TEST_LIMITS, ALL_MODALITIES).ok).toBe(true)
   })
   it("rejects an unsupported modality", () => {
-    const v = checkMedia(
-      { ...base, kind: "audio", mimeType: "audio/wav" },
-      ANTHROPIC_LIMITS,
-      IMG_ONLY,
-    )
+    const v = checkMedia({ ...base, kind: "audio", mimeType: "audio/wav" }, TEST_LIMITS, IMG_ONLY)
     expect(v).toMatchObject({ ok: false, code: "unsupported-modality" })
   })
   it("rejects an unsupported mime", () => {
-    const v = checkMedia({ ...base, mimeType: "image/heic" }, ANTHROPIC_LIMITS, ALL_MODALITIES)
+    const v = checkMedia({ ...base, mimeType: "image/heic" }, TEST_LIMITS, ALL_MODALITIES)
     expect(v).toMatchObject({ ok: false, code: "unsupported-type" })
   })
   it("rejects an oversize item", () => {
-    const v = checkMedia({ ...base, sizeBytes: 9 * 1024 * 1024 }, ANTHROPIC_LIMITS, ALL_MODALITIES)
+    const v = checkMedia({ ...base, sizeBytes: 9 * 1024 * 1024 }, TEST_LIMITS, ALL_MODALITIES)
     expect(v).toMatchObject({ ok: false, code: "too-large" })
   })
   it("rejects a raw size under the cap whose base64 encoding exceeds it", () => {
     // Regression: a 4.2 MB macOS screenshot is < 5 MB raw but ~5.6 MB once
     // base64-encoded, which is what the API actually weighs. A raw-only check
     // passed it and the server returned a 400. The encoded check must reject.
-    const v = checkMedia(
-      { ...base, sizeBytes: 4.2 * 1024 * 1024 },
-      ANTHROPIC_LIMITS,
-      ALL_MODALITIES,
-    )
+    const v = checkMedia({ ...base, sizeBytes: 4.2 * 1024 * 1024 }, TEST_LIMITS, ALL_MODALITIES)
     expect(v).toMatchObject({ ok: false, code: "too-large" })
   })
   it("accepts a raw size that stays under the cap after encoding", () => {
     // 3.5 MB raw → ~4.67 MB encoded, still under 5 MB.
-    const v = checkMedia(
-      { ...base, sizeBytes: 3.5 * 1024 * 1024 },
-      ANTHROPIC_LIMITS,
-      ALL_MODALITIES,
-    )
+    const v = checkMedia({ ...base, sizeBytes: 3.5 * 1024 * 1024 }, TEST_LIMITS, ALL_MODALITIES)
     expect(v.ok).toBe(true)
   })
   it("rejects oversize dimensions", () => {
     const v = checkMedia(
       { ...base, dimensions: { width: 9000, height: 100 } },
-      ANTHROPIC_LIMITS,
+      TEST_LIMITS,
       ALL_MODALITIES,
     )
     expect(v).toMatchObject({ ok: false, code: "dimensions" })
@@ -220,7 +208,7 @@ describe("kindModality", () => {
 describe("checkMediaSet", () => {
   it("rejects the items that overflow the request byte budget", () => {
     const big = { sizeBytes: 20 * 1024 * 1024 }
-    const verdicts = checkMediaSet([big, big, big], ANTHROPIC_LIMITS)
+    const verdicts = checkMediaSet([big, big, big], TEST_LIMITS)
     // Encoded: 20MB → ~26.7MB. First fits under 32MB; running total ~53.3MB on
     // the 2nd and ~80MB on the 3rd both overflow the request budget.
     expect(verdicts[0]!.ok).toBe(true)
@@ -229,7 +217,7 @@ describe("checkMediaSet", () => {
   })
   it("rejects beyond the item count cap", () => {
     const tiny = { sizeBytes: 1 }
-    const limits = { ...ANTHROPIC_LIMITS, maxItemsPerRequest: 2 }
+    const limits = { ...TEST_LIMITS, maxItemsPerRequest: 2 }
     const verdicts = checkMediaSet([tiny, tiny, tiny], limits)
     expect(verdicts[2]).toMatchObject({ ok: false, code: "too-many" })
   })

@@ -7,10 +7,11 @@
  * straight through as a single text block, so this is a safe drop-in for the
  * existing "text -> user content" step.
  *
- * Anthropic is the only live provider today; its modality set (image + pdf, no
- * audio/video) and {@link anthropicMediaLimits} are the defaults. When the
- * canonical multi-provider path lands, the caller passes the active model's
- * limits/modalities instead.
+ * Provider-neutral: limits/modalities resolve from the ACTIVE model through
+ * the registry + the provider's `mediaLimits` hook (`resolveToolMediaContext`
+ * route), falling back to the conservative neutral floor in
+ * `./default-limits.ts`. Callers on a known model should pass the resolved
+ * `limits`/`modalities`; the defaults exist for unresolved/early-boot cases.
  *
  * @module media/ingest
  */
@@ -24,7 +25,7 @@ import { diag } from "../diagnostic-bus.ts"
 import { canonicalMessageToLegacy } from "../llm/adapter-legacy.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
-import { anthropicMediaLimits } from "./anthropic.ts"
+import { defaultMediaLimits } from "./default-limits.ts"
 import type { MediaLimits } from "./limits.ts"
 import type { MediaRegistry } from "./registry.ts"
 import { type MediaPreparer, resolveMediaTurn } from "./resolve.ts"
@@ -32,8 +33,13 @@ import { getSessionMediaRegistry } from "./session-registry.ts"
 import { formatMediaToken } from "./token.ts"
 import type { MediaItem, MediaRejection } from "./types.ts"
 
-/** Anthropic vision models: image + document in, no audio/video. */
-export const ANTHROPIC_MODALITIES: ModalitySupport = {
+/**
+ * Neutral default modality assumption for vision-era chat models: image +
+ * document in, no audio/video. Used only when the caller has no resolved
+ * model (the registry's `capabilities.modalities` is authoritative
+ * otherwise).
+ */
+export const DEFAULT_VISION_MODALITIES: ModalitySupport = {
   image: true,
   pdf: true,
   audio: false,
@@ -42,7 +48,7 @@ export const ANTHROPIC_MODALITIES: ModalitySupport = {
 
 export interface BuildUserContentOptions {
   modelId?: string
-  /** Override limits (default: {@link anthropicMediaLimits}). */
+  /** Override limits (default: the neutral {@link defaultMediaLimits} floor). */
   limits?: MediaLimits
   /** Context window, to size the per-request image cap. */
   contextWindow?: number
@@ -68,18 +74,17 @@ export interface UserContentResult {
  * Resolve a submitted prompt into legacy user-message content, attaching any
  * referenced media as image/document blocks (image-then-text ordering).
  */
-export async function buildAnthropicUserContent(
+export async function buildUserContent(
   text: string,
   registry: MediaRegistry,
   opts: BuildUserContentOptions = {},
 ): Promise<UserContentResult> {
-  const limits =
-    opts.limits ?? anthropicMediaLimits({ contextWindow: opts.contextWindow ?? 200_000 })
+  const limits = opts.limits ?? defaultMediaLimits()
   const resolved = await resolveMediaTurn({
     text,
     registry,
     limits,
-    modalities: opts.modalities ?? ANTHROPIC_MODALITIES,
+    modalities: opts.modalities ?? DEFAULT_VISION_MODALITIES,
     modelId: opts.modelId,
     prepare: opts.prepare,
   })
@@ -154,8 +159,15 @@ export async function ingestUserText(
   opts: BuildUserContentOptions = {},
 ): Promise<UserContentResult> {
   const materialized = await materializeInlineImagePaths(text, registry)
-  return buildAnthropicUserContent(materialized, registry, opts)
+  return buildUserContent(materialized, registry, opts)
 }
+
+/**
+ * @deprecated Renamed to {@link buildUserContent}: the function was never
+ * Anthropic-specific (limits/modalities are parameters). Shim kept one
+ * release for out-of-tree callers.
+ */
+export const buildAnthropicUserContent = buildUserContent
 
 /**
  * The single call the agent's submit path makes: resolve the prompt against the
