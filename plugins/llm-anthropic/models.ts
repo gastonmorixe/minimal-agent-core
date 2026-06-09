@@ -3,7 +3,8 @@
  *
  * Calling `registerAnthropicModels()` populates the canonical model
  * registry with every model in the live Anthropic catalog as of
- * 2026-05-28. Pricing comes from the typed tables in `pricing.ts`;
+ * 2026-06-09 (incl. `claude-fable-5`). Pricing comes from the typed
+ * tables in `pricing.ts`;
  * capabilities come from `capabilities.ts`. `[1m]` aliases let the
  * caller request 1M context explicitly even when the default already
  * exposes it.
@@ -14,6 +15,7 @@
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { registerModel } from "../../src/llm/model-registry.ts"
 import {
+  ANTHROPIC_FABLE_5,
   ANTHROPIC_HAIKU_45,
   ANTHROPIC_OPUS_4X_FAST_LEGACY,
   ANTHROPIC_OPUS_4X_STANDARD,
@@ -24,6 +26,7 @@ import {
 import { makeCharRatioEstimator } from "../../src/llm/token-estimate.ts"
 
 import {
+  CAPS_FABLE_5,
   CAPS_HAIKU_45,
   CAPS_OPUS_46,
   CAPS_OPUS_47,
@@ -62,6 +65,30 @@ const estimateAnthropicTokens = makeCharRatioEstimator(3.5)
  * Returns the registered ids for testability.
  */
 export function registerAnthropicModels(): string[] {
+  registerModel({
+    id: "claude-fable-5",
+    aliases: ["claude-fable-5[1m]"],
+    providerId: "anthropic",
+    surfaceId: "anthropic-messages",
+    displayName: "Claude Fable 5",
+    knowledgeCutoff: "2026-01",
+    tags: ["fable", "mythos", "1m-context", "flagship", "production"],
+    capabilities: CAPS_FABLE_5,
+    estimateTokens: estimateAnthropicTokens,
+    // Fable ships a single flat rate (no speed:"fast" tier), so no
+    // pricingForRequest picker : the base `pricing` always applies.
+    pricing: ANTHROPIC_FABLE_5,
+    vendorIds: {
+      firstParty: "claude-fable-5",
+      bedrock: "us.anthropic.claude-fable-5",
+      vertex: "claude-fable-5",
+      foundry: "claude-fable-5",
+      anthropicAws: "claude-fable-5",
+      mantle: "anthropic.claude-fable-5",
+      gateway: "claude-fable-5",
+    },
+  })
+
   registerModel({
     id: "claude-opus-4-8",
     aliases: ["claude-opus-4-8[1m]"],
@@ -195,6 +222,7 @@ export function registerAnthropicModels(): string[] {
   })
 
   return [
+    "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
