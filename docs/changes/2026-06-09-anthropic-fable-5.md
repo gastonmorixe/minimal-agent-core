@@ -103,6 +103,27 @@ Anthropic model.
 - **`src/client/list-models.ts`** — `supports1M()` now matches
   `claude-fable-5`, so the synthesized `[1m]` variant shows in `--list-models`.
 
+### Follow-up: 1M-context beta gate on the legacy transport
+
+A second, pre-existing gap surfaced once Fable was usable (flagged by a parallel
+review session). `src/headers.ts` `buildBetaFlags()` gated the
+`context-1m-2025-08-07` beta on `/[1m]/ || model.includes("opus")`. Plain
+`claude-fable-5` (no `[1m]` suffix) matched neither, so the **legacy transport**
+(still used by `Agent.send` / `Agent.run` via `client.ts`) never sent the 1M
+beta and long Fable sessions would 400 once they grew past ~200k. The canonical
+transport was already correct (it gates on `capabilities.contextWindow >=
+1_000_000`).
+
+Fixed by replacing the `opus` substring with an explicit 1M-native family list
+that mirrors the canonical capability test: opus 4.6/4.7/4.8, sonnet 4.6, and
+fable-5. This also closes a latent twin gap, **`claude-sonnet-4-6` is 1M-native
+and was missing the flag too**. A bare `"sonnet-4"` substring was deliberately
+avoided so the 200k `sonnet-4-5` / `haiku` stay excluded. The registry isn't
+readable from this low-level module (import-cycle risk + late plugin
+activation), which is why the families are enumerated as strings rather than
+read from `capabilities`. Added three `headers.test.ts` cases (fable-5 positive,
+sonnet-4-6 positive, 200k-models negative).
+
 ## Why this is the right layer
 
 The model was already *displayable* but not *buildable*. The honest fix is to
@@ -122,6 +143,8 @@ it scoped to Fable.
 - `bun x tsc --noEmit` — clean (no duplicate-symbol / type errors).
 - Targeted suites (`plugins/llm-anthropic`, `model-registry`, `system-prompt`,
   `pricing`): **116 pass / 0 fail**.
+- `headers.test.ts` after the 1M-gate fix: **47 pass / 0 fail** (incl. the 3 new
+  context-1m cases).
 - Full `bun run check` — green.
 - Live: `claude-fable-5` returns **200** through the harness path with the
   Claude-Code preamble attached (was 429 on every attempt before).

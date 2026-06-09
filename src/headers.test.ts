@@ -122,6 +122,31 @@ describe("headers", () => {
       expect(flags).toContain(BetaFlagId.CONTEXT_1M_20250807)
     })
 
+    // 1M-native families must send context-1m on the legacy transport too,
+    // mirroring the canonical path's capabilities.contextWindow >= 1M test.
+    // Regression guard: plain claude-fable-5 (no [1m] suffix) used to miss
+    // this gate and would 400 past ~200k in long sessions.
+    it("beta flags for claude-fable-5 include context-1m (no [1m] suffix)", () => {
+      expect(buildBetaFlags("conversation", "claude-fable-5")).toContain(
+        BetaFlagId.CONTEXT_1M_20250807,
+      )
+    })
+
+    it("beta flags for sonnet-4-6 include context-1m (1M-native)", () => {
+      expect(buildBetaFlags("conversation", "claude-sonnet-4-6")).toContain(
+        BetaFlagId.CONTEXT_1M_20250807,
+      )
+    })
+
+    it("beta flags for 200k models (sonnet-4-5, haiku) omit context-1m", () => {
+      expect(buildBetaFlags("conversation", "claude-sonnet-4-5-20250929")).not.toContain(
+        BetaFlagId.CONTEXT_1M_20250807,
+      )
+      expect(buildBetaFlags("conversation", "claude-haiku-4-5-20251001")).not.toContain(
+        BetaFlagId.CONTEXT_1M_20250807,
+      )
+    })
+
     it("quota beta flags are a smaller set", () => {
       const headers = buildHeaders(mockAuth, "s", "quota")
       const flags = headers["anthropic-beta"].split(",")
