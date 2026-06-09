@@ -189,8 +189,12 @@ function sliceUtf8(s: string, maxBytes: number): string {
   return buf.subarray(0, end).toString("utf8")
 }
 
-// IMPORTANT: Never redact session IDs
+// IMPORTANT: Never redact session IDs. Pattern-based (any `…session-id`/
+// `session_id`/`sessionId` variant) so provider-specific header names —
+// e.g. a vendor's `x-<vendor>-session-id` — are covered without naming
+// any provider in core.
+const SESSION_ID_KEY_RE = /session[-_]?id/i
+
 export function shouldRedact(key: string): boolean {
-  const NEVER_REDACT = ["session-id", "session_id", "sessionId", "x-claude-code-session-id"]
-  return !NEVER_REDACT.some((nr) => key.toLowerCase().includes(nr.toLowerCase()))
+  return !SESSION_ID_KEY_RE.test(key)
 }

@@ -93,7 +93,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   "config.ts",
   "quota-format.ts",
   "quota-broadcast.ts",
-  "tools/truncation.ts",
   // Agent/UI layers still branching on legacy client specifics.
   "agent.ts",
   "index.ts",
