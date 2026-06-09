@@ -91,7 +91,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   // Agent/UI layers still branching on legacy client specifics.
   "agent.ts",
   "index.ts",
-  "cache.ts",
   // Tests of all of the above (fixtures use real model ids/headers).
   "agent.canonical-dispatch.test.ts",
   "agent.max-tokens-budget.test.ts",

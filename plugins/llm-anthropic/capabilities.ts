@@ -251,7 +251,11 @@ export const CAPS_HAIKU_45: Capabilities = {
     explicit: true,
     automatic: false,
     ttls: ["5m"],
-    minPrefixTokens: 1024,
+    // Haiku-family cache-eligibility floor is 2048 tokens (vs 1024 on
+    // sonnet/opus) per the documented API minimums; was wrongly 1024
+    // here while src/cache.ts hardcoded the correct 2048 by id regex.
+    // The capability is now the single source (cache.ts reads it).
+    minPrefixTokens: 2048,
     reportsCacheHits: true,
   },
   tools: { ...TOOLS_BASIC },
