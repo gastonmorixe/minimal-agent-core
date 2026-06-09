@@ -356,9 +356,25 @@ export function buildBetaFlags(
       ]
     case "conversation": {
       const flags: BetaFlagId[] = [BetaFlagId.CLAUDE_CODE_20250219, BetaFlagId.OAUTH_20250420]
-      // context-1m: enabled when model has [1m] suffix (client-side convention)
-      // or for opus models by default (in v2.1.91 capture, opus always had this flag)
-      const wants1m = model ? /\[1m\]/i.test(model) || model.includes("opus") : false
+      // context-1m: enabled when the model has the [1m] suffix (client-side
+      // convention) OR is a 1M-native family. This MUST mirror the canonical
+      // transport's capability test (`capabilities.contextWindow >= 1_000_000`
+      // in plugins/llm-anthropic/beta-flags.ts) so both transports agree. We
+      // can't read the registry here (low-level module + late plugin
+      // activation), so the 1M families are enumerated explicitly: opus 4.6/
+      // 4.7/4.8, sonnet 4.6, and fable-5. Deliberately NOT a bare "opus" /
+      // "sonnet-4" substring: that would wrongly flag the 200k sonnet-4-5 /
+      // sonnet-4 and legacy 200k opus ids. Add new 1M models here when they
+      // register. Without this, plain `claude-fable-5` on the legacy transport
+      // never sends the 1M beta and long sessions 400 past ~200k.
+      const wants1m = model
+        ? /\[1m\]/i.test(model) ||
+          model.includes("opus-4-6") ||
+          model.includes("opus-4-7") ||
+          model.includes("opus-4-8") ||
+          model.includes("sonnet-4-6") ||
+          model.includes("fable-5")
+        : false
       if (wants1m) {
         flags.push(BetaFlagId.CONTEXT_1M_20250807)
       }
