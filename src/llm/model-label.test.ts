@@ -24,6 +24,9 @@ describe("modelShortLabel", () => {
     expect(modelShortLabel("claude-sonnet-4-6")).toBe("anth-4.6")
     expect(modelShortLabel("claude-haiku-4-5-20251001")).toBe("anth-4.5")
     expect(modelShortLabel("claude-opus-4-8[1m]")).toBe("anth-4.8")
+    // Single-digit families (no minor version): fable-5 → anth-5.
+    expect(modelShortLabel("claude-fable-5")).toBe("anth-5")
+    expect(modelShortLabel("claude-fable-5[1m]")).toBe("anth-5")
   })
 
   it("tags registered OpenAI models as oai-<version>", () => {

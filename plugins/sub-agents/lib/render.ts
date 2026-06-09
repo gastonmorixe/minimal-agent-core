@@ -22,7 +22,7 @@ export interface DisplayParts {
 /** Shorten a model id to its tier word when possible: `claude-sonnet-4-6` → `sonnet`. */
 export function shortModel(model: string): string {
   const m = model.toLowerCase()
-  for (const tier of ["opus", "sonnet", "haiku"]) {
+  for (const tier of ["opus", "sonnet", "haiku", "fable"]) {
     if (m.includes(tier)) return tier
   }
   return model

@@ -88,7 +88,7 @@ Claude-Code preamble is attached on plan auth, identical to every other
 Anthropic model.
 
 - **`src/llm/pricing.ts`** — new `ANTHROPIC_FABLE_5` rate: `$10 / 1M` input,
-  `$50 / 1M` output, `$12.50` cache-write, `$1` cache-read (half the gated
+  `$50 / 1M` output, `$12.50` cache-write, `$1` cache-read (0.4x the gated
   Mythos Preview's $25/$125). Single flat rate; Fable has no `speed:"fast"` tier.
 - **`plugins/llm-anthropic/capabilities.ts`** — new `CAPS_FABLE_5`, mirroring
   Opus 4.8's request surface per the live `/v1/models` record (1M context, 128K
