@@ -134,9 +134,12 @@ export const ANTHROPIC_OPUS_48_FAST: MTokRate = {
 
 /**
  * Claude Fable 5 rate : the public Mythos-class model released 2026-06-09.
- * $10 / 1M input, $50 / 1M output (half the gated Mythos Preview's $25/$125),
+ * $10 / 1M input, $50 / 1M output (0.4x the gated Mythos Preview's $25/$125),
  * with the standard 1.25x cache-write / 0.1x cache-read multipliers. There is
  * no `speed:"fast"` tier for this model, so a single flat rate applies.
+ * Numerically identical to ANTHROPIC_OPUS_48_FAST; kept as a separate table
+ * because the two rates move independently (one is a fast-tier surcharge,
+ * this is a base rate).
  */
 export const ANTHROPIC_FABLE_5: MTokRate = {
   inputUSD: 10,

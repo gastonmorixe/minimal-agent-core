@@ -25,9 +25,11 @@ function providerShort(modelId: string): string {
 
 /** Parse a compact version token from a model id. */
 function versionToken(modelId: string): string {
-  // Anthropic "claude-<tier>-<maj>-<min>[-date][1m]" → "maj.min".
-  const claude = modelId.match(/^claude-(?:opus|sonnet|haiku)-(\d+)-(\d+)/)
-  if (claude) return `${claude[1]}.${claude[2]}`
+  // Anthropic "claude-<tier>-<maj>[-min][-date][1m]" → "maj.min" or "maj".
+  // The minor digit is optional: fable ships as plain "claude-fable-5"
+  // (one version digit), unlike "claude-opus-4-8".
+  const claude = modelId.match(/^claude-(?:opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/)
+  if (claude) return claude[2] !== undefined ? `${claude[1]}.${claude[2]}` : claude[1]
   // OpenAI "gpt-<rest>" → rest, minus a trailing date or "-chat" alias.
   const gpt = modelId.match(/^gpt-(.+)$/)
   if (gpt) return gpt[1].replace(/-\d{6,}.*$/, "").replace(/-chat$/, "")

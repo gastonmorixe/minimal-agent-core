@@ -64,10 +64,11 @@ export async function listModels(
   // API model IDs. The actual 1M activation happens via the context-1m-2025-08-07
   // beta flag. See cc-03312026/src/utils/context.ts:modelSupports1M().
   //
-  // 1M-capable families (as of 2026-05-28 / claude-code 2.1.154):
+  // 1M-capable families (as of 2026-06-09):
   //   - Sonnet 4 / 4.5 / 4.6  (sonnet-4 substring match)
   //   - Opus 4.6 / 4.7 / 4.8  (each gated explicitly to avoid catching
   //     older opus-4-0/4-1 ids which were 200k)
+  //   - Fable 5 (1M-native flagship, launched 2026-06-09)
   const supports1M = (id: string) =>
     id.includes("claude-sonnet-4") ||
     id.includes("opus-4-6") ||

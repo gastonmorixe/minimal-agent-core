@@ -726,10 +726,13 @@ const DEFAULT_INSTRUCTIONS = renderPrompt(corePrompt("instructions.md"))
 export const SYSTEM_PROMPT = buildSystemPrompt()
 
 /**
- * Latest model IDs as of capture 2026-04-25 (claude-cli/2.1.118). Use these
- * constants instead of string literals so a future model bump touches one
- * place. Live 2.1.118 capture confirms `claude-opus-4-7` as the canonical
- * opus ID (the previous `claude-opus-4-6` is gone).
+ * Convenience tier ids for the legacy client path. NOT the model catalog:
+ * the canonical, complete catalog lives in `plugins/llm-anthropic/models.ts`
+ * (claude-fable-5, opus 4.8/4.7/4.6, sonnet 4.6/4.5, haiku 4.5). These three
+ * constants only feed DEFAULT_MODEL and a couple of legacy callers, so they
+ * track "a sensible id per tier", not "the newest model" (OPUS deliberately
+ * stays 4-7 here; bump deliberately, with a capture). Last reviewed
+ * 2026-06-09.
  */
 export const MODELS = {
   OPUS: "claude-opus-4-7",

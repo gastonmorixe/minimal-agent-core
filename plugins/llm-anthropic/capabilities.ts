@@ -4,7 +4,10 @@
  * Source of truth: cli.patched.cjs gates at L116443+ + L116685+
  * (`vGH`, `EGH`, `qh9`, `PH6`, `NA_`, `Pj`, `VcH`, `YW`, `JH6`) and
  * the embedded Anthropic skill at L713970 that lists feature
- * availability per model.
+ * availability per model. Exception: CAPS_FABLE_5 post-dates that
+ * capture; it is derived from the live `GET /v1/models?beta=true`
+ * record of 2026-06-09 plus A/B request probes (see
+ * docs/changes/2026-06-09-anthropic-fable-5.md), not the cjs gates.
  *
  * Each export is a complete `Capabilities` record so the registry
  * entries in `models.ts` stay declarative.
