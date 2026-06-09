@@ -86,6 +86,29 @@ Zero-behavior-change moves with back-compat shims:
   JS) replaced with `return requestType satisfies never`, making the switch
   exhaustiveness compiler-checked.
 
+## Continuation (same day, phases 12-16)
+
+The decoupling accelerated past the original wave plan once the ratchet
+test existed to enforce it:
+
+- **Phase 12** (`c5b5f3f`): the architecture fitness test + scanner, and the
+  first enforced cleanup (media limits → `ProviderAdapter.mediaLimits` hook,
+  neutral floor in core).
+- **Phase 13** (`de8552b`): `ProviderPlugin.listLiveModels` hook;
+  `--list-models` is provider-neutral (first baseline shrink driven by the
+  ratchet's cleaned-direction assertion).
+- **Phase 14** (`ac3c825`): quota header parsing left core entirely
+  (plugin parser gained the aggregate→`overall` form; neutral
+  `quota-summary.ts` renderer; `quota-broadcast` matches `/ratelimit/i`;
+  `quota-format.ts` deleted; baseline −5).
+- **Phase 15** (`acce7ac`): quota-status plugin dropped its deprecated
+  legacy-map overload (~131 test call sites migrated to neutral fixtures);
+  `infra/session.ts` + `config.ts` neutralized (pattern-based metadata
+  allowlist; `apiKeys` stops enumerating provider ids).
+- **Phase 16** (`e1654e7`): canonical fast-mode offers a degrade (speed
+  stripped) instead of hard-throwing; `canonical-send` accepts degrades.
+  Transports now agree on fast-mode semantics end to end.
+
 ## Open items (deliberately NOT done here)
 
 - **B1 (needs a live probe):** sonnet-4-6 now gets `context-1m` on the legacy
