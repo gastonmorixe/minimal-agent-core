@@ -10,6 +10,8 @@
  *
  * @module plugins/diagnostics/providers/biome-provider
  */
+import { relative } from "node:path"
+
 import { adaptBiome } from "../adapters/biome.ts"
 import type { DiagnosticProvider } from "../lib/provider.ts"
 import type { Finding } from "../lib/types.ts"
@@ -32,7 +34,10 @@ export class BiomeProvider implements DiagnosticProvider {
   }
 
   async check(path: string, _text: string, signal?: AbortSignal): Promise<Finding[]> {
-    const rel = path.startsWith(this.root) ? path.slice(this.root.length + 1) : path
+    // path.relative (not startsWith+slice): `/repo-other` must not match
+    // root `/repo` and yield a garbage suffix.
+    const relPath = relative(this.root, path)
+    const rel = relPath.startsWith("..") ? path : relPath
     const res = await runCapture(this.bin, ["check", "--reporter=json", rel], {
       cwd: this.root,
       ...(signal ? { signal } : {}),

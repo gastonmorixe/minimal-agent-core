@@ -86,9 +86,19 @@ function serviceFor(root: string): DiagnosticsService {
       for (const s of services.values()) s.dispose()
       services.clear()
     }
+    // Bare signal handlers would DISABLE default termination when the host
+    // app has none of its own (Ctrl-C swallowed by a cleanup hook). So:
+    // dispose, then RE-RAISE. `once` has already removed this handler by
+    // then, so the re-raised signal falls through to the host's handlers
+    // (if any) or the default disposition (terminate). Host handlers are
+    // never touched.
     process.once("exit", dispose)
-    process.once("SIGINT", dispose)
-    process.once("SIGTERM", dispose)
+    const onSignal = (sig: NodeJS.Signals) => () => {
+      dispose()
+      process.kill(process.pid, sig)
+    }
+    process.once("SIGINT", onSignal("SIGINT"))
+    process.once("SIGTERM", onSignal("SIGTERM"))
   }
   return svc
 }

@@ -35,6 +35,7 @@ export class LspClient {
   private version = new Map<string, number>()
   private readyPromise: Promise<void>
   private disposed = false
+  private failed = false
   private exitHandler: (() => void) | null = null
 
   constructor(
@@ -43,9 +44,33 @@ export class LspClient {
     opts: LspClientOptions = {},
   ) {
     this.proc = spawn(cmd[0], cmd.slice(1), { cwd })
+    // CRASH GUARD: a ChildProcess (and its stdin Writable) is an
+    // EventEmitter; an `error` with no listener is an UNCAUGHT EXCEPTION
+    // that would take down the whole agent process. Spawn failure
+    // (ENOENT/EMFILE) and EPIPE on a write to a just-crashed server both
+    // land here. Mark the client dead and flush pending requests so
+    // callers fail fast instead of hanging.
+    this.proc.on("error", () => this.markFailed())
+    this.proc.stdin?.on("error", () => this.markFailed())
+    this.proc.on("exit", () => this.flushPending())
     this.proc.stdout?.on("data", (c: Buffer) => this.onData(c))
     this.proc.stderr?.on("data", () => {})
     this.readyPromise = this.initialize(opts.initTimeoutMs ?? 8000)
+  }
+
+  /** Mark the client unusable and fail every in-flight request. */
+  private markFailed(): void {
+    this.failed = true
+    this.flushPending()
+  }
+
+  /** Resolve all pending requests with an error envelope (no hung promises). */
+  private flushPending(): void {
+    const waiting = [...this.pending.values()]
+    this.pending.clear()
+    for (const resolve of waiting) {
+      resolve({ error: { message: "lsp client died" } })
+    }
   }
 
   /** Resolves once `initialize`/`initialized` completed. Rejects on failure. */
@@ -53,9 +78,11 @@ export class LspClient {
     return this.readyPromise
   }
 
-  /** True if the child has exited or been disposed. */
+  /** True if the child failed to spawn, exited, or was disposed. */
   get dead(): boolean {
-    return this.disposed || this.proc.exitCode !== null || this.proc.signalCode !== null
+    return (
+      this.disposed || this.failed || this.proc.exitCode !== null || this.proc.signalCode !== null
+    )
   }
 
   /** Register a callback invoked if the child process exits unexpectedly. */
@@ -124,6 +151,8 @@ export class LspClient {
 
   private async initialize(timeoutMs: number): Promise<void> {
     const initPromise = this.request("initialize", {
+      // (request resolves with an `error` envelope when the client dies;
+      // checked below so whenReady() rejects and the breaker sees it)
       processId: process.pid,
       rootUri: `file://${this.cwd}`,
       capabilities: {
@@ -131,10 +160,18 @@ export class LspClient {
       },
       workspaceFolders: [{ uri: `file://${this.cwd}`, name: "root" }],
     })
-    const timeout = new Promise<never>((_res, rej) =>
-      setTimeout(() => rej(new Error("lsp initialize timeout")), timeoutMs),
-    )
-    await Promise.race([initPromise, timeout])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_res, rej) => {
+      timer = setTimeout(() => rej(new Error("lsp initialize timeout")), timeoutMs)
+    })
+    try {
+      const res = await Promise.race([initPromise, timeout])
+      if (res && typeof res === "object" && "error" in res && res.error) {
+        throw new Error("lsp initialize failed: client died")
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
     this.notify("initialized", {})
     // Let config-watch registration settle (tsgo registers a watcher).
     await new Promise((r) => setTimeout(r, 200))
@@ -159,10 +196,19 @@ export class LspClient {
     }
   }
 
-  /** Pull diagnostics for `path`. Returns the raw LSP `items` array. */
+  /**
+   * Pull diagnostics for `path`. Returns the raw LSP `items` array.
+   * Throws when the server answered with an error envelope (including the
+   * synthetic `lsp client died` one from {@link flushPending}) so the
+   * caller's circuit breaker sees the failure instead of a hollow `[]`.
+   */
   async pullDiagnostics(path: string): Promise<unknown[]> {
     const uri = `file://${path}`
     const res = await this.request("textDocument/diagnostic", { textDocument: { uri } })
+    if (res.error) {
+      const errMsg = (res.error as { message?: string }).message ?? "lsp error"
+      throw new Error(errMsg)
+    }
     const result = res.result as { items?: unknown[] } | undefined
     return Array.isArray(result?.items) ? result.items : []
   }
