@@ -26,6 +26,8 @@
  *     }
  */
 
+import { findModel } from "./llm/model-registry.ts"
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -139,15 +141,16 @@ interface ObservedTurn {
 }
 
 /**
- * Per-model approximate cache-eligibility threshold. The Anthropic API
- * silently ignores `cache_control` markers when the prefix is below this.
- * Thresholds are in tokens; we compare against char counts using a
- * conservative 4-chars-per-token estimate.
+ * Per-model cache-eligibility threshold, from the registry's capability
+ * record (`caching.minPrefixTokens` — each provider declares its own API
+ * minimums; core no longer guesses by id substring). Providers silently
+ * ignore cache markers when the prefix is below this. Thresholds are in
+ * tokens; we compare against char counts with a conservative
+ * 4-chars-per-token estimate. Unregistered ids fall back to the most
+ * common floor (1024) so the detector still educates rather than spams.
  */
-const MIN_TOKENS_FOR_CACHE = (model: string): number => {
-  if (/haiku/i.test(model)) return 2048
-  return 1024 // sonnet / opus / others
-}
+const MIN_TOKENS_FOR_CACHE = (model: string): number =>
+  findModel(model)?.capabilities.caching.minPrefixTokens ?? 1024
 const MIN_CHARS_FOR_CACHE = (model: string): number => MIN_TOKENS_FOR_CACHE(model) * 4
 
 /**
@@ -209,7 +212,7 @@ export class CacheAnomalyDetector {
       fired.push("below_min_block_size")
       this.maybeWarn(
         "below_min_block_size",
-        `cache: prefix is ~${turn.approxPrefixChars} chars (~${Math.round(turn.approxPrefixChars / 4)} tokens), below ${ctx.model.includes("haiku") ? "Haiku's 2048" : "Sonnet/Opus's 1024"}-token cache minimum. Markers are silently ignored until the prefix grows.`,
+        `cache: prefix is ~${turn.approxPrefixChars} chars (~${Math.round(turn.approxPrefixChars / 4)} tokens), below this model's ${MIN_TOKENS_FOR_CACHE(ctx.model)}-token cache minimum. Markers are silently ignored until the prefix grows.`,
       )
     }
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
+import { registerAnthropicModels } from "../plugins/llm-anthropic/models.ts"
+
 import {
   CacheAnomalyDetector,
   type CacheUsage,
@@ -120,17 +122,33 @@ describe("CacheAnomalyDetector", () => {
     expect(strip(writes[0])).toContain("1024-token")
   })
 
-  it("uses Haiku's higher threshold for haiku models", () => {
+  it("uses the registry's higher minPrefixTokens for the cheap tier", () => {
+    // Threshold now comes from capabilities.caching.minPrefixTokens
+    // (Phase 18 inline: providers declare API minimums; core stopped
+    // guessing by id substring). Register the catalog like boot does.
+    registerAnthropicModels()
     const writes: string[] = []
     const d = new CacheAnomalyDetector({ write: (l) => writes.push(l) })
-    // 5000 chars = ~1250 tokens — over Sonnet's 1024 but under Haiku's 2048.
+    // 5000 chars = ~1250 tokens — over the 1024 floor but under the
+    // cheap tier's 2048 minimum.
     const fired = d.observe(usage(0, 0), {
       breakpoints: 2,
       approxPrefixChars: 5000,
       model: "claude-haiku-4-5-20251001",
     })
     expect(fired).toContain("below_min_block_size")
-    expect(strip(writes[0])).toContain("Haiku's 2048")
+    expect(strip(writes[0])).toContain("2048-token")
+  })
+
+  it("falls back to the 1024 floor for unregistered model ids", () => {
+    const writes: string[] = []
+    const d = new CacheAnomalyDetector({ write: (l) => writes.push(l) })
+    const fired = d.observe(usage(0, 0), {
+      breakpoints: 2,
+      approxPrefixChars: 5000, // ~1250 tokens: above the 1024 fallback
+      model: "totally-unknown-model",
+    })
+    expect(fired).not.toContain("below_min_block_size")
   })
 
   it("warns when turn N+1 doesn't read what turn N just wrote", () => {
