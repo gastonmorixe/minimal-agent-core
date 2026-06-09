@@ -406,3 +406,37 @@ History of state changes goes here as date-stamped one-liners. Helps a future ag
 - 2026-05-30T17:15:00-04:00: added T-9c2e7a, T-4b1f08, T-d3a6e2, T-77c9b4, T-1e5fa3, T-a08d6c, T-b6402d (multimodality follow-ups: Files-API upload + progress line, OpenAI media limits, compress modal, real-terminal smoke test, ModelInfo nudge fragment, audio/video enablement, and the gated commit) from session 40d7e158 multimodal ingestion build. Design lives in `private/multimodality-ingestion/`.
 - 2026-05-30T19:00:33-04:00: added T-5c4d10 / T-6e8a22 / T-7f9b33 / T-8a0c44 / T-9b1d55, deferred follow-ups from the scheduled-tasks port (schedule + slash-menu plugins + the prompt.inject / commands[] / live-area-emit host ports, session 38cfcafc; see `docs/changes/2026-05-30-schedule-plugin.md`). The feature shipped green; these are the intentional v1 cuts: model-driven self-paced loop intervals, Esc-to-stop-loop, non-REPL command/scheduler scope, a loader.ts split, and assorted /loop + slash-menu UX polish.
 - 2026-05-30T20:35:00-04:00: session 2dae6456 resumed the role-composition refactor and CLOSED 3 of its 5 follow-ups: T-5a17e0 done (commit 7cb912b, surgical filtered-patch commit of the 3 entangled comment files), T-5b28f1 done (26b0174, 4 dev-doc READMEs), T-5e51c4 done (de76b9f) — the latter promoted from latent to live because session 38cfcafc's `schedule`/`sub-agents` plugins are the first real multi-tool packs and were mis-composing. T-5c39a2 (saved-session migration) and T-5d40b3 (global-cache-block move) remain `todo` by deliberate decision — see their sharpened "Why deferred" notes (381/2459 sessions resume fine via read-tolerance; the cache move needs sign-off + measurement).
+
+### T-f51m29: Verify sonnet-4-6 context-1m beta against a non-overage account (B1)
+
+- [ ] state: `todo`
+- created_by: session=552407ed (fable-5 audit, 2026-06-09)
+
+**What.** Commit `97c0191` made the legacy transport send `context-1m-2025-08-07`
+for sonnet-4-6 (1M-native per its capabilities, matching the canonical
+transport's `contextWindow >= 1M` arm). The OLD headers.ts docstring said
+context-1m was withheld from sonnet because pre-overage accounts 429
+("Extra usage is required for long context requests"). If that server-side
+gating still exists, default-config Pro users (DEFAULT_MODEL = sonnet-4-6)
+could hit soft 429s on long sessions; `parseModelUnavailableError` catches
+the shape and reopens the model picker, so the failure is recoverable, not
+silent. SETTLE WITH: one >200k-token probe on a non-overage account, both
+with and without the beta. Then either keep the unified gate (and delete the
+stale caveat in `src/headers.characterization.test.ts`) or re-split sonnet
+from the 1M family list in BOTH builders + characterization suites.
+Blocks: refactor Wave 2 (single beta-flag source) locking in union behavior.
+
+### T-fab1e5: Wire-test interleaved-thinking on claude-fable-5
+
+- [ ] state: `todo`
+- created_by: session=552407ed (fable-5 audit, 2026-06-09)
+
+**What.** The interleaved-thinking beta is omitted for opus-4-8 only (tool-
+batch spiral pathology, T-7c3f02). Fable-5 is opus-4.8's capability twin and
+DOES receive the beta on both transports today. If fable shares the 4.8
+behavior, long agentic sessions will reproduce the spiral. SETTLE WITH: a
+multi-tool wire test on fable-5 with the beta on (watch for parallel
+tool_use batches whose mid-turn thinking references unexecuted results).
+If pathological: add fable to the omission gate in BOTH
+`src/headers.ts` and `plugins/llm-anthropic/beta-flags.ts` + update both
+characterization suites (the cross-transport agreement walk pins them).
