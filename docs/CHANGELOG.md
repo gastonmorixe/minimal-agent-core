@@ -7,6 +7,22 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
+### Architecture: provider-decoupling ratchet + first cleanups
+
+New fitness test (`src/architecture.provider-decoupling.test.ts`) enforces
+the layering rule: provider-specific code (names, model ids, wire details)
+lives in `plugins/<provider>/`, never `src/` core — comments may reference
+providers, code may not. Violations must match a frozen, shrink-only
+baseline, so new leaks fail CI immediately and cleanups must ratchet the
+baseline down in the same commit. First cleanups shipped behind it:
+Anthropic media limits moved behind the `ProviderAdapter.mediaLimits` hook
+(core falls back to a neutral conservative floor), `--list-models` went
+provider-neutral via the new `ProviderPlugin.listLiveModels` hook, the
+beta-flag model gates unified into plugin-owned `beta-gates.ts` (both
+transports now share one predicate — the drift class behind the fable-5
+context-1m bug), and the tool-output redaction allowlist dropped its
+vendor-specific header literal for a neutral session-id pattern.
+
 ### Feature: Claude Fable 5 in the model catalog
 
 `claude-fable-5` (the public Mythos-class flagship launched 2026-06-09) is now
