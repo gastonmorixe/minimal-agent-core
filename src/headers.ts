@@ -310,27 +310,31 @@ export type RequestType = "quota" | "title" | "conversation"
  * | `conversation` (opus or `[1m]` suffix) | conversation set + context-1m |
  *
  * **Model-specific behavior**:
- * - `context-1m-2025-08-07` is opus-only because sonnet returns 429
- *   "Extra usage is required for long context requests" without overage credits.
+ * - `context-1m-2025-08-07` is sent for 1M-native families (opus 4.6+,
+ *   sonnet 4.6, fable 5) and any `[1m]`-suffixed id. Historical caveat:
+ *   pre-overage sonnet accounts returned 429 "Extra usage is required for
+ *   long context requests"; `parseModelUnavailableError` still catches
+ *   that shape and reopens the model picker if an account lacks access.
  * - The `[1m]` suffix on a model ID is a client-side convention (the actual
  *   API model ID has no suffix). We strip it for the request body but use
  *   it here to detect 1M context intent.
- /**
-  * Builds the array of beta feature flags based on request type and model.
-  *
-  * @param requestType - Which beta set to build (default: \"conversation")
-  * @param model - Model ID, used to gate model-specific flags like `context-1m`
-  * @returns Array of BetaFlagId enum values ready to join with commas
-  *
-  * @example
-  * ```ts
-  * buildBetaFlags("conversation", "claude-opus-4-6")
-  * // → [BetaFlagId.CLAUDE_CODE_20250219, BetaFlagId.OAUTH_20250420, BetaFlagId.CONTEXT_1M_20250807, ...]
-  *
-  * buildBetaFlags("quota")
-  * // → [BetaFlagId.OAUTH_20250420, BetaFlagId.INTERLEAVED_THINKING_20250514, ...]  (5 flags)
-  * ```
-  */
+ *
+ * @param requestType - Which beta set to build (default: "conversation")
+ * @param model - Model ID, used to gate model-specific flags like `context-1m`
+ * @param opts - Conditional feature-gated betas (fast-mode, task budgets,
+ *   cache diagnosis). The caller decides; capability gating happens in
+ *   `client.ts` (see the fast-mode gate in `sendMessageOnce`).
+ * @returns Array of BetaFlagId enum values ready to join with commas
+ *
+ * @example
+ * ```ts
+ * buildBetaFlags("conversation", "claude-opus-4-6")
+ * // → [BetaFlagId.CLAUDE_CODE_20250219, BetaFlagId.OAUTH_20250420, BetaFlagId.CONTEXT_1M_20250807, ...]
+ *
+ * buildBetaFlags("quota")
+ * // → [BetaFlagId.OAUTH_20250420, BetaFlagId.INTERLEAVED_THINKING_20250514, ...]  (5 flags)
+ * ```
+ */
 export function buildBetaFlags(
   requestType: RequestType = "conversation",
   model?: string,
@@ -421,8 +425,11 @@ export function buildBetaFlags(
       return flags
     }
   }
-
-  return buildBetaFlags("conversation", model)
+  // The switch above is exhaustive over RequestType; TypeScript narrows
+  // to `never` here. (A previous fallback recursed with the opts dropped,
+  // which would have silently lost feature betas if ever reached from
+  // untyped JS — removed in the Phase-8 cleanup.)
+  return requestType satisfies never
 }
 
 /**
