@@ -1,5 +1,12 @@
-import { describe, expect, it } from "bun:test"
+import { beforeAll, describe, expect, it } from "bun:test"
 
+// Model short labels resolve through the provider plugins (Phase 17:
+// core no longer hardcodes vendor naming schemes), so this rendering
+// test wires the real Anthropic plugin exactly like production boot does.
+import { anthropicProviderPlugin } from "../plugins/llm-anthropic/adapter.ts"
+import { registerAnthropicModels } from "../plugins/llm-anthropic/models.ts"
+
+import { registerProviderPlugin } from "./llm/provider-plugin.ts"
 import { stripAnsi } from "./term-width.ts"
 import {
   fmtTokens,
@@ -9,6 +16,11 @@ import {
   renderUsageReport,
 } from "./usage-render.ts"
 import type { UsageReport, UsageTotals } from "./usage-stats.ts"
+
+beforeAll(() => {
+  registerAnthropicModels()
+  registerProviderPlugin(anthropicProviderPlugin)
+})
 
 function totals(over: Partial<UsageTotals> = {}): UsageTotals {
   return {

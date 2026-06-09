@@ -226,6 +226,16 @@ export const anthropicProviderPlugin: ProviderPlugin = {
    */
   resolveSystemPrompt: resolveAnthropicSystemPrompt,
   /**
+   * Version token for dense labels: "claude-<family>-<maj>[-min]…" →
+   * "maj.min" / "maj" (fable has no minor digit). Returns undefined for
+   * ids outside this scheme so core's generic fallback applies.
+   */
+  modelVersionToken(modelId: string): string | undefined {
+    const m = modelId.match(/^claude-(?:opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/)
+    if (!m) return undefined
+    return m[2] !== undefined ? `${m[1]}.${m[2]}` : m[1]
+  },
+  /**
    * Live catalog via GET /v1/models?beta=true (incl. the synthesized
    * `[1m]` context-window variants). Implements the neutral
    * `ProviderPlugin.listLiveModels` hook so `--list-models`/the picker

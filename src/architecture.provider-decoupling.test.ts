@@ -85,7 +85,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   // Neutral seams still carrying provider defaults/heuristics in code.
   "llm/adapter-legacy.ts",
   "llm/canonical-request.ts",
-  "llm/model-label.ts",
   "llm/transport/select-transport.ts",
   "llm/transport/canonical-send.ts",
   "media/ingest.ts", // deprecated buildAnthropicUserContent alias (one release)
