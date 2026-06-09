@@ -91,8 +91,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   "media/ingest.ts", // deprecated buildAnthropicUserContent alias (one release)
   "infra/session.ts",
   "config.ts",
-  "quota-format.ts",
-  "quota-broadcast.ts",
   // Agent/UI layers still branching on legacy client specifics.
   "agent.ts",
   "index.ts",
@@ -135,9 +133,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   "non-interactive-defaults.test.ts",
   "plugins/agent-context.test.ts",
   "plugins/loader.test.ts",
-  "quota-broadcast.test.ts",
-  "quota-cache.test.ts",
-  "quota-format.test.ts",
   "session-replay.test.ts",
   "session-restore.test.ts",
   "session-store.test.ts",

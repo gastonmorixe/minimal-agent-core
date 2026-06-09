@@ -57,20 +57,20 @@ describe("quota-broadcast", () => {
 
   it("broadcastResponseRateLimits writes cache and emits once", async () => {
     const headers = makeHeaders({
-      "anthropic-ratelimit-unified-5h-utilization": "0.21",
-      "anthropic-ratelimit-unified-5h-reset": "1700000000",
+      "acme-ratelimit-unified-5h-utilization": "0.21",
+      "acme-ratelimit-unified-5h-reset": "1700000000",
     })
     const out = broadcastResponseRateLimits(headers)
     expect(out.size).toBe(2)
     expect(getLastRateLimits()?.rateLimits.size).toBe(2)
     await flush()
     expect(received.length).toBe(1)
-    expect(received[0]!.rateLimits.get("anthropic-ratelimit-unified-5h-utilization")).toBe("0.21")
+    expect(received[0]!.rateLimits.get("acme-ratelimit-unified-5h-utilization")).toBe("0.21")
   })
 
   it("rebroadcastQuotaForSessionUpdate re-emits without touching cache", async () => {
     const headers = makeHeaders({
-      "anthropic-ratelimit-unified-5h-utilization": "0.42",
+      "acme-ratelimit-unified-5h-utilization": "0.42",
     })
     broadcastResponseRateLimits(headers)
     const firstSnap = getLastRateLimits()
@@ -83,7 +83,7 @@ describe("quota-broadcast", () => {
     // Same cache snapshot — not replaced.
     expect(getLastRateLimits()).toBe(firstSnap)
     // Payload carries the cached rate-limits.
-    expect(received[1]!.rateLimits.get("anthropic-ratelimit-unified-5h-utilization")).toBe("0.42")
+    expect(received[1]!.rateLimits.get("acme-ratelimit-unified-5h-utilization")).toBe("0.42")
   })
 
   it("rebroadcastQuotaForSessionUpdate is a no-op before any broadcast", async () => {
@@ -98,7 +98,7 @@ describe("quota-broadcast", () => {
   it("rebroadcastQuotaForSessionUpdate is a no-op with no bus installed", async () => {
     setGlobalEventBus(null)
     const headers = makeHeaders({
-      "anthropic-ratelimit-unified-5h-utilization": "0.5",
+      "acme-ratelimit-unified-5h-utilization": "0.5",
     })
     // First broadcast populates the cache even when bus is missing
     // (the bus emit is optional-chained).
@@ -116,13 +116,13 @@ describe("quota-broadcast", () => {
     // Pins the contract that the second emit reuses the cached map
     // rather than re-parsing headers or substituting an empty map.
     const headers = makeHeaders({
-      "anthropic-ratelimit-unified-7d-utilization": "0.08",
+      "acme-ratelimit-unified-7d-utilization": "0.08",
     })
     broadcastResponseRateLimits(headers)
     rebroadcastQuotaForSessionUpdate()
     await flush()
     expect(received.length).toBe(2)
-    expect(received[0]!.rateLimits.get("anthropic-ratelimit-unified-7d-utilization")).toBe("0.08")
-    expect(received[1]!.rateLimits.get("anthropic-ratelimit-unified-7d-utilization")).toBe("0.08")
+    expect(received[0]!.rateLimits.get("acme-ratelimit-unified-7d-utilization")).toBe("0.08")
+    expect(received[1]!.rateLimits.get("acme-ratelimit-unified-7d-utilization")).toBe("0.08")
   })
 })
