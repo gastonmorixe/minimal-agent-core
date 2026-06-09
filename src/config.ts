@@ -10,14 +10,15 @@
  *
  *   CLI flag  >  env var  >  config file  >  built-in default
  *
- * Example `~/.minimal-agent/config.jsonc`:
+ * Example `~/.minimal-agent/config.jsonc` (model ids come from the
+ * provider plugins' registries — `--list-models` shows the catalog; the
+ * `[1m]` suffix is the client-side 1M-context opt-in convention):
  *
  *   {
- *     // The 1M-context Opus flavor — the [1m] suffix activates the beta.
- *     "model": "claude-opus-4-7[1m]",
+ *     "model": "<model-id>[1m]",
  *
- *     // Required to see plaintext thinking on Opus 4.7 (server default
- *     // is "omitted" — only encrypted signatures stream otherwise).
+ *     // Show plaintext/summarized thinking when the model's server
+ *     // default streams only encrypted signatures.
  *     "thinkingDisplay": "summarized",
  *
  *     "effort": "high",
@@ -160,13 +161,11 @@ export interface UserConfig {
    * affected by this map.
    *
    * Parsed leniently: non-string / empty values are dropped; an empty (or
-   * all-invalid) map is omitted entirely. Keys are provider ids matching the
-   * canonical transport's resolver (`openai`, `openrouter`).
+   * all-invalid) map is omitted entirely. Keys are provider ids matching
+   * each provider plugin's id (the canonical transport resolves
+   * `apiKeys.<providerId>`); core does not enumerate providers here.
    */
-  apiKeys?: {
-    openai?: string
-    openrouter?: string
-  }
+  apiKeys?: Record<string, string>
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -271,9 +270,9 @@ export function loadUserConfig(): UserConfig {
   }
   // apiKeys: a provider-id → key map (env-var fallback for the canonical
   // transport). Keep only string non-empty values; an empty / all-invalid
-  // map is omitted. We don't restrict the key set here — the transport's
-  // resolver only reads the providers it knows (openai, openrouter), so an
-  // unknown key is harmless and a typo never breaks parsing.
+  // map is omitted. We don't restrict the key set here — each provider
+  // plugin's resolver reads only its own id, so an unknown key is
+  // harmless and a typo never breaks parsing.
   if (obj.apiKeys && typeof obj.apiKeys === "object" && !Array.isArray(obj.apiKeys)) {
     const raw = obj.apiKeys as Record<string, unknown>
     const apiKeys: Record<string, string> = {}

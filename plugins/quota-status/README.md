@@ -54,9 +54,9 @@ Three feeds keep the row up-to-date:
    this one is silent). Falls back to a real `checkQuota()` request if
    the cache hasn't been freshened in the last `refreshMs/2` window.
 
-The handler re-uses `formatQuotaSummary` from `src/quota-format.ts`, so
-the visual output is identical to what the synchronous startup tree
-used to print.
+The handler renders via `renderQuotaFooter` (`./render.ts`), a pure
+renderer fed provider-neutral `QuotaWindow[]` data — it never sees raw
+provider rate-limit headers.
 
 ## Auto-skip of the startup row
 

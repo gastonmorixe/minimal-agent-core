@@ -1,11 +1,12 @@
 /**
- * Overage tail on the NEUTRAL provider-session path.
+ * Overage tail on the provider-neutral path.
  *
- * The live footer now feeds the renderer neutral `QuotaWindow[]` plus an
+ * The live footer feeds the renderer neutral `QuotaWindow[]` plus an
  * `overage` DTO (from `QuotaSnapshot.overage`). These tests pin that the
- * `overage off` readout — previously only reachable via the legacy
- * `ReadonlyMap` overload — surfaces on the neutral path under the same
- * `showOverage` opt-in rules as the legacy path.
+ * `overage off` readout surfaces under the `showOverage` opt-in rules:
+ * only the inactive ("off") state renders, and only when opted in.
+ * (Header parsing into the DTO is provider-side — see
+ * `plugins/llm-anthropic/session-info.overage.test.ts`.)
  *
  * @module quota-status/render.overage.test
  */
@@ -75,25 +76,19 @@ describe("renderQuotaFooter — overage on the neutral path", () => {
     expect(out).not.toContain("overage")
   })
 
-  it("neutral 'overage off' is byte-identical to the legacy-map rendering", () => {
-    // Legacy overload reads the raw header; neutral reads the DTO. The visual
-    // must match exactly (shared `overageTailText`). Render both with overage
-    // as the ONLY thing showing so the strings line up cleanly.
-    const legacy = renderQuotaFooter(
-      new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
-        ["anthropic-ratelimit-unified-overage-status", "off"],
-      ]),
-      TOKENS,
-      { cols: WIDE, showOverage: true, showSession: false },
-    )!
-    const neutral = renderQuotaFooter(WINDOWS, TOKENS, {
+  it("renders the 'overage off' tail with the established bytes (faintWhite label, red value)", () => {
+    // Byte-level pin of the tail's visual, preserving the guarantee the
+    // retired legacy-vs-neutral identity test gave: the rendering must not
+    // drift. faintWhite = `\x1b[2;37m…\x1b[22;39m`; red = `\x1b[31m…\x1b[39m`.
+    const out = renderQuotaFooter(WINDOWS, TOKENS, {
       cols: WIDE,
       showOverage: true,
       showSession: false,
       overage: { active: false },
     })!
-    expect(neutral).toBe(legacy)
+    expect(out).toContain(
+      "\x1b[2;37moverage\x1b[22;39m \x1b[31moff\x1b[39m",
+    )
   })
 
   it("the neutral default-order output is unchanged when showOverage is off", () => {

@@ -89,8 +89,6 @@ const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
   "llm/transport/select-transport.ts",
   "llm/transport/canonical-send.ts",
   "media/ingest.ts", // deprecated buildAnthropicUserContent alias (one release)
-  "infra/session.ts",
-  "config.ts",
   // Agent/UI layers still branching on legacy client specifics.
   "agent.ts",
   "index.ts",

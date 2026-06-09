@@ -117,13 +117,10 @@ export interface RenderOpts {
   /** Surface the `overage off` segment when overage is disabled. Default: false. */
   showOverage?: boolean
   /**
-   * Provider-neutral overage state (from `QuotaSnapshot.overage`). Only
-   * consulted on the neutral {@link QuotaWindow}[] path — the legacy-map
-   * overload reads the raw `anthropic-ratelimit-unified-overage-status`
-   * header instead. When `showOverage` is on and `active === false`, the
-   * renderer appends the same dim `overage off` tail to the quota group
-   * (mirroring the legacy logic: only "off" surfaces, "allowed"/active is
-   * silent). Absent ⇒ no overage readout.
+   * Provider-neutral overage state (from `QuotaSnapshot.overage`). When
+   * `showOverage` is on and `active === false`, the renderer appends a
+   * dim `overage off` tail to the quota group. Only "off" surfaces — an
+   * active/engaged overage is silent. Absent ⇒ no overage readout.
    */
   overage?: { active: boolean }
   /** Render the session-tokens block on the right. Default: true. */
@@ -250,33 +247,16 @@ function humanReset(resetMs: number, now: number): string | null {
   return `${m}m`
 }
 
+/**
+ * Internal render shape for one quota window — a 1:1 mapping from the
+ * provider-neutral {@link QuotaWindow} DTO. No header parsing happens in
+ * this plugin: provider wire knowledge lives in the provider plugins
+ * (see `src/architecture.provider-decoupling.test.ts`).
+ */
 interface ParsedWindow {
   name: string
   util?: number
   reset?: number
-}
-
-function parseWindows(
-  rl: ReadonlyMap<string, string>,
-  showOverage: boolean,
-): ParsedWindow[] {
-  const wins = new Map<string, ParsedWindow>()
-  for (const [k, v] of rl) {
-    const mw = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/)
-    if (!mw) continue
-    const name = mw[1]!
-    const field = mw[2]!
-    if (name === "fallback" || name === "representative") continue
-    if (!showOverage && name === "overage") continue
-    if (!wins.has(name)) wins.set(name, { name })
-    const w = wins.get(name)!
-    if (field === "utilization") w.util = Number(v)
-    else if (field === "reset") w.reset = Number(v) * 1000
-  }
-  const order = (n: string) => (n === "5h" ? 0 : n === "7d" ? 1 : 2)
-  return [...wins.values()]
-    .filter((w) => w.util != null)
-    .sort((a, b) => order(a.name) - order(b.name) || a.name.localeCompare(b.name))
 }
 
 const colorBar = (pct: number) => (pct >= 85 ? c.red : pct >= 60 ? c.yellow : c.green)
@@ -303,9 +283,9 @@ function renderWindowSegment(
     const human = humanReset(w.reset, now)
     if (human) s += ` ${c.dim(human)}`
   }
-  // The synthetic "overage" entry has no `util` so it can't reach this
-  // segment renderer. Surfacing "overage off" lives in `overageTail` and is
-  // appended by the top-level builder when `showOverage` is set.
+  // Overage is not a window (no utilization), so it never reaches this
+  // segment renderer. Surfacing "overage off" lives in `overageTailNeutral`
+  // and is appended by the top-level builder when `showOverage` is set.
   return s
 }
 
@@ -390,33 +370,14 @@ function renderSessionSegment(
 }
 
 /**
- * Shared visual for the `overage off` tail (faintWhite label + red value).
- * Extracted so the legacy-map path and the neutral DTO path render the
- * byte-identical segment — the only difference between them is how each
- * decides WHETHER to show it (raw header vs. neutral `overage` DTO).
- */
-function overageTailText(): string {
-  return `${c.faintWhite("overage")} ${c.red("off")}`
-}
-
-/**
- * Legacy-map overage tail: reads the raw Anthropic header. Surfaces
- * `overage off` for any present status other than `"allowed"` (i.e. `"off"`).
- */
-function overageTail(rl: ReadonlyMap<string, string>): string | null {
-  const ov = rl.get("anthropic-ratelimit-unified-overage-status")
-  if (!ov || ov === "allowed") return null
-  return overageTailText()
-}
-
-/**
- * Neutral-path overage tail: driven by the provider DTO. Surfaces
- * `overage off` only when overage is reported AND inactive (`active === false`),
- * mirroring the legacy `"off"`-only behavior. Active/engaged overage is silent.
+ * Overage tail (faintWhite label + red value), driven by the provider's
+ * neutral `overage` DTO. Surfaces `overage off` only when overage is
+ * reported AND inactive (`active === false`). Active/engaged overage is
+ * silent — only the "off" state is worth a readout.
  */
 function overageTailNeutral(overage: { active: boolean } | undefined): string | null {
   if (!overage || overage.active !== false) return null
-  return overageTailText()
+  return `${c.faintWhite("overage")} ${c.red("off")}`
 }
 
 /**
@@ -589,18 +550,7 @@ function clipToWidth(s: string, maxWidth: number): string {
  * width physically can't accommodate it.
  */
 export function renderQuotaFooter(
-  windows: QuotaWindow[],
-  session: SessionTokens,
-  opts?: RenderOpts,
-): string | null
-/** @deprecated legacy Anthropic-header input; prefer the neutral {@link QuotaWindow}[] form. */
-export function renderQuotaFooter(
-  rl: ReadonlyMap<string, string>,
-  session: SessionTokens,
-  opts?: RenderOpts,
-): string | null
-export function renderQuotaFooter(
-  input: QuotaWindow[] | ReadonlyMap<string, string>,
+  input: QuotaWindow[],
   session: SessionTokens,
   opts: RenderOpts = {},
 ): string | null {
@@ -612,26 +562,18 @@ export function renderQuotaFooter(
   // session info; this `undefined` path is for dev/test callers and the
   // brief pre-model-resolution startup window.
   const contextWindow = opts.contextWindow
-  // Neutral path: a provider-supplied `QuotaWindow[]`. Legacy path: the raw
-  // Anthropic `anthropic-ratelimit-*` map, parsed here for back-compat (the
-  // overage tail only exists on the legacy path — it reads the raw map).
-  const isLegacyMap = !Array.isArray(input)
-  const windows: ParsedWindow[] = isLegacyMap
-    ? parseWindows(input as ReadonlyMap<string, string>, showOverage)
-    : (input as QuotaWindow[]).map((w) => ({
-        name: w.id,
-        util: w.utilization,
-        reset: w.resetAtMs,
-      }))
+  // Provider-neutral input only: a `QuotaWindow[]` from the provider
+  // session seam. Mapping to the internal render shape is 1:1 — no wire
+  // parsing happens here.
+  const windows: ParsedWindow[] = input.map((w) => ({
+    name: w.id,
+    util: w.utilization,
+    reset: w.resetAtMs,
+  }))
   const showSession = opts.showSession ?? true
-  // Overage tail rides with the `quota` group on both paths. Legacy reads the
-  // raw header; neutral reads the provider's `overage` DTO. Same visual via
-  // `overageTailText`; only the "show it?" decision differs.
-  const tail = !showOverage
-    ? null
-    : isLegacyMap
-      ? overageTail(input as ReadonlyMap<string, string>)
-      : overageTailNeutral(opts.overage)
+  // Overage tail rides with the `quota` group, driven by the provider's
+  // neutral `overage` DTO.
+  const tail = !showOverage ? null : overageTailNeutral(opts.overage)
   const order = normalizeSegmentOrder(opts.segments)
 
   if (windows.length === 0 && !showSession && !tail && !opts.effort && !opts.sid) return null
@@ -656,7 +598,7 @@ export function renderQuotaFooter(
   }
   // Segment renderers keyed by id. The compression ladder still toggles the
   // `cfg.with*` flags per segment KIND; only the ORDER comes from `order`.
-  // The overage tail (legacy/power-user) rides with the `quota` group.
+  // The overage tail (power-user opt-in) rides with the `quota` group.
   const renderSegment = (id: StatusSegmentId, cfg: BuildCfg): string[] => {
     switch (id) {
       case "quota": {
