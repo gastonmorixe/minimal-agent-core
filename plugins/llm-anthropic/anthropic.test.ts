@@ -83,6 +83,26 @@ describe("bootstrapAnthropic", () => {
     expect(fast?.inputUSD).toBe(10)
   })
 
+  it("Fable 5 registers with a flat $10/$50 rate, no fast tier, 1M window", () => {
+    setup()
+    const entry = resolveModel("claude-fable-5")
+    // [1m] alias resolves to the same canonical entry.
+    expect(resolveModel("claude-fable-5[1m]").id).toBe("claude-fable-5")
+    // Flat rate: no per-request pricing picker, table pinned exactly.
+    expect(entry.pricingForRequest).toBeUndefined()
+    expect(entry.pricing.inputUSD).toBe(10)
+    expect(entry.pricing.outputUSD).toBe(50)
+    expect(entry.pricing.cacheWriteUSD).toBe(12.5)
+    expect(entry.pricing.cacheReadUSD).toBe(1)
+    // Capability twin of opus-4-8 EXCEPT the fast tier.
+    expect(entry.capabilities.speedFast).toBe(false)
+    expect(entry.capabilities.contextWindow).toBe(1_000_000)
+    expect(entry.capabilities.maxOutputTokens).toBe(128_000)
+    expect(entry.capabilities.effort.levels).toContain("xhigh")
+    expect(entry.capabilities.thinking.adaptive).toBe(true)
+    expect(entry.capabilities.thinking.extended).toBe(false)
+  })
+
   it("recommendSubagentModels maps roles to its OWN registered models by tier (no foreign SKUs)", () => {
     setup()
     const recs = anthropicAdapter.recommendSubagentModels?.() ?? []

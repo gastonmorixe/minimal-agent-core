@@ -50,6 +50,7 @@ import type {
 import { has1mContext, normalizeModelForAPI } from "./client/types.ts"
 import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"
 import { API_URL, buildHeaders, DEFAULT_MODEL, SYSTEM_PROMPT } from "./headers.ts"
+import { findModel } from "./llm/model-registry.ts"
 import { buildMetadata, getSessionId } from "./metadata.ts"
 import {
   defaultNetworkClient,
@@ -233,11 +234,32 @@ export async function* sendMessageOnce(
   const model = normalizeModelForAPI(rawModel)
 
   const sessionId = getSessionId()
+
+  // Fast-mode capability gate. The agent forwards `speed:"fast"` blindly
+  // (sticky CLI flag / env), so the LAST line of defense is here: a model
+  // whose registry entry declares `speedFast: false` (fable-5, sonnet,
+  // haiku) must get NEITHER the body field NOR the fast-mode beta header.
+  // Without this, MINIMAL_AGENT_FAST=1 + a no-fast-tier model 429s every
+  // request ("Usage credits are required for fast mode."). Unregistered
+  // model ids fall through un-gated (forward-compat: let the server
+  // decide), matching the canonical transport's behavior in
+  // plugins/llm-anthropic/{validate,request-body,beta-flags}.ts.
+  const modelEntry = findModel(rawModel)
+  const fastRequested = speed === "fast"
+  const fastSupported = modelEntry ? modelEntry.capabilities.speedFast : true
+  const sendFast = fastRequested && fastSupported
+  if (fastRequested && !sendFast) {
+    diag.warn(
+      "client.fast-mode",
+      `fast mode requested but ${model} has no fast tier; sending without speed:"fast"`,
+    )
+  }
+
   // Pass rawModel so buildBetaFlags sees [1m] and adds context-1m flag.
   // The 5th arg is the optional feature-gated beta set : right now we only
-  // surface `speed === "fast"` from the caller (fast-mode-2026-02-01 beta).
+  // surface the capability-gated fast-mode opt-in (fast-mode-2026-02-01 beta).
   const headers = buildHeaders(auth, sessionId, requestType, rawModel, {
-    speedFast: speed === "fast",
+    speedFast: sendFast,
   })
   const metadata = buildMetadata(auth)
 
@@ -278,10 +300,9 @@ export async function* sendMessageOnce(
 
   // Speed mode: opt-in `speed:"fast"` for the 2026-02-01 fast-mode beta.
   // The beta flag itself lives in headers.ts; here we only set the body
-  // field. Capability gating ("does this model support fast?") happens
-  // upstream — the agent only forwards the option when the model entry
-  // declares `speedFast: true`.
-  if (speed === "fast") {
+  // field. `sendFast` is the capability-gated decision computed above —
+  // body field and beta header always travel together.
+  if (sendFast) {
     body.speed = "fast"
   }
 
