@@ -1,5 +1,5 @@
 /**
- * Helper that extracts `anthropic-ratelimit-*` headers from a fetch
+ * Helper that extracts rate-limit-shaped headers (any `*ratelimit*` name) from a fetch
  * `Response` and pushes them onto BOTH:
  *
  * 1. The in-process {@link setLastRateLimits} cache, so the
@@ -42,8 +42,18 @@ export interface QuotaHeadersReceivedPayload {
 }
 
 /**
- * Walk the response headers, copy every `anthropic-ratelimit-*`
- * entry into a new `Map`, and broadcast it to the cache + bus.
+ * Rate-limit header NAME pattern, provider-agnostic: any header whose name
+ * contains "ratelimit" (vendors ship `<vendor>-ratelimit-*`,
+ * `x-ratelimit-*`, `ratelimit-*` per the IETF draft). Core only DETECTS
+ * and caches these raw entries; interpreting them (window shapes, fields)
+ * is the owning provider plugin's job behind the session-info seam, which
+ * simply ignores names it doesn't understand.
+ */
+const RATELIMIT_HEADER_RE = /ratelimit/i
+
+/**
+ * Walk the response headers, copy every rate-limit-shaped entry into a
+ * new `Map`, and broadcast it to the cache + bus.
  *
  * Returns the extracted map (always — the caller often wants it for
  * its own bookkeeping; e.g. `checkQuota` returns it to the user as
@@ -51,13 +61,13 @@ export interface QuotaHeadersReceivedPayload {
  * carried no matching headers.
  *
  * Header names are not lowercased: real responses already arrive
- * lowercased and `formatQuotaSummary` matches both forms via regex.
+ * lowercased, and the plugin parsers match their own exact shapes.
  * We preserve the wire form for parity with prior behavior.
  */
 export function broadcastResponseRateLimits(responseHeaders: Headers): Map<string, string> {
   const rl = new Map<string, string>()
   responseHeaders.forEach((v, k) => {
-    if (k.startsWith("anthropic-ratelimit-")) rl.set(k, v)
+    if (RATELIMIT_HEADER_RE.test(k)) rl.set(k, v)
   })
   if (rl.size === 0) return rl
 

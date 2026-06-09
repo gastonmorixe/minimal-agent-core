@@ -84,6 +84,7 @@ import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { DEFAULT_MODEL, VERSION } from "./headers.ts"
 import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
+import { resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { clipboardText } from "./media/clipboard.ts"
 import { mediaPasteInterceptor } from "./media/paste-intercept.ts"
 import { getSessionId, setSessionId } from "./metadata.ts"
@@ -93,7 +94,7 @@ import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defau
 import { createAgentContext } from "./plugins/agent-context.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
-import { formatQuotaSummary } from "./quota-format.ts"
+import { formatQuotaWindows } from "./quota-summary.ts"
 import { buildReadyBanner } from "./ready-banner.ts"
 import {
   buildResumeHeader,
@@ -669,10 +670,10 @@ function startStartupRowSpinner(
   }
 }
 
-// `formatQuotaSummary` lives in `./quota-format.ts` so the startup tree
-// AND the live-area `quota-status` plugin can share one source of
-// truth. The startup row passes `leadSpaces: 2` to align with the
-// tree's `╰ ok ✔` indent; the live-area slot passes `0`.
+// The startup quota row renders NEUTRAL QuotaWindows via
+// `./quota-summary.ts` (`leadSpaces: 2` aligns with the tree's `╰ ok ✔`
+// indent). Header-shape knowledge lives in each provider plugin's
+// session-info seam; core never parses rate-limit header names.
 
 /**
  * Extract a non-interactive prompt from command-line args.
@@ -1461,9 +1462,22 @@ async function main() {
       )
       process.exit(1)
     }
-    quotaSpinner.ok(
-      `${c.boldGreen("ok")} ${c.boldGreen("✔")}${formatQuotaSummary(result.rateLimits, { leadSpaces: 2 })}`,
-    )
+    // Banner quota summary: provider-NEUTRAL path. checkQuota's broadcast
+    // just populated the quota cache; the provider plugin's session-info
+    // seam parses its own header shapes into neutral QuotaWindows, and core
+    // renders those (Phase 14 — header-name knowledge left core).
+    let quotaSegment = ""
+    try {
+      const info = await resolveProviderSessionInfo(selectedModel)
+      quotaSegment = formatQuotaWindows(info.quota?.windows ?? [], {
+        leadSpaces: 2,
+        showOverage: process.env.MINIMAL_AGENT_QUOTA_OVERAGE === "1",
+        overage: info.quota?.overage,
+      })
+    } catch {
+      // No provider session seam (or cold cache): skip the segment.
+    }
+    quotaSpinner.ok(`${c.boldGreen("ok")} ${c.boldGreen("✔")}${quotaSegment}`)
   }
   // Resolve --resume: load prior conversation if asked.
   // We resolve the sid, load the session, hash-check against current

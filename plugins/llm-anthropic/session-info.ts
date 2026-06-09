@@ -52,23 +52,36 @@ const FRESHNESS_MS = 60_000
 /**
  * Parse Anthropic's `anthropic-ratelimit-unified-<window>-<field>` headers into
  * neutral {@link QuotaWindow}s. Drops the synthetic `fallback`/`representative`
- * entries and `overage` (a power-user-only readout). Sorted 5h, 7d, then the
- * rest. Windows without a utilization value are dropped.
+ * entries and `overage` (a power-user-only readout). The windowless AGGREGATE
+ * form (`anthropic-ratelimit-unified-<field>`) becomes `id:"overall"` so the
+ * startup banner can show the account-level line the raw headers used to feed.
+ * Sorted 5h, 7d, other named windows, `overall` last. Windows without a
+ * utilization value are dropped.
  */
 export function parseAnthropicQuotaWindows(rl: ReadonlyMap<string, string>): QuotaWindow[] {
   const wins = new Map<string, { id: string; utilization?: number; resetAtMs?: number }>()
+  const FIELDS = new Set(["utilization", "reset", "status", "remaining", "limit"])
   for (const [k, v] of rl) {
-    const m = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/)
-    if (!m) continue
-    const name = m[1]!
-    const field = m[2]!
+    let name: string
+    let field: string
+    const mw = k.match(/^anthropic-ratelimit-unified-([\w]+)-(\w+)$/)
+    if (mw && !FIELDS.has(mw[1]!)) {
+      name = mw[1]!
+      field = mw[2]!
+    } else {
+      // Aggregate (windowless) form: anthropic-ratelimit-unified-<field>.
+      const ma = k.match(/^anthropic-ratelimit-unified-(\w+)$/)
+      if (!ma || !FIELDS.has(ma[1]!)) continue
+      name = "overall"
+      field = ma[1]!
+    }
     if (name === "fallback" || name === "representative" || name === "overage") continue
     if (!wins.has(name)) wins.set(name, { id: name })
     const w = wins.get(name)!
     if (field === "utilization") w.utilization = Number(v)
     else if (field === "reset") w.resetAtMs = Number(v) * 1000
   }
-  const order = (n: string) => (n === "5h" ? 0 : n === "7d" ? 1 : 2)
+  const order = (n: string) => (n === "5h" ? 0 : n === "7d" ? 1 : n === "overall" ? 3 : 2)
   return [...wins.values()]
     .filter((w) => w.utilization != null)
     .sort((a, b) => order(a.id) - order(b.id) || a.id.localeCompare(b.id))
