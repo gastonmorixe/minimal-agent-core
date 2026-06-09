@@ -3,9 +3,15 @@
  * assert side. We pin the structure (no leading "quota" word, bar
  * shapes, session segment with its own bar, overage opt-in, responsive
  * degradation), not specific SGR bytes.
+ *
+ * Input is the provider-neutral `QuotaWindow[]` DTO. Header PARSING is
+ * a provider concern and is covered where the parser lives
+ * (`plugins/llm-anthropic/session-info*.test.ts`) — nothing here knows
+ * about `anthropic-ratelimit-*` headers.
  */
 
 import { describe, expect, it } from "bun:test"
+import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
 import type { SessionTokens } from "../../src/session-tokens.ts"
 import { renderQuotaFooter } from "./render.ts"
 
@@ -35,16 +41,14 @@ const SOME_TOKENS: SessionTokens = {
 
 describe("renderQuotaFooter", () => {
   it("returns null when there is nothing to render (no windows, session off)", () => {
-    expect(
-      renderQuotaFooter(new Map(), NO_TOKENS, { showSession: false }),
-    ).toBeNull()
+    expect(renderQuotaFooter([], NO_TOKENS, { showSession: false })).toBeNull()
   })
 
   it("renders the session block even when there are no quota windows (known window)", () => {
     // Pre-traffic, before the first response arrives, we still want users
     // to see their context-budget signpost (`200k ░░░░░░░░ 0% 0`).
     const out = stripAnsi(
-      renderQuotaFooter(new Map(), NO_TOKENS, { contextWindow: 200_000 }),
+      renderQuotaFooter([], NO_TOKENS, { contextWindow: 200_000 }),
     )
     // `✦` was retired — the size label is the session marker.
     expect(out).not.toContain("✦")
@@ -62,7 +66,7 @@ describe("renderQuotaFooter", () => {
     // No `contextWindow` opt → renderer can't compute a fill % → drops
     // the bar+percent and uses a dim middle-dot as the label. The
     // trailing token count still renders.
-    const out = stripAnsi(renderQuotaFooter(new Map(), NO_TOKENS))
+    const out = stripAnsi(renderQuotaFooter([], NO_TOKENS))
     expect(out).toContain("·") // placeholder for unknown window
     expect(out).not.toContain("0%") // no percent without a denominator
     expect(out).not.toContain("200k") // no implicit default value
@@ -72,16 +76,18 @@ describe("renderQuotaFooter", () => {
   })
 
   it("never starts with the word 'quota'", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.21"]])
-    const out = stripAnsi(renderQuotaFooter(rl, SOME_TOKENS))
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.21 }]
+    const out = stripAnsi(renderQuotaFooter(windows, SOME_TOKENS))
     expect(out.startsWith("quota")).toBe(false)
     // A2: first char is the window NAME label, not a bar glyph.
     expect(out.startsWith("5h ")).toBe(true)
   })
 
   it("uses an 8-cell bar (fill + empty glyphs sum to 8 per window)", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.5"]])
-    const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { showSession: false }))
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.5 }]
+    const out = stripAnsi(
+      renderQuotaFooter(windows, NO_TOKENS, { showSession: false }),
+    )
     // The bar follows the window-name label (`5h `) — extract by matching
     // the first run of bar glyphs anywhere in the line.
     const m = out.match(/[█▏▎▍▌▋▊▉░]+/)
@@ -90,32 +96,30 @@ describe("renderQuotaFooter", () => {
   })
 
   it("renders the window name LEFT of the bar, then bar + percent", () => {
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-    ])
-    const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { showSession: false }))
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21 },
+      { id: "7d", utilization: 0.08 },
+    ]
+    const out = stripAnsi(
+      renderQuotaFooter(windows, NO_TOKENS, { showSession: false }),
+    )
     // A2 layout: `<name> <bar> <pct>` — name leads.
     expect(out).toMatch(/5h [█▏▎▍▌▋▊▉░]{8} 21%/)
     expect(out).toMatch(/7d [█▏▎▍▌▋▊▉░]{8} 8%/)
-    // 5h must precede 7d.
+    // 5h must precede 7d (windows render in provider-given order).
     expect(out.indexOf("5h")).toBeLessThan(out.indexOf("7d"))
   })
 
   it("appends the reset countdown as a trailing dim duration (no · separator, no ↻ icon)", () => {
     const now = 1_700_000_000_000
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      [
-        "anthropic-ratelimit-unified-5h-reset",
-        String(Math.floor((now + 90 * 60_000) / 1000)),
-      ],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21, resetAtMs: now + 90 * 60_000 },
+    ]
     // `showSession: false` so the session block (which can carry a `·`
     // placeholder when context window is unknown) doesn't leak into
     // this assertion.
     const out = stripAnsi(
-      renderQuotaFooter(rl, NO_TOKENS, { now: () => now, showSession: false }),
+      renderQuotaFooter(windows, NO_TOKENS, { now: () => now, showSession: false }),
     )
     // Shape: `<name> <bar> <pct> <reset>` — single-space gaps everywhere.
     // The dim color of the reset countdown is enough visual separation
@@ -126,9 +130,9 @@ describe("renderQuotaFooter", () => {
   })
 
   it("appends the session block as `<size> <bar> <pct> <used>` (structurally identical to quota)", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
     )
     expect(out).not.toContain("✦")
     expect(out).toContain("47.5k")
@@ -149,9 +153,9 @@ describe("renderQuotaFooter", () => {
   })
 
   it("uses contextSize (not the inflated cumulative `total`) for the displayed number", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
     )
     // `total` is 58_500 in SOME_TOKENS but contextSize is 47_500.
     expect(out).toContain("47.5k")
@@ -161,9 +165,9 @@ describe("renderQuotaFooter", () => {
   it("ALWAYS shows the session block — even when contextSize is 0", () => {
     // User-facing requirement: from the very first paint (before any API
     // response), the context-budget signpost should be visible.
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out = stripAnsi(
-      renderQuotaFooter(rl, NO_TOKENS, { contextWindow: 200_000 }),
+      renderQuotaFooter(windows, NO_TOKENS, { contextWindow: 200_000 }),
     )
     expect(out).not.toContain("✦")
     expect(out).toContain("0%")
@@ -176,10 +180,10 @@ describe("renderQuotaFooter", () => {
     // the footer (it grows as you work). Once it's > 0 it must NOT be
     // faint. The zero state can stay quiet — there's no live data to
     // emphasise, and parallel to 5h/7d's dim pre-traffic shape.
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const opts = { contextWindow: 200_000 }
-    const live = renderQuotaFooter(rl, SOME_TOKENS, opts) ?? ""
-    const cold = renderQuotaFooter(rl, NO_TOKENS, opts) ?? ""
+    const live = renderQuotaFooter(windows, SOME_TOKENS, opts) ?? ""
+    const cold = renderQuotaFooter(windows, NO_TOKENS, opts) ?? ""
     // Bold SGR opener (\x1b[1m) wraps the live numerator.
     expect(live).toContain("\x1b[1m47.5k\x1b[22m")
     // Live numerator is NOT inside a faintWhite wrap (faintWhite is
@@ -197,20 +201,12 @@ describe("renderQuotaFooter", () => {
     // window is unknown, so this guard is scoped to a
     // `showSession: false` render.
     const now = 1_700_000_000_000
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      [
-        "anthropic-ratelimit-unified-5h-reset",
-        String(Math.floor((now + 90 * 60_000) / 1000)),
-      ],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      [
-        "anthropic-ratelimit-unified-7d-reset",
-        String(Math.floor((now + 6 * 86400_000) / 1000)),
-      ],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21, resetAtMs: now + 90 * 60_000 },
+      { id: "7d", utilization: 0.08, resetAtMs: now + 6 * 86_400_000 },
+    ]
     const out = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { now: () => now, showSession: false }),
+      renderQuotaFooter(windows, SOME_TOKENS, { now: () => now, showSession: false }),
     )
     expect(out).not.toContain("·")
   })
@@ -220,15 +216,15 @@ describe("renderQuotaFooter", () => {
     // segment's label says what its bar represents. For session that's
     // the model's context window magnitude, formatted compactly so the
     // user can see at a glance whether they're on 200k or 1M.
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out200k = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
     )
     const out1m = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 1_000_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 1_000_000 }),
     )
     const out500k = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 500_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 500_000 }),
     )
     // Size label precedes the session bar (after the 4-space group separator).
     expect(out200k).toMatch(/ {4}200k [█▏▎▍▌▋▊▉░]{8}/)
@@ -243,20 +239,20 @@ describe("renderQuotaFooter", () => {
   it("uses faintWhite for the size label (same tier as 5h/7d quota labels)", () => {
     // Visual-tier check: the size label sits at the same intensity as
     // the quota labels so the three segments read as a row of peers.
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-    const live = renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 200_000 }) ?? ""
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+    const live = renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }) ?? ""
     // faintWhite is `\x1b[2;37m...\x1b[22;39m` (dim + white fg).
     expect(live).toContain("\x1b[2;37m200k\x1b[22;39m")
     expect(live).toContain("\x1b[2;37m5h\x1b[22;39m")
   })
 
   it("honors contextWindow opt (1M model context → smaller fill % for the same tokens)", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out200k = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 200_000 }),
     )
     const out1m = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { contextWindow: 1_000_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { contextWindow: 1_000_000 }),
     )
     expect(out200k).toContain("24%") // 47.5k / 200k
     expect(out1m).toContain("5%") //   47.5k / 1M
@@ -269,20 +265,20 @@ describe("renderQuotaFooter", () => {
   })
 
   it("clamps the session bar % at 100 when contextSize overshoots the window", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const huge: SessionTokens = { ...NO_TOKENS, contextSize: 250_000, turns: 1 }
     const out = stripAnsi(
-      renderQuotaFooter(rl, huge, { contextWindow: 200_000 }),
+      renderQuotaFooter(windows, huge, { contextWindow: 200_000 }),
     )
     expect(out).toContain("100%")
   })
 
   it("color-grades the session bar like the quota bars (green/yellow/red)", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.0"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.0 }]
     const ctx = 200_000
     const at = (frac: number) => {
       const s: SessionTokens = { ...NO_TOKENS, contextSize: Math.floor(frac * ctx) }
-      return renderQuotaFooter(rl, s, { contextWindow: ctx }) ?? ""
+      return renderQuotaFooter(windows, s, { contextWindow: ctx }) ?? ""
     }
     // SGR 31=red, 33=yellow, 32=green.
     expect(at(0.1)).toMatch(/\x1b\[(?:\d+;)?32m/)
@@ -291,42 +287,43 @@ describe("renderQuotaFooter", () => {
   })
 
   it("hides 'overage' by default", () => {
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
-      ["anthropic-ratelimit-unified-overage-status", "off"],
-    ])
-    expect(stripAnsi(renderQuotaFooter(rl, NO_TOKENS))).not.toContain("overage")
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+    expect(
+      stripAnsi(
+        renderQuotaFooter(windows, NO_TOKENS, { overage: { active: false } }),
+      ),
+    ).not.toContain("overage")
   })
 
-  it("surfaces 'overage off' only when showOverage: true and status != allowed", () => {
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
-      ["anthropic-ratelimit-unified-overage-status", "off"],
-    ])
+  it("surfaces 'overage off' only when showOverage: true and overage is inactive", () => {
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out = stripAnsi(
-      renderQuotaFooter(rl, NO_TOKENS, { showOverage: true }),
+      renderQuotaFooter(windows, NO_TOKENS, {
+        showOverage: true,
+        overage: { active: false },
+      }),
     )
     expect(out).toContain("overage")
     expect(out).toContain("off")
   })
 
-  it("hides overage even with showOverage: true when status is 'allowed'", () => {
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
-      ["anthropic-ratelimit-unified-overage-status", "allowed"],
-    ])
+  it("hides overage even with showOverage: true when overage is active", () => {
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     expect(
-      stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { showOverage: true })),
+      stripAnsi(
+        renderQuotaFooter(windows, NO_TOKENS, {
+          showOverage: true,
+          overage: { active: true },
+        }),
+      ),
     ).not.toContain("overage")
   })
 
   it("color-grades the quota bar (green <60, yellow 60-84, red >=85)", () => {
     const at = (util: number) =>
-      renderQuotaFooter(
-        new Map([["anthropic-ratelimit-unified-5h-utilization", String(util)]]),
-        NO_TOKENS,
-        { showSession: false },
-      ) ?? ""
+      renderQuotaFooter([{ id: "5h", utilization: util }], NO_TOKENS, {
+        showSession: false,
+      }) ?? ""
     // SGR 31=red, 33=yellow, 32=green.
     expect(at(0.1)).toMatch(/\x1b\[(?:\d+;)?32m/)
     expect(at(0.7)).toMatch(/\x1b\[(?:\d+;)?33m/)
@@ -335,20 +332,12 @@ describe("renderQuotaFooter", () => {
 
   it("wide layout: full segments, max separator, full bars", () => {
     const now = 1_700_000_000_000
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      [
-        "anthropic-ratelimit-unified-5h-reset",
-        String(Math.floor((now + 90 * 60_000) / 1000)),
-      ],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      [
-        "anthropic-ratelimit-unified-7d-reset",
-        String(Math.floor((now + 6 * 24 * 3600 * 1000) / 1000)),
-      ],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21, resetAtMs: now + 90 * 60_000 },
+      { id: "7d", utilization: 0.08, resetAtMs: now + 6 * 24 * 3600 * 1000 },
+    ]
     const wide = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, {
+      renderQuotaFooter(windows, SOME_TOKENS, {
         cols: 200,
         now: () => now,
         contextWindow: 200_000,
@@ -376,37 +365,37 @@ describe("renderQuotaFooter", () => {
     // Three widths chosen so each triggers exactly one separator step.
     // No effort / sid / overage to keep the math focused on sep alone.
     // Segment costs at bar=8: 5h=15, 7d=14, 200k+47.5k=23.
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21 },
+      { id: "7d", utilization: 0.08 },
+    ]
     // sep=4 step cost = 15+4+14+4+23 = 60 cells.
     const sep4 = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { cols: 200, contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { cols: 200, contextWindow: 200_000 }),
     )
     expect(sep4).toMatch(/21% {4}7d/) // 4-space gap
     // cols=59 forces sep=3 (step cost = 58).
     const sep3 = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { cols: 59, contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { cols: 59, contextWindow: 200_000 }),
     )
     expect(sep3).toMatch(/21% {3}7d/) // 3-space gap
     // cols=57 forces sep=2 (step cost = 56). Rule 1 floor.
     const sep2 = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { cols: 57, contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { cols: 57, contextWindow: 200_000 }),
     )
     expect(sep2).toMatch(/21% {2}7d/) // 2-space gap (Rule 1 floor)
   })
 
   it("compression: bars shrink 8 → 4 cells under pressure (Rule 2.1.1)", () => {
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.50"],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.50"],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.5 },
+      { id: "7d", utilization: 0.5 },
+    ]
     // Bar=4 step cost (sep=2, all tail dropped, session bar still on):
     // empirically 45 cells (`5h ██░░ 50%  7d ██░░ 50%  200k █░░░ 24% 47.5k`).
     // Bar at 50% with 4 cells: eighths=round(50*4*8/100)=16, so 2 full + 0 part + 2 empty = "██░░".
     const tight = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { cols: 45, contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { cols: 45, contextWindow: 200_000 }),
     )
     expect(tight).toMatch(/5h ██░░ 50%/)
     expect(tight).toMatch(/7d ██░░ 50%/)
@@ -416,13 +405,13 @@ describe("renderQuotaFooter", () => {
   })
 
   it("drops 7d window only after all compressions are exhausted", () => {
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21 },
+      { id: "7d", utilization: 0.08 },
+    ]
     // Below the leanest compressed multi-window form, only 5h remains.
     const veryTight = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { cols: 20, contextWindow: 200_000 }),
+      renderQuotaFooter(windows, SOME_TOKENS, { cols: 20, contextWindow: 200_000 }),
     )
     expect(veryTight).toContain("5h")
     expect(veryTight).not.toContain("7d")
@@ -431,15 +420,15 @@ describe("renderQuotaFooter", () => {
 
   it("drops the session bar but keeps the trailing count at medium widths", () => {
     const now = 1_700_000_000_000
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-      ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.21 },
+      { id: "7d", utilization: 0.08 },
+    ]
     // cols below the leanest "with-session-bar" candidate but above the
     // "without-session-bar" one. With sep=2 + bar=4 the with-bar form
     // is ~45 cells; the bar-dropped form is ~33 cells.
     const mid = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, {
+      renderQuotaFooter(windows, SOME_TOKENS, {
         cols: 40,
         now: () => now,
         contextWindow: 200_000,
@@ -459,33 +448,29 @@ describe("renderQuotaFooter", () => {
   })
 
   it("fmtTokens rounds .0 cleanly (e.g. 1000 → '1k', not '1.0k')", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const sess: SessionTokens = { ...NO_TOKENS, contextSize: 1_000, turns: 1 }
-    const out = stripAnsi(renderQuotaFooter(rl, sess))
+    const out = stripAnsi(renderQuotaFooter(windows, sess))
     expect(out).toContain("1k")
     expect(out).not.toContain("1.0k")
   })
 
   it("fmtTokens uses M suffix at >=1M", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const sess: SessionTokens = { ...NO_TOKENS, contextSize: 2_500_000, turns: 1 }
     const out = stripAnsi(
-      renderQuotaFooter(rl, sess, { contextWindow: 1_000_000 }),
+      renderQuotaFooter(windows, sess, { contextWindow: 1_000_000 }),
     )
     expect(out).toContain("2.5M")
   })
 
   it("omits reset clause when reset is in the past", () => {
     const now = 1_700_000_000_000
-    const rl = new Map([
-      ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
-      [
-        "anthropic-ratelimit-unified-5h-reset",
-        String(Math.floor((now - 60_000) / 1000)),
-      ],
-    ])
+    const windows: QuotaWindow[] = [
+      { id: "5h", utilization: 0.1, resetAtMs: now - 60_000 },
+    ]
     const out = stripAnsi(
-      renderQuotaFooter(rl, NO_TOKENS, { now: () => now, showSession: false }),
+      renderQuotaFooter(windows, NO_TOKENS, { now: () => now, showSession: false }),
     )
     // A2: no countdown clause — `<name> <bar> <pct>` with nothing trailing.
     expect(out).toMatch(/5h [█▏▎▍▌▋▊▉░]{8} 10%$/)
@@ -493,9 +478,9 @@ describe("renderQuotaFooter", () => {
 
   describe("effort segment", () => {
     it("appends `effort <level>` as a trailing segment when opts.effort is set", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, NO_TOKENS, {
+        renderQuotaFooter(windows, NO_TOKENS, {
           contextWindow: 200_000,
           effort: "medium",
         }),
@@ -509,28 +494,28 @@ describe("renderQuotaFooter", () => {
       // Mirrors src/effort-resolution.ts no-validate philosophy: any
       // forward-compatible level the server starts accepting should
       // appear in the footer without a client release.
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, NO_TOKENS, { effort: "ultra" }),
+        renderQuotaFooter(windows, NO_TOKENS, { effort: "ultra" }),
       )
       expect(out).toMatch(/effort ultra$/)
     })
 
     it("omits the effort segment entirely when opts.effort is undefined (haiku case)", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-      const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS))
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS))
       expect(out).not.toContain("effort")
     })
 
     it("omits the effort segment when opts.effort is an empty string", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-      const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { effort: "" }))
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { effort: "" }))
       expect(out).not.toContain("effort")
     })
 
     it("renders the label faintWhite and the value bold", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-      const out = renderQuotaFooter(rl, NO_TOKENS, { effort: "high" }) ?? ""
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = renderQuotaFooter(windows, NO_TOKENS, { effort: "high" }) ?? ""
       // Label sits on the same visual tier as 5h/7d (faintWhite = dim+white-fg).
       expect(out).toContain("\x1b[2;37meffort\x1b[22;39m")
       // Value pops at bold weight — parallel to the bold trailing
@@ -539,8 +524,9 @@ describe("renderQuotaFooter", () => {
     })
 
     it("renders <tag>:<level> (bold tag, faint level) when modelLabel is set, replacing the word", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-      const out = renderQuotaFooter(rl, NO_TOKENS, { effort: "max", modelLabel: "anth-4.8" }) ?? ""
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out =
+        renderQuotaFooter(windows, NO_TOKENS, { effort: "max", modelLabel: "anth-4.8" }) ?? ""
       // The compact form drops the literal "effort" word for the tag.
       expect(stripAnsi(out)).toContain("anth-4.8:max")
       expect(stripAnsi(out)).not.toContain("effort")
@@ -551,11 +537,12 @@ describe("renderQuotaFooter", () => {
     it("does NOT colour-grade the effort value (no green/yellow/red)", () => {
       // Severity palette belongs to the quota bars. Carrying it onto
       // effort would read "high effort == bad", which is wrong.
-      const rl = new Map() // no quota windows → no severity SGRs from bars
-      const out = renderQuotaFooter(rl, NO_TOKENS, {
-        showSession: false,
-        effort: "max",
-      }) ?? ""
+      const out =
+        renderQuotaFooter([], NO_TOKENS, {
+          // no quota windows → no severity SGRs from bars
+          showSession: false,
+          effort: "max",
+        }) ?? ""
       // No 31/32/33 SGRs anywhere in the effort-only render.
       expect(out).not.toMatch(/\x1b\[(?:\d+;)?3[123]m/)
     })
@@ -565,7 +552,7 @@ describe("renderQuotaFooter", () => {
       // not collapse to null just because the quota and session pieces
       // would have been empty.
       const out = stripAnsi(
-        renderQuotaFooter(new Map(), NO_TOKENS, {
+        renderQuotaFooter([], NO_TOKENS, {
           showSession: false,
           effort: "low",
         }),
@@ -574,9 +561,9 @@ describe("renderQuotaFooter", () => {
     })
 
     it("appears AFTER the session block (effort is the trailing-most segment)", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, {
+        renderQuotaFooter(windows, SOME_TOKENS, {
           contextWindow: 200_000,
           effort: "medium",
         }),
@@ -591,27 +578,27 @@ describe("renderQuotaFooter", () => {
       // value shortens (`medium` → `med`), and only as a last resort
       // does the segment go away entirely. Three widths to walk each
       // step.
-      const rl = new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      ])
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
       const opts = { contextWindow: 200_000, effort: "medium" } as const
       // Wide: full form `effort medium`.
       const full = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, { ...opts, cols: 200 }),
+        renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 200 }),
       )
       expect(full).toContain("effort medium")
       // cols=64: forces effortFmt:"value" (`effort medium` → `medium`,
       // saves 7 cells). Step 4 cost = 71-7 = 64.
       const value = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, { ...opts, cols: 64 }),
+        renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 64 }),
       )
       expect(value).not.toContain("effort medium")
       expect(value).toMatch(/ medium$/)
       // cols=62: forces effortFmt:"short" (`medium` → `med`, saves
       // another 3 cells). Step 6 cost = 64-3 = 61.
       const short = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, { ...opts, cols: 62 }),
+        renderQuotaFooter(windows, SOME_TOKENS, { ...opts, cols: 62 }),
       )
       expect(short).not.toMatch(/ medium$/)
       expect(short).toMatch(/ med$/)
@@ -622,14 +609,14 @@ describe("renderQuotaFooter", () => {
       // time. When width gets tight, the live-growing piece earns its
       // cells over the static one — but only AFTER the full
       // compression ladder has been walked (Rule 2.1.x).
-      const rl = new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      ])
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
       // Compressed step "no effort, with session bar" fits ≈44 cells;
       // the step before it ("effort=short, with session bar") is ≈49.
       const out = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, {
+        renderQuotaFooter(windows, SOME_TOKENS, {
           cols: 47,
           contextWindow: 200_000,
           effort: "medium",
@@ -647,9 +634,9 @@ describe("renderQuotaFooter", () => {
 
   describe("sid (session-id anchor) segment", () => {
     it("appends the sid as the ABSOLUTE-trailing segment", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, NO_TOKENS, {
+        renderQuotaFooter(windows, NO_TOKENS, {
           contextWindow: 200_000,
           effort: "medium",
           sid: "b1d82846",
@@ -667,32 +654,32 @@ describe("renderQuotaFooter", () => {
       // The handler is responsible for the 8-hex prefix; renderer is
       // just a sink. This keeps the contract simple for tests and
       // future callers that may want different truncations.
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, NO_TOKENS, { sid: "b1d82846-8ee4" }),
+        renderQuotaFooter(windows, NO_TOKENS, { sid: "b1d82846-8ee4" }),
       )
       expect(out).toMatch(/ {4}b1d82846-8ee4$/)
     })
 
     it("omits the sid segment when opts.sid is undefined", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, NO_TOKENS, { effort: "medium" }),
+        renderQuotaFooter(windows, NO_TOKENS, { effort: "medium" }),
       )
       // Line ends with the effort segment, no trailing hex blob.
       expect(out).toMatch(/effort medium$/)
     })
 
     it("omits the sid segment when opts.sid is an empty string", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-      const out = stripAnsi(renderQuotaFooter(rl, NO_TOKENS, { sid: "" }))
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { sid: "" }))
       // No trailing 4-space-then-hex pattern.
       expect(out).not.toMatch(/ {4}[0-9a-f]{6,}$/)
     })
 
     it("renders the sid dim (static reference, not a live reading)", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
-      const out = renderQuotaFooter(rl, NO_TOKENS, { sid: "b1d82846" }) ?? ""
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = renderQuotaFooter(windows, NO_TOKENS, { sid: "b1d82846" }) ?? ""
       // c.dim() is SGR 2 / 22; the value sits inside a plain dim wrap
       // (no white-fg modifier — that's the faintWhite label tier).
       expect(out).toContain("\x1b[2mb1d82846\x1b[22m")
@@ -702,7 +689,7 @@ describe("renderQuotaFooter", () => {
       // If somehow only sid is set and everything else is absent, the
       // line is just the sid. Mirrors the effort-alone test above.
       const out = stripAnsi(
-        renderQuotaFooter(new Map(), NO_TOKENS, {
+        renderQuotaFooter([], NO_TOKENS, {
           showSession: false,
           sid: "b1d82846",
         }),
@@ -711,9 +698,9 @@ describe("renderQuotaFooter", () => {
     })
 
     it("appears AFTER the effort segment when both are present", () => {
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       const out = stripAnsi(
-        renderQuotaFooter(rl, NO_TOKENS, {
+        renderQuotaFooter(windows, NO_TOKENS, {
           effort: "medium",
           sid: "b1d82846",
         }),
@@ -726,15 +713,15 @@ describe("renderQuotaFooter", () => {
       // end (after the opt-in overage). Effort, which reflects the
       // live wire config, sticks around longer (in some compressed
       // form — `medium` then `med` — before being dropped itself).
-      const rl = new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      ])
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
       // cols chosen so the ladder lands on
       // {sep:2, effortFmt:"value", withSid:false}. The previous step
       // (sid still on) is ~72 cells; this step is ~62 cells.
       const out = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, {
+        renderQuotaFooter(windows, SOME_TOKENS, {
           cols: 65,
           contextWindow: 200_000,
           effort: "medium",
@@ -749,19 +736,17 @@ describe("renderQuotaFooter", () => {
     it("drops sid AFTER dropping the opt-in overage segment", () => {
       // When both overage and sid would be present, overage drops
       // first (it's opt-in noise; sid is always-on forensics value).
-      const rl = new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.10"],
-        ["anthropic-ratelimit-unified-overage-status", "off"],
-      ])
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
       // cols chosen so the ladder picks
       // {sep:2, effortFmt:"full", withOverage:false} — overage gone,
       // sid + full effort label still present. The sep=2-with-overage
       // step costs ~77 cells; the no-overage step is ~64.
       const out = stripAnsi(
-        renderQuotaFooter(rl, SOME_TOKENS, {
+        renderQuotaFooter(windows, SOME_TOKENS, {
           cols: 70,
           contextWindow: 200_000,
           showOverage: true,
+          overage: { active: false },
           effort: "medium",
           sid: "b1d82846",
         }),
@@ -777,17 +762,17 @@ describe("renderQuotaFooter", () => {
       // Every width from 1 cell up to the leanest fitting candidate
       // must produce a string whose displayed width is <= cols. The
       // truncation safety net (with dim `…`) handles the tail.
-      const rl = new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      ])
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
       // Pull stripAnsi via the same path the renderer uses internally —
       // duplicating the helper here avoids module re-exports.
       const stripAnsiHere = (s: string | null) =>
         (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
       for (let cols = 1; cols <= 60; cols++) {
         const out = stripAnsiHere(
-          renderQuotaFooter(rl, SOME_TOKENS, {
+          renderQuotaFooter(windows, SOME_TOKENS, {
             cols,
             contextWindow: 200_000,
             effort: "medium",
@@ -804,11 +789,12 @@ describe("renderQuotaFooter", () => {
     it("appends a dim `…` ellipsis when the leanest candidate would still overflow", () => {
       // Force the safety net to fire: cols smaller than even the
       // leanest single-window candidate (5h alone at bar=4 ≈ 11 cells).
-      const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.21"]])
-      const out = renderQuotaFooter(rl, NO_TOKENS, {
-        cols: 6,
-        showSession: false,
-      }) ?? ""
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.21 }]
+      const out =
+        renderQuotaFooter(windows, NO_TOKENS, {
+          cols: 6,
+          showSession: false,
+        }) ?? ""
       // Dim `…` (SGR 2 / `\x1b[2m` open, `\x1b[22m` close) marks
       // the truncation. The text content is clipped to cols-1 = 5
       // cells.
@@ -821,12 +807,12 @@ describe("renderQuotaFooter", () => {
       // Opt-out path: caller wants overflow over clipping. Renderer
       // returns the full baseRich form regardless of cols. Terminal
       // natural-wraps the excess; live area grows.
-      const rl = new Map([
-        ["anthropic-ratelimit-unified-5h-utilization", "0.21"],
-        ["anthropic-ratelimit-unified-7d-utilization", "0.08"],
-      ])
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
       const stripped = (
-        renderQuotaFooter(rl, SOME_TOKENS, {
+        renderQuotaFooter(windows, SOME_TOKENS, {
           cols: 30,
           contextWindow: 200_000,
           effort: "medium",
@@ -846,9 +832,9 @@ describe("renderQuotaFooter", () => {
   })
 
   it("respects showSession: false (suppresses the block even with traffic)", () => {
-    const rl = new Map([["anthropic-ratelimit-unified-5h-utilization", "0.10"]])
+    const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
     const out = stripAnsi(
-      renderQuotaFooter(rl, SOME_TOKENS, { showSession: false }),
+      renderQuotaFooter(windows, SOME_TOKENS, { showSession: false }),
     )
     expect(out).not.toContain("✦")
     // The live count `47.5k` is the unambiguous session marker. Its

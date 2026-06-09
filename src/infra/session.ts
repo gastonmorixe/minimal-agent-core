@@ -18,17 +18,13 @@ export function generateSessionId(): string {
 
 /**
  * Should this value be displayed without redaction?
- * Session IDs, request IDs, and model names are always shown.
+ * Session IDs, request IDs, model names, and API-version markers are
+ * always shown. Pattern-based so PROVIDER-specific header spellings
+ * (any vendor's `x-<vendor>-session-id` / `<vendor>-version`) match
+ * without core naming a provider.
  */
+const PUBLIC_METADATA_RE = /(session[-_]?id|request[-_]?id|model|-version$)/i
+
 export function isPublicMetadata(key: string): boolean {
-  const PUBLIC_KEYS = [
-    "session-id",
-    "session_id",
-    "sessionId",
-    "x-claude-code-session-id",
-    "x-client-request-id",
-    "model",
-    "anthropic-version",
-  ]
-  return PUBLIC_KEYS.some((pk) => key.toLowerCase().includes(pk.toLowerCase()))
+  return PUBLIC_METADATA_RE.test(key)
 }
