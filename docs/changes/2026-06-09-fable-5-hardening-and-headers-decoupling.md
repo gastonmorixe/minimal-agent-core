@@ -109,6 +109,30 @@ test existed to enforce it:
   stripped) instead of hard-throwing; `canonical-send` accepts degrades.
   Transports now agree on fast-mode semantics end to end.
 
+## Wave-3 parity inventory (Phase 18, lead-authored 2026-06-09)
+
+Census of every legacy-transport consumer (non-test), what the canonical
+path offers, and the gap. Evidence: grep over `sendMessage*|checkQuota|
+requestType` at this commit.
+
+| Flow | Legacy mechanism | Canonical equivalent | Gap |
+| --- | --- | --- | --- |
+| Conversation (agent main loop, wrap-up) | `agent.ts` → `selectedTransport()` → `client.ts sendMessage` | `canonical-send.ts` (equivalence-pinned vs legacy incl. callback order; resilience middleware wired) | NONE functional. Flip changes B3 redact-thinking + B2 api-key betas (deliberate pin edits) |
+| Title-style structured output | ONLY consumer is `plugins/memory/lib/summarize.ts` (`requestType:"title"` via `sendMessageSync`) | `run()` accepts `outputFormat.json_schema`; `classifyRequest` returns `"title"` | Port summarize to the canonical send (its `sendFn` seam makes this a small, injectable change) |
+| Quota probe (`checkQuota`) | `client/quota.ts` haiku max_tokens=1 POST; feeds startup gate + `primeAnthropicSessionInfo` | none — canonical has no minimal-probe helper | Build `probeQuota` on the canonical stack (or plugin-side fetch reusing `buildAnthropicHeaders`), keep the broadcast side-effect |
+| Bootstrap overlay | plugin-owned already (`bootstrap.ts`, fetch + `applyBootstrapOverrides`) | same code, transport-independent | NONE |
+| list-models | plugin-owned via `listLiveModels` hook (Phase 13) | same | NONE |
+| Session prime | `primeAnthropicSessionInfo` → `checkQuota` | blocked on the quota-probe gap above | inherits quota gap |
+| 401/auth refresh | `client/auth-401.ts` inside legacy retry | `transport/auth-refresh.ts` (keychain-first, pinned) | NONE |
+| Stream watchdog/retry | legacy client internal | `transport/watchdog.ts` + resilience middleware (pinned end-to-end) | NONE |
+
+Net: TWO build items (canonical quota probe; summarize port), then the
+flip in `select-transport.ts` (auto → canonical for Anthropic) with
+`MINIMAL_AGENT_LEGACY_TRANSPORT=1` as the escape hatch, plus deliberate
+edits to the B2/B3 characterization pins in the same commit. Post-flip,
+Wave 4 deletes `client.ts`/`headers.ts` and most of the remaining
+ratchet baseline.
+
 ## Open items (deliberately NOT done here)
 
 - **B1 (needs a live probe):** sonnet-4-6 now gets `context-1m` on the legacy
