@@ -1,6 +1,17 @@
+/**
+ * `--dump <sid|last>` command — print a session transcript to stdout.
+ *
+ * Thin shell over the SAME `sessions:read` capability provider that backs
+ * the `session-history` plugin's `SessionHistory` tool
+ * (`src/plugins/v2/providers/sessions-read.ts`). One rendering path: the
+ * CLI dump and the tool's `{action:"dump"}` are byte-identical for the
+ * same session, and improvements to the provider serve both surfaces.
+ *
+ * @module commands/dump
+ */
+
 import { writeStdoutSafely } from "../infra/safe-stdout.ts"
-import { formatSessionAsMarkdown, formatSessionAsXml } from "../session-dump.ts"
-import { loadSession } from "../session-restore.ts"
+import { createSessionsReadApi } from "../plugins/v2/providers/sessions-read.ts"
 
 import { resolveSessionTarget } from "./session-index.ts"
 
@@ -18,8 +29,12 @@ export async function runDumpCommand(input: DumpCommandInput): Promise<void> {
     throw new DumpCommandError("no saved sessions found to dump")
   }
 
-  const loaded = loadSession(sid)
-  const payload =
-    input.format === "xml" ? formatSessionAsXml(loaded) : formatSessionAsMarkdown(loaded)
-  await writeStdoutSafely(payload)
+  const sessions = createSessionsReadApi()
+  const result = await sessions.dump(sid, {
+    format: input.format === "xml" ? "xml" : "markdown",
+  })
+  if (!result) {
+    throw new DumpCommandError(`no session file on disk for sid ${JSON.stringify(sid)}`)
+  }
+  await writeStdoutSafely(result.text)
 }

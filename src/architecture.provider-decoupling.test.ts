@@ -42,10 +42,16 @@ import {
 } from "./architecture/provider-scan.ts"
 
 const SRC_ROOT = join(import.meta.dirname)
-/** This test + the scanner must name the tokens; both are exempt. */
+/**
+ * This test + the scanner must name the tokens; both are exempt. The
+ * plugin-decoupling ratchet's frozen baseline must name plugin file paths
+ * (`llm-anthropic/adapter.ts`, ...), which unavoidably contain provider
+ * names — same category, same exemption.
+ */
 const EXEMPT: ReadonlySet<string> = new Set([
   "architecture.provider-decoupling.test.ts",
   "architecture/provider-scan.ts",
+  "architecture.plugin-decoupling.test.ts",
 ])
 
 /**

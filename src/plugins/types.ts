@@ -12,6 +12,8 @@
 
 import type { PluginLogger } from "../diagnostic-bus.ts"
 
+import type { PluginHostV2 } from "./v2/host-capabilities.ts"
+
 // Re-export for plugin authors; they can `import type { PluginLogger }
 // from "<minimal-agent>/src/plugins/types"` without reaching into
 // `diagnostic-bus`.
@@ -268,6 +270,18 @@ export interface TUIContext {
    * narrow (`const recs = ctx.recommendSubagentModels?.() ?? []`).
    */
   recommendSubagentModels?: () => SubagentModelRecommendation[]
+  /**
+   * Frozen capability host carrying ONLY the namespaces this plugin's
+   * manifest declared in `capabilities: [...]` (deny-by-default; see
+   * {@link ManifestFile.capabilities}). The decoupled way for a plugin to
+   * read host data: instead of importing `src/...`, the plugin re-declares
+   * the slice it consumes as a local structural interface and narrows at
+   * runtime (`if (!ctx.host?.sessions) return error`).
+   *
+   * Optional + in-process only: `undefined` for subprocess handlers, for
+   * plugins that declared no capabilities, and for back-compat callers.
+   */
+  host?: PluginHostV2
 }
 
 // ---------------------------------------------------------------------------
@@ -516,6 +530,19 @@ export interface ManifestFile {
    * Optional; defaults to `[]`.
    */
   permissions?: string[]
+  /**
+   * Capability namespaces this plugin requests on the host object it
+   * receives as `ctx.host` (e.g. `"sessions:read"`, `"blobs:read"`,
+   * `"clock"`). Deny-by-default: only declared namespaces are populated;
+   * everything else is `undefined` on the host. The full token list and
+   * the per-namespace API shapes live in
+   * `src/plugins/v2/host-capabilities.ts` — plugins re-declare the slice
+   * they consume as a LOCAL structural interface and must NOT import that
+   * module (or anything under `src/`).
+   *
+   * Optional; defaults to `[]` (no host access).
+   */
+  capabilities?: string[]
   /**
    * If `true`, this plugin needs `UNSAFE_HOOKS=1` in the environment
    * to load. The loader skips the plugin (with a clear log) when the

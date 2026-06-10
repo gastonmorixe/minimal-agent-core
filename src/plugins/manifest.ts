@@ -30,6 +30,11 @@ import type {
   SurfaceStyleRequest,
   ThemeKey,
 } from "./types.ts"
+import {
+  type CapabilityToken,
+  isCapabilityToken,
+  KNOWN_CAPABILITIES,
+} from "./v2/host-capabilities.ts"
 
 /**
  * Thrown by {@link parseManifest} when the input does not conform.
@@ -124,6 +129,20 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
       }
     }
   }
+  if (obj.capabilities != null) {
+    if (!Array.isArray(obj.capabilities)) err("capabilities must be an array if present")
+    const seenCaps = new Set<string>()
+    for (const c of obj.capabilities as unknown[]) {
+      if (typeof c !== "string" || !isCapabilityToken(c)) {
+        err(
+          `capabilities entries must be one of ${KNOWN_CAPABILITIES.join(", ")} ` +
+            `(got: ${JSON.stringify(c)})`,
+        )
+      }
+      if (seenCaps.has(c as string)) err(`duplicate capability: ${JSON.stringify(c)}`)
+      seenCaps.add(c as string)
+    }
+  }
   if (obj.requiresUnsafeHooks != null && typeof obj.requiresUnsafeHooks !== "boolean") {
     err("requiresUnsafeHooks must be a boolean if present")
   }
@@ -212,6 +231,7 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     liveAreaSlots,
     commands,
     permissions: (obj.permissions as string[] | undefined) ?? [],
+    capabilities: (obj.capabilities as CapabilityToken[] | undefined) ?? [],
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
   }
