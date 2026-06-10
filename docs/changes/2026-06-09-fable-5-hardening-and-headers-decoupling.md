@@ -133,6 +133,38 @@ edits to the B2/B3 characterization pins in the same commit. Post-flip,
 Wave 4 deletes `client.ts`/`headers.ts` and most of the remaining
 ratchet baseline.
 
+## Wave-3 flip decision package (Phase 19c — NEEDS GASTON'S SIGN-OFF)
+
+Both parity gaps are closed (19a summarize port `d96bece`, 19b canonical
+quota probe `b22aacc`). The flip itself is one line in
+`select-transport.ts` (`auto` → canonical for Anthropic) plus
+`MINIMAL_AGENT_LEGACY_TRANSPORT=1` as the escape hatch. Two DELIBERATE
+behavior changes ride along; each requires editing a characterization pin
+in the flip commit, which is by design:
+
+**Decision B3 — redact-thinking.** Legacy conversations OMIT the
+redact-thinking beta (thinking streams visible in the TUI); canonical
+always adds it (matches Claude Code's wire). Flipping as-is = thinking
+becomes signatures-only unless `thinkingDisplay` re-requests it.
+OPTIONS: (a) align canonical to legacy (drop the flag from conversations
+— keeps today's UX, edits the canonical suite pin), (b) accept CC-parity
+redaction (edits the legacy-vs-canonical divergence pin). RECOMMEND (a):
+visible thinking is a product feature here, not an accident.
+
+**Decision B2 — api-key beta set.** Legacy api-key requests send ZERO
+beta headers (and are likely broken anyway: the default system prompt
+bakes 1h-TTL cache_control, which needs its beta). Canonical sends the
+full non-OAuth set. Flipping = api-key users gain context-1m/effort/1h-
+cache betas. RECOMMEND: accept canonical behavior (it is more correct),
+verify once with a real api-key account, edit the legacy
+api-key-zero-betas pin with a note.
+
+**Flip-commit checklist:** wire `primeAnthropicSessionInfo` + the
+startup gate to `probeQuota`; flip `select-transport.ts` default; add
+the env escape hatch + README note; edit the B2/B3 pins per the chosen
+options; full gate + one live `E2E=1` smoke per auth kind; dogfood
+before deleting anything (Wave 4).
+
 ## Open items (deliberately NOT done here)
 
 - **B1 (needs a live probe):** sonnet-4-6 now gets `context-1m` on the legacy
