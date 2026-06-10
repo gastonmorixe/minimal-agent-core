@@ -96,4 +96,16 @@ describe("clipPrompt / cadenceLabel / relativeTime", () => {
     expect(relativeTime(NOW + 30_000, NOW)).toBe("in 30s")
     expect(relativeTime(NOW + 5 * 60_000, NOW)).toBe("in 5m")
   })
+
+  it("keeps seconds precision under an hour so live countdowns visibly tick", () => {
+    // A minutes-only label looks FROZEN in the footer for up to 60s while
+    // the countdown is actually running (user-reported). Sub-hour deltas
+    // carry the seconds remainder; exact minutes stay compact.
+    expect(relativeTime(NOW + 90_000, NOW)).toBe("in 1m30s")
+    expect(relativeTime(NOW + 2 * 60_000 + 1_000, NOW)).toBe("in 2m1s")
+    expect(relativeTime(NOW + 59 * 60_000 + 59_000, NOW)).toBe("in 59m59s")
+    // Hour+ scales stay coarse (nobody watches those tick).
+    expect(relativeTime(NOW + 60 * 60_000, NOW)).toBe("in 1h")
+    expect(relativeTime(NOW + 90 * 60_000, NOW)).toBe("in 1h 30m")
+  })
 })

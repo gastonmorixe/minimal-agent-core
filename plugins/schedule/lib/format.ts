@@ -41,14 +41,25 @@ export function cadenceLabel(e: CronEntry): string {
   return e.cron
 }
 
-/** Format a ms delta from now as a compact relative string. */
+/**
+ * Format a ms delta from now as a compact relative string.
+ *
+ * Sub-hour deltas keep SECONDS precision (`in 1m30s`, not `in 2m`): the
+ * live footer redraws every tick, and a minutes-only label looks frozen
+ * for up to a minute while the countdown is actually running. Hour/day
+ * scales stay coarse — nobody watches those tick.
+ */
 export function relativeTime(targetMs: number, now: number): string {
   const d = targetMs - now
   if (d <= 0) return "due now"
   const s = Math.round(d / 1000)
   if (s < 60) return `in ${s}s`
-  const m = Math.round(s / 60)
-  if (m < 60) return `in ${m}m`
+  if (s < 3600) {
+    const m = Math.floor(s / 60)
+    const remS = s % 60
+    return remS > 0 ? `in ${m}m${remS}s` : `in ${m}m`
+  }
+  const m = Math.floor(s / 60)
   const h = Math.floor(m / 60)
   const rem = m % 60
   if (h < 24) return rem > 0 ? `in ${h}h ${rem}m` : `in ${h}h`
