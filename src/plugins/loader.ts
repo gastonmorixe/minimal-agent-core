@@ -64,6 +64,8 @@ import type {
   TUIResult,
   TUITrigger,
 } from "./types.ts"
+import { buildPluginHostV2 } from "./v2/host.ts"
+import type { PluginHostV2 } from "./v2/host-capabilities.ts"
 
 /**
  * Module-handler default-export signature for hook subscriptions.
@@ -214,6 +216,14 @@ export interface PluginLoaderOptions {
    */
   sessionId?: string
   /**
+   * Overrides for the per-plugin capability hosts built from manifest
+   * `capabilities` grants (see {@link ManifestFile.capabilities}).
+   * Production leaves this unset (hosts read the real
+   * `~/.minimal-agent/sessions/` store); tests inject a temp
+   * `sessionsDir` so capability-backed tools run against fixtures.
+   */
+  hostOptions?: { sessionsDir?: string }
+  /**
    * Set of plugin ids to skip entirely. The loader silently ignores any
    * package whose `manifest.id` is in this set — discovery still walks
    * the dirs, but the manifest is dropped before validation, before
@@ -318,6 +328,16 @@ export class PluginLoader {
    * `slash-menu` overlay (via `listCommandInfo`) read it.
    */
   private readonly commandIndex: Map<string, ResolvedCommand>
+  /**
+   * Per-plugin capability hosts, memoized by plugin id. Built lazily on
+   * first dispatch to a handler whose manifest declared `capabilities`.
+   * One frozen host per plugin for the loader's lifetime — handler calls
+   * across turns see the same object identity (cheap, and consistent
+   * with the frozen-value-object discipline of {@link AgentContext}).
+   */
+  private readonly hostCache = new Map<string, PluginHostV2>()
+  /** Capability-host overrides (test sessionsDir injection). See {@link PluginLoaderOptions.hostOptions}. */
+  private readonly hostOptions: { sessionsDir?: string } | undefined
 
   private constructor(
     plugins: LoadedPlugin[],
@@ -334,6 +354,7 @@ export class PluginLoader {
     agent: AgentContext | undefined,
     modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
     recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined,
+    hostOptions: { sessionsDir?: string } | undefined,
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
@@ -349,6 +370,7 @@ export class PluginLoader {
     this.agent = agent
     this.modelInfoProvider = modelInfoProvider
     this.recommendSubagentModels = recommendSubagentModels
+    this.hostOptions = hostOptions
 
     // Build the global command index, first-wins on cross-plugin name
     // collision (mirrors mode-id dedupe). A colliding command is dropped
@@ -956,6 +978,7 @@ export class PluginLoader {
       agent,
       opts.modelInfoProvider,
       opts.recommendSubagentModels,
+      opts.hostOptions,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -1415,6 +1438,28 @@ export class PluginLoader {
   }
 
   /**
+   * Lazily build (and memoize) the frozen capability host for a plugin,
+   * keyed by plugin id. Returns `undefined` when the plugin declared no
+   * `capabilities` in its manifest — `ctx.host` stays absent and the
+   * plugin has zero host-data access (deny-by-default).
+   */
+  private hostFor(pluginId: string): PluginHostV2 | undefined {
+    if (!pluginId) return undefined
+    const cached = this.hostCache.get(pluginId)
+    if (cached) return cached
+    const pkg = this.plugins.find((p) => p.manifest.id === pluginId)
+    const caps = pkg?.manifest.capabilities ?? []
+    if (caps.length === 0) return undefined
+    const host = buildPluginHostV2({
+      capabilities: caps,
+      logger: createPluginLogger(pluginId),
+      sessionsDir: this.hostOptions?.sessionsDir,
+    })
+    this.hostCache.set(pluginId, host)
+    return host
+  }
+
+  /**
    * Route a trigger to the matching handler and return its result.
    *
    * Handler exceptions and timeouts are converted to either
@@ -1482,6 +1527,8 @@ export class PluginLoader {
       }
     }
 
+    const pluginId = findPluginIdFor(this.plugins, handler)
+    const host = this.hostFor(pluginId)
     const ctx: TUIContext = {
       trigger,
       packageDir: findPackageDirFor(this.plugins, handler),
@@ -1496,12 +1543,13 @@ export class PluginLoader {
       stdout: process.stdout,
       stdin: process.stdin,
       stderr: process.stderr,
-      log: createPluginLogger(findPluginIdFor(this.plugins, handler)),
+      log: createPluginLogger(pluginId),
       agent: this.agent,
       ...(this.modelInfoProvider ? { queryModelInfo: this.modelInfoProvider } : {}),
       ...(this.recommendSubagentModels
         ? { recommendSubagentModels: this.recommendSubagentModels }
         : {}),
+      ...(host ? { host } : {}),
     }
 
     try {

@@ -32,6 +32,42 @@ describe("parseManifest", () => {
     expect(m.tuis![0].trigger.type).toBe("tool")
   })
 
+  describe("capabilities", () => {
+    it("defaults to [] when omitted", () => {
+      const m = parseManifest(valid, "/fake/manifest.json")
+      expect(m.capabilities).toEqual([])
+    })
+
+    it("accepts known capability tokens", () => {
+      const m = parseManifest(
+        { ...valid, capabilities: ["sessions:read", "blobs:read", "clock"] },
+        "/fake/manifest.json",
+      )
+      expect(m.capabilities).toEqual(["sessions:read", "blobs:read", "clock"])
+    })
+
+    it("rejects unknown capability tokens", () => {
+      expect(() =>
+        parseManifest({ ...valid, capabilities: ["filesystem:write"] }, "/fake/manifest.json"),
+      ).toThrow(ManifestError)
+    })
+
+    it("rejects duplicate capability tokens", () => {
+      expect(() =>
+        parseManifest(
+          { ...valid, capabilities: ["sessions:read", "sessions:read"] },
+          "/fake/manifest.json",
+        ),
+      ).toThrow(/duplicate capability/)
+    })
+
+    it("rejects non-array capabilities", () => {
+      expect(() =>
+        parseManifest({ ...valid, capabilities: "sessions:read" }, "/fake/manifest.json"),
+      ).toThrow(ManifestError)
+    })
+  })
+
   it("rejects missing top-level id", () => {
     const bad = { ...valid, id: undefined }
     expect(() => parseManifest(bad, "/x")).toThrow(ManifestError)
