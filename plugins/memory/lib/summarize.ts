@@ -23,7 +23,25 @@
 
 import type { AuthResult } from "../../../src/auth.ts"
 import { getAuth } from "../../../src/auth.ts"
-import { type SendOptions, sendMessageSync } from "../../../src/client.ts"
+import type { SendOptions } from "../../../src/client.ts"
+import { canonicalSendFn } from "../../../src/llm/transport/canonical-send.ts"
+
+/**
+ * Drain `canonicalSendFn` into the flat string the summarizer consumes.
+ * Same contract as the old legacy text sender: concatenated text deltas.
+ * Kept tiny + local so the `deps.sendFn` seam (tests inject fakes) keeps
+ * its `(opts) => Promise<string>` shape across the transport port.
+ */
+async function canonicalSendText(opts: SendOptions): Promise<string> {
+  let text = ""
+  const gen = canonicalSendFn(opts)
+  while (true) {
+    const { value, done } = await gen.next()
+    if (done) return text
+    text += value
+  }
+}
+
 import { promptPath, renderPrompt } from "../../../src/prompts.ts"
 
 import { defaultSummaryModel } from "./memory-config.ts"
@@ -55,7 +73,7 @@ export interface SummarizeDeps {
   authProvider?: () => Promise<AuthResult>
   /**
    * Sends a one-shot LLM request and returns the text response.
-   * Defaults to {@link sendMessageSync}. Tests inject a fake.
+   * Defaults to {@link canonicalSendText} (the canonical transport). Tests inject a fake.
    */
   sendFn?: (opts: SendOptions) => Promise<string>
 }
@@ -110,7 +128,7 @@ export function buildSystemPrompt(scope: "global" | "project"): string {
 /**
  * Wrap a promise with a timeout. If `ms` elapses first, the returned
  * promise rejects with a {@link SummarizeError} of kind `"timeout"`.
- * The underlying work is NOT canceled (sendMessageSync doesn't accept
+ * The underlying work is NOT canceled (the send fn doesn't accept
  * an AbortSignal in its current shape) — it just stops being awaited.
  */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -144,7 +162,7 @@ export async function summarize(
   deps: SummarizeDeps = {},
 ): Promise<string> {
   const authProvider = deps.authProvider ?? (() => getAuth())
-  const sendFn = deps.sendFn ?? sendMessageSync
+  const sendFn = deps.sendFn ?? canonicalSendText
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
   let auth: AuthResult
@@ -166,8 +184,9 @@ export async function summarize(
     system: [{ type: "text", text: buildSystemPrompt(opts.scope) }],
     maxTokens: 8192,
     stream: false,
-    // "title" requestType is the cheapest beta-flag set for non-conversation
-    // use (no thinking, no effort gate). Matches haiku title-gen wire shape.
+    // "title" requestType maps to the cheapest beta-flag set for
+    // non-conversation use (the canonical classifier derives the same
+    // kind from the request shape; the field is advisory there).
     requestType: "title",
     thinking: false,
   }
