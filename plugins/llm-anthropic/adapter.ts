@@ -30,6 +30,7 @@ import type { ProviderPlugin, ProviderStartupContext } from "../../src/llm/provi
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
+import { broadcastResponseRateLimits } from "../../src/quota-broadcast.ts"
 
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
@@ -167,6 +168,17 @@ export const anthropicAdapter: ProviderAdapter = {
       const text = await response.text()
       throw new Error(`Anthropic API ${response.status}: ${text}`)
     }
+    // Cache + broadcast THIS response's rate-limit snapshot so the status-bar
+    // footer keeps the live 5h/7d windows fresh on every real turn. Before the
+    // Wave-B transport flip the legacy `client.ts` chat path did this; the
+    // canonical path only re-emitted the cached snapshot via
+    // `rebroadcastQuotaForSessionUpdate`, so once the cold-start prime probe's
+    // headers aged past the slot's 60s freshness window the windows collapsed
+    // off the footer mid-session. The helper is provider-neutral (it copies any
+    // `*ratelimit*` header), and this mirrors the OpenAI adapter's own
+    // `setOpenAIRateLimits(response.headers)` call — each provider broadcasts
+    // its own response headers from its own `run()`. Best-effort + non-throwing.
+    broadcastResponseRateLimits(response.headers)
     if (!response.body) {
       throw new Error("Anthropic API: empty response body for stream")
     }
