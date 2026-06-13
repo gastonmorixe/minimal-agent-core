@@ -1,73 +1,22 @@
 /**
- * Provider-neutral token estimation.
+ * Provider-neutral token estimation — `src/` surface.
  *
- * When a session never persisted billed `usage` (old sessions, crashes
- * before the first `message_delta`, providers that don't report usage), we
- * still want a "tokens this session" number for listings. The honest answer
- * is "we don't know exactly", so we estimate from text length using a
- * per-model-family chars-per-token ratio and mark the result as estimated.
- *
- * The estimator is intentionally dumb: `ceil(chars / ratio)`. Real
- * tokenizers (BPE) vary with content, but a single ratio is within ~10-15%
- * for prose/code, which is all a listing column needs. The point is to give
- * a defensible magnitude, not to reproduce the billing meter.
- *
- * `ModelEntry.estimateTokens` lets each provider override the ratio for its
- * tokenizer family (Anthropic ≈ 3.5, OpenAI cl100k/o200k ≈ 4). Callers that
- * have a `modelId` use {@link estimateTokensForModel}; callers without one
- * fall back to {@link DEFAULT_CHARS_PER_TOKEN}.
+ * Wave D-2 split: the PURE helpers (`makeCharRatioEstimator`,
+ * `estimateTokensFromText`, `DEFAULT_CHARS_PER_TOKEN`, `TokenEstimator`) MOVED
+ * to the leaf contract package `@minimal-agent/plugin-api/llm/token-estimate`
+ * so a plugin's `models.ts` can build its per-model estimator without reaching
+ * into `src/`. This module re-exports them, and keeps the one registry-bound
+ * function {@link estimateTokensForModel} here — it calls `findModel` on the
+ * live model registry (host state), which must not ship in a shared package.
  *
  * @module llm/token-estimate
  */
 
+import { estimateTokensFromText } from "@minimal-agent/plugin-api/llm/token-estimate"
+
 import { findModel } from "./model-registry.ts"
 
-/**
- * Fallback chars-per-token when no model-specific estimator is available.
- * 3.5 matches the heuristic already used in `src/client.ts` (live output
- * token estimate) and `src/cache.ts` (cache-eligibility threshold), so the
- * estimated and live numbers stay in the same ballpark.
- */
-export const DEFAULT_CHARS_PER_TOKEN = 3.5
-
-/**
- * A function that estimates the token count of a piece of text. This is the
- * shape stored on `ModelEntry.estimateTokens` (in `./model-registry.ts`).
- */
-export type TokenEstimator = (text: string) => number
-
-/**
- * Build a {@link TokenEstimator} from a fixed chars-per-token ratio.
- *
- * Each provider's `models.ts` calls this with its tokenizer-family ratio and
- * stores the result on every `ModelEntry.estimateTokens`. Keeping the factory
- * in core (rather than re-deriving the arithmetic in each plugin) is what
- * makes the estimate consistent and the wiring a one-liner per model.
- *
- * @param charsPerToken - Average characters per token for the family. Must be
- *   positive; non-positive or non-finite values fall back to
- *   {@link DEFAULT_CHARS_PER_TOKEN}.
- * @returns An estimator: `text => ceil(text.length / charsPerToken)`.
- */
-export function makeCharRatioEstimator(charsPerToken: number): TokenEstimator {
-  const ratio =
-    Number.isFinite(charsPerToken) && charsPerToken > 0 ? charsPerToken : DEFAULT_CHARS_PER_TOKEN
-  return (text: string): number => {
-    if (!text) return 0
-    return Math.ceil(text.length / ratio)
-  }
-}
-
-/**
- * Estimate the token count of `text` using `charsPerToken` (defaults to
- * {@link DEFAULT_CHARS_PER_TOKEN}). Provider-neutral; no registry lookup.
- */
-export function estimateTokensFromText(
-  text: string,
-  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN,
-): number {
-  return makeCharRatioEstimator(charsPerToken)(text)
-}
+export * from "@minimal-agent/plugin-api/llm/token-estimate"
 
 /**
  * Estimate the token count of `text` for a specific model, using that
@@ -75,7 +24,7 @@ export function estimateTokensFromText(
  *
  * Resolution order:
  *   1. `modelId` resolves to a registered entry with `estimateTokens` → use it.
- *   2. Otherwise → {@link estimateTokensFromText} at the default ratio.
+ *   2. Otherwise → `estimateTokensFromText` at the default ratio.
  *
  * An unknown / forward-compat model id (the CLI doesn't gate `--model` on the
  * registry) degrades to the default ratio rather than throwing, so listings

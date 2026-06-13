@@ -296,7 +296,7 @@ describe("parsePastedCode", () => {
   })
 
   it("accepts the full callback URL with code and state query params", () => {
-    const r = parsePastedCode("https://platform.claude.com/oauth/code/callback?code=ABC&state=XYZ")
+    const r = parsePastedCode("https://auth.example.com/oauth/code/callback?code=ABC&state=XYZ")
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.code).toBe("ABC")

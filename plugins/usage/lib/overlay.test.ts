@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
-import { stripAnsi } from "../../../src/term-width.ts"
+import { stripAnsi } from "@minimal-agent/plugin-api/utils/term-width"
+
 import { aggregateAllPeriods } from "../../../src/usage-stats.ts"
 
 import {

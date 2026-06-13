@@ -28,9 +28,10 @@
 
 import { hostname } from "node:os"
 
+import type { TUIContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { resolveModel } from "../../../src/llm/model-registry.ts"
 import { resolveProviderSessionInfo } from "../../../src/llm/provider-session.ts"
-import type { TUIContext } from "../../../src/plugins/types.ts"
 import { getSessionTokens } from "../../../src/session-tokens.ts"
 
 import type { QuotaLine, SessionInfoSnapshot } from "./snapshot.ts"

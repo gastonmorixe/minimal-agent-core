@@ -16,6 +16,15 @@
  */
 
 import type { PluginLogger } from "../../diagnostic-bus.ts"
+import {
+  findModel,
+  findModelByTags,
+  getDefaultModelId,
+  listRegisteredModels,
+  registerModel,
+  resolveModel,
+  setDefaultModelId,
+} from "../../llm/model-registry.ts"
 
 import type { CapabilityToken, PluginHostV2 } from "./host-capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
@@ -51,6 +60,25 @@ export function buildPluginHostV2(opts: BuildHostOptions): PluginHostV2 {
       : {}),
     ...(has("blobs:read")
       ? { blobs: Object.freeze(createBlobsReadApi({ dir: opts.sessionsDir })) }
+      : {}),
+    ...(has("models:read")
+      ? {
+          models: Object.freeze({
+            find: findModel,
+            resolve: resolveModel,
+            list: listRegisteredModels,
+            findByTags: findModelByTags,
+            defaultModelId: getDefaultModelId,
+          }),
+        }
+      : {}),
+    ...(has("models:register")
+      ? {
+          modelsRegistry: Object.freeze({
+            register: registerModel,
+            setDefault: setDefaultModelId,
+          }),
+        }
       : {}),
     ...(has("clock")
       ? {

@@ -17,13 +17,14 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import type { TUIContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import {
   buildHolder,
   type LockHolder,
   lockPathFor,
   serializeHolder,
 } from "../../../src/file-lock.ts"
-import type { TUIContext } from "../../../src/plugins/types.ts"
 
 import lockStatusHandler, {
   annotate,

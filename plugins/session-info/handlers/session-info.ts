@@ -14,7 +14,8 @@
  * @module plugins/session-info/handlers/session-info
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { gatherSessionInfo } from "../lib/gather.ts"
 import { formatSessionInfo } from "../lib/snapshot.ts"
 

@@ -10,7 +10,11 @@
  * @module plugins/model-info/handlers/model-info
  */
 
-import type { ModelInfoSnapshot, TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type {
+  ModelInfoSnapshot,
+  TUIContext,
+  TUIResult,
+} from "@minimal-agent/plugin-api/types/plugin"
 
 const n = (x: number): string => x.toLocaleString("en-US")
 

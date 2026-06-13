@@ -25,6 +25,7 @@
  */
 
 import type { PluginLogger } from "../../diagnostic-bus.ts"
+import type { ModelEntry } from "../../llm/model-registry.ts"
 
 // ---------------------------------------------------------------------------
 // Capability tokens
@@ -36,9 +37,12 @@ import type { PluginLogger } from "../../diagnostic-bus.ts"
  * granted namespaces; everything else is `undefined`, so a plugin must
  * defensively check before use.
  *
- * `sessions:write`, `tasks:read`, and `memory:read` are reserved names
- * (declared so manifests validate forward) but not implemented in this
- * cut.
+ * `models:read` / `models:register` (Wave D-2) expose the live model registry
+ * (`src/llm/model-registry.ts`) so a plugin can read the catalog (or register
+ * into it) without importing `registerModel` / `resolveModel` from `src/`.
+ *
+ * `sessions:write` and `tasks:read` are reserved names (declared so manifests
+ * validate forward) but not implemented in this cut.
  */
 export type CapabilityToken =
   | "sessions:read"
@@ -47,6 +51,8 @@ export type CapabilityToken =
   | "tasks:read"
   | "memory:read"
   | "presence:read"
+  | "models:read"
+  | "models:register"
   | "clock"
   | "logger"
 
@@ -58,6 +64,8 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "tasks:read",
   "memory:read",
   "presence:read",
+  "models:read",
+  "models:register",
   "clock",
   "logger",
 ] as const
@@ -295,6 +303,55 @@ export interface ClockApi {
 }
 
 // ---------------------------------------------------------------------------
+// models:read / models:register (Wave D-2)
+// ---------------------------------------------------------------------------
+
+/**
+ * `models:read` — read-only view of the live model registry
+ * (`src/llm/model-registry.ts`). A plugin uses this to resolve a model's
+ * capabilities / pricing / tags (e.g. memory's cheap-tier pick, session-info's
+ * context-window lookup, model-info's report) without importing `resolveModel`
+ * / `findModelByTags` from `src/`. The returned {@link ModelEntry} objects are
+ * the registry's own records; treat them as read-only.
+ */
+export interface ModelsReadApi {
+  /** Look up a model by id or alias. `undefined` when not registered. */
+  find(idOrAlias: string): ModelEntry | undefined
+  /** Look up a model by id or alias. Throws when not registered. */
+  resolve(idOrAlias: string): ModelEntry
+  /** Every registered model, in registration order. */
+  list(): ModelEntry[]
+  /**
+   * First model for `providerId` whose `tags` include EVERY tag in `mustHave`
+   * (insertion order wins). `undefined` when none match.
+   */
+  findByTags(providerId: string, mustHave: readonly string[]): ModelEntry | undefined
+  /** The default model id a no-model session boots with. */
+  defaultModelId(): string
+}
+
+/**
+ * `models:register` — setup-time write access to the live model registry. A
+ * provider plugin uses this to contribute its catalog (instead of importing
+ * `registerModel` / `setDefaultModelId` from `src/`). Idempotent;
+ * last-write-wins per id (collisions with an existing alias throw, surfacing
+ * registration bugs early).
+ *
+ * NOTE (Wave D-2 finding): LLM provider plugins currently activate through the
+ * dedicated provider loader (`src/llm/provider-discovery.ts` →
+ * `ProviderPlugin.register()`, which takes no `ctx`), NOT through the v2
+ * capability host. So this namespace has no live provider consumer yet; it is
+ * placed here so a future provider-loader convergence (or a TUI plugin that
+ * needs to register a model) can use it without a new seam.
+ */
+export interface ModelsRegisterApi {
+  /** Add or replace a model entry. Throws on id/alias collision. */
+  register(entry: ModelEntry): void
+  /** Declare the default model id a no-model session should boot with. */
+  setDefault(id: string | null): void
+}
+
+// ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------
 
@@ -309,6 +366,8 @@ export interface PluginHostV2 {
   readonly sessions?: SessionsReadApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
+  readonly models?: ModelsReadApi
+  readonly modelsRegistry?: ModelsRegisterApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }

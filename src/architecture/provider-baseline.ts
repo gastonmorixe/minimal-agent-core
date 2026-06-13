@@ -54,10 +54,13 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // OAuth/identity for claude.ai plan auth (dissolves with the stack).
   "auth.ts",
   "auth.test.ts",
-  "auth-store.ts",
-  "auth-store.test.ts",
-  "oauth-login.test.ts",
-  "commands/login.ts",
+  // B-3 (login cluster): auth-store.ts, auth-store.test.ts, oauth-login.test.ts,
+  // and commands/login.ts were ratcheted OUT. They are the provider-NEUTRAL
+  // credential vault, PKCE engine tests, and CLI login plumbing (the Anthropic
+  // login specifics already live in plugins/llm-anthropic/oauth-login.ts). Their
+  // only coupling was incidental provider-token STRINGS (example slugs/names, a
+  // callback-URL test fixture, a CLI banner), now neutralized to generic
+  // placeholders. auth.ts itself STAYS pending B-6.
   // Anthropic rate tables + registry vendor-extension keys pending
   // extraction to the plugin.
   "llm/model-registry.ts",

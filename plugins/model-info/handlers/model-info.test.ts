@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { ModelInfoSnapshot, TUIContext } from "../../../src/plugins/types.ts"
+import type { ModelInfoSnapshot, TUIContext } from "@minimal-agent/plugin-api/types/plugin"
 
 import handler from "./model-info.ts"
 

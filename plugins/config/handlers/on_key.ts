@@ -21,7 +21,8 @@
  * @module config/handlers/on_key
  */
 
-import type { HookHandlerContext } from "../../../src/plugins/types.ts"
+import type { HookHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { type Event, type KeyName, transition } from "../lib/fsm.ts"
 import type { EditorKeyPayload } from "../lib/host-types.ts"
 import { type ApplyDeps, applyEffects } from "../lib/runtime.ts"

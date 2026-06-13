@@ -10,8 +10,7 @@
  * @module llm/providers/openrouter/capabilities
  */
 
-import type { Capabilities } from "../../src/llm/capabilities.ts"
-import { defaultCapabilities } from "../../src/llm/capabilities.ts"
+import { type Capabilities, defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 
 /** Generic OpenRouter chat capability (text + image in, sampling-friendly). */
 export const CAPS_OPENROUTER_CHAT: Capabilities = {

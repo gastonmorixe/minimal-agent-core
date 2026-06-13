@@ -51,12 +51,12 @@ describe("defaultAuthFilePath (token-store path — byte-pinned)", () => {
 
 describe("normalizeProviderId", () => {
   it("lowercases and accepts dash-case ascii", () => {
-    expect(normalizeProviderId("Anthropic")).toBe("anthropic")
-    expect(normalizeProviderId(" Anthropic-Plan-OAuth ")).toBe("anthropic-plan-oauth")
-    expect(normalizeProviderId("openai-api-key")).toBe("openai-api-key")
+    expect(normalizeProviderId("Acme")).toBe("acme")
+    expect(normalizeProviderId(" Acme-Plan-OAuth ")).toBe("acme-plan-oauth")
+    expect(normalizeProviderId("widget-api-key")).toBe("widget-api-key")
   })
   it("rejects spaces, unicode, leading/trailing/double dashes", () => {
-    for (const bad of ["", "an thropic", "-anthropic", "anthropic-", "a--b", "anthröpic", "a_b"]) {
+    for (const bad of ["", "ac me", "-acme", "acme-", "a--b", "acmé", "a_b"]) {
       expect(() => normalizeProviderId(bad)).toThrow(AuthStoreError)
     }
   })
@@ -65,27 +65,27 @@ describe("normalizeProviderId", () => {
 describe("AuthStore basic CRUD", () => {
   it("returns null/empty for a fresh (nonexistent) store", () => {
     const s = freshStore()
-    expect(s.get("anthropic-plan-oauth")).toBeNull()
-    expect(s.getSecrets("anthropic-plan-oauth")).toBeNull()
-    expect(s.has("anthropic-plan-oauth")).toBe(false)
+    expect(s.get("acme-plan-oauth")).toBeNull()
+    expect(s.getSecrets("acme-plan-oauth")).toBeNull()
+    expect(s.has("acme-plan-oauth")).toBe(false)
     expect(s.list()).toEqual([])
   })
 
   it("sets and reads back an opaque secret bag verbatim", () => {
     const s = freshStore()
     const bag = { accessToken: "AT", nested: { a: [1, 2, 3], b: null }, n: 42, ok: true }
-    s.set("anthropic-plan-oauth", "Anthropic Plan (OAuth)", bag)
-    expect(s.getSecrets("anthropic-plan-oauth")).toEqual(bag)
-    const entry = s.get("anthropic-plan-oauth")!
-    expect(entry.id).toBe("anthropic-plan-oauth")
-    expect(entry.name).toBe("Anthropic Plan (OAuth)")
+    s.set("acme-plan-oauth", "Acme Plan (OAuth)", bag)
+    expect(s.getSecrets("acme-plan-oauth")).toEqual(bag)
+    const entry = s.get("acme-plan-oauth")!
+    expect(entry.id).toBe("acme-plan-oauth")
+    expect(entry.name).toBe("Acme Plan (OAuth)")
     expect(entry.createdAt).toBeDefined()
   })
 
   it("normalizes the provider id on write (case-insensitive lookups)", () => {
     const s = freshStore()
-    s.set("Anthropic-Plan-OAuth", "X", { k: 1 })
-    expect(s.getSecrets("anthropic-plan-oauth")).toEqual({ k: 1 })
+    s.set("Acme-Plan-OAuth", "X", { k: 1 })
+    expect(s.getSecrets("acme-plan-oauth")).toEqual({ k: 1 })
   })
 
   it("upsert preserves createdAt but advances updatedAt", () => {
@@ -139,13 +139,13 @@ describe("AuthStore basic CRUD", () => {
 describe("AuthStore multi-entry / same-slug semantics", () => {
   it("allows multiple entries under one slug with distinct names", () => {
     const s = freshStore()
-    s.set("anthropic-enterprise-oauth", "Anthropic Enterprise (OAuth)", { org: "A" })
-    s.set("anthropic-enterprise-oauth", "Anthropic Enterprise (OAuth) 2", { org: "B" })
-    expect(s.list("anthropic-enterprise-oauth")).toHaveLength(2)
-    expect(s.getSecrets("anthropic-enterprise-oauth", "Anthropic Enterprise (OAuth)")).toEqual({
+    s.set("acme-enterprise-oauth", "Acme Enterprise (OAuth)", { org: "A" })
+    s.set("acme-enterprise-oauth", "Acme Enterprise (OAuth) 2", { org: "B" })
+    expect(s.list("acme-enterprise-oauth")).toHaveLength(2)
+    expect(s.getSecrets("acme-enterprise-oauth", "Acme Enterprise (OAuth)")).toEqual({
       org: "A",
     })
-    expect(s.getSecrets("anthropic-enterprise-oauth", "Anthropic Enterprise (OAuth) 2")).toEqual({
+    expect(s.getSecrets("acme-enterprise-oauth", "Acme Enterprise (OAuth) 2")).toEqual({
       org: "B",
     })
   })
@@ -187,14 +187,14 @@ describe("AuthStore validation", () => {
 
 describe("AuthStore persistence", () => {
   it("writes a 0600 .jsonc file with a banner, re-readable by a new instance", () => {
-    freshStore().set("anthropic-plan-oauth", "Anthropic Plan (OAuth)", { accessToken: "AT" })
+    freshStore().set("acme-plan-oauth", "Acme Plan (OAuth)", { accessToken: "AT" })
     const text = readFileSync(path, "utf-8")
     expect(text).toContain("minimal-agent credential store")
     expect(text).toContain('"version": 1')
     // 0600 — owner rw only
     expect(statSync(path).mode & 0o777).toBe(0o600)
     // a brand-new instance sees the persisted data
-    expect(new AuthStore({ path }).getSecrets("anthropic-plan-oauth")).toEqual({
+    expect(new AuthStore({ path }).getSecrets("acme-plan-oauth")).toEqual({
       accessToken: "AT",
     })
   })

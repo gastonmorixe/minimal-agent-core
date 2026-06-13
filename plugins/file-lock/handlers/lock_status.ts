@@ -35,6 +35,8 @@ import { existsSync, unlinkSync } from "node:fs"
 import { hostname } from "node:os"
 import { isAbsolute, resolve } from "node:path"
 
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import {
   DEFAULT_STALE_AFTER_MS,
   defaultPidAlive,
@@ -43,7 +45,6 @@ import {
   lockPathFor,
   readLockFile,
 } from "../../../src/file-lock.ts"
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
 // ---------------------------------------------------------------------------
 // Input shape
@@ -496,7 +497,8 @@ function resolveStaleAfterMs(_ctx: TUIContext): number {
     const fs = require("node:fs") as typeof import("node:fs")
     if (!fs.existsSync(path)) return DEFAULT_STALE_AFTER_MS
     const raw = fs.readFileSync(path, "utf-8")
-    const jsonc = require("../../../src/jsonc.ts") as typeof import("../../../src/jsonc.ts")
+    const jsonc =
+      require("@minimal-agent/plugin-api/utils/jsonc") as typeof import("@minimal-agent/plugin-api/utils/jsonc")
     const parsed = jsonc.parseJsonc(raw) as Record<string, unknown> | null
     if (!parsed || typeof parsed !== "object") return DEFAULT_STALE_AFTER_MS
     const plugins = (parsed as Record<string, unknown>).plugins as

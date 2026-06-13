@@ -14,19 +14,16 @@
  * @module llm/providers/openrouter/adapter
  */
 
-import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
+import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
+import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/types/plugin"
+import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
-import type {
-  ProviderAdapter,
-  RunContext,
-  SurfaceId,
-  ValidationResult,
-} from "../../src/llm/provider.ts"
-import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
-import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
+import type { ProviderAdapter, SurfaceId, ValidationResult } from "../../src/llm/provider.ts"
 import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
-import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import {
   buildOpenAIChatBody,
   buildOpenAIHeaders,
