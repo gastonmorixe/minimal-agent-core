@@ -19,10 +19,9 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 
-import { ansiStyle as A, ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { BREATHING_DOT } from "../spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"
+import { startStartupProgressSpinner } from "../startup/progress-spinner.ts"
 
 const RELEASES_API = "https://api.github.com/repos/gastonmorixe/mdstream/releases/latest"
 
@@ -62,75 +61,6 @@ function assetName(): string | null {
   const arch = archMap[process.arch]
   if (!os || !arch) return null
   return `mdstream-${os}-${arch}.tar.gz`
-}
-
-/** Shared tree-prefix used by the startup rows in index.ts */
-const PIPE = `  ${A.faintWhite("│")} `
-
-// ---------------------------------------------------------------------------
-// Inline spinner — runs on stderr while the download is in progress.
-// ---------------------------------------------------------------------------
-
-interface DownloadSpinner {
-  setPhase(label: string): void
-  done(finalLine: string): void
-  fail(errorLine: string): void
-}
-
-/**
- * Start an animated breathing-dot spinner that overwrites a single stderr line.
- * Each frame of BREATHING_DOT (`· ∙ • ● • ∙`) is painted with a matching
- * color from {@link BREATHING_COLORS} so hue and size peak together at `●`.
- *
- * Call `.setPhase()` to update the label mid-flight, `.done()` to swap the
- * spinner for a green ✔ and advance the cursor, or `.fail()` to show a red ✗.
- */
-function startSpinner(initialLabel: string): DownloadSpinner {
-  let phase = initialLabel
-  let frameIdx = 0
-  let colorIdx = 0
-
-  function coloredFrame(): string {
-    const char = BREATHING_DOT[frameIdx] ?? "·"
-    const colorize = ANSI_PALETTE_RAINBOW[colorIdx % ANSI_PALETTE_RAINBOW.length]!
-    return colorize(char)
-  }
-
-  function renderLine(): string {
-    // ─── visual anatomy ───────────────────────────────────────────────
-    //   │   •  downloading  mdstream  v1.2.3  ·  darwin  aarch64
-    //   ^   ^  ^─────────────────────────────────────────────────^
-    //  pipe glyph               phase label (set by caller)
-    return `\r${PIPE} ${coloredFrame()} ${phase}`
-  }
-
-  // Blank │ line for visual breathing room before the spinner row.
-  process.stderr.write(`${PIPE}\n`)
-  process.stderr.write(renderLine())
-
-  const timer = setInterval(() => {
-    frameIdx = (frameIdx + 1) % BREATHING_DOT.length
-    colorIdx++
-    process.stderr.write(renderLine())
-  }, 160)
-
-  function stop(finalGlyph: string, finalLabel: string): void {
-    clearInterval(timer)
-    process.stderr.write(`\r${ANSI_CODES.ERASE_LINE}${PIPE} ${finalGlyph} ${finalLabel}\n`)
-    process.stderr.write(`${PIPE}\n`)
-  }
-
-  return {
-    setPhase(label: string) {
-      phase = label
-    },
-    done(finalLine: string) {
-      stop(A.boldGreen("✔"), finalLine)
-    },
-    fail(errorLine: string) {
-      stop(A.boldRed("✗"), errorLine)
-    },
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +129,7 @@ export async function resolveFormatter(explicitCmd?: string[]): Promise<Formatte
 
   // ── Phase 1: fetch release metadata ──────────────────────────────────────
   const platformLabel = A.dim(`${process.platform} · ${process.arch}`)
-  const spinner = startSpinner(
+  const spinner = startStartupProgressSpinner(
     `${A.dim("fetching")}  ${A.bold("mdstream")} release info  ${platformLabel}`,
   )
 
