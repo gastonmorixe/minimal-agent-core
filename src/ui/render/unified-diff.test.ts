@@ -1,5 +1,5 @@
 /**
- * Byte-parity pin for the core-local unified-diff renderer.
+ * Byte-parity pin for the host UI unified-diff renderer.
  *
  * The expected strings below were captured VERBATIM from the diff-view
  * plugin's `renderUnifiedDiff` (plugins/diff-view/handlers/render.ts)
@@ -68,7 +68,7 @@ const EXPECTED_PALETTED =
   "\n" +
   "plain trailing line"
 
-describe("render/unified-diff — byte parity with the diff-view plugin renderer", () => {
+describe("ui/render/unified-diff — byte parity with the diff-view plugin renderer", () => {
   let savedPalette: string | undefined
 
   beforeEach(() => {

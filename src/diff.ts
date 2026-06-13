@@ -14,12 +14,12 @@
  *
  * Both return a standard unified-diff string with `--- a/path`, `+++ b/path`,
  * and `@@ -oldStart,oldLen +newStart,newLen @@` hunk headers, suitable to
- * pass straight into {@link renderUnifiedDiff} (the core-local colorizer
- * in `src/render/unified-diff.ts`, byte-parity-pinned to the diff-view
+ * pass straight into {@link renderUnifiedDiff} (the UI colorizer
+ * in `src/ui/render/unified-diff.ts`, byte-parity-pinned to the diff-view
  * plugin's renderer).
  */
 
-export { renderUnifiedDiff } from "./render/unified-diff.ts"
+export { renderUnifiedDiff } from "./ui/render/unified-diff.ts"
 
 interface Hunk {
   oldStart: number // 1-based line number in `before`
