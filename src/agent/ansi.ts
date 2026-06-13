@@ -64,8 +64,13 @@ export const c = {
 
 /**
  * Re-dim a thinking chunk so any embedded SGR resets don't break the
- * dim envelope. The reset sequences `\x1b[0m` / `\x1b[22m` are followed
- * by a fresh `\x1b[2m` so the rest of the chunk stays faint.
+ * dim envelope. The reset sequences `\x1b[0m` / `\x1b[m` / `\x1b[22m` are
+ * followed by a fresh `\x1b[2m` so the rest of the chunk stays faint.
+ *
+ * `\x1b[m` (empty parameter) is the same full reset as `\x1b[0m`; markdown
+ * renderers emit it to close spans, and without re-asserting faint after it
+ * the formatter path would lose dimness mid-block while the raw-chunk path
+ * (which feeds plain text with no interior resets) stays faint throughout.
  *
  * @param s - Raw thinking text (may contain SGR sequences).
  * @returns The same content wrapped + interior-fixed for dim display.
@@ -76,6 +81,7 @@ export const faintThinkingChunk = (s: string): string => {
   if (body.length === 0) return trailingNewline ? "\n" : ""
   const redimmed = body
     .replaceAll("\x1b[0m", "\x1b[0m\x1b[2m")
+    .replaceAll("\x1b[m", "\x1b[m\x1b[2m")
     .replaceAll("\x1b[22m", "\x1b[22m\x1b[2m")
   return `\x1b[2m${redimmed}\x1b[22m${trailingNewline ? "\n" : ""}`
 }
