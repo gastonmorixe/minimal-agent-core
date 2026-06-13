@@ -9,13 +9,9 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import type { Finding } from "../plugins/hooks/tool-lifecycle.ts"
+import type { Finding } from "../../plugins/hooks/tool-lifecycle.ts"
 
-import {
-  formatDiagnosticsAnnotation,
-  formatToolPreview,
-  renderFindingsPanel,
-} from "./tool-format.ts"
+import { formatDiagnosticsAnnotation, formatToolPreview, renderFindingsPanel } from "./format.ts"
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")
 

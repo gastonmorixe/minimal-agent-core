@@ -11,8 +11,8 @@
 
 import type { ModelInfo } from "../client.ts"
 import { RawInput } from "../input.ts"
+import { c } from "../ui/style/ansi.ts"
 
-import { c } from "./ansi.ts"
 import type { ReplErrOutput } from "./repl.ts"
 
 /**

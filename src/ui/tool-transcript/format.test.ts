@@ -23,15 +23,16 @@
  */
 import { describe, expect, it } from "bun:test"
 
+import type { ToolUseBlock } from "../../client.ts"
+import { displayWidth } from "../../term-width.ts"
+import type { TruncationInfo } from "../../tools/truncation.ts"
+
 import {
   clampTranscriptRow,
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
-} from "./agent.ts"
-import type { ToolUseBlock } from "./client.ts"
-import { displayWidth } from "./term-width.ts"
-import type { TruncationInfo } from "./tools/truncation.ts"
+} from "./format.ts"
 
 /** Strip ANSI escapes so assertions don't fight against the SGR wrap. */
 function stripAnsi(s: string): string {

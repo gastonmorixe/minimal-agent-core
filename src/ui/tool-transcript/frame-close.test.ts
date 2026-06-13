@@ -33,7 +33,9 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { c, formatToolPreview, isOuterFrameClose } from "./agent.ts"
+import { c } from "../style/ansi.ts"
+
+import { formatToolPreview, isOuterFrameClose } from "./format.ts"
 
 describe("isOuterFrameClose — outer-gutter ╰ recognition", () => {
   it("matches a plain outer frame closer (no ANSI)", () => {

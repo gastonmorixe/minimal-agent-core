@@ -29,8 +29,9 @@ import { buildPendingModeChangeDecoration } from "../ui/chrome/mode-change-pendi
 import { buildQueueDecorationLines } from "../ui/chrome/queue-decoration.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
+import { c, faintThinkingChunk, formatAbortedEcho } from "../ui/style/ansi.ts"
+import { isOuterFrameClose } from "../ui/tool-transcript/format.ts"
 
-import { c, faintThinkingChunk, formatAbortedEcho } from "./ansi.ts"
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
 import type { AskUserFn } from "./preflight-pipeline.ts"
 import type {
@@ -41,7 +42,6 @@ import type {
   ReplOutput,
   StatusController,
 } from "./repl.ts"
-import { isOuterFrameClose } from "./tool-format.ts"
 
 /**
  * Runs the interactive REPL on the compositor-based "live area" UI: a
