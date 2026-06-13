@@ -74,7 +74,6 @@ import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } fro
 import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
-import { isColdStart, maybeShowFirstRunWelcome } from "./first-run.ts"
 import { setGlobalEventBus } from "./global-bus.ts"
 import {
   activateDiscoveredProviders,
@@ -110,6 +109,7 @@ import {
 import { bootSessionStores } from "./startup/session-store-boot.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
+import { isColdStart, maybeShowFirstRunWelcome } from "./ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./ui/formatter/auto.ts"
 import { Formatter, parseFormatterCommand } from "./ui/formatter/formatter.ts"
