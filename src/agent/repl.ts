@@ -32,8 +32,8 @@ import type { ManifestMode } from "../plugins/types.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import { StatusRenderer, type StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
+import { c, faintThinkingChunk } from "../ui/style/ansi.ts"
 
-import { c, faintThinkingChunk } from "./ansi.ts"
 import {
   parseModelNotFoundError,
   parseModelUnavailableError,

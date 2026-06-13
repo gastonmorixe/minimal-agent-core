@@ -20,15 +20,6 @@
  * transcripts) before the resumed REPL prompt.
  */
 
-import {
-  c,
-  clampTranscriptRow,
-  faintThinkingChunk,
-  formatToolInput,
-  formatToolInputContinuation,
-  formatToolPreview,
-  toolContinuationIndentCells,
-} from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import { Formatter } from "./formatter.ts"
 import type { ModeManager } from "./modes.ts"
@@ -37,6 +28,14 @@ import type { SessionRecord } from "./session-store.ts"
 import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
+import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
+import {
+  clampTranscriptRow,
+  formatToolInput,
+  formatToolInputContinuation,
+  formatToolPreview,
+  toolContinuationIndentCells,
+} from "./ui/tool-transcript/format.ts"
 
 /**
  * Sink shape: anything with a `write(string)`. The live-area REPL passes

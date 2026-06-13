@@ -6,8 +6,9 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import { c } from "./ansi.ts"
-import { isOuterFrameClose, reopenFrameCloser } from "./tool-format.ts"
+import { c } from "../style/ansi.ts"
+
+import { isOuterFrameClose, reopenFrameCloser } from "./format.ts"
 
 describe("reopenFrameCloser", () => {
   it("swaps a dimCyan ╰ closer for a dimCyan │ continuation", () => {

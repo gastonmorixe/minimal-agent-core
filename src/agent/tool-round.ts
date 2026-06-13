@@ -36,8 +36,7 @@ import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools.ts"
-
-import { c } from "./ansi.ts"
+import { c } from "../ui/style/ansi.ts"
 import {
   clampBodyWithHint,
   clampTranscriptRow,
@@ -55,7 +54,7 @@ import {
   TOOL_PREVIEW_LINES_DEFAULT,
   toolContinuationIndentCells,
   tuiPreviewHint,
-} from "./tool-format.ts"
+} from "../ui/tool-transcript/format.ts"
 
 /**
  * Cosmetic per-tool presentation hints (icon, label color, early-header

@@ -6,13 +6,14 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { ToolUseBlock } from "../../client.ts"
+import { displayWidth } from "../../term-width.ts"
+
 import {
   formatToolInput,
   formatToolInputContinuation,
   toolContinuationIndentCells,
-} from "./agent.ts"
-import type { ToolUseBlock } from "./client.ts"
-import { displayWidth } from "./term-width.ts"
+} from "./format.ts"
 
 function tu(name: string, input: Record<string, unknown>): ToolUseBlock {
   return { type: "tool_use", id: "test", name, input } as ToolUseBlock

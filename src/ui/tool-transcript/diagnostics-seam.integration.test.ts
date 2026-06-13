@@ -11,19 +11,15 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import { Hooks } from "../plugins/hooks/hooks.ts"
+import { Hooks } from "../../plugins/hooks/hooks.ts"
 import {
   addFinding,
   addNote,
   makeToolDidInvokePayload,
   type ToolDidInvokePayload,
-} from "../plugins/hooks/tool-lifecycle.ts"
+} from "../../plugins/hooks/tool-lifecycle.ts"
 
-import {
-  formatDiagnosticsAnnotation,
-  formatToolPreview,
-  renderFindingsPanel,
-} from "./tool-format.ts"
+import { formatDiagnosticsAnnotation, formatToolPreview, renderFindingsPanel } from "./format.ts"
 
 const noLog = () => {}
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")

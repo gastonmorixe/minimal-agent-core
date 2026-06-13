@@ -25,12 +25,11 @@
  * @module agent
  */
 
-// ANSI helpers, reflection-checkpoint utilities, and the rolling-cache
-// breakpoint helper live in `src/agent/` submodules to keep this file
-// under the `max-lines` lint budget. Imported here for in-class use,
-// and re-exported below so external consumers can still
+// Reflection-checkpoint utilities and the rolling-cache breakpoint helper
+// live in `src/agent/` submodules to keep this file under the `max-lines`
+// lint budget. UI style helpers live under `src/ui` and are re-exported
+// below so external consumers can still
 // `import { c, runReflectionCooldown, ... } from "./agent.ts"`.
-import { c, faintThinkingChunk, formatAbortedEcho } from "./agent/ansi.ts"
 import { withRollingCacheBreakpoint } from "./agent/cache.ts"
 import {
   repairOrphanedToolUse as repairOrphanedToolUseImpl,
@@ -73,6 +72,7 @@ import { GLOBAL_STATUS_BUS } from "./status.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import { TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
+import { c, faintThinkingChunk, formatAbortedEcho } from "./ui/style/ansi.ts"
 
 export {
   c,
@@ -1491,13 +1491,10 @@ export class Agent {
 }
 
 // ---------------------------------------------------------------------------
-// Tool-format helpers (extracted to ./agent/tool-format.ts)
+// Tool transcript render helpers (implementation lives under ./ui)
 // ---------------------------------------------------------------------------
 
-// All tool input/output formatting helpers live in
-// `src/agent/tool-format.ts` so this file stays under the `max-lines`
-// lint budget. Imported here for in-class use and re-exported below
-// so external consumers (`session-replay.ts`, tests, etc.) can keep
+// Re-exported here so external consumers can keep
 // `import { formatToolInput, ... } from "./agent.ts"`.
 import {
   clampTranscriptRow,
@@ -1506,7 +1503,7 @@ import {
   formatToolPreview,
   isOuterFrameClose,
   toolContinuationIndentCells,
-} from "./agent/tool-format.ts"
+} from "./ui/tool-transcript/format.ts"
 
 export {
   clampTranscriptRow,

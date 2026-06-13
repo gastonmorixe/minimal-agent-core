@@ -3,21 +3,19 @@
  * lines, continuation rows, and bordered output previews shown
  * inline between the `╭` and `╰` frames.
  *
- * Split out of `src/agent.ts` to keep that file under the `max-lines`
- * lint budget. Names are re-exported from `agent.ts` for back-compat
- * with existing consumers (`session-replay.ts`, tests, etc.).
+ * Names are re-exported from `agent.ts` for back-compat with existing
+ * consumers (`session-replay.ts`, tests, etc.).
  *
- * @module agent/tool-format
+ * @module ui/tool-transcript/format
  */
 
-import { shouldSoftSplit, splitBashSegments } from "../bash-split.ts"
-import type { ToolUseBlock } from "../client.ts"
-import type { Finding, FindingSeverity } from "../plugins/hooks/tool-lifecycle.ts"
-import { displayWidth, expandTabs, truncateDisplayWidth } from "../term-width.ts"
-import { countLines, type TruncationInfo } from "../tools/truncation.ts"
-import { truncHint } from "../truncate-hint.ts"
-
-import { c } from "./ansi.ts"
+import { shouldSoftSplit, splitBashSegments } from "../../bash-split.ts"
+import type { ToolUseBlock } from "../../client.ts"
+import type { Finding, FindingSeverity } from "../../plugins/hooks/tool-lifecycle.ts"
+import { displayWidth, expandTabs, truncateDisplayWidth } from "../../term-width.ts"
+import { countLines, type TruncationInfo } from "../../tools/truncation.ts"
+import { truncHint } from "../../truncate-hint.ts"
+import { c } from "../style/ansi.ts"
 
 /**
  * Per-tool char cap for the bordered tool **header** line ("╭ Bash $ ..."),

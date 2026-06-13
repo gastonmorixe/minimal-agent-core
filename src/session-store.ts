@@ -157,7 +157,7 @@ export interface ToolResultRecord {
    * Additive field: missing from records written before the resume
    * fidelity fix landed. `parseLines` reads them unchanged.
    *
-   * See `formatToolPreview` in `src/agent/tool-format.ts` (the `display`
+   * See `formatToolPreview` in `src/ui/tool-transcript/format.ts` (the `display`
    * branch) and the replay path in `src/session-replay.ts`.
    */
   display?: string

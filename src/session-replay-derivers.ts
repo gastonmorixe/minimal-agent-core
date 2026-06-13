@@ -141,7 +141,7 @@ export function clearReplayRenderers(): void {
  * `<ma::tui-preview …>…</ma::tui-preview>` blocks don't bleed into
  * the derived header/body/footer.
  *
- * Mirrors `findAnnotationStart` in `src/agent/tool-format.ts`. Kept
+ * Mirrors `findAnnotationStart` in `src/ui/tool-transcript/format.ts`. Kept
  * local here to avoid the import-cycle risk (replay → agent → replay).
  */
 const ANNOTATION_OPENERS: readonly string[] = [
