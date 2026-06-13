@@ -1,19 +1,38 @@
 /**
  * Decoupling guard. The diagnostics plugin must NOT depend on the agent at
- * runtime, but its {@link Finding} must stay STRUCTURALLY assignable to the
- * agent's `tool.didInvoke` payload `Finding` so the plugin can push entries
- * straight onto `payload.findings`.
+ * runtime OR at compile time — it must be able to live in its own repo, so it
+ * imports NOTHING from `src/`, not even type-only. Its {@link Finding} must
+ * nonetheless stay STRUCTURALLY assignable to the agent's `tool.didInvoke`
+ * payload `Finding` so the plugin can push entries straight onto
+ * `payload.findings`.
  *
- * This test imports the agent type ONLY in a type position (erased at runtime,
- * no runtime coupling) and asserts assignability in both directions via a
- * compile-time check. If either shape drifts, `bun test`/typecheck fails here
- * instead of silently at the hook boundary.
+ * The contract is enforced here against a LOCAL structural re-declaration of
+ * the host's `Finding` (the decoupling idiom: re-state the host slice as a
+ * local interface; TypeScript's structural typing makes the real host object
+ * satisfy it at runtime). The host-side source of truth for this shape is
+ * `src/plugins/hooks/tool-lifecycle.ts` — keep this mirror in lockstep with
+ * it. If the plugin's `Finding` and this mirror drift, the compile-time
+ * checks below fail in `bun test`/typecheck instead of silently at the hook
+ * boundary.
  */
 import { describe, expect, it } from "bun:test"
 
-import type { Finding as AgentFinding } from "../../../src/plugins/hooks/tool-lifecycle.ts"
-
 import type { Finding as PluginFinding } from "./types.ts"
+
+/**
+ * LOCAL structural mirror of the host's `Finding` (the `tool.didInvoke`
+ * payload entry). Source of truth: `src/plugins/hooks/tool-lifecycle.ts`.
+ * Re-declared here (not imported) so the plugin stays repo-independent.
+ */
+interface AgentFinding {
+  source: string
+  severity: "error" | "warning" | "info"
+  line?: number
+  col?: number
+  code?: string
+  message: string
+  path?: string
+}
 
 // Compile-time assignability both ways. `satisfies` forces the check; the
 // values are never used at runtime.
