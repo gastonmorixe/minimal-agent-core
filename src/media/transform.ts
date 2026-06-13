@@ -23,6 +23,20 @@ import { base64EncodedSize } from "./limits.ts"
 /** The pixel ceiling worth sending to a vision model; larger just burns tokens. */
 export const VISION_LONG_EDGE_PX = 1568
 
+/**
+ * Hard ceiling on total pixels (width × height) we will ever DECODE.
+ *
+ * `metadata()` is a cheap header read, but `.resize()` triggers a full decode
+ * that allocates roughly `width × height × 4` bytes of raw bitmap. A tiny,
+ * highly-compressed file can declare an enormous canvas (e.g. 60000×60000 =
+ * 3.6 gigapixels ≈ 14 GB decoded) — a classic decompression bomb that OOMs the
+ * process. 50 megapixels is generous (an 8K display is ~33 MP, a 50 MP photo
+ * comes off high-end phone sensors) yet blocks any bomb by orders of magnitude.
+ * This is the single chokepoint: every decode path funnels through
+ * {@link fitImageToBudget}, so this guard covers them all.
+ */
+export const MAX_DECODE_PIXELS = 50_000_000
+
 /** Quality ladder walked (high → low) when re-encoding a lossy format. */
 const QUALITY_LADDER = [85, 75, 65, 55, 45] as const
 
@@ -114,6 +128,15 @@ export async function fitImageToBudget(
     return null // undecodable / unsupported format
   }
   if (srcW <= 0 || srcH <= 0) return null
+
+  // Decompression-bomb chokepoint: metadata() (above) is a cheap header read,
+  // but the .resize() below fully DECODES the image into a raw bitmap sized by
+  // these declared dimensions. A crafted file can claim a multi-gigapixel canvas
+  // from a few KB on disk. Reject over-cap images here, BEFORE any decode, using
+  // the same `null` "can't fit" signal callers already treat as a clean
+  // rejection. metadata() reports real width/height even when the cheap header
+  // parser (imageDimensions) desynced to null, so this also closes that path.
+  if (srcW * srcH > MAX_DECODE_PIXELS) return null
 
   const longEdge = Math.max(srcW, srcH)
   // The first target never enlarges: min(source, ceiling).
