@@ -30,8 +30,9 @@
  * @module ui/compositor
  */
 
-import { AnsiStreamBuffer } from "../ansi-stream.ts"
 import { cursorVisualCol, displayWidth } from "../term-width.ts"
+
+import { AnsiStreamBuffer } from "./terminal/ansi-stream.ts"
 
 export interface CompositorOutput {
   write(s: string): boolean | void

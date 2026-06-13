@@ -21,7 +21,7 @@
 
 import { format } from "node:util"
 
-import { AnsiStreamBuffer } from "../ansi-stream.ts"
+import { AnsiStreamBuffer } from "./terminal/ansi-stream.ts"
 
 interface CompositorLike {
   writeStream(chunk: string): void
