@@ -6,7 +6,7 @@
     "src/agent.ts",
     "src/auth.ts",
     "src/client.ts",
-    "src/formatter.ts",
+    "src/ui/formatter/formatter.ts",
     "src/headers.ts",
     "src/tools.ts",
     "src/plugins/loader.ts",
