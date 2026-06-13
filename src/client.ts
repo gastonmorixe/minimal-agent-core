@@ -1147,6 +1147,18 @@ export async function* sendMessageOnce(
   } finally {
     requestStatus.clear()
     networkActivityObserver.detach(reqId)
+    // Tear down the in-flight request when the generator is abandoned
+    // mid-yield (the consumer stops iterating — e.g. the agent loop breaks
+    // out early). The stream watchdog timer was already cleared in the inner
+    // finally, so without this the underlying HTTP/2 request body is never
+    // aborted and the connection/stream leaks (B-098). We abort only the
+    // internal per-attempt controller, never the caller's `signal`. On the
+    // normal success path the `return` above runs first and the stream is
+    // already fully consumed, so abort() is a harmless no-op on a finished
+    // request. Each `sendMessageOnce` call owns its own `attemptAbort`
+    // (retries spin up a fresh generator), so this never clobbers a
+    // subsequent attempt's controller.
+    attemptAbort.abort()
   }
 }
 
