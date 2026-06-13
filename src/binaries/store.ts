@@ -474,6 +474,19 @@ export class BinaryStore {
     }
 
     const out = join(workDir, "download")
+    // SSRF / scheme guard (B-047): a plugin-supplied `kind:"url"` source could
+    // otherwise aim the fetch at file://, plaintext http://, or an internal /
+    // cloud-metadata host. Validate the URL we're about to hit. The resolved
+    // GitHub asset URL is always https://api.github.com/... so it passes; the
+    // 302 it returns to a signed CDN host is followed by `redirect: "follow"`
+    // (per-hop revalidation is a deferred follow-up, see rejectUnsafeDownloadUrl).
+    const unsafe = rejectUnsafeDownloadUrl(url)
+    if (unsafe) {
+      return {
+        ok: false,
+        outcome: fail("download-failed", `${unsafe} (for ${spec.name})`),
+      }
+    }
     try {
       const res = await this.deps.fetchFn(url, { headers, redirect: "follow" })
       if (!res.ok || !res.body) {
@@ -543,7 +556,15 @@ export class BinaryStore {
     source: Extract<BinarySource, { kind: "github-release" }>,
     token: string,
   ): Promise<{ ok: true; url: string } | { ok: false; outcome: InstallOutcome }> {
-    const api = `https://api.github.com/repos/${source.repo}/releases/tags/${encodeURIComponent(source.tag)}`
+    // `repo` is "owner/name", so encode each path segment (NOT the slash)
+    // rather than the whole string. Plugin-supplied (B-047): encode it the same
+    // way `tag` already is, so a crafted value can't inject extra path segments
+    // / query / a different host into the API URL.
+    const repoPath = source.repo
+      .split("/")
+      .map((seg) => encodeURIComponent(seg))
+      .join("/")
+    const api = `https://api.github.com/repos/${repoPath}/releases/tags/${encodeURIComponent(source.tag)}`
     try {
       const res = await this.deps.fetchFn(api, {
         headers: {
@@ -575,7 +596,7 @@ export class BinaryStore {
       }
       return {
         ok: true,
-        url: `https://api.github.com/repos/${source.repo}/releases/assets/${asset.id}`,
+        url: `https://api.github.com/repos/${repoPath}/releases/assets/${asset.id}`,
       }
     } catch (err) {
       return {
@@ -620,6 +641,82 @@ export function classify(
   const cmp = compareVersions(installed.version, spec.version)
   if (Number.isNaN(cmp)) return "unknown-version"
   return cmp >= 0 ? "satisfied" : "outdated"
+}
+
+/**
+ * Reject a download URL that isn't a plain `https:` request to a non-internal
+ * host (B-047). A `kind:"url"` source is plugin-supplied, so without this a
+ * hostile/compromised spec could point the fetch at `file://`, plaintext
+ * `http://`, `data:`, or an internal/metadata target (`169.254.169.254`,
+ * `localhost`, RFC-1918 ranges) and turn the provisioner into an SSRF/exfil
+ * primitive. Returns a human-readable reason when the URL MUST be rejected,
+ * else `null`.
+ *
+ * Scope: this validates the URL we are about to fetch. `redirect: "follow"`
+ * can still bounce a 3xx to an internal host, so full protection needs per-hop
+ * revalidation (`redirect: "manual"` + re-checking each `Location`). That is a
+ * deliberate FOLLOW-UP, not done here: the GitHub asset path legitimately 302s
+ * to a signed `objects.githubusercontent.com` / S3 host, and manual redirect
+ * following would complicate that happy path. DNS-rebind (a hostname that
+ * *resolves* to a private IP at connect time) is likewise out of scope; this
+ * is a literal-hostname guard against the direct cases a hostile spec uses.
+ */
+export function rejectUnsafeDownloadUrl(raw: string): string | null {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return `invalid download URL: ${raw}`
+  }
+  if (u.protocol !== "https:") {
+    return `refusing non-https download URL (scheme "${u.protocol}"): ${raw}`
+  }
+  if (isInternalHost(u.hostname)) {
+    return `refusing download from internal/metadata host "${u.hostname}"`
+  }
+  return null
+}
+
+/**
+ * Literal-hostname check for obvious internal / loopback / link-local /
+ * metadata targets (the SSRF blocklist for {@link rejectUnsafeDownloadUrl}).
+ * Best-effort string match against the URL's hostname, NOT full DNS-rebind
+ * protection (a hostname that resolves to a private IP is out of scope). IPv6
+ * prefix checks only fire on an actual IPv6 literal (contains `:`) so a normal
+ * domain like `fcservice.com` is never misclassified.
+ */
+export function isInternalHost(hostname: string): boolean {
+  // URL.hostname is already lowercased and has IPv6 brackets stripped.
+  const h = hostname.toLowerCase()
+  if (h === "localhost" || h.endsWith(".localhost")) return true
+
+  // IPv6 literal: only reachable when the hostname actually contains a colon,
+  // so these prefix tests can't collide with a hex-leading domain name.
+  if (h.includes(":")) {
+    if (h === "::1" || h === "::") return true // loopback / unspecified
+    if (h.startsWith("fc") || h.startsWith("fd")) return true // unique-local fc00::/7
+    if (h.startsWith("fe8") || h.startsWith("fe9") || h.startsWith("fea") || h.startsWith("feb"))
+      return true // link-local fe80::/10
+    // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) → re-check the embedded v4.
+    const mapped = h.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
+    if (mapped) return isInternalHost(mapped[1]!)
+    return false
+  }
+
+  // IPv4 dotted-quad literal.
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (m) {
+    const a = Number(m[1])
+    const b = Number(m[2])
+    if (a === 127 || a === 10 || a === 0) return true // loopback / private / "this host"
+    if (a === 169 && b === 254) return true // link-local incl. 169.254.169.254 metadata
+    if (a === 192 && b === 168) return true // 192.168.0.0/16
+    if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12
+    if (a >= 224) return true // multicast / reserved
+    return false
+  }
+
+  return false
 }
 
 /** True when a path/URL ends in an archive extension we know how to extract. */
