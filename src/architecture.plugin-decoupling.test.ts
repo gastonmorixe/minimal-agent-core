@@ -90,22 +90,23 @@ const BASELINE = new Map<string, number>([
   // `auth`/`llm:send` capability on the v2 host yet, nor a `ctx.host` on
   // the prompt-fragment context. See reports/D7-memory.md.
   ["memory/lib/summarize.ts", 2],
-  ["quota-status/handler.ts", 4],
-  ["quota-status/render.overage.test.ts", 3],
-  ["quota-status/render.segments.test.ts", 3],
-  ["quota-status/render.test.ts", 2],
-  ["quota-status/render.ts", 4],
-  ["quota-status/script-runner.ts", 1],
+  // D-quota-schedule: render.ts/render*.test.ts/script-runner.ts swept to 0
+  // (QuotaWindow → plugin-api/llm/provider-plugin; stripAnsi/displayWidth →
+  // plugin-api/utils/term-width; SessionTokens → local structural slice; the
+  // `c` palette wrappers → local module over plugin-api/utils/palette;
+  // parseFormatterCommand inlined). handler.ts keeps 3: it is a live-area slot
+  // whose ctx has NO `ctx.host`, and there is no config / session-tokens /
+  // provider-session capability — loadUserConfig, getSessionTokens, and
+  // resolveProviderSessionInfo stay host imports until such a seam exists.
+  ["quota-status/handler.ts", 3],
+  // D-quota-schedule: the two host-runtime integration tests keep their src/
+  // imports — they drive the REAL PluginLoader / REPL / Compositor / agent
+  // run() end-to-end, which is the whole point of the test, so they are not
+  // decouplable. Every other schedule file swept to 0 (TUIContext/TUIResult/
+  // CommandContext/CommandResult/LiveAreaHandlerContext → plugin-api/types/
+  // plugin; PALETTE → plugin-api/utils/palette; displayWidth → plugin-api/
+  // utils/term-width).
   ["schedule/fire-e2e.test.ts", 6],
-  ["schedule/handlers/cmd_loop.ts", 1],
-  ["schedule/handlers/cmd_schedule.ts", 1],
-  ["schedule/handlers/cron_create.ts", 1],
-  ["schedule/handlers/cron_delete.ts", 1],
-  ["schedule/handlers/cron_list.ts", 1],
-  ["schedule/handlers/heartbeat.ts", 1],
-  ["schedule/lib/box.ts", 1],
-  ["schedule/lib/footer.test.ts", 2],
-  ["schedule/lib/footer.ts", 2],
   ["schedule/load.test.ts", 1],
   ["session-info/lib/gather.ts", 3],
   ["usage/handlers/cmd_usage.ts", 1],

@@ -16,7 +16,8 @@
  * @module schedule/handlers/cmd_loop
  */
 
-import type { CommandContext, CommandResult } from "../../../src/plugins/types.ts"
+import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { renderBox } from "../lib/box.ts"
 import { clockHHMMSS, GLYPH_LOOP, taskFooter, taskInfo, wrapText } from "../lib/format.ts"
 import { intervalToCron, parseDurationMs } from "../lib/interval.ts"

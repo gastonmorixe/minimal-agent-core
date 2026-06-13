@@ -59,10 +59,11 @@
  * Pure: no I/O, no env reads, no `Date.now()` except via the injectable `now()`.
  */
 
-import { c } from "../../src/agent.ts"
-import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
-import type { SessionTokens } from "../../src/session-tokens.ts"
-import { displayWidth, stripAnsi } from "../../src/term-width.ts"
+import type { QuotaWindow } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import { displayWidth, stripAnsi } from "@minimal-agent/plugin-api/utils/term-width"
+
+import { c } from "./colors.ts"
+import type { SessionTokens } from "./host-types.ts"
 
 /**
  * The user-configurable status-bar segments, in render order.

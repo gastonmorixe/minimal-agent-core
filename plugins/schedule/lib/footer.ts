@@ -24,8 +24,8 @@
  * @module schedule/lib/footer
  */
 
-import { PALETTE } from "../../../src/palette.ts"
-import { displayWidth } from "../../../src/term-width.ts"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+import { displayWidth } from "@minimal-agent/plugin-api/utils/term-width"
 
 import { GLYPH_TIME, relativeTime } from "./format.ts"
 import { nextFireMs } from "./scheduler.ts"

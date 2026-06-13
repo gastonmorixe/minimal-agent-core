@@ -12,9 +12,9 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
-import type { SessionTokens } from "../../src/session-tokens.ts"
+import type { QuotaWindow } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
+import type { SessionTokens } from "./host-types.ts"
 import { renderQuotaFooter } from "./render.ts"
 
 const stripAnsi = (s: string | null): string => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")

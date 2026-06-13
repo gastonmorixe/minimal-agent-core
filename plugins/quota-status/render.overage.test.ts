@@ -13,10 +13,10 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { QuotaWindow } from "../../src/llm/provider-plugin.ts"
-import type { SessionTokens } from "../../src/session-tokens.ts"
-import { stripAnsi } from "../../src/term-width.ts"
+import type { QuotaWindow } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import { stripAnsi } from "@minimal-agent/plugin-api/utils/term-width"
 
+import type { SessionTokens } from "./host-types.ts"
 import { renderQuotaFooter } from "./render.ts"
 
 const TOKENS: SessionTokens = {
