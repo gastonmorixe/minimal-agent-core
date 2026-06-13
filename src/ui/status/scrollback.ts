@@ -59,26 +59,24 @@
  * @module ui/status/scrollback
  */
 
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+
 import {
   type DiagnosticBus,
   type LogEvent,
   Severity,
   type StructuredData,
 } from "../../diagnostic-bus.ts"
-import { FG_RESET, PALETTE } from "../../palette.ts"
 
 // ---------------------------------------------------------------------------
 // SGR helpers (no `c` import; these compose raw palette opens with attributes).
 // ---------------------------------------------------------------------------
 
-const SGR_DIM = "\x1b[2m"
-const SGR_DIM_OFF = "\x1b[22m"
-const SGR_BOLD = "\x1b[1m"
-const SGR_BOLD_OFF = "\x1b[22m"
-
-const paint = (open: string, s: string): string => `${open}${s}${FG_RESET}`
-const dim = (s: string): string => `${SGR_DIM}${s}${SGR_DIM_OFF}`
-const bold = (open: string, s: string): string => `${SGR_BOLD}${open}${s}${FG_RESET}${SGR_BOLD_OFF}`
+const paint = (open: string, s: string): string => `${open}${s}${ANSI_CODES.FG_RESET}`
+const dim = (s: string): string => `${ANSI_CODES.DIM}${s}${ANSI_CODES.DIM_CLOSE}`
+const bold = (open: string, s: string): string =>
+  `${ANSI_CODES.BOLD}${open}${s}${ANSI_CODES.FG_RESET}${ANSI_CODES.BOLD_CLOSE}`
 
 // ---------------------------------------------------------------------------
 // Dedup state (one entry per source id)
