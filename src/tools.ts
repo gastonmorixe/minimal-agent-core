@@ -27,7 +27,7 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { basename, dirname } from "node:path"
 
 import { configPath as userConfigPath } from "./config.ts"
@@ -39,6 +39,8 @@ import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
 import { getSessionId } from "./session-id.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
+
+const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 
 /**
  * A non-text block a tool may attach to its `tool_result`. Today only canonical
@@ -1045,6 +1047,24 @@ async function execRead(
   const filePath = resolveWhitespaceConfusablePath(requestedPath) ?? requestedPath
   const healedNote =
     filePath !== requestedPath ? `Note: resolved to "${filePath}" (whitespace mismatch).\n` : ""
+
+  // Size guard (B-045): both branches below slurp the whole file via
+  // readFileSync, which OOMs on a multi-GB file. Check the on-disk size BEFORE
+  // either read. On stat failure (e.g. missing file) skip the guard and let the
+  // existing readFileSync catch produce the normal "Read error" message.
+  try {
+    const st = statSync(filePath)
+    if (st.size > MAX_READ_BYTES) {
+      return {
+        content:
+          healedNote +
+          `File is ${(st.size / 1024 / 1024).toFixed(1)} MB, exceeds the 50 MB read limit. Use offset/limit to read a portion, or Grep to search it.`,
+        is_error: true,
+      }
+    }
+  } catch {
+    // Stat failed; fall through so the read path emits the canonical error.
+  }
 
   // Media-aware branch. Read the raw bytes ONCE, let the (pure, provider-
   // neutral) policy decide image-vs-text-vs-reject, and reuse the decoded
