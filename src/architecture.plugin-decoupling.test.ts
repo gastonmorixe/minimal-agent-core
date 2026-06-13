@@ -148,17 +148,13 @@ const BASELINE = new Map<string, number>([
   // on the v2 host (same gap as quota-status/handler.ts), so they stay until a
   // session-tokens / provider-session seam exists.
   ["session-info/lib/gather.ts", 2],
-  // D-quickwins: usage swept state.ts → 0 (its type-only UsagePeriod/UsageReport
-  // import became a local structural interface, lib/host-types.ts — the
-  // session-history idiom). The remaining usage sites are RESIDUAL: they import
-  // the host usage DATA ENGINE (scanUsageEvents / aggregate* / parseUsagePeriod
-  // / USAGE_PERIODS) which scans the session store + reads the model registry,
-  // and the host RENDERERS (renderUsageReport / renderUsageOverlay). Neither has
-  // a package home nor a `usage:read` capability on the v2 host, so they stay
-  // until such a seam exists.
-  ["usage/handlers/cmd_usage.ts", 2], // [surfaced by FIX-i3] +1: multi-line `} from "../../../src/usage-stats.ts"`
+  // D-usage-render: usage renderers + report shapes moved to plugin-api. The
+  // remaining handler src/ import is the host usage DATA ENGINE
+  // (scanUsageEvents / aggregate* / parseUsagePeriod), which scans the session
+  // store + reads the model registry. It stays until a `usage:read` capability
+  // exists.
+  ["usage/handlers/cmd_usage.ts", 1],
   ["usage/lib/overlay.test.ts", 1],
-  ["usage/lib/overlay.ts", 2],
   ["usage/lib/state.test.ts", 1],
   // D-quickwins: residual. `brave.ts` imports `retry` + `type RetryOptions`
   // from `src/retry.ts`. That module is PURE (zero host state, injectable

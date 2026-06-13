@@ -1,32 +1,23 @@
 /**
- * Pure ASCII renderer for {@link UsageReport}s.
+ * Pure ANSI renderer for token-usage reports.
  *
- * Produces an array of ANSI-styled lines (no trailing newlines) so the same
- * output drives BOTH the `usage` CLI command (printed to stdout) and the
- * `/usage` live-area overlay (painted into the editor decoration band).
+ * Produces arrays of styled lines (no trailing newlines) for both the host
+ * `usage` CLI command and plugin-owned `/usage` overlays. The renderer is a
+ * leaf utility: callers inject host-specific model labeling through options
+ * instead of importing the model registry here.
  *
- * Two render surfaces:
- *   - {@link renderUsageReport}: the full report (totals header + provider
- *     bar chart + model bar chart), for the CLI.
- *   - {@link renderUsageOverlay}: a compact, height-bounded variant for the
- *     footer overlay, with a period-tab strip and a key hint.
- *
- * The bar glyphs reuse the 1/8th-block ramp from the quota-status footer so
- * the two surfaces look like the same product.
- *
- * @module ui/usage/render
+ * @module usage-render
  */
 
-import { modelShortLabel } from "../../llm/model-label.ts"
-import { displayWidth } from "../../term-width.ts"
+import { ansiStyle as c } from "./ansi.ts"
+import { displayWidth } from "./term-width.ts"
 import {
   USAGE_PERIODS,
   type UsageBreakdownRow,
   type UsagePeriod,
   type UsageReport,
   type UsageTotals,
-} from "../../usage-stats.ts"
-import { c } from "../style/ansi.ts"
+} from "./usage-report.ts"
 
 /** 1/8th-block ramp (shared visual language with quota-status). */
 const SLICES = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] as const
@@ -70,7 +61,7 @@ function bar(value: number, max: number, cells: number): { full: string; empty: 
   }
 }
 
-/** Pad a styled label to a fixed DISPLAY width (ANSI-aware). */
+/** Pad a styled label to a fixed display width. */
 function padLabel(label: string, width: number): string {
   const w = displayWidth(label)
   if (w >= width) return label
@@ -82,15 +73,12 @@ function provenanceMark(t: UsageTotals): string {
   if (t.turns === 0) return ""
   if (t.estimatedTurns === 0) return c.green("[R]")
   if (t.estimatedTurns === t.turns) return c.yellow("[E]")
-  return c.yellow("[~]") // mixed real + estimated
+  return c.yellow("[~]")
 }
 
 /**
  * One breakdown row as a bar line:
  *   `anthropic   ███████████░░░░  1.2M  $4.56  [R]`
- *
- * `opts.labelFn` maps the row key to a display label (e.g. model short
- * label); `labelWidth` / `barCells` / `tokWidth` are layout widths.
  */
 function renderRow(
   row: UsageBreakdownRow,
@@ -122,10 +110,7 @@ function renderSection(
   return out
 }
 
-/**
- * The totals header line, e.g.:
- *   `Total  1.2M tok  ·  in 90k  out 30k  cache-r 1.0M  cache-w 8k  ·  $4.56  ·  42 turns  [R]`
- */
+/** The totals header lines. */
 function renderTotalsLines(t: UsageTotals): string[] {
   if (t.turns === 0) {
     return [`  ${c.dim("no usage recorded in this period")}`]
@@ -133,27 +118,28 @@ function renderTotalsLines(t: UsageTotals): string[] {
   const head = `  ${c.bold("Total")} ${c.boldCyan(fmtTokens(t.tokens))} ${c.dim("tok")}  ${provenanceMark(t)}`
   const breakdown =
     t.estimatedTurns === t.turns
-      ? // Fully estimated: no billed split / cost to show.
-        `    ${c.dim("(estimated from transcript text — no billed usage saved)")}`
+      ? `    ${c.dim("(estimated from transcript text — no billed usage saved)")}`
       : `    ${c.dim("in")} ${fmtTokens(t.input)}  ${c.dim("out")} ${fmtTokens(t.output)}  ${c.dim("cache-r")} ${fmtTokens(t.cacheRead)}  ${c.dim("cache-w")} ${fmtTokens(t.cacheCreate)}  ${c.dim("·")}  ${c.green(fmtUSD(t.costUSD))}`
   const turns = `    ${c.dim(`${t.turns} turn${t.turns === 1 ? "" : "s"}${t.estimatedTurns > 0 && t.estimatedTurns < t.turns ? ` · ${t.estimatedTurns} estimated` : ""}`)}`
   return [head, breakdown, turns]
 }
 
-/** Label a model id compactly (provider-tagged short label, e.g. `anth-4.8`). */
-function modelShort(k: string): string {
-  if (k === "unknown") return "unknown"
-  return modelShortLabel(k) || k
-}
-
 export interface RenderUsageOpts {
   /** Total render width in columns. Default 80. */
   cols?: number
+  /** Optional host-specific compact label resolver for model ids. */
+  modelLabel?: (modelId: string) => string
+}
+
+/** Label a model id compactly through an injected resolver when available. */
+function modelShort(k: string, opts: RenderUsageOpts): string {
+  if (k === "unknown") return "unknown"
+  return opts.modelLabel?.(k) || k
 }
 
 /**
- * Render the FULL usage report (CLI surface): a period heading, the totals
- * header, then the per-provider and per-model bar charts.
+ * Render the full usage report: a period heading, totals, and provider/model
+ * bar charts.
  */
 export function renderUsageReport(report: UsageReport, opts: RenderUsageOpts = {}): string[] {
   const cols = Math.max(48, opts.cols ?? 80)
@@ -168,7 +154,6 @@ export function renderUsageReport(report: UsageReport, opts: RenderUsageOpts = {
   out.push(...renderTotalsLines(report.totals))
   out.push("")
 
-  // Bar cells: reserve space for label + count columns.
   const labelWidth = 14
   const barCells = Math.max(8, Math.min(40, cols - labelWidth - 24))
 
@@ -183,7 +168,7 @@ export function renderUsageReport(report: UsageReport, opts: RenderUsageOpts = {
     ...renderSection("By model", report.byModel, {
       labelWidth,
       barCells,
-      labelFn: modelShort,
+      labelFn: (k) => modelShort(k, opts),
     }),
   )
   out.push("")
@@ -191,30 +176,22 @@ export function renderUsageReport(report: UsageReport, opts: RenderUsageOpts = {
 }
 
 /**
- * Render the COMPACT overlay surface (`/usage` footer): a period-tab strip,
- * the totals header, a short model breakdown, and a key hint. Height-bounded
- * by `maxRows` so it fits the live area without scrolling the prompt away.
- *
- * The `opts` bag carries `cols` (render width) and `maxRows` (max
- * breakdown rows to show, default 6).
- *
- * @param report - The active period's report.
+ * Render the compact overlay surface (`/usage` footer): period tabs, totals,
+ * top model rows, and a key hint.
  */
 export function renderUsageOverlay(
   report: UsageReport,
-  opts: { cols?: number; maxRows?: number } = {},
+  opts: RenderUsageOpts & { maxRows?: number } = {},
 ): string[] {
   const cols = Math.max(48, opts.cols ?? 80)
   const maxRows = opts.maxRows ?? 6
   const out: string[] = []
 
-  // Period tab strip: [Today] Last 24h  Last 30d  ... (active highlighted).
   const tabs = USAGE_PERIODS.map((p) =>
     p.id === report.period ? c.boldCyan(`[${p.label}]`) : c.dim(p.label),
   ).join("  ")
   out.push(`  ${tabs}`)
 
-  // Totals (condensed to two lines).
   const t = report.totals
   if (t.turns === 0) {
     out.push(`  ${c.dim("no usage recorded in this period")}`)
@@ -226,20 +203,25 @@ export function renderUsageOverlay(
     )
   }
 
-  // Model breakdown (top N), compact bars.
   const labelWidth = 12
   const barCells = Math.max(6, Math.min(24, cols - labelWidth - 22))
   const rows = report.byModel.slice(0, maxRows)
   const maxTokens = rows.reduce((m, r) => Math.max(m, r.totals.tokens), 0)
   const tokWidth = rows.reduce((m, r) => Math.max(m, fmtTokens(r.totals.tokens).length), 0)
   for (const row of rows) {
-    out.push(renderRow(row, maxTokens, { labelWidth, barCells, tokWidth, labelFn: modelShort }))
+    out.push(
+      renderRow(row, maxTokens, {
+        labelWidth,
+        barCells,
+        tokWidth,
+        labelFn: (k) => modelShort(k, opts),
+      }),
+    )
   }
   if (report.byModel.length > maxRows) {
     out.push(`  ${c.dim(`… +${report.byModel.length - maxRows} more model(s)`)}`)
   }
 
-  // Key hint.
   out.push(`  ${c.dim("← →")} ${c.dim("period")}   ${c.dim("Esc")} ${c.dim("close")}`)
   return out
 }

@@ -25,6 +25,14 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import {
+  USAGE_PERIODS,
+  type UsageBreakdownRow,
+  type UsagePeriod,
+  type UsageReport,
+  type UsageTotals,
+} from "@minimal-agent/plugin-api/utils/usage-report"
+
 import type { CanonicalUsage } from "./llm/canonical-events.ts"
 import { findModel } from "./llm/model-registry.ts"
 import { calculateUsageCost } from "./llm/pricing.ts"
@@ -41,18 +49,13 @@ import { billedUsageOf } from "./session-usage.ts"
 // Periods
 // ---------------------------------------------------------------------------
 
-/** The selectable look-back windows. Each is an independent filter ending "now". */
-export type UsagePeriod = "today" | "last-day" | "last-month" | "ytd" | "year" | "all"
-
-/** Ordered list of periods with short display labels, for the interactive switcher. */
-export const USAGE_PERIODS: ReadonlyArray<{ id: UsagePeriod; label: string }> = [
-  { id: "today", label: "Today" },
-  { id: "last-day", label: "Last 24h" },
-  { id: "last-month", label: "Last 30d" },
-  { id: "ytd", label: "YTD" },
-  { id: "year", label: "Last year" },
-  { id: "all", label: "All time" },
-]
+export {
+  USAGE_PERIODS,
+  type UsageBreakdownRow,
+  type UsagePeriod,
+  type UsageReport,
+  type UsageTotals,
+} from "@minimal-agent/plugin-api/utils/usage-report"
 
 /** Map a free-form CLI token to a {@link UsagePeriod}. Returns null on no match. */
 export function parseUsagePeriod(raw: string | undefined): UsagePeriod | null {
@@ -320,45 +323,6 @@ export function scanUsageEvents(dir: string = defaultSessionsDir()): UsageEvent[
 // ---------------------------------------------------------------------------
 // Aggregation
 // ---------------------------------------------------------------------------
-
-/** Folded totals for a set of events. */
-export interface UsageTotals {
-  input: number
-  output: number
-  cacheRead: number
-  cacheCreate: number
-  /** Sum of {@link UsageEvent.tokens} across the set. */
-  tokens: number
-  /** Sum of exact USD cost (real events only; estimated contribute 0). */
-  costUSD: number
-  /** Number of assistant turns counted. */
-  turns: number
-  /** Of {@link turns}, how many were estimated (no saved billed usage). */
-  estimatedTurns: number
-}
-
-/** A named breakdown row (per provider or per model) with its totals. */
-export interface UsageBreakdownRow {
-  /** Provider id or model id. */
-  key: string
-  totals: UsageTotals
-}
-
-/** Full usage report for one period: totals + provider + model breakdowns. */
-export interface UsageReport {
-  period: UsagePeriod
-  /** Window lower bound (epoch ms); 0 for `all`. */
-  startMs: number
-  /** "Now" the report was computed against (epoch ms). */
-  nowMs: number
-  totals: UsageTotals
-  /** Per-provider rows, sorted by tokens descending. */
-  byProvider: UsageBreakdownRow[]
-  /** Per-model rows, sorted by tokens descending. */
-  byModel: UsageBreakdownRow[]
-  /** True when ANY counted turn was estimated. Drives the `[E]`/mixed marker. */
-  estimated: boolean
-}
 
 function emptyTotals(): UsageTotals {
   return {
