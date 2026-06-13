@@ -45,11 +45,14 @@ const PLUGINS_ROOT = join(import.meta.dirname, "..", "plugins")
  * ENTRIES — new plugin code talks to the host through its context.
  */
 const BASELINE = new Map<string, number>([
-  ["diagnostics/lib/structural-contract.test.ts", 1],
   ["file-lock/cli.test.ts", 1],
   ["file-lock/cli.ts", 2],
   ["file-lock/handlers/lock_status.ts", 1],
   ["file-lock/integration.test.ts", 2],
+  // D-quickwins: residual. This is a host-runtime integration test that drives
+  // the REAL PluginLoader (`src/plugins/loader.ts`) end-to-end to prove the
+  // plugin loads + wires through the live loader — that import IS the point of
+  // the test, so it is not decouplable (same category as schedule/fire-e2e).
   ["history/integration.test.ts", 1],
   // Wave D-anthropic: §5 net/registry/pure-neutral re-point sweep (76→51).
   // Residual src sites are all blocked type families: canonical-request (C-3),
