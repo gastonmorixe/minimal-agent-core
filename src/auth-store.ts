@@ -108,7 +108,7 @@
  * @module auth-store
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -496,7 +496,17 @@ export class AuthStore {
    */
   private save(file: AuthFileV1): void {
     const dir = dirname(this.path)
-    mkdirSync(dir, { recursive: true })
+    // Create the credential directory owner-only (0o700) to match the 0600
+    // secrets file. mkdirSync's mode is masked by umask and only applies to
+    // dirs it creates, so tighten the leaf dir afterward to also fix an
+    // already-existing loose dir. Best-effort: a chmod failure on a dir we do
+    // not own must not crash auth.
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    try {
+      chmodSync(dir, 0o700)
+    } catch {
+      // best-effort: cannot tighten a dir we do not own; leave as-is
+    }
     const body = JSON.stringify({ version: SCHEMA_VERSION, entries: file.entries }, null, 2)
     const text = `${FILE_BANNER}${body}\n`
     const tmp = `${this.path}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
