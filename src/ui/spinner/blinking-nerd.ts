@@ -8,10 +8,10 @@
  * an animated rotor, pass `{ "agent.thinking": THINKING_ROTOR_ASCII }` from
  * the {@link library} module.
  *
- * @module spinner/blinking-nerd
+ * @module ui/spinner/blinking-nerd
  */
 
-import { effectiveDisplayWidth, visualCellsForGlyph } from "../nerd-glyph-width.ts"
+import { effectiveDisplayWidth, visualCellsForGlyph } from "../../nerd-glyph-width.ts"
 
 import { ANSI_PALETTE_RAINBOW } from "./library/palettes.ts"
 import {

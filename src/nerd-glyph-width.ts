@@ -57,7 +57,7 @@ export type NerdGlyphCells = 1 | 2
  *   - `LiveAreaStatusController.paint` (in `./live-area-status.ts`)
  *     to size the gap between icon and label (1 ASCII space for narrow,
  *     2 ASCII spaces for wide PUA).
- *   - `BlinkingNerdSpinner.render` (in `./spinner/blinking-nerd.ts`)
+ *   - `BlinkingNerdSpinner.render` (in `./ui/spinner/blinking-nerd.ts`)
  *     to populate the `iconCells` hint on every frame so paint stays
  *     stable across the on/off blink cycle.
  *

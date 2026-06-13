@@ -1,11 +1,11 @@
+import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 import {
   BlinkingNerdSpinner,
   type BlinkingNerdSpinnerTheme,
   type Spinner,
   SpinnerManager,
   type SpinnerNotification,
-} from "./spinner.ts"
-import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
+} from "./ui/spinner/index.ts"
 
 type StatusListener = (label: string | null) => void
 

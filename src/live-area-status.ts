@@ -14,18 +14,18 @@
 import type { StatusController } from "./agent.ts"
 import { visualCellsForGlyph } from "./nerd-glyph-width.ts"
 import {
-  BlinkingNerdSpinner,
-  type Spinner,
-  SpinnerManager,
-  type SpinnerNotification,
-} from "./spinner.ts"
-import {
   formatActivityInfix,
   formatElapsedSuffix,
   type StatusBus,
   type StatusSnapshot,
   type StatusSpinnerTheme,
 } from "./status.ts"
+import {
+  BlinkingNerdSpinner,
+  type Spinner,
+  SpinnerManager,
+  type SpinnerNotification,
+} from "./ui/spinner/index.ts"
 
 interface EditorStatusSink {
   setStatus(text: string | null): void

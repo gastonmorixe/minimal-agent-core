@@ -20,7 +20,7 @@
  * new BlinkingNerdSpinner();
  *
  * // Swap thinking to the box-drawing rotor.
- * import { THINKING_ROTOR_BOX } from "./spinner/library/frames.ts";
+ * import { THINKING_ROTOR_BOX } from "./library/frames.ts";
  * new BlinkingNerdSpinner({
  *   iconByNotificationId: { "agent.thinking": THINKING_ROTOR_BOX },
  * });
@@ -33,7 +33,7 @@
  * });
  * ```
  *
- * @module spinner
+ * @module ui/spinner
  */
 
 export * from "./blinking-nerd.ts"

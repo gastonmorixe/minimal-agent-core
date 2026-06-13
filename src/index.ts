@@ -103,8 +103,6 @@ import {
 } from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
 import { shortHash } from "./session-store.ts"
-import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
-import type { Spinner } from "./spinner.ts"
 import { printHelp, readEmbeddedPackageVersion } from "./startup/help.ts"
 import { resolveStartupAuth, startupAuthLabel } from "./startup/provider-auth.ts"
 import {
@@ -124,6 +122,8 @@ import {
 import type { StatusSpinnerTheme } from "./status.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
+import type { Spinner } from "./ui/spinner/index.ts"
+import { getSpinnerPreset, type NamedSpinnerPreset } from "./ui/spinner/named-presets.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing
