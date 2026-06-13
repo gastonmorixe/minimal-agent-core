@@ -34,9 +34,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs"
-import { homedir, hostname as osHostname } from "node:os"
+import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
 
+import { resolveSessionsDir } from "./agent-paths.ts"
 import type { ContentBlock, ToolResultBlock } from "./client.ts"
 
 // ---------------------------------------------------------------------------
@@ -255,9 +256,17 @@ export type SessionRecord =
 // Paths
 // ---------------------------------------------------------------------------
 
-/** Root directory: `~/.minimal-agent/sessions/`. */
+/**
+ * Root directory: `<agent-home>/sessions/`, honoring `MINIMAL_AGENT_HOME`.
+ *
+ * Routed through the single resolver in `src/agent-paths.ts` so the host's own
+ * session store agrees with the home that `publishAgentHomeEnv` advertises to
+ * plugins. Hardcoding `~/.minimal-agent` here would split-brain a relocated
+ * setup: plugins (which read the env var) would write under the new root while
+ * the host read sessions from the old one.
+ */
 export function defaultSessionsDir(): string {
-  return join(homedir(), ".minimal-agent", "sessions")
+  return resolveSessionsDir()
 }
 
 /** Full path for a session's JSONL log. */

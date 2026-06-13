@@ -12,9 +12,9 @@
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { resolveSessionsDir } from "../../../agent-paths.ts"
 import type { BlobMeta, BlobsReadApi } from "../host-capabilities.ts"
 
 const READ_DEFAULT_MAX_BYTES = 64 * 1024
@@ -38,7 +38,7 @@ export interface BlobsReadDeps {
 }
 
 function defaultDir(): string {
-  return join(homedir(), ".minimal-agent", "sessions")
+  return resolveSessionsDir()
 }
 
 /** Build the host-side `blobs:read` implementation. */

@@ -42,7 +42,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -52,6 +51,7 @@ import {
   parseReplaySidecarTasks,
 } from "./agent/turn-attachments.ts"
 import { Agent, c, runRepl } from "./agent.ts"
+import { publishAgentHomeEnv, resolveSessionsDir } from "./agent-paths.ts"
 import { getAuth } from "./auth.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
@@ -364,6 +364,13 @@ async function extractPrompt(): Promise<string | null> {
  * the external process for realtime formatting.
  */
 async function main() {
+  // Publish the resolved agent home into the environment BEFORE anything else,
+  // so every plugin (and subprocess) inherits an authoritative, relocation-
+  // correct base path (`MINIMAL_AGENT_HOME`) instead of hardcoding
+  // `~/.minimal-agent`. This is the host→plugin "where is my storage" signal
+  // (see `src/agent-paths.ts`). Idempotent and override-preserving.
+  publishAgentHomeEnv()
+
   // Register provider plugins by discovery (plugins/llm-*) BEFORE any model
   // resolution (the bootstrap probe + footer + canonical run() all read the
   // registry). Replaces the old static builtin barrel: the entrypoint imports
@@ -1034,7 +1041,7 @@ async function main() {
       // the tasks plugin's parser — the I2 invariant keeps the plugin
       // import out of core). See `toolDisplaysFromRecords` +
       // `deriveTaskDisplay` for the per-call cutoff semantics.
-      const sidecarPath = join(homedir(), ".minimal-agent", "sessions", `${resumeSid}.tasks.jsonl`)
+      const sidecarPath = join(resolveSessionsDir(), `${resumeSid}.tasks.jsonl`)
       let sidecarTasks: import("./session-replay-derivers.ts").ReplaySidecarTask[] | null = null
       try {
         if (existsSync(sidecarPath)) {

@@ -25,8 +25,8 @@
  */
 
 import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+
+import { resolveAgentHome } from "./agent-paths.ts"
 
 // Inline ANSI — keep this module free of agent.ts imports so it can be loaded
 // on the cold path before the heavier UI modules.
@@ -85,11 +85,13 @@ export function isColdStart(homeDir: string = defaultAgentHome()): boolean {
   return !existsSync(homeDir)
 }
 
-/** Resolve the agent's home dir. `MINIMAL_AGENT_HOME` overrides (tests). */
+/**
+ * Resolve the agent's home dir. `MINIMAL_AGENT_HOME` overrides (relocation,
+ * tests, sandboxes). Delegates to the single source of truth in
+ * `src/agent-paths.ts` so the resolution rule lives in exactly one place.
+ */
 export function defaultAgentHome(): string {
-  const override = process.env.MINIMAL_AGENT_HOME?.trim()
-  if (override) return override
-  return join(homedir(), ".minimal-agent")
+  return resolveAgentHome()
 }
 
 /**
