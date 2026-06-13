@@ -10,7 +10,7 @@
  *   /loop 15m                   → maintenance prompt on a fixed interval
  *
  * Deterministic: it writes the task to the same store the Cron* tools use
- * and returns a colored boxed scrollback notice (no model turn). The
+ * and returns a semantic scrollback notice block (no model turn). The
  * heartbeat injects the prompt when due.
  *
  * @module schedule/handlers/cmd_loop
@@ -19,7 +19,6 @@
 import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
 import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { renderBox } from "../lib/box.ts"
 import { clockHHMMSS, GLYPH_LOOP, taskFooter, taskInfo, wrapText } from "../lib/format.ts"
 import { intervalToCron, parseDurationMs } from "../lib/interval.ts"
 import { resolveLoopPrompt } from "../lib/loop-md.ts"
@@ -101,7 +100,7 @@ export default async function cmdLoop(ctx: CommandContext): Promise<CommandResul
 
   return {
     kind: "notice",
-    lines: renderBox({
+    block: {
       icon: GLYPH_LOOP,
       title: "loop",
       info,
@@ -109,6 +108,6 @@ export default async function cmdLoop(ctx: CommandContext): Promise<CommandResul
       body,
       footer: taskFooter(e, now),
       color: "gold",
-    }),
+    },
   }
 }

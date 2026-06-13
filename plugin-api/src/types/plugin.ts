@@ -976,6 +976,23 @@ export interface ManifestCommand {
  * Outcome of invoking a {@link CommandHandler}. A discriminated union so
  * the host can react exhaustively (make illegal states unrepresentable).
  */
+export interface CommandNoticeBlock {
+  /** Leading glyph rendered before the title. */
+  icon?: string
+  /** Short heading, e.g. `"loop"` or `"schedule"`. */
+  title: string
+  /** Secondary header text rendered after the title. */
+  info?: string
+  /** Optional trailing header timestamp. */
+  timestamp?: string
+  /** Body rows. ANSI is preserved; the host owns only the frame chrome. */
+  body?: string[]
+  /** Footer text rendered on the closing row. */
+  footer?: string
+  /** Host palette key for frame/icon/title chrome. Unknown values fall back. */
+  color?: string
+}
+
 export type CommandResult =
   | {
       /** Submit `prompt` as a normal user turn (the model sees it). */
@@ -984,12 +1001,13 @@ export type CommandResult =
     }
   | {
       /**
-       * Print these lines to scrollback with NO model turn. Use for
-       * deterministic side-effects (e.g. `/loop` created a cron entry —
-       * confirm the cadence without spending a round-trip).
+       * Print a notice to scrollback with NO model turn. Prefer `block` for
+       * framed TUI output so the host owns chrome; `lines` remains for
+       * preformatted legacy notices and terse command responses.
        */
       kind: "notice"
-      lines: string[]
+      lines?: string[]
+      block?: CommandNoticeBlock
     }
   | {
       /** Print an error notice (styled), no model turn. */

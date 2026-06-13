@@ -50,6 +50,7 @@ export default async function (ctx) {
   switch (ctx.argv) {
     case "expand": return { kind: "expand", prompt: "EXPANDED:" + ctx.name }
     case "notice": return { kind: "notice", lines: ["line one", "line two"] }
+    case "block": return { kind: "notice", block: { icon: "⟳", title: "loop", info: "every 5m", body: ["do work"], footer: "id-1", color: "gold" } }
     case "error": return { kind: "error", message: "nope" }
     case "throw": throw new Error("handler exploded")
     case "bad": return { kind: "weird-unknown" }
@@ -173,6 +174,17 @@ describe("loader: dispatchCommand", () => {
     expect(await loader.dispatchCommand("/loop notice")).toEqual({
       kind: "notice",
       lines: ["line one", "line two"],
+    })
+    expect(await loader.dispatchCommand("/loop block")).toEqual({
+      kind: "notice",
+      block: {
+        icon: "⟳",
+        title: "loop",
+        info: "every 5m",
+        body: ["do work"],
+        footer: "id-1",
+        color: "gold",
+      },
     })
     expect(await loader.dispatchCommand("/loop error")).toEqual({ kind: "error", message: "nope" })
     expect(await loader.dispatchCommand("/loop")).toEqual({ kind: "none" })

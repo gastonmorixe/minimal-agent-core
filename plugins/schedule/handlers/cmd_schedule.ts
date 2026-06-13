@@ -7,7 +7,7 @@
  *   /schedule                       → usage
  *
  * Deterministic: writes to the same store the Cron* tools use and returns a
- * colored boxed scrollback notice (no model turn). The heartbeat fires due
+ * semantic scrollback notice block (no model turn). The heartbeat fires due
  * tasks between turns.
  *
  * @module schedule/handlers/cmd_schedule
@@ -16,7 +16,6 @@
 import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
 import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { coloredEntryLine, renderBox } from "../lib/box.ts"
 import { isValidCron } from "../lib/cron.ts"
 import {
   clockHHMMSS,
@@ -27,6 +26,7 @@ import {
   wrapText,
 } from "../lib/format.ts"
 import { parseScheduleArgs } from "../lib/loop-parse.ts"
+import { coloredEntryLine } from "../lib/notice-lines.ts"
 import { cronStoreForSession } from "../lib/store.ts"
 
 const { DIM, RESET } = ANSI_CODES
@@ -62,20 +62,21 @@ export default async function cmdSchedule(ctx: CommandContext): Promise<CommandR
       if (entries.length === 0) {
         return {
           kind: "notice",
-          lines: renderBox({ icon: GLYPH_TIME, title: "schedule", info: "no tasks", body: [] }),
+          block: { icon: GLYPH_TIME, title: "schedule", info: "no tasks", color: "gold" },
         }
       }
       const sorted = entries.slice().sort((a, b) => a.createdAt - b.createdAt)
       return {
         kind: "notice",
-        lines: renderBox({
+        block: {
           icon: GLYPH_TIME,
           title: "schedule",
           info: `${entries.length} task${entries.length === 1 ? "" : "s"}`,
           timestamp: clockHHMMSS(now),
           body: sorted.map((e) => coloredEntryLine(e, now)),
           footer: "cancel /schedule cancel <id>",
-        }),
+          color: "gold",
+        },
       }
     }
 
@@ -99,14 +100,15 @@ export default async function cmdSchedule(ctx: CommandContext): Promise<CommandR
       const e = res.value
       return {
         kind: "notice",
-        lines: renderBox({
+        block: {
           icon: kindGlyph(e),
           title: "schedule",
           info: taskInfo(e, now),
           timestamp: clockHHMMSS(now),
           body: wrapText(e.prompt, 72),
           footer: taskFooter(e, now),
-        }),
+          color: "gold",
+        },
       }
     }
 

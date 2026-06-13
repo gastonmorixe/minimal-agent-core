@@ -9,8 +9,8 @@
 
 import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
 
-import { coloredEntryLine } from "../lib/box.ts"
 import { formatList } from "../lib/format.ts"
+import { coloredEntryLine } from "../lib/notice-lines.ts"
 import { cronStoreForSession } from "../lib/store.ts"
 
 /**
