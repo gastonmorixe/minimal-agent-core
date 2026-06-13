@@ -41,7 +41,9 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { acquireLock, type LockHandle } from "../file-lock.ts"
 import { parseJsonc } from "../jsonc.ts"
+import { getSessionId } from "../session-id.ts"
 
 import type {
   BinaryInventory,
@@ -351,7 +353,14 @@ export class BinaryStore {
         }
       }
 
-      // (5) Record.
+      // (5) Record. Serialize the manifest read-modify-write with the shared
+      // cooperative file lock (B-046): two sessions installing DIFFERENT
+      // binaries can otherwise interleave readManifest → filter → push →
+      // writeManifest and clobber each other's entry, leaving a lost record
+      // (which then triggers a spurious haltIfMissing or a needless reinstall).
+      // The lock is keyed on the manifest file path; the read happens UNDER the
+      // lock so we never trust a pre-lock snapshot. Install is async, so the
+      // await fits without changing any sync call site.
       const installed: InstalledBinary = {
         name: spec.name,
         path: dest,
@@ -361,9 +370,29 @@ export class BinaryStore {
         sourceUrl: sourceLabel(spec.source),
         ...(installedExtras.length > 0 ? { extras: installedExtras } : {}),
       }
-      const next = this.readManifest().filter((e) => e.name !== spec.name)
-      next.push(installed)
-      this.writeManifest(next)
+      let manifestLock: LockHandle | null = null
+      try {
+        manifestLock = await acquireLock(
+          this.manifestPath,
+          { sessionId: getSessionId(), tool: "binary-provision" },
+          { timeoutMs: 10_000 },
+        )
+      } catch (err) {
+        // Couldn't get the lock (timeout / abort / IO). Degrade to an unlocked
+        // write rather than dropping the record of an install whose bytes are
+        // ALREADY on disk; this is no worse than the pre-lock behavior.
+        this.deps.log("notice", "binaries.manifest-lock", "proceeding without manifest lock", {
+          path: this.manifestPath,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+      try {
+        const next = this.readManifest().filter((e) => e.name !== spec.name)
+        next.push(installed)
+        this.writeManifest(next)
+      } finally {
+        manifestLock?.release()
+      }
 
       this.progress(spec, "done", 1)
       this.deps.log("info", `binaries.${action}`, `${action} ${spec.name} ${spec.version}`, {
