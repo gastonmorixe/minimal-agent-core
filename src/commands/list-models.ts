@@ -16,6 +16,7 @@ import type { AuthResult } from "../auth.ts"
 import { listRegisteredModels } from "../llm/model-registry.ts"
 import type { ProviderAuth } from "../llm/provider.ts"
 import { listProviderPlugins } from "../llm/provider-plugin.ts"
+import { writeCommandTable } from "../ui/command-table.ts"
 import { c } from "../ui/style/ansi.ts"
 
 interface ModelRow {
@@ -42,6 +43,10 @@ function toProviderAuth(auth: AuthResult): ProviderAuth {
 export async function runListModelsCommand(
   auth: AuthResult,
   providerFilter?: string,
+  deps: {
+    output?: { write(s: string): unknown }
+    error?: { write(s: string): unknown }
+  } = {},
 ): Promise<void> {
   const byId = new Map<string, ModelRow>()
 
@@ -56,7 +61,7 @@ export async function runListModelsCommand(
   for (const r of results) {
     if (r.status === "rejected") {
       const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
-      console.error(`  ${c.dim(`(live model list unavailable: ${msg})`)}`)
+      ;(deps.error ?? process.stderr).write(`  ${c.dim(`(live model list unavailable: ${msg})`)}\n`)
       continue
     }
     for (const m of r.value.rows ?? []) {
@@ -105,25 +110,39 @@ export async function runListModelsCommand(
   const nameW = Math.max(12, ...shownRows.map((r) => (r.displayName ?? "").length))
   const surfaceW = Math.max(10, ...shownRows.map((r) => (r.surface ?? "").length))
 
-  let shown = 0
-  console.log("")
-  for (const provider of providerIds) {
+  const sections = providerIds.flatMap((provider) => {
     const rows = byProvider.get(provider)
-    if (!rows || rows.length === 0) {
-      if (providerFilter)
-        console.log(`  ${c.dim(`no models registered for provider "${provider}"`)}`)
-      continue
-    }
-    console.log(`  ${c.bold(provider)}`)
-    for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
-      const id = c.cyan(row.id.padEnd(idW))
-      const name = c.dim((row.displayName ?? "").padEnd(nameW))
-      const surface = c.dim((row.surface ?? "").padEnd(surfaceW))
-      const date = row.date ? c.dim(row.date) : ""
-      console.log(`    ${id} ${name} ${surface} ${date}`)
-      shown++
-    }
-    console.log("")
-  }
-  console.log(`  ${c.dim(`${shown} models available`)}`)
+    if (!rows || rows.length === 0) return []
+    return [
+      {
+        title: provider,
+        rows: rows
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((row) => ({
+            cells: {
+              id: row.id,
+              name: row.displayName ?? "",
+              surface: row.surface ?? "",
+              date: row.date ?? "",
+            },
+          })),
+      },
+    ]
+  })
+  const shown = sections.reduce((n, section) => n + section.rows.length, 0)
+
+  writeCommandTable(
+    {
+      columns: [
+        { key: "id", minWidth: idW, color: "cyan" },
+        { key: "name", minWidth: nameW, color: "dim" },
+        { key: "surface", minWidth: surfaceW, color: "dim" },
+        { key: "date", color: "dim" },
+      ],
+      sections,
+      empty: providerFilter ? `no models registered for provider "${providerFilter}"` : undefined,
+      summary: `${shown} models available`,
+    },
+    deps.output,
+  )
 }
