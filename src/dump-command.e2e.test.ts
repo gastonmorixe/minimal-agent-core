@@ -40,6 +40,10 @@ describe("dump command architecture", () => {
         env: {
           ...process.env,
           HOME: home,
+          // Clear any inherited MINIMAL_AGENT_HOME (the running harness sets it),
+          // else it wins over HOME in resolveAgentHome and the spawned CLI reads
+          // the real ~/.minimal-agent instead of this test's tmp home.
+          MINIMAL_AGENT_HOME: join(home, ".minimal-agent"),
         },
       })
       const [code, stdout, stderr] = await Promise.all([
@@ -73,6 +77,9 @@ describe("dump command architecture", () => {
           env: {
             ...process.env,
             HOME: home,
+            // Clear inherited MINIMAL_AGENT_HOME (see note above); else it wins
+            // over HOME and the spawned CLI reads the real ~/.minimal-agent.
+            MINIMAL_AGENT_HOME: join(home, ".minimal-agent"),
           },
         },
       )
@@ -95,6 +102,10 @@ describe("dump command architecture", () => {
         env: {
           ...process.env,
           HOME: home,
+          // Clear any inherited MINIMAL_AGENT_HOME (the running harness sets it),
+          // else it wins over HOME in resolveAgentHome and the spawned CLI reads
+          // the real ~/.minimal-agent instead of this test's tmp home.
+          MINIMAL_AGENT_HOME: join(home, ".minimal-agent"),
         },
       })
       const [code, stdout, stderr] = await Promise.all([
@@ -144,7 +155,7 @@ describe("dump command architecture", () => {
       const p = Bun.spawn(["bun", "run", "src/index.ts", "sessions", "alpha"], {
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, HOME: home },
+        env: { ...process.env, HOME: home, MINIMAL_AGENT_HOME: join(home, ".minimal-agent") },
       })
       const [code, stdout, stderr] = await Promise.all([
         p.exited,
@@ -184,7 +195,7 @@ describe("dump command architecture", () => {
         {
           stdout: "pipe",
           stderr: "pipe",
-          env: { ...process.env, HOME: home },
+          env: { ...process.env, HOME: home, MINIMAL_AGENT_HOME: join(home, ".minimal-agent") },
         },
       )
       const [_code, stdout, stderr] = await Promise.all([

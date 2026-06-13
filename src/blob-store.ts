@@ -37,9 +37,9 @@ import {
   writeFileSync,
 } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { resolveSessionsDir } from "./agent-paths.ts"
 import { configPath as userConfigPath } from "./config.ts"
 import { parseJsonc } from "./jsonc.ts"
 
@@ -206,9 +206,13 @@ export function loadBlobStoreConfig(): BlobStoreRuntimeConfig {
 // Paths
 // ---------------------------------------------------------------------------
 
-/** Root directory for all sessions' blobs. Lives next to `<sid>.jsonl`. */
+/**
+ * Root directory for all sessions' blobs. Lives next to `<sid>.jsonl`. Honors
+ * `MINIMAL_AGENT_HOME` via the single resolver in `src/agent-paths.ts`, so blob
+ * storage tracks the same relocated home the host advertises to plugins.
+ */
 export function defaultSessionsDir(): string {
-  return join(homedir(), ".minimal-agent", "sessions")
+  return resolveSessionsDir()
 }
 
 /**
