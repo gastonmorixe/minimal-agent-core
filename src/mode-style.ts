@@ -37,6 +37,7 @@
 
 import { PALETTE, SEMANTIC } from "./palette.ts"
 import type { ColorRequest, ModeStyleRequest, ThemeKey } from "./plugins/types.ts"
+import { truncateDisplayWidth } from "./term-width.ts"
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -316,11 +317,17 @@ export function paint(text: string, style: ResolvedSurfaceStyle): string {
 }
 
 /**
- * Truncate a label to {@link MAX_LABEL_WIDTH} with an ellipsis. Plugin
- * authors are not expected to hit this in practice — it's a guardrail
+ * Truncate a label to {@link MAX_LABEL_WIDTH} *display cells* with an ellipsis.
+ * Plugin authors are not expected to hit this in practice — it's a guardrail
  * against a misbehaving manifest stuffing the prompt full of text.
+ *
+ * Measures and cuts by terminal display width, not `.length` (B-072): the old
+ * code-unit math counted a 2-cell CJK glyph as 1 (so a full-width label
+ * overflowed the prompt) and sliced on a UTF-16 boundary (splitting a surrogate
+ * pair into mojibake). `truncateDisplayWidth` counts real cells and never
+ * splits a codepoint, while preserving the prior shape: a body of
+ * `MAX_LABEL_WIDTH - 3` cells plus a 3-cell `"..."`.
  */
 export function clampLabel(label: string): string {
-  if (label.length <= MAX_LABEL_WIDTH) return label
-  return label.slice(0, MAX_LABEL_WIDTH - 3) + "..."
+  return truncateDisplayWidth(label, MAX_LABEL_WIDTH, "...")
 }
