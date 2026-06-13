@@ -20,6 +20,7 @@ import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
 
 import { modelShortLabel } from "../llm/model-label.ts"
+import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 import {
   aggregateAllPeriods,
   aggregateUsage,
@@ -34,10 +35,14 @@ export interface RunUsageOptions {
   period?: string
   /** Force one-shot (no interactive loop) even on a TTY. */
   noInteractive?: boolean
+  /** Output stream for one-shot reports; tests inject a collector. */
+  output?: CommandOutput
+  /** Error stream for invalid arguments; tests inject a collector. */
+  error?: CommandOutput
 }
 
-function cols(): number {
-  const n = (process.stdout as { columns?: number }).columns
+function cols(output: CommandOutput = process.stdout): number {
+  const n = (output as { columns?: number }).columns
   return typeof n === "number" && n > 0 ? n : 80
 }
 
@@ -48,8 +53,9 @@ function cols(): number {
 export async function runUsageCommand(opts: RunUsageOptions = {}): Promise<void> {
   const explicit = parseUsagePeriod(opts.period)
   if (opts.period && !explicit) {
-    console.error(
-      `  unknown period "${opts.period}". Valid: ${USAGE_PERIODS.map((p) => p.id).join(", ")}`,
+    writeCommandRows(
+      [`  unknown period "${opts.period}". Valid: ${USAGE_PERIODS.map((p) => p.id).join(", ")}`],
+      opts.error ?? process.stderr,
     )
     process.exitCode = 1
     return
@@ -66,7 +72,10 @@ export async function runUsageCommand(opts: RunUsageOptions = {}): Promise<void>
   if (oneShot) {
     const period: UsagePeriod = explicit ?? "all"
     const report = aggregateUsage(events, period)
-    console.log(renderUsageReport(report, { cols: cols(), modelLabel: modelShortLabel }).join("\n"))
+    writeCommandRows(
+      renderUsageReport(report, { cols: cols(opts.output), modelLabel: modelShortLabel }),
+      opts.output,
+    )
     return
   }
 
