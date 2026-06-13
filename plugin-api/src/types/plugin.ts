@@ -1303,8 +1303,9 @@ export type ColorRequest =
 /**
  * Style request for one renderable surface (label, arrow, status spinner).
  *
- * All fields are optional. Omitted `fg` inherits from the `label` surface.
- * Omitted `bg` defaults to `"transparent"`.
+ * All fields are optional. Omitted `fg` leaves that surface on the agent's
+ * default/terminal foreground; surfaces do not implicitly inherit from each
+ * other. Omitted `bg` defaults to `"transparent"`.
  */
 export interface SurfaceStyleRequest {
   fg?: ColorRequest

@@ -26,8 +26,9 @@
  * @module plugins/loader
  */
 
+import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
+
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
-import { paletteEnvJson } from "../palette.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
 
 import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
