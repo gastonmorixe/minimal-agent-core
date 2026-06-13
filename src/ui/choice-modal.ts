@@ -17,6 +17,9 @@
  * @module ui/choice-modal
  */
 
+import { ANSI_CODES, color as colorText } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+
 import { displayWidth } from "../term-width.ts"
 
 import type { LiveOverlay, OverlayKey } from "./overlay.ts"
@@ -59,18 +62,16 @@ const FRAME_V = "│"
 const DEFAULT_WIDTH = 60
 const MIN_INNER_WIDTH = 30
 
-// ANSI helpers ; kept local so the module doesn't pull in the agent palette.
-const ANSI = {
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  reset: "\x1b[0m",
-  fgYellow: "\x1b[33m",
-  fgPink: "\x1b[38;5;213m",
-  fgGray: "\x1b[38;5;244m",
-}
+const COLOR = {
+  bold: ANSI_CODES.BOLD,
+  dim: ANSI_CODES.DIM,
+  warning: PALETTE.yellow,
+  focus: PALETTE.pink,
+  muted: ANSI_CODES.LIGHT_GRAY,
+} as const
 
-function color(s: string, code: string): string {
-  return `${code}${s}${ANSI.reset}`
+function paint(s: string, code: string): string {
+  return colorText(true, code, s)
 }
 
 /**
@@ -109,7 +110,7 @@ export class ChoiceModal implements LiveOverlay {
     lines.push(`${FRAME_TOP_LEFT}${FRAME_H.repeat(effectiveWidth - 2)}${FRAME_TOP_RIGHT}`)
 
     // Title row
-    lines.push(this.framedLine(color(this.opts.title, ANSI.bold), innerWidth))
+    lines.push(this.framedLine(paint(this.opts.title, COLOR.bold), innerWidth))
 
     // Separator
     lines.push(`${FRAME_V} ${" ".repeat(innerWidth)} ${FRAME_V}`)
@@ -146,7 +147,7 @@ export class ChoiceModal implements LiveOverlay {
       lines.push(`${FRAME_V} ${" ".repeat(innerWidth)} ${FRAME_V}`)
       const descLines = wrapText(focused.description, innerWidth)
       for (const dline of descLines) {
-        lines.push(this.framedLine(color(dline, ANSI.dim), innerWidth))
+        lines.push(this.framedLine(paint(dline, COLOR.dim), innerWidth))
       }
     }
 
@@ -158,7 +159,7 @@ export class ChoiceModal implements LiveOverlay {
     const hintPlain = "← →: navigate   Enter: confirm   Esc: cancel"
     const hintLines = wrapText(hintPlain, innerWidth)
     for (const hl of hintLines) {
-      lines.push(this.framedLine(color(hl, ANSI.dim), innerWidth))
+      lines.push(this.framedLine(paint(hl, COLOR.dim), innerWidth))
     }
 
     // Bottom border
@@ -217,13 +218,13 @@ export class ChoiceModal implements LiveOverlay {
     const warn = opt.destructive ? `${WARN_GLYPH} ` : ""
     const label = `${warn}${opt.label}`
     if (focused) {
-      const colored = color(
+      const colored = paint(
         `${FOCUS_LEFT} ${label} ${FOCUS_RIGHT}`,
-        opt.destructive ? ANSI.fgYellow + ANSI.bold : ANSI.fgPink + ANSI.bold,
+        opt.destructive ? COLOR.warning + COLOR.bold : COLOR.focus + COLOR.bold,
       )
       return colored
     }
-    return color(`  ${label}  `, ANSI.fgGray)
+    return paint(`  ${label}  `, COLOR.muted)
   }
 
   private framedLine(content: string, innerWidth: number): string {
