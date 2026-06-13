@@ -43,6 +43,18 @@ describe("ansi helpers", () => {
     expect(ANSI_CODES.BRIGHT_BLACK).toBe("\x1b[90m")
     expect(ANSI_CODES.DARK_GRAY).toBe("\x1b[38;5;240m")
     expect(ANSI_CODES.LIGHT_GRAY).toBe("\x1b[38;5;246m")
+    expect(ANSI_CODES.FAINT_WHITE).toBe("\x1b[2;37m")
+    expect(ANSI_CODES.BOLD_WHITE).toBe("\x1b[1;37m")
+    expect(ANSI_CODES.BOLD_BRIGHT_RED).toBe("\x1b[1;91m")
+    expect(ANSI_CODES.DIM_LIME).toBe("\x1b[2;38;5;118m")
+    expect(ANSI_CODES.DIM_SKY).toBe("\x1b[2;38;5;45m")
+    expect(ANSI_CODES.DIM_GOLD).toBe("\x1b[2;38;5;214m")
+    expect(ANSI_CODES.DIM_RED).toBe("\x1b[2;31m")
+    expect(ANSI_CODES.DIM_VIOLET).toBe("\x1b[2;38;2;180;140;255m")
+    expect(ANSI_CODES.BOLD_SKY).toBe("\x1b[1;38;5;45m")
+    expect(ANSI_CODES.BOLD_LIME).toBe("\x1b[1;38;5;118m")
+    expect(ANSI_CODES.BOLD_GOLD).toBe("\x1b[1;38;5;214m")
+    expect(ANSI_CODES.BOLD_PINK).toBe("\x1b[1;38;5;199m")
   })
 
   it("conditionally colors text with a full reset", () => {

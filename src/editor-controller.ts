@@ -54,6 +54,7 @@ import type { Hooks } from "./plugins/hooks/hooks.ts"
 import { truncateDisplayWidth } from "./term-width.ts"
 import { formatArmedFooter } from "./ui/chrome/armed-footer.ts"
 import { computeCursorVisualPos, EditorRenderer } from "./ui/editor/renderer.ts"
+import { c } from "./ui/style/ansi.ts"
 
 // Public surface lives in `src/editor/types.ts` and is re-exported here
 // so external consumers (commands, tests, plugins) keep their existing
@@ -1364,11 +1365,10 @@ export class EditorController extends EventEmitter {
     // scrolled: visible content rows below the indicator render with the
     // continuation prompt (two spaces) and carry no mode info.
     //
-    // The prompt comes pre-styled (its own SGR open/close). We then open a
-    // dim attribute (`\x1b[2m`) for the dashes+label and close with
-    // `\x1b[22m`. `cols` is read fresh from `this.output.columns` on every
-    // repaint, so SIGWINCH → `notifyResize()` → `repaint()` recomputes the
-    // dash run to fit the new width.
+    // The prompt comes pre-styled (its own SGR open/close). The indicator
+    // suffix uses the shared dim wrapper. `cols` is read fresh from
+    // `this.output.columns` on every repaint, so SIGWINCH → `notifyResize()`
+    // → `repaint()` recomputes the dash run to fit the new width.
     let indicatorLine: string | null = null
     if (vTop > 0) {
       const w = cols ?? 0
@@ -1387,11 +1387,11 @@ export class EditorController extends EventEmitter {
       //      Same shape as the pre-mode-aware indicator - graceful degrade.
       if (w >= promptW + labelW + 3) {
         const dashes = w - promptW - labelW - 2
-        indicatorLine = `${prompt}\x1b[2m${"\u2500".repeat(dashes)} ${label}\x1b[22m`
+        indicatorLine = `${prompt}${c.dim(`${"\u2500".repeat(dashes)} ${label}`)}`
       } else if (w >= promptW + labelW) {
-        indicatorLine = `${prompt}\x1b[2m${label}\x1b[22m`
+        indicatorLine = `${prompt}${c.dim(label)}`
       } else {
-        indicatorLine = `\x1b[2m ${label}\x1b[22m`
+        indicatorLine = c.dim(` ${label}`)
       }
     }
 
