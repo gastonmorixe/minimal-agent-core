@@ -37,6 +37,7 @@ export const ANSI = {
   RESET: ANSI_CODES.RESET,
   BOLD: ANSI_CODES.BOLD,
   DIM: ANSI_CODES.DIM,
+  ITALIC: ANSI_CODES.ITALIC,
   LIME: PALETTE.lime, // done
   SKY: PALETTE.sky, // running
   RED: PALETTE.red, // failed
