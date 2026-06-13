@@ -553,10 +553,20 @@ export async function acquireLock(
     if (lastExisting === null) {
       // EEXIST + corrupt content → break and retry. Don't sleep; this is
       // not contention, just garbage we need to clear.
-      try {
-        unlinkSync(lockPathFor(filePath))
-      } catch {
-        // ignore : next attempt will still see it; we'll retry
+      //
+      // TOCTOU guard: only unlink if the lock file on disk is STILL
+      // corrupt/missing (matches the `null` we observed). A peer may have
+      // already broken this corrupt lock and reacquired it with a valid
+      // holder between our read and now; unlinking unconditionally would
+      // clobber their fresh lock. If the re-read parses to a real holder,
+      // skip the unlink and just retry the wx-create (which will EEXIST
+      // against the new holder and fall through to normal contention).
+      if (readLockFile(lockPathFor(filePath)) === null) {
+        try {
+          unlinkSync(lockPathFor(filePath))
+        } catch {
+          // ignore : next attempt will still see it; we'll retry
+        }
       }
       continue
     }
@@ -582,10 +592,30 @@ export async function acquireLock(
     }
     const stale = isStaleLock(lastExisting, { staleAfterMs, ourHost, pidAlive, now })
     if (stale.stale) {
-      try {
-        unlinkSync(lockPathFor(filePath))
-      } catch {
-        // ignore
+      // TOCTOU guard: only break the lock if the file on disk STILL matches
+      // the exact stale holder we observed (identity tuple: pid +
+      // acquiredAtMs + host + sessionId). Race: two peers can both read the
+      // same stale holder C and both decide "stale". If peer B unlinks C and
+      // wins the wx-create first (B now legitimately holds a FRESH lock), an
+      // unconditional unlink here would smash B's live lock and let both A
+      // and B believe they hold it : exactly the lost-write race the lock
+      // exists to prevent. Re-read immediately before unlinking; if the
+      // holder no longer matches (someone already broke + reacquired), do NOT
+      // unlink : just retry the wx-create, which will EEXIST against the new
+      // holder and fall through to normal contention/backoff.
+      const reread = readLockFile(lockPathFor(filePath))
+      if (
+        reread !== null &&
+        reread.pid === lastExisting.pid &&
+        reread.acquiredAtMs === lastExisting.acquiredAtMs &&
+        reread.host === lastExisting.host &&
+        reread.sessionId === lastExisting.sessionId
+      ) {
+        try {
+          unlinkSync(lockPathFor(filePath))
+        } catch {
+          // ignore
+        }
       }
       continue
     }
