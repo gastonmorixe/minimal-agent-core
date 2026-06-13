@@ -8,7 +8,7 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { buildFirstRunCard, isColdStart, maybeShowFirstRunWelcome } from "./first-run.ts"
+import { buildFirstRunCard, isColdStart, maybeShowFirstRunWelcome } from "./ui/chrome/first-run.ts"
 
 /** Strip ANSI SGR sequences so assertions read against plain text. */
 function plain(s: string): string {
