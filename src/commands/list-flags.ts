@@ -1,4 +1,5 @@
 import { BETA_FLAGS_DETAILED } from "../headers.ts"
+import { writeCommandList } from "../ui/command-list.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /**
@@ -6,15 +7,18 @@ import { c } from "../ui/style/ansi.ts"
  * client sends with Messages API requests, including each flag's source and
  * the condition under which it is attached.
  */
-export function runListFlagsCommand(): void {
-  console.log(`\n  ${c.bold("Beta feature flags")}`)
-  console.log(`  ${c.dim("Sent with every Messages API request")}\n`)
-  for (const flag of BETA_FLAGS_DETAILED) {
-    console.log(`  ${c.dimCyan("╭")} ${c.cyan(flag.id)}`)
-    console.log(`  ${c.dimCyan("│")} ${flag.description}`)
-    console.log(`  ${c.dimCyan("│")} ${c.dim(`source: ${flag.source}`)}`)
-    console.log(`  ${c.dimCyan("╰")} ${c.dim(`when:   ${flag.condition}`)}`)
-    console.log()
-  }
-  console.log(`  ${c.dim(`${BETA_FLAGS_DETAILED.length} flags total`)}`)
+export function runListFlagsCommand(deps: { output?: { write(s: string): unknown } } = {}): void {
+  writeCommandList(
+    {
+      title: "Beta feature flags",
+      subtitle: "Sent with every Messages API request",
+      items: BETA_FLAGS_DETAILED.map((flag) => ({
+        title: flag.id,
+        body: [flag.description, c.dim(`source: ${flag.source}`)],
+        footer: `when:   ${flag.condition}`,
+      })),
+      summary: `${BETA_FLAGS_DETAILED.length} flags total`,
+    },
+    deps.output,
+  )
 }
