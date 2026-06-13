@@ -639,7 +639,7 @@ const VALID_THEMES: ReadonlySet<ThemeKey> = new Set<ThemeKey>(["dark", "light", 
 const VALID_SURFACES = new Set(["label", "arrow", "status"])
 /**
  * Semantic tokens recognized by the resolver. Plugins reference these by
- * name; the agent owns the concrete per-theme palette in `mode-style.ts`.
+ * name; the agent owns the concrete per-theme palette in `ui/style/mode.ts`.
  * Kept here purely for validation.
  */
 const VALID_SEMANTIC_TOKENS = new Set(["accent", "accent-soft", "danger", "muted"])

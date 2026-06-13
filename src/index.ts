@@ -500,7 +500,7 @@ async function main() {
   // auth / config) warning emitted mid-banner would tear through the
   // box mid-paint instead of landing cleanly below it with the proper
   // `⚠ warn ╰` chrome.
-  let scrollbackSink: import("./log-scrollback.ts").ScrollbackDiagnosticSink | null = null
+  let scrollbackSink: import("./ui/status/scrollback.ts").ScrollbackDiagnosticSink | null = null
   {
     const { FileLogSink } = await import("./log-file.ts")
     new FileLogSink(getSessionId()).attach(getDiagnosticBus())
@@ -522,7 +522,7 @@ async function main() {
     // with no in-context signal that anything went wrong. Attached
     // here, before any other subsystem can emit, so the first error
     // of the session is captured.
-    const { ScrollbackDiagnosticSink } = await import("./log-scrollback.ts")
+    const { ScrollbackDiagnosticSink } = await import("./ui/status/scrollback.ts")
     scrollbackSink = new ScrollbackDiagnosticSink()
     scrollbackSink.attach(getDiagnosticBus())
     // Start buffering immediately. We're about to start drawing the

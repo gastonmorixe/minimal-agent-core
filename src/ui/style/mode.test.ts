@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { clampLabel, MAX_LABEL_WIDTH } from "./mode-style.ts"
-import { displayWidth } from "./term-width.ts"
+import { displayWidth } from "../../term-width.ts"
+
+import { clampLabel, MAX_LABEL_WIDTH } from "./mode.ts"
 
 describe("clampLabel (B-072: display-width truncation)", () => {
   it("passes short ASCII labels through unchanged", () => {

@@ -1,15 +1,10 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 
-import { registerTestProvider } from "./llm/test-fixtures.ts"
-import { stripAnsi } from "./term-width.ts"
-import {
-  fmtTokens,
-  fmtUSD,
-  periodLabel,
-  renderUsageOverlay,
-  renderUsageReport,
-} from "./usage-render.ts"
-import type { UsageReport, UsageTotals } from "./usage-stats.ts"
+import { registerTestProvider } from "../../llm/test-fixtures.ts"
+import { stripAnsi } from "../../term-width.ts"
+import type { UsageReport, UsageTotals } from "../../usage-stats.ts"
+
+import { fmtTokens, fmtUSD, periodLabel, renderUsageOverlay, renderUsageReport } from "./render.ts"
 
 beforeAll(() => {
   // Model short labels resolve through the provider-plugin registry (Phase

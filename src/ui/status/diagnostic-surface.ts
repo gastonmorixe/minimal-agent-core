@@ -47,10 +47,11 @@
  * one `setDiagnosticLines(...)` repaint. The downstream sink does
  * shallow-compare dedup so no-op repaints are cheap.
  *
- * @module log-tui
+ * @module ui/status/diagnostic-surface
  */
 
-import { type DiagnosticBus, type LogEvent, Severity } from "./diagnostic-bus.ts"
+import { type DiagnosticBus, type LogEvent, Severity } from "../../diagnostic-bus.ts"
+import { c } from "../style/ansi.ts"
 
 /**
  * Sink interface for receiving 0..2 styled diagnostic lines. Wired up
@@ -64,32 +65,6 @@ export interface DiagnosticLinesSink {
 interface Slot {
   event: LogEvent | null
   count: number
-}
-
-// Inline SGR strings. We avoid pulling `c` from src/agent.ts to keep
-// this module a leaf — agent.ts is a 3.5k-line monolith.
-const SGR = {
-  reset: "\x1b[0m",
-  dim: "\x1b[2m",
-  dimOff: "\x1b[22m",
-  gold: "\x1b[38;5;214m", // PALETTE.gold (matches src/palette.ts)
-  red: "\x1b[31m", // PALETTE.red
-  faintWhite: "\x1b[2;37m", // c.faintWhite open
-  faintWhiteOff: "\x1b[22;39m", // c.faintWhite close
-  fgReset: "\x1b[39m",
-}
-
-function gold(s: string): string {
-  return `${SGR.gold}${s}${SGR.fgReset}`
-}
-function red(s: string): string {
-  return `${SGR.red}${s}${SGR.fgReset}`
-}
-function dim(s: string): string {
-  return `${SGR.dim}${s}${SGR.dimOff}`
-}
-function faintWhite(s: string): string {
-  return `${SGR.faintWhite}${s}${SGR.faintWhiteOff}`
 }
 
 /**
@@ -209,9 +184,9 @@ function bumpOrReplace(slot: Slot, e: LogEvent): Slot {
 }
 
 function renderLine(kind: "warn" | "error", e: LogEvent, count: number): string {
-  const icon = kind === "warn" ? gold("⚠") : red("✗")
-  const src = faintWhite(e.source)
+  const icon = kind === "warn" ? c.gold("⚠") : c.red("✗")
+  const src = c.faintWhite(e.source)
   const msg = e.message
-  const suffix = count > 1 ? " " + dim(`(×${count})`) : ""
+  const suffix = count > 1 ? " " + c.dim(`(×${count})`) : ""
   return `${icon} ${src}: ${msg}${suffix}`
 }

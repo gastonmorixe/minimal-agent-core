@@ -7,7 +7,7 @@
  * Two sources want to paint into the editor's footer band:
  *
  *   1. `TuiDiagnosticSurface` — 0..2 lines of "last warn / last error
- *      with count" (`src/log-tui.ts`).
+ *      with count" (`src/ui/status/diagnostic-surface.ts`).
  *   2. `LiveAreaScheduler` — N lines of plugin-contributed slots, e.g.
  *      the quota footer (`src/live-area-providers.ts`).
  *
@@ -29,7 +29,7 @@
  */
 
 import type { LiveAreaSink } from "./live-area-providers.ts"
-import type { DiagnosticLinesSink } from "./log-tui.ts"
+import type { DiagnosticLinesSink } from "./ui/status/diagnostic-surface.ts"
 
 /**
  * Merges the two writers that share the footer band below the editor:

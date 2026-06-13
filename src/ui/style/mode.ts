@@ -32,12 +32,12 @@
  * is the planned upgrade path once we have theme detection and a real test
  * harness.
  *
- * @module mode-style
+ * @module ui/style/mode
  */
 
-import { PALETTE, SEMANTIC } from "./palette.ts"
-import type { ColorRequest, ModeStyleRequest, ThemeKey } from "./plugins/types.ts"
-import { truncateDisplayWidth } from "./term-width.ts"
+import { PALETTE, SEMANTIC } from "../../palette.ts"
+import type { ColorRequest, ModeStyleRequest, ThemeKey } from "../../plugins/types.ts"
+import { truncateDisplayWidth } from "../../term-width.ts"
 
 // ---------------------------------------------------------------------------
 // Public types

@@ -381,7 +381,9 @@ export async function runReplLiveArea(
   // `finally` block at end-of-fn can still reference them.
   const slotRows = loader?.getLiveAreaSlots() ?? []
   let liveAreaScheduler: import("../live-area-providers.ts").LiveAreaScheduler | null = null
-  let tuiDiagnosticSurface: import("../log-tui.ts").TuiDiagnosticSurface | null = null
+  let tuiDiagnosticSurface:
+    | import("../ui/status/diagnostic-surface.ts").TuiDiagnosticSurface
+    | null = null
 
   // Ready banner is now written from `src/index.ts` via direct stdout
   // BEFORE the compositor mounts and BEFORE any resume replay. See
@@ -796,7 +798,7 @@ export async function runReplLiveArea(
   // event (see the comment above the `slotRows` declaration).
   if (typeof editor.setFooterLines === "function") {
     const { FooterAggregator } = await import("../log-aggregator.ts")
-    const { TuiDiagnosticSurface } = await import("../log-tui.ts")
+    const { TuiDiagnosticSurface } = await import("../ui/status/diagnostic-surface.ts")
     const { getDiagnosticBus } = await import("../diagnostic-bus.ts")
 
     const aggregator = new FooterAggregator(

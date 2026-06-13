@@ -32,7 +32,7 @@
  *   - Warning   → gold (semantic alias `warning`)
  *   - Error+    → red  (semantic alias `danger`)
  *
- * Source id renders in cyan (mirrors `mode-style`'s subsystem color);
+ * Source id renders in cyan (mirrors `ui/style/mode`'s subsystem color);
  * the timestamp and structured-data keys are dim.
  *
  * # Dedup window
@@ -56,7 +56,7 @@
  * area; in non-interactive mode it lands directly in the terminal.
  * Both surfaces preserve the warning in scroll history.
  *
- * @module log-scrollback
+ * @module ui/status/scrollback
  */
 
 import {
@@ -64,11 +64,11 @@ import {
   type LogEvent,
   Severity,
   type StructuredData,
-} from "./diagnostic-bus.ts"
-import { FG_RESET, PALETTE } from "./palette.ts"
+} from "../../diagnostic-bus.ts"
+import { FG_RESET, PALETTE } from "../../palette.ts"
 
 // ---------------------------------------------------------------------------
-// SGR helpers (no `c` import — this module stays a leaf, like log-tui.ts)
+// SGR helpers (no `c` import; these compose raw palette opens with attributes).
 // ---------------------------------------------------------------------------
 
 const SGR_DIM = "\x1b[2m"

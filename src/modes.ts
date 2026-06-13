@@ -29,6 +29,7 @@
 
 import { c } from "./agent.ts"
 import type { ContentBlock } from "./client.ts"
+import type { ManifestMode, ModePermissions } from "./plugins/types.ts"
 import {
   clampLabel,
   detectStyleEnv,
@@ -38,8 +39,7 @@ import {
   resolveModeStyle,
   type StyleEnv,
   styleFromLegacyColor,
-} from "./mode-style.ts"
-import type { ManifestMode, ModePermissions } from "./plugins/types.ts"
+} from "./ui/style/mode.ts"
 
 /**
  * Resolved (allow, deny) lists for a mode, with all defaults filled in.
