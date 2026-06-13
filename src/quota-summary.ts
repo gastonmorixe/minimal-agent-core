@@ -43,9 +43,11 @@ export function formatQuotaWindows(
   const now = opts.now ?? Date.now
 
   const colorPct = (util: number): string => {
-    const pct = util * 100
-    // Integer percent for at-a-glance compactness.
-    const txt = `${Math.round(pct)}%`
+    // Integer percent for at-a-glance compactness. Round ONCE and branch the
+    // color on the same rounded value the user sees, so the color and the
+    // number never disagree at boundaries (e.g. 84.6 → "85%" must be red).
+    const pct = Math.round(util * 100)
+    const txt = `${pct}%`
     if (pct >= 85) return c.red(txt)
     if (pct >= 60) return c.yellow(txt)
     return c.green(txt)
