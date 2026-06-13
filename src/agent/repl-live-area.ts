@@ -836,6 +836,25 @@ export async function runReplLiveArea(
     }
   }
 
+  // Terminal-resize handling. Without this, after a terminal shrink the
+  // footer band + queued-message decoration rows keep their old (now
+  // over-wide) layout and corrupt the live region until the next repaint.
+  // On every SIGWINCH-driven `resize` event we (1) tell the editor to
+  // reflow its prompt/footer at the new width (`notifyResize`) and (2)
+  // re-run `renderDecoration` so the queue/mode-change rows recompute
+  // against `process.stdout.columns`. Both are cheap, so no debounce is
+  // needed (and there's no debounce util in scope to reuse). The listener
+  // is removed in the `finally` below, alongside the other subscription
+  // disposals, so it never leaks; `resizeDisposed` guards the handler
+  // against firing during/after teardown.
+  let resizeDisposed = false
+  const onTerminalResize = (): void => {
+    if (resizeDisposed) return
+    editor.notifyResize?.()
+    renderDecoration()
+  }
+  process.stdout.on("resize", onTerminalResize)
+
   try {
     while (!cancelled) {
       if (queue.length === 0) {
@@ -1304,6 +1323,11 @@ export async function runReplLiveArea(
       }
     }
   } finally {
+    // Remove the resize listener FIRST and flag it disposed so any
+    // in-flight `resize` event can't touch the editor/compositor while
+    // they're being torn down below.
+    resizeDisposed = true
+    process.stdout.off("resize", onTerminalResize)
     disposePromptInject?.()
     disposeCommandRun?.()
     liveAreaScheduler?.stop()
