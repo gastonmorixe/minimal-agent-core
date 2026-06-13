@@ -3,6 +3,7 @@
   "name": "Session Info",
   "version": "0.1.0",
   "description": "Contributes the SessionInfo tool: the agent's live runtime state at call time, context fullness (tokens used vs window), the selected effort/reasoning settings and fast-mode, provider quota windows, cumulative token usage and rough cost, the current working directory, and uptime. The runtime-state counterpart to ModelInfo (which reports static capabilities). Reads stable host data sources directly (session tokens, provider session info, model registry), so it needs no provider import and never blocks on the network.",
+  "capabilities": ["models:read"],
   "tuis": [
     {
       "id": "session_info_tool",
