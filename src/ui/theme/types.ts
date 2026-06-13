@@ -28,7 +28,7 @@
  * no `Date.now()`, no `process.*`. Importable from anywhere, including
  * subprocess plugins, without dragging in node-only globals.
  *
- * @module theme/types
+ * @module ui/theme/types
  */
 
 // ---------------------------------------------------------------------------

@@ -4,9 +4,9 @@
  * Import from here when you want the *catalog*:
  *
  *     import \{ THINKING_ROTOR_BOX, ICON_DOT_FILLED, ANSI_PALETTE_COOL \}
- *       from "./spinner/library/index.ts";
+ *       from "./library/index.ts";
  *
- * @module spinner/library
+ * @module ui/spinner/library
  */
 
 export * from "./frames.ts"

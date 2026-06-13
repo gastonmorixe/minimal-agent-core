@@ -1,4 +1,4 @@
-import { SPINNER_PRESETS } from "../spinner/named-presets.ts"
+import { SPINNER_PRESETS } from "../ui/spinner/named-presets.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /**

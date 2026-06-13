@@ -34,8 +34,8 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { BREATHING_DOT } from "./spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
+import { BREATHING_DOT } from "./ui/spinner/library/frames.ts"
+import { ANSI_PALETTE_RAINBOW } from "./ui/spinner/library/palettes.ts"
 
 /** Default remote for the extended first-party plugins. */
 export const DEFAULT_PLUGINS_REPO = "https://github.com/gastonmorixe/minimal-agent-plugins.git"

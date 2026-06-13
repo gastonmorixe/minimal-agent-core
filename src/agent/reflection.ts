@@ -92,7 +92,7 @@ export function parseReflectionAck(
  * `<blinking-⏸> reflection @ round 50 · 59s remaining · press Esc to interrupt`
  * tick down in the live area without spamming scrollback. The leading
  * pause glyph is contributed by the live-area status icon (see
- * `agent.reflection-cooldown` in `src/spinner/presets.ts`) : the label
+ * `agent.reflection-cooldown` in `src/ui/spinner/presets.ts`) : the label
  * itself MUST NOT carry one too or the row reads as a duplicated icon.
  *
  * Three ways this resolves

@@ -1,23 +1,24 @@
 import { describe, expect, it } from "bun:test"
 
-import { effectiveDisplayWidth } from "./nerd-glyph-width.ts"
-import { THINKING_BREATHING, TOOL_SQUARE_PULSE } from "./spinner/library/frames.ts"
+import { effectiveDisplayWidth } from "../../nerd-glyph-width.ts"
+import { displayWidth } from "../../term-width.ts"
+
+import type { Spinner } from "./index.ts"
+import { BlinkingNerdSpinner, SpinnerManager } from "./index.ts"
+import { THINKING_BREATHING, TOOL_SQUARE_PULSE } from "./library/frames.ts"
 import {
   ICON_DOT_FILLED,
   ICON_PAUSE,
   ICON_SQUARE_BIG,
   ICON_SQUARE_SMALL,
   NF_LOCK,
-} from "./spinner/library/icons.ts"
+} from "./library/icons.ts"
 import {
   DEFAULT_ICON_BY_CATEGORY,
   DEFAULT_ICON_BY_NOTIFICATION_ID,
   DEFAULT_NERD_ICON,
-} from "./spinner/presets.ts"
-import { isAnimatedIcon } from "./spinner/types.ts"
-import type { Spinner } from "./spinner.ts"
-import { BlinkingNerdSpinner, SpinnerManager } from "./spinner.ts"
-import { displayWidth } from "./term-width.ts"
+} from "./presets.ts"
+import { isAnimatedIcon } from "./types.ts"
 
 describe("SpinnerManager", () => {
   it("switches spinners after the negotiated grace window", () => {

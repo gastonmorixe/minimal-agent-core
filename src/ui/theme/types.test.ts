@@ -1,5 +1,5 @@
 /**
- * Tests for `theme/types.ts` — focus on the constructors with runtime
+ * Tests for `ui/theme/types.ts` — focus on the constructors with runtime
  * validation (the brand-only `unsafe*` constructors are tested only
  * structurally elsewhere).
  */

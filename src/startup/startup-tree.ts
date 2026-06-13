@@ -19,10 +19,10 @@
 
 import { catRows, DEFAULT_CAT } from "../cats.ts"
 import { VERSION } from "../headers.ts"
-import { BREATHING_DOT } from "../spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"
 import { wrapStartupToolsRows } from "../startup-tools-row.ts"
 import { displayWidth, truncateDisplayWidth, wrapRows } from "../term-width.ts"
+import { BREATHING_DOT } from "../ui/spinner/library/frames.ts"
+import { ANSI_PALETTE_RAINBOW } from "../ui/spinner/library/palettes.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /**
