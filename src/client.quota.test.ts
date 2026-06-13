@@ -15,15 +15,35 @@ describe("client", () => {
       // via `AbortSignal.any([caller, watchdog])`. The transport sees
       // the COMPOSED signal. What matters for the harness is that an
       // abort on the caller's signal still propagates through.
+      //
+      // We observe the three contract facts INSIDE the handler (i.e.
+      // mid-request), NOT after sendMessageFull resolves: the B-098 fix
+      // tears down the per-attempt controller in a `finally` on every
+      // path (success included), so the composed signal is intentionally
+      // aborted once the call returns. Checking post-completion would
+      // see that teardown, not the live propagation. The fake's stream
+      // is pre-buffered, so aborting the caller mid-handler does not make
+      // the already-enqueued read throw — the call still completes.
+      const ac = new AbortController()
       let captured: NetworkRequest | null = null
+      let sameInstance = true
+      let abortedBeforeCancel = true
+      let abortedAfterCancel = false
       const networkClient = fakeNetworkClient((req) => {
         captured = req
+        const sig = req.signal!
+        // Composed, not the caller's exact instance.
+        sameInstance = sig === ac.signal
+        // Not yet aborted before the caller cancels.
+        abortedBeforeCancel = sig.aborted
+        // Caller cancels mid-request -> the composed signal aborts.
+        ac.abort(new Error("user cancellation"))
+        abortedAfterCancel = sig.aborted
         return sseResponse([
           { type: "message_start", message: { id: "x", model: "claude", usage: {} } },
           { type: "message_stop" },
         ])
       })
-      const ac = new AbortController()
       const auth: AuthResult = { type: "api-key", token: "tok", refresh: undefined }
       await sendMessageFull({
         auth,
@@ -32,14 +52,9 @@ describe("client", () => {
         signal: ac.signal,
       })
       expect(captured).not.toBeNull()
-      const requestSignal = (captured as unknown as NetworkRequest).signal!
-      // The signal forwarded to the transport is NOT the exact same
-      // instance (it's composed via AbortSignal.any), but aborting the
-      // caller's signal still aborts the forwarded one.
-      expect(requestSignal).not.toBe(ac.signal)
-      expect(requestSignal.aborted).toBe(false)
-      ac.abort(new Error("user cancellation"))
-      expect(requestSignal.aborted).toBe(true)
+      expect(sameInstance).toBe(false)
+      expect(abortedBeforeCancel).toBe(false)
+      expect(abortedAfterCancel).toBe(true)
     })
 
     // -----------------------------------------------------------------
