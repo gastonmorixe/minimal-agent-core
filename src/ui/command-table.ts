@@ -7,6 +7,7 @@
  * @module ui/command-table
  */
 
+import { type CommandOutput, writeCommandRows } from "./command-output.ts"
 import { c } from "./style/ansi.ts"
 
 export interface CommandTableColumn {
@@ -99,7 +100,7 @@ export function renderCommandTable(spec: CommandTableSpec): string[] {
 /** Write rendered rows with one trailing newline. */
 export function writeCommandTable(
   spec: CommandTableSpec,
-  output: { write(s: string): unknown } = process.stdout,
+  output: CommandOutput = process.stdout,
 ): void {
-  output.write(`${renderCommandTable(spec).join("\n")}\n`)
+  writeCommandRows(renderCommandTable(spec), output)
 }

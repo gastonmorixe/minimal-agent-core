@@ -9,6 +9,7 @@ import {
   sessionFilePath,
 } from "../session-store.ts"
 import { computeSessionUsage, type SessionUsage, ZERO_SESSION_USAGE } from "../session-usage.ts"
+import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
 
 import { readSessionIndex } from "./session-index.ts"
@@ -119,6 +120,74 @@ export function matchesQuery(rec: IndexRecord, query: string): boolean {
 export interface RunSessionsOptions {
   /** Optional fuzzy filter applied to date+sid+cwd before any file I/O. */
   query?: string
+  /** Output stream; tests inject a collector. */
+  output?: CommandOutput
+}
+
+export interface SessionCommandRow {
+  createdAt: string
+  sid: string
+  model: string
+  bytes: number
+  usage: SessionUsage
+  cwd?: string
+  snippet: string
+}
+
+export interface SessionsRenderInput {
+  allCount: number
+  rows: readonly SessionCommandRow[]
+  query?: string
+}
+
+function formatSessionTableRow(row: SessionCommandRow): string {
+  const when = c.dim(row.createdAt.replace("T", " ").slice(0, 19))
+  const sid = c.cyan(row.sid.padEnd(38))
+  const model = c.dim(row.model.padEnd(22))
+  const size = c.dim(formatBytes(row.bytes))
+  // Estimated counts read dim (less trustworthy); real counts read in a
+  // brighter faint-white so the [R] rows stand out at a glance.
+  const tokens =
+    row.usage.turns === 0
+      ? c.dim(formatTokenCell(row.usage))
+      : row.usage.estimated
+        ? c.dim(formatTokenCell(row.usage))
+        : c.faintWhite(formatTokenCell(row.usage))
+  const cwd = c.dim(formatCwd(row.cwd ?? "", PATH_COL_WIDTH))
+  return `  ${when}  ${sid} ${model} ${size} ${tokens} ${cwd} ${c.faintWhite(row.snippet)}`
+}
+
+/** Render the `sessions` command table/empty states without writing to the terminal. */
+export function renderSessionsCommandRows(input: SessionsRenderInput): string[] {
+  const query = input.query?.trim() ?? ""
+  if (input.allCount === 0) {
+    return [
+      "",
+      `  ${c.dim("no saved sessions yet")}`,
+      `  ${c.dim(`(sessions are stored at ${defaultSessionsDir()})`)}`,
+    ]
+  }
+  if (input.rows.length === 0) {
+    return [
+      "",
+      `  ${c.dim(`no sessions matching ${JSON.stringify(query)}`)}`,
+      `  ${c.dim(`(${input.allCount} total at ${defaultSessionsDir()})`)}`,
+    ]
+  }
+
+  const rendered = [
+    "",
+    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("size".padStart(SIZE_COL_WIDTH))} ${c.bold("tokens".padStart(TOKENS_COL_WIDTH))} ${c.bold("cwd".padEnd(PATH_COL_WIDTH))} ${c.bold("preview")}`,
+    ...input.rows.map(formatSessionTableRow),
+    "",
+  ]
+  const summary =
+    query.length > 0
+      ? `${input.rows.length} of ${input.allCount} session(s) matching ${JSON.stringify(query)}`
+      : `${input.allCount} session(s) at ${defaultSessionsDir()}`
+  rendered.push(`  ${c.dim(summary)}`)
+  rendered.push(`  ${c.dim("resume with: --resume <sid>  (or --resume last)")}`)
+  return rendered
 }
 
 /**
@@ -133,23 +202,20 @@ export function runSessionsCommand(opts: RunSessionsOptions = {}): void {
   const query = opts.query?.trim() ?? ""
   const all = readSessionIndex()
   if (all.length === 0) {
-    console.log(`\n  ${c.dim("no saved sessions yet")}`)
-    console.log(`  ${c.dim(`(sessions are stored at ${defaultSessionsDir()})`)}`)
+    writeCommandRows(renderSessionsCommandRows({ allCount: 0, rows: [], query }), opts.output)
     return
   }
   // Index-only filter pass. Pure in-memory string match on three small
   // fields per record. No file reads.
   const matched = query.length > 0 ? all.filter((rec) => matchesQuery(rec, query)) : all
   if (matched.length === 0) {
-    console.log("")
-    console.log(`  ${c.dim(`no sessions matching ${JSON.stringify(query)}`)}`)
-    console.log(`  ${c.dim(`(${all.length} total at ${defaultSessionsDir()})`)}`)
+    writeCommandRows(
+      renderSessionsCommandRows({ allCount: all.length, rows: [], query }),
+      opts.output,
+    )
     return
   }
-  console.log("")
-  console.log(
-    `  ${c.bold("when".padEnd(20))} ${c.bold("sid".padEnd(38))} ${c.bold("model".padEnd(22))} ${c.bold("size".padStart(SIZE_COL_WIDTH))} ${c.bold("tokens".padStart(TOKENS_COL_WIDTH))} ${c.bold("cwd".padEnd(PATH_COL_WIDTH))} ${c.bold("preview")}`,
-  )
+  const rows: SessionCommandRow[] = []
   for (const rec of matched) {
     const path = sessionFilePath(rec.sid)
     let bytes = Number.NaN
@@ -176,26 +242,15 @@ export function runSessionsCommand(opts: RunSessionsOptions = {}): void {
     } catch {
       // ignore — session file may have been deleted
     }
-    const when = c.dim(rec.createdAt.replace("T", " ").slice(0, 19))
-    const sid = c.cyan(rec.sid.padEnd(38))
-    const model = c.dim(rec.model.padEnd(22))
-    const size = c.dim(formatBytes(bytes))
-    // Estimated counts read dim (less trustworthy); real counts read in a
-    // brighter faint-white so the [R] rows stand out at a glance.
-    const tokens =
-      usage.turns === 0
-        ? c.dim(formatTokenCell(usage))
-        : usage.estimated
-          ? c.dim(formatTokenCell(usage))
-          : c.faintWhite(formatTokenCell(usage))
-    const cwd = c.dim(formatCwd(rec.cwd ?? "", PATH_COL_WIDTH))
-    console.log(`  ${when}  ${sid} ${model} ${size} ${tokens} ${cwd} ${c.faintWhite(snippet)}`)
+    rows.push({
+      createdAt: rec.createdAt,
+      sid: rec.sid,
+      model: rec.model,
+      bytes,
+      usage,
+      cwd: rec.cwd,
+      snippet,
+    })
   }
-  console.log("")
-  const summary =
-    query.length > 0
-      ? `${matched.length} of ${all.length} session(s) matching ${JSON.stringify(query)}`
-      : `${all.length} session(s) at ${defaultSessionsDir()}`
-  console.log(`  ${c.dim(summary)}`)
-  console.log(`  ${c.dim("resume with: --resume <sid>  (or --resume last)")}`)
+  writeCommandRows(renderSessionsCommandRows({ allCount: all.length, rows, query }), opts.output)
 }
