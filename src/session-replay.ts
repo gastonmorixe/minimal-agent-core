@@ -21,13 +21,13 @@
  */
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
-import { Formatter } from "./formatter.ts"
 import type { ModeManager } from "./modes.ts"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
 import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
+import { Formatter } from "./ui/formatter/formatter.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
 import {
   clampTranscriptRow,
@@ -246,7 +246,7 @@ export async function replayToScrollback(
   // Wrap the sink as a `FormatterOutput` so a spawned Formatter can pipe
   // its rendered stdout back into the same scrollback target. `columns`
   // / `rows` come from the host stdout — `COLUMNS` is load-bearing for
-  // mdstream ≥ 0.2.2 (see `formatterEnv` in src/formatter.ts), and
+  // mdstream >= 0.2.2 (see `formatterEnv` in src/ui/formatter/formatter.ts), and
   // mdstream uses it to wrap paragraphs.
   const textFormatterOutput = formatterCmd ? makeFormatterOutput(sink, null) : null
   // Thinking output wraps each emitted chunk with `faintThinkingChunk`
@@ -495,7 +495,7 @@ export async function replayToScrollback(
  * Column/row hints come live from `process.stdout` so that, on
  * mid-replay terminal resize, a later spawn sees the new dimensions.
  * mdstream consumes these via the `COLUMNS`/`LINES` env (see
- * `formatterEnv` in src/formatter.ts).
+ * `formatterEnv` in src/ui/formatter/formatter.ts).
  */
 function makeFormatterOutput(
   sink: ReplaySink,

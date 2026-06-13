@@ -32,12 +32,12 @@
  * await fmt.end();
  * ```
  *
- * @module formatter
+ * @module ui/formatter/formatter
  */
 
 import type { FileSink, Subprocess } from "bun"
 
-import { AnsiStreamBuffer } from "./ui/terminal/ansi-stream.ts"
+import { AnsiStreamBuffer } from "../terminal/ansi-stream.ts"
 
 type FormatterOutput = Pick<NodeJS.WriteStream, "write"> & {
   columns?: number

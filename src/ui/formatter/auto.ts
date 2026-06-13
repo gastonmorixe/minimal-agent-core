@@ -13,14 +13,14 @@
  *    - If no suitable asset exists → return a warning, no formatter
  *    - Download tarball, extract binary, install to `~/.minimal-agent/bin/`
  *
- * @module auto-formatter
+ * @module ui/formatter/auto
  */
 
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 
-import { BREATHING_DOT } from "./ui/spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "./ui/spinner/library/palettes.ts"
+import { BREATHING_DOT } from "../spinner/library/frames.ts"
+import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"
 
 const RELEASES_API = "https://api.github.com/repos/gastonmorixe/mdstream/releases/latest"
 
