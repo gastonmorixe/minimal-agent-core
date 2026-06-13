@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { FakeClock, makeSink, makeSlot } from "./live-area-providers.fixtures.ts"
-import { LiveAreaScheduler } from "./live-area-providers.ts"
+import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
+import { LiveAreaScheduler } from "./live-area-scheduler.ts"
 
 // --------------------------------- tests ----------------------------------
 
@@ -308,7 +308,7 @@ describe("LiveAreaScheduler — failure modes", () => {
     "force-releases inFlight when timeoutMs fires AND invoke ignores ctx.abort " +
       "(heartbeat + refreshOn both recover)",
     async () => {
-      const { EventBus } = await import("./plugins/event-bus.ts")
+      const { EventBus } = await import("../../plugins/event-bus.ts")
       const bus = new EventBus(() => {})
       let invokeCount = 0
       const slot = makeSlot({
@@ -540,7 +540,7 @@ describe("LiveAreaScheduler — placeholder + refreshOn", () => {
   })
 
   it("refreshOn events trigger an off-cycle re-fire", async () => {
-    const { EventBus } = await import("./plugins/event-bus.ts")
+    const { EventBus } = await import("../../plugins/event-bus.ts")
     const bus = new EventBus(() => {})
     let invokeCount = 0
     const slot = makeSlot({
@@ -579,7 +579,7 @@ describe("LiveAreaScheduler — placeholder + refreshOn", () => {
   })
 
   it("refreshOn drops events that arrive while a previous tick is in-flight", async () => {
-    const { EventBus } = await import("./plugins/event-bus.ts")
+    const { EventBus } = await import("../../plugins/event-bus.ts")
     const bus = new EventBus(() => {})
     let invokeCount = 0
     let resolveFirst!: (v: string | null) => void
@@ -621,7 +621,7 @@ describe("LiveAreaScheduler — placeholder + refreshOn", () => {
   })
 
   it("stop() removes refreshOn listeners (no leak across REPL teardown)", async () => {
-    const { EventBus } = await import("./plugins/event-bus.ts")
+    const { EventBus } = await import("../../plugins/event-bus.ts")
     const bus = new EventBus(() => {})
     let invokeCount = 0
     const slot = makeSlot({

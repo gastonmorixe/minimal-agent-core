@@ -1,13 +1,13 @@
 /**
  * `LiveAreaScheduler` — diagnosticBus integration + ctx.emit side-channel.
- * Split out of `live-area-providers.test.ts` (oxlint max-lines); shares
- * fixtures via `live-area-providers.fixtures.ts`.
+ * Split out of `live-area-scheduler.test.ts` (oxlint max-lines); shares
+ * fixtures via `live-area-scheduler.fixtures.ts`.
  */
 
 import { describe, expect, it } from "bun:test"
 
-import { FakeClock, makeSink, makeSlot } from "./live-area-providers.fixtures.ts"
-import { LiveAreaScheduler } from "./live-area-providers.ts"
+import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
+import { LiveAreaScheduler } from "./live-area-scheduler.ts"
 
 // ---------------------------------------------------------------------------
 // DiagnosticBus integration — added with the log subsystem refactor.
@@ -19,7 +19,7 @@ import { LiveAreaScheduler } from "./live-area-providers.ts"
 
 describe("LiveAreaScheduler — diagnosticBus integration", () => {
   it("emits live-area.timeout (Warning) with slot + timeout-ms structured data", async () => {
-    const { createDiagnosticBus, Severity } = await import("./diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -63,7 +63,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("emits live-area.handler-failed (Error) when the invoke rejects", async () => {
-    const { createDiagnosticBus, Severity } = await import("./diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -101,7 +101,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("emits Notice with recovery=true after a healthy tick following a failure", async () => {
-    const { createDiagnosticBus, Severity } = await import("./diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../diagnostic-bus.ts")
     type LocalEvent = {
       // Keep `severity` typed as the enum here so the comparison below
       // doesn't trip oxlint's `no-unsafe-enum-comparison` (the bus's
@@ -148,7 +148,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("does NOT emit recovery when no prior failure occurred", async () => {
-    const { createDiagnosticBus } = await import("./diagnostic-bus.ts")
+    const { createDiagnosticBus } = await import("../../diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -177,7 +177,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("emits live-area.header-position (Notice) when a slot requests header position", async () => {
-    const { createDiagnosticBus, Severity } = await import("./diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -212,7 +212,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("legacyLogger takes precedence over diagnosticBus", async () => {
-    const { createDiagnosticBus } = await import("./diagnostic-bus.ts")
+    const { createDiagnosticBus } = await import("../../diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const busEvents: unknown[] = []
     bus.on("*", (e) => busEvents.push(e))
@@ -243,7 +243,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
 
 describe("LiveAreaScheduler — ctx.emit side-channel (prompt.inject port)", () => {
   it("slot ctx.emit fans out onto the shared bus", async () => {
-    const { EventBus } = await import("./plugins/event-bus.ts")
+    const { EventBus } = await import("../../plugins/event-bus.ts")
     const bus = new EventBus(() => {})
     const received: unknown[] = []
     bus.on("prompt.inject", (ctx) => {

@@ -1,15 +1,16 @@
 /**
  * Shared test fixtures for the `LiveAreaScheduler` test files
- * (`live-area-providers.test.ts`, `live-area-providers.diagnostics.test.ts`).
+ * (`live-area-scheduler.test.ts`, `live-area-scheduler.diagnostics.test.ts`).
  * Not a test file itself.
  */
 
-import type { LiveAreaSink } from "./live-area-providers.ts"
 import type {
   LiveAreaHandlerContext,
   ManifestLiveAreaSlot,
   ResolvedLiveAreaSlot,
-} from "./plugins/types.ts"
+} from "../../plugins/types.ts"
+
+import type { LiveAreaSink } from "./live-area-scheduler.ts"
 
 // ----------------------------- fake timer ---------------------------------
 

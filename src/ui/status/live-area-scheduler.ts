@@ -15,7 +15,7 @@
  * `setFooterLines` keeps the live area free of repaint flicker at
  * steady state.
  *
- * @module live-area-providers
+ * @module ui/status/live-area-scheduler
  */
 
 import {
@@ -24,10 +24,10 @@ import {
   Facility,
   getDiagnosticBus,
   Severity,
-} from "./diagnostic-bus.ts"
-import { agentContextToEnv } from "./plugins/agent-context.ts"
-import type { EventBus } from "./plugins/event-bus.ts"
-import type { AgentContext, ResolvedLiveAreaSlot } from "./plugins/types.ts"
+} from "../../diagnostic-bus.ts"
+import { agentContextToEnv } from "../../plugins/agent-context.ts"
+import type { EventBus } from "../../plugins/event-bus.ts"
+import type { AgentContext, ResolvedLiveAreaSlot } from "../../plugins/types.ts"
 
 /** Sink the scheduler writes into. Mirrors the `ReplEditor` shape. */
 export interface LiveAreaSink {

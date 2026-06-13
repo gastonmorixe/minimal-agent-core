@@ -9,7 +9,7 @@
  *   1. `TuiDiagnosticSurface` — 0..2 lines of "last warn / last error
  *      with count" (`src/ui/status/diagnostic-surface.ts`).
  *   2. `LiveAreaScheduler` — N lines of plugin-contributed slots, e.g.
- *      the quota footer (`src/live-area-providers.ts`).
+ *      the quota footer (`src/ui/status/live-area-scheduler.ts`).
  *
  * Both push to `setFooterLines`. If they pushed independently each
  * would overwrite the other on every change.
@@ -25,11 +25,11 @@
  * via the manifest's `position: "header"` — but right now only the
  * queue uses it. We pass-through plugin decoration writes unchanged.
  *
- * @module log-aggregator
+ * @module ui/status/footer-aggregator
  */
 
-import type { LiveAreaSink } from "./live-area-providers.ts"
-import type { DiagnosticLinesSink } from "./ui/status/diagnostic-surface.ts"
+import type { DiagnosticLinesSink } from "./diagnostic-surface.ts"
+import type { LiveAreaSink } from "./live-area-scheduler.ts"
 
 /**
  * Merges the two writers that share the footer band below the editor:
