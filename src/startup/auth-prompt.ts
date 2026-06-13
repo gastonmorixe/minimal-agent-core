@@ -14,7 +14,27 @@
 
 import { getAuth } from "../auth.ts"
 import { runLoginCommand } from "../commands/login.ts"
-import { c } from "../ui/style/ansi.ts"
+import {
+  renderStartupAuthPromptAborted,
+  renderStartupAuthPromptIntro,
+  renderStartupAuthPromptQuestion,
+  renderStartupAuthPromptStarting,
+  type StartupAuthPromptKind,
+} from "../ui/chrome/auth-prompt.ts"
+import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
+
+export interface FirstTimeAuthPromptDeps {
+  /** Override credential resolution for tests. */
+  getAuth?: typeof getAuth
+  /** Override login handoff for tests. */
+  runLogin?: () => Promise<number>
+  /** Input stream for the yes/no prompt. */
+  input?: NodeJS.ReadableStream & { isTTY?: boolean }
+  /** Output stream for prompt rows. */
+  output?: CommandOutput
+  /** Force interactivity in tests. Defaults to stdin+stdout TTY. */
+  isInteractive?: boolean
+}
 
 /**
  * Wrap `getAuth()` with a first-time / stale-credentials login prompt.
@@ -37,9 +57,15 @@ import { c } from "../ui/style/ansi.ts"
  * `client.ts` is handled separately (it bubbles a clean error that already
  * mentions `--login`).
  */
-export async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<typeof getAuth>>> {
+export async function getAuthWithFirstTimePrompt(
+  deps: FirstTimeAuthPromptDeps = {},
+): Promise<Awaited<ReturnType<typeof getAuth>>> {
+  const auth = deps.getAuth ?? getAuth
+  const input = deps.input ?? process.stdin
+  const output = deps.output ?? process.stderr
+  const runLogin = deps.runLogin ?? (() => runLoginCommand())
   try {
-    return await getAuth()
+    return await auth()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     const looksLikeMissing =
@@ -47,7 +73,8 @@ export async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<t
         msg,
       )
     const looksLikeStale = /invalid_grant|stale/i.test(msg)
-    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true
+    const interactive =
+      deps.isInteractive ?? (input.isTTY === true && process.stdout.isTTY === true)
 
     if (!interactive || (!looksLikeMissing && !looksLikeStale)) {
       throw err
@@ -58,26 +85,22 @@ export async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<t
     // "no" for stale credentials (user might prefer to re-run with
     // different flags) and "yes" for fresh installs (the only sane next
     // step).
-    const headline = looksLikeMissing
-      ? `${c.bold("Welcome to minimal-agent")} — you're not signed in yet.`
-      : `${c.bold("Credentials expired")} — refresh token rejected.`
-    console.error("")
-    console.error(`  ${c.bold(c.pink("⮕"))} ${headline}`)
-    console.error(`  ${c.faintWhite("│")} ${c.dim(msg)}`)
+    const kind: StartupAuthPromptKind = looksLikeMissing ? "missing" : "stale"
+    writeCommandRows(renderStartupAuthPromptIntro(kind, msg), output)
     const defaultYes = looksLikeMissing
-    const promptText = `  ${c.faintWhite("│")} Sign in now? ${c.dim(defaultYes ? "[Y/n]" : "[y/N]")} `
-    const answer = await readSingleLineFromStdin(promptText)
+    const answer = await readSingleLineFromStdin(
+      renderStartupAuthPromptQuestion(defaultYes),
+      input,
+      output,
+    )
     const yes = answer === "" ? defaultYes : /^y(es)?$/i.test(answer.trim())
     if (!yes) {
-      console.error(
-        `  ${c.faintWhite("╰")} ${c.dim("aborted — run `minimal-agent --login` later to sign in.")}`,
-      )
+      writeCommandRows(renderStartupAuthPromptAborted(), output)
       throw err
     }
-    console.error(`  ${c.faintWhite("╰")} ${c.dim("starting login…")}`)
-    console.error("")
+    writeCommandRows(renderStartupAuthPromptStarting(), output)
 
-    const code = await runLoginCommand()
+    const code = await runLogin()
     if (code !== 0) {
       // Preserve the original error as `cause` so callers (or a future
       // structured-logging hook) can surface BOTH the post-login retry
@@ -89,7 +112,7 @@ export async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<t
     }
     // Login wrote the keychain; retry. If THIS still fails, surface
     // the error — we're not going to loop.
-    return await getAuth()
+    return await auth()
   }
 }
 
@@ -99,11 +122,15 @@ export async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<t
  * `commands/login.ts`'s `readLine` but inlined so we don't pull in the
  * full login command module before we know it's needed.
  */
-async function readSingleLineFromStdin(promptText: string): Promise<string> {
+async function readSingleLineFromStdin(
+  promptText: string,
+  input: NodeJS.ReadableStream = process.stdin,
+  output: CommandOutput = process.stderr,
+): Promise<string> {
   const { createInterface } = await import("node:readline")
   return new Promise<string>((resolve) => {
-    process.stderr.write(promptText)
-    const rl = createInterface({ input: process.stdin, terminal: false })
+    output.write(promptText)
+    const rl = createInterface({ input, terminal: false })
     // Resolve BEFORE closing + a `settled` guard: `rl.close()` emits
     // `'close'` synchronously, so `resolve(line)` after `rl.close()` would
     // lose the race to the close handler's `resolve("")`. Mirrors the fix in
