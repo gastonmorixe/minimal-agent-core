@@ -40,7 +40,7 @@
  */
 
 import { buildEditDiff, buildFileDiff } from "./diff.ts"
-import { renderUnifiedDiff } from "./render/unified-diff.ts"
+import { renderUnifiedDiff } from "./ui/render/unified-diff.ts"
 
 /**
  * Override fields a re-deriver may populate. Each one is independently
