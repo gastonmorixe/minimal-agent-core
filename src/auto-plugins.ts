@@ -89,7 +89,13 @@ export async function resolveGithubToken(
  * the args unchanged and let git's own auth (ssh-agent, credential store) run.
  */
 export function buildCloneArgs(repoUrl: string, dest: string, hasToken: boolean): string[] {
-  const base = ["clone", "--depth", "1", repoUrl, dest]
+  // The `--` end-of-options separator (B-153) makes git treat repoUrl + dest as
+  // positionals even if repoUrl starts with `-`. Without it a pluginsRepo of
+  // `--upload-pack=<cmd>` (from MINIMAL_AGENT_PLUGINS_REPO env / config) is
+  // parsed by git as an OPTION, not a URL -> command execution on first-run
+  // plugin bootstrap (classic git-clone arg-injection). Env/home-dir-trusted so
+  // it's defense-in-depth, but the guard is one token.
+  const base = ["clone", "--depth", "1", "--", repoUrl, dest]
   const isHttpsGithub = /^https:\/\/[^/]*github\.com\//i.test(repoUrl)
   if (!hasToken || !isHttpsGithub) return base
   const helper =
