@@ -26,13 +26,13 @@ import { describe, expect, it } from "bun:test"
 import { systemMessage, userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
+import * as modelRegistry from "../../src/llm/model-registry.ts"
 import {
   clearModelRegistry,
   clearProviderRegistry,
   resolveModel,
   resolveProvider,
 } from "../../src/llm/model-registry.ts"
-import * as modelRegistry from "../../src/llm/model-registry.ts"
 
 import { anthropicAdapter, anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags, classifyRequest } from "./beta-flags.ts"

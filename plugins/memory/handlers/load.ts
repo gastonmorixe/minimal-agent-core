@@ -48,6 +48,7 @@
 import { existsSync, readFileSync } from "node:fs"
 
 import type { PromptFragmentContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { loadMemoryConfig, type MemoryConfig, type MemoryInjectMode } from "../lib/memory-config.ts"
 import {
   globalMemoryPath as storeGlobalMemoryPath,
