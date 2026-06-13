@@ -108,13 +108,8 @@ describe("scanSourceForSrcImports", () => {
 
   // Step 4 (constructed-bypass from the audit): a fresh multi-line import that
   // escapes into src/ from a clean plugin file MUST now be detected.
-  it("detects the audit's constructed multi-line bypass (from \"../../src/agent.ts\")", () => {
-    const source = [
-      `import {`,
-      `  runAgent,`,
-      `} from "../../src/agent.ts"`,
-      ``,
-    ].join("\n")
+  it('detects the audit\'s constructed multi-line bypass (from "../../src/agent.ts")', () => {
+    const source = [`import {`, `  runAgent,`, `} from "../../src/agent.ts"`, ``].join("\n")
     const sites = scanSourceForSrcImports(source, "clean-plugin/handlers/h.ts")
     expect(sites).toHaveLength(1)
     expect(sites[0].specifier).toBe("../../src/agent.ts")
