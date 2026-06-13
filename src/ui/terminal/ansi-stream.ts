@@ -21,7 +21,7 @@
  * and stop pretending we can recover — better to draw garbage than to
  * stall the stream forever.
  *
- * @module ansi-stream
+ * @module ui/terminal/ansi-stream
  */
 
 /** Cap on how much we'll buffer waiting for the next chunk. */
