@@ -49,11 +49,11 @@ import {
 } from "./editor/types.ts"
 import { VerticalNavigator } from "./editor/vertical-nav.ts"
 import { EditorBuffer } from "./editor-buffer.ts"
-import { computeCursorVisualPos, EditorRenderer } from "./editor-renderer.ts"
 import { type InputCaptureStack, inputCaptureStack } from "./input-capture-stack.ts"
 import type { Hooks } from "./plugins/hooks/hooks.ts"
 import { truncateDisplayWidth } from "./term-width.ts"
 import { formatArmedFooter } from "./ui/chrome/armed-footer.ts"
+import { computeCursorVisualPos, EditorRenderer } from "./ui/editor/renderer.ts"
 
 // Public surface lives in `src/editor/types.ts` and is re-exported here
 // so external consumers (commands, tests, plugins) keep their existing

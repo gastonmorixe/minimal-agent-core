@@ -53,7 +53,7 @@ export function isVerbose(): boolean {
 /**
  * When --show-hidden-chars (or MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1) is on,
  * debug output reveals invisible characters as faint glyphs : same idea
- * as the input editor's show-hidden mode (see editor-renderer.ts).
+ * as the input editor's show-hidden mode (see ui/editor/renderer.ts).
  *
  * Without this, multi-line tool descriptions (e.g. a Bash description
  * containing literal `\n\n` breaks) wrap onto real lines in the debug log
@@ -68,7 +68,7 @@ export function isShowHiddenChars(): boolean {
  *   space → ·, tab → →, LF → ↵, CR → ␍.
  * No-op unless `--show-hidden-chars` is active.
  *
- * Kept independent of editor-renderer.ts's `markHidden` because here we
+ * Kept independent of ui/editor/renderer.ts's `markHidden` because here we
  * also want to fold newlines (which the editor handles structurally) so
  * the debug log keeps each value on a single line.
  */

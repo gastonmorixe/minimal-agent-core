@@ -13,8 +13,8 @@
  */
 
 import type { EditorBuffer } from "../editor-buffer.ts"
-import { computeCursorVisualPos, findColAtVisualPos } from "../editor-renderer.ts"
 import { displayWidth } from "../term-width.ts"
+import { computeCursorVisualPos, findColAtVisualPos } from "../ui/editor/renderer.ts"
 
 /**
  * Per-row prompt geometry the navigator needs from the renderer:

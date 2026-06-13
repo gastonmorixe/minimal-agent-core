@@ -11,17 +11,17 @@
  * relies on terminal-side wrap and breaks cursor placement for wrapped
  * lines — TTY callers should always pass `columns`).
  *
- * @module editor-renderer
+ * @module ui/editor/renderer
  */
 
-import type { EditorBuffer } from "./editor-buffer.ts"
+import type { EditorBuffer } from "../../editor-buffer.ts"
 import {
   codePointWidth,
   cursorRowOffset,
   cursorVisualCol,
   displayWidth,
   wrapRows,
-} from "./term-width.ts"
+} from "../../term-width.ts"
 
 export interface EditorRendererOptions {
   prompt: string
