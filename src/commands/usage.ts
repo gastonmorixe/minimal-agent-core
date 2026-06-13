@@ -9,13 +9,13 @@
  *   - One-shot: an explicit period arg (`usage month`) OR a non-TTY stdout
  *     (piped / redirected) prints that period (default: all time) and exits.
  *
- * The data + render are the reusable `usage-stats.ts` + `usage-render.ts`
+ * The data + render are the reusable `usage-stats.ts` + `ui/usage/render.ts`
  * modules, shared with the `/usage` live-area overlay.
  *
  * @module commands/usage
  */
 
-import { renderUsageReport } from "../usage-render.ts"
+import { renderUsageReport } from "../ui/usage/render.ts"
 import {
   aggregateAllPeriods,
   aggregateUsage,

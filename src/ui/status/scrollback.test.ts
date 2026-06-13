@@ -25,14 +25,15 @@
 
 import { beforeEach, describe, expect, it } from "bun:test"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
+import { createDiagnosticBus, Facility, type LogEvent, Severity } from "../../diagnostic-bus.ts"
+import { PALETTE } from "../../palette.ts"
+
 import {
   formatScrollbackTs,
   renderBlock,
   ScrollbackDiagnosticSink,
   scrollbackSeverityChrome,
-} from "./log-scrollback.ts"
-import { PALETTE } from "./palette.ts"
+} from "./scrollback.ts"
 
 // ---------------------------------------------------------------------------
 // Test helpers

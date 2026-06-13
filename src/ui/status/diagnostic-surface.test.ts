@@ -28,8 +28,9 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
-import { type DiagnosticLinesSink, TuiDiagnosticSurface } from "./log-tui.ts"
+import { createDiagnosticBus, Facility, type LogEvent, Severity } from "../../diagnostic-bus.ts"
+
+import { type DiagnosticLinesSink, TuiDiagnosticSurface } from "./diagnostic-surface.ts"
 
 function event(over: Partial<LogEvent> = {}): LogEvent {
   return {

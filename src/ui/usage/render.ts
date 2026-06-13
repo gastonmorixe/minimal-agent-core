@@ -14,19 +14,19 @@
  * The bar glyphs reuse the 1/8th-block ramp from the quota-status footer so
  * the two surfaces look like the same product.
  *
- * @module usage-render
+ * @module ui/usage/render
  */
 
-import { modelShortLabel } from "./llm/model-label.ts"
-import { displayWidth } from "./term-width.ts"
-import { c } from "./ui/style/ansi.ts"
+import { modelShortLabel } from "../../llm/model-label.ts"
+import { displayWidth } from "../../term-width.ts"
 import {
   USAGE_PERIODS,
   type UsageBreakdownRow,
   type UsagePeriod,
   type UsageReport,
   type UsageTotals,
-} from "./usage-stats.ts"
+} from "../../usage-stats.ts"
+import { c } from "../style/ansi.ts"
 
 /** 1/8th-block ramp (shared visual language with quota-status). */
 const SLICES = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] as const

@@ -13,7 +13,8 @@
  * subsystem.
  *
  * The file sink keeps full detail off-screen and parseable. The TUI
- * surface (src/log-tui.ts) is a separate, deduped, summary view.
+ * surface (src/ui/status/diagnostic-surface.ts) is a separate, deduped,
+ * summary view.
  *
  * # Best-effort I/O
  *
