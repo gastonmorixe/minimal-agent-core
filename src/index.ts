@@ -108,14 +108,6 @@ import {
   signInStepLabel,
 } from "./startup/provider-presentation.ts"
 import { bootSessionStores } from "./startup/session-store-boot.ts"
-import {
-  closeStartupTree,
-  printStartupHeader,
-  printStartupRow,
-  printStartupToolsRow,
-  setStartupTreeVisible,
-  startStartupRowSpinner,
-} from "./startup/startup-tree.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 import { buildReadyBanner } from "./ui/chrome/ready-banner.ts"
@@ -123,6 +115,14 @@ import { resolveFormatter } from "./ui/formatter/auto.ts"
 import { Formatter, parseFormatterCommand } from "./ui/formatter/formatter.ts"
 import type { Spinner } from "./ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./ui/spinner/named-presets.ts"
+import {
+  closeStartupTree,
+  printStartupHeader,
+  printStartupRow,
+  printStartupToolsRow,
+  setStartupTreeVisible,
+  startStartupRowSpinner,
+} from "./ui/startup/tree.ts"
 import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 
 // ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ const SHOW_HEADER = resolveShowHeader({
   env: { HEADER: process.env.MINIMAL_AGENT_HEADER },
   config: { header: userConfig.header },
 })
-// The startup-tree renderer (src/startup/startup-tree.ts) holds the
+// The startup-tree renderer (src/ui/startup/tree.ts) holds the
 // row-printing state; arm its visibility gate once, here, so every
 // printer below (and in main()) respects the resolved preference.
 setStartupTreeVisible(SHOW_HEADER)

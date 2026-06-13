@@ -18,9 +18,8 @@
 
 import { diag } from "../diagnostic-bus.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import { startStartupRowSpinner } from "../ui/startup/tree.ts"
 import { c } from "../ui/style/ansi.ts"
-
-import { startStartupRowSpinner } from "./startup-tree.ts"
 
 /**
  * Run every plugin's `setup()` and provision the binaries they require.
