@@ -93,5 +93,5 @@ function paintFlat(text: string, fgOpen: string | null): string {
 /** Paint `text` bold in `fgOpen`. Bold + faint white when no accent. */
 function paintBold(text: string, fgOpen: string | null): string {
   if (fgOpen) return `${ANSI_CODES.BOLD}${fgOpen}${text}${ANSI_CODES.RESET}`
-  return `\x1b[1;37m${text}${ANSI_CODES.RESET}`
+  return c.boldWhite(text)
 }

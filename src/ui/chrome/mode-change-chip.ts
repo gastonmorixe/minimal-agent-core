@@ -149,7 +149,7 @@ function paintFlat(text: string, fgOpen: string | null): string {
  */
 function paintBold(text: string, fgOpen: string | null): string {
   if (fgOpen) return `${ANSI_CODES.BOLD}${fgOpen}${text}${ANSI_CODES.RESET}`
-  return `\x1b[1;37m${text}${ANSI_CODES.RESET}`
+  return c.boldWhite(text)
 }
 
 // ---------------------------------------------------------------------------

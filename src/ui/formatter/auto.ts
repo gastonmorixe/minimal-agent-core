@@ -19,6 +19,8 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 
+import { ansiStyle as A, ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+
 import { BREATHING_DOT } from "../spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"
 
@@ -62,21 +64,8 @@ function assetName(): string | null {
   return `mdstream-${os}-${arch}.tar.gz`
 }
 
-// ---------------------------------------------------------------------------
-// Inline ANSI helpers — keep this file self-contained (no agent.ts import).
-// ---------------------------------------------------------------------------
-
-const A = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[22m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
-  faint: (s: string) => `\x1b[2;37m${s}\x1b[22;39m`, // faintWhite
-  boldGreen: (s: string) => `\x1b[1;32m${s}\x1b[22;39m`,
-  sky: (s: string) => `\x1b[38;5;45m${s}\x1b[39m`,
-  clearLine: "\x1b[2K", // erase entire current line
-}
-
 /** Shared tree-prefix used by the startup rows in index.ts */
-const PIPE = `  ${A.faint("│")} `
+const PIPE = `  ${A.faintWhite("│")} `
 
 // ---------------------------------------------------------------------------
 // Inline spinner — runs on stderr while the download is in progress.
@@ -127,7 +116,7 @@ function startSpinner(initialLabel: string): DownloadSpinner {
 
   function stop(finalGlyph: string, finalLabel: string): void {
     clearInterval(timer)
-    process.stderr.write(`\r${A.clearLine}${PIPE} ${finalGlyph} ${finalLabel}\n`)
+    process.stderr.write(`\r${ANSI_CODES.ERASE_LINE}${PIPE} ${finalGlyph} ${finalLabel}\n`)
     process.stderr.write(`${PIPE}\n`)
   }
 
@@ -139,7 +128,7 @@ function startSpinner(initialLabel: string): DownloadSpinner {
       stop(A.boldGreen("✔"), finalLine)
     },
     fail(errorLine: string) {
-      stop(`\x1b[1;31m✗\x1b[22;39m`, errorLine)
+      stop(A.boldRed("✗"), errorLine)
     },
   }
 }
@@ -333,7 +322,7 @@ export async function resolveFormatter(explicitCmd?: string[]): Promise<Formatte
 
   // ── Done ──────────────────────────────────────────────────────────────────
   spinner.done(
-    `${A.bold("mdstream")} ${A.sky(version)}  ${A.dim("installed")}  ${A.faint("→")}  ${A.dim(cachedBin)}`,
+    `${A.bold("mdstream")} ${A.sky(version)}  ${A.dim("installed")}  ${A.faintWhite("→")}  ${A.dim(cachedBin)}`,
   )
 
   return {

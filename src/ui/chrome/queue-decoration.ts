@@ -50,6 +50,8 @@
  * builder renders the plain, non-interactive block exactly as before
  * (byte-for-byte) so a turn that merely has a queue looks unchanged.
  */
+import { ANSI_CODES, bgRgb, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import { displayWidth, truncateDisplayWidth } from "../../term-width.ts"
 import { truncHint } from "../../truncate-hint.ts"
 
@@ -73,33 +75,6 @@ export const QUEUE_PREVIEW_W = 70
  */
 export const QUEUE_ITEM_SEPARATOR = "▸"
 
-/** SGR dim wrapper. Inlined to keep this module dependency-light. */
-const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
-
-/** SGR dim+white. Matches `c.faintWhite` in agent.ts byte-for-byte. */
-const faintWhite = (s: string): string => `\x1b[2;37m${s}\x1b[22;39m`
-
-/**
- * SGR violet (palette token `violet`). Truecolor `rgb(180, 140, 255)`
- * (#B48CFF) — same bytes mdstream emits for inline code / H5, so the
- * `⏳ queued` header reads as part of the visual family of backtick
- * spans everywhere else. Visually distinct from:
- *   - `sky` (256-color 45) — tasks "doing" status
- *   - `lime` (118) — tasks "done" / addition / success
- *   - `pink` (199) — agent brand / prompt arrow
- *   - `gold` (214) / `yellow` — warning / quota tiers
- * Non-dim so the header pops above the dim item rows that follow.
- * Keep in sync with `PALETTE.violet` in `./palette.ts`.
- */
-const violet = (s: string): string => `\x1b[38;2;180;140;255m${s}\x1b[39m`
-
-/**
- * SGR violet + dim. Same hue as the header but muted, used for the row
- * numbers so they read as "part of the queue family" without competing
- * with the header for attention. Bytes match `\x1b[2m` + `PALETTE.violet`.
- */
-const dimViolet = (s: string): string => `\x1b[2;38;2;180;140;255m${s}\x1b[22;39m`
-
 /**
  * Background fill for the selected row in navigation mode. A dark violet
  * `rgb(55, 45, 85)` so the row reads as a contiguous highlighted bar that
@@ -107,14 +82,15 @@ const dimViolet = (s: string): string => `\x1b[2;38;2;180;140;255m${s}\x1b[22;39
  * the foreground text. Closed with `\x1b[49m` (background-only reset) so
  * any foreground SGR inside the row is unaffected.
  */
-const SEL_BG_OPEN = "\x1b[48;2;55;45;85m"
-const SEL_BG_CLOSE = "\x1b[49m"
+const SEL_BG_OPEN = bgRgb(55, 45, 85)
+const SEL_BG_CLOSE = ANSI_CODES.BG_RESET
 
-/** Bright (non-dim) violet, for the selected row's marker + number. */
-const brightViolet = (s: string): string => `\x1b[38;2;180;140;255m${s}\x1b[39m`
-
-/** Bold near-white, for the selected row's preview (pops on the bar). */
-const selectedText = (s: string): string => `\x1b[1;97m${s}\x1b[22;39m`
+const dim = c.dim
+const faintWhite = c.faintWhite
+const violet = c.violet
+const dimViolet = c.dimViolet
+const brightViolet = c.violet
+const selectedText = c.boldBrightWhite
 
 /**
  * Left-edge marker glyph for the selected row (U+258C LEFT HALF BLOCK,
