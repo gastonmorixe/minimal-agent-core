@@ -134,7 +134,7 @@ export async function readLine(
  * layout (URL on its own indented line, etc.).
  */
 function printBanner(): void {
-  process.stderr.write(`  ${c.bold(c.pink("⮕"))} ${c.bold("Sign in to Claude")}\n`)
+  process.stderr.write(`  ${c.bold(c.pink("⮕"))} ${c.bold("Sign in")}\n`)
   process.stderr.write(`  ${c.faintWhite("│")}\n`)
 }
 

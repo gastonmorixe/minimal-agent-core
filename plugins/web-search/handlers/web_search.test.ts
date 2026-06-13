@@ -14,7 +14,7 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
 
 import handler from "./web_search.ts"
 

@@ -20,7 +20,8 @@
  * @module config/handlers/cmd_config
  */
 
-import type { CommandContext, CommandResult } from "../../../src/plugins/types.ts"
+import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { discoverPlugins, pluginFields } from "../lib/discovery.ts"
 import { transition } from "../lib/fsm.ts"
 import { ConfigModel } from "../lib/model.ts"

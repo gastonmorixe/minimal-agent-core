@@ -7,7 +7,7 @@
  * rendered output in the live stream.
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
 
 import { renderUnifiedDiff } from "./render.ts"
 

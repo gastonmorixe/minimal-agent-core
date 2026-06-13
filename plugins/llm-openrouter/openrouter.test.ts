@@ -11,18 +11,18 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { type CanonicalEvent, isEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
+import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
+import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
+
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import {
-  type CanonicalEvent,
-  type CanonicalRequest,
   clearModelRegistry,
   clearProviderRegistry,
-  isEvent,
-  type RunContext,
   resolveModel,
   resolveProvider,
-  userText,
 } from "../../src/llm/index.ts"
-import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "../llm-openai/index.ts"
 
 import { bootstrapOpenRouter, openrouterProviderPlugin } from "./adapter.ts"

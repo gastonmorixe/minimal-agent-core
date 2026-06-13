@@ -23,7 +23,8 @@
  * @module web-search/handlers/web_search
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { loadWebSearchConfig, type WebSearchConfig } from "../config.ts"
 import { formatJsonString, formatText } from "../format.ts"
 import { buildChain, runChain, WebSearchAllFailedError } from "../providers/registry.ts"

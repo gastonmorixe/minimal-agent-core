@@ -24,7 +24,8 @@
  * @module plugins/history/handlers/on_key
  */
 
-import type { HookHandlerContext } from "../../../src/plugins/types.ts"
+import type { HookHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { recallFor } from "../lib/session.ts"
 import { isDisabled } from "../lib/store.ts"
 

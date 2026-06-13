@@ -18,6 +18,8 @@
  * @module types/host-capabilities
  */
 
+import type { Capabilities } from "../llm/capabilities.ts"
+
 import type { PluginLogger } from "./logger.ts"
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,8 @@ export type CapabilityToken =
   | "tasks:read"
   | "memory:read"
   | "presence:read"
+  | "models:read"
+  | "models:register"
   | "clock"
   | "logger"
 
@@ -272,6 +276,80 @@ export interface ClockApi {
 }
 
 // ---------------------------------------------------------------------------
+// models:read / models:register (Wave D-2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-1M-token USD rates for a model — provider-neutral, structurally
+ * identical to the host's `MTokRate` (which stays in `src/llm/pricing.ts`,
+ * token-free but not yet moved). Declared here so the leaf package depends on
+ * nothing in `src/`; the host's real rate object satisfies it structurally.
+ */
+export interface ModelRate {
+  inputUSD: number
+  outputUSD: number
+  cacheWriteUSD: number
+  cacheReadUSD: number
+  webSearchPerCallUSD: number
+  reasoningUSD?: number
+}
+
+/**
+ * One model record, provider-neutral projection of the host's `ModelEntry`
+ * (`src/llm/model-registry.ts`). `surfaceId` is a plain string here (the host's
+ * `SurfaceId` is a token-bearing union that stays in `src/`), and the optional
+ * per-request / estimator closures are omitted from the contract slice. The
+ * host's real `ModelEntry` is assignable to this, so the loader hands the real
+ * registry view into a package-typed `ctx.host.models` without a cast.
+ */
+export interface ModelView {
+  id: string
+  aliases?: ReadonlyArray<string>
+  providerId: string
+  surfaceId: string
+  displayName: string
+  knowledgeCutoff?: string
+  tags?: ReadonlyArray<string>
+  capabilities: Capabilities
+  pricing: ModelRate
+}
+
+/**
+ * `models:read` — read-only view of the live model registry. A plugin uses
+ * this to resolve a model's capabilities / pricing / tags without importing
+ * `resolveModel` / `findModelByTags` from `src/`. Treat returned records as
+ * read-only.
+ */
+export interface ModelsReadApi {
+  /** Look up a model by id or alias. `undefined` when not registered. */
+  find(idOrAlias: string): ModelView | undefined
+  /** Look up a model by id or alias. Throws when not registered. */
+  resolve(idOrAlias: string): ModelView
+  /** Every registered model, in registration order. */
+  list(): ModelView[]
+  /**
+   * First model for `providerId` whose `tags` include EVERY tag in `mustHave`
+   * (insertion order wins). `undefined` when none match.
+   */
+  findByTags(providerId: string, mustHave: readonly string[]): ModelView | undefined
+  /** The default model id a no-model session boots with. */
+  defaultModelId(): string
+}
+
+/**
+ * `models:register` — setup-time write access to the live model registry. A
+ * provider plugin uses this to contribute its catalog instead of importing
+ * `registerModel` / `setDefaultModelId` from `src/`. Idempotent;
+ * last-write-wins per id.
+ */
+export interface ModelsRegisterApi {
+  /** Add or replace a model entry. Throws on id/alias collision. */
+  register(entry: ModelView): void
+  /** Declare the default model id a no-model session should boot with. */
+  setDefault(id: string | null): void
+}
+
+// ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------
 
@@ -286,6 +364,8 @@ export interface PluginHostV2 {
   readonly sessions?: SessionsReadApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
+  readonly models?: ModelsReadApi
+  readonly modelsRegistry?: ModelsRegisterApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }

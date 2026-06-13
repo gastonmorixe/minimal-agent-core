@@ -18,7 +18,8 @@
  * @module plugins/history/handlers/on_submit
  */
 
-import type { EventHandler, EventHandlerContext } from "../../../src/plugins/types.ts"
+import type { EventHandler, EventHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { recallFor } from "../lib/session.ts"
 import { appendBoth, buildEntry, isDisabled } from "../lib/store.ts"
 

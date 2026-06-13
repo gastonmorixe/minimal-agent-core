@@ -190,7 +190,7 @@ export function normalizeProviderId(raw: string): string {
   if (!SLUG_RE.test(id)) {
     throw new AuthStoreError(
       `Invalid provider id ${JSON.stringify(raw)}: expected lowercase dash-case ASCII ` +
-        `(e.g. "anthropic-plan-oauth"), matching ${SLUG_RE}`,
+        `(e.g. "acme-plan-oauth"), matching ${SLUG_RE}`,
     )
   }
   return id

@@ -40,7 +40,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { parseJsonc } from "../../src/jsonc.ts"
+import { parseJsonc } from "@minimal-agent/plugin-api/utils/jsonc"
 
 import type { ProviderConfig, SearchType } from "./providers/types.ts"
 

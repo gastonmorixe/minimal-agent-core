@@ -14,7 +14,8 @@
  * @module usage/handlers/on_key
  */
 
-import type { HookHandlerContext } from "../../../src/plugins/types.ts"
+import type { HookHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { jumpIndex, renderOverlayFrame, stepIndex } from "../lib/overlay.ts"
 import { closeOverlay, getOverlayState, USAGE_OVERLAY_OWNER } from "../lib/state.ts"
 

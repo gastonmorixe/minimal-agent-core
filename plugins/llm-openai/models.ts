@@ -14,8 +14,9 @@
  * @module llm/providers/openai/models
  */
 
+import { makeCharRatioEstimator } from "@minimal-agent/plugin-api/llm/token-estimate"
+
 import { registerModel } from "../../src/llm/model-registry.ts"
-import { makeCharRatioEstimator } from "../../src/llm/token-estimate.ts"
 
 import {
   CAPS_GPT_4O_CHAT,
