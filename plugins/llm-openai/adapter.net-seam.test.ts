@@ -5,9 +5,9 @@
  *
  * Wave D (net seam): the host owns the network singleton and threads it into
  * `RunContext.networkClient` (see `src/llm/run.ts`). A provider plugin must be
- * able to live in its own repo, so it cannot `import { defaultNetworkClient }
- * from "../../src/network/..."` as a fallback — the client crosses the
- * provider port, typed by the leaf contract `@minimal-agent/plugin-api/net/types`.
+ * able to live in its own repo, so it cannot import the host's
+ * `defaultNetworkClient` from `src/network` as a fallback. The client crosses
+ * the provider port, typed by the leaf contract net-types module.
  *
  * Two cases:
  *   1. (positive) an injected fake client is the one actually called, and the
