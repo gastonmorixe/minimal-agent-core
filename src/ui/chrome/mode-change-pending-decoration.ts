@@ -43,10 +43,10 @@
  * @module mode-change-pending-decoration
  */
 
-import type { PendingModeAttachment } from "./modes.ts"
+import type { PendingModeAttachment } from "../../modes.ts"
 
 // ---------------------------------------------------------------------------
-// SGR primitives (mirror src/mode-change-chip.ts so the two renderers stay
+// SGR primitives (mirror mode-change-chip.ts so the two renderers stay
 // byte-aligned without a cross-file import cycle)
 // ---------------------------------------------------------------------------
 

@@ -8,6 +8,9 @@
 
 import { describe, expect, test } from "bun:test"
 
+import { ModeManager } from "../../modes.ts"
+import type { ManifestMode } from "../../plugins/types.ts"
+
 import {
   buildModeChangeChip,
   buildPendingModeChangeChip,
@@ -15,8 +18,6 @@ import {
   formatModeTimestamp,
   labelFor,
 } from "./mode-change-chip.ts"
-import { ModeManager } from "./modes.ts"
-import type { ManifestMode } from "./plugins/types.ts"
 
 // ---------------------------------------------------------------------------
 // Fixtures

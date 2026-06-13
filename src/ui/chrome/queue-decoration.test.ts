@@ -13,13 +13,14 @@
  */
 import { describe, expect, it } from "bun:test"
 
+import { displayWidth } from "../../term-width.ts"
+
 import {
   buildQueueDecorationLines,
   QUEUE_ITEM_SEPARATOR,
   QUEUE_MAX_VISIBLE_ITEMS,
   QUEUE_PREVIEW_W,
 } from "./queue-decoration.ts"
-import { displayWidth } from "./term-width.ts"
 
 /** Strip ANSI SGR escapes for shape assertions. */
 const noAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "")

@@ -17,7 +17,8 @@
  */
 import { describe, expect, it } from "bun:test"
 
-import type { ModeManager } from "./modes.ts"
+import type { ModeManager } from "../../modes.ts"
+
 import { buildReadyBanner } from "./ready-banner.ts"
 
 const ANSI = /\x1b\[[\d;]*m/g

@@ -26,8 +26,8 @@
  * @module mode-change-chip
  */
 
-import type { ModeChangeEvent, PendingModeAttachment } from "./modes.ts"
-import type { ManifestMode } from "./plugins/types.ts"
+import type { ModeChangeEvent, PendingModeAttachment } from "../../modes.ts"
+import type { ManifestMode } from "../../plugins/types.ts"
 
 // ---------------------------------------------------------------------------
 // SGR primitives (mirrors src/palette.ts MODERN entries)
