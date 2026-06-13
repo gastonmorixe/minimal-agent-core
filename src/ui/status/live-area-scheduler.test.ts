@@ -173,7 +173,7 @@ describe("LiveAreaScheduler — repaint dedup & routing", () => {
     sched.stop()
   })
 
-  it('treats `position: "header"` as footer (with a one-time warning)', async () => {
+  it('routes `position: "header"` to decoration lines', async () => {
     const warnings: string[] = []
     const slot = makeSlot({
       id: "h",
@@ -192,9 +192,34 @@ describe("LiveAreaScheduler — repaint dedup & routing", () => {
     await clock.tick(0)
     await clock.tick(1_000)
     await clock.tick(1_000)
-    expect(sink.footerCalls.at(-1)).toEqual(["hi"])
-    // Warning fires exactly once even across multiple ticks.
-    expect(warnings.filter((w) => w.includes('position="header"'))).toHaveLength(1)
+    expect(sink.decorationCalls.at(-1)).toEqual(["hi"])
+    expect(sink.footerCalls).toEqual([])
+    expect(warnings.filter((w) => w.includes('position="header"'))).toHaveLength(0)
+    sched.stop()
+  })
+
+  it("clears header slots through decoration lines", async () => {
+    let returnNull = false
+    const slot = makeSlot({
+      id: "h",
+      position: "header",
+      refreshMs: 1_000,
+      invoke: async () => (returnNull ? null : "ok"),
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(sink.decorationCalls.at(-1)).toEqual(["ok"])
+    returnNull = true
+    await clock.tick(1_000)
+    expect(sink.decorationCalls.at(-1)).toEqual([])
+    expect(sink.footerCalls).toEqual([])
     sched.stop()
   })
 })

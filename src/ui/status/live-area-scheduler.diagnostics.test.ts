@@ -176,41 +176,6 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
     expect(events.filter((e) => e.structuredData?.recovery === "true")).toHaveLength(0)
   })
 
-  it("emits live-area.header-position (Notice) when a slot requests header position", async () => {
-    const { createDiagnosticBus, Severity } = await import("../../diagnostic-bus.ts")
-    const bus = createDiagnosticBus()
-    const events: Array<{
-      severity: number
-      source: string
-      message: string
-      structuredData?: Readonly<Record<string, string | number | boolean>>
-    }> = []
-    bus.on("*", (e) => events.push(e))
-
-    const slot = makeSlot({
-      id: "h",
-      position: "header",
-      refreshMs: 1_000,
-      invoke: async () => "x",
-    })
-    const clock = new FakeClock()
-    const sched = new LiveAreaScheduler([slot], makeSink(), {
-      setTimeout: clock.setTimeout,
-      clearTimeout: clock.clearTimeout,
-      diagnosticBus: bus,
-    })
-    sched.start()
-    await clock.tick(0)
-    await clock.tick(1_000)
-    sched.stop()
-
-    const positionEvents = events.filter((e) => e.source === "live-area.header-position")
-    // Fires exactly once across multiple ticks.
-    expect(positionEvents).toHaveLength(1)
-    expect(positionEvents[0].severity).toBe(Severity.Notice)
-    expect(positionEvents[0].structuredData?.slot).toBe("fake-plugin/h")
-  })
-
   it("legacyLogger takes precedence over diagnosticBus", async () => {
     const { createDiagnosticBus } = await import("../../diagnostic-bus.ts")
     const bus = createDiagnosticBus()

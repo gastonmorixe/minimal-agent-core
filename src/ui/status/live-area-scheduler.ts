@@ -106,7 +106,6 @@ interface SlotState {
   /** Opaque handle from {@link LiveAreaSchedulerDeps.setTimeout}. */
   timer: unknown
   abort: AbortController | null
-  warnedHeader: boolean
   /**
    * `true` when the previous tick emitted a timeout or failure diag
    * event. The next successful tick emits a recovery notice (via
@@ -148,7 +147,6 @@ export class LiveAreaScheduler {
       inFlight: false,
       timer: null,
       abort: null,
-      warnedHeader: false,
       hadFailure: false,
     }))
     this.sink = sink
@@ -470,52 +468,43 @@ export class LiveAreaScheduler {
     }, refreshMs)
   }
 
+  /** Last value pushed to {@link sink.setDecorationLines}; used for dedup. */
+  private lastHeader: string[] = []
   /** Last value pushed to {@link sink.setFooterLines}; used for dedup. */
   private lastFooter: string[] = []
 
   private repaint(): void {
-    // Footer-only routing in this cut. `position: "header"` is accepted
-    // by the manifest parser but the REPL reserves `setDecorationLines`
-    // for the queued-message display; until we have a mediator that
-    // merges plugin-header lines with queue lines, header slots fall
-    // through to footer with a one-time warning per slot.
+    const header: string[] = []
     const footer: string[] = []
     for (const s of this.slots) {
       const line = s.current
       if (line == null || line.length === 0) continue
-      if ((s.slot.definition.position ?? "footer") === "header" && !s.warnedHeader) {
-        const slotLabel = `${s.slot.pluginId}/${s.slot.definition.id}`
-        const msg =
-          `slot "${slotLabel}" requested position="header"; ` +
-          `rendered as footer until queue/decoration mediator lands`
-        if (this.legacyLogger) {
-          this.legacyLogger(msg)
-        } else {
-          this.diagnosticBus.emit({
-            ts: Date.now(),
-            severity: Severity.Notice,
-            facility: Facility.User,
-            source: "live-area.header-position",
-            message: msg,
-            structuredData: { slot: slotLabel },
-          })
-        }
-        s.warnedHeader = true
-      }
       // A slot may return a MULTI-LINE value: one logical widget that paints
       // several rows (e.g. a sub-agent fleet panel — a header row plus one row
-      // per running worker). Split on "\n" so each row becomes a distinct
-      // footer line the editor counts toward live-area height. A single-line
-      // value yields exactly one element, so existing slots are byte-for-byte
-      // unaffected. The slot owns its own row budget (cap rows + "+N more").
-      for (const row of line.split("\n")) footer.push(row)
+      // per running worker). Split on "\n" so each row becomes a distinct live
+      // area line the editor counts toward height. A single-line value yields
+      // exactly one element. The slot owns its own row budget (cap rows +
+      // "+N more").
+      const target = (s.slot.definition.position ?? "footer") === "header" ? header : footer
+      for (const row of line.split("\n")) target.push(row)
     }
-    // Dedup at the scheduler layer: skip the sink push when nothing
-    // changed since the last paint. This keeps the initial
-    // "no-placeholder, no-data" `start()` repaint quiet (otherwise
-    // it would emit a no-op `setFooterLines([])` that complicates
-    // tests and adds a sink-level repaint EditorController already
-    // shallow-compares away).
+
+    this.flushHeader(header)
+    this.flushFooter(footer)
+  }
+
+  private flushHeader(header: string[]): void {
+    if (
+      header.length === this.lastHeader.length &&
+      header.every((l, i) => l === this.lastHeader[i])
+    ) {
+      return
+    }
+    this.lastHeader = header.slice()
+    if (this.sink.setDecorationLines) this.sink.setDecorationLines(header)
+  }
+
+  private flushFooter(footer: string[]): void {
     if (
       footer.length === this.lastFooter.length &&
       footer.every((l, i) => l === this.lastFooter[i])
