@@ -201,6 +201,10 @@ export interface TokenExchangeInput {
   clientId: string
   /** Redirect URI sent at exchange time. MUST equal the one used in buildAuthUrl. */
   redirectUri: string
+  /** Token-exchange body encoding. Defaults to JSON for legacy providers. */
+  encoding?: "json" | "form"
+  /** Whether to include state in the token request. Defaults to true. */
+  includeState?: boolean
 }
 
 /**
@@ -211,7 +215,7 @@ export interface TokenExchangeInput {
 export interface TokenExchangeResponse extends Record<string, unknown> {
   access_token: string
   refresh_token: string
-  expires_in: number
+  expires_in?: number
   scope?: string
   account?: {
     uuid: string
@@ -240,20 +244,24 @@ export async function exchangeCodeForTokens(
   input: TokenExchangeInput,
   networkClient: NetworkClient = defaultNetworkClient,
 ): Promise<TokenExchangeResponse> {
-  const body = JSON.stringify({
+  const includeState = input.includeState ?? true
+  const fields: Record<string, string> = {
     grant_type: "authorization_code",
     code: input.authorizationCode,
     redirect_uri: input.redirectUri,
     client_id: input.clientId,
     code_verifier: input.codeVerifier,
-    state: input.state,
-  })
+  }
+  if (includeState) fields.state = input.state
+  const encoding = input.encoding ?? "json"
+  const body = encoding === "form" ? new URLSearchParams(fields).toString() : JSON.stringify(fields)
+  const contentType = encoding === "form" ? "application/x-www-form-urlencoded" : "application/json"
 
   const response = await networkClient.request({
     label: "oauth.login.exchange",
     method: "POST",
     url: input.tokenUrl,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": contentType },
     body,
     capture: {
       // The body contains the auth code AND code_verifier; both are
@@ -447,6 +455,8 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
         tokenUrl,
         clientId,
         redirectUri,
+        encoding: config.tokenRequestEncoding,
+        includeState: config.tokenRequestIncludesState,
       },
       network,
     )

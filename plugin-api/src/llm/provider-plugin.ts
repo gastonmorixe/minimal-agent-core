@@ -249,6 +249,10 @@ export interface OAuthLoginConfig {
   authorizeParams?: Readonly<Record<string, string>>
   /** Query parameter name used for optional email pre-fill. */
   loginHintParam?: string
+  /** Token-exchange body encoding. Defaults to JSON for legacy providers. */
+  tokenRequestEncoding?: "json" | "form"
+  /** Whether the token exchange should include the OAuth state value. Defaults to true. */
+  tokenRequestIncludesState?: boolean
 }
 
 /**
@@ -299,6 +303,8 @@ export interface OAuthLoginProvider {
   config(): OAuthLoginConfig
   /** Convert the raw token response into a host-persistable credential write. */
   buildCredential(response: Record<string, unknown>): OAuthLoginBuildResult
+  /** Decode a stored credential bag into runtime auth, when this OAuth credential is usable. */
+  readAuth?(secrets: AuthSecretBag): ProviderAuth | null
 }
 
 /** Provider-owned API-key credential strategy. */
@@ -307,10 +313,6 @@ export interface ApiKeyAuthProvider {
   serviceId: string
   /** Human label for diagnostics/UI. */
   displayName: string
-  /** Environment variables accepted for this provider, in precedence order. */
-  envVars: readonly string[]
-  /** Optional key under `UserConfig.apiKeys`. */
-  configKey?: string
   /** Convert an API key into a host-persistable credential write. */
   buildCredential(apiKey: string): AuthCredentialWrite
   /** Decode this provider's API key from its stored opaque secret bag. */

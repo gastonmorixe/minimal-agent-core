@@ -1528,7 +1528,6 @@ export async function sendMessageSync(opts: SendOptions): Promise<string> {
  *
  * @param opts - Same options as {@link sendMessage}
  * @returns Full structured response (blocks + text + stopReason)
- *
  * @example
  * ```ts
  * const result = await sendMessageFull({ auth, messages, tools: TOOL_DEFINITIONS });
@@ -1540,13 +1539,8 @@ export async function sendMessageSync(opts: SendOptions): Promise<string> {
  */
 export async function sendMessageFull(opts: SendOptions): Promise<StreamedResponse> {
   const gen = sendMessage(opts)
-  let lastReturn: StreamedResponse | undefined
   while (true) {
     const next = await gen.next()
-    if (next.done) {
-      lastReturn = next.value
-      break
-    }
+    if (next.done) return next.value ?? { blocks: [], text: "", stopReason: null }
   }
-  return lastReturn ?? { blocks: [], text: "", stopReason: null }
 }

@@ -59,11 +59,9 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
     expect(openrouterProviderPlugin.oauthLogin).toBeUndefined()
   })
 
-  it("declares OpenRouter API-key sources and credential codec", () => {
+  it("declares the OpenRouter API-key credential codec", () => {
     expect(openRouterApiKeyAuth.serviceId).toBe(OPENROUTER_API_KEY_AUTH.serviceId)
     expect(openRouterApiKeyAuth.displayName).toBe("OpenRouter API Key")
-    expect(openRouterApiKeyAuth.envVars).toEqual(["OPENROUTER_KEY"])
-    expect(openRouterApiKeyAuth.configKey).toBe("openrouter")
 
     const write = buildOpenRouterApiKeyCredential("sk-or-test")
     expect(write).toEqual({

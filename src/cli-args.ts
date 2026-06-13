@@ -21,6 +21,8 @@
  * sessions resume <sid|last>       → --resume <sid|last>
  * usage    [<period>]              → --usage [<period>]
  * resume   <sid|last>              → --resume <sid|last>
+ * provider <id> login [method]     → --login --provider <id> [--auth-method <method>]
+ * login    [<provider>] [method]   → --login [--provider <provider>] [--auth-method <method>]
  * help                             → --help
  * ```
  *
@@ -123,6 +125,7 @@ export function normalizeArgs(raw: string[]): string[] {
     } else if (head === "providers" && raw[1] !== undefined && !raw[1].startsWith("-")) {
       // Nested `providers <verb>` grammar (parallels `sessions`):
       //   providers models [<providerId>] → --list-models [<providerId>]
+      //   providers login <providerId>    → --login --provider <providerId>
       //   providers list                  → --list-providers
       //   providers <other>               → --list-providers (bare list)
       // Bare `providers` (no verb, or a flag next) falls through to
@@ -135,6 +138,37 @@ export function normalizeArgs(raw: string[]): string[] {
           out.push(raw[2])
           start = 3
         }
+      } else if (second === "login") {
+        out.push("--login")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push("--provider", raw[2])
+          start = 3
+          if (raw[3] !== undefined && !raw[3].startsWith("-")) {
+            out.push("--auth-method", raw[3])
+            start = 4
+          }
+        }
+      } else {
+        out.push("--list-providers")
+        start = 2
+      }
+    } else if (head === "provider" && raw[1] !== undefined && !raw[1].startsWith("-")) {
+      // Singular provider grammar:
+      //   provider <providerId> login  → --login --provider <providerId>
+      //   provider <providerId> models → --list-models <providerId>
+      const providerId = raw[1]
+      const action = raw[2]
+      if (action === "login") {
+        out.push("--login", "--provider", providerId)
+        start = 3
+        if (raw[3] !== undefined && !raw[3].startsWith("-")) {
+          out.push("--auth-method", raw[3])
+          start = 4
+        }
+      } else if (action === "models") {
+        out.push("--list-models", providerId)
+        start = 3
       } else {
         out.push("--list-providers")
         start = 2
@@ -144,7 +178,14 @@ export function normalizeArgs(raw: string[]): string[] {
       if (sub) {
         out.push(sub.flag)
         start = 1
-        if (sub.takesValue) {
+        if (head === "login" && raw[1] !== undefined && !raw[1].startsWith("-")) {
+          out.push("--provider", raw[1])
+          start = 2
+          if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+            out.push("--auth-method", raw[2])
+            start = 3
+          }
+        } else if (sub.takesValue) {
           // `resume <sid>`: consume the next positional, if present and not a flag.
           if (raw[1] !== undefined && !raw[1].startsWith("-")) {
             out.push(raw[1])

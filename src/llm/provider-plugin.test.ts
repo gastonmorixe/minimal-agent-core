@@ -123,8 +123,6 @@ describe("provider-plugin registry", () => {
     const apiKeyAuth: ApiKeyAuthProvider = {
       serviceId: "fake-api-key",
       displayName: "Fake API Key",
-      envVars: ["FAKE_API_KEY"],
-      configKey: "fake",
       buildCredential(apiKey) {
         return {
           serviceId: "fake-api-key",

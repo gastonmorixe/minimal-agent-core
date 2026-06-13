@@ -17,6 +17,14 @@
 import { createInterface } from "node:readline"
 
 import { c } from "../agent.ts"
+import { defaultAuthStore, type SecretBag } from "../auth-store.ts"
+import {
+  findApiKeyAuthProvider,
+  findOAuthLoginProvider,
+  listApiKeyAuthProviders,
+  listOAuthLoginProviderEntries,
+} from "../auth-strategies.ts"
+import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../llm/provider-plugin.ts"
 import { type LoginInstallResult, type LoginOutcome, runOAuthLogin } from "../oauth-login.ts"
 
 /**
@@ -67,8 +75,66 @@ async function openBrowser(url: string): Promise<boolean> {
 export interface LoginCommandOptions {
   /** Pre-fill email on the login form. */
   loginHint?: string
+  /** Provider id whose OAuth login strategy should run. */
+  providerId?: string
+  /** Auth method to run for the provider. Defaults to OAuth when available, else API key. */
+  authMethod?: string
   /** Override the maximum number of paste attempts (default 3). */
   maxAttempts?: number
+}
+
+type LoginMethod =
+  | { kind: "oauth"; provider: OAuthLoginProvider }
+  | { kind: "api-key"; providerId: string; provider: ApiKeyAuthProvider }
+
+function resolveOAuthLoginProvider(providerId: string | undefined): OAuthLoginProvider {
+  if (providerId) {
+    const provider = findOAuthLoginProvider(providerId)
+    if (!provider) throw new Error(`provider "${providerId}" does not support OAuth login`)
+    return provider
+  }
+
+  const providers = listOAuthLoginProviderEntries()
+  if (providers.length === 1) return providers[0].auth
+  if (providers.length === 0) throw new Error("No OAuth login provider is registered.")
+  throw new Error(
+    `multiple OAuth providers are registered; choose one with ` +
+      `\`minimal-agent provider <id> login\` (${providers.map((p) => p.providerId).join(", ")})`,
+  )
+}
+
+function resolveApiKeyLoginProvider(providerId: string | undefined): LoginMethod {
+  if (providerId) {
+    const provider = findApiKeyAuthProvider(providerId)
+    if (!provider) throw new Error(`provider "${providerId}" does not support API-key login`)
+    return { kind: "api-key", providerId, provider }
+  }
+
+  const providers = listApiKeyAuthProviders()
+  if (providers.length === 1) {
+    const [entry] = providers
+    return { kind: "api-key", providerId: entry.providerId, provider: entry.auth }
+  }
+  if (providers.length === 0) throw new Error("No API-key login provider is registered.")
+  throw new Error(
+    `multiple API-key providers are registered; choose one with ` +
+      `\`minimal-agent provider <id> login api-key\` (${providers.map((p) => p.providerId).join(", ")})`,
+  )
+}
+
+function resolveLoginMethod(opts: LoginCommandOptions): LoginMethod {
+  const method = opts.authMethod?.trim().toLowerCase()
+  if (method && method !== "oauth" && method !== "api-key" && method !== "key") {
+    throw new Error(`unknown auth method "${opts.authMethod}" (expected oauth or api-key)`)
+  }
+  if (method === "api-key" || method === "key") return resolveApiKeyLoginProvider(opts.providerId)
+  if (method === "oauth")
+    return { kind: "oauth", provider: resolveOAuthLoginProvider(opts.providerId) }
+
+  const oauth = opts.providerId ? findOAuthLoginProvider(opts.providerId) : undefined
+  if (oauth) return { kind: "oauth", provider: oauth }
+  if (opts.providerId) return resolveApiKeyLoginProvider(opts.providerId)
+  return { kind: "oauth", provider: resolveOAuthLoginProvider(undefined) }
 }
 
 /**
@@ -126,6 +192,50 @@ export async function readLine(
   })
 }
 
+/** Read a single secret line from a TTY without echoing the bytes. */
+export async function readSecretLine(
+  promptText: string,
+  input: NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void } = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+): Promise<string> {
+  output.write(promptText)
+  return new Promise<string>((resolve) => {
+    let value = ""
+    const wasRaw = input.isRaw
+    const onData = (chunk: Buffer | string) => {
+      const text = chunk.toString("utf8")
+      for (const ch of text) {
+        const code = ch.charCodeAt(0)
+        if (ch === "\r" || ch === "\n") {
+          cleanup()
+          output.write("\n")
+          resolve(value)
+          return
+        }
+        if (code === 3) {
+          cleanup()
+          output.write("\n")
+          process.kill(process.pid, "SIGINT")
+          return
+        }
+        if (code === 127 || code === 8) {
+          value = value.slice(0, -1)
+          continue
+        }
+        value += ch
+      }
+    }
+    const cleanup = () => {
+      input.off("data", onData)
+      input.pause()
+      if (input.setRawMode && wasRaw !== undefined) input.setRawMode(wasRaw)
+    }
+    if (input.setRawMode) input.setRawMode(true)
+    input.resume()
+    input.on("data", onData)
+  })
+}
+
 /**
  * Print the auth URL with a click-friendly format and the rest of the
  * instructions. We separate `display(...)` calls in `runOAuthLogin` from
@@ -149,6 +259,11 @@ function printSuccessFooter(result: LoginInstallResult): void {
   }
   const expDate = new Date(result.expiresAt).toISOString().replace("T", " ").slice(0, 19)
   process.stderr.write(`  ${c.dim(`expires: ${expDate} UTC`)}\n`)
+}
+
+function printApiKeySuccessFooter(displayName: string): void {
+  process.stderr.write(`\n  ${c.boldGreen("✔")} ${c.bold("Login successful")}\n`)
+  process.stderr.write(`  ${c.dim(`stored: ${displayName}`)}\n`)
 }
 
 function printFailureFooter(reason: string): void {
@@ -180,10 +295,39 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
     return 1
   }
   printBanner()
+  let method: LoginMethod
+  try {
+    method = resolveLoginMethod(opts)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    printFailureFooter(msg)
+    return 1
+  }
+
+  if (method.kind === "api-key") {
+    try {
+      const key = await readSecretLine(
+        `  ${c.faintWhite("│")} ${c.dim(`${method.provider.displayName} key`)} ${c.bold(c.pink("›"))} `,
+      )
+      if (key.trim().length === 0) {
+        printFailureFooter("empty API key")
+        return 1
+      }
+      const write = method.provider.buildCredential(key.trim())
+      defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
+      printApiKeySuccessFooter(write.displayName)
+      return 0
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      printFailureFooter(msg)
+      return 1
+    }
+  }
 
   let outcome: LoginOutcome
   try {
     outcome = await runOAuthLogin({
+      provider: method.provider,
       loginHint: opts.loginHint,
       maxAttempts: opts.maxAttempts,
       openUrl: openBrowser,

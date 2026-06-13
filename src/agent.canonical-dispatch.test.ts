@@ -22,10 +22,15 @@
  * @module agent.canonical-dispatch.test
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
+import { defaultAuthStore, resetDefaultAuthStoreForTests, type SecretBag } from "./auth-store.ts"
 import type { CanonicalEvent } from "./llm/canonical-events.ts"
 import { clearModelRegistry, clearProviderRegistry } from "./llm/model-registry.ts"
 import { type ApiKeyAuthProvider, clearProviderPlugins } from "./llm/provider-plugin.ts"
@@ -78,8 +83,6 @@ function pongEvents(): CanonicalEvent[] {
 const openAITestApiKeyAuth: ApiKeyAuthProvider = {
   serviceId: "openai-api-key",
   displayName: "OpenAI API Key",
-  envVars: ["OPENAI_API_KEY"],
-  configKey: "openai",
   buildCredential(apiKey) {
     return {
       serviceId: this.serviceId,
@@ -112,46 +115,55 @@ afterAll(() => {
   clearProviderPlugins()
 })
 
+function writeStoredOpenAIKey(apiKey: string): void {
+  const write = openAITestApiKeyAuth.buildCredential(apiKey)
+  defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
+}
+
 describe("Agent default transport — multi-provider dispatch", () => {
-  it("routes a registered non-Anthropic model to its owner with OPENAI_API_KEY, never the Anthropic token", async () => {
-    // The agent holds the ANTHROPIC session credential (as in production).
-    // It must NOT be sent to the OpenAI-owned model; OPENAI_API_KEY is used.
+  let dir: string
+  const prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "minimal-agent-agent-auth-"))
+    process.env.MINIMAL_AGENT_AUTH_FILE = join(dir, "auth.jsonc")
+    resetDefaultAuthStoreForTests()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    if (prevAuthFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+    else process.env.MINIMAL_AGENT_AUTH_FILE = prevAuthFile
+    resetDefaultAuthStoreForTests()
+  })
+
+  it("routes a registered non-Anthropic model to its owner with stored provider auth, never the Anthropic token", async () => {
     const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
-    const prevKey = process.env.OPENAI_API_KEY
-    process.env.OPENAI_API_KEY = "sk-openai-real-key"
-    try {
-      let seenUrl = ""
-      let seenAuth = ""
-      const networkClient = fakeNetworkClient((req) => {
-        seenUrl = req.url
-        seenAuth = req.headers?.authorization ?? ""
-        return sseFromEvents(pongEvents())
-      })
+    writeStoredOpenAIKey("sk-openai-real-key")
+    let seenUrl = ""
+    let seenAuth = ""
+    const networkClient = fakeNetworkClient((req) => {
+      seenUrl = req.url
+      seenAuth = req.headers?.authorization ?? ""
+      return sseFromEvents(pongEvents())
+    })
 
-      const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
-      // NO sendFn injected → the production default (selectedTransport) runs.
-      const agent = new Agent({ auth, model: "gpt-5.5", networkClient })
+    const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
+    const agent = new Agent({ auth, model: "gpt-5.5", networkClient })
 
-      const out: string[] = []
-      const gen = agent.run("ping")
-      while (true) {
-        const { done, value } = await gen.next()
-        if (done) break
-        if (typeof value === "string") out.push(value)
-      }
-
-      // The migration payoff: a gpt-5.5 turn through the agent hit the
-      // owning provider's endpoint, authenticated with the OpenAI key (not
-      // the host's Anthropic session).
-      expect(seenUrl).toBe(testProviderUrl("openai"))
-      expect(seenUrl).not.toContain("anthropic")
-      expect(seenAuth).toBe("Bearer sk-openai-real-key")
-      expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
-      expect(out.join("")).toContain("pong")
-    } finally {
-      if (prevKey === undefined) delete process.env.OPENAI_API_KEY
-      else process.env.OPENAI_API_KEY = prevKey
+    const out: string[] = []
+    const gen = agent.run("ping")
+    while (true) {
+      const { done, value } = await gen.next()
+      if (done) break
+      if (typeof value === "string") out.push(value)
     }
+
+    expect(seenUrl).toBe(testProviderUrl("openai"))
+    expect(seenUrl).not.toContain("anthropic")
+    expect(seenAuth).toBe("Bearer sk-openai-real-key")
+    expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
+    expect(out.join("")).toContain("pong")
   }, 20_000)
 
   it("falls back to the legacy client for an unregistered model id (api.anthropic.com)", async () => {

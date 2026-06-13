@@ -78,8 +78,12 @@ import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./first-run.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
 import { setGlobalEventBus } from "./global-bus.ts"
-import { DEFAULT_MODEL } from "./headers.ts"
-import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
+import {
+  activateDiscoveredProviders,
+  getDefaultModelId,
+  registerDiscoveredProviders,
+  resolveModel,
+} from "./llm/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
@@ -101,8 +105,8 @@ import { loadSession } from "./session-restore.ts"
 import { shortHash } from "./session-store.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
 import type { Spinner } from "./spinner.ts"
-import { getAuthWithFirstTimePrompt } from "./startup/auth-prompt.ts"
 import { printHelp, readEmbeddedPackageVersion } from "./startup/help.ts"
+import { resolveStartupAuth, startupAuthLabel } from "./startup/provider-auth.ts"
 import {
   modelHidesReasoning,
   providerWantsQuotaProbe,
@@ -378,7 +382,7 @@ async function main() {
   // rather than throwing.
   const srcDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
   await registerDiscoveredProviders(join(dirname(srcDir), "plugins"))
-  activateProviderPlugins()
+  activateDiscoveredProviders()
 
   switch (commandPlan.command) {
     case "dump": {
@@ -426,7 +430,7 @@ async function main() {
       return
     }
     case "login": {
-      // OAuth login flow. Never reads existing credentials — the whole
+      // Provider login flow. Never reads existing credentials — the whole
       // point of the command is to acquire (or replace) them. Email
       // pre-fill: `--login --email foo@bar.com` (or `--email-hint` if you
       // squint at the upstream CLI). We accept either form.
@@ -436,7 +440,13 @@ async function main() {
         emailIdx !== -1 && args[emailIdx + 1] && !args[emailIdx + 1].startsWith("-")
           ? args[emailIdx + 1]
           : undefined
-      const code = await runLoginCommand({ loginHint })
+      const providerIdx = args.indexOf("--provider")
+      const providerId =
+        providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1].startsWith("-")
+          ? args[providerIdx + 1]
+          : undefined
+      const authMethod = readFlagValue("--auth-method")
+      const code = await runLoginCommand({ loginHint, providerId, authMethod })
       process.exit(code)
     }
     case "logout": {
@@ -531,16 +541,11 @@ async function main() {
     }
   }
 
-  const auth = await getAuthWithFirstTimePrompt()
-  printStartupRow(
-    "auth",
-    `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`,
-  )
-
   // Resolve the SELECTED model's provider once, up front. Everything that
   // is provider-specific (startup probe, quota) keys off this so a session
   // started with e.g. `--model gpt-5.5` never contacts Anthropic.
-  const selectedModel = model ?? userConfig.model ?? DEFAULT_MODEL
+  const selectedModel =
+    model ?? process.env.MINIMAL_AGENT_MODEL ?? userConfig.model ?? getDefaultModelId()
   const selectedModelBase = selectedModel.replace(/\[(1|2)m\]/gi, "")
   let selectedProviderId: string | undefined
   try {
@@ -548,6 +553,9 @@ async function main() {
   } catch {
     selectedProviderId = undefined
   }
+
+  const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase)
+  printStartupRow("auth", startupAuthLabel(auth, selectedProviderId))
 
   // Provider startup probe (fire-and-forget) for the SELECTED provider only.
   // A plugin MAY overlay server-shipped data onto the canonical registry —
