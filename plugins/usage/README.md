@@ -38,12 +38,14 @@ slash command plus a footer overlay. Same data + renderer as the top-level
 
 ## How it works
 
-The data engine (`src/usage-stats.ts`) and renderer (`src/ui/usage/render.ts`)
-are host modules, reused by both this overlay and the `usage` CLI command.
-This plugin is the thin interactive shell: a `commands[]` entry that opens the
+The data engine (`src/usage-stats.ts`) is host-owned because it scans session
+history and model metadata. The renderer is the shared
+`@minimal-agent/plugin-api/utils/usage-render` leaf utility, reused by both this
+overlay and the `usage` CLI command without importing host UI modules. This
+plugin is the thin interactive shell: a `commands[]` entry that opens the
 overlay, an `editor.key` hook that drives period switching, and a
-process-singleton (`lib/state.ts`) shared between them — the same pattern as
-the `config` and `slash-menu` plugins.
+process-singleton (`lib/state.ts`) shared between them — the same pattern as the
+`config` and `slash-menu` plugins.
 
 The command is registered through the host command registry, so it also shows
 up in the slash-menu autocomplete and works headlessly.

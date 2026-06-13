@@ -9,13 +9,16 @@
  *   - One-shot: an explicit period arg (`usage month`) OR a non-TTY stdout
  *     (piped / redirected) prints that period (default: all time) and exits.
  *
- * The data + render are the reusable `usage-stats.ts` + `ui/usage/render.ts`
- * modules, shared with the `/usage` live-area overlay.
+ * The data engine is `usage-stats.ts`; the renderer is the shared
+ * `@minimal-agent/plugin-api/utils/usage-render` leaf utility also used by the
+ * `/usage` live-area overlay.
  *
  * @module commands/usage
  */
 
-import { renderUsageReport } from "../ui/usage/render.ts"
+import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
+
+import { modelShortLabel } from "../llm/model-label.ts"
 import {
   aggregateAllPeriods,
   aggregateUsage,
@@ -62,7 +65,7 @@ export async function runUsageCommand(opts: RunUsageOptions = {}): Promise<void>
   if (oneShot) {
     const period: UsagePeriod = explicit ?? "all"
     const report = aggregateUsage(events, period)
-    console.log(renderUsageReport(report, { cols: cols() }).join("\n"))
+    console.log(renderUsageReport(report, { cols: cols(), modelLabel: modelShortLabel }).join("\n"))
     return
   }
 
@@ -91,7 +94,7 @@ async function runInteractive(events: ReturnType<typeof scanUsageEvents>): Promi
   const paint = (): void => {
     clearPrevious()
     const period = USAGE_PERIODS[idx]!.id
-    const lines = renderUsageReport(reports[period], { cols: cols() })
+    const lines = renderUsageReport(reports[period], { cols: cols(), modelLabel: modelShortLabel })
     const footer = "  \x1b[2m← → switch period · 1-6 jump · q quit\x1b[0m"
     const all = [...lines, footer]
     stdout.write(`${all.join("\n")}\n`)

@@ -122,5 +122,4 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "usage-stats.test.ts",
   "ui/choice-modal.test.ts",
   "ui/compositor.test.ts",
-  "ui/usage/render.test.ts",
 ])

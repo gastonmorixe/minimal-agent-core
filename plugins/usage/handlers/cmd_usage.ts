@@ -12,15 +12,16 @@
  *
  * Decoupling: the handler emits on the shared bus (`editor.overlay.open`,
  * `editor.footer.set`) and never imports the editor or queue directly. The
- * data + render live in the host's reusable `usage-stats` / `ui/usage/render`
- * modules (also used by the `usage` CLI command).
+ * data engine lives in the host's reusable `usage-stats` module; rendering
+ * comes from the shared plugin-api usage renderer, so this plugin does not
+ * import host UI modules.
  *
  * @module usage/handlers/cmd_usage
  */
 
 import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
+import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
 
-import { renderUsageReport } from "../../../src/ui/usage/render.ts"
 import {
   aggregateAllPeriods,
   aggregateUsage,

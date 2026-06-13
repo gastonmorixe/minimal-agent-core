@@ -15,6 +15,8 @@
     "./utils/jsonc": "./src/utils/jsonc.ts",
     "./utils/palette": "./src/utils/palette.ts",
     "./utils/ansi": "./src/utils/ansi.ts",
+    "./utils/usage-report": "./src/utils/usage-report.ts",
+    "./utils/usage-render": "./src/utils/usage-render.ts",
     "./utils/sse-parser": "./src/utils/sse-parser.ts",
     "./utils/unified-diff": "./src/utils/unified-diff.ts",
     "./types/plugin": "./src/types/plugin.ts",

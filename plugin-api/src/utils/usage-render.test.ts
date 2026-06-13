@@ -1,29 +1,8 @@
-import { beforeAll, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 
-import { registerTestProvider } from "../../llm/test-fixtures.ts"
-import { stripAnsi } from "../../term-width.ts"
-import type { UsageReport, UsageTotals } from "../../usage-stats.ts"
-
-import { fmtTokens, fmtUSD, periodLabel, renderUsageOverlay, renderUsageReport } from "./render.ts"
-
-beforeAll(() => {
-  // Model short labels resolve through the provider-plugin registry (Phase
-  // 17: core no longer hardcodes vendor naming schemes). A synthetic
-  // provider supplies the same registry data the real plugin would —
-  // shortCode + version-token scheme — without importing plugins/ (A-5,
-  // I2). The provider-flavored id/labels stay here as DATA so the
-  // rendering pins are byte-identical to production.
-  registerTestProvider({
-    id: "anthropic",
-    shortCode: "anth",
-    models: [{ id: "claude-opus-4-8" }],
-    modelVersionToken: (modelId) => {
-      const m = modelId.match(/^claude-(?:opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/)
-      if (!m) return undefined
-      return m[2] !== undefined ? `${m[1]}.${m[2]}` : m[1]
-    },
-  })
-})
+import { stripAnsi } from "./term-width.ts"
+import type { UsageReport, UsageTotals } from "./usage-report.ts"
+import { fmtTokens, fmtUSD, periodLabel, renderUsageOverlay, renderUsageReport } from "./usage-render.ts"
 
 function totals(over: Partial<UsageTotals> = {}): UsageTotals {
   return {
@@ -61,7 +40,8 @@ describe("fmtTokens", () => {
     expect(fmtTokens(1_000_000)).toBe("1M")
     expect(fmtTokens(2_500_000_000)).toBe("2.5B")
   })
-  it("sentinel for negatives", () => {
+
+  it("uses a sentinel for negatives", () => {
     expect(fmtTokens(-1)).toBe("—")
   })
 })
@@ -105,13 +85,18 @@ describe("renderUsageReport", () => {
         { key: "claude-opus-4-8", totals: totals({ tokens: 150, costUSD: 1.5, turns: 2 }) },
       ],
     })
-    const text = stripAnsi(renderUsageReport(r, { cols: 80 }).join("\n"))
+    const text = stripAnsi(
+      renderUsageReport(r, {
+        cols: 80,
+        modelLabel: (modelId) => (modelId === "claude-opus-4-8" ? "anth-4.8" : modelId),
+      }).join("\n"),
+    )
     expect(text).toContain("Total")
     expect(text).toContain("[R]")
     expect(text).toContain("By provider")
     expect(text).toContain("anthropic")
     expect(text).toContain("By model")
-    expect(text).toContain("anth-4.8") // model short label
+    expect(text).toContain("anth-4.8")
     expect(text).toContain("$1.50")
   })
 
@@ -135,7 +120,6 @@ describe("renderUsageOverlay", () => {
     const text = stripAnsi(renderUsageOverlay(r, { cols: 80 }).join("\n"))
     expect(text).toContain("[YTD]")
     expect(text).toContain("Today")
-    // Key hint present.
     expect(text).toContain("period")
     expect(text).toContain("close")
   })
