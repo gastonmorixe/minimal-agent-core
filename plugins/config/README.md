@@ -81,7 +81,7 @@ plugins/config/
     ├── render.ts            #   RenderModel → ANSI footer lines
     ├── runtime.ts           #   effect applier (the testable shell core)
     ├── state.ts             #   per-process singleton (FSM state + model)
-    └── palette.ts           #   local SGR shortcuts (synced with src/palette)
+    └── palette.ts           #   style facade backed by plugin-api palette/ANSI helpers
 ```
 
 The `lib/` core has **zero** host imports — it talks only in plain data, so
