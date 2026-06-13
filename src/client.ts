@@ -134,6 +134,26 @@ async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncIterable<Stream
         }
       }
     }
+
+    // Stream closed (reader signaled `done`). Flush the final line the server
+    // may have left in `buffer` WITHOUT a trailing newline. A server that
+    // sends the closing `data: {...message_stop...}` (or `data: [DONE]`) and
+    // then closes the socket with no "\n" leaves that last line stranded in
+    // `buffer` — the in-loop split never emits it. Dropping it means the
+    // caller never sees `message_stop`, throws `stream_truncated`, and
+    // re-streams an already-billed turn (B-097). Process it exactly like an
+    // in-loop line. A normal newline-terminated stream leaves `buffer` empty
+    // here, so this is a no-op for that path.
+    buffer += decoder.decode() // flush any bytes pending in the TextDecoder
+    if (buffer.startsWith("data: ")) {
+      const data = buffer.slice(6).trim()
+      if (data === "[DONE]") return
+      try {
+        yield JSON.parse(data) as StreamEvent
+      } catch {
+        // skip malformed events : shouldn't happen but defensive
+      }
+    }
   } finally {
     reader.releaseLock()
   }
@@ -713,6 +733,42 @@ export async function* sendMessageOnce(
     // forgets to clean up still terminates). Bun + Node both honor this.
     if (typeof watchdogTimer.unref === "function") watchdogTimer.unref()
 
+    // Single source of truth for the tagged, retryable stall error. Called
+    // from BOTH the for-await catch (when our watchdog aborts mid-stream) and
+    // the post-loop `if(!messageStopReceived)` block (when the server closes
+    // the body without a terminator). Reads `watchdogAbortReason`, `lastEventAt`
+    // and `attemptStartedAt` at call time so the message reflects the moment of
+    // failure.
+    const buildStallError = (): Error & { streamErrorType?: string } => {
+      type AbortCode = "stream_idle" | "attempt_too_long" | "stream_truncated"
+      const code: AbortCode = (watchdogAbortReason ?? "stream_truncated") as AbortCode
+      const requestId = response.headers.get("request-id") ?? response.headers.get("x-request-id")
+      const cfRay = response.headers.get("cf-ray")
+      const idleMs = Date.now() - lastEventAt
+      const elapsedMs = Date.now() - attemptStartedAt
+      const message =
+        code === "stream_idle"
+          ? `no SSE event received for ${(idleMs / 1000).toFixed(1)}s — aborting (request stalled mid-stream, no message_stop)`
+          : code === "attempt_too_long"
+            ? `attempt exceeded ${(elapsedMs / 1000).toFixed(0)}s — aborting`
+            : `stream ended without message_stop after ${(elapsedMs / 1000).toFixed(1)}s (server truncated the SSE response)`
+
+      diag.warn("api.stream-stalled", message, {
+        "error-type": code,
+        ...(requestId ? { "request-id": requestId } : {}),
+        ...(cfRay ? { "cf-ray": cfRay } : {}),
+        "idle-ms": idleMs,
+        "elapsed-ms": elapsedMs,
+        "blocks-received": blocks.length,
+      })
+
+      const err = markErrorAsDiagEmitted(
+        new Error(`Anthropic stream ${code}: ${message}`),
+      ) as Error & { streamErrorType?: string }
+      err.streamErrorType = code
+      return err
+    }
+
     try {
       for await (const event of parseSSE(response.body)) {
         lastEventAt = Date.now()
@@ -1017,6 +1073,24 @@ export async function* sendMessageOnce(
           }
         }
       }
+    } catch (err) {
+      // The watchdog aborts via `attemptAbort` (idle / hard-timeout). That
+      // abort rejects `reader.read()` with an AbortError which — without this
+      // catch — propagates PAST the `if(!messageStopReceived)` block below, so
+      // the retryable stream_idle / attempt_too_long tag never gets attached
+      // and the harness may treat a recoverable stall as terminal (B-096).
+      // This mirrors the symmetric retag the pre-response TTFB guard does at
+      // ~440-461. If the abort was OURS (the watchdog) and NOT the user's
+      // Ctrl+C, retag with the same tagged error the post-loop block builds.
+      // Note: when the user's `signal` aborts, the composed `attemptSignal`
+      // aborts but `attemptAbort.signal` does NOT, so a real cancel falls
+      // through and rethrows untouched. Any non-abort throw (e.g. a mid-stream
+      // `event: error`) also leaves `attemptAbort.signal.aborted` false and
+      // rethrows as-is.
+      if (attemptAbort.signal.aborted && !signal?.aborted) {
+        throw buildStallError()
+      }
+      throw err
     } finally {
       clearInterval(watchdogTimer)
     }
@@ -1030,33 +1104,7 @@ export async function* sendMessageOnce(
     // Either case → throw a tagged retryable error so the outer
     // `sendMessage` re-tries. The harness keeps going.
     if (!messageStopReceived) {
-      type AbortCode = "stream_idle" | "attempt_too_long" | "stream_truncated"
-      const code: AbortCode = (watchdogAbortReason ?? "stream_truncated") as AbortCode
-      const requestId = response.headers.get("request-id") ?? response.headers.get("x-request-id")
-      const cfRay = response.headers.get("cf-ray")
-      const idleMs = Date.now() - lastEventAt
-      const elapsedMs = Date.now() - attemptStartedAt
-      const message =
-        code === "stream_idle"
-          ? `no SSE event received for ${(idleMs / 1000).toFixed(1)}s — aborting (request stalled mid-stream, no message_stop)`
-          : code === "attempt_too_long"
-            ? `attempt exceeded ${(elapsedMs / 1000).toFixed(0)}s — aborting`
-            : `stream ended without message_stop after ${(elapsedMs / 1000).toFixed(1)}s (server truncated the SSE response)`
-
-      diag.warn("api.stream-stalled", message, {
-        "error-type": code,
-        ...(requestId ? { "request-id": requestId } : {}),
-        ...(cfRay ? { "cf-ray": cfRay } : {}),
-        "idle-ms": idleMs,
-        "elapsed-ms": elapsedMs,
-        "blocks-received": blocks.length,
-      })
-
-      const err = markErrorAsDiagEmitted(
-        new Error(`Anthropic stream ${code}: ${message}`),
-      ) as Error & { streamErrorType?: string }
-      err.streamErrorType = code
-      throw err
+      throw buildStallError()
     }
 
     // Salvage a block left open at stream end. When the server stops the
