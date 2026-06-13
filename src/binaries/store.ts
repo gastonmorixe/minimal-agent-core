@@ -59,6 +59,17 @@ const SHA_RE = /^[0-9a-f]{64}$/i
 const MANIFEST_FILE = ".binaries.json"
 const MANIFEST_VERSION = 1
 
+/**
+ * Hard ceiling on a single download's body, enforced DURING the read loop (not
+ * just trusted from `content-length`, which a hostile server can omit or lie
+ * about). A managed CLI binary / archive is tens of MiB at most; 512 MiB is a
+ * generous headroom that still stops a multi-GB or unbounded body from OOMing
+ * the boot/provision path before the sha256 check (which only runs after the
+ * whole body is in RAM). Exceeding it aborts the fetch with `download-failed`
+ * and writes nothing.
+ */
+const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+
 /** Default managed bin dir: `~/.minimal-agent/bin`. */
 export function defaultBinDir(): string {
   return join(homedir(), ".minimal-agent", "bin")
@@ -443,6 +454,18 @@ export class BinaryStore {
         }
       }
       const total = Number(res.headers.get("content-length") ?? "") || undefined
+      // Trust nothing: reject a too-large body up front if the server even
+      // admits its size, AND enforce the ceiling byte-by-byte below (a hostile
+      // server can omit or under-report content-length).
+      if (total !== undefined && total > MAX_DOWNLOAD_BYTES) {
+        return {
+          ok: false,
+          outcome: fail(
+            "download-failed",
+            `${spec.name} exceeds max size: content-length ${total} > ${MAX_DOWNLOAD_BYTES} bytes`,
+          ),
+        }
+      }
       const reader = res.body.getReader()
       const chunks: Uint8Array[] = []
       let done = 0
@@ -450,8 +473,20 @@ export class BinaryStore {
         const { value, done: finished } = await reader.read()
         if (finished) break
         if (value) {
-          chunks.push(value)
           done += value.byteLength
+          // Abort BEFORE buffering more: cancel the stream and bail rather than
+          // Buffer.concat a partial multi-GB body that would OOM the host.
+          if (done > MAX_DOWNLOAD_BYTES) {
+            await reader.cancel().catch(() => {})
+            return {
+              ok: false,
+              outcome: fail(
+                "download-failed",
+                `${spec.name} exceeds max size: read ${done} bytes > ${MAX_DOWNLOAD_BYTES} bytes`,
+              ),
+            }
+          }
+          chunks.push(value)
           this.progress(spec, "fetching", total ? done / total : null, done, total)
         }
       }
