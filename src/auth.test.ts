@@ -82,7 +82,7 @@ describe("auth", () => {
       )
     })
 
-    it("doRefresh re-reads the keychain on every call (mode B: in-process rotation)", async () => {
+    it("doRefresh re-reads the credential store on every call (mode B: in-process rotation)", async () => {
       // Regression: long-lived sessions previously failed on the *second*
       // refresh because the closure captured the original snapshot's
       // refreshToken. After the server rotated RT1→RT2 on the first
@@ -125,7 +125,7 @@ describe("auth", () => {
       const after2 = await after1.refresh!()
       const after3 = await after2.refresh!()
 
-      // Each refresh sent the *current* keychain RT, not the captured one
+      // Each refresh sent the *current* credential store RT, not the captured one
       expect(sentRefreshTokens).toEqual(["RT1", "RT2", "RT3"])
       expect(after3.token).toBe("AT_RT4")
       expect(storedRT).toBe("RT4")
@@ -160,12 +160,12 @@ describe("auth", () => {
       await expect(auth.refresh!()).rejects.toThrow(/minimal-agent --login/)
     })
 
-    it("doRefresh skips the server call when keychain already has a fresher token", async () => {
+    it("doRefresh skips the server call when credential store already has a fresher token", async () => {
       // Models the multi-process race: between our 401 and our refresh,
-      // another process refreshed → keychain now holds a NEW access
+      // another process refreshed → credential store now holds a NEW access
       // token (different from what we issued last time). doRefresh
       // should detect this via the in-closure `lastIssuedToken` tracker
-      // and return the keychain's token directly, skipping the server
+      // and return the credential store's token directly, skipping the server
       // round-trip and the destructive refresh-token rotation.
       let storedAccess = "AT_v1"
       let storedRT = "RT_v1"
@@ -200,8 +200,8 @@ describe("auth", () => {
       // Initial: lastIssuedToken == "AT_v1" (the value getAuth observed).
 
       // Simulate: ANOTHER process refreshed and wrote a new token to the
-      // keychain WITHOUT us calling refresh ourselves. Now when WE call
-      // auth.refresh(), the closure should compare keychain's accessToken
+      // credential store WITHOUT us calling refresh ourselves. Now when WE call
+      // auth.refresh(), the closure should compare credential store's accessToken
       // to lastIssuedToken, see a difference, return the fresh token, and
       // NOT call refreshFn.
       storedAccess = "AT_from_other_process"
@@ -213,9 +213,9 @@ describe("auth", () => {
       expect(result.token).toBe("AT_from_other_process")
     })
 
-    it("doRefresh DOES call refresh when keychain still has the same token we last used", async () => {
+    it("doRefresh DOES call refresh when credential store still has the same token we last used", async () => {
       // Counterpart of the previous test: if no other process has
-      // refreshed, the keychain still matches lastIssuedToken, so we
+      // refreshed, the credential store still matches lastIssuedToken, so we
       // must do a real refresh (not silently skip).
       let storedAccess = "AT_v1"
       let storedRT = "RT_v1"
@@ -248,13 +248,13 @@ describe("auth", () => {
         refresh: fakeRefresh,
       })
 
-      // No other process has touched the keychain. auth.refresh() must
+      // No other process has touched the credential store. auth.refresh() must
       // call the server.
       const result = await auth.refresh!()
 
       expect(refreshCalls).toBe(1)
       expect(result.token).toBe("AT_fresh_1")
-      // And the keychain reflects the new tokens.
+      // And the credential store reflects the new tokens.
       expect(storedAccess).toBe("AT_fresh_1")
     })
 
