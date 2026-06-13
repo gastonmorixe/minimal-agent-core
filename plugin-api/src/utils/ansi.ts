@@ -47,6 +47,11 @@ export const combo = (open: string, close: string): AnsiWrapper => {
   return attr(open, close)
 }
 
+/** Conditionally wrap text in raw SGR codes, closing with a full reset. */
+export function color(ansi: boolean, codes: string, text: string): string {
+  return ansi ? `${codes}${text}${ANSI_CODES.RESET}` : text
+}
+
 /**
  * Common style helpers shared by the host TUI and plugin renderers. These are
  * intentionally byte-compatible with the long-standing `c.*` helper surface.

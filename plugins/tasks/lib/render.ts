@@ -44,6 +44,9 @@
  * @module tasks/lib/render
  */
 
+import { ANSI_CODES, color } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+
 import { localIsoDateTime, type Task, type TaskStatus } from "./parse.ts"
 import type { Stats, View } from "./store.ts"
 
@@ -77,11 +80,11 @@ export const GLYPHS = {
 // ---------------------------------------------------------------------------
 
 const ANSI = {
-  RESET: "\x1b[0m",
-  BOLD: "\x1b[1m",
-  DIM: "\x1b[2m",
-  STRIKE: "\x1b[9m",
-  LIME: "\x1b[38;5;118m",
+  RESET: ANSI_CODES.RESET,
+  BOLD: ANSI_CODES.BOLD,
+  DIM: ANSI_CODES.DIM,
+  STRIKE: ANSI_CODES.STRIKE,
+  LIME: PALETTE.lime,
   /**
    * The agent's accent blue (palette token `sky`, 256-color 45). Used
    * for the "doing" status — "in focus / actively being worked on"
@@ -92,17 +95,11 @@ const ANSI = {
    * but the value was stale. Renamed to `SKY` so future readers don't
    * trip over the same divergence.
    */
-  SKY: "\x1b[38;5;45m",
-  RED: "\x1b[31m",
-  DGRAY: "\x1b[38;5;240m",
-  LGRAY: "\x1b[38;5;246m",
+  SKY: PALETTE.sky,
+  RED: PALETTE.red,
+  DGRAY: ANSI_CODES.DARK_GRAY,
+  LGRAY: ANSI_CODES.LIGHT_GRAY,
 } as const
-
-/** Wrap `text` in ANSI codes when `ansi` is true; identity otherwise. */
-function color(ansi: boolean, codes: string, text: string): string {
-  if (!ansi) return text
-  return `${codes}${text}${ANSI.RESET}`
-}
 
 // ---------------------------------------------------------------------------
 // Render options + action verbs
