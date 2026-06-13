@@ -9,9 +9,9 @@
  * @module startup/provider-auth
  */
 
-import { c } from "../agent/ansi.ts"
 import type { AuthResult } from "../auth.ts"
 import { resolveStoredProviderAuth } from "../auth-strategies.ts"
+import { c } from "../ui/style/ansi.ts"
 
 import { getAuthWithFirstTimePrompt } from "./auth-prompt.ts"
 

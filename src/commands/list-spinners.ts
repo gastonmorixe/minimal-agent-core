@@ -1,5 +1,5 @@
-import { c } from "../agent.ts"
 import { SPINNER_PRESETS } from "../spinner/named-presets.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * Implements `minimal-agent list-spinners`: prints every named spinner preset

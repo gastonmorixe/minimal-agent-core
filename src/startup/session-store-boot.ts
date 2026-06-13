@@ -13,11 +13,11 @@
  * @module startup/session-store-boot
  */
 
-import { c } from "../agent/ansi.ts"
 import { BlobStore, loadBlobStoreConfig } from "../blob-store.ts"
 import { VERSION } from "../headers.ts"
 import { loadSession } from "../session-restore.ts"
 import { SessionStore } from "../session-store.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /** Inputs for {@link bootSessionStores}. */
 export interface SessionStoreBootOptions {

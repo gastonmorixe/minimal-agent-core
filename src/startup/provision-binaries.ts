@@ -16,9 +16,9 @@
  * @module startup/provision-binaries
  */
 
-import { c } from "../agent/ansi.ts"
 import { diag } from "../diagnostic-bus.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import { c } from "../ui/style/ansi.ts"
 
 import { startStartupRowSpinner } from "./startup-tree.ts"
 

@@ -11,8 +11,9 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { c } from "../agent/ansi.ts"
 import { VERSION } from "../headers.ts"
+import { type HelpSection, renderHelpSections } from "../ui/help/render.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * Read the agent's semver from the embedded `<repo>/package.json` next
@@ -49,86 +50,225 @@ export function printHelp(): void {
     `    ${c.dim("$")} minimal-agent ${c.dim('"prompt text"')}`,
     `    ${c.dim("$")} echo "prompt" | minimal-agent ${c.dim("-")}`,
     "",
-    `  ${c.bold("Options")}`,
-    `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim("(else MINIMAL_AGENT_MODEL, config model, provider default)")}`,
-    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, xhigh, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
-    `    ${c.cyan("--fast")}                    Fast-mode dispatch ${c.dim('(speed:"fast", fast-capable models only, ~2.5x tok/s, ~2x cost, or MINIMAL_AGENT_FAST=1)')}`,
-    `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
-    `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
-    `    ${c.cyan("--formatter-args")} ${c.dim("<args>")}   Extra args appended to the formatter ${c.dim('(e.g. "--table-fit", or MINIMAL_AGENT_FORMATTER_ARGS)')}`,
-    `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
-    `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
-    `    ${c.cyan("--mode")} ${c.dim("<id|none>")}         Initial mode ${c.dim("(default: ask in non-interactive, plugin default otherwise)")}`,
-    `    ${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}      Force startup tree on/off ${c.dim("(default: hidden in non-interactive)")}`,
-    `    ${c.cyan("--session-id")} ${c.dim("<uuid>")}      Pin this run's session id ${c.dim("(else MINIMAL_AGENT_SESSION_ID, else random)")}`,
-    `    ${c.cyan("-d")}, ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
-    `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
-    `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
-    `    ${c.cyan("--show-hidden-chars")}      Reveal spaces/tabs/newlines as faint glyphs (input editor + --debug output)`,
-    "",
-    `  ${c.bold("Auth")} ${c.dim("(provider-owned auth flows; flags remain legacy aliases)")}`,
-    `    ${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("login")} ${c.dim("[--email <addr>]")}  Sign in to a provider, e.g. ${c.dim("provider openai login")}`,
-    `    ${c.cyan("login")} ${c.dim("<id>")} ${c.dim("[--email <addr>]")}      Short alias for provider login`,
-    `    ${c.cyan("--logout")}                   Clear minimal-agent credentials ${c.dim("(~/.minimal-agent/auth.jsonc)")}`,
-    `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
-    "",
-    `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
-    `    ${c.cyan("providers")}                     List registered providers ${c.dim("(id · surfaces)")}`,
-    `    ${c.cyan("providers models")} ${c.dim("[<id>]")}      List models, optionally one provider ${c.dim("(alias: --list-models)")}`,
-    `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
-    `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
-    `    ${c.cyan("--sessions")} ${c.dim("[<query>]")}          List saved sessions ${c.dim("(fuzzy filter on date/sid/cwd)")}`,
-    `    ${c.cyan("usage")} ${c.dim("[<period>]")}             Token-usage stats ${c.dim("(today|last-day|last-month|ytd|year|all, interactive on a TTY)")}`,
-    `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session ${c.dim("(also: `sessions resume <sid>`)")}`,
-    `    ${c.cyan("--dump")} ${c.dim("<sid|last>")}         Dump a full session history to stdout`,
-    `    ${c.cyan("--dump-format")} ${c.dim("<md|xml>")}    Output format for --dump ${c.dim("(default: md)")}`,
-    `    ${c.cyan("-h")}, ${c.cyan("--help")}                 Show this help`,
-    "",
-    `  ${c.bold("Env")}`,
-    `    ${c.cyan("DEBUG=1")}                  Verbose request/response logging to stderr`,
-    `    ${c.cyan("MINIMAL_AGENT_TRANSPORT")}  Transport: http2 ${c.dim("(default)")} or fetch`,
-    `    ${c.cyan("MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1")}  Allow fetch fallback after HTTP/2 failure`,
-    `    ${c.cyan("MINIMAL_AGENT_NET_DBG=1")}  Mirror raw HTTP req/res to ${c.dim("./.net-dbg/")}`,
-    `    ${c.cyan("CLAUDE_CODE_EXTRA_METADATA")}  JSON object merged into metadata.user_id`,
-    `    ${c.cyan("MINIMAL_AGENT_SPINNER")}    Spinner preset id ${c.dim("(same values as --spinner)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_EFFORT")}     Reasoning effort ${c.dim("(low | medium | high | xhigh | max)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_FAST=1")}     Opt into fast-mode dispatch ${c.dim("(fast-capable models only)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_FORMATTER_ARGS")}  Extra args for the formatter ${c.dim('(shell-style, e.g. "--table-fit")')}`,
-    `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_MODEL")}      Default model id ${c.dim("(same as --model)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_MEMORY_NAMESPACE")}  Namespace memory paths under ${c.dim("namespaces/<ns>/")} ${c.dim("(memory plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
-    `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,
-    `    ${c.cyan("MINIMAL_AGENT_HEADER")}     Force startup tree: ${c.dim("0|1 (default: hidden in non-interactive)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_MODE")}       Initial mode id (or ${c.dim('"none"')} to disable)`,
-    `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
-    `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
-    `    ${c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1")}       Skip startup quota check`,
-    `    ${c.cyan("MINIMAL_AGENT_NO_PLUGIN_SYNC=1")}   Skip the first-run extended-plugins clone`,
-    `    ${c.cyan("MINIMAL_AGENT_PLUGINS_REPO")}  Git URL for the extended plugins repo ${c.dim("(fork/mirror)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_GITHUB_TOKEN")}  Token to clone a ${c.dim("private")} plugins repo ${c.dim("(else GITHUB_TOKEN / GH_TOKEN / gh)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_NO_HISTORY=1")}       Disable ↑/↓ prompt history ${c.dim("(history plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_FILE_LOCK_DISABLED=1")}  Disable cooperative file locking ${c.dim("(file-lock plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_SUBAGENT_MODEL")}  Force a model for spawned workers ${c.dim("(else they inherit your model, sub-agents plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1")}  Let specialists pick a per-role model ${c.dim("(cheap scout / flagship deep, default off, workers inherit your model)")}`,
-    `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
-    "",
-    `  ${c.bold("Plugins")} ${c.dim("(toggle via ~/.minimal-agent/config.jsonc)")}`,
-    `    ${c.dim("Opt out  :")} ${c.dim('{ "plugins": { "<id>": { "enabled": false } } }')}`,
-    `    ${c.dim("Opt in   :")} ${c.dim('{ "plugins": { "<id>": { "enabled": true } } }')}  ${c.dim("(for plugins shipped disabled)")}`,
-    "",
-    `    ${c.dim("Built-in :")} ask-mode, config, diff-view, env-info, file-lock,`,
-    `    ${c.dim("           ")} history, memory, model-info, quota-status, schedule,`,
-    `    ${c.dim("           ")} session-info, sub-agents, tasks, usage, web-search`,
-    `    ${c.dim("Disabled :")} interleave-thinking ${c.dim("(opt in to use, see Opt in above)")}`,
-    "",
-    `  ${c.bold("Docs")}`,
-    `    ${c.dim("docs/CHANGELOG.md")}          Release notes, newest first`,
-    `    ${c.dim("docs/tui/")}                  Terminal renderer architecture (compositor, live area, editor)`,
-    `    ${c.dim("docs/network/")}              HTTP transport, retry, and wire-capture notes`,
-    `    ${c.dim("docs/sub-agents-prompt.md")}  How the sub-agents system prompt composes`,
-    `    ${c.dim("docs/changes/")}              Per-change write-ups, dated`,
+    ...renderHelpSections(buildHelpSections()),
   ]
   console.log(lines.join("\n"))
+}
+
+function buildHelpSections(): HelpSection[] {
+  return [
+    {
+      title: c.bold("Options"),
+      rows: [
+        row(`${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}`, "Select model", [
+          "else MINIMAL_AGENT_MODEL, config model, provider default",
+        ]),
+        row(
+          `${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}`,
+          "Reasoning effort: low, medium, high, xhigh, max",
+          ["or MINIMAL_AGENT_EFFORT"],
+        ),
+        row(c.cyan("--fast"), "Fast-mode dispatch", [
+          'speed:"fast", fast-capable models only, ~2.5x tok/s, ~2x cost, or MINIMAL_AGENT_FAST=1',
+        ]),
+        row(
+          `${c.cyan("--thinking-display")} ${c.dim("<mode>")}`,
+          "Force thinking display: summarized or omitted",
+          ["or MINIMAL_AGENT_THINKING_DISPLAY"],
+        ),
+        row(
+          `${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}`,
+          "Pipe output through formatter",
+          ["default: mdstream"],
+        ),
+        row(
+          `${c.cyan("--formatter-args")} ${c.dim("<args>")}`,
+          "Extra args appended to the formatter",
+          ['e.g. "--table-fit", or MINIMAL_AGENT_FORMATTER_ARGS'],
+        ),
+        row(
+          `${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}`,
+          "Pick a status spinner preset",
+          ["see --list-spinners"],
+        ),
+        row(
+          `${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}`,
+          "Non-interactive: send prompt, print, exit",
+        ),
+        row(`${c.cyan("--mode")} ${c.dim("<id|none>")}`, "Initial mode", [
+          "default: ask in non-interactive, plugin default otherwise",
+        ]),
+        row(
+          `${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}`,
+          "Force startup tree on/off",
+          ["default: hidden in non-interactive"],
+        ),
+        row(`${c.cyan("--session-id")} ${c.dim("<uuid>")}`, "Pin this run's session id", [
+          "else MINIMAL_AGENT_SESSION_ID, else random",
+        ]),
+        row(`${c.cyan("-d")}, ${c.cyan("--debug")}`, "Enable debug logging", ["or DEBUG=1"]),
+        row(`${c.cyan("-v")}, ${c.cyan("--verbose")}`, "Don't truncate debug output", [
+          "or VERBOSE=1",
+        ]),
+        row(c.cyan("--skip-quota"), "Skip startup quota check", ["or MINIMAL_AGENT_SKIP_QUOTA=1"]),
+        row(c.cyan("--show-hidden-chars"), "Reveal spaces/tabs/newlines as faint glyphs"),
+      ],
+    },
+    {
+      title: c.bold("Auth"),
+      note: c.dim("(provider-owned auth flows; flags remain legacy aliases)"),
+      rows: [
+        row(
+          `${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("login")} ${c.dim("[method]")}`,
+          "Sign in to a provider",
+          ["provider openai login oauth"],
+        ),
+        row(`${c.cyan("login")} ${c.dim("<id> [method]")}`, "Short alias for provider login", [
+          "method: oauth | api-key",
+        ]),
+        row(c.cyan("--logout"), "Clear minimal-agent credentials", ["~/.minimal-agent/auth.jsonc"]),
+        row(c.cyan("--auth-status"), "Show login status, account, scopes, expiry"),
+      ],
+    },
+    {
+      title: c.bold("Info"),
+      note: c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)"),
+      rows: [
+        row(c.cyan("providers"), "List registered providers", ["id · surfaces"]),
+        row(
+          `${c.cyan("providers models")} ${c.dim("[<id>]")}`,
+          "List models, optionally one provider",
+          ["alias: --list-models"],
+        ),
+        row(
+          `${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}`,
+          "Show beta feature flags",
+        ),
+        row(
+          `${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}`,
+          "Show available spinner presets",
+        ),
+        row(`${c.cyan("--sessions")} ${c.dim("[<query>]")}`, "List saved sessions", [
+          "fuzzy filter on date/sid/cwd",
+        ]),
+        row(`${c.cyan("usage")} ${c.dim("[<period>]")}`, "Token-usage stats", [
+          "today|last-day|last-month|ytd|year|all, interactive on a TTY",
+        ]),
+        row(
+          `${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}`,
+          "Resume a saved session",
+          ["`sessions resume <sid>`"],
+        ),
+        row(`${c.cyan("--dump")} ${c.dim("<sid|last>")}`, "Dump a full session history to stdout"),
+        row(`${c.cyan("--dump-format")} ${c.dim("<md|xml>")}`, "Output format for --dump", [
+          "default: md",
+        ]),
+        row(`${c.cyan("-h")}, ${c.cyan("--help")}`, "Show this help"),
+      ],
+    },
+    {
+      title: c.bold("Env"),
+      rows: [
+        row(c.cyan("DEBUG=1"), "Verbose request/response logging to stderr"),
+        row(c.cyan("MINIMAL_AGENT_TRANSPORT"), "Transport: http2 or fetch", ["default: http2"]),
+        row(
+          c.cyan("MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1"),
+          "Allow fetch fallback after HTTP/2 failure",
+        ),
+        row(c.cyan("MINIMAL_AGENT_NET_DBG=1"), "Mirror raw HTTP req/res to ./.net-dbg/"),
+        row(c.cyan("CLAUDE_CODE_EXTRA_METADATA"), "JSON object merged into metadata.user_id"),
+        row(c.cyan("MINIMAL_AGENT_SPINNER"), "Spinner preset id", ["same values as --spinner"]),
+        row(c.cyan("MINIMAL_AGENT_EFFORT"), "Reasoning effort", [
+          "low | medium | high | xhigh | max",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_FAST=1"), "Opt into fast-mode dispatch", [
+          "fast-capable models only",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_THINKING_DISPLAY"), "Force thinking display", [
+          "summarized | omitted",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_FORMATTER_ARGS"), "Extra args for the formatter", [
+          'shell-style, e.g. "--table-fit"',
+        ]),
+        row(c.cyan("MINIMAL_AGENT_CONFIG"), "Override config path", [
+          "default: ~/.minimal-agent/config.jsonc",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_MODEL"), "Default model id", ["same as --model"]),
+        row(
+          c.cyan("MINIMAL_AGENT_MEMORY_NAMESPACE"),
+          "Namespace memory paths under namespaces/<ns>/",
+          ["memory plugin"],
+        ),
+        row(c.cyan("MINIMAL_AGENT_THEME"), "UI theme", ["dark | light | high-contrast"]),
+        row(c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1"), "Disable live-area REPL", [
+          "fall back to legacy raw input",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_HEADER"), "Force startup tree", [
+          "0|1, default hidden in non-interactive",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_MODE"), "Initial mode id", ['or "none" to disable']),
+        row(c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT"), "Override continuation-prompt prefix", [
+          'default: "  "',
+        ]),
+        row(
+          c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1"),
+          "Show spaces/tabs/newlines as faint glyphs",
+        ),
+        row(c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1"), "Skip startup quota check"),
+        row(c.cyan("MINIMAL_AGENT_NO_PLUGIN_SYNC=1"), "Skip the first-run extended-plugins clone"),
+        row(c.cyan("MINIMAL_AGENT_PLUGINS_REPO"), "Git URL for the extended plugins repo", [
+          "fork/mirror",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_GITHUB_TOKEN"), "Token to clone a private plugins repo", [
+          "else GITHUB_TOKEN / GH_TOKEN / gh",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_NO_HISTORY=1"), "Disable prompt history", ["history plugin"]),
+        row(c.cyan("MINIMAL_AGENT_FILE_LOCK_DISABLED=1"), "Disable cooperative file locking", [
+          "file-lock plugin",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_SUBAGENT_MODEL"), "Force a model for spawned workers", [
+          "else inherit your model",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1"), "Let specialists pick a per-role model", [
+          "default off",
+        ]),
+        row(c.cyan("NERD_FONT=1"), "Enable Nerd Font glyphs in TUI"),
+      ],
+    },
+    {
+      title: c.bold("Plugins"),
+      note: c.dim("(toggle via ~/.minimal-agent/config.jsonc)"),
+      rows: [
+        row(c.dim("Opt out"), c.dim('{ "plugins": { "<id>": { "enabled": false } } }')),
+        row(c.dim("Opt in"), c.dim('{ "plugins": { "<id>": { "enabled": true } } }'), [
+          "for plugins shipped disabled",
+        ]),
+        row(c.dim("Built-in"), c.dim("ask-mode, config, diff-view, env-info, file-lock,")),
+        row("", c.dim("history, memory, model-info, quota-status, schedule,")),
+        row("", c.dim("session-info, sub-agents, tasks, usage, web-search")),
+        row(c.dim("Disabled"), `interleave-thinking ${c.dim("(opt in to use, see Opt in above)")}`),
+      ],
+    },
+    {
+      title: c.bold("Docs"),
+      rows: [
+        row(c.dim("docs/CHANGELOG.md"), "Release notes, newest first"),
+        row(c.dim("docs/tui/"), "Terminal renderer architecture (compositor, live area, editor)"),
+        row(c.dim("docs/network/"), "HTTP transport, retry, and wire-capture notes"),
+        row(c.dim("docs/sub-agents-prompt.md"), "How the sub-agents system prompt composes"),
+        row(c.dim("docs/changes/"), "Per-change write-ups, dated"),
+      ],
+    },
+  ]
+}
+
+function row(
+  term: string,
+  summary: string,
+  notes: string[] = [],
+): { term: string; summary: string } {
+  return {
+    term,
+    summary: notes.length > 0 ? `${summary} ${c.dim(`(${notes.join("; ")})`)}` : summary,
+  }
 }

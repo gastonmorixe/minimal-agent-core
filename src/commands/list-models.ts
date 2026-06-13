@@ -12,11 +12,11 @@
  * @module commands/list-models
  */
 
-import { c } from "../agent.ts"
 import type { AuthResult } from "../auth.ts"
 import { listRegisteredModels } from "../llm/model-registry.ts"
 import type { ProviderAuth } from "../llm/provider.ts"
 import { listProviderPlugins } from "../llm/provider-plugin.ts"
+import { c } from "../ui/style/ansi.ts"
 
 interface ModelRow {
   id: string

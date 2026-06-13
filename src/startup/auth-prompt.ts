@@ -12,9 +12,9 @@
  * @module startup/auth-prompt
  */
 
-import { c } from "../agent/ansi.ts"
 import { getAuth } from "../auth.ts"
 import { runLoginCommand } from "../commands/login.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * Wrap `getAuth()` with a first-time / stale-credentials login prompt.

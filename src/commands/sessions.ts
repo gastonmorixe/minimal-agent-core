@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 
-import { c } from "../agent.ts"
 import { firstUserPromptSnippet } from "../session-restore.ts"
 import {
   defaultSessionsDir,
@@ -10,6 +9,7 @@ import {
   sessionFilePath,
 } from "../session-store.ts"
 import { computeSessionUsage, type SessionUsage, ZERO_SESSION_USAGE } from "../session-usage.ts"
+import { c } from "../ui/style/ansi.ts"
 
 import { readSessionIndex } from "./session-index.ts"
 

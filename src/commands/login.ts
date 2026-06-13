@@ -16,7 +16,6 @@
 
 import { createInterface } from "node:readline"
 
-import { c } from "../agent.ts"
 import { defaultAuthStore, type SecretBag } from "../auth-store.ts"
 import {
   findApiKeyAuthProvider,
@@ -26,6 +25,7 @@ import {
 } from "../auth-strategies.ts"
 import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../llm/provider-plugin.ts"
 import { type LoginInstallResult, type LoginOutcome, runOAuthLogin } from "../oauth-login.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * Open a URL in the user's default browser. Returns `true` on success,
