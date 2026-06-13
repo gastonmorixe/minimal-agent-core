@@ -767,7 +767,7 @@ export class ModeManager {
     if (m?.systemPromptAppend && !this.warnedSystemPromptAppend) {
       this.warnedSystemPromptAppend = true
       console.error(
-        `  \x1b[33m⚠\x1b[0m mode "${m.id}" declares deprecated ` +
+        `  ${c.yellow("⚠")} mode "${m.id}" declares deprecated ` +
           `\`systemPromptAppend\` — move the text to the plugin's ` +
           `PROMPT.md so the system-prompt cache survives toggles. ` +
           `(see ManifestMode.systemPromptAppend JSDoc)`,
