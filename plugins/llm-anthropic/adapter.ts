@@ -242,6 +242,7 @@ export const anthropicProviderPlugin: ProviderPlugin = {
   displayName: "Anthropic",
   shortCode: "anth",
   register: bootstrapAnthropic,
+  usesLegacyStartupAuth: true,
   oauthLogin: anthropicOAuthLogin,
   /**
    * Plan-auth (OAuth) requests get the mandatory billing + Claude-Code

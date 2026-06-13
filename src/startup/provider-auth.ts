@@ -4,13 +4,14 @@
  * Keeps `src/index.ts` as the composition root while moving provider-auth
  * bridging out of the entrypoint. The legacy agent still accepts `AuthResult`;
  * this module maps stored provider credentials into that shape without making
- * startup prompt Anthropic credentials for non-Anthropic models.
+ * startup prompt credentials for providers that own their own auth strategies.
  *
  * @module startup/provider-auth
  */
 
 import type { AuthResult } from "../auth.ts"
 import { resolveStoredProviderAuth } from "../auth-strategies.ts"
+import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { c } from "../ui/style/ansi.ts"
 
 import { getAuthWithFirstTimePrompt } from "./auth-prompt.ts"
@@ -18,14 +19,15 @@ import { getAuthWithFirstTimePrompt } from "./auth-prompt.ts"
 /**
  * Resolve startup credentials for the selected provider.
  *
- * Anthropic keeps the legacy first-run prompt for now; every other provider
- * is resolved from minimal-agent's host-owned provider auth store.
+ * Providers can opt into the legacy host prompt while that compatibility path
+ * exists. Otherwise, startup reads minimal-agent's host-owned provider store.
  */
 export async function resolveStartupAuth(
   providerId: string | undefined,
   modelId: string,
 ): Promise<AuthResult> {
-  if (providerId === undefined || providerId === "anthropic") {
+  const plugin = providerId ? findProviderPlugin(providerId) : undefined
+  if (providerId === undefined || plugin?.usesLegacyStartupAuth) {
     return getAuthWithFirstTimePrompt()
   }
   const auth = resolveStoredProviderAuth(providerId, modelId)
@@ -56,7 +58,8 @@ function refreshBridge(refresh: () => Promise<{ token: string }>): () => Promise
 
 /** Render the auth row shown in the startup tree. */
 export function startupAuthLabel(auth: AuthResult, providerId: string | undefined): string {
-  if (providerId && providerId !== "anthropic") {
+  const plugin = providerId ? findProviderPlugin(providerId) : undefined
+  if (providerId && !plugin?.usesLegacyStartupAuth) {
     return `${auth.type} ${c.dim(`(${providerId})`)}`
   }
   return `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`

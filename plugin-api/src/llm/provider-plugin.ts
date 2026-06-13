@@ -342,6 +342,12 @@ export interface ProviderPlugin {
    */
   register(ctx?: ProviderSetupContext): void
   /**
+   * Temporary compatibility hook for providers still using the host's legacy
+   * startup auth prompt and `AuthResult` bridge. New providers should omit this
+   * and resolve credentials through provider-declared auth strategies.
+   */
+  usesLegacyStartupAuth?: boolean
+  /**
    * Optional fire-and-forget startup probe, run once after activation and
    * before the first request. Lets a provider overlay server-shipped data
    * onto the registry (e.g. a `/bootstrap` model-cost override).
