@@ -947,7 +947,7 @@ async function main() {
     const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
     const result = await checkQuota(auth)
     if (!result.ok) {
-      quotaSpinner.fail(`${c.boldRed("failed")} \x1b[1;31m✗\x1b[22;39m`)
+      quotaSpinner.fail(`${c.boldRed("failed")} ${c.boldRed("✗")}`)
       console.error(
         `  ${c.boldRed("error")} quota check failed. Account may not have quota or token is invalid.`,
       )

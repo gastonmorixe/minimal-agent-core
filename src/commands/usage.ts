@@ -16,6 +16,7 @@
  * @module commands/usage
  */
 
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
 
 import { modelShortLabel } from "../llm/model-label.ts"
@@ -95,7 +96,7 @@ async function runInteractive(events: ReturnType<typeof scanUsageEvents>): Promi
     clearPrevious()
     const period = USAGE_PERIODS[idx]!.id
     const lines = renderUsageReport(reports[period], { cols: cols(), modelLabel: modelShortLabel })
-    const footer = "  \x1b[2m← → switch period · 1-6 jump · q quit\x1b[0m"
+    const footer = `  ${c.dim("← → switch period · 1-6 jump · q quit")}`
     const all = [...lines, footer]
     stdout.write(`${all.join("\n")}\n`)
     lastLineCount = all.length
