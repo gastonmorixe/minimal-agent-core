@@ -13,7 +13,7 @@ desc("tmux smoke: streaming status updates with detailed labels", () => {
     const session = `streamstatus-${Date.now()}`
     // Driver runs ~3-4s (≈40 events × 60ms pull). Keep pane alive after exit
     // so capture-pane can read the final scrollback state.
-    const cmd = "bun run tmp/streaming-status-tmux-driver.ts; sleep 5"
+    const cmd = "bun run src/test-utils/fixtures/streaming-status-tmux-driver.ts; sleep 5"
 
     spawnSync("tmux", ["kill-session", "-t", session], { stdio: "ignore" })
     const start = spawnSync("tmux", [

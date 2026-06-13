@@ -29,8 +29,9 @@ import { ModeManager } from "../modes.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ManifestMode } from "../plugins/types.ts"
-import { GLOBAL_STATUS_BUS, StatusBus, StatusRenderer, type StatusSpinnerTheme } from "../status.ts"
+import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
+import { StatusRenderer, type StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 
 import { c, faintThinkingChunk } from "./ansi.ts"
 import {

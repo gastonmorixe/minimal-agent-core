@@ -130,7 +130,7 @@ export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
     //     `●` = 1). Keeps the LABEL column stable on every blink.
     //
     //   - `iconCells` = 1 or 2 layout-policy class of the FIRST
-    //     codepoint. Hands to `live-area-status.paint` so it can pick
+    //     codepoint. Hands to the live-area status paint path so it can pick
     //     the gap width (1 ASCII space for narrow / multi-char ASCII,
     //     2 ASCII spaces for wide PUA / wide UAX glyphs). Stays the
     //     SAME value across on/off frames.

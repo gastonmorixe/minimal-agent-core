@@ -1,16 +1,16 @@
 import { describe, expect, it } from "bun:test"
 
+import { type StatusActivity, StatusBus } from "../../status.ts"
+import { stripAnsi } from "../../term-width.ts"
+import type { Spinner } from "../spinner/index.ts"
+
 import {
   formatActivityInfix,
   formatElapsed,
   formatElapsedSuffix,
   STALL_THRESHOLD_MS,
-  type StatusActivity,
-  StatusBus,
-  StatusRenderer,
-} from "./status.ts"
-import { stripAnsi } from "./term-width.ts"
-import type { Spinner } from "./ui/spinner/index.ts"
+} from "./format.ts"
+import { StatusRenderer } from "./line-renderer.ts"
 
 class FakeTTYOutput {
   isTTY = true
@@ -146,7 +146,7 @@ describe("status", () => {
           phase: "upload",
           sentBytes: 47_312,
           sentTokens: 124_000,
-          target: { host: "api.anthropic.com", protocol: "h2", model: "opus-4-7" },
+          target: { host: "api.provider.test", protocol: "h2", model: "model-primary" },
           startedAt: 1_000,
         },
       })
@@ -157,9 +157,9 @@ describe("status", () => {
       expect(snap?.activity?.direction).toBe("up")
       expect(snap?.activity?.sentBytes).toBe(47_312)
       expect(snap?.activity?.target).toEqual({
-        host: "api.anthropic.com",
+        host: "api.provider.test",
         protocol: "h2",
-        model: "opus-4-7",
+        model: "model-primary",
       })
 
       handle.clear()
@@ -171,7 +171,7 @@ describe("status", () => {
         activity: {
           phase: "upload",
           sentBytes: 1_000,
-          target: { host: "api.anthropic.com" },
+          target: { host: "api.provider.test" },
         },
       })
 
@@ -182,7 +182,7 @@ describe("status", () => {
       expect(snap?.activity?.phase).toBe("stream")
       expect(snap?.activity?.sentBytes).toBe(1_000) // preserved
       expect(snap?.activity?.recvBytes).toBe(512) // new
-      expect(snap?.activity?.target?.host).toBe("api.anthropic.com") // preserved
+      expect(snap?.activity?.target?.host).toBe("api.provider.test") // preserved
 
       handle.clear()
     })
@@ -190,17 +190,17 @@ describe("status", () => {
     it("merges target sub-object instead of replacing", () => {
       const bus = new StatusBus()
       const handle = bus.create("Sending", {
-        activity: { target: { host: "api.anthropic.com", protocol: "h2" } },
+        activity: { target: { host: "api.provider.test", protocol: "h2" } },
       })
 
       // Only model changes; host + protocol must survive.
-      handle.updateActivity({ target: { model: "opus-4-7[1m]" } })
+      handle.updateActivity({ target: { model: "model-primary[1m]" } })
 
       const snap = bus.currentStatus()
       expect(snap?.activity?.target).toEqual({
-        host: "api.anthropic.com",
+        host: "api.provider.test",
         protocol: "h2",
-        model: "opus-4-7[1m]",
+        model: "model-primary[1m]",
       })
 
       handle.clear()
@@ -516,19 +516,19 @@ describe("formatActivityInfix", () => {
     const a: StatusActivity = {
       direction: "down",
       recvBytes: 4_096,
-      target: { host: "api.anthropic.com", protocol: "h2" },
+      target: { host: "api.provider.test", protocol: "h2" },
     }
     const out = formatActivityInfix(a)
-    expect(stripAnsi(out)).toBe(" ↓ 4.0 KB · api.anthropic.com:h2")
+    expect(stripAnsi(out)).toBe(" ↓ 4.0 KB · api.provider.test:h2")
   })
 
   it("renders host alone when protocol is missing", () => {
     const a: StatusActivity = {
       direction: "down",
       recvBytes: 4_096,
-      target: { host: "api.anthropic.com" },
+      target: { host: "api.provider.test" },
     }
-    expect(stripAnsi(formatActivityInfix(a))).toBe(" ↓ 4.0 KB · api.anthropic.com")
+    expect(stripAnsi(formatActivityInfix(a))).toBe(" ↓ 4.0 KB · api.provider.test")
   })
 
   it("computes tok/s rate when entryStartedAt and tokens are present", () => {
@@ -566,10 +566,10 @@ describe("formatActivityInfix", () => {
     const a: StatusActivity = {
       direction: "down",
       recvBytes: 12_700,
-      target: { host: "api.anthropic.com", protocol: "h2" },
+      target: { host: "api.provider.test", protocol: "h2" },
     }
     const out = formatActivityInfix(a, { hideBytes: true })
-    expect(stripAnsi(out)).toBe(" ↓ api.anthropic.com:h2")
+    expect(stripAnsi(out)).toBe(" ↓ api.provider.test:h2")
     expect(stripAnsi(out)).not.toContain("KB")
   })
 
@@ -578,13 +578,13 @@ describe("formatActivityInfix", () => {
       direction: "down",
       recvBytes: 12_700,
       recvTokens: 215,
-      target: { host: "api.anthropic.com", protocol: "h2" },
+      target: { host: "api.provider.test", protocol: "h2" },
     }
-    // Full width: ` ↓ 12.4 KB · ~215 tok · api.anthropic.com:h2` ≈ 45 cells.
+    // Full width: ` ↓ 12.4 KB · ~215 tok · api.provider.test:h2` ≈ 45 cells.
     // Capping at 25 must drop host first, then maybe tokens.
     const out = formatActivityInfix(a, { maxWidth: 25 })
     const plain = stripAnsi(out)
-    expect(plain).not.toContain("api.anthropic.com") // host dropped first
+    expect(plain).not.toContain("api.provider.test") // host dropped first
     expect(plain).toContain("12.4 KB") // bytes survive (highest priority)
   })
 
@@ -721,7 +721,7 @@ describe("formatActivityInfix", () => {
         direction: "down",
         recvBytes: 10,
         lastChunkAt: NOW - 30_000, // 30s ago — matches the user's screenshot
-        target: { host: "api.anthropic.com" },
+        target: { host: "api.provider.test" },
       }
       const out = formatActivityInfix(a, { now: NOW })
       const plain = stripAnsi(out)
@@ -785,12 +785,12 @@ describe("LiveAreaStatusController + StatusRenderer infix wiring", () => {
       activity: {
         direction: "down",
         recvBytes: 12_700,
-        target: { host: "api.anthropic.com" },
+        target: { host: "api.provider.test" },
       },
     })
     const last = stripAnsi(output.chunks.at(-1) ?? "")
     expect(last).toContain("Calling Write: streaming input (10 B)")
-    expect(last).toContain("api.anthropic.com") // host survives
+    expect(last).toContain("api.provider.test") // host survives
     expect(last).not.toContain("12.4 KB") // bytes suppressed (would duplicate label)
     handle.clear()
     renderer.stop()
@@ -810,7 +810,7 @@ describe("LiveAreaStatusController + StatusRenderer infix wiring", () => {
     // the composed line well past the row width.
     const handle = bus.create(
       "A very long status label that would overflow a narrow terminal row",
-      { activity: { direction: "down", recvBytes: 4_096, target: { host: "api.anthropic.com" } } },
+      { activity: { direction: "down", recvBytes: 4_096, target: { host: "api.provider.test" } } },
     )
     const last = output.chunks.at(-1) ?? ""
     // The visible (ANSI-stripped) body, minus the leading `\r\x1b[2K` control,

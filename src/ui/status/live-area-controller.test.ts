@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { LiveAreaStatusController } from "./live-area-status.ts"
-import { _resetNerdGlyphCellsForTest, setNerdGlyphCells } from "./nerd-glyph-width.ts"
-import { StatusBus } from "./status.ts"
-import { displayWidth } from "./term-width.ts"
-import { BlinkingNerdSpinner, type Spinner } from "./ui/spinner/index.ts"
+import { _resetNerdGlyphCellsForTest, setNerdGlyphCells } from "../../nerd-glyph-width.ts"
+import { StatusBus } from "../../status.ts"
+import { displayWidth } from "../../term-width.ts"
+import { BlinkingNerdSpinner, type Spinner } from "../spinner/index.ts"
+
+import { LiveAreaStatusController } from "./live-area-controller.ts"
 
 class FakeEditor {
   readonly statuses: Array<string | null> = []

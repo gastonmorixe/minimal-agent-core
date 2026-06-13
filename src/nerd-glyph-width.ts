@@ -54,7 +54,7 @@ export type NerdGlyphCells = 1 | 2
  *
  * Returns `1` or `2` -- the two regimes the status-row gap formula cares
  * about. Used by:
- *   - `LiveAreaStatusController.paint` (in `./live-area-status.ts`)
+ *   - `LiveAreaStatusController.paint` (in `./ui/status/live-area-controller.ts`)
  *     to size the gap between icon and label (1 ASCII space for narrow,
  *     2 ASCII spaces for wide PUA).
  *   - `BlinkingNerdSpinner.render` (in `./ui/spinner/blinking-nerd.ts`)
