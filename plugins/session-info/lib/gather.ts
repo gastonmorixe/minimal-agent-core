@@ -30,7 +30,6 @@ import { hostname } from "node:os"
 
 import type { TUIContext } from "@minimal-agent/plugin-api/types/plugin"
 
-import { resolveModel } from "../../../src/llm/model-registry.ts"
 import { resolveProviderSessionInfo } from "../../../src/llm/provider-session.ts"
 import { getSessionTokens } from "../../../src/session-tokens.ts"
 
@@ -79,13 +78,20 @@ function reasoningOf(t: { adaptive: boolean; extended: boolean; interleaved: boo
  * model's `speedFast` capability so the footer never claims a fast tier
  * the model doesn't have (the client gates the wire the same way):
  * requested + unsupported renders as not-fast, matching what is sent.
+ *
+ * The capability lookup goes through the host's `models:read` capability
+ * (`ctx.host.models`), not a `src/` registry import. When the capability is
+ * absent or the model is unregistered, we report the request as-is (the
+ * server decides) — the same "honest fallback" as before.
  */
-function resolveFastState(modelId: string): boolean {
+function resolveFastState(ctx: TUIContext, modelId: string): boolean {
   if (process.env.MINIMAL_AGENT_FAST !== "1") return false
   try {
-    return resolveModel(modelId).capabilities.speedFast
+    const e = ctx.host?.models?.resolve(modelId)
+    // Unregistered model OR no models capability: report the request as-is.
+    return e ? e.capabilities.speedFast : true
   } catch {
-    // Unregistered model: report the request as-is (server decides).
+    // resolve() throws on an unregistered id: report the request as-is.
     return true
   }
 }
@@ -116,7 +122,8 @@ function resolveModelBits(ctx: TUIContext): ModelBits {
 
   const modelId = process.env.MINIMAL_AGENT_MODEL || "unknown"
   try {
-    const e = resolveModel(modelId)
+    const e = ctx.host?.models?.resolve(modelId)
+    if (!e) return { modelId, modelLabel: modelId, providerId: "unknown", reasoning: [] }
     return {
       modelId,
       modelLabel: e.displayName,
@@ -179,7 +186,7 @@ export async function gatherSessionInfo(ctx: TUIContext): Promise<SessionInfoSna
     modelLabel: bits.modelLabel,
     providerId: bits.providerId,
     effort: process.env.MINIMAL_AGENT_EFFORT || undefined,
-    fast: resolveFastState(bits.modelId),
+    fast: resolveFastState(ctx, bits.modelId),
     reasoning: bits.reasoning,
     contextSize: tok.contextSize,
     contextWindow,

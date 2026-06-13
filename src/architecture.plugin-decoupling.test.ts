@@ -117,7 +117,12 @@ const BASELINE = new Map<string, number>([
   // utils/term-width).
   ["schedule/fire-e2e.test.ts", 6],
   ["schedule/load.test.ts", 1],
-  ["session-info/lib/gather.ts", 3],
+  // D-quickwins: resolveModel → ctx.host.models.resolve (models:read; manifest
+  // grants it). The remaining 2 are residual: resolveProviderSessionInfo
+  // (provider-session) + getSessionTokens (session-tokens) have NO capability
+  // on the v2 host (same gap as quota-status/handler.ts), so they stay until a
+  // session-tokens / provider-session seam exists.
+  ["session-info/lib/gather.ts", 2],
   ["usage/handlers/cmd_usage.ts", 1],
   ["usage/lib/overlay.test.ts", 1],
   ["usage/lib/overlay.ts", 2],
