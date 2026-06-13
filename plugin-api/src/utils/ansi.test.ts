@@ -19,6 +19,7 @@ describe("ansi helpers", () => {
   it("keeps the shared style helper byte-compatible with the previous host c palette", () => {
     expect(ansiStyle.dim("x")).toBe("\x1b[2mx\x1b[22m")
     expect(ansiStyle.bold("x")).toBe("\x1b[1mx\x1b[22m")
+    expect(ansiStyle.inverse("x")).toBe("\x1b[7mx\x1b[27m")
     expect(ansiStyle.red("x")).toBe("\x1b[31mx\x1b[39m")
     expect(ansiStyle.white("x")).toBe("\x1b[37mx\x1b[39m")
     expect(ansiStyle.gray("x")).toBe("\x1b[90mx\x1b[39m")
@@ -37,6 +38,8 @@ describe("ansi helpers", () => {
     expect(ANSI_CODES.ERASE_LINE).toBe("\x1b[2K")
     expect(ANSI_CODES.BOLD).toBe("\x1b[1m")
     expect(ANSI_CODES.DIM).toBe("\x1b[2m")
+    expect(ANSI_CODES.INVERSE).toBe("\x1b[7m")
+    expect(ANSI_CODES.INVERSE_CLOSE).toBe("\x1b[27m")
     expect(ANSI_CODES.BRIGHT_BLACK).toBe("\x1b[90m")
     expect(ANSI_CODES.DARK_GRAY).toBe("\x1b[38;5;240m")
     expect(ANSI_CODES.LIGHT_GRAY).toBe("\x1b[38;5;246m")
