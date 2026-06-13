@@ -16,14 +16,14 @@
  * The fields read off `usage` mirror the live wire shape from Claude Code
  * 2.1.118 (verified against `~/.node-net-dbg/...`):
  *
- *     "usage": {
+ *     "usage": \{
  *       "input_tokens": 1,
  *       "cache_creation_input_tokens": 419,
  *       "cache_read_input_tokens": 38789,
- *       "cache_creation": { "ephemeral_5m_input_tokens": 0,
- *                           "ephemeral_1h_input_tokens": 419 },
+ *       "cache_creation": \{ "ephemeral_5m_input_tokens": 0,
+ *                           "ephemeral_1h_input_tokens": 419 \},
  *       "output_tokens": 1
- *     }
+ *     \}
  */
 
 import { findModel } from "./llm/model-registry.ts"

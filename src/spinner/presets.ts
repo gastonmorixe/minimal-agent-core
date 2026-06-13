@@ -19,10 +19,10 @@ export const DEFAULT_NERD_ICON: IconSpec = ICON_DOT_SMALL
 
 /**
  * Ships:
- * - `agent.thinking`            → breathing dot `· ∙ • ● • ∙` @ 160ms
+ * - `agent.thinking`            → breathing dot `· ∙ • ● • ∙` at 160ms
  *                                  (`steadyColor`: 1 hue per full breath)
  * - `tool.running`              → big/small square size-pulse `◼ ↔ ◾`
- *                                  @ 500ms, rainbow per frame
+ *                                  at 500ms, rainbow per frame
  * - `network.request`           → blinking filled dot `●` (rainbow per cycle)
  * - `auth.refresh`              → blinking `nf-md-lock` (rainbow per cycle)
  * - `agent.reflection-cooldown` → blinking pause `⏸` (rainbow per cycle)

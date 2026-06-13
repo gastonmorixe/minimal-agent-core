@@ -10,9 +10,9 @@
  * is fine); CODE — identifiers and string literals, where model ids and
  * API hosts live — may not.
  *
- * THE RATCHET: `LEGACY_VIOLATION_BASELINE` is the frozen list of files that
- * already violated the rule when this test landed (dominated by the legacy
- * Anthropic client stack awaiting Wave-4 dissolution — see
+ * THE RATCHET: `LEGACY_PROVIDER_TOKEN_BASELINE` is the frozen list of files
+ * that already violated the rule when this test landed (dominated by the
+ * legacy Anthropic client stack awaiting Wave-4 dissolution — see
  * docs/changes/2026-06-09-fable-5-hardening-and-headers-decoupling.md).
  * The assertion is exact-set equality, so BOTH directions fail fast:
  *
@@ -22,10 +22,14 @@
  *   - A baseline file gets cleaned → FAIL: delete it from the baseline.
  *     The list only shrinks; cleanups can never silently regress.
  *
+ * Fast check:
+ *
+ *   bun test src/architecture.provider-decoupling.test.ts
+ *
  * Scanner internals live in `src/architecture/provider-scan.ts` so tooling
  * can reuse them. To regenerate the violation set after intentional moves:
  *
- *   bun -e 'import("./src/architecture/provider-scan.ts").then(m =>
+ *   bun -e 'import("./src/architecture/provider-scan.ts").then(m =\>
  *     console.log(JSON.stringify(m.scanProviderTokenViolations("src",
  *       new Set(["architecture.provider-decoupling.test.ts",
  *                "architecture/provider-scan.ts"])), null, 2)))'
@@ -36,120 +40,25 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import {
+  LEGACY_PROVIDER_TOKEN_BASELINE,
+  PROVIDER_SCAN_EXEMPT,
+} from "./architecture/provider-baseline.ts"
+import {
   PROVIDER_NAME_RE,
   scanProviderTokenViolations,
   tsFilesUnder,
 } from "./architecture/provider-scan.ts"
 
 const SRC_ROOT = join(import.meta.dirname)
-/**
- * This test + the scanner must name the tokens; both are exempt. The
- * plugin-decoupling ratchet's frozen baseline must name plugin file paths
- * (`llm-anthropic/adapter.ts`, ...), which unavoidably contain provider
- * names — same category, same exemption.
- */
-const EXEMPT: ReadonlySet<string> = new Set([
-  "architecture.provider-decoupling.test.ts",
-  "architecture/provider-scan.ts",
-  "architecture.plugin-decoupling.test.ts",
-])
 
-/**
- * Frozen legacy violations. Dissolution waves shrink this list to empty;
- * every removal is a reviewed edit here. DO NOT ADD ENTRIES — new provider
- * code goes in the provider's plugin.
- */
-const LEGACY_VIOLATION_BASELINE: ReadonlySet<string> = new Set([
-  // The legacy Anthropic wire module + its direct tests.
-  "headers.ts",
-  "headers.test.ts",
-  "headers.characterization.test.ts",
-  // Legacy Anthropic client stack.
-  "client.ts",
-  "client.test.ts",
-  "client.max-tokens-salvage.test.ts",
-  "client.stream-watchdog.test.ts",
-  "client.text-stop.test.ts",
-  "client.transport-contract.test.ts",
-  "client/debug.ts",
-  "client/list-models.ts",
-  "client/quota.ts",
-  // OAuth/identity for claude.ai plan auth (dissolves with the stack).
-  "auth.ts",
-  "auth.test.ts",
-  "auth-store.ts",
-  "auth-store.test.ts",
-  "metadata.ts",
-  "metadata.test.ts",
-  "oauth-login.ts",
-  "oauth-login.test.ts",
-  "commands/login.ts",
-  // Anthropic rate tables + registry vendor-extension keys pending
-  // extraction to the plugin.
-  "llm/model-registry.ts",
-  "llm/provider.ts",
-  // Neutral seams still carrying provider defaults/heuristics in code.
-  "llm/adapter-legacy.ts",
-  "llm/canonical-request.ts",
-  "llm/transport/select-transport.ts",
-  "llm/transport/canonical-send.ts",
-  "media/ingest.ts", // deprecated buildAnthropicUserContent alias (one release)
-  // Agent/UI layers still branching on legacy client specifics.
-  "agent.ts",
-  "index.ts",
-  // Tests of all of the above (fixtures use real model ids/headers).
-  "agent.canonical-dispatch.test.ts",
-  "agent.max-tokens-budget.test.ts",
-  "agent.preflight.test.ts",
-  "agent.read-media.test.ts",
-  "agent.thinking-display.test.ts",
-  "agent.turn-attachments.test.ts",
-  "agent/preflight-pipeline.test.ts",
-  "cache.test.ts",
-  "cli-args.test.ts",
-  "commands/sessions.test.ts",
-  "config.test.ts",
-  "dump-command.e2e.test.ts",
-  "e2e-smoke.test.ts",
-  "jsonc.test.ts",
-  "llm/errors.test.ts",
-  "llm/adapter-legacy-media.test.ts",
-  "llm/adapter-legacy-salvage.test.ts",
-  "llm/adapter-legacy-usage.test.ts",
-  "llm/llm.test.ts",
-  "llm/model-info.test.ts",
-  "llm/model-label.test.ts",
-  "llm/provider-discovery.test.ts",
-  "llm/provider-session.test.ts",
-  "llm/system-prompt.test.ts",
-  "llm/transport/auth-refresh.test.ts",
-  "llm/transport/canonical-send.test.ts",
-  "llm/transport/retry.test.ts",
-  "llm/transport/select-transport.test.ts",
-  "llm/transport/watchdog.test.ts",
-  "net-dbg.test.ts",
-  "network/network.test.ts",
-  "network/activity-observer.test.ts",
-  "network/http3-transport.test.ts",
-  "network/transient-error.test.ts",
-  "non-interactive-defaults.test.ts",
-  "plugins/agent-context.test.ts",
-  "plugins/loader.test.ts",
-  "session-replay.test.ts",
-  "session-restore.test.ts",
-  "session-store.test.ts",
-  "session-usage.test.ts",
-  "status.test.ts",
-  "usage-stats.test.ts",
-  "ui/choice-modal.test.ts",
-  "ui/compositor.test.ts",
-  "usage-render.test.ts",
-])
+function providerTokenViolations(): string[] {
+  return scanProviderTokenViolations(SRC_ROOT, PROVIDER_SCAN_EXEMPT)
+}
 
 describe("architecture: provider decoupling", () => {
   it("no provider names in src/ file or directory names", () => {
     const offenders = tsFilesUnder(SRC_ROOT).filter(
-      (f) => !EXEMPT.has(f) && PROVIDER_NAME_RE.test(f),
+      (f) => !PROVIDER_SCAN_EXEMPT.has(f) && PROVIDER_NAME_RE.test(f),
     )
     expect(
       offenders,
@@ -158,10 +67,10 @@ describe("architecture: provider decoupling", () => {
   })
 
   it("provider tokens appear in core CODE only inside the frozen legacy baseline (ratchet)", () => {
-    const violations = new Set(scanProviderTokenViolations(SRC_ROOT, EXEMPT))
+    const violations = new Set(providerTokenViolations())
 
-    const newLeaks = [...violations].filter((f) => !LEGACY_VIOLATION_BASELINE.has(f)).sort()
-    const cleaned = [...LEGACY_VIOLATION_BASELINE].filter((f) => !violations.has(f)).sort()
+    const newLeaks = [...violations].filter((f) => !LEGACY_PROVIDER_TOKEN_BASELINE.has(f)).sort()
+    const cleaned = [...LEGACY_PROVIDER_TOKEN_BASELINE].filter((f) => !violations.has(f)).sort()
 
     expect(
       newLeaks,
@@ -173,7 +82,7 @@ describe("architecture: provider decoupling", () => {
     expect(
       cleaned,
       `These files no longer contain provider tokens — ratchet down: remove them from ` +
-        `LEGACY_VIOLATION_BASELINE so the cleanup can never regress: ${cleaned.join(", ")}`,
+        `LEGACY_PROVIDER_TOKEN_BASELINE so the cleanup can never regress: ${cleaned.join(", ")}`,
     ).toEqual([])
   })
 })

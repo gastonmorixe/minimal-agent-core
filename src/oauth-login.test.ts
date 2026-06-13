@@ -1,5 +1,5 @@
 /**
- * Unit tests for {@link ./oauth-login.ts}.
+ * Unit tests for `./oauth-login.ts`.
  *
  * Covers:
  *   - PKCE crypto: verifier shape, challenge SHA-256, state randomness
@@ -17,21 +17,18 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { type CredentialsData, readCredentials, writeCredentials } from "./auth.ts"
 import { AuthStore } from "./auth-store.ts"
+import type { OAuthLoginProvider } from "./llm/provider-plugin.ts"
 import { NetworkClient, type NetworkRequest, NetworkResponse } from "./network/index.ts"
 import type { NetworkTransport } from "./network/types.ts"
 import {
   base64UrlEncode,
   buildAuthUrl,
-  CLAUDE_AI_AUTHORIZE_URL,
   exchangeCodeForTokens,
   generateCodeChallenge,
   generateCodeVerifier,
   generateState,
   installCredentials,
-  LOGIN_SCOPES,
-  MANUAL_REDIRECT_URL,
   parsePastedCode,
   runOAuthLogin,
   type TokenExchangeResponse,
@@ -74,6 +71,95 @@ class CannedTransport implements NetworkTransport {
         },
       }),
     })
+  }
+}
+
+const TEST_AUTHORIZE_URL = "https://login.example.test/oauth/authorize"
+const TEST_TOKEN_URL = "https://login.example.test/oauth/token"
+const TEST_REDIRECT_URI = "https://login.example.test/oauth/code/callback"
+const TEST_SCOPES = ["profile", "inference"] as const
+const tempDirs: string[] = []
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+function tempStore(prefix = "ma-oauth-test-"): AuthStore {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  tempDirs.push(dir)
+  return new AuthStore({ path: join(dir, "auth.jsonc") })
+}
+
+const fakeOAuthProvider: OAuthLoginProvider = {
+  serviceId: "test-oauth",
+  displayName: "Test OAuth",
+  config() {
+    return {
+      clientId: "test-client",
+      authorizeUrl: TEST_AUTHORIZE_URL,
+      tokenUrl: TEST_TOKEN_URL,
+      redirectUri: TEST_REDIRECT_URI,
+      scopes: TEST_SCOPES,
+      authorizeParams: { code: "true" },
+      loginHintParam: "login_hint",
+    }
+  },
+  buildCredential(response) {
+    const accessToken = String(response.access_token)
+    const refreshToken = String(response.refresh_token)
+    const scopes =
+      typeof response.scope === "string" ? response.scope.split(" ").filter(Boolean) : []
+    const expiresAt = Date.now() + Number(response.expires_in) * 1000
+    const account =
+      typeof response.account === "object" && response.account !== null
+        ? (response.account as { uuid?: unknown; email_address?: unknown })
+        : undefined
+    const organization =
+      typeof response.organization === "object" && response.organization !== null
+        ? (response.organization as { uuid?: unknown })
+        : undefined
+    return {
+      credential: {
+        serviceId: this.serviceId,
+        displayName: this.displayName,
+        secrets: {
+          tokenType: "oauth",
+          accessToken,
+          refreshToken,
+          expiresAt,
+          scopes,
+          ...(account?.uuid ? { accountUuid: String(account.uuid) } : {}),
+          ...(account?.email_address ? { emailAddress: String(account.email_address) } : {}),
+          ...(organization?.uuid ? { organizationUuid: String(organization.uuid) } : {}),
+        },
+      },
+      result: {
+        accessToken,
+        refreshToken,
+        expiresAt,
+        scopes,
+        ...(account?.uuid && account.email_address
+          ? { account: { uuid: String(account.uuid), emailAddress: String(account.email_address) } }
+          : {}),
+        ...(organization?.uuid ? { organization: { uuid: String(organization.uuid) } } : {}),
+      },
+    }
+  },
+}
+
+function buildUrlInput(overrides: Partial<Parameters<typeof buildAuthUrl>[0]> = {}) {
+  return {
+    clientId: "test-client",
+    codeChallenge: "CHALLENGE",
+    state: "STATE",
+    authorizeUrl: TEST_AUTHORIZE_URL,
+    redirectUri: TEST_REDIRECT_URI,
+    scopes: TEST_SCOPES,
+    authorizeParams: { code: "true" },
+    loginHintParam: "login_hint",
+    ...overrides,
   }
 }
 
@@ -132,15 +218,11 @@ describe("generateCodeVerifier / generateCodeChallenge", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildAuthUrl", () => {
-  const baseInput = {
-    clientId: "test-client",
-    codeChallenge: "CHALLENGE",
-    state: "STATE",
-  }
+  const baseInput = buildUrlInput()
 
-  it("uses CLAUDE_AI_AUTHORIZE_URL by default", () => {
+  it("uses the provider authorize URL", () => {
     const url = buildAuthUrl(baseInput)
-    expect(url.startsWith(CLAUDE_AI_AUTHORIZE_URL + "?")).toBe(true)
+    expect(url.startsWith(TEST_AUTHORIZE_URL + "?")).toBe(true)
   })
 
   it("emits all required PKCE params with code_challenge_method=S256", () => {
@@ -148,7 +230,7 @@ describe("buildAuthUrl", () => {
     expect(url.searchParams.get("code")).toBe("true") // Max upsell hint
     expect(url.searchParams.get("client_id")).toBe("test-client")
     expect(url.searchParams.get("response_type")).toBe("code")
-    expect(url.searchParams.get("redirect_uri")).toBe(MANUAL_REDIRECT_URL)
+    expect(url.searchParams.get("redirect_uri")).toBe(TEST_REDIRECT_URI)
     expect(url.searchParams.get("code_challenge")).toBe("CHALLENGE")
     expect(url.searchParams.get("code_challenge_method")).toBe("S256")
     expect(url.searchParams.get("state")).toBe("STATE")
@@ -156,7 +238,7 @@ describe("buildAuthUrl", () => {
 
   it("requests the union scope set in deterministic order", () => {
     const url = new URL(buildAuthUrl(baseInput))
-    expect(url.searchParams.get("scope")).toBe(LOGIN_SCOPES.join(" "))
+    expect(url.searchParams.get("scope")).toBe(TEST_SCOPES.join(" "))
   })
 
   it("includes login_hint only when provided", () => {
@@ -171,6 +253,7 @@ describe("buildAuthUrl", () => {
         ...baseInput,
         authorizeUrl: "https://example.com/oauth/authorize",
         redirectUri: "http://localhost:9999/callback",
+        scopes: ["a", "b"],
       }),
     )
     expect(url.origin + url.pathname).toBe("https://example.com/oauth/authorize")
@@ -290,6 +373,7 @@ describe("exchangeCodeForTokens", () => {
         codeVerifier: "secret-verifier",
         tokenUrl: "https://example.com/token",
         clientId: "C",
+        redirectUri: "https://example.com/cb",
       },
       new NetworkClient({ primary: t }),
     )
@@ -308,6 +392,7 @@ describe("exchangeCodeForTokens", () => {
           codeVerifier: "V",
           tokenUrl: "https://example.com/token",
           clientId: "C",
+          redirectUri: "https://example.com/cb",
         },
         new NetworkClient({ primary: t }),
       ),
@@ -324,6 +409,7 @@ describe("exchangeCodeForTokens", () => {
           codeVerifier: "Z",
           tokenUrl: "https://example.com/token",
           clientId: "C",
+          redirectUri: "https://example.com/cb",
         },
         new NetworkClient({ primary: t }),
       ),
@@ -336,8 +422,8 @@ describe("exchangeCodeForTokens", () => {
 // ---------------------------------------------------------------------------
 
 describe("installCredentials", () => {
-  it("writes CredentialsData with claudeAiOauth + oauthAccount via writeCredentials", () => {
-    let written: CredentialsData | null = null
+  it("persists the provider-built credential through AuthStore", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
     const resp: TokenExchangeResponse = {
       access_token: "AT",
       refresh_token: "RT",
@@ -346,23 +432,22 @@ describe("installCredentials", () => {
       account: { uuid: "acc-uuid", email_address: "u@example.com" },
       organization: { uuid: "org-uuid" },
     }
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      const result = installCredentials(resp, { store }, fakeOAuthProvider)
+      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
 
-    const result = installCredentials(resp, {
-      writeCredentials: (data) => {
-        written = data
-      },
-    })
-
-    expect(written).not.toBeNull()
-    expect(written!.claudeAiOauth?.accessToken).toBe("AT")
-    expect(written!.claudeAiOauth?.refreshToken).toBe("RT")
-    expect(written!.claudeAiOauth?.scopes).toEqual(["user:profile", "user:inference"])
-    expect(written!.claudeAiOauth?.expiresAt).toBeGreaterThan(Date.now())
-    expect(written!.oauthAccount?.accountUuid).toBe("acc-uuid")
-    expect(written!.oauthAccount?.organizationUuid).toBe("org-uuid")
-    expect(written!.oauthAccount?.emailAddress).toBe("u@example.com")
-    expect(result.account?.uuid).toBe("acc-uuid")
-    expect(result.organization?.uuid).toBe("org-uuid")
+      expect(secrets.accessToken).toBe("AT")
+      expect(secrets.refreshToken).toBe("RT")
+      expect(secrets.scopes).toEqual(["user:profile", "user:inference"])
+      expect(secrets.accountUuid).toBe("acc-uuid")
+      expect(secrets.organizationUuid).toBe("org-uuid")
+      expect(secrets.emailAddress).toBe("u@example.com")
+      expect(result.account?.uuid).toBe("acc-uuid")
+      expect(result.organization?.uuid).toBe("org-uuid")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it("computes expiresAt = now + expires_in*1000 (within tolerance)", () => {
@@ -373,7 +458,8 @@ describe("installCredentials", () => {
         refresh_token: "RT",
         expires_in: 60,
       } as TokenExchangeResponse,
-      { writeCredentials: () => {} },
+      { store: tempStore("ma-oauth-install-") },
+      fakeOAuthProvider,
     )
     const after = Date.now()
     expect(result.expiresAt).toBeGreaterThanOrEqual(before + 60_000)
@@ -381,43 +467,49 @@ describe("installCredentials", () => {
   })
 
   it("omits oauthAccount entirely when the response has no account or organization", () => {
-    let written: CredentialsData | null = null
-    installCredentials(
-      {
-        access_token: "AT",
-        refresh_token: "RT",
-        expires_in: 3600,
-        // no `account`, no `organization`
-      },
-      {
-        writeCredentials: (data) => {
-          written = data
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      installCredentials(
+        {
+          access_token: "AT",
+          refresh_token: "RT",
+          expires_in: 3600,
+          // no `account`, no `organization`
         },
-      },
-    )
-    expect(written).not.toBeNull()
-    expect(written!.oauthAccount).toBeUndefined()
-    expect(written!.claudeAiOauth?.accessToken).toBe("AT")
+        { store },
+        fakeOAuthProvider,
+      )
+      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      expect(secrets.accountUuid).toBeUndefined()
+      expect(secrets.organizationUuid).toBeUndefined()
+      expect(secrets.accessToken).toBe("AT")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it("records account uuid + email even without an organization", () => {
-    let written: CredentialsData | null = null
-    installCredentials(
-      {
-        access_token: "AT",
-        refresh_token: "RT",
-        expires_in: 3600,
-        account: { uuid: "acc-only", email_address: "a@b.example" },
-      },
-      {
-        writeCredentials: (data) => {
-          written = data
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      installCredentials(
+        {
+          access_token: "AT",
+          refresh_token: "RT",
+          expires_in: 3600,
+          account: { uuid: "acc-only", email_address: "a@b.example" },
         },
-      },
-    )
-    expect(written!.oauthAccount?.accountUuid).toBe("acc-only")
-    expect(written!.oauthAccount?.emailAddress).toBe("a@b.example")
-    expect(written!.oauthAccount?.organizationUuid).toBeUndefined()
+        { store },
+        fakeOAuthProvider,
+      )
+      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      expect(secrets.accountUuid).toBe("acc-only")
+      expect(secrets.emailAddress).toBe("a@b.example")
+      expect(secrets.organizationUuid).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it("persists end-to-end through a real AuthStore round-trip", () => {
@@ -433,13 +525,14 @@ describe("installCredentials", () => {
           account: { uuid: "acc-uuid", email_address: "u@example.com" },
           organization: { uuid: "org-uuid" },
         },
-        { writeCredentials: (data) => writeCredentials(data, store) },
+        { store },
+        fakeOAuthProvider,
       )
-      const creds = readCredentials(store)!
-      expect(creds.claudeAiOauth?.accessToken).toBe("AT")
-      expect(creds.oauthAccount?.accountUuid).toBe("acc-uuid")
-      expect(creds.oauthAccount?.organizationUuid).toBe("org-uuid")
-      expect(creds.oauthAccount?.emailAddress).toBe("u@example.com")
+      const secrets = store.getSecrets("test-oauth", "Test OAuth")!
+      expect(secrets.accessToken).toBe("AT")
+      expect(secrets.accountUuid).toBe("acc-uuid")
+      expect(secrets.organizationUuid).toBe("org-uuid")
+      expect(secrets.emailAddress).toBe("u@example.com")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -451,11 +544,6 @@ describe("installCredentials", () => {
 // ---------------------------------------------------------------------------
 
 describe("runOAuthLogin", () => {
-  afterEach(() => {
-    // Tests fiddle with CLAUDE_CODE_OAUTH_CLIENT_ID via overrides only,
-    // never via env mutation. Nothing to reset.
-  })
-
   it("happy path: paste once, exchange succeeds, install runs", async () => {
     const tokenSrv = new CannedTransport(
       200,
@@ -514,6 +602,7 @@ describe("runOAuthLogin", () => {
     expect(state.length).toBeGreaterThan(0)
 
     const outcome = await runOAuthLogin({
+      provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       openUrl: async (u) => {
         openedUrl = u
@@ -522,11 +611,7 @@ describe("runOAuthLogin", () => {
       display: (m) => messages.push(m),
       readPaste: async () => `AUTHCODE#${orchState}`,
       randomBytes: orchestratorRand,
-      install: {
-        writeCredentials: (data) => {
-          installedAccount = data.oauthAccount?.accountUuid
-        },
-      },
+      install: { store: tempStore("ma-oauth-run-") },
     })
 
     expect(outcome.ok).toBe(true)
@@ -536,6 +621,7 @@ describe("runOAuthLogin", () => {
     }
     expect(openedUrl).toContain("client_id=")
     expect(openedUrl).toContain(`state=${encodeURIComponent(orchState)}`)
+    installedAccount = outcome.ok ? outcome.result.account?.uuid : undefined
     expect(installedAccount).toBe("u")
     // Verify the body sent to the token server contains the orch verifier.
     expect(tokenSrv.seen.length).toBe(1)
@@ -573,11 +659,12 @@ describe("runOAuthLogin", () => {
     const pastes = ["nope", `OK#${orchState}`]
     const messages: string[] = []
     const outcome = await runOAuthLogin({
+      provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
       display: (m) => messages.push(m),
-      install: { writeCredentials: () => {} },
+      install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(true)
     expect(messages.some((m) => /Invalid code/.test(m))).toBe(true)
@@ -605,11 +692,12 @@ describe("runOAuthLogin", () => {
     const pastes = ["CODE#WRONG_STATE", `CODE#${orchState}`]
     const messages: string[] = []
     const outcome = await runOAuthLogin({
+      provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => pastes.shift() ?? "",
       randomBytes: orchestratorRand,
       display: (m) => messages.push(m),
-      install: { writeCredentials: () => {} },
+      install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(true)
     expect(messages.some((m) => /State mismatch/i.test(m))).toBe(true)
@@ -626,11 +714,12 @@ describe("runOAuthLogin", () => {
     const tokenSrv = new CannedTransport(200, "{}")
 
     const outcome = await runOAuthLogin({
+      provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => "nope",
       maxAttempts: 2,
       randomBytes: orchestratorRand,
-      install: { writeCredentials: () => {} },
+      install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) {
@@ -657,10 +746,11 @@ describe("runOAuthLogin", () => {
     const tokenSrv = new CannedTransport(401, '{"error":"invalid_grant"}')
     await expect(
       runOAuthLogin({
+        provider: fakeOAuthProvider,
         networkClient: new NetworkClient({ primary: tokenSrv }),
         readPaste: async () => `BAD#${orchState}`,
         randomBytes: orchestratorRand,
-        install: { writeCredentials: () => {} },
+        install: { store: tempStore("ma-oauth-run-") },
       }),
     ).rejects.toThrow(/invalid authorization code/i)
   })
@@ -686,10 +776,11 @@ describe("runOAuthLogin", () => {
     // No `openUrl` in deps — the function should still complete using the
     // pasted code path. Just asserting "no throw".
     const outcome = await runOAuthLogin({
+      provider: fakeOAuthProvider,
       networkClient: new NetworkClient({ primary: tokenSrv }),
       readPaste: async () => `OK#${orchState}`,
       randomBytes: orchestratorRand,
-      install: { writeCredentials: () => {} },
+      install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(true)
   })

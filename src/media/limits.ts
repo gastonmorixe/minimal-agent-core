@@ -72,8 +72,7 @@ export function kindModality(kind: MediaKind): keyof ModalitySupport {
     case "document":
       return "pdf"
     default: {
-      const _exhaustive: never = kind
-      throw new Error(`unhandled media kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled media kind: ${String(kind satisfies never)}`)
     }
   }
 }

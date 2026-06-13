@@ -1,21 +1,24 @@
-import { describe, expect, it } from "bun:test"
-
-import type { Task } from "../plugins/tasks/lib/parse.ts"
+import { afterEach, describe, expect, it } from "bun:test"
 
 import {
+  clearReplayRenderers,
   deriveDisplayFallback,
   deriveEditDisplay,
   deriveTaskDisplay,
   deriveWriteDisplay,
-  snapshotTasksAt,
+  type ReplaySidecarTask,
+  type ReplayToolRenderInput,
+  registerReplayRenderer,
 } from "./session-replay-derivers.ts"
 
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "")
 }
 
-/** Build a Task fixture; defaults match the live store's v2 shape. */
-function task(overrides: Partial<Task> & Pick<Task, "id" | "title">): Task {
+/** Build a sidecar-task fixture using the CORE-LOCAL structural type. */
+function sidecarTask(
+  overrides: Partial<ReplaySidecarTask> & Pick<ReplaySidecarTask, "id" | "title">,
+): ReplaySidecarTask {
   return {
     parent: null,
     status: "todo",
@@ -30,10 +33,10 @@ function task(overrides: Partial<Task> & Pick<Task, "id" | "title">): Task {
 }
 
 describe("deriveTaskDisplay", () => {
-  // Structural fallback (no sidecar) : the deriver splits the
-  // model-facing content text into header / body / footer. This is the
-  // path used when no per-session `<sid>.tasks.jsonl` sidecar is
-  // available (tests, pre-v2 sessions, plugin disabled).
+  // Structural fallback: the deriver splits the model-facing content
+  // text into header / body / footer. This is the CORE-LOCAL plain-text
+  // path used when no plugin replay renderer is registered (tests,
+  // plugin disabled, non-resume runs).
   it("splits a 3+ line content into header / body / footer", () => {
     const content = [
       "+ added 3 tasks · 0/3 · 2026-05-28 13:50:22",
@@ -120,253 +123,130 @@ describe("deriveTaskDisplay", () => {
   })
 })
 
-describe("deriveTaskDisplay — sidecar-driven re-render (colorized path)", () => {
-  // When the per-session `.tasks.jsonl` sidecar is supplied, the
-  // deriver feeds a SNAPSHOT of the task tree (at the call's wall-clock
-  // cutoff) into the plugin's `renderToolDisplay({ansi: true})` so the
-  // body lands in scrollback with the same hot-pink / lime / sky-blue
-  // styling the live agent drew. This is what the user asked for in
-  // "restored tasks are missing the beautiful styling and colors".
-  const t0 = "2026-05-28T08:00:00-04:00"
-  const t1 = "2026-05-28T08:05:00-04:00"
-  const t2 = "2026-05-28T08:10:00-04:00"
-  const callTs = new Date("2026-05-28T08:15:00-04:00")
+describe("replay renderer seam (loader-registered plugin renderers)", () => {
+  // The seam: a plugin may register a per-tool replay renderer (the
+  // loader resolves it from the plugin manifest's `replayRenderers`
+  // declaration). `deriveDisplayFallback` gives the registered renderer
+  // first crack at a row; `undefined` / a throw falls back to the
+  // core-local built-ins (content-split for Task, synthesized diffs for
+  // Edit / Write, nothing for unknown tools).
+  afterEach(() => {
+    clearReplayRenderers()
+  })
 
-  function threeDoneTasks(): Task[] {
-    return [
-      task({
-        id: "aaa",
-        title: "first",
-        status: "done",
-        created_at: t0,
-        started_at: t0,
-        done_at: t1,
-        active_ms: 300000,
-      }),
-      task({
-        id: "bbb",
-        title: "second",
-        status: "done",
-        created_at: t0,
-        started_at: t1,
-        done_at: t2,
-        active_ms: 300000,
-      }),
-      task({
-        id: "ccc",
-        title: "third",
-        status: "done",
-        created_at: t0,
-        started_at: t2,
-        done_at: callTs.toISOString(),
-        active_ms: 300000,
-      }),
-    ]
-  }
-
-  it("emits an ANSI-colored body when sidecar + input are supplied", () => {
-    const d = deriveTaskDisplay({
-      content: "(model-facing content goes here)",
-      input: { action: "done", id: "#ccc" },
+  it("routes a row through a registered renderer (round-trip with a fake plugin handler)", () => {
+    const seen: ReplayToolRenderInput[] = []
+    registerReplayRenderer("FakeTool", (ctx) => {
+      seen.push(ctx)
+      return { displayHeader: "fake hdr", display: `FAKE:${ctx.content}`, displayFooter: "ftr" }
+    })
+    const callTs = new Date("2026-05-28T08:15:00-04:00")
+    const sidecar = [sidecarTask({ id: "aaa", title: "first", status: "done" })]
+    const d = deriveDisplayFallback({
+      toolName: "FakeTool",
+      input: { action: "x" },
+      content: "model-facing content",
+      isError: false,
       callTs,
-      sidecarTasks: threeDoneTasks(),
+      sidecarTasks: sidecar,
     })
-    expect(d?.display).toBeDefined()
-    // ANSI escapes present in the body. The plain content-split path
-    // would produce 0 escapes for a body of model-facing text.
-    expect(d!.display!).toMatch(/\x1b\[/)
-    // Status icons + ids both render after the gutter.
-    expect(stripAnsi(d!.display!)).toContain("✔")
-    expect(stripAnsi(d!.display!)).toContain("#aaa")
-    expect(stripAnsi(d!.display!)).toContain("#bbb")
-    expect(stripAnsi(d!.display!)).toContain("#ccc")
+    expect(d).toEqual({
+      displayHeader: "fake hdr",
+      display: "FAKE:model-facing content",
+      displayFooter: "ftr",
+    })
+    // The renderer received exactly the row's data.
+    expect(seen).toHaveLength(1)
+    expect(seen[0].input).toEqual({ action: "x" })
+    expect(seen[0].content).toBe("model-facing content")
+    expect(seen[0].callTs).toBe(callTs)
+    expect(seen[0].sidecarTasks).toBe(sidecar)
   })
 
-  it("`action=done` with all tasks done upgrades to ALL DONE header", () => {
-    const d = deriveTaskDisplay({
-      content: "(noise)",
-      input: { action: "done", id: "#ccc" },
-      callTs,
-      sidecarTasks: threeDoneTasks(),
-    })
-    // The header carries the celebratory ALL DONE row, matching the
-    // live plugin's `marked_done → all_done` upgrade when the post-
-    // mutation snapshot has every top-level task done.
-    expect(stripAnsi(d!.displayHeader!)).toMatch(/ALL DONE · 3\/3/)
-  })
-
-  it("per-call cutoff reconstructs status (aaa doing, bbb/ccc todo at +1m)", () => {
-    // Cutoff at t0+1min:
-    //   aaa: started_at=t0 (≤ cutoff), done_at=t1 (> cutoff) → doing
-    //   bbb: started_at=t1 (> cutoff) → todo
-    //   ccc: started_at=t2 (> cutoff) → todo
-    // Before this fix, all three would render in their `done` final
-    // status because the sidecar's mutated-in-place state has them
-    // done. With the per-call cutoff, history is faithful.
-    const earlyCutoff = new Date("2026-05-28T08:01:00-04:00")
-    const d = deriveTaskDisplay({
-      content: "(noise)",
-      input: { action: "start", id: "#aaa" },
-      callTs: earlyCutoff,
-      sidecarTasks: threeDoneTasks(),
-    })
-    const plain = stripAnsi(d!.display!)
-    // All three are visible (created at t0 = before cutoff).
-    expect(plain).toContain("#aaa")
-    expect(plain).toContain("#bbb")
-    expect(plain).toContain("#ccc")
-    // Per-call status reconstruction.
-    const snap = snapshotTasksAt(threeDoneTasks(), earlyCutoff)
-    expect(snap.find((t) => t.id === "aaa")?.status).toBe("doing")
-    expect(snap.find((t) => t.id === "bbb")?.status).toBe("todo")
-    expect(snap.find((t) => t.id === "ccc")?.status).toBe("todo")
-  })
-
-  it("falls back to content-split when sidecar is empty (no usable snapshot)", () => {
-    const d = deriveTaskDisplay({
-      content: "HDR LINE\n  body\nFTR LINE",
+  it("a registered renderer overrides the built-in Task content-split", () => {
+    registerReplayRenderer("Task", () => ({ display: "PLUGIN BODY" }))
+    const d = deriveDisplayFallback({
+      toolName: "Task",
       input: { action: "list" },
-      sidecarTasks: [],
+      content: "hdr\nbody\nftr",
+      isError: false,
     })
-    // Content-split path active : header/body/footer match the
-    // structural split.
-    expect(d?.displayHeader).toBe("HDR LINE")
-    expect(d?.display).toBe("  body")
-    expect(d?.displayFooter).toBe("FTR LINE")
+    expect(d).toEqual({ display: "PLUGIN BODY" })
   })
 
-  it("falls back to content-split when no input is provided (paranoia)", () => {
-    const d = deriveTaskDisplay({
-      content: "HDR\nBODY\nFTR",
-      sidecarTasks: threeDoneTasks(),
-      // no `input`, so the plugin renderer can't pick an action verb
+  it("renderer returning undefined falls back to the core content-split", () => {
+    registerReplayRenderer("Task", () => undefined)
+    const d = deriveDisplayFallback({
+      toolName: "Task",
+      input: { action: "list" },
+      content: "hdr\nbody\nftr",
+      isError: false,
     })
-    // Content-split path active.
-    expect(d?.displayHeader).toBe("HDR")
-    expect(d?.displayFooter).toBe("FTR")
+    expect(d?.displayHeader).toBe("hdr")
+    expect(d?.display).toBe("body")
+    expect(d?.displayFooter).toBe("ftr")
   })
 
-  it("add_many with empty sidecar still renders (special-case so initial calls work)", () => {
-    // The sidecar is empty BEFORE any task gets added, but an
-    // add_many call's render is meaningful (the count header).
-    const d = deriveTaskDisplay({
-      content: "(noise)",
-      input: { action: "add_many", titles: ["a", "b"] },
-      sidecarTasks: [],
+  it("renderer throwing falls back to the core content-split (a buggy plugin never breaks resume)", () => {
+    registerReplayRenderer("Task", () => {
+      throw new Error("boom")
     })
-    // Sidecar-driven path took over (header is from the plugin renderer,
-    // not the content-split fallback).
-    expect(d?.displayHeader).toBeDefined()
-    expect(stripAnsi(d!.displayHeader!)).toMatch(/added 2 tasks/)
-  })
-})
-
-describe("snapshotTasksAt", () => {
-  // The per-call cutoff machine: time-travel the task list to a
-  // historical wall-clock so the plugin renderer sees the state as it
-  // existed at THAT moment, not the sidecar's current state.
-  it("returns a copy when cutoff is null (current state)", () => {
-    const tasks: Task[] = [task({ id: "a", title: "x", status: "done" })]
-    const snap = snapshotTasksAt(tasks, null)
-    expect(snap.length).toBe(1)
-    expect(snap[0].status).toBe("done")
-    expect(snap).not.toBe(tasks) // a copy, not the same reference
+    const d = deriveDisplayFallback({
+      toolName: "Task",
+      input: { action: "list" },
+      content: "hdr\nbody\nftr",
+      isError: false,
+    })
+    expect(d?.displayHeader).toBe("hdr")
+    expect(d?.display).toBe("body")
+    expect(d?.displayFooter).toBe("ftr")
   })
 
-  it("drops tasks whose created_at is after the cutoff", () => {
-    const tasks: Task[] = [
-      task({ id: "a", title: "early", created_at: "2026-05-28T08:00:00-04:00" }),
-      task({ id: "b", title: "late", created_at: "2026-05-28T09:00:00-04:00" }),
-    ]
-    const snap = snapshotTasksAt(tasks, new Date("2026-05-28T08:30:00-04:00"))
-    expect(snap.length).toBe(1)
-    expect(snap[0].id).toBe("a")
+  it("no renderer registered (plugin absent) → core fallback path", () => {
+    const d = deriveDisplayFallback({
+      toolName: "Task",
+      input: { action: "list" },
+      content: "hdr\nbody\nftr",
+      isError: false,
+    })
+    expect(d?.displayHeader).toBe("hdr")
+    expect(d?.display).toBe("body")
+    expect(d?.displayFooter).toBe("ftr")
   })
 
-  it("reconstructs status: done if done_at <= cutoff, doing if started_at <= cutoff, else todo", () => {
-    const t1 = "2026-05-28T08:00:00-04:00"
-    const t2 = "2026-05-28T08:10:00-04:00"
-    const t3 = "2026-05-28T08:20:00-04:00"
-    const tasks: Task[] = [
-      task({
-        id: "a",
-        title: "finished early",
-        status: "done",
-        created_at: t1,
-        started_at: t1,
-        done_at: t2,
-      }),
-      task({
-        id: "b",
-        title: "in progress at cutoff",
-        status: "done",
-        created_at: t1,
-        started_at: t1,
-        done_at: t3,
-      }),
-      task({
-        id: "c",
-        title: "not started at cutoff",
-        status: "done",
-        created_at: t1,
-        started_at: t3,
-        done_at: t3,
-      }),
-    ]
-    const cutoff = new Date("2026-05-28T08:15:00-04:00")
-    const snap = snapshotTasksAt(tasks, cutoff)
-    expect(snap.find((t) => t.id === "a")?.status).toBe("done")
-    expect(snap.find((t) => t.id === "b")?.status).toBe("doing")
-    expect(snap.find((t) => t.id === "c")?.status).toBe("todo")
+  it("error rows never reach the renderer", () => {
+    let called = 0
+    registerReplayRenderer("Task", () => {
+      called += 1
+      return { display: "nope" }
+    })
+    const d = deriveDisplayFallback({
+      toolName: "Task",
+      input: {},
+      content: "Task error: whatever",
+      isError: true,
+    })
+    expect(d).toBeUndefined()
+    expect(called).toBe(0)
   })
 
-  it("clears done_at / started_at on reconstructed doing / todo rows", () => {
-    const tasks: Task[] = [
-      task({
-        id: "a",
-        title: "in flight at cutoff",
-        status: "done",
-        created_at: "2026-05-28T08:00:00-04:00",
-        started_at: "2026-05-28T08:00:00-04:00",
-        done_at: "2026-05-28T08:30:00-04:00",
-      }),
-    ]
-    const snap = snapshotTasksAt(tasks, new Date("2026-05-28T08:15:00-04:00"))
-    expect(snap[0].status).toBe("doing")
-    // done_at must be null since the task isn't done yet at cutoff.
-    expect(snap[0].done_at).toBeNull()
-    // started_at is preserved (the task DID start at this point).
-    expect(snap[0].started_at).toBe("2026-05-28T08:00:00-04:00")
-  })
-
-  it("preserves canceled status as-is (no explicit cancel timestamp to reason from)", () => {
-    const tasks: Task[] = [
-      task({
-        id: "a",
-        title: "abandoned",
-        status: "canceled",
-        created_at: "2026-05-28T08:00:00-04:00",
-      }),
-    ]
-    const snap = snapshotTasksAt(tasks, new Date("2026-05-28T08:30:00-04:00"))
-    expect(snap[0].status).toBe("canceled")
-  })
-
-  it("handles unparseable timestamps gracefully (treats as null)", () => {
-    const tasks: Task[] = [
-      task({
-        id: "a",
-        title: "broken ts",
-        status: "done",
-        created_at: "not-a-date",
-        done_at: "also-not-a-date",
-      }),
-    ]
-    // Should not throw. created_at unparseable → not dropped. done_at
-    // unparseable → status defaults to todo.
-    const snap = snapshotTasksAt(tasks, new Date("2026-05-28T08:30:00-04:00"))
-    expect(snap.length).toBe(1)
-    expect(snap[0].status).toBe("todo")
+  it("register returns an unregister handle; first registration wins until removed", () => {
+    const un = registerReplayRenderer("FakeTool", () => ({ display: "one" }))
+    const d1 = deriveDisplayFallback({
+      toolName: "FakeTool",
+      input: {},
+      content: "c",
+      isError: false,
+    })
+    expect(d1).toEqual({ display: "one" })
+    un()
+    const d2 = deriveDisplayFallback({
+      toolName: "FakeTool",
+      input: {},
+      content: "c",
+      isError: false,
+    })
+    expect(d2).toBeUndefined()
   })
 })
 

@@ -304,7 +304,7 @@ describe("memory plugin v0.3 — closing-the-loop integration", () => {
     )
 
     // The file must exist under tmpHome, not under the real home.
-    expect(projectMemoryPath(process.cwd(), tmpHome).startsWith(tmpHome)).toBe(true)
+    expect(projectMemoryPath(process.cwd(), { home: tmpHome }).startsWith(tmpHome)).toBe(true)
     expect(MemoryStore.project(process.cwd(), { home: tmpHome }).list().length).toBe(1)
   })
 

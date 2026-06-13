@@ -23,6 +23,10 @@ function fail(message: string): TUIResult {
   return { kind: "tool_result", content: message, is_error: true }
 }
 
+/**
+ * Tool handler for `CronCreate`: validates the cron/interval spec and prompt,
+ * then registers the task (recurring or one-shot) in the session store.
+ */
 export default async function cronCreate(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") {
     return fail("Scheduling is disabled (MINIMAL_AGENT_DISABLE_CRON=1).")

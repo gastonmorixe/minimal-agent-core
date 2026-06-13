@@ -104,7 +104,7 @@ export class NetworkActivityTracker {
    *
    *   - `lastChunkAt` MUST be fresh (per-chunk) — otherwise a steady
    *     stream of 50-byte SSE pings within the throttle window would
-   *     look stalled because the last EMIT was >2s ago, even though
+   *     look stalled because the last EMIT was \>2s ago, even though
    *     the wire is healthy.
    *   - The status update is still throttled (default 100ms) so we
    *     don't repaint the row on every TCP frame.

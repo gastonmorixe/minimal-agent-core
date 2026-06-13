@@ -138,9 +138,9 @@ export interface RenderOptions {
   /**
    * Time source for duration-rendering. Defaults to `Date.now()` (epoch
    * ms). Tests inject a fixed epoch so the live-elapsed math for `doing`
-   * rows is deterministic. The same value is fed BOTH to {@link
-   * localIsoDateTime} for the header date suffix AND to the `active_ms +
-   * (now − last_resumed_at)` math on doing rows.
+   * rows is deterministic. The same value is fed BOTH to
+   * {@link localIsoDateTime} for the header date suffix AND to the
+   * `active_ms + (now − last_resumed_at)` math on doing rows.
    */
   now?: () => number
 }
@@ -279,8 +279,7 @@ function statusGlyph(status: TaskStatus, ansi: boolean, ghost?: "removed"): stri
       // `consistent-return` and acts as an exhaustiveness check at the
       // type level (the `never` cast errors if a new variant is added
       // without a case above).
-      const _exhaustive: never = status
-      throw new Error(`unhandled status: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status: ${String(status satisfies never)}`)
     }
   }
 }
@@ -293,7 +292,7 @@ function statusGlyph(status: TaskStatus, ansi: boolean, ghost?: "removed"): stri
  * instead of "colored icon + neutral title".
  *
  *  - ghost="removed"           → red + strikethrough (diff/status ignored)
- *  - diff={oldTitle}           → `<old red+strike>  →  <new sky+bold>`
+ *  - `diff={oldTitle}`         → `<old red+strike>  →  <new sky+bold>`
  *                                The "new" half is always SKY+BOLD (the
  *                                update action's identity color), never
  *                                inheriting per-status styling — so a
@@ -403,8 +402,7 @@ function styleTitleByStatus(t: Task, title: string, ansi: boolean, targeted = fa
       )
     default: {
       // Exhaustiveness check; see the matching default in `statusGlyph`.
-      const _exhaustive: never = t.status
-      throw new Error(`unhandled status: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status: ${String(t.status satisfies never)}`)
     }
   }
 }
@@ -613,8 +611,7 @@ function styleNumCol(v: View, ansi: boolean, targeted: boolean): string {
       // Closed-union exhaustiveness check; mirrors the pattern in
       // `statusGlyph` above. Adding a new TaskStatus variant will
       // trigger a type error here.
-      const _exhaustive: never = v.task.status
-      throw new Error(`unhandled status: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status: ${String(v.task.status satisfies never)}`)
     }
   }
 }
@@ -691,8 +688,7 @@ function renderDurationSuffix(
         styled = color(ansi, ANSI.DIM, text)
         break
       default: {
-        const _exhaustive: never = status
-        throw new Error(`unhandled status: ${String(_exhaustive)}`)
+        throw new Error(`unhandled status: ${String(status satisfies never)}`)
       }
     }
   }
@@ -786,7 +782,7 @@ function renderGap(ansi: boolean): string {
  *   - empty list (total=0)               → false (nothing to celebrate)
  *   - only canceled tasks (done=0)       → false (nothing was finished)
  *   - first add_many (everything todo)   → false (done=0)
- *   - last todo gets canceled            → true  (doing=0, todo=0, done>0)
+ *   - last todo gets canceled            → true  (doing=0, todo=0, `done>0`)
  */
 function isAllDone(stats: Stats): boolean {
   return stats.doing === 0 && stats.todo === 0 && stats.done > 0
@@ -844,8 +840,7 @@ function targetHashFromAction(action: RenderAction): string | null {
       return null
     default: {
       // Exhaustiveness check — fail closed (no emphasis) on a new kind.
-      const _exhaustive: never = action
-      void _exhaustive
+      void (action satisfies never)
       return null
     }
   }
@@ -914,6 +909,10 @@ export interface ToolDisplayParts {
   footer: string
 }
 
+/**
+ * Render the full task tree for the tool's transcript display: one row per
+ * task with status glyph, hash, title, and timing, plus the summary footer.
+ */
 export function renderToolDisplay(
   views: readonly View[],
   stats: Stats,

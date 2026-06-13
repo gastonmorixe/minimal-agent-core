@@ -3,26 +3,35 @@
  *
  * Picks, per request, which transport implements `Agent.sendFn`:
  *
- * - **Anthropic** models → the legacy `client.ts` `sendMessage` (its
- *   battle-tested retry / watchdog / 401-keychain-race infra, untouched).
- * - **Everything else** (OpenAI Chat/Responses, OpenRouter, future
- *   OpenAI-compatible vendors) → `canonicalSendFn`, which routes through
- *   the canonical `run()` so the request actually reaches the right vendor.
- *   This is the only path on which `--model gpt-5.5` dispatches to OpenAI.
+ * - **Every registered model** (Anthropic, OpenAI Chat/Responses,
+ *   OpenRouter, future vendors) → `canonicalSendFn`, which routes through
+ *   the canonical `run()` so the request reaches the model's own provider
+ *   adapter. This is the Wave-B flip (B-0, PLAN.md §2): the canonical
+ *   Anthropic path is equivalence-pinned against the legacy client
+ *   (callback order included; parity gaps closed by the summarize port +
+ *   the canonical quota probe), with two DELIBERATE divergences resolved
+ *   in the flip commit (B3a: redact-thinking omitted from conversations,
+ *   B2: api-key requests adopt the canonical beta set).
+ * - **Unregistered / missing model ids** → the legacy `sendMessage`
+ *   fallback, so a genuinely bad id fails the same way it always did.
  *
- * This provider-conditional default is the low-risk staging of the
- * canonical migration: the Anthropic experience is byte-identical to
- * before (same `sendMessage`), while non-Anthropic models go from
- * "registered but non-functional at runtime" to "working".
+ * # Reversibility (env escape hatches)
  *
- * # Reversibility (env escape hatch)
+ * `MINIMAL_AGENT_LEGACY_TRANSPORT`:
+ * - `"1"`: route EVERY request through the legacy `sendMessage` stack
+ *   (instant rollback for the B-0 flip; equivalent to mode `"off"`).
+ *   Takes precedence over `MINIMAL_AGENT_CANONICAL_TRANSPORT` — the
+ *   revert switch must be absolute. The legacy stack is not deleted
+ *   until the post-flip bake passes (B-5).
  *
  * `MINIMAL_AGENT_CANONICAL_TRANSPORT`:
- * - unset / `"auto"` (default): provider-conditional, as above.
- * - `"all"`: route EVERY model (incl. Anthropic) through `canonicalSendFn`.
- *   Used to exercise the canonical Anthropic path end-to-end (Phase 4).
- * - `"off"`: route EVERY model through legacy `sendMessage` (emergency
- *   revert; non-Anthropic models will fail, as they did before this work).
+ * - unset / `"auto"` (default): registry-conditional, as above.
+ * - `"all"`: route EVERY model through `canonicalSendFn`, including ids
+ *   the registry can't resolve (run() then raises its own unknown-model
+ *   error).
+ * - `"off"`: route EVERY model through legacy `sendMessage` (same effect
+ *   as the legacy hatch; non-Anthropic models will fail, as they did
+ *   before the canonical transport existed).
  *
  * @module llm/transport/select-transport
  */
@@ -35,8 +44,13 @@ import { canonicalSendFn } from "./canonical-send.ts"
 
 export type TransportMode = "auto" | "all" | "off"
 
-/** Read + normalize the transport mode from the environment. */
+/**
+ * Read + normalize the transport mode from the environment.
+ * `MINIMAL_AGENT_LEGACY_TRANSPORT=1` (the B-0 rollback hatch) wins over
+ * everything; otherwise `MINIMAL_AGENT_CANONICAL_TRANSPORT` applies.
+ */
 export function transportMode(): TransportMode {
+  if (process.env.MINIMAL_AGENT_LEGACY_TRANSPORT === "1") return "off"
   const v = (process.env.MINIMAL_AGENT_CANONICAL_TRANSPORT ?? "auto").toLowerCase()
   return v === "all" || v === "off" ? v : "auto"
 }
@@ -51,11 +65,12 @@ export function pickTransport(
 ): typeof sendMessage {
   if (mode === "off") return sendMessage
   if (mode === "all") return canonicalSendFn
-  // auto: route by the model's registered provider. Anthropic stays legacy;
-  // anything else (or an unresolved id) is canonical / legacy-safe-default.
+  // auto: any model the registry resolves goes canonical (the B-0 flip);
+  // an unresolved id falls back to legacy so failure modes are unchanged.
   if (!modelId) return sendMessage
   try {
-    return resolveModel(modelId).providerId === "anthropic" ? sendMessage : canonicalSendFn
+    resolveModel(modelId)
+    return canonicalSendFn
   } catch {
     // Unregistered model id: fall back to the legacy default (preserves
     // prior behavior; a genuinely bad id fails the same way it used to).

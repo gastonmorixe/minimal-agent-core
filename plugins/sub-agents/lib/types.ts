@@ -217,8 +217,7 @@ export function isTerminal(s: SubagentStatus): boolean {
     case "running":
       return false
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }
@@ -320,8 +319,7 @@ export function fleetStats(records: readonly SubagentRecord[]): FleetStats {
         stopped++
         break
       default: {
-        const _exhaustive: never = r.status
-        throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+        throw new Error(`unhandled status kind: ${String(r.status satisfies never)}`)
       }
     }
   }

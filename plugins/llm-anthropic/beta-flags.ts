@@ -126,7 +126,16 @@ export function buildBetaFlags(opts: {
   if (!omitsInterleavedThinking(model.id)) {
     flags.add(ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING)
   }
-  flags.add(ANTHROPIC_BETA_FLAGS.REDACT_THINKING)
+  // redact-thinking: PROBE kinds only (quota/title). Conversations (and
+  // subtasks) deliberately omit it so thinking streams stay visible in the
+  // TUI — a product feature, not an accident. Decision B3 option (a) from
+  // the Wave-3 flip package (docs/changes/2026-06-09-…-decoupling.md),
+  // executed in the B-0 flip: the canonical builder aligned to the legacy
+  // builder, collapsing the cross-transport divergence into an agreement
+  // (pinned in ./beta-flags.characterization.test.ts).
+  if (kind === "quota" || kind === "title") {
+    flags.add(ANTHROPIC_BETA_FLAGS.REDACT_THINKING)
+  }
   flags.add(ANTHROPIC_BETA_FLAGS.CONTEXT_MANAGEMENT)
   if (isOAuth) flags.add(ANTHROPIC_BETA_FLAGS.PROMPT_CACHING_SCOPE)
 

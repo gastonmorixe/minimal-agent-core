@@ -65,6 +65,10 @@ function parseScope(attrs: Record<string, string>): Scope {
   return "project"
 }
 
+/**
+ * Inline-tag handler for `<ma::emit::memory>`: appends the tag body to the
+ * scoped memory store and replaces it with a dim confirmation line.
+ */
 export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "inline_tag") {
     return { kind: "rendered", ansi: "" }

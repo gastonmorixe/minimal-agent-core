@@ -3,7 +3,9 @@
  *
  * The agent builds a provider-AGNOSTIC skeleton here:
  *
- *   [ <neutral identity>, <instructions (cached)>, <session context?> ]
+ * ```text
+ * [ <neutral identity>, <instructions (cached)>, <session context?> ]
+ * ```
  *
  * then asks the request's provider plugin to resolve the FINAL wire blocks
  * via {@link ProviderPlugin.resolveSystemPrompt}. That is the single seam

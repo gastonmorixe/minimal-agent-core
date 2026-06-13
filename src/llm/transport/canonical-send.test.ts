@@ -3,34 +3,30 @@
  *
  * These prove the Phase-1 claim: a transport that routes through the
  * canonical `run()` is observably interchangeable with the legacy
- * `sendMessage` behind `Agent.sendFn`, AND it dispatches non-Anthropic
- * models to the right provider (the whole point of the migration).
+ * `sendMessage` behind `Agent.sendFn`, AND it dispatches each model to the
+ * provider that OWNS it (the whole point of the migration).
  *
- * - **Anthropic**: feed `canonicalSendFn` the SAME synthesized SSE as the
- *   Phase-0 golden (`client.transport-contract.test.ts`) and assert the
- *   identical observable surface : text-channel yields, lifecycle callback
- *   order, and the final `StreamedResponse` (blocks / text / stopReason).
- *
- * - **OpenAI**: replay the `chat-pong.sse` fixture and assert the request
- *   actually went to `https://api.openai.com/v1/chat/completions` (NOT
- *   Anthropic) and produced the expected text + stop reason. This is the
- *   proof that `--model gpt-*` reaches OpenAI through the agent's transport
- *   seam.
+ * Post A-3 (PLAN.md Wave A): the suite drives the stack through the
+ * synthetic in-test provider fixture (`src/llm/test-fixtures.ts`) instead
+ * of bootstrapping real adapters from `plugins/` (invariant I2: core never
+ * imports plugins). Provider ids ("anthropic", "openai") still appear AS
+ * DATA because `canonicalSendFn`'s credential strategy is keyed by
+ * provider id until C-5 makes it a plugin hook; the real adapters' own
+ * wire behavior (SSE translation, real URLs, captured fixtures) is pinned
+ * in each plugin's suite. The fake adapter speaks canonical-event SSE, so
+ * every scenario here is expressed in canonical terms.
  *
  * Full retry / watchdog / 401 middleware is Phase 2; this is the raw path.
  *
  * @module llm/transport/canonical-send.test
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
-import { bootstrapAnthropic } from "../../../plugins/llm-anthropic/adapter.ts"
-import { bootstrapOpenAI } from "../../../plugins/llm-openai/adapter.ts"
-import { CHAT_COMPLETIONS_URL } from "../../../plugins/llm-openai/wire-constants.ts"
 import { type AuthResult, getAuth } from "../../auth.ts"
 import type { Message, StreamedResponse } from "../../client/types.ts"
 import {
@@ -40,6 +36,11 @@ import {
   type NetworkTransport,
 } from "../../network/index.ts"
 import { clearSessionTokens, getSessionTokens } from "../../session-tokens.ts"
+import type { CanonicalEvent } from "../canonical-events.ts"
+import { registerDiscoveredProviders } from "../provider-discovery.ts"
+import type { ApiKeyAuthProvider } from "../provider-plugin.ts"
+import { activateProviderPlugins } from "../provider-plugin.ts"
+import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../test-fixtures.ts"
 
 import { canonicalSendFn } from "./canonical-send.ts"
 
@@ -54,114 +55,106 @@ function fakeNetworkClient(handler: FakeHandler): NetworkClient {
   return new NetworkClient({ primary: transport })
 }
 
-/** SSE response built from explicit event objects (one `data:` line each). */
-function sseFromEvents(events: unknown[]): NetworkResponse {
-  const enc = new TextEncoder()
+/** SSE response whose `data:` lines are canonical events (the fixture wire). */
+function sseFromEvents(events: CanonicalEvent[]): NetworkResponse {
   return new NetworkResponse({
     status: 200,
     headers: { "content-type": "text/event-stream", "request-id": "req_cs_001" },
     transport: { id: "fake", protocol: "h2" },
-    body: new ReadableStream<Uint8Array>({
-      start(c) {
-        for (const e of events) c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n`))
-        c.close()
-      },
-    }),
+    body: sseBodyFromEvents(events),
   })
 }
 
-/** SSE response from a raw fixture string (already in `data: ...` form). */
-function sseFromString(raw: string): NetworkResponse {
-  const enc = new TextEncoder()
-  return new NetworkResponse({
-    status: 200,
-    headers: { "content-type": "text/event-stream", "request-id": "req_cs_002" },
-    transport: { id: "fake", protocol: "h2" },
-    body: new ReadableStream<Uint8Array>({
-      start(c) {
-        c.enqueue(enc.encode(raw))
-        c.close()
-      },
-    }),
-  })
-}
-
-function openaiFixture(name: string): string {
-  return readFileSync(
-    join(import.meta.dir, "../../../plugins/llm-openai/__fixtures__", name),
-    "utf-8",
-  )
-}
-
-function anthropicFixture(name: string): string {
-  return readFileSync(
-    join(import.meta.dir, "../../../plugins/llm-anthropic/__fixtures__", name),
-    "utf-8",
-  )
+/** A complete single-text-block stream: `text` then a clean `end_turn`. */
+function pongEvents(text = "pong"): CanonicalEvent[] {
+  return [
+    {
+      type: "message_start",
+      messageId: "msg_pong",
+      modelId: "gpt-4o",
+      initialUsage: { inputTokens: 1, outputTokens: 0 },
+    },
+    { type: "text_start", index: 0 },
+    { type: "text_delta", index: 0, text },
+    { type: "text_stop", index: 0 },
+    {
+      type: "message_delta",
+      stopReason: "end_turn",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    },
+    { type: "message_stop" },
+  ]
 }
 
 const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
 
-// Register both provider adapters so `run()` can resolve their models.
+const openAITestApiKeyAuth: ApiKeyAuthProvider = {
+  serviceId: "openai-api-key",
+  displayName: "OpenAI API Key",
+  envVars: ["OPENAI_API_KEY"],
+  configKey: "openai",
+  buildCredential(apiKey) {
+    return {
+      serviceId: this.serviceId,
+      displayName: this.displayName,
+      secrets: { api_key: apiKey },
+    }
+  },
+  readApiKey(secrets) {
+    const value = secrets.api_key
+    return typeof value === "string" ? value : null
+  },
+}
+
+// Synthetic registrations replace the real adapter bootstraps. The fake
+// providers REUSE the real provider ids as test data; each id's model set
+// and auth strategy mirrors what the tests dispatch without importing
+// provider plugins into core.
 beforeAll(() => {
-  bootstrapAnthropic()
-  bootstrapOpenAI()
+  registerTestProvider({
+    id: "anthropic",
+    models: [{ id: "claude-opus-4-8", aliases: ["claude-opus-4-8[1m]"] }],
+  })
+  registerTestProvider({
+    id: "openai",
+    models: [{ id: "gpt-4o" }, { id: "gpt-5.5" }],
+    apiKeyAuth: openAITestApiKeyAuth,
+  })
 })
 
 // ---------------------------------------------------------------------------
-// Anthropic: equivalence with the Phase-0 legacy golden
+// Equivalence with the Phase-0 legacy golden (yields / callbacks / response)
 // ---------------------------------------------------------------------------
 
-describe("canonicalSendFn — Anthropic equivalence with legacy sendMessage", () => {
+describe("canonicalSendFn — equivalence with legacy sendMessage", () => {
   it("reproduces the exact yields + callback order + StreamedResponse", async () => {
     const networkClient = fakeNetworkClient(() =>
       sseFromEvents([
         {
           type: "message_start",
-          message: { id: "msg_c", model: "claude-opus-4-8", usage: { input_tokens: 5 } },
+          messageId: "msg_c",
+          modelId: "claude-opus-4-8",
+          initialUsage: { inputTokens: 5, outputTokens: 0 },
         },
+        { type: "thinking_start", index: 0 },
+        { type: "thinking_delta", index: 0, text: "let me think " },
+        { type: "thinking_delta", index: 0, text: "about it" },
+        { type: "thinking_signature", index: 0, signature: "sig-xyz" },
+        { type: "thinking_stop", index: 0 },
+        { type: "text_start", index: 1 },
+        { type: "text_delta", index: 1, text: "Hello " },
+        { type: "text_delta", index: 1, text: "world" },
+        { type: "text_stop", index: 1 },
+        { type: "tool_use_start", index: 2, id: "tu_1", name: "Bash" },
+        { type: "tool_use_input_delta", index: 2, partialJson: '{"command":' },
+        { type: "tool_use_input_delta", index: 2, partialJson: '"ls"}' },
+        { type: "tool_use_stop", index: 2 },
         {
-          type: "content_block_start",
-          index: 0,
-          content_block: { type: "thinking", thinking: "", signature: "" },
+          type: "message_delta",
+          stopReason: "tool_use",
+          stopSequence: null,
+          usage: { inputTokens: 5, outputTokens: 2 },
         },
-        {
-          type: "content_block_delta",
-          index: 0,
-          delta: { type: "thinking_delta", thinking: "let me think " },
-        },
-        {
-          type: "content_block_delta",
-          index: 0,
-          delta: { type: "thinking_delta", thinking: "about it" },
-        },
-        {
-          type: "content_block_delta",
-          index: 0,
-          delta: { type: "signature_delta", signature: "sig-xyz" },
-        },
-        { type: "content_block_stop", index: 0 },
-        { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
-        { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Hello " } },
-        { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "world" } },
-        { type: "content_block_stop", index: 1 },
-        {
-          type: "content_block_start",
-          index: 2,
-          content_block: { type: "tool_use", id: "tu_1", name: "Bash", input: {} },
-        },
-        {
-          type: "content_block_delta",
-          index: 2,
-          delta: { type: "input_json_delta", partial_json: '{"command":' },
-        },
-        {
-          type: "content_block_delta",
-          index: 2,
-          delta: { type: "input_json_delta", partial_json: '"ls"}' },
-        },
-        { type: "content_block_stop", index: 2 },
-        { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null } },
         { type: "message_stop" },
       ]),
     )
@@ -220,12 +213,13 @@ describe("canonicalSendFn — Anthropic equivalence with legacy sendMessage", ()
 })
 
 // ---------------------------------------------------------------------------
-// OpenAI: the migration payoff — gpt-* dispatches to OpenAI, not Anthropic
+// Cross-provider dispatch + per-provider auth (the migration payoff)
 // ---------------------------------------------------------------------------
 
-describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration payoff)", () => {
+describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the migration payoff)", () => {
   // The host's single credential is the ANTHROPIC session. It must NEVER be
-  // sent to OpenAI; OpenAI authenticates with OPENAI_API_KEY.
+  // sent to another provider; OpenAI-owned models authenticate with
+  // OPENAI_API_KEY.
   const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
   const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
 
@@ -238,7 +232,7 @@ describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration
       const networkClient = fakeNetworkClient((req) => {
         seenUrl = req.url
         seenAuth = req.headers?.authorization ?? ""
-        return sseFromString(openaiFixture("chat-pong.sse"))
+        return sseFromEvents(pongEvents())
       })
       const yields: string[] = []
       const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
@@ -247,7 +241,9 @@ describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration
       while (!(res = await gen.next()).done) yields.push(res.value as string)
       const response = res.value as { text: string; stopReason: string | null }
 
-      expect(seenUrl).toBe(CHAT_COMPLETIONS_URL)
+      // Dispatched to the endpoint of the provider that OWNS gpt-4o — never
+      // the claude-opus owner's endpoint.
+      expect(seenUrl).toBe(testProviderUrl("openai"))
       // The OpenAI key, never the Anthropic session token.
       expect(seenAuth).toBe("Bearer sk-openai-real-key")
       expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
@@ -273,7 +269,7 @@ describe("canonicalSendFn — OpenAI dispatch + per-provider auth (the migration
       let reached = false
       const networkClient = fakeNetworkClient(() => {
         reached = true
-        return sseFromString(openaiFixture("chat-pong.sse"))
+        return sseFromEvents(pongEvents())
       })
       const gen = canonicalSendFn({ auth, messages, model: "gpt-5.5", stream: true, networkClient })
       let caught = ""
@@ -327,7 +323,7 @@ describe("canonicalSendFn — API key precedence (env > config > throw)", () => 
     let seenAuth = ""
     const networkClient = fakeNetworkClient((req) => {
       seenAuth = req.headers?.authorization ?? ""
-      return sseFromString(openaiFixture("chat-pong.sse"))
+      return sseFromEvents(pongEvents())
     })
     const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
     while (!(await gen.next()).done) {
@@ -346,7 +342,7 @@ describe("canonicalSendFn — API key precedence (env > config > throw)", () => 
     let seenAuth = ""
     const networkClient = fakeNetworkClient((req) => {
       seenAuth = req.headers?.authorization ?? ""
-      return sseFromString(openaiFixture("chat-pong.sse"))
+      return sseFromEvents(pongEvents())
     })
     const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
     while (!(await gen.next()).done) {
@@ -364,7 +360,7 @@ describe("canonicalSendFn — API key precedence (env > config > throw)", () => 
     let reached = false
     const networkClient = fakeNetworkClient(() => {
       reached = true
-      return sseFromString(openaiFixture("chat-pong.sse"))
+      return sseFromEvents(pongEvents())
     })
     const gen = canonicalSendFn({ auth, messages, model: "gpt-5.5", stream: true, networkClient })
     let caught = ""
@@ -398,22 +394,30 @@ describe("canonicalSendFn — resilience middleware is wired end-to-end", () => 
         return sseFromEvents([
           {
             type: "message_start",
-            message: { id: "m1", model: "claude-opus-4-8", usage: { input_tokens: 1 } },
+            messageId: "m1",
+            modelId: "claude-opus-4-8",
+            initialUsage: { inputTokens: 1, outputTokens: 0 },
           },
-          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } },
+          { type: "text_start", index: 0 },
+          { type: "text_delta", index: 0, text: "partial" },
         ])
       }
       // Recovery: a complete stream.
       return sseFromEvents([
         {
           type: "message_start",
-          message: { id: "m2", model: "claude-opus-4-8", usage: { input_tokens: 1 } },
+          messageId: "m2",
+          modelId: "claude-opus-4-8",
+          initialUsage: { inputTokens: 1, outputTokens: 0 },
         },
-        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "recovered" } },
-        { type: "content_block_stop", index: 0 },
-        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        { type: "text_start", index: 0 },
+        { type: "text_delta", index: 0, text: "recovered" },
+        { type: "text_stop", index: 0 },
+        {
+          type: "message_delta",
+          stopReason: "end_turn",
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
         { type: "message_stop" },
       ])
     })
@@ -456,16 +460,18 @@ describe("canonicalSendFn — usage broadcast", () => {
       sseFromEvents([
         {
           type: "message_start",
-          message: {
-            id: "mu",
-            model: "claude-opus-4-8",
-            usage: { input_tokens: 42, output_tokens: 0 },
-          },
+          messageId: "mu",
+          modelId: "claude-opus-4-8",
+          initialUsage: { inputTokens: 42, outputTokens: 0 },
         },
-        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
-        { type: "content_block_stop", index: 0 },
-        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        { type: "text_start", index: 0 },
+        { type: "text_delta", index: 0, text: "hi" },
+        { type: "text_stop", index: 0 },
+        {
+          type: "message_delta",
+          stopReason: "end_turn",
+          usage: { inputTokens: 42, outputTokens: 1 },
+        },
         { type: "message_stop" },
       ]),
     )
@@ -485,18 +491,40 @@ describe("canonicalSendFn — usage broadcast", () => {
 })
 
 // ---------------------------------------------------------------------------
-// net-dbg parity: the canonical stack consumes a REAL captured Anthropic wire
+// Full-stack consumption: a multi-block stream through the WHOLE transport
+// (run → adapter → SSE → watchdog → bridge → retry), dispatched by owner.
+// The real Anthropic capture replay lives in plugins/llm-anthropic
+// (translateAnthropicStream's fixture test) — adapter wire parsing is the
+// plugin's contract, owner dispatch + stream consumption is core's.
 // ---------------------------------------------------------------------------
 
-describe("canonicalSendFn — real captured Anthropic wire (net-dbg parity)", () => {
-  it("consumes the real Opus 4.8 capture end-to-end and hits the Anthropic endpoint", async () => {
+describe("canonicalSendFn — multi-block stream through the whole canonical stack", () => {
+  it("consumes a thinking+text stream end-to-end and hits the owning provider's endpoint", async () => {
     let seenUrl = ""
     const networkClient = fakeNetworkClient((req) => {
       seenUrl = req.url
-      // The exact SSE captured from api.anthropic.com on 2026-05-28 (the
-      // same fixture the adapter-level translateAnthropicStream test replays),
-      // now driven through the WHOLE canonical transport stack.
-      return sseFromString(anthropicFixture("conversation-opus48.res-body.sse"))
+      return sseFromEvents([
+        {
+          type: "message_start",
+          messageId: "msg_full",
+          modelId: "claude-opus-4-8",
+          initialUsage: { inputTokens: 9, outputTokens: 0 },
+        },
+        { type: "thinking_start", index: 0 },
+        { type: "thinking_delta", index: 0, text: "plan the answer" },
+        { type: "thinking_signature", index: 0, signature: "sig-full" },
+        { type: "thinking_stop", index: 0 },
+        { type: "text_start", index: 1 },
+        { type: "text_delta", index: 1, text: "The answer " },
+        { type: "text_delta", index: 1, text: "is 42." },
+        { type: "text_stop", index: 1 },
+        {
+          type: "message_delta",
+          stopReason: "end_turn",
+          usage: { inputTokens: 9, outputTokens: 5 },
+        },
+        { type: "message_stop" },
+      ])
     })
     const auth: AuthResult = { type: "oauth", token: "oauth-test" }
     const yields: string[] = []
@@ -512,11 +540,10 @@ describe("canonicalSendFn — real captured Anthropic wire (net-dbg parity)", ()
     while (!(res = await gen.next()).done) yields.push(res.value)
     const response = res.value
 
-    // Dispatched to the real Anthropic Messages endpoint.
-    expect(seenUrl).toContain("api.anthropic.com")
-    expect(seenUrl).toContain("/v1/messages")
-    // The real stream was consumed: text streamed, a text block accumulated,
-    // and the captured end_turn stop reason surfaced.
+    // Dispatched to the endpoint of the provider that owns the model.
+    expect(seenUrl).toBe(testProviderUrl("anthropic"))
+    // The stream was consumed: text streamed, a text block accumulated,
+    // and the end_turn stop reason surfaced.
     expect(yields.join("").length).toBeGreaterThan(0)
     expect(response.blocks.some((b) => b.type === "text")).toBe(true)
     expect(response.stopReason).toBe("end_turn")
@@ -524,12 +551,71 @@ describe("canonicalSendFn — real captured Anthropic wire (net-dbg parity)", ()
 })
 
 // ---------------------------------------------------------------------------
+// --debug request dump: the canonical transport must emit the same stderr
+// request dump the legacy sendMessage did. Regression: when the default
+// transport flipped to canonicalSendFn, the dump (model/max_tokens/messages/
+// tools) was lost because it lived only in client.ts's sendMessage, so
+// `--debug` printed nothing for a normal conversation.
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — --debug request dump", () => {
+  it("prints the request dump to stderr when DEBUG=1", async () => {
+    const prevDebug = process.env.DEBUG
+    process.env.DEBUG = "1"
+    const lines: string[] = []
+    const origError = console.error
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map((a) => String(a)).join(" "))
+    }
+    try {
+      const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const gen = canonicalSendFn({
+        auth,
+        messages,
+        model: "claude-opus-4-8",
+        stream: true,
+        maxTokens: 4096,
+        networkClient,
+        tools: [{ name: "Bash", description: "run a shell command", input_schema: {} }],
+      })
+      while (!(await gen.next()).done) {
+        // drain
+      }
+    } finally {
+      console.error = origError
+      if (prevDebug === undefined) delete process.env.DEBUG
+      else process.env.DEBUG = prevDebug
+    }
+
+    const out = lines.join("\n")
+    // The dump names the model, the token budget, the message count, and the
+    // tool set — the signal a `--debug` user expects before each request.
+    expect(out).toContain("claude-opus-4-8")
+    expect(out).toContain("max_tokens")
+    expect(out).toContain("4096")
+    expect(out).toContain("message(s)")
+    expect(out).toContain("Bash")
+  }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
 // Live (gated by E2E): Anthropic round-trip through the canonical stack.
+// Uses the loader's runtime discovery (the blessed seam) to register the
+// REAL provider plugins — no literal plugins/ import.
 // OpenRouter's live 402-ok case is covered in plugins/llm-openrouter.
 // ---------------------------------------------------------------------------
 
 describe("canonicalSendFn — live (gated by E2E)", () => {
   const skip = !process.env.E2E
+
+  beforeAll(async () => {
+    if (skip) return
+    // Real adapters override the synthetic registrations for the live run.
+    await registerDiscoveredProviders(join(import.meta.dir, "../../../plugins"))
+    activateProviderPlugins()
+  })
+
   it.skipIf(skip)(
     "Anthropic haiku round-trip through the canonical stack (proves mode=all live)",
     async () => {

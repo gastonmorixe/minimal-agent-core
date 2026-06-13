@@ -95,7 +95,7 @@ export type Colorizer = (text: string) => string
  */
 export interface AnimatedIcon {
   frames: readonly string[]
-  /** Per-frame interval in ms. Must be > 0. */
+  /** Per-frame interval in ms. Must be \> 0. */
   intervalMs: number
   /**
    * If `true`, the palette colorizer is held constant across all frames of
@@ -108,6 +108,7 @@ export interface AnimatedIcon {
 /** Either a static glyph (blinks on/off) or an animated frame set. */
 export type IconSpec = string | AnimatedIcon
 
+/** Type guard separating animated frame-set icons from static single-glyph icons. */
 export function isAnimatedIcon(spec: IconSpec): spec is AnimatedIcon {
   return typeof spec === "object" && Array.isArray((spec as AnimatedIcon).frames)
 }

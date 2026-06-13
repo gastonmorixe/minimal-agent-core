@@ -9,7 +9,7 @@
  *
  * `writeAsync` moves the filesystem write off the synchronous critical
  * section (fs.promises). These tests pin the contract:
- *   1. it returns the same {path,bytes,sha256} shape as the sync path,
+ *   1. it returns the same \{path,bytes,sha256\} shape as the sync path,
  *   2. the file is NOT created synchronously (the write is deferred to a
  *      later microtask/tick — proof the hot path didn't block on fs),
  *   3. the persisted bytes + digest match the sync path exactly.

@@ -1,3 +1,9 @@
+/**
+ * Runs independent startup tasks concurrently and times each one. Failures
+ * are captured per task instead of aborting the batch; a failed task marked
+ * `critical` makes the whole call throw after all tasks settle. Returns the
+ * per-task `{name, ms, ok}` results plus the total elapsed time.
+ */
 export async function parallelInit(
   tasks: { name: string; init: () => Promise<unknown>; critical?: boolean }[],
 ) {

@@ -5,11 +5,16 @@
  * @module sub-agents/handlers/list_agents
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { fleetText } from "../lib/content.ts"
 import { storeFromCtx } from "../lib/handler-deps.ts"
 import { renderFleetDisplay } from "../lib/render.ts"
 
+/**
+ * Tool handler for `ListAgents`: renders the fleet roster (id, type, status,
+ * elapsed, tokens, current activity) from the supervisor store.
+ */
 export default async function listAgents(ctx: TUIContext): Promise<TUIResult> {
   const store = storeFromCtx(ctx)
   if (!store)

@@ -18,6 +18,11 @@ import { runCapture } from "./spawn.ts"
 
 const EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
 
+/**
+ * Diagnostic provider that shells out to the workspace's oxlint binary
+ * (`--format=json`) for one file and adapts the output to findings. Only
+ * handles JS/TS-family paths inside the workspace root.
+ */
 export class OxlintProvider implements DiagnosticProvider {
   readonly id = "oxlint"
   readonly kind = "lint" as const

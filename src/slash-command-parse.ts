@@ -58,7 +58,7 @@ const COMMAND_RE = /^\/([a-z0-9][a-z0-9_-]*)(?:[ \t]+([\s\S]*))?$/
  * A trailing newline (common from the editor) is tolerated because the
  * argv group consumes it and the result is trimmed.
  *
- * @param text Raw submitted prompt text.
+ * @param text - Raw submitted prompt text.
  * @returns The parsed command, or `null` when `text` is not a command line.
  */
 export function parseCommandLine(text: string): ParsedCommandLine | null {
@@ -77,7 +77,7 @@ export function parseCommandLine(text: string): ParsedCommandLine | null {
  * without running the full regex. Does not guarantee
  * {@link parseCommandLine} will return non-null (e.g. `/usr/bin`).
  *
- * @param text Current buffer text.
+ * @param text - Current buffer text.
  * @returns True when `text` starts with `/` followed by a name-start char.
  */
 export function looksLikeCommand(text: string): boolean {

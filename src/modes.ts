@@ -75,7 +75,7 @@ export interface ModeUserOverride {
 }
 
 /**
- * Resolve effective {allow, deny} for a mode by overlaying user config
+ * Resolve effective \{allow, deny\} for a mode by overlaying user config
  * on top of the manifest, with hard defaults underneath.
  *
  * Resolution order (later wins, array-level replacement, not merge):
@@ -147,7 +147,7 @@ export function buildEffectiveModePermissions(
  *   3. If `tool` is in `allow`, return `true`.
  *   4. Otherwise return `false`.
  *
- * Pure. Constant in policy size for typical (<20 entries) lists; we
+ * Pure. Constant in policy size for typical (under 20 entries) lists; we
  * use `Array.includes` rather than a `Set` to keep the no-mode hot path
  * allocation-free.
  *
@@ -359,6 +359,8 @@ export class ModeManager {
   private permissionsCache: (EffectiveModePermissions | null)[]
 
   /**
+   * Builds the manager and resolves the starting mode.
+   *
    * @param modes - The list of available modes (in cycle order).
    * @param defaultModeId - Optional id of the mode to start in. When the id
    *   is unknown or omitted, the manager starts with no active mode.
@@ -546,8 +548,8 @@ export class ModeManager {
    * Tools are ALWAYS registered in the request body (removing them
    * would mutate the cached `tools` array bytes and bust the prompt
    * cache on every mode toggle). The agent's tool loop calls this
-   * method right before invoking each `tool_use` block; on `allowed:
-   * false` the loop synthesizes a structured `is_error: true`
+   * method right before invoking each `tool_use` block; on
+   * `allowed: false` the loop synthesizes a structured `is_error: true`
    * `tool_result` with the returned `message` and skips execution.
    * The model sees the rejection on its next round and adapts.
    *
@@ -588,7 +590,9 @@ export class ModeManager {
    *
    * Format (single self-closing tag, no inner content):
    *
-   *     <ma::agent::mode-active id="ask" since="2026-05-27T15:02:19.000Z" />
+   * ```text
+   * <ma::agent::mode-active id="ask" since="2026-05-27T15:02:19.000Z" />
+   * ```
    *
    * The tag rides on the tail of the tool_result `content` (text) so
    * it sits in the rolling-tail cache breakpoint that's invalidated
@@ -736,6 +740,8 @@ export class ModeManager {
   }
 
   /**
+   * No-op pass-through that returns `tools` unchanged.
+   *
    * @deprecated Use {@link isToolAllowed} at dispatch time instead.
    * Kept for one release as a no-op pass-through so external callers
    * don't crash; tools are no longer filtered out of the request body.
@@ -746,6 +752,9 @@ export class ModeManager {
   }
 
   /**
+   * Always returns `""`, warning once per process when an active mode still
+   * declares the retired `systemPromptAppend` field.
+   *
    * @deprecated Mode behavior text should live in the plugin's own
    * `PROMPT.md` (which is part of the cached `pluginBlock`). Splicing
    * `systemPromptAppend` into `sys[3]` invalidates the prompt cache on

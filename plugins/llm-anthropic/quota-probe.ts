@@ -63,6 +63,11 @@ export interface QuotaProbeDeps {
   readCreds?: typeof readCredentials
 }
 
+/**
+ * Fire a minimal countable request at the provider to read back the quota
+ * window headers (utilization + reset), without polluting the session
+ * transcript.
+ */
 export async function probeQuota(
   auth: AuthResult,
   networkClient: NetworkClient = defaultNetworkClient,

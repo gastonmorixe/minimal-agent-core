@@ -158,6 +158,32 @@ describe("TasksAttachment", () => {
     expect(text!.startsWith("<tui::")).toBe(false)
     expect(text!.startsWith("<ma::tui::")).toBe(false)
   })
+
+  // Relocated from the core seam test (src/agent.tasks-attachment.test.ts,
+  // Wave A unit A-4): the core file may not import this plugin (invariant
+  // I2), so the live-list + zero-tasks behavior the agent depends on is
+  // characterized here, against a real TaskStore. The agent-side seam
+  // (a producer's block is prepended / a null producer adds nothing) stays
+  // in the core file with an in-test fake producer.
+  test("produces the live task list (total + both titles) when the store has tasks", () => {
+    const store = new TaskStore(sid, { home: tmpHome })
+    store.add({ title: "first task" })
+    store.add({ title: "second task" })
+
+    const att = new TasksAttachment(sid, { home: tmpHome }).toAttachment()
+    expect(att).not.toBeNull()
+    expect(att!.type).toBe("text")
+    const text = (att as { text: string }).text
+    expect(text).toContain("<ma::agent::tasks")
+    expect(text).toContain(`total="2"`)
+    expect(text).toContain("first task")
+    expect(text).toContain("second task")
+  })
+
+  test("omits the attachment (toAttachment null) when the session has zero tasks", () => {
+    const att = new TasksAttachment(sid, { home: tmpHome }).toAttachment()
+    expect(att).toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------

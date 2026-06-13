@@ -306,8 +306,7 @@ export function summarizeRecord(r: SessionRecord): string {
     case "detach":
       return `detach · pid ${r.pid} · ${r.reason}`
     default: {
-      const _exhaustive: never = r
-      return `unknown · ${JSON.stringify(_exhaustive)}`
+      return `unknown · ${JSON.stringify(r satisfies never)}`
     }
   }
 }
@@ -330,8 +329,7 @@ export function recordBodyText(r: SessionRecord): string {
     case "detach":
       return ""
     default: {
-      const _exhaustive: never = r
-      return JSON.stringify(_exhaustive)
+      return JSON.stringify(r satisfies never)
     }
   }
 }
@@ -454,8 +452,7 @@ function toSessionLiveness(l: Liveness): SessionLiveness {
     case "unknown":
       return { status: "unknown", source: "pid", reason: l.reason }
     default: {
-      const _exhaustive: never = l
-      throw new Error(`unhandled liveness: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled liveness: ${JSON.stringify(l satisfies never)}`)
     }
   }
 }

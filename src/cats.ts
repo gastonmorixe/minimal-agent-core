@@ -3,9 +3,11 @@
  *
  * Each cat is three rows wide, monospace-aligned:
  *
- *      /\_/\         ← ears
- *     ( ^.^ )        ← face   (the expressive row)
- *      > ω <         ← mouth
+ * ```text
+ *     /\_/\         ← ears
+ *    ( ^.^ )        ← face   (the expressive row)
+ *     > ω <         ← mouth
+ * ```
  *
  * The middle row carries the personality; the ears and mouth stay
  * mostly stable across moods. Use `catRows(expr)` when you want the

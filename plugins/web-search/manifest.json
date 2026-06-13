@@ -16,7 +16,7 @@
             "properties": {
               "query": {
                 "type": "string",
-                "description": "The search query. Max 400 characters. Brevity helps — most providers do better with 2-6 well-chosen keywords than full sentences."
+                "description": "The search query. Max 400 characters. Brevity helps; most providers do better with 2-6 well-chosen keywords than full sentences."
               },
               "type": {
                 "type": "string",
@@ -29,7 +29,7 @@
                 "minimum": 1,
                 "maximum": 20,
                 "default": 10,
-                "description": "How many hits to return. Default 10. Smaller is usually better — top 5 are typically the only ones worth reading."
+                "description": "How many hits to return. Default 10. Smaller is usually better; top 5 are typically the only ones worth reading."
               },
               "offset": {
                 "type": "integer",

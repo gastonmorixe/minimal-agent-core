@@ -28,6 +28,7 @@ import {
   isVerbose,
   truncate,
 } from "./client/debug.ts"
+import { buildLegacyMetadata } from "./client/quota.ts"
 // Wire-format types live in `src/client/types.ts`; debug/ratelimit/status
 // helpers in `src/client/debug.ts`. Imported here for internal use and
 // re-exported below so external consumers can still
@@ -51,7 +52,6 @@ import { has1mContext, normalizeModelForAPI } from "./client/types.ts"
 import { diag, markErrorAsDiagEmitted } from "./diagnostic-bus.ts"
 import { API_URL, buildHeaders, DEFAULT_MODEL, SYSTEM_PROMPT } from "./headers.ts"
 import { findModel } from "./llm/model-registry.ts"
-import { buildMetadata, getSessionId } from "./metadata.ts"
 import {
   defaultNetworkClient,
   networkActivityObserver,
@@ -60,6 +60,7 @@ import {
 } from "./network/index.ts"
 import { broadcastResponseRateLimits, rebroadcastQuotaForSessionUpdate } from "./quota-broadcast.ts"
 import { abortableSleep } from "./retry.ts"
+import { getSessionId } from "./session-id.ts"
 import { addSessionUsage } from "./session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "./status.ts"
 
@@ -67,7 +68,7 @@ import { GLOBAL_STATUS_BUS } from "./status.ts"
 // importers (`import { checkQuota, listModels } from "./client.ts"`) keep
 // resolving after the decomposition.
 export { listModels } from "./client/list-models.ts"
-export { checkQuota, type QuotaResult } from "./client/quota.ts"
+export { buildLegacyMetadata, checkQuota, type QuotaResult } from "./client/quota.ts"
 export type {
   BlockCacheControl,
   ContentBlock,
@@ -92,8 +93,11 @@ export { has1mContext, isDebug, isShowHiddenChars, isVerbose, normalizeModelForA
  * Parse a Server-Sent Events stream into typed event objects.
  *
  * The Anthropic streaming API uses standard SSE format:
- *   event: <type>\n
- *   data: <json>\n\n
+ *
+ * ```text
+ * event: <type>\n
+ * data: <json>\n\n
+ * ```
  *
  * We only look at `data:` lines since the event type is also in the JSON.
  * The stream ends with `data: [DONE]` (not standard SSE, but conventional).
@@ -261,7 +265,7 @@ export async function* sendMessageOnce(
   const headers = buildHeaders(auth, sessionId, requestType, rawModel, {
     speedFast: sendFast,
   })
-  const metadata = buildMetadata(auth)
+  const metadata = buildLegacyMetadata(auth)
 
   const body: Record<string, unknown> = {
     model,
@@ -1100,8 +1104,9 @@ export async function* sendMessageOnce(
 
 /**
  * Best-effort pull of the Anthropic `error.type` out of a non-2xx response
- * body. Anthropic error bodies are `{"type":"error","error":{"type":"…",
- * "message":"…"}}`. Returns `undefined` if the body isn't JSON or lacks the
+ * body. Anthropic error bodies are
+ * `{"type":"error","error":{"type":"…","message":"…"}}`.
+ * Returns `undefined` if the body isn't JSON or lacks the
  * field, so the caller can fall back to status-code mapping.
  */
 function parseUpstreamErrorType(body: string): string | undefined {

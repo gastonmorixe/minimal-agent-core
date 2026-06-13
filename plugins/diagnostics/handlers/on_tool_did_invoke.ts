@@ -104,6 +104,13 @@ function serviceFor(root: string): DiagnosticsService {
 /** Tools whose results carry a file we should diagnose. */
 const FILE_MUTATING_TOOLS = new Set(["Edit", "Write"])
 
+/**
+ * Post-tool hook that lints a file right after a successful Edit/Write:
+ * resolves the touched path, runs the diagnostics service on it, and appends
+ * the findings to the tool result as model-facing notes. Best-effort
+ * throughout; any internal failure leaves the payload unmodified rather than
+ * breaking the tool call.
+ */
 export default async function onToolDidInvoke(
   payload: ToolDidInvokePayload,
   ctx: ChainCtx,

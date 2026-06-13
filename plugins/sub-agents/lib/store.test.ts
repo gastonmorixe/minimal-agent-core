@@ -35,7 +35,7 @@ describe("parse / serialize", () => {
     const text = `\n${good}\n{ not json\n42\n`
     const parsed = parseRecords(text)
     expect(parsed).toHaveLength(1)
-    expect(parsed[0]?.id).toBe("A1")
+    expect(parsed[0]?.id).toBe(subagentId("A1"))
   })
 
   it("serializes empty to empty string", () => {
@@ -45,14 +45,14 @@ describe("parse / serialize", () => {
 
 describe("nextId", () => {
   it("is monotonic over the max numeric suffix (stable across removals)", () => {
-    expect(nextId([])).toBe("A1")
-    expect(nextId([rec("A1"), rec("A2")])).toBe("A3")
+    expect(nextId([])).toBe(subagentId("A1"))
+    expect(nextId([rec("A1"), rec("A2")])).toBe(subagentId("A3"))
     // A2 removed → next is still A3, never reuses A2.
-    expect(nextId([rec("A1"), rec("A3")])).toBe("A4")
+    expect(nextId([rec("A1"), rec("A3")])).toBe(subagentId("A4"))
   })
 
   it("honors a custom prefix", () => {
-    expect(nextId([rec("A5")], "W")).toBe("W1")
+    expect(nextId([rec("A5")], "W")).toBe(subagentId("W1"))
   })
 })
 
@@ -75,28 +75,28 @@ describe("SubagentStore", () => {
     const store = new SubagentStore("lead-1", { dir })
     store.upsert(rec("A1"))
     store.upsert(rec("A2"))
-    expect(store.all().map((r) => r.id)).toEqual(["A1", "A2"])
+    expect(store.all().map((r) => r.id)).toEqual([subagentId("A1"), subagentId("A2")])
 
     const updated: SubagentRecord = {
       ...rec("A1"),
       status: { kind: "running", pid: 99, startedAt: "t", progress: { tools: 0, tokens: 0 } },
     }
     store.upsert(updated)
-    expect(store.all().map((r) => r.id)).toEqual(["A1", "A2"]) // order preserved
+    expect(store.all().map((r) => r.id)).toEqual([subagentId("A1"), subagentId("A2")]) // order preserved
     expect(store.get("A1")?.status.kind).toBe("running")
   })
 
   it("nextId reflects persisted state", () => {
     const store = new SubagentStore("lead-1", { dir })
-    expect(store.nextId()).toBe("A1")
+    expect(store.nextId()).toBe(subagentId("A1"))
     store.upsert(rec("A1"))
-    expect(store.nextId()).toBe("A2")
+    expect(store.nextId()).toBe(subagentId("A2"))
   })
 
   it("replaceAll overwrites the whole fleet", () => {
     const store = new SubagentStore("lead-1", { dir })
     store.upsert(rec("A1"))
     store.replaceAll([rec("A9")])
-    expect(store.all().map((r) => r.id)).toEqual(["A9"])
+    expect(store.all().map((r) => r.id)).toEqual([subagentId("A9")])
   })
 })

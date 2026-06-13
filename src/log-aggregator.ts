@@ -31,6 +31,12 @@
 import type { LiveAreaSink } from "./live-area-providers.ts"
 import type { DiagnosticLinesSink } from "./log-tui.ts"
 
+/**
+ * Merges the two writers that share the footer band below the editor:
+ * diagnostic lines (warn/error chips) and plugin footer lines. Each side can
+ * update independently; every change re-emits the concatenated
+ * `[diagnostic..., plugin...]` array so neither writer clobbers the other.
+ */
 export class FooterAggregator {
   private diagnosticLines: string[] = []
   private pluginFooterLines: string[] = []

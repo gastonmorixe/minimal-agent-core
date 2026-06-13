@@ -16,7 +16,7 @@ describe("library specialists", () => {
       expect(def.model).toBeUndefined()
       expect(def.effort).toBeUndefined()
       // every specialist carries an abstract role instead
-      expect(["scout", "balanced", "deep"]).toContain(def.role)
+      expect(["scout", "balanced", "deep"]).toContain(def.role ?? "")
     }
   })
 

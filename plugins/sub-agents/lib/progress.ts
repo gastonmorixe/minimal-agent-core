@@ -11,19 +11,42 @@
  * @module sub-agents/lib/progress
  */
 
-import { billedUsageOf } from "../../../src/session-usage.ts"
-
 import { type Progress, ZERO_PROGRESS } from "./types.ts"
+
+/** The Anthropic-wire saved usage payload (only the fields we read). */
+interface MaybeUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+}
 
 /** One parsed session record (only the fields we read; everything else ignored). */
 interface MaybeRecord {
   kind?: string
   content?: unknown
-  usage?: {
-    input_tokens?: number
-    output_tokens?: number
-    cache_read_input_tokens?: number
-    cache_creation_input_tokens?: number
+  usage?: MaybeUsage
+}
+
+/**
+ * Normalize a saved `usage` payload into the four billed counters (missing →
+ * 0). LOCAL re-declaration of the host's `billedUsageOf` pure helper (source
+ * of truth: `src/session-usage.ts`); re-declared here so the plugin imports
+ * nothing from the host repo (the decoupling contract). The fleet widget sums
+ * `input + output` only — the honest monotonic billed-work number, with
+ * cache re-reads excluded (they'd inflate it; see session-tokens cacheRead).
+ */
+function billedUsageOf(u: MaybeUsage | undefined): {
+  input: number
+  output: number
+  cacheRead: number
+  cacheCreate: number
+} {
+  return {
+    input: u?.input_tokens ?? 0,
+    output: u?.output_tokens ?? 0,
+    cacheRead: u?.cache_read_input_tokens ?? 0,
+    cacheCreate: u?.cache_creation_input_tokens ?? 0,
   }
 }
 
@@ -117,7 +140,8 @@ export function parseProgress(jsonlText: string): Progress {
  * echo). Returns `undefined` when there is no assistant text at all (a truly
  * silent worker → the supervisor marks it `incomplete`).
  *
- * @param maxChars Clip the result to this many characters (default 2000) so a
+ * @param jsonlText - The worker session transcript as raw JSONL text.
+ * @param maxChars - Clip the result to this many characters (default 2000) so a
  *   runaway final message can't blow the lead's context. Clipping is marked.
  */
 export function parseFinalText(jsonlText: string, maxChars = 2000): string | undefined {

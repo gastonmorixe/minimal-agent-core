@@ -15,7 +15,7 @@
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { clearLastRateLimits, setLastRateLimits } from "../../src/quota-cache.ts"
+import { clearLastRateLimits, getLastRateLimits, setLastRateLimits } from "../../src/quota-cache.ts"
 
 import {
   _resetAnthropicPrimeInFlight,
@@ -93,6 +93,46 @@ describe("primeAnthropicSessionInfo", () => {
     // which is inside the freshness window, so the prime's cache-first check
     // returns before any I/O.
     await expect(primeAnthropicSessionInfo({ modelId: "claude-opus-4-8" })).resolves.toBeUndefined()
+  })
+
+  it("probes through the canonical probeQuota (B-0 flip), not the legacy checkQuota", async () => {
+    // Pin the WIRE SHAPE of the cold-start prime probe. The canonical
+    // probeQuota body is exactly {model, max_tokens, messages} — the legacy
+    // checkQuota body additionally carried a `metadata` envelope. Wiring
+    // prime → probeQuota is flip-checklist item 3 (PLAN.md §2); this test
+    // is its red→green proof and its regression pin.
+    const prevTestAuth = process.env.MINIMAL_AGENT_TEST_AUTH
+    process.env.MINIMAL_AGENT_TEST_AUTH = "1" // getAuth() → synthetic oauth (test env only)
+    try {
+      let seenUrl = ""
+      let seenBody: Record<string, unknown> | null = null
+      const networkClient = {
+        request: async (req: { url: string; body?: string }) => {
+          seenUrl = req.url
+          seenBody = req.body ? (JSON.parse(req.body) as Record<string, unknown>) : null
+          return new Response("{}", {
+            status: 200,
+            headers: { "anthropic-ratelimit-unified-5h-utilization": "0.33" },
+          })
+        },
+      }
+      await primeAnthropicSessionInfo({
+        modelId: "claude-opus-4-8",
+        networkClient,
+      })
+      expect(seenUrl).toContain("api.anthropic.com/v1/messages")
+      expect(seenBody).not.toBeNull()
+      // Canonical probe shape: no metadata envelope, 1-token bare user msg.
+      expect(Object.keys(seenBody!).sort()).toEqual(["max_tokens", "messages", "model"])
+      expect(seenBody!.max_tokens).toBe(1)
+      // The broadcast side effect populated the cache.
+      expect(
+        getLastRateLimits()?.rateLimits.get("anthropic-ratelimit-unified-5h-utilization"),
+      ).toBe("0.33")
+    } finally {
+      if (prevTestAuth === undefined) delete process.env.MINIMAL_AGENT_TEST_AUTH
+      else process.env.MINIMAL_AGENT_TEST_AUTH = prevTestAuth
+    }
   })
 
   it("dedupes concurrent calls into a single in-flight promise", async () => {

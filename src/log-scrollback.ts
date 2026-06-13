@@ -131,6 +131,13 @@ export interface ScrollbackSinkOptions {
 // Sink
 // ---------------------------------------------------------------------------
 
+/**
+ * Diagnostic-bus sink that prints warn/error events into terminal scrollback
+ * as styled chips. Per-source dedup collapses repeats inside a time window
+ * into a counter repaint instead of new lines, and a buffering mode (used
+ * during the startup banner) holds renderings until {@link flushBuffer} so
+ * diagnostics cannot tear a box being painted.
+ */
 export class ScrollbackDiagnosticSink {
   private writeImpl: (text: string) => void
   private dedupWindowMs: number

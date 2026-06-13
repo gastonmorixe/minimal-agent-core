@@ -25,7 +25,13 @@ import {
 import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "../llm-openai/index.ts"
 
-import { bootstrapOpenRouter } from "./adapter.ts"
+import { bootstrapOpenRouter, openrouterProviderPlugin } from "./adapter.ts"
+import {
+  buildOpenRouterApiKeyCredential,
+  OPENROUTER_API_KEY_AUTH,
+  openRouterApiKeyAuth,
+  readOpenRouterApiKey,
+} from "./auth.ts"
 
 function setup() {
   clearModelRegistry()
@@ -48,6 +54,27 @@ function openaiChatPong(): string {
 }
 
 describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire layer)", () => {
+  it("exposes API-key auth and no OAuth login strategy", () => {
+    expect(openrouterProviderPlugin.apiKeyAuth).toBe(openRouterApiKeyAuth)
+    expect(openrouterProviderPlugin.oauthLogin).toBeUndefined()
+  })
+
+  it("declares OpenRouter API-key sources and credential codec", () => {
+    expect(openRouterApiKeyAuth.serviceId).toBe(OPENROUTER_API_KEY_AUTH.serviceId)
+    expect(openRouterApiKeyAuth.displayName).toBe("OpenRouter API Key")
+    expect(openRouterApiKeyAuth.envVars).toEqual(["OPENROUTER_KEY"])
+    expect(openRouterApiKeyAuth.configKey).toBe("openrouter")
+
+    const write = buildOpenRouterApiKeyCredential("sk-or-test")
+    expect(write).toEqual({
+      serviceId: "openrouter-api-key",
+      displayName: "OpenRouter API Key",
+      secrets: { tokenType: "api-key", apiKey: "sk-or-test" },
+    })
+    expect(readOpenRouterApiKey(write.secrets)).toBe("sk-or-test")
+    expect(readOpenRouterApiKey({ tokenType: "api-key" })).toBeNull()
+  })
+
   it("registers slugs on the shared openai-chat-completions surface", () => {
     setup()
     const m = resolveModel("openai/gpt-4o-mini")

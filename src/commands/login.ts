@@ -1,7 +1,7 @@
 /**
  * `minimal-agent --login` command.
  *
- * Thin CLI wrapper over {@link ../oauth-login.ts}'s `runOAuthLogin`. Handles
+ * Thin CLI wrapper over `../oauth-login.ts`'s `runOAuthLogin`. Handles
  * the I/O surfaces the orchestrator delegates: reading the pasted code from
  * stdin (with `readline`, supports both interactive TTY and piped stdin),
  * opening the browser via the macOS / Linux / Windows handlers, and

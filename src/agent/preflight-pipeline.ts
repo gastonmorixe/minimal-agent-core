@@ -61,7 +61,7 @@ export interface PreflightPipelineOutcome {
  * when the provider raises no issues. The hot path adds one canonical
  * conversion pass over `messages` per send : O(N×B) where N = messages
  * and B = avg blocks per message. For a 100-message conversation this
- * is < 1ms.
+ * is under 1ms.
  */
 export async function runPreflightPipeline(opts: {
   messages: Message[]

@@ -24,7 +24,7 @@
  * same `source` clears the matching slot. Producers signal recovery
  * explicitly:
  *
- *     diag.notice("auth.refresh", "token rotated cleanly", { recovery: "true" })
+ *     diag.notice("auth.refresh", "token rotated cleanly", \{ recovery: "true" \})
  *
  * Plain notices (without the flag) and Info/Debug are ignored — they
  * land in the file log but not in the UI.
@@ -35,7 +35,7 @@
  * stays decoupled from `src/agent.ts`):
  *
  *   ⚠ <source>: <message>            (one warning, count 1)
- *   ⚠ <source>: <message> (×42)      (one warning, count > 1)
+ *   ⚠ <source>: <message> (×42)      (one warning, count above 1)
  *   ✗ <source>: <message>            (one error, count 1)
  *
  * Both lines:
@@ -92,6 +92,12 @@ function faintWhite(s: string): string {
   return `${SGR.faintWhite}${s}${SGR.faintWhiteOff}`
 }
 
+/**
+ * Renders the most recent warn and error diagnostics as at most two compact
+ * footer lines for the TUI. Keeps one slot per severity with a repeat
+ * counter (so floods show `xN` instead of scrolling), and pushes re-rendered
+ * lines into the attached {@link DiagnosticLinesSink} on every bus event.
+ */
 export class TuiDiagnosticSurface {
   private warn: Slot = { event: null, count: 0 }
   private error: Slot = { event: null, count: 0 }

@@ -13,6 +13,7 @@
  *   bun run plugins/tasks/cli.ts <command> [args] [flags]
  *
  * Commands:
+ * ```
  *   list                              Render the current task list.
  *   add <title...>                    Append a new task.
  *   start <id>                        Flip a task to doing.
@@ -23,8 +24,10 @@
  *   reorder <id1> <id2> ...           Reorder top-level tasks.
  *   clear                             Wipe all (refuses if a task is doing).
  *   path                              Print the resolved file path.
+ * ```
  *
  * Flags (global):
+ * ```
  *   --sid <sid>                       Session id (default: $MINIMAL_AGENT_SESSION_ID)
  *   --home <path>                     Override the HOME dir (default: $HOME). Tasks file
  *                                     lives at <home>/.minimal-agent/sessions/<sid>.tasks.jsonl.
@@ -34,6 +37,7 @@
  *   --no-color                        Disable ANSI colors.
  *   -f, --format text|json            Output format for `list`/`status`/etc. (default: text)
  *   -h, --help                        Show this help.
+ * ```
  *
  * Exit codes:
  *   0  success
@@ -75,6 +79,7 @@ interface Flags {
   errors: string[]
 }
 
+/** Parse the tasks-CLI argv into typed flags (command, filters, format). */
 function parseArgv(argv: readonly string[]): Flags {
   const flags: Flags = {
     positional: [],
@@ -185,6 +190,7 @@ function resolveIdRef(raw: string): string | number {
 // Command implementations
 // ---------------------------------------------------------------------------
 
+/** Dispatch the parsed flags to the matching task-store operation. */
 function run(flags: Flags): { code: number; output: string } {
   if (flags.help || flags.command === undefined) {
     return { code: 0, output: help() }

@@ -9,7 +9,7 @@
  *  3. When `abortBus.requestAbort` fires while a turn is in flight, the
  *     REPL:
  *       - swallows the resulting `AbortError` (no `error` footer);
- *       - prints a faint+strikethrough "✘ ABORTED · ❯ <echoed body>" block
+ *       - prints a faint+strikethrough `✘ ABORTED · ❯ <echoed body>` block
  *         (see `formatAbortedEcho` : replaces the older single-line
  *         "⊘ aborted by user : prompt restored to editor" footer);
  *       - calls `editor.setBuffer(text)` to restore the in-flight prompt;
@@ -418,7 +418,8 @@ describe("runReplLiveArea : abort bus integration", () => {
       },
       async *run(_text, _opts) {
         throw new Error("boom not abort")
-        yield "" // unreachable, satisfies generator type
+        // oxlint-disable-next-line no-unreachable -- yield satisfies the generator type
+        yield ""
       },
     }
 
@@ -456,6 +457,7 @@ describe("runReplLiveArea : abort bus integration", () => {
       rollbackPendingTurn: () => false,
       async *run(_text, _opts) {
         throw new Error("kaboom")
+        // oxlint-disable-next-line no-unreachable -- yield satisfies the generator type
         yield ""
       },
     }

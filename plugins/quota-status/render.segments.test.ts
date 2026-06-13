@@ -13,12 +13,14 @@ import { stripAnsi } from "../../src/term-width.ts"
 import { DEFAULT_SEGMENT_ORDER, normalizeSegmentOrder, renderQuotaFooter } from "./render.ts"
 
 const TOKENS: SessionTokens = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cacheReadTokens: 0,
-  cacheCreationTokens: 0,
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheCreate: 0,
+  total: 0,
+  turns: 0,
   contextSize: 24_000,
-} as SessionTokens
+}
 
 const WINDOWS: QuotaWindow[] = [
   { id: "5h", utilization: 0.21 },

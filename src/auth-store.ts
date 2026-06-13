@@ -67,18 +67,18 @@
  * ───────────────────────────────────────────────────────────────────────────
  *  FILE FORMAT  (~/.minimal-agent/auth.jsonc, schema version 1)
  * ───────────────────────────────────────────────────────────────────────────
- *   {
+ *   \{
  *     "version": 1,
  *     "entries": [
- *       {
+ *       \{
  *         "id": "anthropic-plan-oauth",      // provider slug (normalized)
  *         "name": "Anthropic Plan (OAuth)",  // display name; unique within id
- *         "secrets": { ...opaque, plugin-owned... },
+ *         "secrets": \{ ...opaque, plugin-owned... \},
  *         "createdAt": "2026-05-25T23:00:00.000Z",
  *         "updatedAt": "2026-05-25T23:00:00.000Z"
- *       }
+ *       \}
  *     ]
- *   }
+ *   \}
  *
  * It is a `.jsonc` file: it carries a leading comment banner documenting what
  * it is. The file is **machine-managed** — every save regenerates it, so the

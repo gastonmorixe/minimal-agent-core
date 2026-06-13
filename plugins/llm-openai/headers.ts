@@ -6,7 +6,7 @@
  * @module llm/providers/openai/headers
  */
 
-import type { ProviderAuth } from "../../src/llm/provider.ts"
+import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
 
 import { OPENAI_USER_AGENT } from "./wire-constants.ts"
 
@@ -16,6 +16,7 @@ export interface OpenAIHeadersOpts {
   beta?: string
 }
 
+/** Build the auth + content headers for a Chat/Responses API request. */
 export function buildOpenAIHeaders(opts: OpenAIHeadersOpts): Record<string, string> {
   const headers: Record<string, string> = {
     accept: "application/json",

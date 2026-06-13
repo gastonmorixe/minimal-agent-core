@@ -7,8 +7,8 @@
 
 import type { AuthResult } from "../auth.ts"
 import { buildHeaders } from "../headers.ts"
-import { getSessionId } from "../metadata.ts"
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
+import { getSessionId } from "../session-id.ts"
 
 import { debugHeader, debugResponse } from "./debug.ts"
 import type { ModelInfo } from "./types.ts"
@@ -27,8 +27,8 @@ const MODELS_URL = "https://api.anthropic.com/v1/models?beta=true"
  * `--list-models` CLI flag uses this expanded list so users can pick
  * `claude-opus-4-7[1m]` from the menu and get 1M context automatically.
  *
- * @param auth Authenticated credentials
- * @param networkClient Network client used for the models request.
+ * @param auth - Authenticated credentials
+ * @param networkClient - Network client used for the models request.
  * @returns Array of {@link ModelInfo}, with `[1m]` variants appended
  *
  * @see cc-03312026/src/utils/context.ts:modelSupports1M()

@@ -86,4 +86,37 @@ describe("SubagentsAttachment", () => {
     const t = new SubagentsAttachment("lead", { dir }, () => NOW).toText() as string
     expect(t).toContain("more (ListAgents)")
   })
+
+  // Relocated from the core seam test (src/agent.turn-attachments.test.ts,
+  // Wave A unit A-4): the core file may not import this plugin (invariant
+  // I2), so the single-running-worker and empty-session shapes the agent
+  // surfaces are characterized here, against a real SubagentStore. The
+  // agent-side seam (a producer's block is injected in array order / a null
+  // producer adds nothing) stays in the core file with an in-test fake
+  // producer.
+  it("toAttachment surfaces the fleet (worker id + running) when ONE worker is active", () => {
+    const store = new SubagentStore("lead", { dir })
+    store.upsert(
+      rec("A1", {
+        kind: "running",
+        pid: 1,
+        startedAt: "2026-05-30T11:59:00.000Z",
+        progress: { tools: 0, tokens: 0 },
+      }),
+    )
+    const att = new SubagentsAttachment("lead", { dir }, () => NOW).toAttachment()
+    expect(att).not.toBeNull()
+    expect(att!.type).toBe("text")
+    const text = (att as { text: string }).text
+    expect(text).toContain("<ma::agent::subagents")
+    expect(text).toContain("A1")
+    expect(text).toContain("running")
+  })
+
+  it("toAttachment returns null for an empty session (no workers at all)", () => {
+    // Construct the store but add nothing — the session has zero workers.
+    const _store = new SubagentStore("lead", { dir })
+    void _store
+    expect(new SubagentsAttachment("lead", { dir }, () => NOW).toAttachment()).toBeNull()
+  })
 })

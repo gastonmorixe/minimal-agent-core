@@ -1,5 +1,5 @@
 /**
- * Tests for {@link ./retry.ts}.
+ * Tests for `./retry.ts`.
  *
  * The retry module's contract has four pieces, each of which has its own
  * describe block:

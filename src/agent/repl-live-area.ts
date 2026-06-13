@@ -42,6 +42,13 @@ import type {
 } from "./repl.ts"
 import { isOuterFrameClose } from "./tool-format.ts"
 
+/**
+ * Runs the interactive REPL on the compositor-based "live area" UI: a
+ * persistent bottom-anchored editor with a status row, instead of the legacy
+ * inline prompt. Owns the read-eval loop until the user quits, wiring
+ * keybindings, slash commands, mode cycling, and abort handling around the
+ * supplied agent. Blocks for the lifetime of the session.
+ */
 export async function runReplLiveArea(
   agent: ReplAgentLike,
   opts: {
@@ -698,8 +705,7 @@ export async function runReplLiveArea(
       case "none":
         break
       default: {
-        const _exhaustive: never = result
-        throw new Error(`unhandled command result: ${JSON.stringify(_exhaustive)}`)
+        throw new Error(`unhandled command result: ${JSON.stringify(result satisfies never)}`)
       }
     }
   }

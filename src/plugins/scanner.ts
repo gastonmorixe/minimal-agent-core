@@ -22,7 +22,7 @@
  * channel sees `<ma::emit::...`). This is the only escape.
  *
  * **Markdown code context:** the scanner tracks inline code spans
- * (`` `...` ``, or any backtick run `` ``...`` `` closed by the same run
+ * (single-backtick spans, or any longer backtick run closed by the same run
  * length) and fenced code blocks (lines beginning with 3+ backticks or 3+
  * tildes, closed by a same-char fence of equal-or-greater length at line
  * start). Inside either context, `<ma::emit::` openers are passed through

@@ -191,7 +191,7 @@ export interface ReplEditor {
    * overlay driven from the prompt:
    *
    *   - `↑` at an empty prompt dequeues the sole queued item back to the
-   *     input, or (with >1 queued) opens a selection overlay.
+   *     input, or (with more than one queued) opens a selection overlay.
    *   - In the overlay: `↑`/`↓` move the selection, `d`/`Enter` dequeue
    *     the selected item to the input, `x` removes it, `k` dequeues all
    *     (numbered), `Esc` closes the overlay.
@@ -283,8 +283,11 @@ export interface ReplEditor {
  * markdown rendering state resets between user messages : this avoids
  * the formatter getting confused by stale state from previous turns.
  *
+ * The `opts` bag's most common field is `formatterCmd`, an optional
+ * formatter argv (e.g. `["mdstream"]`); the rest are dependency-injection
+ * seams (input/output streams, editor, compositor, spinner, status bus).
+ *
  * @param agent - Initialized agent instance
- * @param opts.formatterCmd - Optional formatter argv (e.g. `["mdstream"]`)
  *
  * @example
  * ```ts

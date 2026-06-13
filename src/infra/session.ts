@@ -25,6 +25,7 @@ export function generateSessionId(): string {
  */
 const PUBLIC_METADATA_RE = /(session[-_]?id|request[-_]?id|model|-version$)/i
 
+/** True when the header/metadata key matches {@link PUBLIC_METADATA_RE} and may be shown unredacted. */
 export function isPublicMetadata(key: string): boolean {
   return PUBLIC_METADATA_RE.test(key)
 }

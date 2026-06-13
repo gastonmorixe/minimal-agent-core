@@ -471,8 +471,8 @@ export async function resolveLiveAreaSlot(
  * a malformed shape; the loader's `invoke` wrapper turns the throw into a
  * `{kind:"error"}` the host can render.
  *
- * @param out Raw value the handler returned.
- * @param name Command name, for error messages.
+ * @param out - Raw value the handler returned.
+ * @param name - Command name, for error messages.
  * @returns A well-formed {@link CommandResult}.
  */
 function normalizeCommandResult(out: unknown, name: string): CommandResult {
@@ -518,10 +518,10 @@ function normalizeCommandResult(out: unknown, name: string): CommandResult {
  * diagnostic) on any resolution failure, so one broken command never
  * disqualifies the rest of the plugin.
  *
- * @param spec Validated manifest command entry.
- * @param pluginId Owning plugin id.
- * @param packageDir Absolute package dir (the command's cwd).
- * @param logger Diagnostic sink.
+ * @param spec - Validated manifest command entry.
+ * @param pluginId - Owning plugin id.
+ * @param packageDir - Absolute package dir (the command's cwd).
+ * @param logger - Diagnostic sink.
  * @returns The resolved command, or `null` when it could not be loaded.
  */
 export async function resolveCommand(

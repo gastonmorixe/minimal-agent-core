@@ -30,6 +30,10 @@ import { cronStoreForSession } from "../lib/store.ts"
 const DIM = "\x1b[2m"
 const RESET = "\x1b[0m"
 
+/**
+ * Command handler for `/schedule`: parses the subcommand (raw cron line,
+ * `list`, or `cancel <id>`) and manages tasks in the session cron store.
+ */
 export default async function cmdSchedule(ctx: CommandContext): Promise<CommandResult> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") {
     return { kind: "error", message: "scheduling is disabled (MINIMAL_AGENT_DISABLE_CRON=1)" }
@@ -109,8 +113,7 @@ export default async function cmdSchedule(ctx: CommandContext): Promise<CommandR
       return { kind: "error", message: action.message ?? "invalid /schedule usage" }
 
     default: {
-      const _exhaustive: never = action
-      return { kind: "error", message: `unhandled: ${JSON.stringify(_exhaustive)}` }
+      return { kind: "error", message: `unhandled: ${JSON.stringify(action satisfies never)}` }
     }
   }
 }

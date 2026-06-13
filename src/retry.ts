@@ -158,10 +158,10 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
  * The function receives the 1-indexed attempt number, which can be useful
  * for telemetry inside the wrapped operation itself.
  *
- * @param fn   The operation to attempt. Called with the attempt number
+ * @param fn - The operation to attempt. Called with the attempt number
  *             (`1` for first call, `2` for first retry, ...).
- * @param opts Tunables — see {@link RetryOptions}.
- * @param deps Test-only injection of `sleep`/`random`/`now`.
+ * @param opts - Tunables — see {@link RetryOptions}.
+ * @param deps - Test-only injection of `sleep`/`random`/`now`.
  * @returns    The resolved value of `fn` on the first successful attempt,
  *             or rejects with the last error after exhausting retries
  *             (or with the abort reason if `opts.signal` aborts).

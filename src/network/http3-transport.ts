@@ -36,11 +36,11 @@ import { type NetworkRequest, NetworkResponse, type NetworkTransport } from "./t
  *
  * @example
  *   const transport = new Http3Transport()
- *   const client = new NetworkClient({
+ *   const client = new NetworkClient(\{
  *     primary: new Http2Transport(),
  *     transports: new Map([["http3", transport]]),
  *     policies: [http3OpportunisticPolicy(new Http3NegotiationCache())],
- *   })
+ *   \})
  */
 export class Http3Transport implements NetworkTransport {
   readonly id = "http3"

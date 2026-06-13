@@ -181,6 +181,10 @@ function paintBold(text: string, fgOpen: string | null): string {
  * sequences (ASK → default → ASK with no send) yield `pending = null`
  * and this returns `null`, so no chip is ever written for them.
  *
+ * @param pending - The pending mode transition to render, or null.
+ * @param resolveLabel - Maps a mode id (or null) to its display label.
+ * @param resolveFgOpen - Maps a mode id (or null) to its ANSI fg-open
+ *   sequence, or null for the default color.
  * @param at - Wall-clock at the moment of send. The caller captures
  *   this once; replay uses the user-record's `ts` and calls
  *   {@link buildModeChangeChip} directly.

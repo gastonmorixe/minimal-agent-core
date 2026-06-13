@@ -3,8 +3,9 @@
  *
  * Three primitives live here:
  *
- *  - {@link parseReflectionAck} extracts the `<ma::agent::reflection-ack
- *    silence-for="K" reason="..." />` tag out of an assistant response.
+ *  - {@link parseReflectionAck} extracts the reflection-ack tag
+ *    (`<ma::agent::reflection-ack silence-for="K" reason="..." />`)
+ *    out of an assistant response.
  *  - {@link runReflectionCooldown} applies a wall-clock pause + live
  *    status surface, with Esc as a "skip cooldown but keep going"
  *    affordance.
@@ -105,9 +106,10 @@ export function parseReflectionAck(
  *     model is supposed to see.
  *  3. **Abort signal fires** (turn aborting, e.g. Ctrl+C or a second
  *     Esc after this cooldown closed): the wait resolves immediately
- *     and the caller's top-of-loop `if (signal?.aborted) throw
- *     AbortError` tears the turn down on the next iteration. The
- *     checkpoint marker is still pushed; messages stay well-formed.
+ *     and the caller's top-of-loop aborted-signal check
+ *     (`if (signal?.aborted) throw AbortError`) tears the turn down on
+ *     the next iteration. The checkpoint marker is still pushed;
+ *     messages stay well-formed.
  *
  * Without a stack (back-compat path), behavior (2) collapses into
  * behavior (3): Esc on its own goes through the abort-quit FSM and
@@ -118,17 +120,17 @@ export function parseReflectionAck(
  * injected by the caller in that case (model-facing marker without
  * the wall-clock penalty).
  *
- * @param opts - Cooldown options.
- * @param opts.totalMs - Total cooldown duration in milliseconds. `<= 0`
+ * Cooldown options (the `opts` bag):
+ *   - `totalMs` - Total cooldown duration in milliseconds. `<= 0`
  *   makes this a no-op.
- * @param opts.round - The tool-loop round at which the checkpoint
+ *   - `round` - The tool-loop round at which the checkpoint
  *   fires; shown in the status label.
- * @param opts.signal - Optional abort signal. When it fires the
+ *   - `signal` - Optional abort signal. When it fires the
  *   cooldown resolves immediately (the caller's top-of-loop check will
  *   tear the turn down on the next iteration).
- * @param opts.statusBus - Live-area status bus used to surface the
+ *   - `statusBus` - Live-area status bus used to surface the
  *   countdown row.
- * @param opts.inputCaptureStack - Stack to push the "Esc skips this
+ *   - `inputCaptureStack` - Stack to push the "Esc skips this
  *   cooldown" capture onto. When omitted (tests / standalone use), Esc
  *   routes through the editor's FSM as before and aborts the turn
  *   instead of just skipping the cooldown.

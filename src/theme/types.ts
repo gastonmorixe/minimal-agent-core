@@ -346,7 +346,7 @@ export interface Theme {
    * degrade to identity (no color) — see {@link Theme.resolveToken}
    * for typed-error introspection.
    *
-   * Token forms accepted: `"red.base"`, `"red"` (=> `red.base`),
+   * Token forms accepted: `"red.base"`, `"red"` (=\> `red.base`),
    * semantic alias (`"danger"`), or a {@link TokenName} brand.
    */
   fg(token: TokenName | string): Wrap

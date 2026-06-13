@@ -13,7 +13,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { ENV_RESULT_PATH, parseResultDigest } from "../lib/spawn.ts"
 
 import reportResult, { available } from "./report_result.ts"
@@ -37,6 +38,7 @@ function ctx(input: Record<string, unknown>, env: Record<string, string>): TUICo
     stdout: process.stdout,
     stdin: process.stdin,
     stderr: process.stderr,
+    log: { info() {}, warn() {}, error() {}, debug() {} } as never,
   }
 }
 

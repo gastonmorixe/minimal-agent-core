@@ -50,8 +50,7 @@ function base64Source(item: MediaItem, data: string): ImageSource | AudioSource 
     case "document":
       return { kind: "base64", mediaType: item.mimeType, data }
     default: {
-      const _exhaustive: never = item.kind
-      throw new Error(`unhandled media kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled media kind: ${String(item.kind satisfies never)}`)
     }
   }
 }
@@ -79,8 +78,7 @@ function blockFromPrepared(item: MediaItem, prepared: PreparedMedia): CanonicalB
       // No canonical video block yet; modality gating rejects video upstream.
       return null
     default: {
-      const _exhaustive: never = item.kind
-      throw new Error(`unhandled media kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled media kind: ${String(item.kind satisfies never)}`)
     }
   }
 }

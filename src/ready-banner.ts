@@ -61,9 +61,9 @@ function wrapChunks(chunks: string[], indent: string, maxWidth: number): string 
 /**
  * Build the dim/colored banner string. Pure : no I/O, no side effects.
  *
- * @param modeManager When non-null AND `hasModes()` is true, appends a
+ * @param modeManager - When non-null AND `hasModes()` is true, appends a
  *   `· shift+tab cycle mode` tail to the hint row.
- * @param cols Terminal width in columns. Hint chunks are reflowed across
+ * @param cols - Terminal width in columns. Hint chunks are reflowed across
  *   multiple indented lines when they don't all fit on one line. Defaults
  *   to 80 (wide enough to fit everything on a single line).
  * @returns ANSI-tagged banner: `\n  status ready\n  <hints>\n\n`.

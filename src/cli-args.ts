@@ -13,14 +13,16 @@
  *   • Subcommand syntax (only when the very FIRST positional matches a
  *     known verb — to mirror `git status`, `npm run`, etc.):
  *
- *       models   [list]                  → --list-models
- *       flags    [list]                  → --list-flags
- *       spinners [list]                  → --list-spinners
- *       sessions [list|<query>]          → --sessions [<query>]
- *       sessions resume <sid|last>       → --resume <sid|last>
- *       usage    [<period>]              → --usage [<period>]
- *       resume   <sid|last>              → --resume <sid|last>
- *       help                             → --help
+ * ```text
+ * models   [list]                  → --list-models
+ * flags    [list]                  → --list-flags
+ * spinners [list]                  → --list-spinners
+ * sessions [list|<query>]          → --sessions [<query>]
+ * sessions resume <sid|last>       → --resume <sid|last>
+ * usage    [<period>]              → --usage [<period>]
+ * resume   <sid|last>              → --resume <sid|last>
+ * help                             → --help
+ * ```
  *
  * The bare `-` (read prompt from stdin) is preserved verbatim.
  *

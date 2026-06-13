@@ -1,11 +1,17 @@
 /**
  * Tests for the tasks-plugin attachment wiring in `Agent.run`.
  *
- * Covers the new optional injectable on the Agent constructor:
+ * Covers the optional injectable on the Agent constructor:
  *
  *   - `tasksAttachment` — `{toAttachment(): ContentBlock | null}` called
  *     once at the INITIAL user-message seam only; produces a
  *     `<ma::agent::tasks …>…</ma::agent::tasks>` block.
+ *
+ * Core-side seam test (Wave A unit A-4): this file exercises ONLY the
+ * agent↔producer seam contract through in-test FAKE producers — it does
+ * not import the tasks plugin (invariant I2). The real `TasksAttachment`
+ * class wired through a `TaskStore` is characterized in the plugin's own
+ * suite (`plugins/tasks/lib/attachment.test.ts`).
  *
  * Structurally identical to `shortTermSnapshot` (see
  * `agent.memory-attachments.test.ts`) so the assertions here mirror that
@@ -22,18 +28,9 @@
  *      context with stale repeats — same rule STM follows).
  *   6. `toAttachment()` is called exactly once per `run()` (initial
  *      seam only).
- *   7. The real `TasksAttachment` class, plumbed through a tmp HOME
- *      with a real `TaskStore`, produces the right wire shape.
  */
 
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
-
-import { TasksAttachment } from "../plugins/tasks/lib/attachment.ts"
-import { TaskStore } from "../plugins/tasks/lib/store.ts"
+import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
@@ -336,64 +333,5 @@ describe("Agent.run — tasks attachment (loop seam)", () => {
 
     // toAttachment must have been called exactly ONCE (initial seam only).
     expect(tasks.callCount).toBe(1)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// (5) End-to-end with the real TasksAttachment + TaskStore
-// ---------------------------------------------------------------------------
-
-describe("Agent.run — tasks attachment (real TasksAttachment integration)", () => {
-  let tmpHome: string
-  const sid = "agent-tasks-integration-sid"
-
-  beforeEach(() => {
-    tmpHome = mkdtempSync(join(tmpdir(), "agent-tasks-"))
-  })
-
-  afterEach(() => {
-    rmSync(tmpHome, { recursive: true, force: true })
-  })
-
-  it("populates the initial user message with the live task list", async () => {
-    // Seed the real store with two tasks.
-    const store = new TaskStore(sid, { home: tmpHome })
-    store.add({ title: "first task" })
-    store.add({ title: "second task" })
-
-    const records: Array<Record<string, unknown>> = []
-    const sendFn = makeTextSendFn(records)
-    const tasksAttachment = new TasksAttachment(sid, { home: tmpHome })
-    const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment })
-
-    for await (const _ of agent.run("plan it")) {
-      // drain
-    }
-
-    const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
-    const content = messages[0]?.content ?? []
-    expect(content.length).toBe(2)
-    const attText = (content[0] as { text: string }).text
-    expect(attText).toContain("<ma::agent::tasks")
-    expect(attText).toContain(`total="2"`)
-    expect(attText).toContain("first task")
-    expect(attText).toContain("second task")
-    expect((content[1] as { text: string }).text).toBe("plan it")
-  })
-
-  it("omits the attachment when the session has zero tasks", async () => {
-    const records: Array<Record<string, unknown>> = []
-    const sendFn = makeTextSendFn(records)
-    const tasksAttachment = new TasksAttachment(sid, { home: tmpHome })
-    const agent = new Agent({ auth, model: "test", sendFn, tasksAttachment })
-
-    for await (const _ of agent.run("hi")) {
-      // drain
-    }
-
-    const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
-    const content = messages[0]?.content ?? []
-    expect(content.length).toBe(1)
-    expect((content[0] as { text: string }).text).toBe("hi")
   })
 })

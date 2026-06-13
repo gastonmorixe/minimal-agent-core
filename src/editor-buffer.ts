@@ -12,6 +12,12 @@
  * @module editor-buffer
  */
 
+/**
+ * Multiline text buffer plus cursor, with all mutation methods (insert,
+ * delete, cursor movement) operating in code-point columns. Holds no terminal
+ * or rendering state, which keeps it unit-testable and lets the controller
+ * and renderer evolve independently.
+ */
 export class EditorBuffer {
   private linesValue: string[] = [""]
   private rowValue = 0

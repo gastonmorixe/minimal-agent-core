@@ -89,7 +89,8 @@ function provenanceMark(t: UsageTotals): string {
  * One breakdown row as a bar line:
  *   `anthropic   ███████████░░░░  1.2M  $4.56  [R]`
  *
- * @param labelFn - Maps the row key to a display label (e.g. model short label).
+ * `opts.labelFn` maps the row key to a display label (e.g. model short
+ * label); `labelWidth` / `barCells` / `tokWidth` are layout widths.
  */
 function renderRow(
   row: UsageBreakdownRow,
@@ -194,9 +195,10 @@ export function renderUsageReport(report: UsageReport, opts: RenderUsageOpts = {
  * the totals header, a short model breakdown, and a key hint. Height-bounded
  * by `maxRows` so it fits the live area without scrolling the prompt away.
  *
+ * The `opts` bag carries `cols` (render width) and `maxRows` (max
+ * breakdown rows to show, default 6).
+ *
  * @param report - The active period's report.
- * @param opts.cols - Render width.
- * @param opts.maxRows - Max breakdown rows to show (default 6).
  */
 export function renderUsageOverlay(
   report: UsageReport,

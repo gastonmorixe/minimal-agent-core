@@ -13,7 +13,7 @@
 import { redactHeaders } from "../net-dbg.ts"
 import { clampWithHint } from "../truncate-hint.ts"
 
-import type { ContentBlock, Message } from "./types.ts"
+import type { ContentBlock, Message, SendOptions } from "./types.ts"
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -55,9 +55,9 @@ export function isVerbose(): boolean {
  * debug output reveals invisible characters as faint glyphs : same idea
  * as the input editor's show-hidden mode (see editor-renderer.ts).
  *
- * Without this, multi-line tool descriptions (e.g. "Bash: ...\n\nThe working
- * directory...") wrap onto real lines in the debug log and visually break
- * the structured key/value layout.
+ * Without this, multi-line tool descriptions (e.g. a Bash description
+ * containing literal `\n\n` breaks) wrap onto real lines in the debug log
+ * and visually break the structured key/value layout.
  */
 export function isShowHiddenChars(): boolean {
   return process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1"
@@ -158,8 +158,7 @@ export function previewBlock(b: ContentBlock): string {
       // Compile-time exhaustiveness. If ContentBlock gains a member, tsc
       // errors here ("Type 'XBlock' is not assignable to type 'never'").
       // Runtime fallback below keeps the agent alive on unknown shapes.
-      const _exhaustive: never = b
-      void _exhaustive
+      void (b satisfies never)
       return `unknown(${(b as { type?: string } | null)?.type ?? "?"})`
     }
   }
@@ -180,11 +179,13 @@ export function previewContent(content: string | ContentBlock[], max = 80): stri
   return truncate(content.map(previewBlock).join("  ⟶  "), max)
 }
 
+/** Prints a cyan `--- label ---` section divider to stderr; no-op unless debug mode is on. */
 export function debugHeader(label: string): void {
   if (!isDebug()) return
   console.error(`\n${c.bold(c.cyan(`--- ${label} ---`))}`)
 }
 
+/** Prints one indented `key: value` line to stderr; no-op unless debug mode is on. */
 export function debugKV(key: string, value: string): void {
   if (!isDebug()) return
   console.error(`  ${c.dim(key + ":")} ${value}`)
@@ -271,6 +272,41 @@ export function debugBody(body: Record<string, unknown>): void {
       console.error(`    ${c.yellow(k)}: ${revealHidden(JSON.stringify(v))}`)
     }
   }
+}
+
+/**
+ * Transport-agnostic `--debug` request dump.
+ *
+ * Prints the model / stream / max_tokens / request_type header lines plus the
+ * structured `messages` / `system` / `tools` body preview (via {@link debugBody})
+ * to stderr. No-op unless debug mode is on.
+ *
+ * This is the dump a `--debug` user expects to see before every request. It
+ * used to live inline in the legacy `sendMessage` (src/client.ts); when the
+ * default transport flipped to the canonical path it was lost, so this is the
+ * extracted version both transports call from `SendOptions` (the canonical
+ * path builds its real wire body downstream, but the user-facing debug view is
+ * identical because it is derived from the same options).
+ *
+ * Security: never prints `auth` (the credential). Headers are dumped separately
+ * via {@link debugHeaders}, which redacts tokens.
+ */
+export function debugRequestOptions(opts: SendOptions): void {
+  if (!isDebug()) return
+  debugHeader(`POST ${opts.model ?? "(default model)"}`)
+  if (opts.model) debugKV("model", opts.model)
+  debugKV("stream", String(opts.stream ?? true))
+  if (opts.maxTokens != null) debugKV("max_tokens", String(opts.maxTokens))
+  debugKV("request_type", opts.requestType ?? "conversation")
+  if (opts.thinking) debugKV("thinking", JSON.stringify(opts.thinking))
+  if (opts.outputConfig) debugKV("output_config", JSON.stringify(opts.outputConfig))
+  if (opts.speed && opts.speed !== "normal") debugKV("speed", opts.speed)
+  // Reuse the structured body printer so the messages/system/tools preview is
+  // byte-identical to the legacy dump.
+  const body: Record<string, unknown> = { messages: opts.messages }
+  if (opts.system) body.system = opts.system
+  if (opts.tools) body.tools = opts.tools
+  debugBody(body)
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +520,11 @@ export function extractToolHint(toolName: string, partialJson: string): string {
   return ""
 }
 
+/**
+ * Undoes the most common JSON string escapes (`\n`, `\t`, `\r`, `\"`, `\\`)
+ * in a raw partial-JSON fragment so error hints read as plain text. Not a
+ * full JSON string parser, just enough for one-line display.
+ */
 export function unescapeJsonish(s: string): string {
   // Cheap unescape sufficient for hint display (not a full JSON string parser).
   return s
@@ -494,6 +535,7 @@ export function unescapeJsonish(s: string): string {
     .replace(/\\\\/g, "\\")
 }
 
+/** Collapses whitespace to one line and ellipsis-truncates at 80 chars, for inline error hints. */
 export function shortenHint(s: string): string {
   const oneLine = s.replace(/\s+/g, " ").trim()
   if (oneLine.length <= 80) return oneLine

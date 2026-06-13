@@ -12,10 +12,10 @@
  *     fit inside the scheduler's per-slot `timeoutMs`.
  *
  *   - {@link primeAnthropicSessionInfo} → `ProviderPlugin.primeSessionInfo`.
- *     **Cold-start cache warmup.** A bounded `checkQuota` probe through the
- *     shared transport. Called fire-and-forget by the agent boot for the
- *     selected provider so the slot's first tick already finds a fresh
- *     cache. Self-deduplicates: a second prime while the first is in
+ *     **Cold-start cache warmup.** A bounded probe through the canonical
+ *     plugin-owned `probeQuota`. Called fire-and-forget by the agent boot
+ *     for the selected provider so the slot's first tick already finds a
+ *     fresh cache. Self-deduplicates: a second prime while the first is in
  *     flight joins the same promise (no double probe).
  *
  * The split matters because, before, `fetchSessionInfo` itself ran the cold
@@ -35,7 +35,6 @@
  */
 
 import { getAuth } from "../../src/auth.ts"
-import { checkQuota } from "../../src/client.ts"
 import { modelShortLabel } from "../../src/llm/model-label.ts"
 import { resolveModel } from "../../src/llm/model-registry.ts"
 import type {
@@ -45,6 +44,8 @@ import type {
 } from "../../src/llm/provider-plugin.ts"
 import type { NetworkClient } from "../../src/network/index.ts"
 import { getLastRateLimits } from "../../src/quota-cache.ts"
+
+import { probeQuota } from "./quota-probe.ts"
 
 /** Trust a cached snapshot newer than this without treating it as stale. */
 const FRESHNESS_MS = 60_000
@@ -160,12 +161,13 @@ export function _resetAnthropicPrimeInFlight(): void {
 
 /**
  * Warm the Anthropic quota cache so the status-bar slot's first tick finds
- * fresh data. Issues a bounded 1-token Haiku POST through the shared transport
- * (`src/client/quota.ts::checkQuota`), whose response headers carry the
- * `anthropic-ratelimit-*` map that `broadcastResponseRateLimits` copies into
- * the in-process cache AND emits on `quota.headersReceived`. The status-bar
- * slot's `refreshOn: ["quota.headersReceived"]` then refires it and the
- * footer populates.
+ * fresh data. Issues a bounded 1-token Haiku POST through the canonical,
+ * plugin-owned probe (`./quota-probe.ts::probeQuota` — wired at the B-0
+ * transport flip, replacing the legacy `checkQuota`), whose response headers
+ * carry the `anthropic-ratelimit-*` map that `broadcastResponseRateLimits`
+ * copies into the in-process cache AND emits on `quota.headersReceived`. The
+ * status-bar slot's `refreshOn: ["quota.headersReceived"]` then refires it
+ * and the footer populates.
  *
  * Never throws. Self-gates on missing auth (no creds → just return; the
  * footer keeps the context-only view). Self-deduplicates a concurrent caller
@@ -202,11 +204,13 @@ export function primeAnthropicSessionInfo(ctx: ProviderSessionContext): Promise<
     }
     if (!auth) return
 
-    // `checkQuota` already broadcasts on success (cache write + bus emit
-    // via `broadcastResponseRateLimits`), so we don't need its return.
-    // It also swallows its own errors and honors `ctx.signal` composed
-    // with its internal 15s deadline.
-    await checkQuota(auth, ctx.networkClient as NetworkClient | undefined, ctx.signal)
+    // `probeQuota` (the canonical, plugin-owned probe — wired here at the
+    // B-0 flip, replacing the legacy `src/client/quota.ts checkQuota`)
+    // already broadcasts on success (cache write + bus emit via
+    // `broadcastResponseRateLimits`), so we don't need its return. It also
+    // swallows its own errors and honors `ctx.signal` composed with its
+    // internal 15s deadline.
+    await probeQuota(auth, ctx.networkClient as NetworkClient | undefined, ctx.signal)
   })()
 
   inFlightPrime = work

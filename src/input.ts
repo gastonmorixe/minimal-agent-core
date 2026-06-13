@@ -1,6 +1,17 @@
 import { createInterface } from "node:readline"
 
 import {
+  findCsiEnd,
+  hasModifier,
+  isPrintableChar,
+  isPrintableCodePoint,
+  type ParsedKey,
+  parseCsiUKey,
+  parseXtermOtherKey,
+  trailingPrefixLength,
+} from "./input/key-codec.ts"
+import { LineBuffer } from "./input/line-buffer.ts"
+import {
   codePointWidth,
   cursorRowOffset,
   cursorVisualCol,
@@ -17,13 +28,10 @@ type EscapeToken =
   | { kind: "submit"; consumed: number; value: string | null }
   | { kind: "edit"; consumed: number; apply: () => boolean }
 
-type ParsedKey = {
-  code: number
-  modifiers: number
-  eventType: number
-  text: string | null
-}
-
+/**
+ * Raw-mode stdin reader: decodes keypresses, bracketed paste, and mouse
+ * sequences into typed events for the editor layer.
+ */
 export class RawInput {
   private static readonly BRACKETED_PASTE_START = "\x1b[200~"
   private static readonly BRACKETED_PASTE_END = "\x1b[201~"
@@ -83,9 +91,8 @@ export class RawInput {
   private active: "idle" | "ambient" | "reading" = "idle"
   /** Shared data listener installed by {@link enable}. Null when idle. */
   private ambientListener: ((chunk: string | Buffer) => void) | null = null
-  private lines: string[] = [""]
-  private row = 0
-  private col = 0
+  /** Logical-line buffer + code-point cursor. See {@link LineBuffer}. */
+  private readonly buf = new LineBuffer()
   private pending = ""
   private bracketedPaste = false
   private renderedLineCount = 0
@@ -263,7 +270,7 @@ export class RawInput {
 
   /**
    * Show the prompt and read input until the user submits.
-   * Returns the full text (may contain \n for multiline).
+   * Returns the full text (may contain `\n` for multiline).
    * Returns null when the read is cancelled, or when non-TTY stdin closes.
    */
   async read(): Promise<string | null> {
@@ -343,9 +350,9 @@ export class RawInput {
   }
 
   private resetState(): void {
-    this.lines = [""]
-    this.row = 0
-    this.col = 0
+    this.buf.lines = [""]
+    this.buf.row = 0
+    this.buf.col = 0
     this.pending = ""
     this.bracketedPaste = false
     this.renderedLineCount = 0
@@ -399,12 +406,12 @@ export class RawInput {
           continue
         }
         if (token.kind === "submit_current") {
-          if (this.isBlankBuffer()) {
-            this.clearBuffer()
+          if (this.buf.isBlank()) {
+            this.buf.clear()
             this.render()
             continue
           }
-          return { kind: "submit", value: this.lines.join("\n") }
+          return { kind: "submit", value: this.buf.lines.join("\n") }
         }
         if (token.kind === "submit") {
           return { kind: "submit", value: token.value }
@@ -440,22 +447,22 @@ export class RawInput {
         // a blank-line newline-insert (matching Alt/Option+Enter, which
         // bypasses isBlank() entirely via the escape parser).
         if (char === "\n" && outcome === "submit") {
-          this.insertNewline()
+          this.buf.insertNewline()
           this.render()
           continue
         }
         // Real Enter (coalesced CRLF or bare CR). On an empty / blank-
         // whitespace buffer this is the standard "press Enter on empty
         // line" no-op: clear any whitespace, don't submit.
-        if (this.isBlankBuffer()) {
-          this.clearBuffer()
+        if (this.buf.isBlank()) {
+          this.buf.clear()
           this.render()
           continue
         }
-        return { kind: "submit", value: this.lines.join("\n") }
+        return { kind: "submit", value: this.buf.lines.join("\n") }
       }
       if (char === "\x04") {
-        if (this.deleteForward()) {
+        if (this.buf.deleteForward()) {
           this.render()
         }
         continue
@@ -464,50 +471,50 @@ export class RawInput {
         return { kind: "submit", value: null }
       }
       if (char === "\x7f") {
-        if (this.deleteBackward()) {
+        if (this.buf.deleteBackward()) {
           this.render()
         }
         continue
       }
       if (char === "\x01") {
-        if (this.moveLineStart()) {
+        if (this.buf.moveLineStart()) {
           this.render()
         }
         continue
       }
       if (char === "\x05") {
-        if (this.moveLineEnd()) {
+        if (this.buf.moveLineEnd()) {
           this.render()
         }
         continue
       }
       if (char === "\x0b") {
-        if (this.killToLineEnd()) {
+        if (this.buf.killToLineEnd()) {
           this.render()
         }
         continue
       }
       if (char === "\x15") {
-        if (this.killToLineStart()) {
+        if (this.buf.killToLineStart()) {
           this.render()
         }
         continue
       }
       if (char === "\x17") {
-        if (this.deleteWordBackward()) {
+        if (this.buf.deleteWordBackward()) {
           this.render()
         }
         continue
       }
       if (char === "\t") {
-        this.insertText(char)
+        this.buf.insertText(char)
         this.render()
         continue
       }
 
-      if (this.isPrintable(char)) {
+      if (isPrintableChar(char)) {
         const rest = this.readPrintableRun(char)
-        this.insertText(rest)
+        this.buf.insertText(rest)
         this.render()
       }
     }
@@ -523,7 +530,7 @@ export class RawInput {
       const codePoint = this.pending.codePointAt(0)
       if (codePoint === undefined) break
       const char = String.fromCodePoint(codePoint)
-      if (!this.isPrintable(char)) break
+      if (!isPrintableChar(char)) break
       parts.push(char)
       this.pending = this.pending.slice(char.length)
     }
@@ -537,7 +544,7 @@ export class RawInput {
     }
 
     if (input[1] === "[") {
-      const end = this.findCsiEnd(input)
+      const end = findCsiEnd(input)
       if (end === null) {
         return { kind: "wait" }
       }
@@ -566,25 +573,25 @@ export class RawInput {
       }
       switch (seq) {
         case "\x1b[3~":
-          return { kind: "edit", consumed: seq.length, apply: () => this.deleteForward() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.deleteForward() }
         case "\x1b[D":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveLeft() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveLeft() }
         case "\x1b[C":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveRight() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveRight() }
         case "\x1b[A":
           return { kind: "edit", consumed: seq.length, apply: () => this.moveUp() }
         case "\x1b[B":
           return { kind: "edit", consumed: seq.length, apply: () => this.moveDown() }
         case "\x1b[1;3D":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveWordLeft() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveWordLeft() }
         case "\x1b[1;3C":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveWordRight() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveWordRight() }
         case "\x1b[H":
         case "\x1b[1~":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveLineStart() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveLineStart() }
         case "\x1b[F":
         case "\x1b[4~":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveLineEnd() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveLineEnd() }
         default:
           return { kind: "ignore", consumed: seq.length }
       }
@@ -597,9 +604,9 @@ export class RawInput {
       const seq = input.slice(0, 3)
       switch (seq) {
         case "\x1bOH":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveLineStart() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveLineStart() }
         case "\x1bOF":
-          return { kind: "edit", consumed: seq.length, apply: () => this.moveLineEnd() }
+          return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveLineEnd() }
         default:
           return { kind: "ignore", consumed: seq.length }
       }
@@ -609,24 +616,14 @@ export class RawInput {
     switch (seq) {
       case "\x1b\r":
       case "\x1b\n":
-        return { kind: "edit", consumed: seq.length, apply: () => this.insertNewline() }
+        return { kind: "edit", consumed: seq.length, apply: () => this.buf.insertNewline() }
       case "\x1bb":
-        return { kind: "edit", consumed: seq.length, apply: () => this.moveWordLeft() }
+        return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveWordLeft() }
       case "\x1bf":
-        return { kind: "edit", consumed: seq.length, apply: () => this.moveWordRight() }
+        return { kind: "edit", consumed: seq.length, apply: () => this.buf.moveWordRight() }
       default:
         return { kind: "ignore", consumed: seq.length }
     }
-  }
-
-  private findCsiEnd(input: string): number | null {
-    for (let i = 2; i < input.length; i++) {
-      const code = input.charCodeAt(i)
-      if (code >= 0x40 && code <= 0x7e) {
-        return i
-      }
-    }
-    return null
   }
 
   private consumeBracketedPaste(): { kind: "wait" } | { kind: "continue"; changed: boolean } {
@@ -636,17 +633,17 @@ export class RawInput {
       const pasted = this.pending.slice(0, endIdx)
       this.pending = this.pending.slice(endIdx + endSeq.length)
       this.bracketedPaste = false
-      return { kind: "continue", changed: this.insertPastedText(pasted) }
+      return { kind: "continue", changed: this.buf.insertPastedText(pasted) }
     }
 
-    const keep = this.trailingPrefixLength(this.pending, endSeq)
+    const keep = trailingPrefixLength(this.pending, endSeq)
     const pasted = this.pending.slice(0, this.pending.length - keep)
     if (pasted.length === 0) {
       return { kind: "wait" }
     }
 
     this.pending = this.pending.slice(pasted.length)
-    return { kind: "continue", changed: this.insertPastedText(pasted) }
+    return { kind: "continue", changed: this.buf.insertPastedText(pasted) }
   }
 
   /**
@@ -677,7 +674,7 @@ export class RawInput {
     if (this.pending.length === 0) return coalesced ? "submit_coalesced" : "submit"
     if (this.pending.startsWith("\x1b")) return coalesced ? "submit_coalesced" : "submit"
 
-    this.insertNewline()
+    this.buf.insertNewline()
     return "newline"
   }
 
@@ -705,7 +702,7 @@ export class RawInput {
   }
 
   private parseModifiedKeySequence(seq: string): EscapeToken | null {
-    const key = this.parseCsiUKey(seq) ?? this.parseXtermOtherKey(seq)
+    const key = parseCsiUKey(seq) ?? parseXtermOtherKey(seq)
     if (!key) {
       return null
     }
@@ -717,76 +714,25 @@ export class RawInput {
     return this.tokenForModifiedKey(seq.length, key)
   }
 
-  private parseCsiUKey(seq: string): ParsedKey | null {
-    if (!seq.endsWith("u")) {
-      return null
-    }
-
-    const body = seq.slice(2, -1)
-    const fields = body.split(";")
-    const code = Number(fields[0]?.split(":")[0] ?? "")
-    if (!Number.isInteger(code)) {
-      return null
-    }
-
-    const modifierParts = fields[1]?.split(":") ?? []
-    const modifiers = modifierParts[0] ? Number(modifierParts[0]) : 1
-    const eventType = modifierParts[1] ? Number(modifierParts[1]) : 1
-
-    if (!Number.isInteger(modifiers) || modifiers < 1) {
-      return null
-    }
-    if (!Number.isInteger(eventType) || eventType < 1) {
-      return null
-    }
-
-    return {
-      code,
-      modifiers,
-      eventType,
-      text: this.parseTextCodePoints(fields[2]),
-    }
-  }
-
-  private parseXtermOtherKey(seq: string): ParsedKey | null {
-    if (!seq.endsWith("~")) {
-      return null
-    }
-
-    const body = seq.slice(2, -1)
-    const fields = body.split(";")
-    if (fields.length < 3 || fields[0] !== "27") {
-      return null
-    }
-
-    const modifiers = Number(fields[1])
-    const code = Number(fields[2])
-    if (!Number.isInteger(code) || !Number.isInteger(modifiers) || modifiers < 1) {
-      return null
-    }
-
-    return { code, modifiers, eventType: 1, text: null }
-  }
-
   private tokenForModifiedKey(consumed: number, key: ParsedKey): EscapeToken {
     const { code, modifiers, text } = key
-    const shift = this.hasModifier(modifiers, 0)
-    const alt = this.hasModifier(modifiers, 1)
-    const ctrl = this.hasModifier(modifiers, 2)
+    const shift = hasModifier(modifiers, 0)
+    const alt = hasModifier(modifiers, 1)
+    const ctrl = hasModifier(modifiers, 2)
 
     if ((code === 10 || code === 13) && !ctrl) {
       if (shift || alt) {
-        return { kind: "edit", consumed, apply: () => this.insertNewline() }
+        return { kind: "edit", consumed, apply: () => this.buf.insertNewline() }
       }
       return { kind: "submit_current", consumed }
     }
 
     if (code === 127 && !shift && !alt && !ctrl) {
-      return { kind: "edit", consumed, apply: () => this.deleteBackward() }
+      return { kind: "edit", consumed, apply: () => this.buf.deleteBackward() }
     }
 
     if (code === 9 && !shift && !alt && !ctrl) {
-      return { kind: "edit", consumed, apply: () => this.insertText("\t") }
+      return { kind: "edit", consumed, apply: () => this.buf.insertText("\t") }
     }
 
     // Shift+Tab and Ctrl+Shift+Tab: cycle modes.
@@ -816,148 +762,45 @@ export class RawInput {
 
     if (alt) {
       if (code === 98) {
-        return { kind: "edit", consumed, apply: () => this.moveWordLeft() }
+        return { kind: "edit", consumed, apply: () => this.buf.moveWordLeft() }
       }
       if (code === 102) {
-        return { kind: "edit", consumed, apply: () => this.moveWordRight() }
+        return { kind: "edit", consumed, apply: () => this.buf.moveWordRight() }
       }
     }
 
     if (ctrl) {
       switch (code) {
         case 97:
-          return { kind: "edit", consumed, apply: () => this.moveLineStart() }
+          return { kind: "edit", consumed, apply: () => this.buf.moveLineStart() }
         case 99:
           return { kind: "submit", consumed, value: null }
         case 100:
-          return { kind: "edit", consumed, apply: () => this.deleteForward() }
+          return { kind: "edit", consumed, apply: () => this.buf.deleteForward() }
         case 101:
-          return { kind: "edit", consumed, apply: () => this.moveLineEnd() }
+          return { kind: "edit", consumed, apply: () => this.buf.moveLineEnd() }
         case 107:
-          return { kind: "edit", consumed, apply: () => this.killToLineEnd() }
+          return { kind: "edit", consumed, apply: () => this.buf.killToLineEnd() }
         case 117:
-          return { kind: "edit", consumed, apply: () => this.killToLineStart() }
+          return { kind: "edit", consumed, apply: () => this.buf.killToLineStart() }
         case 119:
-          return { kind: "edit", consumed, apply: () => this.deleteWordBackward() }
+          return { kind: "edit", consumed, apply: () => this.buf.deleteWordBackward() }
       }
     }
 
     if (text && !ctrl) {
-      return { kind: "edit", consumed, apply: () => this.insertText(text) }
+      return { kind: "edit", consumed, apply: () => this.buf.insertText(text) }
     }
 
-    if (!shift && !alt && !ctrl && this.isPrintableCodePoint(code)) {
+    if (!shift && !alt && !ctrl && isPrintableCodePoint(code)) {
       return {
         kind: "edit",
         consumed,
-        apply: () => this.insertText(String.fromCodePoint(code)),
+        apply: () => this.buf.insertText(String.fromCodePoint(code)),
       }
     }
 
     return { kind: "ignore", consumed }
-  }
-
-  private hasModifier(modifiers: number, bit: number): boolean {
-    return ((modifiers - 1) & (1 << bit)) !== 0
-  }
-
-  private isPrintable(char: string): boolean {
-    const codePoint = char.codePointAt(0)
-    return codePoint !== undefined && codePoint >= 0x20 && char !== "\x7f"
-  }
-
-  /**
-   * "Blank" means the buffer holds nothing the user typed — exactly one
-   * empty logical line. This is intentionally narrower than
-   * `lines.join("\n").trim() === ""`: a multi-line buffer made of blank
-   * lines is real content the user composed, and pressing Enter on it
-   * should submit (or insert another newline), not silently wipe it.
-   */
-  private isBlankBuffer(): boolean {
-    return this.lines.length === 1 && this.lines[0].length === 0
-  }
-
-  private insertText(text: string): boolean {
-    const [before, after] = this.splitAt(this.lines[this.row], this.col)
-    this.lines[this.row] = before + text + after
-    this.col += this.charLength(text)
-    return true
-  }
-
-  private insertNewline(): boolean {
-    const [before, after] = this.splitAt(this.lines[this.row], this.col)
-    this.lines.splice(this.row, 1, before, after)
-    this.row += 1
-    this.col = 0
-    return true
-  }
-
-  private deleteBackward(): boolean {
-    if (this.col > 0) {
-      this.lines[this.row] = this.removeRange(this.lines[this.row], this.col - 1, this.col)
-      this.col -= 1
-      return true
-    }
-
-    if (this.row === 0) {
-      return false
-    }
-
-    const previous = this.lines[this.row - 1]
-    const current = this.lines[this.row]
-    const previousLength = this.charLength(previous)
-    this.lines.splice(this.row - 1, 2, previous + current)
-    this.row -= 1
-    this.col = previousLength
-    return true
-  }
-
-  private deleteForward(): boolean {
-    const line = this.lines[this.row]
-    const lineLength = this.charLength(line)
-
-    if (this.col < lineLength) {
-      this.lines[this.row] = this.removeRange(line, this.col, this.col + 1)
-      return true
-    }
-
-    if (this.row >= this.lines.length - 1) {
-      return false
-    }
-
-    this.lines.splice(this.row, 2, line + this.lines[this.row + 1])
-    return true
-  }
-
-  private moveLeft(): boolean {
-    if (this.col > 0) {
-      this.col -= 1
-      return true
-    }
-
-    if (this.row === 0) {
-      return false
-    }
-
-    this.row -= 1
-    this.col = this.lineLength(this.row)
-    return true
-  }
-
-  private moveRight(): boolean {
-    const lineLength = this.lineLength(this.row)
-    if (this.col < lineLength) {
-      this.col += 1
-      return true
-    }
-
-    if (this.row >= this.lines.length - 1) {
-      return false
-    }
-
-    this.row += 1
-    this.col = 0
-    return true
   }
 
   /**
@@ -1003,218 +846,30 @@ export class RawInput {
    * cursor is already on the first sub-row of its line.
    */
   private moveUp(): boolean {
-    const { physInLine, vCol } = this.visualPos(this.row, this.col)
+    const { physInLine, vCol } = this.visualPos(this.buf.row, this.buf.col)
     if (physInLine > 0) {
-      this.col = this.colForVisual(this.row, physInLine - 1, vCol)
+      this.buf.col = this.colForVisual(this.buf.row, physInLine - 1, vCol)
       return true
     }
-    if (this.row === 0) return false
-    this.row -= 1
-    const lastPhys = this.physRowsInLine(this.row) - 1
-    this.col = this.colForVisual(this.row, lastPhys, vCol)
+    if (this.buf.row === 0) return false
+    this.buf.row -= 1
+    const lastPhys = this.physRowsInLine(this.buf.row) - 1
+    this.buf.col = this.colForVisual(this.buf.row, lastPhys, vCol)
     return true
   }
 
   /** Down-arrow. Symmetric to {@link moveUp}. */
   private moveDown(): boolean {
-    const { physInLine, vCol } = this.visualPos(this.row, this.col)
-    const lastPhys = this.physRowsInLine(this.row) - 1
+    const { physInLine, vCol } = this.visualPos(this.buf.row, this.buf.col)
+    const lastPhys = this.physRowsInLine(this.buf.row) - 1
     if (physInLine < lastPhys) {
-      this.col = this.colForVisual(this.row, physInLine + 1, vCol)
+      this.buf.col = this.colForVisual(this.buf.row, physInLine + 1, vCol)
       return true
     }
-    if (this.row >= this.lines.length - 1) return false
-    this.row += 1
-    this.col = this.colForVisual(this.row, 0, vCol)
+    if (this.buf.row >= this.buf.lines.length - 1) return false
+    this.buf.row += 1
+    this.buf.col = this.colForVisual(this.buf.row, 0, vCol)
     return true
-  }
-
-  private moveWordLeft(): boolean {
-    const [row, col] = this.scanWordLeft(this.row, this.col)
-    if (row === this.row && col === this.col) {
-      return false
-    }
-    this.row = row
-    this.col = col
-    return true
-  }
-
-  private moveWordRight(): boolean {
-    const [row, col] = this.scanWordRight(this.row, this.col)
-    if (row === this.row && col === this.col) {
-      return false
-    }
-    this.row = row
-    this.col = col
-    return true
-  }
-
-  /**
-   * Walk left from (row, col) over one "word", treating line breaks as
-   * whitespace. Mirrors {@link EditorBuffer.scanWordLeft} so multi-line
-   * word motion / delete behave the same in both code paths.
-   */
-  private scanWordLeft(row: number, col: number): [number, number] {
-    let r = row
-    let c = col
-    while (true) {
-      if (c === 0) {
-        if (r === 0) break
-        r -= 1
-        c = this.lineLength(r)
-        continue
-      }
-      const chars = this.lineChars(r)
-      if (!this.isWhitespace(chars[c - 1])) break
-      c -= 1
-    }
-    while (c > 0) {
-      const chars = this.lineChars(r)
-      if (this.isWhitespace(chars[c - 1])) break
-      c -= 1
-    }
-    return [r, c]
-  }
-
-  /**
-   * Mirror of {@link scanWordLeft} going forward.
-   */
-  private scanWordRight(row: number, col: number): [number, number] {
-    let r = row
-    let c = col
-    while (true) {
-      const lineLen = this.lineLength(r)
-      if (c === lineLen) {
-        if (r === this.lines.length - 1) break
-        r += 1
-        c = 0
-        continue
-      }
-      const chars = this.lineChars(r)
-      if (!this.isWhitespace(chars[c])) break
-      c += 1
-    }
-    while (true) {
-      const lineLen = this.lineLength(r)
-      if (c === lineLen) break
-      const chars = this.lineChars(r)
-      if (this.isWhitespace(chars[c])) break
-      c += 1
-    }
-    return [r, c]
-  }
-
-  private moveLineStart(): boolean {
-    if (this.col === 0) {
-      return false
-    }
-    this.col = 0
-    return true
-  }
-
-  private moveLineEnd(): boolean {
-    const nextCol = this.lineLength(this.row)
-    if (this.col === nextCol) {
-      return false
-    }
-    this.col = nextCol
-    return true
-  }
-
-  private killToLineEnd(): boolean {
-    const lineLength = this.lineLength(this.row)
-    if (this.col < lineLength) {
-      this.lines[this.row] = this.sliceChars(this.lines[this.row], 0, this.col)
-      return true
-    }
-
-    if (this.row >= this.lines.length - 1) {
-      return false
-    }
-
-    this.lines.splice(this.row, 2, this.lines[this.row] + this.lines[this.row + 1])
-    return true
-  }
-
-  private killToLineStart(): boolean {
-    if (this.col === 0) {
-      return false
-    }
-
-    this.lines[this.row] = this.sliceChars(this.lines[this.row], this.col)
-    this.col = 0
-    return true
-  }
-
-  private deleteWordBackward(): boolean {
-    const endRow = this.row
-    const endCol = this.col
-    const [startRow, startCol] = this.scanWordLeft(endRow, endCol)
-    if (startRow === endRow && startCol === endCol) {
-      return false
-    }
-    if (startRow === endRow) {
-      const chars = this.lineChars(endRow)
-      this.lines[endRow] = chars.slice(0, startCol).join("") + chars.slice(endCol).join("")
-    } else {
-      const startChars = this.lineChars(startRow)
-      const endChars = this.lineChars(endRow)
-      const merged = startChars.slice(0, startCol).join("") + endChars.slice(endCol).join("")
-      this.lines.splice(startRow, endRow - startRow + 1, merged)
-    }
-    this.row = startRow
-    this.col = startCol
-    return true
-  }
-
-  private clearBuffer(): void {
-    this.lines = [""]
-    this.row = 0
-    this.col = 0
-  }
-
-  private insertPastedText(text: string): boolean {
-    let changed = false
-    let run = ""
-
-    const flushRun = () => {
-      if (!run) {
-        return
-      }
-      this.insertText(run)
-      run = ""
-      changed = true
-    }
-
-    for (let i = 0; i < text.length; ) {
-      const codePoint = text.codePointAt(i)
-      if (codePoint === undefined) {
-        break
-      }
-
-      const char = String.fromCodePoint(codePoint)
-      i += char.length
-
-      if (char === "\r" || char === "\n") {
-        flushRun()
-        if (i < text.length) {
-          const next = text[i]
-          if ((char === "\r" && next === "\n") || (char === "\n" && next === "\r")) {
-            i += 1
-          }
-        }
-        this.insertNewline()
-        changed = true
-        continue
-      }
-
-      if (char === "\t" || this.isPrintable(char)) {
-        run += char
-      }
-    }
-
-    flushRun()
-    return changed
   }
 
   private columnsOrDefault(): number {
@@ -1222,7 +877,7 @@ export class RawInput {
   }
 
   private lineDisplayWidth(row: number): number {
-    return displayWidth(this.lines[row])
+    return displayWidth(this.buf.lines[row])
   }
 
   /**
@@ -1231,7 +886,7 @@ export class RawInput {
    * column into a visual column.
    */
   private displayWidthBefore(row: number, endCol: number): number {
-    const chars = this.lineChars(row)
+    const chars = this.buf.lineChars(row)
     const slice = chars.slice(0, endCol).join("")
     return displayWidth(slice)
   }
@@ -1243,7 +898,7 @@ export class RawInput {
    * lands at "the same visual column" on a wrapped row.
    */
   private colForDisplayWidth(row: number, targetCells: number): number {
-    const chars = this.lineChars(row)
+    const chars = this.buf.lineChars(row)
     let acc = 0
     for (let i = 0; i < chars.length; i++) {
       const cp = chars[i].codePointAt(0) ?? 0
@@ -1275,7 +930,7 @@ export class RawInput {
   private getTotalPhysicalRows(): number {
     const cols = this.columnsOrDefault()
     let total = 0
-    for (let i = 0; i < this.lines.length; i++) {
+    for (let i = 0; i < this.buf.lines.length; i++) {
       total += wrapRows(this.promptWidth(i) + this.lineDisplayWidth(i), cols)
     }
     return total
@@ -1304,30 +959,30 @@ export class RawInput {
       parts.push("\r\x1b[J")
     }
 
-    for (let i = 0; i < this.lines.length; i++) {
+    for (let i = 0; i < this.buf.lines.length; i++) {
       parts.push(i === 0 ? this.prompt : this.continuationPrompt)
-      parts.push(this.lines[i])
-      if (i < this.lines.length - 1) {
+      parts.push(this.buf.lines[i])
+      if (i < this.buf.lines.length - 1) {
         parts.push("\r\n")
       }
     }
 
-    const currentPhysicalRow = this.getPhysicalRows(this.row, this.col)
+    const currentPhysicalRow = this.getPhysicalRows(this.buf.row, this.buf.col)
     const totalPhysicalRows = this.getTotalPhysicalRows()
     const rowsUp = totalPhysicalRows - 1 - currentPhysicalRow
     if (rowsUp > 0) parts.push(`\x1b[${rowsUp}A`)
     parts.push("\r")
 
     const visualCol = cursorVisualCol(
-      this.promptWidth(this.row),
-      this.displayWidthBefore(this.row, this.col),
+      this.promptWidth(this.buf.row),
+      this.displayWidthBefore(this.buf.row, this.buf.col),
       cols,
     )
     // Position cursor at visualCol (1-based for CUF; 0 means "stay at col 0").
     if (visualCol > 0) parts.push(`\x1b[${visualCol}C`)
 
     this.output.write(parts.join(""))
-    this.renderedLineCount = this.lines.length
+    this.renderedLineCount = this.buf.lines.length
     this.renderedCursorRow = currentPhysicalRow
     this.renderedTotalPhysicalRows = totalPhysicalRows
   }
@@ -1341,7 +996,7 @@ export class RawInput {
     parts.push("\r")
 
     const cols = this.columnsOrDefault()
-    const lastRow = this.lines.length - 1
+    const lastRow = this.buf.lines.length - 1
     const visualCol = cursorVisualCol(
       this.promptWidth(lastRow),
       this.lineDisplayWidth(lastRow),
@@ -1355,66 +1010,5 @@ export class RawInput {
 
   private promptWidth(row: number): number {
     return row === 0 ? this.promptDisplayWidth : this.continuationPromptDisplayWidth
-  }
-
-  private lineLength(row: number): number {
-    return this.charLength(this.lines[row])
-  }
-
-  private lineChars(row: number): string[] {
-    return Array.from(this.lines[row])
-  }
-
-  private charLength(text: string): number {
-    return Array.from(text).length
-  }
-
-  private splitAt(text: string, index: number): [string, string] {
-    const chars = Array.from(text)
-    return [chars.slice(0, index).join(""), chars.slice(index).join("")]
-  }
-
-  private sliceChars(text: string, start: number, end?: number): string {
-    return Array.from(text).slice(start, end).join("")
-  }
-
-  private removeRange(text: string, start: number, end: number): string {
-    const chars = Array.from(text)
-    return chars.slice(0, start).join("") + chars.slice(end).join("")
-  }
-
-  private trailingPrefixLength(text: string, pattern: string): number {
-    const max = Math.min(text.length, pattern.length - 1)
-    for (let len = max; len > 0; len--) {
-      if (text.endsWith(pattern.slice(0, len))) {
-        return len
-      }
-    }
-    return 0
-  }
-
-  private isWhitespace(char: string): boolean {
-    return /\s/u.test(char)
-  }
-
-  private parseTextCodePoints(field?: string): string | null {
-    if (!field) {
-      return null
-    }
-
-    const codePoints: number[] = []
-    for (const part of field.split(":")) {
-      const value = Number(part)
-      if (!Number.isInteger(value) || value < 0) {
-        return null
-      }
-      codePoints.push(value)
-    }
-
-    return codePoints.length > 0 ? String.fromCodePoint(...codePoints) : null
-  }
-
-  private isPrintableCodePoint(codePoint: number): boolean {
-    return codePoint >= 0x20 && codePoint !== 0x7f
   }
 }

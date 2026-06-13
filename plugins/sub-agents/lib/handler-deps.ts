@@ -9,7 +9,7 @@
 
 import { randomUUID } from "node:crypto"
 
-import type { LiveAreaHandlerContext, TUIContext } from "../../../src/plugins/types.ts"
+import type { LiveAreaHandlerContext, TUIContext } from "@minimal-agent/plugin-api/types/plugin"
 
 import { resolveDefinition } from "./library.ts"
 import { presenceDir } from "./presence.ts"

@@ -6,7 +6,7 @@
  * screenshot PNG into mojibake and makes a vision-capable model conclude it
  * "can't read images" — even though the provider accepts image input and the
  * canonical layer already carries images inside a `tool_result` (see
- * {@link module:llm/canonical-messages} `ToolResultContentBlock`). This module
+ * `llm/canonical-messages`' `ToolResultContentBlock`). This module
  * is the single, pure decision point that closes that gap:
  *
  *   - recognized image + model accepts images  → embed it as an

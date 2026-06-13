@@ -37,6 +37,10 @@ function terminalCols(): number {
   return typeof c === "number" && c > 0 ? c : 80
 }
 
+/**
+ * Command handler for `/usage`: toggles or renders the token-usage overlay
+ * (per-turn and cumulative token/cost stats) for the session.
+ */
 export default function cmdUsage(ctx: CommandContext): CommandResult {
   const argv = ctx.argv.trim()
 

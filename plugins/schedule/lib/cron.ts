@@ -133,7 +133,7 @@ function addNormalized(set: Set<number>, v: number, spec: FieldSpec): void {
  * Parse a 5-field cron expression. Throws {@link CronError} on any
  * malformed field. Whitespace between fields is collapsed.
  *
- * @param expr A 5-field cron string, e.g. `"*​/5 * * * *"`.
+ * @param expr - A 5-field cron string, e.g. `"*​/5 * * * *"`.
  * @returns The parsed, evaluable expression.
  */
 export function parseCron(expr: string): CronExpr {
@@ -170,8 +170,8 @@ export function isValidCron(expr: string): boolean {
  * matches; otherwise both must match (the unconstrained one is `*` and
  * always does).
  *
- * @param expr Parsed expression.
- * @param date Local-time instant to test.
+ * @param expr - Parsed expression.
+ * @param date - Local-time instant to test.
  */
 export function matches(expr: CronExpr, date: Date): boolean {
   if (!expr.minute.values.has(date.getMinutes())) return false
@@ -191,9 +191,9 @@ export function matches(expr: CronExpr, date: Date): boolean {
  * Field-aware skipping keeps this cheap (a handful of iterations even for
  * yearly jobs), so the heartbeat can call it for a "next fire" status row.
  *
- * @param expr Parsed expression.
- * @param from Lower bound (exclusive at minute granularity).
- * @param horizonDays Max look-ahead before giving up. Default 366.
+ * @param expr - Parsed expression.
+ * @param from - Lower bound (exclusive at minute granularity).
+ * @param horizonDays - Max look-ahead before giving up. Default 366.
  */
 export function nextFire(expr: CronExpr, from: Date, horizonDays = 366): Date | null {
   const cap = new Date(from.getTime() + horizonDays * 24 * 60 * 60 * 1000)

@@ -29,7 +29,8 @@
  * @module tasks/handlers/task_tool
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { isTaskStatus, type Task, type TaskStatus } from "../lib/parse.ts"
 import { type RenderAction, renderToolDisplay } from "../lib/render.ts"
 import { buildViews, TaskStore, TaskStoreError, type View } from "../lib/store.ts"
@@ -341,6 +342,11 @@ function err(message: string): TUIResult {
 // Default export — tool dispatch
 // ---------------------------------------------------------------------------
 
+/**
+ * Tool handler for `Task`: routes the action (add, add_many, start, done,
+ * status, remove, reorder, list, clear) to the task store and renders the
+ * post-mutation list.
+ */
 export default async function taskToolHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return err("wrong trigger type (expected tool)")
@@ -386,8 +392,7 @@ export default async function taskToolHandler(ctx: TUIContext): Promise<TUIResul
       case "clear":
         return doClear(store, input)
       default: {
-        const _exhaustive: never = input.action
-        return err(`unhandled action ${String(_exhaustive)}`)
+        return err(`unhandled action ${String(input.action satisfies never)}`)
       }
     }
   } catch (e) {

@@ -48,7 +48,7 @@ const CPR_RE = /\x1b\[(\d+);(\d+)R/
  *
  * Strategy: anchor with `\r`, ask CPR for the start column, write the
  * glyph, ask CPR for the end column. Width = end - start. Two probes
- * (rather than assuming "after \r we're at col 1") so the call is safe
+ * (rather than assuming "after `\r` we're at col 1") so the call is safe
  * even when the user's prompt or some other writer left the cursor at
  * an arbitrary column.
  */

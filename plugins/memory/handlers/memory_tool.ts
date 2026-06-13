@@ -228,6 +228,11 @@ function makeStore(
 // Default export: tool dispatch
 // ---------------------------------------------------------------------------
 
+/**
+ * Tool handler for `MemoryTool`: routes the action (list, read, add, edit,
+ * remove, clear) to the scoped memory store and formats the result for both
+ * audiences.
+ */
 export default async function memoryToolHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return {
@@ -282,10 +287,9 @@ export default async function memoryToolHandler(ctx: TUIContext): Promise<TUIRes
         // Exhaustiveness check: `action` is narrowed to `never` once every
         // case is handled. If a new action is added to the union without a
         // case here, this throws at runtime AND fails the typecheck.
-        const _exhaustive: never = action
         return {
           kind: "tool_result",
-          content: `MemoryTool: unhandled action ${String(_exhaustive)}`,
+          content: `MemoryTool: unhandled action ${String(action satisfies never)}`,
           is_error: true,
         }
       }
@@ -307,7 +311,7 @@ export default async function memoryToolHandler(ctx: TUIContext): Promise<TUIRes
  * Semantics: `offset` is measured FROM THE NEWEST END.
  *   - offset=0, limit=20 → the last 20 entries (most recent page).
  *   - offset=20, limit=20 → the 20 entries before that.
- *   - offset >= total → empty page.
+ *   - `offset >= total` → empty page.
  *
  * Within the returned slice we preserve source order: the page reads
  * top-to-bottom as oldest→newest, matching how the model reads files

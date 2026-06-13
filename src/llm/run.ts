@@ -43,6 +43,15 @@ export interface RunOptions {
   context: RunContext
 }
 
+/**
+ * Provider-neutral entry point for one streaming completion: resolves the
+ * model and its provider adapter, validates the request against the model's
+ * capabilities (optionally degrading instead of failing when
+ * `acceptDegrade` is set), then delegates to the adapter and yields its
+ * canonical event stream. Validation failures surface as a thrown
+ * `UnsupportedCapabilityError` or an in-stream `stream_error` event, never as
+ * a provider-specific error shape.
+ */
 export async function* run(req: CanonicalRequest, opts: RunOptions): AsyncIterable<CanonicalEvent> {
   const model = resolveModel(req.modelId)
   const adapter = resolveProvider(model.providerId)

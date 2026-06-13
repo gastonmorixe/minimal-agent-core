@@ -37,6 +37,11 @@ export const WINDOW_DEFAULT_LIMIT = 10
 
 const ACTIONS = new Set(["window", "meta", "list", "search", "tool_calls", "blob", "dump"])
 
+/**
+ * Parse and validate the raw `SessionHistory` tool input into a typed
+ * request, defaulting the action to `window` and range-checking every
+ * numeric knob.
+ */
 export function parseInput(input: Record<string, unknown>): ParseResult {
   const action = typeof input.action === "string" ? input.action : "window"
   if (!ACTIONS.has(action)) {

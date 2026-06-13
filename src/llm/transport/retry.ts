@@ -114,7 +114,7 @@ function retryableStreamErrorType(err: unknown): string | undefined {
  * attempt's text deltas (plus a visible stall marker on retry-after-yield)
  * and returns the successful attempt's `StreamedResponse`.
  *
- * @param makeAttempt Fresh attempt factory. Called once per attempt; each
+ * @param makeAttempt - Fresh attempt factory. Called once per attempt; each
  *   call must start a brand-new request (the watchdog + auth-refresh layers
  *   live inside it, so a fresh attempt re-runs them with current auth).
  * @yields Text deltas, interleaved with `↳ stream stalled` markers on retry.

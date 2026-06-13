@@ -15,21 +15,23 @@
  *
  * Quick recipes:
  *
- *     // Use the defaults (rotor for thinking, blink for everything else).
- *     new BlinkingNerdSpinner();
+ * ```ts
+ * // Use the defaults (rotor for thinking, blink for everything else).
+ * new BlinkingNerdSpinner();
  *
- *     // Swap thinking to the box-drawing rotor.
- *     import { THINKING_ROTOR_BOX } from "./spinner/library/frames.ts";
- *     new BlinkingNerdSpinner({
- *       iconByNotificationId: { "agent.thinking": THINKING_ROTOR_BOX },
- *     });
+ * // Swap thinking to the box-drawing rotor.
+ * import { THINKING_ROTOR_BOX } from "./spinner/library/frames.ts";
+ * new BlinkingNerdSpinner({
+ *   iconByNotificationId: { "agent.thinking": THINKING_ROTOR_BOX },
+ * });
  *
- *     // Custom rotor inline.
- *     new BlinkingNerdSpinner({
- *       iconByNotificationId: {
- *         "agent.thinking": { frames: ["◐", "◓", "◑", "◒"], intervalMs: 140 },
- *       },
- *     });
+ * // Custom rotor inline.
+ * new BlinkingNerdSpinner({
+ *   iconByNotificationId: {
+ *     "agent.thinking": { frames: ["◐", "◓", "◑", "◒"], intervalMs: 140 },
+ *   },
+ * });
+ * ```
  *
  * @module spinner
  */

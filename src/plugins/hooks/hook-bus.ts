@@ -66,7 +66,7 @@ export interface StreamHandle<T> {
  */
 export class HookBus {
   /**
-   * channel -> shape (recorded on first declare or first on/emit).
+   * channel -\> shape (recorded on first declare or first on/emit).
    * Used to detect shape mismatches between declare/on/emit.
    */
   private readonly shapes = new Map<string, ChannelShape>()

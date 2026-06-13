@@ -36,6 +36,13 @@ type MountedSpinner<TTheme> = {
   startedAt: number
 }
 
+/**
+ * Owns which spinner is mounted and renders frames from it. Spinner switches
+ * requested by status notifications are deferred until the current spinner
+ * reaches a visually clean boundary (or a grace deadline expires), so the
+ * glyph never jumps mid-animation. Also tracks the FPS the mounted spinner
+ * wants so the render loop can throttle correctly.
+ */
 export class SpinnerManager<TTheme> {
   private readonly now: () => number
   private readonly defaultSpinner: Spinner<TTheme>

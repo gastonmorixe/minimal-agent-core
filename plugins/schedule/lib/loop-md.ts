@@ -42,8 +42,8 @@ function readCapped(path: string): string | null {
 /**
  * Resolve the bare-`/loop` prompt for a working directory.
  *
- * @param cwd The agent's current working directory.
- * @param home Override for `~` (testing). Defaults to `os.homedir()`.
+ * @param cwd - The agent's current working directory.
+ * @param home - Override for `~` (testing). Defaults to `os.homedir()`.
  */
 export function resolveLoopPrompt(cwd: string, home: string = homedir()): string {
   return (

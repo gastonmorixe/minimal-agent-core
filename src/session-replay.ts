@@ -20,8 +20,6 @@
  * transcripts) before the resumed REPL prompt.
  */
 
-import type { Task as TaskSidecarTask } from "../plugins/tasks/lib/parse.ts"
-
 import {
   c,
   clampTranscriptRow,
@@ -35,7 +33,7 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./cli
 import { Formatter } from "./formatter.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./mode-change-chip.ts"
 import type { ModeManager } from "./modes.ts"
-import { deriveDisplayFallback } from "./session-replay-derivers.ts"
+import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
 import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
@@ -595,15 +593,16 @@ export function toolDisplaysFromRecords(
   opts?: {
     /**
      * Pre-parsed task list from the per-session `<sid>.tasks.jsonl`
-     * sidecar. Threaded into the Task deriver so it can render the
-     * historical body via the plugin's `renderToolDisplay({ansi: true})`
-     * for byte-identical coloring with the live agent.
+     * sidecar (core-local structural slice — see
+     * {@link ReplaySidecarTask}). Threaded into the loader-registered
+     * tasks replay renderer so it can re-render the historical body
+     * with the live agent's ANSI styling.
      *
-     * When `null` / `undefined` (the test path), the Task deriver
-     * falls back to the structural content-split path which preserves
-     * the tree shape but loses body colors.
+     * When `null` / `undefined` (the test path, or the plugin absent),
+     * the core Task deriver falls back to the structural content-split
+     * path which preserves the tree shape but loses body colors.
      */
-    sidecarTasks?: readonly TaskSidecarTask[] | null
+    sidecarTasks?: readonly ReplaySidecarTask[] | null
   },
 ): Map<string, { display?: string; displayHeader?: string; displayFooter?: string }> {
   const out = new Map<
@@ -675,6 +674,14 @@ export function toolDisplaysFromRecords(
   return out
 }
 
+/**
+ * Derives a per-message timestamp list aligned with the message array that
+ * folding produces from the same records: one entry per user/assistant
+ * message, `null` where a record carried no parseable `ts`. Honors `rewind`
+ * records by truncating back to the rewound user message, and merges
+ * consecutive tool-result user records the same way folding does so indexes
+ * stay aligned.
+ */
 export function userTimestampsFromRecords(records: readonly SessionRecord[]): (Date | null)[] {
   const out: (Date | null)[] = []
   // Track which user-record ids we've already produced a message for,

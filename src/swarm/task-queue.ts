@@ -1,6 +1,11 @@
 import type { Task } from "./swarm"
 
 const P: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+/**
+ * Priority queue for swarm tasks, ordered critical, high, medium, low.
+ * `dequeue` peeks the highest-priority pending task without removing it;
+ * tasks leave the pending set by being marked complete.
+ */
 export class TaskQueue {
   private q: Task[] = []
   enqueue(t: Task) {

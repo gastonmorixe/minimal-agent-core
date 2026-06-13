@@ -103,8 +103,7 @@ function formatBlockAsMarkdown(block: ContentBlock): string {
       return `> 📄 **Document**: (${s.type} ${detail})`
     }
     default: {
-      const _exhaustive: never = block
-      return `> *(Unknown block: ${JSON.stringify(_exhaustive)})*`
+      return `> *(Unknown block: ${JSON.stringify(block satisfies never)})*`
     }
   }
 }
@@ -196,8 +195,7 @@ function formatBlockAsXml(block: ContentBlock, indent: number): string {
       return `${pad}<document source="${escapeXml(s.type)}" ref="${escapeXml(ref)}" />`
     }
     default: {
-      const _exhaustive: never = block
-      return `${pad}<unknown>${escapeXml(JSON.stringify(_exhaustive))}</unknown>`
+      return `${pad}<unknown>${escapeXml(JSON.stringify(block satisfies never))}</unknown>`
     }
   }
 }

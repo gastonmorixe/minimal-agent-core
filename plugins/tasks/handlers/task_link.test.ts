@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import type { EventHandlerContext } from "../../../src/plugins/types.ts"
+import type { EventHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { TaskStore } from "../lib/store.ts"
 
 import taskLink from "./task_link.ts"

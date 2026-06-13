@@ -1,3 +1,10 @@
+/**
+ * Incremental markdown-ish formatter for streamed assistant text. Feed it
+ * deltas as they arrive; it buffers across chunk boundaries, switches between
+ * prose and fenced-code states on triple-backtick fence markers, and returns ANSI-styled
+ * output ready to print. State persists between {@link StreamingFormatter.feed}
+ * calls, so one instance must be used per stream.
+ */
 export class StreamingFormatter {
   private state: "prose" | "code" = "prose"
   private buf = ""

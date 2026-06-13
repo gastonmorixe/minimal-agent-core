@@ -7,8 +7,8 @@
  * computes the next fleet AND a list of {@link Effect} DESCRIPTIONS the shell
  * executes (inject a digest, emit a bus event, kill a timed-out pid).
  *
- * No IO, no clock, no bus, no spawn. The heartbeat handler (`handlers/
- * heartbeat.ts`) is the imperative shell that gathers probes, calls this, runs
+ * No IO, no clock, no bus, no spawn. The heartbeat handler
+ * (`handlers/heartbeat.ts`) is the imperative shell that gathers probes, calls this, runs
  * the effects, and persists the fleet. This split is what makes the lifecycle
  * state machine exhaustively unit-testable. Mirrors `schedule/lib/scheduler`.
  *
@@ -106,8 +106,7 @@ export function completionDigest(r: SubagentRecord): string {
     case "running":
       return `Sub-agent ${r.id} (${r.label}) is ${r.status.kind}.`
     default: {
-      const _exhaustive: never = r.status
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(r.status satisfies never)}`)
     }
   }
 }

@@ -109,8 +109,8 @@ export function cronFilePath(sid: string, dir: string = defaultCronDir()): strin
  * taken from the PLUGIN CONTEXT's env (the decoupled read) rather than
  * global `process.env`. Handlers call this with `ctx.env`.
  *
- * @param sid Session id.
- * @param env The plugin context's environment map.
+ * @param sid - Session id.
+ * @param env - The plugin context's environment map.
  */
 export function cronStoreForSession(
   sid: string,
@@ -226,8 +226,8 @@ export class CronStore {
    * Create + persist a new task. Enforces the 50-task cap and computes the
    * 7-day expiry for recurring tasks.
    *
-   * @param input Task definition.
-   * @param now Injectable clock (ms epoch).
+   * @param input - Task definition.
+   * @param now - Injectable clock (ms epoch).
    */
   create(input: CronCreateInput, now: number = Date.now()): StoreResult<CronEntry> {
     const entries = this.load()

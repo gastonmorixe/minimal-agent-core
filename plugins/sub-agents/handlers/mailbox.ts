@@ -10,7 +10,8 @@
  * @module sub-agents/handlers/mailbox
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { type MailMessage, postMessage, readMailbox, visibleTo } from "../lib/mailbox.ts"
 import { resolveSessionsDir } from "../lib/runtime.ts"
 import { ENV_ID, ENV_LEAD } from "../lib/spawn-plan.ts"
@@ -26,6 +27,11 @@ function fmt(m: MailMessage): string {
   return `${ts}  ${m.from} ${arrow} [${m.kind}] ${m.body}`
 }
 
+/**
+ * Tool handler for `Mailbox`: posts a message to a sibling worker (or
+ * broadcast) or reads the caller's addressed + broadcast messages from the
+ * shared board.
+ */
 export default async function mailbox(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "Mailbox: unexpected trigger", is_error: true }

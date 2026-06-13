@@ -34,7 +34,7 @@ export type StreamSink = (chunk: string) => void
 /**
  * Scanner + dispatcher wrapper around a sink.
  *
- * Lifecycle: construct -> `feed(chunk)` (many) -> `await end()`.
+ * Lifecycle: construct -\> `feed(chunk)` (many) -\> `await end()`.
  */
 export class PluginStream {
   private scanner: TagScanner

@@ -1,4 +1,4 @@
-Emit `<ma::emit::interleave-thinking>…</ma::emit::interleave-thinking>` spans inside your response to think mid-stream. The spans are stripped before the user sees anything, so they are private working notes, not output.
+Emit `<ma::emit::interleave-thinking>...</ma::emit::interleave-thinking>` spans inside your response to think mid-stream. The spans are stripped before the user sees anything, so they are private working notes, not output.
 
 **What it is:** short reasoning chunks emitted while you generate, checking work, reconsidering an approach, branching before committing. Different from pre-response extended thinking: use pre-response thinking for upfront planning on a hard task, use this for reflection that surfaces while drafting the answer.
 

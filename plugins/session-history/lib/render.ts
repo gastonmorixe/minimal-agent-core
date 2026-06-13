@@ -19,6 +19,7 @@ import type {
   ToolCallHit,
 } from "./host-types.ts"
 
+/** Render a paged window of session records with stable indexes. */
 export function renderWindow(w: RecordWindow, anchor: "start" | "end", offset: number): string {
   if (w.total === 0) return `Session ${w.sid}: empty (0 records).`
   const lines: string[] = [
@@ -56,6 +57,7 @@ export function nextWindowHint(
   return `More records exist: call again with {anchor:"start", offset:${consumed}}.`
 }
 
+/** Render a one-session summary (model, cwd, counts, liveness, blobs). */
 export function renderMeta(m: SessionMetaView): string {
   const counts = Object.entries(m.counts)
     .map(([k, v]) => `${k}=${v}`)
@@ -79,6 +81,7 @@ export function renderMeta(m: SessionMetaView): string {
     .join("\n")
 }
 
+/** Render the saved-sessions index, newest first, with paging hints. */
 export function renderList(
   items: readonly SessionIndexEntry[],
   total: number,
@@ -95,6 +98,7 @@ export function renderList(
   return lines.join("\n")
 }
 
+/** Render tool-invocation hits (tool, input preview, record index). */
 export function renderToolCalls(
   hits: readonly ToolCallHit[],
   total: number,
@@ -116,6 +120,7 @@ export function renderToolCalls(
   return lines.join("\n")
 }
 
+/** Render text-search hits with per-record previews and counts. */
 export function renderSearch(
   hits: readonly SearchHit[],
   total: number,

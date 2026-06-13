@@ -963,6 +963,6 @@ describe("MemoryTool: defensive paths", () => {
     process.env.HOME = tmpHome
 
     // Confirm nothing got written under PLUGIN_DIR.
-    expect(existsSync(globalMemoryPath(PLUGIN_DIR))).toBe(false)
+    expect(existsSync(globalMemoryPath({ home: PLUGIN_DIR }))).toBe(false)
   })
 })

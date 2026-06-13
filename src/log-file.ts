@@ -26,8 +26,8 @@
  *
  * `appendFileSync` is a deliberate choice over async/batched:
  *
- * - Volume is low (<1000 events/session typical, often <50).
- * - Each write completes in <0.1ms on a local SSD.
+ * - Volume is low (under 1000 events/session typical, often under 50).
+ * - Each write completes in under 0.1ms on a local SSD.
  * - Crash-safety: every event lands on disk before the producer
  *   returns. We don't lose the last few events on a SIGKILL.
  *
@@ -94,6 +94,13 @@ export interface FileLogSinkOptions {
   now?: () => number
 }
 
+/**
+ * Diagnostic-bus sink that appends RFC 5424 syslog lines to a per-session
+ * file. Enforces a byte cap: once `maxBytes` is reached it writes a single
+ * "log capped" notice and silently drops everything after, so a runaway
+ * diagnostic loop cannot fill the disk. All filesystem ops are injectable
+ * for tests.
+ */
 export class FileLogSink {
   readonly path: string
 

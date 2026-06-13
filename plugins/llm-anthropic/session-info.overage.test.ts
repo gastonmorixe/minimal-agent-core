@@ -1,8 +1,9 @@
 /**
  * Anthropic overage parsing → neutral `QuotaSnapshot.overage` DTO.
  *
- * `parseAnthropicOverage` maps the raw `anthropic-ratelimit-unified-overage-
- * status` header to the provider-neutral `{ active }` shape, and never adds an
+ * `parseAnthropicOverage` maps the raw
+ * `anthropic-ratelimit-unified-overage-status` header to the
+ * provider-neutral `{ active }` shape, and never adds an
  * overage pseudo-window to `parseAnthropicQuotaWindows` (overage has no
  * utilization).
  *

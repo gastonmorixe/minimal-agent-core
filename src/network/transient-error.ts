@@ -3,8 +3,8 @@
  *
  * The forever-retry loops (`sendMessage` in `client.ts` and its canonical
  * twin `withRetry` in `llm/transport/retry.ts`) decide retryability from an
- * error's `streamErrorType` tag. That tag is attached to in-stream `event:
- * error` frames, failed HTTP statuses, and the stream watchdog's idle /
+ * error's `streamErrorType` tag. That tag is attached to in-stream
+ * `event: error` frames, failed HTTP statuses, and the stream watchdog's idle /
  * truncation trips. None of those cover a failure that happens BEFORE a
  * response exists: a TCP connect timeout, a reset socket, a DNS blip, an
  * HTTP/2 GOAWAY mid-dial. Those throw a plain, untagged `Error` straight out
@@ -131,7 +131,7 @@ function chainMessage(err: unknown): string {
  *    explicit `retryable: false`),
  *  - errors with no recognizable transient signal.
  *
- * @param err The thrown value from a send attempt.
+ * @param err - The thrown value from a send attempt.
  * @returns true when the error is a retryable transient transport failure.
  */
 export function isTransientNetworkError(err: unknown): boolean {
@@ -167,7 +167,7 @@ export function isTransientNetworkError(err: unknown): boolean {
  * and `retry.ts` rely on the returned reference being the same object, so the
  * stack and cause chain stay intact for diagnostics.
  *
- * @param err The thrown value from a send attempt.
+ * @param err - The thrown value from a send attempt.
  * @returns `err`, tagged in place when transient.
  */
 export function tagTransientNetworkError(err: unknown): unknown {

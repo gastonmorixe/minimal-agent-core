@@ -18,7 +18,7 @@
  *
  * Each row:
  *
- *   {"id":"<id>","ts":"<iso>","sid":"<uuid|null>","cwd":"<abs-path>","text":"...","exit":"submitted"|"canceled"}
+ *   `{"id":"<id>","ts":"<iso>","sid":"<uuid|null>","cwd":"<abs-path>","text":"...","exit":"submitted"|"canceled"}`
  *
  * Stable — append-only, never edit. `id` is the same
  * `<base36-millis>-<rand4hex>` format the memory plugin uses (sortable,

@@ -8,13 +8,18 @@
 
 import { existsSync, readFileSync } from "node:fs"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { statusDetail } from "../lib/content.ts"
 import { sessionsDirFromCtx, storeFromCtx } from "../lib/handler-deps.ts"
 import { transcriptTail } from "../lib/output.ts"
 import { ANSI, color, GLYPHS } from "../lib/style.ts"
 import { parseIdArg } from "../lib/validate.ts"
 
+/**
+ * Tool handler for `AgentOutput`: tails a worker's recent activity (latest
+ * tool calls and notes with timestamps), bounded, never the full transcript.
+ */
 export default async function agentOutput(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "AgentOutput: unexpected trigger", is_error: true }

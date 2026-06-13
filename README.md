@@ -232,6 +232,7 @@ Common environment variables:
 - **`VERBOSE=1`:** Avoid truncating debug output.
 - **`MINIMAL_AGENT_CONFIG`:** Use a custom config file.
 - **`MINIMAL_AGENT_TRANSPORT`:** Select `http2` or `fetch`.
+- **`MINIMAL_AGENT_LEGACY_TRANSPORT=1`:** Route every request through the legacy Anthropic client instead of the canonical provider transport (rollback escape hatch for the transport flip; wins over `MINIMAL_AGENT_CANONICAL_TRANSPORT`).
 - **`MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1`:** Permit fetch fallback after HTTP/2 failure.
 - **`MINIMAL_AGENT_NET_DBG=1`:** Mirror raw HTTP traffic to `.net-dbg/`.
 - **`MINIMAL_AGENT_SPINNER`:** Select the spinner preset.

@@ -4,7 +4,8 @@
  * @module sub-agents/handlers/stop_agent
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { storeFromCtx } from "../lib/handler-deps.ts"
 import { renderStopDisplay } from "../lib/render.ts"
 import { stopAgent } from "../lib/service.ts"
@@ -14,6 +15,10 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined
 }
 
+/**
+ * Tool handler for `StopAgent`: signals the worker's process group, marks the
+ * handle stopped with the optional reason, and reports the outcome.
+ */
 export default async function stop(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "StopAgent: unexpected trigger", is_error: true }

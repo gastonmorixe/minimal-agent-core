@@ -92,8 +92,8 @@ const NAMESPACE_RE = /^[A-Za-z0-9_.-]+$/
  * Cap on short-term entries. When `add` would push the count above this,
  * the oldest entry (by file order, which is also insertion order modulo
  * edits — see {@link MemoryStore.edit} for the bump-to-bottom rule) is
- * evicted. Surfaced to the model via the save-echo `<ma::agent::memory-saved …
- * evicted="N">` block (Phase 2).
+ * evicted. Surfaced to the model via the save-echo
+ * `<ma::agent::memory-saved … evicted="N">` block (Phase 2).
  *
  * Picked at 20 deliberately: large enough for "active hypotheses + key
  * facts about this debug session" but small enough to force the model
@@ -198,10 +198,12 @@ function rootDir(deps?: StoreDeps): string {
   return join(home, ".minimal-agent", "namespaces", ns)
 }
 
+/** Absolute path of the cross-project (global) memory file. */
 export function globalMemoryPath(deps?: StoreDeps): string {
   return join(rootDir(deps), "memory.md")
 }
 
+/** Absolute path of the per-project memory file for `cwd`. */
 export function projectMemoryPath(cwd: string, deps?: StoreDeps): string {
   // Strip leading slashes so the cwd becomes a relative tree under
   // `<root>/projects/`. Mirrors the existing layout in
@@ -210,6 +212,7 @@ export function projectMemoryPath(cwd: string, deps?: StoreDeps): string {
   return join(rootDir(deps), "projects", rel, "memory.md")
 }
 
+/** Absolute path of the per-session short-term scratchpad file. */
 export function shortTermMemoryPath(sid: string, deps?: StoreDeps): string {
   return join(rootDir(deps), "sessions", `${sid}.scratch.md`)
 }

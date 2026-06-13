@@ -5,8 +5,8 @@
  *   1. Whether to show the startup tree (banner + rows + closer).
  *   2. Which mode (if any) to enter on boot.
  *
- * Lifted into its own module so the precedence ladder (CLI > env > config
- * > built-in default) can be unit-tested without pulling the entire
+ * Lifted into its own module so the precedence ladder (CLI \> env \> config
+ * \> built-in default) can be unit-tested without pulling the entire
  * `src/index.ts` startup graph. Pure: no I/O, no time, no globals.
  *
  * Non-interactive detection itself lives in `./extract-prompt.ts`; this
@@ -85,7 +85,8 @@ export function resolveShowHeader(inp: ResolveInputs): boolean {
  * responsible for verifying the id matches a loaded mode — unknown ids
  * are passed through and `ModeManager.setMode` will silently no-op.
  *
- * @param pluginDefault The default supplied by plugins
+ * @param inp - The resolution inputs (CLI flag, env var, interactivity).
+ * @param pluginDefault - The default supplied by plugins
  *   (`PluginLoader.getDefaultModeId()`), used when the user has
  *   expressed no preference and the session is interactive.
  */

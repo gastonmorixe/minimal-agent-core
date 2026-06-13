@@ -246,9 +246,9 @@ function guessIndentUnit(s: string): string {
  * Set (or insert) the value at `path` in JSONC `text`, preserving comments
  * and layout. Returns the new text.
  *
- * @param text Raw JSONC document. An empty/blank document becomes `{}` first.
- * @param path Non-empty object key path, e.g. `["plugins","ma-fetch","enabled"]`.
- * @param value Any JSON-serializable value to write at the path.
+ * @param text - Raw JSONC document. An empty/blank document becomes `{}` first.
+ * @param path - Non-empty object key path, e.g. `["plugins","ma-fetch","enabled"]`.
+ * @param value - Any JSON-serializable value to write at the path.
  * @throws JsoncEditError when the structure can't be edited safely.
  */
 export function setKeyPath(text: string, path: string[], value: unknown): string {

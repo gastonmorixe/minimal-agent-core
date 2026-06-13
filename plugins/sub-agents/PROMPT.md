@@ -11,15 +11,15 @@ Delegate when a unit of work is **self-contained** and either (a) would flood yo
 with output you won't reuse (searching a big codebase, running a test suite, reading logs,
 fetching docs), or (b) is **genuinely independent** of other work so it can run in parallel.
 
-Do NOT delegate when the task needs tight back-and-forth with you, shares a lot of evolving
+Do not delegate when the task needs tight back-and-forth with you, shares a lot of evolving
 context, or is a quick edit you can just do. A sub-agent starts fresh and costs real tokens.
 A fleet costs ~15x a single chat. Spawning is deliberate, not reflexive.
 
 ## Scale effort to complexity
 
-- Simple lookup / one file → **1** worker (often `explorer`).
-- A comparison or a 2-3 way split → **2-4** workers.
-- Broad, genuinely-parallel research or a multi-unit refactor → more, but only when the units
+- Simple lookup or one file: **1** worker (often `explorer`).
+- A comparison or a 2-3 way split: **2-4** workers.
+- Broad, genuinely-parallel research or a multi-unit refactor: more, but only when the units
   are independent. If two units touch the same file, sequence them, don't parallelize.
 
 Never spawn make-work agents to look busy. One capable worker beats five redundant ones.
@@ -27,8 +27,8 @@ Never spawn make-work agents to look busy. One capable worker beats five redunda
 ## The tools
 
 - **SpawnAgent** `{task, agent?, system?, model?, effort?, isolation?, label?, budget?}`:
-  delegate and get an immediate handle. You are NOT blocked; it runs in the background. Give
-  a DETAILED `task`: the objective, the exact scope/file boundaries, and the output you want
+  delegate and get an immediate handle. You are not blocked; it runs in the background. Give
+  a detailed `task`: the objective, the exact scope/file boundaries, and the output you want
   back. Vague tasks cause duplicated work and gaps. Pick a named `agent` specialist when one
   fits, otherwise describe an inline `system`.
 - **ListAgents**: the fleet at a glance. Cheap, no transcript.

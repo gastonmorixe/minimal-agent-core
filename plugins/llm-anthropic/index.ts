@@ -29,7 +29,26 @@ export {
   CAPS_SONNET_46,
 } from "./capabilities.ts"
 export { buildAnthropicHeaders } from "./headers.ts"
+export {
+  buildMetadata,
+  buildUserId,
+  getDeviceId,
+  type IdentityAuth,
+  loadExtraMetadata,
+} from "./identity.ts"
 export { registerAnthropicModels } from "./models.ts"
+export {
+  ANTHROPIC_PLAN_OAUTH,
+  type AnthropicCredentialsData,
+  type AnthropicTokenExchangeResponse,
+  anthropicCredentialsToSecrets,
+  anthropicOAuthLogin,
+  anthropicOAuthLoginConfig,
+  buildAnthropicOAuthCredential,
+  CLAUDE_AI_AUTHORIZE_URL,
+  LOGIN_SCOPES,
+  MANUAL_REDIRECT_URL,
+} from "./oauth-login.ts"
 export {
   type AnthropicRequestBody,
   buildAnthropicRequestBody,

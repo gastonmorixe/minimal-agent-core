@@ -275,7 +275,7 @@ describe("BraveProvider.search — retry behavior", () => {
         baseDelayMs: 1, // tiny jitter — Retry-After should dominate
         maxDelayMs: 100,
         // Capture observed delay for assertion.
-        onRetry: ({ delayMs }) => onRetryDelays.push(delayMs),
+        onRetry: ({ delayMs }: { delayMs: number }) => onRetryDelays.push(delayMs),
       },
       fetch: makeFetch(() => {
         attempts++
@@ -303,7 +303,7 @@ describe("BraveProvider.search — retry behavior", () => {
       retry: {
         baseDelayMs: 5,
         maxDelayMs: 50,
-        onRetry: ({ delayMs }) => onRetryDelays.push(delayMs),
+        onRetry: ({ delayMs }: { delayMs: number }) => onRetryDelays.push(delayMs),
       },
       fetch: makeFetch(() => {
         attempts++

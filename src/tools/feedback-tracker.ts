@@ -3,7 +3,7 @@
  *
  * Companion to the static prompt improvements (Layer 1, in tool descriptions)
  * and the in-band `[truncated: ...]` notice (Layer 2, in
- * {@link import("./truncation.ts").truncateToolOutput}). This layer is the
+ * `truncateToolOutput` (in `./truncation.ts`)). This layer is the
  * dynamic / reactive nudge: when the agent observes a *pattern* across
  * multiple tool calls — e.g. **3 consecutive truncations of the same tool**
  * — it appends a single-line meta-note to the next `tool_result.content`
@@ -81,7 +81,7 @@ const STREAK_NOTE_DEFAULT =
 
 /**
  * Stateful tracker for tool-level streak patterns. One instance per
- * {@link import("../agent.ts").Agent}; consulted on every tool dispatch.
+ * `Agent` (in `../agent.ts`); consulted on every tool dispatch.
  *
  * Usage from `agent.ts`:
  *

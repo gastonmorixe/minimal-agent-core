@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
   "files": {
     "ignoreUnknown": true,
     "includes": [
@@ -11,7 +11,8 @@
       "biome.json",
       ".oxlintrc.json",
       "typedoc.json",
-      "tsdoc.json"
+      "tsdoc.json",
+      "!private/**"
     ]
   },
   "formatter": {

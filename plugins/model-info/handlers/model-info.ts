@@ -66,6 +66,11 @@ function report(info: ModelInfoSnapshot, ctx: TUIContext): string {
   return lines.join("\n")
 }
 
+/**
+ * Tool handler for `ModelInfo`: reports the active model's provider, surface,
+ * modalities, context window, pricing, and session basics from the host's
+ * model-info query.
+ */
 export default async function modelInfo(ctx: TUIContext): Promise<TUIResult> {
   const info = ctx.queryModelInfo?.()
   if (!info) {

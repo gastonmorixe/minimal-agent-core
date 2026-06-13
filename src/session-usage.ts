@@ -170,9 +170,11 @@ function modelIdFromRecords(records: SessionRecord[]): string | undefined {
 /**
  * Compute the token usage of a session from its records.
  *
+ * The `opts` bag accepts `modelId`, which overrides the model used for
+ * estimation. Defaults to the `meta` record's model. Only consulted on
+ * the estimated path.
+ *
  * @param records - Parsed session records (from `parseLines`). Order-independent.
- * @param opts.modelId - Override the model used for estimation. Defaults to
- *   the `meta` record's model. Only consulted on the estimated path.
  * @returns Aggregated {@link SessionUsage}.
  */
 export function computeSessionUsage(

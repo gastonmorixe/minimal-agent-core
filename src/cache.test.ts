@@ -1,7 +1,5 @@
 import { describe, expect, it } from "bun:test"
 
-import { registerAnthropicModels } from "../plugins/llm-anthropic/models.ts"
-
 import {
   CacheAnomalyDetector,
   type CacheUsage,
@@ -9,6 +7,7 @@ import {
   type RequestContextSnapshot,
   snapshotRequest,
 } from "./cache.ts"
+import { registerTestProvider } from "./llm/test-fixtures.ts"
 
 const ANSI = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const strip = (s: string) => s.replace(ANSI, "")
@@ -125,8 +124,25 @@ describe("CacheAnomalyDetector", () => {
   it("uses the registry's higher minPrefixTokens for the cheap tier", () => {
     // Threshold now comes from capabilities.caching.minPrefixTokens
     // (Phase 18 inline: providers declare API minimums; core stopped
-    // guessing by id substring). Register the catalog like boot does.
-    registerAnthropicModels()
+    // guessing by id substring). Register a synthetic model that declares
+    // the higher cheap-tier minimum, like a provider catalog would (A-5:
+    // no plugins/ import — the detector only reads the registry record).
+    registerTestProvider({
+      models: [
+        {
+          id: "test-cheap-model-1",
+          capabilities: {
+            caching: {
+              explicit: true,
+              automatic: false,
+              ttls: ["5m", "1h"],
+              minPrefixTokens: 2048,
+              reportsCacheHits: true,
+            },
+          },
+        },
+      ],
+    })
     const writes: string[] = []
     const d = new CacheAnomalyDetector({ write: (l) => writes.push(l) })
     // 5000 chars = ~1250 tokens — over the 1024 floor but under the
@@ -134,7 +150,7 @@ describe("CacheAnomalyDetector", () => {
     const fired = d.observe(usage(0, 0), {
       breakpoints: 2,
       approxPrefixChars: 5000,
-      model: "claude-haiku-4-5-20251001",
+      model: "test-cheap-model-1",
     })
     expect(fired).toContain("below_min_block_size")
     expect(strip(writes[0])).toContain("2048-token")

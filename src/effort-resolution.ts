@@ -2,7 +2,7 @@
  * Resolve the `effort` (output_config.effort) setting from the three sources
  * we accept, with precedence:
  *
- *     CLI flag (--effort / -e)   >   env (MINIMAL_AGENT_EFFORT)   >   config file
+ *     CLI flag (--effort / -e)   \>   env (MINIMAL_AGENT_EFFORT)   \>   config file
  *
  * Pass-through philosophy: we do NOT validate the value. Whatever the user
  * passes is forwarded verbatim to `output_config.effort` on the wire. The
@@ -47,6 +47,12 @@ export interface ResolvedEffort {
   source: EffortSource | undefined
 }
 
+/**
+ * Pick the effective effort value with precedence CLI over env over config
+ * file, treating empty strings as unset. No validation is performed: the winning
+ * raw string is forwarded to the server verbatim, and both value and source
+ * come back `undefined` when nothing was set anywhere.
+ */
 export function resolveEffort(input: ResolveEffortInput): ResolvedEffort {
   if (input.cli !== undefined && input.cli !== "") {
     return { effort: input.cli, source: "cli" }

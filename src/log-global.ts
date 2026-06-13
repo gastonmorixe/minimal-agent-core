@@ -1,7 +1,7 @@
 /**
  * Persistent, cross-session global log sink.
  *
- * Complements {@link import("./log-file.ts").FileLogSink} (one file PER
+ * Complements `FileLogSink` (in `./log-file.ts`) (one file PER
  * session, `~/.minimal-agent/logs/ma-session-<sid>.log`) with a SINGLE durable
  * log that survives across runs: `~/.minimal-agent/ma.log`. This is the
  * long-lived audit trail for subsystems whose history matters beyond one

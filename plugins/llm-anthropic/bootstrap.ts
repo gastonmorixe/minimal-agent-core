@@ -3,6 +3,7 @@
  *
  * New in claude-code v2.1.154. Returns:
  *
+ * ```
  *   {
  *     client_data: null,
  *     additional_model_options: <opts override map> | null,
@@ -12,6 +13,7 @@
  *                      organization_rate_limit_tier, user_rate_limit_tier,
  *                      seat_tier }
  *   }
+ * ```
  *
  * The `additional_model_costs` field is the interesting one: Anthropic
  * can ship a new model id without releasing a new CLI, and the cost

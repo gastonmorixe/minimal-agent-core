@@ -2,7 +2,7 @@
   "id": "tasks",
   "name": "Tasks",
   "version": "0.1.0",
-  "description": "Per-session task list. Plan multi-step work, mark progress as you go, the user sees a live TODO. Single Task tool with action switch (add, add_many, update, status, start, done, remove, reorder, list, clear). State lives at ~/.minimal-agent/sessions/<sid>.tasks.jsonl. Current task list is auto-injected into every user turn as <ma::tui::tasks>.",
+  "description": "Per-session task list. Plan multi-step work, mark progress as you go, the user sees a live TODO. Single Task tool with action switch (add, add_many, update, status, start, done, remove, reorder, list, clear). State lives at ~/.minimal-agent/sessions/<sid>.tasks.jsonl. Current task list is auto-injected into every user turn as <ma::agent::tasks>.",
   "promptFragments": [
     {
       "id": "planning",
@@ -116,6 +116,24 @@
       "id": "subagent_task_link",
       "on": "subagent.taskUpdate",
       "handler": { "type": "module", "path": "./handlers/task_link.ts", "export": "default" }
+    }
+  ],
+  "replayRenderers": [
+    {
+      "id": "task_replay",
+      "tool": "Task",
+      "handler": { "type": "module", "path": "./handlers/replay_render.ts", "export": "default" }
+    }
+  ],
+  "turnAttachments": [
+    {
+      "id": "tasks_snapshot",
+      "order": 20,
+      "handler": {
+        "type": "module",
+        "path": "./handlers/turn_attachment.ts",
+        "export": "default"
+      }
     }
   ]
 }

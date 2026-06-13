@@ -6,7 +6,7 @@
  * carries bytes (lazily) plus probed metadata, and nothing provider-specific.
  * Each provider adapter turns an item into wire content at send time via the
  * canonical {@link ImageSource} / {@link AudioSource} / {@link FileSource}
- * trichotomy already defined in {@link module:llm/canonical-messages}.
+ * trichotomy already defined in `llm/canonical-messages`.
  *
  * Design: `private/multimodality-ingestion/design/20-design-spec.md`.
  *
@@ -123,8 +123,7 @@ export function kindToken(kind: MediaKind): "Image" | "Audio" | "Video" | "File"
     case "document":
       return "File"
     default: {
-      const _exhaustive: never = kind
-      throw new Error(`unhandled media kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled media kind: ${String(kind satisfies never)}`)
     }
   }
 }

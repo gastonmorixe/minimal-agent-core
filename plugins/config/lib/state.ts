@@ -31,10 +31,12 @@ export const CONFIG_OVERLAY_OWNER = "config"
 /** FSM state (per-process). */
 let fsmState: State = CLOSED
 
+/** Current overlay FSM state (module-global, one per process). */
 export function getState(): State {
   return fsmState
 }
 
+/** Replaces the overlay FSM state; callers go through the FSM's `transition`, not directly. */
 export function setState(next: State): void {
   fsmState = next
 }
@@ -42,10 +44,12 @@ export function setState(next: State): void {
 /** The live model, present only while the overlay is open. */
 let model: ConfigModel | null = null
 
+/** The config model backing the open overlay, or `null` when the overlay is closed. */
 export function getModel(): ConfigModel | null {
   return model
 }
 
+/** Installs (or clears, with `null`) the model for the overlay's lifetime. */
 export function setModel(m: ConfigModel | null): void {
   model = m
 }

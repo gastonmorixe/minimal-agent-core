@@ -63,8 +63,7 @@ function statusOf(s: SubagentStatus): PresenceStatus {
     case "stopped":
       return "stopped"
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }

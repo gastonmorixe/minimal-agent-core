@@ -2,7 +2,7 @@
   "id": "interleave-thinking",
   "name": "Interleave Thinking",
   "version": "0.2.0",
-  "description": "Captures <ma::plugin::interleave-thinking> spans in assistant text and drops them from the user-visible output stream. Ships disabled (manifest.enabled = false); opt in with `plugins[\"interleave-thinking\"].enabled = true` in ~/.minimal-agent/config.jsonc.",
+  "description": "Captures <ma::emit::interleave-thinking> spans in assistant text and drops them from the user-visible output stream. Ships disabled (manifest.enabled = false); opt in with `plugins[\"interleave-thinking\"].enabled = true` in ~/.minimal-agent/config.jsonc.",
   "enabled": false,
   "tuis": [
     {

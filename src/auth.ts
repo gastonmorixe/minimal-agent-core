@@ -26,7 +26,7 @@
  *
  * SECRET BAG SHAPE (private to this "provider", opaque to the store):
  *
- *     {
+ *     \{
  *       "tokenType": "oauth" | "api-key",
  *       // oauth:
  *       "accessToken": "sk-ant-oat01-…",
@@ -41,7 +41,7 @@
  *       "emailAddress": "…",
  *       // api-key:
  *       "apiKey": "sk-ant-…"
- *     }
+ *     \}
  *
  * Account info (uuid/org/email) used to live in `~/.claude.json`; now we
  * capture it from the OAuth token-exchange response at login time and persist
@@ -302,15 +302,15 @@ export function getOauthRefreshConfig(): OAuthRefreshConfig {
  *
  * Mirrors `BB6()` in cli.pretty.js (L129419-129489):
  *   1. POST to TOKEN_URL with grant_type=refresh_token
- *   2. Parse response: { access_token, refresh_token?, expires_in }
+ *   2. Parse response: \{ access_token, refresh_token?, expires_in \}
  *   3. Compute expiresAt = Date.now() + expires_in * 1000
  *
  * The response may include a new refresh_token (token rotation), or the
  * same one if the server doesn't rotate. We fall back to the original
  * refresh token if the response doesn't include one.
  *
- * @param refreshToken OAuth refresh token from the credential store.
- * @param networkClient Network client used for the token endpoint request.
+ * @param refreshToken - OAuth refresh token from the credential store.
+ * @param networkClient - Network client used for the token endpoint request.
  * @returns Updated credential data.
  */
 export async function refreshAccessToken(
@@ -378,7 +378,7 @@ export interface GetAuthDeps {
  * cross-process rotation (another minimal-agent process refreshing under the
  * shared advisory lock) is honored.
  *
- * @param providerId Provider slug to resolve (defaults to the one provider we
+ * @param providerId - Provider slug to resolve (defaults to the one provider we
  *   ship with). Also used to key the per-provider refresh lockfile.
  */
 export async function getAuth(

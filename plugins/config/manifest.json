@@ -2,7 +2,7 @@
   "id": "config",
   "name": "Config",
   "version": "0.1.0",
-  "description": "Interactive editor for ~/.minimal-agent/config.jsonc. The /config command opens a footer overlay to browse and edit settings (model, effort, thinkingDisplay, mode, formatter, status bar, …) and toggle every discovered plugin on/off. Edits are comment-preserving: your // notes survive a save. Also /config get <id> and /config path for headless use.",
+  "description": "Interactive editor for ~/.minimal-agent/config.jsonc. The /config command opens a footer overlay to browse and edit settings (model, effort, thinkingDisplay, mode, formatter, status bar, etc.) and toggle every discovered plugin on/off. Edits are comment-preserving: your // notes survive a save. Also /config get <id> and /config path for headless use.",
   "commands": [
     {
       "name": "config",

@@ -114,14 +114,14 @@ describe("tool descriptions — search routing directives", () => {
   // edit can't silently drop the steer.
   it("Grep tells the model to never invoke grep/rg via Bash", () => {
     const d = descOf("Grep")
-    expect(d).toMatch(/NEVER/i)
+    expect(d).toMatch(/never|do not/i)
     expect(d).toMatch(/\bgrep\b/)
     expect(d).toMatch(/\brg\b/)
   })
 
   it("Glob tells the model to never use find/fd/ls via Bash", () => {
     const d = descOf("Glob")
-    expect(d).toMatch(/NEVER/i)
+    expect(d).toMatch(/never|do not/i)
     expect(d).toMatch(/\bfind\b/)
   })
 

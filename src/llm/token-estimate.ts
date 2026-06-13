@@ -32,7 +32,7 @@ export const DEFAULT_CHARS_PER_TOKEN = 3.5
 
 /**
  * A function that estimates the token count of a piece of text. This is the
- * shape stored on {@link import("./model-registry.ts").ModelEntry.estimateTokens}.
+ * shape stored on `ModelEntry.estimateTokens` (in `./model-registry.ts`).
  */
 export type TokenEstimator = (text: string) => number
 

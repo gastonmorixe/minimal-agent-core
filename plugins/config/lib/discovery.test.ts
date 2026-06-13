@@ -8,7 +8,7 @@ import { describe, expect, it } from "bun:test"
 
 import { type DiscoverDeps, discoverPlugins, pluginFields } from "./discovery.ts"
 
-/** Build an in-memory fs fake from a { "root/sub/file": contents } map. */
+/** Build an in-memory fs fake from a `{ "root/sub/file": contents }` map. */
 function fakeFs(roots: string[], tree: Record<string, string>): DiscoverDeps {
   const join = (...p: string[]): string => p.join("/")
   return {

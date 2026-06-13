@@ -137,13 +137,13 @@ export type BashSplitResult = {
  * - **Backslash escape (`\`)** — the next character is consumed verbatim
  *   regardless of context (even inside the operator probe). This means
  *   `\&\&` is never matched as `&&`.
- * - **Quotes** — `'…'`, `"…"`, and `` `…` `` open a quoted region;
- *   operator probing is suppressed until the matching closing quote.
- *   Quotes do not nest (entering `"` while inside `'` is part of the
- *   single-quoted body, etc.).
+ * - **Quotes** — `'…'`, `"…"`, and backtick-quoted regions open a quoted
+ *   region; operator probing is suppressed until the matching closing
+ *   quote. Quotes do not nest (entering `"` while inside `'` is part of
+ *   the single-quoted body, etc.).
  * - **Subshell / parameter expansion** — `$(`, `${`, and bare `(`
  *   increment a depth counter; matching `)` / `}` decrement it.
- *   Operator probing is suppressed while depth > 0. Nested subshells
+ *   Operator probing is suppressed while depth \> 0. Nested subshells
  *   work because depth is a counter, not a flag.
  * - **Operator probe** — at each top-level position the tokenizer walks
  *   {@link BASH_OPERATORS} in order and takes the first match. Order is
@@ -165,19 +165,25 @@ export type BashSplitResult = {
  *   the worst outcome is "no split, hard-wrap as before".
  *
  * @example No operators
- *   splitBashSegments("echo hello")
- *   // → { lead: "echo hello", rest: [] }
+ * ```ts
+ * splitBashSegments("echo hello")
+ * // → { lead: "echo hello", rest: [] }
+ * ```
  *
  * @example Mixed pipeline
- *   splitBashSegments("cd /tmp && grep foo bar | wc -l")
- *   // → { lead: "cd /tmp", rest: [
- *   //       {op:"&&", body:"grep foo bar"},
- *   //       {op:"|",  body:"wc -l"},
- *   //   ] }
+ * ```ts
+ * splitBashSegments("cd /tmp && grep foo bar | wc -l")
+ * // → { lead: "cd /tmp", rest: [
+ * //       {op:"&&", body:"grep foo bar"},
+ * //       {op:"|",  body:"wc -l"},
+ * //   ] }
+ * ```
  *
  * @example Quote-protected operator
- *   splitBashSegments('echo "a && b"')
- *   // → { lead: 'echo "a && b"', rest: [] }
+ * ```ts
+ * splitBashSegments('echo "a && b"')
+ * // → { lead: 'echo "a && b"', rest: [] }
+ * ```
  */
 export function splitBashSegments(cmd: string): BashSplitResult {
   // State.
@@ -334,17 +340,19 @@ export const MULTI_OP_SOFT_SPLIT_MIN = 2
  * renderer to mean "width unknown — don't split"). Non-TTY callers
  * (tests, piped output) hit this path and keep single-line headers.
  *
- * @param cmd the (single-line) command body, without `$ ` or any prefix
- * @param cols the terminal width in cells (typically `process.stdout.columns`)
- * @param headerPrefixCells cells consumed by the bordered header before
+ * @param cmd - the (single-line) command body, without `$ ` or any prefix
+ * @param cols - the terminal width in cells (typically `process.stdout.columns`)
+ * @param headerPrefixCells - cells consumed by the bordered header before
  *   the command body. Defaults to {@link BASH_HEADER_PREFIX_CELLS_DEFAULT}.
  *
  * @example
- *   shouldSoftSplit("ls | wc -l", 80)               // false — 1 op, fits
- *   shouldSoftSplit("x".repeat(200), 80)            // true — overflows
- *   shouldSoftSplit("a && b | c", 200)              // true — 2 ops, multi-op rule
- *   shouldSoftSplit("a && b | c", Infinity)         // false — cols unknown
- *   shouldSoftSplit("ls", 20, 5)                    // false — 2 + 5 < 20
+ * ```ts
+ * shouldSoftSplit("ls | wc -l", 80)               // false — 1 op, fits
+ * shouldSoftSplit("x".repeat(200), 80)            // true — overflows
+ * shouldSoftSplit("a && b | c", 200)              // true — 2 ops, multi-op rule
+ * shouldSoftSplit("a && b | c", Infinity)         // false — cols unknown
+ * shouldSoftSplit("ls", 20, 5)                    // false — 2 + 5 < 20
+ * ```
  */
 export function shouldSoftSplit(
   cmd: string,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { parseJsonc, stripJsonc } from "./jsonc.ts"
+import { parseJsonc, stripJsonc } from "@minimal-agent/plugin-api/utils/jsonc"
 
 describe("jsonc", () => {
   it("parses plain JSON unchanged", () => {

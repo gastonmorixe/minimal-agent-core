@@ -71,7 +71,7 @@ const joined = (cap: Capture) => cap.writes.join("")
 /**
  * Find the cursor-back-and-erase sequence the compositor emits before
  * the live-area redraw: `\x1b[<n>A\r\x1b[1A\x1b[<col>C\x1b[J` (or the
- * `\x1b[<col>C\x1b[J` portion when streamCol > 0).
+ * `\x1b[<col>C\x1b[J` portion when streamCol \> 0).
  */
 function extractRedrawCol(stream: string): number | null {
   // Match the eraseLiveSeq's "step back to streamCol" tail. As of May 2026

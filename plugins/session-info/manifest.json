@@ -2,7 +2,7 @@
   "id": "session-info",
   "name": "Session Info",
   "version": "0.1.0",
-  "description": "Contributes the SessionInfo tool: the agent's LIVE runtime state at call time, context fullness (tokens used vs window), the selected effort/reasoning settings and fast-mode, provider quota windows, cumulative token usage and rough cost, the current working directory, and uptime. The runtime-state counterpart to ModelInfo (which reports static capabilities). Reads stable host data sources directly (session tokens, provider session info, model registry), so it needs no provider import and never blocks on the network.",
+  "description": "Contributes the SessionInfo tool: the agent's live runtime state at call time, context fullness (tokens used vs window), the selected effort/reasoning settings and fast-mode, provider quota windows, cumulative token usage and rough cost, the current working directory, and uptime. The runtime-state counterpart to ModelInfo (which reports static capabilities). Reads stable host data sources directly (session tokens, provider session info, model registry), so it needs no provider import and never blocks on the network.",
   "tuis": [
     {
       "id": "session_info_tool",
@@ -10,7 +10,7 @@
         "type": "tool",
         "tool": {
           "name": "SessionInfo",
-          "description": "Report your CURRENT runtime state right now (not your capabilities, use ModelInfo for those). Returns: how full your context window is (tokens used / total / percent / headroom) and turn count; the actually-selected effort level, reasoning/thinking mode, and whether fast-mode is on; provider quota windows (e.g. 5h / 7d utilization and reset); cumulative token usage and a rough USD cost estimate; the LIVE working directory (which may have changed since startup); and how long this run has been going. Call this when the user asks about context/token budget, cost, quota, how long the session has run, the current working directory, or your current settings, and use it to self-regulate (for example, to decide whether to compact context when it is getting full). Takes no input.",
+          "description": "Report your current runtime state right now (not your capabilities, use ModelInfo for those). Returns: how full your context window is (tokens used / total / percent / headroom) and turn count; the actually-selected effort level, reasoning/thinking mode, and whether fast-mode is on; provider quota windows (e.g. 5h / 7d utilization and reset); cumulative token usage and a rough USD cost estimate; the live working directory (which may have changed since startup); and how long this run has been going. Call this when the user asks about context/token budget, cost, quota, how long the session has run, the current working directory, or your current settings, and use it to self-regulate (for example, to decide whether to compact context when it is getting full). Takes no input.",
           "input_schema": {
             "type": "object",
             "properties": {},

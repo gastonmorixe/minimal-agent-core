@@ -20,8 +20,9 @@
  * Why this matters: when a session is forked across model boundaries
  * (e.g. parent ran on claude-opus-4-7, child resumes on claude-opus-4-8),
  * the inherited thinking blocks carry signatures bound to the OLD model.
- * The new model rejects them with `messages.<i>.content.<j>: thinking
- * blocks in the latest assistant message cannot be modified`. The
+ * The new model rejects them with
+ * `messages.<i>.content.<j>: thinking blocks in the latest assistant message cannot be modified`.
+ * The
  * decoded model id lets us detect this BEFORE sending and offer the
  * user a clean recovery path (strip stale thinking vs switch back).
  *

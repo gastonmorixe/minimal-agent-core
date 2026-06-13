@@ -1,12 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 
-// Model short labels resolve through the provider plugins (Phase 17:
-// core no longer hardcodes vendor naming schemes), so this rendering
-// test wires the real Anthropic plugin exactly like production boot does.
-import { anthropicProviderPlugin } from "../plugins/llm-anthropic/adapter.ts"
-import { registerAnthropicModels } from "../plugins/llm-anthropic/models.ts"
-
-import { registerProviderPlugin } from "./llm/provider-plugin.ts"
+import { registerTestProvider } from "./llm/test-fixtures.ts"
 import { stripAnsi } from "./term-width.ts"
 import {
   fmtTokens,
@@ -18,8 +12,22 @@ import {
 import type { UsageReport, UsageTotals } from "./usage-stats.ts"
 
 beforeAll(() => {
-  registerAnthropicModels()
-  registerProviderPlugin(anthropicProviderPlugin)
+  // Model short labels resolve through the provider-plugin registry (Phase
+  // 17: core no longer hardcodes vendor naming schemes). A synthetic
+  // provider supplies the same registry data the real plugin would —
+  // shortCode + version-token scheme — without importing plugins/ (A-5,
+  // I2). The provider-flavored id/labels stay here as DATA so the
+  // rendering pins are byte-identical to production.
+  registerTestProvider({
+    id: "anthropic",
+    shortCode: "anth",
+    models: [{ id: "claude-opus-4-8" }],
+    modelVersionToken: (modelId) => {
+      const m = modelId.match(/^claude-(?:opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/)
+      if (!m) return undefined
+      return m[2] !== undefined ? `${m[1]}.${m[2]}` : m[1]
+    },
+  })
 })
 
 function totals(over: Partial<UsageTotals> = {}): UsageTotals {

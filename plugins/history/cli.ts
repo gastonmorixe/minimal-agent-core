@@ -70,6 +70,7 @@ Flags:
   -h, --help                 Show this help.
 `
 
+/** Parse the history-CLI argv into a typed args record. */
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
   let scope: Scope = "project"
@@ -153,6 +154,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 }
 
+/** Raised for bad CLI usage; rendered as usage help plus exit code 2. */
 export class UsageError extends Error {
   constructor(message: string) {
     super(message)
@@ -160,6 +162,7 @@ export class UsageError extends Error {
   }
 }
 
+/** Raised for domain failures (missing session, bad id); exit code 1. */
 export class DomainError extends Error {
   constructor(message: string) {
     super(message)
@@ -202,6 +205,10 @@ export interface RunIO {
   confirm?: (prompt: string) => boolean
 }
 
+/**
+ * CLI entrypoint: parses argv, dispatches the subcommand against the session
+ * store, writes output through `io`, and returns the process exit code.
+ */
 export async function run(argv: string[], io: RunIO): Promise<number> {
   let args: ParsedArgs
   try {

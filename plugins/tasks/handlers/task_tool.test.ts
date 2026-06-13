@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { TaskStore } from "../lib/store.ts"
 
 import taskToolHandler from "./task_tool.ts"
@@ -26,6 +27,7 @@ function ctx(input: Record<string, unknown>): TUIContext {
     stdout: process.stdout,
     stdin: process.stdin,
     stderr: process.stderr,
+    log: { info() {}, warn() {}, error() {}, debug() {} } as never,
   }
 }
 
@@ -37,8 +39,12 @@ afterEach(() => {
   rmSync(tmpHome, { recursive: true, force: true })
 })
 
-async function call(input: Record<string, unknown>): Promise<TUIResult> {
-  return taskToolHandler(ctx(input))
+type ToolResult = Extract<TUIResult, { kind: "tool_result" }>
+
+async function call(input: Record<string, unknown>): Promise<ToolResult> {
+  const r = await taskToolHandler(ctx(input))
+  if (r.kind !== "tool_result") throw new Error(`expected tool_result, got ${r.kind}`)
+  return r
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +95,7 @@ describe("session id", () => {
       ...ctx({ action: "list" }),
       env: { HOME: tmpHome, MINIMAL_AGENT_SESSION_ID: "" },
     })
+    if (r.kind !== "tool_result") throw new Error(`expected tool_result, got ${r.kind}`)
     expect(r.is_error).toBe(true)
     expect(r.content).toMatch(/session id/)
   })

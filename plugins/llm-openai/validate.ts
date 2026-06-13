@@ -14,6 +14,10 @@ import { modalityViolations } from "../../src/llm/modality-check.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 import type { ValidationResult } from "../../src/llm/provider.ts"
 
+/**
+ * Provider preflight validation: checks a canonical request against the
+ * resolved model's declared capabilities and returns the violations found.
+ */
 export function validateOpenAIRequest(req: CanonicalRequest, model: ModelEntry): ValidationResult {
   const errors: CapabilityViolation[] = []
   const caps = model.capabilities

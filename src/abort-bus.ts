@@ -23,6 +23,12 @@ export type AbortReason =
   | { kind: "programmatic"; tag: string }
   | { kind: "timeout"; ms: number }
 
+/**
+ * Single-owner cancellation hub for the in-flight agent turn. Hands out one
+ * `AbortController` per turn via {@link beginTurn}, collapses concurrent abort
+ * requests into a single `"abort"` event carrying the structured
+ * {@link AbortReason}, and ignores aborts that arrive when no turn is active.
+ */
 export class AbortBus extends EventEmitter {
   private controller: AbortController | null = null
   private aborted = false

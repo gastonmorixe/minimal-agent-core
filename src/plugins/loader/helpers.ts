@@ -23,6 +23,11 @@ import type {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Lists plugin package directories under `rootDir/sub`: every immediate
+ * subdirectory containing a `manifest.json`. Returns `[]` when the base
+ * directory does not exist, so missing plugin roots are not an error.
+ */
 export function discoverPackageDirs(rootDir: string, sub: string): string[] {
   const base = join(rootDir, sub)
   if (!existsSync(base) || !statSync(base).isDirectory()) return []
@@ -36,6 +41,7 @@ export function discoverPackageDirs(rootDir: string, sub: string): string[] {
   return out
 }
 
+/** Resolves a manifest-declared path against the package dir, passing absolute paths through untouched. */
 export function resolvePath(pkgDir: string, rel: string): string {
   return isAbsolute(rel) ? rel : resolve(pkgDir, rel)
 }
@@ -123,7 +129,7 @@ export function escapeTagAttr(s: string): string {
  *
  * 1. declares a mode            → `mode`,  name = first mode id
  * 2. contributes ONE tool       → `tool`,  name = that tool's name
- *    contributes >1 tool        → `tool`,  name = slug(H1 | display name)
+ *    contributes \>1 tool        → `tool`,  name = slug(H1 | display name)
  * 3. contributes only inline tag→ `emit`,  name = first inline-tag name
  * 4. PROMPT.md only (no frags)  → `behavior`, name = slug(H1 | display name)
  * 5. PROMPT.md + prompt fragment→ `context`,  name = slug(H1 | display name)
@@ -161,6 +167,14 @@ export function classifyPluginPrompt(pkg: LoadedPlugin): { role: PromptRole; nam
   return { role: hasFragments ? "context" : "behavior", name }
 }
 
+/**
+ * Materializes one manifest handler declaration into an invokable
+ * {@link ResolvedHandler}: imports `module` handlers (validating the default
+ * export and optional `available` gate) or wraps `command` handlers in a
+ * subprocess runner. Returns `null` and logs instead of throwing when the
+ * module is missing or malformed, so one bad handler cannot take down the
+ * plugin load.
+ */
 export async function resolveHandler(
   h: ManifestHandler,
   packageDir: string,
@@ -316,6 +330,11 @@ export async function invokeSubprocess(
   }
 }
 
+/**
+ * Locates the package directory of the plugin that owns the given handler
+ * instance, falling back to `process.cwd()` when no plugin matches (test
+ * fixtures constructing handlers by hand).
+ */
 export function findPackageDirFor(plugins: LoadedPlugin[], handler: ResolvedHandler): string {
   for (const pkg of plugins) {
     if (pkg.handlers.includes(handler)) return pkg.packageDir

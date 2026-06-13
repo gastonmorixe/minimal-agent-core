@@ -2,7 +2,7 @@
  * Universal tool-output guardrail.
  *
  * Every tool result passes through {@link truncateToolOutput} as the very
- * last step in {@link import("../tools.ts").executeTool}. The clamp enforces
+ * last step in `executeTool` (in `../tools.ts`). The clamp enforces
  * one byte budget and one line budget — whichever is hit first wins —
  * and appends a single-line, machine-readable notice the model can use to
  * decide a follow-up call without guessing.
@@ -90,6 +90,12 @@ export function countLines(s: string): number {
   return n
 }
 
+/**
+ * Applies the universal tool-output guardrail: clamps a body that exceeds
+ * the byte or line cap (cutting on a UTF-8 boundary), appends a structured
+ * truncation notice, and reports the original totals either way so the TUI
+ * can show size stats. Untruncated bodies pass through byte-identical.
+ */
 export function truncateToolOutput(
   output: string,
   ctx: TruncateCtx = {},
@@ -195,6 +201,7 @@ function sliceUtf8(s: string, maxBytes: number): string {
 // any provider in core.
 const SESSION_ID_KEY_RE = /session[-_]?id/i
 
+/** True for every metadata key except session-id variants, which must stay visible for debugging. */
 export function shouldRedact(key: string): boolean {
   return !SESSION_ID_KEY_RE.test(key)
 }

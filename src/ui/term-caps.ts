@@ -23,7 +23,7 @@
  *     - `0` = mode not recognized → unsupported
  *     - `1` = currently set            ┐
  *     - `2` = currently reset          │ supported
- *     - `3` = permanently set          │ (n ∈ {1,2,3,4})
+ *     - `3` = permanently set          │ (n ∈ `{1,2,3,4}`)
  *     - `4` = permanently reset        ┘
  *   - No reply within timeout → assume unsupported.
  *
@@ -71,7 +71,9 @@ const DECRPM_RE = /\x1b\[\?2026;(\d+)\$y/
  * or stdout is not a TTY (CI, pipe, test harness) — there's nothing to
  * probe and synchronized output is moot anyway.
  *
- * @param timeoutMs how long to wait for the reply before giving up.
+ * @param input - Stdin-like stream the reply bytes arrive on.
+ * @param output - Stdout-like stream the probe sequence is written to.
+ * @param timeoutMs - how long to wait for the reply before giving up.
  *   Default 80ms — long enough for a fast remote SSH session, short
  *   enough that a non-supporting terminal doesn't visibly stall startup.
  */

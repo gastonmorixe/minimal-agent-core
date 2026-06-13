@@ -5,7 +5,7 @@
  * resolves any `[Image #id …]` tokens into legacy wire content blocks ready to
  * push onto the conversation as a `user` message. Text-only prompts pass
  * straight through as a single text block, so this is a safe drop-in for the
- * existing "text -> user content" step.
+ * existing "text -\> user content" step.
  *
  * Provider-neutral: limits/modalities resolve from the ACTIVE model through
  * the registry + the provider's `mediaLimits` hook (`resolveToolMediaContext`

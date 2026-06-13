@@ -44,8 +44,8 @@ export interface AuthRefreshState {
 export interface AuthRefreshOptions {
   /**
    * Keychain-first peer-rotation read: returns a token discovered locally
-   * WITHOUT a network refresh (e.g. `readCredentials()?.claudeAiOauth
-   * ?.accessToken`), or undefined/null when none. Injected so the middleware
+   * WITHOUT a network refresh (e.g.
+   * `readCredentials()?.claudeAiOauth?.accessToken`), or undefined/null when none. Injected so the middleware
    * stays provider-neutral. Omit to skip straight to network refresh.
    */
   peerToken?: () => string | undefined | null
@@ -65,8 +65,8 @@ export function is401(err: unknown): boolean {
  * network refresh. Non-401 errors (and 401s with no refresh available)
  * propagate unchanged for the outer retry coordinator to classify.
  *
- * @param makeAttempt Fresh attempt factory; re-reads `state.auth` each call.
- * @param state Mutable auth holder; `auth.token` is updated on refresh.
+ * @param makeAttempt - Fresh attempt factory; re-reads `state.auth` each call.
+ * @param state - Mutable auth holder; `auth.token` is updated on refresh.
  * @yields the attempt's text deltas.
  * @returns the successful attempt's `StreamedResponse`.
  */

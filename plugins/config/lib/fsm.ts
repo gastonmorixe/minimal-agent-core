@@ -149,8 +149,7 @@ export function transition(state: State, event: Event, ctx: TransitionCtx): Tran
     case "buffer":
       return onBuffer(state, event.text)
     default: {
-      const _exhaustive: never = event
-      throw new Error(`unhandled event: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled event: ${JSON.stringify(event satisfies never)}`)
     }
   }
 }
@@ -205,8 +204,7 @@ function onKeyBrowse(
       // No text field active; swallow so it can't reach the hidden prompt.
       return { state, effects: [{ kind: "halt" }] }
     default: {
-      const _exhaustive: never = key
-      throw new Error(`unhandled key: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled key: ${JSON.stringify(key satisfies never)}`)
     }
   }
 }
@@ -215,8 +213,10 @@ function onKeyBrowse(
  * In browse: cycle an enum/boolean field, enter edit mode for a free-text
  * field, or perform an action row.
  *
- * @param dir cycle direction (Right/Enter = +1, Left = -1).
- * @param enter true for an Enter/Tab press (vs Left/Right).
+ * @param state - The open-config FSM state being acted on.
+ * @param row - The currently-selected row (undefined for an empty list).
+ * @param dir - cycle direction (Right/Enter = +1, Left = -1).
+ * @param enter - true for an Enter/Tab press (vs Left/Right).
  */
 function activateOrCycle(
   state: Extract<State, { kind: "open" }>,
@@ -237,8 +237,7 @@ function activateOrCycle(
       case "close":
         return { state: CLOSED, effects: [{ kind: "close" }, { kind: "halt" }] }
       default: {
-        const _exhaustive: never = row.action
-        throw new Error(`unhandled action: ${JSON.stringify(_exhaustive)}`)
+        throw new Error(`unhandled action: ${JSON.stringify(row.action satisfies never)}`)
       }
     }
   }
@@ -268,8 +267,7 @@ function activateOrCycle(
       return { state: next, effects: [{ kind: "repaint" }, { kind: "halt" }] }
     }
     default: {
-      const _exhaustive: never = row.fieldKind
-      throw new Error(`unhandled field kind: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled field kind: ${JSON.stringify(row.fieldKind satisfies never)}`)
     }
   }
 }
@@ -308,8 +306,7 @@ function onKeyEdit(
     case "ArrowRight":
       return { state, effects: [{ kind: "halt" }] }
     default: {
-      const _exhaustive: never = key
-      throw new Error(`unhandled key: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled key: ${JSON.stringify(key satisfies never)}`)
     }
   }
 }

@@ -1,5 +1,6 @@
 import { homedir } from "os"
 import { join } from "path"
+/** Builds a human-sortable session id: `ma-session-YYYYMMDD-` plus a 4-char random suffix. */
 export function generateSessionId() {
   return (
     "ma-session-" +
@@ -8,6 +9,12 @@ export function generateSessionId() {
     Math.random().toString(36).slice(2, 6)
   )
 }
+/**
+ * Buffered JSONL logger: `info`/`error` append records in memory and a
+ * 500 ms interval flushes them to `~/.minimal-agent/logs/<sid>.jsonl`. The
+ * interval keeps the process alive until something calls `unref`/exit, and
+ * records can be lost if the process dies between flushes.
+ */
 export class Logger {
   private buf: any[] = []
   constructor(private sid: string) {

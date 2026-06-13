@@ -9,7 +9,7 @@
  *   - No leading "quota" word — the bar is the visual cue.
  *   - 8-cell bar with fractional fill (1/8th eighth-block ramp) for sub-cell
  *     precision.
- *   - Bar fill colour-graded by severity (green <60%, yellow 60-84%, red ≥85%).
+ *   - Bar fill colour-graded by severity (green under 60%, yellow 60-84%, red ≥85%).
  *   - **Window name is a LEFT label**, not a trailing word. Promotes the name
  *     from grammatically-a-duration (next to the reset countdown, which is
  *     itself a duration) to grammatically-a-title (anchoring the segment).
@@ -29,7 +29,7 @@
  *     middle-dot `·` placeholder and the bar+percent drop (we can't
  *     compute fill without a denominator); the trailing count remains.
  *     The bar (when shown) renders `contextSize / contextWindow`. The
- *     trailing meta is the live count: bold when contextSize > 0 ("this
+ *     trailing meta is the live count: bold when `contextSize > 0` ("this
  *     is your current usage"), dim when 0 (pre-traffic shape stays
  *     quiet, parallel to `5h`/`7d`). The cumulative-sum approach
  *     (pre-May 2026) over-counted cached prefixes by ~N× since the same
@@ -306,7 +306,7 @@ function renderWindowSegment(
  * window formatted compactly (`200k`, `1M`, `500k`, …) — informative,
  * parallel in role to `5h`/`7d` (each segment's label says what the
  * bar represents). The meta slot holds the live count instead of a
- * reset countdown. Count is bold when contextSize > 0, dim when 0
+ * reset countdown. Count is bold when `contextSize > 0`, dim when 0
  * (parallel to the quiet pre-traffic shape on the quota windows).
  *
  * When `contextWindow` is undefined the renderer falls back to a dim

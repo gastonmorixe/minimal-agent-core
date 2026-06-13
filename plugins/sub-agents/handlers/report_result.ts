@@ -18,7 +18,12 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
-import type { ToolAvailability, TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type {
+  ToolAvailability,
+  TUIContext,
+  TUIResult,
+} from "@minimal-agent/plugin-api/types/plugin"
+
 import { buildDigest, parseReportRequest, serializeDigest } from "../lib/report.ts"
 import { ENV_RESULT_PATH } from "../lib/spawn.ts"
 
@@ -33,6 +38,11 @@ import { ENV_RESULT_PATH } from "../lib/spawn.ts"
  */
 export const available: ToolAvailability = (ctx) => Boolean(ctx.env[ENV_RESULT_PATH]?.trim())
 
+/**
+ * Tool handler for `ReportResult`: records a sub-agent worker's final
+ * summary/artifacts at the result path the supervisor injected via env, so
+ * the lead can read it back with `AgentResult`.
+ */
 export default async function reportResult(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "ReportResult: unexpected trigger", is_error: true }

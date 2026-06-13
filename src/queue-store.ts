@@ -17,7 +17,7 @@
  * session directory and clean up the same way (`rm <sid>*`).
  *
  * Why a full snapshot (not append-only JSONL)?
- *   - The queue is small (typically <20 items). Rewriting the whole file
+ *   - The queue is small (typically under 20 items). Rewriting the whole file
  *     on each push/shift is ~1 KiB, well under the cost of an append +
  *     periodic compaction.
  *   - Persisted state is "what's currently pending"; an append-only log

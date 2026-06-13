@@ -29,6 +29,11 @@ const DYNAMIC_FIRST_MS = 60_000
 /** Cron's floor: intervals shorter than this can't be expressed as cron. */
 const MIN_CRON_MS = 60_000
 
+/**
+ * Command handler for `/loop`: parses the optional interval and prompt and
+ * registers a recurring task (or the built-in maintenance loop) in the
+ * session cron store.
+ */
 export default async function cmdLoop(ctx: CommandContext): Promise<CommandResult> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") {
     return { kind: "error", message: "scheduling is disabled (MINIMAL_AGENT_DISABLE_CRON=1)" }

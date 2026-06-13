@@ -104,7 +104,7 @@ export interface StatusActivity {
   startedAt?: number
   /**
    * ms timestamp (`Date.now()`) of the most recent chunk arrival. The renderer
-   * uses this to detect the "no bytes for >N seconds" stalled state, which is
+   * uses this to detect the "no bytes for \>N seconds" stalled state, which is
    * the answer to "why is `Calling Write: streaming input (10 B) (30s)`
    * frozen?" — the model went quiet mid-stream but the elapsed clock keeps
    * ticking on its own timer. When `lastChunkAt` exists AND
@@ -175,9 +175,9 @@ function dim(text: string): string {
  * Compact "wall-clock elapsed" formatter for status-row suffixes.
  *
  * Ladder:
- *   - `< 60s`              -> `"<n>s"`              (e.g. `"2s"`)
- *   - `60s..3599s`         -> `"<m>m <s>s"`         (e.g. `"1m 2s"`)
- *   - `>= 3600s`           -> `"<h>h <m>m"`         (e.g. `"1h 2m"` -- seconds dropped at hour scale)
+ *   - `< 60s`              -\> `"<n>s"`              (e.g. `"2s"`)
+ *   - `60s..3599s`         -\> `"<m>m <s>s"`         (e.g. `"1m 2s"`)
+ *   - `>= 3600s`           -\> `"<h>h <m>m"`         (e.g. `"1h 2m"` -- seconds dropped at hour scale)
  *
  * Negative inputs and `NaN` are clamped to `0` (returns `"0s"`).
  */
@@ -199,7 +199,7 @@ export function formatElapsed(ms: number): string {
  * relative to the label).
  *
  * Suppressed under 1 second to avoid flicker on fast operations that
- * complete in <1s (the row would briefly flash `(0s)` and then clear).
+ * complete in under 1s (the row would briefly flash `(0s)` and then clear).
  *
  * Includes the LEADING space, so callers concatenate
  * unconditionally: `${label}${formatElapsedSuffix(ms)}` produces
@@ -295,7 +295,7 @@ export interface FormatActivityOptions {
  *   - `↓` (lime)           — `direction: "down"`, chunks arriving
  *   - `·` (dim)            — `direction: "idle"` or unspecified
  *   - `⋯ stalled` (gold)   — `direction: "down"` AND no chunk for
- *                             >`stallThresholdMs` ms
+ *                             \>`stallThresholdMs` ms
  *
  * Segment drop order under `maxWidth` pressure (right-to-left):
  *   1. host:proto   (lowest priority — context, not progress)
@@ -476,6 +476,12 @@ function applyMetadata(entry: StatusEntry, metadata?: StatusMetadata): void {
   }
 }
 
+/**
+ * Ordered registry of active status entries (one per concurrent operation)
+ * with a tiny pub/sub layer. {@link create} returns a handle scoped to one
+ * entry; the bus notifies every subscriber with a fresh snapshot on each
+ * mutation, and new subscribers immediately receive the current state.
+ */
 export class StatusBus {
   private listeners = new Set<StatusListener>()
   private entries: StatusEntry[] = []
@@ -567,6 +573,12 @@ export interface StatusRendererOptions {
   now?: () => number
 }
 
+/**
+ * Paints the topmost {@link StatusBus} entry as a single spinner-prefixed
+ * line on a TTY stream using carriage-return rewrites, throttled to `maxFps`.
+ * Non-TTY outputs get nothing (it checks `isTTY`), and {@link StatusRenderer.suspend}
+ * lets other writers temporarily own the line without tearing.
+ */
 export class StatusRenderer {
   private readonly bus: StatusBus
   private readonly output: StatusOutput

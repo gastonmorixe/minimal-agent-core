@@ -86,7 +86,7 @@ export type PromptSource = { kind: "literal"; text: string } | { kind: "stdin" }
  *
  * Does NOT read stdin — caller does that on `{kind:"stdin"}`.
  *
- * @param args Normalized argv (output of `normalizeArgs`).
+ * @param args - Normalized argv (output of `normalizeArgs`).
  */
 export function extractPromptFromArgs(args: readonly string[]): PromptSource {
   // 1. --prompt "text"

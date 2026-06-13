@@ -35,6 +35,7 @@ const state: UsageOverlayState = {
   reports: null,
 }
 
+/** Read the current usage-overlay state (singleton per process). */
 export function getOverlayState(): UsageOverlayState {
   return state
 }
