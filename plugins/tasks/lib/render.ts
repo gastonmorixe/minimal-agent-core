@@ -83,6 +83,7 @@ const ANSI = {
   RESET: ANSI_CODES.RESET,
   BOLD: ANSI_CODES.BOLD,
   DIM: ANSI_CODES.DIM,
+  ITALIC: ANSI_CODES.ITALIC,
   STRIKE: ANSI_CODES.STRIKE,
   LIME: PALETTE.lime,
   /**
@@ -511,7 +512,7 @@ function renderHeaderText(
       break
     case "list":
       if (stats.total === 0) {
-        middle = color(ansi, `${ANSI.DIM}\x1b[3m`, "no tasks")
+        middle = color(ansi, `${ANSI.DIM}${ANSI.ITALIC}`, "no tasks")
       } else {
         middle = color(ansi, ANSI.LGRAY, `${stats.total} task${stats.total === 1 ? "" : "s"}`)
       }
@@ -923,7 +924,7 @@ export function renderToolDisplay(
   const bodyLines: string[] = []
   if (views.length === 0) {
     if (opts.action.kind === "list" || opts.action.kind === "cleared") {
-      const dim = opts.ansi ? `${ANSI.DIM}\x1b[3m` : ""
+      const dim = opts.ansi ? `${ANSI.DIM}${ANSI.ITALIC}` : ""
       const reset = opts.ansi ? ANSI.RESET : ""
       bodyLines.push(
         `  ${dim}Task({action: "add_many", titles: [...]}) to plan a multi-step change${reset}`,
@@ -976,7 +977,7 @@ export function renderBlock(views: readonly View[], stats: Stats, opts: RenderOp
   if (views.length === 0) {
     lines.push(renderGap(opts.ansi))
     if (opts.action.kind === "list" || opts.action.kind === "cleared") {
-      const dim = opts.ansi ? `${ANSI.DIM}\x1b[3m` : ""
+      const dim = opts.ansi ? `${ANSI.DIM}${ANSI.ITALIC}` : ""
       const reset = opts.ansi ? ANSI.RESET : ""
       lines.push(
         `${renderGap(opts.ansi)}   ${dim}Task({action: "add_many", titles: [...]}) to plan a multi-step change${reset}`,

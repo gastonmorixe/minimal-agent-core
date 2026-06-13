@@ -122,7 +122,7 @@ export function renderFleetDisplay(
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   if (records.length === 0) {
     return {
-      header: color(ansi, `${ANSI.DIM}\x1b[3m`, "no sub-agents"),
+      header: color(ansi, `${ANSI.DIM}${ANSI.ITALIC}`, "no sub-agents"),
       body: color(ansi, ANSI.DIM, "  SpawnAgent({task, agent}) to delegate work"),
       footer: "",
     }
