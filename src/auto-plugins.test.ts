@@ -60,7 +60,14 @@ describe("buildCloneArgs", () => {
   const URL = "https://github.com/gastonmorixe/minimal-agent-plugins.git"
 
   it("returns a plain shallow clone when there is no token", () => {
-    expect(buildCloneArgs(URL, "/dest", false)).toEqual(["clone", "--depth", "1", URL, "/dest"])
+    expect(buildCloneArgs(URL, "/dest", false)).toEqual([
+      "clone",
+      "--depth",
+      "1",
+      "--",
+      URL,
+      "/dest",
+    ])
   })
 
   it("prepends an inline credential helper for https github + token", () => {
@@ -70,13 +77,27 @@ describe("buildCloneArgs", () => {
     // The token VALUE is never in argv — only the env var reference.
     expect(args[1]).toContain("$MA_GIT_TOKEN")
     expect(args.join(" ")).not.toContain("ghp_")
-    expect(args.slice(2)).toEqual(["clone", "--depth", "1", URL, "/dest"])
+    expect(args.slice(2)).toEqual(["clone", "--depth", "1", "--", URL, "/dest"])
   })
 
   it("does NOT inject a helper for non-github or ssh URLs even with a token", () => {
     expect(buildCloneArgs("git@github.com:o/r.git", "/d", true)[0]).toBe("clone")
     expect(buildCloneArgs("https://gitlab.com/o/r.git", "/d", true)[0]).toBe("clone")
     expect(buildCloneArgs("/local/mirror.git", "/d", true)[0]).toBe("clone")
+  })
+
+  it("guards against git-clone arg-injection with a `--` separator (B-153)", () => {
+    // A repoUrl that looks like a git option must be forced to a positional by
+    // the `--` end-of-options marker, never parsed by git as `--upload-pack=…`
+    // (a command-execution vector on first-run plugin bootstrap).
+    const evil = "--upload-pack=touch /tmp/pwned"
+    const args = buildCloneArgs(evil, "/dest", false)
+    const sep = args.indexOf("--")
+    expect(sep).toBeGreaterThan(-1)
+    // The hostile value sits AFTER `--`, so git treats it as the (bogus) URL.
+    expect(args.indexOf(evil)).toBeGreaterThan(sep)
+    // And `--` precedes both positionals (repoUrl, dest).
+    expect(args.slice(sep + 1)).toEqual([evil, "/dest"])
   })
 })
 
@@ -252,8 +273,10 @@ describe("bootstrapUserPlugins", () => {
   it("honors a custom repoUrl by passing it to git clone", async () => {
     let seenUrl = ""
     const git = (args: string[]): Promise<GitRunResult> => {
-      // args: ["clone", "--depth", "1", <url>, <dest>]
-      seenUrl = args[3]!
+      // args: ["clone", "--depth", "1", "--", <url>, <dest>]. Read the URL
+      // relative to the `--` separator so this stays correct as flags evolve.
+      const sep = args.indexOf("--")
+      seenUrl = args[sep + 1]!
       writePkg(args[args.length - 1]!, "ma-fetch-plugin")
       return Promise.resolve({ code: 0, stdout: "", stderr: "" })
     }
