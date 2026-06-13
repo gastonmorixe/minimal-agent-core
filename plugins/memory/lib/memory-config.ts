@@ -43,19 +43,40 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { parseJsonc } from "../../../src/jsonc.ts"
-import { findModelByTags } from "../../../src/llm/model-registry.ts"
+import { parseJsonc } from "@minimal-agent/plugin-api/utils/jsonc"
 
 /**
- * Default summarizer model: the cheap/fast Anthropic tier, resolved from
- * the model registry by tags so this plugin no longer hardcodes a model
- * id via `src/headers.ts` (refactor Wave 1: plugins must not reach into
- * the legacy wire module for catalog data). The literal fallback covers
- * early-boot callers that read the config before the provider plugin
- * registered its models; it matches the registry's current haiku id.
+ * Structural slice of the host's `models:read` catalog lookup (source of
+ * truth: `ModelsReadApi.findByTags` on the v2 capability host). The
+ * decoupling contract forbids importing `src/llm/model-registry.ts`, so
+ * a caller that HAS a host (a `TUIContext` handler with `models:read`)
+ * may pass this resolver in; the cheap-tier id is then upgraded from the
+ * live registry. Config loading itself runs in the prompt-fragment
+ * context, which exposes no host, so production almost always takes the
+ * literal-fallback branch below — the same branch the old registry call
+ * hit at early boot before any provider had registered its models.
  */
-export function defaultSummaryModel(): string {
-  return findModelByTags("anthropic", ["haiku", "production"])?.id ?? "claude-haiku-4-5-20251001"
+export type CheapTierResolver = (
+  providerId: string,
+  mustHave: readonly string[],
+) => { id: string } | undefined
+
+/**
+ * Literal cheap/fast tier id. Matches the registry's current haiku id.
+ * Kept as the single fallback constant so the plugin no longer reaches
+ * into `src/llm/model-registry.ts` for catalog data (Wave D-7 decoupling).
+ */
+const FALLBACK_SUMMARY_MODEL = "claude-haiku-4-5-20251001"
+
+/**
+ * Default summarizer model: the cheap/fast tier. When a `models:read`
+ * resolver is supplied (a host-backed caller), the id is upgraded from
+ * the live registry by tags; otherwise the {@link FALLBACK_SUMMARY_MODEL}
+ * literal is used. Summary-mode callers can always override via
+ * `plugins.memory.summary.model` in the user config.
+ */
+export function defaultSummaryModel(resolveByTags?: CheapTierResolver): string {
+  return resolveByTags?.("anthropic", ["haiku", "production"])?.id ?? FALLBACK_SUMMARY_MODEL
 }
 
 // ---------------------------------------------------------------------------

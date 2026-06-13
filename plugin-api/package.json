@@ -17,6 +17,7 @@
     "./utils/sse-parser": "./src/utils/sse-parser.ts",
     "./utils/unified-diff": "./src/utils/unified-diff.ts",
     "./types/plugin": "./src/types/plugin.ts",
+    "./net/types": "./src/net/types.ts",
     "./llm/capabilities": "./src/llm/capabilities.ts",
     "./llm/errors": "./src/llm/errors.ts",
     "./llm/token-estimate": "./src/llm/token-estimate.ts",

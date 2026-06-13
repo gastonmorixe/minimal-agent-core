@@ -17,7 +17,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import type { PromptFragmentContext } from "../../../src/plugins/types.ts"
+import type { PromptFragmentContext } from "@minimal-agent/plugin-api/types/plugin"
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "../lib/memory-config.ts"
 import type { refreshAndRender } from "../lib/summary-refresh.ts"
 

@@ -19,16 +19,19 @@
  */
 
 import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import { classifyUpstreamError } from "@minimal-agent/plugin-api/llm/errors"
 import type { ProviderAuth, RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
-import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type {
+  ProviderPlugin,
+  ProviderSetupContext,
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
 import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/types/plugin"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
-import { classifyUpstreamError } from "../../src/llm/errors.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import type { ProviderAdapter, SurfaceId, ValidationResult } from "../../src/llm/provider.ts"
-import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
 
 import { openAIApiKeyAuth } from "./auth.ts"
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
@@ -71,7 +74,15 @@ export const openaiAdapter: ProviderAdapter = {
     }
 
     const headers = buildOpenAIHeaders({ auth })
-    const networkClient = (ctx.networkClient as NetworkClient | undefined) ?? defaultNetworkClient
+    // Net seam (Wave D): the client crosses the provider port via
+    // `ctx.networkClient`, populated by the host orchestrator (`src/llm/run.ts`)
+    // with its shared `defaultNetworkClient` (or a test-injected client). The
+    // plugin owns no global, so an absent client is a host wiring bug, not a
+    // silent fallback to a singleton this package can't import.
+    const networkClient = ctx.networkClient as NetworkClient | undefined
+    if (!networkClient) {
+      throw new Error("OpenAI adapter: missing ctx.networkClient (host must provide the client)")
+    }
 
     if (model.surfaceId === "openai-chat-completions") {
       const body = buildOpenAIChatBody(req, model)
@@ -199,9 +210,19 @@ function taggedHttpError(
  * registry. Idempotent. Call once at application start (alongside
  * `bootstrapAnthropic()`). After this, `resolveModel("gpt-5.5")` and
  * `run()` can reach the OpenAI surfaces.
+ *
+ * Registry seam (Wave D): when the host passes a {@link ProviderSetupContext}
+ * (via `register(ctx)`), the model catalog is contributed through
+ * `ctx.models` (the `models:register` capability) instead of the direct
+ * registry import. Without a context (the legacy no-arg activation path) it
+ * falls back to {@link registerOpenAIModels}'s own import. The adapter itself
+ * still registers through {@link registerProvider} (the provider-adapter port
+ * has not moved to a capability yet — see D-net-seam §3).
+ *
+ * @param ctx - Optional host setup context carrying the model registrar.
  */
-export function bootstrapOpenAI(): void {
-  registerOpenAIModels()
+export function bootstrapOpenAI(ctx?: ProviderSetupContext): void {
+  registerOpenAIModels(ctx?.models)
   registerProvider(openaiAdapter)
 }
 

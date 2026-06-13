@@ -8,26 +8,33 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { AuthResult } from "../../../src/auth.ts"
-import type { SendOptions } from "../../../src/client.ts"
-
 import {
   buildSystemPrompt,
   DEFAULT_TIMEOUT_MS,
   MAX_OUTPUT_RATIO,
   MIN_OUTPUT_RATIO,
+  type SummarizeAuth,
   SummarizeError,
+  type SummarizeSendOptions,
   summarize,
 } from "./summarize.ts"
 
-const FAKE_AUTH: AuthResult = { type: "oauth", token: "test-token", accountUuid: "test-account" }
+// Auth/send types are derived by `summarize.ts` from its residual host
+// runtime imports (`getAuth`/`canonicalSendFn`), so the test consumes the
+// re-exported `SummarizeAuth`/`SummarizeSendOptions` and imports nothing
+// from `src/` itself (decoupling contract).
+const FAKE_AUTH: SummarizeAuth = {
+  type: "oauth",
+  token: "test-token",
+  accountUuid: "test-account",
+}
 
 function captureSendArgs(response: string): {
-  sendFn: (opts: SendOptions) => Promise<string>
-  calls: SendOptions[]
+  sendFn: (opts: SummarizeSendOptions) => Promise<string>
+  calls: SummarizeSendOptions[]
 } {
-  const calls: SendOptions[] = []
-  const sendFn = async (opts: SendOptions) => {
+  const calls: SummarizeSendOptions[] = []
+  const sendFn = async (opts: SummarizeSendOptions) => {
     calls.push(opts)
     return response
   }

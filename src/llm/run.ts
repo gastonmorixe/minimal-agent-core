@@ -24,6 +24,8 @@
  * @module llm/run
  */
 
+import { defaultNetworkClient } from "../network/index.ts"
+
 import type { CanonicalEvent } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { UnsupportedCapabilityError } from "./errors.ts"
@@ -70,5 +72,13 @@ export async function* run(req: CanonicalRequest, opts: RunOptions): AsyncIterab
       throw new UnsupportedCapabilityError(validation.errors, validation.degrade)
     }
   }
-  yield* adapter.run(effective, model, opts.context)
+  // Net seam (Wave D): the host owns the network singleton, not the plugin.
+  // Always populate `ctx.networkClient` with the shared `defaultNetworkClient`
+  // unless the caller injected its own (tests, alt transports). Adapters then
+  // read `ctx.networkClient` instead of importing `src/network` for the
+  // runtime client — the client crosses the provider port, not a module edge.
+  const context: RunContext = opts.context.networkClient
+    ? opts.context
+    : { ...opts.context, networkClient: defaultNetworkClient }
+  yield* adapter.run(effective, model, context)
 }

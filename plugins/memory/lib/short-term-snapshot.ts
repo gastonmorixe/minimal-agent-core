@@ -29,8 +29,7 @@
  * @module memory/lib/short-term-snapshot
  */
 
-import type { ContentBlock } from "../../../src/client.ts"
-
+import { type AttachmentTextBlock } from "./save-echo.ts"
 import { MemoryStore, type StoreDeps } from "./store.ts"
 
 /**
@@ -55,7 +54,7 @@ export class ShortTermSnapshot {
    *     const att = snapshot.toAttachment()
    *     if (att) userContent.push(att)
    */
-  toAttachment(): ContentBlock | null {
+  toAttachment(): AttachmentTextBlock | null {
     if (this.sid === null || this.sid.trim().length === 0) return null
 
     const store = MemoryStore.shortTerm(this.sid, this.deps)

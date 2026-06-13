@@ -1,7 +1,10 @@
 /**
  * Tests for the `memory` plugin's save handler (memory.ts) and load
- * fragment (load.ts), plus an end-to-end integration test that loads the
- * plugin through `PluginLoader` and checks the assembled prompt block.
+ * fragment (load.ts), plus handler-direct end-to-end tests that exercise
+ * the inject-mode load fragment and the save-echo bus seam. The tests
+ * import nothing from the host repo (Wave D-7 decoupling): the bus is a
+ * local fake matching the plugin's structural slices, wired exactly as
+ * the host's turn-attachment seam wires the real bus in production.
  *
  * Each test uses a dedicated temp dir as `$HOME` so we never read or
  * write the user's actual `~/.minimal-agent/`.
@@ -21,16 +24,58 @@ import { join, resolve } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { setGlobalEventBus } from "../../../src/global-bus.ts"
-import { EventBus } from "../../../src/plugins/event-bus.ts"
-import { PluginLoader } from "../../../src/plugins/loader.ts"
-import type { PromptFragmentContext, TUIContext } from "../../../src/plugins/types.ts"
+import type { PromptFragmentContext, TUIContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "../lib/memory-config.ts"
-import { MEMORY_SAVED, type MemorySavedPayload } from "../lib/save-echo.ts"
+import {
+  type EventBusSlice,
+  type EventContextSlice,
+  MEMORY_SAVED,
+  type MemorySavedPayload,
+  setSaveBus,
+  type Unsubscribe,
+} from "../lib/save-echo.ts"
 import { shortTermMemoryPath } from "../lib/store.ts"
 
 import loadMemories, { globalMemoryPath, projectMemoryPath } from "./load.ts"
 import memoryHandler, { localIsoSeconds } from "./memory.ts"
+
+/**
+ * Minimal in-test event bus satisfying the plugin's structural slices.
+ * Dispatches on the microtask tick like the host's real `EventBus`, so
+ * the tests' `await Promise.resolve()` boundary observes delivered
+ * events. The inline-tag save handler reads the emit side via the
+ * plugin-local pointer set with {@link setSaveBus}; the collector side
+ * subscribes via {@link EventBusSlice.on}. Re-declared locally because
+ * the plugin imports nothing from the host repo (decoupling contract).
+ */
+class FakeBus implements EventBusSlice {
+  private readonly listeners = new Map<string, Set<(ctx: EventContextSlice) => void>>()
+  private disposed = false
+
+  on(event: string, listener: (ctx: EventContextSlice) => void): Unsubscribe {
+    if (this.disposed) return () => {}
+    let set = this.listeners.get(event)
+    if (!set) {
+      set = new Set()
+      this.listeners.set(event, set)
+    }
+    set.add(listener)
+    return () => set?.delete(listener)
+  }
+
+  emit(event: string, payload?: unknown): void {
+    if (this.disposed) return
+    for (const fn of [...(this.listeners.get(event) ?? [])]) {
+      queueMicrotask(() => fn({ payload }))
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.listeners.clear()
+  }
+}
 
 /**
  * Build a {@link MemoryConfig} cloned from {@link DEFAULT_MEMORY_CONFIG}
@@ -49,7 +94,6 @@ const TS_RE = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}[+-]\\d{2}:\\d{2}"
 /** Convenient prefix `- [#<id>] [<ts>] ` (no trailing space sentinel). */
 const PREFIX = "- \\[#" + ID_RE + "\\] \\[" + TS_RE + "\\] "
 
-const PROJECT_ROOT = resolve(__dirname, "../../..")
 const PLUGIN_DIR = resolve(__dirname, "..")
 
 let tmpHome: string
@@ -66,7 +110,7 @@ beforeEach(() => {
   // session id. Tests that need a sid set ctx.env explicitly.
   savedSid = process.env.MINIMAL_AGENT_SESSION_ID
   delete process.env.MINIMAL_AGENT_SESSION_ID
-  setGlobalEventBus(null)
+  setSaveBus(null)
 })
 
 afterEach(() => {
@@ -75,7 +119,7 @@ afterEach(() => {
   if (savedSid === undefined) delete process.env.MINIMAL_AGENT_SESSION_ID
   else process.env.MINIMAL_AGENT_SESSION_ID = savedSid
   rmSync(tmpHome, { recursive: true, force: true })
-  setGlobalEventBus(null)
+  setSaveBus(null)
 })
 
 // ---------------------------------------------------------------------------
@@ -356,10 +400,10 @@ describe("memory: save handler: file IO and back-compat", () => {
 // Bus emit (memory.saved)
 // ---------------------------------------------------------------------------
 
-describe("memory: save handler: emits memory.saved on global bus", () => {
+describe("memory: save handler: emits memory.saved on the wired save bus", () => {
   it("emits payload {scope,id,body} after a successful save", async () => {
-    const bus = new EventBus()
-    setGlobalEventBus(bus)
+    const bus = new FakeBus()
+    setSaveBus(bus)
 
     const events: MemorySavedPayload[] = []
     bus.on(MEMORY_SAVED, (ctx) => {
@@ -380,8 +424,8 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
   })
 
   it("emits scope='short-term' and integer id for short-term saves", async () => {
-    const bus = new EventBus()
-    setGlobalEventBus(bus)
+    const bus = new FakeBus()
+    setSaveBus(bus)
 
     const events: MemorySavedPayload[] = []
     bus.on(MEMORY_SAVED, (ctx) => {
@@ -405,8 +449,8 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
   })
 
   it("includes evicted count when short-term overflows the cap", async () => {
-    const bus = new EventBus()
-    setGlobalEventBus(bus)
+    const bus = new FakeBus()
+    setSaveBus(bus)
     const events: MemorySavedPayload[] = []
     bus.on(MEMORY_SAVED, (ctx) => {
       events.push(ctx.payload as MemorySavedPayload)
@@ -433,8 +477,8 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
   })
 
   it("does NOT emit when the save was refused (no sid, packageDir, etc.)", async () => {
-    const bus = new EventBus()
-    setGlobalEventBus(bus)
+    const bus = new FakeBus()
+    setSaveBus(bus)
     const events: MemorySavedPayload[] = []
     bus.on(MEMORY_SAVED, (ctx) => {
       events.push(ctx.payload as MemorySavedPayload)
@@ -449,7 +493,7 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
   })
 
   it("absent global bus is fine (save still happens, no throw)", async () => {
-    setGlobalEventBus(null)
+    setSaveBus(null)
     const res = await memoryHandler(makeSaveCtx({ body: "no bus", cwd: "/p" }))
     expect(res.kind).toBe("rendered")
     if (res.kind !== "rendered") throw new Error("unreachable")
@@ -613,15 +657,23 @@ describe("memory: load fragment (inject='verbatim' opt-in)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// End-to-end via PluginLoader
+// End-to-end (handler-direct, repo-portable)
 // ---------------------------------------------------------------------------
 
-describe("memory: integration with PluginLoader", () => {
+describe("memory: integration (handler-direct, repo-portable)", () => {
+  // Wave D-7 decoupling: these were previously driven through the host's
+  // real `PluginLoader` (a `src/` import). The plugin must compile and
+  // make sense without the host repo, so the loader→dispatch path is
+  // replaced by invoking the plugin's OWN handlers against structural-fake
+  // contexts and wiring the plugin-local save bus (`setSaveBus`) the same
+  // way the host's turn-attachment seam does in production. The host's
+  // loader discovery/dispatch wiring is covered by the host's own
+  // loader-contract tests.
+
   /**
-   * Point loadMemoryConfig at a temp config file for the duration of
-   * one test, set inject mode, restore after. We use the public env
-   * override `MINIMAL_AGENT_CONFIG` since the integration test uses the
-   * REAL handler (no DI shortcut available through the loader API).
+   * Set the memory inject mode via the public `MINIMAL_AGENT_CONFIG`
+   * override (so the REAL `loadMemoryConfig` path is exercised), run
+   * `fn`, restore after.
    */
   async function withInjectMode<T>(mode: MemoryConfig["inject"], fn: () => Promise<T>): Promise<T> {
     const configPath = join(tmpHome, "config.jsonc")
@@ -636,10 +688,10 @@ describe("memory: integration with PluginLoader", () => {
     }
   }
 
-  it("default (no config, no opt-in): memories are NOT in the prompt block", async () => {
-    // The whole point of v0.4. The plugin loads, the tool is in the
-    // tool list, PROMPT.md is in the system prompt: but memory bullet
-    // contents stay out. Regression guard against accidental re-flip.
+  it("default (no config, no opt-in): the load fragment emits NO memory contents", async () => {
+    // The whole point of v0.4: memories stay OUT of the system prompt by
+    // default. Regression guard against accidental re-flip. Exercises the
+    // REAL `loadMemoryConfig` (no DI) via the env override.
     const gp = globalMemoryPath(tmpHome)
     const pp = projectMemoryPath(process.cwd(), tmpHome)
     require("node:fs").mkdirSync(require("node:path").dirname(gp), { recursive: true })
@@ -647,22 +699,21 @@ describe("memory: integration with PluginLoader", () => {
     writeFileSync(gp, "- E2E global memory line\n")
     writeFileSync(pp, "- E2E project memory line\n")
 
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
+    await withInjectMode("none", async () => {
+      const out = await loadMemories(makeLoadCtx(process.cwd()))
+      expect(out).not.toContain("- E2E global memory line")
+      expect(out).not.toContain("- E2E project memory line")
+      expect(out).toBe("")
     })
 
-    const block = await loader.getPromptBlockAsync()
-    // The block itself may still exist (other plugins inject) but it
-    // MUST NOT carry the memory contents.
-    const blockText = block ?? ""
-    expect(blockText).not.toContain("- E2E global memory line")
-    expect(blockText).not.toContain("- E2E project memory line")
-    // The plugin's PROMPT.md still tells the model the tool exists.
-    expect(blockText).toMatch(/MemoryTool/)
+    // The plugin's PROMPT.md (loaded into the system prompt by the host)
+    // still tells the model the tool exists — a plugin-owned file, so we
+    // assert on it directly instead of via the host loader.
+    const promptMd = readFileSync(resolve(PLUGIN_DIR, "PROMPT.md"), "utf-8")
+    expect(promptMd).toMatch(/MemoryTool/)
   })
 
-  it("inject='verbatim' opt-in: memories ARE embedded in the prompt block", async () => {
+  it("inject='verbatim' opt-in: the load fragment embeds the memory contents", async () => {
     const gp = globalMemoryPath(tmpHome)
     const pp = projectMemoryPath(process.cwd(), tmpHome)
     require("node:fs").mkdirSync(require("node:path").dirname(gp), { recursive: true })
@@ -671,38 +722,22 @@ describe("memory: integration with PluginLoader", () => {
     writeFileSync(pp, "- E2E project memory line\n")
 
     await withInjectMode("verbatim", async () => {
-      const loader = await PluginLoader.load({
-        embeddedDir: PROJECT_ROOT,
-        coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      })
-
-      const block = await loader.getPromptBlockAsync()
-      expect(block).not.toBeNull()
-      if (block === null) throw new Error("unreachable")
-      expect(block).toContain("## Saved memories")
-      expect(block).toContain("- E2E global memory line")
-      expect(block).toContain("- E2E project memory line")
+      const out = await loadMemories(makeLoadCtx(process.cwd()))
+      expect(out).toContain("## Saved memories")
+      expect(out).toContain("- E2E global memory line")
+      expect(out).toContain("- E2E project memory line")
     })
   })
 
-  it("loader threads its sessionId into the saved bullet", async () => {
+  it("threads the session id (from ctx.env) into the saved bullet", async () => {
     const sid = "11111111-2222-3333-4444-555555555555"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
-
-    const cwd = process.cwd()
-    await loader.dispatch(
-      {
-        type: "inline_tag",
-        name: "memory",
-        attrs: { scope: "project" },
+    const cwd = "/loader/p"
+    await memoryHandler(
+      makeSaveCtx({
         body: "stamped from loader",
-        self_closing: false,
-      },
-      cwd,
+        cwd,
+        env: { MINIMAL_AGENT_SESSION_ID: sid },
+      }),
     )
 
     const path = projectMemoryPath(cwd, tmpHome)
@@ -719,26 +754,13 @@ describe("memory: integration with PluginLoader", () => {
     )
   })
 
-  it("save handler dispatched through scanner writes to the right file", async () => {
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-    })
-
-    const cwd = process.cwd()
-    const result = await loader.dispatch(
-      {
-        type: "inline_tag",
-        name: "memory",
-        attrs: { scope: "project" },
-        body: "integration save test",
-        self_closing: false,
-      },
-      cwd,
+  it("dispatched save writes to the right file", async () => {
+    const cwd = "/loader/q"
+    const result = await memoryHandler(
+      makeSaveCtx({ body: "integration save test", attrs: { scope: "project" }, cwd }),
     )
-    expect(result).not.toBeNull()
-    if (result === null) throw new Error("unreachable")
     expect(result.kind).toBe("rendered")
+    if (result.kind !== "rendered") throw new Error("unreachable")
 
     const path = projectMemoryPath(cwd, tmpHome)
     expect(readFileSync(path, "utf-8")).toMatch(
@@ -746,42 +768,28 @@ describe("memory: integration with PluginLoader", () => {
     )
   })
 
-  it("end-to-end: SaveEchoCollector attached to loader.bus() picks up dispatched save and renders <ma::agent::memory-saved>", async () => {
-    // The full closing-the-loop flow as wired in `src/index.ts`:
-    //
-    //   1. Loader is constructed.
-    //   2. setGlobalEventBus(loader.bus()): so `getGlobalEventBus()` from
-    //      inside the handler resolves to the same bus.
-    //   3. SaveEchoCollector.attach(loader.bus()): subscribes to MEMORY_SAVED.
-    //   4. A `<ma::emit::memory>` tag is dispatched through the loader.
-    //   5. The collector should now have a queued ContentBlock the agent
-    //      would prepend to the next user turn.
+  it("end-to-end: SaveEchoCollector on the same bus picks up a dispatched save and renders <ma::agent::memory-saved>", async () => {
+    // The full closing-the-loop flow as wired in `src/index.ts`, but
+    // without the host loader: the save-echo turn-attachment factory wires
+    // the host bus into BOTH the plugin-local emit pointer (`setSaveBus`,
+    // read by the save handler) AND the collector subscription. Here we
+    // wire one FakeBus to both sides, exactly as the factory does.
     const sid = "11111111-2222-3333-4444-555555555555"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
-    setGlobalEventBus(loader.bus())
+    const bus = new FakeBus()
+    setSaveBus(bus)
     const { SaveEchoCollector } = await import("../lib/save-echo.ts")
-    const collector = SaveEchoCollector.attach(loader.bus())
+    const collector = SaveEchoCollector.attach(bus)
 
-    // Dispatch a short-term save. The handler emits memory.saved on the
-    // global bus (= loader.bus()), which the collector buffers.
-    await loader.dispatch(
-      {
-        type: "inline_tag",
-        name: "memory",
-        attrs: { scope: "short-term" },
+    await memoryHandler(
+      makeSaveCtx({
         body: "active hypothesis: width 80",
-        self_closing: false,
-      },
-      process.cwd(),
+        attrs: { scope: "short-term" },
+        env: { MINIMAL_AGENT_SESSION_ID: sid },
+      }),
     )
     // Bus dispatches via queueMicrotask: wait one tick.
     await Promise.resolve()
 
-    // Drain: exactly one block, with the expected <ma::agent::memory-saved> shape.
     const blocks = collector.consumeAll()
     expect(blocks.length).toBe(1)
     expect(blocks[0]?.type).toBe("text")
@@ -795,31 +803,25 @@ describe("memory: integration with PluginLoader", () => {
     expect(collector.consumeAll().length).toBe(0)
 
     collector.detach()
+    bus.dispose()
   })
 
-  it("end-to-end: dispatched short-term save emits memory.saved on the loader's bus", async () => {
+  it("end-to-end: dispatched short-term save emits memory.saved on the wired bus", async () => {
     const sid = "55555555-6666-7777-8888-999999999999"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
-    setGlobalEventBus(loader.bus())
+    const bus = new FakeBus()
+    setSaveBus(bus)
 
     const events: MemorySavedPayload[] = []
-    loader.bus().on(MEMORY_SAVED, (ctx) => {
+    bus.on(MEMORY_SAVED, (ctx) => {
       events.push(ctx.payload as MemorySavedPayload)
     })
 
-    await loader.dispatch(
-      {
-        type: "inline_tag",
-        name: "memory",
-        attrs: { scope: "short-term" },
+    await memoryHandler(
+      makeSaveCtx({
         body: "scratch via loader",
-        self_closing: false,
-      },
-      process.cwd(),
+        attrs: { scope: "short-term" },
+        env: { MINIMAL_AGENT_SESSION_ID: sid },
+      }),
     )
     await Promise.resolve()
 

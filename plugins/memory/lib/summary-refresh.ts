@@ -227,25 +227,23 @@ export interface RefreshResult {
 }
 
 /**
- * Default logger routes through the singleton diagnostic bus (file
- * log + TUI surface). When DEBUG=1 we also keep a verbose-info trail;
- * otherwise summary-refresh diagnostics ride the Notice severity so
- * they show up in the log file but stay out of the TUI surface (which
- * only surfaces Warning + more severe).
+ * Default logger. Best-effort and decoupled: writes only when `DEBUG=1`
+ * (matching the old verbose-info trail) and never reaches into the host
+ * repo. Production callers that want diagnostics on the agent's
+ * structured logger thread their `ctx.log` in via `deps.log` (the
+ * prompt-fragment handler has it); without that, summary-refresh
+ * diagnostics fall back to this quiet stderr line. Must never throw.
+ *
+ * The plugin used to dynamic-import `src/diagnostic-bus.ts` here; that
+ * was the last host coupling in this file and is removed in Wave D-7.
+ * Routing onto the diagnostic bus is recovered for free whenever the
+ * caller passes `ctx.log` as `deps.log`.
  */
 function defaultLog(msg: string): void {
-  // Lazy import: keep `summary-refresh.ts` lightweight when the
-  // optional dependency surface (diagnostic-bus) isn't loaded yet.
-  // Failing the import = silently drop. This is best-effort logging.
   try {
-    // biome-ignore lint/suspicious/noExplicitAny: lazy import for optional dep
-    void import("../../../src/diagnostic-bus.ts").then(({ diag }: any) => {
-      if (process.env.DEBUG === "1") {
-        diag.info("memory.summary-refresh", msg)
-      } else {
-        diag.notice("memory.summary-refresh", msg)
-      }
-    })
+    if (process.env.DEBUG === "1") {
+      process.stderr.write(`memory.summary-refresh: ${msg}\n`)
+    }
   } catch {
     // Logging is best-effort and must never throw.
   }
