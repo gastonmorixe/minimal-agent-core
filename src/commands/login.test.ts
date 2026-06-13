@@ -14,12 +14,28 @@ import { PassThrough } from "node:stream"
 
 import { describe, expect, it } from "bun:test"
 
-import { readLine } from "./login.ts"
+import { readLine, runLoginCommand } from "./login.ts"
 
 describe("commands/login module shape", () => {
   it("exports runLoginCommand as an async function", async () => {
     const mod = await import("./login.ts")
     expect(typeof mod.runLoginCommand).toBe("function")
+  })
+})
+
+describe("runLoginCommand", () => {
+  it("writes non-TTY failure through injected output", async () => {
+    const input = new PassThrough() as PassThrough & { isTTY?: boolean }
+    input.isTTY = false
+    let out = ""
+
+    const code = await runLoginCommand({
+      input,
+      output: { write: (s: string) => ((out += s), true) } as NodeJS.WritableStream,
+    })
+
+    expect(code).toBe(1)
+    expect(out).toContain("--login requires an interactive terminal")
   })
 })
 
