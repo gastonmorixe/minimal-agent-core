@@ -180,10 +180,21 @@ async function decideImage(
     }
   }
 
-  // The only image rejections worth trying to repair are size/dimension: a
-  // 4K screenshot shrinks to ~1568px with no loss the model would notice.
-  // Unsupported-type (e.g. a future heic) can't be fixed by resizing.
-  if (verdict.code !== "too-large" && verdict.code !== "dimensions") {
+  // A "dimensions" rejection means the cheap header parse (imageDimensions,
+  // above) already proved the image is over the pixel-count cap. Resizing it
+  // would mean fully DECODING an image we already know is enormous — and a
+  // tiny, highly-compressed file can declare e.g. 60000x60000 px, so that
+  // decode is a multi-GB / OOM decompression bomb. Bail without ever decoding,
+  // exactly like the unsupported-type early return. The cap is in the message.
+  if (verdict.code === "dimensions") {
+    return { kind: "rejected", code: "unsupported-type", message: verdict.message }
+  }
+
+  // The only image rejection worth trying to repair is byte size: a 4K
+  // screenshot shrinks to ~1568px with no loss the model would notice, and
+  // fitImageToBudget caps the decode by long edge. Unsupported-type (e.g. a
+  // future heic) can't be fixed by resizing.
+  if (verdict.code !== "too-large") {
     return { kind: "rejected", code: "unsupported-type", message: verdict.message }
   }
 
