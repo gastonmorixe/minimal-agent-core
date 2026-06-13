@@ -42,14 +42,40 @@ export interface PluginImportSite {
 }
 
 /**
- * Matches static `import`/`export ... from "<spec>"` and dynamic
- * `import("<spec>")` forms after comments are stripped. Group 1 = the
- * `type` keyword when present (static forms only), group 2/3 = specifier.
+ * Matches every import form that carries a LITERAL specifier, across lines
+ * (multi-line import clauses included). Mirrors the hardened regex in
+ * `core-plugin-import-scan.ts` so the I3 scanner can no longer be evaded by
+ * the forms that scanner already catches. Alternatives and groups:
+ *
+ *   1. `import [type] … from "spec"`   → g1 = `type` kw, g2 = spec
+ *   2. `export [type] … from "spec"`   → g3 = `type` kw, g4 = spec
+ *   3. `import("spec")` / `import("spec", …)` — dynamic with a string
+ *      LITERAL first argument only      → g5 = spec
+ *   4. `import "spec"` (side-effect)    → g6 = spec
+ *   5. `require("spec")` — CommonJS with a string LITERAL only argument
+ *      (bun supports `require` in .ts) → g7 = spec
+ *   6. backtick form `import(NO-SUBSTITUTION-template)` — a template
+ *      literal with no dollar-brace substitution is a fully static
+ *      specifier at runtime              → g8 = spec
+ *
+ * The clause body class `[^"'=;]` cannot cross a `=` or `;`, which stops the
+ * lazy matcher from bleeding across statement boundaries (e.g. an
+ * `export type Foo = …` alias must not absorb a following import and
+ * mis-classify it as type-only). Computed dynamic imports — `import(abs)`,
+ * concatenations, `${…}` template literals — have no static string literal
+ * directly inside the parens and never match alternatives 3/5/6.
  */
-const IMPORT_RE =
-  /(?:\bimport\s+(type\s+)?[^"']*?from\s*|\bexport\s+(?:type\s+)?[^"']*?from\s*|\bimport\s*\(\s*)["']([^"']+)["']/g
-
-const TYPE_EXPORT_RE = /\bexport\s+type\s+[^"']*?from\s*["']([^"']+)["']/
+const IMPORT_RE = new RegExp(
+  [
+    String.raw`\bimport\s+(type\s+)?[^"'=;]*?from\s*["']([^"']+)["']`,
+    String.raw`\bexport\s+(type\s+)?[^"'=;]*?from\s*["']([^"']+)["']`,
+    String.raw`\bimport\s*\(\s*["']([^"']+)["']\s*[),]`,
+    String.raw`\bimport\s+["']([^"']+)["']`,
+    String.raw`\brequire\s*\(\s*["']([^"']+)["']\s*\)`,
+    "\\bimport\\s*\\(\\s*`([^`$]+)`\\s*[),]",
+  ].join("|"),
+  "g",
+)
 
 /** True when a relative specifier escapes the plugins tree into `src/`. */
 export function isSrcImport(specifier: string): boolean {
@@ -73,21 +99,25 @@ export function pluginTsFilesUnder(root: string): string[] {
   return out.sort()
 }
 
-/** Scan one file's source text for `src/` import sites. */
+/**
+ * Scan one file's source text for `src/` import sites. Comments are stripped
+ * first; the regex then runs over the WHOLE text so multi-line import clauses,
+ * side-effect imports, and `require()` calls are all matched (the old
+ * line-by-line scan missed every form whose specifier was not on the same
+ * line as the `import` keyword).
+ */
 export function scanSourceForSrcImports(source: string, file: string): PluginImportSite[] {
   const code = stripComments(source)
   const out: PluginImportSite[] = []
-  for (const line of code.split("\n")) {
-    IMPORT_RE.lastIndex = 0
-    let m: RegExpExecArray | null = IMPORT_RE.exec(line)
-    while (m !== null) {
-      const specifier = m[2]
-      if (isSrcImport(specifier)) {
-        const typeOnly = m[1] !== undefined || TYPE_EXPORT_RE.test(line)
-        out.push({ file, specifier, typeOnly })
-      }
-      m = IMPORT_RE.exec(line)
+  IMPORT_RE.lastIndex = 0
+  let m: RegExpExecArray | null = IMPORT_RE.exec(code)
+  while (m !== null) {
+    const specifier = m[2] ?? m[4] ?? m[5] ?? m[6] ?? m[7] ?? m[8]
+    if (specifier !== undefined && isSrcImport(specifier)) {
+      const typeOnly = m[1] !== undefined || m[3] !== undefined
+      out.push({ file, specifier, typeOnly })
     }
+    m = IMPORT_RE.exec(code)
   }
   return out
 }

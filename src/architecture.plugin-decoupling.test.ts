@@ -43,11 +43,29 @@ const PLUGINS_ROOT = join(import.meta.dirname, "..", "plugins")
  * sites at freeze time. Decoupling waves shrink counts toward zero; every
  * change here is a reviewed edit. DO NOT INCREASE ANY COUNT and DO NOT ADD
  * ENTRIES — new plugin code talks to the host through its context.
+ *
+ * SCANNER-HARDENING RE-BASELINE (FIX-i3, contrarian audit §5): the I3 scanner
+ * (`architecture/plugin-import-scan.ts`) used to split source BY LINE before
+ * matching, so it MISSED every import whose specifier did not sit on the same
+ * line as the `import` keyword: multi-line `import { … } from "../../src/x.ts"`
+ * clauses, `require("../../src/x.ts")`, and side-effect `import "../../src/x.ts"`.
+ * The scanner now strips comments over the WHOLE source and matches with a
+ * multiline-capable regex (mirroring core-plugin-import-scan.ts). That surfaced
+ * 13 sites across 11 files that were ALWAYS there but hidden, raising the honest
+ * count 97 → 110. Entries marked `[surfaced by FIX-i3]` below are those
+ * previously-hidden sites being frozen at their TRUE values — freezing reality,
+ * NOT widening the gate. All but one were multi-line clauses; the exception is a
+ * `require("../../../src/config.ts")` in file-lock's lock_status.ts. Full
+ * site-by-site list in reports/FIX-i3.md.
  */
 const BASELINE = new Map<string, number>([
   ["file-lock/cli.test.ts", 1],
   ["file-lock/cli.ts", 2],
-  ["file-lock/handlers/lock_status.ts", 1],
+  // [surfaced by FIX-i3] +1: multi-line `} from "../../../src/file-lock.ts"`.
+  ["file-lock/handlers/lock_status.test.ts", 1],
+  // [surfaced by FIX-i3] 1→3: multi-line `} from "../../../src/file-lock.ts"`
+  // clause plus `require("../../../src/config.ts")`.
+  ["file-lock/handlers/lock_status.ts", 3],
   ["file-lock/integration.test.ts", 2],
   // D-quickwins: residual. This is a host-runtime integration test that drives
   // the REAL PluginLoader (`src/plugins/loader.ts`) end-to-end to prove the
@@ -61,10 +79,10 @@ const BASELINE = new Map<string, number>([
   // and host-only modules with no package home (auth, headers, quota-cache/
   // broadcast, model-label, list-models, preflight, session-restore, media).
   // See reports/D-anthropic.md.
-  ["llm-anthropic/adapter.broadcast.test.ts", 2],
+  ["llm-anthropic/adapter.broadcast.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
   ["llm-anthropic/adapter.preflight.test.ts", 2],
-  ["llm-anthropic/adapter.ts", 5],
-  ["llm-anthropic/anthropic.test.ts", 2],
+  ["llm-anthropic/adapter.ts", 6], // [surfaced by FIX-i3] +1: multi-line clause
+  ["llm-anthropic/anthropic.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
   ["llm-anthropic/beta-flags.characterization.test.ts", 3],
   ["llm-anthropic/beta-flags.ts", 2],
   ["llm-anthropic/beta-gates.ts", 1],
@@ -72,7 +90,10 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/forked-session.e2e.test.ts", 3],
   ["llm-anthropic/headers.ts", 2],
   ["llm-anthropic/media-limits.ts", 1],
-  ["llm-anthropic/models.ts", 2],
+  ["llm-anthropic/models.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
+  // [surfaced by FIX-i3] +2: two multi-line clauses (canonical-request type,
+  // model-registry).
+  ["llm-anthropic/opus-48-features.test.ts", 2],
   ["llm-anthropic/quota-probe.test.ts", 2],
   ["llm-anthropic/quota-probe.ts", 5],
   ["llm-anthropic/request-body.ts", 2],
@@ -83,15 +104,19 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/thinking-preflight.ts", 2],
   ["llm-anthropic/validate.degrade.test.ts", 2],
   ["llm-anthropic/validate.ts", 3],
+  // [surfaced by FIX-i3] +1: multi-line `} from "../../src/headers.ts"`.
+  ["llm-anthropic/wire-constants.ts", 1],
   ["llm-openai/adapter.ts", 3], // D-net-seam: network singleton → ctx.networkClient (port); classifyUpstreamError → plugin-api. Left: canonical-request, model-registry, provider.ts (all C-3 / port-split deferred)
   ["llm-openai/chat/request-body.ts", 2],
   ["llm-openai/models.ts", 1], // D-2: makeCharRatioEstimator → plugin-api. D-net-seam: registerModel now a ctx.models fallback (registrar adopted via register(ctx)); import drops to 0 once activateDiscoveredProviders is the live path (convergence)
+  // [surfaced by FIX-i3] +1: multi-line `} from "../../src/llm/index.ts"`.
+  ["llm-openai/openai.test.ts", 1],
   ["llm-openai/pricing.ts", 1],
   ["llm-openai/responses/request-body.ts", 2],
   ["llm-openai/validate.ts", 3], // D-net-seam: errors + modality-check → plugin-api. Left: canonical-request, model-registry, provider.ts (all deferred)
   ["llm-openrouter/adapter.ts", 4],
   ["llm-openrouter/models.ts", 1], // D-2: makeCharRatioEstimator → @minimal-agent/plugin-api; registerModel stays (no-arg register())
-  ["llm-openrouter/openrouter.test.ts", 1],
+  ["llm-openrouter/openrouter.test.ts", 2], // [surfaced by FIX-i3] +1: multi-line clause
   ["llm-openrouter/pricing.ts", 1],
   // Wave D-7: memory swept to its residual. Only summarize.ts keeps two
   // src/ sites — the summary pipeline needs an authenticated LLM call at
@@ -123,11 +148,18 @@ const BASELINE = new Map<string, number>([
   // on the v2 host (same gap as quota-status/handler.ts), so they stay until a
   // session-tokens / provider-session seam exists.
   ["session-info/lib/gather.ts", 2],
-  ["usage/handlers/cmd_usage.ts", 1],
+  // D-quickwins: usage swept state.ts → 0 (its type-only UsagePeriod/UsageReport
+  // import became a local structural interface, lib/host-types.ts — the
+  // session-history idiom). The remaining usage sites are RESIDUAL: they import
+  // the host usage DATA ENGINE (scanUsageEvents / aggregate* / parseUsagePeriod
+  // / USAGE_PERIODS) which scans the session store + reads the model registry,
+  // and the host RENDERERS (renderUsageReport / renderUsageOverlay). Neither has
+  // a package home nor a `usage:read` capability on the v2 host, so they stay
+  // until such a seam exists.
+  ["usage/handlers/cmd_usage.ts", 2], // [surfaced by FIX-i3] +1: multi-line `} from "../../../src/usage-stats.ts"`
   ["usage/lib/overlay.test.ts", 1],
   ["usage/lib/overlay.ts", 2],
   ["usage/lib/state.test.ts", 1],
-  ["usage/lib/state.ts", 1],
   // D-quickwins: residual. `brave.ts` imports `retry` + `type RetryOptions`
   // from `src/retry.ts`. That module is PURE (zero host state, injectable
   // sleep/now/random) and belongs in `@minimal-agent/plugin-api/utils/retry`,

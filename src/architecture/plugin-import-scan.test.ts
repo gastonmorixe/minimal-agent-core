@@ -65,6 +65,74 @@ describe("scanSourceForSrcImports", () => {
     expect(sites).toHaveLength(1)
   })
 
+  // Blind-spot (a): a multi-line import clause puts the specifier on a LATER
+  // line than the `import` keyword. The old line-by-line scan never saw it.
+  it("finds MULTI-LINE static imports (specifier on a later line)", () => {
+    const source = [
+      `import {`,
+      `  getSessionTokens,`,
+      `  type SessionTokens,`,
+      `} from "../../src/session-tokens.ts"`,
+      ``,
+    ].join("\n")
+    const sites = scanSourceForSrcImports(source, "p/f.ts")
+    expect(sites).toHaveLength(1)
+    expect(sites[0].specifier).toBe("../../src/session-tokens.ts")
+    expect(sites[0].typeOnly).toBe(false)
+  })
+
+  // Blind-spot (b): bun supports CommonJS require() in .ts files, so a literal
+  // require specifier is a real evasion channel — the lint rule does not see it
+  // either. The scanner must flag it (mirrors core-plugin-import-scan m1).
+  it('finds CommonJS require("literal") into src/ (b)', () => {
+    const sites = scanSourceForSrcImports(`const x = require("../../src/util.ts")\n`, "p/f.ts")
+    expect(sites).toHaveLength(1)
+    expect(sites[0].specifier).toBe("../../src/util.ts")
+    expect(sites[0].typeOnly).toBe(false)
+  })
+
+  it("ignores require with a computed (non-literal) argument", () => {
+    expect(scanSourceForSrcImports(`const x = require(abs)\n`, "p/f.ts")).toHaveLength(0)
+    expect(
+      scanSourceForSrcImports(`const x = require("../../src/" + name)\n`, "p/f.ts"),
+    ).toHaveLength(0)
+  })
+
+  // Blind-spot (c): a side-effect import has no clause at all — `import "spec"`.
+  it('finds side-effect imports (import "spec") into src/ (c)', () => {
+    const sites = scanSourceForSrcImports(`import "../../src/register.ts"\n`, "p/f.ts")
+    expect(sites).toHaveLength(1)
+    expect(sites[0].specifier).toBe("../../src/register.ts")
+    expect(sites[0].typeOnly).toBe(false)
+  })
+
+  // Step 4 (constructed-bypass from the audit): a fresh multi-line import that
+  // escapes into src/ from a clean plugin file MUST now be detected.
+  it("detects the audit's constructed multi-line bypass (from \"../../src/agent.ts\")", () => {
+    const source = [
+      `import {`,
+      `  runAgent,`,
+      `} from "../../src/agent.ts"`,
+      ``,
+    ].join("\n")
+    const sites = scanSourceForSrcImports(source, "clean-plugin/handlers/h.ts")
+    expect(sites).toHaveLength(1)
+    expect(sites[0].specifier).toBe("../../src/agent.ts")
+    expect(sites[0].typeOnly).toBe(false)
+  })
+
+  it("classifies a multi-line import type clause as typeOnly", () => {
+    const source = [
+      `import type {`,
+      `  TUIContext,`,
+      `} from "../../../src/plugins/types.ts"`,
+      ``,
+    ].join("\n")
+    const sites = scanSourceForSrcImports(source, "p/f.ts")
+    expect(sites).toHaveLength(1)
+    expect(sites[0].typeOnly).toBe(true)
+  })
+
   it("ignores imports inside comments", () => {
     const sites = scanSourceForSrcImports(
       `// import { x } from "../../src/dead.ts"\n/* import y from "../../src/dead2.ts" */\n`,
