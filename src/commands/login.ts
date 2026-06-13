@@ -24,7 +24,16 @@ import {
   listOAuthLoginProviderEntries,
 } from "../auth-strategies.ts"
 import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../llm/provider-plugin.ts"
-import { type LoginInstallResult, type LoginOutcome, runOAuthLogin } from "../oauth-login.ts"
+import { type LoginOutcome, runOAuthLogin } from "../oauth-login.ts"
+import {
+  renderApiKeyLoginSuccess,
+  renderLoginBanner,
+  renderLoginDisplayMessage,
+  renderLoginFailure,
+  renderLoginRequiresTty,
+  renderOAuthLoginSuccess,
+} from "../ui/chrome/login.ts"
+import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /**
@@ -81,6 +90,14 @@ export interface LoginCommandOptions {
   authMethod?: string
   /** Override the maximum number of paste attempts (default 3). */
   maxAttempts?: number
+  /** Input stream; tests inject a fake TTY/non-TTY stream. */
+  input?: NodeJS.ReadableStream & {
+    isRaw?: boolean
+    isTTY?: boolean
+    setRawMode?: (mode: boolean) => void
+  }
+  /** UI output stream. Defaults to stderr. */
+  output?: NodeJS.WritableStream
 }
 
 type LoginMethod =
@@ -195,7 +212,10 @@ export async function readLine(
 /** Read a single secret line from a TTY without echoing the bytes. */
 export async function readSecretLine(
   promptText: string,
-  input: NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void } = process.stdin,
+  input: NodeJS.ReadableStream & {
+    isRaw?: boolean
+    setRawMode?: (mode: boolean) => void
+  } = process.stdin,
   output: NodeJS.WritableStream = process.stderr,
 ): Promise<string> {
   output.write(promptText)
@@ -243,33 +263,6 @@ export async function readSecretLine(
  * "displayed" is one-line-per-call, but the CLI wants a nicer multi-line
  * layout (URL on its own indented line, etc.).
  */
-function printBanner(): void {
-  process.stderr.write(`  ${c.bold(c.pink("⮕"))} ${c.bold("Sign in")}\n`)
-  process.stderr.write(`  ${c.faintWhite("│")}\n`)
-}
-
-function printSuccessFooter(result: LoginInstallResult): void {
-  const account = result.account
-  const acctSuffix = account
-    ? ` ${c.dim(`(${account.emailAddress} · ${account.uuid.slice(0, 8)}…)`)}`
-    : ""
-  process.stderr.write(`\n  ${c.boldGreen("✔")} ${c.bold("Login successful")}${acctSuffix}\n`)
-  if (result.scopes.length > 0) {
-    process.stderr.write(`  ${c.dim(`scopes: ${result.scopes.join(" ")}`)}\n`)
-  }
-  const expDate = new Date(result.expiresAt).toISOString().replace("T", " ").slice(0, 19)
-  process.stderr.write(`  ${c.dim(`expires: ${expDate} UTC`)}\n`)
-}
-
-function printApiKeySuccessFooter(displayName: string): void {
-  process.stderr.write(`\n  ${c.boldGreen("✔")} ${c.bold("Login successful")}\n`)
-  process.stderr.write(`  ${c.dim(`stored: ${displayName}`)}\n`)
-}
-
-function printFailureFooter(reason: string): void {
-  process.stderr.write(`\n  ${c.boldRed("✗")} ${c.bold("Login failed")} ${c.dim(`— ${reason}`)}\n`)
-}
-
 /**
  * Run the OAuth login flow as a top-level CLI command. Returns an exit code
  * suitable for `process.exit(code)`. The caller is responsible for actually
@@ -286,21 +279,19 @@ function printFailureFooter(reason: string): void {
  * (which is what an EOF-on-first-read used to do).
  */
 export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<number> {
-  if (!process.stdin.isTTY) {
-    process.stderr.write(
-      `  ${c.boldRed("✗")} ${c.bold("--login requires an interactive terminal")} ${c.dim(
-        "(stdin must be a TTY; PKCE manual-paste flow can't be scripted)",
-      )}\n`,
-    )
+  const input = opts.input ?? process.stdin
+  const output = opts.output ?? process.stderr
+  if (!input.isTTY) {
+    writeCommandRows(renderLoginRequiresTty(), output)
     return 1
   }
-  printBanner()
+  writeCommandRows(renderLoginBanner(), output)
   let method: LoginMethod
   try {
     method = resolveLoginMethod(opts)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    printFailureFooter(msg)
+    writeCommandRows(renderLoginFailure(msg), output)
     return 1
   }
 
@@ -308,18 +299,20 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
     try {
       const key = await readSecretLine(
         `  ${c.faintWhite("│")} ${c.dim(`${method.provider.displayName} key`)} ${c.bold(c.pink("›"))} `,
+        input,
+        output,
       )
       if (key.trim().length === 0) {
-        printFailureFooter("empty API key")
+        writeCommandRows(renderLoginFailure("empty API key"), output)
         return 1
       }
       const write = method.provider.buildCredential(key.trim())
       defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
-      printApiKeySuccessFooter(write.displayName)
+      writeCommandRows(renderApiKeyLoginSuccess(write.displayName), output)
       return 0
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      printFailureFooter(msg)
+      writeCommandRows(renderLoginFailure(msg), output)
       return 1
     }
   }
@@ -336,24 +329,25 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
         // didn't open, visit:\n  URL", and any "Invalid code" /
         // "State mismatch" follow-ups. Indent + faint-pipe to match the
         // startup tree's visual style.
-        const lines = msg.split("\n")
-        for (const line of lines) {
-          process.stderr.write(`  ${c.faintWhite("│")} ${line}\n`)
-        }
+        writeCommandRows(renderLoginDisplayMessage(msg), output)
       },
       readPaste: async () =>
-        readLine(`  ${c.faintWhite("│")} ${c.dim("paste code")} ${c.bold(c.pink("›"))} `),
+        readLine(
+          `  ${c.faintWhite("│")} ${c.dim("paste code")} ${c.bold(c.pink("›"))} `,
+          input,
+          output,
+        ),
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    printFailureFooter(msg)
+    writeCommandRows(renderLoginFailure(msg), output)
     return 1
   }
 
   if (!outcome.ok) {
-    printFailureFooter(outcome.reason)
+    writeCommandRows(renderLoginFailure(outcome.reason), output)
     return 1
   }
-  printSuccessFooter(outcome.result)
+  writeCommandRows(renderOAuthLoginSuccess(outcome.result), output)
   return 0
 }
