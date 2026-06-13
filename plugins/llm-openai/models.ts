@@ -14,6 +14,10 @@
  * @module llm/providers/openai/models
  */
 
+import type {
+  ModelRegistrar,
+  ProviderModelSpec,
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
 import { makeCharRatioEstimator } from "@minimal-agent/plugin-api/llm/token-estimate"
 
 import { registerModel } from "../../src/llm/model-registry.ts"
@@ -48,11 +52,30 @@ const estimateOpenAITokens = makeCharRatioEstimator(4)
 /**
  * Populate the canonical model registry with the OpenAI catalog.
  * Idempotent (last-write-wins). Returns the registered ids for tests.
+ *
+ * Registry seam (Wave D): when the host passes a {@link ModelRegistrar} (the
+ * `models:register` capability, threaded through `register(ctx)`), the catalog
+ * is contributed through `ctx.models.register` — no `src/` import needed. When
+ * no registrar is supplied (the legacy no-arg activation path, or a direct call
+ * in a test), it falls back to the imported `registerModel`. This lets the live
+ * provider-loader adopt the ctx-driven path provider-by-provider without
+ * breaking the no-context callers.
+ *
+ * @param registrar - Optional host model registrar; defaults to the direct import.
+ * @returns The registered model ids.
  */
-export function registerOpenAIModels(): string[] {
+export function registerOpenAIModels(registrar?: ModelRegistrar): string[] {
+  // Single registration sink: the host registrar when present, else the
+  // direct registry import (back-compat fallback). The fallback cast bridges
+  // the contract's plain-string `surfaceId` to the host's `SurfaceId` union;
+  // the literals below are valid surface ids either way.
+  const register = (spec: ProviderModelSpec): void => {
+    if (registrar) registrar.register(spec)
+    else registerModel(spec as Parameters<typeof registerModel>[0])
+  }
   // GPT-5.5 — flagship. Responses is the preferred surface; the `-chat`
   // id targets Chat Completions. Both send model id "gpt-5.5".
-  registerModel({
+  register({
     id: "gpt-5.5",
     providerId: "openai",
     surfaceId: "openai-responses",
@@ -64,7 +87,7 @@ export function registerOpenAIModels(): string[] {
     pricing: PRICING_GPT_5_5,
     vendorIds: { firstParty: "gpt-5.5" },
   })
-  registerModel({
+  register({
     id: "gpt-5.5-chat",
     providerId: "openai",
     surfaceId: "openai-chat-completions",
@@ -78,7 +101,7 @@ export function registerOpenAIModels(): string[] {
   })
 
   // GPT-5 (Responses surface).
-  registerModel({
+  register({
     id: "gpt-5",
     providerId: "openai",
     surfaceId: "openai-responses",
@@ -91,7 +114,7 @@ export function registerOpenAIModels(): string[] {
   })
 
   // o-series reasoning models (Responses surface, visible reasoning).
-  registerModel({
+  register({
     id: "o3",
     providerId: "openai",
     surfaceId: "openai-responses",
@@ -102,7 +125,7 @@ export function registerOpenAIModels(): string[] {
     pricing: PRICING_O3,
     vendorIds: { firstParty: "o3" },
   })
-  registerModel({
+  register({
     id: "o4-mini",
     providerId: "openai",
     surfaceId: "openai-responses",
@@ -115,7 +138,7 @@ export function registerOpenAIModels(): string[] {
   })
 
   // gpt-4 family (Chat Completions surface).
-  registerModel({
+  register({
     id: "gpt-4.1",
     providerId: "openai",
     surfaceId: "openai-chat-completions",
@@ -126,7 +149,7 @@ export function registerOpenAIModels(): string[] {
     pricing: PRICING_GPT_41,
     vendorIds: { firstParty: "gpt-4.1" },
   })
-  registerModel({
+  register({
     id: "gpt-4o",
     providerId: "openai",
     surfaceId: "openai-chat-completions",
@@ -137,7 +160,7 @@ export function registerOpenAIModels(): string[] {
     pricing: PRICING_GPT_4O,
     vendorIds: { firstParty: "gpt-4o" },
   })
-  registerModel({
+  register({
     id: "gpt-4o-mini",
     providerId: "openai",
     surfaceId: "openai-chat-completions",

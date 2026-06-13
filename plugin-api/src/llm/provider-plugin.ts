@@ -22,7 +22,11 @@
  * @module llm/provider-plugin
  */
 
+import type { ModelRate } from "../types/host-capabilities.ts"
+
+import type { Capabilities } from "./capabilities.ts"
 import type { ProviderAuth } from "./provider-auth.ts"
+import type { TokenEstimator } from "./token-estimate.ts"
 
 /**
  * Context handed to a plugin's optional {@link ProviderPlugin.onStartupProbe}.
@@ -47,6 +51,69 @@ export interface LiveModelRow {
   displayName?: string
   /** ISO date (YYYY-MM-DD) the server reports for the model, if any. */
   createdAt?: string
+}
+
+// ---------------------------------------------------------------------------
+// Setup-time model registration (Wave D net/registry seam)
+// ---------------------------------------------------------------------------
+
+/**
+ * Provider-neutral spec for registering ONE model into the host registry, the
+ * input shape a provider plugin hands to {@link ModelRegistrar.register}.
+ *
+ * This is the registration counterpart of the read-only `ModelView`: it adds
+ * the two fields a registration needs that a read view omits — the optional
+ * {@link TokenEstimator} and the per-cloud `vendorIds` map. `surfaceId` is a
+ * plain `string` here (the host's `SurfaceId` is a token-bearing union that
+ * stays in `src/`); the host's registrar narrows it when it forwards the spec
+ * to the real `registerModel`. The host's real `ModelEntry` is structurally
+ * compatible, so a plugin can build this spec without importing `src/`.
+ */
+export interface ProviderModelSpec {
+  id: string
+  aliases?: ReadonlyArray<string>
+  providerId: string
+  surfaceId: string
+  displayName: string
+  knowledgeCutoff?: string
+  tags?: ReadonlyArray<string>
+  capabilities: Capabilities
+  pricing: ModelRate
+  /** Per-cloud-vendor model ids (e.g. `{ firstParty: "gpt-5.5" }`). */
+  vendorIds?: Readonly<Record<string, string>>
+  /** Optional token estimator for this model's tokenizer family. */
+  estimateTokens?: TokenEstimator
+}
+
+/**
+ * Setup-time write access to the host model registry. The host builds this and
+ * passes it to {@link ProviderPlugin.register} via {@link ProviderSetupContext},
+ * so a provider plugin contributes its catalog by calling `ctx.models.register`
+ * instead of importing `registerModel` / `setDefaultModelId` from `src/`.
+ * Idempotent; last-write-wins per id (mirrors the registry's own contract).
+ */
+export interface ModelRegistrar {
+  /** Add or replace a model entry. Throws on id/alias collision. */
+  register(spec: ProviderModelSpec): void
+  /** Declare the default model id a no-model session should boot with. */
+  setDefault(id: string | null): void
+}
+
+/**
+ * Context handed to {@link ProviderPlugin.register} at activation. Carries the
+ * host capabilities a provider needs at LOAD time — today just the model
+ * {@link ModelRegistrar}. It is the provider-loader analogue of the TUI
+ * `ctx.host`: the seam that lets a provider plugin reach host state (the model
+ * registry) without a `src/` import.
+ *
+ * `register()` keeps a no-arg call path for back-compat (a plugin that hasn't
+ * adopted the seam, or a host that hasn't wired it, still works); a plugin that
+ * HAS adopted it reads `ctx?.models` and falls back to its own wiring when the
+ * context is absent.
+ */
+export interface ProviderSetupContext {
+  /** Setup-time model-registry writer (the `models:register` capability). */
+  models: ModelRegistrar
 }
 
 // ---------------------------------------------------------------------------
@@ -262,8 +329,16 @@ export interface ProviderPlugin {
   displayName: string
   /** Compact tag for dense UI (e.g. footer): `"anth"`, `"oai"`. */
   shortCode: string
-  /** Register this provider's adapter + model catalog. Idempotent. */
-  register(): void
+  /**
+   * Register this provider's adapter + model catalog. Idempotent.
+   *
+   * Receives an optional {@link ProviderSetupContext}: when the host passes
+   * one, the plugin registers its models through `ctx.models` (the
+   * `models:register` capability) instead of importing the registry from
+   * `src/`. The argument is optional so the no-arg call path stays valid for
+   * back-compat (a host or plugin that hasn't adopted the seam yet).
+   */
+  register(ctx?: ProviderSetupContext): void
   /**
    * Optional fire-and-forget startup probe, run once after activation and
    * before the first request. Lets a provider overlay server-shipped data

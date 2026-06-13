@@ -36,8 +36,86 @@
  * @module memory/lib/save-echo
  */
 
-import type { ContentBlock } from "../../../src/client.ts"
-import type { EventBus, Unsubscribe } from "../../../src/plugins/event-bus.ts"
+// ---------------------------------------------------------------------------
+// Host structural slices (decoupling contract: import nothing from src/)
+// ---------------------------------------------------------------------------
+
+/**
+ * LOCAL structural slice of the host's `ContentBlock` (source of truth:
+ * `src/client/types.ts#TextBlock`). The collector only ever emits text
+ * blocks, so the single-variant slice is sufficient; TypeScript's
+ * structural typing makes the host's `ContentBlock` registry accept it
+ * unchanged. Re-declared here so this module imports nothing from the
+ * host repo (the Wave D decoupling contract).
+ */
+export interface AttachmentTextBlock {
+  type: "text"
+  text: string
+}
+
+/** Unsubscribe handle returned by {@link EventBusSlice.on}. */
+export type Unsubscribe = () => void
+
+/**
+ * LOCAL structural slice of the host's `EventBus` (source of truth:
+ * `src/plugins/event-bus.ts#EventBus`). Only the `on(event, listener)`
+ * subscribe method is consumed here; the listener receives an
+ * {@link EventContextSlice}. The real frozen host bus satisfies this at
+ * runtime via structural typing.
+ */
+export interface EventBusSlice {
+  on(event: string, listener: (ctx: EventContextSlice) => void): Unsubscribe
+}
+
+/** LOCAL structural slice of the host bus's listener invocation context. */
+export interface EventContextSlice {
+  readonly payload: unknown
+}
+
+/**
+ * LOCAL structural slice of the host bus's emit side. The inline-tag save
+ * handler fires `memory.saved` onto this so the {@link SaveEchoCollector}
+ * (subscribed via {@link SaveEchoCollector.attach}) buffers it for the
+ * next turn. The real host bus satisfies both this and {@link EventBusSlice}.
+ */
+export interface EmitBusSlice {
+  emit(event: string, payload?: unknown): void
+}
+
+// ---------------------------------------------------------------------------
+// Plugin-local bus pointer (replaces the old `src/global-bus.ts` singleton)
+// ---------------------------------------------------------------------------
+
+/**
+ * Plugin-owned pointer to the host event bus, set by the save-echo
+ * turn-attachment factory (`handlers/turn_attachment_save_echo.ts`) when
+ * the host hands it `ctx.bus` at boot. The inline-tag save handler reads
+ * it to emit `memory.saved`.
+ *
+ * Why this exists: a `TUIContext` carries no event bus and the
+ * decoupling contract forbids importing `src/global-bus.ts`. In
+ * production the host wires BOTH the collector AND this pointer from the
+ * SAME `loader.bus()` (index.ts: `setGlobalEventBus(loader.bus())` ran
+ * beside `instantiateTurnAttachments({ bus: loader.bus() })`), so the
+ * emit and the subscription meet on one bus exactly as before. When no
+ * bus was plumbed through (ad-hoc tests), the pointer is `null` and the
+ * emit is a no-op — the save itself never depends on the echo.
+ */
+let saveBus: EmitBusSlice | null = null
+
+/**
+ * Set (or clear, with `null`) the plugin-local bus the inline-tag save
+ * handler emits `memory.saved` on. Idempotent. Called by the save-echo
+ * turn-attachment factory; tests call it directly to wire a fake bus.
+ */
+export function setSaveBus(bus: EmitBusSlice | null): void {
+  saveBus = bus
+}
+
+/** Read the plugin-local emit bus, or `null` when none was wired. */
+export function getSaveBus(): EmitBusSlice | null {
+  return saveBus
+}
 
 // ---------------------------------------------------------------------------
 // Wire format
@@ -110,7 +188,7 @@ export class SaveEchoCollector {
    * Subscribe to `memory.saved` on the given bus and start buffering
    * events until consumed. Returns the collector instance (chain-friendly).
    */
-  static attach(bus: EventBus): SaveEchoCollector {
+  static attach(bus: EventBusSlice): SaveEchoCollector {
     const c = new SaveEchoCollector()
     c.off = bus.on(MEMORY_SAVED, (ctx) => {
       if (isMemorySavedPayload(ctx.payload)) c.queue.push(ctx.payload)
@@ -129,14 +207,15 @@ export class SaveEchoCollector {
   }
 
   /**
-   * Drain the queue into `ContentBlock[]`. Returns `[]` when empty so
-   * the caller can splat into a list builder unconditionally.
+   * Drain the queue into {@link AttachmentTextBlock}[] (structurally a
+   * host `ContentBlock[]`). Returns `[]` when empty so the caller can
+   * splat into a list builder unconditionally.
    *
    * One block per queued payload, rendered as
    * `<ma::agent::memory-saved scope="…" id="…"[ evicted="N"]>preview</ma::agent::memory-saved>`.
    * Preview is the body trimmed to 60 chars with `…` ellipsis on overflow.
    */
-  consumeAll(): ContentBlock[] {
+  consumeAll(): AttachmentTextBlock[] {
     if (this.queue.length === 0) return []
     const out = this.queue.map((p) => ({
       type: "text" as const,

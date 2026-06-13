@@ -33,8 +33,7 @@ import type {
   CanonicalUsage,
   StopReason,
 } from "@minimal-agent/plugin-api/llm/canonical-events"
-
-import { classifyUpstreamError } from "../../../src/llm/errors.ts"
+import { classifyUpstreamError } from "@minimal-agent/plugin-api/llm/errors"
 
 // ---------------------------------------------------------------------------
 // Wire types (subset we consume)

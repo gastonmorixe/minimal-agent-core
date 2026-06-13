@@ -18,7 +18,7 @@
  * @module memory/handlers/turn_attachment_save_echo
  */
 
-import { SaveEchoCollector } from "../lib/save-echo.ts"
+import { SaveEchoCollector, setSaveBus } from "../lib/save-echo.ts"
 
 /** Local structural slice of the host's `TurnAttachmentContext`. */
 interface TurnAttachmentContext {
@@ -29,14 +29,23 @@ interface TurnAttachmentContext {
 }
 
 /**
- * Attach a {@link SaveEchoCollector} to the host bus. Returns `null`
- * (no contribution) when the host supplied no bus — without a bus
- * there is nothing to collect, and the host treats `null` as a clean
+ * Attach a {@link SaveEchoCollector} to the host bus AND publish the same
+ * bus to the plugin-local emit pointer (`setSaveBus`) so the inline-tag
+ * save handler — which has no `ctx.bus` of its own — can fire
+ * `memory.saved` onto the very bus this collector subscribes to. Both
+ * sides meet on the one host bus the loader hands in here, replacing the
+ * old `src/global-bus.ts` singleton.
+ *
+ * Returns `null` (no contribution) when the host supplied no bus — without
+ * a bus there is nothing to collect, and the host treats `null` as a clean
  * decline (graceful degradation, never an error).
  */
 export default function makeSaveEcho(ctx: TurnAttachmentContext): SaveEchoCollector | null {
   const bus = ctx.bus
   if (bus === null || typeof bus !== "object") return null
   if (typeof (bus as { on?: unknown }).on !== "function") return null
+  if (typeof (bus as { emit?: unknown }).emit === "function") {
+    setSaveBus(bus as Parameters<typeof setSaveBus>[0])
+  }
   return SaveEchoCollector.attach(bus as Parameters<typeof SaveEchoCollector.attach>[0])
 }

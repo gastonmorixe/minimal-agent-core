@@ -40,9 +40,9 @@
  * @module memory/handlers/memory
  */
 
-import { getGlobalEventBus } from "../../../src/global-bus.ts"
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
-import { MEMORY_SAVED, type MemorySavedPayload } from "../lib/save-echo.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
+import { getSaveBus, MEMORY_SAVED, type MemorySavedPayload } from "../lib/save-echo.ts"
 import { MemoryStore, type StoreKind } from "../lib/store.ts"
 
 // Re-export `localIsoSeconds` for callers that imported it from this
@@ -118,19 +118,20 @@ export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult>
   try {
     const { bullet, evicted } = store.add(body)
 
-    // Emit on the global bus so the agent's SaveEchoCollector picks
-    // it up and surfaces the id to the model on the next user turn.
-    // Optional-chained: the bus may be null in ad-hoc tests / before
-    // setGlobalEventBus is called. The save itself isn't gated on bus
-    // availability — losing the echo is recoverable (the model can
-    // call MemoryTool to discover the id).
+    // Emit on the plugin-local bus (wired from the host bus by the
+    // save-echo turn-attachment factory) so the agent's SaveEchoCollector
+    // picks it up and surfaces the id to the model on the next user turn.
+    // Optional-chained: the bus may be null in ad-hoc tests / before the
+    // factory ran. The save itself isn't gated on bus availability —
+    // losing the echo is recoverable (the model can call MemoryTool to
+    // discover the id).
     const payload: MemorySavedPayload = {
       scope,
       id: bullet.id,
       body: bullet.body,
       ...(evicted.length > 0 ? { evicted: evicted.length } : {}),
     }
-    getGlobalEventBus()?.emit(MEMORY_SAVED, payload)
+    getSaveBus()?.emit(MEMORY_SAVED, payload)
 
     // Visible-to-user confirmation line, dim. Includes the eviction
     // count when relevant so the human sees why a short-term entry

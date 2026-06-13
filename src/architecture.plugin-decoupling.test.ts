@@ -74,31 +74,22 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/thinking-preflight.ts", 3],
   ["llm-anthropic/validate.degrade.test.ts", 2],
   ["llm-anthropic/validate.ts", 5],
-  ["llm-openai/adapter.ts", 5],
+  ["llm-openai/adapter.ts", 3], // D-net-seam: network singleton → ctx.networkClient (port); classifyUpstreamError → plugin-api. Left: canonical-request, model-registry, provider.ts (all C-3 / port-split deferred)
   ["llm-openai/chat/request-body.ts", 2],
-  ["llm-openai/models.ts", 1], // D-2: makeCharRatioEstimator → @minimal-agent/plugin-api; registerModel stays (no-arg register())
+  ["llm-openai/models.ts", 1], // D-2: makeCharRatioEstimator → plugin-api. D-net-seam: registerModel now a ctx.models fallback (registrar adopted via register(ctx)); import drops to 0 once activateDiscoveredProviders is the live path (convergence)
   ["llm-openai/pricing.ts", 1],
   ["llm-openai/responses/request-body.ts", 2],
-  ["llm-openai/responses/response-stream.ts", 1],
-  ["llm-openai/validate.ts", 5],
+  ["llm-openai/validate.ts", 3], // D-net-seam: errors + modality-check → plugin-api. Left: canonical-request, model-registry, provider.ts (all deferred)
   ["llm-openrouter/adapter.ts", 4],
   ["llm-openrouter/models.ts", 1], // D-2: makeCharRatioEstimator → @minimal-agent/plugin-api; registerModel stays (no-arg register())
   ["llm-openrouter/openrouter.test.ts", 1],
   ["llm-openrouter/pricing.ts", 1],
-  ["memory/handlers/load.test.ts", 1],
-  ["memory/handlers/load.ts", 1],
-  ["memory/handlers/memory_tool.test.ts", 1],
-  ["memory/handlers/memory_tool.ts", 1],
-  ["memory/handlers/memory.test.ts", 4],
-  ["memory/handlers/memory.ts", 2],
-  ["memory/integration.test.ts", 2],
-  ["memory/lib/memory-config.ts", 2],
-  ["memory/lib/save-echo.test.ts", 1],
-  ["memory/lib/save-echo.ts", 2],
-  ["memory/lib/short-term-snapshot.ts", 1],
-  ["memory/lib/summarize.test.ts", 2],
-  ["memory/lib/summarize.ts", 5],
-  ["memory/lib/summary-refresh.ts", 1],
+  // Wave D-7: memory swept to its residual. Only summarize.ts keeps two
+  // src/ sites — the summary pipeline needs an authenticated LLM call at
+  // prompt-fragment time (getAuth + canonicalSendFn) and there is no
+  // `auth`/`llm:send` capability on the v2 host yet, nor a `ctx.host` on
+  // the prompt-fragment context. See reports/D7-memory.md.
+  ["memory/lib/summarize.ts", 2],
   ["quota-status/handler.ts", 4],
   ["quota-status/render.overage.test.ts", 3],
   ["quota-status/render.segments.test.ts", 3],

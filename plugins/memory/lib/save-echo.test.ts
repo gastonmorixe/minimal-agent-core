@@ -15,15 +15,53 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { EventBus } from "../../../src/plugins/event-bus.ts"
-
 import {
+  type EventBusSlice,
+  type EventContextSlice,
   isMemorySavedPayload,
   MEMORY_SAVED,
   type MemorySavedPayload,
   renderEcho,
   SaveEchoCollector,
+  type Unsubscribe,
 } from "./save-echo.ts"
+
+/**
+ * Minimal in-test event bus satisfying the plugin's structural slices
+ * ({@link EventBusSlice} + emit). Dispatches on the microtask tick, like
+ * the host's real `EventBus`, so the tests' `await Promise.resolve()`
+ * boundary observes delivered events. Re-declared locally because the
+ * plugin imports nothing from the host repo (decoupling contract).
+ */
+class FakeBus implements EventBusSlice {
+  private readonly listeners = new Map<string, Set<(ctx: EventContextSlice) => void>>()
+  private disposed = false
+
+  on(event: string, listener: (ctx: EventContextSlice) => void): Unsubscribe {
+    if (this.disposed) return () => {}
+    let set = this.listeners.get(event)
+    if (!set) {
+      set = new Set()
+      this.listeners.set(event, set)
+    }
+    set.add(listener)
+    return () => set?.delete(listener)
+  }
+
+  emit(event: string, payload?: unknown): void {
+    if (this.disposed) return
+    const set = this.listeners.get(event)
+    if (!set) return
+    for (const fn of [...set]) {
+      queueMicrotask(() => fn({ payload }))
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.listeners.clear()
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Type guard
@@ -76,7 +114,7 @@ describe("isMemorySavedPayload", () => {
 
 describe("SaveEchoCollector + EventBus", () => {
   it("buffers emitted events and drains them on consumeAll", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
 
     bus.emit(MEMORY_SAVED, { scope: "project", id: "p1", body: "hello" })
@@ -103,7 +141,7 @@ describe("SaveEchoCollector + EventBus", () => {
   })
 
   it("consumeAll is idempotent — second call returns []", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
     bus.emit(MEMORY_SAVED, { scope: "project", id: "x", body: "y" })
     await Promise.resolve()
@@ -116,7 +154,7 @@ describe("SaveEchoCollector + EventBus", () => {
   })
 
   it("queues new events after a drain", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
 
     bus.emit(MEMORY_SAVED, { scope: "project", id: "a", body: "a" })
@@ -131,7 +169,7 @@ describe("SaveEchoCollector + EventBus", () => {
   })
 
   it("ignores malformed payloads silently", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
 
     bus.emit(MEMORY_SAVED, { scope: "weird", id: "x", body: "" })
@@ -144,7 +182,7 @@ describe("SaveEchoCollector + EventBus", () => {
   })
 
   it("detach removes the listener — subsequent emits don't queue", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
     collector.detach()
 
@@ -156,7 +194,7 @@ describe("SaveEchoCollector + EventBus", () => {
   })
 
   it("detach also drops any already-queued events", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
     bus.emit(MEMORY_SAVED, { scope: "project", id: "x", body: "y" })
     await Promise.resolve()
@@ -168,7 +206,7 @@ describe("SaveEchoCollector + EventBus", () => {
   })
 
   it("detach is idempotent", () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
     collector.detach()
     expect(() => collector.detach()).not.toThrow()
@@ -260,7 +298,7 @@ describe("renderEcho", () => {
 
 describe("end-to-end shape", () => {
   it("emitting then consuming produces the expected ContentBlock shape", async () => {
-    const bus = new EventBus()
+    const bus = new FakeBus()
     const collector = SaveEchoCollector.attach(bus)
 
     const payload: MemorySavedPayload = {

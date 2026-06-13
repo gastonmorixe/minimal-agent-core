@@ -23,7 +23,19 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { type ProviderPlugin, registerProviderPlugin } from "./provider-plugin.ts"
+import type {
+  ModelRegistrar,
+  ProviderModelSpec,
+  ProviderSetupContext,
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
+
+import { registerModel, setDefaultModelId } from "./model-registry.ts"
+import type { SurfaceId } from "./provider.ts"
+import {
+  listProviderPlugins,
+  type ProviderPlugin,
+  registerProviderPlugin,
+} from "./provider-plugin.ts"
 
 interface ProviderDescriptor {
   id: string
@@ -103,4 +115,75 @@ export async function registerDiscoveredProviders(pluginsDir: string): Promise<s
   const plugins = await discoverProviderPlugins(pluginsDir)
   for (const plugin of plugins) registerProviderPlugin(plugin)
   return plugins.map((p) => p.id)
+}
+
+// ---------------------------------------------------------------------------
+// Provider setup-context (the models:register seam for the provider loader)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the {@link ProviderSetupContext} the host hands a provider plugin at
+ * activation. It exposes the live model registry as a provider-neutral
+ * {@link ModelRegistrar} (the `models:register` capability), so a provider's
+ * `register(ctx)` contributes its catalog through `ctx.models.register`
+ * instead of importing `registerModel` / `setDefaultModelId` from `src/`.
+ *
+ * This is the provider-loader analogue of `buildPluginHostV2` (the TUI
+ * `ctx.host`): the host owns the registry singleton and the registrar is a thin
+ * provider-neutral facade over it. The registrar narrows the spec's plain
+ * `surfaceId` string back to the host's token-bearing `SurfaceId` union as it
+ * forwards to the real `registerModel` (the host is allowed to name surfaces;
+ * the contract package is not).
+ *
+ * Keeping this here (rather than in `buildPluginHostV2`) is deliberate: provider
+ * plugins load through this dedicated early loader, NOT the TUI loader, and they
+ * need the registry BEFORE model resolution at startup. See the v2-convergence
+ * note in `private/decoupling-refactor-work/reports/D-net-seam.md` §3.
+ *
+ * @returns A fresh setup context bound to the process-wide model registry.
+ */
+export function buildProviderSetupContext(): ProviderSetupContext {
+  const models: ModelRegistrar = {
+    register(spec: ProviderModelSpec): void {
+      // The contract package carries no `SurfaceId` token union, so the spec's
+      // `surfaceId` is a plain string; the host narrows it here as it forwards
+      // to the real registry. A bad surface id surfaces later at dispatch
+      // (`adapter.run`), identical to the direct-import path.
+      registerModel({ ...spec, surfaceId: spec.surfaceId as SurfaceId })
+    },
+    setDefault(id: string | null): void {
+      setDefaultModelId(id)
+    },
+  }
+  return { models }
+}
+
+/**
+ * Activate every registered provider plugin WITH a host setup context: calls
+ * each plugin's `register(ctx)` so it can contribute its catalog through
+ * `ctx.models` (the `models:register` capability) instead of importing the
+ * registry from `src/`. This is the context-carrying counterpart of
+ * `activateProviderPlugins()` (which calls `register()` with no arguments).
+ *
+ * Idempotent because `register()` is. Returns the activated provider ids.
+ *
+ * This is the provider-loader convergence injection point (D-net-seam §3): the
+ * agent entrypoint can switch from `activateProviderPlugins()` to this once the
+ * sibling provider plugins (anthropic, openrouter) adopt the ctx-driven
+ * `register(ctx)` path. Until then both call paths coexist — a plugin's
+ * `register(ctx?)` reads `ctx?.models` when present and falls back to its own
+ * wiring when absent, so this is safe to adopt provider-by-provider.
+ *
+ * @param ctx - Setup context (defaults to a fresh {@link buildProviderSetupContext}).
+ * @returns The activated provider ids.
+ */
+export function activateDiscoveredProviders(
+  ctx: ProviderSetupContext = buildProviderSetupContext(),
+): string[] {
+  const activated: string[] = []
+  for (const plugin of listProviderPlugins()) {
+    plugin.register(ctx)
+    activated.push(plugin.id)
+  }
+  return activated
 }

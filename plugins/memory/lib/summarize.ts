@@ -21,10 +21,32 @@
  * @module memory/lib/summarize
  */
 
-import type { AuthResult } from "../../../src/auth.ts"
+// RESIDUAL host coupling (Wave D-7): the summary pipeline needs an
+// authenticated LLM call at prompt-fragment time. There is no `auth` or
+// `llm:send` capability on the v2 host yet, and the prompt-fragment
+// context exposes no `ctx.host` at all, so these two RUNTIME helpers stay
+// imported from `src/` until that capability lands. Their TYPES are
+// DERIVED from the runtime values (`ReturnType`/`Parameters`) below, so
+// the plugin re-declares no host wire-types and adds no extra src/ site.
 import { getAuth } from "../../../src/auth.ts"
-import type { SendOptions } from "../../../src/client.ts"
 import { canonicalSendFn } from "../../../src/llm/transport/canonical-send.ts"
+
+import { defaultSummaryModel } from "./memory-config.ts"
+import { promptPath, renderPrompt } from "./prompt-io.ts"
+
+/**
+ * Auth credential shape the summarizer threads to the transport. Derived
+ * from the host's {@link getAuth} so the plugin re-declares no host type
+ * (structural-typing decoupling: the residual runtime import carries the
+ * type for free).
+ */
+export type SummarizeAuth = Awaited<ReturnType<typeof getAuth>>
+
+/**
+ * Send-options shape the canonical transport consumes. Derived from
+ * {@link canonicalSendFn} for the same reason as {@link SummarizeAuth}.
+ */
+export type SummarizeSendOptions = Parameters<typeof canonicalSendFn>[0]
 
 /**
  * Drain `canonicalSendFn` into the flat string the summarizer consumes.
@@ -32,7 +54,7 @@ import { canonicalSendFn } from "../../../src/llm/transport/canonical-send.ts"
  * Kept tiny + local so the `deps.sendFn` seam (tests inject fakes) keeps
  * its `(opts) => Promise<string>` shape across the transport port.
  */
-async function canonicalSendText(opts: SendOptions): Promise<string> {
+async function canonicalSendText(opts: SummarizeSendOptions): Promise<string> {
   let text = ""
   const gen = canonicalSendFn(opts)
   while (true) {
@@ -41,10 +63,6 @@ async function canonicalSendText(opts: SendOptions): Promise<string> {
     text += value
   }
 }
-
-import { promptPath, renderPrompt } from "../../../src/prompts.ts"
-
-import { defaultSummaryModel } from "./memory-config.ts"
 
 /** Configuration for one summarize() call. */
 export interface SummarizeOptions {
@@ -70,12 +88,12 @@ export interface SummarizeOptions {
  */
 export interface SummarizeDeps {
   /** Returns auth credentials. Defaults to {@link getAuth}. */
-  authProvider?: () => Promise<AuthResult>
+  authProvider?: () => Promise<SummarizeAuth>
   /**
    * Sends a one-shot LLM request and returns the text response.
    * Defaults to {@link canonicalSendText} (the canonical transport). Tests inject a fake.
    */
-  sendFn?: (opts: SendOptions) => Promise<string>
+  sendFn?: (opts: SummarizeSendOptions) => Promise<string>
 }
 
 /**
@@ -165,14 +183,14 @@ export async function summarize(
   const sendFn = deps.sendFn ?? canonicalSendText
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
-  let auth: AuthResult
+  let auth: SummarizeAuth
   try {
     auth = await authProvider()
   } catch (e) {
     throw new SummarizeError("auth-failed", `auth failed: ${(e as Error).message}`)
   }
 
-  const sendOpts: SendOptions = {
+  const sendOpts: SummarizeSendOptions = {
     auth,
     model: opts.model ?? defaultSummaryModel(),
     messages: [
