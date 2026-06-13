@@ -57,6 +57,17 @@ const SEARCH_DEFAULT_LIMIT = 20
 const SEARCH_DEFAULT_MAX_SESSIONS = 10
 const TOOLCALLS_DEFAULT_LIMIT = 20
 
+// Session ids are UUIDs, so this allowlist (the same class already used for
+// tool_use_id in blobs-read) is safe and sufficient. It rejects "." and "/",
+// which blocks path-traversal payloads like "../../../../etc" from escaping
+// the sessions root through join(dir, sid + ".jsonl") and friends.
+const SAFE_SID = /^[A-Za-z0-9_-]+$/
+
+/** Reject any sid not shaped like a real session id (path-traversal guard). */
+function isSafeSid(sid: string): boolean {
+  return SAFE_SID.test(sid)
+}
+
 /** Constructor deps — `dir` overrides the sessions directory (tests). */
 export interface SessionsReadDeps {
   dir?: string
@@ -91,6 +102,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
     },
 
     async meta(sid) {
+      if (!isSafeSid(sid)) return null
       const records = readRecords(sid, dir)
       if (records === null) return null
       const meta = records.find((r): r is MetaRecord => r.kind === "meta") ?? null
@@ -125,12 +137,14 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
     },
 
     async window(sid, opts) {
+      if (!isSafeSid(sid)) return null
       const records = readRecords(sid, dir)
       if (records === null) return null
       return buildWindow(sid, records, opts)
     },
 
     async toolCalls(sid, opts = {}) {
+      if (!isSafeSid(sid)) return null
       const records = readRecords(sid, dir)
       if (records === null) return null
       const limit = clampInt(opts.limit, 1, 200, TOOLCALLS_DEFAULT_LIMIT)
@@ -165,7 +179,9 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
       if (needle.length === 0) return { hits: [], total: 0, scannedSessions: 0 }
 
       const sids = opts.sid
-        ? [opts.sid]
+        ? isSafeSid(opts.sid)
+          ? [opts.sid]
+          : []
         : readIndex(dir)
             .map((e) => e.sid)
             .reverse()
@@ -199,6 +215,7 @@ export function createSessionsReadApi(deps: SessionsReadDeps = {}): SessionsRead
     },
 
     async dump(sid, opts = {}) {
+      if (!isSafeSid(sid)) return null
       if (!existsSync(sessionFilePath(sid, dir))) return null
       const loaded = loadSession(sid, dir)
       const text =
