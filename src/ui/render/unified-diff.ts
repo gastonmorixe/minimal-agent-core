@@ -4,11 +4,8 @@
  *
  * The unified-diff colorizer now lives at
  * `plugin-api/src/utils/unified-diff.ts`. This file stays at the old path
- * so every core importer can use the UI rendering boundary while the
- * implementation stays shared with plugins. Output is byte-identical
- * (the package file is a verbatim copy, still byte-parity-pinned by
- * `src/ui/render/unified-diff.test.ts`). After the move the diff-view plugin
- * can consume this ONE copy via the package instead of keeping its own.
+ * so every core importer can use the UI rendering boundary while host code
+ * and plugins consume the same implementation.
  *
  * @module ui/render/unified-diff
  */

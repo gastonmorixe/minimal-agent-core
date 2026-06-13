@@ -13,25 +13,23 @@
  *   - URL never trimmed (the model needs the canonical link).
  *   - Source defaults to URL hostname when the provider didn't supply one.
  *
- * No internal-package imports — formatter stays usable from the CLI and
- * from any future provider-only test harness.
+ * Uses only the leaf plugin-api ANSI constants, so formatter stays usable from
+ * the CLI and from any future provider-only test harness without host imports.
  *
  * @module web-search/format
  */
+
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
 import type { SearchHit, SearchResponse } from "./providers/types.ts"
 
 const TITLE_MAX = 120
 const SNIPPET_MAX = 240
 
-// Raw ANSI — keeps this module dep-free and palette-agnostic.
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const ITALIC = "\x1b[3m"
-const UNDERLINE = "\x1b[4m"
-const FG_CYAN = "\x1b[36m"
+const { BOLD, DIM, ITALIC, RESET, UNDERLINE } = ANSI_CODES
+const FG_CYAN = PALETTE.cyan
 const FG_GREY = "\x1b[90m"
-const RESET = "\x1b[0m"
 
 function clip(s: string, max: number): string {
   if (s.length <= max) return s

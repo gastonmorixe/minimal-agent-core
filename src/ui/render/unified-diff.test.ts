@@ -1,19 +1,15 @@
 /**
  * Byte-parity pin for the host UI unified-diff renderer.
  *
- * The expected strings below were captured VERBATIM from the diff-view
- * plugin's `renderUnifiedDiff` (plugins/diff-view/handlers/render.ts)
- * on 2026-06-10, BEFORE `src/diff.ts` / the replay derivers switched to
- * the core-local copy (Wave A unit A-2). They are the characterization
- * contract: the core copy must produce byte-identical output for the
- * same inputs, so the Edit/Write transcript hunks and the replay
- * derivations keep the exact pink/lime/cyan styling users saw before
- * the seam landed.
+ * The expected strings below were captured VERBATIM from the historical
+ * diff-view plugin renderer on 2026-06-10. They are the characterization
+ * contract: the shared plugin-api renderer must produce byte-identical output
+ * for the same inputs, so Edit/Write transcript hunks and replay derivations
+ * keep the exact pink/lime/cyan styling users saw before the seam landed.
  *
  * NOTE: this test deliberately does NOT import the plugin (that would
- * add a new I2 core→plugins site). The pinned bytes ARE the plugin's
- * output; regenerate them from the plugin renderer only on a deliberate,
- * reviewed styling change.
+ * add a new I2 core→plugins site). Regenerate the pinned bytes only on a
+ * deliberate, reviewed styling change.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"

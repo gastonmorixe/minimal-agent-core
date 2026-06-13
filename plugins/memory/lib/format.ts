@@ -9,22 +9,22 @@
  *               `tool_result.display` and printed by the CLI directly
  *               to a TTY.
  *
- * No internal-package imports: formatter stays usable from the CLI and
- * any future test harness.
+ * Uses only the leaf plugin-api ANSI constants, so formatter stays usable from
+ * the CLI and any future test harness without importing host internals.
  *
  * @module memory/lib/format
  */
 
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+
 import type { Bullet } from "./parse.ts"
 
-// Raw ANSI: keep this module dep-free / palette-agnostic.
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const FG_CYAN = "\x1b[36m"
-const FG_GREEN = "\x1b[32m"
-const FG_RED = "\x1b[31m"
-const FG_YELLOW = "\x1b[33m"
-const RESET = "\x1b[0m"
+const { BOLD, DIM, RESET } = ANSI_CODES
+const FG_CYAN = PALETTE.cyan
+const FG_GREEN = PALETTE.green
+const FG_RED = PALETTE.red
+const FG_YELLOW = PALETTE.yellow
 
 /**
  * Default body clip for single-bullet display (read / add / edit /

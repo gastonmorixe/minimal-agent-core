@@ -35,7 +35,7 @@
  * Returns `null` when no change is pending (active matches
  * lastAdvertised). Pure: no I/O, no closure state.
  *
- * The TARGET label re-uses the same color logic as the scrollback
+ * The TARGET label re-uses the same shared ANSI helpers as the scrollback
  * chip (`mode-change-chip.ts`): accent color + bold for the
  * destination, plain accent (or dim) for the source. This keeps the
  * "where you ended up" cue visually consistent across both surfaces.
@@ -43,26 +43,9 @@
  * @module mode-change-pending-decoration
  */
 
+import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import type { PendingModeAttachment } from "../../modes.ts"
-
-// ---------------------------------------------------------------------------
-// SGR primitives (mirror mode-change-chip.ts so the two renderers stay
-// byte-aligned without a cross-file import cycle)
-// ---------------------------------------------------------------------------
-
-const RESET = "\x1b[0m"
-const FG_RESET = "\x1b[39m"
-
-/** SGR dim. */
-const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
-
-/**
- * SGR violet (truecolor `rgb(180, 140, 255)` = `#B48CFF`). Matches
- * the `⏳` glyph color used by `buildQueueDecorationLines` so the
- * mode-change pending widget reads as a sibling of the queued-text
- * decoration above it. Keep in sync with `PALETTE.violet`.
- */
-const violet = (s: string): string => `\x1b[38;2;180;140;255m${s}\x1b[39m`
 
 // ---------------------------------------------------------------------------
 // Public renderer
@@ -95,20 +78,20 @@ export function buildPendingModeChangeDecoration(
   const toLbl = paintBold(resolveLabel(pending.toId), resolveFgOpen(pending.toId))
   // Layout: `  ⏳ mode   <FROM> → <TO>   pending · ⌥M to apply now`
   return (
-    `  ${violet("⏳")} ${dim("mode")}   ` +
-    `${fromLbl} ${dim("→")} ${toLbl}   ` +
-    `${dim("pending")} ${dim("·")} ${dim("⌥M to apply now")}`
+    `  ${c.violet("⏳")} ${c.dim("mode")}   ` +
+    `${fromLbl} ${c.dim("→")} ${toLbl}   ` +
+    `${c.dim("pending")} ${c.dim("·")} ${c.dim("⌥M to apply now")}`
   )
 }
 
 /** Paint `text` in `fgOpen` (non-bold). Dim fallback when no accent. */
 function paintFlat(text: string, fgOpen: string | null): string {
-  if (fgOpen) return `${fgOpen}${text}${FG_RESET}`
-  return dim(text)
+  if (fgOpen) return `${fgOpen}${text}${ANSI_CODES.FG_RESET}`
+  return c.dim(text)
 }
 
 /** Paint `text` bold in `fgOpen`. Bold + faint white when no accent. */
 function paintBold(text: string, fgOpen: string | null): string {
-  if (fgOpen) return `\x1b[1m${fgOpen}${text}${RESET}`
-  return `\x1b[1;37m${text}${RESET}`
+  if (fgOpen) return `${ANSI_CODES.BOLD}${fgOpen}${text}${ANSI_CODES.RESET}`
+  return `\x1b[1;37m${text}${ANSI_CODES.RESET}`
 }

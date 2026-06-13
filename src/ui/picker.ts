@@ -5,8 +5,9 @@
  * caller owns key event delivery and writing the rendered rows to the screen.
  */
 
-const DIM = "\x1b[2m"
-const RESET = "\x1b[0m"
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+
+const { DIM, RESET } = ANSI_CODES
 const INVERT = "\x1b[7m"
 
 export interface PickerItem<V = unknown> {

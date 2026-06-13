@@ -12,7 +12,7 @@
  * shape — they let a consumer pull one utility without dragging the rest.
  *
  * Wave D-0 contents: pure, host-state-free utilities only —
- * `term-width`, `jsonc`, `palette`, `sse-parser`, `unified-diff`. Types
+ * `term-width`, `jsonc`, `palette`, `ansi`, `sse-parser`, `unified-diff`. Types
  * land in D-1.
  *
  * @module plugin-api
@@ -21,5 +21,6 @@
 export * from "./utils/term-width.ts"
 export * from "./utils/jsonc.ts"
 export * from "./utils/palette.ts"
+export * from "./utils/ansi.ts"
 export * from "./utils/sse-parser.ts"
 export * from "./utils/unified-diff.ts"

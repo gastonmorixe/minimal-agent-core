@@ -36,6 +36,7 @@ import { hostname } from "node:os"
 import { isAbsolute, resolve } from "node:path"
 
 import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
 import {
   DEFAULT_STALE_AFTER_MS,
@@ -311,30 +312,20 @@ export function runClear(input: ParsedInput, deps: RunDeps): RunResult {
 // Rendering
 // ---------------------------------------------------------------------------
 
-// Minimal ANSI helpers : we don't pull in the full palette here, just a
-// few tokens for the transcript. The handler runs without colors when
-// piped (TTY detection is the agent's job).
-const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
-const bold = (s: string): string => `\x1b[1m${s}\x1b[22m`
-const red = (s: string): string => `\x1b[31m${s}\x1b[39m`
-const yellow = (s: string): string => `\x1b[33m${s}\x1b[39m`
-const green = (s: string): string => `\x1b[32m${s}\x1b[39m`
-const cyan = (s: string): string => `\x1b[36m${s}\x1b[39m`
-
 function statusBadge(s: LockStatus): string {
   switch (s) {
     case "held":
-      return red("● held")
+      return c.red("● held")
     case "stale-pid":
-      return yellow("○ stale (pid)")
+      return c.yellow("○ stale (pid)")
     case "stale-time":
-      return yellow("○ stale (time)")
+      return c.yellow("○ stale (time)")
     case "corrupt":
-      return yellow("○ corrupt")
+      return c.yellow("○ corrupt")
     case "cross-host":
-      return cyan("◌ cross-host")
+      return c.cyan("◌ cross-host")
   }
-  return green(s)
+  return c.green(s)
 }
 
 function formatAge(ms: number | null): string {
@@ -347,9 +338,9 @@ function formatAge(ms: number | null): string {
 }
 
 function renderListText(root: string, locks: AnnotatedLock[]): string {
-  if (locks.length === 0) return dim(`No locks under ${root}.`)
+  if (locks.length === 0) return c.dim(`No locks under ${root}.`)
   const lines: string[] = []
-  lines.push(bold(`Locks under ${root}: ${locks.length}`))
+  lines.push(c.bold(`Locks under ${root}: ${locks.length}`))
   for (const l of locks) {
     lines.push(formatLockLine(l))
   }
@@ -359,19 +350,19 @@ function renderListText(root: string, locks: AnnotatedLock[]): string {
 function formatLockLine(l: AnnotatedLock): string {
   const age = formatAge(l.ageMs)
   if (!l.holder) {
-    return `  ${statusBadge(l.status)}  ${l.filePath}  ${dim(`(${l.reason ?? "?"})`)}`
+    return `  ${statusBadge(l.status)}  ${l.filePath}  ${c.dim(`(${l.reason ?? "?"})`)}`
   }
   const owner = `${l.holder.harness}/${l.holder.tool} pid=${l.holder.pid} sid=${l.holder.sessionId.slice(0, 8)} host=${l.holder.host}`
-  const trail = l.reason ? ` ${dim(`(${l.reason})`)}` : ""
-  return `  ${statusBadge(l.status)}  ${l.filePath}  ${dim(`age=${age}`)}  ${dim(owner)}${trail}`
+  const trail = l.reason ? ` ${c.dim(`(${l.reason})`)}` : ""
+  return `  ${statusBadge(l.status)}  ${l.filePath}  ${c.dim(`age=${age}`)}  ${c.dim(owner)}${trail}`
 }
 
 function renderInspectText(l: AnnotatedLock): string {
   const lines: string[] = []
-  lines.push(bold(`Lock: ${l.filePath}`))
+  lines.push(c.bold(`Lock: ${l.filePath}`))
   lines.push(`  status:    ${statusBadge(l.status)}`)
-  if (l.reason) lines.push(`  reason:    ${dim(l.reason)}`)
-  lines.push(`  lockPath:  ${dim(l.lockPath)}`)
+  if (l.reason) lines.push(`  reason:    ${c.dim(l.reason)}`)
+  lines.push(`  lockPath:  ${c.dim(l.lockPath)}`)
   if (l.holder) {
     lines.push(`  holder:`)
     lines.push(`    harness:    ${l.holder.harness}`)
@@ -392,28 +383,28 @@ function renderClearStaleText(
   kept: AnnotatedLock[],
 ): string {
   const lines: string[] = []
-  lines.push(bold(`clear-stale under ${root}`))
+  lines.push(c.bold(`clear-stale under ${root}`))
   lines.push(`  removed: ${removed.length}`)
-  for (const r of removed) lines.push(`    ${green("✓")} ${r.filePath}  ${dim(r.reason ?? "")}`)
+  for (const r of removed) lines.push(`    ${c.green("✓")} ${r.filePath}  ${c.dim(r.reason ?? "")}`)
   lines.push(`  kept:    ${kept.length}`)
-  for (const k of kept) lines.push(`    ${dim("·")} ${formatLockLine(k).trimStart()}`)
+  for (const k of kept) lines.push(`    ${c.dim("·")} ${formatLockLine(k).trimStart()}`)
   return lines.join("\n")
 }
 
 function renderClearText(l: AnnotatedLock, verdict: string): string {
   const top =
     verdict === "OK"
-      ? green(`✓ cleared lock on ${l.filePath}`)
-      : red(`! cleared lock on ${l.filePath}`)
+      ? c.green(`✓ cleared lock on ${l.filePath}`)
+      : c.red(`! cleared lock on ${l.filePath}`)
   const detail = l.reason ?? l.status
-  const verdictLine = verdict === "OK" ? dim(`(${detail})`) : red(verdict)
+  const verdictLine = verdict === "OK" ? c.dim(`(${detail})`) : c.red(verdict)
   return [top, `  ${verdictLine}`].join("\n")
 }
 
 function errorResult(msg: string): RunResult {
   return {
     content: `LockStatus error: ${msg}`,
-    display: red(`LockStatus error: ${msg}`),
+    display: c.red(`LockStatus error: ${msg}`),
     is_error: true,
   }
 }
