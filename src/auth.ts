@@ -112,6 +112,16 @@ const OAUTH_SCOPES = [
  */
 const EXPIRY_BUFFER_MS = 60_000
 
+/**
+ * Fallback access-token lifetime (in seconds) used when the token endpoint
+ * returns a missing or non-numeric `expires_in`. Without a finite lifetime,
+ * `expiresAt` would become NaN and proactive refresh would be silently
+ * disabled forever (NaN comparisons are always false). One hour is a
+ * conservative default: short enough that we re-refresh well before most
+ * real OAuth tokens (typically 8h+) actually expire.
+ */
+const DEFAULT_TOKEN_LIFETIME_SECONDS = 3600
+
 /** Sanitize a provider id into a safe lockfile name component. */
 function sanitizeForFilename(id: string): string {
   const sanitized = id.replace(/[^A-Za-z0-9._-]+/g, "_")
@@ -342,15 +352,39 @@ export async function refreshAccessToken(
   }
 
   const data = await response.json<{
-    access_token: string
-    refresh_token?: string
-    expires_in: number
+    access_token?: unknown
+    refresh_token?: unknown
+    expires_in?: unknown
   }>()
 
+  // Validate the parsed fields before use. The server response is untrusted:
+  // a malformed body (missing access_token, or a non-numeric expires_in) must
+  // not silently produce a broken credential. In particular, a non-finite
+  // `expires_in` would make `expiresAt` NaN, and since `NaN < threshold` is
+  // always false, proactive refresh would be silently disabled forever.
+  const accessToken = data.access_token
+  if (typeof accessToken !== "string" || accessToken.length === 0) {
+    throw new Error("token refresh returned no access_token")
+  }
+
+  // Use the server-provided lifetime only when it is a finite positive number;
+  // otherwise fall back to a sane default so `expiresAt` is always finite and
+  // `needsRefresh` keeps working.
+  const expiresIn = data.expires_in
+  const lifetimeSeconds =
+    typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0
+      ? expiresIn
+      : DEFAULT_TOKEN_LIFETIME_SECONDS
+
+  const newRefreshToken =
+    typeof data.refresh_token === "string" && data.refresh_token.length > 0
+      ? data.refresh_token
+      : refreshToken
+
   return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token ?? refreshToken,
-    expiresAt: Date.now() + data.expires_in * 1000,
+    accessToken,
+    refreshToken: newRefreshToken,
+    expiresAt: Date.now() + lifetimeSeconds * 1000,
   }
 }
 
@@ -551,8 +585,15 @@ export async function getAuth(
     return await doRefreshUnlocked()
   }
 
-  // Proactively refresh if token is expired or about to expire
-  const needsRefresh = oauth.expiresAt != null && oauth.expiresAt - Date.now() < EXPIRY_BUFFER_MS
+  // Proactively refresh if token is expired or about to expire.
+  // Belt-and-suspenders: a non-finite `expiresAt` (NaN/Infinity, or a missing
+  // value) is treated as "needs refresh now" rather than "never refresh", so a
+  // credential without a usable expiry cannot silently disable proactive
+  // refresh forever (addresses credentials lacking a valid expiresAt).
+  const needsRefresh =
+    oauth.expiresAt == null ||
+    !Number.isFinite(oauth.expiresAt) ||
+    oauth.expiresAt - Date.now() < EXPIRY_BUFFER_MS
 
   if (needsRefresh && oauth.refreshToken) {
     return doRefresh()
