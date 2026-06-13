@@ -19,7 +19,7 @@
  * @module web-search/format
  */
 
-import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
 import type { SearchHit, SearchResponse } from "./providers/types.ts"
@@ -29,7 +29,6 @@ const SNIPPET_MAX = 240
 
 const { BOLD, DIM, ITALIC, RESET, UNDERLINE } = ANSI_CODES
 const FG_CYAN = PALETTE.cyan
-const FG_GREY = "\x1b[90m"
 
 function clip(s: string, max: number): string {
   if (s.length <= max) return s
@@ -62,7 +61,7 @@ export function formatText(response: SearchResponse, opts: { ansi?: boolean } = 
   const ansi = opts.ansi ?? false
   const b = (s: string) => (ansi ? `${BOLD}${s}${RESET}` : s)
   const dim = (s: string) => (ansi ? `${DIM}${s}${RESET}` : s)
-  const grey = (s: string) => (ansi ? `${FG_GREY}${s}${RESET}` : s)
+  const grey = (s: string) => (ansi ? c.gray(s) : s)
   const cyan = (s: string) => (ansi ? `${FG_CYAN}${s}${RESET}` : s)
   const url = (s: string) => (ansi ? `${DIM}${UNDERLINE}${s}${RESET}` : s)
   const it = (s: string) => (ansi ? `${ITALIC}${s}${RESET}` : s)

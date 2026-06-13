@@ -41,6 +41,7 @@
  */
 
 import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
 import { getSaveBus, MEMORY_SAVED, type MemorySavedPayload } from "../lib/save-echo.ts"
 import { MemoryStore, type StoreKind } from "../lib/store.ts"
@@ -86,8 +87,6 @@ export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult>
   // `<sid>.scratch.md`). Without one we have nowhere to put the
   // bullet — refuse loudly so the model sees the failure.
   if (scope === "short-term" && !sid) {
-    const ansi =
-      "\x1b[31m· memory save refused: short-term scope requires a session id (none plumbed through)\x1b[0m\n"
     ctx.log.warn(
       "short-term-no-sid",
       "refused short-term write: MINIMAL_AGENT_SESSION_ID is empty",
@@ -95,7 +94,10 @@ export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult>
         scope,
       },
     )
-    return { kind: "rendered", ansi }
+    return {
+      kind: "rendered",
+      ansi: `${c.red("· memory save refused: short-term scope requires a session id (none plumbed through)")}\n`,
+    }
   }
 
   // Build the right store. Persistent stores stamp `[session:<sid>]` on
@@ -107,12 +109,14 @@ export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult>
   // fixture). The store reads `$HOME` from env which we accept here, so
   // the same guard still pays off.
   if (store.path.startsWith(`${ctx.packageDir}/`) || store.path === ctx.packageDir) {
-    const ansi = `\x1b[31m· memory save refused: target inside plugin dir (${store.path})\x1b[0m\n`
     ctx.log.error("save-refused-package-dir", "refused write under plugin packageDir", {
       scope,
       path: store.path,
     })
-    return { kind: "rendered", ansi }
+    return {
+      kind: "rendered",
+      ansi: `${c.red(`· memory save refused: target inside plugin dir (${store.path})`)}\n`,
+    }
   }
 
   try {
@@ -140,13 +144,12 @@ export default async function memoryHandler(ctx: TUIContext): Promise<TUIResult>
     const preview = oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine
     const tag = scope === "global" ? "global" : scope === "short-term" ? "short-term" : "project"
     const evictedHint = evicted.length > 0 ? ` (evicted ${evicted.length} oldest)` : ""
-    const ansi = `\x1b[2m· memory saved [${tag}#${bullet.id}]${evictedHint}: ${preview}\x1b[0m\n`
+    const ansi = `${c.dim(`· memory saved [${tag}#${bullet.id}]${evictedHint}: ${preview}`)}\n`
     return { kind: "rendered", ansi }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     ctx.log.error("save-failed", msg, { scope })
-    const ansi = `\x1b[31m· memory save failed: ${msg}\x1b[0m\n`
-    return { kind: "rendered", ansi }
+    return { kind: "rendered", ansi: `${c.red(`· memory save failed: ${msg}`)}\n` }
   }
 }
 
