@@ -1,5 +1,5 @@
 import { listRegisteredModels, listRegisteredProviders } from "../llm/model-registry.ts"
-import { c } from "../ui/style/ansi.ts"
+import { writeCommandTable } from "../ui/command-table.ts"
 
 /**
  * `providers` (bare): list every provider registered in the canonical
@@ -8,7 +8,9 @@ import { c } from "../ui/style/ansi.ts"
  * registered at startup by the discovery loader, so this reflects every
  * `plugins/llm-*` package present.
  */
-export function runListProvidersCommand(): void {
+export function runListProvidersCommand(
+  deps: { output?: { write(s: string): unknown } } = {},
+): void {
   const providers = listRegisteredProviders()
 
   const modelCount = new Map<string, number>()
@@ -16,22 +18,38 @@ export function runListProvidersCommand(): void {
     modelCount.set(m.providerId, (modelCount.get(m.providerId) ?? 0) + 1)
   }
 
-  console.log("")
   if (providers.length === 0) {
-    console.log(`  ${c.dim("no providers registered")}`)
+    writeCommandTable(
+      { columns: [{ key: "id" }], sections: [], empty: "no providers registered" },
+      deps.output,
+    )
     return
   }
 
-  for (const p of [...providers].sort((a, b) => a.id.localeCompare(b.id))) {
-    const id = c.cyan(p.id.padEnd(16))
-    const name = c.dim((p.displayName ?? "").padEnd(20))
-    const surfaces = c.dim(p.surfaces.join(", "))
-    const n = modelCount.get(p.id) ?? 0
-    console.log(`  ${id} ${name} ${surfaces}  ${c.dim(`(${n} models)`)}`)
-  }
-
-  console.log("")
-  console.log(
-    `  ${c.dim(`${providers.length} providers · use 'providers models [id]' to list models`)}`,
+  writeCommandTable(
+    {
+      columns: [
+        { key: "id", minWidth: 16, color: "cyan" },
+        { key: "name", minWidth: 20, color: "dim" },
+        { key: "surfaces", color: "dim" },
+        { key: "count", color: "dim" },
+      ],
+      sections: [
+        {
+          rows: [...providers]
+            .sort((a, b) => a.id.localeCompare(b.id))
+            .map((p) => ({
+              cells: {
+                id: p.id,
+                name: p.displayName ?? "",
+                surfaces: p.surfaces.join(", "),
+                count: `(${modelCount.get(p.id) ?? 0} models)`,
+              },
+            })),
+        },
+      ],
+      summary: `${providers.length} providers · use 'providers models [id]' to list models`,
+    },
+    deps.output,
   )
 }
