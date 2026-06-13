@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { EditorBuffer } from "./editor-buffer.ts"
-import { EditorRenderer } from "./editor-renderer.ts"
+import { EditorBuffer } from "../../editor-buffer.ts"
+
+import { EditorRenderer } from "./renderer.ts"
 
 describe("EditorRenderer", () => {
   it("renders an empty buffer as a single prompt-only row", () => {
