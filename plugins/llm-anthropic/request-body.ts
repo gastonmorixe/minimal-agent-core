@@ -19,9 +19,13 @@
  * @module llm/providers/anthropic/request-body
  */
 
-import type { CanonicalBlock, CanonicalMessage } from "../../src/llm/canonical-messages.ts"
+import type {
+  CanonicalBlock,
+  CanonicalMessage,
+} from "@minimal-agent/plugin-api/llm/canonical-messages"
+import type { CanonicalToolDefinition } from "@minimal-agent/plugin-api/llm/canonical-tools"
+
 import type { CanonicalRequest, ThinkingConfig } from "../../src/llm/canonical-request.ts"
-import type { CanonicalToolDefinition } from "../../src/llm/canonical-tools.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 
 import { classifyRequest } from "./beta-flags.ts"
@@ -311,7 +315,7 @@ function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock |
 }
 
 function toAnthropicImageSource(
-  src: import("../../src/llm/canonical-messages.ts").ImageSource,
+  src: import("@minimal-agent/plugin-api/llm/canonical-messages").ImageSource,
 ): AnthropicImageSource | null {
   switch (src.kind) {
     case "url":
@@ -328,7 +332,7 @@ function toAnthropicImageSource(
 }
 
 function toAnthropicCacheControl(
-  hint: import("../../src/llm/canonical-messages.ts").CanonicalCacheHint,
+  hint: import("@minimal-agent/plugin-api/llm/canonical-messages").CanonicalCacheHint,
 ): AnthropicCacheControl {
   const out: AnthropicCacheControl = { type: "ephemeral" }
   if (hint.ttl) out.ttl = hint.ttl
@@ -345,7 +349,7 @@ function toAnthropicToolDef(tool: CanonicalToolDefinition): AnthropicToolDef {
 }
 
 function toAnthropicToolChoice(
-  choice: import("../../src/llm/canonical-tools.ts").ToolChoice,
+  choice: import("@minimal-agent/plugin-api/llm/canonical-tools").ToolChoice,
 ): AnthropicRequestBody["tool_choice"] {
   switch (choice.type) {
     case "auto":

@@ -22,12 +22,13 @@
  * @module llm/providers/anthropic/system-prompt
  */
 
-import { buildBillingHeaderText, CLAUDE_CODE_IDENTITY } from "../../src/headers.ts"
 import {
   neutralSystemPrompt,
   type SystemPromptBlock,
   type SystemPromptContext,
-} from "../../src/llm/provider-plugin.ts"
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
+
+import { buildBillingHeaderText, CLAUDE_CODE_IDENTITY } from "../../src/headers.ts"
 
 /**
  * The exact Claude-Code identity line the server validates (plan auth).

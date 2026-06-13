@@ -3,8 +3,8 @@
  *
  * Wires the building blocks (headers, request body, validation, SSE
  * translator) into the canonical `ProviderAdapter` shape. Dispatches
- * via the network client provided in `RunContext` (defaulting to the
- * package's `defaultNetworkClient` when none supplied).
+ * via the network client provided in `RunContext` (the host orchestrator
+ * populates `ctx.networkClient`; an absent client is a wiring bug).
  *
  * Retry / 401-refresh / stream-watchdog are intentionally NOT here :
  * those are provider-neutral and live one layer up. This adapter
@@ -13,23 +13,27 @@
  * @module llm/providers/anthropic/adapter
  */
 
+import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import type { ProviderAuth, RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
+import type {
+  ProviderPlugin,
+  ProviderSetupContext,
+  ProviderStartupContext,
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
+import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/types/plugin"
+import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
+
 import { listModels } from "../../src/client/list-models.ts"
-import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import {
   type PreflightIssue,
   type PreflightResolution,
   type ProviderAdapter,
-  type ProviderAuth,
-  type RunContext,
   type SurfaceId,
   type ValidationResult,
 } from "../../src/llm/provider.ts"
-import type { ProviderPlugin, ProviderStartupContext } from "../../src/llm/provider-plugin.ts"
-import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
-import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
-import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 import { broadcastResponseRateLimits } from "../../src/quota-broadcast.ts"
 
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
@@ -155,7 +159,10 @@ export const anthropicAdapter: ProviderAdapter = {
     ctx.debug?.headers(headers)
     ctx.debug?.body(body)
 
-    const networkClient = (ctx.networkClient as NetworkClient | undefined) ?? defaultNetworkClient
+    const networkClient = ctx.networkClient as NetworkClient | undefined
+    if (!networkClient) {
+      throw new Error("Anthropic adapter: missing ctx.networkClient (host must provide the client)")
+    }
     const response = await networkClient.request({
       label: "messages.send",
       method: "POST",
@@ -215,9 +222,17 @@ export const anthropicAdapter: ProviderAdapter = {
  * Register the Anthropic adapter + its model catalog into the global
  * registry. Idempotent. Call once at application start (typically
  * from `src/index.ts` or test setup).
+ *
+ * Registry seam (Wave D): when the host passes a {@link ProviderSetupContext}
+ * (the `models:register` capability, via `activateDiscoveredProviders`), the
+ * catalog is contributed through `ctx.models`; otherwise `registerAnthropicModels`
+ * falls back to its own `registerModel` import. The adapter itself still
+ * registers through `registerProvider` (the provider-port seam lands later).
+ *
+ * @param ctx - Optional host setup context carrying the model registrar.
  */
-export function bootstrapAnthropic(): void {
-  registerAnthropicModels()
+export function bootstrapAnthropic(ctx?: ProviderSetupContext): void {
+  registerAnthropicModels(ctx?.models)
   registerProvider(anthropicAdapter)
 }
 

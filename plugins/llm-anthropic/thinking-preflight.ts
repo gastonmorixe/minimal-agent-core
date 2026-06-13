@@ -34,7 +34,11 @@
  * @module llm/providers/anthropic/thinking-preflight
  */
 
-import type { CanonicalBlock, CanonicalMessage } from "../../src/llm/canonical-messages.ts"
+import type {
+  CanonicalBlock,
+  CanonicalMessage,
+} from "@minimal-agent/plugin-api/llm/canonical-messages"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import type { PreflightIssue, PreflightOption } from "../../src/llm/provider.ts"
 

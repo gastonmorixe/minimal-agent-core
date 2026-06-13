@@ -23,15 +23,15 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { systemMessage, userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
+
+import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import {
-  type CanonicalRequest,
   clearModelRegistry,
   clearProviderRegistry,
   resolveModel,
   resolveProvider,
-  systemMessage,
-  userText,
-} from "../../src/llm/index.ts"
+} from "../../src/llm/model-registry.ts"
 import * as modelRegistry from "../../src/llm/model-registry.ts"
 
 import { anthropicAdapter, anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
@@ -696,7 +696,7 @@ describe("translateAnthropicStream", () => {
       { type: "message_stop" },
     ] as const
 
-    const out: import("../../src/llm/canonical-events.ts").CanonicalEvent[] = []
+    const out: import("@minimal-agent/plugin-api/llm/canonical-events").CanonicalEvent[] = []
     for await (const ev of translateAnthropicStream(asAsyncIterable(events))) out.push(ev)
     const stopEv = out.find((e) => e.type === "tool_use_stop")
     expect(stopEv).toBeDefined()
@@ -745,7 +745,7 @@ describe("translateAnthropicStream", () => {
         error: { type: "overloaded_error", message: "try later" },
       },
     ] as const
-    const out: import("../../src/llm/canonical-events.ts").CanonicalEvent[] = []
+    const out: import("@minimal-agent/plugin-api/llm/canonical-events").CanonicalEvent[] = []
     for await (const ev of translateAnthropicStream(asAsyncIterable(events))) out.push(ev)
     expect(out[0]?.type).toBe("stream_error")
     if (out[0]?.type === "stream_error") {
@@ -757,7 +757,7 @@ describe("translateAnthropicStream", () => {
   it("translates the captured Opus 4.8 SSE response end-to-end", async () => {
     const raw = fixture("conversation-opus48.res-body.sse")
     const events = parseSseFixture(raw)
-    const out: import("../../src/llm/canonical-events.ts").CanonicalEvent[] = []
+    const out: import("@minimal-agent/plugin-api/llm/canonical-events").CanonicalEvent[] = []
     for await (const ev of translateAnthropicStream(asAsyncIterable(events))) out.push(ev)
     const stopEv = out.find((e) => e.type === "message_delta")
     expect(stopEv).toBeDefined()

@@ -27,7 +27,7 @@ import type {
   CanonicalUsage,
   StopDetails,
   StopReason,
-} from "../../src/llm/canonical-events.ts"
+} from "@minimal-agent/plugin-api/llm/canonical-events"
 
 // ---------------------------------------------------------------------------
 // Anthropic wire types (subset we consume)

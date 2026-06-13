@@ -51,29 +51,35 @@ const BASELINE = new Map<string, number>([
   ["file-lock/handlers/lock_status.ts", 1],
   ["file-lock/integration.test.ts", 2],
   ["history/integration.test.ts", 1],
-  ["llm-anthropic/adapter.broadcast.test.ts", 4], // committed in 5d12dc0 (quota footer fix); Wave D-5 sweeps to 0
+  // Wave D-anthropic: §5 net/registry/pure-neutral re-point sweep (76→51).
+  // Residual src sites are all blocked type families: canonical-request (C-3),
+  // model-registry runtime + ModelEntry, provider.ts port (post-C-3), pricing
+  // MTokRate, defaultNetworkClient (startup-probe + probeQuota param default),
+  // and host-only modules with no package home (auth, headers, quota-cache/
+  // broadcast, model-label, list-models, preflight, session-restore, media).
+  // See reports/D-anthropic.md.
+  ["llm-anthropic/adapter.broadcast.test.ts", 2],
   ["llm-anthropic/adapter.preflight.test.ts", 2],
-  ["llm-anthropic/adapter.ts", 10], // 9→10 in 5d12dc0 (quota footer fix); Wave D-5 sweeps to 0
-  ["llm-anthropic/anthropic.test.ts", 4],
+  ["llm-anthropic/adapter.ts", 5],
+  ["llm-anthropic/anthropic.test.ts", 2],
   ["llm-anthropic/beta-flags.characterization.test.ts", 3],
   ["llm-anthropic/beta-flags.ts", 2],
   ["llm-anthropic/beta-gates.ts", 1],
-  ["llm-anthropic/bootstrap.ts", 4],
-  ["llm-anthropic/capabilities.ts", 2],
+  ["llm-anthropic/bootstrap.ts", 3],
   ["llm-anthropic/forked-session.e2e.test.ts", 3],
-  ["llm-anthropic/headers.ts", 3],
+  ["llm-anthropic/headers.ts", 2],
   ["llm-anthropic/media-limits.ts", 1],
-  ["llm-anthropic/models.ts", 3],
-  ["llm-anthropic/quota-probe.test.ts", 3],
+  ["llm-anthropic/models.ts", 2],
+  ["llm-anthropic/quota-probe.test.ts", 2],
   ["llm-anthropic/quota-probe.ts", 5],
-  ["llm-anthropic/request-body.ts", 7],
+  ["llm-anthropic/request-body.ts", 2],
   ["llm-anthropic/session-info.cache.test.ts", 1],
-  ["llm-anthropic/session-info.ts", 5],
+  ["llm-anthropic/session-info.ts", 4],
   ["llm-anthropic/system-prompt.ts", 1],
-  ["llm-anthropic/thinking-preflight.test.ts", 2],
-  ["llm-anthropic/thinking-preflight.ts", 3],
+  ["llm-anthropic/thinking-preflight.test.ts", 1],
+  ["llm-anthropic/thinking-preflight.ts", 2],
   ["llm-anthropic/validate.degrade.test.ts", 2],
-  ["llm-anthropic/validate.ts", 5],
+  ["llm-anthropic/validate.ts", 3],
   ["llm-openai/adapter.ts", 3], // D-net-seam: network singleton → ctx.networkClient (port); classifyUpstreamError → plugin-api. Left: canonical-request, model-registry, provider.ts (all C-3 / port-split deferred)
   ["llm-openai/chat/request-body.ts", 2],
   ["llm-openai/models.ts", 1], // D-2: makeCharRatioEstimator → plugin-api. D-net-seam: registerModel now a ctx.models fallback (registrar adopted via register(ctx)); import drops to 0 once activateDiscoveredProviders is the live path (convergence)

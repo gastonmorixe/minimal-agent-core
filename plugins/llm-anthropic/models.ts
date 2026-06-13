@@ -12,6 +12,12 @@
  * @module llm/providers/anthropic/models
  */
 
+import type {
+  ModelRegistrar,
+  ProviderModelSpec,
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
+import { makeCharRatioEstimator } from "@minimal-agent/plugin-api/llm/token-estimate"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { registerModel } from "../../src/llm/model-registry.ts"
 import {
@@ -23,7 +29,6 @@ import {
   ANTHROPIC_SONNET_STANDARD,
   type MTokRate,
 } from "../../src/llm/pricing.ts"
-import { makeCharRatioEstimator } from "../../src/llm/token-estimate.ts"
 
 import {
   CAPS_FABLE_5,
@@ -34,6 +39,17 @@ import {
   CAPS_SONNET_45,
   CAPS_SONNET_46,
 } from "./capabilities.ts"
+
+/**
+ * The neutral {@link ProviderModelSpec} plus the optional per-request pricing
+ * picker the Anthropic catalog needs (the `speed:"fast"` rate switch). It is a
+ * subtype of `ProviderModelSpec`, so a spec built here registers through the
+ * host {@link ModelRegistrar} unchanged; the picker rides along on the object
+ * and the registry's `ModelEntry.pricingForRequest` slot consumes it.
+ */
+type AnthropicModelSpec = ProviderModelSpec & {
+  pricingForRequest?: (req: CanonicalRequest) => MTokRate
+}
 
 // ---------------------------------------------------------------------------
 // Per-model pricing pickers (handle speed:"fast" rate switch)
@@ -62,10 +78,31 @@ const estimateAnthropicTokens = makeCharRatioEstimator(3.5)
  * catalog. Idempotent : safe to call multiple times (re-registration
  * is last-write-wins).
  *
- * Returns the registered ids for testability.
+ * Registry seam (Wave D): when the host passes a {@link ModelRegistrar} (the
+ * `models:register` capability, threaded through `register(ctx)`), the catalog
+ * is contributed through `ctx.models.register` — no `src/` import needed. When
+ * no registrar is supplied (the legacy no-arg activation path, or a direct call
+ * in a test), it falls back to the imported `registerModel`. This lets the live
+ * provider-loader adopt the ctx-driven path provider-by-provider without
+ * breaking the no-context callers.
+ *
+ * @param registrar - Optional host model registrar; defaults to the direct import.
+ * @returns the registered ids for testability.
  */
-export function registerAnthropicModels(): string[] {
-  registerModel({
+export function registerAnthropicModels(registrar?: ModelRegistrar): string[] {
+  // Single registration sink: the host registrar when present, else the
+  // direct registry import (back-compat fallback). The fallback cast bridges
+  // the contract's plain-string `surfaceId` to the host's `SurfaceId` union;
+  // the literals below are valid surface ids either way. The local spec type
+  // widens `ProviderModelSpec` with the optional `pricingForRequest` picker
+  // (the speed:"fast" rate switch the Anthropic catalog needs but the neutral
+  // contract omits); it stays assignable to `ProviderModelSpec`, and the host
+  // registrar/`registerModel` both carry the picker through unchanged.
+  const register = (spec: AnthropicModelSpec): void => {
+    if (registrar) registrar.register(spec)
+    else registerModel(spec as Parameters<typeof registerModel>[0])
+  }
+  register({
     id: "claude-fable-5",
     aliases: ["claude-fable-5[1m]"],
     providerId: "anthropic",
@@ -89,7 +126,7 @@ export function registerAnthropicModels(): string[] {
     },
   })
 
-  registerModel({
+  register({
     id: "claude-opus-4-8",
     aliases: ["claude-opus-4-8[1m]"],
     providerId: "anthropic",
@@ -112,7 +149,7 @@ export function registerAnthropicModels(): string[] {
     },
   })
 
-  registerModel({
+  register({
     id: "claude-opus-4-7",
     aliases: ["claude-opus-4-7[1m]"],
     providerId: "anthropic",
@@ -135,7 +172,7 @@ export function registerAnthropicModels(): string[] {
     },
   })
 
-  registerModel({
+  register({
     id: "claude-opus-4-6",
     aliases: ["claude-opus-4-6[1m]"],
     providerId: "anthropic",
@@ -157,7 +194,7 @@ export function registerAnthropicModels(): string[] {
     },
   })
 
-  registerModel({
+  register({
     id: "claude-sonnet-4-6",
     aliases: ["claude-sonnet-4-6[1m]"],
     providerId: "anthropic",
@@ -178,7 +215,7 @@ export function registerAnthropicModels(): string[] {
     },
   })
 
-  registerModel({
+  register({
     id: "claude-sonnet-4-5-20250929",
     aliases: ["claude-sonnet-4-5"],
     providerId: "anthropic",
@@ -199,7 +236,7 @@ export function registerAnthropicModels(): string[] {
     },
   })
 
-  registerModel({
+  register({
     id: "claude-haiku-4-5-20251001",
     aliases: ["claude-haiku-4-5"],
     providerId: "anthropic",
