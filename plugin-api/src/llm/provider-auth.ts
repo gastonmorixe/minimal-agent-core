@@ -37,6 +37,16 @@ export type ProviderAuth =
       kind: "oauth"
       token: string
       refresh?: () => Promise<{ token: string }>
+      /**
+       * Optional provider-owned request headers derived from stored auth
+       * metadata. The host carries these but does not interpret them.
+       */
+      headers?: Record<string, string>
+      /**
+       * Optional provider-owned runtime API base URL for auth modes whose
+       * endpoint differs from API-key auth (for example plan-auth backends).
+       */
+      baseUrl?: string
     }
   | {
       kind: "api-key"

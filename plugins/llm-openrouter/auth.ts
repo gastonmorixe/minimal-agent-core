@@ -12,8 +12,6 @@ import type {
 export const OPENROUTER_API_KEY_AUTH = {
   serviceId: "openrouter-api-key",
   displayName: "OpenRouter API Key",
-  envVars: ["OPENROUTER_KEY"] as const,
-  configKey: "openrouter",
 } as const
 
 function str(v: unknown): string | undefined {

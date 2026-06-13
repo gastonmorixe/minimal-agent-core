@@ -148,6 +148,52 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs(["auth-status"])).toEqual(["--auth-status"])
   })
 
+  test("provider login command grammar maps to provider-selected OAuth login", () => {
+    expect(normalizeArgs(["provider", "openai", "login"])).toEqual([
+      "--login",
+      "--provider",
+      "openai",
+    ])
+    expect(normalizeArgs(["providers", "login", "openai"])).toEqual([
+      "--login",
+      "--provider",
+      "openai",
+    ])
+    expect(normalizeArgs(["login", "openai"])).toEqual(["--login", "--provider", "openai"])
+    expect(normalizeArgs(["provider", "openai", "login", "oauth"])).toEqual([
+      "--login",
+      "--provider",
+      "openai",
+      "--auth-method",
+      "oauth",
+    ])
+    expect(normalizeArgs(["provider", "openai", "login", "api-key"])).toEqual([
+      "--login",
+      "--provider",
+      "openai",
+      "--auth-method",
+      "api-key",
+    ])
+    expect(normalizeArgs(["providers", "login", "openai", "api-key"])).toEqual([
+      "--login",
+      "--provider",
+      "openai",
+      "--auth-method",
+      "api-key",
+    ])
+    expect(normalizeArgs(["login", "openai", "oauth"])).toEqual([
+      "--login",
+      "--provider",
+      "openai",
+      "--auth-method",
+      "oauth",
+    ])
+  })
+
+  test("provider model command grammar maps to provider-filtered model list", () => {
+    expect(normalizeArgs(["provider", "openai", "models"])).toEqual(["--list-models", "openai"])
+  })
+
   test("auth subcommands keep trailing flags after the verb", () => {
     // `minimal-agent login --email foo@bar` → `--login --email foo@bar`.
     // The subcommand recognizer only consumes the first positional;

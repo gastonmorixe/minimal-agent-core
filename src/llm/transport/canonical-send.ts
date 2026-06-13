@@ -38,7 +38,7 @@
 import { randomUUID } from "node:crypto"
 
 import { readCredentials } from "../../auth.ts"
-import { resolveApiKeyAuth } from "../../auth-strategies.ts"
+import { resolveStoredProviderAuth } from "../../auth-strategies.ts"
 import { debugRequestOptions } from "../../client/debug.ts"
 import type { SendOptions, StreamedResponse } from "../../client/types.ts"
 import { diag } from "../../diagnostic-bus.ts"
@@ -70,9 +70,9 @@ import { withStreamWatchdog } from "./watchdog.ts"
  *
  * - anthropic  → the legacy `AuthResult` (OAuth keychain; keeps the
  *   keychain-first / peer-token 401 recovery wired in `canonicalSendFn`).
- * - openai     → `OPENAI_API_KEY` env, else `apiKeys.openai` from config.
- * - openrouter → `OPENROUTER_KEY` env, else `apiKeys.openrouter` from config.
- * - missing key → THROW (no silent fallback to the Anthropic token).
+ * - openai/openrouter/etc. → minimal-agent's own provider auth store.
+ * - missing credentials → THROW (no silent fallback to env/config or the
+ *   Anthropic token).
  *
  * An unresolvable model id defers to the legacy credential so `run()` raises
  * its own "unknown model" error rather than this masking it (that path never
@@ -90,7 +90,7 @@ function resolveProviderAuth(opts: SendOptions): ProviderAuth {
     case "anthropic":
       return legacyAuthToProviderAuth(opts.auth)
     default:
-      return resolveApiKeyAuth(providerId, modelId)
+      return resolveStoredProviderAuth(providerId, modelId)
   }
 }
 

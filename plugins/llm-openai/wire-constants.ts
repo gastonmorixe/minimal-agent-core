@@ -17,8 +17,11 @@
 
 export const OPENAI_BASE_URL = "https://api.openai.com"
 
-export const CHAT_COMPLETIONS_URL = `${OPENAI_BASE_URL}/v1/chat/completions`
-export const RESPONSES_URL = `${OPENAI_BASE_URL}/v1/responses`
+export const CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+export const RESPONSES_PATH = "/v1/responses"
+
+export const CHAT_COMPLETIONS_URL = `${OPENAI_BASE_URL}${CHAT_COMPLETIONS_PATH}`
+export const RESPONSES_URL = `${OPENAI_BASE_URL}${RESPONSES_PATH}`
 
 /**
  * User-Agent the adapter advertises. Mirrors what the official OpenAI

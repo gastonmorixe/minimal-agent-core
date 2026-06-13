@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { c } from "../agent/ansi.ts"
-import { DEFAULT_MODEL, VERSION } from "../headers.ts"
+import { VERSION } from "../headers.ts"
 
 /**
  * Read the agent's semver from the embedded `<repo>/package.json` next
@@ -50,7 +50,7 @@ export function printHelp(): void {
     `    ${c.dim("$")} echo "prompt" | minimal-agent ${c.dim("-")}`,
     "",
     `  ${c.bold("Options")}`,
-    `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
+    `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim("(else MINIMAL_AGENT_MODEL, config model, provider default)")}`,
     `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, xhigh, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
     `    ${c.cyan("--fast")}                    Fast-mode dispatch ${c.dim('(speed:"fast", fast-capable models only, ~2.5x tok/s, ~2x cost, or MINIMAL_AGENT_FAST=1)')}`,
     `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
@@ -66,8 +66,9 @@ export function printHelp(): void {
     `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
     `    ${c.cyan("--show-hidden-chars")}      Reveal spaces/tabs/newlines as faint glyphs (input editor + --debug output)`,
     "",
-    `  ${c.bold("Auth")} ${c.dim("(also as subcommands: `login`, `logout`, `auth-status`)")}`,
-    `    ${c.cyan("--login")} ${c.dim("[--email <addr>]")}   Sign in via OAuth (PKCE manual-paste flow)`,
+    `  ${c.bold("Auth")} ${c.dim("(provider-owned auth flows; flags remain legacy aliases)")}`,
+    `    ${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("login")} ${c.dim("[--email <addr>]")}  Sign in to a provider, e.g. ${c.dim("provider openai login")}`,
+    `    ${c.cyan("login")} ${c.dim("<id>")} ${c.dim("[--email <addr>]")}      Short alias for provider login`,
     `    ${c.cyan("--logout")}                   Clear minimal-agent credentials ${c.dim("(~/.minimal-agent/auth.jsonc)")}`,
     `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
     "",
@@ -95,6 +96,7 @@ export function printHelp(): void {
     `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
     `    ${c.cyan("MINIMAL_AGENT_FORMATTER_ARGS")}  Extra args for the formatter ${c.dim('(shell-style, e.g. "--table-fit")')}`,
     `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
+    `    ${c.cyan("MINIMAL_AGENT_MODEL")}      Default model id ${c.dim("(same as --model)")}`,
     `    ${c.cyan("MINIMAL_AGENT_MEMORY_NAMESPACE")}  Namespace memory paths under ${c.dim("namespaces/<ns>/")} ${c.dim("(memory plugin)")}`,
     `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
     `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,

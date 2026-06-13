@@ -33,7 +33,7 @@ import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import type { ProviderAdapter, SurfaceId, ValidationResult } from "../../src/llm/provider.ts"
 
-import { openAIApiKeyAuth } from "./auth.ts"
+import { openAIApiKeyAuth, openAIOAuthLogin } from "./auth.ts"
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
 import { buildOpenAIHeaders } from "./headers.ts"
@@ -45,7 +45,12 @@ import {
 } from "./responses/response-stream.ts"
 import { fetchOpenAISessionInfo, setOpenAIRateLimits } from "./session-info.ts"
 import { validateOpenAIRequest } from "./validate.ts"
-import { CHAT_COMPLETIONS_URL, RESPONSES_URL } from "./wire-constants.ts"
+import {
+  CHAT_COMPLETIONS_PATH,
+  CHAT_COMPLETIONS_URL,
+  RESPONSES_PATH,
+  RESPONSES_URL,
+} from "./wire-constants.ts"
 
 /**
  * OpenAI adapter (Chat Completions + Responses). Singleton; register
@@ -86,7 +91,8 @@ export const openaiAdapter: ProviderAdapter = {
 
     if (model.surfaceId === "openai-chat-completions") {
       const body = buildOpenAIChatBody(req, model)
-      ctx.debug?.header(`POST ${CHAT_COMPLETIONS_URL}`)
+      const url = openAIUrl(auth, CHAT_COMPLETIONS_PATH, CHAT_COMPLETIONS_URL)
+      ctx.debug?.header(`POST ${url}`)
       ctx.debug?.kv("model", body.model)
       ctx.debug?.kv("surface", "chat")
       ctx.debug?.headers(headers)
@@ -95,7 +101,7 @@ export const openaiAdapter: ProviderAdapter = {
       const response = await networkClient.request({
         label: "openai.chat.completions",
         method: "POST",
-        url: CHAT_COMPLETIONS_URL,
+        url,
         headers,
         body: JSON.stringify(body),
         signal: req.signal,
@@ -116,7 +122,8 @@ export const openaiAdapter: ProviderAdapter = {
 
     if (model.surfaceId === "openai-responses") {
       const body = buildOpenAIResponsesBody(req, model)
-      ctx.debug?.header(`POST ${RESPONSES_URL}`)
+      const url = openAIUrl(auth, RESPONSES_PATH, RESPONSES_URL)
+      ctx.debug?.header(`POST ${url}`)
       ctx.debug?.kv("model", body.model)
       ctx.debug?.kv("surface", "responses")
       ctx.debug?.headers(headers)
@@ -125,7 +132,7 @@ export const openaiAdapter: ProviderAdapter = {
       const response = await networkClient.request({
         label: "openai.responses",
         method: "POST",
-        url: RESPONSES_URL,
+        url,
         headers,
         body: JSON.stringify(body),
         signal: req.signal,
@@ -169,6 +176,11 @@ export const openaiAdapter: ProviderAdapter = {
     }
     return recs
   },
+}
+
+function openAIUrl(auth: ProviderAuth, path: string, fallback: string): string {
+  if (auth.kind !== "oauth" || !auth.baseUrl) return fallback
+  return `${auth.baseUrl.replace(/\/+$/, "")}${path}`
 }
 
 /**
@@ -233,6 +245,7 @@ export const openaiProviderPlugin: ProviderPlugin = {
   shortCode: "oai",
   register: bootstrapOpenAI,
   apiKeyAuth: openAIApiKeyAuth,
+  oauthLogin: openAIOAuthLogin,
   fetchSessionInfo: fetchOpenAISessionInfo,
   /**
    * Version token for dense labels: "gpt-<rest>" → rest minus trailing

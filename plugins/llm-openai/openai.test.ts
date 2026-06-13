@@ -31,6 +31,7 @@ import {
   buildOpenAIApiKeyCredential,
   OPENAI_API_KEY_AUTH,
   openAIApiKeyAuth,
+  openAIOAuthLogin,
   readOpenAIApiKey,
 } from "./auth.ts"
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
@@ -149,16 +150,14 @@ describe("bootstrapOpenAI", () => {
 })
 
 describe("openaiProviderPlugin auth strategy", () => {
-  it("exposes API-key auth and no OAuth login strategy", () => {
+  it("exposes API-key auth and OAuth login strategies", () => {
     expect(openaiProviderPlugin.apiKeyAuth).toBe(openAIApiKeyAuth)
-    expect(openaiProviderPlugin.oauthLogin).toBeUndefined()
+    expect(openaiProviderPlugin.oauthLogin).toBe(openAIOAuthLogin)
   })
 
-  it("declares OpenAI API-key sources and credential codec", () => {
+  it("declares the OpenAI API-key credential codec", () => {
     expect(openAIApiKeyAuth.serviceId).toBe(OPENAI_API_KEY_AUTH.serviceId)
     expect(openAIApiKeyAuth.displayName).toBe("OpenAI API Key")
-    expect(openAIApiKeyAuth.envVars).toEqual(["OPENAI_API_KEY"])
-    expect(openAIApiKeyAuth.configKey).toBe("openai")
 
     const write = buildOpenAIApiKeyCredential("sk-test")
     expect(write).toEqual({
@@ -168,6 +167,16 @@ describe("openaiProviderPlugin auth strategy", () => {
     })
     expect(readOpenAIApiKey(write.secrets)).toBe("sk-test")
     expect(readOpenAIApiKey({ tokenType: "api-key" })).toBeNull()
+  })
+
+  it("declares Codex-compatible OpenAI OAuth login settings", () => {
+    const config = openAIOAuthLogin.config()
+    expect(config.clientId).toBe("app_EMoamEEZ73f0CkXaXp7hrann")
+    expect(config.authorizeUrl).toBe("https://auth.openai.com/oauth/authorize")
+    expect(config.tokenUrl).toBe("https://auth.openai.com/oauth/token")
+    expect(config.tokenRequestEncoding).toBe("form")
+    expect(config.tokenRequestIncludesState).toBe(false)
+    expect(config.scopes).toContain("offline_access")
   })
 })
 

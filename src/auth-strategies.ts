@@ -3,13 +3,12 @@
  *
  * This module is the host-side facade over provider plugin auth hooks. It
  * keeps credential lookup policy generic while providers own their service
- * ids, environment variable names, config keys, and store codecs.
+ * ids and store codecs.
  *
  * @module auth-strategies
  */
 
 import { defaultAuthStore } from "./auth-store.ts"
-import { loadUserConfig } from "./config.ts"
 import type { ProviderAuth } from "./llm/provider.ts"
 import {
   type ApiKeyAuthProvider,
@@ -23,6 +22,16 @@ export function listOAuthLoginProviders(): OAuthLoginProvider[] {
   return listProviderPlugins()
     .map((p) => p.oauthLogin)
     .filter((p): p is OAuthLoginProvider => p !== undefined)
+}
+
+/** List registered provider OAuth login strategies with their owning provider ids. */
+export function listOAuthLoginProviderEntries(): Array<{
+  providerId: string
+  auth: OAuthLoginProvider
+}> {
+  return listProviderPlugins().flatMap((p) =>
+    p.oauthLogin ? [{ providerId: p.id, auth: p.oauthLogin }] : [],
+  )
 }
 
 /** Find a provider OAuth login strategy, or the default one when no id is supplied. */
@@ -43,39 +52,35 @@ export function findApiKeyAuthProvider(providerId: string): ApiKeyAuthProvider |
   return findProviderPlugin(providerId)?.apiKeyAuth
 }
 
-/** Resolve API-key auth for a provider from env, config, then the host auth store. */
-export function resolveApiKeyAuth(providerId: string, modelId: string): ProviderAuth {
-  const strategy = findApiKeyAuthProvider(providerId)
-  if (!strategy) {
+/** Resolve runtime auth for a provider from minimal-agent's own auth store only. */
+export function resolveStoredProviderAuth(providerId: string, modelId: string): ProviderAuth {
+  const plugin = findProviderPlugin(providerId)
+  if (!plugin) {
     throw new Error(
       `canonical transport: no credential strategy for provider "${providerId}" ` +
-        `(model "${modelId}"). Add apiKeyAuth or oauthLogin to that provider plugin.`,
+        `(model "${modelId}"). Provider plugin is not registered.`,
     )
   }
 
-  for (const envVar of strategy.envVars) {
-    const value = process.env[envVar]
-    if (value && value.trim().length > 0) return { kind: "api-key", key: value }
+  const store = defaultAuthStore()
+
+  const oauth = plugin.oauthLogin
+  if (oauth?.readAuth) {
+    const storedSecrets = store.getSecrets(oauth.serviceId, oauth.displayName)
+    const auth = storedSecrets ? oauth.readAuth(storedSecrets) : null
+    if (auth) return auth
   }
 
-  const configKey = strategy.configKey
-  if (configKey) {
-    const apiKeys = loadUserConfig().apiKeys as Record<string, string | undefined> | undefined
-    const value = apiKeys?.[configKey]
-    if (value && value.trim().length > 0) return { kind: "api-key", key: value }
+  const apiKey = plugin.apiKeyAuth
+  if (apiKey) {
+    const storedSecrets = store.getSecrets(apiKey.serviceId, apiKey.displayName)
+    const stored = storedSecrets ? apiKey.readApiKey(storedSecrets) : null
+    if (stored && stored.trim().length > 0) return { kind: "api-key", key: stored }
   }
 
-  const storedSecrets = defaultAuthStore().getSecrets(strategy.serviceId, strategy.displayName)
-  const stored = storedSecrets ? strategy.readApiKey(storedSecrets) : null
-  if (stored && stored.trim().length > 0) return { kind: "api-key", key: stored }
-
-  const envHint = strategy.envVars.length > 0 ? strategy.envVars.join(" or ") : "an env var"
-  const configHint = configKey
-    ? `, add "apiKeys.${configKey}" to ~/.minimal-agent/config.jsonc`
-    : ""
   throw new Error(
-    `canonical transport: no API key for provider "${providerId}" (model "${modelId}"). ` +
-      `Set ${envHint}${configHint}, or run ` +
-      `minimal-agent --login --provider ${providerId} --api-key.`,
+    `canonical transport: no stored credentials for provider "${providerId}" ` +
+      `(model "${modelId}"). Run ` +
+      `minimal-agent provider ${providerId} login.`,
   )
 }

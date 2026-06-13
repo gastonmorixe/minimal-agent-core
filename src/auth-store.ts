@@ -538,3 +538,8 @@ export function defaultAuthStore(): AuthStore {
   if (!_default) _default = new AuthStore()
   return _default
 }
+
+/** Reset the lazy default store after tests change MINIMAL_AGENT_AUTH_FILE. */
+export function resetDefaultAuthStoreForTests(): void {
+  _default = undefined
+}
