@@ -10,11 +10,6 @@
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import {
-  CLAUDE_CODE_IDENTITY,
-  resolveAnthropicSystemPrompt,
-} from "../../plugins/llm-anthropic/system-prompt.ts"
-
 import type { Capabilities } from "./capabilities.ts"
 import { clearModelRegistry, registerModel } from "./model-registry.ts"
 import {
@@ -53,43 +48,9 @@ afterEach(() => {
   clearModelRegistry()
 })
 
-describe("resolveAnthropicSystemPrompt", () => {
-  const body: SystemPromptContext["body"] = [
-    {
-      type: "text",
-      text: "INSTRUCTIONS",
-      cache_control: { type: "ephemeral", ttl: "1h", scope: "global" },
-    },
-  ]
-
-  it("OAuth (plan auth): billing block + exact Claude-Code identity, neutral identity dropped", () => {
-    const out = resolveAnthropicSystemPrompt({
-      identity: NEUTRAL_IDENTITY,
-      body,
-      authKind: "oauth",
-      modelId: "claude-opus-4-7",
-    })
-    expect(out).toHaveLength(3)
-    expect(out[0].text).toMatch(
-      /^x-anthropic-billing-header: cc_version=\d+\.\d+\.\S+; cc_entrypoint=cli; cch=00000;$/,
-    )
-    expect(out[1].text).toBe(CLAUDE_CODE_IDENTITY)
-    expect(out[1].text).not.toContain("Minimal Agent")
-    expect(out[2].text).toBe("INSTRUCTIONS")
-  })
-
-  it("api-key: keeps neutral identity, NO billing header", () => {
-    const out = resolveAnthropicSystemPrompt({
-      identity: NEUTRAL_IDENTITY,
-      body,
-      authKind: "api-key",
-      modelId: "claude-opus-4-7",
-    })
-    expect(out).toHaveLength(2)
-    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
-    expect(out.some((b) => b.text.startsWith("x-anthropic-billing-header"))).toBe(false)
-  })
-})
+// resolveAnthropicSystemPrompt's billing-header / Claude-Code-identity pins
+// moved to plugins/llm-anthropic/system-prompt.test.ts (A-5): that preamble
+// is provider wire knowledge and is pinned in the provider's own suite.
 
 describe("resolveSystemPromptForModel", () => {
   it("delegates to the registered provider plugin's resolveSystemPrompt", () => {

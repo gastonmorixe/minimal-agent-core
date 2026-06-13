@@ -20,7 +20,7 @@
  *   8. Persist the resulting tokens — access/refresh/expiry/scopes plus the
  *      account+org uuids and email from the exchange response — into
  *      minimal-agent's OWN credential store (`~/.minimal-agent/auth.jsonc`,
- *      see {@link ../auth-store.ts}). We do NOT write the macOS Keychain or
+ *      see `../auth-store.ts`). We do NOT write the macOS Keychain or
  *      `~/.claude.json`; minimal-agent is fully independent of the official
  *      `claude` CLI's storage.
  *
@@ -41,54 +41,13 @@
 
 import { createHash, randomBytes } from "node:crypto"
 
+import { type AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import {
-  type CredentialsData,
-  writeCredentials as defaultWriteCredentials,
-  getOauthRefreshConfig,
-} from "./auth.ts"
+  listProviderPlugins,
+  type OAuthLoginInstallResult,
+  type OAuthLoginProvider,
+} from "./llm/provider-plugin.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Manual-flow redirect URL. Matches the prod config in cli.pretty.js L55492-55493:
- *   `MANUAL_REDIRECT_URL: "https://platform.claude.com/oauth/code/callback"`
- *
- * After successful sign-in the auth server lands the user on this page,
- * which displays the authorization code in `<code>#<state>` format ready
- * to be copy-pasted back into the CLI prompt.
- */
-export const MANUAL_REDIRECT_URL = "https://platform.claude.com/oauth/code/callback"
-
-/**
- * Default authorize endpoint for Claude.ai sign-in. Matches the prod config
- * `CLAUDE_AI_AUTHORIZE_URL` at L55485 (the `claude.com/cai/...` bounce path
- * that 307s to `claude.ai/oauth/authorize` so CLI sign-ins are attributed
- * to claude.com visits — that bounce is invisible to us, we just hit the
- * documented entry URL).
- */
-export const CLAUDE_AI_AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize"
-
-/**
- * OAuth scopes requested at login time. We deliberately request the **union**
- * of the Claude.ai and Console scope sets so a single login works for both
- * subscription types — that mirrors `ALL_OAUTH_SCOPES` at
- * `cc-03312026-2.1.88/src/constants/oauth.ts:56`.
- *
- * Order matches the upstream constant. The token server returns the actually
- * granted scopes via the `scope` field of the response, so requesting more
- * than the user is entitled to is harmless.
- */
-export const LOGIN_SCOPES: readonly string[] = [
-  "org:create_api_key", // CONSOLE
-  "user:profile", // both
-  "user:inference",
-  "user:sessions:claude_code",
-  "user:mcp_servers",
-  "user:file_upload",
-] as const
 
 // ---------------------------------------------------------------------------
 // PKCE / state helpers
@@ -142,11 +101,11 @@ export interface BuildAuthUrlInput {
   clientId: string
   codeChallenge: string
   state: string
-  /** Override the authorize URL base (defaults to claude.ai). */
-  authorizeUrl?: string
-  /** Override the manual redirect URL (defaults to the prod manual one). */
-  redirectUri?: string
-  /** Optional pre-fill email (claude.ai login form). */
+  authorizeUrl: string
+  redirectUri: string
+  scopes: readonly string[]
+  authorizeParams?: Readonly<Record<string, string>>
+  loginHintParam?: string
   loginHint?: string
 }
 
@@ -161,16 +120,20 @@ export interface BuildAuthUrlInput {
  * "tells the login page to show Claude Max upsell" — kept for parity.
  */
 export function buildAuthUrl(input: BuildAuthUrlInput): string {
-  const url = new URL(input.authorizeUrl ?? CLAUDE_AI_AUTHORIZE_URL)
-  url.searchParams.set("code", "true")
+  const url = new URL(input.authorizeUrl)
+  for (const [key, value] of Object.entries(input.authorizeParams ?? {})) {
+    url.searchParams.set(key, value)
+  }
   url.searchParams.set("client_id", input.clientId)
   url.searchParams.set("response_type", "code")
-  url.searchParams.set("redirect_uri", input.redirectUri ?? MANUAL_REDIRECT_URL)
-  url.searchParams.set("scope", LOGIN_SCOPES.join(" "))
+  url.searchParams.set("redirect_uri", input.redirectUri)
+  url.searchParams.set("scope", input.scopes.join(" "))
   url.searchParams.set("code_challenge", input.codeChallenge)
   url.searchParams.set("code_challenge_method", "S256")
   url.searchParams.set("state", input.state)
-  if (input.loginHint) url.searchParams.set("login_hint", input.loginHint)
+  if (input.loginHint && input.loginHintParam) {
+    url.searchParams.set(input.loginHintParam, input.loginHint)
+  }
   return url.toString()
 }
 
@@ -234,12 +197,10 @@ export interface TokenExchangeInput {
   authorizationCode: string
   state: string
   codeVerifier: string
-  /** Override the token URL (defaults to the value returned by getOauthRefreshConfig). */
-  tokenUrl?: string
-  /** Override the client id (defaults to the value returned by getOauthRefreshConfig). */
-  clientId?: string
-  /** Override the redirect URI sent at exchange time. MUST equal the one used in buildAuthUrl. */
-  redirectUri?: string
+  tokenUrl: string
+  clientId: string
+  /** Redirect URI sent at exchange time. MUST equal the one used in buildAuthUrl. */
+  redirectUri: string
 }
 
 /**
@@ -247,7 +208,7 @@ export interface TokenExchangeInput {
  * (account info, organization info) on the success path — see
  * `services/oauth/types.ts: OAuthTokenExchangeResponse` upstream.
  */
-export interface TokenExchangeResponse {
+export interface TokenExchangeResponse extends Record<string, unknown> {
   access_token: string
   refresh_token: string
   expires_in: number
@@ -261,25 +222,8 @@ export interface TokenExchangeResponse {
   }
 }
 
-/**
- * Result of a successful login + persistence.
- *
- * Pulled out as its own type because tests assert against it and the CLI
- * needs to know which fields to print in the "Login successful" footer.
- */
-export interface LoginInstallResult {
-  accessToken: string
-  refreshToken: string
-  expiresAt: number
-  scopes: string[]
-  account?: {
-    uuid: string
-    emailAddress: string
-  }
-  organization?: {
-    uuid: string
-  }
-}
+/** Result of a successful provider login + persistence. */
+export type LoginInstallResult = OAuthLoginInstallResult
 
 /**
  * Exchange the pasted authorization code for tokens.
@@ -296,16 +240,11 @@ export async function exchangeCodeForTokens(
   input: TokenExchangeInput,
   networkClient: NetworkClient = defaultNetworkClient,
 ): Promise<TokenExchangeResponse> {
-  const oauth = getOauthRefreshConfig()
-  const tokenUrl = input.tokenUrl ?? oauth.tokenUrl
-  const clientId = input.clientId ?? oauth.clientId
-  const redirectUri = input.redirectUri ?? MANUAL_REDIRECT_URL
-
   const body = JSON.stringify({
     grant_type: "authorization_code",
     code: input.authorizationCode,
-    redirect_uri: redirectUri,
-    client_id: clientId,
+    redirect_uri: input.redirectUri,
+    client_id: input.clientId,
     code_verifier: input.codeVerifier,
     state: input.state,
   })
@@ -313,7 +252,7 @@ export async function exchangeCodeForTokens(
   const response = await networkClient.request({
     label: "oauth.login.exchange",
     method: "POST",
-    url: tokenUrl,
+    url: input.tokenUrl,
     headers: { "content-type": "application/json" },
     body,
     capture: {
@@ -340,18 +279,12 @@ export async function exchangeCodeForTokens(
 // ---------------------------------------------------------------------------
 
 export interface InstallCredentialsDeps {
-  /**
-   * Override credential persistence (tests). Receives the assembled
-   * {@link CredentialsData}; defaults to {@link writeCredentials} from
-   * `auth.ts`, which writes the `anthropic-plan-oauth` entry into
-   * `~/.minimal-agent/auth.jsonc`.
-   */
-  writeCredentials?: (data: CredentialsData) => void
+  store?: AuthStore
 }
 
 /**
  * Persist a successful token-exchange result into minimal-agent's own
- * credential store ({@link ../auth-store.ts}). Captures everything we need to
+ * credential store (`../auth-store.ts`). Captures everything we need to
  * run independently of the official `claude` CLI — tokens, expiry, scopes,
  * and the account/org uuids + email from the exchange response — so there is
  * no dependency on the macOS Keychain or `~/.claude.json`.
@@ -370,38 +303,16 @@ export interface InstallCredentialsDeps {
 export function installCredentials(
   resp: TokenExchangeResponse,
   deps: InstallCredentialsDeps = {},
+  provider: OAuthLoginProvider = resolveDefaultOAuthLoginProvider(),
 ): LoginInstallResult {
-  const expiresAt = Date.now() + resp.expires_in * 1000
-  const scopes = (resp.scope ?? "").split(" ").filter(Boolean)
-
-  const account = resp.account
-  const organization = resp.organization
-  const credentials: CredentialsData = {
-    claudeAiOauth: {
-      accessToken: resp.access_token,
-      refreshToken: resp.refresh_token,
-      expiresAt,
-      scopes,
-    },
-  }
-  if (account || organization) {
-    credentials.oauthAccount = {
-      ...(account ? { accountUuid: account.uuid, emailAddress: account.email_address } : {}),
-      ...(organization ? { organizationUuid: organization.uuid } : {}),
-    }
-  }
-
-  const write = deps.writeCredentials ?? defaultWriteCredentials
-  write(credentials)
-
-  return {
-    accessToken: resp.access_token,
-    refreshToken: resp.refresh_token,
-    expiresAt,
-    scopes,
-    ...(account ? { account: { uuid: account.uuid, emailAddress: account.email_address } } : {}),
-    ...(organization ? { organization: { uuid: organization.uuid } } : {}),
-  }
+  const built = provider.buildCredential(resp)
+  const store = deps.store ?? defaultAuthStore()
+  store.set(
+    built.credential.serviceId,
+    built.credential.displayName,
+    built.credential.secrets as SecretBag,
+  )
+  return built.result
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +326,8 @@ export interface LoginPrompt {
 }
 
 export interface LoginDeps {
+  /** Provider-owned OAuth strategy. Defaults to the first discovered provider with oauthLogin. */
+  provider?: OAuthLoginProvider
   /** Network client for the token-exchange POST. */
   networkClient?: NetworkClient
   /** Open a URL in the default browser. Best-effort; failure is non-fatal. */
@@ -425,13 +338,13 @@ export interface LoginDeps {
   readPaste: () => Promise<string>
   /** Random bytes (32-byte chunks) for PKCE/state. Defaults to crypto.randomBytes. */
   randomBytes?: RandomBytesFn
-  /** Override the OAuth client id (defaults to env / built-in). */
+  /** Override the OAuth client id (normally supplied by the provider). */
   clientId?: string
-  /** Override the authorize URL base. */
+  /** Override the authorize URL base (normally supplied by the provider). */
   authorizeUrl?: string
-  /** Override the token URL. */
+  /** Override the token URL (normally supplied by the provider). */
   tokenUrl?: string
-  /** Override the manual redirect URL. */
+  /** Override the manual redirect URL (normally supplied by the provider). */
   redirectUri?: string
   /** Optional email pre-fill on the login form. */
   loginHint?: string
@@ -442,6 +355,15 @@ export interface LoginDeps {
 }
 
 export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: false; reason: string }
+
+/** Resolve the first registered provider that supports OAuth login. */
+export function resolveDefaultOAuthLoginProvider(): OAuthLoginProvider {
+  const provider = listProviderPlugins().find((p) => p.oauthLogin)?.oauthLogin
+  if (!provider) {
+    throw new Error("No OAuth login provider is registered.")
+  }
+  return provider
+}
 
 /**
  * Run the full PKCE manual-paste login flow end-to-end.
@@ -455,11 +377,12 @@ export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: fals
  * store, randomness) goes through `LoginDeps`.
  */
 export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
-  const oauth = getOauthRefreshConfig()
-  const clientId = deps.clientId ?? oauth.clientId
-  const tokenUrl = deps.tokenUrl ?? oauth.tokenUrl
-  const redirectUri = deps.redirectUri ?? MANUAL_REDIRECT_URL
-  const authorizeUrl = deps.authorizeUrl ?? CLAUDE_AI_AUTHORIZE_URL
+  const provider = deps.provider ?? resolveDefaultOAuthLoginProvider()
+  const config = provider.config()
+  const clientId = deps.clientId ?? config.clientId
+  const tokenUrl = deps.tokenUrl ?? config.tokenUrl
+  const redirectUri = deps.redirectUri ?? config.redirectUri
+  const authorizeUrl = deps.authorizeUrl ?? config.authorizeUrl
   const network = deps.networkClient ?? defaultNetworkClient
   const display = deps.display ?? (() => {})
   const maxAttempts = deps.maxAttempts ?? 3
@@ -473,6 +396,9 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
     state,
     authorizeUrl,
     redirectUri,
+    scopes: config.scopes,
+    authorizeParams: config.authorizeParams,
+    loginHintParam: config.loginHintParam,
     loginHint: deps.loginHint,
   })
 
@@ -524,7 +450,7 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
       },
       network,
     )
-    const result = installCredentials(tokens, deps.install)
+    const result = installCredentials(tokens, deps.install, provider)
     return { ok: true, result }
   }
 

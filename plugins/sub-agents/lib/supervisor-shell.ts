@@ -134,8 +134,7 @@ function runEffect(e: Effect, deps: SupervisorDeps): void {
       }
       break
     default: {
-      const _exhaustive: never = e
-      throw new Error(`unhandled effect: ${String(_exhaustive)}`)
+      throw new Error(`unhandled effect: ${String(e satisfies never)}`)
     }
   }
 }

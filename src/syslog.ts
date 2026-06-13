@@ -5,11 +5,15 @@
  *
  * Output shape:
  *
- *   <PRI>1 TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG
+ * ```text
+ * <PRI>1 TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG
+ * ```
  *
  * Example produced by this formatter:
  *
- *   <12>1 2026-05-20T11:14:37.412Z macbookpro.home.arpa minimal-agent 87654 live-area.timeout [ma@local slot="quota-status/quota" timeout-ms="8000"] invoke did not resolve in time
+ * ```text
+ * <12>1 2026-05-20T11:14:37.412Z macbookpro.home.arpa minimal-agent 87654 live-area.timeout [ma@local slot="quota-status/quota" timeout-ms="8000"] invoke did not resolve in time
+ * ```
  *
  * Notes on our profile:
  *
@@ -113,7 +117,7 @@ function escapeSdValue(v: string): string {
 /**
  * RFC 5424 SD-NAME: PRINTUSASCII excluding `=`, `]`, `"`, SP. We replace
  * forbidden chars with `_` so e.g. `"timeout ms"` becomes `timeout_ms`.
- * Also strips control chars (<0x20) and DEL (0x7f).
+ * Also strips control chars (below 0x20) and DEL (0x7f).
  */
 function sanitizeSdName(name: string): string {
   let out = ""
@@ -143,7 +147,7 @@ function sanitizeSdId(id: string): string {
 
 /**
  * Strip control chars from header fields (HOSTNAME, APP-NAME, PROCID,
- * MSGID). RFC requires PRINTUSASCII; we replace any byte < 0x21 (incl.
+ * MSGID). RFC requires PRINTUSASCII; we replace any byte below 0x21 (incl.
  * SP since fields are space-separated) and DEL with `_`. We DON'T strip
  * non-ASCII bytes — most modern parsers handle UTF-8 in the header
  * gracefully, and the `os.hostname()` value on some systems is UTF-8.

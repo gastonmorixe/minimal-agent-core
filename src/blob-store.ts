@@ -1,7 +1,7 @@
 /**
  * Per-session blob store for raw tool outputs.
  *
- * Sits next to {@link import("./session-store.ts").SessionStore}: one blob
+ * Sits next to `SessionStore` (see `./session-store.ts`): one blob
  * file per tool call, keyed by `tool_use_id`, under
  * `~/.minimal-agent/sessions/<sid>.blobs/`. Captures the pre-clamp,
  * pre-annotation `content` so the agent can later read the FULL output
@@ -244,7 +244,7 @@ export function shortSha256(input: string | Uint8Array): string {
 /**
  * Append-only, per-session blob store. One file per tool call, named
  * `<tool_use_id>.raw` under `<sessionsDir>/<sid>.blobs/`. Synchronous fs
- * ops match the {@link import("./session-store.ts").SessionStore}
+ * ops match the `SessionStore` (`./session-store.ts`)
  * discipline: tools.ts is hot-path on every Edit/Write, and the blob
  * write is part of that same critical section.
  *
@@ -314,9 +314,9 @@ export class BlobStore {
    * Eligibility is decided BEFORE the write so we don't touch the
    * filesystem when there's nothing to persist:
    *
-   *   - store disabled       → null
-   *   - body < minBytes      → null
-   *   - empty body           → null
+   *   - store disabled → null
+   *   - body smaller than minBytes → null
+   *   - empty body → null
    *
    * On a successful write, runs LRU eviction (count + bytes).
    */
@@ -498,8 +498,8 @@ export class BlobStore {
  * Example:
  *   `<ma::agent::raw-output path="/Users/.../<sid>.blobs/toolu_01abc.raw" size="85kB" sha256="ab12cd34ef567890" />`
  *
- * (Pre-2026-05-28 emit used the bracket form `[raw-output: <path> <size>
- * · sha256=<hex>]`. Replay accepts both.)
+ * (Pre-2026-05-28 emit used the bracket form
+ * `[raw-output: <path> <size> · sha256=<hex>]`. Replay accepts both.)
  */
 export function formatRawOutputFooter(r: BlobWriteResult): string {
   return `<ma::agent::raw-output path="${r.path}" size="${formatBytes(r.bytes)}" sha256="${r.sha256}" />`

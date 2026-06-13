@@ -12,6 +12,12 @@ export interface BrailleSpinnerTheme {
   accent?: (text: string) => string
 }
 
+/**
+ * Classic braille-dot spinner: cycles a fixed frame set at a configurable
+ * FPS, deriving the frame index purely from elapsed time so rendering stays
+ * stateless and deterministic. The theme's optional `accent` colorizes the
+ * glyph.
+ */
 export class BrailleSpinner implements Spinner<BrailleSpinnerTheme> {
   readonly preferredFps: number
   private readonly frames: string[]

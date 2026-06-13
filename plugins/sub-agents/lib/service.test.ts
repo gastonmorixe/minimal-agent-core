@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { type ServiceDeps, spawnAgent, stopAgent, type WorkerDefinition } from "./service.ts"
 import { type SpawnDeps } from "./spawn.ts"
 import { SubagentStore } from "./store.ts"
-import { sessionId } from "./types.ts"
+import { sessionId, subagentId } from "./types.ts"
 
 const LEAD = sessionId("11111111-1111-4111-8111-111111111111")
 const FIXED_SID = "9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"
@@ -51,11 +51,11 @@ describe("spawnAgent", () => {
     const r = spawnAgent({ task: "refactor parser" }, deps)
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.value.id).toBe("A1")
+    expect(r.value.id).toBe(subagentId("A1"))
     expect(r.value.status.kind).toBe("running")
     if (r.value.status.kind === "running") expect(r.value.status.pid).toBe(5001)
     // persisted
-    expect(deps.store.get("A1")?.sid).toBe(FIXED_SID)
+    expect(deps.store.get("A1")?.sid).toBe(sessionId(FIXED_SID))
     // launched with the pinned sid + the task (now followed by the REQUIRED
     // deliverable protocol, so the prompt CONTAINS the task rather than equals it)
     expect(deps.launched[0]).toContain("--session-id")

@@ -210,7 +210,7 @@ export function streamedResponseToCanonicalEvents(
 // ---------------------------------------------------------------------------
 
 /**
- * canonical message -> legacy `Message`.
+ * canonical message -\> legacy `Message`.
  *
  * Exported so callers that operate in the canonical layer (e.g. the
  * preflight resolution pipeline) can translate the resolved request
@@ -309,8 +309,7 @@ function canonicalBlockToLegacy(block: CanonicalBlock): LegacyContentBlock | nul
       // only a belt-and-suspenders no-op.
       return null
     default: {
-      const _exhaustive: never = block
-      throw new Error(`unhandled canonical block: ${_exhaustive}`)
+      throw new Error(`unhandled canonical block: ${String(block satisfies never)}`)
     }
   }
 }
@@ -327,7 +326,7 @@ function legacyCacheControl(hint: NonNullable<CanonicalBlock["cache"]>): {
 }
 
 /**
- * canonical {@link ImageSource} -> Anthropic wire image source. The canonical
+ * canonical {@link ImageSource} -\> Anthropic wire image source. The canonical
  * `file_id` kind maps to wire `source.type:"file"` (not `"file_id"`).
  */
 function imageSourceToLegacy(source: ImageSource): LegacyImageBlock["source"] {
@@ -339,13 +338,12 @@ function imageSourceToLegacy(source: ImageSource): LegacyImageBlock["source"] {
     case "file_id":
       return { type: "file", file_id: source.fileId }
     default: {
-      const _exhaustive: never = source
-      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled media source: ${JSON.stringify(source satisfies never)}`)
     }
   }
 }
 
-/** canonical {@link FileSource} -> Anthropic wire document source. */
+/** canonical {@link FileSource} -\> Anthropic wire document source. */
 function fileSourceToLegacy(source: FileSource): LegacyDocumentBlock["source"] {
   switch (source.kind) {
     case "base64":
@@ -355,8 +353,7 @@ function fileSourceToLegacy(source: FileSource): LegacyDocumentBlock["source"] {
     case "file_id":
       return { type: "file", file_id: source.fileId }
     default: {
-      const _exhaustive: never = source
-      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled media source: ${JSON.stringify(source satisfies never)}`)
     }
   }
 }
@@ -493,7 +490,7 @@ export async function* runLegacyAsCanonical(opts: {
 
 type LegacyCacheControl = { type: "ephemeral"; ttl?: "5m" | "1h"; scope?: "global" }
 
-/** legacy `cache_control` -> canonical `cache` hint. */
+/** legacy `cache_control` -\> canonical `cache` hint. */
 function legacyCacheToCanonical(
   cc?: LegacyCacheControl,
 ): NonNullable<CanonicalBlock["cache"]> | undefined {
@@ -504,7 +501,7 @@ function legacyCacheToCanonical(
   return out
 }
 
-/** legacy assistant/user `ContentBlock` -> canonical block (null = dropped). */
+/** legacy assistant/user `ContentBlock` -\> canonical block (null = dropped). */
 function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | null {
   switch (block.type) {
     case "text": {
@@ -591,13 +588,12 @@ function legacyBlockToCanonical(block: LegacyContentBlock): CanonicalBlock | nul
       return out
     }
     default: {
-      const _exhaustive: never = block
-      throw new Error(`unhandled legacy block: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled legacy block: ${JSON.stringify(block satisfies never)}`)
     }
   }
 }
 
-/** Anthropic wire image source -> canonical {@link ImageSource}. */
+/** Anthropic wire image source -\> canonical {@link ImageSource}. */
 function legacyImageSourceToCanonical(source: LegacyImageBlock["source"]): ImageSource {
   switch (source.type) {
     case "base64":
@@ -607,13 +603,12 @@ function legacyImageSourceToCanonical(source: LegacyImageBlock["source"]): Image
     case "file":
       return { kind: "file_id", fileId: source.file_id }
     default: {
-      const _exhaustive: never = source
-      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled media source: ${JSON.stringify(source satisfies never)}`)
     }
   }
 }
 
-/** Anthropic wire document source (sans inline `text`) -> canonical {@link FileSource}. */
+/** Anthropic wire document source (sans inline `text`) -\> canonical {@link FileSource}. */
 function legacyDocSourceToCanonical(
   source: Exclude<LegacyDocumentBlock["source"], { type: "text" }>,
 ): FileSource {
@@ -625,14 +620,13 @@ function legacyDocSourceToCanonical(
     case "file":
       return { kind: "file_id", fileId: source.file_id }
     default: {
-      const _exhaustive: never = source
-      throw new Error(`unhandled media source: ${JSON.stringify(_exhaustive)}`)
+      throw new Error(`unhandled media source: ${JSON.stringify(source satisfies never)}`)
     }
   }
 }
 
 /**
- * legacy `Message` -> canonical message.
+ * legacy `Message` -\> canonical message.
  *
  * Exported so other layers (preflight pipeline, etc.) can convert
  * without re-implementing the per-block translation.
@@ -645,7 +639,7 @@ export function legacyMessageToCanonical(msg: LegacyMessage): CanonicalMessage {
   return { role: msg.role, content: blocks }
 }
 
-/** legacy `SystemBlock` -> canonical text block (preserving cache hints). */
+/** legacy `SystemBlock` -\> canonical text block (preserving cache hints). */
 function systemBlockToCanonical(sb: SystemBlock): CanonicalBlock {
   const out: CanonicalBlock = { type: "text", text: sb.text }
   const cache = legacyCacheToCanonical(sb.cache_control)
@@ -653,7 +647,7 @@ function systemBlockToCanonical(sb: SystemBlock): CanonicalBlock {
   return out
 }
 
-/** legacy thinking opt -> canonical `ThinkingConfig`. */
+/** legacy thinking opt -\> canonical `ThinkingConfig`. */
 function legacyThinkingToCanonical(
   thinking: LegacySendOptions["thinking"],
 ): ThinkingConfig | undefined {
@@ -912,8 +906,7 @@ export async function* canonicalEventsToLegacyStream(
       case "ping":
         break
       default: {
-        const _exhaustive: never = ev
-        throw new Error(`unhandled canonical event: ${JSON.stringify(_exhaustive)}`)
+        throw new Error(`unhandled canonical event: ${JSON.stringify(ev satisfies never)}`)
       }
     }
   }

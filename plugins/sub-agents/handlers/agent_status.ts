@@ -5,12 +5,17 @@
  * @module sub-agents/handlers/agent_status
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { fleetText, statusDetail } from "../lib/content.ts"
 import { storeFromCtx } from "../lib/handler-deps.ts"
 import { renderFleetDisplay } from "../lib/render.ts"
 import { parseIdArg } from "../lib/validate.ts"
 
+/**
+ * Tool handler for `AgentStatus`: reports one worker's detail (status,
+ * progress, model, isolation) or the whole fleet when no id is given.
+ */
 export default async function agentStatus(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "AgentStatus: unexpected trigger", is_error: true }

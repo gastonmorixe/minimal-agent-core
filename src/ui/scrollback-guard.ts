@@ -1,3 +1,9 @@
+/**
+ * Reserves a block of rows at the bottom of the terminal by scrolling the
+ * viewport up, then lets callers repaint individual reserved lines in place
+ * with save/restore-cursor escapes. Predecessor of the Compositor's live
+ * area; writes directly to `process.stdout`.
+ */
 export class ScrollbackGuard {
   private reserved = 0
   reserve(n: number) {

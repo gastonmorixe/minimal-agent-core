@@ -408,7 +408,9 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
     const bus = new EventBus()
     setGlobalEventBus(bus)
     const events: MemorySavedPayload[] = []
-    bus.on(MEMORY_SAVED, (ctx) => events.push(ctx.payload as MemorySavedPayload))
+    bus.on(MEMORY_SAVED, (ctx) => {
+      events.push(ctx.payload as MemorySavedPayload)
+    })
 
     const sid = "sid-evict"
     const env = { MINIMAL_AGENT_SESSION_ID: sid }
@@ -434,7 +436,9 @@ describe("memory: save handler: emits memory.saved on global bus", () => {
     const bus = new EventBus()
     setGlobalEventBus(bus)
     const events: MemorySavedPayload[] = []
-    bus.on(MEMORY_SAVED, (ctx) => events.push(ctx.payload as MemorySavedPayload))
+    bus.on(MEMORY_SAVED, (ctx) => {
+      events.push(ctx.payload as MemorySavedPayload)
+    })
 
     // Refused: short-term without sid.
     await memoryHandler(makeSaveCtx({ body: "x", attrs: { scope: "short-term" } }))
@@ -803,7 +807,9 @@ describe("memory: integration with PluginLoader", () => {
     setGlobalEventBus(loader.bus())
 
     const events: MemorySavedPayload[] = []
-    loader.bus().on(MEMORY_SAVED, (ctx) => events.push(ctx.payload as MemorySavedPayload))
+    loader.bus().on(MEMORY_SAVED, (ctx) => {
+      events.push(ctx.payload as MemorySavedPayload)
+    })
 
     await loader.dispatch(
       {

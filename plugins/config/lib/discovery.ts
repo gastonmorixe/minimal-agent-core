@@ -48,7 +48,7 @@ export interface DiscoveredPlugin {
 /**
  * Scan `deps.roots` for plugin packages (dirs containing `manifest.json`
  * with a string `id`). First-seen id wins (matches the loader's
- * precedence: project > home > embedded when roots are ordered that way).
+ * precedence: project over home over embedded when roots are ordered that way).
  */
 export function discoverPlugins(deps: DiscoverDeps): DiscoveredPlugin[] {
   const seen = new Set<string>()

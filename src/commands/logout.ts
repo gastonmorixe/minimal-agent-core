@@ -2,7 +2,7 @@
  * `minimal-agent --logout` command.
  *
  * Removes minimal-agent's own credentials from its independent store
- * (`~/.minimal-agent/auth.jsonc`, see {@link ../auth-store.ts}). It does NOT
+ * (`~/.minimal-agent/auth.jsonc`, see `../auth-store.ts`). It does NOT
  * touch the macOS Keychain or `~/.claude.json` — those belong to the official
  * `claude` CLI and minimal-agent no longer shares them, so logging out here
  * leaves any official-CLI login completely intact.

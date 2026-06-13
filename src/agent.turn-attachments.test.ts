@@ -3,24 +3,22 @@
  *
  * `turnAttachments: Array<{toAttachment(): ContentBlock | null}>` are the open
  * slot for plugins (e.g. `sub-agents`) to surface live per-turn state without
- * the agent core knowing the producer's identity. Invariants mirror the named
- * `tasksAttachment` producer:
+ * the agent core knowing the producer's identity.
+ *
+ * Core-side seam test (Wave A unit A-4): this file exercises ONLY the
+ * agent↔producer seam contract through in-test FAKE producers — it does
+ * not import any plugin (invariant I2). The real `SubagentsAttachment`
+ * (active → block; idle → omitted) is characterized in the plugin's own
+ * suite (`plugins/sub-agents/lib/attachment.test.ts`).
+ *
+ * Invariants, mirroring the named `tasksAttachment` producer:
  *
  *   1. Injected AFTER tasks, BEFORE the user text, in array order.
  *   2. null-returning producers contribute nothing.
- *   3. Initial seam only (not re-emitted post tool_use).
- *   4. End-to-end with the real SubagentsAttachment (active → block; idle → omitted).
+ *   3. Initial seam only (called once per run).
  */
 
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
-
-import { SubagentsAttachment } from "../plugins/sub-agents/lib/attachment.ts"
-import { SubagentStore } from "../plugins/sub-agents/lib/store.ts"
-import { sessionId, subagentId } from "../plugins/sub-agents/lib/types.ts"
+import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
@@ -95,76 +93,5 @@ describe("Agent.run — generic turnAttachments", () => {
     expect(content.length).toBe(1)
     expect((content[0] as { text: string }).text).toBe("hi")
     expect(a.callCount).toBe(1) // called once at the initial seam
-  })
-})
-
-describe("Agent.run — real SubagentsAttachment integration", () => {
-  let dir: string
-  const sid = "lead-turn-attach-sid"
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "agent-subagents-"))
-  })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
-
-  it("surfaces the fleet when a worker is active", async () => {
-    const store = new SubagentStore(sid, { dir })
-    store.upsert({
-      id: subagentId("A1"),
-      sid: sessionId("9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"),
-      label: "worker",
-      type: "worker",
-      model: "claude-haiku-4-5",
-      task: "t",
-      isolation: "fresh",
-      workspace: "inherit-cwd",
-      spawnedAt: "2026-05-30T11:59:00.000Z",
-      status: {
-        kind: "running",
-        pid: 1,
-        startedAt: "2026-05-30T11:59:00.000Z",
-        progress: { tools: 0, tokens: 0 },
-      },
-      depth: 1,
-      leadSid: sessionId("11111111-1111-4111-8111-111111111111"),
-    })
-
-    const records: Array<Record<string, unknown>> = []
-    const sendFn = makeTextSendFn(records)
-    const agent = new Agent({
-      auth,
-      model: "test",
-      sendFn,
-      turnAttachments: [new SubagentsAttachment(sid, { dir })],
-    })
-
-    for await (const _ of agent.run("status?")) {
-      // drain
-    }
-
-    const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
-    const content = messages[0]?.content ?? []
-    expect(content.length).toBe(2)
-    expect((content[0] as { text: string }).text).toContain("<ma::agent::subagents")
-    expect((content[0] as { text: string }).text).toContain("A1")
-  })
-
-  it("omits the block when no worker is active", async () => {
-    const records: Array<Record<string, unknown>> = []
-    const sendFn = makeTextSendFn(records)
-    const agent = new Agent({
-      auth,
-      model: "test",
-      sendFn,
-      turnAttachments: [new SubagentsAttachment(sid, { dir })],
-    })
-
-    for await (const _ of agent.run("hi")) {
-      // drain
-    }
-
-    const messages = records[0]?.messages as Array<{ content: ContentBlock[] }>
-    const content = messages[0]?.content ?? []
-    expect(content.length).toBe(1)
-    expect((content[0] as { text: string }).text).toBe("hi")
   })
 })

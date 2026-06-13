@@ -10,7 +10,7 @@
  * The driver simulates the user pressing Ctrl+C, waiting 600ms, then
  * pressing Ctrl+C again — the FSM's armed → quit:confirmed transition.
  * (The escape-hatch path would close with "force-quit", which the driver
- * intentionally avoids by spacing the two Ctrl+Cs > 500ms apart.)
+ * intentionally avoids by spacing the two Ctrl+Cs \> 500ms apart.)
  *
  * This guards the user-facing UX contract (#abort-quit-ux-spec):
  *   - Single Ctrl+C does NOT quit

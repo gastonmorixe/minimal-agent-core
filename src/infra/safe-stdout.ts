@@ -2,6 +2,7 @@ function isNodeError(v: unknown): v is NodeJS.ErrnoException {
   return typeof v === "object" && v !== null
 }
 
+/** True when the error is an EPIPE, i.e. the reader side of stdout has gone away. */
 export function isBrokenPipeError(err: unknown): boolean {
   return isNodeError(err) && err.code === "EPIPE"
 }

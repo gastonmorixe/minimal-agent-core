@@ -67,6 +67,7 @@ interface ParsedArgs {
   help: boolean
 }
 
+/** Parse the lock-CLI argv into command, positionals, and flags. */
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const out: ParsedArgs = { cmd: "", positional: [], json: false, help: false }
   const rest: string[] = []

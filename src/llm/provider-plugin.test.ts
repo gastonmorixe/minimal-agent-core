@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
 import {
+  findApiKeyAuthProvider,
+  findOAuthLoginProvider,
+  listApiKeyAuthProviders,
+  listOAuthLoginProviders,
+} from "../auth-strategies.ts"
+
+import {
+  type ApiKeyAuthProvider,
   activateProviderPlugins,
   clearProviderPlugins,
   findProviderPlugin,
   listProviderPlugins,
+  type OAuthLoginProvider,
   type ProviderPlugin,
   type ProviderStartupContext,
   registerProviderPlugin,
@@ -80,5 +89,70 @@ describe("provider-plugin registry", () => {
       for (const p of listProviderPlugins()) p.onStartupProbe?.(ctx)
     }).not.toThrow()
     expect(seen).toEqual([ctx])
+  })
+
+  it("preserves provider-declared auth strategy hooks", () => {
+    const oauthLogin: OAuthLoginProvider = {
+      serviceId: "fake-oauth",
+      displayName: "Fake OAuth",
+      config() {
+        return {
+          clientId: "client",
+          authorizeUrl: "https://example.test/authorize",
+          tokenUrl: "https://example.test/token",
+          redirectUri: "https://example.test/callback",
+          scopes: ["scope"],
+        }
+      },
+      buildCredential() {
+        return {
+          credential: {
+            serviceId: "fake-oauth",
+            displayName: "Fake OAuth",
+            secrets: { tokenType: "oauth", accessToken: "at" },
+          },
+          result: {
+            accessToken: "at",
+            refreshToken: "rt",
+            expiresAt: 1,
+            scopes: [],
+          },
+        }
+      },
+    }
+    const apiKeyAuth: ApiKeyAuthProvider = {
+      serviceId: "fake-api-key",
+      displayName: "Fake API Key",
+      envVars: ["FAKE_API_KEY"],
+      configKey: "fake",
+      buildCredential(apiKey) {
+        return {
+          serviceId: "fake-api-key",
+          displayName: "Fake API Key",
+          secrets: { tokenType: "api-key", apiKey },
+        }
+      },
+      readApiKey(secrets) {
+        return typeof secrets.apiKey === "string" ? secrets.apiKey : null
+      },
+    }
+    const fake: ProviderPlugin = {
+      id: "fake",
+      displayName: "Fake",
+      shortCode: "fk",
+      register() {},
+      oauthLogin,
+      apiKeyAuth,
+    }
+
+    registerProviderPlugin(fake)
+
+    expect(findProviderPlugin("fake")?.oauthLogin).toBe(oauthLogin)
+    expect(findProviderPlugin("fake")?.apiKeyAuth).toBe(apiKeyAuth)
+    expect(listOAuthLoginProviders()).toEqual([oauthLogin])
+    expect(findOAuthLoginProvider()).toBe(oauthLogin)
+    expect(findOAuthLoginProvider("fake")).toBe(oauthLogin)
+    expect(listApiKeyAuthProviders()).toEqual([{ providerId: "fake", auth: apiKeyAuth }])
+    expect(findApiKeyAuthProvider("fake")).toBe(apiKeyAuth)
   })
 })

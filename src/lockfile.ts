@@ -11,8 +11,8 @@
  * sharing one credential, refresh-token rotation makes every successful
  * refresh by ANY process invalidate the access tokens cached by the
  * OTHER N-1. Without coordination they all 401, all refresh in parallel,
- * and the storm never settles. See `docs/changes/2026-05-10-fix-auth-
- * refresh-storm.md` for the full diagnosis.
+ * and the storm never settles. See
+ * `docs/changes/2026-05-10-fix-auth-refresh-storm.md` for the full diagnosis.
  *
  * This module is the coordination layer. We use the well-worn lockfile
  * pattern:

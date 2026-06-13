@@ -48,7 +48,7 @@ export type BinarySource =
        * token), which only helps on a machine where the user is logged in.
        *
        * NEVER logged and NEVER written to the manifest (only {@link sourceLabel}
-       * (repo@tag/asset) is recorded).
+       * — the `repo@tag/asset` string — is recorded).
        */
       token?: string
       /** Override archive detection; inferred from the asset name when omitted. */
@@ -88,8 +88,9 @@ export interface BinarySpec {
    *     the HOST supplies (never hardcoded in the plugin). This is the path
    *     that lets a private source repo ship binaries WITHOUT a public URL: the
    *     plugin pins `repo + tag + asset + sha256`, and the agent adds the
-   *     user's token (the same `MINIMAL_AGENT_GITHUB_TOKEN → GITHUB_TOKEN →
-   *     GH_TOKEN → gh auth token` chain used for the private plugin clone).
+   *     user's token (the same chain used for the private plugin clone:
+   *     `MINIMAL_AGENT_GITHUB_TOKEN`, then `GITHUB_TOKEN`, then `GH_TOKEN`,
+   *     then `gh auth token`).
    *     Strangers with no token can't download; the user and their team can.
    */
   source: BinarySource
@@ -157,9 +158,9 @@ export interface BinaryInventory {
 /**
  * Result of comparing a {@link BinarySpec} against the inventory.
  *
- * - `"satisfied"`: an installed copy exists and its version is >= the spec.
+ * - `"satisfied"`: an installed copy exists and its version is \>= the spec.
  * - `"missing"`: nothing installed (or the recorded file is gone from disk).
- * - `"outdated"`: an installed copy exists but its version is < the spec.
+ * - `"outdated"`: an installed copy exists but its version is below the spec.
  * - `"unknown-version"`: a file is present but carries no comparable version
  *   record (a foreign install); the host treats it as needing (re)install.
  */

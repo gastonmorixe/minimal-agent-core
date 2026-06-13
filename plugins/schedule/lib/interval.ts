@@ -64,7 +64,7 @@ export interface IntervalCron {
  * `every` and surrounding whitespace are ignored. Returns `null` when the
  * input is not a recognizable duration.
  *
- * @param input Raw duration text.
+ * @param input - Raw duration text.
  */
 export function parseDuration(input: string): number | null {
   const cleaned = input
@@ -114,7 +114,7 @@ function labelFor(seconds: number): string {
 /**
  * Convert a duration (in seconds) to a clean-cadence cron expression.
  *
- * @param seconds Requested interval in seconds (>0).
+ * @param seconds - Requested interval in seconds (greater than 0).
  * @returns The cron + the cadence actually chosen + whether it was rounded.
  */
 export function durationToCron(seconds: number): IntervalCron {
@@ -157,7 +157,7 @@ export function durationToCron(seconds: number): IntervalCron {
  * Parse a human interval string and convert it to a clean cron cadence in
  * one step. Returns `null` when `input` is not a duration.
  *
- * @param input e.g. `"5m"`, `"every 2 hours"`, `"90m"`.
+ * @param input - e.g. `"5m"`, `"every 2 hours"`, `"90m"`.
  */
 export function intervalToCron(input: string): IntervalCron | null {
   const seconds = parseDuration(input)

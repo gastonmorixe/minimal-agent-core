@@ -10,8 +10,8 @@
  * appends `❯ \x1b[K...`, the terminal's parser glues them together as
  * one malformed escape and prints fragments as literal text.
  *
- * Producers that read from a pipe (`Bun.spawn(..., { stdout: "pipe"
- * })` or a pty master fd) hit arbitrary byte boundaries and can split
+ * Producers that read from a pipe (`Bun.spawn(..., { stdout: "pipe" })`
+ * or a pty master fd) hit arbitrary byte boundaries and can split
  * any escape mid-way. Wrap them in {@link AnsiStreamBuffer} before
  * forwarding to the compositor.
  *

@@ -46,6 +46,12 @@ export interface BlinkingNerdSpinnerOptions {
   iconByCategory?: Record<string, IconSpec>
 }
 
+/**
+ * The default status spinner: a Nerd Font icon that blinks on a fixed period
+ * and cycles through a color palette. The icon is picked per status
+ * notification (by notification id, then category, then the default), so a
+ * Bash call and a Fetch call animate with different glyphs.
+ */
 export class BlinkingNerdSpinner implements Spinner<BlinkingNerdSpinnerTheme> {
   readonly preferredFps: number
   private readonly blinkMs: number

@@ -10,7 +10,8 @@
 
 import { existsSync, readFileSync } from "node:fs"
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { resultText } from "../lib/content.ts"
 import { sessionsDirFromCtx, storeFromCtx } from "../lib/handler-deps.ts"
 import { renderResultDisplay } from "../lib/render.ts"
@@ -32,6 +33,11 @@ function tailLog(path: string, n: number): string | null {
   }
 }
 
+/**
+ * Tool handler for `AgentResult`: pulls a finished worker's distilled
+ * deliverable (summary + artifacts, or salvaged findings) into the lead's
+ * context.
+ */
 export default async function agentResult(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "AgentResult: unexpected trigger", is_error: true }

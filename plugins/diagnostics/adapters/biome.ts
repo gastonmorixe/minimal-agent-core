@@ -2,9 +2,11 @@
  * Adapter: biome `check --reporter=json` output → {@link Finding}[].
  *
  * biome shape (captured from the real binary):
+ * ```
  *   { summary:{errors,warnings,...},
  *     diagnostics:[ { severity:"error"|"warning"|"information", category:"lint/...",
  *       description?|message?, location:{ path, start:{line,column}, end } } ] }
+ * ```
  *
  * `message` may be a plain string OR an array of `{content}` spans (biome's
  * markup form); we flatten both. `description` is the fallback. 1-based
@@ -42,6 +44,12 @@ function messageOf(rec: Record<string, unknown>): string {
   return ""
 }
 
+/**
+ * Converts `biome check --reporter=json` stdout into neutral {@link Finding}s.
+ * Total function: malformed or empty JSON yields `[]` so the runner degrades
+ * instead of throwing. Biome's 0-based sourceSpan offsets are translated to
+ * the 1-based line/column findings use.
+ */
 export function adaptBiome(stdout: string): Finding[] {
   if (!stdout || stdout.trim().length === 0) return []
   let parsed: unknown

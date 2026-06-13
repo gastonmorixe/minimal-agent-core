@@ -56,7 +56,7 @@ export function realFsDeps(path: string): FsDeps {
 
 /**
  * The plugin discovery roots, mirroring `PluginLoader.load`'s scan order
- * (project > home > embedded). `packageDir` is this plugin's own dir
+ * (project, then home, then embedded). `packageDir` is this plugin's own dir
  * (`<repo>/plugins/config`), so the embedded root is its parent.
  *
  * Order matters: first-seen id wins in `discoverPlugins`, matching the

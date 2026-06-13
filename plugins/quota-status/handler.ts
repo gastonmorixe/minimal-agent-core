@@ -69,7 +69,8 @@ function currentModelId(): string {
 /**
  * Resolved reasoning-effort level being sent on the wire, surfaced by
  * the agent on `process.env.MINIMAL_AGENT_EFFORT` after resolution
- * (CLI > env > config > "medium" default for non-haiku models). For
+ * (CLI takes precedence over env, then config, then the "medium"
+ * default for non-haiku models). For
  * haiku the agent clears the env var entirely so the segment is
  * suppressed. Snapshot-once at module load — matches the
  * `MINIMAL_AGENT_MODEL` pattern above.
@@ -131,6 +132,11 @@ function cols(): number {
   return Number.isFinite(v) && v > 0 ? v : Number.POSITIVE_INFINITY
 }
 
+/**
+ * Live-area handler: queries the active provider's session metadata for
+ * quota windows and renders the utilization/reset widget line (or null when
+ * the provider exposes none).
+ */
 export default async function handle(ctx: LiveAreaHandlerContext): Promise<string | null> {
   // Ask the CURRENT model's provider for session metadata (quota windows,
   // context window, model label). Provider-agnostic: the handler names no

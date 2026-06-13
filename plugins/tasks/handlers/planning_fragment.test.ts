@@ -2,7 +2,10 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import type { ModelInfoSnapshot, PromptFragmentContext } from "../../../src/plugins/types.ts"
+import type {
+  ModelInfoSnapshot,
+  PromptFragmentContext,
+} from "@minimal-agent/plugin-api/types/plugin"
 
 import planningFragment from "./planning_fragment.ts"
 
@@ -48,9 +51,9 @@ function ctx(query?: () => ModelInfoSnapshot | undefined): PromptFragmentContext
 }
 
 describe("tasks planning fragment", () => {
-  it("emits the PLAN/PHASES guidance when the model supports user-defined tools", () => {
+  it("emits the phase-planning guidance when the model supports user-defined tools", () => {
     const out = planningFragment(ctx(() => snapshot(true)))
-    expect(out).toMatch(/PLAN and work in PHASES with TASKs and SUB-TASKs/)
+    expect(out).toMatch(/Plan non-trivial work in phases with `Task`/)
   })
 
   it("suppresses the guidance when the model lacks user-defined tool support", () => {
@@ -60,7 +63,7 @@ describe("tasks planning fragment", () => {
 
   it("emits when no model snapshot is available (defers to the loader gate)", () => {
     const out = planningFragment(ctx())
-    expect(out).toMatch(/PLAN and work in PHASES/)
+    expect(out).toMatch(/Plan non-trivial work in phases/)
   })
 
   it("reads the text from prompts/planning.md, not a hardcoded literal", () => {

@@ -1,12 +1,12 @@
-Use `Task` to plan and track multi-step work the user can watch in real time. The live list is auto-injected into every user turn as a `<ma::agent::tasks …>` block, so you always see the current plan without re-querying.
+Use `Task` to plan and track multi-step work the user can watch in real time. The live list is auto-injected into every user turn as a `<ma::agent::tasks ...>` block, so you always see the current plan without re-querying.
 
 ## When to use
 
 - **Use it** when you're about to do something with **3+ distinct steps** the user will want to track. Most refactors, multi-file changes, bug investigations with branching hypotheses, anything where "the plan" is a meaningful artifact.
 - **Use it** when the user says "make a plan", "what would you do", "let's tackle X", or otherwise signals they want to see the shape of the work before you start.
-- **A single task with 3+ substeps** worth tracking → use `parent` to nest. Tree depth is limited to 2 (top-level + one layer of children). Don't try to nest deeper.
+- **A single task with 3+ substeps** worth tracking: use `parent` to nest. Tree depth is limited to 2 (top-level + one layer of children). Don't try to nest deeper.
 
-## When NOT to use
+## When not to use
 
 - Trivial 1-2 step tasks. Just do them.
 - Recording past decisions or lessons-learned. That's `memory`.
@@ -15,10 +15,10 @@ Use `Task` to plan and track multi-step work the user can watch in real time. Th
 
 ## Workflow
 
-1. **Plan in one shot.** `Task({action: "add_many", titles: […]})` at the start. Don't drip-feed tasks one at a time. The user wants to see the whole plan up front.
+1. **Plan in one shot.** `Task({action: "add_many", titles: [...]})` at the start. Don't drip-feed tasks one at a time. The user wants to see the whole plan up front.
 2. **Start before you work.** `Task({action: "start", id: N})` flips the task to `doing` AND demotes any other `doing` task back to `todo` (single-focus discipline). The user's progress meter stays unambiguous. Use `parallel: true` only if you genuinely have two tasks in flight at once (rare).
 3. **Done when materially complete.** `Task({action: "done", id: N})`. Don't pre-mark. Only mark `done` when you've actually finished the work the title described.
-4. **New substeps surface as you work.** If you discover a task is actually 3 substeps, `Task({action: "add", title: "…", parent: "#<hash>"})` for each. Then `start` the first child.
+4. **New substeps surface as you work.** If you discover a task is actually 3 substeps, `Task({action: "add", title: "...", parent: "#<hash>"})` for each. Then `start` the first child.
 5. **Plans change.** If the user redirects, don't silently abandon tasks:
    - If a task was never started, `remove` it.
    - If a task is still in-flight or was completed but reverted,
@@ -96,10 +96,10 @@ Work through it:
 
 ```
 Task({action: "start", id: 1})
-   …do the work, then…
+   ...do the work, then...
 Task({action: "done", id: 1})
 Task({action: "start", id: 2})
-   …
+   ...
 ```
 
 Discover substeps mid-task:

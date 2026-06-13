@@ -189,7 +189,7 @@ export interface EditorControllerOptions {
    *
    * Default: 150ms - long enough to fully swallow a drag's SIGWINCH burst
    * (measured: a 120→48 drag leaks 25 duplicate live areas at 0ms, 10 at
-   * 80ms, and 0 at >=150ms), short enough that a deliberate single resize
+   * 80ms, and 0 at \>=150ms), short enough that a deliberate single resize
    * still feels instant. Set to 0 to repaint synchronously on every resize
    * (legacy behavior; used by tests that assert a repaint-per-resize).
    */

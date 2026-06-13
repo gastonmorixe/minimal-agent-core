@@ -243,6 +243,7 @@ describe("withRetry", () => {
             retryable: false,
           })
           // biome-ignore lint/correctness/useYield: throw-only attempt
+          // oxlint-disable-next-line no-unreachable -- yield satisfies the generator type
           yield ""
         }),
       )

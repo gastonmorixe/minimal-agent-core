@@ -15,7 +15,7 @@
  *
  * # Format
  *
- *   [LEVEL] source: message k="v" k2="v2"\n
+ *   `[LEVEL] source: message k="v" k2="v2"\n`
  *
  * Compact and grep-able. We don't bother with RFC 5424 here — the
  * file sink covers structured parsing.
@@ -36,6 +36,12 @@ export interface StderrMirrorSinkOptions {
   level?: Severity
 }
 
+/**
+ * Diagnostic-bus sink that mirrors events to stderr as plain one-line
+ * messages, for headless/piped runs where no TUI surface exists. Must be
+ * wired with the interceptor's raw write in production so mirrored lines
+ * bypass the compositor instead of corrupting the live area.
+ */
 export class StderrMirrorSink {
   private readonly write: (s: string) => void
   private readonly level: Severity

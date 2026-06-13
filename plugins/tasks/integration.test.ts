@@ -1,91 +1,105 @@
 /**
  * End-to-end integration tests for the tasks plugin.
  *
- * Exercises the full closing-the-loop flow:
+ * Exercises the full closing-the-loop flow WITHOUT importing host code, so
+ * the plugin's own suite stays repo-portable (the decoupling contract):
  *
- *   1. Real `PluginLoader` discovers and loads the embedded tasks plugin.
- *   2. A `Task({action: "add_many", ...})` tool_use is dispatched through
- *      the loader → handler appends to disk via `TaskStore` → returns
- *      the rendered list in `tool_result.display`.
- *   3. A fresh `TasksAttachment` for the same session id sees the
- *      committed state, ready to inject on the next user turn.
- *   4. A `Task({action: "done", id: 1})` dispatched through the loader
- *      flips the first task and the attachment reflects it.
+ *   1. The plugin's `manifest.json` declares the `Task` tool (with its icon
+ *      and color) and the per-turn `tasks_snapshot` attachment.
+ *   2. A `Task({action: "add_many", ...})` is dispatched by invoking the
+ *      handler's default export directly → handler appends to disk via
+ *      `TaskStore` → returns the rendered list in `tool_result.display`.
+ *   3. A fresh `TasksAttachment` for the same session id sees the committed
+ *      state, ready to inject on the next user turn.
+ *   4. A `Task({action: "done", id: 1})` flips the first task and the
+ *      attachment reflects it.
  *
- * If any seam breaks (manifest validation, handler module load, store
- * write/read, attachment file read), this test catches it.
+ * The host loader's discovery/dispatch wiring (manifest → module resolve →
+ * dispatch) is host-internal and covered by the host's own loader-contract
+ * tests; here we cover the plugin's handler + store + attachment seams, which
+ * is what must keep working when this directory lives in its own repo.
  */
 
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { PluginLoader } from "../../src/plugins/loader.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
 
+import taskToolHandler from "./handlers/task_tool.ts"
 import { TasksAttachment } from "./lib/attachment.ts"
 import { TaskStore } from "./lib/store.ts"
 
-const PROJECT_ROOT = resolve(__dirname, "../..")
+const MANIFEST = JSON.parse(readFileSync(join(import.meta.dir, "manifest.json"), "utf-8")) as {
+  tuis: { trigger: { tool?: { name?: string } }; icon?: string; color?: string }[]
+  turnAttachments?: { id: string }[]
+}
 
 let tmpHome: string
-let savedHome: string | undefined
 
 beforeEach(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "tasks-integration-"))
-  savedHome = process.env.HOME
-  process.env.HOME = tmpHome
 })
 
 afterEach(() => {
-  if (savedHome === undefined) delete process.env.HOME
-  else process.env.HOME = savedHome
   rmSync(tmpHome, { recursive: true, force: true })
 })
 
-describe("tasks plugin — full loader → handler → attachment loop", () => {
+/** A minimal TUIContext good enough to dispatch the Task tool handler. */
+function ctx(sid: string, input: Record<string, unknown>): TUIContext {
+  return {
+    trigger: { type: "tool", name: "Task", input, tool_use_id: "tu" },
+    packageDir: "/tmp/fake-package-dir",
+    cwd: "/tmp/fake-cwd",
+    env: { HOME: tmpHome, MINIMAL_AGENT_SESSION_ID: sid },
+    abort: new AbortController().signal,
+    stdout: process.stdout,
+    stdin: process.stdin,
+    stderr: process.stderr,
+    log: { info() {}, warn() {}, error() {}, debug() {} } as never,
+  } as unknown as TUIContext
+}
+
+type ToolResult = Extract<TUIResult, { kind: "tool_result" }>
+
+async function dispatch(sid: string, input: Record<string, unknown>): Promise<ToolResult> {
+  const r = await taskToolHandler(ctx(sid, input))
+  if (r.kind !== "tool_result") throw new Error(`expected tool_result, got ${r.kind}`)
+  return r
+}
+
+describe("tasks plugin — full handler → store → attachment loop", () => {
+  it("manifest declares the Task tool and the tasks snapshot attachment", () => {
+    const task = MANIFEST.tuis.find((t) => t.trigger.tool?.name === "Task")
+    expect(task).toBeDefined()
+    // The cosmetic icon + color flow into the host tool frame (toolPresentation).
+    expect(task?.icon).toBe("✔")
+    expect(task?.color).toBe("lime")
+    expect(MANIFEST.turnAttachments?.some((a) => a.id === "tasks_snapshot")).toBe(true)
+  })
+
   it("add_many → store on disk → attachment reflects it", async () => {
     const sid = "11111111-aaaa-bbbb-cccc-dddddddddddd"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
+
+    // --- Dispatch add_many through the handler ---
+    const addResult = await dispatch(sid, {
+      action: "add_many",
+      titles: ["plan step 1", "plan step 2", "plan step 3"],
     })
-
-    // --- 1. Loader discovered the Task tool ---
-    const tools = loader.getExtraTools()
-    const task = tools.find((t) => t.name === "Task")
-    expect(task).toBeDefined()
-    expect(task!.description).toContain("task")
-
-    // --- 2. Dispatch add_many via the loader ---
-    const addResult = await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: {
-          action: "add_many",
-          titles: ["plan step 1", "plan step 2", "plan step 3"],
-        },
-        tool_use_id: "tu-add",
-      },
-      process.cwd(),
-    )
-    expect(addResult).not.toBeNull()
-    if (addResult?.kind !== "tool_result") return
     expect(addResult.is_error).toBeFalsy()
     expect(addResult.displayHeader).toContain("added 3 tasks")
     expect(addResult.content).toContain("plan step 1")
     expect(addResult.content).toContain("plan step 3")
 
-    // --- 3. File on disk has the tasks ---
+    // --- File on disk has the tasks ---
     const store = new TaskStore(sid, { home: tmpHome })
     const tasks = store.list()
     expect(tasks).toHaveLength(3)
     expect(tasks.map((t) => t.title)).toEqual(["plan step 1", "plan step 2", "plan step 3"])
 
-    // --- 4. A fresh TasksAttachment sees the committed state ---
+    // --- A fresh TasksAttachment sees the committed state ---
     const att = new TasksAttachment(sid, { home: tmpHome })
     const text = att.toText()
     expect(text).not.toBeNull()
@@ -96,34 +110,10 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
 
   it("done flips a task and the attachment reflects the new status", async () => {
     const sid = "22222222-aaaa-bbbb-cccc-dddddddddddd"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
 
-    // Seed two tasks via add_many, then mark #1 done.
-    await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "add_many", titles: ["first", "second"] },
-        tool_use_id: "tu-add",
-      },
-      process.cwd(),
-    )
+    await dispatch(sid, { action: "add_many", titles: ["first", "second"] })
 
-    const doneResult = await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "done", id: 1 },
-        tool_use_id: "tu-done",
-      },
-      process.cwd(),
-    )
-    expect(doneResult).not.toBeNull()
-    if (doneResult?.kind !== "tool_result") return
+    const doneResult = await dispatch(sid, { action: "done", id: 1 })
     expect(doneResult.is_error).toBeFalsy()
     expect(doneResult.displayHeader).toContain("marked done")
 
@@ -136,74 +126,22 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
 
   it("all-done verb fires when the LAST top-level task is completed", async () => {
     const sid = "33333333-aaaa-bbbb-cccc-dddddddddddd"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
 
-    await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "add", title: "the only task" },
-        tool_use_id: "tu-add",
-      },
-      process.cwd(),
-    )
-    const r = await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "done", id: 1 },
-        tool_use_id: "tu-done",
-      },
-      process.cwd(),
-    )
-    if (r?.kind !== "tool_result") return
+    await dispatch(sid, { action: "add", title: "the only task" })
+    const r = await dispatch(sid, { action: "done", id: 1 })
     expect(r.displayHeader).toContain("ALL DONE")
   })
 
   it("subtasks: add child via #parent and the attachment shows the tree", async () => {
     const sid = "44444444-aaaa-bbbb-cccc-dddddddddddd"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
 
-    const parentR = await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "add", title: "parent" },
-        tool_use_id: "tu-p",
-      },
-      process.cwd(),
-    )
-    if (parentR?.kind !== "tool_result") return
+    const parentR = await dispatch(sid, { action: "add", title: "parent" })
     const m = /#([0-9a-f]{6})/.exec(parentR.content!)
     expect(m).not.toBeNull()
     const parentHash = m![1]
 
-    await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "add", title: "child A", parent: `#${parentHash}` },
-        tool_use_id: "tu-c1",
-      },
-      process.cwd(),
-    )
-    await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "add", title: "child B", parent: `#${parentHash}` },
-        tool_use_id: "tu-c2",
-      },
-      process.cwd(),
-    )
+    await dispatch(sid, { action: "add", title: "child A", parent: `#${parentHash}` })
+    await dispatch(sid, { action: "add", title: "child B", parent: `#${parentHash}` })
 
     const text = new TasksAttachment(sid, { home: tmpHome }).toText()!
     // Subtask positions are 1a, 1b — pinned by the attachment renderer.
@@ -217,73 +155,18 @@ describe("tasks plugin — full loader → handler → attachment loop", () => {
 
   it("clear refuses with a doing task; force overrides", async () => {
     const sid = "55555555-aaaa-bbbb-cccc-dddddddddddd"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
 
-    await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "add", title: "x" },
-        tool_use_id: "tu-add",
-      },
-      process.cwd(),
-    )
-    await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "start", id: 1 },
-        tool_use_id: "tu-start",
-      },
-      process.cwd(),
-    )
+    await dispatch(sid, { action: "add", title: "x" })
+    await dispatch(sid, { action: "start", id: 1 })
 
-    const refused = await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "clear" },
-        tool_use_id: "tu-clear-1",
-      },
-      process.cwd(),
-    )
-    if (refused?.kind !== "tool_result") return
+    const refused = await dispatch(sid, { action: "clear" })
     expect(refused.is_error).toBe(true)
     expect(refused.content).toMatch(/refusing to clear/)
 
-    const forced = await loader.dispatch(
-      {
-        type: "tool",
-        name: "Task",
-        input: { action: "clear", force: true },
-        tool_use_id: "tu-clear-2",
-      },
-      process.cwd(),
-    )
-    if (forced?.kind !== "tool_result") return
+    const forced = await dispatch(sid, { action: "clear", force: true })
     expect(forced.is_error).toBeFalsy()
 
     const store = new TaskStore(sid, { home: tmpHome })
     expect(store.list()).toEqual([])
-  })
-
-  it("renders the Task tool with the manifest's icon and color on the loader's tool list", async () => {
-    const sid = "66666666-aaaa-bbbb-cccc-dddddddddddd"
-    const loader = await PluginLoader.load({
-      embeddedDir: PROJECT_ROOT,
-      coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-      sessionId: sid,
-    })
-    const task = loader.getExtraTools().find((t) => t.name === "Task")
-    expect(task).toBeDefined()
-    // The cosmetic icon + color flow into `toolPresentation` in agent.ts.
-    // We just verify the manifest fields are carried through to the
-    // loader's external tool list — the rendering itself lives in agent.ts.
-    expect((task as unknown as { icon?: string }).icon).toBe("✔")
-    expect((task as unknown as { color?: string }).color).toBe("lime")
   })
 })

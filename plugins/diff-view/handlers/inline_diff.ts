@@ -11,6 +11,10 @@ import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
 import { renderUnifiedDiff } from "./render.ts"
 
+/**
+ * Inline-tag handler for `<ma::emit::diff>`: replaces the tagged unified-diff
+ * text with its ANSI-colored render, in place in the streamed response.
+ */
 export default async function inlineDiffHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "inline_tag") {
     return { kind: "rendered", ansi: "" }

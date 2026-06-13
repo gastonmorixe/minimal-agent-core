@@ -18,6 +18,11 @@ import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 import { gatherSessionInfo } from "../lib/gather.ts"
 import { formatSessionInfo } from "../lib/snapshot.ts"
 
+/**
+ * Tool handler for `SessionInfo`: gathers the live runtime snapshot (context
+ * usage, effort, quota, cost, cwd, uptime) and renders it for both the model
+ * and the transcript.
+ */
 export default async function sessionInfo(ctx: TUIContext): Promise<TUIResult> {
   const snap = await gatherSessionInfo(ctx)
 

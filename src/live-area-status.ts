@@ -47,6 +47,13 @@ export interface LiveAreaStatusOptions {
   now?: () => number
 }
 
+/**
+ * Status renderer for the persistent-editor UI: subscribes to the
+ * {@link StatusBus}, animates the spinner on its own FPS-capped timer, and
+ * pushes the composed status line into the editor's status row instead of
+ * writing escape sequences. Suspends cleanly while a modal overlay owns the
+ * screen.
+ */
 export class LiveAreaStatusController implements StatusController {
   private readonly bus: StatusBus
   private readonly editor: EditorStatusSink
@@ -66,7 +73,7 @@ export class LiveAreaStatusController implements StatusController {
    * Reset triggers: bus.create() (new id), cleared status (null), or
    * controller stop. `update()` on the same handle keeps the same id
    * so phase transitions on one network request keep ticking from the
-   * original start (e.g. `Sending` -> `Receiving stream` -> `Thinking`
+   * original start (e.g. `Sending` -\> `Receiving stream` -\> `Thinking`
    * all share an elapsed counter).
    */
   private statusId: number | null = null

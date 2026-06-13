@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "plugin-api"
+  ],
   "description": "A tiny, beautiful, composable terminal agent harness that runs straight from source on Bun.",
   "homepage": "https://github.com/gastonmorixe/minimal-agent",
   "repository": {
@@ -13,11 +16,15 @@
     "minimal-agent": "src/index.ts"
   },
   "engines": {
-    "bun": ">=1.1.0"
+    "bun": ">=1.4.0"
+  },
+  "dependencies": {
+    "@minimal-agent/plugin-api": "workspace:*"
   },
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",
+    "test:arch": "bun test src/architecture",
     "test:e2e": "E2E=1 bun test",
     "typecheck": "bun run scripts/typecheck.ts",
     "typecheck:fast": "tsgo --noEmit",
@@ -33,13 +40,14 @@
     "check": "bun run scripts/check.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.13",
+    "@biomejs/biome": "^2.4.16",
     "@typescript/native-preview": "beta",
-    "bun-types": "^1.3.11",
-    "eslint-plugin-jsdoc": "^62.9.0",
-    "oxlint": "^1.61.0",
-    "oxlint-tsgolint": "^0.22.0",
-    "typedoc": "^0.28.0",
+    "bun-types": "^1.3.14",
+    "eslint-plugin-jsdoc": "^63.0.2",
+    "eslint-plugin-tsdoc": "^0.5.2",
+    "oxlint": "^1.69.0",
+    "oxlint-tsgolint": "^0.22.1",
+    "typedoc": "^0.28.19",
     "typescript": "^6.0.3"
   },
   "overrides": {

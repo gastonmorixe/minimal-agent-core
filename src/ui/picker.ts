@@ -36,6 +36,12 @@ export type PickerKey =
 
 export type PickerResult<V> = "stay" | { close: true; result: V | null }
 
+/**
+ * Keyboard-driven list selection widget: maintains a cursor over enabled
+ * items with paging (up/down/page/home/end), skipping disabled rows in
+ * either direction. `onKey` returns `"stay"` while navigating and a
+ * `{close, result}` envelope on Enter (the item's value) or Escape (`null`).
+ */
 export class Picker<V> {
   private readonly title?: string
   private readonly footer?: string

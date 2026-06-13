@@ -120,8 +120,7 @@ export function periodStartMs(period: UsagePeriod, nowMs: number): number {
     case "all":
       return 0
     default: {
-      const _exhaustive: never = period
-      throw new Error(`unhandled period: ${_exhaustive}`)
+      throw new Error(`unhandled period: ${String(period satisfies never)}`)
     }
   }
 }

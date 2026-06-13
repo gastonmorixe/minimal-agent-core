@@ -13,7 +13,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { getSessionId } from "./metadata.ts"
+import { getSessionId } from "./session-id.ts"
 
 /**
  * Captured at module load. Toggling MINIMAL_AGENT_NET_DBG at runtime does NOT
@@ -118,12 +118,10 @@ const NULL_HANDLE: NetDbgHandle = {
  * Records a request to disk and returns a handle for streaming the response.
  * Returns a no-op handle when MINIMAL_AGENT_NET_DBG is not set.
  *
- * @param opts Request capture options.
- * @param opts.url Request URL.
- * @param opts.method Request method.
- * @param opts.headers Request headers.
- * @param opts.body Request body to write.
- * @param opts.protocol Transport label for file naming.
+ * The `opts` bag carries the request capture data: `url`, `method`,
+ * `headers`, `body` (request body to write), and `protocol` (transport
+ * label for file naming).
+ *
  * @returns Capture handle used to finish response logging.
  */
 export function beginRequest(opts: {

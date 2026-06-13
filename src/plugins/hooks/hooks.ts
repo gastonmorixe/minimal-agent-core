@@ -4,9 +4,9 @@
  * Routes registrations and emits to the right backend based on the
  * channel's declared shape:
  *
- * - `broadcast-async` -> existing {@link EventBus} (microtask-deferred,
+ * - `broadcast-async` -\> existing {@link EventBus} (microtask-deferred,
  *   coalesce/throttle aware).
- * - `chain`, `broadcast-sync`, `stream` -> {@link HookBus}.
+ * - `chain`, `broadcast-sync`, `stream` -\> {@link HookBus}.
  *
  * Plugin authors call `hooks.on(channel, fn, opts)` and get the right
  * dispatcher by virtue of channel registration. They never need to
@@ -62,6 +62,13 @@ export interface HooksOptions {
   unsafeHooks?: boolean
 }
 
+/**
+ * Facade over the plugin extension system: owns the {@link EventBus}
+ * (fire-and-forget events) and {@link HookBus} (chain/sync/stream hooks),
+ * validates channel names against the static catalog plus runtime-declared
+ * channels, and clamps plugin listener priorities to `[0..100]` unless
+ * `UNSAFE_HOOKS=1` opts out.
+ */
 export class Hooks {
   readonly eventBus: EventBus
   readonly hookBus: HookBus
@@ -104,9 +111,9 @@ export class Hooks {
    * privilege band. This prevents the silent-typo failure where
    * passing `source: "agent"` (the free-form label field) instead of
    * `caller: "agent"` made the listener default to the plugin band and
-   * silently clamped a 5000-priority listener down to 100. See the
-   * regression test `"agent listener registered with caller:'agent'
-   * keeps its priority"` in `hooks.test.ts`.
+   * silently clamped a 5000-priority listener down to 100. See the regression test
+   * "agent listener registered with caller:'agent' keeps its priority"
+   * in `hooks.test.ts`.
    *
    * The runtime fallback (`opts.caller ?? "plugin"`) is retained as
    * defense-in-depth against callers that bypass type-checking via

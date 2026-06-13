@@ -5,7 +5,7 @@ import { describe, expect, it } from "bun:test"
 
 import { getAuth } from "../auth.ts"
 import { buildHeaders } from "../headers.ts"
-import { getSessionId } from "../metadata.ts"
+import { getSessionId } from "../session-id.ts"
 
 import {
   defaultNetworkClient,

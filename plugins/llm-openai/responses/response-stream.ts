@@ -32,7 +32,8 @@ import type {
   CanonicalEvent,
   CanonicalUsage,
   StopReason,
-} from "../../../src/llm/canonical-events.ts"
+} from "@minimal-agent/plugin-api/llm/canonical-events"
+
 import { classifyUpstreamError } from "../../../src/llm/errors.ts"
 
 // ---------------------------------------------------------------------------

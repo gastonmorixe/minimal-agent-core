@@ -250,11 +250,11 @@ function emitToSingleton(
  *
  * Anywhere in the codebase:
  *
- *   import { diag } from "./diagnostic-bus.ts"
- *   diag.warn("live-area.timeout", "invoke did not resolve in time", {
+ *   import \{ diag \} from "./diagnostic-bus.ts"
+ *   diag.warn("live-area.timeout", "invoke did not resolve in time", \{
  *     slot: "quota-status/quota",
  *     "timeout-ms": 8000,
- *   })
+ *   \})
  */
 export const diag = {
   emergency(source: string, message: string, sd?: StructuredData): void {

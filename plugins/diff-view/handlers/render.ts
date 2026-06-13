@@ -68,6 +68,10 @@ function resolvePalette(): DiffPalette {
   }
 }
 
+/**
+ * Render a unified diff as ANSI-colored lines (additions lime, deletions
+ * pink, hunk headers cyan), with an optional title heading.
+ */
 export function renderUnifiedDiff(patch: string, title?: string): string {
   const lines = patch.split("\n")
   const out: string[] = []

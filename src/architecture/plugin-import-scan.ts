@@ -14,7 +14,7 @@
  *
  * Regenerate the baseline after intentional cleanups:
  *
- *   bun -e 'import("./src/architecture/plugin-import-scan.ts").then(m =>
+ *   bun -e 'import("./src/architecture/plugin-import-scan.ts").then(m =\>
  *     console.log(m.renderBaseline(m.scanPluginSrcImports("plugins"))))'
  *
  * @module architecture/plugin-import-scan

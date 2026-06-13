@@ -6,12 +6,18 @@
  * @module sub-agents/handlers/spawn_agent
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { serviceDepsFromCtx } from "../lib/handler-deps.ts"
 import { renderSpawnDisplay } from "../lib/render.ts"
 import { spawnAgent } from "../lib/service.ts"
 import { parseSpawnRequest } from "../lib/validate.ts"
 
+/**
+ * Tool handler for `SpawnAgent`: validates the delegation request, enforces
+ * the nesting ban, provisions the worker session, and launches the
+ * background sub-agent process.
+ */
 export default async function spawn(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "SpawnAgent: unexpected trigger", is_error: true }

@@ -14,6 +14,7 @@
  *   bun run plugins/memory/cli.ts <command> [args] [flags]
  *
  * Commands:
+ * ```
  *   list                              List entries in a scope.
  *   read <id>                         Read one entry by id.
  *   add <body...>                     Append a new entry.
@@ -22,18 +23,23 @@
  *   clear                             Wipe a scope (short-term only).
  *   rewrite-ids                       Stamp [#<id>] onto legacy bullets in-place.
  *   path                              Print the resolved file path.
+ * ```
  *
  * Flags (global):
+ * ```
  *   -s, --scope <s>                   global | project | short-term (default: project)
  *   --cwd <path>                      Working dir for project scope (default: $PWD)
  *   --sid <sid>                       Session id for short-term (default: $MINIMAL_AGENT_SESSION_ID)
  *   -f, --format text|json            Output format (default: text)
  *   --no-color                        Disable ANSI colors in text output
  *   -h, --help                        Show this help
+ * ```
  *
  * Flags (list only):
+ * ```
  *   -q, --query <s>                   Case-insensitive substring filter
  *   -L, --limit <n>                   Show only the N most recent matches
+ * ```
  *
  * Exit codes:
  *   0  success

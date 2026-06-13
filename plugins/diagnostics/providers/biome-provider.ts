@@ -20,6 +20,12 @@ import { runCapture } from "./spawn.ts"
 
 const EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|json|jsonc|css)$/
 
+/**
+ * Diagnostic provider that shells out to the workspace's biome binary
+ * (`biome check --reporter=json`) for one file and adapts the output to
+ * findings. Only handles paths inside the workspace root with extensions
+ * biome formats/lints.
+ */
 export class BiomeProvider implements DiagnosticProvider {
   readonly id = "biome"
   readonly kind = "format" as const

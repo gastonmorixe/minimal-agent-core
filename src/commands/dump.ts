@@ -21,8 +21,14 @@ export interface DumpCommandInput {
   cwd: string
 }
 
+/** Thrown for user-facing `dump` failures (bad target, no sessions); the CLI prints the message without a stack. */
 export class DumpCommandError extends Error {}
 
+/**
+ * Implements the `minimal-agent dump <session>` CLI command: resolves the
+ * target (id prefix or "last") to a session, renders the whole transcript as
+ * markdown or XML via the sessions read API, and writes it to stdout.
+ */
 export async function runDumpCommand(input: DumpCommandInput): Promise<void> {
   const sid = resolveSessionTarget(input.target, input.cwd)
   if (!sid) {

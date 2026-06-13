@@ -10,7 +10,7 @@
  * Visual contract (pinned in `quota-summary.test.ts`, ported from the old
  * formatter's tests so the banner is byte-stable across the refactor):
  *   `5h 12% ↻ 3h12m · 7d 4% ↻ 2d6h · overall 9%`
- *   - integer percent, green <60 / yellow 60-84 / red ≥85
+ *   - integer percent, green below 60 / yellow 60-84 / red ≥85
  *   - reset humanized as `Nm` / `NhMm` / `Nd` / `NdMh`, omitted when past
  *   - windows pre-sorted by the provider (5h, 7d, named, overall)
  *   - optional trailing `overage off` segment (opt-in, non-"allowed" only)

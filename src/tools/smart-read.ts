@@ -1,4 +1,10 @@
 const MAX_BYTES = 100_000
+/**
+ * Reads a window of a text file by line offset/limit (default 200 lines),
+ * additionally clamping the result to 100 kB. Reports the file's total line
+ * count, whether the byte cap fired, and a follow-up `offset` suggestion for
+ * paging when it did.
+ */
 export async function smartRead(opts: { filePath: string; offset?: number; limit?: number }) {
   const text = await Bun.file(opts.filePath).text()
   const lines = text.split("\n")

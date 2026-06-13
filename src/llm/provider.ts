@@ -16,102 +16,33 @@ import type { MediaLimits } from "../media/limits.ts"
 import type { MediaItem, PreparedMedia } from "../media/types.ts"
 import type { SubagentModelRecommendation } from "../plugins/types.ts"
 
-import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
+import type { CanonicalEvent } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import type { CapabilityViolation } from "./errors.ts"
 import type { ModelEntry } from "./model-registry.ts"
 
 // ---------------------------------------------------------------------------
-// Auth
+// Auth + run context (Wave D-1: MOVED to the leaf contract package)
 // ---------------------------------------------------------------------------
 
 /**
- * Provider-neutral auth descriptor.
- *
- * - `oauth`: OAuth bearer with optional refresh callback (Anthropic).
- *   The shared transport handles the 401-keychain-race fix and forwards
- *   refreshed tokens back into the same request without restarting
- *   the conversation.
- * - `api-key`: header-token auth (OpenAI, Anthropic API key,
- *   Anthropic Bedrock). No refresh.
- * - `custom`: arbitrary header bag for self-hosted gateways.
+ * The provider-neutral run-time contract slice — `ProviderAuth`, `RunContext`,
+ * `MediaProgress`, `DebugSink` — now lives in
+ * `@minimal-agent/plugin-api/llm/provider-auth`. It carries no provider
+ * fingerprint, so it is safe in the leaf package both core and plugins depend
+ * on. This re-export keeps `src/llm/provider.ts` the single import surface for
+ * core (and any not-yet-swept plugin): the token-bearing port below
+ * (`SurfaceId`, `ProviderAdapter`, validation/preflight) STAYS here in `src/`,
+ * so this file remains an I1 baseline member until Wave C scrubs those tokens.
  */
-export type ProviderAuth =
-  | {
-      kind: "oauth"
-      token: string
-      refresh?: () => Promise<{ token: string }>
-    }
-  | {
-      kind: "api-key"
-      key: string
-      organization?: string
-      project?: string
-    }
-  | {
-      kind: "custom"
-      headers: Record<string, string>
-    }
+import type {
+  DebugSink,
+  MediaProgress,
+  ProviderAuth,
+  RunContext,
+} from "@minimal-agent/plugin-api/llm/provider-auth"
 
-// ---------------------------------------------------------------------------
-// Run context (transport + observability)
-// ---------------------------------------------------------------------------
-
-/**
- * Per-call context handed to every adapter. Carries the network client
- * (so tests can swap it), session id, auth, and observation hooks.
- *
- * Kept deliberately small; everything provider-specific lives on the
- * `CanonicalRequest.vendor.*` namespace, not here.
- */
-export interface RunContext {
-  auth: ProviderAuth
-  sessionId: string
-  /**
-   * Network client; defaults to the global one. Tests inject mocks.
-   * The shape is intentionally not imported here to keep this file
-   * dependency-light : adapters import what they need.
-   */
-  networkClient?: unknown
-  /**
-   * Debug sink. When provided, adapters log request/response metadata.
-   * No-op by default.
-   */
-  debug?: DebugSink
-  /**
-   * Fired on every usage snapshot the provider reports during a stream
-   * (initial + cumulative deltas + final). Adapter computes USD cost
-   * via the registry's pricing table.
-   */
-  onUsage?: (usage: CanonicalUsage, costUSD: number) => void
-  /**
-   * Fired by {@link ProviderAdapter.prepareMedia} as an async media step
-   * (upload / transcode) progresses. The agent renders a transient progress
-   * line above the input prompt. No-op by default.
-   */
-  onMediaProgress?: (progress: MediaProgress) => void
-}
-
-/**
- * Progress event for an in-flight async media step (e.g. a Files API upload).
- * Emitted via {@link RunContext.onMediaProgress}.
- */
-export interface MediaProgress {
-  /** The {@link MediaItem.id} the progress refers to. */
-  mediaId: string
-  phase: "reading" | "uploading" | "processing"
-  /** Completion in `[0,1]` when known; `null` for an indeterminate spinner. */
-  fraction: number | null
-  bytesDone?: number
-  bytesTotal?: number
-}
-
-export interface DebugSink {
-  header(line: string): void
-  kv(key: string, value: string): void
-  headers(map: Record<string, string>): void
-  body(value: unknown): void
-}
+export type { DebugSink, MediaProgress, ProviderAuth, RunContext }
 
 // ---------------------------------------------------------------------------
 // Validation

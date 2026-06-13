@@ -29,6 +29,11 @@ import {
 
 const DUMP_WARN_BYTES = 256 * 1024
 
+/**
+ * Tool handler for `SessionHistory`: routes the parsed action (window, meta,
+ * list, search, tool_calls, blob, dump) to the session-transcript store and
+ * renders the bounded result.
+ */
 export default async function sessionHistory(ctx: HandlerContextSlice): Promise<ToolResultSlice> {
   if (ctx.trigger.type !== "tool") {
     return err("SessionHistory only runs as a tool call.")
@@ -163,14 +168,14 @@ async function run(
     }
 
     default: {
-      const _exhaustive: never = req
-      return err(`Unhandled action: ${JSON.stringify(_exhaustive)}`)
+      return err(`Unhandled action: ${JSON.stringify(req satisfies never)}`)
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// sid resolution ("last" → newest session for this cwd, else newest overall)
+// sid resolution ("last" → newest session for this cwd, else newest overall;
+// anything else → unique-prefix match against the index, e.g. "260d72dd")
 // ---------------------------------------------------------------------------
 
 type SidResolution = { ok: true; sid: string } | { ok: false; error: string }
@@ -180,12 +185,34 @@ async function resolveSid(
   sessions: NonNullable<PluginHostSlice["sessions"]>,
   cwd: string,
 ): Promise<SidResolution> {
-  if (sid !== "last") return { ok: true, sid }
-  const inCwd = await sessions.list({ cwd, limit: 1 })
-  if (inCwd.items.length > 0) return { ok: true, sid: inCwd.items[0].sid }
-  const anywhere = await sessions.list({ limit: 1 })
-  if (anywhere.items.length > 0) return { ok: true, sid: anywhere.items[0].sid }
-  return { ok: false, error: "No saved sessions found." }
+  if (sid === "last") {
+    const inCwd = await sessions.list({ cwd, limit: 1 })
+    if (inCwd.items.length > 0) return { ok: true, sid: inCwd.items[0].sid }
+    const anywhere = await sessions.list({ limit: 1 })
+    if (anywhere.items.length > 0) return { ok: true, sid: anywhere.items[0].sid }
+    return { ok: false, error: "No saved sessions found." }
+  }
+
+  // Short sid support: resolve a prefix (e.g. "260d72dd") to the full id. An
+  // exact full sid is its own unique prefix, so it resolves to itself.
+  const { items } = await sessions.list({ query: sid, limit: 200 })
+  const needle = sid.toLowerCase()
+  const matches = items.filter((e) => e.sid.toLowerCase().startsWith(needle))
+  if (matches.length === 1) return { ok: true, sid: matches[0].sid }
+  if (matches.length > 1) {
+    const exact = matches.find((e) => e.sid.toLowerCase() === needle)
+    if (exact) return { ok: true, sid: exact.sid }
+    const shown = matches.slice(0, 8).map((e) => e.sid)
+    return {
+      ok: false,
+      error:
+        `Ambiguous session id prefix ${JSON.stringify(sid)} — ${matches.length} sessions match: ` +
+        `${shown.join(", ")}${matches.length > shown.length ? ", …" : ""}. Use a longer prefix.`,
+    }
+  }
+  // No prefix match in the index — pass through unchanged so the action's own
+  // lookup decides (covers files present on disk but missing from the index).
+  return { ok: true, sid }
 }
 
 // ---------------------------------------------------------------------------

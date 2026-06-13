@@ -130,8 +130,7 @@ export function foldRecords(records: SessionRecord[]): Message[] {
  *    appends `user(A) + assistant(tool_use)` then crashes; run 2 loads,
  *    surfaces `user(A)` as `pendingDraft`, the user discards it and
  *    types `user(B)`, which appends to the same log; run 3 loads and
- *    repair-step-1 drops the orphan assistant, leaving `[user(A),
- *    user(B), …]`. We drop the EARLIER user (it was never replied to,
+ *    repair-step-1 drops the orphan assistant, leaving `[user(A), user(B), …]`. We drop the EARLIER user (it was never replied to,
  *    and the later one is the conversation the user actually moved on
  *    to). The dropped prompt is unrecoverable here — its retry chance
  *    was at the FIRST resume via `pendingDraft`. Surfacing it at run 3
@@ -402,6 +401,13 @@ export function extractPendingDraft(messages: Message[]): string | null {
   return joined
 }
 
+/**
+ * Parses raw JSONL transcript text into a resumable session: folds records
+ * into messages, repairs structural damage from crashes (orphan tool_use /
+ * tool_result pairs), and extracts any pending draft the user typed but never
+ * sent. `dropped` and `repaired` report how lossy the load was so callers can
+ * warn the user.
+ */
 export function loadSessionFromText(text: string): LoadedSession {
   const { records, dropped } = parseLines(text)
   const meta = (records.find((r) => r.kind === "meta") as MetaRecord | undefined) ?? null
@@ -429,6 +435,11 @@ export function loadSessionFromText(text: string): LoadedSession {
   return { meta, records, messages, dropped, repaired, pendingDraft }
 }
 
+/**
+ * Reads a session transcript from disk by id and runs it through
+ * {@link loadSessionFromText}. Throws (ENOENT) when no transcript exists for
+ * the id.
+ */
 export function loadSession(sid: string, dir?: string): LoadedSession {
   const path = sessionFilePath(sid, dir)
   const text = readFileSync(path, "utf-8")
@@ -439,6 +450,11 @@ export function loadSession(sid: string, dir?: string): LoadedSession {
 // Re-export shape helpers (useful for callers building previews)
 // ---------------------------------------------------------------------------
 
+/**
+ * One-line preview of the session's first user prompt, whitespace-collapsed
+ * and ellipsis-truncated to `maxLen`. Returns `""` when the transcript has no
+ * user record. Used by session pickers and resume banners.
+ */
 export function firstUserPromptSnippet(records: SessionRecord[], maxLen = 60): string {
   for (const r of records) {
     if (r.kind === "user") {

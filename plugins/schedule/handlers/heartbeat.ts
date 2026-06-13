@@ -14,6 +14,10 @@ import type { LiveAreaHandlerContext } from "../../../src/plugins/types.ts"
 import { cronStoreForSession } from "../lib/store.ts"
 import { runTick } from "../lib/tick.ts"
 
+/**
+ * Live-area heartbeat: ticks the cron store between turns, fires due tasks
+ * as injected prompts, and returns the widget line (or null when idle).
+ */
 export default async function heartbeat(ctx: LiveAreaHandlerContext): Promise<string | null> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") return null
   const sid = ctx.agent?.sessionId

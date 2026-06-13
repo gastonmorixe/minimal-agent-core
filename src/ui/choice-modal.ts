@@ -73,6 +73,12 @@ function color(s: string, code: string): string {
   return `${code}${s}${ANSI.reset}`
 }
 
+/**
+ * Generic N-option modal overlay (e.g. "compact / clear / cancel"). Renders
+ * a boxed prompt with arrow-key selection and resolves to the chosen
+ * option's value, or `null` on Escape. Requires at least one option;
+ * the constructor throws otherwise.
+ */
 export class ChoiceModal implements LiveOverlay {
   private selectedIndex: number
   private readonly opts: ChoiceModalOpts

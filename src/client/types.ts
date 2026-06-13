@@ -491,10 +491,10 @@ export interface StreamedResponse {
  *   - message_start: message object with id, model, usage
  *   - content_block_start: new content block (text, thinking, tool_use)
  *   - content_block_delta: incremental data:
- *       text_delta: { type: "text_delta", text: "..." }
- *       thinking_delta: { type: "thinking_delta", thinking: "..." }
- *       signature_delta: { type: "signature_delta", signature: "..." }
- *       input_json_delta: { type: "input_json_delta", partial_json: "..." }
+ *       text_delta: \{ type: "text_delta", text: "..." \}
+ *       thinking_delta: \{ type: "thinking_delta", thinking: "..." \}
+ *       signature_delta: \{ type: "signature_delta", signature: "..." \}
+ *       input_json_delta: \{ type: "input_json_delta", partial_json: "..." \}
  *   - content_block_stop: end of a content block
  *   - message_delta: stop_reason, usage, context_management
  *   - message_stop: end of message

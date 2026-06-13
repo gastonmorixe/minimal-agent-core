@@ -25,7 +25,7 @@
  *
  * One writer per session by construction (the session id is unique).
  * Full-rewrite on every mutation is fine: the file is tiny (typical
- * plan is <20 lines, never more than a few hundred).
+ * plan is under 20 lines, never more than a few hundred).
  *
  * @module tasks/lib/store
  */
@@ -67,8 +67,8 @@ import {
  *  - `doing → doing` is a no-op for timing (same as no transition).
  *  - `* → done` also stamps `done_at` (preserved from pre-v2 behavior).
  *  - `* → canceled` clears `reason` only if the caller doesn't preserve it.
- *  - When `last_resumed_at` is missing or unparseable on a `doing →
- *    other` transition (resumed v1 file, file corruption), no time is
+ *  - When `last_resumed_at` is missing or unparseable on a
+ *    `doing → other` transition (resumed v1 file, file corruption), no time is
  *    accrued — `active_ms` stays put. Better to lose a few seconds of
  *    history than to inject NaN into the counter.
  *
@@ -149,7 +149,7 @@ export interface View {
   /**
    * When set, the title column renders as a diff:
    *
-   *     <oldTitle struck through red>  →  <newTitle bold>
+   * `<oldTitle struck through red>  →  <newTitle bold>`
    *
    * Used by `update` so the user sees WHAT changed, not just the new
    * title. The handler is responsible for skipping this when old===new.
@@ -231,6 +231,10 @@ export class TaskStoreError extends Error {
   }
 }
 
+/**
+ * Append-only JSONL-backed task store: owns task/subtask CRUD, status
+ * transitions, ordering, and hash-or-position id resolution for one session.
+ */
 export class TaskStore {
   readonly path: string
   private readonly deps: StoreDeps

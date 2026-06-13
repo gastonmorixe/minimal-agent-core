@@ -77,9 +77,9 @@ export interface DueOutcome {
 /**
  * Compute which tasks fire at `now`.
  *
- * @param entries Current task set (already pruned of resume-stale items).
- * @param now Wall clock in ms.
- * @param opts Jitter + dynamic-cadence injection.
+ * @param entries - Current task set (already pruned of resume-stale items).
+ * @param now - Wall clock in ms.
+ * @param opts - Jitter + dynamic-cadence injection.
  */
 export function due(entries: CronEntry[], now: number, opts: DueOptions = {}): DueOutcome {
   const jitter = opts.jitterSeconds ?? (() => 0)
@@ -152,8 +152,8 @@ export interface PruneOutcome {
  * Called once when the heartbeat first loads (tick 0). Returns the kept
  * set + the dropped set (for an optional log).
  *
- * @param entries Loaded task set.
- * @param now Load time in ms.
+ * @param entries - Loaded task set.
+ * @param now - Load time in ms.
  */
 export function pruneOnLoad(entries: CronEntry[], now: number): PruneOutcome {
   const kept: CronEntry[] = []
@@ -177,8 +177,8 @@ export function pruneOnLoad(entries: CronEntry[], now: number): PruneOutcome {
  * `null` when none is computable (malformed cron, or a one-shot already
  * past).
  *
- * @param entry Task.
- * @param now Reference time.
+ * @param entry - Task.
+ * @param now - Reference time.
  */
 export function nextFireMs(entry: CronEntry, now: number): number | null {
   if (isTimeBased(entry) && entry.nextAtMs !== undefined) {

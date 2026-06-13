@@ -15,8 +15,8 @@ const ID_LEN = 8
 /**
  * Generate a unique 8-char id.
  *
- * @param exists Predicate: true when an id is already taken.
- * @param rand Injectable [0,1) source (default `Math.random`) for tests.
+ * @param exists - Predicate: true when an id is already taken.
+ * @param rand - Injectable [0,1) source (default `Math.random`) for tests.
  * @returns A fresh id not currently in use.
  */
 export function generateId(

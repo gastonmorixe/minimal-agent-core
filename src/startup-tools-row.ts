@@ -40,7 +40,7 @@ import { c } from "./agent.ts"
 import { displayWidth } from "./term-width.ts"
 
 /**
- * Subset of {@link import("./plugins/loader.ts").PluginToolDefinition}
+ * Subset of `PluginToolDefinition` (in `./plugins/loader.ts`)
  * we actually need. Kept minimal so callers don't have to plumb the
  * full schema through.
  */
@@ -133,8 +133,8 @@ export function formatStartupToolsRow(tools: ReadonlyArray<StartupToolEntry>): s
  * row used to clip with `…` on narrow terminals, hiding which tools were
  * actually loaded. Now the names wrap and stay fully visible.
  *
- * @param tools    Loaded tool entries (name + optional icon/color).
- * @param maxWidth Visible cell budget per line (already net of the row's
+ * @param tools - Loaded tool entries (name + optional icon/color).
+ * @param maxWidth - Visible cell budget per line (already net of the row's
  *                 chrome + label + indent). Non-positive → everything on
  *                 one line (defensive; caller should pass ≥1).
  * @returns One styled string per physical line, or `[]` when empty.

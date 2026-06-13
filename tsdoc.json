@@ -13,10 +13,5 @@
       "tagName": "@since",
       "syntaxKind": "block"
     }
-  ],
-  "supportForTags": {
-    "@module": true,
-    "@yields": true,
-    "@since": true
-  }
+  ]
 }

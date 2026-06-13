@@ -6,7 +6,7 @@
  * Pins the feature contract:
  *   - 0 non-empty messages → ""
  *   - exactly 1 → verbatim (no numbering)
- *   - >1 → "1. … / 2. … / N. …" with continuation lines indented
+ *   - \>1 → "1. … / 2. … / N. …" with continuation lines indented
  *   - empty / whitespace-only entries dropped before counting
  */
 import { describe, expect, it } from "bun:test"

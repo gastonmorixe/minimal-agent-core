@@ -26,9 +26,6 @@
  * @module plugins/loader
  */
 
-import { existsSync, readFileSync, realpathSync } from "node:fs"
-import { isAbsolute, join, resolve } from "node:path"
-
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
 import { paletteEnvJson } from "../palette.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
@@ -37,26 +34,20 @@ import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
-import { ManifestError, parseManifest } from "./manifest.ts"
 import type {
   AgentContext,
   CommandContext,
   CommandInfo,
   CommandResult,
   LoadedPlugin,
-  ManifestFile,
   ManifestMode,
-  ManifestPromptFragment,
   ModelInfoSnapshot,
-  PromptFragmentContext,
-  PromptFragmentHandler,
   ResolvedCommand,
   ResolvedEventSub,
   ResolvedHandler,
   ResolvedHookSub,
   ResolvedLiveAreaSlot,
   SetupBinaryInventory,
-  SetupHandler,
   SetupResult,
   SubagentModelRecommendation,
   ToolAvailabilityContext,
@@ -249,7 +240,6 @@ export interface PluginLoaderOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
-const DEFAULT_FRAGMENT_TIMEOUT_MS = 2000
 const DEFAULT_FRAGMENT_ORDER = 100
 
 /**
@@ -476,223 +466,28 @@ export class PluginLoader {
     const disabledPluginIds = opts.disabledPluginIds ?? new Set<string>()
     const enabledPluginIds = opts.enabledPluginIds ?? new Set<string>()
 
-    // Discover packages in all four roots. Precedence on package-id
-    // collision: project > home > user > embedded (closer-to-user wins).
-    type PkgRoot = "embedded" | "user" | "home" | "project"
-    const packages: { dir: string; root: PkgRoot }[] = []
-    if (opts.embeddedDir) {
-      for (const d of discoverPackageDirs(opts.embeddedDir, "plugins")) {
-        packages.push({ dir: d, root: "embedded" })
-      }
-    }
-    if (opts.userDir) {
-      for (const d of discoverPackageDirs(opts.userDir, "plugins")) {
-        packages.push({ dir: d, root: "user" })
-      }
-    }
-    if (opts.homeDir) {
-      for (const d of discoverPackageDirs(opts.homeDir, "plugins")) {
-        packages.push({ dir: d, root: "home" })
-      }
-    }
-    if (opts.projectDir) {
-      for (const d of discoverPackageDirs(opts.projectDir, ".agents/plugins")) {
-        packages.push({ dir: d, root: "project" })
-      }
-    }
-
-    // Dedupe by realpath BEFORE the id-collision check. Two roots can
-    // legitimately point at the same physical directory:
-    //   - cwd == $HOME → projectDir = $HOME → scans $HOME/.agents/plugins
-    //   - homeDir = $HOME/.agents       → scans $HOME/.agents/plugins (same dir!)
-    //   - symlinks under ~/.agents/plugins pointing into a shared
-    //     dev checkout that also lives under projectDir
-    // Keep only the highest-precedence root (project > home > user > embedded)
-    // for each physical package. This is not a user-actionable warning —
-    // emit a Notice that lands in the file log only, not the scrollback.
-    const ROOT_PRECEDENCE = { project: 4, home: 3, user: 2, embedded: 1 } as const
-    const byRealPath = new Map<string, { dir: string; root: PkgRoot }>()
-    for (const pkg of packages) {
-      let real: string
-      try {
-        real = realpathSync(pkg.dir)
-      } catch {
-        // realpath failed (broken symlink, racing unlink, permission) —
-        // fall back to the lexical path so we still dedupe identical strings.
-        real = pkg.dir
-      }
-      const existing = byRealPath.get(real)
-      if (existing === undefined) {
-        byRealPath.set(real, pkg)
-        continue
-      }
-      // Same physical directory discovered through a second root.
-      const winner = ROOT_PRECEDENCE[pkg.root] > ROOT_PRECEDENCE[existing.root] ? pkg : existing
-      const loser = winner === pkg ? existing : pkg
-      byRealPath.set(real, winner)
-      diag.notice(
-        "plugin-loader",
-        `deduped overlapping package roots for ${real}: kept ${winner.root}, ` +
-          `dropped ${loser.root} (${loser.dir})`,
-      )
-    }
-    const dedupedPackages = Array.from(byRealPath.values())
-
-    // Parse manifests.
-    const parsed: LoadedPlugin[] = []
-    const seenIds = new Set<string>()
-    // Walk in precedence order: project > home > user > embedded.
-    const ordered = [
-      ...dedupedPackages.filter((p) => p.root === "project"),
-      ...dedupedPackages.filter((p) => p.root === "home"),
-      ...dedupedPackages.filter((p) => p.root === "user"),
-      ...dedupedPackages.filter((p) => p.root === "embedded"),
-    ]
-    for (const { dir, root } of ordered) {
-      const manifestPath = join(dir, "manifest.json")
-      let manifest: ManifestFile
-      try {
-        const raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
-        manifest = parseManifest(raw, manifestPath)
-      } catch (e) {
-        const msg =
-          e instanceof ManifestError
-            ? `skipping ${dir}: manifest error: ${e.message}`
-            : e instanceof SyntaxError
-              ? `skipping ${dir}: manifest.json is not valid JSON: ${e.message}`
-              : `skipping ${dir}: ${e instanceof Error ? e.message : String(e)}`
-        logger(msg)
-        continue
-      }
-
-      if (seenIds.has(manifest.id)) {
-        // A higher-precedence copy of this id already won, so this copy is
-        // skipped. That part is correct and intentional. But this is routine
-        // precedence resolution, NOT a user-actionable error: the common
-        // trigger is the same plugins repo present under two roots with
-        // DISTINCT realpaths (e.g. ~/.agents/plugins/* symlinked into one
-        // checkout while ~/.minimal-agent/plugins/* is a second checkout of
-        // the same repo — same manifest id, different files on disk, so the
-        // realpath dedup above can't collapse them). Emitting a loud ⚠ warn
-        // for that on every startup just races the banner box with noise.
-        //
-        // Route through the injected logger when a test supplies one (so the
-        // shadow stays observable in tests) and otherwise emit a Notice that
-        // lands in the file log only, never the scrollback — matching the
-        // realpath-dedup and disabled-by-manifest branches that bracket this
-        // one.
-        const msg =
-          `skipping ${dir}: package id "${manifest.id}" already loaded ` +
-          `(precedence: project > home > user > embedded)`
-        if (opts.logger) {
-          opts.logger(msg)
-        } else {
-          diag.notice("plugin-loader", msg)
-        }
-        continue
-      }
-
-      if (disabledPluginIds.has(manifest.id)) {
-        logger(
-          `skipping ${dir}: plugin "${manifest.id}" is disabled in user config ` +
-            `(plugins.${manifest.id}.enabled = false)`,
-        )
-        // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
-        seenIds.add(manifest.id)
-        continue
-      }
-
-      // Manifest-level opt-out: plugin author shipped with `enabled: false`.
-      // The user can still bring it back online with an explicit `enabled:
-      // true` in their config (the `enabledPluginIds` override set).
-      //
-      // Unlike the user-config opt-out above, this is BY DESIGN: the author
-      // intentionally shipped the package disabled. Emit as a notice (file
-      // log only, never stderr) so the by-design state stays auditable
-      // without polluting the scrollback. Tests that inject a custom
-      // `logger` still see the message verbatim.
-      if (manifest.enabled === false && !enabledPluginIds.has(manifest.id)) {
-        const msg =
-          `skipping ${dir}: plugin "${manifest.id}" is disabled by its manifest ` +
-          `(manifest.enabled = false); set plugins.${manifest.id}.enabled = true ` +
-          `in ~/.minimal-agent/config.jsonc to enable`
-        if (opts.logger) {
-          opts.logger(msg)
-        } else {
-          diag.notice("plugin-loader", msg)
-        }
-        // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
-        seenIds.add(manifest.id)
-        continue
-      }
-
-      // Resolve prompt content.
-      //
-      // PROMPT.md is genuinely optional. A plugin that contributes only
-      // editor hooks, live-area slots, or other UX-layer behavior has
-      // nothing to teach the model and should ship NO PROMPT.md at all
-      // (the `buildBlock` codepath below then omits the `<plugin id="...">`
-      // wrapper entirely). Falling back to `manifest.description` here
-      // would leak per-plugin dev docs into the cached system prompt for
-      // every request, which is what we're trying to avoid.
-      //
-      // If `manifest.prompt` is explicitly set but the referenced file is
-      // missing, that's an authoring error (the author asked for a specific
-      // file). Warn so it surfaces in the file log without breaking load.
-      const promptExplicit = typeof manifest.prompt === "string"
-      const promptRel = manifest.prompt ?? "./PROMPT.md"
-      const promptAbs = resolvePath(dir, promptRel)
-      let prompt: string | null = null
-      if (existsSync(promptAbs)) {
-        prompt = readFileSync(promptAbs, "utf-8")
-      } else if (promptExplicit) {
-        logger(
-          `${dir}: manifest.prompt points to "${promptRel}" but the file is ` +
-            `missing; the plugin will be silent in the system prompt`,
-        )
-      }
-
-      // Dead-weight check: a plugin with no declared contributions AND no
-      // PROMPT.md on disk loads successfully but does nothing. This is
-      // almost always an authoring mistake (typo'd manifest, abandoned
-      // scaffold). Surface it via the logger so the operator notices,
-      // but don't block. The loader keeps going.
-      //
-      // We deliberately let `prompt` count (any non-null `prompt` value,
-      // resolved from disk via either the default `./PROMPT.md` or an
-      // explicit `manifest.prompt` override). A plugin whose entire
-      // value is a system-prompt fragment (writing-style discipline,
-      // coding-conventions doc) is a legitimate shape.
-      const hasAnyDeclared =
-        (manifest.tuis?.length ?? 0) > 0 ||
-        (manifest.modes?.length ?? 0) > 0 ||
-        (manifest.events?.length ?? 0) > 0 ||
-        (manifest.hooks?.length ?? 0) > 0 ||
-        (manifest.promptFragments?.length ?? 0) > 0 ||
-        (manifest.liveAreaSlots?.length ?? 0) > 0
-      if (!hasAnyDeclared && prompt === null) {
-        logger(
-          `${dir}: plugin "${manifest.id}" declares no contributions (tuis, ` +
-            `modes, events, hooks, promptFragments, liveAreaSlots) and ships ` +
-            `no PROMPT.md; it will load but do nothing`,
-        )
-      }
-
-      parsed.push({
-        packageDir: dir,
-        root,
-        manifest,
-        handlers: [], // filled after collision resolution
-        eventSubs: [], // filled after handler resolution
-        hookSubs: [], // filled after hook permission/shape checks
-        liveAreaSlots: [], // filled after handler resolution
-        commands: [], // filled after handler resolution
-        prompt,
-      })
-      seenIds.add(manifest.id)
-    }
+    // Discover packages under all four roots, dedupe by realpath, parse
+    // + gate manifests, and resolve PROMPT.md bodies. Lives in
+    // `src/plugins/loader/discovery.ts`; see that module for the
+    // precedence / opt-out / dead-weight rules.
+    const { parsed, replayRenderersRaw, turnAttachmentsRaw } = discoverAndParsePackages({
+      ...(opts.embeddedDir !== undefined ? { embeddedDir: opts.embeddedDir } : {}),
+      ...(opts.userDir !== undefined ? { userDir: opts.userDir } : {}),
+      ...(opts.homeDir !== undefined ? { homeDir: opts.homeDir } : {}),
+      ...(opts.projectDir !== undefined ? { projectDir: opts.projectDir } : {}),
+      logger,
+      explicitLogger: opts.logger,
+      disabledPluginIds,
+      enabledPluginIds,
+    })
 
     // Resolve handlers, apply collision rules.
+    // Replay-renderer tool names already claimed in this load
+    // (first-wins across packages, walked in precedence order).
+    const claimedReplayTools = new Set<string>()
+    // Turn-attachment registry keys (`<pluginId>/<entryId>`) already
+    // claimed in this load (first-wins across packages, precedence order).
+    const claimedTurnAttachmentKeys = new Set<string>()
     const toolIndex = new Map<string, ResolvedHandler>()
     const aliasIndex = new Map<string, string>() // alias → canonical
     const tagIndex = new Map<string, ResolvedHandler>()
@@ -902,6 +697,29 @@ export class PluginLoader {
       }
       pkg.commands = resolvedCommands
 
+      // Resolve + register manifest-declared replay renderers (the
+      // `--resume` re-render seam). Lenient like events/hooks/commands:
+      // a broken entry is logged and skipped, never disqualifies the
+      // plugin. First-wins per tool name across packages (we walk in
+      // precedence order).
+      await registerManifestReplayRenderers(
+        replayRenderersRaw.get(pkg.packageDir),
+        pkg.packageDir,
+        claimedReplayTools,
+        logger,
+      )
+
+      // Resolve + register manifest-declared turn-attachment factories
+      // (the per-turn user-message attachment seam consumed by the boot
+      // path). Same lenient + first-wins policy as replay renderers.
+      await registerManifestTurnAttachments(
+        turnAttachmentsRaw.get(pkg.packageDir),
+        pkg.manifest.id,
+        pkg.packageDir,
+        claimedTurnAttachmentKeys,
+        logger,
+      )
+
       finalPlugins.push(pkg)
     }
 
@@ -1005,7 +823,7 @@ export class PluginLoader {
    * to decide, synchronously at submit time, whether a `/<name>` line is
    * a command (dispatch it) or just text (queue it as a prompt).
    *
-   * @param name Command name without the leading slash.
+   * @param name - Command name without the leading slash.
    */
   hasCommand(name: string): boolean {
     return this.commandIndex.has(name)
@@ -1038,9 +856,10 @@ export class PluginLoader {
    * a handler throw (or malformed return) is caught and surfaced as
    * `{kind:"error"}` so a buggy command never crashes the REPL.
    *
-   * @param line Raw submitted text.
-   * @param opts `cwd` (defaults to `process.cwd()`) + optional external
-   *   abort signal composed with the per-call timeout.
+   * The `opts` bag carries `cwd` (defaults to `process.cwd()`) and an
+   * optional external abort `signal` composed with the per-call timeout.
+   *
+   * @param line - Raw submitted text.
    */
   async dispatchCommand(
     line: string,
@@ -1584,62 +1403,30 @@ export class PluginLoader {
    * per-call timeout via {@link timeoutMs}.
    *
    * @param inventory - The managed-binary inventory adapter the host builds
-   *   from its {@link import("../binaries/store.ts").BinaryStore}.
+   *   from its `BinaryStore` (in `../binaries/store.ts`).
    */
   async runSetups(
     inventory: SetupBinaryInventory,
   ): Promise<Array<{ pluginId: string; result: SetupResult }>> {
-    const out: Array<{ pluginId: string; result: SetupResult }> = []
-    for (const pkg of this.plugins) {
-      const entry = pkg.manifest.setup
-      if (!entry || entry.type !== "module") continue
-      const pluginId = pkg.manifest.id
-      const abs = resolvePath(pkg.packageDir, entry.path)
-      if (!existsSync(abs)) {
-        this.logger(`${pkg.packageDir}: setup module not found: ${abs}`)
-        continue
-      }
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), this.timeoutMs)
-      ;(timer as unknown as { unref?: () => void }).unref?.()
-      try {
-        const mod = (await import(abs)) as { default?: SetupHandler }
-        const fn = mod.default
-        if (typeof fn !== "function") {
-          this.logger(`${abs}: setup has no default export function`)
-          continue
-        }
-        const result = await fn({
-          packageDir: pkg.packageDir,
-          cwd: process.cwd(),
-          env: {
-            ...process.env,
-            TUI_PLUGIN_PROTOCOL: "1",
-            ...(this.agent ? agentContextToEnv(this.agent) : {}),
-          } as Record<string, string>,
-          abort: ctrl.signal,
-          log: createPluginLogger(pluginId),
-          agent: this.agent,
-          binaries: inventory,
-        })
-        if (result && typeof result === "object") out.push({ pluginId, result })
-      } catch (e) {
-        this.logger(
-          `${pkg.packageDir}: setup failed: ${e instanceof Error ? e.message : String(e)}`,
-        )
-      } finally {
-        clearTimeout(timer)
-      }
-    }
-    return out
+    return runPluginSetups(this.plugins, inventory, this.logger, this.timeoutMs, this.agent)
   }
 }
 
 // ---------------------------------------------------------------------------
-// Helpers (extracted to ./loader/helpers.ts) +
-// Event-sub resolution (extracted to ./loader/event-subs.ts)
+// Extracted submodules (kept under the max-lines lint budget):
+//   ./loader/helpers.ts          — pure fs + handler-resolution helpers
+//   ./loader/event-subs.ts       — event/hook/live-area/command resolution
+//   ./loader/discovery.ts        — package discovery + manifest parsing
+//   ./loader/fragments.ts        — async prompt-fragment producers
+//   ./loader/replay-renderers.ts — --resume re-render seam
+//   ./loader/turn-attachments.ts — per-turn attachment factory seam
+//   ./loader/setups.ts           — plugin setup() execution
 // ---------------------------------------------------------------------------
 
+// Package discovery + manifest parsing (the four-root walk, realpath
+// dedupe, enable/disable gates, PROMPT.md resolution) lives in
+// `src/plugins/loader/discovery.ts`.
+import { discoverAndParsePackages } from "./loader/discovery.ts"
 import {
   registerEventSub,
   registerHookSub,
@@ -1648,6 +1435,9 @@ import {
   resolveHookSub,
   resolveLiveAreaSlot,
 } from "./loader/event-subs.ts"
+// Async prompt-fragment producers (module + subprocess) live in
+// `src/plugins/loader/fragments.ts`.
+import { DEFAULT_FRAGMENT_TIMEOUT_MS, findFragmentDef, startFragment } from "./loader/fragments.ts"
 // Pure filesystem + handler-resolution helpers live in
 // `src/plugins/loader/helpers.ts`. Async event-sub / hook-sub /
 // live-area-slot resolution + registration live in
@@ -1656,141 +1446,20 @@ import {
 // external consumer of this module touched those names).
 import {
   classifyPluginPrompt,
-  discoverPackageDirs,
   escapeTagAttr,
   findPackageDirFor,
   findPluginIdFor,
   PROMPT_ROLE_ORDER,
   type PromptRole,
   resolveHandler,
-  resolvePath,
   stripLeadingHeading,
 } from "./loader/helpers.ts"
-
-// ---------------------------------------------------------------------------
-// Async prompt-fragment producers
-// ---------------------------------------------------------------------------
-
-/**
- * Look up the {@link ManifestPromptFragment} definition for a given
- * plugin id + fragment id pair. Used by `resolveFragments` to retrieve
- * `timeoutMs` after the producer has been kicked off (we don't keep a
- * back-pointer from `PendingFragment` to the manifest entry).
- */
-function findFragmentDef(
-  plugins: LoadedPlugin[],
-  pluginId: string,
-  fragmentId: string,
-): ManifestPromptFragment | null {
-  for (const pkg of plugins) {
-    if (pkg.manifest.id !== pluginId) continue
-    for (const f of pkg.manifest.promptFragments ?? []) {
-      if (f.id === fragmentId) return f
-    }
-  }
-  return null
-}
-
-/**
- * Start a prompt fragment producer.
- *
- * The returned promise resolves to the fragment text on success, or
- * `null` if the producer fails. Rejection paths (missing entry, import
- * error, non-zero exit) are converted to `null` here so the caller in
- * `resolveFragments` can treat success-or-drop uniformly.
- *
- * The producer runs immediately at loader-init time and is detached from
- * the boot path — its eventual error never throws synchronously.
- */
-function startFragment(
-  frag: ManifestPromptFragment,
-  packageDir: string,
-  logger: (msg: string) => void,
-  agent: AgentContext | undefined,
-  pluginId: string,
-  modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
-): Promise<string | null> {
-  return runFragment(frag, packageDir, agent, pluginId, modelInfoProvider).catch((e) => {
-    logger(
-      `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
-    )
-    return null
-  })
-}
-
-async function runFragment(
-  frag: ManifestPromptFragment,
-  packageDir: string,
-  agent: AgentContext | undefined,
-  pluginId: string,
-  modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
-): Promise<string | null> {
-  const ctrl = new AbortController()
-  // The loader-level timeout in resolveFragments races this; if it wins,
-  // we never see the resolved value. We still wire the abort signal in case
-  // the handler wants to cooperatively stop. (For subprocess we don't kill
-  // the process here — that's intentional: a stuck probe is dropped, not
-  // surfaced, and the OS reaps it on agent exit.)
-  void ctrl
-  const env = {
-    ...process.env,
-    TUI_PLUGIN_PROTOCOL: "1",
-    MINIMAL_AGENT_PALETTE: paletteEnvJson(),
-    ...(agent ? agentContextToEnv(agent) : {}),
-  } as Record<string, string>
-
-  if (frag.handler.type === "module") {
-    const abs = resolvePath(packageDir, frag.handler.path)
-    if (!existsSync(abs)) {
-      throw new Error(`module not found: ${abs}`)
-    }
-    const mod = (await import(abs)) as { default?: PromptFragmentHandler }
-    const fn = mod.default
-    if (typeof fn !== "function") {
-      throw new Error(`${abs} has no default export function`)
-    }
-    const ctx: PromptFragmentContext = {
-      packageDir,
-      cwd: process.cwd(),
-      env,
-      // Deprecated mirror of `agent.sessionId` for back-compat readers.
-      sessionId: agent?.sessionId,
-      abort: ctrl.signal,
-      stderr: process.stderr,
-      log: createPluginLogger(pluginId),
-      agent,
-      // Live model snapshot so a module fragment can gate its text on what the
-      // active model supports (e.g. only emit tool-centric guidance when
-      // `tools.userDefined`). Subprocess fragments don't get this (no JSON
-      // round-trip wired); they remain `queryModelInfo`-less.
-      ...(modelInfoProvider ? { queryModelInfo: modelInfoProvider } : {}),
-    }
-    const out = await fn(ctx)
-    return typeof out === "string" ? out : null
-  }
-
-  // subprocess
-  const cmd = frag.handler.command
-  const exe = cmd[0]
-  const exeAbs = isAbsolute(exe) ? exe : resolve(packageDir, exe)
-  if (!existsSync(exeAbs)) {
-    throw new Error(`subprocess executable not found: ${exeAbs}`)
-  }
-  // Run the probe in the agent's cwd, not the plugin dir, so probes that
-  // report `$PWD` / `git status` / etc. describe the agent's environment
-  // (which is what env-info wants). The plugin dir is exposed via
-  // TUI_PLUGIN_DIR so a probe that needs sibling files can still find them.
-  const proc = Bun.spawn([exeAbs, ...cmd.slice(1)], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "inherit",
-    cwd: process.cwd(),
-    env: { ...env, TUI_PLUGIN_DIR: packageDir },
-  })
-  // Empty stdin — fragments don't get a trigger envelope (there is none).
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  const code = await proc.exited
-  if (code !== 0) throw new Error(`exited with code ${code}`)
-  return out
-}
+// Replay-renderer resolution (the `--resume` re-render seam) lives in
+// `src/plugins/loader/replay-renderers.ts`.
+import { registerManifestReplayRenderers } from "./loader/replay-renderers.ts"
+// Plugin `setup()` execution (binary-provisioning declarations) lives in
+// `src/plugins/loader/setups.ts`.
+import { runPluginSetups } from "./loader/setups.ts"
+// Turn-attachment factory resolution (the per-turn user-message
+// attachment seam) lives in `src/plugins/loader/turn-attachments.ts`.
+import { registerManifestTurnAttachments } from "./loader/turn-attachments.ts"

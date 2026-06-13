@@ -54,10 +54,10 @@ export type NerdGlyphCells = 1 | 2
  *
  * Returns `1` or `2` -- the two regimes the status-row gap formula cares
  * about. Used by:
- *   - {@link import("./live-area-status.ts").LiveAreaStatusController.paint}
+ *   - `LiveAreaStatusController.paint` (in `./live-area-status.ts`)
  *     to size the gap between icon and label (1 ASCII space for narrow,
  *     2 ASCII spaces for wide PUA).
- *   - {@link import("./spinner/blinking-nerd.ts").BlinkingNerdSpinner.render}
+ *   - `BlinkingNerdSpinner.render` (in `./spinner/blinking-nerd.ts`)
  *     to populate the `iconCells` hint on every frame so paint stays
  *     stable across the on/off blink cycle.
  *
@@ -80,7 +80,7 @@ export function visualCellsForGlyph(text: string): NerdGlyphCells {
 /**
  * Total visual cell width of a rendered string, PUA-aware.
  *
- * Like {@link import("./term-width.ts").displayWidth} but:
+ * Like `displayWidth` (in `./term-width.ts`) but:
  *   - PUA codepoints (Nerd Font range) contribute the *probed* width
  *     (`getNerdGlyphCells()`) instead of the static `1` from
  *     `term-width.ts`.
@@ -225,7 +225,7 @@ let cacheExplicit = false
  * Returns the cached value (default `1`) when the probe hasn't run or
  * the user hasn't set an override. Renderers that need to position
  * content relative to a PUA glyph should read this, not
- * {@link import("./term-width.ts").displayWidth}, which always
+ * `displayWidth` (in `./term-width.ts`), which always
  * returns `1` for PUA codepoints regardless of font config.
  */
 export function getNerdGlyphCells(): NerdGlyphCells {

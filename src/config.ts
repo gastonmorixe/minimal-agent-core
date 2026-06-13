@@ -8,21 +8,23 @@
  * Optional. When present, values fill in defaults for CLI flags / env
  * vars. Precedence (highest wins):
  *
- *   CLI flag  >  env var  >  config file  >  built-in default
+ * `CLI flag > env var > config file > built-in default`
  *
  * Example `~/.minimal-agent/config.jsonc` (model ids come from the
  * provider plugins' registries — `--list-models` shows the catalog; the
  * `[1m]` suffix is the client-side 1M-context opt-in convention):
  *
- *   {
- *     "model": "<model-id>[1m]",
+ * ```jsonc
+ * {
+ *   "model": "<model-id>[1m]",
  *
- *     // Show plaintext/summarized thinking when the model's server
- *     // default streams only encrypted signatures.
- *     "thinkingDisplay": "summarized",
+ *   // Show plaintext/summarized thinking when the model's server
+ *   // default streams only encrypted signatures.
+ *   "thinkingDisplay": "summarized",
  *
- *     "effort": "high",
- *   }
+ *   "effort": "high",
+ * }
+ * ```
  *
  * Unknown keys are ignored. Malformed file or unreadable file → empty
  * config (logged once to stderr in --debug mode, never fatal).
@@ -121,7 +123,7 @@ export interface UserConfig {
   /**
    * Status-bar (quota footer) customization. Declarative; provider-aware.
    *
-   *   "statusBar": { "segments": ["context", "quota", "model", "sid"] }
+   * `"statusBar": { "segments": ["context", "quota", "model", "sid"] }`
    *
    * `segments` is the ordered list of segments to render. Valid ids:
    *   - `"quota"`   : the provider's plan/rate-limit windows (5h, 7d, …).
@@ -150,12 +152,14 @@ export interface UserConfig {
    * canonical transport reads. Lets a user keep keys in config instead of
    * exporting env vars every session.
    *
-   *   "apiKeys": {
-   *     "openai":     "sk-...",
-   *     "openrouter": "sk-or-..."
-   *   }
+   * ```jsonc
+   * "apiKeys": {
+   *   "openai":     "sk-...",
+   *   "openrouter": "sk-or-..."
+   * }
+   * ```
    *
-   * Precedence (highest wins): env var > config file > (throw). So
+   * Precedence (highest wins): `env var > config file > (throw)`. So
    * `export OPENAI_API_KEY=...` still wins over `apiKeys.openai`, and CI
    * keeps working unchanged. The Anthropic path is OAuth-based and is NOT
    * affected by this map.
@@ -311,8 +315,8 @@ export function loadDisabledPluginIds(): Set<string> {
  *
  * The loader uses this as an OVERRIDE for the manifest-level
  * `enabled: false` opt-out: a plugin whose author shipped it disabled
- * comes back online if the user adds `{ "plugins": { "<id>": { "enabled":
- * true } } }` to their config.
+ * comes back online if the user adds
+ * `{ "plugins": { "<id>": { "enabled": true } } }` to their config.
  *
  * Lenient: missing file, missing `plugins` section, malformed JSON, or
  * non-object plugin blocks → empty set. Never throws.
@@ -396,20 +400,22 @@ export interface ModeUserOverrideConfig {
  *
  * @example User config:
  *
- *     {
- *       "plugins": {
- *         "ask-mode": {
- *           "modes": {
- *             "ask": {
- *               "permissions": {
- *                 "allow": ["*"],
- *                 "deny":  ["Edit", "Write", "Bash"]
- *               }
- *             }
+ * ```jsonc
+ * {
+ *   "plugins": {
+ *     "ask-mode": {
+ *       "modes": {
+ *         "ask": {
+ *           "permissions": {
+ *             "allow": ["*"],
+ *             "deny":  ["Edit", "Write", "Bash"]
  *           }
  *         }
  *       }
  *     }
+ *   }
+ * }
+ * ```
  *
  * Returns `Map { "ask" => { permissions: { allow: ["*"], deny: [...] } } }`.
  */

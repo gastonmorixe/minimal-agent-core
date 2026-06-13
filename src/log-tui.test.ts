@@ -19,7 +19,7 @@
  *   - 0 lines when both slots empty.
  *   - 1 line when only one slot is filled.
  *   - 2 lines when both filled. Order: [warn, error].
- *   - Count suffix `(×N)` only when N > 1.
+ *   - Count suffix `(×N)` only when N is above 1.
  *
  * The surface is decoupled from the bus subscription wiring; tests
  * inject events directly via `surface.onEvent(e)` to keep the trail

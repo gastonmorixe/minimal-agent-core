@@ -55,6 +55,14 @@ export interface CompositorOptions {
   syncOutput?: boolean
 }
 
+/**
+ * Owner of the terminal's bottom "live area" (editor, status row, footer)
+ * coexisting with normal scrollback output. Every scrollback write goes
+ * through erase-live, then write, then redraw-live so the live region never
+ * interleaves with streamed text; it also normalizes blank-line runs,
+ * buffers partial ANSI escapes across writes, and can wrap frames in DEC
+ * 2026 synchronized-update markers to eliminate flicker.
+ */
 export class Compositor {
   private readonly output: CompositorOutput
   private readonly tty: boolean
@@ -94,7 +102,7 @@ export class Compositor {
   /**
    * Rows of `\r\n` that `drawLiveSeq` emitted between the previous
    * scrollback content and the start of the live area: 0 (no forced
-   * \r\n, no separator), 1 (one of: forced-CRLF for mid-line OR the
+   * `\r\n`, no separator), 1 (one of: forced-CRLF for mid-line OR the
    * smart-skip separator), or 2 (both). `eraseLiveSeq` walks the
    * cursor back UP over this many rows so the next chunk write lands
    * at the original scrollback cursor position, not on a separator
@@ -220,7 +228,7 @@ export class Compositor {
    * past the second consecutive one is dropped from the output. State
    * persists across calls, so a trailing run can extend an earlier one
    * (a chunk ending in `\n` followed by a chunk starting with `\n\n`
-   * sees the second \n as the third in the run and drops it).
+   * sees the second `\n` as the third in the run and drops it).
    */
   private capBlankLines(chunk: string): string {
     if (chunk.length === 0) return chunk

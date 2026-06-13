@@ -9,8 +9,8 @@
  *    twice (placeholder phase, then data phase) and assert the
  *    prompt row index is identical between them.
  *
- * Skips when `tmux` or the gitignored driver `tmp/quota-footer-tmux-
- * driver.ts` is missing.
+ * Skips when `tmux` or the gitignored driver
+ * `tmp/quota-footer-tmux-driver.ts` is missing.
  */
 
 import { spawnSync } from "node:child_process"

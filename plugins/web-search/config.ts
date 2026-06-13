@@ -12,6 +12,7 @@
  *
  * Shape:
  *
+ * ```
  *   {
  *     "plugins": {
  *       "web-search": {
@@ -30,6 +31,7 @@
  *       }
  *     }
  *   }
+ * ```
  *
  * @module web-search/config
  */

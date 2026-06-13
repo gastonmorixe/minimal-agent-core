@@ -47,6 +47,12 @@ export interface EditorRenderOptions {
   columns?: number
 }
 
+/**
+ * Stateless painter that turns an {@link EditorBuffer} into prompt-prefixed
+ * terminal rows and a cursor position for the live area. Prompt widths are
+ * measured once in the constructor; soft-wrapping happens per render when
+ * `columns` is supplied.
+ */
 export class EditorRenderer {
   private prompt: string
   private continuationPrompt: string
@@ -106,7 +112,7 @@ export class EditorRenderer {
 
   /**
    * Display width (in terminal cells) of the continuation prompt used on
-   * logical rows > 0. Used by the controller's wrap-aware up/down
+   * logical rows \> 0. Used by the controller's wrap-aware up/down
    * navigation to compute which physical row a cursor sits on.
    */
   getContinuationPromptDisplayWidth(): number {

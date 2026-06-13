@@ -18,6 +18,12 @@ const steps: Step[] = [
   { label: "format:check", command: ["bun", "run", "format:check"] },
   { label: "biome:check", command: ["bun", "run", "biome:check"] },
   { label: "docs:check", command: ["bun", "run", "docs:check"] },
+  // Architecture invariants (I1 provider-clean core, I2 core never imports
+  // plugins, I3 plugins never import core) also run inside the full `bun
+  // test` step below; this explicit step fails the gate FAST and surfaces
+  // boundary violations as a distinct line in CI output. Matches
+  // src/architecture/* unit tests + src/architecture.*.test.ts suites.
+  { label: "test:arch", command: ["bun", "run", "test:arch"] },
   { label: "test", command: ["bun", "test"] },
 ]
 

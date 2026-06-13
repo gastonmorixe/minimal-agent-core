@@ -61,8 +61,7 @@ export function statusGlyph(s: SubagentStatus, ansi: boolean): string {
     case "stopped":
       return color(ansi, `${ANSI.RED}${ANSI.BOLD}`, GLYPHS.failed)
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }
@@ -83,8 +82,7 @@ export function statusLabel(s: SubagentStatus, ansi: boolean): string {
     case "stopped":
       return color(ansi, ANSI.RED, "stopped")
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }

@@ -18,8 +18,7 @@
  * @module llm/providers/openai/capabilities
  */
 
-import type { Capabilities } from "../../src/llm/capabilities.ts"
-import { defaultCapabilities } from "../../src/llm/capabilities.ts"
+import { type Capabilities, defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 
 // ---------------------------------------------------------------------------
 // Shared sub-shapes

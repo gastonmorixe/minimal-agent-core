@@ -144,10 +144,20 @@ export function scoreQuestion(rawText: string, opts: ScoreOptions = {}): number 
 export const ASK_THRESHOLD = 2
 export const REVERT_THRESHOLD = -2
 
+/**
+ * True when the heuristic score is confident enough to treat the input as a
+ * question, i.e. it reaches {@link ASK_THRESHOLD} so the REPL may suggest or
+ * auto-enter ask mode.
+ */
 export function isQuestionConfident(score: number): boolean {
   return score >= ASK_THRESHOLD
 }
 
+/**
+ * True when the score is confidently action-like (at or below
+ * {@link REVERT_THRESHOLD}), meaning an auto-entered ask mode should be
+ * reverted because the user is asking for changes, not answers.
+ */
 export function isActionConfident(score: number): boolean {
   return score <= REVERT_THRESHOLD
 }

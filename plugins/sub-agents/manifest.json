@@ -10,7 +10,7 @@
         "type": "tool",
         "tool": {
           "name": "SpawnAgent",
-          "description": "Delegate a self-contained unit of work to a background sub-agent and get an immediate handle (it runs concurrently; you are NOT blocked). Use it to keep verbose work (searching, running tests, fetching docs, a focused refactor) out of your own context: the worker does it in its own window and returns only a distilled summary. Give a DETAILED task: the objective, the exact file/scope boundaries, and the output you want back. Match worker count to complexity (1 for a simple lookup, 2-4 for a comparison, more only for genuinely independent breadth-first work). Every worker costs tokens. Pick a named `agent` specialist when one fits, else describe an inline `system`. The worker reports a one-line digest between turns when it finishes; pull its full deliverable with AgentResult.",
+          "description": "Delegate a self-contained unit of work to a background sub-agent and get an immediate handle (it runs concurrently; you are not blocked). Use it to keep verbose work (searching, running tests, fetching docs, a focused refactor) out of your own context: the worker does it in its own window and returns only a distilled summary. Give a detailed task: the objective, the exact file/scope boundaries, and the output you want back. Match worker count to complexity (1 for a simple lookup, 2-4 for a comparison, more only for genuinely independent breadth-first work). Every worker costs tokens. Pick a named `agent` specialist when one fits, else describe an inline `system`. The worker reports a one-line digest between turns when it finishes; pull its full deliverable with AgentResult.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -50,7 +50,7 @@
               "expectArtifacts": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Absolute paths this worker MUST produce to count as done. When set, the supervisor refuses to mark the worker done unless every path exists and is non-empty; a missing one flips it to 'incomplete' with a warning. Use for delegations whose whole point is to produce a file (e.g. ['/abs/findings.md']) so the system enforces the deliverable instead of you having to check."
+                "description": "Absolute paths this worker must produce to count as done. When set, the supervisor refuses to mark the worker done unless every path exists and is non-empty; a missing one flips it to 'incomplete' with a warning. Use for delegations whose whole point is to produce a file (e.g. ['/abs/findings.md']) so the system enforces the deliverable instead of you having to check."
               },
               "budget": {
                 "type": "object",
@@ -82,7 +82,7 @@
         "type": "tool",
         "tool": {
           "name": "ReportResult",
-          "description": "Sub-agent completion: a worker calls this as its FINAL action to hand its result back to the lead. The tool records the result for you, so you never write a status file by hand or worry about its format or path. Put your real findings in `summary` (a dense, self-contained paragraph or two, not a pointer). List any files you created or changed in `artifacts`. Set `incomplete: true` if you could not finish. Only sub-agents use this; if the lead calls it there is nothing to report.",
+          "description": "Sub-agent completion: a worker calls this as its final action to hand its result back to the lead. The tool records the result for you, so you never write a status file by hand or worry about its format or path. Put your real findings in `summary` (a dense, self-contained paragraph or two, not a pointer). List any files you created or changed in `artifacts`. Set `incomplete: true` if you could not finish. Only sub-agents use this; if the lead calls it there is nothing to report.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -97,7 +97,7 @@
               },
               "incomplete": {
                 "type": "boolean",
-                "description": "Set true if you could NOT finish the task. The lead will treat the work as unverified and may re-spawn. Default false."
+                "description": "Set true if you could not finish the task. The lead will treat the work as unverified and may re-spawn. Default false."
               }
             },
             "required": ["summary"],
@@ -155,7 +155,7 @@
         "type": "tool",
         "tool": {
           "name": "AgentResult",
-          "description": "Pull a finished sub-agent's distilled deliverable into your context (its result summary plus any artifact references, NOT its full transcript). This is the only sub-agent tool that carries real worker content back, and it is bounded. Call it after a worker reaches `done`.",
+          "description": "Pull a finished sub-agent's distilled deliverable into your context (its result summary plus any artifact references, not its full transcript). This is the only sub-agent tool that carries real worker content back, and it is bounded. Call it after a worker reaches `done`.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -199,7 +199,7 @@
         "type": "tool",
         "tool": {
           "name": "Mailbox",
-          "description": "Coordinate with sibling sub-agents (and the lead) over a shared, durable message board. `post` a short message to a specific worker id (`to`) or broadcast to all (`to:\"*\"`); `read` messages addressed to you or broadcast. Opt-in and bounded: use ONLY when your task tells you to coordinate (e.g. claim a file before editing it, flag a blocker, hand off a finding). Do not chatter, excessive cross-talk is a known failure mode.",
+          "description": "Coordinate with sibling sub-agents (and the lead) over a shared, durable message board. `post` a short message to a specific worker id (`to`) or broadcast to all (`to:\"*\"`); `read` messages addressed to you or broadcast. Opt-in and bounded: use only when your task tells you to coordinate (e.g. claim a file before editing it, flag a blocker, hand off a finding). Do not chatter, excessive cross-talk is a known failure mode.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -268,6 +268,17 @@
       "position": "footer",
       "refreshMs": 1000,
       "timeoutMs": 4000
+    }
+  ],
+  "turnAttachments": [
+    {
+      "id": "fleet_digest",
+      "order": 30,
+      "handler": {
+        "type": "module",
+        "path": "./handlers/turn_attachment.ts",
+        "export": "default"
+      }
     }
   ]
 }

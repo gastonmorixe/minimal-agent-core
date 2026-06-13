@@ -1,4 +1,10 @@
 import type { StreamProvider } from "./interfaces"
+/**
+ * Mutable registry of SDK stream providers with one "active" selection. The
+ * first registration becomes active automatically; `switch` changes the
+ * selection only when the target id is registered, returning whether it took
+ * effect.
+ */
 export class ProviderRegistry {
   private providers = new Map<string, StreamProvider>()
   private active: string | null = null

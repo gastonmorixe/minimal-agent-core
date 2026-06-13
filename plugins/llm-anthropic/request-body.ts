@@ -322,8 +322,7 @@ function toAnthropicImageSource(
       // Anthropic doesn't host files (yet) — drop.
       return null
     default: {
-      const _exhaustive: never = src
-      throw new Error(`unhandled image source kind: ${_exhaustive}`)
+      throw new Error(`unhandled image source kind: ${String(src satisfies never)}`)
     }
   }
 }
@@ -358,8 +357,7 @@ function toAnthropicToolChoice(
     case "tool":
       return { type: "tool", name: choice.name }
     default: {
-      const _exhaustive: never = choice
-      throw new Error(`unhandled tool choice: ${_exhaustive}`)
+      throw new Error(`unhandled tool choice: ${String(choice satisfies never)}`)
     }
   }
 }
@@ -414,8 +412,7 @@ function mapThinking(
         display: config.display === "omitted" ? "omitted" : undefined,
       }
     default: {
-      const _exhaustive: never = config
-      throw new Error(`unhandled thinking mode: ${_exhaustive}`)
+      throw new Error(`unhandled thinking mode: ${String(config satisfies never)}`)
     }
   }
 }

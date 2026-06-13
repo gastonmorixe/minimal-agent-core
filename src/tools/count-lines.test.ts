@@ -9,7 +9,7 @@
  * for `\n`, allocating nothing.
  *
  * Contract: for every input, `countLines(s) === s.split("\n").length`
- * exactly (including the empty-string edge: "".split("\n").length === 1,
+ * exactly (including the empty-string edge: `"".split("\n").length === 1`,
  * but truncation treats "" as 0 lines separately, so we pin the raw
  * split-equivalence here and let the caller keep its empty-string guard).
  */

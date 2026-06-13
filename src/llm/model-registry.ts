@@ -62,7 +62,7 @@ export interface ModelEntry {
    * was persisted (old sessions, crashes, providers that don't report
    * usage) so a listing can still show a "tokens this session" magnitude,
    * marked as estimated. Built via
-   * {@link import("./token-estimate.ts").makeCharRatioEstimator} in each
+   * `makeCharRatioEstimator` (in `./token-estimate.ts`) in each
    * provider's `models.ts`. When absent, callers fall back to the default
    * chars-per-token ratio (see `estimateTokensForModel`).
    */
@@ -88,6 +88,25 @@ export type VendorRoute =
 
 const models = new Map<string, ModelEntry>()
 const aliases = new Map<string, string>()
+
+/**
+ * Neutral, provider-free fallback id used by {@link getDefaultModelId} when
+ * the registry is empty AND no default was declared. It is deliberately NOT
+ * a provider SKU : core must name no provider token. A boot path that reaches
+ * this (no provider plugin activated) has no real model to talk to anyway;
+ * the id only has to be a stable non-empty placeholder so downstream lookups
+ * degrade predictably (`findModel` returns `undefined`, transports apply their
+ * own defaults).
+ */
+const FALLBACK_MODEL_ID = "default"
+
+/**
+ * Optional explicitly-declared default model id. A provider plugin (or config)
+ * calls {@link setDefaultModelId} during registration to nominate the model a
+ * no-model session should boot with. `null` ⇒ none declared; the resolver then
+ * falls back to the first registered model.
+ */
+let declaredDefaultModelId: string | null = null
 
 /**
  * Add or replace a model entry. Throws when `id` collides with an
@@ -160,10 +179,41 @@ export function findModelByTags(
   return undefined
 }
 
+/**
+ * Declare the default model a no-model session should boot with. A provider
+ * plugin (or config) calls this so the agent entrypoint picks a default
+ * without naming a provider SKU in core code. Last write wins; pass `null`
+ * to clear the declaration and fall back to the first registered model.
+ */
+export function setDefaultModelId(id: string | null): void {
+  declaredDefaultModelId = id
+}
+
+/**
+ * Resolve the default model id for a session started with no explicit model.
+ *
+ * Resolution order (all provider-neutral : core names no SKU):
+ *   1. an explicitly declared default ({@link setDefaultModelId}), when still
+ *      registered;
+ *   2. the FIRST registered model (insertion order : a provider lists its
+ *      preferred model first);
+ *   3. a neutral placeholder ({@link FALLBACK_MODEL_ID}) when the registry is
+ *      empty (no provider activated) : never a provider literal.
+ */
+export function getDefaultModelId(): string {
+  if (declaredDefaultModelId && models.has(declaredDefaultModelId)) {
+    return declaredDefaultModelId
+  }
+  const first = models.keys().next()
+  if (!first.done) return first.value
+  return FALLBACK_MODEL_ID
+}
+
 /** Clear all registrations. Tests only. */
 export function clearModelRegistry(): void {
   models.clear()
   aliases.clear()
+  declaredDefaultModelId = null
 }
 
 // ---------------------------------------------------------------------------
@@ -172,14 +222,20 @@ export function clearModelRegistry(): void {
 
 const providers = new Map<string, ProviderAdapter>()
 
+/** Registers (or replaces) a provider adapter under its `id`; later registrations win. */
 export function registerProvider(adapter: ProviderAdapter): void {
   providers.set(adapter.id, adapter)
 }
 
+/** Looks up a provider adapter by id, returning `undefined` when none is registered. */
 export function findProvider(id: string): ProviderAdapter | undefined {
   return providers.get(id)
 }
 
+/**
+ * Like {@link findProvider} but throws on a miss, listing the registered
+ * provider ids in the error so a typo is immediately diagnosable.
+ */
 export function resolveProvider(id: string): ProviderAdapter {
   const p = providers.get(id)
   if (!p) {
@@ -190,10 +246,12 @@ export function resolveProvider(id: string): ProviderAdapter {
   return p
 }
 
+/** All currently registered provider adapters, in registration order. */
 export function listRegisteredProviders(): ProviderAdapter[] {
   return [...providers.values()]
 }
 
+/** Empties the provider registry. Intended for test isolation, not production code. */
 export function clearProviderRegistry(): void {
   providers.clear()
 }

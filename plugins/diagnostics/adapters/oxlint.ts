@@ -2,8 +2,10 @@
  * Adapter: oxlint `-f json` output → {@link Finding}[].
  *
  * oxlint shape (captured from the real binary):
+ * ```
  *   { diagnostics: [ { message, code:"eslint(no-debugger)", severity:"error"|"warning",
  *     help?, filename, labels:[{ span:{ offset, length, line, column } }] } ] }
+ * ```
  *
  * Pure + total: any parse failure yields `[]` (the runner degrades, never
  * throws). The 1-based line/column from oxlint's span is used directly.
@@ -16,6 +18,11 @@ function severityOf(s: unknown): FindingSeverity {
   return s === "error" ? "error" : s === "warning" ? "warning" : "info"
 }
 
+/**
+ * Converts `oxlint --format=json` stdout into neutral {@link Finding}s,
+ * keeping only the first line of each message. Total function: any parse
+ * failure yields `[]` so the runner degrades instead of throwing.
+ */
 export function adaptOxlint(stdout: string): Finding[] {
   if (!stdout || stdout.trim().length === 0) return []
   let parsed: unknown

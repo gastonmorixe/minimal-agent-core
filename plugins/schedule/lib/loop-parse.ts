@@ -21,7 +21,7 @@ export interface LoopArgs {
  * clause (`every 2 hours check …`). Anything else is treated as all-prompt
  * (a self-paced loop). Whitespace inside the prompt is collapsed.
  *
- * @param argv The raw argv after `/loop`.
+ * @param argv - The raw argv after `/loop`.
  */
 export function parseLoopArgs(argv: string): LoopArgs {
   const trimmed = argv.trim()
@@ -58,7 +58,7 @@ const USAGE = 'usage: /schedule "<cron>" <prompt>  |  /schedule list  |  /schedu
  * Forms: `list`, `cancel <id>`, `"<cron>" <prompt>` (quoted cron), or
  * `<5 cron fields> <prompt>` (unquoted). Empty argv → usage.
  *
- * @param argv The raw argv after `/schedule`.
+ * @param argv - The raw argv after `/schedule`.
  */
 export function parseScheduleArgs(argv: string): ScheduleAction {
   const t = argv.trim()

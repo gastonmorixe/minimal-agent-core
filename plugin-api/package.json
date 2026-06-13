@@ -1,0 +1,27 @@
+{
+  "name": "@minimal-agent/plugin-api",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Leaf contract package for minimal-agent: provider-neutral types and pure utilities shared by the host (src/) and plugins. Imports NOTHING from src/ or plugins/.",
+  "homepage": "https://github.com/gastonmorixe/minimal-agent",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gastonmorixe/minimal-agent.git"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./utils/term-width": "./src/utils/term-width.ts",
+    "./utils/jsonc": "./src/utils/jsonc.ts",
+    "./utils/palette": "./src/utils/palette.ts",
+    "./utils/sse-parser": "./src/utils/sse-parser.ts",
+    "./utils/unified-diff": "./src/utils/unified-diff.ts",
+    "./types/plugin": "./src/types/plugin.ts",
+    "./llm/capabilities": "./src/llm/capabilities.ts",
+    "./llm/canonical-events": "./src/llm/canonical-events.ts",
+    "./llm/canonical-messages": "./src/llm/canonical-messages.ts",
+    "./llm/canonical-tools": "./src/llm/canonical-tools.ts",
+    "./llm/provider-auth": "./src/llm/provider-auth.ts",
+    "./llm/provider-plugin": "./src/llm/provider-plugin.ts"
+  }
+}

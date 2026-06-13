@@ -45,6 +45,13 @@ interface Cell {
   width: 1 | 2
 }
 
+/**
+ * Headless terminal emulator for tests: feed it raw output (text + ANSI
+ * escapes) and read back the rendered grid and scrollback as strings.
+ * Implements the subset the compositor exercises, including wide (CJK/emoji)
+ * cells, deferred wrap at the right margin, and partial escape sequences
+ * split across `feed` calls.
+ */
 export class FakeTerminal {
   readonly cols: number
   readonly rows: number

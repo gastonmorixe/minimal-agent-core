@@ -13,11 +13,22 @@
  * @module sub-agents/lib/attachment
  */
 
-import type { ContentBlock } from "../../../src/client.ts"
-
 import { type StoreDeps, SubagentStore } from "./store.ts"
 import { fmtElapsed, fmtTokens } from "./style.ts"
 import { fleetStats, isActive, type SubagentRecord } from "./types.ts"
+
+/**
+ * LOCAL structural slice of the host's `ContentBlock` union — the text block
+ * this producer emits. The host's turn-attachment registry expects
+ * `toAttachment(): ContentBlock | null`; a text block satisfies that union
+ * structurally, so the real host accepts it without the plugin importing host
+ * code (the decoupling contract). Source of truth: `src/client/types.ts`
+ * (`TextBlock`).
+ */
+interface AttachmentTextBlock {
+  type: "text"
+  text: string
+}
 
 const MAX_ROWS = 8
 
@@ -47,8 +58,7 @@ function row(r: SubagentRecord, nowMs: number): string {
       state = "stopped"
       break
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
   return `${r.id.padEnd(4)} ${r.type.padEnd(10)} ${state}`
@@ -66,7 +76,7 @@ export class SubagentsAttachment {
     private readonly now: () => number = Date.now,
   ) {}
 
-  toAttachment(): ContentBlock | null {
+  toAttachment(): AttachmentTextBlock | null {
     if (this.sid === null || this.sid.trim().length === 0) return null
     const records = new SubagentStore(this.sid, this.deps).all()
     const active = records.filter((r) => isActive(r.status))

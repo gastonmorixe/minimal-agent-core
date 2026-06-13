@@ -40,8 +40,10 @@ describe("launchWorker", () => {
     }
     const r = launchWorker(plan("fresh"), deps, "/tmp/x.log")
     expect(r.ok && r.value).toBe(4321)
-    expect(launched?.cwd).toBe("/repo")
-    expect(launched?.argv[0]).toBe("minimal-agent")
+    // TS control-flow can't see the closure ran; re-widen before reading.
+    const got = launched as { argv: readonly string[]; cwd: string } | null
+    expect(got?.cwd).toBe("/repo")
+    expect(got?.argv[0]).toBe("minimal-agent")
   })
 
   it("launches a fork worker via --resume (no pre-step)", () => {

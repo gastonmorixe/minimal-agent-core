@@ -331,11 +331,13 @@ export type RequestType = "quota" | "title" | "conversation"
  *   API model ID has no suffix). We strip it for the request body but use
  *   it here to detect 1M context intent.
  *
+ * The optional third argument (`opts`) carries conditional feature-gated
+ * betas: `speedFast` (fast-mode), `taskBudget` (task budgets), and
+ * `cacheDiagnosis` (cache diagnosis). The caller decides; capability gating
+ * happens in `client.ts` (see the fast-mode gate in `sendMessageOnce`).
+ *
  * @param requestType - Which beta set to build (default: "conversation")
  * @param model - Model ID, used to gate model-specific flags like `context-1m`
- * @param opts - Conditional feature-gated betas (fast-mode, task budgets,
- *   cache diagnosis). The caller decides; capability gating happens in
- *   `client.ts` (see the fast-mode gate in `sendMessageOnce`).
  * @returns Array of BetaFlagId enum values ready to join with commas
  *
  * @example
@@ -617,21 +619,23 @@ export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): str
  * second cache_control was added on system[3] (without scope, per-session).
  * system[0] and system[1] still have no cache_control.
  *
- * @param opts.instructions - Custom system[2] content. Defaults to a short
+ * Options accepted via the single `opts` argument:
+ *
+ * - `instructions` - Custom system[2] content. Defaults to a short
  *   minimal instructions block. Pass the full real-CLI instructions here if
  *   you want behavior identical to the real Claude Code.
- * @param opts.sessionContext - Optional system[3] content. Omit to send only
+ * - `sessionContext` - Optional system[3] content. Omit to send only
  *   3 blocks (the minimum). Real CLI always includes this with environment
  *   details, CLAUDE.md, git status, etc.
- * @param opts.reflectionInterval - Reflection checkpoint cadence (rounds)
+ * - `reflectionInterval` - Reflection checkpoint cadence (rounds)
  *   used to generate the loop-safety paragraph appended to system[2].
  *   Defaults to {@link DEFAULT_REFLECTION_INTERVAL}. Pass 0 to omit the
  *   reflection section of the safety paragraph.
- * @param opts.reflectionCooldownMs - Wall-clock cooldown (ms) used to
+ * - `reflectionCooldownMs` - Wall-clock cooldown (ms) used to
  *   generate the loop-safety paragraph. Defaults to
  *   {@link DEFAULT_REFLECTION_COOLDOWN_MS}. Pass 0 to describe a
  *   checkpoint without a wall-clock pause.
- * @param opts.maxToolRounds - Emergency hard cap (rounds) used to generate
+ * - `maxToolRounds` - Emergency hard cap (rounds) used to generate
  *   the loop-safety paragraph. Defaults to `Number.POSITIVE_INFINITY` (no
  *   emergency cap, no mention in the prompt). Pass a finite value to add
  *   the emergency-cap paragraph.

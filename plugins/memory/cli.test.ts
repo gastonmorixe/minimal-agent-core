@@ -418,13 +418,13 @@ describe("main — path", () => {
     const io = makeIO()
     const code = await main(["path"], io)
     expect(code).toBe(0)
-    expect(io.out.join("").trimEnd()).toBe(projectMemoryPath(process.cwd(), tmpHome))
+    expect(io.out.join("").trimEnd()).toBe(projectMemoryPath(process.cwd(), { home: tmpHome }))
   })
 
   it("global: prints globalMemoryPath", async () => {
     const io = makeIO()
     await main(["path", "-s", "global"], io)
-    expect(io.out.join("").trimEnd()).toBe(globalMemoryPath(tmpHome))
+    expect(io.out.join("").trimEnd()).toBe(globalMemoryPath({ home: tmpHome }))
   })
 
   it("short-term: requires --sid", async () => {
@@ -482,7 +482,7 @@ describe("main — path", () => {
 
 describe("main — rewrite-ids", () => {
   it("stamps persistent ids onto legacy bullets", async () => {
-    const path = projectMemoryPath(process.cwd(), tmpHome)
+    const path = projectMemoryPath(process.cwd(), { home: tmpHome })
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(
       path,
@@ -508,7 +508,7 @@ describe("main — rewrite-ids", () => {
   })
 
   it("idempotent: running twice does nothing the second time", async () => {
-    const path = projectMemoryPath(process.cwd(), tmpHome)
+    const path = projectMemoryPath(process.cwd(), { home: tmpHome })
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, "- legacy\n")
 

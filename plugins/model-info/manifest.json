@@ -2,7 +2,7 @@
   "id": "model-info",
   "name": "Model Info",
   "version": "0.1.0",
-  "description": "Contributes the ModelInfo tool: a decoupled, provider-agnostic way for the model to read its OWN current capabilities (input modalities, context window, effort, caching, pricing) and session details at call time. Reads the live current-model snapshot via the plugin context (TUIContext.queryModelInfo), so it stays correct across mid-session model/provider switches and resume without importing any provider. Not duplicated per provider.",
+  "description": "Contributes the ModelInfo tool: a decoupled, provider-agnostic way for the model to read its own current capabilities (input modalities, context window, effort, caching, pricing) and session details at call time. Reads the live current-model snapshot via the plugin context (TUIContext.queryModelInfo), so it stays correct across mid-session model/provider switches and resume without importing any provider. Not duplicated per provider.",
   "tuis": [
     {
       "id": "model_info_tool",
@@ -10,7 +10,7 @@
         "type": "tool",
         "tool": {
           "name": "ModelInfo",
-          "description": "Report the agent's CURRENT model and what it can actually do right now: provider, surface, input modalities (does it accept images / PDFs / audio / video, and which file formats), context window, max output tokens, effort levels, reasoning/thinking support, prompt caching, pricing, plus the session id and working directory. The active model and its capabilities CAN change during a session (the user may switch models) and may differ after a resume, so do NOT answer from training-time assumptions. Call this tool to read your live capabilities before telling the user you cannot do something (for example, before claiming you cannot accept an image). Takes no input.",
+          "description": "Report the agent's current model and what it can actually do right now: provider, surface, input modalities (whether it accepts images / PDFs / audio / video, and which file formats), context window, max output tokens, effort levels, reasoning/thinking support, prompt caching, pricing, plus the session id and working directory. The active model and its capabilities can change during a session (the user may switch models) and may differ after a resume, so do not answer from training-time assumptions. Call this tool to read your live capabilities before telling the user you cannot do something (for example, before claiming you cannot accept an image). Takes no input.",
           "input_schema": {
             "type": "object",
             "properties": {},

@@ -18,6 +18,25 @@ import cronDelete from "./handlers/cron_delete.ts"
 import cronList from "./handlers/cron_list.ts"
 import { CronStore } from "./lib/store.ts"
 
+/**
+ * Local structural mirror of the host's `tool_result` TUIResult variant.
+ * Plugins must not import src/ (plugin-decoupling invariant I1); the
+ * handler results are structurally compatible with this shape.
+ */
+type ToolResult = {
+  kind: "tool_result"
+  content: string
+  is_error?: boolean
+  display?: string
+  displayFooter?: string
+}
+
+/** Narrow a handler result to the `tool_result` variant (throws otherwise). */
+function asTool(r: { kind: string }): ToolResult {
+  if (r.kind !== "tool_result") throw new Error(`expected tool_result, got ${r.kind}`)
+  return r as ToolResult
+}
+
 let dir: string
 const SID = "integ-session"
 
@@ -46,21 +65,21 @@ function ctx(input: Record<string, unknown>, env: Record<string, string> = {}) {
 
 describe("CronCreate", () => {
   it("creates from an interval and persists", async () => {
-    const r = await cronCreate(ctx({ every: "5m", prompt: "check deploy" }))
+    const r = asTool(await cronCreate(ctx({ every: "5m", prompt: "check deploy" })))
     expect(r.is_error).toBeUndefined()
     expect(r.content).toContain("Scheduled task")
     expect(new CronStore(SID, { dir }).count()).toBe(1)
   })
 
   it("creates from a raw cron", async () => {
-    const r = await cronCreate(ctx({ cron: "0 9 * * 1-5", prompt: "morning report" }))
+    const r = asTool(await cronCreate(ctx({ cron: "0 9 * * 1-5", prompt: "morning report" })))
     expect(r.is_error).toBeUndefined()
     const e = new CronStore(SID, { dir }).load()[0]
     expect(e?.cron).toBe("0 9 * * 1-5")
   })
 
   it("creates a one-shot with a future fire time", async () => {
-    const r = await cronCreate(ctx({ cron: "30 14 15 3 *", prompt: "push", recurs: false }))
+    const r = asTool(await cronCreate(ctx({ cron: "30 14 15 3 *", prompt: "push", recurs: false })))
     expect(r.is_error).toBeUndefined()
     const e = new CronStore(SID, { dir }).load()[0]
     expect(e?.recurs).toBe(false)
@@ -68,14 +87,14 @@ describe("CronCreate", () => {
   })
 
   it("rejects missing prompt / bad cron / no schedule", async () => {
-    expect((await cronCreate(ctx({ every: "5m" }))).is_error).toBe(true)
-    expect((await cronCreate(ctx({ cron: "not cron", prompt: "p" }))).is_error).toBe(true)
-    expect((await cronCreate(ctx({ prompt: "p" }))).is_error).toBe(true)
+    expect(asTool(await cronCreate(ctx({ every: "5m" }))).is_error).toBe(true)
+    expect(asTool(await cronCreate(ctx({ cron: "not cron", prompt: "p" }))).is_error).toBe(true)
+    expect(asTool(await cronCreate(ctx({ prompt: "p" }))).is_error).toBe(true)
   })
 
   it("honors the disable gate", async () => {
-    const r = await cronCreate(
-      ctx({ every: "5m", prompt: "p" }, { MINIMAL_AGENT_DISABLE_CRON: "1" }),
+    const r = asTool(
+      await cronCreate(ctx({ every: "5m", prompt: "p" }, { MINIMAL_AGENT_DISABLE_CRON: "1" })),
     )
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("disabled")
@@ -87,23 +106,23 @@ describe("CronList + CronDelete", () => {
     await cronCreate(ctx({ every: "5m", prompt: "task one" }))
     await cronCreate(ctx({ cron: "0 9 * * *", prompt: "task two" }))
 
-    const listed = await cronList(ctx({}))
+    const listed = asTool(await cronList(ctx({})))
     expect(listed.content).toContain("task one")
     expect(listed.content).toContain("task two")
 
     const id = new CronStore(SID, { dir }).load()[0]?.id as string
-    const del = await cronDelete(ctx({ id }))
+    const del = asTool(await cronDelete(ctx({ id })))
     expect(del.is_error).toBeUndefined()
     expect(del.content).toContain("Canceled")
     expect(new CronStore(SID, { dir }).count()).toBe(1)
 
     // Deleting an unknown id errors.
-    const bad = await cronDelete(ctx({ id: "zzzzzzzz" }))
+    const bad = asTool(await cronDelete(ctx({ id: "zzzzzzzz" })))
     expect(bad.is_error).toBe(true)
   })
 
   it("lists empty cleanly", async () => {
-    const listed = await cronList(ctx({}))
+    const listed = asTool(await cronList(ctx({})))
     expect(listed.content).toContain("No scheduled tasks")
   })
 })

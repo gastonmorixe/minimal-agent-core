@@ -62,6 +62,9 @@ export class PromptTemplateError extends Error {
   /** Absolute path of the template file, when rendered from disk. */
   readonly source?: string
   /**
+   * Builds the error message from the missing names, mentioning the template
+   * path when one is known.
+   *
    * @param missing - Required placeholder names with no supplied value.
    * @param source - Absolute path of the template file, if loaded from disk.
    */
@@ -100,7 +103,7 @@ export interface RenderOptions {
  * @param vars - Values to substitute. Missing keys are "not supplied".
  * @param opts - {@link RenderOptions}.
  * @returns The rendered string (trimmed unless `opts.trim === false`).
- * @throws {PromptTemplateError} If a required placeholder has no value.
+ * @throws \{PromptTemplateError\} If a required placeholder has no value.
  */
 export function renderTemplate(
   template: string,
@@ -167,7 +170,7 @@ export function loadPromptText(absPath: string): string {
  * @param vars - Values for the file's placeholders.
  * @param opts - {@link RenderOptions} (`source` is filled in automatically).
  * @returns The rendered prompt text (trimmed by default).
- * @throws {PromptTemplateError} If a required placeholder has no value.
+ * @throws \{PromptTemplateError\} If a required placeholder has no value.
  */
 export function renderPrompt(
   absPath: string,

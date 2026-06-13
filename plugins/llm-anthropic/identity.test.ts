@@ -3,17 +3,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import {
-  _resetSessionId,
-  buildUserId,
-  getDeviceId,
-  getSessionId,
-  setSessionId,
-} from "./metadata.ts"
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const SAMPLE_UUID = "9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"
-const OTHER_UUID = "00000000-0000-4000-8000-000000000000"
+import { buildMetadata, buildUserId, getDeviceId } from "./identity.ts"
 
 /** Path to the real CLI config */
 const CLI_CONFIG = join(process.env.HOME ?? "", ".claude.json")
@@ -22,18 +12,11 @@ const CLI_CONFIG = join(process.env.HOME ?? "", ".claude.json")
  * Sanitized excerpt of a real captured Messages API request body. The
  * wire shape of `metadata.user_id` is preserved verbatim; the real
  * device_id / account_uuid / session_id are replaced with synthetic
- * stand-ins so the fixture is safe to check in. See
- * `src/test-utils/fixtures/metadata-user-id-capture.json` for the
- * provenance note and refresh instructions.
+ * stand-ins so the fixture is safe to check in.
  */
-const USER_ID_FIXTURE = join(
-  import.meta.dir,
-  "test-utils",
-  "fixtures",
-  "metadata-user-id-capture.json",
-)
+const USER_ID_FIXTURE = join(import.meta.dir, "__fixtures__", "metadata-user-id-capture.json")
 
-describe("metadata", () => {
+describe("anthropic identity", () => {
   describe("buildUserId", () => {
     it("produces compact JSON with correct key order", () => {
       const result = buildUserId({
@@ -91,13 +74,9 @@ describe("metadata", () => {
 
   describe("verify against captured traffic", () => {
     it("buildUserId emits the exact wire shape the real CLI produces", () => {
-      // Load a sanitized excerpt of a real Messages API request body.
-      // Using a fixture instead of walking ~/Projects/claude-cli-versions/
-      // .node-net-dbg/ (which has 700k+ files and only lives on the dev
-      // machine where the captures were taken). The fixture preserves
-      // the on-the-wire shape of `metadata.user_id` byte-for-byte;
-      // values are synthetic but shape-valid. Refresh the fixture if
-      // the CLI's user_id schema ever changes.
+      // Load a sanitized excerpt of a real Messages API request body. The
+      // fixture preserves the on-the-wire shape of `metadata.user_id`
+      // byte-for-byte; values are synthetic but shape-valid.
       const fixture = JSON.parse(readFileSync(USER_ID_FIXTURE, "utf-8")) as {
         user_id: string
       }
@@ -130,63 +109,27 @@ describe("metadata", () => {
     })
   })
 
-  describe("session id", () => {
-    /** Run `fn` with a cleared sid cache, restored afterward. */
-    function fresh(fn: () => void): void {
-      _resetSessionId()
-      try {
-        fn()
-      } finally {
-        _resetSessionId()
-      }
-    }
-
-    it("mints a random UUID by default", () => {
-      fresh(() => {
-        const id = getSessionId()
-        expect(id).toMatch(UUID_RE)
-        // Stable for the process lifetime (cached).
-        expect(getSessionId()).toBe(id)
-      })
+  describe("buildMetadata", () => {
+    it("uses the caller-provided session id (core owns the UUID)", () => {
+      const meta = buildMetadata(
+        { type: "oauth", accountUuid: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
+        "11111111-2222-4333-8444-555555555555",
+        CLI_CONFIG,
+      )
+      const parsed = JSON.parse(meta.user_id)
+      expect(parsed.account_uuid).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+      expect(parsed.session_id).toBe("11111111-2222-4333-8444-555555555555")
+      expect(typeof parsed.device_id).toBe("string")
     })
 
-    it("does NOT auto-adopt the ambient MINIMAL_AGENT_SESSION_ID env var", () => {
-      // That var leaks into every spawned child (plugin subprocesses, bun
-      // test, grandchildren). Adopting it would collide session files. The
-      // only supported seed is the explicit --session-id flag (setSessionId).
-      const prev = process.env.MINIMAL_AGENT_SESSION_ID
-      process.env.MINIMAL_AGENT_SESSION_ID = SAMPLE_UUID
-      try {
-        fresh(() => {
-          const id = getSessionId()
-          expect(id).toMatch(UUID_RE)
-          expect(id).not.toBe(SAMPLE_UUID)
-        })
-      } finally {
-        if (prev === undefined) delete process.env.MINIMAL_AGENT_SESSION_ID
-        else process.env.MINIMAL_AGENT_SESSION_ID = prev
-      }
-    })
-
-    it("setSessionId pins the id before first resolution (--session-id flag)", () => {
-      fresh(() => {
-        setSessionId(SAMPLE_UUID)
-        expect(getSessionId()).toBe(SAMPLE_UUID)
-      })
-    })
-
-    it("setSessionId rejects a malformed id", () => {
-      fresh(() => {
-        expect(() => setSessionId("nope")).toThrow(/not a UUID/)
-      })
-    })
-
-    it("setSessionId is idempotent on the same id but throws on a different one", () => {
-      fresh(() => {
-        setSessionId(SAMPLE_UUID)
-        expect(() => setSessionId(SAMPLE_UUID)).not.toThrow()
-        expect(() => setSessionId(OTHER_UUID)).toThrow(/already resolved/)
-      })
+    it("emits empty account_uuid for api-key auth", () => {
+      const meta = buildMetadata(
+        { type: "api-key" },
+        "11111111-2222-4333-8444-555555555555",
+        CLI_CONFIG,
+      )
+      const parsed = JSON.parse(meta.user_id)
+      expect(parsed.account_uuid).toBe("")
     })
   })
 })

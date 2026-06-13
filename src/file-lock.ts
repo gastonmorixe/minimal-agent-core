@@ -17,7 +17,7 @@
  * - **Atomic creation** via `O_CREAT | O_EXCL` (`openSync(path, "wx")`). POSIX
  *   primitive that succeeds on exactly one of N concurrent creators.
  * - **Held briefly.** The lock spans the body of `execEdit` / `execWrite` only
- *   : typically <100ms. There is no notion of "lock for the whole turn".
+ *   : typically under 100ms. There is no notion of "lock for the whole turn".
  * - **Self-healing.** Stale locks (holder PID dead OR holder lock older than
  *   `staleAfterMs`) are auto-broken on the next acquire attempt. Three crash
  *   safety layers: (a) `try/finally` always releases on tool exit, (b) a
@@ -33,10 +33,12 @@
  * **Lock file format** (single-line JSON, atomic-ish read; partial-write parses
  * to null and is treated as stale):
  *
- *     {"v":1,"harness":"minimal-agent","sessionId":"d07a1090-...",
- *      "pid":12345,"host":"MacBook-Pro.local","tool":"Edit",
- *      "callId":"toolu_01abc","filePath":"/abs/foo.ts",
- *      "acquiredAt":"2026-05-10T05:45:30-04:00","acquiredAtMs":1715332530123}
+ * ```json
+ * {"v":1,"harness":"minimal-agent","sessionId":"d07a1090-...",
+ *  "pid":12345,"host":"MacBook-Pro.local","tool":"Edit",
+ *  "callId":"toolu_01abc","filePath":"/abs/foo.ts",
+ *  "acquiredAt":"2026-05-10T05:45:30-04:00","acquiredAtMs":1715332530123}
+ * ```
  *
  * **Companion plugin**: `plugins/file-lock/` ships a `LockStatus` tool and
  * CLI for human-and-model inspection, plus opt-out via
@@ -489,7 +491,8 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
  * 2. On EEXIST: read the existing holder.
  *    - If the file is corrupt → break it, retry.
  *    - If our own session+pid → reentrant, return a no-op handle.
- *    - If holder is stale (PID dead OR age > `staleAfterMs`) → break it, retry.
+ *    - If holder is stale (PID dead OR age exceeds `staleAfterMs`) → break
+ *      it, retry.
  *    - Otherwise → backoff sleep, retry. After the deadline, throw
  *      {@link LockTimeoutError}.
  * 3. On other IO error: bubble.
@@ -498,9 +501,11 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
  * lock that someone else broke and now owns (defense against silently
  * smashing a peer's lock during a race).
  *
- * @param filePath  absolute path of the file to be edited / written
- * @param args      session id + tool name + optional callId/harness for the holder record
- * @param opts      tunables and test seams
+ * The `args` record carries the holder identity (`sessionId`, `tool`, and
+ * optional `callId` / `harness`) written into the lock file; `opts` carries
+ * tunables and test seams.
+ *
+ * @param filePath - absolute path of the file to be edited / written
  */
 export async function acquireLock(
   filePath: string,

@@ -41,6 +41,13 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   }) as Promise<T>
 }
 
+/**
+ * Type-checking provider backed by a long-lived `tsgo` LSP server. Boots the
+ * server lazily (sharing one boot promise across concurrent checks), pulls
+ * diagnostics per file with a timeout, and wraps every interaction in a
+ * {@link CircuitBreaker} so a crashing or hung server degrades the provider
+ * instead of stalling every Edit/Write.
+ */
 export class TsgoLspProvider implements DiagnosticProvider {
   readonly id = "tsgo"
   readonly kind = "type" as const

@@ -1,5 +1,10 @@
 import type { LiveOverlay, OverlayKey } from "./overlay.ts"
 
+/**
+ * Yes/No confirmation overlay shown when the user asks to quit. Defaults the
+ * selection to "No" so a stray double-Enter cannot exit the session;
+ * resolves `true` only when "Yes" is explicitly chosen.
+ */
 export class QuitModal implements LiveOverlay {
   // 0 = Yes, 1 = No
   private selectedIndex: 0 | 1 = 1

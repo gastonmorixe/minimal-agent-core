@@ -53,8 +53,8 @@
  * | armed    | printable           | idle                  | [hide-armed]                         |
  * | armed    | turn-start          | working               | [hide-armed]                         |
  * | armed    | turn-end            | armed                 | []                                   |
- * | armed    | tick (at>=expires)  | idle                  | [hide-armed]                         |
- * | armed    | tick (at<expires)   | armed                 | []                                   |
+ * | armed    | tick (at ≥ expires) | idle                  | [hide-armed]                         |
+ * | armed    | tick (at \< expires) | armed                 | []                                   |
  * | quitting | *                   | quitting              | []                                   |
  *
  * @module abort-quit-fsm

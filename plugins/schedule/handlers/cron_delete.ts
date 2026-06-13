@@ -7,6 +7,10 @@
 import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 import { cronStoreForSession } from "../lib/store.ts"
 
+/**
+ * Tool handler for `CronDelete`: cancels one scheduled task by its
+ * 8-character id and confirms (or reports the miss).
+ */
 export default async function cronDelete(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") {
     return { kind: "tool_result", content: "Scheduling is disabled.", is_error: true }

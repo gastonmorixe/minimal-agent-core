@@ -10,9 +10,12 @@
  * review, never as silent drift.
  *
  * Companion: plugins/llm-anthropic/beta-flags.characterization.test.ts
- * pins the canonical transport's flag assembly over the same matrix and
- * asserts the KNOWN divergences between the two builders (redact-thinking,
- * api-key handling), so a wave that accidentally changes either side fails.
+ * pins the canonical transport's flag assembly over the same matrix. Since
+ * the B-0 transport flip the redact-thinking divergence is an AGREEMENT pin
+ * (B3a: both builders omit it from conversations) and the legacy api-key
+ * zero-beta pin was deliberately deleted (B2: the canonical default path
+ * sends the full non-OAuth set; this legacy builder only serves the
+ * MINIMAL_AGENT_LEGACY_TRANSPORT=1 escape hatch until B-5 deletes it).
  */
 
 import { describe, expect, it } from "bun:test"
@@ -213,16 +216,22 @@ describe("characterization: legacy buildHeaders auth split", () => {
     expect(h["x-claude-code-session-id"]).toBe("sid-1")
   })
 
-  it("pins api-key headers: x-api-key and ZERO beta flags (known gap B2)", () => {
-    // Current behavior, pinned on purpose: the api-key path sends NO
-    // anthropic-beta header at all, even though the default SYSTEM_PROMPT
-    // bakes ttl:"1h" cache_control into its blocks (which needs the
-    // extended-cache-ttl beta). Fixing B2 must edit this snapshot
-    // deliberately, with a live verification.
+  it("pins api-key headers: x-api-key auth split (B2 zero-beta pin DELETED at the B-0 flip)", () => {
+    // B2 RESOLVED at the B-0 transport flip (PLAN.md §2; decision package
+    // in docs/changes/2026-06-09-fable-5-hardening-and-headers-decoupling.md):
+    // the default transport is now the canonical stack, whose api-key
+    // requests adopt the canonical (non-OAuth) beta set — the legacy
+    // zero-beta behavior was likely broken anyway (the default SYSTEM_PROMPT
+    // bakes ttl:"1h" cache_control, which REQUIRES the extended-cache-ttl
+    // beta). The old `expect(h["anthropic-beta"]).toBeUndefined()` pin is
+    // deliberately DELETED here rather than inverted: this legacy builder is
+    // off the default path (reachable only via MINIMAL_AGENT_LEGACY_TRANSPORT
+    // =1) and dies wholesale in B-5; its api-key beta behavior is no longer a
+    // wire contract worth pinning. The auth-split mechanics it still owns
+    // (x-api-key vs bearer, no browser-access header) stay pinned below.
     const h = buildHeaders(apiKey, "sid-2", "conversation", "claude-fable-5")
     expect(h["x-api-key"]).toBe("sk-test")
     expect(h.authorization).toBeUndefined()
-    expect(h["anthropic-beta"]).toBeUndefined()
     expect(h["anthropic-dangerous-direct-browser-access"]).toBeUndefined()
   })
 

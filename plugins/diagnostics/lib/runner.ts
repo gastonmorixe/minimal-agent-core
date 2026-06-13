@@ -57,6 +57,12 @@ async function withTimeout<T>(
   }
 }
 
+/**
+ * Fans one file check out to every provider that handles the path, in
+ * parallel with a shared timeout. Provider failures and timeouts degrade
+ * (the provider is reported in `degraded`) rather than failing the run, so
+ * one broken linter never blocks the others' findings.
+ */
 export class DiagnosticsRunner {
   private readonly timeoutMs: number
 

@@ -12,6 +12,10 @@ import { coloredEntryLine } from "../lib/box.ts"
 import { formatList } from "../lib/format.ts"
 import { cronStoreForSession } from "../lib/store.ts"
 
+/**
+ * Tool handler for `CronList`: renders every scheduled task in the session
+ * store with id, schedule, next fire time, and prompt.
+ */
 export default async function cronList(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.env.MINIMAL_AGENT_DISABLE_CRON === "1") {
     return {

@@ -36,6 +36,7 @@ import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { anthropicMediaLimits } from "./media-limits.ts"
 import { registerAnthropicModels } from "./models.ts"
+import { anthropicOAuthLogin } from "./oauth-login.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "./response-stream.ts"
 import { fetchAnthropicSessionInfo, primeAnthropicSessionInfo } from "./session-info.ts"
@@ -226,6 +227,7 @@ export const anthropicProviderPlugin: ProviderPlugin = {
   displayName: "Anthropic",
   shortCode: "anth",
   register: bootstrapAnthropic,
+  oauthLogin: anthropicOAuthLogin,
   /**
    * Plan-auth (OAuth) requests get the mandatory billing + Claude-Code
    * identity preamble the Anthropic server validates; api-key/custom auth

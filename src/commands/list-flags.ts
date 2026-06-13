@@ -1,6 +1,11 @@
 import { c } from "../agent.ts"
 import { BETA_FLAGS_DETAILED } from "../headers.ts"
 
+/**
+ * Implements `minimal-agent list-flags`: prints every beta feature flag the
+ * client sends with Messages API requests, including each flag's source and
+ * the condition under which it is attached.
+ */
 export function runListFlagsCommand(): void {
   console.log(`\n  ${c.bold("Beta feature flags")}`)
   console.log(`  ${c.dim("Sent with every Messages API request")}\n`)

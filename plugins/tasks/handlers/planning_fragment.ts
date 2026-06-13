@@ -31,7 +31,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import type { PromptFragmentContext } from "../../../src/plugins/types.ts"
+import type { PromptFragmentContext } from "@minimal-agent/plugin-api/types/plugin"
 
 /**
  * Render the PLAN/PHASES fragment.

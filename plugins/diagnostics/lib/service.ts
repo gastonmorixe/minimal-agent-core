@@ -36,6 +36,12 @@ export interface ServiceCheckResult {
   degraded: string[]
 }
 
+/**
+ * Session-scoped facade over the diagnostics pipeline: lazily detects which
+ * tools (biome/oxlint/tsgo) exist in the workspace, builds the provider
+ * runner once, and turns raw findings into severity-filtered, capped,
+ * model-facing note lines per checked file.
+ */
 export class DiagnosticsService {
   private runner: DiagnosticsRunner | null = null
   private built = false

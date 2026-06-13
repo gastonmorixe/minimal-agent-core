@@ -4,6 +4,7 @@
  *
  * Pipeline:
  *
+ * ```
  *   inline-tag handler   ──emit("memory.saved")──►   global EventBus
  *           │                                              │
  *           │   tool handler (Phase 4)                     │
@@ -15,6 +16,7 @@
  *           │                                              ▼
  *           │                              prepended to next user turn as
  *           │                              <ma::agent::memory-saved scope="…" id="…">…</ma::agent::memory-saved>
+ * ```
  *
  * The agent owns one {@link SaveEchoCollector}. At the start of every
  * user message it constructs (initial + loop seams in `agent.ts`), it

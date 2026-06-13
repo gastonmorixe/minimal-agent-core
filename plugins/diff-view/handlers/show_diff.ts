@@ -18,6 +18,10 @@ import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
 
 import { renderUnifiedDiff } from "./render.ts"
 
+/**
+ * Tool handler for `ShowDiff`: renders the unified-diff `patch` input as
+ * ANSI-colored output, with the optional title heading.
+ */
 export default async function showDiffHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return { kind: "tool_result", content: "ShowDiff: wrong trigger", is_error: true }

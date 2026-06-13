@@ -107,6 +107,7 @@ export interface JsonShape {
   }>
 }
 
+/** Shape a search response as the structured JSON variant of the tool output. */
 export function formatJson(response: SearchResponse): JsonShape {
   return {
     query: response.query,

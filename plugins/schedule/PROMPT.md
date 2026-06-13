@@ -5,13 +5,13 @@ a deploy, babysits a PR, or reminds the user without you having to busy-wait.
 
 ## When to schedule
 
-- The user says "remind me at 3pm to push the release" → one-shot:
+- The user says "remind me at 3pm to push the release": one-shot:
   `CronCreate({ cron: "0 15 * * *", prompt: "Remind me to push the release.", recurs: false })`.
-- "in 45 minutes, check whether the integration tests passed" → one-shot with an
+- "in 45 minutes, check whether the integration tests passed": one-shot with an
   interval: `CronCreate({ every: "45m", prompt: "Check whether the integration tests passed.", recurs: false })`.
-- "every 5 minutes, check if the deploy finished" → recurring:
+- "every 5 minutes, check if the deploy finished": recurring:
   `CronCreate({ every: "5m", prompt: "Check if the deploy finished and tell me what happened." })`.
-- "weekdays at 9am, summarize overnight CI" → `CronCreate({ cron: "0 9 * * 1-5", prompt: "Summarize overnight CI." })`.
+- "weekdays at 9am, summarize overnight CI": `CronCreate({ cron: "0 9 * * 1-5", prompt: "Summarize overnight CI." })`.
 
 ## Rules
 
@@ -32,12 +32,12 @@ a deploy, babysits a PR, or reminds the user without you having to busy-wait.
 
 The user can also type `/loop` and `/schedule` directly:
 
-- `/loop 5m check the deploy` — recurring loop on a fixed interval.
-- `/loop check CI and address review comments` — a loop whose prompt runs at a
+- `/loop 5m check the deploy`: recurring loop on a fixed interval.
+- `/loop check CI and address review comments`: a loop whose prompt runs at a
   default cadence (the user can stop it with Esc or `CronDelete`).
-- `/loop` — runs a built-in maintenance prompt (or the project's `.claude/loop.md`).
-- `/schedule "0 9 * * 1-5" run the morning report` — schedule by raw cron.
-- `/schedule list` / `/schedule cancel <id>` — manage tasks.
+- `/loop`: runs a built-in maintenance prompt (or the project's `.claude/loop.md`).
+- `/schedule "0 9 * * 1-5" run the morning report`: schedule by raw cron.
+- `/schedule list` / `/schedule cancel <id>`: manage tasks.
 
 These write tasks to the same store your `Cron*` tools use, so `CronList` shows
 them and `CronDelete` cancels them.

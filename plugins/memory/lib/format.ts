@@ -226,7 +226,7 @@ interface BuildHintArgs {
  * (b) `limit` is also set. The hint reads as a concrete tool call so
  * the model can paste it back verbatim:
  *
- *   next: MemoryTool({action: "list", scope: "project", offset: 20, limit: 20})
+ *   `next: MemoryTool({action: "list", scope: "project", offset: 20, limit: 20})`
  */
 export function buildNextPageHint(args: BuildHintArgs): string {
   if (args.nextOffset == null || args.limit == null) return ""
@@ -244,6 +244,7 @@ export function buildNextPageHint(args: BuildHintArgs): string {
 // read (single bullet)
 // ---------------------------------------------------------------------------
 
+/** Format one bullet's full body for the `read` action. */
 export function formatRead(b: Bullet, scope: string, ansi: boolean): string {
   const id = `#${b.id}`
   const ts = formatTs(b.ts)
@@ -258,6 +259,7 @@ export function formatRead(b: Bullet, scope: string, ansi: boolean): string {
 // add / edit / remove confirmations
 // ---------------------------------------------------------------------------
 
+/** Format the `add` confirmation, including any eviction notice. */
 export function formatAdded(b: Bullet, scope: string, evicted: number, ansi: boolean): string {
   const tag = `[${scope}#${b.id}]`
   const evictedHint = evicted > 0 ? ` (evicted ${evicted} oldest)` : ""
@@ -268,6 +270,7 @@ export function formatAdded(b: Bullet, scope: string, evicted: number, ansi: boo
   return `saved ${tag}${evictedHint}: ${body}\n`
 }
 
+/** Format the `edit` confirmation with the bullet's new body. */
 export function formatEdited(b: Bullet, scope: string, ansi: boolean): string {
   const tag = `[${scope}#${b.id}]`
   const body = clip(b.body, BODY_MAX)
@@ -277,6 +280,7 @@ export function formatEdited(b: Bullet, scope: string, ansi: boolean): string {
   return `edited ${tag}: ${body}\n`
 }
 
+/** Format the `remove` confirmation for a deleted bullet. */
 export function formatRemoved(b: Bullet, scope: string, ansi: boolean): string {
   const tag = `[${scope}#${b.id}]`
   const body = clip(b.body, BODY_MAX)
@@ -286,6 +290,7 @@ export function formatRemoved(b: Bullet, scope: string, ansi: boolean): string {
   return `removed ${tag}: ${body}\n`
 }
 
+/** Format the `clear` confirmation with the removed-entry count. */
 export function formatCleared(count: number, scope: string, ansi: boolean): string {
   if (ansi) {
     return `${FG_RED}cleared${RESET} ${BOLD}${count}${RESET} ${scope} entries\n`
@@ -305,6 +310,7 @@ export interface BulletJson {
   is_legacy: boolean
 }
 
+/** Convert one bullet to its JSON wire shape. */
 export function bulletToJson(b: Bullet): BulletJson {
   return {
     id: b.id,
@@ -315,6 +321,7 @@ export function bulletToJson(b: Bullet): BulletJson {
   }
 }
 
+/** Convert a bullet list to its JSON wire shape. */
 export function bulletsToJson(bs: readonly Bullet[]): BulletJson[] {
   return bs.map(bulletToJson)
 }

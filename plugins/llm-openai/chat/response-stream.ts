@@ -3,6 +3,7 @@
  *
  * Wire shape per chunk (the SSE `data:` JSON):
  *
+ * ```
  *   {
  *     id: "chatcmpl-…",
  *     object: "chat.completion.chunk",
@@ -29,6 +30,7 @@
  *       completion_tokens_details: { reasoning_tokens }
  *     }
  *   }
+ * ```
  *
  * Stream ends with `data: [DONE]` (handled by the generic SSE parser).
  *
@@ -39,7 +41,7 @@ import type {
   CanonicalEvent,
   CanonicalUsage,
   StopReason,
-} from "../../../src/llm/canonical-events.ts"
+} from "@minimal-agent/plugin-api/llm/canonical-events"
 
 // ---------------------------------------------------------------------------
 // Wire types

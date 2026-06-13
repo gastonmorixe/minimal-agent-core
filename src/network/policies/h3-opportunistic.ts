@@ -92,11 +92,11 @@ export interface H3DowngradeEvent {
  *
  * @example
  *   const cache = new Http3NegotiationCache()
- *   const client = new NetworkClient({
+ *   const client = new NetworkClient(\{
  *     primary: new Http2Transport(),
  *     transports: new Map([["http3", new Http3Transport()]]),
- *     policies: [http3OpportunisticPolicy({ cache, mode: "opt" })],
- *   })
+ *     policies: [http3OpportunisticPolicy(\{ cache, mode: "opt" \})],
+ *   \})
  */
 export function http3OpportunisticPolicy(opts: H3OpportunisticOptions): NetworkPolicy {
   const { cache, mode = "opt", onDecision } = opts

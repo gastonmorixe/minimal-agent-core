@@ -6,6 +6,13 @@
 
 export { bootstrapOpenAI, openaiAdapter, openaiProviderPlugin } from "./adapter.ts"
 export {
+  buildOpenAIApiKeyCredential,
+  OPENAI_API_KEY_AUTH,
+  openAIApiKeyAuth,
+  openAIApiKeyToSecrets,
+  readOpenAIApiKey,
+} from "./auth.ts"
+export {
   CAPS_GPT_4O_CHAT,
   CAPS_GPT_4O_MINI_CHAT,
   CAPS_GPT_5_5_CHAT,

@@ -7,12 +7,12 @@
  * emits a `tool_use` block, then sends the result back as a `tool_result`.
  *
  * **Tools provided:**
- * - {@link BASH_TOOL Bash}: execute shell commands (cwd persists across calls)
- * - {@link READ_TOOL Read}: read file contents with cat -n style line numbers
- * - {@link WRITE_TOOL Write}: write/create files (creates parent dirs)
- * - {@link EDIT_TOOL Edit}: exact string replacement in files
- * - {@link GLOB_TOOL Glob}: find files by glob pattern (uses bash globstar)
- * - {@link GREP_TOOL Grep}: search file contents using ripgrep
+ * - {@link BASH_TOOL | Bash}: execute shell commands (cwd persists across calls)
+ * - {@link READ_TOOL | Read}: read file contents with cat -n style line numbers
+ * - {@link WRITE_TOOL | Write}: write/create files (creates parent dirs)
+ * - {@link EDIT_TOOL | Edit}: exact string replacement in files
+ * - {@link GLOB_TOOL | Glob}: find files by glob pattern (uses bash globstar)
+ * - {@link GREP_TOOL | Grep}: search file contents using ripgrep
  *
  * **Skipped intentionally** (not implemented in minimal agent):
  * - Agent (sub-agent spawning)
@@ -36,8 +36,8 @@ import { acquireLock, LockAbortedError, type LockHandle, LockTimeoutError } from
 import { parseJsonc } from "./jsonc.ts"
 import type { ImageBlock } from "./llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
-import { getSessionId } from "./metadata.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
+import { getSessionId } from "./session-id.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
 
 /**
@@ -256,8 +256,8 @@ export interface ToolExecResult {
   _aborted?: boolean
   /**
    * Internal: pre-clamp body, populated by {@link executeTool} ONLY when
-   * the universal truncation clamp actually fired (`info.truncated ===
-   * true`). The agent uses this as the source for the per-session blob
+   * the universal truncation clamp actually fired
+   * (`info.truncated === true`). The agent uses this as the source for the per-session blob
    * store (see `src/blob-store.ts`) so the FULL output survives even
    * though the model only sees the clamped `content`. Absent when the
    * body fit under both budgets (no information to preserve). Stripped
@@ -272,8 +272,8 @@ export interface ToolExecResult {
  *
  * `signal` lets the host cancel a long-running tool (e.g. a `Bash` call
  * doing `sleep 60`) without freezing the event loop. When the signal
- * fires the tool resolves with `{ is_error: true, content: "tool aborted
- * by user", _aborted: true }`.
+ * fires the tool resolves with
+ * `{ is_error: true, content: "tool aborted by user", _aborted: true }`.
  */
 export interface ToolExecOpts {
   signal?: AbortSignal
@@ -693,7 +693,7 @@ export function _resetFileLockConfigForTests(): void {
  * Wrap a mutation tool's execution in a cooperative file lock.
  *
  * The lock spans only the body of `run()` : held for as long as the
- * read-modify-write takes, typically <100ms. On lock failure, returns a
+ * read-modify-write takes, typically under 100ms. On lock failure, returns a
  * `tool_result` with `is_error: true` and a holder-rich diagnostic so the
  * model can decide to wait, inspect via `LockStatus`, or proceed elsewhere.
  *
@@ -752,8 +752,9 @@ async function withFileLock(
  * Stdout and stderr are concatenated into the result content. Non-zero exit
  * codes are reported as errors.
  *
- * @param input.command - Shell command to execute
- * @param input.timeout - Optional timeout in ms (default: 120000)
+ * @param input - Tool input:
+ *   - `command` - Shell command to execute
+ *   - `timeout` - Optional timeout in ms (default: 120000)
  */
 async function execBash(
   input: Record<string, unknown>,
@@ -1014,8 +1015,9 @@ async function execBash(
  * real CLI's Read tool so the model can cite line numbers in later Edit calls.
  *
  * Media behavior (only when `opts.media` is supplied : a multimodal host):
- * - recognized image the model accepts → `{ content: "<caption>", blocks:
- *   [image] }`, resized first if it would blow the per-item byte cap. This is
+ * - recognized image the model accepts →
+ *   `{ content: "<caption>", blocks: [image] }`,
+ *   resized first if it would blow the per-item byte cap. This is
  *   what makes "Read the screenshot" actually work instead of decoding PNG
  *   bytes as UTF-8 mojibake.
  * - recognized media the model/limits reject → an honest, actionable message.
@@ -1024,9 +1026,10 @@ async function execBash(
  *   content-addressed (magic bytes), so a `.png` that actually holds text is
  *   still read as text.
  *
- * @param input.file_path - Absolute path to read
- * @param input.offset - Zero-based line offset to start at (default: 0)
- * @param input.limit - Max number of lines to read (default: all)
+ * @param input - Tool input:
+ *   - `file_path` - Absolute path to read
+ *   - `offset` - Zero-based line offset to start at (default: 0)
+ *   - `limit` - Max number of lines to read (default: all)
  */
 async function execRead(
   input: Record<string, unknown>,
@@ -1116,8 +1119,9 @@ function renderTextRead(
  * Write content to a file, overwriting any existing content. Creates parent
  * directories as needed (matching the real CLI's Write tool behavior).
  *
- * @param input.file_path - Absolute path to write
- * @param input.content - Full file content
+ * @param input - Tool input:
+ *   - `file_path` - Absolute path to write
+ *   - `content` - Full file content
  */
 async function execWrite(
   input: Record<string, unknown>,
@@ -1158,10 +1162,11 @@ async function execWrite(
  * match exactly once. Multiple matches return an error so the model is
  * forced to provide more context (matching the real CLI's safety behavior).
  *
- * @param input.file_path - Absolute path to modify
- * @param input.old_string - Exact text to find
- * @param input.new_string - Replacement text
- * @param input.replace_all - If true, replace all matches (default: false)
+ * @param input - Tool input:
+ *   - `file_path` - Absolute path to modify
+ *   - `old_string` - Exact text to find
+ *   - `new_string` - Replacement text
+ *   - `replace_all` - If true, replace all matches (default: false)
  */
 async function execEdit(
   input: Record<string, unknown>,
@@ -1222,8 +1227,9 @@ async function execEdit(
  * Output is limited to 100 entries to avoid context bloat. Patterns like
  * `**\/*.ts` (recursive) and `*.json` (single-level) both work.
  *
- * @param input.pattern - Glob pattern (e.g. `**\/*.ts`, `src/*.{js,ts}`)
- * @param input.path - Directory to search in (default: current bash cwd)
+ * @param input - Tool input:
+ *   - `pattern` - Glob pattern (e.g. `**\/*.ts`, `src/*.{js,ts}`)
+ *   - `path` - Directory to search in (default: current bash cwd)
  */
 async function execGlob(
   input: Record<string, unknown>,
@@ -1274,16 +1280,18 @@ async function execGlob(
  * Results are head-limited (default 250 lines) with a "... N more lines"
  * marker to keep responses bounded. Pass `head_limit: 0` for unlimited.
  *
- * @param input.pattern - Regex pattern to search for
- * @param input.path - File or directory to search (default: bash cwd)
- * @param input.glob - Glob filter (e.g. `*.ts`)
- * @param input.output_mode - `content` | `files_with_matches` | `count`
- * @param input["-i"] - Case insensitive
- * @param input["-A"] - Lines after match (content mode only)
- * @param input["-B"] - Lines before match (content mode only)
- * @param input["-C"] - Context lines (content mode only)
- * @param input.head_limit - Cap output lines (default: 250, 0 = unlimited)
- * @param input.multiline - Allow `.` to match newlines
+ * Recognized `input` fields:
+ *
+ * - `pattern` - Regex pattern to search for
+ * - `path` - File or directory to search (default: bash cwd)
+ * - `glob` - Glob filter (e.g. `*.ts`)
+ * - `output_mode` - `content` | `files_with_matches` | `count`
+ * - `-i` - Case insensitive
+ * - `-A` - Lines after match (content mode only)
+ * - `-B` - Lines before match (content mode only)
+ * - `-C` - Context lines (content mode only)
+ * - `head_limit` - Cap output lines (default: 250, 0 = unlimited)
+ * - `multiline` - Allow `.` to match newlines
  */
 async function execGrep(
   input: Record<string, unknown>,

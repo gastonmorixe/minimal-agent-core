@@ -9,7 +9,7 @@ import {
   stripAnsi,
   truncateDisplayWidth,
   wrapRows,
-} from "./term-width.ts"
+} from "@minimal-agent/plugin-api/utils/term-width"
 
 describe("term-width", () => {
   it("strips CSI / SGR escapes", () => {

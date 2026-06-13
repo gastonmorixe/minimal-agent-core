@@ -39,6 +39,13 @@ import { ANTHROPIC_BETA_FLAGS, buildBetaFlags, classifyRequest } from "./beta-fl
 import { applyBootstrapOverrides } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"
+import {
+  anthropicOAuthLogin,
+  buildAnthropicOAuthCredential,
+  CLAUDE_AI_AUTHORIZE_URL,
+  LOGIN_SCOPES,
+  MANUAL_REDIRECT_URL,
+} from "./oauth-login.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
 import { translateAnthropicStream } from "./response-stream.ts"
 
@@ -113,6 +120,58 @@ describe("bootstrapAnthropic", () => {
     expect(byRole.get("deep")).toBe("claude-opus-4-8")
     // every recommended model is actually an Anthropic model in the registry
     for (const r of recs) expect(resolveModel(r.modelId).providerId).toBe("anthropic")
+  })
+})
+
+describe("anthropicProviderPlugin auth strategy", () => {
+  it("exposes the Anthropic plan OAuth login strategy, not an API-key login strategy", () => {
+    expect(anthropicProviderPlugin.oauthLogin).toBe(anthropicOAuthLogin)
+    expect(anthropicProviderPlugin.apiKeyAuth).toBeUndefined()
+  })
+
+  it("keeps Anthropic OAuth endpoints and scopes provider-local", () => {
+    const cfg = anthropicOAuthLogin.config()
+
+    expect(cfg.authorizeUrl).toBe(CLAUDE_AI_AUTHORIZE_URL)
+    expect(cfg.tokenUrl).toBe("https://platform.claude.com/v1/oauth/token")
+    expect(cfg.redirectUri).toBe(MANUAL_REDIRECT_URL)
+    expect(cfg.scopes).toEqual(LOGIN_SCOPES)
+    expect(cfg.authorizeParams).toEqual({ code: "true" })
+    expect(cfg.loginHintParam).toBe("login_hint")
+  })
+
+  it("builds an opaque host-persistable credential from a token response", () => {
+    const built = buildAnthropicOAuthCredential({
+      access_token: "AT",
+      refresh_token: "RT",
+      expires_in: 3600,
+      scope: "user:profile user:inference",
+      account: { uuid: "acc-uuid", email_address: "u@example.com" },
+      organization: { uuid: "org-uuid" },
+    })
+
+    expect(built.credential.serviceId).toBe("anthropic-plan-oauth")
+    expect(built.credential.displayName).toBe("Anthropic Plan (OAuth)")
+    expect(built.credential.secrets).toMatchObject({
+      tokenType: "oauth",
+      accessToken: "AT",
+      refreshToken: "RT",
+      scopes: ["user:profile", "user:inference"],
+      accountUuid: "acc-uuid",
+      organizationUuid: "org-uuid",
+      emailAddress: "u@example.com",
+    })
+    expect(built.result.account?.uuid).toBe("acc-uuid")
+    expect(built.result.organization?.uuid).toBe("org-uuid")
+  })
+
+  it("rejects malformed token responses in the provider codec", () => {
+    expect(() => buildAnthropicOAuthCredential({ refresh_token: "RT", expires_in: 3600 })).toThrow(
+      /missing access_token/,
+    )
+    expect(() =>
+      buildAnthropicOAuthCredential({ access_token: "AT", refresh_token: "RT" }),
+    ).toThrow(/missing expires_in/)
   })
 })
 
@@ -242,6 +301,11 @@ describe("buildBetaFlags", () => {
     })
     // interleaved-thinking intentionally absent for opus-4-8 (T-7c3f02).
     expect(flags).not.toContain(ANTHROPIC_BETA_FLAGS.INTERLEAVED_THINKING)
+    // redact-thinking intentionally absent for conversations since the B-0
+    // flip (decision B3a): visible thinking is a product feature here. The
+    // live CLI capture DOES send it; we deviate deliberately, matching the
+    // legacy builder. Probe kinds (quota/title) still carry it.
+    expect(flags).not.toContain(ANTHROPIC_BETA_FLAGS.REDACT_THINKING)
     expect(flags).toEqual([
       ANTHROPIC_BETA_FLAGS.CLAUDE_CODE,
       ANTHROPIC_BETA_FLAGS.OAUTH,
@@ -251,7 +315,6 @@ describe("buildBetaFlags", () => {
       ANTHROPIC_BETA_FLAGS.EFFORT,
       ANTHROPIC_BETA_FLAGS.PROMPT_CACHING_SCOPE,
       ANTHROPIC_BETA_FLAGS.EXTENDED_CACHE_TTL,
-      ANTHROPIC_BETA_FLAGS.REDACT_THINKING,
       ANTHROPIC_BETA_FLAGS.MID_CONVERSATION_SYSTEM,
     ])
   })
@@ -513,9 +576,11 @@ describe("buildAnthropicHeaders", () => {
     expect(headers["x-app"]).toBe("cli")
     expect(headers["user-agent"]).toMatch(/^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/)
     expect(headers["x-stainless-package-version"]).toBe("0.94.0")
-    // 10, not 11: interleaved-thinking is omitted for opus-4-8 (T-7c3f02).
+    // 9, not 11: interleaved-thinking is omitted for opus-4-8 (T-7c3f02)
+    // and redact-thinking is omitted for conversations (B3a, B-0 flip).
     expect(headers["anthropic-beta"]).not.toContain("interleaved-thinking-2025-05-14")
-    expect(betaFlags.length).toBe(10)
+    expect(headers["anthropic-beta"]).not.toContain("redact-thinking-2026-02-12")
+    expect(betaFlags.length).toBe(9)
   })
 
   it("uses x-api-key auth when api-key provided", () => {

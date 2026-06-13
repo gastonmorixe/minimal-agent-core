@@ -18,22 +18,19 @@
  * @module llm/providers/openai/adapter
  */
 
-import type { CanonicalEvent } from "../../src/llm/canonical-events.ts"
+import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import type { ProviderAuth, RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
+import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/types/plugin"
+import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { classifyUpstreamError } from "../../src/llm/errors.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
-import type {
-  ProviderAdapter,
-  ProviderAuth,
-  RunContext,
-  SurfaceId,
-  ValidationResult,
-} from "../../src/llm/provider.ts"
-import type { ProviderPlugin } from "../../src/llm/provider-plugin.ts"
-import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
+import type { ProviderAdapter, SurfaceId, ValidationResult } from "../../src/llm/provider.ts"
 import { defaultNetworkClient, type NetworkClient } from "../../src/network/index.ts"
-import type { SubagentModelRecommendation } from "../../src/plugins/types.ts"
 
+import { openAIApiKeyAuth } from "./auth.ts"
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
 import { buildOpenAIHeaders } from "./headers.ts"
@@ -214,6 +211,7 @@ export const openaiProviderPlugin: ProviderPlugin = {
   displayName: "OpenAI",
   shortCode: "oai",
   register: bootstrapOpenAI,
+  apiKeyAuth: openAIApiKeyAuth,
   fetchSessionInfo: fetchOpenAISessionInfo,
   /**
    * Version token for dense labels: "gpt-<rest>" → rest minus trailing

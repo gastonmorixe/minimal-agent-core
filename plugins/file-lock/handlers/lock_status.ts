@@ -182,6 +182,7 @@ export interface RunResult {
   is_error?: boolean
 }
 
+/** `list` action: walk the tree under the input path and report every lock. */
 export function runList(input: ParsedInput, deps: RunDeps): RunResult {
   const root = input.path ?? deps.cwd
   if (!existsSync(root)) {
@@ -201,6 +202,7 @@ export function runList(input: ParsedInput, deps: RunDeps): RunResult {
   return { content: text, display: text }
 }
 
+/** `inspect` action: report one lock's holder metadata by file path. */
 export function runInspect(input: ParsedInput, deps: RunDeps): RunResult {
   const filePath = input.path
   if (!filePath) return errorResult("`path` required for inspect")
@@ -227,6 +229,7 @@ export function runInspect(input: ParsedInput, deps: RunDeps): RunResult {
   return { content: text, display: text }
 }
 
+/** `clear-stale` action: remove locks whose holder is dead or expired. */
 export function runClearStale(input: ParsedInput, deps: RunDeps): RunResult {
   const root = input.path ?? deps.cwd
   if (!existsSync(root)) return errorResult(`path does not exist: ${root}`)
@@ -268,6 +271,7 @@ export function runClearStale(input: ParsedInput, deps: RunDeps): RunResult {
   return { content: text, display: text }
 }
 
+/** `clear` action: force-remove one lock by file path (unsafe escape hatch). */
 export function runClear(input: ParsedInput, deps: RunDeps): RunResult {
   const filePath = input.path
   if (!filePath) return errorResult("`path` required for clear")
@@ -417,6 +421,10 @@ function errorResult(msg: string): RunResult {
 // Default export : adapter from TUIContext to runX functions
 // ---------------------------------------------------------------------------
 
+/**
+ * Tool handler for `LockStatus`: parses the action input, runs the matching
+ * lock operation against the cwd tree, and renders text or JSON output.
+ */
 export default async function lockStatusHandler(ctx: TUIContext): Promise<TUIResult> {
   if (ctx.trigger.type !== "tool") {
     return {

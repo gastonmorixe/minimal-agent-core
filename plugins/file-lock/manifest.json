@@ -10,7 +10,7 @@
         "type": "tool",
         "tool": {
           "name": "LockStatus",
-          "description": "Inspect or clear cooperative file locks under cwd. Use when an Edit/Write returns a 'file is locked' error and you need to understand the situation. Actions: `list` (show all locks under cwd, with holder details), `inspect` (show one lock by file_path), `clear-stale` (remove locks whose holder PID is dead OR older than the stale threshold : safe), `clear` (remove a specific lock by file_path : UNSAFE, only when you have strong reason to believe the auto-stale-breaker missed something).",
+          "description": "Inspect or clear cooperative file locks under cwd. Use when an Edit/Write returns a 'file is locked' error and you need to understand the situation. Actions: `list` (show all locks under cwd, with holder details), `inspect` (show one lock by file_path), `clear-stale` (remove locks whose holder PID is dead or older than the stale threshold; safe), `clear` (remove a specific lock by file_path; unsafe, only when you have strong reason to believe the auto-stale-breaker missed something).",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -21,7 +21,7 @@
               },
               "path": {
                 "type": "string",
-                "description": "For `list`/`clear-stale`: the directory to walk (default: cwd). For `inspect`/`clear`: absolute path of the locked file (NOT the .locked sibling)."
+                "description": "For `list`/`clear-stale`: the directory to walk (default: cwd). For `inspect`/`clear`: absolute path of the locked file, not the .locked sibling."
               },
               "format": {
                 "type": "string",

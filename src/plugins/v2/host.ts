@@ -10,7 +10,7 @@
  *
  * The returned object is deep-frozen so a misbehaving plugin can't mutate
  * the shared surface and bleed state into a sibling handler (same rule as
- * {@link import("../agent-context.ts").createAgentContext}).
+ * `createAgentContext` (in `../agent-context.ts`)).
  *
  * @module plugins/v2/host
  */

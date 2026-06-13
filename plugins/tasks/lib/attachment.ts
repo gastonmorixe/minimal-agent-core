@@ -46,10 +46,21 @@
  * @module tasks/lib/attachment
  */
 
-import type { ContentBlock } from "../../../src/client.ts"
-
 import type { Task } from "./parse.ts"
 import { type StoreDeps, TaskStore } from "./store.ts"
+
+/**
+ * LOCAL structural slice of the host's `ContentBlock` union — the text block
+ * this producer emits. The host's turn-attachment registry expects
+ * `toAttachment(): ContentBlock | null`; a text block satisfies that union
+ * structurally, so the real host accepts it without the plugin importing host
+ * code (the decoupling contract). Source of truth: `src/client/types.ts`
+ * (`TextBlock`).
+ */
+interface AttachmentTextBlock {
+  type: "text"
+  text: string
+}
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -85,6 +96,10 @@ function fmtDur(ms: number): string {
   return `${d}d${rh.toString().padStart(2, "0")}h`
 }
 
+/**
+ * Render the task list as the body of the per-turn `<ma::agent::tasks>`
+ * attachment; empty string when there are no tasks (zero token cost).
+ */
 export function renderAttachmentBody(tasks: readonly Task[]): string {
   if (tasks.length === 0) return ""
   // Pre-compute per-task display position: top-level tasks get a 1-indexed
@@ -170,14 +185,16 @@ export class TasksAttachment {
    *
    * Output shape:
    *
+   * ```
    *     <ma::agent::tasks total="5" done="2" doing="1" todo="2" canceled="0">
    *     1   #a7b3c4   done      Add contextSize to SessionTokens
    *     2   #f8e21a   doing     Update src/session-tokens.test.ts
    *     2a  #f8e21aa  done      Zero-state includes contextSize
    *     ...
    *     </ma::agent::tasks>
+   * ```
    */
-  toAttachment(): ContentBlock | null {
+  toAttachment(): AttachmentTextBlock | null {
     if (this.sid === null || this.sid.trim().length === 0) return null
 
     const store = new TaskStore(this.sid, this.deps)

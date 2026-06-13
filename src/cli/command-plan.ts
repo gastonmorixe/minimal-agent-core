@@ -98,8 +98,7 @@ function capabilities(command: CommandName): CommandCapabilities {
         supportsPromptInput: true,
       }
     default: {
-      const _exhaustive: never = command
-      throw new Error(`unknown command: ${_exhaustive}`)
+      throw new Error(`unknown command: ${String(command satisfies never)}`)
     }
   }
 }
@@ -108,8 +107,8 @@ function capabilities(command: CommandName): CommandCapabilities {
  * Decide which top-level command should run, then expose an explicit
  * capability profile so startup dependencies are only initialized when needed.
  *
- * Precedence: dump > sessions > usage > list-flags > list-spinners >
- * list-models > login > logout > auth-status > run. Auth subcommands sit
+ * Precedence: dump \> sessions \> usage \> list-flags \> list-spinners \>
+ * list-models \> login \> logout \> auth-status \> run. Auth subcommands sit
  * ahead of `run` but after the read-only inspection commands so a
  * `--sessions --logout` combo still falls through to sessions (whoever wrote
  * that flag combo almost certainly meant the read).

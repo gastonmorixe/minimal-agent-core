@@ -93,8 +93,8 @@ export function formatList(entries: CronEntry[], now: number): string[] {
 }
 
 /**
- * Header tail for a task box: cadence + next fire, e.g. `every 10s · next in
- * 8s`. ANSI-free; the box renderer dims it.
+ * Header tail for a task box: cadence + next fire, e.g.
+ * `every 10s · next in 8s`. ANSI-free; the box renderer dims it.
  */
 export function taskInfo(e: CronEntry, now: number): string {
   const next = nextFireMs(e, now)

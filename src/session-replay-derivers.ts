@@ -4,70 +4,134 @@
  * the session JSONL was written BEFORE those fields were persisted (or
  * by a tool that doesn't supply them).
  *
- * Each re-deriver is a pure function `(input, content) -> overrides?`:
+ * Two layers, plugin first:
  *
- *   - `input` is the `tool_use.input` object as the model supplied it.
- *     For `Edit` that's `{ file_path, old_string, new_string,
- *     replace_all }`; for `Task` it's the action verb (`add_many`,
- *     `done`, …) plus action-specific fields.
+ *   1. **Loader-registered replay renderers (the seam).** A plugin may
+ *      declare a `replayRenderers` entry in its manifest; the loader
+ *      resolves the handler module through its blessed dynamic-import
+ *      seam and registers it here via {@link registerReplayRenderer}.
+ *      At replay time {@link deriveDisplayFallback} gives the
+ *      registered renderer first crack at the row. The tasks plugin
+ *      uses this to re-render historical `Task` calls with full ANSI
+ *      styling from the per-session sidecar. A renderer that returns
+ *      `undefined` (or throws) falls through to layer 2 — a buggy or
+ *      absent plugin never breaks `--resume`.
  *
- *   - `content` is the model-facing `tool_result.content` text. For
- *     Task that text already carries the rendered tree
- *     (`header\n<body>\nfooter`) because the live plugin builds
- *     `content` by joining the same `displayParts`. We just need to
- *     split it back apart.
+ *   2. **Core-local fallbacks.** Pure functions with no plugin
+ *      dependency:
  *
- *   - The return shape mirrors `ToolResultRecord`'s presentation
- *     fields. `undefined` means "no override produced, fall back to
- *     the default content rendering" — never "throw".
+ *      - **Task** — split `content` at the first / last lines and treat
+ *        the middle as the body (the Task plugin's `content` is built
+ *        by joining the same `displayParts`, so the split recovers the
+ *        plain-text tree shape, minus ANSI styling).
+ *      - **Edit** — synthesize a unified diff from `old_string` /
+ *        `new_string` and colorize through the core-local
+ *        {@link renderUnifiedDiff}, so the pink/lime hunk styling
+ *        matches the live tool.
+ *      - **Write** — same idea with `before=""`, so the whole input
+ *        renders as `+`-prefixed addition lines.
  *
- * Tools we cover today:
- *
- *   1. **Task** — split `content` at the first / last lines and treat
- *      the middle as the body. The Task plugin's `renderResult` joins
- *      `[header, body, footer]` with `\n`, so we get back what the
- *      user saw, minus ANSI styling. Still way better than the
- *      pre-fix bug: header carries `✔ ALL DONE · N/M · …` instead of
- *      the raw JSON args, and the body fits without the `shown N/M L`
- *      truncation footer.
- *
- *   2. **Edit** — synthesize a unified diff from `old_string` /
- *      `new_string`. The live `Edit` tool needs the file's BEFORE
- *      content to build proper context; at replay time the file may
- *      have been edited many more times, so we fall back to a
- *      no-context `-old\n+new` synthetic diff. Renders through the
- *      same `renderUnifiedDiff` colorizer the live tool uses, so the
- *      pink/lime hunk styling matches.
- *
- *   3. **Write** — same idea but with `before=""`, so the entire
- *      `content` of the input shows as `+`-prefixed addition lines.
- *
- * Plugin tools other than Task (WebSearch, MemoryTool, ShowDiff,
- * LockStatus, …) currently have no derivation : pre-fix sessions
- * render their model-facing `content` line-by-line, same as today's
- * unconditional fallback. Adding more derivers later is straight
- * forward : each one is a self-contained function with no global
- * state, and `deriveDisplayFallback` dispatches by tool name.
+ * Each re-deriver is a pure function `(input, content) -> overrides?`.
+ * The return shape mirrors `ToolResultRecord`'s presentation fields.
+ * `undefined` means "no override produced, fall back to the default
+ * content rendering" — never "throw".
  *
  * @module session-replay-derivers
  */
 
-import { renderUnifiedDiff } from "../plugins/diff-view/handlers/render.ts"
-import type { Task, TaskStatus } from "../plugins/tasks/lib/parse.ts"
-import { type RenderAction, renderToolDisplay } from "../plugins/tasks/lib/render.ts"
-import { buildViews } from "../plugins/tasks/lib/store.ts"
-
 import { buildEditDiff, buildFileDiff } from "./diff.ts"
+import { renderUnifiedDiff } from "./render/unified-diff.ts"
 
 /**
  * Override fields a re-deriver may populate. Each one is independently
- * optional : a deriver that only knows the body returns `{display:
- * "..."}` and leaves header/footer untouched.
+ * optional : a deriver that only knows the body returns
+ * `{ display: "..." }` and leaves header/footer untouched.
  */
 export interface DerivedDisplay {
   display?: string
   displayHeader?: string
   displayFooter?: string
+}
+
+/**
+ * Structural slice of the tasks plugin's per-session sidecar row
+ * (`<sid>.tasks.jsonl`). Re-declared core-locally so the replay path
+ * carries sidecar data WITHOUT importing the plugins tree (the I2
+ * invariant); the plugin's own `Task` shape is assignable to this by
+ * structural typing, and the plugin-registered replay renderer is the
+ * only consumer that interprets it.
+ */
+export interface ReplaySidecarTask {
+  /** Six hex chars for top-level, parent-id + alpha suffix for subtasks. No `#` prefix. */
+  id: string
+  /** Parent task id (no `#`), or `null` for top-level tasks. */
+  parent: string | null
+  /** Lifecycle state. */
+  status: "todo" | "doing" | "done" | "canceled"
+  /** Free-text title. */
+  title: string
+  /** ISO 8601 creation timestamp. */
+  created_at: string
+  /** ISO 8601 timestamp when status flipped to `done`, else `null`. */
+  done_at: string | null
+  /** Optional reason recorded with a `canceled` status. */
+  reason: string | null
+  /** ISO 8601 timestamp of the first `*→doing` transition, else `null`. */
+  started_at: string | null
+  /** ISO 8601 timestamp of the most recent `*→doing` transition, else `null`. */
+  last_resumed_at: string | null
+  /** Total accumulated time-in-`doing` (milliseconds). */
+  active_ms: number
+}
+
+/**
+ * The row data a registered replay renderer receives. Mirrors what
+ * {@link deriveDisplayFallback} is called with for a single historical
+ * `tool_result` row (errors are filtered out before renderers run).
+ */
+export interface ReplayToolRenderInput {
+  /** The tool_use's `input` object as the model supplied it. */
+  input: Record<string, unknown>
+  /** The model-facing `tool_result.content` text. */
+  content: string
+  /** Wall-clock at the moment the historical call ran, when known. */
+  callTs: Date | null
+  /** Parsed sidecar task list, when the caller loaded one. */
+  sidecarTasks: readonly ReplaySidecarTask[] | null
+}
+
+/**
+ * A plugin-supplied replay renderer for one tool name. Returns the
+ * presentation overrides for the row, or `undefined` to decline (the
+ * core fallback then runs). Must be synchronous — replay derivation is
+ * a pure pass over the loaded records.
+ */
+export type ReplayToolRenderer = (ctx: ReplayToolRenderInput) => DerivedDisplay | undefined
+
+/**
+ * Registered renderers, keyed by tool name. Module-level by design:
+ * the loader registers at boot (before any replay runs) and the
+ * registry is consulted by {@link deriveDisplayFallback} without the
+ * replay call sites having to thread a loader handle through.
+ */
+const replayRenderers = new Map<string, ReplayToolRenderer>()
+
+/**
+ * Register a replay renderer for `toolName`. A second registration for
+ * the same tool replaces the first (loader precedence already settled
+ * which plugin wins before this is called). Returns an unregister
+ * handle that removes the renderer only if it is still the active one.
+ */
+export function registerReplayRenderer(toolName: string, fn: ReplayToolRenderer): () => void {
+  replayRenderers.set(toolName, fn)
+  return () => {
+    if (replayRenderers.get(toolName) === fn) replayRenderers.delete(toolName)
+  }
+}
+
+/** Drop every registered replay renderer. Test hygiene helper. */
+export function clearReplayRenderers(): void {
+  replayRenderers.clear()
 }
 
 /**
@@ -111,80 +175,14 @@ function stripTrailingAnnotations(content: string): string {
  * uses a blank line between top-level tasks and the subtree). Trailing
  * whitespace on each line is preserved verbatim so the alignment the
  * user saw live stays intact.
+ *
+ * This is the CORE fallback: plain text only. The ANSI-colored
+ * re-render (per-call status snapshots from the sidecar) lives in the
+ * tasks plugin's `replayRenderers` handler and reaches replay through
+ * {@link registerReplayRenderer}.
  */
-export function deriveTaskDisplay(opts: {
-  content: string
-  /**
-   * The Task tool_use's `input` object (the same the model sent). Only
-   * required when the sidecar-driven re-render path activates : the
-   * `action` field maps to a {@link RenderAction} for the header verb.
-   */
-  input?: Record<string, unknown>
-  /**
-   * Wall-clock at the moment the historical Task call ran. Used to
-   * snapshot {@link sidecarTasks} BACK in time so a `start` call early
-   * in the session renders with `todo` rows even though the sidecar
-   * (which is overwritten in place by every action) now has those
-   * tasks as `done`. When `null` the snapshot uses the sidecar's
-   * current state.
-   */
-  callTs?: Date | null
-  /**
-   * Full task list parsed from the per-session `<sid>.tasks.jsonl`
-   * sidecar. When provided, the deriver renders the body via the
-   * plugin's `renderToolDisplay({ansi: true})` for byte-identical
-   * coloring with the live agent (status glyph colors, dim hashes,
-   * sky-blue durations, etc.). When `null` / `undefined`, falls back
-   * to the structural content-split path (header / body / footer
-   * with no ANSI inside the body).
-   */
-  sidecarTasks?: readonly Task[] | null
-}): DerivedDisplay | undefined {
-  const content = opts.content
-  const sidecar = opts.sidecarTasks ?? null
-  const input = opts.input ?? null
-
-  // Sidecar-driven re-render: snapshot the task tree at the call's
-  // wall-clock and run the live plugin's renderToolDisplay. Wrapped in
-  // try/catch so a malformed sidecar / unexpected input falls back to
-  // the structural split path instead of breaking resume.
-  //
-  // The outer gate accepts an EMPTY sidecar so `add_many` /
-  // `add` calls (which precede any persisted task) still render via
-  // the plugin path. The inner gate decides per-action whether the
-  // post-cutoff snapshot is renderable.
-  if (sidecar !== null && input !== null) {
-    try {
-      const cutoff = opts.callTs ?? null
-      const snapshot = snapshotTasksAt(sidecar, cutoff)
-      // Empty snapshot at this cutoff is meaningful for add-like
-      // actions (the plugin renders an "+ added N tasks" header with
-      // no body rows). For every other action, fall through to the
-      // content-split path : we'd produce a contentless block.
-      if (snapshot.length > 0 || input.action === "add_many" || input.action === "add") {
-        const stats = computeStats(snapshot)
-        const action = mapInputToRenderAction(input, stats)
-        const views = buildViews(snapshot)
-        const now = cutoff !== null ? () => cutoff.getTime() : undefined
-        const parts = renderToolDisplay(views, stats, {
-          ansi: true,
-          action,
-          ...(now !== undefined ? { now } : {}),
-        })
-        return {
-          displayHeader: parts.header,
-          display: parts.body,
-          displayFooter: parts.footer,
-        }
-      }
-    } catch {
-      // Fall through to the structural split path below.
-    }
-  }
-
-  // Structural fallback: split content into header / body / footer
-  // when no sidecar is available (tests, missing file, plugin disabled).
-  const trimmed = stripTrailingAnnotations(content).replace(/\n+$/g, "")
+export function deriveTaskDisplay(opts: { content: string }): DerivedDisplay | undefined {
+  const trimmed = stripTrailingAnnotations(opts.content).replace(/\n+$/g, "")
   if (trimmed.length === 0) return undefined
   const lines = trimmed.split("\n")
   if (lines.length === 1) return { displayHeader: lines[0] }
@@ -193,147 +191,6 @@ export function deriveTaskDisplay(opts: {
   const footer = lines[lines.length - 1]
   const bodyLines = lines.slice(1, -1)
   return { displayHeader: header, display: bodyLines.join("\n"), displayFooter: footer }
-}
-
-/**
- * Reconstruct the state of every task at a historical `cutoff`
- * timestamp using the per-task `created_at` / `started_at` / `done_at`
- * fields the sidecar stores. Tasks created after the cutoff are
- * dropped. Status is back-computed:
- *
- *   - `done_at <= cutoff` → `done`.
- *   - `started_at <= cutoff` → `doing` (and `done_at` reset to null
- *     since we hadn't completed it yet).
- *   - otherwise → `todo` (with `started_at` AND `done_at` cleared).
- *
- * Limitations (intentional):
- *
- *   - `canceled` tasks have no explicit cancel timestamp, so they're
- *     surfaced with their final status regardless of cutoff. This is
- *     a small lie when a task was canceled mid-session and we're
- *     rendering an earlier call, but the alternative is to misclassify
- *     them as `todo` which is also a lie.
- *
- *   - Tasks that were REMOVED before the cutoff are unrecoverable :
- *     the sidecar is rewritten in place (not append-only), so the
- *     remove erases history. Tradeoff is acceptable : most sessions
- *     don't remove tasks.
- *
- *   - `active_ms` is NOT back-adjusted. Top-level row durations may
- *     read slightly high for in-flight `doing` rows at the cutoff.
- *
- * When `cutoff` is `null`, returns a shallow copy of the input
- * (current state).
- */
-export function snapshotTasksAt(tasks: readonly Task[], cutoff: Date | null): Task[] {
-  if (cutoff === null) return [...tasks]
-  const cutoffMs = cutoff.getTime()
-  const out: Task[] = []
-  for (const t of tasks) {
-    const createdAtMs = Date.parse(t.created_at)
-    if (Number.isFinite(createdAtMs) && createdAtMs > cutoffMs) continue
-    let status: TaskStatus = t.status
-    let started_at: string | null = t.started_at
-    let done_at: string | null = t.done_at
-    const doneAtMs = t.done_at ? Date.parse(t.done_at) : Number.NaN
-    const startedAtMs = t.started_at ? Date.parse(t.started_at) : Number.NaN
-    if (t.status === "canceled") {
-      // Preserve as-is. See module doc for the trade-off.
-    } else if (Number.isFinite(doneAtMs) && doneAtMs <= cutoffMs) {
-      status = "done"
-    } else if (Number.isFinite(startedAtMs) && startedAtMs <= cutoffMs) {
-      status = "doing"
-      done_at = null
-    } else {
-      status = "todo"
-      started_at = null
-      done_at = null
-    }
-    out.push({ ...t, status, started_at, done_at })
-  }
-  return out
-}
-
-/**
- * Compute the post-mutation `Stats` aggregate for the rendered footer.
- * Mirrors `TaskStore.stats()` so we don't have to construct a full
- * store at re-derive time.
- */
-function computeStats(tasks: readonly Task[]): {
-  total: number
-  done: number
-  doing: number
-  todo: number
-  canceled: number
-} {
-  const s = { total: tasks.length, done: 0, doing: 0, todo: 0, canceled: 0 }
-  for (const t of tasks) s[t.status] += 1
-  return s
-}
-
-/**
- * Map a Task tool_use's `input` object to a {@link RenderAction} the
- * plugin's renderer understands. The mapping is verb-driven:
- *
- *   - `add_many` → `added_many` with the title count.
- *   - `add` → `added_many` with `count: 1` (we don't have the new
- *     hash : it's generated at exec time and not echoed back in the
- *     input). Loses the per-row "targeted" highlight but renders the
- *     correct header verb.
- *   - `start` / `done` / `status` → `started` / `marked_done` /
- *     `marked_<value>` with the task hash (`#` prefix stripped).
- *   - `update` / `remove` → `updated` / `removed` with the hash.
- *   - `reorder` / `list` / `clear` → kind-only.
- *
- * **`marked_done → all_done` upgrade**: when the post-mutation snapshot
- * shows every top-level task as `done`, we emit `{kind: "all_done"}`
- * instead. The live plugin does the same check (see
- * `task_tool.ts :: ok` and the header-text selector for the "ALL DONE"
- * row), so this preserves the user's expected closing celebratory line.
- */
-function mapInputToRenderAction(
-  input: Record<string, unknown>,
-  stats: { total: number; done: number; doing: number; todo: number; canceled: number },
-): RenderAction {
-  const action = typeof input.action === "string" ? input.action : ""
-  const stripHash = (raw: unknown): string => {
-    const s = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw : ""
-    return s.startsWith("#") ? s.slice(1) : s
-  }
-  const allDone = stats.total > 0 && stats.done === stats.total
-  switch (action) {
-    case "add_many": {
-      const titles = Array.isArray(input.titles) ? input.titles : []
-      return { kind: "added_many", count: titles.length }
-    }
-    case "add":
-      return { kind: "added_many", count: 1 }
-    case "start":
-      return { kind: "started", hash: stripHash(input.id) }
-    case "done":
-      return allDone ? { kind: "all_done" } : { kind: "marked_done", hash: stripHash(input.id) }
-    case "status": {
-      const status = typeof input.status === "string" ? input.status : ""
-      const hash = stripHash(input.id)
-      if (status === "doing") return { kind: "marked_doing", hash }
-      if (status === "todo") return { kind: "marked_todo", hash }
-      if (status === "canceled") return { kind: "marked_canceled", hash }
-      // status === "done"
-      return allDone ? { kind: "all_done" } : { kind: "marked_done", hash }
-    }
-    case "update":
-      return { kind: "updated", hash: stripHash(input.id) }
-    case "remove":
-      return { kind: "removed", hash: stripHash(input.id) }
-    case "reorder":
-      return { kind: "reordered" }
-    case "list":
-      return { kind: "list" }
-    case "clear":
-      return { kind: "cleared", count: stats.total }
-    default:
-      return { kind: "list" }
-  }
 }
 
 /**
@@ -394,15 +251,42 @@ export function deriveWriteDisplay(input: Record<string, unknown>): DerivedDispl
 }
 
 /**
+ * Validate and narrow a renderer's return value. Plugins are untrusted
+ * here: anything that isn't a plain object with string presentation
+ * fields is treated as "declined" so the core fallback still runs.
+ */
+function sanitizeRendererResult(result: unknown): DerivedDisplay | undefined {
+  if (typeof result !== "object" || result === null) return undefined
+  const r = result as Record<string, unknown>
+  const out: DerivedDisplay = {}
+  if (typeof r.display === "string") out.display = r.display
+  if (typeof r.displayHeader === "string") out.displayHeader = r.displayHeader
+  if (typeof r.displayFooter === "string") out.displayFooter = r.displayFooter
+  if (
+    out.display === undefined &&
+    out.displayHeader === undefined &&
+    out.displayFooter === undefined
+  ) {
+    return undefined
+  }
+  return out
+}
+
+/**
  * Tool-name → re-deriver dispatch. Used by `toolDisplaysFromRecords`
  * in `src/session-replay.ts` when the persisted `tool_result` row has
- * no `display` / `displayHeader` / `displayFooter` of its own. Errors
- * inside a re-deriver are swallowed (returns undefined) so a buggy
- * deriver never breaks the resume path : the worst case is "this tool
- * row falls back to the unconditional content render".
+ * no `display` / `displayHeader` / `displayFooter` of its own.
  *
- * Tools not in the dispatch table return `undefined` quietly. Adding
- * a new deriver = adding a new case here.
+ * Resolution order per row:
+ *
+ *   1. A loader-registered plugin renderer for the tool name (the
+ *      seam). Errors and `undefined` fall through.
+ *   2. The core-local fallback for Task / Edit / Write.
+ *   3. `undefined` — the row renders its model-facing `content`.
+ *
+ * Errors inside any layer are swallowed (returns undefined) so a buggy
+ * renderer never breaks the resume path : the worst case is "this tool
+ * row falls back to the unconditional content render".
  */
 export function deriveDisplayFallback(opts: {
   toolName: string
@@ -411,29 +295,43 @@ export function deriveDisplayFallback(opts: {
   isError: boolean
   /**
    * Wall-clock at the moment the historical call ran. Forwarded to
-   * `deriveTaskDisplay` for cutoff-based status reconstruction. Other
-   * derivers (Edit / Write) ignore it.
+   * registered plugin renderers (the tasks plugin uses it for
+   * cutoff-based status reconstruction). Core fallbacks ignore it.
    */
   callTs?: Date | null
   /**
-   * Sidecar task list (already parsed). Forwarded to
-   * `deriveTaskDisplay` for ANSI-colored re-rendering. When omitted /
-   * empty, the task deriver falls back to its content-split path
-   * (works but loses body colors).
+   * Sidecar task list (already parsed). Forwarded to registered plugin
+   * renderers for ANSI-colored re-rendering. When omitted / empty, the
+   * core Task fallback's content-split path still works (plain text).
    */
-  sidecarTasks?: readonly Task[] | null
+  sidecarTasks?: readonly ReplaySidecarTask[] | null
 }): DerivedDisplay | undefined {
   if (opts.isError) return undefined
   const input = opts.input ?? {}
+
+  // Layer 1: plugin-registered renderer (the loader-resolved seam).
+  const renderer = replayRenderers.get(opts.toolName)
+  if (renderer !== undefined) {
+    try {
+      const result = sanitizeRendererResult(
+        renderer({
+          input,
+          content: opts.content,
+          callTs: opts.callTs ?? null,
+          sidecarTasks: opts.sidecarTasks ?? null,
+        }),
+      )
+      if (result !== undefined) return result
+    } catch {
+      // Fall through to the core fallback below.
+    }
+  }
+
+  // Layer 2: core-local fallbacks.
   try {
     switch (opts.toolName) {
       case "Task":
-        return deriveTaskDisplay({
-          content: opts.content,
-          input,
-          callTs: opts.callTs ?? null,
-          sidecarTasks: opts.sidecarTasks ?? null,
-        })
+        return deriveTaskDisplay({ content: opts.content })
       case "Edit":
         return deriveEditDisplay(input)
       case "Write":

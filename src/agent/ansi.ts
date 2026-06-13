@@ -1,6 +1,6 @@
 /**
  * ANSI color helpers and small text-formatting utilities used by the
- * agent (and re-exported from {@link module:agent}).
+ * agent (and re-exported from the `agent` module).
  *
  * The SGR open sequences live in `src/palette.ts` (the agent-owned
  * single source of truth, also exported to plugins via the
@@ -117,12 +117,13 @@ export const faintThinkingChunk = (s: string): string => {
  * Pure / no IO; the caller writes the returned string (followed by `\n`)
  * to the compositor's scrollback stream.
  *
+ * The per-call `opts` bag carries `activeModeLabel`: the active mode
+ * label (e.g. `"ASK"`), or null/undefined for default mode. Uppercased
+ * on display.
+ *
  * @param text - The original user prompt text. Multi-line input is split
  *   on `\n`; each line is dimmed + strikethrough separately so terminal
  *   attribute state never leaks across line boundaries.
- * @param opts - Per-call options.
- * @param opts.activeModeLabel - Active mode label (e.g. `"ASK"`), or
- *   null/undefined for default mode. Uppercased on display.
  * @returns Multi-line string ready to write to the scrollback stream.
  */
 export function formatAbortedEcho(

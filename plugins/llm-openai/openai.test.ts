@@ -12,6 +12,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
+
 import {
   type CanonicalEvent,
   type CanonicalRequest,
@@ -23,9 +25,14 @@ import {
   resolveProvider,
   userText,
 } from "../../src/llm/index.ts"
-import { parseSse } from "../../src/llm/streaming/sse-parser.ts"
 
-import { bootstrapOpenAI } from "./adapter.ts"
+import { bootstrapOpenAI, openaiProviderPlugin } from "./adapter.ts"
+import {
+  buildOpenAIApiKeyCredential,
+  OPENAI_API_KEY_AUTH,
+  openAIApiKeyAuth,
+  readOpenAIApiKey,
+} from "./auth.ts"
 import { buildOpenAIChatBody } from "./chat/request-body.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "./chat/response-stream.ts"
 import { registerOpenAIModels } from "./models.ts"
@@ -138,6 +145,29 @@ describe("bootstrapOpenAI", () => {
     expect(adapter.surfaces).toContain("openai-responses")
     expect(findModel("gpt-4o")?.surfaceId).toBe("openai-chat-completions")
     expect(findModel("o3")?.surfaceId).toBe("openai-responses")
+  })
+})
+
+describe("openaiProviderPlugin auth strategy", () => {
+  it("exposes API-key auth and no OAuth login strategy", () => {
+    expect(openaiProviderPlugin.apiKeyAuth).toBe(openAIApiKeyAuth)
+    expect(openaiProviderPlugin.oauthLogin).toBeUndefined()
+  })
+
+  it("declares OpenAI API-key sources and credential codec", () => {
+    expect(openAIApiKeyAuth.serviceId).toBe(OPENAI_API_KEY_AUTH.serviceId)
+    expect(openAIApiKeyAuth.displayName).toBe("OpenAI API Key")
+    expect(openAIApiKeyAuth.envVars).toEqual(["OPENAI_API_KEY"])
+    expect(openAIApiKeyAuth.configKey).toBe("openai")
+
+    const write = buildOpenAIApiKeyCredential("sk-test")
+    expect(write).toEqual({
+      serviceId: "openai-api-key",
+      displayName: "OpenAI API Key",
+      secrets: { tokenType: "api-key", apiKey: "sk-test" },
+    })
+    expect(readOpenAIApiKey(write.secrets)).toBe("sk-test")
+    expect(readOpenAIApiKey({ tokenType: "api-key" })).toBeNull()
   })
 })
 

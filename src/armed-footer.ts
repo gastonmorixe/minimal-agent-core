@@ -24,7 +24,7 @@
  *     visual vocabulary across the agent) and the off-ramp is
  *     `esc resume` (there's nothing to cancel, the work already stopped).
  *
- * Hierarchy: heading (anchor) > ⌃C (action) > Ns (urgency) > esc (off-ramp).
+ * Hierarchy: heading (anchor), then ⌃C (action), then Ns (urgency), then esc (off-ramp).
  * `⌃` is U+2303 — the macOS Control symbol the user already sees in every
  * menu item. BMP-narrow, no emoji-presentation risk.
  *

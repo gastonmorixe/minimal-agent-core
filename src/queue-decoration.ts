@@ -4,17 +4,21 @@
  *
  * Layout (n = queue.length):
  *
- *   `  ⏳ queued · n`            <- header: count as trailing badge
- *   `  ┊  1 ▸ first preview`     <- item rows: position + ▸ + preview
- *   `  ┊  2 ▸ second preview`
- *   `  ╰  3 ▸ third preview`     <- last visible row uses `╰`
+ * ```text
+ *   ⏳ queued · n             <- header: count as trailing badge
+ *   ┊  1 ▸ first preview      <- item rows: position + ▸ + preview
+ *   ┊  2 ▸ second preview
+ *   ╰  3 ▸ third preview      <- last visible row uses ╰
+ * ```
  *
- * Overflow (n > QUEUE_MAX_VISIBLE_ITEMS):
+ * Overflow (n exceeds QUEUE_MAX_VISIBLE_ITEMS):
  *
- *   `  ⏳ queued · n`
- *   `  ┊  1 ▸ first`
- *   `  …  (rows 2..10) …`
- *   `  ╰  ... and (n-10) more`   <- elision tail closes the block
+ * ```text
+ *   ⏳ queued · n
+ *   ┊  1 ▸ first
+ *   …  (rows 2..10) …
+ *   ╰  ... and (n-10) more    <- elision tail closes the block
+ * ```
  *
  * Item numbering is 1-based; per-row layout pads the 1-cell `┊` / `╰`
  * glyph with one extra space so its number column aligns under the
@@ -37,7 +41,7 @@
  *
  * Selection / navigation mode (June 2026)
  * ---------------------------------------
- * When the user presses ↑ at an empty prompt with >1 queued items, the
+ * When the user presses ↑ at an empty prompt with more than one queued item, the
  * REPL enters a transient "queue navigation" mode: one row is selected
  * (highlighted with a full-width background bar) and a footer hint row
  * teaches the d / x / k / esc actions. Pass `opts.selectedIndex` to

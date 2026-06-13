@@ -3,7 +3,7 @@
  * `publishDiagnostics`) → {@link Finding}[].
  *
  * LSP shape:
- *   { range:{ start:{line,character}, end }, severity:1|2|3|4, code?, message, source? }
+ *   `{ range:{ start:{line,character}, end }, severity:1|2|3|4, code?, message, source? }`
  *
  * LSP positions are 0-BASED; we convert to the 1-based line/col the rest of the
  * pipeline (and the editor's gutter) uses. Numeric TypeScript codes are
@@ -29,6 +29,12 @@ function codeOf(code: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * Converts an LSP `Diagnostic[]` payload into neutral {@link Finding}s tagged
+ * with `source` (e.g. `"tsgo"`). Tolerates malformed entries by skipping
+ * them, maps LSP severity 1/2 to error/warning (everything else info), and
+ * converts the 0-based LSP positions to 1-based line/column.
+ */
 export function adaptLspDiagnostics(items: unknown, source: string): Finding[] {
   if (!Array.isArray(items)) return []
   const out: Finding[] = []

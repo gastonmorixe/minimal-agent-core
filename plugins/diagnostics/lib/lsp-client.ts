@@ -26,6 +26,14 @@ export interface LspClientOptions {
   initTimeoutMs?: number
 }
 
+/**
+ * Minimal JSON-RPC-over-stdio LSP client for pull diagnostics: spawns the
+ * server, performs the `initialize` handshake (with a timeout), tracks
+ * opened documents and their versions, and correlates request ids to
+ * resolvers. Implements only the slice of LSP the diagnostics plugin needs;
+ * a dead or failed server flips it into a permanent failed state instead of
+ * throwing on every call.
+ */
 export class LspClient {
   private proc: ChildProcess
   private buf = Buffer.alloc(0)

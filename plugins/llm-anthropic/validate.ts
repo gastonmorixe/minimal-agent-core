@@ -16,6 +16,11 @@ import { modalityViolations } from "../../src/llm/modality-check.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 import type { ValidationResult } from "../../src/llm/provider.ts"
 
+/**
+ * Provider preflight validation: checks a canonical request against the
+ * resolved model's declared capabilities (thinking, effort, speed, media,
+ * mid-conversation system) and returns the violations found.
+ */
 export function validateAnthropicRequest(
   req: CanonicalRequest,
   model: ModelEntry,

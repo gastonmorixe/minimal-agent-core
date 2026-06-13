@@ -33,6 +33,12 @@ function toProviderAuth(auth: AuthResult): ProviderAuth {
     : { kind: "api-key", key: auth.token }
 }
 
+/**
+ * Implements `minimal-agent list-models`: merges live model catalogs from
+ * every provider plugin (queried in parallel, fault-isolated so one outage
+ * cannot hide another provider's rows) with the static registry fallback,
+ * then prints a deduplicated table, optionally filtered to one provider.
+ */
 export async function runListModelsCommand(
   auth: AuthResult,
   providerFilter?: string,

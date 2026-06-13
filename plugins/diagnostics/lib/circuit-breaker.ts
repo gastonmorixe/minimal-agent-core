@@ -25,6 +25,13 @@ export interface CircuitBreakerOptions {
   now?: () => number
 }
 
+/**
+ * Classic closed/open/half-open circuit breaker guarding a flaky diagnostic
+ * provider. Consecutive failures trip it open; after a cooldown one
+ * half-open trial is allowed, and a success closes it again. A provider that
+ * trips `maxTrips` times goes permanently `dead` for the rest of the
+ * session.
+ */
 export class CircuitBreaker {
   private readonly maxFailures: number
   private readonly cooldownMs: number

@@ -96,6 +96,13 @@ export interface BinaryStoreDeps {
   tokenProvider?: () => Promise<string | null>
 }
 
+/**
+ * Content-addressed store for plugin-declared external binaries under a
+ * single directory (default `~/.minimal-agent/bin`). Downloads archives,
+ * verifies checksums, extracts, and tracks installs in a JSON manifest so
+ * repeat requests are no-ops. All failure modes surface as structured
+ * `InstallProgress` events rather than thrown strings.
+ */
 export class BinaryStore {
   readonly dir: string
   private readonly manifestPath: string

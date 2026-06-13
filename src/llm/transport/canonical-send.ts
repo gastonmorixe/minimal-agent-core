@@ -5,7 +5,7 @@
  *
  * Signature-compatible with `client.ts`'s `sendMessage`:
  *
- *   (opts: SendOptions) => AsyncGenerator<string, StreamedResponse>
+ * `(opts: SendOptions) => AsyncGenerator<string, StreamedResponse>`
  *
  * so it is a drop-in for `Agent`'s injectable transport. The difference is
  * WHERE the request goes: `sendMessage` always hits Anthropic;
@@ -19,8 +19,8 @@
  *
  * - **watchdog** (innermost): idle / hard-timeout / truncation guard over
  *   one attempt's canonical event stream; throws tagged errors.
- * - **bridge**: canonical events → legacy `(yield string, return
- *   StreamedResponse)` + lifecycle callbacks.
+ * - **bridge**: canonical events → legacy shape
+ *   (`yield string` / `return StreamedResponse`) + lifecycle callbacks.
  * - **auth-refresh**: on 401, keychain-first peer adoption then network
  *   refresh, retry once; provider-neutral via `ProviderAuth.refresh`.
  * - **retry** (outermost): retry tagged transient/hard errors forever with
@@ -36,8 +36,9 @@
  */
 
 import { readCredentials } from "../../auth.ts"
+import { resolveApiKeyAuth } from "../../auth-strategies.ts"
+import { debugRequestOptions } from "../../client/debug.ts"
 import type { SendOptions, StreamedResponse } from "../../client/types.ts"
-import { loadUserConfig } from "../../config.ts"
 import { diag } from "../../diagnostic-bus.ts"
 import { rebroadcastQuotaForSessionUpdate } from "../../quota-broadcast.ts"
 import { addSessionUsage } from "../../session-tokens.ts"
@@ -53,40 +54,6 @@ import { run } from "../run.ts"
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { withRetry } from "./retry.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
-
-/**
- * Resolve a provider API key with precedence: env var > config file > throw.
- *
- * - env var (e.g. `OPENAI_API_KEY`) is HIGHEST so `export` always wins and CI
- *   keeps working unchanged.
- * - config file (`~/.minimal-agent/config.jsonc` → `apiKeys.<configKey>`) is
- *   the fallback for users who'd rather not export env vars every session.
- * - both missing → throw an actionable error naming BOTH surfaces.
- *
- * Security: the key value is never logged; the error only names the env var and
- * the config key, never the secret.
- */
-function resolveProviderKey(
-  envVar: string,
-  configKey: "openai" | "openrouter",
-  providerId: string,
-  modelId: string,
-): ProviderAuth {
-  const envKey = process.env[envVar]
-  if (envKey && envKey.trim().length > 0) return { kind: "api-key", key: envKey }
-
-  const configKeyValue = loadUserConfig().apiKeys?.[configKey]
-  if (configKeyValue && configKeyValue.trim().length > 0) {
-    return { kind: "api-key", key: configKeyValue }
-  }
-
-  throw new Error(
-    `canonical transport: no API key for provider "${providerId}" (model "${modelId}"), ` +
-      `which authenticates with its own API key (NOT the Anthropic session). Set the ` +
-      `${envVar} environment variable, or add "apiKeys.${configKey}" to ` +
-      `~/.minimal-agent/config.jsonc, then retry.`,
-  )
-}
 
 /**
  * Resolve the credential for the request's PROVIDER, not the host's single
@@ -114,15 +81,8 @@ function resolveProviderAuth(opts: SendOptions): ProviderAuth {
   switch (providerId) {
     case "anthropic":
       return legacyAuthToProviderAuth(opts.auth)
-    case "openai":
-      return resolveProviderKey("OPENAI_API_KEY", "openai", providerId, modelId)
-    case "openrouter":
-      return resolveProviderKey("OPENROUTER_KEY", "openrouter", providerId, modelId)
     default:
-      throw new Error(
-        `canonical transport: no credential strategy for provider "${providerId}" ` +
-          `(model "${modelId}"). Add one in src/llm/transport/canonical-send.ts:resolveProviderAuth.`,
-      )
+      return resolveApiKeyAuth(providerId, modelId)
   }
 }
 
@@ -130,13 +90,18 @@ function resolveProviderAuth(opts: SendOptions): ProviderAuth {
  * Stream a request through the canonical layer + resilience middleware
  * while presenting the legacy `sendMessage` surface.
  *
- * @param opts Legacy send options (auth, messages, model, tools, callbacks…).
+ * @param opts - Legacy send options (auth, messages, model, tools, callbacks…).
  * @yields Text deltas (the legacy string channel), plus retry stall markers.
  * @returns The final {@link StreamedResponse} once the stream completes.
  */
 export async function* canonicalSendFn(
   opts: SendOptions,
 ): AsyncGenerator<string, StreamedResponse, undefined> {
+  // `--debug` / `--verbose` request dump. The legacy `sendMessage` printed
+  // this inline; the canonical path must do it too or `--debug` goes silent
+  // for normal conversations (which all route through here post-flip).
+  debugRequestOptions(opts)
+
   const req = sendOptionsToCanonical(opts)
   // Shared, mutable auth keyed by the model's PROVIDER (not the host's
   // Anthropic session): OpenAI/OpenRouter get their own API key, Anthropic

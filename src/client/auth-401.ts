@@ -56,11 +56,13 @@ export interface KeychainRecoveryResult {
  * `auth.refresh()` fallback (with its caller-specific status UI, error
  * wrapping, and persistent-401 handling) stays in each caller.
  *
- * @param args.auth Credentials whose `.token` is compared + mutated in place.
- * @param args.doRequest Re-issues the request with a given bearer token.
- * @param args.onPeerRotated Fired right before retrying with a peer token
+ * The `args` bag carries:
+ *   - `auth` - Credentials whose `.token` is compared + mutated in place.
+ *   - `doRequest` - Re-issues the request with a given bearer token.
+ *   - `onPeerRotated` - Fired right before retrying with a peer token
  *   (callers use it for status-bar + diag UI).
- * @param args.onPeerRecovered Fired after the peer-token retry returns 2xx.
+ *   - `onPeerRecovered` - Fired after the peer-token retry returns 2xx.
+ *
  * @returns Whether a peer token recovered the request, and the retry response.
  */
 export async function recoverFrom401ViaKeychain(args: {

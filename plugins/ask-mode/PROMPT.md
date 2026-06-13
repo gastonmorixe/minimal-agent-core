@@ -1,6 +1,6 @@
-`ask` is a read-only investigation mode. While it is active, the harness REFUSES `Edit` and `Write` at dispatch time and returns a structured error asking you to present changes as diffs instead. The tools stay registered (so the request prefix is byte-stable and the prompt cache survives), but calling them bounces.
+`ask` is a read-only investigation mode. While it is active, the harness refuses `Edit` and `Write` at dispatch time and returns a structured error asking you to present changes as diffs instead. The tools stay registered (so the request prefix is byte-stable and the prompt cache survives), but calling them bounces.
 
-The user cycles modes from the REPL with Shift+Tab; the prompt prefix turns blue (`ASK ❯`) and the spinner reads `Asking…`. You don't control the mode, but you can tell the user how to leave it.
+The user cycles modes from the REPL with Shift+Tab; the prompt prefix turns blue (`ASK ❯`) and the spinner reads `Asking...`. You don't control the mode, but you can tell the user how to leave it.
 
 ## When `ask` is active
 
@@ -20,8 +20,8 @@ Enforcement happens at dispatch time, not via your cooperation:
 
 ## How you learn the active mode
 
-1. **`<ma::agent::mode-active id="…" since="…" />`** is stamped on every tool result. Freshest signal. `id="default"` or no stamp means no mode is active (unrestricted).
-2. **`<ma::agent::mode-change from="…" to="…" at="…" />`** rides the next user turn when the user toggles. Read `to=` for the new mode.
+1. **`<ma::agent::mode-active id="..." since="..." />`** is stamped on every tool result. Freshest signal. `id="default"` or no stamp means no mode is active (unrestricted).
+2. **`<ma::agent::mode-change from="..." to="..." at="..." />`** rides the next user turn when the user toggles. Read `to=` for the new mode.
 3. **`Mode` tool**, on demand, for a deterministic answer when no recent tool result is available. It returns the id, label, and the allow/deny permission lists. `id: null` means no mode active.
 
 You don't need to call `Mode` routinely; the tool-result stamp is the primary signal.

@@ -1,10 +1,15 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { AuthStore, AuthStoreError, normalizeProviderId } from "./auth-store.ts"
+import {
+  AuthStore,
+  AuthStoreError,
+  defaultAuthFilePath,
+  normalizeProviderId,
+} from "./auth-store.ts"
 
 let dir: string
 let path: string
@@ -18,6 +23,30 @@ beforeEach(() => {
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+})
+
+describe("defaultAuthFilePath (token-store path — byte-pinned)", () => {
+  it("defaults to ~/.minimal-agent/auth.jsonc", () => {
+    const prev = process.env.MINIMAL_AGENT_AUTH_FILE
+    delete process.env.MINIMAL_AGENT_AUTH_FILE
+    try {
+      expect(defaultAuthFilePath()).toBe(join(homedir(), ".minimal-agent", "auth.jsonc"))
+    } finally {
+      if (prev === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+      else process.env.MINIMAL_AGENT_AUTH_FILE = prev
+    }
+  })
+
+  it("honors the MINIMAL_AGENT_AUTH_FILE override verbatim", () => {
+    const prev = process.env.MINIMAL_AGENT_AUTH_FILE
+    process.env.MINIMAL_AGENT_AUTH_FILE = "/tmp/custom-auth.jsonc"
+    try {
+      expect(defaultAuthFilePath()).toBe("/tmp/custom-auth.jsonc")
+    } finally {
+      if (prev === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+      else process.env.MINIMAL_AGENT_AUTH_FILE = prev
+    }
+  })
 })
 
 describe("normalizeProviderId", () => {

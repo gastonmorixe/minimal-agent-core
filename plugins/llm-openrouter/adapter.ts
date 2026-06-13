@@ -35,6 +35,7 @@ import {
   validateOpenAIRequest,
 } from "../llm-openai/index.ts"
 
+import { openRouterApiKeyAuth } from "./auth.ts"
 import { registerOpenRouterModels } from "./models.ts"
 import { fetchOpenRouterSessionInfo, setOpenRouterRateLimits } from "./session-info.ts"
 
@@ -123,5 +124,6 @@ export const openrouterProviderPlugin: ProviderPlugin = {
   displayName: "OpenRouter",
   shortCode: "or",
   register: bootstrapOpenRouter,
+  apiKeyAuth: openRouterApiKeyAuth,
   fetchSessionInfo: fetchOpenRouterSessionInfo,
 }

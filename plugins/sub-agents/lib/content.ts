@@ -26,8 +26,7 @@ function statusText(s: SubagentStatus, nowMs: number): string {
     case "stopped":
       return `stopped${s.reason ? ` · ${s.reason}` : ""}`
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }
@@ -98,8 +97,7 @@ export function resultText(r: SubagentRecord): string {
     case "running":
       return `Sub-agent ${r.id} is still ${r.status.kind}; no final result yet. Check AgentStatus ${r.id} or wait for the digest that arrives between turns when it finishes.`
     default: {
-      const _exhaustive: never = r.status
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(r.status satisfies never)}`)
     }
   }
 }

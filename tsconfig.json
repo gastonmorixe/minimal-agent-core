@@ -10,6 +10,5 @@
     "skipLibCheck": true,
     "types": ["bun-types"]
   },
-  "include": ["src", "plugins"],
-  "exclude": ["plugins/**/*.test.ts"]
+  "include": ["src", "plugins"]
 }

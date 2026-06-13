@@ -44,8 +44,7 @@ export interface SessionTokens {
   /** Number of API responses contributing to these totals. */
   turns: number
   /**
-   * Latest turn's input footprint: `input_tokens + cache_read +
-   * cache_create`. Approximates "size of the conversation currently in
+   * Latest turn's input footprint: `input_tokens + cache_read + cache_create`. Approximates "size of the conversation currently in
    * the model's context window."
    *
    * Replace-not-accumulate semantics — overwritten on every
@@ -91,10 +90,15 @@ export function addSessionUsage(u: CacheUsage | undefined): void {
   totals.contextSize = i + cr + cc
 }
 
+/** Snapshot of the session-wide token totals (a defensive copy, safe to mutate). */
 export function getSessionTokens(): SessionTokens {
   return { ...totals }
 }
 
+/**
+ * Resets every counter to zero. Called when a new session starts (or a resume
+ * re-seeds usage) so totals never leak across sessions.
+ */
 export function clearSessionTokens(): void {
   totals = {
     input: 0,

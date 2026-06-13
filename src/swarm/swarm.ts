@@ -5,6 +5,11 @@ export interface Task {
   status: "pending" | "assigned" | "running" | "done"
   assignee?: string
 }
+/**
+ * In-memory bookkeeping for a multi-agent run: registers agents by role,
+ * assigns prioritized tasks to them, and tracks task completion. Pure state
+ * container; it does not spawn processes or schedule anything itself.
+ */
 export class Swarm {
   private agents = new Map<string, { id: string; role: string }>()
   private tasks = new Map<string, Task>()

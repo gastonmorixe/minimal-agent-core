@@ -46,20 +46,17 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { SaveEchoCollector } from "../plugins/memory/lib/save-echo.ts"
-import { ShortTermSnapshot } from "../plugins/memory/lib/short-term-snapshot.ts"
-import { SubagentsAttachment } from "../plugins/sub-agents/lib/attachment.ts"
-import { TasksAttachment } from "../plugins/tasks/lib/attachment.ts"
-import { parseFile as parseTasksFile } from "../plugins/tasks/lib/parse.ts"
-
+import {
+  combineTurnDrains,
+  instantiateTurnAttachments,
+  parseReplaySidecarTasks,
+} from "./agent/turn-attachments.ts"
 import { Agent, c, runRepl } from "./agent.ts"
 import { getAuth } from "./auth.ts"
-import { AutoAskController } from "./auto-ask.ts"
 import { resolveFormatter } from "./auto-formatter.ts"
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
-import { BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
-import { catRows, DEFAULT_CAT } from "./cats.ts"
+import { loadBlobStoreConfig } from "./blob-store.ts"
 import { planCommand } from "./cli/command-plan.ts"
 import { normalizeArgs } from "./cli-args.ts"
 import { checkQuota } from "./client.ts"
@@ -80,14 +77,11 @@ import { resolveEffort } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./first-run.ts"
 import { Formatter, parseFormatterCommand } from "./formatter.ts"
-import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
-import { DEFAULT_MODEL, VERSION } from "./headers.ts"
+import { setGlobalEventBus } from "./global-bus.ts"
+import { DEFAULT_MODEL } from "./headers.ts"
 import { activateProviderPlugins, registerDiscoveredProviders, resolveModel } from "./llm/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { resolveProviderSessionInfo } from "./llm/provider-session.ts"
-import { clipboardText } from "./media/clipboard.ts"
-import { mediaPasteInterceptor } from "./media/paste-intercept.ts"
-import { getSessionId, setSessionId } from "./metadata.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
@@ -96,6 +90,7 @@ import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaWindows } from "./quota-summary.ts"
 import { buildReadyBanner } from "./ready-banner.ts"
+import { getSessionId, setSessionId } from "./session-id.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
@@ -103,14 +98,26 @@ import {
   userTimestampsFromRecords,
 } from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
-import { SessionStore, shortHash } from "./session-store.ts"
-import { BREATHING_DOT } from "./spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "./spinner/library/palettes.ts"
+import { shortHash } from "./session-store.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./spinner/named-presets.ts"
 import type { Spinner } from "./spinner.ts"
-import { wrapStartupToolsRows } from "./startup-tools-row.ts"
+import { getAuthWithFirstTimePrompt } from "./startup/auth-prompt.ts"
+import { printHelp, readEmbeddedPackageVersion } from "./startup/help.ts"
+import {
+  modelHidesReasoning,
+  providerWantsQuotaProbe,
+  signInStepLabel,
+} from "./startup/provider-presentation.ts"
+import { bootSessionStores } from "./startup/session-store-boot.ts"
+import {
+  closeStartupTree,
+  printStartupHeader,
+  printStartupRow,
+  printStartupToolsRow,
+  setStartupTreeVisible,
+  startStartupRowSpinner,
+} from "./startup/startup-tree.ts"
 import type { StatusSpinnerTheme } from "./status.ts"
-import { displayWidth, truncateDisplayWidth, wrapRows } from "./term-width.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 
@@ -174,6 +181,10 @@ const SHOW_HEADER = resolveShowHeader({
   env: { HEADER: process.env.MINIMAL_AGENT_HEADER },
   config: { header: userConfig.header },
 })
+// The startup-tree renderer (src/startup/startup-tree.ts) holds the
+// row-printing state; arm its visibility gate once, here, so every
+// printer below (and in main()) respects the resolved preference.
+setStartupTreeVisible(SHOW_HEADER)
 
 const spinnerName =
   spinnerIdx !== -1 && args[spinnerIdx + 1]
@@ -205,29 +216,6 @@ function readFlagValue(name: string): string | undefined {
   return undefined
 }
 
-/**
- * Read the agent's semver from the embedded `<repo>/package.json` next
- * to the source tree. Returns `"0.0.0"` on any failure (missing file,
- * malformed JSON, missing `version` field) so the AgentContext factory
- * never throws on a dev tree with a broken manifest. Called once at boot.
- */
-function readEmbeddedPackageVersion(embeddedDir: string): string {
-  try {
-    const raw = readFileSync(join(embeddedDir, "package.json"), "utf8")
-    const parsed: unknown = JSON.parse(raw)
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "version" in parsed &&
-      typeof (parsed as { version: unknown }).version === "string"
-    ) {
-      return (parsed as { version: string }).version
-    }
-  } catch {
-    // Best-effort. Fall through to default below.
-  }
-  return "0.0.0"
-}
 const thinkingDisplayRaw =
   readFlagValue("--thinking-display") ??
   process.env.MINIMAL_AGENT_THINKING_DISPLAY ??
@@ -334,347 +322,6 @@ const commandPlan = planCommand({
   wantAuthStatus,
 })
 
-function printHelp(): void {
-  const lines = [
-    `  ${c.bold("minimal-agent")} ${c.dim(`v${VERSION}`)}`,
-    `  ${c.faintWhite(c.italic("by Gaston Morixe"))} ${c.faintWhite("·")} ${c.faintWhite(c.italic("github.com/gastonmorixe/minimal-agent"))}`,
-    "",
-    `  ${c.bold("Usage")}`,
-    `    ${c.dim("$")} minimal-agent ${c.dim("[options]")}`,
-    `    ${c.dim("$")} minimal-agent ${c.dim('"prompt text"')}`,
-    `    ${c.dim("$")} echo "prompt" | minimal-agent ${c.dim("-")}`,
-    "",
-    `  ${c.bold("Options")}`,
-    `    ${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}        Select model ${c.dim(`(default: ${DEFAULT_MODEL})`)}`,
-    `    ${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}    Reasoning effort: low, medium, high, xhigh, max ${c.dim("(or MINIMAL_AGENT_EFFORT)")}`,
-    `    ${c.cyan("--fast")}                    Fast-mode dispatch ${c.dim('(speed:"fast", opus-4-8 only, ~2.5x tok/s, ~2x cost, or MINIMAL_AGENT_FAST=1)')}`,
-    `    ${c.cyan("--thinking-display")} ${c.dim("<mode>")}  Force thinking display: summarized or omitted ${c.dim("(or MINIMAL_AGENT_THINKING_DISPLAY)")}`,
-    `    ${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}   Pipe output through formatter ${c.dim("(default: mdstream)")}`,
-    `    ${c.cyan("--formatter-args")} ${c.dim("<args>")}   Extra args appended to the formatter ${c.dim('(e.g. "--table-fit", or MINIMAL_AGENT_FORMATTER_ARGS)')}`,
-    `    ${c.cyan("-s")}, ${c.cyan("--spinner")} ${c.dim("<preset>")}  Pick a status spinner preset ${c.dim("(see --list-spinners)")}`,
-    `    ${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}     Non-interactive: send prompt, print, exit`,
-    `    ${c.cyan("--mode")} ${c.dim("<id|none>")}         Initial mode ${c.dim("(default: ask in non-interactive, plugin default otherwise)")}`,
-    `    ${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}      Force startup tree on/off ${c.dim("(default: hidden in non-interactive)")}`,
-    `    ${c.cyan("--session-id")} ${c.dim("<uuid>")}      Pin this run's session id ${c.dim("(else MINIMAL_AGENT_SESSION_ID, else random)")}`,
-    `    ${c.cyan("-d")}, ${c.cyan("--debug")}             Enable debug logging ${c.dim("(or DEBUG=1)")}`,
-    `    ${c.cyan("-v")}, ${c.cyan("--verbose")}           Don't truncate debug output ${c.dim("(or VERBOSE=1)")}`,
-    `    ${c.cyan("--skip-quota")}            Skip startup quota check ${c.dim("(or MINIMAL_AGENT_SKIP_QUOTA=1)")}`,
-    `    ${c.cyan("--show-hidden-chars")}      Reveal spaces/tabs/newlines as faint glyphs (input editor + --debug output)`,
-    "",
-    `  ${c.bold("Auth")} ${c.dim("(also as subcommands: `login`, `logout`, `auth-status`)")}`,
-    `    ${c.cyan("--login")} ${c.dim("[--email <addr>]")}   Sign in via OAuth (PKCE manual-paste flow)`,
-    `    ${c.cyan("--logout")}                   Clear minimal-agent credentials ${c.dim("(~/.minimal-agent/auth.jsonc)")}`,
-    `    ${c.cyan("--auth-status")}              Show login status, account, scopes, expiry`,
-    "",
-    `  ${c.bold("Info")} ${c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)")}`,
-    `    ${c.cyan("providers")}                     List registered providers ${c.dim("(id · surfaces)")}`,
-    `    ${c.cyan("providers models")} ${c.dim("[<id>]")}      List models, optionally one provider ${c.dim("(alias: --list-models)")}`,
-    `    ${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}         Show beta feature flags`,
-    `    ${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}   Show available spinner presets`,
-    `    ${c.cyan("--sessions")} ${c.dim("[<query>]")}          List saved sessions ${c.dim("(fuzzy filter on date/sid/cwd)")}`,
-    `    ${c.cyan("usage")} ${c.dim("[<period>]")}             Token-usage stats ${c.dim("(today|last-day|last-month|ytd|year|all, interactive on a TTY)")}`,
-    `    ${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}     Resume a saved session ${c.dim("(also: `sessions resume <sid>`)")}`,
-    `    ${c.cyan("--dump")} ${c.dim("<sid|last>")}         Dump a full session history to stdout`,
-    `    ${c.cyan("--dump-format")} ${c.dim("<md|xml>")}    Output format for --dump ${c.dim("(default: md)")}`,
-    `    ${c.cyan("-h")}, ${c.cyan("--help")}                 Show this help`,
-    "",
-    `  ${c.bold("Env")}`,
-    `    ${c.cyan("DEBUG=1")}                  Verbose request/response logging to stderr`,
-    `    ${c.cyan("MINIMAL_AGENT_TRANSPORT")}  Transport: http2 ${c.dim("(default)")} or fetch`,
-    `    ${c.cyan("MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1")}  Allow fetch fallback after HTTP/2 failure`,
-    `    ${c.cyan("MINIMAL_AGENT_NET_DBG=1")}  Mirror raw HTTP req/res to ${c.dim("./.net-dbg/")}`,
-    `    ${c.cyan("CLAUDE_CODE_EXTRA_METADATA")}  JSON object merged into metadata.user_id`,
-    `    ${c.cyan("MINIMAL_AGENT_SPINNER")}    Spinner preset id ${c.dim("(same values as --spinner)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_EFFORT")}     Reasoning effort ${c.dim("(low | medium | high | xhigh | max)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_FAST=1")}     Opt into fast-mode dispatch ${c.dim("(opus-4-8 only)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_THINKING_DISPLAY")}  Force thinking display ${c.dim("(summarized | omitted)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_FORMATTER_ARGS")}  Extra args for the formatter ${c.dim('(shell-style, e.g. "--table-fit")')}`,
-    `    ${c.cyan("MINIMAL_AGENT_CONFIG")}     Override config path ${c.dim("(default: ~/.minimal-agent/config.jsonc)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_MEMORY_NAMESPACE")}  Namespace memory paths under ${c.dim("namespaces/<ns>/")} ${c.dim("(memory plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_THEME")}      UI theme: ${c.dim("dark | light | high-contrast")}`,
-    `    ${c.cyan("MINIMAL_AGENT_NO_LIVE_AREA=1")}  Disable live-area REPL (fall back to legacy raw input)`,
-    `    ${c.cyan("MINIMAL_AGENT_HEADER")}     Force startup tree: ${c.dim("0|1 (default: hidden in non-interactive)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_MODE")}       Initial mode id (or ${c.dim('"none"')} to disable)`,
-    `    ${c.cyan("MINIMAL_AGENT_CONTINUATION_PROMPT")}  Override continuation-prompt prefix ${c.dim('(default: "  ")')}`,
-    `    ${c.cyan("MINIMAL_AGENT_SHOW_HIDDEN_CHARS=1")}  Show spaces/tabs/newlines as faint glyphs in the editor`,
-    `    ${c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1")}       Skip startup quota check`,
-    `    ${c.cyan("MINIMAL_AGENT_NO_PLUGIN_SYNC=1")}   Skip the first-run extended-plugins clone`,
-    `    ${c.cyan("MINIMAL_AGENT_PLUGINS_REPO")}  Git URL for the extended plugins repo ${c.dim("(fork/mirror)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_GITHUB_TOKEN")}  Token to clone a ${c.dim("private")} plugins repo ${c.dim("(else GITHUB_TOKEN / GH_TOKEN / gh)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_NO_HISTORY=1")}       Disable ↑/↓ prompt history ${c.dim("(history plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_FILE_LOCK_DISABLED=1")}  Disable cooperative file locking ${c.dim("(file-lock plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_SUBAGENT_MODEL")}  Force a model for spawned workers ${c.dim("(else they inherit your model, sub-agents plugin)")}`,
-    `    ${c.cyan("MINIMAL_AGENT_SUBAGENT_AUTO_TIER=1")}  Let specialists pick a per-role model ${c.dim("(cheap scout / flagship deep, default off, workers inherit your model)")}`,
-    `    ${c.cyan("NERD_FONT=1")}              Enable Nerd Font glyphs in TUI`,
-    "",
-    `  ${c.bold("Plugins")} ${c.dim("(toggle via ~/.minimal-agent/config.jsonc)")}`,
-    `    ${c.dim("Opt out  :")} ${c.dim('{ "plugins": { "<id>": { "enabled": false } } }')}`,
-    `    ${c.dim("Opt in   :")} ${c.dim('{ "plugins": { "<id>": { "enabled": true } } }')}  ${c.dim("(for plugins shipped disabled)")}`,
-    "",
-    `    ${c.dim("Built-in :")} ask-mode, config, diff-view, env-info, file-lock,`,
-    `    ${c.dim("           ")} history, memory, model-info, quota-status, schedule,`,
-    `    ${c.dim("           ")} session-info, sub-agents, tasks, usage, web-search`,
-    `    ${c.dim("Disabled :")} interleave-thinking ${c.dim("(opt in to use, see Opt in above)")}`,
-    "",
-    `  ${c.bold("Docs")}`,
-    `    ${c.dim("docs/CHANGELOG.md")}          Release notes, newest first`,
-    `    ${c.dim("docs/tui/")}                  Terminal renderer architecture (compositor, live area, editor)`,
-    `    ${c.dim("docs/network/")}              HTTP transport, retry, and wire-capture notes`,
-    `    ${c.dim("docs/sub-agents-prompt.md")}  How the sub-agents system prompt composes`,
-    `    ${c.dim("docs/changes/")}              Per-change write-ups, dated`,
-  ]
-  console.log(lines.join("\n"))
-}
-
-function printStartupHeader(): void {
-  if (!SHOW_HEADER) return
-  const by = c.faintWhite(c.italic("by"))
-  const author = c.faintWhite(c.italic("Gaston Morixe"))
-  const sep = c.faintWhite("·")
-  const url = c.faintWhite(c.italic("github.com/gastonmorixe/minimal-agent"))
-  // Rounded tree: ╭ for the opener, │ for body rows, ╰ to close.
-  // Standard Unicode has no rounded ├ tee, so we drop the middle tee
-  // entirely and rely on the first/last rounded corners to give the
-  // tree a softer, more curved feel.
-  const line1 = `  ${c.faintWhite("╭")} ${c.bold(c.pink("minimal-agent"))} ${c.faintWhite(`v${VERSION}`)}`
-  // Truncate line2 to terminal width so it never wraps and leaves an
-  // unstyled continuation on narrow terminals (e.g. mobile-sized 52-col).
-  const cols = stderrCols()
-  const line2Full = `  ${c.faintWhite("│")} ${by} ${author} ${sep} ${url}`
-  const line2 = truncateDisplayWidth(line2Full, cols)
-
-  // Tiny cat mascot, anchored a fixed gap after the LONGER of the two
-  // header lines — not flush to the terminal's right edge. Anchoring
-  // to the terminal width means a resize re-flows the cat sideways
-  // and breaks alignment between line 1 and line 2; anchoring to the
-  // header content keeps the cat glued to the wordmark forever.
-  //
-  // We only use the top two rows of the 3-row cat (ears + face) because
-  // the third header line is just `│` and the user's request was the
-  // two title lines specifically. Faint color so the cat doesn't
-  // upstage the wordmark.
-  const [ears, face /*, mouth */] = catRows(DEFAULT_CAT)
-  const GAP = 4 // spaces between header text and cat
-  const anchorCol = Math.max(displayWidth(line1), displayWidth(line2)) + GAP
-  // If the terminal is too narrow to fit even the cat, drop it rather
-  // than wrap. The cat's widest row is `( ^.^ )` ≈ 7 cells; require
-  // anchorCol + catWidth ≤ columns, otherwise skip.
-  const catWidth = Math.max(displayWidth(ears), displayWidth(face))
-  const fits = anchorCol + catWidth <= cols
-
-  // Breathing room between the user's shell prompt and our banner when
-  // running interactively. Skipped on non-TTY (piped/redirected stderr)
-  // so log files don't gain a stray leading blank line.
-  if (process.stderr.isTTY) console.error("")
-  console.error(fits ? padTo(line1, anchorCol) + c.faintWhite(ears) : line1)
-  console.error(fits ? padTo(line2, anchorCol) + c.faintWhite(face) : line2)
-  console.error(`  ${c.faintWhite("│")}`)
-}
-
-/**
- * Pad `line` with spaces on the right so its visible width reaches
- * `targetCol`. ANSI escapes are excluded from width math. If `line`
- * is already wider than `targetCol`, returned unchanged (no truncation).
- */
-function padTo(line: string, targetCol: number): string {
-  const w = displayWidth(line)
-  if (w >= targetCol) return line
-  return line + " ".repeat(targetCol - w)
-}
-
-// Visible-cell count of the fixed chrome that precedes the value in every
-// startup row: "  │ " (4) + label.padEnd(9) (9) + "  " (2) = 15 cells.
-const STARTUP_ROW_OVERHEAD = 15
-
-/** Styled tree gutter glyphs. Body rows use `│`; the tree closes with `╰`. */
-const TREE_BODY_GUTTER = c.faintWhite("│")
-const TREE_CLOSE_GUTTER = c.faintWhite("╰")
-
-/** Current stderr terminal width, falling back to 80 for non-TTY / unknown. */
-function stderrCols(): number {
-  return (process.stderr as { columns?: number }).columns ?? 80
-}
-
-/**
- * Truncate a startup-row value so the full row fits on a single terminal
- * line. Prevents wrapped rows from confusing the cursor-up math in
- * `closeStartupTree` and keeps the tree visually compact on narrow terminals.
- */
-function fitRowValue(value: string): string {
-  const cols = stderrCols()
-  const maxWidth = Math.max(0, cols - STARTUP_ROW_OVERHEAD)
-  return truncateDisplayWidth(value, maxWidth)
-}
-
-/**
- * The last logical startup row, stored as the exact physical line strings
- * that were printed (each already includes the `│` gutter + label column).
- * A row is usually one physical line, but the `tools` row can span several
- * (it wraps instead of truncating). {@link closeStartupTree} rewrites this
- * block in place to swap the final line's `│` gutter for the closing `╰`.
- */
-let lastStartupRow: { lines: string[] } | null = null
-
-function printStartupRow(label: string, value: string): void {
-  if (!SHOW_HEADER) return
-  const v = fitRowValue(value)
-  const row = `  ${TREE_BODY_GUTTER} ${c.sky(label.padEnd(9))}  ${v}`
-  console.error(row)
-  lastStartupRow = { lines: [row] }
-}
-
-/**
- * Print the `tools` row, wrapping the tool list across as many physical
- * lines as the terminal width needs instead of truncating it with `…`.
- * Continuation lines repeat the `│` gutter and leave the label column
- * blank so the names line up under the first row's value column.
- *
- * Why this is its own function: the generic {@link printStartupRow}
- * truncates to a single line (fine for `model`, `session`, etc.), but the
- * tools row is the one place users want the full inventory visible. The
- * wrap also keeps {@link closeStartupTree}'s cursor math honest — every
- * emitted line fits within the terminal width, so the "one logical row =
- * one physical line" assumption that used to break on the over-long,
- * emoji-containing tools row holds again.
- */
-function printStartupToolsRow(
-  tools: ReadonlyArray<{ name: string; icon?: string; color?: string }>,
-): void {
-  if (!SHOW_HEADER) return
-  const cols = stderrCols()
-  const maxWidth = Math.max(1, cols - STARTUP_ROW_OVERHEAD)
-  const valueLines = wrapStartupToolsRows(tools, maxWidth)
-  if (valueLines.length === 0) return
-  const blankLabel = " ".repeat(9)
-  const printed: string[] = []
-  valueLines.forEach((value, i) => {
-    const label = i === 0 ? c.sky("tools".padEnd(9)) : blankLabel
-    const row = `  ${TREE_BODY_GUTTER} ${label}  ${value}`
-    console.error(row)
-    printed.push(row)
-  })
-  lastStartupRow = { lines: printed }
-}
-
-/**
- * Close the startup tree by rewriting the last `│` row with `╰`.
- *
- * On a TTY we walk the cursor up to the start of the last row and erase
- * everything to end-of-screen before reprinting with the closing corner,
- * so the tree terminates visually on its final entry (e.g. `╰ quota   ok`).
- * Using `\x1b[J` (erase to end of screen) instead of `\x1b[2K` (erase
- * current line only) handles the edge case where the previous row wrapped
- * to multiple physical lines — all continuation lines are cleared cleanly.
- *
- * On non-TTY output (pipes, redirects) we just append a standalone `╰`
- * closer line since cursor motion wouldn't render.
- */
-function closeStartupTree(): void {
-  if (!SHOW_HEADER) return
-  if (!lastStartupRow) return
-  const { lines } = lastStartupRow
-  lastStartupRow = null
-  if (lines.length === 0) return
-  // The closer swaps the body gutter (`│`) for the rounded corner (`╰`) on
-  // the FINAL physical line of the last logical row. Continuation lines of
-  // a wrapped tools row keep their `│` so the tree stays connected.
-  const closedLines = lines.slice()
-  const lastIdx = closedLines.length - 1
-  closedLines[lastIdx] = closedLines[lastIdx]!.replace(TREE_BODY_GUTTER, TREE_CLOSE_GUTTER)
-  if (process.stderr.isTTY) {
-    const cols = stderrCols()
-    // How many physical lines did the last logical row occupy? Each stored
-    // line is pre-wrapped to fit the terminal width, so this is almost
-    // always `lines.length`, but we sum wrapRows() defensively in case a
-    // future caller bypasses the width-fitting helpers.
-    const physLines = lines.reduce((sum, line) => sum + wrapRows(displayWidth(line), cols), 0)
-    // Go up to the start of the first stored line, then erase from cursor to
-    // end of screen (clears every physical line of the row + any wrap).
-    process.stderr.write(`\x1b[${physLines}A\x1b[J`)
-    for (const line of closedLines) console.error(line)
-  } else {
-    console.error(`  ${TREE_CLOSE_GUTTER}`)
-  }
-}
-
-/**
- * Print a startup row that animates a breathing-dot spinner while an async
- * task runs, then resolves to a final value in-place.
- *
- * Returns `{ ok(value), fail(value) }` — call one of them when the task
- * settles to overwrite the spinner with the final state and advance the
- * cursor. `lastStartupRow` is updated so `closeStartupTree` works correctly.
- *
- * On non-TTY output the spinner is skipped and only the final value prints.
- */
-function startStartupRowSpinner(
-  label: string,
-  checking: string,
-): {
-  ok(value: string): void
-  fail(value: string): void
-} {
-  // Header suppressed (typical for non-interactive `--prompt` runs):
-  // no rows, no spinner, no settle output. Callers don't need to know.
-  if (!SHOW_HEADER) {
-    return { ok() {}, fail() {} }
-  }
-  const PIPE = `  ${c.faintWhite("│")} `
-  const prefix = `${PIPE}${c.sky(label.padEnd(9))}  `
-
-  // Non-TTY: no cursor tricks — just print the row when settled.
-  if (!process.stderr.isTTY) {
-    return {
-      ok(value) {
-        const v = fitRowValue(value)
-        const row = `${prefix}${v}`
-        console.error(row)
-        lastStartupRow = { lines: [row] }
-      },
-      fail(value) {
-        const v = fitRowValue(value)
-        const row = `${prefix}${v}`
-        console.error(row)
-        lastStartupRow = { lines: [row] }
-      },
-    }
-  }
-
-  let frameIdx = 0
-  let colorIdx = 0
-
-  function coloredDot(): string {
-    const char = BREATHING_DOT[frameIdx] ?? "·"
-    return ANSI_PALETTE_RAINBOW[colorIdx % ANSI_PALETTE_RAINBOW.length]!(char)
-  }
-
-  // Print the first frame immediately (no trailing newline — will be overwritten).
-  process.stderr.write(`${prefix}${coloredDot()} ${checking}`)
-
-  const timer = setInterval(() => {
-    frameIdx = (frameIdx + 1) % BREATHING_DOT.length
-    colorIdx++
-    process.stderr.write(`\r${prefix}${coloredDot()} ${checking}`)
-  }, 160)
-
-  function settle(value: string): void {
-    clearInterval(timer)
-    const v = fitRowValue(value)
-    process.stderr.write(`\r\x1b[2K${prefix}${v}\n`)
-    lastStartupRow = { lines: [`${prefix}${v}`] }
-  }
-
-  return {
-    ok: settle,
-    fail: settle,
-  }
-}
-
-// The startup quota row renders NEUTRAL QuotaWindows via
-// `./quota-summary.ts` (`leadSpaces: 2` aligns with the tree's `╰ ok ✔`
-// indent). Header-shape knowledge lives in each provider plugin's
-// session-info seam; core never parses rate-limit header names.
-
 /**
  * Extract a non-interactive prompt from command-line args.
  *
@@ -695,110 +342,6 @@ async function extractPrompt(): Promise<string | null> {
     return Buffer.concat(chunks).toString("utf-8").trim()
   }
   return null
-}
-
-/**
- * Wrap `getAuth()` with a first-time / stale-credentials login prompt.
- *
- * On a fresh install minimal-agent's own store (`~/.minimal-agent/auth.jsonc`)
- * is empty; `getAuth()` throws `"No minimal-agent credentials found …"`.
- * Rather than dump the user back at the shell with an error, we detect that
- * case in interactive mode (TTY on stdout AND stdin) and offer to run
- * `--login` inline. If they accept, we run the OAuth flow and retry
- * `getAuth()`.
- *
- * Non-interactive runs (non-TTY, `--prompt`, piped stdin) keep the current
- * "fail fast with a hint" behavior — script-friendly and predictable.
- *
- * Stale credentials (refresh token rejected) take a similar path: we surface
- * the error and ask if they want to re-login. `getAuth()` itself doesn't
- * eagerly refresh unless the token is within `EXPIRY_BUFFER_MS` of expiry,
- * so this branch only fires when we're about to make a real API call AND
- * the cached token won't survive it. The 401-after-refresh case in
- * `client.ts` is handled separately (it bubbles a clean error that already
- * mentions `--login`).
- */
-async function getAuthWithFirstTimePrompt(): Promise<Awaited<ReturnType<typeof getAuth>>> {
-  try {
-    return await getAuth()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    const looksLikeMissing =
-      /No minimal-agent credentials|No credentials found|No OAuth access token|No refresh token/i.test(
-        msg,
-      )
-    const looksLikeStale = /invalid_grant|stale/i.test(msg)
-    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true
-
-    if (!interactive || (!looksLikeMissing && !looksLikeStale)) {
-      throw err
-    }
-
-    // Interactive — offer a one-shot login. Print the diagnosis first so
-    // the user sees WHY the prompt appeared, then ask y/N. Default is
-    // "no" for stale credentials (user might prefer to re-run with
-    // different flags) and "yes" for fresh installs (the only sane next
-    // step).
-    const headline = looksLikeMissing
-      ? `${c.bold("Welcome to minimal-agent")} — you're not signed in yet.`
-      : `${c.bold("Credentials expired")} — refresh token rejected.`
-    console.error("")
-    console.error(`  ${c.bold(c.pink("⮕"))} ${headline}`)
-    console.error(`  ${c.faintWhite("│")} ${c.dim(msg)}`)
-    const defaultYes = looksLikeMissing
-    const promptText = `  ${c.faintWhite("│")} Sign in now? ${c.dim(defaultYes ? "[Y/n]" : "[y/N]")} `
-    const answer = await readSingleLineFromStdin(promptText)
-    const yes = answer === "" ? defaultYes : /^y(es)?$/i.test(answer.trim())
-    if (!yes) {
-      console.error(
-        `  ${c.faintWhite("╰")} ${c.dim("aborted — run `minimal-agent --login` later to sign in.")}`,
-      )
-      throw err
-    }
-    console.error(`  ${c.faintWhite("╰")} ${c.dim("starting login…")}`)
-    console.error("")
-
-    const code = await runLoginCommand()
-    if (code !== 0) {
-      // Preserve the original error as `cause` so callers (or a future
-      // structured-logging hook) can surface BOTH the post-login retry
-      // failure AND the original "no creds / invalid_grant" diagnosis.
-      throw new Error(
-        "Login failed; see messages above. Re-run `minimal-agent --login` to retry.",
-        { cause: err },
-      )
-    }
-    // Login wrote the keychain; retry. If THIS still fails, surface
-    // the error — we're not going to loop.
-    return await getAuth()
-  }
-}
-
-/**
- * Read one line from stdin without entering raw mode. Used for the
- * first-time-login y/N prompt. Implementation is the same shape as
- * `commands/login.ts`'s `readLine` but inlined so we don't pull in the
- * full login command module before we know it's needed.
- */
-async function readSingleLineFromStdin(promptText: string): Promise<string> {
-  const { createInterface } = await import("node:readline")
-  return new Promise<string>((resolve) => {
-    process.stderr.write(promptText)
-    const rl = createInterface({ input: process.stdin, terminal: false })
-    // Resolve BEFORE closing + a `settled` guard: `rl.close()` emits
-    // `'close'` synchronously, so `resolve(line)` after `rl.close()` would
-    // lose the race to the close handler's `resolve("")`. Mirrors the fix in
-    // commands/login.ts's `readLine` and src/input.ts's `readFallback`.
-    let settled = false
-    rl.once("line", (line) => {
-      settled = true
-      resolve(line)
-      rl.close()
-    })
-    rl.once("close", () => {
-      if (!settled) resolve("")
-    })
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -916,7 +459,9 @@ async function main() {
     maybeShowFirstRunWelcome({
       isInteractive: true,
       steps: [
-        { label: "sign in to your Anthropic (Claude) account" },
+        // Provider-supplied label: names the default provider's displayName,
+        // or a neutral "sign in to your account" when none is registered.
+        { label: signInStepLabel() },
         { label: `fetch ${c.bold("mdstream")}, the Markdown renderer` },
         { label: `fetch the extended plugins ${c.dim("(Fetch, Skill, slash-menu, …)")}` },
       ],
@@ -1058,13 +603,14 @@ async function main() {
 
   printStartupRow("model", c.boldCyan(selectedModel))
 
-  // Thinking + effort: surface what we'll actually send on the wire.
-  // Defaults live in `sendMessage` in src/client.ts:
-  //   thinking: { type: "adaptive" }   — non-haiku only
-  //   output_config.effort: "medium"   — non-haiku only
-  // Haiku models get neither field, so show "off" for both.
-  const isHaiku = selectedModel.includes("haiku")
-  const thinkingLabel = isHaiku
+  // Thinking + effort: surface what we'll actually send on the wire. A
+  // cheap/fast-tier model that supports neither thinking nor an effort
+  // parameter gets neither field, so we show "off" for both. This is a
+  // capability-driven test (registry flags), not a model-name substring
+  // match, so any provider's cheap tier reads correctly. See
+  // `modelHidesReasoning` in src/startup/provider-presentation.ts.
+  const hidesReasoning = modelHidesReasoning(selectedModel)
+  const thinkingLabel = hidesReasoning
     ? c.dim("off")
     : thinkingDisplay
       ? `adaptive ${c.dim(`(display=${thinkingDisplay})`)}`
@@ -1077,7 +623,7 @@ async function main() {
         : effortSource === "config"
           ? "(config)"
           : ""
-  const effortLabel = isHaiku
+  const effortLabel = hidesReasoning
     ? c.dim("off")
     : effort
       ? `${effort} ${c.dim(effortProvenance)}`
@@ -1212,9 +758,10 @@ async function main() {
   // overwrite-with-resolved-value pattern as MINIMAL_AGENT_MODEL above:
   // the env var was a user-facing INPUT during resolution (read once at
   // module load, line 161); after this point we own it as the OUTPUT
-  // "what we'll actually send on the wire". For haiku the wire field is
-  // suppressed entirely, so we clear the env so the footer doesn't lie.
-  if (isHaiku) {
+  // "what we'll actually send on the wire". For a cheap/fast-tier model with
+  // no reasoning fields the wire field is suppressed entirely, so we clear
+  // the env so the footer doesn't lie.
+  if (hidesReasoning) {
     delete process.env.MINIMAL_AGENT_EFFORT
   } else {
     process.env.MINIMAL_AGENT_EFFORT = effort ?? "medium"
@@ -1263,26 +810,19 @@ async function main() {
   // `client.ts`, which broadcasts `quota.headersReceived` after every
   // successful API response — see src/global-bus.ts for the rationale).
   setGlobalEventBus(loader.bus())
-  // Memory plugin v0.3 collectors. Both subscribe to the loader's bus
-  // (or read from disk on demand). The Agent receives them via its
-  // optional `saveEcho` / `shortTermSnapshot` constructor params and
-  // drains them at every user-message seam — see `Agent.run` and
-  // `plugins/memory/lib/{save-echo,short-term-snapshot}.ts`.
-  const saveEcho = SaveEchoCollector.attach(loader.bus())
-  const shortTermSnapshot = new ShortTermSnapshot(getSessionId())
-  // Tasks plugin attachment producer. Reads the per-session JSONL on
-  // every initial-seam call and renders `<ma::agent::tasks …>…</ma::agent::tasks>`
-  // for the model. Unconditional construction (mirrors ShortTermSnapshot):
-  // if the user disables the `tasks` plugin in config, the Task tool is
-  // skipped at loader time and the file stays empty, so this attachment
-  // returns null and costs nothing. See
-  // `plugins/tasks/lib/attachment.ts`.
-  const tasksAttachment = new TasksAttachment(getSessionId())
-  // Sub-agents plugin fleet digest. Same null-on-empty contract: when the
-  // session has no active workers (or the plugin is disabled), it returns
-  // null and costs nothing. Rides the generic `turnAttachments` extension
-  // point so the agent core stays sub-agent-agnostic.
-  const subagentsAttachment = new SubagentsAttachment(getSessionId())
+  // Per-turn attachment producers + content drains, contributed by
+  // plugins through the loader's `turnAttachments` manifest seam (the
+  // memory plugin's short-term snapshot + save-echo collector, the
+  // tasks snapshot, the sub-agents fleet digest, …). Core consumes ONLY
+  // the registry — it neither knows nor imports the producers'
+  // identities (the I2 invariant). A disabled/absent plugin simply
+  // contributes nothing: the agent then runs without that attachment
+  // (graceful degradation, pinned in `src/agent/turn-attachments.test.ts`).
+  const turnAttachmentSeam = await instantiateTurnAttachments(
+    { sessionId: getSessionId(), bus: loader.bus() },
+    (m) => diag.notice("turn-attachments", m),
+  )
+  const saveEcho = combineTurnDrains(turnAttachmentSeam.drains)
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
   const hasPromptBlock = loader.getPromptBlock() !== null
@@ -1322,74 +862,8 @@ async function main() {
   // or grow the install set under the user's feet. Opt out entirely with
   // MINIMAL_AGENT_NO_BINARY_SETUP=1.
   if (SHOW_HEADER && process.env.MINIMAL_AGENT_NO_BINARY_SETUP !== "1") {
-    const { BinaryStore, inventoryAdapter, provisionSetups } = await import("./binaries/index.ts")
-    const { resolveGithubToken } = await import("./auto-plugins.ts")
-    // Memoized token resolver (the user's own GitHub token), used as the
-    // FALLBACK for `github-release` sources that ship no embedded credential.
-    // A plugin that bakes in its own read-only token (so account-less copies
-    // can pull) never reaches this. Resolved at most once per boot.
-    let tokenCache: string | null | undefined
-    const store = new BinaryStore(undefined, {
-      tokenProvider: async () => {
-        if (tokenCache === undefined) tokenCache = await resolveGithubToken()
-        return tokenCache
-      },
-      // Route binary lifecycle events onto the diagnostic bus so they land in
-      // both the per-session log and the persistent `~/.minimal-agent/ma.log`
-      // audit trail. Severity maps 1:1 to the diag helpers.
-      log: (severity, source, message, sd) => {
-        diag[severity](source, message, sd)
-      },
-    })
-    let setups: Awaited<ReturnType<typeof loader.runSetups>> = []
-    try {
-      setups = await loader.runSetups(inventoryAdapter(store))
-    } catch (e) {
-      diag.notice(
-        "binaries.setup",
-        `plugin setup phase failed: ${e instanceof Error ? e.message : String(e)}`,
-      )
-    }
-    const needsWork = setups.some((s) =>
-      (s.result.requireBinaries ?? []).some((spec) => store.status(spec) !== "satisfied"),
-    )
-    if (setups.length > 0 && needsWork) {
-      const row = startStartupRowSpinner("binaries", "provisioning")
-      const summary = await provisionSetups(store, setups, (p) => {
-        if (p.phase === "fetching" && p.fraction != null) {
-          // (spinner label is static; granular bytes land in the file log)
-        }
-      })
-      // Render each touched binary as `<sigil>name (version)`, the version dim.
-      // e.g. `+obscura (1780598942)` on a fresh install, `↑obscura (…)` on update.
-      const withVer = (name: string): string => {
-        const v = summary.versions[name]
-        return v ? `${name} ${c.dim(`(${v})`)}` : name
-      }
-      const parts: string[] = []
-      if (summary.installed.length > 0)
-        parts.push(summary.installed.map((n) => `+${withVer(n)}`).join(", "))
-      if (summary.updated.length > 0)
-        parts.push(summary.updated.map((n) => `↑${withVer(n)}`).join(", "))
-      if (summary.failed.length > 0)
-        parts.push(c.boldRed(`✗${summary.failed.map((f) => f.name).join(", ")}`))
-      const label = parts.length > 0 ? parts.join(c.dim(" · ")) : c.dim("up to date")
-      if (summary.halt) row.fail(c.boldRed(label))
-      else row.ok(label)
-      if (summary.halt) {
-        console.error("")
-        console.error(
-          `  ${c.boldRed("✗")} ${c.bold("Setup incomplete")} ${c.dim(`(${summary.halt.pluginId})`)}`,
-        )
-        for (const line of summary.halt.message.split("\n")) {
-          console.error(`  ${c.faintWhite("│")} ${line}`)
-        }
-        console.error(
-          `  ${c.faintWhite("╰")} ${c.dim("fix the above, then re-run. Skip this check with MINIMAL_AGENT_NO_BINARY_SETUP=1.")}`,
-        )
-        process.exit(1)
-      }
-    }
+    const { provisionPluginBinaries } = await import("./startup/provision-binaries.ts")
+    await provisionPluginBinaries(loader)
   }
 
   // Resolve the initial mode. In non-interactive (--prompt/`-`/positional)
@@ -1432,8 +906,8 @@ async function main() {
     printStartupRow("mode", c.bold(c.cyan(label)))
   }
 
-  // Quota check — verify account has quota before starting conversation.
-  // Matches v2.1.91 behavior: cheap haiku request with max_tokens=1.
+  // Quota check — verify account has quota before starting conversation
+  // with a cheap probe request.
   //
   // Skipped automatically when ANY loaded plugin contributes a live-area
   // slot with id `"quota"` — the slot will fetch the same data
@@ -1444,9 +918,11 @@ async function main() {
   const hasQuotaSlot = loader.getLiveAreaSlots().some((s) => s.definition.id === "quota")
   const shouldSkipQuota =
     !commandPlan.needsQuota ||
-    // `checkQuota` polls api.anthropic.com; only meaningful for an Anthropic
-    // session. A gpt-5.5 / OpenRouter session skips it (no Anthropic quota).
-    selectedProviderId !== "anthropic" ||
+    // Only meaningful for a provider that declares a quota-probe seam. A
+    // provider whose quota fills from chat traffic (or that has no quota
+    // concept) declares none and skips the blocking boot probe. See
+    // `providerWantsQuotaProbe` in src/startup/provider-presentation.ts.
+    !providerWantsQuotaProbe(selectedProviderId) ||
     args.includes("--skip-quota") ||
     process.env.MINIMAL_AGENT_SKIP_QUOTA === "1" ||
     userConfig.skipQuota === true ||
@@ -1553,15 +1029,17 @@ async function main() {
       // per-call status snapshots, instead of falling back to the
       // structural content-split path. The sidecar load is best-effort:
       // a missing file just yields a `null` sidecar, which the deriver
-      // handles by taking the structural path. See
-      // `toolDisplaysFromRecords` + `deriveTaskDisplay` for the
-      // per-call cutoff semantics.
+      // handles by taking the structural path. Parsed via the
+      // core-local `parseReplaySidecarTasks` (a structural mirror of
+      // the tasks plugin's parser — the I2 invariant keeps the plugin
+      // import out of core). See `toolDisplaysFromRecords` +
+      // `deriveTaskDisplay` for the per-call cutoff semantics.
       const sidecarPath = join(homedir(), ".minimal-agent", "sessions", `${resumeSid}.tasks.jsonl`)
-      let sidecarTasks: import("../plugins/tasks/lib/parse.ts").Task[] | null = null
+      let sidecarTasks: import("./session-replay-derivers.ts").ReplaySidecarTask[] | null = null
       try {
         if (existsSync(sidecarPath)) {
           const text = readFileSync(sidecarPath, "utf8")
-          sidecarTasks = parseTasksFile(text)
+          sidecarTasks = parseReplaySidecarTasks(text)
         }
       } catch {
         // Best-effort: a malformed sidecar is just treated as missing.
@@ -1671,168 +1149,17 @@ async function main() {
   const systemHash = shortHash(systemForHash)
   const toolsHash = shortHash(toolsForHash)
 
-  // Open the session store. Two paths:
-  //   - new session: SessionStore.open(getSessionId())
-  //   - resume:      SessionStore.fork({ srcSid: resumeSid, dstSid: getSessionId() })
-  //
-  // Fork semantics matter: every other subsystem (banner, file log, plugin
-  // sessionId, tasks/scratch files, goodbye banner's `--resume <id>` hint)
-  // ALREADY uses `getSessionId()` — the fresh per-process UUID. Before this
-  // path was wired, the store was the only outlier: it appended to the
-  // parent's `<resumeSid>.jsonl` (with existsOk:true), so the goodbye
-  // banner's `minimal-agent --resume <new-sid>` pointed to a file that
-  // did not exist. Forking copies the parent's records into a new file
-  // under the new sid, aligns the store with everything else, and leaves
-  // the parent untouched (non-destructive — re-resuming the parent works
-  // forever).
-  //
-  // `SessionStore.fork` ALSO copies per-sid sidecar files (tasks plugin's
-  // `<sid>.tasks.jsonl`, memory plugin's `<sid>.scratch.md`, draft store's
-  // `<sid>.draft`, …) from `srcSid` to `dstSid`. Without this, sidecar
-  // plugins read from an empty file on resume even though the
-  // conversation log references their prior state (e.g. the model marks
-  // task #6 done but task #6 doesn't exist in the new file). The blob
-  // DIRECTORY is the one exception — tool results carry absolute paths
-  // into the parent's `<srcSid>.blobs/`, so blobs survive resume by
-  // reference without duplication.
-  //
-  // Resume drift check emits a one-line yellow warning when system/tools
-  // have changed since the parent was saved.
+  // Session store + blob store + resume warnings + attach/detach
+  // lifecycle markers. Lives in `src/startup/session-store-boot.ts`;
+  // see that module for the fork-on-resume + best-effort semantics.
   const sid = getSessionId()
-  let store: SessionStore | null = null
-  try {
-    store = resumeSid
-      ? SessionStore.fork({
-          srcSid: resumeSid,
-          dstSid: sid,
-          model: selectedModel,
-          cwd: process.cwd(),
-          systemHash,
-          toolsHash,
-          agentVersion: VERSION,
-          argv: process.argv,
-        })
-      : SessionStore.open({
-          sid,
-          model: selectedModel,
-          cwd: process.cwd(),
-          systemHash,
-          toolsHash,
-          agentVersion: VERSION,
-          argv: process.argv,
-        })
-  } catch (err) {
-    // Persistence is best-effort; never block startup on it. The agent
-    // will work without a store (just no resume for THIS session).
-    console.error(
-      `  ${c.boldYellow("warn")} session store unavailable: ${err instanceof Error ? err.message : String(err)}`,
-    )
-  }
-
-  // Per-session blob store for raw tool outputs. Lives at
-  // `~/.minimal-agent/sessions/<sid>.blobs/`, populated lazily as tools
-  // emit large or truncated bodies. Best-effort like the session store:
-  // a missing or disabled blob store means tool results still flow,
-  // just without the `<ma::agent::raw-output …/>` footer pointer. The config gates
-  // (enabled, minBytesToPersist, max caps, skipTools, env opt-out) are
-  // resolved here and frozen for the session.
-  let blobStore: BlobStore | null = null
-  try {
-    const { config: blobConfig } = loadBlobStoreConfig()
-    if (blobConfig.enabled) {
-      blobStore = new BlobStore({
-        sid,
-        config: blobConfig,
-      })
-    }
-  } catch (err) {
-    console.error(
-      `  ${c.boldYellow("warn")} blob store unavailable: ${err instanceof Error ? err.message : String(err)}`,
-    )
-  }
-
-  // Soft warn-on-resume: if another agent process appears to be live on
-  // this same session, the user is about to fork the conversation.
-  // Liveness is OS-probed (kill(0) + ps -o lstart=) so this catches the
-  // common cases (running, dead, pid-reused) without relying on clean
-  // detach markers. See `src/session-liveness.ts`.
-  if (resumeSid) {
-    try {
-      const { getSessionLiveness } = await import("./session-liveness.ts")
-      const live = getSessionLiveness(resumeSid)
-      if (live.status === "live" && live.pid !== process.pid) {
-        console.error(
-          `  ${c.boldYellow("warn")} session ${resumeSid} appears live ` +
-            `(pid ${live.pid}, since ${live.since}); resuming anyway will ` +
-            `fork the conversation`,
-        )
-      }
-    } catch {
-      // best-effort; never block resume on liveness probing
-    }
-
-    try {
-      const loaded = loadSession(resumeSid)
-      const drifted =
-        loaded.meta &&
-        (loaded.meta.systemHash !== systemHash || loaded.meta.toolsHash !== toolsHash)
-      if (drifted) {
-        console.error(
-          `  ${c.boldYellow("warn")} system prompt or tool set changed since this session was saved — resuming anyway`,
-        )
-      }
-    } catch {
-      // already reported above
-    }
-  }
-
-  // Mark this process as the current owner of the session (new OR resume).
-  // Liveness is OS-probed by readers; the AttachRecord is just the pointer
-  // they walk. The matching DetachRecord is best-effort and missing it is
-  // explicitly fine — readers verify against the live OS, not the log.
-  if (store) {
-    try {
-      store.appendAttach()
-    } catch {
-      // best-effort
-    }
-    let detachWritten = false
-    const writeDetach = (reason: "exit" | "signal" | "error", code?: number) => {
-      if (detachWritten || !store) return
-      detachWritten = true
-      // Skip cleanup on the error paths — a SIGINT/uncaughtException
-      // mid-turn may have committed nothing yet but the user still wants
-      // an audit trail (and the on-disk meta can be useful for debugging
-      // a crash). Only the clean "exit" path with no recorded
-      // conversation is eligible for the session to vanish.
-      if (reason === "exit") {
-        try {
-          if (store.cleanupIfUnused()) return
-        } catch {
-          // best-effort; fall through and write the detach marker
-        }
-      }
-      try {
-        store.appendDetach(reason, code)
-      } catch {
-        // swallow — we may already be inside process.exit
-      }
-    }
-    // The editor-controller's signal handlers call process.exit(), which
-    // fires the 'exit' event and runs this handler. So a single 'exit'
-    // hook covers SIGINT/SIGTERM/SIGHUP plus clean exits. Fatal handlers
-    // only record the detach marker, then rethrow so the runtime still
-    // terminates instead of continuing in a corrupted state.
-    process.on("exit", (code) => writeDetach("exit", typeof code === "number" ? code : 0))
-    process.on("uncaughtException", (err) => {
-      writeDetach("error")
-      throw err
-    })
-    process.on("unhandledRejection", (reason) => {
-      writeDetach("error")
-      throw reason
-    })
-  }
+  const { store, blobStore } = await bootSessionStores({
+    sid,
+    resumeSid,
+    selectedModel,
+    systemHash,
+    toolsHash,
+  })
 
   // Shared time-hint tracker. One instance threads through both
   // session-replay (for the historical tool headers when --resume hydrates
@@ -1851,9 +1178,13 @@ async function main() {
     loader: hasPlugins ? loader : null,
     modeManager,
     saveEcho,
-    shortTermSnapshot,
-    tasksAttachment,
-    turnAttachments: [subagentsAttachment],
+    // All plugin-contributed producers ride the generic array, in
+    // registry order (memory's short-term snapshot, tasks snapshot,
+    // sub-agents fleet digest, …) — same model-visible attachment order
+    // as the old named wiring. The named `shortTermSnapshot` /
+    // `tasksAttachment` params stay unset: core no longer knows those
+    // producers' identities.
+    turnAttachments: turnAttachmentSeam.producers,
     store,
     blobStore,
     initialMessages,
@@ -2027,201 +1358,24 @@ async function main() {
   if (noLiveArea) {
     await runRepl(agent, { formatterCmd, auth, spinner })
   } else {
-    const { Compositor } = await import("./ui/compositor.ts")
-    const { EditorController } = await import("./editor-controller.ts")
-    const { StdioInterceptor } = await import("./ui/stdio-interceptor.ts")
-    const { detectSynchronizedOutput } = await import("./ui/term-caps.ts")
-    const { probeNerdGlyphCells, setNerdGlyphCells } = await import("./nerd-glyph-width.ts")
-
-    // Probe the terminal for DEC mode 2026 (synchronized output) BEFORE
-    // creating the editor. Detection puts stdin into raw mode briefly,
-    // sends a DECRPM query, and parses the reply. If the terminal supports
-    // it, the Compositor wraps each redraw batch in BSU/ESU so the user
-    // sees a single atomic frame instead of erase→write→redraw flicker.
-    // Any typeahead bytes that arrived during the probe are saved and
-    // re-emitted to the editor below so a fast-typing user doesn't lose
-    // a keystroke. Disabled (and detection is skipped) when MINIMAL_AGENT_NO_SYNC=1.
-    const syncProbe =
-      process.env.MINIMAL_AGENT_NO_SYNC === "1"
-        ? { syncOutput: false, unparsed: "" }
-        : await detectSynchronizedOutput(process.stdin as any, process.stdout as any)
-
-    // Resolve PUA Nerd-Font glyph cell width. Precedence:
-    //   env MINIMAL_AGENT_NERD_GLYPH_CELLS  >  config.nerdGlyphCells  >  probe
-    //
-    // The env / config values "1" and "2" force the width without probing.
-    // "auto" (or unset) runs the probe; on probe failure / non-TTY / inside
-    // tmux the module default (`1`) survives. We re-use stdin in raw mode
-    // here -- detectSynchronizedOutput already raw'd it -- and chain the
-    // probes with `alreadyRaw: true` so we don't double-toggle.
-    const envCells = process.env.MINIMAL_AGENT_NERD_GLYPH_CELLS
-    const cfgCells = userConfig.nerdGlyphCells
-    let nerdProbeUnparsed = ""
-    if (envCells === "1" || cfgCells === 1) {
-      setNerdGlyphCells(1)
-    } else if (envCells === "2" || cfgCells === 2) {
-      setNerdGlyphCells(2)
-    } else if (envCells === undefined || envCells === "auto" || cfgCells === "auto") {
-      const r = await probeNerdGlyphCells(process.stdin as any, process.stdout as any, {
-        alreadyRaw: true,
-      })
-      nerdProbeUnparsed = r.unparsed
-      // r.cells is null on failure → module-level default (`1`) is preserved.
-    } else if (envCells === "0" || envCells === "off" || envCells === "false") {
-      // Treat falsy values as "skip probe, keep default" -- matches
-      // MINIMAL_AGENT_NO_SYNC's stance for the sync probe.
-      // (No-op: setNerdGlyphCells not called.)
-    } else {
-      // Unrecognized value: fall through to probe (don't break startup on a typo).
-      const r = await probeNerdGlyphCells(process.stdin as any, process.stdout as any, {
-        alreadyRaw: true,
-      })
-      nerdProbeUnparsed = r.unparsed
-    }
-
-    // Two-phase wiring: the StdioInterceptor needs a compositor to forward
-    // intercepted writes to, and the Compositor needs an output that
-    // bypasses the interceptor (so its own escape sequences don't recurse).
-    // We give the compositor an adapter whose write() goes through the
-    // interceptor's raw-write escape hatch when available.
-    let interceptorRef: import("./ui/stdio-interceptor.ts").StdioInterceptor | null = null
-    const compositor = new Compositor({
-      output: {
-        isTTY: process.stdout.isTTY,
-        get columns() {
-          return process.stdout.columns
-        },
-        get rows() {
-          return process.stdout.rows
-        },
-        write: (s: string) => {
-          if (interceptorRef) {
-            return interceptorRef.rawStdoutWrite(s) as boolean
-          }
-          return process.stdout.write(s)
-        },
-      } as any,
-      syncOutput: syncProbe.syncOutput,
+    // Full interactive TTY stack (capability probes, compositor,
+    // interceptor, editor, resize fan-out, Auto-ASK) lives in
+    // `src/startup/live-repl.ts`. `runRepl` is passed in as a value to
+    // keep that module import-cycle-free with `../agent.ts`.
+    const { runLiveAreaRepl } = await import("./startup/live-repl.ts")
+    await runLiveAreaRepl({
+      agent,
+      repl: runRepl,
+      formatterCmd,
+      auth,
+      spinner,
+      args,
+      userConfig,
+      modeManager,
+      hasPlugins,
+      loader,
+      pendingDraft,
     })
-    const interceptor = new StdioInterceptor(compositor)
-    interceptorRef = interceptor
-
-    const continuationPrompt = process.env.MINIMAL_AGENT_CONTINUATION_PROMPT ?? "  "
-    const showHiddenCharsInit =
-      process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1" ||
-      args.includes("--show-hidden-chars") ||
-      (modeManager?.editorShowHidden() ?? false)
-    const editor = new EditorController({
-      prompt: `${c.bold(c.pink("❯"))} `,
-      continuationPrompt,
-      compositor,
-      maxLiveHeight: () => Math.max(2, Math.floor((process.stdout.rows ?? 24) / 2)),
-      showHidden: showHiddenCharsInit,
-      // Pass the plugin hooks facade so the editor can emit `editor.key`
-      // for ArrowUp / ArrowDown / Ctrl+R. Plugins (notably `history`)
-      // subscribe via their manifest's `hooks` array. Null when no
-      // plugins are loaded — the editor short-circuits the emit.
-      ...(hasPlugins ? { hooks: loader.hooks() } : {}),
-    })
-    // Media ingestion: a dropped image path (or an empty paste while an image
-    // sits on the clipboard) becomes a `[Image #id WxH size]` token instead of
-    // literal text. The submit path (agent.run) resolves the token to an image
-    // block. See src/media/paste-intercept.ts.
-    editor.setPasteInterceptor((pasted) => mediaPasteInterceptor(pasted))
-    // Ctrl+V: pull the system clipboard ourselves. Prefer an image (the
-    // interceptor's empty-paste branch captures a clipboard image and returns
-    // an `[Image #id …]` token); else paste clipboard text. This covers
-    // terminals/OSes where Cmd+V is swallowed and never reaches us.
-    editor.setClipboardPasteHandler(() => mediaPasteInterceptor("") ?? clipboardText())
-    // Restore the unsent draft (if any) into the editor buffer. This is
-    // the resume-time twin of the abort-flow's setBuffer call in
-    // `agent.ts` (search "setBuffer" in the abort branch) — same visual
-    // idiom: the user sees a populated input with their text, cursor at
-    // end, ready to edit or press Enter. The corresponding hint line
-    // above the editor was emitted as part of the resume block (see
-    // `pendingDraft` handling earlier in this function). Safe before
-    // `editor.start()` because `setBuffer` only paints when
-    // `this.started` is true; the buffer state is captured and the
-    // first repaint shows the prefilled text.
-    if (pendingDraft !== null) {
-      editor.setBuffer(pendingDraft)
-    }
-    // Keep show-hidden in sync with mode changes: a mode with
-    // `editorShowHidden: true` overrides the env-var/flag baseline.
-    if (modeManager) {
-      const showHiddenBase =
-        process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS === "1" || args.includes("--show-hidden-chars")
-      modeManager.subscribe((_active) => {
-        editor.setShowHidden(showHiddenBase || (modeManager.editorShowHidden() ?? false))
-      })
-    }
-    const onResize = () => {
-      compositor.notifyResize()
-      editor.notifyResize()
-      // Broadcast on the plugin event bus so live-area slots that
-      // declare `refreshOn: ["terminal.resize"]` can re-fire their
-      // handler off-cycle and reflow. We pass the new cols/rows in
-      // the payload for any plugin that wants to skip a refresh when
-      // only one dimension changed.
-      //
-      // This is the "high-level resize notification" the quota-status
-      // plugin subscribes to — it must NOT install its own
-      // `process.stdout.on("resize", ...)` listener (low-level SIGWINCH
-      // ownership lives here and only here, so the order of
-      // `notifyResize()` → bus emit stays deterministic).
-      const cols = typeof process.stdout.columns === "number" ? process.stdout.columns : 0
-      const rows = typeof process.stdout.rows === "number" ? process.stdout.rows : 0
-      getGlobalEventBus()?.emit("terminal.resize", { cols, rows })
-    }
-    process.stdout.on("resize", onResize)
-
-    // Auto-ASK: silently flip into ASK mode when the editor buffer reads
-    // like a question, revert on action verbs, never override a manual
-    // Shift+Tab. Opt-out via `MINIMAL_AGENT_AUTO_ASK=0` or `autoAsk:false`
-    // in the user config. Only wires up when an "ask" mode actually
-    // exists in the active manifest set (otherwise: dead code).
-    if (modeManager && modeManager.list().some((m) => m.id === "ask")) {
-      const envOff = process.env.MINIMAL_AGENT_AUTO_ASK === "0"
-      const cfgOff = userConfig.autoAsk === false
-      if (!envOff && !cfgOff) {
-        // Controller installs itself on the editor; the reference is intentionally
-        // not retained — it lives until the editor is destroyed.
-        void new AutoAskController(editor, modeManager, {
-          logger:
-            process.env.DEBUG === "1"
-              ? (m) => process.stderr.write(`[auto-ask] ${m}\n`)
-              : undefined,
-        })
-      }
-    }
-
-    // Install AFTER the editor is built but BEFORE handing control to
-    // runRepl: from this point on, every console.log / console.error /
-    // direct stderr.write goes through the compositor and respects the
-    // live area.
-    interceptor.install()
-
-    try {
-      await runRepl(agent, {
-        formatterCmd,
-        auth,
-        spinner,
-        useLiveArea: true,
-        compositor,
-        editor,
-        // Forward typeahead bytes captured by EITHER probe (DECRPM and the
-        // Nerd-glyph CPR probe) so a fast-typing user's first keystroke
-        // isn't lost. Order: sync probe first (ran first), then nerd probe.
-        initialStdinBytes: syncProbe.unparsed + nerdProbeUnparsed,
-        // Threaded into the goodbye banner's `--resume <id>` hint. Empty
-        // string when not yet initialized; runReplLiveArea degrades the
-        // closer copy in that case.
-        sessionId: getSessionId(),
-      })
-    } finally {
-      interceptor.uninstall()
-      process.stdout.off("resize", onResize)
-    }
   }
 
   process.exit(0)

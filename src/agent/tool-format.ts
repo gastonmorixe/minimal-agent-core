@@ -546,7 +546,7 @@ function clampToolPreviewBodyLine(line: string, maxWidth: number | undefined): s
  * column count and the terminal soft-wraps the row into the gutter.
  *
  * 12 cells covers `"...(+99999ch)"` (worst realistic case for `head -c`
- * sized output) ; rare overshoots (cut > 99_999 chars) drift one cell
+ * sized output) ; rare overshoots (cut \> 99_999 chars) drift one cell
  * past the cap, far below the `WRAP_SAFETY` slop on the outside of the
  * row. Picked over an iterative "compute hint width, re-trim" loop for
  * simplicity : the lost 1–2 body cells are imperceptible.
@@ -631,13 +631,17 @@ export function clampTranscriptRow(row: string, cols?: number): string {
  * gutter behind it.
  *
  * Recognized shapes (all match):
+ * ```text
  *   "  ╰ 5 done · 1 doing · 2 todo"
  *   "  \x1b[36m╰\x1b[0m  0/3"
  *   "  \x1b[36;2m╰\x1b[0m"               (just the glyph, no body)
+ * ```
  *
  * Non-matches (body rows that happen to contain ╰):
+ * ```text
  *   "  │        ╰  ○  #abc  Add regression test"   ← tasks treeLast
  *   "  │ note: file named ╰.txt"                   ← body content
+ * ```
  */
 // Match the outer-gutter `╰`: start-of-line, optional ≤2 leading spaces
 // (the gutter indent), then any number of ANSI CSI SGR sequences
@@ -692,17 +696,17 @@ export function reopenFrameCloser(line: string): string {
  * verbatim without truncation — diffs and structured renders are the
  * point of the override channel.
  *
- * @param content   Raw tool output (model-facing payload); may carry a
+ * @param content - Raw tool output (model-facing payload); may carry a
  *                  trailing `[truncated: ...]` notice which is stripped
  *                  before display (the human-facing footer carries the
  *                  same facts in compact form).
- * @param isError   When true, render bias toward visibility (no display
+ * @param isError - When true, render bias toward visibility (no display
  *                  override, no overflow trim).
- * @param display   Optional pre-rendered ANSI payload to use instead of
+ * @param display - Optional pre-rendered ANSI payload to use instead of
  *                  the truncated `content`.
- * @param opts      `tool` (line budget), `info` (truncation facts for
- *                  the footer), `footer` (display-mode footer override),
- *                  `cols` (per-line clamp width).
+ * The trailing options bag carries `tool` (line budget), `info`
+ * (truncation facts for the footer), `footer` (display-mode footer
+ * override), and `cols` (per-line clamp width).
  */
 export function formatToolPreview(
   content: string,
@@ -1017,10 +1021,12 @@ export function renderFindingsPanel(
  *
  * Shape (one note per line, `count` attribute for a quick scan):
  *
- *     <ma::agent::diagnostics count="2">
- *     12:5 error TS2322 Type 'string' is not assignable to type 'number'.
- *     7:1 warning no-unused-vars 'x' is never used.
- *     </ma::agent::diagnostics>
+ * ```text
+ * <ma::agent::diagnostics count="2">
+ * 12:5 error TS2322 Type 'string' is not assignable to type 'number'.
+ * 7:1 warning no-unused-vars 'x' is never used.
+ * </ma::agent::diagnostics>
+ * ```
  */
 export function formatDiagnosticsAnnotation(notes: string[]): string {
   const clean = notes.filter((n) => typeof n === "string" && n.trim().length > 0)

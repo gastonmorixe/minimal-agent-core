@@ -11,7 +11,7 @@
  *
  * Covers the feature contract:
  *   - ↑ with one queued item dequeues it straight back to the prompt
- *   - ↑ with >1 opens the overlay (selection + hint row), ↑/↓ move it
+ *   - ↑ with 2+ opens the overlay (selection + hint row), ↑/↓ move it
  *   - d / Enter dequeue the selected item, x removes it, k dequeues all
  *     (numbered), Esc closes the overlay leaving the queue intact
  *   - aborting a turn dequeues EVERYTHING (in-flight + queued) back to
@@ -120,6 +120,20 @@ function makeHoldingAgent() {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 5))
+
+/**
+ * Poll until `pred` holds (or the deadline passes). The on-disk queue
+ * snapshot is written by an async Bun.write+rename chain with no
+ * completion signal exposed at the REPL layer, so persistence asserts
+ * must wait for the observable condition instead of a fixed tick
+ * (a fixed 5ms tick lost the race ~1/3 of runs under load).
+ */
+async function eventually(pred: () => boolean, deadlineMs = 1000): Promise<void> {
+  const t0 = Date.now()
+  while (!pred() && Date.now() - t0 < deadlineMs) {
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
 
 /**
  * Start a REPL, drain a first turn so the agent is mid-flight, then queue
@@ -343,7 +357,9 @@ describe("runReplLiveArea : queue-nav persistence", () => {
     // Open + dequeue the bottom one (drop me) back to the prompt.
     editor.queueKey("ArrowUp") // select "drop me"
     editor.queueKey("d")
-    await tick() // QueueStore.save flushes on a microtask
+    // QueueStore.save flushes via async Bun.write+rename; wait for the
+    // snapshot to land rather than racing it with a fixed tick.
+    await eventually(() => loadQueue(sid).length === 1)
     // Persisted snapshot now reflects the single remaining item.
     expect(loadQueue(sid).map((i) => i.text)).toEqual(["keep me"])
     await teardown()
@@ -356,7 +372,8 @@ describe("runReplLiveArea : queue-nav persistence", () => {
     expect(existsSync(queueFilePath(sid))).toBe(true)
     editor.queueKey("ArrowUp")
     editor.queueKey("k")
-    await tick() // QueueStore.clear() unlinks on a microtask
+    // QueueStore.clear() unlinks asynchronously; wait for it to land.
+    await eventually(() => !existsSync(queueFilePath(sid)))
     // Empty queue → file deleted.
     expect(existsSync(queueFilePath(sid))).toBe(false)
     expect(loadQueue(sid)).toEqual([])

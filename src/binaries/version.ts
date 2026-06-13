@@ -10,7 +10,7 @@
  *      field-by-field, missing trailing fields treated as 0.
  *
  * Mixed shapes: an all-digit token (no dots) is treated as a single integer
- * field, so "1733345678" > "0.1.6" (a 10-digit epoch dwarfs any dotted
+ * field, so "1733345678" \> "0.1.6" (a 10-digit epoch dwarfs any dotted
  * release). That is intentional: once CI moves to epoch naming, every epoch
  * build sorts above legacy dotted tags, which is the desired migration order.
  *

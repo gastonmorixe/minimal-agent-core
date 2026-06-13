@@ -1,13 +1,13 @@
 Use `MemoryTool` for durable, per-user notes that persist across sessions, plus a per-session scratchpad. Two write paths (the inline `<ma::emit::memory>` tag and `MemoryTool.add`) and one read/edit/remove path (`MemoryTool`).
 
-## You have memories. They are NOT in your context by default.
+## You have memories. They are not in your context by default.
 
 Persistent memories (`global` and `project` scopes) used to be dumped verbatim into the system prompt at session start. That ate ~13% of a 200k context window and only got worse as the file grew. As of v0.4 the dump is OFF by default.
 
 What this means for you:
 
 - **The `MemoryTool` is always registered.** You can call it whenever you want, no flag, no opt-in.
-- **Bullet contents are NOT in this prompt.** Asking yourself "what do I remember about X?" should make you reach for the tool, not recite.
+- **Bullet contents are not in this prompt.** Asking yourself "what do I remember about X?" should make you reach for the tool, not recite.
 - **Saves still work the same way.** The inline `<ma::emit::memory>` tag appends to the file, and the next-turn `<ma::agent::memory-saved id="...">` attachment hands you the bullet's id.
 
 The short-term scratchpad (`short-term` scope) is the exception. It still rides every turn as a `<ma::agent::short-term-memory>` attachment, so what you wrote there last turn is right above this paragraph in your next user message.
@@ -16,7 +16,7 @@ The short-term scratchpad (`short-term` scope) is the exception. It still rides 
 
 Reach for it whenever any of these is true:
 
-- The user asks "what do you remember about X?" or "do we have notes on Y?". Do NOT improvise an answer. Query.
+- The user asks "what do you remember about X?" or "do we have notes on Y?". Do not improvise an answer. Query.
 - You're about to debug a symptom that feels familiar (a wrap bug at width 80, an auth refresh storm, a tmux-vs-iTerm discrepancy, etc.). A 5-second `list` with a keyword may save you the round trip.
 - You're about to start a non-trivial change in this codebase. Skim `project` for the subsystem you're touching ("compositor", "editor-controller", "agent.ts").
 - You're about to save a new bullet on a topic. Query first. If a near-duplicate exists, `edit` it instead of stacking another.
@@ -41,11 +41,11 @@ Calls are paginated and bodies are truncated, on purpose, to keep tool results s
 So a typical flow looks like:
 
     MemoryTool({action: "list", scope: "project", query: "compositor"})
-       → header: showing 5 of 5 entries matching "compositor"
-       → 5 truncated bodies with their ids
+       -> header: showing 5 of 5 entries matching "compositor"
+       -> 5 truncated bodies with their ids
 
     MemoryTool({action: "read", scope: "project", id: "mpfm-..."})
-       → full body of the one that looked most relevant
+       -> full body of the one that looked most relevant
 
 Don't fetch full bodies for every match. Skim previews, then `read` the one or two you actually need.
 
@@ -66,9 +66,9 @@ If `MINIMAL_AGENT_MEMORY_NAMESPACE=<name>` is set, every path above is rebased u
 ## Decision tree (run top-to-bottom before saving)
 
 1. **Will this still be true in a *future* session?**
-    - In any project I'll work on with this user → `global`
-    - In this project only → `project`
-    - No → `short-term` (or don't save at all)
+    - In any project I'll work on with this user -> `global`
+    - In this project only -> `project`
+    - No -> `short-term` (or don't save at all)
 
 2. **Is it actionable / specific?** Vague aspirations ("we should fix the bug") aren't memories. Use a TODO list.
 
@@ -92,7 +92,7 @@ Short-term entries appear in your context as `<ma::agent::short-term-memory>` at
 - Transient turn-by-turn task state. Use a TODO list in the response.
 - Long verbatim content. One or two sentences max.
 - Things already in `CLAUDE.md` / `AGENTS.md` / the README.
-- Manually-prefixed dates in the body (`[2026-05-10] foo …`). The store attaches `[<ts>]` automatically. Duplicating it is noise.
+- Manually-prefixed dates in the body (`[2026-05-10] foo ...`). The store attaches `[<ts>]` automatically. Duplicating it is noise.
 - Secrets, tokens, credentials.
 
 ## Saving via inline tag (preferred for in-flight saves)
@@ -114,7 +114,7 @@ Mid-response, low-friction. The body is hidden from the user (the tag is replace
 
 After every save, your **next user turn** will carry a small attachment:
 
-    <ma::agent::memory-saved scope="short-term" id="3">Active hypothesis: …</ma::agent::memory-saved>
+    <ma::agent::memory-saved scope="short-term" id="3">Active hypothesis: ...</ma::agent::memory-saved>
 
 Keep an eye on it. That's how you learn the bullet's id, which you'll need if you later want to edit or remove the entry. When short-term overflows the cap, the echo also reports the eviction count (`evicted="1"`).
 
@@ -133,7 +133,7 @@ Schema: `{action, scope, id?, body?, query?, limit?, offset?, format?}`. `scope`
 
     # Mutate.
     MemoryTool({action: "add",    scope: "project", body: "tests live in src/*.test.ts"})
-    MemoryTool({action: "edit",   scope: "short-term", id: "3", body: "Refined: …"})
+    MemoryTool({action: "edit",   scope: "short-term", id: "3", body: "Refined: ..."})
     MemoryTool({action: "remove", scope: "short-term", id: "2"})
     MemoryTool({action: "clear",  scope: "short-term"})       # short-term only
 
@@ -150,7 +150,7 @@ Schema: `{action, scope, id?, body?, query?, limit?, offset?, format?}`. `scope`
 
 ## When memories appear in context directly
 
-By default persistent memories are NOT in your context; you query them with `MemoryTool.list`. If the user has opted into pre-loading, a `## Saved memories` section appears above in your system prompt (sometimes a compressed summary with `Sources: #id` citations). Even then, `MemoryTool.read` by id fetches the full body when the summary is lossy.
+By default persistent memories are not in your context; you query them with `MemoryTool.list`. If the user has opted into pre-loading, a `## Saved memories` section appears above in your system prompt (sometimes a compressed summary with `Sources: #id` citations). Even then, `MemoryTool.read` by id fetches the full body when the summary is lossy.
 
 ## Id formats
 

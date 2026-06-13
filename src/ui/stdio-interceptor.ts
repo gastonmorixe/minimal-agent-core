@@ -42,6 +42,13 @@ export interface StdioInterceptorOptions {
   stderr?: IOStreamLike
 }
 
+/**
+ * Monkey-patches `process.stdout`/`stderr.write` (and the console methods)
+ * to route every stray write through the compositor's scrollback path, so
+ * third-party prints cannot tear the live area. Keeps the original write
+ * functions for raw escape-hatch output and full uninstall, and buffers
+ * partial ANSI sequences per stream so split escapes survive interception.
+ */
 export class StdioInterceptor {
   private readonly compositor: CompositorLike
   private readonly stdout: IOStreamLike

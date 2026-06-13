@@ -189,6 +189,47 @@ describe("SessionHistory: window paging", () => {
   })
 })
 
+describe("SessionHistory: short-sid prefix resolution", () => {
+  it("a unique prefix resolves to the full sid", async () => {
+    const r = await call({ action: "meta", sid: "sid-n" })
+    expect(r.is_error).toBeFalsy()
+    expect(r.content).toContain("Session: sid-new")
+  })
+
+  it("an ambiguous prefix errors listing the candidates", async () => {
+    const r = await call({ action: "meta", sid: "sid-" })
+    expect(r.is_error).toBe(true)
+    expect(r.content).toContain("Ambiguous")
+    expect(r.content).toContain("sid-new")
+    expect(r.content).toContain("sid-old")
+  })
+
+  it("an exact sid that is also a prefix of another resolves to itself", async () => {
+    const sessions = fakeSessions({
+      async list(opts = {}) {
+        const all = [
+          { sid: "abc", createdAt: "2026-06-09T10:00:00Z", cwd: "/proj", model: "m1" },
+          { sid: "abcdef", createdAt: "2026-06-08T10:00:00Z", cwd: "/proj", model: "m1" },
+        ]
+        const filtered = opts.cwd ? all.filter((e) => e.cwd === opts.cwd) : all
+        return { items: filtered.slice(0, opts.limit ?? 25), total: filtered.length }
+      },
+    })
+    const r = await call({ action: "meta", sid: "abc" }, { sessions, blobs: fakeBlobs })
+    expect(r.is_error).toBeFalsy()
+    expect(r.content).toContain("Session: abc")
+    expect(r.content).not.toContain("Session: abcdef")
+  })
+
+  it("a non-matching sid passes through unchanged to the action lookup", async () => {
+    // "missing" matches no index entry as a prefix → passed through verbatim →
+    // the fake's meta() returns null for it → clean unknown-sid error.
+    const r = await call({ action: "meta", sid: "missing" })
+    expect(r.is_error).toBe(true)
+    expect(r.content).toContain("Unknown session id")
+  })
+})
+
 describe("SessionHistory: meta / list / search / tool_calls", () => {
   it("meta renders counts, liveness, sidecars", async () => {
     const r = await call({ action: "meta", sid: "sid-new" })

@@ -13,7 +13,8 @@
  * @module tasks/handlers/task_link
  */
 
-import type { EventHandler } from "../../../src/plugins/types.ts"
+import type { EventHandler } from "@minimal-agent/plugin-api/types/plugin"
+
 import { TaskStore } from "../lib/store.ts"
 
 interface TaskUpdatePayload {

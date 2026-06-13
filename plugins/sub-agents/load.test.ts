@@ -1,47 +1,53 @@
 /**
- * Load-integration: the real sub-agents manifest resolves through the host
- * PluginLoader — its 5 tools and the supervisor live-area slot are wired, and
- * the PROMPT.md contributes a system-prompt block. The plugin is symlinked
- * into a temp root so ONLY `sub-agents` loads.
+ * Load-contract: the sub-agents manifest declares the surface the host loader
+ * wires, and the env-gated handlers behave correctly. This is the repo-portable
+ * counterpart to a host loader-integration test (the decoupling contract): it
+ * asserts the plugin's OWN contract — its manifest shape, its tool-availability
+ * gate, its system-prompt body, its validation — without importing host code.
+ * The host's loader-discovery wiring is covered by the host's own
+ * loader-contract tests.
  *
  * @module sub-agents/load.test
  */
 
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { afterEach, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 
-import { PluginLoader } from "../../src/plugins/loader.ts"
+import type { ToolAvailabilityContext } from "@minimal-agent/plugin-api/types/plugin"
 
-const roots: string[] = []
-afterEach(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true })
-  roots.length = 0
-})
+import reportResultHandler, {
+  available as reportResultAvailable,
+} from "./handlers/report_result.ts"
+import spawnHandler from "./handlers/spawn_agent.ts"
+import { ENV_RESULT_PATH } from "./lib/spawn.ts"
 
-async function loadSubAgents(): Promise<{ loader: PluginLoader; warnings: string[] }> {
-  const root = mkdtempSync(join(tmpdir(), "ma-subagents-load-"))
-  roots.push(root)
-  mkdirSync(join(root, "plugins"), { recursive: true })
-  symlinkSync(import.meta.dir, join(root, "plugins", "sub-agents"))
-  const warnings: string[] = []
-  const loader = await PluginLoader.load({
-    embeddedDir: root,
-    homeDir: root,
-    projectDir: root,
-    sessionId: "load-test",
-    coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
-    logger: (m) => warnings.push(m),
-  })
-  return { loader, warnings }
+interface Manifest {
+  tuis: {
+    id: string
+    trigger: { tool?: { name?: string } }
+    handler: { path: string }
+  }[]
+  liveAreaSlots?: { id: string; refreshMs?: number }[]
 }
 
-describe("sub-agents manifest loads", () => {
-  it("advertises the lead-facing sub-agent tools", async () => {
-    const { loader } = await loadSubAgents()
-    const names = loader.getExtraTools().map((t) => t.name)
+const MANIFEST = JSON.parse(
+  readFileSync(join(import.meta.dir, "manifest.json"), "utf-8"),
+) as Manifest
+
+function toolNames(): string[] {
+  return MANIFEST.tuis.map((t) => t.trigger.tool?.name).filter((n): n is string => Boolean(n))
+}
+
+/** A minimal ToolAvailabilityContext: only `env` matters for the gate. */
+function availCtx(env: Record<string, string>): ToolAvailabilityContext {
+  return { env } as unknown as ToolAvailabilityContext
+}
+
+describe("sub-agents manifest contract", () => {
+  it("declares the lead-facing sub-agent tools", () => {
+    const names = toolNames()
     expect(names).toContain("SpawnAgent")
     expect(names).toContain("ListAgents")
     expect(names).toContain("AgentStatus")
@@ -49,54 +55,66 @@ describe("sub-agents manifest loads", () => {
     expect(names).toContain("AgentOutput")
     expect(names).toContain("Mailbox")
     expect(names).toContain("StopAgent")
+    // ReportResult is declared too (advertised only inside a worker, see below).
+    expect(names).toContain("ReportResult")
   })
 
-  it("HIDES ReportResult from a lead (no result-path env) but keeps it dispatchable", async () => {
-    const prev = process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
-    delete process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
-    try {
-      const { loader } = await loadSubAgents()
-      // not advertised to the model...
-      expect(loader.getExtraTools().map((t) => t.name)).not.toContain("ReportResult")
-      // ...but still registered, so a stray/forced call can still be dispatched.
-      expect(loader.hasTool("ReportResult")).toBe(true)
-    } finally {
-      if (prev !== undefined) process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH = prev
-    }
-  })
-
-  it("ADVERTISES ReportResult inside a worker (result-path env present)", async () => {
-    const prev = process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
-    process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH = "/tmp/worker.result.json"
-    try {
-      const { loader } = await loadSubAgents()
-      expect(loader.getExtraTools().map((t) => t.name)).toContain("ReportResult")
-    } finally {
-      if (prev === undefined) delete process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH
-      else process.env.MINIMAL_AGENT_SUBAGENT_RESULT_PATH = prev
-    }
-  })
-
-  it("registers the supervisor live-area slot at 1s", async () => {
-    const { loader } = await loadSubAgents()
-    const slot = loader.getLiveAreaSlots().find((s) => s.definition.id === "fleet_supervisor")
+  it("registers the supervisor live-area slot at 1s", () => {
+    const slot = MANIFEST.liveAreaSlots?.find((s) => s.id === "fleet_supervisor")
     expect(slot).toBeDefined()
-    expect(slot?.definition.refreshMs).toBe(1000)
+    expect(slot?.refreshMs).toBe(1000)
   })
 
-  it("contributes a system-prompt tool block and loads without warnings", async () => {
-    const { loader, warnings } = await loadSubAgents()
-    expect(warnings).toEqual([])
-    const block = loader.getPromptBlock()
-    expect(block).toContain("SpawnAgent")
+  it("contributes a system-prompt block mentioning SpawnAgent", () => {
+    const prompt = readFileSync(join(import.meta.dir, "PROMPT.md"), "utf-8")
+    expect(prompt).toContain("SpawnAgent")
+  })
+})
+
+describe("ReportResult availability gate", () => {
+  it("HIDES ReportResult from a lead (no result-path env)", () => {
+    expect(reportResultAvailable(availCtx({}))).toBe(false)
   })
 
-  it("dispatches SpawnAgent and surfaces a validation error for a missing task", async () => {
-    const { loader } = await loadSubAgents()
-    const res = await loader.dispatch(
-      { type: "tool", name: "SpawnAgent", input: {}, tool_use_id: "t1" },
-      process.cwd(),
+  it("ADVERTISES ReportResult inside a worker (result-path env present)", () => {
+    expect(reportResultAvailable(availCtx({ [ENV_RESULT_PATH]: "/tmp/worker.result.json" }))).toBe(
+      true,
     )
+  })
+
+  it("a lead-context ReportResult call explains there is nothing to report", async () => {
+    const res = await reportResultHandler({
+      trigger: { type: "tool", name: "ReportResult", input: { summary: "x" }, tool_use_id: "t1" },
+      packageDir: "/tmp/pkg",
+      cwd: process.cwd(),
+      env: {},
+      abort: new AbortController().signal,
+      stdout: process.stdout,
+      stdin: process.stdin,
+      stderr: process.stderr,
+      log: { info() {}, warn() {}, error() {}, debug() {} } as never,
+    } as never)
+    expect(res.kind).toBe("tool_result")
+    if (res.kind === "tool_result") {
+      expect(res.is_error).toBe(true)
+      expect(res.content).toMatch(/not a sub-agent|nothing to report/i)
+    }
+  })
+})
+
+describe("SpawnAgent validation", () => {
+  it("surfaces a validation error for a missing task", async () => {
+    const res = await spawnHandler({
+      trigger: { type: "tool", name: "SpawnAgent", input: {}, tool_use_id: "t1" },
+      packageDir: "/tmp/pkg",
+      cwd: process.cwd(),
+      env: {},
+      abort: new AbortController().signal,
+      stdout: process.stdout,
+      stdin: process.stdin,
+      stderr: process.stderr,
+      log: { info() {}, warn() {}, error() {}, debug() {} } as never,
+    } as never)
     expect(res.kind).toBe("tool_result")
     if (res.kind === "tool_result") {
       expect(res.is_error).toBe(true)

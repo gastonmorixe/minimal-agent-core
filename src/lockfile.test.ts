@@ -1,5 +1,5 @@
 /**
- * Tests for {@link ./lockfile.ts}.
+ * Tests for `./lockfile.ts`.
  *
  * The lockfile module's contract is small but load-bearing. Three things
  * must hold:

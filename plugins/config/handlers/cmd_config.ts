@@ -33,6 +33,12 @@ import { discoveryRoots, realDiscoverDeps, realFsDeps, resolveConfigPath } from 
 
 const MAX_ROWS = 9
 
+/**
+ * Entry point for the `/config` command. With arguments it runs the headless
+ * sub-commands (get/set/path) and returns text; with no arguments it builds
+ * the config model (static schema plus one toggle per discovered plugin) and
+ * opens the interactive overlay via the editor-overlay channels.
+ */
 export default function cmdConfig(ctx: CommandContext): CommandResult {
   const path = resolveConfigPath(ctx.env)
 

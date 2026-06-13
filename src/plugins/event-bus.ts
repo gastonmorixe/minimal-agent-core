@@ -137,6 +137,8 @@ export class EventBus {
   private disposed = false
 
   /**
+   * Creates the bus with an optional diagnostic sink.
+   *
    * @param logger - Diagnostic sink for listener errors. Defaults to
    *   writing to `process.stderr`. Pass a no-op in tests.
    */

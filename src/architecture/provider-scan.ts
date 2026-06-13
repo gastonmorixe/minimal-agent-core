@@ -16,7 +16,7 @@ import { join, relative } from "node:path"
  * only as gpt-<digit>/gpt-4o; bare "o3" excluded as collision-prone).
  */
 export const PROVIDER_TOKEN_RE =
-  /\b(anthropic|claude|opus|sonnet|haiku|fable|mythos|openai|openrouter|chatgpt|gpt-\d|gpt-4o|bedrock|x-stainless|claude-cli|claude-code)\b/i
+  /\b(anthropic|claude|opus|sonnet|haiku|fable|mythos|openai|openrouter|chatgpt|gpt-\d|gpt-4o|bedrock|x-stainless|claude-cli|claude-code|gemini|mistral|google-vertex|vertexai|groq|xai|grok)\b/i
 
 /** Same screen for file and directory names under src/. */
 export const PROVIDER_NAME_RE = /(anthropic|claude|openai|openrouter|gpt|gemini|mistral)/i
@@ -37,9 +37,10 @@ export function tsFilesUnder(root: string): string[] {
 
 /**
  * Strip comments while preserving string/template contents. Tiny state
- * machine: handles '…', "…", `…` (with \-escapes; ${…} expression code is
- * left inline and still scanned), // line and /* block comments. Good
- * enough for fingerprint scanning; not a parser.
+ * machine: handles single-quoted, double-quoted, and template strings
+ * (with backslash-escapes; `${…}` expression code is left inline and
+ * still scanned), plus line and block comments. Good enough for
+ * fingerprint scanning; not a parser.
  */
 export function stripComments(source: string): string {
   let out = ""

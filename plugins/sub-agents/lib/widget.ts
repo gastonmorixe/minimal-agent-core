@@ -6,7 +6,7 @@
  * worker is active, so a single-agent session looks exactly as it does today.
  *
  * Pure: takes records + render options, returns a string or null. The core
- * multi-row live-area seam (split a slot value on "\n") makes this paint.
+ * multi-row live-area seam (split a slot value on `"\n"`) makes this paint.
  *
  * @module sub-agents/lib/widget
  */
@@ -59,8 +59,7 @@ function rowDetail(r: SubagentRecord, ansi: boolean): string {
     case "queued":
       return color(ansi, ANSI.DIM, "queued…")
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }
@@ -103,8 +102,7 @@ function rowRank(s: SubagentStatus): number {
     case "stopped":
       return 5
     default: {
-      const _exhaustive: never = s
-      throw new Error(`unhandled status kind: ${String(_exhaustive)}`)
+      throw new Error(`unhandled status kind: ${String(s satisfies never)}`)
     }
   }
 }

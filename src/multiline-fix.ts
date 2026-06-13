@@ -1,4 +1,10 @@
 // NEVER remove old content from scrollback
+/**
+ * Minimal append-only multiline input buffer used by the legacy line editor.
+ * Tracks a cursor across logical lines and refuses further mutation once
+ * {@link MultilineBuffer.commit} seals the text, so committed input can never
+ * be retroactively altered in scrollback.
+ */
 export class MultilineBuffer {
   private lines: string[] = [""]
   private cy = 0

@@ -4,25 +4,29 @@
  * Verified against the OpenAI API reference (https://platform.openai.com/docs/api-reference/chat).
  * Key shapes:
  *
- * - `messages[]`: role ∈ {system, developer, user, assistant, tool},
+ * - `messages[]`: role ∈ `{system, developer, user, assistant, tool}`,
  *   content is string or [parts]. Tool calls live on the assistant
  *   message under `tool_calls[]`; results live on `role:"tool"` with
  *   `tool_call_id`.
- * - `tools[]`: `{type:"function", function:{name, description,
- *   parameters, strict?}}`.
- * - `tool_choice`: `"auto" | "none" | "required" | {type:"function",
- *   function:{name}}`.
+ * - `tools[]`: `{type:"function", function:{name, description, parameters, strict?}}`.
+ * - `tool_choice`: `"auto" | "none" | "required"` or `{type:"function", function:{name}}`.
  * - `reasoning_effort`: `"low" | "medium" | "high"` (o-series/gpt-5).
  * - `max_completion_tokens`: replaces `max_tokens` on reasoning models.
- * - `response_format`: `{type:"text"|"json_object"|"json_schema",
- *   json_schema?:{name, schema, strict?}}`.
+ * - `response_format`: `{type:"text"|"json_object"|"json_schema", json_schema?:{name, schema, strict?}}`.
  *
  * @module llm/providers/openai/chat/request-body
  */
 
-import type { CanonicalBlock, CanonicalMessage } from "../../../src/llm/canonical-messages.ts"
+import type {
+  CanonicalBlock,
+  CanonicalMessage,
+} from "@minimal-agent/plugin-api/llm/canonical-messages"
+import type {
+  CanonicalToolDefinition,
+  ToolChoice,
+} from "@minimal-agent/plugin-api/llm/canonical-tools"
+
 import type { CanonicalRequest } from "../../../src/llm/canonical-request.ts"
-import type { CanonicalToolDefinition, ToolChoice } from "../../../src/llm/canonical-tools.ts"
 import type { ModelEntry } from "../../../src/llm/model-registry.ts"
 
 // ---------------------------------------------------------------------------
@@ -88,6 +92,10 @@ export type OpenAIChatResponseFormat =
 // Build
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the Chat Completions request body from a canonical request: maps
+ * messages/tools/sampling knobs onto the chat-completions wire shape.
+ */
 export function buildOpenAIChatBody(
   req: CanonicalRequest,
   model: ModelEntry,
@@ -244,7 +252,7 @@ function canonicalMessageToChat(msg: CanonicalMessage): OpenAIChatMessage {
 }
 
 function imageToChatPart(block: {
-  source: import("../../../src/llm/canonical-messages.ts").ImageSource
+  source: import("@minimal-agent/plugin-api/llm/canonical-messages").ImageSource
   type: "image"
 }): OpenAIChatContentPart | null {
   const src = block.source
@@ -282,8 +290,7 @@ function toChatToolChoice(choice: ToolChoice): OpenAIChatRequestBody["tool_choic
     case "tool":
       return { type: "function", function: { name: choice.name } }
     default: {
-      const _exhaustive: never = choice
-      throw new Error(`unhandled tool choice: ${_exhaustive}`)
+      throw new Error(`unhandled tool choice: ${String(choice satisfies never)}`)
     }
   }
 }

@@ -9,8 +9,8 @@
  *   `messages[]` — pure prefix, no role wrapping.
  * - `input` is either a string OR an array of `InputItem` (message,
  *   function_call, function_call_output, image, file, computer_call).
- * - `tools[]` are **flat** `{type:"function", name, description,
- *   parameters, strict?}` — no nested `function` wrapper. Server tools
+ * - `tools[]` are **flat** `{type:"function", name, description, parameters, strict?}`
+ *   — no nested `function` wrapper. Server tools
  *   live alongside as `{type:"web_search_preview"}` etc.
  * - `reasoning: {effort, summary?}` replaces `reasoning_effort`.
  * - `max_output_tokens` replaces `max_tokens` / `max_completion_tokens`.
@@ -22,10 +22,17 @@
  * @module llm/providers/openai/responses/request-body
  */
 
-import type { CanonicalBlock, CanonicalMessage } from "../../../src/llm/canonical-messages.ts"
+import type {
+  CanonicalBlock,
+  CanonicalMessage,
+} from "@minimal-agent/plugin-api/llm/canonical-messages"
+import type {
+  CanonicalToolDefinition,
+  ToolChoice,
+} from "@minimal-agent/plugin-api/llm/canonical-tools"
+import type { ServerToolId } from "@minimal-agent/plugin-api/llm/capabilities"
+
 import type { CanonicalRequest } from "../../../src/llm/canonical-request.ts"
-import type { CanonicalToolDefinition, ToolChoice } from "../../../src/llm/canonical-tools.ts"
-import type { ServerToolId } from "../../../src/llm/capabilities.ts"
 import type { ModelEntry } from "../../../src/llm/model-registry.ts"
 
 // ---------------------------------------------------------------------------
@@ -105,6 +112,11 @@ export type OpenAIResponsesTool =
 // Build
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the Responses API request body from a canonical request: maps
+ * messages, tools, reasoning, and sampling knobs onto the responses wire
+ * shape.
+ */
 export function buildOpenAIResponsesBody(
   req: CanonicalRequest,
   model: ModelEntry,
@@ -322,8 +334,7 @@ function mapServerTool(id: ServerToolId): OpenAIResponsesTool {
       // Anthropic-only concept; coerce to a no-op (drop) by falling through.
       return { type: "web_search_preview" }
     default: {
-      const _exhaustive: never = id
-      throw new Error(`unhandled server tool: ${_exhaustive}`)
+      throw new Error(`unhandled server tool: ${String(id satisfies never)}`)
     }
   }
 }
@@ -339,8 +350,7 @@ function toResponsesToolChoice(choice: ToolChoice): OpenAIResponsesRequestBody["
     case "tool":
       return { type: "function", name: choice.name }
     default: {
-      const _exhaustive: never = choice
-      throw new Error(`unhandled tool choice: ${_exhaustive}`)
+      throw new Error(`unhandled tool choice: ${String(choice satisfies never)}`)
     }
   }
 }

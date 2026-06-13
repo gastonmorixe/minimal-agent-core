@@ -146,6 +146,7 @@ describe("runSupervisor", () => {
   it("kills a budget-tripped worker (deadline) and marks it failed", () => {
     const store = new SubagentStore(LEAD, { dir })
     const r = running("A1", 4242)
+    if (r.status.kind !== "running") throw new Error("expected running status")
     store.upsert({
       ...r,
       status: { ...r.status, startedAt: "2026-05-30T11:58:00.000Z" },

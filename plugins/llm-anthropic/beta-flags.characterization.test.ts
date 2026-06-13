@@ -10,8 +10,10 @@
  * closes/opens a divergence, fails here and forces a reviewed edit.
  *
  * Known divergences pinned at the bottom (from the Phase-2 review):
- *  - redact-thinking: canonical always adds it; legacy excludes it from
- *    conversations (keeps thinking visible) yet includes it in probes.
+ *  - redact-thinking: UNIFIED by the B-0 flip (decision B3a, 2026-06-09
+ *    package): BOTH builders now omit it from conversations (thinking
+ *    stays visible — a product feature) and include it in probes. The
+ *    former divergence pin is now an agreement pin.
  *  - api-key auth: canonical still emits most flags; legacy emits NONE.
  *  - fast-mode: canonical gates on capabilities.speedFast inside the
  *    builder; legacy trusts the caller (gate lives in client.ts).
@@ -61,7 +63,8 @@ describe("characterization: canonical buildBetaFlags (conversation, oauth)", () 
         F.EFFORT,
         F.PROMPT_CACHING_SCOPE,
         F.EXTENDED_CACHE_TTL,
-        F.REDACT_THINKING,
+        // redact-thinking omitted for conversations since B3a (B-0 flip):
+        // visible thinking is a product feature; matches the legacy builder.
         F.MID_CONVERSATION_SYSTEM,
       ],
     ],
@@ -78,7 +81,7 @@ describe("characterization: canonical buildBetaFlags (conversation, oauth)", () 
         F.EFFORT,
         F.PROMPT_CACHING_SCOPE,
         F.EXTENDED_CACHE_TTL,
-        F.REDACT_THINKING,
+        // redact-thinking omitted (B3a).
         F.MID_CONVERSATION_SYSTEM,
       ],
     ],
@@ -95,7 +98,7 @@ describe("characterization: canonical buildBetaFlags (conversation, oauth)", () 
         F.EFFORT,
         F.PROMPT_CACHING_SCOPE,
         F.EXTENDED_CACHE_TTL,
-        F.REDACT_THINKING,
+        // redact-thinking omitted (B3a).
         F.MID_CONVERSATION_SYSTEM,
       ],
     ],
@@ -112,7 +115,7 @@ describe("characterization: canonical buildBetaFlags (conversation, oauth)", () 
         F.ADVANCED_TOOL_USE,
         F.PROMPT_CACHING_SCOPE,
         F.EXTENDED_CACHE_TTL,
-        F.REDACT_THINKING,
+        // redact-thinking omitted (B3a).
       ],
     ],
   ]
@@ -159,17 +162,24 @@ describe("characterization: cross-transport divergence contract", () => {
   // edit this block in the same commit, which is exactly the review
   // visibility we want.
 
-  it("redact-thinking: canonical adds it to conversations, legacy does not", () => {
+  it("redact-thinking: BOTH transports omit it from conversations, keep it in probes (B3a)", () => {
+    // Former divergence pin, flipped to an AGREEMENT pin by the B-0 flip
+    // (decision B3a, option (a) of the 2026-06-09 decision package): the
+    // canonical builder aligned to legacy — conversations keep thinking
+    // visible; the quota/title probe sets still carry the redact flag.
     const model = resolveModel("claude-opus-4-7")
-    const canonical = buildBetaFlags({
-      kind: "conversation",
-      req: conversationReq("claude-opus-4-7"),
-      model,
-      authKind: "oauth",
-    })
+    const req = conversationReq("claude-opus-4-7")
+    const canonical = buildBetaFlags({ kind: "conversation", req, model, authKind: "oauth" })
     const legacy = legacyBuildBetaFlags("conversation", "claude-opus-4-7")
-    expect(canonical).toContain(F.REDACT_THINKING)
+    expect(canonical).not.toContain(F.REDACT_THINKING)
     expect(legacy.map(String)).not.toContain(F.REDACT_THINKING)
+    // Probe kinds keep the flag on both sides (unchanged by B3a).
+    const canonicalQuota = buildBetaFlags({ kind: "quota", req, model, authKind: "oauth" })
+    const canonicalTitle = buildBetaFlags({ kind: "title", req, model, authKind: "oauth" })
+    expect(canonicalQuota).toContain(F.REDACT_THINKING)
+    expect(canonicalTitle).toContain(F.REDACT_THINKING)
+    expect(legacyBuildBetaFlags("quota").map(String)).toContain(F.REDACT_THINKING)
+    expect(legacyBuildBetaFlags("title").map(String)).toContain(F.REDACT_THINKING)
   })
 
   it("api-key: canonical still emits flags, legacy emits none (B2)", () => {
