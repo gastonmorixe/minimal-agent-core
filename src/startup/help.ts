@@ -121,7 +121,7 @@ function buildHelpSections(): HelpSection[] {
         row(
           `${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("login")} ${c.dim("[method]")}`,
           "Sign in to a provider",
-          ["provider openai login oauth"],
+          ["provider <id> login oauth"],
         ),
         row(`${c.cyan("login")} ${c.dim("<id> [method]")}`, "Short alias for provider login", [
           "method: oauth | api-key",
