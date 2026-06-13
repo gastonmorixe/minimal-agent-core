@@ -34,15 +34,16 @@
  * @module llm/providers/anthropic/session-info
  */
 
-import { getAuth } from "../../src/auth.ts"
-import { modelShortLabel } from "../../src/llm/model-label.ts"
-import { resolveModel } from "../../src/llm/model-registry.ts"
 import type {
   ProviderSessionContext,
   ProviderSessionInfo,
   QuotaWindow,
-} from "../../src/llm/provider-plugin.ts"
-import type { NetworkClient } from "../../src/network/index.ts"
+} from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
+
+import { getAuth } from "../../src/auth.ts"
+import { modelShortLabel } from "../../src/llm/model-label.ts"
+import { resolveModel } from "../../src/llm/model-registry.ts"
 import { getLastRateLimits } from "../../src/quota-cache.ts"
 
 import { probeQuota } from "./quota-probe.ts"

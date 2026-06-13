@@ -6,8 +6,13 @@
 
 import { beforeAll, describe, expect, it } from "bun:test"
 
+import type {
+  NetworkClient,
+  NetworkRequest,
+  NetworkResponse,
+} from "@minimal-agent/plugin-api/net/types"
+
 import type { AuthResult } from "../../src/auth.ts"
-import type { NetworkClient, NetworkRequest, NetworkResponse } from "../../src/network/index.ts"
 import { getLastRateLimits } from "../../src/quota-cache.ts"
 
 import { registerAnthropicModels } from "./models.ts"

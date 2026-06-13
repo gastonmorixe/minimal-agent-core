@@ -11,7 +11,8 @@
 
 import { describe, expect, test } from "bun:test"
 
-import type { CanonicalMessage } from "../../src/llm/canonical-messages.ts"
+import type { CanonicalMessage } from "@minimal-agent/plugin-api/llm/canonical-messages"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 
 import {

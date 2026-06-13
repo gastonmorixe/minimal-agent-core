@@ -10,9 +10,10 @@
  * @module llm/providers/anthropic/validate
  */
 
+import { CapabilityViolation } from "@minimal-agent/plugin-api/llm/errors"
+import { modalityViolations } from "@minimal-agent/plugin-api/llm/modality-check"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
-import { CapabilityViolation } from "../../src/llm/errors.ts"
-import { modalityViolations } from "../../src/llm/modality-check.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 import type { ValidationResult } from "../../src/llm/provider.ts"
 

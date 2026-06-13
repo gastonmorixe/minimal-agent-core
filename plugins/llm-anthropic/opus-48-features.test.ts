@@ -20,15 +20,18 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import { systemMessage, userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
+
+import type {
+  // Residual blocked src import (Wave C-3 relocates canonical-request).
+  CanonicalRequest,
+} from "../../src/llm/canonical-request.ts"
 import {
-  type CanonicalEvent,
-  type CanonicalRequest,
   clearModelRegistry,
   clearProviderRegistry,
   resolveModel,
-  systemMessage,
-  userText,
-} from "../../src/llm/index.ts"
+} from "../../src/llm/model-registry.ts"
 
 import { bootstrapAnthropic } from "./adapter.ts"
 import { ANTHROPIC_BETA_FLAGS, buildBetaFlags } from "./beta-flags.ts"

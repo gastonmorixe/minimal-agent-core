@@ -15,8 +15,8 @@
  * @module llm/providers/anthropic/capabilities
  */
 
-import type { Capabilities } from "../../src/llm/capabilities.ts"
-import { defaultCapabilities } from "../../src/llm/capabilities.ts"
+import type { Capabilities } from "@minimal-agent/plugin-api/llm/capabilities"
+import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 
 // ---------------------------------------------------------------------------
 // Shared sub-shapes
