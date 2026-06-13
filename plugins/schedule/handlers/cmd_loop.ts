@@ -17,6 +17,7 @@
  */
 
 import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
 import { renderBox } from "../lib/box.ts"
 import { clockHHMMSS, GLYPH_LOOP, taskFooter, taskInfo, wrapText } from "../lib/format.ts"
@@ -96,8 +97,7 @@ export default async function cmdLoop(ctx: CommandContext): Promise<CommandResul
   const e = res.value
   const info = rounded ? `${taskInfo(e, now)} · rounded to ${e.label}` : taskInfo(e, now)
   const body = wrapText(effectivePrompt, 72)
-  if (usingDefault)
-    body.push("\x1b[2mmaintenance prompt — edit .claude/loop.md to customize\x1b[0m")
+  if (usingDefault) body.push(c.dim("maintenance prompt — edit .claude/loop.md to customize"))
 
   return {
     kind: "notice",

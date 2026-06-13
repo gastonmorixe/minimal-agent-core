@@ -30,6 +30,7 @@ export const ANSI_CODES = {
   ITALIC_CLOSE: "\x1b[23m",
   UNDERLINE_CLOSE: "\x1b[24m",
   STRIKE_CLOSE: "\x1b[29m",
+  BRIGHT_BLACK: "\x1b[90m",
   DARK_GRAY: "\x1b[38;5;240m",
   LIGHT_GRAY: "\x1b[38;5;246m",
 } as const
@@ -72,6 +73,7 @@ export const ansiStyle = {
   green: fg(PALETTE.green),
   red: fg(PALETTE.red),
   white: fg(PALETTE.white),
+  gray: fg(ANSI_CODES.BRIGHT_BLACK),
   bold: attr(ANSI_CODES.BOLD, ANSI_CODES.BOLD_CLOSE),
   italic: attr(ANSI_CODES.ITALIC, ANSI_CODES.ITALIC_CLOSE),
   underline: attr(ANSI_CODES.UNDERLINE, ANSI_CODES.UNDERLINE_CLOSE),
