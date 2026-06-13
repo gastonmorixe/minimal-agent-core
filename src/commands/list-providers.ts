@@ -1,5 +1,5 @@
-import { c } from "../agent.ts"
 import { listRegisteredModels, listRegisteredProviders } from "../llm/model-registry.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * `providers` (bare): list every provider registered in the canonical

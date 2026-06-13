@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
-import { c } from "./agent.ts"
 import { formatStartupToolsRow, wrapStartupToolsRows } from "./startup-tools-row.ts"
 import { displayWidth, stripAnsi } from "./term-width.ts"
+import { c } from "./ui/style/ansi.ts"
 
 describe("formatStartupToolsRow", () => {
   test("empty input returns null", () => {

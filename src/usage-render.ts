@@ -17,9 +17,9 @@
  * @module usage-render
  */
 
-import { c } from "./agent/ansi.ts"
 import { modelShortLabel } from "./llm/model-label.ts"
 import { displayWidth } from "./term-width.ts"
+import { c } from "./ui/style/ansi.ts"
 import {
   USAGE_PERIODS,
   type UsageBreakdownRow,

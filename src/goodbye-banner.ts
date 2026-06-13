@@ -16,7 +16,7 @@
  * @module goodbye-banner
  */
 
-import { c } from "./agent.ts"
+import { c } from "./ui/style/ansi.ts"
 
 export interface GoodbyeOptions {
   /** Session id to include in the resume hint. Empty/missing → degraded copy. */

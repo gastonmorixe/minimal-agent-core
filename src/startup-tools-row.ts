@@ -36,8 +36,8 @@
  * @module startup-tools-row
  */
 
-import { c } from "./agent.ts"
 import { displayWidth } from "./term-width.ts"
+import { c } from "./ui/style/ansi.ts"
 
 /**
  * Subset of `PluginToolDefinition` (in `./plugins/loader.ts`)

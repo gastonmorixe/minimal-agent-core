@@ -13,8 +13,8 @@
  * @module commands/logout
  */
 
-import { c } from "../agent.ts"
 import { clearCredentials } from "../auth.ts"
+import { c } from "../ui/style/ansi.ts"
 
 export interface LogoutDeps {
   /**

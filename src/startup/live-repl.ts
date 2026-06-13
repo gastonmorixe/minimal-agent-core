@@ -15,7 +15,6 @@
  * @module startup/live-repl
  */
 
-import { c } from "../agent/ansi.ts"
 import type { Agent, runRepl } from "../agent.ts"
 import type { AuthResult } from "../auth.ts"
 import { AutoAskController } from "../auto-ask.ts"
@@ -28,6 +27,7 @@ import type { PluginLoader } from "../plugins/loader.ts"
 import { getSessionId } from "../session-id.ts"
 import type { Spinner } from "../spinner.ts"
 import type { StatusSpinnerTheme } from "../status.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /** Inputs for {@link runLiveAreaRepl}. */
 export interface LiveAreaReplOptions {

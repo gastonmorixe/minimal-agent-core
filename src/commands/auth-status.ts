@@ -14,8 +14,8 @@
  * @module commands/auth-status
  */
 
-import { c } from "../agent.ts"
 import { type CredentialsData, readCredentials } from "../auth.ts"
+import { c } from "../ui/style/ansi.ts"
 
 export interface AuthStatusDeps {
   /** Override the credential-store read (tests). */

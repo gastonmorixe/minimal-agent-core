@@ -1,5 +1,5 @@
-import { c } from "../agent.ts"
 import { BETA_FLAGS_DETAILED } from "../headers.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * Implements `minimal-agent list-flags`: prints every beta feature flag the

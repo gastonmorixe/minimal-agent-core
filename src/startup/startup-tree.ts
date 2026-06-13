@@ -17,13 +17,13 @@
  * @module startup/startup-tree
  */
 
-import { c } from "../agent/ansi.ts"
 import { catRows, DEFAULT_CAT } from "../cats.ts"
 import { VERSION } from "../headers.ts"
 import { BREATHING_DOT } from "../spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"
 import { wrapStartupToolsRows } from "../startup-tools-row.ts"
 import { displayWidth, truncateDisplayWidth, wrapRows } from "../term-width.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /**
  * Whether the startup tree prints at all. Set once at boot from

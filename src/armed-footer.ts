@@ -32,7 +32,7 @@
  */
 
 import type { ArmedSource } from "./abort-quit-fsm.ts"
-import { c } from "./agent.ts"
+import { c } from "./ui/style/ansi.ts"
 
 export interface ArmedFooterOptions {
   source: ArmedSource
