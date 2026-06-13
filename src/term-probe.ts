@@ -6,7 +6,7 @@
  * Our `term-width.ts` table is a best-guess; iTerm + a patched Nerd Font
  * Mono renders `U+F1064` two cells wide while advancing the cursor only
  * one cell, which makes the right half of the glyph overdraw the next
- * cell (see the long discussion in src/live-area-status.ts and the
+ * cell (see the long discussion in src/ui/status/live-area-controller.ts and the
  * memory log).
  *
  * The only way to know for sure is to ask the terminal: write the glyph,

@@ -8,24 +8,21 @@
  * {@link EditorController.setStatus}, which paints it as the top row of the
  * compositor's live area.
  *
- * @module live-area-status
+ * @module ui/status/live-area-controller
  */
 
-import type { StatusController } from "./agent.ts"
-import { visualCellsForGlyph } from "./nerd-glyph-width.ts"
-import {
-  formatActivityInfix,
-  formatElapsedSuffix,
-  type StatusBus,
-  type StatusSnapshot,
-  type StatusSpinnerTheme,
-} from "./status.ts"
+import type { StatusController } from "../../agent.ts"
+import { visualCellsForGlyph } from "../../nerd-glyph-width.ts"
+import type { StatusBus, StatusSnapshot } from "../../status.ts"
 import {
   BlinkingNerdSpinner,
   type Spinner,
   SpinnerManager,
   type SpinnerNotification,
-} from "./ui/spinner/index.ts"
+} from "../spinner/index.ts"
+
+import { formatActivityInfix, formatElapsedSuffix, LABEL_BYTES_RE } from "./format.ts"
+import type { StatusSpinnerTheme } from "./line-renderer.ts"
 
 interface EditorStatusSink {
   setStatus(text: string | null): void
@@ -37,8 +34,6 @@ interface EditorStatusSink {
  * counter (in which case the activity infix suppresses its own bytes
  * segment to avoid duplication). See `formatActivityInfix.hideBytes`.
  */
-const LABEL_BYTES_RE = /\(\d+(?:\.\d+)?\s?(?:B|KB|MB)\)\s*$/
-
 export interface LiveAreaStatusOptions {
   maxFps?: number
   spinner?: Spinner<StatusSpinnerTheme>
@@ -194,7 +189,9 @@ export class LiveAreaStatusController implements StatusController {
     }
     this.spinnerManager.ensureMounted()
     this.spinnerManager.setNotification(this.toNotification(status))
-    this.spinnerManager.setTheme(status.spinnerTheme ?? this.baseTheme)
+    this.spinnerManager.setTheme(
+      (status.spinnerTheme as StatusSpinnerTheme | undefined) ?? this.baseTheme,
+    )
     this.spinnerGlyph = this.nextGlyph()
     this.paint()
     this.scheduleNextTick()

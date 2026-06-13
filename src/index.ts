@@ -119,11 +119,11 @@ import {
   setStartupTreeVisible,
   startStartupRowSpinner,
 } from "./startup/startup-tree.ts"
-import type { StatusSpinnerTheme } from "./status.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
 import type { Spinner } from "./ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./ui/spinner/named-presets.ts"
+import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing

@@ -25,7 +25,8 @@ import type { AuthResult } from "./auth.ts"
 import type { SendOptions, StreamedResponse } from "./client.ts"
 import type { PluginLoader } from "./plugins/loader.ts"
 import type { TUIResult } from "./plugins/types.ts"
-import { formatActivityInfix, GLOBAL_STATUS_BUS, type StatusActivity } from "./status.ts"
+import { GLOBAL_STATUS_BUS, type StatusActivity } from "./status.ts"
+import { formatActivityInfix } from "./ui/status/format.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")

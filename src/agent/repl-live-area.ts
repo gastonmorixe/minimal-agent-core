@@ -26,8 +26,9 @@ import { buildQueueDecorationLines } from "../queue-decoration.ts"
 import { formatRestoredMessages } from "../queue-restore.ts"
 import { loadQueue, QueueStore } from "../queue-store.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
-import { GLOBAL_STATUS_BUS, StatusBus, type StatusSpinnerTheme } from "../status.ts"
+import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
+import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 
 import { c, faintThinkingChunk, formatAbortedEcho } from "./ansi.ts"
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
@@ -189,7 +190,7 @@ export async function runReplLiveArea(
   if (opts && "statusRenderer" in opts) {
     statusRenderer = opts.statusRenderer ?? null
   } else {
-    const { LiveAreaStatusController } = await import("../live-area-status.ts")
+    const { LiveAreaStatusController } = await import("../ui/status/live-area-controller.ts")
     if (typeof editor.setStatus !== "function") {
       throw new Error("runRepl: editor.setStatus is required when statusRenderer is omitted")
     }

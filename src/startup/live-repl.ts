@@ -25,8 +25,8 @@ import { mediaPasteInterceptor } from "../media/paste-intercept.ts"
 import type { ModeManager } from "../modes.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import { getSessionId } from "../session-id.ts"
-import type { StatusSpinnerTheme } from "../status.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
+import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /** Inputs for {@link runLiveAreaRepl}. */

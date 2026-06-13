@@ -119,7 +119,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "session-restore.test.ts",
   "session-store.test.ts",
   "session-usage.test.ts",
-  "status.test.ts",
   "usage-stats.test.ts",
   "ui/choice-modal.test.ts",
   "ui/compositor.test.ts",
