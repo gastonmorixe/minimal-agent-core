@@ -31,10 +31,10 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { Formatter } from "../formatter.ts"
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
 
 import { Compositor } from "./compositor.ts"
+import { Formatter } from "./formatter/formatter.ts"
 
 function loadFixture(name: string): string {
   const p = join(import.meta.dir, "..", "test-utils", "fixtures", name)

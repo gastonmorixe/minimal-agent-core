@@ -828,7 +828,7 @@ async function execBash(
     // tput's hardcoded 80x24 last-resort fallback. Snapshot-at-spawn, not
     // live : if the user resizes mid-command, `$COLUMNS` inside that bash
     // does NOT update. Acceptable because bash commands are short-lived;
-    // mirrors the stance documented in `src/formatter.ts:buildEnv`.
+    // mirrors the stance documented in `src/ui/formatter/formatter.ts:formatterEnv`.
     // `TERM=dumb` is kept : it prevents subprocess tools from emitting
     // ANSI escapes that would corrupt our tool-output rendering. Size
     // belongs to env vars; capabilities belong to TERM.

@@ -33,8 +33,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { parseFormatterCommand } from "./formatter.ts"
 import { parseJsonc } from "./jsonc.ts"
+import { parseFormatterCommand } from "./ui/formatter/formatter.ts"
 
 export interface UserConfig {
   model?: string
