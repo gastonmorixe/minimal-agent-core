@@ -7,10 +7,12 @@
  * @module sub-agents/lib/style
  */
 
-import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, color } from "@minimal-agent/plugin-api/utils/ansi"
 import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
 import type { SubagentStatus } from "./types.ts"
+
+export { color }
 
 /** Glyphs. Status glyphs are intentionally shared with the `tasks` plugin. */
 export const GLYPHS = {
@@ -42,11 +44,6 @@ export const ANSI = {
   DGRAY: ANSI_CODES.DARK_GRAY, // frame chrome
   LGRAY: ANSI_CODES.LIGHT_GRAY, // secondary chrome
 } as const
-
-/** Wrap `text` in ANSI codes when `ansi` is true; identity otherwise. */
-export function color(ansi: boolean, codes: string, text: string): string {
-  return ansi ? `${codes}${text}${ANSI.RESET}` : text
-}
 
 /** The status glyph for a worker, colored by state. */
 export function statusGlyph(s: SubagentStatus, ansi: boolean): string {

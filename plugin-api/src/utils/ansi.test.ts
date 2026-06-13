@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { ANSI_CODES, ansiStyle, attr, combo, fg } from "./ansi.ts"
+import { ANSI_CODES, ansiStyle, attr, color, combo, fg } from "./ansi.ts"
 import { PALETTE } from "./palette.ts"
 
 describe("ansi helpers", () => {
@@ -32,5 +32,10 @@ describe("ansi helpers", () => {
     expect(ANSI_CODES.DIM).toBe("\x1b[2m")
     expect(ANSI_CODES.DARK_GRAY).toBe("\x1b[38;5;240m")
     expect(ANSI_CODES.LIGHT_GRAY).toBe("\x1b[38;5;246m")
+  })
+
+  it("conditionally colors text with a full reset", () => {
+    expect(color(true, ANSI_CODES.BOLD, "x")).toBe("\x1b[1mx\x1b[0m")
+    expect(color(false, ANSI_CODES.BOLD, "x")).toBe("x")
   })
 })
