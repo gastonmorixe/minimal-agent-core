@@ -10,8 +10,7 @@
  * @module usage/lib/state
  */
 
-import type { UsagePeriod, UsageReport } from "../../../src/usage-stats.ts"
-
+import type { UsagePeriod, UsageReport } from "./host-types.ts"
 import { DEFAULT_PERIOD_INDEX } from "./overlay.ts"
 
 /**
