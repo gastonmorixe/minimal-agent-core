@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { VERSION } from "../headers.ts"
+import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 import { type HelpSection, renderHelpSections } from "../ui/help/render.ts"
 import { c } from "../ui/style/ansi.ts"
 
@@ -39,9 +40,9 @@ export function readEmbeddedPackageVersion(embeddedDir: string): string {
   return "0.0.0"
 }
 
-/** Print the full `--help` usage text to stdout. */
-export function printHelp(): void {
-  const lines = [
+/** Render the full `--help` usage text without writing to stdout. */
+export function renderHelp(): string[] {
+  return [
     `  ${c.bold("minimal-agent")} ${c.dim(`v${VERSION}`)}`,
     `  ${c.faintWhite(c.italic("by Gaston Morixe"))} ${c.faintWhite("·")} ${c.faintWhite(c.italic("github.com/gastonmorixe/minimal-agent"))}`,
     "",
@@ -52,7 +53,11 @@ export function printHelp(): void {
     "",
     ...renderHelpSections(buildHelpSections()),
   ]
-  console.log(lines.join("\n"))
+}
+
+/** Print the full `--help` usage text to stdout. */
+export function printHelp(output: CommandOutput = process.stdout): void {
+  writeCommandRows(renderHelp(), output)
 }
 
 function buildHelpSections(): HelpSection[] {
