@@ -10,7 +10,8 @@
  * @module schedule/handlers/cron_create
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { isValidCron, nextFire, parseCron } from "../lib/cron.ts"
 import { describeCreated, taskFooter, taskInfo, wrapText } from "../lib/format.ts"
 import { intervalToCron, parseDurationMs } from "../lib/interval.ts"

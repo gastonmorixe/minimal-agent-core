@@ -25,9 +25,10 @@
  * `MINIMAL_AGENT_QUOTA_OVERAGE=1` to surface it.
  */
 
+import type { LiveAreaHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { loadUserConfig } from "../../src/config.ts"
 import { resolveProviderSessionInfo } from "../../src/llm/provider-session.ts"
-import type { LiveAreaHandlerContext } from "../../src/plugins/types.ts"
 import { getSessionTokens } from "../../src/session-tokens.ts"
 
 import { renderQuotaFooter } from "./render.ts"

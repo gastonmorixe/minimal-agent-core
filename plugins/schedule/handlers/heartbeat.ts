@@ -10,7 +10,8 @@
  * @module schedule/handlers/heartbeat
  */
 
-import type { LiveAreaHandlerContext } from "../../../src/plugins/types.ts"
+import type { LiveAreaHandlerContext } from "@minimal-agent/plugin-api/types/plugin"
+
 import { cronStoreForSession } from "../lib/store.ts"
 import { runTick } from "../lib/tick.ts"
 

@@ -7,7 +7,8 @@
  * @module schedule/handlers/cron_list
  */
 
-import type { TUIContext, TUIResult } from "../../../src/plugins/types.ts"
+import type { TUIContext, TUIResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { coloredEntryLine } from "../lib/box.ts"
 import { formatList } from "../lib/format.ts"
 import { cronStoreForSession } from "../lib/store.ts"

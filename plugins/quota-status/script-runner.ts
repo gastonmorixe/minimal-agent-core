@@ -17,10 +17,29 @@
  * @module quota-status/script-runner
  */
 
-import { parseFormatterCommand } from "../../src/formatter.ts"
-
 /** Hard cap for a status script, independent of the caller signal. */
 const SCRIPT_TIMEOUT_MS = 4_000
+
+/**
+ * Split a shell-ish command string into argv, honoring `"..."` / `'...'`
+ * quoting. Local, dependency-free copy of the host's `parseFormatterCommand`
+ * (`src/formatter.ts`): the decoupling contract (Wave D) forbids importing
+ * from `src/`, and this parser is a few lines of pure regex with no host
+ * state. Behavior is identical: double- or single-quoted runs become one arg
+ * (quotes stripped), bare whitespace-delimited tokens become separate args.
+ *
+ * @param cmd - The raw command string from `statusBar.script`.
+ * @returns The parsed argv (empty when `cmd` is blank).
+ */
+function parseFormatterCommand(cmd: string): string[] {
+  const args: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(cmd)) !== null) {
+    args.push(match[1] ?? match[2] ?? match[3]!)
+  }
+  return args
+}
 
 /**
  * Run `script` with `payload` (JSON) on stdin. Returns the first stdout line, or

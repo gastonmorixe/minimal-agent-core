@@ -13,7 +13,8 @@
  * @module schedule/handlers/cmd_schedule
  */
 
-import type { CommandContext, CommandResult } from "../../../src/plugins/types.ts"
+import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
+
 import { coloredEntryLine, renderBox } from "../lib/box.ts"
 import { isValidCron } from "../lib/cron.ts"
 import {

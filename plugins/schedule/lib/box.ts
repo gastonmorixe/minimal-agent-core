@@ -25,7 +25,7 @@
  * @module schedule/lib/box
  */
 
-import { PALETTE } from "../../../src/palette.ts"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
 import { cadenceLabel, clipPrompt, kindGlyph, relativeTime } from "./format.ts"
 import { nextFireMs } from "./scheduler.ts"
