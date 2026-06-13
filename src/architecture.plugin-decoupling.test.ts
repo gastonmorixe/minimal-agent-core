@@ -123,6 +123,13 @@ const BASELINE = new Map<string, number>([
   ["usage/lib/overlay.ts", 2],
   ["usage/lib/state.test.ts", 1],
   ["usage/lib/state.ts", 1],
+  // D-quickwins: residual. `brave.ts` imports `retry` + `type RetryOptions`
+  // from `src/retry.ts`. That module is PURE (zero host state, injectable
+  // sleep/now/random) and belongs in `@minimal-agent/plugin-api/utils/retry`,
+  // but no such export exists yet and plugin-api/ is out of this unit's
+  // allowlist. Re-point mechanically once a plugin-api unit adds the export
+  // (trivial pure-util move). Inlining a 250-line fork here was rejected as a
+  // maintenance/behavior risk, not a mechanical re-point.
   ["web-search/providers/brave.ts", 1],
 ])
 
