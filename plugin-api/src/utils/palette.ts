@@ -19,14 +19,14 @@
  *
  * # Plugin sharing
  *
- * The plugin loader injects {@link paletteEnvJson} as
- * `MINIMAL_AGENT_PALETTE` in every handler's environment. Subprocess
- * plugins can `JSON.parse(process.env.MINIMAL_AGENT_PALETTE)` to read a
- * `{tokenName: SGRopen}` map. Module plugins co-located in this repo
- * can also `import { PALETTE } from "../../../src/palette.ts"` directly.
+ * Module plugins import these tokens from `@minimal-agent/plugin-api/utils/palette`.
+ * Subprocess plugins receive the same data through {@link paletteEnvJson} as
+ * `MINIMAL_AGENT_PALETTE` and can `JSON.parse(process.env.MINIMAL_AGENT_PALETTE)`
+ * to read a `{tokenName: SGRopen}` map.
  *
  * Reuse is **opt-in, not mandatory** — every entry is a plain string, so
- * a plugin that doesn't care can keep emitting raw `\x1b[31m`.
+ * a plugin that needs bespoke terminal styling can still supply its own SGR
+ * strings without importing host UI modules.
  *
  * @module palette
  */

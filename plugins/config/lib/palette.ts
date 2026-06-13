@@ -1,32 +1,38 @@
 /**
- * Local SGR shortcuts for the config overlay.
+ * Config overlay style facade.
  *
- * Mirrors the colors in minimal-agent's `src/palette.ts` so the overlay
- * renders in the same visual family, but kept as raw byte strings here so
- * the plugin's `lib/` stays a pure, host-free, standalone-testable unit.
- * (Same decoupling pattern as `ma-slash-menu-plugin/lib/palette.ts`.)
+ * This module keeps the renderer's local names stable while sourcing ANSI,
+ * palette, and display-width behavior from the shared plugin API. The plugin
+ * remains host-free: it depends on the contract package, not `src/ui/*`.
  *
  * @module config/lib/palette
  */
 
+import { ANSI_CODES, color } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+import {
+  displayWidth,
+  stripAnsi,
+  truncateDisplayWidth,
+} from "@minimal-agent/plugin-api/utils/term-width"
+
 export const SGR = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  italic: "\x1b[3m",
-  underline: "\x1b[4m",
-  // Modern "Cool Summer" palette (synced with src/palette.ts).
-  pink: "\x1b[38;5;199m",
-  lime: "\x1b[38;5;118m",
-  sky: "\x1b[38;5;45m",
-  violet: "\x1b[38;2;180;140;255m",
-  gold: "\x1b[38;5;214m",
-  orange: "\x1b[38;5;208m",
-  purple: "\x1b[38;5;98m",
+  reset: ANSI_CODES.RESET,
+  bold: ANSI_CODES.BOLD,
+  dim: ANSI_CODES.DIM,
+  italic: ANSI_CODES.ITALIC,
+  underline: ANSI_CODES.UNDERLINE,
+  pink: PALETTE.pink,
+  lime: PALETTE.lime,
+  sky: PALETTE.sky,
+  violet: PALETTE.violet,
+  gold: PALETTE.gold,
+  orange: PALETTE.orange,
+  purple: PALETTE.purple,
   // Standard.
-  red: "\x1b[31m",
-  brightRed: "\x1b[91m",
-  white: "\x1b[37m",
+  red: PALETTE.red,
+  brightRed: PALETTE.brightRed,
+  white: PALETTE.white,
   faintWhite: "\x1b[2;37m",
   boldWhite: "\x1b[1;37m",
   // Dim / bold variants for headers + emphasis.
@@ -45,7 +51,7 @@ export const SGR = {
 /** Wrap text in an SGR open + reset, with a guard for empty strings. */
 export function wrap(text: string, sgr: string): string {
   if (text === "") return ""
-  return `${sgr}${text}${SGR.reset}`
+  return color(true, sgr, text)
 }
 
 /** Wrap with dim. */
@@ -55,13 +61,12 @@ export function dim(text: string): string {
 
 /** Strip SGR escapes — needed for visual-width math + tests. */
 export function stripSgr(s: string): string {
-  // ESC = U+001B; intentional control char to match real ANSI streams.
-  return s.replace(/\u001b\[[\d;]*m/g, "")
+  return stripAnsi(s)
 }
 
-/** Visible cell width (ASCII-only content; good enough for our rows). */
+/** Visible cell width using the shared terminal-width model. */
 export function visualWidth(s: string): number {
-  return stripSgr(s).length
+  return displayWidth(s)
 }
 
 /** Right-pad to `width` visible cells. */
@@ -76,7 +81,7 @@ export function padRight(s: string, width: number, padChar = " "): string {
 export function truncate(s: string, maxWidth: number): string {
   if (visualWidth(s) <= maxWidth) return s
   if (maxWidth <= 1) return "…"
-  return s.slice(0, maxWidth - 1) + "…"
+  return truncateDisplayWidth(s, maxWidth, "…")
 }
 
 /**
@@ -85,22 +90,5 @@ export function truncate(s: string, maxWidth: number): string {
  * a wide value never wraps the live area.
  */
 export function truncateVisible(s: string, maxCells: number): string {
-  if (maxCells <= 0) return ""
-  let out = ""
-  let cells = 0
-  let i = 0
-  while (i < s.length) {
-    if (s[i] === "\u001b") {
-      const end = s.indexOf("m", i)
-      if (end < 0) break
-      out += s.slice(i, end + 1)
-      i = end + 1
-      continue
-    }
-    if (cells >= maxCells) break
-    out += s[i]
-    cells++
-    i++
-  }
-  return out
+  return truncateDisplayWidth(s, maxCells, "")
 }
