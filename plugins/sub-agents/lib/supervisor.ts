@@ -127,13 +127,53 @@ function stripIncompleteMarker(short: string): string | undefined {
   return out.length > 0 ? out : undefined
 }
 
-/** Deadline check: has a running worker blown its `budget.deadlineSec`? */
+/**
+ * Hard wall-clock ceiling applied to EVERY running worker when its budget does
+ * not set an explicit `deadlineSec` (B-083). Budgets are almost never set, so
+ * without a default a worker that wedges mid-finalize (e.g. frozen at its
+ * `ReportResult` write) stays `running` forever and permanently holds a
+ * concurrency slot (it keeps counting toward `maxConcurrent` via `isActive`).
+ * 30 min is generous enough that a legitimate long-running worker is not killed,
+ * but a truly stuck one is eventually reaped. An explicit `budget.deadlineSec`
+ * always overrides this.
+ */
+export const DEFAULT_DEADLINE_SEC = 30 * 60 // 30 minutes
+
+/**
+ * Shorter no-progress window after which a worker would be treated as stalled.
+ *
+ * FOLLOW-UP (B-083, stall watchdog): a true stall watchdog needs a
+ * last-progress timestamp on the record (e.g. `Progress.lastProgressAt` or a
+ * `SubagentRecord` field the heartbeat stamps when tools/tokens advance). The
+ * current `Progress` type ({@link types.ts}) carries `tools`/`tokens`/`lastTool`/
+ * `lastActivity` but NO timestamp, and this reducer is pure (it only gets `now`
+ * each tick), so it cannot measure "no progress for N seconds" without that
+ * field. Rather than invent a whole tracking system here, the watchdog is left
+ * as a follow-up: add a progress timestamp, then gate a stall kill on it through
+ * the SAME terminal path as the deadline below. The default hard deadline
+ * (above) already stops the unbounded slot leak in the meantime.
+ */
+export const DEFAULT_STALL_SEC = 5 * 60 // 5 minutes (reserved for the follow-up watchdog)
+
+/**
+ * The effective wall-clock deadline (seconds) for a worker: its explicit
+ * `budget.deadlineSec` when set and positive, else the hard {@link
+ * DEFAULT_DEADLINE_SEC} (B-083). A non-positive budget is treated as "unset".
+ */
+function effectiveDeadlineSec(r: SubagentRecord): number {
+  const explicit = r.budget?.deadlineSec
+  return explicit !== undefined && explicit > 0 ? explicit : DEFAULT_DEADLINE_SEC
+}
+
+/**
+ * Deadline check: has a running worker blown its effective deadline? Unlike the
+ * old check, an UNBUDGETED worker is no longer exempt — it falls back to
+ * {@link DEFAULT_DEADLINE_SEC} so a wedged worker is eventually killed (B-083).
+ */
 function deadlineExceeded(r: SubagentRecord, startedAt: string, nowMs: number): boolean {
-  const sec = r.budget?.deadlineSec
-  if (sec === undefined || sec <= 0) return false
   const startMs = Date.parse(startedAt)
   if (!Number.isFinite(startMs)) return false
-  return nowMs - startMs > sec * 1000
+  return nowMs - startMs > effectiveDeadlineSec(r) * 1000
 }
 
 /**
@@ -172,12 +212,21 @@ function step(
   if (s.kind !== "running") return { status: s, effects: [] }
 
   // running: the interesting transitions.
-  // 1. Budget tripped → ask the shell to kill, mark failed(timeout).
+  // 1. Deadline tripped → ask the shell to kill, mark failed(timeout). This now
+  //    fires for UNBUDGETED workers too, via the DEFAULT_DEADLINE_SEC fallback
+  //    in `deadlineExceeded` (B-083): a worker wedged mid-finalize (e.g. stuck at
+  //    ReportResult) used to be exempt and leaked its concurrency slot forever.
+  //    Routed through the SAME stop + terminalEffects path as an explicit budget
+  //    so the pid is actually killed and the record transitions to failed WITH
+  //    terminal effects emitted (no B-087-style bypass).
   if (deadlineExceeded(r, s.startedAt, nowMs)) {
+    const hadBudget = (r.budget?.deadlineSec ?? 0) > 0
     const status: SubagentStatus = {
       kind: "failed",
       endedAt: now,
-      error: "timed out (budget deadline exceeded)",
+      error: hadBudget
+        ? "timed out (budget deadline exceeded)"
+        : `timed out (no progress; exceeded ${DEFAULT_DEADLINE_SEC}s default hard deadline — likely wedged)`,
     }
     return {
       status,
