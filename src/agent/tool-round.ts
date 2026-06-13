@@ -31,7 +31,7 @@ import {
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { SessionStore } from "../session-store.ts"
 import { GLOBAL_STATUS_BUS } from "../status.ts"
-import { displayWidth, expandTabs } from "../term-width.ts"
+import { expandTabs } from "../term-width.ts"
 import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
@@ -39,12 +39,10 @@ import { executeTool, type ToolResultMediaBlock } from "../tools.ts"
 import { c } from "../ui/style/ansi.ts"
 import {
   clampBodyWithHint,
-  clampTranscriptRow,
   computeTuiElision,
   effectiveBodyLineWidth,
   formatDiagnosticsAnnotation,
-  formatToolInput,
-  formatToolInputContinuation,
+  formatToolHeaderRows,
   formatToolPreview,
   renderFindingsPanel,
   renderStreamedTail,
@@ -52,26 +50,9 @@ import {
   TOOL_PREVIEW_GUTTER_WIDTH,
   TOOL_PREVIEW_LINES,
   TOOL_PREVIEW_LINES_DEFAULT,
-  toolContinuationIndentCells,
+  type ToolPresentation,
   tuiPreviewHint,
 } from "../ui/tool-transcript/format.ts"
-
-/**
- * Cosmetic per-tool presentation hints (icon, label color, early-header
- * input field) stripped from the tool definitions before they go on the
- * wire. Keyed by tool name in {@link ToolRoundContext.presentation}.
- */
-export interface ToolPresentation {
-  /** Glyph drawn before the bold tool name in the transcript header. */
-  icon?: string
-  /** Palette key (a method name on `c`) for the icon + label color. */
-  color?: string
-  /**
-   * Input field whose value can headline the transcript header BEFORE the
-   * handler returns (the early-paint opt-in for long-running plugin tools).
-   */
-  headerKey?: string
-}
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
@@ -218,72 +199,15 @@ export async function executeToolRound(
   const writeToolHeader = (override?: string): void => {
     if (headerWritten) return
     headerWritten = true
-    // Header layout is always `╭ [icon] [label]  [content] [· <time>]`.
-    // The icon and label come from the manifest unconditionally (so
-    // the tool's identity stays visible regardless of what the plugin
-    // renders); the content slot is the only thing a plugin can
-    // customize, via `displayHeader`. When no override is provided,
-    // the slot is filled with the default `formatToolInput` summary
-    // plus any continuation rows the formatter wants to add. The
-    // optional ` · <time>` suffix is appended last when an
-    // Agent.toolTimeTracker is wired up (production always; tests
-    // opt in). See src/tool-time.ts for the format ladder
-    // (HH:MM:SS / Mon DD HH:MM:SS).
-    const labelColor =
-      pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
-        ? (c as Record<string, (s: string) => string>)[pres.color]
-        : c.orange
-    // Icon is bold + colored (matches the bold name). Bold gives thin
-    // monochrome glyphs (⧗, ◈, ✦) real presence; without it they read
-    // as faint specks at terminal size.
-    const icon = pres?.icon ? `${c.bold(labelColor(pres.icon))} ` : ""
-    const label = c.bold(labelColor(tool.name))
-    // Capture the time-hint BEFORE formatting the content so
-    // soft-split (and continuation rows) can be told to leave room
-    // for it on the right. First-tool / day-rollover suffix is
-    // "May 14 15:42:03" (15 cells); steady-state is "15:42:03"
-    // (8 cells). The leading ` · ` separator adds 3 more, plus a
-    // small gutter so the suffix doesn't visually butt against the
-    // wrap edge. Both formatToolInput AND formatToolInputContinuation
-    // get the SAME adjusted cols so the soft-split decision is
-    // consistent across the first row and continuation rows.
-    // `suppressToolTime` is set by plugins that draw their own
-    // trailing date+time inside `displayHeader` (e.g. the tasks
-    // plugin renders `· YYYY-MM-DD HH:MM:SS` with year). Skip the
-    // agent's `· HH:MM:SS` suffix entirely AND do NOT advance the
-    // ToolTimeTracker — letting a later non-suppressed tool emit
-    // the normal day-rollover prefix if appropriate.
     const timeText = suppressToolTime ? undefined : ctx.toolTimeTracker?.format(Date.now())
-    const timeSuffix = timeText !== undefined ? ` · ${timeText}` : ""
-    const TIME_HINT_GUTTER = 2
-    const adjustedCols =
-      renderCols !== undefined && timeSuffix.length > 0
-        ? Math.max(20, renderCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
-        : renderCols
-    const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
-    const content = override ?? c.dim(formatToolInput(tool, adjustedCols, pres?.headerKey))
-    const headerLine =
-      content.length === 0
-        ? `${icon}${label}${dimTimeSuffix}`
-        : `${icon}${label}  ${content}${dimTimeSuffix}`
-    // Outer-row clamp catches cases the inner soft-split machinery
-    // doesn't (Bash commands with no operators, long file paths,
-    // generic JSON-fallback headers). Pre-clamp the row INCLUDING
-    // its `  ╭ ` gutter prefix so it never overflows the visible
-    // column count. See {@link clampTranscriptRow}.
-    writeTranscript(`\n${clampTranscriptRow(`  ${c.dimCyan("╭")} ${headerLine}`, renderCols)}`)
-    if (override === undefined) {
-      // Indent so `↳`/`>` aligns directly under the start of the
-      // command body in the header (under `c` of `cd …`). See
-      // {@link toolContinuationIndentCells} for the layout walk.
-      const indent = " ".repeat(toolContinuationIndentCells(tool.name, pres?.icon))
-      for (const cont of formatToolInputContinuation(tool, adjustedCols)) {
-        writeTranscript(
-          clampTranscriptRow(`  ${c.dimCyan("│")} ${indent}${c.dim(cont)}`, renderCols),
-        )
-      }
-    }
-    writeTranscript(`  ${c.dimCyan("│")}`)
+    const rows = formatToolHeaderRows({
+      tool,
+      presentation: pres,
+      headerOverride: override,
+      timeText,
+      cols: renderCols,
+    })
+    for (const [idx, row] of rows.entries()) writeTranscript(idx === 0 ? `\n${row}` : row)
   }
 
   let content: string

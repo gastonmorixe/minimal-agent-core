@@ -18,6 +18,23 @@ import { truncHint } from "../../truncate-hint.ts"
 import { c } from "../style/ansi.ts"
 
 /**
+ * Cosmetic per-tool presentation hints stripped from tool definitions before
+ * they go on the model wire. The transcript renderer owns how these hints are
+ * applied to the TUI frame.
+ */
+export interface ToolPresentation {
+  /** Glyph drawn before the bold tool name in the transcript header. */
+  icon?: string
+  /** Palette key (a method name on `c`) for the icon + label color. */
+  color?: string
+  /**
+   * Input field whose value can headline the transcript header before the
+   * handler returns.
+   */
+  headerKey?: string
+}
+
+/**
  * Per-tool char cap for the bordered tool **header** line ("╭ Bash $ ..."),
  * applied only when the input field truly overflows. The cap is generous
  * (500 chars for Bash, 200 for the JSON fallback) : much wider than the
@@ -322,10 +339,9 @@ export function formatToolInputContinuation(tool: ToolUseBlock, cols?: number): 
  *  - with `»` icon → 10 cells of padding
  *  - without icon (session-replay header) → 8 cells of padding
  *
- * Two emit sites consume this: `agent.ts` (live agent transcript) and
- * `session-replay.ts` (--resume scrollback rehydration). Keeping the
- * arithmetic in one helper makes both stay in sync if header shape
- * changes later.
+ * `formatToolHeaderRows` consumes this for both live execution and
+ * session replay. Keeping the arithmetic behind that shared helper makes
+ * both paths stay in sync if header shape changes later.
  */
 export function toolContinuationIndentCells(toolName: string, iconText?: string): number {
   if (toolName !== "Bash") return 0
@@ -334,6 +350,58 @@ export function toolContinuationIndentCells(toolName: string, iconText?: string)
   const gapCells = 2
   const cmdSigilCells = 2 // "$ " from formatToolInput
   return iconCells + labelCells + gapCells + cmdSigilCells
+}
+
+/**
+ * Render the rows that open a tool transcript block:
+ *
+ *   ╭ [icon] [Tool]  [input/header override] [· time]
+ *   │ [continuation rows, when the default header owns Bash wrapping]
+ *   │
+ *
+ * Live execution and session replay both use this helper so frame chrome,
+ * width adjustment for the time suffix, continuation indentation, and
+ * presentation color fallback stay byte-identical.
+ */
+export function formatToolHeaderRows(opts: {
+  tool: ToolUseBlock
+  presentation?: ToolPresentation | null
+  headerOverride?: string
+  timeText?: string
+  cols?: number
+}): string[] {
+  const { tool, presentation, headerOverride, timeText, cols } = opts
+  const labelColor =
+    presentation?.color && (c as Record<string, (s: string) => string>)[presentation.color]
+      ? (c as Record<string, (s: string) => string>)[presentation.color]
+      : c.orange
+  const icon = presentation?.icon ? `${c.bold(labelColor(presentation.icon))} ` : ""
+  const label = c.bold(labelColor(tool.name))
+  const timeSuffix = timeText !== undefined ? ` · ${timeText}` : ""
+  const TIME_HINT_GUTTER = 2
+  const adjustedCols =
+    cols !== undefined && timeSuffix.length > 0
+      ? Math.max(20, cols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
+      : cols
+  const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
+  const content =
+    headerOverride !== undefined
+      ? headerOverride
+      : c.dim(formatToolInput(tool, adjustedCols, presentation?.headerKey))
+  const headerLine =
+    content.length === 0
+      ? `${icon}${label}${dimTimeSuffix}`
+      : `${icon}${label}  ${content}${dimTimeSuffix}`
+
+  const rows = [clampTranscriptRow(`  ${c.dimCyan("╭")} ${headerLine}`, cols)]
+  if (headerOverride === undefined) {
+    const indent = " ".repeat(toolContinuationIndentCells(tool.name, presentation?.icon))
+    for (const cont of formatToolInputContinuation(tool, adjustedCols)) {
+      rows.push(clampTranscriptRow(`  ${c.dimCyan("│")} ${indent}${c.dim(cont)}`, cols))
+    }
+  }
+  rows.push(`  ${c.dimCyan("│")}`)
+  return rows
 }
 
 /**
