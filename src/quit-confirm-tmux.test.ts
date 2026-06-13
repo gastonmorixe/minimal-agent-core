@@ -1,7 +1,7 @@
 /**
  * tmux smoke: end-to-end regression guard for the abort-quit-FSM.
  *
- * Spawns `tmp/quit-confirm-tmux-driver.ts` inside a real tmux pane and
+ * Spawns `src/test-utils/fixtures/quit-confirm-tmux-driver.ts` inside a real tmux pane and
  * asserts the captured pane shows:
  *   - the goodbye banner heading ("bye")
  *   - the resume hint with a UUID-shaped session id
@@ -31,7 +31,7 @@ const desc = haveTmux() ? describe : describe.skip
 desc("tmux smoke: abort-quit-fsm — confirmed quit prints goodbye banner", () => {
   it("Ctrl+C, wait, Ctrl+C → banner with session id and 'thanks' closer", () => {
     const session = `quit-${Date.now()}`
-    const cmd = "bun run tmp/quit-confirm-tmux-driver.ts; sleep 5"
+    const cmd = "bun run src/test-utils/fixtures/quit-confirm-tmux-driver.ts; sleep 5"
     spawnSync("tmux", ["kill-session", "-t", session], { stdio: "ignore" })
     const start = spawnSync("tmux", [
       "new-session",

@@ -87,7 +87,7 @@ describe("runRepl", () => {
     // The "ctrl+c quit" hint banner used to be emitted from runRepl
     // itself, but moved to `src/index.ts` (May 2026) so it lands above
     // resume replay rather than below it. The banner string lives in
-    // `src/ready-banner.ts`; its content has its own unit test.
+    // `src/ui/chrome/ready-banner.ts`; its content has its own unit test.
     expect(text).not.toContain("^D")
     expect(text).not.toContain("clear")
     expect(text).not.toContain("────────────────")

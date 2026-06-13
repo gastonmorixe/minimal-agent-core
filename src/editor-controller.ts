@@ -23,7 +23,6 @@ import {
   initialState as initialFsmState,
   type QuitReason,
 } from "./abort-quit-fsm.ts"
-import { formatArmedFooter } from "./armed-footer.ts"
 import { EditorKeyDispatcher, type KeyDispatchHost } from "./editor/key-dispatch.ts"
 import {
   type CompositorLike,
@@ -54,6 +53,7 @@ import { computeCursorVisualPos, EditorRenderer } from "./editor-renderer.ts"
 import { type InputCaptureStack, inputCaptureStack } from "./input-capture-stack.ts"
 import type { Hooks } from "./plugins/hooks/hooks.ts"
 import { truncateDisplayWidth } from "./term-width.ts"
+import { formatArmedFooter } from "./ui/chrome/armed-footer.ts"
 
 // Public surface lives in `src/editor/types.ts` and is re-exported here
 // so external consumers (commands, tests, plugins) keep their existing

@@ -93,7 +93,6 @@ import { createAgentContext } from "./plugins/agent-context.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaWindows } from "./quota-summary.ts"
-import { buildReadyBanner } from "./ready-banner.ts"
 import { getSessionId, setSessionId } from "./session-id.ts"
 import {
   buildResumeHeader,
@@ -121,6 +120,7 @@ import {
 } from "./startup/startup-tree.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
+import { buildReadyBanner } from "./ui/chrome/ready-banner.ts"
 import type { Spinner } from "./ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./ui/spinner/named-presets.ts"
 import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"

@@ -16,17 +16,17 @@ import type { ModelInfo } from "../client.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
 import type { QueueKeyHandler } from "../editor/types.ts"
 import { Formatter } from "../formatter.ts"
-import { printGoodbye } from "../goodbye-banner.ts"
-import { buildModeChangeChip } from "../mode-change-chip.ts"
-import { buildPendingModeChangeDecoration } from "../mode-change-pending-decoration.ts"
 import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"
-import { buildQueueDecorationLines } from "../queue-decoration.ts"
 import { formatRestoredMessages } from "../queue-restore.ts"
 import { loadQueue, QueueStore } from "../queue-store.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
+import { printGoodbye } from "../ui/chrome/goodbye-banner.ts"
+import { buildModeChangeChip } from "../ui/chrome/mode-change-chip.ts"
+import { buildPendingModeChangeDecoration } from "../ui/chrome/mode-change-pending-decoration.ts"
+import { buildQueueDecorationLines } from "../ui/chrome/queue-decoration.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 
@@ -385,7 +385,7 @@ export async function runReplLiveArea(
 
   // Ready banner is now written from `src/index.ts` via direct stdout
   // BEFORE the compositor mounts and BEFORE any resume replay. See
-  // `buildReadyBanner` in `./ready-banner.ts` for the rationale (on
+  // `buildReadyBanner` in `../ui/chrome/ready-banner.ts` for the rationale (on
   // resume the banner used to land below the replayed content because
   // the replay had already streamed straight to stdout pre-mount;
   // moving the banner to the top of the scrollback phase fixes that).
@@ -495,7 +495,7 @@ export async function runReplLiveArea(
    * status row and the editor prompt. Only rendered while a turn is in
    * flight : at idle the main loop drains items immediately so there
    * would be nothing to queue. Byte-exact layout lives in the pure
-   * builder `buildQueueDecorationLines` in `src/queue-decoration.ts`.
+   * builder `buildQueueDecorationLines` in `src/ui/chrome/queue-decoration.ts`.
    */
   const renderDecoration = (): void => {
     if (typeof editor.setDecorationLines !== "function") return

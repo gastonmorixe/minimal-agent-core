@@ -55,14 +55,14 @@ applied by the host. Full transition table in the module docstring;
 backstop the host applies BEFORE feeding the FSM, so a wedged FSM cannot
 prevent quit. (6 unit tests.)
 
-### `src/armed-footer.ts` — countdown renderer
+### `src/ui/chrome/armed-footer.ts` — countdown renderer
 
 Pure `formatArmedFooter({source, expiresAt, now}) → string | null`.
 Returns null when expired. Countdown rounds up so a fresh 10s window
 reads "10s" not "9s". Different copy for `idle-confirm` ("ready to
 quit") vs `post-abort` ("aborted"). (12 unit tests.)
 
-### `src/goodbye-banner.ts` — quit footer
+### `src/ui/chrome/goodbye-banner.ts` — quit footer
 
 `formatGoodbye({sessionId, reason}) → string[]` and `printGoodbye(...)`.
 Frame chrome matches startup banner (`╭│╰`, pink brand, lime ✦). The
@@ -121,8 +121,8 @@ Total: 71 new tests across 5 new test files. Full suite: 2356 pass / 0 fail / 5 
 
 New:
 - `src/abort-quit-fsm.ts` + `.test.ts`
-- `src/armed-footer.ts` + `.test.ts`
-- `src/goodbye-banner.ts` + `.test.ts`
+- `src/ui/chrome/armed-footer.ts` + `.test.ts`
+- `src/ui/chrome/goodbye-banner.ts` + `.test.ts`
 - `src/quit-confirm-tmux.test.ts`
 - `tmp/quit-confirm-tmux-driver.ts` (local-only regression guard)
 - `tmp/quit-armed-footer-tmux.ts` (local-only)

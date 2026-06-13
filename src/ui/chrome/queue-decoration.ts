@@ -50,8 +50,8 @@
  * builder renders the plain, non-interactive block exactly as before
  * (byte-for-byte) so a turn that merely has a queue looks unchanged.
  */
-import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
-import { truncHint } from "./truncate-hint.ts"
+import { displayWidth, truncateDisplayWidth } from "../../term-width.ts"
+import { truncHint } from "../../truncate-hint.ts"
 
 /**
  * Cap on item rows before eliding into a "... and N more" tail. Bumped

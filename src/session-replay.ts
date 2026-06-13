@@ -31,12 +31,12 @@ import {
 } from "./agent.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import { Formatter } from "./formatter.ts"
-import { buildModeChangeChip, type ChipRenderInput } from "./mode-change-chip.ts"
 import type { ModeManager } from "./modes.ts"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
 import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
+import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
 
 /**
  * Sink shape: anything with a `write(string)`. The live-area REPL passes
@@ -157,7 +157,7 @@ export interface ReplayOptions {
  *
  * Returns `  ── resumed from <sid> (...) ──\n\n` with NO leading `\n`.
  * The caller is responsible for spacing above the header. When the
- * ready banner (`src/ready-banner.ts`) is written immediately before
+ * ready banner (`src/ui/chrome/ready-banner.ts`) is written immediately before
  * this, its trailing `\n\n` already provides the blank row of breathing
  * room : adding another `\n` here would compound into two blank rows.
  */

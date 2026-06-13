@@ -396,7 +396,7 @@ export async function runRepl(
   if (input instanceof RawInput) input.enable()
 
   // Ready banner is now written from `src/index.ts` BEFORE any resume
-  // replay (see `buildReadyBanner` in `./ready-banner.ts`). This REPL
+  // replay (see `buildReadyBanner` in `../ui/chrome/ready-banner.ts`). This REPL
   // entry point no longer emits it : keeps the banner at the top of
   // scrollback for both fresh starts and `--resume` sessions instead of
   // landing below the replayed content.

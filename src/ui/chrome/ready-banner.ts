@@ -18,9 +18,9 @@
  * @module ready-banner
  */
 
-import type { ModeManager } from "./modes.ts"
-import { displayWidth } from "./term-width.ts"
-import { c } from "./ui/style/ansi.ts"
+import type { ModeManager } from "../../modes.ts"
+import { displayWidth } from "../../term-width.ts"
+import { c } from "../style/ansi.ts"
 
 /** Separator between hint chunks: two spaces, a mid-dot, two spaces. */
 const SEP = "  ·  "
