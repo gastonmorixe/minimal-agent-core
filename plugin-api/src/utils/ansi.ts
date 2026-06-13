@@ -18,6 +18,8 @@ export type AnsiWrapper = (s: string) => string
 export const ANSI_CODES = {
   RESET: "\x1b[0m",
   FG_RESET,
+  BG_RESET: "\x1b[49m",
+  ERASE_LINE: "\x1b[2K",
   BOLD: "\x1b[1m",
   DIM: "\x1b[2m",
   ITALIC: "\x1b[3m",
@@ -31,6 +33,11 @@ export const ANSI_CODES = {
   DARK_GRAY: "\x1b[38;5;240m",
   LIGHT_GRAY: "\x1b[38;5;246m",
 } as const
+
+/** Truecolor background SGR open sequence. */
+export function bgRgb(r: number, g: number, b: number): string {
+  return `\x1b[48;2;${r};${g};${b}m`
+}
 
 /** Wrap with an arbitrary open + close sequence. */
 export const attr = (open: string, close: string): AnsiWrapper => {
@@ -64,6 +71,7 @@ export const ansiStyle = {
   yellow: fg(PALETTE.yellow),
   green: fg(PALETTE.green),
   red: fg(PALETTE.red),
+  white: fg(PALETTE.white),
   bold: attr(ANSI_CODES.BOLD, ANSI_CODES.BOLD_CLOSE),
   italic: attr(ANSI_CODES.ITALIC, ANSI_CODES.ITALIC_CLOSE),
   underline: attr(ANSI_CODES.UNDERLINE, ANSI_CODES.UNDERLINE_CLOSE),
@@ -76,8 +84,11 @@ export const ansiStyle = {
   boldGreen: combo("\x1b[1;32m", "\x1b[22;39m"),
   boldRed: combo("\x1b[1;31m", "\x1b[22;39m"),
   boldYellow: combo("\x1b[1;33m", "\x1b[22;39m"),
+  boldWhite: combo("\x1b[1;37m", ANSI_CODES.RESET),
+  boldBrightWhite: combo("\x1b[1;97m", "\x1b[22;39m"),
   dimCyan: combo("\x1b[2;36m", "\x1b[22;39m"),
   dimRed: combo("\x1b[2;31m", "\x1b[22;39m"),
+  dimViolet: combo("\x1b[2;38;2;180;140;255m", "\x1b[22;39m"),
   faintWhite: combo("\x1b[2;37m", "\x1b[22;39m"),
   strike: attr(ANSI_CODES.STRIKE, ANSI_CODES.STRIKE_CLOSE),
   orange: fg(PALETTE.orange),

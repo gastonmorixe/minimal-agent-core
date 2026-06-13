@@ -8,19 +8,21 @@
  * @module spinner/library/palettes
  */
 
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import type { Colorizer } from "../types.ts"
 
 // ─── Single-color colorizers (basic ANSI 16-color, foreground) ──────────────
 
-export const ansiCyan: Colorizer = (t) => `\x1b[36m${t}\x1b[39m`
-export const ansiBlue: Colorizer = (t) => `\x1b[34m${t}\x1b[39m`
-export const ansiMagenta: Colorizer = (t) => `\x1b[35m${t}\x1b[39m`
-export const ansiGreen: Colorizer = (t) => `\x1b[32m${t}\x1b[39m`
-export const ansiYellow: Colorizer = (t) => `\x1b[33m${t}\x1b[39m`
-export const ansiRed: Colorizer = (t) => `\x1b[31m${t}\x1b[39m`
-export const ansiWhite: Colorizer = (t) => `\x1b[37m${t}\x1b[39m`
-export const ansiDim: Colorizer = (t) => `\x1b[2m${t}\x1b[22m`
-export const ansiBold: Colorizer = (t) => `\x1b[1m${t}\x1b[22m`
+export const ansiCyan: Colorizer = c.cyan
+export const ansiBlue: Colorizer = c.blue
+export const ansiMagenta: Colorizer = c.magenta
+export const ansiGreen: Colorizer = c.green
+export const ansiYellow: Colorizer = c.yellow
+export const ansiRed: Colorizer = c.red
+export const ansiWhite: Colorizer = c.white
+export const ansiDim: Colorizer = c.dim
+export const ansiBold: Colorizer = c.bold
 
 // ─── Palettes ───────────────────────────────────────────────────────────────
 
@@ -37,11 +39,7 @@ export const ANSI_PALETTE_RAINBOW: readonly Colorizer[] = [
 export const ANSI_PALETTE_COOL: readonly Colorizer[] = [ansiCyan, ansiBlue, ansiMagenta]
 
 /** Warm palette — sun colors. */
-export const ANSI_PALETTE_WARM: readonly Colorizer[] = [
-  ansiYellow,
-  (t) => `\x1b[38;5;208m${t}\x1b[39m`, // orange
-  ansiRed,
-]
+export const ANSI_PALETTE_WARM: readonly Colorizer[] = [ansiYellow, c.orange, ansiRed]
 
 /** Monochrome — single color, no rotation. */
 export const ANSI_PALETTE_MONO_CYAN: readonly Colorizer[] = [ansiCyan]
@@ -49,8 +47,8 @@ export const ANSI_PALETTE_MONO_DIM: readonly Colorizer[] = [ansiDim]
 
 /** Breathing palette — fades dim→normal→bold→normal→dim, single hue. */
 export const ANSI_PALETTE_BREATHE_CYAN: readonly Colorizer[] = [
-  (t) => `\x1b[2;36m${t}\x1b[22;39m`,
-  (t) => `\x1b[36m${t}\x1b[39m`,
-  (t) => `\x1b[1;36m${t}\x1b[22;39m`,
-  (t) => `\x1b[36m${t}\x1b[39m`,
+  c.dimCyan,
+  c.cyan,
+  c.boldCyan,
+  c.cyan,
 ]
