@@ -26,6 +26,7 @@ import { printGoodbye } from "../ui/chrome/goodbye-banner.ts"
 import { buildModeChangeChip } from "../ui/chrome/mode-change-chip.ts"
 import { buildPendingModeChangeDecoration } from "../ui/chrome/mode-change-pending-decoration.ts"
 import { buildQueueDecorationLines } from "../ui/chrome/queue-decoration.ts"
+import { renderCommandNoticeBlock } from "../ui/command-notice.ts"
 import { Formatter } from "../ui/formatter/formatter.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
@@ -701,7 +702,10 @@ export async function runReplLiveArea(
         enqueuePrompt(result.prompt, [])
         break
       case "notice":
-        writeNoticeLines(result.lines)
+        writeNoticeLines([
+          ...(result.block ? renderCommandNoticeBlock(result.block) : []),
+          ...(result.lines ?? []),
+        ])
         break
       case "error":
         writeNoticeLines([`✗ ${result.message}`])

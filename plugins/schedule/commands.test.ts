@@ -51,6 +51,7 @@ describe("/loop", () => {
     expect(e).toMatchObject({ recurs: true, pace: "fixed", label: "5m", source: "loop" })
     expect(e?.prompt).toBe("check the deploy")
     expect(e?.cron).toBe("*/5 * * * *")
+    if (r.kind === "notice") expect(r.block?.title).toBe("loop")
   })
 
   it("creates a self-paced loop when no interval is given", async () => {
@@ -87,7 +88,7 @@ describe("/schedule", () => {
     await cmdSchedule(ctx('"*/5 * * * *" poll', "schedule"))
     const r = await cmdSchedule(ctx("list", "schedule"))
     expect(r.kind).toBe("notice")
-    if (r.kind === "notice") expect(r.lines.join("\n")).toContain("poll")
+    if (r.kind === "notice") expect(r.block?.body?.join("\n")).toContain("poll")
   })
 
   it("cancels by id", async () => {
@@ -106,7 +107,7 @@ describe("/schedule", () => {
   it("shows usage for bare /schedule", async () => {
     const r = await cmdSchedule(ctx("", "schedule"))
     expect(r.kind).toBe("notice")
-    if (r.kind === "notice") expect(r.lines.join("\n")).toContain("usage")
+    if (r.kind === "notice") expect(r.lines?.join("\n")).toContain("usage")
   })
 
   it("errors when canceling an unknown id", async () => {

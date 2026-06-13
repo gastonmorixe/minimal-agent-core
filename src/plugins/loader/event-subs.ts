@@ -493,10 +493,21 @@ function normalizeCommandResult(out: unknown, name: string): CommandResult {
     }
     case "notice": {
       const lines = (out as { lines?: unknown }).lines
-      if (!Array.isArray(lines) || lines.some((l) => typeof l !== "string")) {
-        throw new Error(`command "/${name}" notice result needs a string[] "lines"`)
+      const block = (out as { block?: unknown }).block
+      const result: Extract<CommandResult, { kind: "notice" }> = { kind: "notice" }
+      if (lines !== undefined) {
+        if (!Array.isArray(lines) || lines.some((l) => typeof l !== "string")) {
+          throw new Error(`command "/${name}" notice result needs a string[] "lines"`)
+        }
+        result.lines = lines as string[]
       }
-      return { kind: "notice", lines: lines as string[] }
+      if (block !== undefined) {
+        result.block = normalizeCommandNoticeBlock(block, name)
+      }
+      if (result.lines === undefined && result.block === undefined) {
+        throw new Error(`command "/${name}" notice result needs "lines" or "block"`)
+      }
+      return result
     }
     case "error": {
       const message = (out as { message?: unknown }).message
@@ -510,6 +521,38 @@ function normalizeCommandResult(out: unknown, name: string): CommandResult {
     default:
       throw new Error(`command "/${name}" returned unknown result kind ${JSON.stringify(kind)}`)
   }
+}
+
+function normalizeCommandNoticeBlock(
+  block: unknown,
+  name: string,
+): NonNullable<Extract<CommandResult, { kind: "notice" }>["block"]> {
+  if (block == null || typeof block !== "object" || Array.isArray(block)) {
+    throw new Error(`command "/${name}" notice block must be an object`)
+  }
+  const raw = block as Record<string, unknown>
+  if (typeof raw.title !== "string" || raw.title.length === 0) {
+    throw new Error(`command "/${name}" notice block needs a non-empty string "title"`)
+  }
+  const normalized: NonNullable<Extract<CommandResult, { kind: "notice" }>["block"]> = {
+    title: raw.title,
+  }
+  for (const key of ["icon", "info", "timestamp", "footer", "color"] as const) {
+    const value = raw[key]
+    if (value !== undefined) {
+      if (typeof value !== "string") {
+        throw new Error(`command "/${name}" notice block field "${key}" must be a string`)
+      }
+      normalized[key] = value
+    }
+  }
+  if (raw.body !== undefined) {
+    if (!Array.isArray(raw.body) || raw.body.some((line) => typeof line !== "string")) {
+      throw new Error(`command "/${name}" notice block field "body" must be a string[]`)
+    }
+    normalized.body = raw.body as string[]
+  }
+  return normalized
 }
 
 /**
