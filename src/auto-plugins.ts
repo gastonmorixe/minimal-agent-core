@@ -14,8 +14,8 @@
  * alone — we never auto-pull, so a user who hand-edits or pins a plugin keeps
  * control. Updating is an explicit `git -C ~/.minimal-agent/plugins pull`.
  *
- * Design mirrors `auto-formatter.ts`:
- *   - self-contained (inline ANSI + spinner, no agent.ts import),
+ * Design mirrors `ui/formatter/auto.ts`:
+ *   - self-contained (no agent.ts import),
  *   - best-effort (every failure path degrades to "no extra plugins", never
  *     throws into the boot path),
  *   - injectable git runner + filesystem probes so the decision logic is
@@ -34,10 +34,9 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { ansiStyle as A, ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { BREATHING_DOT } from "./ui/spinner/library/frames.ts"
-import { ANSI_PALETTE_RAINBOW } from "./ui/spinner/library/palettes.ts"
+import { startStartupProgressSpinner } from "./ui/startup/progress-spinner.ts"
 
 /** Default remote for the extended first-party plugins. */
 export const DEFAULT_PLUGINS_REPO = "https://github.com/gastonmorixe/minimal-agent-plugins.git"
@@ -165,69 +164,6 @@ export interface PluginsSyncOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Spinner chrome (kept self-contained from agent runtime imports).
-// ---------------------------------------------------------------------------
-
-const PIPE = `  ${A.faintWhite("│")} `
-
-interface SyncSpinner {
-  setPhase(label: string): void
-  done(finalLine: string): void
-  fail(errorLine: string): void
-}
-
-/** No-op spinner used when `showSpinner` is false or stderr is not a TTY. */
-const NOOP_SPINNER: SyncSpinner = {
-  setPhase() {},
-  done() {},
-  fail() {},
-}
-
-function startSpinner(initialLabel: string, enabled: boolean): SyncSpinner {
-  if (!enabled || !process.stderr.isTTY) return NOOP_SPINNER
-
-  let phase = initialLabel
-  let frameIdx = 0
-  let colorIdx = 0
-
-  function coloredFrame(): string {
-    const char = BREATHING_DOT[frameIdx] ?? "·"
-    const colorize = ANSI_PALETTE_RAINBOW[colorIdx % ANSI_PALETTE_RAINBOW.length]!
-    return colorize(char)
-  }
-  function renderLine(): string {
-    return `\r${PIPE} ${coloredFrame()} ${phase}`
-  }
-
-  process.stderr.write(`${PIPE}\n`)
-  process.stderr.write(renderLine())
-
-  const timer = setInterval(() => {
-    frameIdx = (frameIdx + 1) % BREATHING_DOT.length
-    colorIdx++
-    process.stderr.write(renderLine())
-  }, 160)
-
-  function stop(finalGlyph: string, finalLabel: string): void {
-    clearInterval(timer)
-    process.stderr.write(`\r${ANSI_CODES.ERASE_LINE}${PIPE} ${finalGlyph} ${finalLabel}\n`)
-    process.stderr.write(`${PIPE}\n`)
-  }
-
-  return {
-    setPhase(label) {
-      phase = label
-    },
-    done(finalLine) {
-      stop(A.boldGreen("✔"), finalLine)
-    },
-    fail(errorLine) {
-      stop(A.boldRed("✗"), errorLine)
-    },
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Filesystem helpers
 // ---------------------------------------------------------------------------
 
@@ -340,9 +276,9 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
   const token = opts.token !== undefined ? opts.token : await resolveGithubToken(process.env, true)
 
   // 5. Clone into a temp sibling, then atomically swap into place.
-  const spinner = startSpinner(
+  const spinner = startStartupProgressSpinner(
     `${A.dim("fetching")}  ${A.bold("minimal-agent-plugins")}${token ? A.dim("  (auth)") : ""}`,
-    opts.showSpinner ?? false,
+    { enabled: opts.showSpinner ?? false },
   )
 
   const parent = dirname(targetDir)
