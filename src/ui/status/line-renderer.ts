@@ -1,3 +1,5 @@
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import type { StatusBus, StatusSnapshot } from "../../status.ts"
 import { displayWidth, truncateDisplayWidth } from "../../term-width.ts"
 import {
@@ -24,10 +26,6 @@ export interface StatusRendererOptions {
   spinnerTheme?: StatusSpinnerTheme
   spinnerSwitchGraceMs?: number
   now?: () => number
-}
-
-function dim(text: string): string {
-  return `\x1b[2m${text}\x1b[22m`
 }
 
 /** Line-mode status renderer for non-live-area TTY output. */
@@ -203,7 +201,7 @@ export class StatusRenderer {
       hideBytes: labelHasBytes,
       maxWidth: infixBudget,
     })
-    const composed = `${prefix}${dim(this.label)}${infix}${suffix}`
+    const composed = `${prefix}${c.dim(this.label)}${infix}${suffix}`
     const clamped = Number.isFinite(maxWidth)
       ? truncateDisplayWidth(composed, maxWidth, "")
       : composed

@@ -14,6 +14,8 @@
  * @module ui/editor/renderer
  */
 
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import type { EditorBuffer } from "../../editor-buffer.ts"
 import {
   codePointWidth,
@@ -408,7 +410,7 @@ function wrapContent(text: string, cols: number, firstPromptW: number): string[]
  * Faint newline glyph appended at the end of every non-last logical line
  * when show-hidden mode is active.
  */
-const HIDDEN_NEWLINE = "\x1b[2m\u21b5\x1b[22m"
+const HIDDEN_NEWLINE = c.dim("\u21b5")
 
 /**
  * Replace invisible characters with faint visual indicator glyphs.
@@ -433,9 +435,9 @@ function markHidden(text: string): string {
     const ch = String.fromCodePoint(cp)
     i += ch.length
     if (ch === " ") {
-      out += "\x1b[2m\u00b7\x1b[22m" // · MIDDLE DOT
+      out += c.dim("\u00b7") // · MIDDLE DOT
     } else if (ch === "\t") {
-      out += "\x1b[2m\u2192\x1b[22m" // → RIGHTWARDS ARROW
+      out += c.dim("\u2192") // → RIGHTWARDS ARROW
     } else {
       out += ch
     }

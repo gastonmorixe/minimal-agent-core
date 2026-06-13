@@ -7,8 +7,7 @@
 
 import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
 
-const { DIM, RESET } = ANSI_CODES
-const INVERT = "\x1b[7m"
+const { DIM, INVERSE, RESET } = ANSI_CODES
 
 export interface PickerItem<V = unknown> {
   label: string
@@ -165,7 +164,7 @@ export class Picker<V> {
       }
       let row = cursor + line
       if (it.disabled) row = `${DIM}${row}${RESET}`
-      else if (i === this.idx) row = `${INVERT}${row}${RESET}`
+      else if (i === this.idx) row = `${INVERSE}${row}${RESET}`
       rows.push(row)
     }
     if (this.footer) rows.push(`${DIM}${truncate(this.footer, w)}${RESET}`)
