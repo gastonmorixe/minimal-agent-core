@@ -103,6 +103,24 @@ describe("executeTool — universal clamp wiring", () => {
     expect(r.content.trim()).toBe("hello")
     expect(r.content).not.toContain("[truncated:")
   })
+
+  it("Bash output ceiling caps a high-volume command in-stream (B-005)", async () => {
+    // 12 MiB > the 10 MiB MAX_BASH_OUTPUT_BYTES drain ceiling. Without the
+    // in-stream cap the drain accumulator would buffer all of it (and a real
+    // `yes`/`cat /dev/zero` would grow unbounded and OOM) before the post-hoc
+    // 64 KB clamp ever ran.
+    const r = await executeTool("Bash", {
+      command: `yes 0123456789ABCDEF | head -c ${12 * 1024 * 1024}`,
+    })
+    expect(r.is_error).toBe(true)
+    expect(r.content).toContain("command terminated and output truncated")
+    // The post-hoc universal clamp still applies on top of the in-stream cap.
+    expect(r.content).toContain("[truncated:")
+    // Hard memory bound: the model-facing body is clamped to ~64 KB, and even
+    // the preserved pre-clamp body is bounded by the drain ceiling, never the
+    // full firehose.
+    if (r._raw) expect(r._raw.length).toBeLessThan(11 * 1024 * 1024)
+  }, 30_000)
 })
 
 describe("executeTool — _raw pre-clamp surface (for blob store)", () => {

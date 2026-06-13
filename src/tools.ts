@@ -43,6 +43,19 @@ import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./too
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 
 /**
+ * Hard ceiling on the COMBINED stdout+stderr a single Bash command may buffer
+ * in memory, enforced DURING the streaming drain (B-005). Without it `drain()`
+ * does `acc += s` with no bound, so a high-volume command (`cat /dev/zero`,
+ * `yes`, a chatty build) grows the accumulator until the process OOMs — long
+ * before the post-hoc 64 KB clamp in {@link executeTool} ever runs. 10 MiB is
+ * far above any legitimate interactive command's output (and ~160x the post-hoc
+ * clamp, so real build logs are still captured whole for the blob store) while
+ * still bounding memory hard. On crossing it we terminate the child group and
+ * return the capped output with unknown totals.
+ */
+const MAX_BASH_OUTPUT_BYTES = 10 * 1024 * 1024
+
+/**
  * A non-text block a tool may attach to its `tool_result`. Today only canonical
  * {@link ImageBlock} (an inline-base64 image) : Anthropic tool results carry
  * text + image content, not documents. Provider-neutral by construction; the
@@ -846,6 +859,11 @@ async function execBash(
 
     let aborted = false
     let timedOut = false
+    // Shared across both drains (stdout + stderr) so the ceiling is on COMBINED
+    // output, not per-stream. JS is single-threaded; the interleaved awaits in
+    // the two drain() calls mutate these safely (B-005).
+    let outputBytes = 0
+    let outputCapped = false
     const killTree = (sig: "SIGTERM" | "SIGKILL") => {
       // Group-kill so any descendants bash spawned die too. Negative pid
       // = process group; only works because we passed `detached: true`
@@ -915,17 +933,34 @@ async function execBash(
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
+          // Once the combined ceiling is hit, keep reading (so the pipe drains
+          // and closes) but DISCARD: never grow `acc` further. Bounds memory at
+          // ~cap + one chunk even if the killed child is slow to release the
+          // write end (B-005).
+          if (outputCapped) continue
+          // Count RAW bytes of the chunk against the shared budget before
+          // decoding. This is the true memory pressure; enforcing it here (not
+          // post-hoc) is the whole point — `acc += s` on `cat /dev/zero` would
+          // OOM long before executeTool's 64 KB clamp ever ran.
+          outputBytes += value.byteLength
           const s = decoder.decode(value, { stream: true })
           if (s) {
             acc += s
             cb?.(s)
+          }
+          if (outputBytes > MAX_BASH_OUTPUT_BYTES) {
+            outputCapped = true
+            // Terminate the child group so it stops producing and both pipes
+            // close (ending both drains). Same escalation as timeout/abort.
+            escalateKill()
           }
         }
       } finally {
         if (signal) signal.removeEventListener("abort", cancelReader)
         reader.releaseLock()
       }
-      const tail = decoder.decode()
+      // Skip the flush tail once capped — we're intentionally not accumulating.
+      const tail = outputCapped ? "" : decoder.decode()
       if (tail) {
         acc += tail
         cb?.(tail)
@@ -979,6 +1014,29 @@ async function execBash(
         _truncCtx: { totalBytes, totalLines },
       }
     }
+    // Output ceiling hit (B-005): the child was killed mid-stream because its
+    // combined stdout+stderr crossed MAX_BASH_OUTPUT_BYTES. Surface what we
+    // captured (bounded at ~cap) plus an explicit marker. Checked before the
+    // timeout/exit-code branches because the kill we issued can also flip those
+    // and the cap is the more precise explanation. The universal post-hoc clamp
+    // still trims this to 64 KB for the model; the full capped body reaches the
+    // blob store via `_raw`.
+    if (outputCapped) {
+      const capMsg = `[output exceeded ${MAX_BASH_OUTPUT_BYTES} bytes; command terminated and output truncated]`
+      // PREPEND the marker: the body is ~MAX_BASH_OUTPUT_BYTES, far past the
+      // universal 64 KB post-hoc clamp which keeps the FRONT. An end-appended
+      // marker would be clipped off; at the front the model always sees it.
+      const trailed = output ? `${capMsg}\n${output}` : capMsg
+      return {
+        content: trailed,
+        is_error: true,
+        _truncCtx: {
+          totalBytes: Buffer.byteLength(trailed, "utf8"),
+          totalLines: trailed.length === 0 ? 0 : trailed.split("\n").length,
+        },
+      }
+    }
+
     const totalBytes = Buffer.byteLength(output, "utf8")
     const totalLines = output.length === 0 ? 0 : output.split("\n").length
 
