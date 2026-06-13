@@ -1515,16 +1515,16 @@ export {
 }
 
 // ---------------------------------------------------------------------------
-// REPL (extracted to ./agent/repl.ts + ./agent/repl-live-area.ts + ./agent/model-picker.ts)
+// REPL (extracted to ./agent/repl.ts + ./agent/repl-live-area.ts + ./agent/model-error.ts)
 // ---------------------------------------------------------------------------
 
 export {
   parseModelNotFoundError,
   parseModelUnavailableError,
-} from "./agent/model-picker.ts"
-// The REPL types, the `runRepl` orchestration shell, the live-area
-// renderer, and the model picker all live under `src/agent/` so this
-// file stays under the `max-lines` lint budget. The public surface
+} from "./agent/model-error.ts"
+// The REPL types, the `runRepl` orchestration shell, and the live-area
+// renderer live under `src/agent/` so this file stays under the
+// `max-lines` lint budget. The public surface
 // (`ReplAgentLike`, `StatusController`, `runRepl`,
 // `parseModelNotFoundError`, `parseModelUnavailableError`) is
 // re-exported below for back-compat with existing consumers.

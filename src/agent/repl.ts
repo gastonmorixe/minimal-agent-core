@@ -30,15 +30,12 @@ import { PluginStream } from "../plugins/stream.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 import { Formatter } from "../ui/formatter/formatter.ts"
+import { promptModelPicker } from "../ui/model-picker.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import { StatusRenderer, type StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 import { c, faintThinkingChunk } from "../ui/style/ansi.ts"
 
-import {
-  parseModelNotFoundError,
-  parseModelUnavailableError,
-  promptModelPicker,
-} from "./model-picker.ts"
+import { parseModelNotFoundError, parseModelUnavailableError } from "./model-error.ts"
 import { runReplLiveArea } from "./repl-live-area.ts"
 
 type MaybePromise<T> = T | Promise<T>
