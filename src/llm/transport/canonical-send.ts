@@ -35,13 +35,21 @@
  * @module llm/transport/canonical-send
  */
 
+import { randomUUID } from "node:crypto"
+
 import { readCredentials } from "../../auth.ts"
 import { resolveApiKeyAuth } from "../../auth-strategies.ts"
 import { debugRequestOptions } from "../../client/debug.ts"
 import type { SendOptions, StreamedResponse } from "../../client/types.ts"
 import { diag } from "../../diagnostic-bus.ts"
+import {
+  defaultNetworkClient,
+  NetworkClient,
+  networkActivityObserver,
+} from "../../network/index.ts"
 import { rebroadcastQuotaForSessionUpdate } from "../../quota-broadcast.ts"
 import { addSessionUsage } from "../../session-tokens.ts"
+import { GLOBAL_STATUS_BUS } from "../../status.ts"
 import {
   canonicalEventsToLegacyStream,
   legacyAuthToProviderAuth,
@@ -109,6 +117,41 @@ export async function* canonicalSendFn(
   // refreshed token is picked up by the next attempt within this send.
   const authState: AuthRefreshState = { auth: resolveProviderAuth(opts) }
 
+  // ------------------------------------------------------------------
+  // Realtime activity binding (the status-line ↑/↓ bytes infix).
+  //
+  // The network client's `networkActivityObserver` accumulates sent/recv
+  // bytes per request and pushes them onto the bound `StatusHandle`, which
+  // the status renderer reads to draw the "↑ N · ↓ N" infix on the
+  // "· Thinking (3s)" line. That observer keys its trackers by the
+  // request's `id` (see network/activity-observer.ts `onChunk(req)` →
+  // `trackers.get(req.id)`). The LEGACY transport (client.ts) bound it by
+  // pre-generating a `reqId`, calling `attach(reqId, handle)`, then firing
+  // `networkClient.request({ id: reqId, ... })` so the wire request carried
+  // the SAME id. When the default transport flipped to this canonical path,
+  // the provider adapter (a plugin) issues `networkClient.request()` WITHOUT
+  // an id, so the client auto-uuids and nothing matched the pre-attached
+  // handle — the infix went empty.
+  //
+  // We restore the exact legacy contract with the smallest provider-neutral
+  // change: pre-generate `reqId`, attach the handle, and hand the adapter a
+  // thin wrapper around the real client that stamps `id: reqId` onto every
+  // request that doesn't already carry one. The adapter stays untouched and
+  // provider-agnostic; the id correlation happens at the client boundary,
+  // using the same `NetworkRequestInput.id` field the legacy path used (no
+  // new global). Retries reuse the one `reqId` across sequential attempts,
+  // exactly as the legacy outer finally did. `attach()` is a documented
+  // no-op when the singleton observer isn't wired into the client in play
+  // (e.g. test-injected clients), so this is inert there.
+  const requestStatus = GLOBAL_STATUS_BUS.create("Sending request", {
+    notificationId: "network.request",
+    category: "network",
+  })
+  const reqId = randomUUID()
+  networkActivityObserver.attach(reqId, requestStatus)
+  const baseClient = (opts.networkClient ?? defaultNetworkClient) as NetworkClient
+  const boundClient = bindRequestId(baseClient, reqId)
+
   // One attempt = run() guarded by the watchdog, bridged to the legacy
   // string/StreamedResponse contract + lifecycle callbacks.
   const makeWatchdoggedAttempt = (): AsyncGenerator<string, StreamedResponse, undefined> => {
@@ -117,7 +160,7 @@ export async function* canonicalSendFn(
         const ctx: RunContext = {
           auth: authState.auth,
           sessionId: "",
-          networkClient: opts.networkClient,
+          networkClient: boundClient,
         }
         // acceptDegrade: when the adapter can offer a cheaper-but-valid
         // variant (e.g. fast-mode requested on a model with no fast tier →
@@ -174,5 +217,29 @@ export async function* canonicalSendFn(
     })
 
   // retry is the outermost layer: forever, capped backoff, user-abortable.
-  return yield* withRetry(makeAuthRefreshedAttempt, { signal: opts.signal })
+  // The status handle stays bound for the WHOLE send (across retries) and is
+  // torn down in finally, mirroring the legacy client's outer try/finally.
+  try {
+    return yield* withRetry(makeAuthRefreshedAttempt, { signal: opts.signal })
+  } finally {
+    requestStatus.clear()
+    networkActivityObserver.detach(reqId)
+  }
+}
+
+/**
+ * Wrap a {@link NetworkClient} so every `request()` it issues carries the
+ * given `id` (unless the caller already supplied one). This is how the
+ * canonical path correlates the provider adapter's wire request with the
+ * `networkActivityObserver` tracker bound to `reqId` — the adapter never
+ * sees the id, the correlation lives entirely at this client boundary.
+ *
+ * Returns a thin prototype-delegating shim: only `request` is overridden,
+ * everything else falls through to the real client, so transport selection,
+ * fallback, policies, and the observer fan-out are unchanged.
+ */
+function bindRequestId(client: NetworkClient, id: string): NetworkClient {
+  const wrapper: NetworkClient = Object.create(client)
+  wrapper.request = (input) => client.request({ id, ...input })
+  return wrapper
 }
