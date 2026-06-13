@@ -117,6 +117,27 @@ export function findEscapeSafeSplit(text: string): number {
       }
       return i // unterminated
     }
+    if (
+      next === 0x50 /* 'P' DCS */ ||
+      next === 0x5f /* '_' APC */ ||
+      next === 0x5e /* '^' PM */ ||
+      next === 0x58 /* 'X' SOS */
+    ) {
+      // String-type sequences (DCS / APC / PM / SOS): the control
+      // introducer opens a string that runs until the ST terminator
+      // (ESC \). These carry tmux passthrough payloads, sixel and
+      // kitty graphics, etc. Splitting inside one lets the compositor
+      // glue its own bytes into the middle → terminal corruption.
+      // Scan like OSC; accept BEL too for lenient parsers.
+      let j = i + 2
+      while (j < text.length) {
+        const c = text.charCodeAt(j)
+        if (c === 0x07) return text.length
+        if (c === 0x1b && text.charCodeAt(j + 1) === 0x5c) return text.length
+        j++
+      }
+      return i // unterminated — hold back for the next chunk
+    }
     // Any other ESC X form is always 2 bytes once `next` is present —
     // and if we got here, `next` is present, so it's complete.
     return text.length
