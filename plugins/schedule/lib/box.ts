@@ -25,15 +25,14 @@
  * @module schedule/lib/box
  */
 
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
 import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
 import { cadenceLabel, clipPrompt, kindGlyph, relativeTime } from "./format.ts"
 import { nextFireMs } from "./scheduler.ts"
 import type { CronEntry } from "./store.ts"
 
-const RESET = "\x1b[0m"
-const DIM = "\x1b[2m"
-const BOLD = "\x1b[1m"
+const { BOLD, DIM, RESET } = ANSI_CODES
 
 /** A named box color → its SGR open string. Defaults to gold. */
 export type BoxColor = "gold" | "lime" | "sky" | "red"

@@ -14,6 +14,7 @@
     "./utils/term-width": "./src/utils/term-width.ts",
     "./utils/jsonc": "./src/utils/jsonc.ts",
     "./utils/palette": "./src/utils/palette.ts",
+    "./utils/ansi": "./src/utils/ansi.ts",
     "./utils/sse-parser": "./src/utils/sse-parser.ts",
     "./utils/unified-diff": "./src/utils/unified-diff.ts",
     "./types/plugin": "./src/types/plugin.ts",

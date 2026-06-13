@@ -14,6 +14,7 @@
  */
 
 import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
 
 import { coloredEntryLine, renderBox } from "../lib/box.ts"
 import { isValidCron } from "../lib/cron.ts"
@@ -28,8 +29,7 @@ import {
 import { parseScheduleArgs } from "../lib/loop-parse.ts"
 import { cronStoreForSession } from "../lib/store.ts"
 
-const DIM = "\x1b[2m"
-const RESET = "\x1b[0m"
+const { DIM, RESET } = ANSI_CODES
 
 /**
  * Command handler for `/schedule`: parses the subcommand (raw cron line,

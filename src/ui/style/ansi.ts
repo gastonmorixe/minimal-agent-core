@@ -2,9 +2,9 @@
  * ANSI color helpers and small text-formatting utilities used by the
  * agent (and re-exported from the `agent` module).
  *
- * The SGR open sequences live in `src/palette.ts` (the agent-owned
- * single source of truth, also exported to plugins via the
- * `MINIMAL_AGENT_PALETTE` env). The wrappers here just close them.
+ * The SGR open sequences and wrapper policy live in the leaf
+ * `@minimal-agent/plugin-api` package so host UI and plugin renderers
+ * close colors/attributes the same way.
  *
  * Split out of `src/agent.ts` to keep that file under the
  * `max-lines` lint budget. The public API is unchanged: every name
@@ -13,11 +13,7 @@
  * @module ui/style/ansi
  */
 
-import { PALETTE } from "../../palette.ts"
-
-const _fg = (open: string) => (s: string) => `${open}${s}\x1b[39m`
-const _attr = (open: string, close: string) => (s: string) => `${open}${s}${close}`
-const _combo = (open: string, close: string) => (s: string) => `${open}${s}${close}`
+import { ansiStyle } from "@minimal-agent/plugin-api/utils/ansi"
 
 /**
  * Palette of ANSI-wrapped color and attribute helpers. Every entry is a
@@ -25,42 +21,7 @@ const _combo = (open: string, close: string) => (s: string) => `${open}${s}${clo
  * drawn from {@link PALETTE}. Composable: `c.bold(c.cyan("x"))` works
  * because each helper closes the attribute it opens.
  */
-export const c = {
-  dim: _attr("\x1b[2m", "\x1b[22m"),
-  cyan: _fg(PALETTE.cyan),
-  blue: _fg(PALETTE.blue),
-  magenta: _fg(PALETTE.magenta),
-  yellow: _fg(PALETTE.yellow),
-  green: _fg(PALETTE.green),
-  red: _fg(PALETTE.red),
-  bold: _attr("\x1b[1m", "\x1b[22m"),
-  italic: _attr("\x1b[3m", "\x1b[23m"),
-  underline: _attr("\x1b[4m", "\x1b[24m"),
-  brightCyan: _fg(PALETTE.brightCyan),
-  brightYellow: _fg(PALETTE.brightYellow),
-  brightGreen: _fg(PALETTE.brightGreen),
-  brightRed: _fg(PALETTE.brightRed),
-  brightMagenta: _fg(PALETTE.brightMagenta),
-  boldCyan: _combo("\x1b[1;36m", "\x1b[22;39m"),
-  boldGreen: _combo("\x1b[1;32m", "\x1b[22;39m"),
-  boldRed: _combo("\x1b[1;31m", "\x1b[22;39m"),
-  boldYellow: _combo("\x1b[1;33m", "\x1b[22;39m"),
-  dimCyan: _combo("\x1b[2;36m", "\x1b[22;39m"),
-  dimRed: _combo("\x1b[2;31m", "\x1b[22;39m"),
-  faintWhite: _combo("\x1b[2;37m", "\x1b[22;39m"),
-  // Strikethrough (SGR 9 / 29). Independent of bold/dim/fg, so it composes
-  // with `c.dim` etc. without sharing close codes.
-  strike: _attr("\x1b[9m", "\x1b[29m"),
-
-  // Modern "Cool Summer" palette (Saturated & Powerful)
-  orange: _fg(PALETTE.orange),
-  pink: _fg(PALETTE.pink),
-  purple: _fg(PALETTE.purple),
-  lime: _fg(PALETTE.lime),
-  sky: _fg(PALETTE.sky),
-  violet: _fg(PALETTE.violet),
-  gold: _fg(PALETTE.gold),
-}
+export const c = ansiStyle
 
 /**
  * Re-dim a thinking chunk so any embedded SGR resets don't break the

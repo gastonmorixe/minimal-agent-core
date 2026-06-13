@@ -1,49 +1,39 @@
 /**
- * Core-local unified-diff colorizer.
+ * Shared unified-diff colorizer.
  *
  * Takes a unified diff string and returns an ANSI-colored version:
  * additions in modern green (lime), deletions in modern hot pink, hunk
  * headers in cyan, file headers bold. Keeps everything else untouched.
  *
- * # Provenance (Wave A unit A-2)
- *
- * This is a byte-identical copy of the diff-view plugin's renderer
- * (`plugins/diff-view/handlers/render.ts :: renderUnifiedDiff`), landed
- * so core (`src/diff.ts`, the replay derivers) stops importing the
- * plugins tree (the I2 invariant). The plugin keeps its own copy for
- * its ShowDiff / inline-diff handlers; both read the same
- * `MINIMAL_AGENT_PALETTE` env so their output stays in lockstep. Parity
- * is pinned by `src/ui/render/unified-diff.test.ts` against fixtures
- * captured from the plugin renderer.
- *
- * // TODO(D-0): move to `@minimal-agent/plugin-api` utils (shared leaf
- * // package) so core and the diff-view plugin consume ONE copy again.
+ * Host code and the diff-view plugin both import this leaf implementation,
+ * so their previews cannot drift while preserving the plugin boundary
+ * (`src/` never imports from `plugins/`).
  *
  * # Color sourcing
  *
- * The agent owns its palette in `src/palette.ts` and exposes it to
- * consumers as a JSON map in `MINIMAL_AGENT_PALETTE`. This renderer
- * prefers those tokens and falls back to local defaults that point at
- * the same Cool-Summer modern palette, so direct callers (tests, CLIs)
- * get the same look without any setup.
+ * The agent owns its palette in `plugin-api/src/utils/palette.ts` and exposes
+ * it to subprocess consumers as a JSON map in `MINIMAL_AGENT_PALETTE`. This
+ * renderer prefers those tokens and falls back to the shared palette constants
+ * so direct callers (tests, CLIs) get the same look without any setup.
  *
  * Minimal and dependency-free. Not a full patch parser; it just
  * decorates lines by their first-character prefix, which is enough for
  * unified-diff output from `git diff` and friends.
  *
- * @module ui/render/unified-diff
+ * @module unified-diff
  */
 
-const RESET = "\x1b[0m"
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
+import { ANSI_CODES } from "./ansi.ts"
+import { PALETTE } from "./palette.ts"
+
+const { BOLD, DIM, RESET } = ANSI_CODES
 
 // Local fallback defaults. These match the agent's modern palette
 // (`pink` = 199, `lime` = 118) so the look is consistent even when
 // `MINIMAL_AGENT_PALETTE` isn't injected.
-const FALLBACK_REMOVAL = "\x1b[38;5;199m" // hot pink / magenta
-const FALLBACK_ADDITION = "\x1b[38;5;118m" // vivid spring green
-const FALLBACK_HUNK = "\x1b[36m" // cyan
+const FALLBACK_REMOVAL = PALETTE.pink
+const FALLBACK_ADDITION = PALETTE.lime
+const FALLBACK_HUNK = PALETTE.cyan
 
 interface DiffPalette {
   removal: string

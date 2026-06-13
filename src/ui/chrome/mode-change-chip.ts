@@ -18,30 +18,17 @@
  * the `Date` (live: `new Date()` at send time; replay: the parent
  * user-record's `ts`).
  *
- * Named colors are pulled from `palette.ts` (no circular dep — that file
- * has zero imports). Other SGR sequences (dim, faint-white, bold) are
- * emitted as raw escapes to avoid a circular import on `src/agent.ts`,
- * whose `c.*` helpers depend on palette + the env-info plugin.
+ * SGR wrapper policy comes from `@minimal-agent/plugin-api/utils/ansi`, the
+ * same source used by plugin renderers. The caller still supplies resolved
+ * mode foreground opens; this renderer only decides layout.
  *
  * @module mode-change-chip
  */
 
+import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import type { ModeChangeEvent, PendingModeAttachment } from "../../modes.ts"
 import type { ManifestMode } from "../../plugins/types.ts"
-
-// ---------------------------------------------------------------------------
-// SGR primitives (mirrors src/palette.ts MODERN entries)
-// ---------------------------------------------------------------------------
-
-const RESET = "\x1b[0m"
-const FG_RESET = "\x1b[39m"
-
-/** SGR dim. */
-const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`
-/** SGR dim + white (`c.faintWhite` byte-for-byte). */
-const faintWhite = (s: string): string => `\x1b[2;37m${s}\x1b[22;39m`
-/** Faint white (no leading space). Used for the timestamp. */
-const time = faintWhite
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -132,16 +119,16 @@ function pad2(n: number): string {
  * Width estimate ≈ 41 cells, well under 60 cols.
  */
 export function buildModeChangeChip(input: ChipRenderInput): string {
-  const leadDot = dim("·")
+  const leadDot = c.dim("·")
   const fromLbl = paintFlat(input.fromLabel, input.fromFgOpen)
   const toLbl = paintBold(input.toLabel, input.toFgOpen)
-  const arrow = dim("→")
-  const stamp = time(formatModeTimestamp(input.at))
+  const arrow = c.dim("→")
+  const stamp = c.faintWhite(formatModeTimestamp(input.at))
   // Spaces: `  · mode   <FROM> → <TO>   <STAMP>`
   // Triple space between `mode` and the transition, and between the
   // transition and the stamp, gives natural column separation between
   // the three info groups (category / transition / time).
-  return `  ${leadDot} ${dim("mode")}   ${fromLbl} ${arrow} ${toLbl}   ${stamp}`
+  return `  ${leadDot} ${c.dim("mode")}   ${fromLbl} ${arrow} ${toLbl}   ${stamp}`
 }
 
 /**
@@ -150,8 +137,8 @@ export function buildModeChangeChip(input: ChipRenderInput): string {
  * pending-decoration renderer.
  */
 function paintFlat(text: string, fgOpen: string | null): string {
-  if (fgOpen) return `${fgOpen}${text}${FG_RESET}`
-  return dim(text)
+  if (fgOpen) return `${fgOpen}${text}${ANSI_CODES.FG_RESET}`
+  return c.dim(text)
 }
 
 /**
@@ -161,8 +148,8 @@ function paintFlat(text: string, fgOpen: string | null): string {
  * renderer byte-for-byte.
  */
 function paintBold(text: string, fgOpen: string | null): string {
-  if (fgOpen) return `\x1b[1m${fgOpen}${text}${RESET}`
-  return `\x1b[1;37m${text}${RESET}`
+  if (fgOpen) return `${ANSI_CODES.BOLD}${fgOpen}${text}${ANSI_CODES.RESET}`
+  return `\x1b[1;37m${text}${ANSI_CODES.RESET}`
 }
 
 // ---------------------------------------------------------------------------

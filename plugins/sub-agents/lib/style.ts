@@ -7,6 +7,9 @@
  * @module sub-agents/lib/style
  */
 
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+
 import type { SubagentStatus } from "./types.ts"
 
 /** Glyphs. Status glyphs are intentionally shared with the `tasks` plugin. */
@@ -29,15 +32,15 @@ export const GLYPHS = {
 export const SPINNER = ["◐", "◓", "◑", "◒"] as const
 
 export const ANSI = {
-  RESET: "\x1b[0m",
-  BOLD: "\x1b[1m",
-  DIM: "\x1b[2m",
-  LIME: "\x1b[38;5;118m", // done
-  SKY: "\x1b[38;5;45m", // running
-  RED: "\x1b[31m", // failed
-  GOLD: "\x1b[38;5;214m", // spawn / cost-over-budget
-  DGRAY: "\x1b[38;5;240m", // frame chrome
-  LGRAY: "\x1b[38;5;246m", // secondary chrome
+  RESET: ANSI_CODES.RESET,
+  BOLD: ANSI_CODES.BOLD,
+  DIM: ANSI_CODES.DIM,
+  LIME: PALETTE.lime, // done
+  SKY: PALETTE.sky, // running
+  RED: PALETTE.red, // failed
+  GOLD: PALETTE.gold, // spawn / cost-over-budget
+  DGRAY: ANSI_CODES.DARK_GRAY, // frame chrome
+  LGRAY: ANSI_CODES.LIGHT_GRAY, // secondary chrome
 } as const
 
 /** Wrap `text` in ANSI codes when `ansi` is true; identity otherwise. */

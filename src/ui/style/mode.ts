@@ -35,6 +35,8 @@
  * @module ui/style/mode
  */
 
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+
 import { PALETTE, SEMANTIC } from "../../palette.ts"
 import type { ColorRequest, ModeStyleRequest, ThemeKey } from "../../plugins/types.ts"
 import { truncateDisplayWidth } from "../../term-width.ts"
@@ -77,7 +79,7 @@ export interface StyleEnv {
 // Constants
 // ---------------------------------------------------------------------------
 
-const RESET = "\x1b[0m"
+const RESET = ANSI_CODES.RESET
 
 /**
  * Maximum visible label length before truncation. Picked at 8 because the

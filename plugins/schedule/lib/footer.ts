@@ -24,6 +24,7 @@
  * @module schedule/lib/footer
  */
 
+import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
 import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 import { displayWidth } from "@minimal-agent/plugin-api/utils/term-width"
 
@@ -31,11 +32,9 @@ import { GLYPH_TIME, relativeTime } from "./format.ts"
 import { nextFireMs } from "./scheduler.ts"
 import type { CronEntry } from "./store.ts"
 
-const DIM = "\x1b[2m"
-const BOLD = "\x1b[1m"
+const { BOLD, DIM, RESET } = ANSI_CODES
 // Full SGR reset (clears color AND dim). NOT `\x1b[39m` (color-only), which
 // would let the dim attribute bleed into whatever the footer renders next.
-const RESET = "\x1b[0m"
 
 /** Soonest task within this window → the glyph turns lime (imminent). */
 const IMMINENT_MS = 60_000
