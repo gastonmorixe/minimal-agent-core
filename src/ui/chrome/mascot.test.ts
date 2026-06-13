@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { CATS, type CatExpression, catBlock, catFace, catRows, DEFAULT_CAT } from "./cats.ts"
-import { displayWidth } from "./term-width.ts"
+import { displayWidth } from "../../term-width.ts"
+
+import { CATS, type CatExpression, catBlock, catFace, catRows, DEFAULT_CAT } from "./mascot.ts"
 
 describe("cats", () => {
   it("default cat is happy", () => {

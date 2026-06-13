@@ -17,9 +17,9 @@
  * @module startup/startup-tree
  */
 
-import { catRows, DEFAULT_CAT } from "../cats.ts"
 import { VERSION } from "../headers.ts"
 import { displayWidth, truncateDisplayWidth, wrapRows } from "../term-width.ts"
+import { catRows, DEFAULT_CAT } from "../ui/chrome/mascot.ts"
 import { wrapStartupToolsRows } from "../ui/chrome/startup-tools-row.ts"
 import { BREATHING_DOT } from "../ui/spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "../ui/spinner/library/palettes.ts"
