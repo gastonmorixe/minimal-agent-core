@@ -34,6 +34,8 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
+import { ansiStyle as A, ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+
 import { BREATHING_DOT } from "./ui/spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "./ui/spinner/library/palettes.ts"
 
@@ -163,19 +165,10 @@ export interface PluginsSyncOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Inline ANSI + spinner (kept self-contained, matching auto-formatter.ts)
+// Spinner chrome (kept self-contained from agent runtime imports).
 // ---------------------------------------------------------------------------
 
-const A = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[22m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
-  faint: (s: string) => `\x1b[2;37m${s}\x1b[22;39m`,
-  boldGreen: (s: string) => `\x1b[1;32m${s}\x1b[22;39m`,
-  sky: (s: string) => `\x1b[38;5;45m${s}\x1b[39m`,
-  clearLine: "\x1b[2K",
-}
-
-const PIPE = `  ${A.faint("│")} `
+const PIPE = `  ${A.faintWhite("│")} `
 
 interface SyncSpinner {
   setPhase(label: string): void
@@ -217,7 +210,7 @@ function startSpinner(initialLabel: string, enabled: boolean): SyncSpinner {
 
   function stop(finalGlyph: string, finalLabel: string): void {
     clearInterval(timer)
-    process.stderr.write(`\r${A.clearLine}${PIPE} ${finalGlyph} ${finalLabel}\n`)
+    process.stderr.write(`\r${ANSI_CODES.ERASE_LINE}${PIPE} ${finalGlyph} ${finalLabel}\n`)
     process.stderr.write(`${PIPE}\n`)
   }
 
@@ -229,7 +222,7 @@ function startSpinner(initialLabel: string, enabled: boolean): SyncSpinner {
       stop(A.boldGreen("✔"), finalLine)
     },
     fail(errorLine) {
-      stop(`\x1b[1;31m✗\x1b[22;39m`, errorLine)
+      stop(A.boldRed("✗"), errorLine)
     },
   }
 }
@@ -426,7 +419,7 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
 
   const count = countPluginPackages(targetDir)
   spinner.done(
-    `${A.bold("minimal-agent-plugins")}  ${A.dim("cloned")}  ${A.faint("→")}  ${A.sky(`${count} plugin${count === 1 ? "" : "s"}`)}`,
+    `${A.bold("minimal-agent-plugins")}  ${A.dim("cloned")}  ${A.faintWhite("→")}  ${A.sky(`${count} plugin${count === 1 ? "" : "s"}`)}`,
   )
   return {
     status: "cloned",

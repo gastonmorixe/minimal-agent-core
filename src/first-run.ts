@@ -26,17 +26,11 @@
 
 import { existsSync } from "node:fs"
 
+import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
+
 import { resolveAgentHome } from "./agent-paths.ts"
 
-// Inline ANSI — keep this module free of agent.ts imports so it can be loaded
-// on the cold path before the heavier UI modules.
-const A = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[22m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
-  faint: (s: string) => `\x1b[2;37m${s}\x1b[22;39m`,
-  pink: (s: string) => `\x1b[38;5;211m${s}\x1b[39m`,
-  sky: (s: string) => `\x1b[38;5;45m${s}\x1b[39m`,
-}
+// Keep this module free of agent runtime imports so the cold path stays light.
 
 /** One setup step shown as a numbered row. */
 export interface FirstRunStep {
@@ -59,9 +53,11 @@ export interface FirstRunCardOptions {
  */
 export function buildFirstRunCard(opts: FirstRunCardOptions): string {
   const home = opts.homeLabel ?? "~/.minimal-agent"
-  const gutter = A.faint("│")
+  const gutter = A.faintWhite("│")
   const lines: string[] = []
-  lines.push(`  ${A.faint("╭")} ${A.bold(A.pink("minimal-agent"))} ${A.faint("· first run")}`)
+  lines.push(
+    `  ${A.faintWhite("╭")} ${A.bold(A.pink("minimal-agent"))} ${A.faintWhite("· first run")}`,
+  )
   lines.push(`  ${gutter} ${A.dim("Setting things up for you. This happens once.")}`)
   lines.push(`  ${gutter}`)
   opts.steps.forEach((step, i) => {
@@ -70,7 +66,7 @@ export function buildFirstRunCard(opts: FirstRunCardOptions): string {
     lines.push(`  ${gutter}   ${n}  ${label}`)
   })
   lines.push(
-    `  ${A.faint("╰")} ${A.dim("takes a few seconds")} ${A.faint("·")} ${A.dim(`everything lands in ${home}`)}`,
+    `  ${A.faintWhite("╰")} ${A.dim("takes a few seconds")} ${A.faintWhite("·")} ${A.dim(`everything lands in ${home}`)}`,
   )
   return lines.join("\n")
 }

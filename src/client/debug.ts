@@ -10,6 +10,8 @@
  * @module client/debug
  */
 
+import { ansiStyle } from "@minimal-agent/plugin-api/utils/ansi"
+
 import { redactHeaders } from "../net-dbg.ts"
 import { clampWithHint } from "../truncate-hint.ts"
 
@@ -19,16 +21,7 @@ import type { ContentBlock, Message, SendOptions } from "./types.ts"
 // ANSI helpers
 // ---------------------------------------------------------------------------
 
-export const c = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[22m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[39m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[39m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[39m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[39m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
-  magenta: (s: string) => `\x1b[35m${s}\x1b[39m`,
-  brightGreen: (s: string) => `\x1b[92m${s}\x1b[39m`,
-}
+export const c = ansiStyle
 
 // ---------------------------------------------------------------------------
 // Debug logging : pretty-printed to stderr
@@ -78,13 +71,13 @@ export function revealHidden(s: string): string {
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]
     if (ch === " ")
-      out += "\x1b[2m\u00b7\x1b[22m" // ·
+      out += c.dim("\u00b7") // ·
     else if (ch === "\t")
-      out += "\x1b[2m\u2192\x1b[22m" // →
+      out += c.dim("\u2192") // →
     else if (ch === "\n")
-      out += "\x1b[2m\u21b5\x1b[22m" // ↵
+      out += c.dim("\u21b5") // ↵
     else if (ch === "\r")
-      out += "\x1b[2m\u240d\x1b[22m" // ␍
+      out += c.dim("\u240d") // ␍
     else out += ch
   }
   return out
