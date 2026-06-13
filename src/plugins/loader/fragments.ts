@@ -18,8 +18,9 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
+import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
+
 import { createPluginLogger } from "../../diagnostic-bus.ts"
-import { paletteEnvJson } from "../../palette.ts"
 import { agentContextToEnv } from "../agent-context.ts"
 import type {
   AgentContext,

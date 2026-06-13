@@ -36,8 +36,8 @@
  */
 
 import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { PALETTE, SEMANTIC } from "@minimal-agent/plugin-api/utils/palette"
 
-import { PALETTE, SEMANTIC } from "../../palette.ts"
 import type { ColorRequest, ModeStyleRequest, ThemeKey } from "../../plugins/types.ts"
 import { truncateDisplayWidth } from "../../term-width.ts"
 
@@ -96,8 +96,8 @@ export const MAX_LABEL_WIDTH = 8
  * Keeping the open sequence (not a wrapper function) lets us compose with
  * background and bold/dim without nesting resets.
  */
-// SGR open sequences per palette name. Sourced from `src/palette.ts` so
-// `c.*` in agent.ts and this resolver can never drift.
+// SGR open sequences per palette name. Sourced from the shared plugin-api
+// palette so host UI and plugin chrome can never drift.
 const LEGACY_FG_OPEN: Record<string, string> = {
   cyan: PALETTE.cyan,
   blue: PALETTE.blue,
@@ -115,8 +115,8 @@ const LEGACY_FG_OPEN: Record<string, string> = {
 
 /**
  * Semantic token → palette color name. Subset of `SEMANTIC` in
- * `src/palette.ts` — the resolver only honors tokens that map to a
- * color name we expose for mode style. Override locally if a mode-style
+ * the shared plugin-api palette — the resolver only honors tokens that map
+ * to a color name we expose for mode style. Override locally if a mode-style
  * surface should pick a different pigment than the broad semantic.
  */
 const SEMANTIC_TO_LEGACY: Record<string, string> = {
