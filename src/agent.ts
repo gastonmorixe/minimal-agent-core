@@ -1498,6 +1498,7 @@ export class Agent {
 // `import { formatToolInput, ... } from "./agent.ts"`.
 import {
   clampTranscriptRow,
+  formatToolHeaderRows,
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
@@ -1505,8 +1506,10 @@ import {
   toolContinuationIndentCells,
 } from "./ui/tool-transcript/format.ts"
 
+export type { ToolPresentation } from "./ui/tool-transcript/format.ts"
 export {
   clampTranscriptRow,
+  formatToolHeaderRows,
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,

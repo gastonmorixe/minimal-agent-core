@@ -24,17 +24,14 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./cli
 import type { ModeManager } from "./modes.ts"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
-import { displayWidth } from "./term-width.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
 import { Formatter } from "./ui/formatter/formatter.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
 import {
-  clampTranscriptRow,
-  formatToolInput,
-  formatToolInputContinuation,
+  formatToolHeaderRows,
   formatToolPreview,
-  toolContinuationIndentCells,
+  type ToolPresentation,
 } from "./ui/tool-transcript/format.ts"
 
 /**
@@ -147,7 +144,7 @@ export interface ReplayOptions {
    * (e.g. `"orange"`, `"gold"`, `"lime"`); unknown values fall back
    * to orange, matching the live agent.
    */
-  toolPresentation?: Map<string, { icon?: string; color?: string; headerKey?: string }> | null
+  toolPresentation?: Map<string, ToolPresentation> | null
 }
 
 /**
@@ -367,78 +364,28 @@ export async function replayToScrollback(
         wroteAnyText = true
       } else if (b.type === "tool_use") {
         const tu = b as ToolUseBlock
-        // Live header: `\n  ╭ ✦ Tool  args [· <time>]` — match it verbatim.
-        // Pass live terminal width so soft-split (overflowing single-line
-        // Bash → `↳ <op> <body>` rows) activates the same way it does in
-        // the live agent. See `src/bash-split.ts`.
         const replayCols = process.stdout.columns
-        // Time-hint suffix mirrors writeToolHeader in src/agent.ts. The
-        // startedAt comes from the AssistantRecord that originally wrote
-        // this tool_use block (caller-supplied via `toolStartTimes`); we
-        // can only render the suffix when both the lookup AND the shared
-        // tracker are present, so a non-resume call (no records loaded)
-        // and an old-format call (no tracker injected) both no-op cleanly.
+        // The startedAt comes from the AssistantRecord that originally wrote
+        // this tool_use block; with the shared tracker it mirrors the live
+        // header's ` · <time>` suffix and advances the day-state for the
+        // resumed agent.
         const startedAt = toolStartTimes?.get(tu.id)
         const timeText =
           toolTimeTracker !== null && startedAt !== undefined
             ? toolTimeTracker.format(startedAt)
             : undefined
-        const timeSuffix = timeText !== undefined ? ` · ${timeText}` : ""
-        const TIME_HINT_GUTTER = 2
-        const adjustedCols =
-          replayCols !== undefined && timeSuffix.length > 0
-            ? Math.max(20, replayCols - displayWidth(timeSuffix) - TIME_HINT_GUTTER)
-            : replayCols
-        const dimTimeSuffix = timeSuffix.length > 0 ? c.dim(timeSuffix) : ""
-        // Resolve icon + label color from the optional presentation map.
-        // The live agent does the same via `pres = toolPresentation.get(tool.name)`
-        // (built from TOOL_DEFINITIONS + plugin manifests). Falls back to
-        // orange + no-icon when the caller didn't supply a map, which
-        // preserves byte-identical output for old tests that don't pass it.
         const pres = toolPresentation?.get(tu.name) ?? null
-        const labelColor =
-          pres?.color && (c as Record<string, (s: string) => string>)[pres.color]
-            ? (c as Record<string, (s: string) => string>)[pres.color]
-            : c.orange
-        const iconText = pres?.icon ? `${c.bold(labelColor(pres.icon))} ` : ""
-        const label = c.bold(labelColor(tu.name))
-        // Header content slot: prefer the persisted `displayHeader` (plugin
-        // override, e.g. the tasks plugin's `✔ ALL DONE · 39/39 · ...`)
-        // when present. Otherwise the default `formatToolInput` summary
-        // (JSON args / Bash command preview), matching live behavior.
-        // When `displayHeader` is in effect we skip the soft-split
-        // continuation rows : the plugin owns the header rendering
-        // entirely, same as the live agent (`writeToolHeader(override)`).
         const result = toolResultById.get(tu.id)
         const displays = toolDisplays?.get(tu.id) ?? null
-        const headerOverride = displays?.displayHeader
-        const headerContent =
-          headerOverride !== undefined
-            ? headerOverride
-            : c.dim(formatToolInput(tu, adjustedCols, pres?.headerKey))
-        const headerLine =
-          headerContent.length === 0
-            ? `${iconText}${label}${dimTimeSuffix}`
-            : `${iconText}${label}  ${headerContent}${dimTimeSuffix}`
-        // Outer-row clamp catches header overflow at narrow terminal
-        // widths : see {@link clampTranscriptRow} in src/agent.ts.
-        sink.write(`\n${clampTranscriptRow(`  ${c.dimCyan("╭")} ${headerLine}`, replayCols)}\n`)
-        if (headerOverride === undefined) {
-          // Continuation rows: `> <line>` for `\n`-separated multi-line,
-          // `↳ <op> <body>` for soft-split single-line overflow. Indented
-          // so the sigil aligns directly under the start of the command
-          // body in the header. Pass the icon (when present) so the
-          // indent matches the live agent's wider indent on iconned rows.
-          const contIndent = " ".repeat(toolContinuationIndentCells(tu.name, pres?.icon))
-          for (const cont of formatToolInputContinuation(tu, adjustedCols)) {
-            const contRow = `  ${c.dimCyan("│")} ${contIndent}${c.dim(cont)}`
-            sink.write(`${clampTranscriptRow(contRow, replayCols)}\n`)
-          }
+        for (const [idx, row] of formatToolHeaderRows({
+          tool: tu,
+          presentation: pres,
+          headerOverride: displays?.displayHeader,
+          timeText,
+          cols: replayCols,
+        }).entries()) {
+          sink.write(idx === 0 ? `\n${row}\n` : `${row}\n`)
         }
-        // Header→body separator (mirrors live agent rendering: the empty
-        // `│` gutter row that sits between the tool header and the first
-        // body line, giving every tool block a consistent visual shape).
-        sink.write(`  ${c.dimCyan("│")}\n`)
         if (result) {
           const content =
             typeof result.content === "string"
