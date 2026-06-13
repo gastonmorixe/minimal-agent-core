@@ -1208,7 +1208,6 @@ export async function runReplLiveArea(
             baseSink(value)
           }
         }
-        if (ps) await ps.end()
       } catch (err) {
         turnError = err
       } finally {
@@ -1228,6 +1227,17 @@ export async function runReplLiveArea(
         queueNavIndex = null
         renderDecoration()
         turnStatus.clear()
+        // Flush the PluginStream on EVERY turn-exit path (B-104). Previously
+        // `ps.end()` ran only on the success path, so on an abort or a
+        // turnError the scanner's buffered tail (already-emitted plugin
+        // output held mid-scan) was silently dropped from scrollback. Ending
+        // it here, in the finally, drains that tail through `baseSink` →
+        // formatter before `endThinkingFormatter`/`formatter.end()` run,
+        // matching the old success-path ordering. It runs exactly once per
+        // turn (the success-only call was removed), so there's no double-end,
+        // and it lands AFTER the abort-bus/FSM cleanup above so the "end the
+        // turn first" invariant survives even if this flush throws.
+        if (ps) await ps.end()
         await endThinkingFormatter()
         if (formatter) await formatter.end()
         // Discard the formatter's trailing-newline buffer entirely. The
@@ -1270,13 +1280,14 @@ export async function runReplLiveArea(
         if (!abortWasModeInterrupt) agent.notePreviousTurnAborted?.()
         // Make sure the abort echo starts on its own line. We separate
         // whenever ANY response text was written this turn, not only when
-        // `lastChunkEndedWithNewline` is false: on an abort the plugin
-        // stream is never flushed (`ps.end()` runs only on the success
-        // path), so the trailing-newline flag can be stale and the old
+        // `lastChunkEndedWithNewline` is false: the trailing-newline flag can
+        // be stale (a streamed line may have ended mid-row), and the old
         // guard let the echo collide with the last streamed line — e.g.
         // `↳ stream stalled — retrying …  ✘ ABORTED …` sharing one row in
         // the abort recording. A redundant blank line is harmless; a
-        // collision is not.
+        // collision is not. (`ps` is now flushed in the finally on every
+        // exit path including abort — B-104 — so any buffered plugin tail
+        // has already updated `wroteOutput`/`lastChunkEndedWithNewline`.)
         if (wroteOutput) compositor.writeStream("\n")
         // Render the faint+strikethrough echo of the rolled-back submission.
         // The visual semantics are unambiguous: the struck-through block
