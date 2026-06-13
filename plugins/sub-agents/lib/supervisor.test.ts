@@ -390,6 +390,28 @@ describe("supervisorTick — budget", () => {
     const out = tick([rec("A1", running(started), 60)], { A1: { alive: true } })
     expect(out.records[0]?.status.kind).toBe("running")
   })
+
+  // B-083: an UNBUDGETED worker (no budget.deadlineSec) used to be exempt from
+  // the deadline check forever, so a worker wedged mid-finalize leaked its
+  // concurrency slot. It must now be reaped via the DEFAULT_DEADLINE_SEC hard
+  // ceiling, through the SAME stop + failed(timeout) terminal path.
+  it("reaps an UNBUDGETED worker past the default hard deadline (B-083)", () => {
+    const started = new Date(NOW_MS - 31 * 60_000).toISOString() // 31 min ago, no budget
+    const out = tick([rec("A1", running(started))], { A1: { alive: true, progress: PROG } })
+    const st = out.records[0]?.status
+    expect(st?.kind).toBe("failed")
+    if (st?.kind === "failed") expect(st.error).toMatch(/timed out/i)
+    // and it is actually killed (terminal effects emitted, not bypassed)
+    const stop = out.effects.find((e) => e.type === "stop")
+    expect(stop?.type === "stop" && stop.pid).toBe(4242)
+    expect(out.effects.some((e) => e.type === "inject")).toBe(true)
+  })
+
+  it("leaves an UNBUDGETED worker running well within the default deadline (B-083)", () => {
+    const started = new Date(NOW_MS - 5 * 60_000).toISOString() // 5 min ago, no budget
+    const out = tick([rec("A1", running(started))], { A1: { alive: true } })
+    expect(out.records[0]?.status.kind).toBe("running")
+  })
 })
 
 describe("supervisorTick — queued + terminal", () => {
