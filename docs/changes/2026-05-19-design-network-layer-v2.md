@@ -49,8 +49,8 @@ Captured 2026-05-19 from `src/`, `tui-plugins/`, and `~/.agents/tui-plugins/`.
 | 3 | `src/client.ts:1507` `MODELS_URL`                     | `GET api.anthropic.com/v1/models`       | ✓ NetworkClient | h2     | Declared, currently only test-referenced.                                                               |
 | 4 | `src/auth.ts:278` `refreshAccessToken()`              | `POST claude.ai/api/oauth/token`        | ✓ NetworkClient | h2     | Token refresh with cross-process lock (`src/lockfile.ts`).                                              |
 | 5 | `src/oauth-login.ts:310` `exchangeCode()`             | `POST claude.ai/api/oauth/token`        | ✓ NetworkClient | h2     | One-shot PKCE code exchange.                                                                            |
-| 6 | `src/auto-formatter.ts:219`                            | `GET api.github.com/repos/.../releases` | ✗ raw `fetch`   | http/1.1 | mdstream auto-download. JSON.                                                                           |
-| 7 | `src/auto-formatter.ts:263`                            | `GET github.com/.../*.tar.gz`           | ✗ raw `fetch`   | http/1.1 | Tarball download, large body, progress bar reimplemented locally.                                       |
+| 6 | `src/ui/formatter/auto.ts:219`                          | `GET api.github.com/repos/.../releases` | ✗ raw `fetch`   | http/1.1 | mdstream auto-download. JSON.                                                                           |
+| 7 | `src/ui/formatter/auto.ts:263`                          | `GET github.com/.../*.tar.gz`           | ✗ raw `fetch`   | http/1.1 | Tarball download, large body, progress bar reimplemented locally.                                       |
 | 8 | `tui-plugins/web-search/providers/brave.ts:229`        | `GET api.search.brave.com/res/v1/...`   | ✗ raw `fetch`   | http/1.1 | API key in `X-Subscription-Token`. Constructor takes an injectable `fetch` for tests but no DI from us. |
 | 9 | `~/.agents/tui-plugins/ma-fetch-plugin/backends/obscura.ts` | (varies, model-controlled URLs)    | ✗ subprocess    | n/a       | Shells out to obscura binary; out of scope for the JS net layer but worth noting.                       |
 
@@ -357,10 +357,10 @@ export function createDefaultNetworkClient(): NetworkClient {
 }
 ```
 
-### 7b. Move `src/auto-formatter.ts` and `web-search/brave.ts` onto the layer
+### 7b. Move `src/ui/formatter/auto.ts` and `web-search/brave.ts` onto the layer
 
 ```ts
-// src/auto-formatter.ts (excerpt)
+// src/ui/formatter/auto.ts (excerpt)
 - const res = await fetch(RELEASES_API, { headers: { ... } })
 + const res = await networkClient.request({
 +   label: "auto-formatter.releases",
@@ -500,7 +500,7 @@ the same token).
    — *unlocks reuse and clears the largest single block of duplicated
    recovery logic*.
 3. **(1 PR, ~300 LoC)** Add `client.stream()` (SSE). Move
-   `src/auto-formatter.ts` + `tui-plugins/web-search/providers/brave.ts`
+   `src/ui/formatter/auto.ts` + `tui-plugins/web-search/providers/brave.ts`
    to the layer. Add `TUIContext.network` and `HookCtx.network`.
    — *gets every in-tree call on one layer*.
 4. **(1 PR, ~400 LoC)** Add `client.enqueue()` + queue UI hook.

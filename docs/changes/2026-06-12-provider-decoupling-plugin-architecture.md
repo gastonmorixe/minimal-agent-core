@@ -188,7 +188,7 @@ moved with the code, not weakened to make a move pass:
   (no api-key credential on the build machine).
 - Pure moves are proven green BEFORE and AFTER with no test edits (utils,
   errors/token-estimate/modality-check). The diff colorizer move was pinned by a
-  byte-parity test (`src/render/unified-diff.test.ts`) against the plugin's SGR
+  byte-parity test (`src/ui/render/unified-diff.test.ts`) against the plugin's SGR
   bytes; sse-parser parity rides the provider adapter suites.
 - The TUI seams (Wave A) preserve behavior: the turn-attachment registry
   (`src/agent/turn-attachments.ts`) and replay-renderer registry

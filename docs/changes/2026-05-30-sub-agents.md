@@ -66,7 +66,7 @@ to no-commit + targeted tests.
    a `turnAttachments: Array<{toAttachment()}>` extension point, injected after
    the named tasks/short-term producers. The sub-agents fleet digest rides it;
    the agent core stays agnostic.
-3. **Multi-row live-area slots** (`src/live-area-providers.ts`): a slot value is
+3. **Multi-row live-area slots** (`src/ui/status/live-area-scheduler.ts`): a slot value is
    split on `\n`, so one slot can paint N rows (the fleet widget). Single-line
    slots are unaffected.
 4. **`subagent.*` hook channels** (`src/plugins/hooks/channels.ts`):

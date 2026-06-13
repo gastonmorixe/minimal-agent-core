@@ -5,7 +5,7 @@
  * and the host writes those lines to scrollback VERBATIM (ANSI preserved). So
  * to make a command render in the same rounded box the host draws around tool
  * calls, we build that chrome ourselves here as raw ANSI and hand it back as
- * `lines`. The shape mirrors `src/agent/tool-format.ts` exactly so a `/loop`
+ * `lines`. The shape mirrors `src/ui/tool-transcript/format.ts` exactly so a `/loop`
  * confirmation is indistinguishable from a `CronCreate` tool box:
  *
  *   ╭─ ⟳ loop  every 10s · next in 8s            16:14:02

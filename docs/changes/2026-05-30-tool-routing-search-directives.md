@@ -59,7 +59,7 @@ wording does NOT spill into refusing Bash for genuine shell work (run tests, git
 - Targeted suites (`tools`, `prompts`, `headers`, `system-prompt`, `anthropic`): 86 pass, 0 fail.
 - `tsgo --noEmit`: exit 0. `oxlint`: 0 errors.
 - Note: the full `bun run check` is currently red on `format:check` for two unrelated untracked
-  files (`src/usage-stats.ts`, `src/usage-render.ts`) that pre-date this change; markdown
+  files (`src/usage-stats.ts`, `src/ui/usage/render.ts`) that pre-date this change; markdown
   prompts are not processed by biome.
 
 ## Follow-up (not done here)

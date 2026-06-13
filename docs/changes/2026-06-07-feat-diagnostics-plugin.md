@@ -3,7 +3,7 @@
 **Date**: 2026-06-07
 **Type**: feat
 **Scope**: src/plugins/hooks/ (tool-lifecycle contract + channel shape),
-src/agent.ts (emit + render), src/agent/tool-format.ts (renderer + annotation),
+src/agent.ts (emit + render), src/ui/tool-transcript/format.ts (renderer + annotation),
 plugins/diagnostics/ (new plugin)
 
 ## Problem
@@ -51,7 +51,7 @@ agent knows about `findings`/`notes`, not about LSP/linters/formatters.
 
 ### The rendering (agent core)
 
-`src/agent/tool-format.ts` gained pure renderers:
+`src/ui/tool-transcript/format.ts` gained pure renderers:
 
 - `renderFindingsPanel(findings)` : colored rows inside the existing tool-block
   gutter (`│ ┊ ╰`), severity dots (`●` red/gold/sky), dim codes/locations, a

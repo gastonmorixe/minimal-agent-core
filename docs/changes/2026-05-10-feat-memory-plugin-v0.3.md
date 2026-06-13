@@ -359,7 +359,7 @@ Three flows:
 - 32 + 42 + 24 + 10 + 36 + 40 + 47 + 7 + 9 = **247 new/changed tests**
   in the memory plugin surface, **all green**.
 - Full repo: 1402+ pass / 0 fail / 5 skip / 1 unrelated pre-existing
-  failure (in `src/live-area-providers.ts`, another agent's WIP, NOT
+  failure (in `src/ui/status/live-area-scheduler.ts`, another agent's WIP, NOT
   touched per the shared-tree rule).
 
 ## UX evidence (tmux smoke)
@@ -415,5 +415,5 @@ short-term (1 entry)
   another agent's WIP in this same working tree). Each was re-applied
   and re-verified. If you see a similar reversion before commit, run
   `git diff` against the listed files and re-apply from this PR.
-- One pre-existing test failure in `src/live-area-providers.test.ts`
+- One pre-existing test failure in `src/ui/status/live-area-scheduler.test.ts`
   is from the other agent's WIP, not this PR.

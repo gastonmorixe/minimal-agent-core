@@ -38,7 +38,7 @@ slash command plus a footer overlay. Same data + renderer as the top-level
 
 ## How it works
 
-The data engine (`src/usage-stats.ts`) and renderer (`src/usage-render.ts`)
+The data engine (`src/usage-stats.ts`) and renderer (`src/ui/usage/render.ts`)
 are host modules, reused by both this overlay and the `usage` CLI command.
 This plugin is the thin interactive shell: a `commands[]` entry that opens the
 overlay, an `editor.key` hook that drives period switching, and a

@@ -13,7 +13,7 @@
  * plugins tree (the I2 invariant). The plugin keeps its own copy for
  * its ShowDiff / inline-diff handlers; both read the same
  * `MINIMAL_AGENT_PALETTE` env so their output stays in lockstep. Parity
- * is pinned by `src/render/unified-diff.test.ts` against fixtures
+ * is pinned by `src/ui/render/unified-diff.test.ts` against fixtures
  * captured from the plugin renderer.
  *
  * // TODO(D-0): move to `@minimal-agent/plugin-api` utils (shared leaf
@@ -31,7 +31,7 @@
  * decorates lines by their first-character prefix, which is enough for
  * unified-diff output from `git diff` and friends.
  *
- * @module render/unified-diff
+ * @module ui/render/unified-diff
  */
 
 const RESET = "\x1b[0m"

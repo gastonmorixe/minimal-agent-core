@@ -49,9 +49,9 @@ There is **no full-screen TUI**. The agent is a scrolling REPL with a small bloc
 | `src/ui/picker.ts` | 173 | generic vertical picker primitive |
 | `src/ui/stdio-interceptor.ts` | 155 | re-routes all writes through the compositor |
 | `src/ui/term-caps.ts` | 138 | DECRPM probe for synchronized output (mode 2026) |
-| `src/ansi-stream.ts` | 126 | escape-safe split-buffer for partial CSI/OSC bytes |
+| `src/ui/terminal/ansi-stream.ts` | 126 | escape-safe split-buffer for partial CSI/OSC bytes |
 | `src/ui/quit-modal.ts` | 38 | example of a `LiveOverlay` |
-| `src/ui/theme.ts` | 27 | dark/light SGR palette |
+| `src/ui/theme/types.ts` | 27 | dark/light SGR palette |
 | `src/ui/overlay.ts` | 19 | `LiveOverlay` interface |
 | `src/ui/scrollback-guard.ts` | 14 | unused-but-kept reserve-region helper |
 
