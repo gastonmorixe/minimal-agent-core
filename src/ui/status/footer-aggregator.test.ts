@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { FooterAggregator } from "./log-aggregator.ts"
+import { FooterAggregator } from "./footer-aggregator.ts"
 
 interface Tap {
   footer: string[][]

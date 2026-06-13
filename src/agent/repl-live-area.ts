@@ -380,7 +380,8 @@ export async function runReplLiveArea(
   // their first keystroke. We pre-declare the locals here so the
   // `finally` block at end-of-fn can still reference them.
   const slotRows = loader?.getLiveAreaSlots() ?? []
-  let liveAreaScheduler: import("../live-area-providers.ts").LiveAreaScheduler | null = null
+  let liveAreaScheduler: import("../ui/status/live-area-scheduler.ts").LiveAreaScheduler | null =
+    null
   let tuiDiagnosticSurface:
     | import("../ui/status/diagnostic-surface.ts").TuiDiagnosticSurface
     | null = null
@@ -797,7 +798,7 @@ export async function runReplLiveArea(
   // so the dynamic imports here cannot orphan a fast-arriving submit
   // event (see the comment above the `slotRows` declaration).
   if (typeof editor.setFooterLines === "function") {
-    const { FooterAggregator } = await import("../log-aggregator.ts")
+    const { FooterAggregator } = await import("../ui/status/footer-aggregator.ts")
     const { TuiDiagnosticSurface } = await import("../ui/status/diagnostic-surface.ts")
     const { getDiagnosticBus } = await import("../diagnostic-bus.ts")
 
@@ -817,7 +818,7 @@ export async function runReplLiveArea(
     tuiDiagnosticSurface.attach(getDiagnosticBus())
 
     if (slotRows.length > 0) {
-      const { LiveAreaScheduler } = await import("../live-area-providers.ts")
+      const { LiveAreaScheduler } = await import("../ui/status/live-area-scheduler.ts")
       liveAreaScheduler = new LiveAreaScheduler(
         slotRows as ResolvedLiveAreaSlot[],
         aggregator.pluginSink(),

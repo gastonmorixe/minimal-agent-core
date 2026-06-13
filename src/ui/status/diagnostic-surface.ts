@@ -55,8 +55,8 @@ import { c } from "../style/ansi.ts"
 
 /**
  * Sink interface for receiving 0..2 styled diagnostic lines. Wired up
- * by `FooterAggregator` (`src/log-aggregator.ts`); production code does
- * not consume this directly.
+ * by `FooterAggregator` (`src/ui/status/footer-aggregator.ts`); production
+ * code does not consume this directly.
  */
 export interface DiagnosticLinesSink {
   setDiagnosticLines(lines: string[]): void
