@@ -23,8 +23,8 @@ const SCRIPT_TIMEOUT_MS = 4_000
 /**
  * Split a shell-ish command string into argv, honoring `"..."` / `'...'`
  * quoting. Local, dependency-free copy of the host's `parseFormatterCommand`
- * (`src/formatter.ts`): the decoupling contract (Wave D) forbids importing
- * from `src/`, and this parser is a few lines of pure regex with no host
+ * (`src/ui/formatter/formatter.ts`): the decoupling contract (Wave D) forbids
+ * importing from `src/`, and this parser is a few lines of pure regex with no host
  * state. Behavior is identical: double- or single-quoted runs become one arg
  * (quotes stripped), bare whitespace-delimited tokens become separate args.
  *

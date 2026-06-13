@@ -38,7 +38,7 @@ overlay can read the registry without importing the loader.
 ### Host port C — `emit` on the live-area handler context
 
 `LiveAreaHandlerContext` gains `emit?(channel, payload)`, wired in
-`src/live-area-providers.ts` to the scheduler's bus. The live-area slot is the
+`src/ui/status/live-area-scheduler.ts` to the scheduler's bus. The live-area slot is the
 only handler the host invokes on a fixed timer, so this turns it into a legal
 periodic actor — the schedule heartbeat fires `prompt.inject` from it.
 

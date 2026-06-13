@@ -51,7 +51,7 @@ interceptor.install()  // from this point on, all writes route through composito
 
 The `interceptorRef` two-phase wiring is intentional: the compositor can't reference the interceptor at construction time because the interceptor needs the compositor first.
 
-## `AnsiStreamBuffer`  (`src/ansi-stream.ts`, 126 LOC)
+## `AnsiStreamBuffer`  (`src/ui/terminal/ansi-stream.ts`, 126 LOC)
 
 A pure split-buffer that holds back any partial CSI or OSC sequence at the end of a chunk so downstream consumers never see a chunk ending mid-escape.
 

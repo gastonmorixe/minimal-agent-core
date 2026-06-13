@@ -1,7 +1,7 @@
 /**
  * ANSI color helpers for the quota-status footer.
  *
- * The host exposes the same wrappers as `c` (`src/agent/ansi.ts`), but the
+ * The host exposes the same wrappers as `c` (`src/ui/style/ansi.ts`), but the
  * decoupling contract (Wave D) forbids importing from `src/`. The SGR open
  * sequences are provider-neutral and the package owns them (`PALETTE` from
  * `@minimal-agent/plugin-api/utils/palette`), so this module rebuilds the

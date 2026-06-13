@@ -15,7 +15,7 @@ full review of the current subsystem, not of a pending change.
 | 20 | src/ui/scrollback-guard.ts |
 | 162 | src/ui/stdio-interceptor.ts |
 | 140 | src/ui/term-caps.ts |
-| 27 | src/ui/theme.ts |
+| 27 | src/ui/theme/types.ts |
 | 1455 | src/editor-controller.ts |
 | 444 | src/editor-renderer.ts |
 | 318 | src/editor-buffer.ts |
@@ -24,9 +24,9 @@ full review of the current subsystem, not of a pending change.
 | 365 | src/input/line-buffer.ts |
 | 1014 | src/input.ts |
 | 224 | src/input-capture-stack.ts |
-| 126 | src/ansi-stream.ts |
+| 126 | src/ui/terminal/ansi-stream.ts |
 | 63 | src/streaming-formatter.ts |
-| 11 | src/spinner.ts (re-export shim only) |
+| 11 | src/ui/spinner/index.ts |
 
 Also read for context: `src/term-width.ts` -> `plugin-api/src/utils/term-width.ts`
 (the shared width model). `tsconfig` has `"strict": true` but **not**
@@ -87,7 +87,7 @@ throws on `setRawMode`, crashing start. **Fix:** mirror `RawInput`: bail (or
 fall back) when `!this.stdin.isTTY`.
 
 ### M2. `findEscapeSafeSplit` treats DCS/APC/PM/SOS as complete 2-byte sequences
-`src/ansi-stream.ts:120-122`
+`src/ui/terminal/ansi-stream.ts:120-122`
 
 The escape-safe splitter handles CSI (`ESC [`) and OSC (`ESC ]`), then falls
 through to "any other `ESC X` is always 2 bytes ... complete." But `ESC P` (DCS),

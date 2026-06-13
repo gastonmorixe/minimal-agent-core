@@ -44,7 +44,7 @@ quota was where it had been days earlier.
 
 ## Root cause
 
-`LiveAreaScheduler.fire()` (`src/live-area-providers.ts`) gates
+`LiveAreaScheduler.fire()` (`src/ui/status/live-area-scheduler.ts`) gates
 re-entry on a per-slot `inFlight` flag and arms an `AbortController`
 with `timeoutMs` (8 s for quota) so a slow producer can't pile up:
 
@@ -108,7 +108,7 @@ look independent:
 
 * **Heartbeat:** `scheduleNext()` → `setTimeout(refreshMs)` → `fire()`
 * **Event:** `bus.on("quota.headersReceived", () => fire(s))` (wired
-  in `LiveAreaScheduler.subscribeRefreshOn()` at `src/live-area-providers.ts:147-159`)
+  in `LiveAreaScheduler.subscribeRefreshOn()` at `src/ui/status/live-area-scheduler.ts:147-159`)
 
 But both funnel through the same `fire(s)` function, which checks the
 same `s.inFlight` flag at the top. The single stuck probe deadlocked
@@ -156,7 +156,7 @@ The slot handler now actually consumes the abort signal the scheduler
 already gives it. Until this turn it was named `_ctx` (TypeScript
 "unused" prefix) — it had been ignored.
 
-### 3. `src/live-area-providers.ts` — defensive belt: force-release `inFlight`
+### 3. `src/ui/status/live-area-scheduler.ts` — defensive belt: force-release `inFlight`
 
 Even with (1) and (2) in place, a future slot handler could forget the
 `ctx.abort` plumbing and recreate the same class of bug. To make that
@@ -200,7 +200,7 @@ invoke ignores ctx.abort` test pins the recovery.
 
 ### Unit (in this commit)
 
-* `src/live-area-providers.test.ts`:
+* `src/ui/status/live-area-scheduler.test.ts`:
   * `force-releases inFlight when timeoutMs fires AND invoke ignores ctx.abort (heartbeat + refreshOn both recover)`
     — drives a slot whose `invoke` returns a never-settling promise,
     advances past `timeoutMs`, asserts the diagnostic log appears, then
@@ -224,7 +224,7 @@ invoke ignores ctx.abort` test pins the recovery.
 
 ### Existing tests that pin the contract
 
-* `src/live-area-providers.test.ts`: `aborts a slow invocation when timeoutMs elapses (next tick still scheduled)` — the original abort/recover happy-path test continues to pass with the latch refactor.
+* `src/ui/status/live-area-scheduler.test.ts`: `aborts a slow invocation when timeoutMs elapses (next tick still scheduled)` — the original abort/recover happy-path test continues to pass with the latch refactor.
 
 ### Manual verification
 
@@ -236,8 +236,8 @@ synthesizes the exact deadlock signature with a never-settling
 
 * `src/client.ts` — `checkQuota` signature + signal plumbing
 * `src/client.test.ts` — 3 new regression tests
-* `src/live-area-providers.ts` — single-fire latch + 2-hop force-release
-* `src/live-area-providers.test.ts` — 2 new regression tests
+* `src/ui/status/live-area-scheduler.ts` — single-fire latch + 2-hop force-release
+* `src/ui/status/live-area-scheduler.test.ts` — 2 new regression tests
 * `tui-plugins/quota-status/handler.ts` — pass `ctx.abort` to `checkQuota`
 
 No public API churn beyond the optional third arg to `checkQuota`.
