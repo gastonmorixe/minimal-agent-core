@@ -14,7 +14,13 @@ import { stripAnsi } from "./term-width.ts"
 
 class FakeTTYOutput {
   isTTY = true
+  /** Terminal width; undefined = no clamp (matches a non-sized stream). */
+  columns?: number
   readonly chunks: string[] = []
+
+  constructor(columns?: number) {
+    this.columns = columns
+  }
 
   write(chunk: string | Uint8Array): boolean {
     this.chunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk))
@@ -786,6 +792,48 @@ describe("LiveAreaStatusController + StatusRenderer infix wiring", () => {
     expect(last).toContain("Calling Write: streaming input (10 B)")
     expect(last).toContain("api.anthropic.com") // host survives
     expect(last).not.toContain("12.4 KB") // bytes suppressed (would duplicate label)
+    handle.clear()
+    renderer.stop()
+  })
+
+  it("clamps the line to terminal width so it never wraps on a narrow term (B-073)", () => {
+    const cols = 20
+    const bus = new StatusBus()
+    const output = new FakeTTYOutput(cols)
+    const renderer = new StatusRenderer(bus, output, {
+      maxFps: 0,
+      spinner: { render: () => ({ glyph: "●", fpsHint: 0 }) },
+      now: () => 100_000,
+    })
+    renderer.start()
+    // Label far longer than 20 cells, plus an activity infix that would push
+    // the composed line well past the row width.
+    const handle = bus.create(
+      "A very long status label that would overflow a narrow terminal row",
+      { activity: { direction: "down", recvBytes: 4_096, target: { host: "api.anthropic.com" } } },
+    )
+    const last = output.chunks.at(-1) ?? ""
+    // The visible (ANSI-stripped) body, minus the leading `\r\x1b[2K` control,
+    // must fit within the column budget — i.e. it can never wrap to row 2.
+    const visible = stripAnsi(last).replace(/^\r/, "")
+    expect(visible.length).toBeLessThanOrEqual(cols)
+    handle.clear()
+    renderer.stop()
+  })
+
+  it("does NOT clamp when the stream reports no columns (pipe / non-sized)", () => {
+    const bus = new StatusBus()
+    const output = new FakeTTYOutput() // columns undefined
+    const renderer = new StatusRenderer(bus, output, {
+      maxFps: 0,
+      spinner: { render: () => ({ glyph: "●", fpsHint: 0 }) },
+      now: () => 100_000,
+    })
+    renderer.start()
+    const longLabel = "A very long status label that would overflow a narrow terminal row"
+    const handle = bus.create(longLabel)
+    const last = stripAnsi(output.chunks.at(-1) ?? "")
+    expect(last).toContain(longLabel) // full label preserved, no truncation
     handle.clear()
     renderer.stop()
   })

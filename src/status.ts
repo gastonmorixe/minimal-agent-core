@@ -5,7 +5,7 @@ import {
   SpinnerManager,
   type SpinnerNotification,
 } from "./spinner.ts"
-import { displayWidth } from "./term-width.ts"
+import { displayWidth, truncateDisplayWidth } from "./term-width.ts"
 
 type StatusListener = (label: string | null) => void
 
@@ -752,12 +752,33 @@ export class StatusRenderer {
     // (Xs)" line-mode output for callers that don't publish activity.
     const status = this.bus.currentStatus()
     const labelHasBytes = LABEL_BYTES_RE.test(this.label)
+    // Terminal width, read fresh each paint (handles SIGWINCH between frames).
+    // 0/undefined columns (non-TTY, or a stream without the field) means "no
+    // clamp" -> Infinity, preserving the legacy unbounded output for pipes.
+    const cols = (this.output as { columns?: number }).columns
+    const maxWidth = typeof cols === "number" && cols > 0 ? cols : Number.POSITIVE_INFINITY
+    // Budget the activity infix against the room left after the fixed parts
+    // (spinner prefix + label + elapsed suffix). The infix degrades segment-by
+    // -segment to fit (see formatActivityInfix); giving it a real budget keeps
+    // the common case readable instead of relying solely on the hard clamp.
+    const fixedWidth = displayWidth(prefix) + displayWidth(this.label) + displayWidth(suffix)
+    const infixBudget = Number.isFinite(maxWidth) ? Math.max(0, maxWidth - fixedWidth) : undefined
     const infix = formatActivityInfix(status?.activity, {
       now,
       entryStartedAt: this.statusStartedAt,
       hideBytes: labelHasBytes,
+      maxWidth: infixBudget,
     })
-    this.output.write(`\r\x1b[2K${prefix}${dim(this.label)}${infix}${suffix}`)
+    // Hard width clamp (B-073): without it a long label/infix wraps to a 2nd
+    // row on a narrow term, and the next `\r\x1b[2K` only clears the row the
+    // cursor landed on -> the wrapped remnant is left as uncleared garbage.
+    // truncateDisplayWidth is ANSI-aware (counts cells, copies SGR, re-resets),
+    // so clamping the fully-composed line is safe even mid-escape.
+    const composed = `${prefix}${dim(this.label)}${infix}${suffix}`
+    const clamped = Number.isFinite(maxWidth)
+      ? truncateDisplayWidth(composed, maxWidth, "")
+      : composed
+    this.output.write(`\r\x1b[2K${clamped}`)
     this.visible = true
   }
 
