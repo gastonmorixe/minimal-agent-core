@@ -9,6 +9,7 @@ import {
   formatTokenCount,
   fuzzyMatch,
   matchesQuery,
+  renderSessionsCommandRows,
 } from "./sessions.ts"
 
 function usage(over: Partial<SessionUsage> = {}): SessionUsage {
@@ -192,5 +193,37 @@ describe("matchesQuery", () => {
     const noCwd = { ...rec, cwd: undefined as unknown as string }
     expect(matchesQuery(noCwd, "4c2e3c84")).toBe(true) // still matches sid
     expect(matchesQuery(noCwd, "minimal-agent")).toBe(false)
+  })
+})
+
+describe("renderSessionsCommandRows", () => {
+  test("renders empty state rows without direct console output", () => {
+    const out = renderSessionsCommandRows({ allCount: 0, rows: [] }).join("\n")
+    expect(out).toContain("no saved sessions yet")
+    expect(out).toContain("sessions are stored at")
+  })
+
+  test("renders matching table rows and summary", () => {
+    const out = renderSessionsCommandRows({
+      allCount: 2,
+      query: "alpha",
+      rows: [
+        {
+          createdAt: "2026-04-28T05:24:32.231Z",
+          sid: "abc123",
+          model: "test-model",
+          bytes: 1536,
+          usage: usage({ tokens: 12_300, estimated: false, turns: 2, realTurns: 2 }),
+          cwd: "/Users/gaston/Projects/minimal-agent",
+          snippet: "hello",
+        },
+      ],
+    }).join("\n")
+
+    expect(out).toContain("when")
+    expect(out).toContain("abc123")
+    expect(out).toContain("1.5 kB")
+    expect(out).toContain("12.3k [R]")
+    expect(out).toContain('1 of 2 session(s) matching "alpha"')
   })
 })

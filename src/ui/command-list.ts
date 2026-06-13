@@ -8,6 +8,7 @@
  * @module ui/command-list
  */
 
+import { type CommandOutput, writeCommandRows } from "./command-output.ts"
 import { c } from "./style/ansi.ts"
 
 export interface CommandListItem {
@@ -48,7 +49,7 @@ export function renderCommandList(spec: CommandListSpec): string[] {
 /** Write rendered rows with one trailing newline. */
 export function writeCommandList(
   spec: CommandListSpec,
-  output: { write(s: string): unknown } = process.stdout,
+  output: CommandOutput = process.stdout,
 ): void {
-  output.write(`${renderCommandList(spec).join("\n")}\n`)
+  writeCommandRows(renderCommandList(spec), output)
 }
