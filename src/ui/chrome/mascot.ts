@@ -16,6 +16,8 @@
  *
  * This module is presentation-only — no ANSI, no I/O. Callers compose
  * color and layout on top.
+ *
+ * @module ui/chrome/mascot
  */
 
 export type CatExpression =
