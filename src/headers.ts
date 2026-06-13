@@ -8,14 +8,63 @@
 
 import { randomUUID } from "node:crypto"
 
-// Anthropic model-gate decisions live in the PROVIDER PLUGIN. This legacy
-// module is itself misplaced Anthropic wire code (Wave-4 dissolution
-// target), so it reaches into the plugin rather than duplicating the
-// logic in core a second time. See plugins/llm-anthropic/beta-gates.ts.
-import { omitsInterleavedThinking, wants1mContext } from "../plugins/llm-anthropic/beta-gates.ts"
-
 import type { AuthResult } from "./auth.ts"
+import { findModel } from "./llm/model-registry.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
+
+// ---------------------------------------------------------------------------
+// Model-gated beta-flag decisions (local copies)
+// ---------------------------------------------------------------------------
+//
+// These two predicates decide which MODEL-dependent beta flags this legacy
+// builder emits. They MUST stay in lockstep with the canonical transport's
+// copies in plugins/llm-anthropic/beta-gates.ts — the cross-transport
+// divergence-contract suite (beta-flags.characterization.test.ts) pins that
+// agreement. They previously lived only in the plugin and this legacy module
+// imported them across the src/→plugins/ boundary; that was the last I2
+// violation (core importing a plugin). It is now severed: the logic is
+// duplicated here as a provider-neutral-seam consumer (model registry +
+// conservative substring fallback). When this whole legacy module dissolves
+// into the plugin (Wave 4), this duplicate goes away and the plugin keeps the
+// single source of truth.
+
+/**
+ * Should requests for `modelId` carry `context-1m-2025-08-07`?
+ *
+ * True when the id opts in via the client-side `[1m]` suffix, when the
+ * registered model's context window is 1M+, or (unregistered fallback) when
+ * the id belongs to a known 1M-native family. The fallback list mirrors what
+ * the plugin's canonical copy ships so unregistered/early-boot callers keep
+ * today's behavior. Pinned cross-transport by the characterization suite.
+ */
+function wants1mContext(modelId: string | undefined): boolean {
+  if (!modelId) return false
+  if (/\[1m\]/i.test(modelId)) return true
+  const entry = findModel(modelId)
+  if (entry) return entry.capabilities.contextWindow >= 1_000_000
+  return (
+    modelId.includes("opus-4-6") ||
+    modelId.includes("opus-4-7") ||
+    modelId.includes("opus-4-8") ||
+    modelId.includes("sonnet-4-6") ||
+    modelId.includes("fable-5")
+  )
+}
+
+/**
+ * Should `interleaved-thinking-2025-05-14` be OMITTED for `modelId`?
+ *
+ * Opus 4.8 only: under this beta it emits huge parallel tool batches whose
+ * mid-turn thinking hallucinates same-turn tool results and spirals
+ * (wire-proven; TODOS.md T-7c3f02). The gate is id-based on purpose: the
+ * pathology tracks the MODEL. `MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1`
+ * overrides for experiments. Mirrors the plugin's canonical copy; pinned
+ * cross-transport by the characterization suite.
+ */
+function omitsInterleavedThinking(modelId: string | undefined): boolean {
+  if (process.env.MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING === "1") return false
+  return !!modelId && modelId.includes("opus-4-8")
+}
 
 /**
  * Resolve a core prompt file under `src/prompts/`. Prose for the system

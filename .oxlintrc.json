@@ -151,17 +151,6 @@
           }
         ]
       }
-    },
-    {
-      // RATCHET: do not extend. Frozen I2 exemptions (legacy core->plugin
-      // imports, severed in Wave A). Mirrors the BASELINE in
-      // src/architecture.core-plugin-imports.test.ts -- when a file is
-      // cleaned there, remove it here too. A-4 cleared the five agent-cluster
-      // test reach-ins; headers.ts:15 is the last site (dies in B-4).
-      "files": ["src/headers.ts"],
-      "rules": {
-        "no-restricted-imports": "off"
-      }
     }
   ],
   "ignorePatterns": [

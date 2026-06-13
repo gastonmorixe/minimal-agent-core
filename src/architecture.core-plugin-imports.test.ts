@@ -58,8 +58,10 @@ const BASELINE = new Map<string, number>([
   // (2), preflight (1), tasks-attachment (2), turn-attachments (3),
   // preflight-pipeline (1) now route through core seams (registerTestProvider,
   // the turn-attachment registry, in-test fake producers/providers) and import
-  // no plugins. headers.ts:1 is the last src→plugins site; it dies in B-4.
-  ["headers.ts", 1],
+  // no plugins. B-4 severed the final site: headers.ts no longer imports
+  // ../plugins/llm-anthropic/beta-gates.ts (the two model-gate predicates are
+  // now inlined as local copies). I2 in src/ is ZERO. END STATE reached: this
+  // map is EMPTY. Keep it empty — any new entry is a NEW core→plugin coupling.
 ])
 
 describe("architecture: core→plugin imports (I2 — src/ never imports plugins/)", () => {
