@@ -14,7 +14,12 @@
  */
 
 import { clearCredentials } from "../auth.ts"
-import { c } from "../ui/style/ansi.ts"
+import {
+  renderLogoutResultRows,
+  renderLogoutStartRows,
+  renderLogoutWarningRows,
+} from "../ui/chrome/logout.ts"
+import { writeCommandRows } from "../ui/command-output.ts"
 
 export interface LogoutDeps {
   /**
@@ -35,24 +40,15 @@ export async function runLogoutCommand(deps: LogoutDeps = {}): Promise<number> {
   const out = deps.output ?? { write: (s: string) => process.stderr.write(s) }
   const clear = deps.clearCredentials ?? clearCredentials
 
-  out.write(`  ${c.bold(c.pink("⊖"))} ${c.bold("Sign out")}\n`)
+  writeCommandRows(renderLogoutStartRows(), out)
 
   let removed = false
   try {
     removed = clear()
   } catch (err) {
-    out.write(
-      `  ${c.boldYellow("warn")} credential removal failed: ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
-    )
+    writeCommandRows(renderLogoutWarningRows(err instanceof Error ? err.message : String(err)), out)
   }
-  out.write(
-    `  ${c.faintWhite("╰")} credentials  ${
-      removed ? c.boldGreen("removed") : c.dim("(no entry)")
-    }\n`,
-  )
 
-  out.write(`\n  ${c.boldGreen("✔")} ${c.bold("Logged out")}\n`)
+  writeCommandRows(renderLogoutResultRows(removed), out)
   return 0
 }
