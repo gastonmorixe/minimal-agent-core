@@ -3,7 +3,7 @@
  *
  * Thin shell over the SAME `sessions:read` capability provider that backs
  * the `session-history` plugin's `SessionHistory` tool
- * (`src/plugins/v2/providers/sessions-read.ts`). One rendering path: the
+ * (`src/plugins/host/providers/sessions-read.ts`). One rendering path: the
  * CLI dump and the tool's `{action:"dump"}` are byte-identical for the
  * same session, and improvements to the provider serve both surfaces.
  *
@@ -11,7 +11,7 @@
  */
 
 import { writeStdoutSafely } from "../infra/safe-stdout.ts"
-import { createSessionsReadApi } from "../plugins/v2/providers/sessions-read.ts"
+import { createSessionsReadApi } from "../plugins/host/providers/sessions-read.ts"
 
 import { resolveSessionTarget } from "./session-index.ts"
 

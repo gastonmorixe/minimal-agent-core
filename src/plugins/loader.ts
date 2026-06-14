@@ -35,6 +35,8 @@ import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
+import type { PluginHost } from "./host/capabilities.ts"
+import { buildPluginHost } from "./host/factory.ts"
 import type {
   AgentContext,
   CommandContext,
@@ -56,8 +58,6 @@ import type {
   TUIResult,
   TUITrigger,
 } from "./types.ts"
-import { buildPluginHostV2 } from "./v2/host.ts"
-import type { PluginHostV2 } from "./v2/host-capabilities.ts"
 
 /**
  * Module-handler default-export signature for hook subscriptions.
@@ -326,7 +326,7 @@ export class PluginLoader {
    * across turns see the same object identity (cheap, and consistent
    * with the frozen-value-object discipline of {@link AgentContext}).
    */
-  private readonly hostCache = new Map<string, PluginHostV2>()
+  private readonly hostCache = new Map<string, PluginHost>()
   /** Capability-host overrides (test sessionsDir injection). See {@link PluginLoaderOptions.hostOptions}. */
   private readonly hostOptions: { sessionsDir?: string } | undefined
 
@@ -1263,14 +1263,14 @@ export class PluginLoader {
    * `capabilities` in its manifest — `ctx.host` stays absent and the
    * plugin has zero host-data access (deny-by-default).
    */
-  private hostFor(pluginId: string): PluginHostV2 | undefined {
+  private hostFor(pluginId: string): PluginHost | undefined {
     if (!pluginId) return undefined
     const cached = this.hostCache.get(pluginId)
     if (cached) return cached
     const pkg = this.plugins.find((p) => p.manifest.id === pluginId)
     const caps = pkg?.manifest.capabilities ?? []
     if (caps.length === 0) return undefined
-    const host = buildPluginHostV2({
+    const host = buildPluginHost({
       capabilities: caps,
       logger: createPluginLogger(pluginId),
       sessionsDir: this.hostOptions?.sessionsDir,

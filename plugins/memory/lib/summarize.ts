@@ -23,7 +23,7 @@
 
 // RESIDUAL host coupling (Wave D-7): the summary pipeline needs an
 // authenticated LLM call at prompt-fragment time. There is no `auth` or
-// `llm:send` capability on the v2 host yet, and the prompt-fragment
+// `llm:send` capability on the plugin host yet, and the prompt-fragment
 // context exposes no `ctx.host` at all, so these two RUNTIME helpers stay
 // imported from `src/` until that capability lands. Their TYPES are
 // DERIVED from the runtime values (`ReturnType`/`Parameters`) below, so

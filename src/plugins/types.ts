@@ -10,9 +10,9 @@
  * It's a types-only module, so `export type *` is sufficient and carries the
  * whole surface, including the `PluginLogger` re-export the package makes for
  * plugin authors. The host references inside the moved module (`PluginLogger`,
- * `PluginHostV2`) resolve against package-local, type-only structural copies;
+ * `PluginHost`) resolve against package-local, type-only structural copies;
  * the runtime that backs them stays in `src/diagnostic-bus.ts` and
- * `src/plugins/v2/`, and the host's real logger/host objects satisfy those
+ * `src/plugins/host/`, and the host's real logger/host objects satisfy those
  * copies structurally at runtime.
  *
  * @module plugins/types

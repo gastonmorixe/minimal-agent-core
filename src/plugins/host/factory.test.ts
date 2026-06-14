@@ -6,9 +6,9 @@ import { afterAll, describe, expect, it } from "bun:test"
 
 import { SessionStore } from "../../session-store.ts"
 
-import { buildPluginHostV2 } from "./host.ts"
+import { buildPluginHost } from "./factory.ts"
 
-const dir = mkdtempSync(join(tmpdir(), "host-v2-"))
+const dir = mkdtempSync(join(tmpdir(), "plugin-host-"))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 const store = SessionStore.open({
@@ -22,9 +22,9 @@ const store = SessionStore.open({
 })
 store.appendUser("hello host")
 
-describe("buildPluginHostV2", () => {
+describe("buildPluginHost", () => {
   it("populates ONLY granted namespaces (deny-by-default)", () => {
-    const host = buildPluginHostV2({ capabilities: ["sessions:read"], sessionsDir: dir })
+    const host = buildPluginHost({ capabilities: ["sessions:read"], sessionsDir: dir })
     expect(host.sessions).toBeDefined()
     expect(host.blobs).toBeUndefined()
     expect(host.clock).toBeUndefined()
@@ -32,7 +32,7 @@ describe("buildPluginHostV2", () => {
   })
 
   it("grants multiple namespaces together", () => {
-    const host = buildPluginHostV2({
+    const host = buildPluginHost({
       capabilities: ["sessions:read", "blobs:read", "clock"],
       sessionsDir: dir,
     })
@@ -42,7 +42,7 @@ describe("buildPluginHostV2", () => {
   })
 
   it("the host object is frozen", () => {
-    const host = buildPluginHostV2({ capabilities: ["sessions:read"], sessionsDir: dir })
+    const host = buildPluginHost({ capabilities: ["sessions:read"], sessionsDir: dir })
     expect(Object.isFrozen(host)).toBe(true)
     expect(Object.isFrozen(host.sessions)).toBe(true)
     expect(() => {
@@ -51,19 +51,19 @@ describe("buildPluginHostV2", () => {
   })
 
   it("granted sessions API actually reads the injected dir", async () => {
-    const host = buildPluginHostV2({ capabilities: ["sessions:read"], sessionsDir: dir })
+    const host = buildPluginHost({ capabilities: ["sessions:read"], sessionsDir: dir })
     const meta = await host.sessions?.meta("host-sid")
     expect(meta?.firstPrompt).toContain("hello host")
   })
 
   it("clock honors the injected now()", () => {
-    const host = buildPluginHostV2({ capabilities: ["clock"], now: () => 1_000_000 })
+    const host = buildPluginHost({ capabilities: ["clock"], now: () => 1_000_000 })
     expect(host.clock?.now()).toBe(1_000_000)
     expect(host.clock?.iso()).toBe(new Date(1_000_000).toISOString())
   })
 
   it("ignores unknown capability strings without throwing", () => {
-    const host = buildPluginHostV2({ capabilities: ["sessions:read", "bogus:cap"] })
+    const host = buildPluginHost({ capabilities: ["sessions:read", "bogus:cap"] })
     expect(host.sessions).toBeDefined()
   })
 })

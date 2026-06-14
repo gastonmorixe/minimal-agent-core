@@ -1,27 +1,25 @@
 /**
- * Host capabilities — the decoupled, capability-oriented surface a v2
- * plugin consumes through its handler context (`ctx.host`).
+ * Host capabilities — the decoupled, capability-oriented surface a plugin
+ * consumes through its handler context (`ctx.host`).
  *
  * ## Why this exists
  *
  * A plugin must be able to live in its own repo. It may NOT import host
  * code (`src/...`) — not even type-only. So the host hands each plugin a
- * frozen {@link PluginHostV2} carrying exactly the capability namespaces
+ * frozen {@link PluginHost} carrying exactly the capability namespaces
  * its manifest declared (`capabilities: ["sessions:read", ...]`). The
  * plugin re-declares the slice it uses as a LOCAL structural interface;
  * TypeScript's structural typing means the real frozen host satisfies it
  * at runtime. The types in THIS file are the host's source of truth:
- * `./host.ts`'s `buildPluginHostV2` produces objects that satisfy them,
+ * `./factory.ts`'s `buildPluginHost` produces objects that satisfy them,
  * and `./providers/*` implement the backing logic against `src/session-*`
  * and `src/blob-store`.
  *
- * This is net-new infra. There was no capability host before; the
- * `sessions` inspection plugin (`plugins/sessions/`) is the first real
- * consumer and the reason this module exists. `plugin-sdk.ts` in this
- * folder is a separate, older `activate()/registerTool()` experiment and
- * is unrelated.
+ * This is the single host-owned capability contract for plugins. Plugins
+ * consume it structurally through the public plugin API; runtime backing logic
+ * stays in this host package.
  *
- * @module plugins/v2/host-capabilities
+ * @module plugins/host/capabilities
  */
 
 import type { PluginLogger } from "../../diagnostic-bus.ts"
@@ -33,7 +31,7 @@ import type { ModelEntry } from "../../llm/model-registry.ts"
 
 /**
  * Capability namespaces a plugin can request in its manifest. Each maps
- * to a frozen sub-API on {@link PluginHostV2}. The loader populates ONLY
+ * to a frozen sub-API on {@link PluginHost}. The loader populates ONLY
  * granted namespaces; everything else is `undefined`, so a plugin must
  * defensively check before use.
  *
@@ -339,7 +337,7 @@ export interface ModelsReadApi {
  *
  * NOTE (Wave D-2 finding): LLM provider plugins currently activate through the
  * dedicated provider loader (`src/llm/provider-discovery.ts` →
- * `ProviderPlugin.register()`, which takes no `ctx`), NOT through the v2
+ * `ProviderPlugin.register()`, which takes no `ctx`), NOT through the TUI
  * capability host. So this namespace has no live provider consumer yet; it is
  * placed here so a future provider-loader convergence (or a TUI plugin that
  * needs to register a model) can use it without a new seam.
@@ -356,12 +354,12 @@ export interface ModelsRegisterApi {
 // ---------------------------------------------------------------------------
 
 /**
- * The frozen capability host handed to a v2 plugin via `ctx.host`. Only
+ * The frozen capability host handed to a plugin via `ctx.host`. Only
  * the namespaces the manifest declared are populated; the rest are
  * `undefined`. The optionality is deliberate — a plugin must check
  * (`if (!host.sessions) return error`) before use.
  */
-export interface PluginHostV2 {
+export interface PluginHost {
   readonly capabilities: readonly CapabilityToken[]
   readonly sessions?: SessionsReadApi
   readonly blobs?: BlobsReadApi

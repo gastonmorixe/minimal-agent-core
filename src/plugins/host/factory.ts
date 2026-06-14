@@ -1,5 +1,5 @@
 /**
- * Capability-host factory — builds the frozen {@link PluginHostV2} a
+ * Capability-host factory — builds the frozen {@link PluginHost} a
  * plugin receives as `ctx.host`, populated ONLY with the namespaces its
  * manifest declared (`capabilities: ["sessions:read", ...]`).
  *
@@ -12,7 +12,7 @@
  * the shared surface and bleed state into a sibling handler (same rule as
  * `createAgentContext` (in `../agent-context.ts`)).
  *
- * @module plugins/v2/host
+ * @module plugins/host/factory
  */
 
 import type { PluginLogger } from "../../diagnostic-bus.ts"
@@ -26,11 +26,11 @@ import {
   setDefaultModelId,
 } from "../../llm/model-registry.ts"
 
-import type { CapabilityToken, PluginHostV2 } from "./host-capabilities.ts"
+import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
 
-/** Inputs for {@link buildPluginHostV2}. All injectable for tests. */
+/** Inputs for {@link buildPluginHost}. All injectable for tests. */
 export interface BuildHostOptions {
   /** Capability namespaces the plugin's manifest declared. */
   capabilities: readonly string[]
@@ -47,11 +47,11 @@ export interface BuildHostOptions {
  * strings are ignored here (manifest validation rejects them earlier;
  * tolerating them keeps this factory total for ad-hoc callers).
  */
-export function buildPluginHostV2(opts: BuildHostOptions): PluginHostV2 {
+export function buildPluginHost(opts: BuildHostOptions): PluginHost {
   const granted = new Set(opts.capabilities)
   const has = (t: CapabilityToken) => granted.has(t)
 
-  const host: PluginHostV2 = Object.freeze({
+  const host: PluginHost = Object.freeze({
     capabilities: Object.freeze(
       [...granted].filter((c): c is CapabilityToken => typeof c === "string"),
     ),

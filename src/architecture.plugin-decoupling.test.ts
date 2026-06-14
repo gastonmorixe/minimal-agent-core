@@ -8,7 +8,7 @@
  * vars, JSON envelopes), and the plugin re-declares the slice it consumes
  * as a LOCAL structural interface (TypeScript's structural typing makes the
  * real host object satisfy it at runtime). See
- * `src/plugins/v2/host-capabilities.ts` for the capability-host design that
+ * `src/plugins/host/capabilities.ts` for the capability-host design that
  * exists precisely to make this possible.
  *
  * THE RATCHET: `BASELINE` freezes the per-file count of `src/` import sites
@@ -121,7 +121,7 @@ const BASELINE = new Map<string, number>([
   // Wave D-7: memory swept to its residual. Only summarize.ts keeps two
   // src/ sites — the summary pipeline needs an authenticated LLM call at
   // prompt-fragment time (getAuth + canonicalSendFn) and there is no
-  // `auth`/`llm:send` capability on the v2 host yet, nor a `ctx.host` on
+  // `auth`/`llm:send` capability on the plugin host yet, nor a `ctx.host` on
   // the prompt-fragment context. See reports/D7-memory.md.
   ["memory/lib/summarize.ts", 2],
   // D-quota-schedule: render.ts/render*.test.ts/script-runner.ts swept to 0
@@ -145,7 +145,7 @@ const BASELINE = new Map<string, number>([
   // D-quickwins: resolveModel → ctx.host.models.resolve (models:read; manifest
   // grants it). The remaining 2 are residual: resolveProviderSessionInfo
   // (provider-session) + getSessionTokens (session-tokens) have NO capability
-  // on the v2 host (same gap as quota-status/handler.ts), so they stay until a
+  // on the plugin host (same gap as quota-status/handler.ts), so they stay until a
   // session-tokens / provider-session seam exists.
   ["session-info/lib/gather.ts", 2],
   // D-usage-render: usage renderers + report shapes moved to plugin-api. The

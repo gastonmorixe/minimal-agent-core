@@ -1,7 +1,7 @@
 /**
  * The agent-mesh presence producer + reader.
  *
- * Realizes the reserved `~/.minimal-agent/presence.jsonl` mesh the v2 host's
+ * Realizes the reserved `~/.minimal-agent/presence.jsonl` mesh the plugin host's
  * `presence:read` capability anticipates — as a DIRECTORY of per-lead files
  * (`<presenceDir>/<leadSid>.jsonl`) so many concurrent agents never contend on
  * one file. Each lead's supervisor rewrites its own small file every tick with

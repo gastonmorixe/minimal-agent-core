@@ -3,16 +3,16 @@
  * consumes through its handler context (`ctx.host`). TYPE-ONLY contract slice.
  *
  * Wave D-1: `src/plugins/types.ts` (now the package's `types/plugin.ts`)
- * references {@link PluginHostV2} for the optional `host` field on
- * {@link TUIContext}. The runtime factory (`buildPluginHostV2`) and the
- * capability-token guard live in `src/plugins/v2/` against real host state
+ * references {@link PluginHost} for the optional `host` field on
+ * {@link TUIContext}. The runtime factory (`buildPluginHost`) and the
+ * capability-token guard live in `src/plugins/host/` against real host state
  * (`src/session-*`, `src/blob-store`) and STAY there. This module is a
  * faithful, type-only structural copy of the host's capability surface so the
  * leaf contract package depends on nothing in `src/`. TypeScript's structural
- * typing makes the host's real frozen `PluginHostV2` satisfy this interface, so
+ * typing makes the host's real frozen `PluginHost` satisfy this interface, so
  * the loader assigns it into a package-typed `TUIContext.host` without a cast.
  *
- * The host's `src/plugins/v2/host-capabilities.ts` remains the runtime source
+ * The host's `src/plugins/host/capabilities.ts` remains the runtime source
  * of truth; Wave D-3 (capability expansion) is where the two formally converge.
  *
  * @module types/host-capabilities
@@ -28,7 +28,7 @@ import type { PluginLogger } from "./logger.ts"
 
 /**
  * Capability namespaces a plugin can request in its manifest. Each maps
- * to a frozen sub-API on {@link PluginHostV2}. The loader populates ONLY
+ * to a frozen sub-API on {@link PluginHost}. The loader populates ONLY
  * granted namespaces; everything else is `undefined`, so a plugin must
  * defensively check before use.
  *
@@ -359,7 +359,7 @@ export interface ModelsRegisterApi {
  * `undefined`. The optionality is deliberate — a plugin must check
  * (`if (!host.sessions) return error`) before use.
  */
-export interface PluginHostV2 {
+export interface PluginHost {
   readonly capabilities: readonly CapabilityToken[]
   readonly sessions?: SessionsReadApi
   readonly blobs?: BlobsReadApi
