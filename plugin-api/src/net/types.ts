@@ -15,7 +15,7 @@
  *
  * These are faithful, type-only structural copies of the host's shapes in
  * `src/network/types.ts` + `src/network/client.ts` (the D-1 "leaf-safe
- * structural copy" pattern, same as `PluginLogger` / `PluginHostV2`). The host
+ * structural copy" pattern, same as `PluginLogger` / `PluginHost`). The host
  * keeps the runtime `NetworkClient` / `NetworkResponse` CLASSES as the single
  * source of truth; TypeScript's structural typing makes those real objects
  * satisfy the interfaces here, so the host hands its real

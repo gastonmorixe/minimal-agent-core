@@ -8,14 +8,14 @@
  * pull a 10 MB blob into model context by accident. ENOENT is a normal
  * stale-pointer case (LRU eviction), surfaced as `null`.
  *
- * @module plugins/v2/providers/blobs-read
+ * @module plugins/host/providers/blobs-read
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 
 import { resolveSessionsDir } from "../../../agent-paths.ts"
-import type { BlobMeta, BlobsReadApi } from "../host-capabilities.ts"
+import type { BlobMeta, BlobsReadApi } from "../capabilities.ts"
 
 const READ_DEFAULT_MAX_BYTES = 64 * 1024
 const READ_HARD_MAX_BYTES = 1024 * 1024

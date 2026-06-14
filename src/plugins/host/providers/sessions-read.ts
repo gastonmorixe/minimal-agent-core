@@ -4,7 +4,7 @@
  * (`src/session-store.ts`, `src/session-restore.ts`, `src/session-dump.ts`,
  * `src/session-liveness.ts`).
  *
- * Ports & Adapters: `host-capabilities.ts` is the PORT a plugin consumes
+ * Ports & Adapters: `capabilities.ts` is the PORT a plugin consumes
  * (re-declared structurally on the plugin side, no `src/` import); this
  * file is the ADAPTER the host wires behind it. All heavy scanning happens
  * here so only bounded DTOs ({@link RecordView}, {@link SearchHit}, ...)
@@ -13,7 +13,7 @@
  * Everything is injectable (`dir`) so tests run against a temp sessions
  * directory without touching `~/.minimal-agent`.
  *
- * @module plugins/v2/providers/sessions-read
+ * @module plugins/host/providers/sessions-read
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs"
@@ -42,7 +42,7 @@ import type {
   SessionsReadApi,
   ToolCallHit,
   WindowOpts,
-} from "../host-capabilities.ts"
+} from "../capabilities.ts"
 
 // ---------------------------------------------------------------------------
 // Tunables (single source of truth for the API's documented defaults)

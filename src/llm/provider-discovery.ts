@@ -128,17 +128,17 @@ export async function registerDiscoveredProviders(pluginsDir: string): Promise<s
  * `register(ctx)` contributes its catalog through `ctx.models.register`
  * instead of importing `registerModel` / `setDefaultModelId` from `src/`.
  *
- * This is the provider-loader analogue of `buildPluginHostV2` (the TUI
+ * This is the provider-loader analogue of `buildPluginHost` (the TUI
  * `ctx.host`): the host owns the registry singleton and the registrar is a thin
  * provider-neutral facade over it. The registrar narrows the spec's plain
  * `surfaceId` string back to the host's token-bearing `SurfaceId` union as it
  * forwards to the real `registerModel` (the host is allowed to name surfaces;
  * the contract package is not).
  *
- * Keeping this here (rather than in `buildPluginHostV2`) is deliberate: provider
+ * Keeping this here (rather than in `buildPluginHost`) is deliberate: provider
  * plugins load through this dedicated early loader, NOT the TUI loader, and they
- * need the registry BEFORE model resolution at startup. See the v2-convergence
- * note in `private/decoupling-refactor-work/reports/D-net-seam.md` §3.
+ * need the registry BEFORE model resolution at startup. See the provider/plugin
+ * convergence note in `private/decoupling-refactor-work/reports/D-net-seam.md` §3.
  *
  * @returns A fresh setup context bound to the process-wide model registry.
  */

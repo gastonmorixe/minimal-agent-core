@@ -9,14 +9,14 @@
  * contract package `@minimal-agent/plugin-api/types/plugin`, so plugins can
  * depend on the author-facing surface without reaching into `src/`. The old
  * `src/plugins/types.ts` is now a re-export shim. The two host references
- * (`PluginLogger`, `PluginHostV2`) point at package-local, type-only structural
+ * (`PluginLogger`, `PluginHost`) point at package-local, type-only structural
  * copies (`./logger.ts`, `./host-capabilities.ts`); the runtime that backs them
  * (the diagnostic bus, the capability-host factory) stays in `src/`.
  *
  * @module types/plugin
  */
 
-import type { PluginHostV2 } from "./host-capabilities.ts"
+import type { PluginHost } from "./host-capabilities.ts"
 import type { PluginLogger } from "./logger.ts"
 
 // Re-export for plugin authors; they can `import type { PluginLogger }
@@ -286,7 +286,7 @@ export interface TUIContext {
    * Optional + in-process only: `undefined` for subprocess handlers, for
    * plugins that declared no capabilities, and for back-compat callers.
    */
-  host?: PluginHostV2
+  host?: PluginHost
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +543,7 @@ export interface ManifestFile {
    * `"clock"`). Deny-by-default: only declared namespaces are populated;
    * everything else is `undefined` on the host. The full token list and
    * the per-namespace API shapes live in
-   * `src/plugins/v2/host-capabilities.ts` — plugins re-declare the slice
+   * `src/plugins/host/capabilities.ts` — plugins re-declare the slice
    * they consume as a LOCAL structural interface and must NOT import that
    * module (or anything under `src/`).
    *

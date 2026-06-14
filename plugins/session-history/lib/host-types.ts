@@ -7,7 +7,7 @@
  * typing means the real frozen host satisfies these at runtime.
  *
  * The host-side source of truth for these shapes is
- * `src/plugins/v2/host-capabilities.ts`. Keep field names in lockstep —
+ * `src/plugins/host/capabilities.ts`. Keep field names in lockstep —
  * the integration test (`integration.test.ts`) dispatches through the
  * real loader and fails on drift.
  *

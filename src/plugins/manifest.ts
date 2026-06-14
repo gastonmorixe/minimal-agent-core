@@ -14,6 +14,7 @@
 
 import { diag } from "../diagnostic-bus.ts"
 
+import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
 import type {
   ColorRequest,
   ManifestCommand,
@@ -30,11 +31,6 @@ import type {
   SurfaceStyleRequest,
   ThemeKey,
 } from "./types.ts"
-import {
-  type CapabilityToken,
-  isCapabilityToken,
-  KNOWN_CAPABILITIES,
-} from "./v2/host-capabilities.ts"
 
 /**
  * Thrown by {@link parseManifest} when the input does not conform.

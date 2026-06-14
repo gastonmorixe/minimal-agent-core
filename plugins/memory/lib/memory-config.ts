@@ -47,7 +47,7 @@ import { parseJsonc } from "@minimal-agent/plugin-api/utils/jsonc"
 
 /**
  * Structural slice of the host's `models:read` catalog lookup (source of
- * truth: `ModelsReadApi.findByTags` on the v2 capability host). The
+ * truth: `ModelsReadApi.findByTags` on the capability host). The
  * decoupling contract forbids importing `src/llm/model-registry.ts`, so
  * a caller that HAS a host (a `TUIContext` handler with `models:read`)
  * may pass this resolver in; the cheap-tier id is then upgraded from the
