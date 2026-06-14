@@ -2,15 +2,14 @@ import { describe, expect, test } from "bun:test"
 
 import type { IndexRecord } from "../session-store.ts"
 import type { SessionUsage } from "../session-usage.ts"
-
 import {
   formatBytes,
   formatTokenCell,
   formatTokenCount,
-  fuzzyMatch,
-  matchesQuery,
   renderSessionsCommandRows,
-} from "./sessions.ts"
+} from "../ui/chrome/sessions-command.ts"
+
+import { fuzzyMatch, matchesQuery } from "./sessions.ts"
 
 function usage(over: Partial<SessionUsage> = {}): SessionUsage {
   return {
@@ -198,7 +197,11 @@ describe("matchesQuery", () => {
 
 describe("renderSessionsCommandRows", () => {
   test("renders empty state rows without direct console output", () => {
-    const out = renderSessionsCommandRows({ allCount: 0, rows: [] }).join("\n")
+    const out = renderSessionsCommandRows({
+      allCount: 0,
+      rows: [],
+      sessionsDir: "/tmp/sessions",
+    }).join("\n")
     expect(out).toContain("no saved sessions yet")
     expect(out).toContain("sessions are stored at")
   })
@@ -207,6 +210,7 @@ describe("renderSessionsCommandRows", () => {
     const out = renderSessionsCommandRows({
       allCount: 2,
       query: "alpha",
+      sessionsDir: "/tmp/sessions",
       rows: [
         {
           createdAt: "2026-04-28T05:24:32.231Z",
