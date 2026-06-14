@@ -18,6 +18,8 @@
 
 import { diag } from "../diagnostic-bus.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
+import { renderBinaryProvisionHalt } from "../ui/chrome/binary-provision.ts"
+import { writeCommandRows } from "../ui/command-output.ts"
 import { startStartupRowSpinner } from "../ui/startup/tree.ts"
 import { c } from "../ui/style/ansi.ts"
 
@@ -88,16 +90,7 @@ export async function provisionPluginBinaries(loader: PluginLoader): Promise<voi
     if (summary.halt) row.fail(c.boldRed(label))
     else row.ok(label)
     if (summary.halt) {
-      console.error("")
-      console.error(
-        `  ${c.boldRed("✗")} ${c.bold("Setup incomplete")} ${c.dim(`(${summary.halt.pluginId})`)}`,
-      )
-      for (const line of summary.halt.message.split("\n")) {
-        console.error(`  ${c.faintWhite("│")} ${line}`)
-      }
-      console.error(
-        `  ${c.faintWhite("╰")} ${c.dim("fix the above, then re-run. Skip this check with MINIMAL_AGENT_NO_BINARY_SETUP=1.")}`,
-      )
+      writeCommandRows(renderBinaryProvisionHalt(summary.halt), process.stderr)
       process.exit(1)
     }
   }
