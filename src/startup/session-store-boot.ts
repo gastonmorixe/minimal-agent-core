@@ -17,7 +17,12 @@ import { BlobStore, loadBlobStoreConfig } from "../blob-store.ts"
 import { VERSION } from "../headers.ts"
 import { loadSession } from "../session-restore.ts"
 import { SessionStore } from "../session-store.ts"
-import { c } from "../ui/style/ansi.ts"
+import {
+  renderLiveSessionWarning,
+  renderSessionDriftWarning,
+  renderStoreUnavailableWarning,
+} from "../ui/chrome/session-store-boot.ts"
+import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 
 /** Inputs for {@link bootSessionStores}. */
 export interface SessionStoreBootOptions {
@@ -31,6 +36,8 @@ export interface SessionStoreBootOptions {
   systemHash: string
   /** Hash of the advertised tool set (resume drift detection). */
   toolsHash: string
+  /** Warning output stream; tests inject a collector. */
+  output?: CommandOutput
 }
 
 /** Result of {@link bootSessionStores}. */
@@ -51,6 +58,7 @@ export async function bootSessionStores(
   opts: SessionStoreBootOptions,
 ): Promise<SessionStoreBootResult> {
   const { sid, resumeSid, selectedModel, systemHash, toolsHash } = opts
+  const output = opts.output ?? process.stderr
 
   // Open the session store. Two paths:
   //   - new session: SessionStore.open(getSessionId())
@@ -104,8 +112,9 @@ export async function bootSessionStores(
   } catch (err) {
     // Persistence is best-effort; never block startup on it. The agent
     // will work without a store (just no resume for THIS session).
-    console.error(
-      `  ${c.boldYellow("warn")} session store unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    writeCommandRows(
+      renderStoreUnavailableWarning("session", err instanceof Error ? err.message : String(err)),
+      output,
     )
   }
 
@@ -126,8 +135,9 @@ export async function bootSessionStores(
       })
     }
   } catch (err) {
-    console.error(
-      `  ${c.boldYellow("warn")} blob store unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    writeCommandRows(
+      renderStoreUnavailableWarning("blob", err instanceof Error ? err.message : String(err)),
+      output,
     )
   }
 
@@ -141,10 +151,9 @@ export async function bootSessionStores(
       const { getSessionLiveness } = await import("../session-liveness.ts")
       const live = getSessionLiveness(resumeSid)
       if (live.status === "live" && live.pid !== process.pid) {
-        console.error(
-          `  ${c.boldYellow("warn")} session ${resumeSid} appears live ` +
-            `(pid ${live.pid}, since ${live.since}); resuming anyway will ` +
-            `fork the conversation`,
+        writeCommandRows(
+          renderLiveSessionWarning({ sid: resumeSid, pid: live.pid, since: live.since }),
+          output,
         )
       }
     } catch {
@@ -157,9 +166,7 @@ export async function bootSessionStores(
         loaded.meta &&
         (loaded.meta.systemHash !== systemHash || loaded.meta.toolsHash !== toolsHash)
       if (drifted) {
-        console.error(
-          `  ${c.boldYellow("warn")} system prompt or tool set changed since this session was saved — resuming anyway`,
-        )
+        writeCommandRows(renderSessionDriftWarning(), output)
       }
     } catch {
       // already reported above
