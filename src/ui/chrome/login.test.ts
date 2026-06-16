@@ -18,9 +18,9 @@ describe("login chrome", () => {
       "  │ hello",
       "  │ world",
     ])
-    expect(renderApiKeyLoginSuccess("test-service").map(stripAnsi).join("\n")).toContain(
-      "stored: test-service",
-    )
+    expect(
+      renderApiKeyLoginSuccess("test-service", "provider-a").map(stripAnsi).join("\n"),
+    ).toContain("stored: test-service")
     expect(renderLoginFailure("bad").map(stripAnsi).join("\n")).toContain("Login failed — bad")
   })
 })

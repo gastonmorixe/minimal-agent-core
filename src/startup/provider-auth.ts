@@ -3,34 +3,19 @@
  *
  * Keeps `src/index.ts` as the composition root while moving provider-auth
  * bridging out of the entrypoint. The legacy agent still accepts `AuthResult`;
- * this module maps stored provider credentials into that shape without making
- * startup prompt credentials for providers that own their own auth strategies.
+ * this module maps stored provider credentials into that shape.
  *
  * @module startup/provider-auth
  */
 
 import type { AuthResult } from "../auth.ts"
-import { resolveStoredProviderAuth } from "../auth-strategies.ts"
+import { storedProvidersHint, tryResolveProviderAuth } from "../auth-strategies.ts"
+import type { ProviderAuth } from "../llm/provider.ts"
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { c } from "../ui/style/ansi.ts"
 
-import { getAuthWithFirstTimePrompt } from "./auth-prompt.ts"
-
-/**
- * Resolve startup credentials for the selected provider.
- *
- * Providers can opt into the legacy host prompt while that compatibility path
- * exists. Otherwise, startup reads minimal-agent's host-owned provider store.
- */
-export async function resolveStartupAuth(
-  providerId: string | undefined,
-  modelId: string,
-): Promise<AuthResult> {
-  const plugin = providerId ? findProviderPlugin(providerId) : undefined
-  if (providerId === undefined || plugin?.usesLegacyStartupAuth) {
-    return getAuthWithFirstTimePrompt()
-  }
-  const auth = resolveStoredProviderAuth(providerId, modelId)
+/** Map neutral {@link ProviderAuth} into the legacy {@link AuthResult} shape. */
+export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
   switch (auth.kind) {
     case "api-key":
       return { type: "api-key", token: auth.key }
@@ -41,12 +26,42 @@ export async function resolveStartupAuth(
         ...(auth.refresh ? { refresh: refreshBridge(auth.refresh) } : {}),
       }
     case "custom":
-      throw new Error(`provider "${providerId}" uses custom auth that startup cannot bridge yet`)
+      throw new Error("custom provider auth cannot bridge to legacy AuthResult")
     default: {
       const _exhaustive: never = auth
       throw new Error(`unhandled provider auth kind: ${_exhaustive}`)
     }
   }
+}
+
+/**
+ * Resolve startup credentials for the selected provider.
+ *
+ * Requires a registered model with a known provider. Missing credentials
+ * throw with provider-specific login guidance.
+ */
+export async function resolveStartupAuth(
+  providerId: string | undefined,
+  modelId: string,
+): Promise<AuthResult> {
+  if (process.env.MINIMAL_AGENT_TEST_AUTH === "1") {
+    return { type: "oauth", token: "test-token", accountUuid: "test-account" }
+  }
+
+  if (providerId === undefined) {
+    throw new Error(`no provider selected for model "${modelId}". ${storedProvidersHint()}`)
+  }
+
+  const auth = tryResolveProviderAuth(providerId, modelId)
+  if (!auth) {
+    const hint = storedProvidersHint()
+    throw new Error(
+      `no credentials for provider "${providerId}" (model "${modelId}"). ` +
+        `Run minimal-agent provider ${providerId} login. ${hint}`,
+    )
+  }
+
+  return providerAuthToAuthResult(auth)
 }
 
 function refreshBridge(refresh: () => Promise<{ token: string }>): () => Promise<AuthResult> {
@@ -58,8 +73,7 @@ function refreshBridge(refresh: () => Promise<{ token: string }>): () => Promise
 
 /** Render the auth row shown in the startup tree. */
 export function startupAuthLabel(auth: AuthResult, providerId: string | undefined): string {
-  const plugin = providerId ? findProviderPlugin(providerId) : undefined
-  if (providerId && !plugin?.usesLegacyStartupAuth) {
+  if (providerId && findProviderPlugin(providerId)) {
     return `${auth.type} ${c.dim(`(${providerId})`)}`
   }
   return `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`

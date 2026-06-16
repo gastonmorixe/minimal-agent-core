@@ -148,7 +148,7 @@ export function beginRequest(opts: {
     protocol: proto,
   }
   writeFileSync(join(dir, `${prefix}-01-req-meta.json`), JSON.stringify(reqMeta, null, 2))
-  writeFileSync(join(dir, `${prefix}-02-req-body.txt`), opts.body)
+  writeFileSync(join(dir, `${prefix}-02-req-body.txt`), redactBody(opts.body))
 
   const resBodyPath = join(dir, `${prefix}-04-res-body.txt`)
   // Pre-create the file so partial streams still leave a trace if the
@@ -169,7 +169,7 @@ export function beginRequest(opts: {
         id: seq,
         timestamp: new Date().toISOString(),
         status,
-        headers: headerObj,
+        headers: redactHeaders(headerObj),
         transport,
       }
       writeFileSync(join(dir, `${prefix}-03-res-meta.json`), JSON.stringify(resMeta, null, 2))
@@ -223,11 +223,41 @@ export function redactHeaders(h: Record<string, string>): Record<string, string>
     const key = k.toLowerCase()
     if (key === "authorization" && v.startsWith("Bearer ")) {
       out[k] = "Bearer [REDACTED]"
-    } else if (key === "x-api-key") {
+    } else if (key === "proxy-authorization") {
+      out[k] = "[REDACTED]"
+    } else if (key === "x-api-key" || key === "cookie" || key === "set-cookie") {
       out[k] = "[REDACTED]"
     } else {
       out[k] = v
     }
   }
   return out
+}
+
+/** Redacts sensitive content from the request body. */
+export function redactBody(body: string): string {
+  if (!body) return body
+  if (body.startsWith("{") || body.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(body)
+      const redactNode = (node: any) => {
+        if (!node || typeof node !== "object") return
+        for (const [k, v] of Object.entries(node)) {
+          if (typeof v === "string" && /secret|token|password|code/i.test(k)) {
+            node[k] = "[REDACTED]"
+          } else if (typeof v === "object") {
+            redactNode(v)
+          }
+        }
+      }
+      redactNode(parsed)
+      return JSON.stringify(parsed)
+    } catch {
+      // Fall through to regex
+    }
+  }
+  return body.replace(
+    /([&?]?(?:client_secret|refresh_token|access_token|token|password|code)=)([^&]*)/gi,
+    "$1[REDACTED]",
+  )
 }

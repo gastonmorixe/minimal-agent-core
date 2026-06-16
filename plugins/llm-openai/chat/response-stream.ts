@@ -58,6 +58,8 @@ export interface OpenAIChatChunk {
       role?: "assistant"
       content?: string | null
       refusal?: string | null
+      /** DeepSeek-style chain-of-thought reasoning. */
+      reasoning_content?: string | null
       tool_calls?: Array<{
         index: number
         id?: string
@@ -101,6 +103,7 @@ export async function* translateOpenAIChatStream(
 ): AsyncIterable<CanonicalEvent> {
   let messageStartEmitted = false
   let textIndex: number | null = null
+  let thinkingIndex: number | null = null
   // Index → block index for tool calls
   const toolBlockIndex = new Map<number, number>()
   const toolNames = new Map<number, string>()
@@ -122,9 +125,15 @@ export async function* translateOpenAIChatStream(
       }
     }
 
-    // Final usage-only chunk: choices is empty, usage is populated.
-    if (chunk.choices.length === 0 && chunk.usage) {
+    // Capture usage from any chunk that has it. Some OpenAI-compatible APIs
+    // (OpenCode Go, DeepSeek) send usage in the same chunk as the final
+    // finish_reason/choice rather than a separate usage-only chunk.
+    if (chunk.usage) {
       lastUsage = mapUsage(chunk.usage)
+    }
+
+    // Usage-only trailing chunk (OpenAI standard): choices empty, usage set.
+    if (chunk.choices.length === 0 && chunk.usage) {
       continue
     }
 
@@ -145,6 +154,21 @@ export async function* translateOpenAIChatStream(
     // Refusal content
     if (typeof delta.refusal === "string" && delta.refusal.length > 0) {
       yield { type: "refusal_delta", text: delta.refusal }
+    }
+
+    // Reasoning content (DeepSeek-style thinking). Streamed as thinking
+    // blocks — `reasoning_content` is the model's internal chain-of-thought.
+    if (delta.reasoning_content !== undefined) {
+      if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+        if (thinkingIndex === null) {
+          thinkingIndex = nextBlockIndex++
+          yield { type: "thinking_start", index: thinkingIndex }
+        }
+        yield { type: "thinking_delta", index: thinkingIndex, text: delta.reasoning_content }
+      } else if (thinkingIndex !== null) {
+        yield { type: "thinking_stop", index: thinkingIndex }
+        thinkingIndex = null
+      }
     }
 
     // Tool call deltas
@@ -180,6 +204,10 @@ export async function* translateOpenAIChatStream(
     // Finish reason → close any open blocks + record stop reason.
     if (choice.finish_reason) {
       stopReason = mapFinishReason(choice.finish_reason)
+      if (thinkingIndex !== null) {
+        yield { type: "thinking_stop", index: thinkingIndex }
+        thinkingIndex = null
+      }
       if (textIndex !== null) {
         yield { type: "text_stop", index: textIndex }
         textIndex = null

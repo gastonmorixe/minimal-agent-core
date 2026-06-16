@@ -58,6 +58,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
+import { clearProviderCredentials } from "./auth-strategies.ts"
 import { withLock } from "./lockfile.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
@@ -288,7 +289,9 @@ export function writeCredentials(
  * entry was removed, `false` if there was nothing to remove (idempotent).
  */
 export function clearCredentials(store: AuthStore = defaultAuthStore()): boolean {
-  return store.remove(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name)
+  let removed = clearProviderCredentials("anthropic", store)
+  removed = store.remove(ANTHROPIC_PLAN_OAUTH.id, ANTHROPIC_PLAN_OAUTH.name) || removed
+  return removed
 }
 
 /**
@@ -436,7 +439,7 @@ export async function getAuth(
   if (!creds) {
     throw new Error(
       "No minimal-agent credentials found (~/.minimal-agent/auth.jsonc). " +
-        "Run `minimal-agent --login` to sign in.",
+        "Run `minimal-agent provider anthropic login` to sign in.",
     )
   }
 
@@ -448,7 +451,7 @@ export async function getAuth(
   const oauth = creds.claudeAiOauth
   if (!oauth?.accessToken) {
     throw new Error(
-      "No OAuth access token found in the auth store. Run `minimal-agent --login` to sign in.",
+      "No OAuth access token found in the auth store. Run `minimal-agent provider anthropic login` to sign in.",
     )
   }
 
@@ -527,7 +530,9 @@ export async function getAuth(
     }
 
     if (!currentOauth?.refreshToken) {
-      throw new Error("No refresh token available. Run `minimal-agent --login` to sign in.")
+      throw new Error(
+        "No refresh token available. Run `minimal-agent provider anthropic login` to sign in.",
+      )
     }
 
     let refreshed: TokenRefreshResult
@@ -538,7 +543,7 @@ export async function getAuth(
       if (msg.includes("invalid_grant")) {
         throw new Error(
           "Refresh token rejected by server (invalid_grant). " +
-            "Run `minimal-agent --login` to re-login.",
+            "Run `minimal-agent provider anthropic login` to re-login.",
           { cause: e },
         )
       }

@@ -8,11 +8,11 @@
  * @module media/id
  */
 
-import { createHash, randomBytes } from "node:crypto"
+import { randomBytes } from "node:crypto"
 
 /** Full sha256 hex digest of the bytes. */
 export function sha256Hex(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex")
+  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
 }
 
 /** Content-addressed 8-hex media id derived from a sha256 hex digest. */

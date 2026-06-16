@@ -35,5 +35,5 @@ export function resolveToolMediaContext(
   const caps = entry.capabilities
   const provider = findProvider(entry.providerId)
   const limits = provider?.mediaLimits?.(entry) ?? defaultMediaLimits()
-  return { modalities: caps.modalities, limits, modelId: entry.id }
+  return { modalities: caps?.modalities, limits, modelId: entry.id }
 }

@@ -280,7 +280,7 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
     } catch (e) {
       caught = (e as Error).message
     }
-    expect(caught).toContain('no stored credentials for provider "openai"')
+    expect(caught).toContain('no credentials for provider "openai"')
     expect(caught).toContain("minimal-agent provider openai login")
     expect(caught).not.toContain("OPENAI_API_KEY")
     expect(caught).not.toContain("apiKeys.openai")
@@ -340,12 +340,12 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
     expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
   }, 15_000)
 
-  it("does not read OPENAI_API_KEY when no stored provider key exists", async () => {
+  it("ignores OPENAI_API_KEY when no stored provider key exists", async () => {
     process.env.OPENAI_API_KEY = "sk-from-env"
     writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
 
     let reached = false
-    const networkClient = fakeNetworkClient(() => {
+    const networkClient = fakeNetworkClient((_req) => {
       reached = true
       return sseFromEvents(pongEvents())
     })
@@ -357,9 +357,29 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
       caught = (e as Error).message
     }
 
-    expect(caught).toContain('no stored credentials for provider "openai"')
-    expect(caught).not.toContain("OPENAI_API_KEY")
-    expect(caught).not.toContain("apiKeys.openai")
+    expect(caught).toContain('no credentials for provider "openai"')
+    expect(caught).not.toContain(ANTHROPIC_SECRET)
+    expect(reached).toBe(false)
+  }, 15_000)
+
+  it("ignores config apiKeys.openai when store and env are empty", async () => {
+    delete process.env.OPENAI_API_KEY
+    writeFileSync(cfgPath, JSON.stringify({ apiKeys: { openai: "sk-from-config" } }))
+
+    let reached = false
+    const networkClient = fakeNetworkClient((_req) => {
+      reached = true
+      return sseFromEvents(pongEvents())
+    })
+    const gen = canonicalSendFn({ auth, messages, model: "gpt-4o", stream: true, networkClient })
+    let caught = ""
+    try {
+      await gen.next()
+    } catch (e) {
+      caught = (e as Error).message
+    }
+
+    expect(caught).toContain('no credentials for provider "openai"')
     expect(reached).toBe(false)
   }, 15_000)
 })

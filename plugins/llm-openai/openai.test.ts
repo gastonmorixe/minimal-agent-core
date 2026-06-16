@@ -12,6 +12,12 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
+import type {
+  NetworkClient,
+  NetworkRequestInput,
+  NetworkResponse,
+} from "@minimal-agent/plugin-api/net/types"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
 import {
@@ -26,7 +32,7 @@ import {
   userText,
 } from "../../src/llm/index.ts"
 
-import { bootstrapOpenAI, openaiProviderPlugin } from "./adapter.ts"
+import { bootstrapOpenAI, openaiAdapter, openaiProviderPlugin } from "./adapter.ts"
 import {
   buildOpenAIApiKeyCredential,
   OPENAI_API_KEY_AUTH,
@@ -96,6 +102,66 @@ function finalDelta(events: CanonicalEvent[]) {
   return firstOf([...events].reverse(), "message_delta")
 }
 
+function emptyStream(): ReadableStream<Uint8Array> {
+  return new ReadableStream({ start: (controller) => controller.close() })
+}
+
+function failedResponse(status: number, body: string): NetworkResponse {
+  return {
+    ok: false,
+    status,
+    headers: new Headers(),
+    body: emptyStream(),
+    transport: { id: "test" },
+    text: async () => body,
+    json: async () => JSON.parse(body),
+  }
+}
+
+function captureFailingNetwork(
+  status = 418,
+  body = '{"error":{"type":"test_error","message":"captured"}}',
+): { requests: NetworkRequestInput[]; networkClient: NetworkClient } {
+  const requests: NetworkRequestInput[] = []
+  return {
+    requests,
+    networkClient: {
+      async request(input) {
+        requests.push(input)
+        return failedResponse(status, body)
+      },
+    },
+  }
+}
+
+async function captureOpenAIResponseRequest(
+  auth: ProviderAuth,
+  reqPatch: Partial<CanonicalRequest> = {},
+): Promise<NetworkRequestInput> {
+  clearModelRegistry()
+  clearProviderRegistry()
+  bootstrapOpenAI()
+  const { requests, networkClient } = captureFailingNetwork()
+  const req: CanonicalRequest = {
+    modelId: "gpt-5.5",
+    messages: [userText("hi")],
+    ...reqPatch,
+  }
+
+  await expect(
+    collect(
+      openaiAdapter.run(req, resolveModel("gpt-5.5"), {
+        auth,
+        sessionId: "test-session",
+        networkClient,
+      }),
+    ),
+  ).rejects.toThrow("OpenAI Responses API 418")
+
+  expect(requests).toHaveLength(1)
+  return requests[0]!
+}
+
 // ---------------------------------------------------------------------------
 // Registry + bootstrap
 // ---------------------------------------------------------------------------
@@ -149,6 +215,44 @@ describe("bootstrapOpenAI", () => {
   })
 })
 
+describe("openaiAdapter request routing", () => {
+  it("routes OAuth Responses traffic to the Codex backend path and forwards auth metadata", async () => {
+    const request = await captureOpenAIResponseRequest(
+      {
+        kind: "oauth",
+        token: "AT",
+        baseUrl: "https://chatgpt.com/backend-api/codex/",
+        headers: { "ChatGPT-Account-ID": "acct-1" },
+      },
+      { generation: { maxOutputTokens: 64 } },
+    )
+
+    expect(request.url).toBe("https://chatgpt.com/backend-api/codex/responses")
+    expect(request.headers?.authorization).toBe("Bearer AT")
+    expect(request.headers?.["ChatGPT-Account-ID"]).toBe("acct-1")
+    const body = JSON.parse(String(request.body))
+    expect(body.model).toBe("gpt-5.5")
+    expect(body.instructions).toBe("")
+    expect(body.store).toBe(false)
+    expect(body.max_output_tokens).toBeUndefined()
+  })
+
+  it("keeps API-key Responses traffic on the public API path", async () => {
+    const request = await captureOpenAIResponseRequest(
+      { kind: "api-key", key: "sk-test" },
+      { generation: { maxOutputTokens: 64 } },
+    )
+
+    expect(request.url).toBe("https://api.openai.com/v1/responses")
+    expect(request.headers?.authorization).toBe("Bearer sk-test")
+    const body = JSON.parse(String(request.body))
+    expect(body.model).toBe("gpt-5.5")
+    expect(body.instructions).toBe("")
+    expect(body.store).toBe(false)
+    expect(body.max_output_tokens).toBe(64)
+  })
+})
+
 describe("openaiProviderPlugin auth strategy", () => {
   it("exposes API-key auth and OAuth login strategies", () => {
     expect(openaiProviderPlugin.apiKeyAuth).toBe(openAIApiKeyAuth)
@@ -167,6 +271,10 @@ describe("openaiProviderPlugin auth strategy", () => {
     })
     expect(readOpenAIApiKey(write.secrets)).toBe("sk-test")
     expect(readOpenAIApiKey({ tokenType: "api-key" })).toBeNull()
+    expect(openAIApiKeyAuth.inspectCredential?.(write.secrets)).toEqual({ usable: true })
+    expect(openAIApiKeyAuth.inspectCredential?.({ tokenType: "api-key" })).toEqual({
+      usable: false,
+    })
   })
 
   it("declares Codex-compatible OpenAI OAuth login settings", () => {
@@ -177,6 +285,62 @@ describe("openaiProviderPlugin auth strategy", () => {
     expect(config.tokenRequestEncoding).toBe("form")
     expect(config.tokenRequestIncludesState).toBe(false)
     expect(config.scopes).toContain("offline_access")
+  })
+
+  it("inspects OAuth credentials without exposing tokens", () => {
+    const info = openAIOAuthLogin.inspectCredential?.({
+      tokenType: "oauth",
+      accessToken: "AT",
+      refreshToken: "RT",
+      expiresAt: 1_700_000_000_000,
+      accountId: "acct-1",
+      userId: "user-1",
+      scopes: ["openid", "profile"],
+    })
+
+    expect(info).toEqual({
+      usable: true,
+      expiresAt: 1_700_000_000_000,
+      hasRefreshToken: true,
+      accountId: "acct-1",
+      scopes: ["openid", "profile"],
+    })
+    expect(JSON.stringify(info)).not.toContain("AT")
+    expect(JSON.stringify(info)).not.toContain("RT")
+  })
+
+  it("aborts device-code polling while waiting for authorization", async () => {
+    const ac = new AbortController()
+    let requests = 0
+    const networkClient = {
+      async request() {
+        requests++
+        return {
+          ok: false,
+          status: 403,
+          headers: new Headers(),
+          body: new ReadableStream<Uint8Array>({ start: (c) => c.close() }),
+          transport: { id: "test" },
+          text: async () => "authorization pending",
+          json: async () => ({}),
+        }
+      },
+    }
+
+    const promise = openAIOAuthLogin.deviceCode!.complete(
+      {
+        verificationUrl: "https://auth.example.test/device",
+        userCode: "ABCD-EFGH",
+        pollIntervalMs: 60_000,
+        providerData: { deviceAuthId: "dev-1" },
+      },
+      { networkClient, signal: ac.signal },
+    )
+    await Promise.resolve()
+    ac.abort()
+
+    await expect(promise).rejects.toThrow("aborted")
+    expect(requests).toBe(1)
   })
 })
 
@@ -263,6 +427,30 @@ describe("translateOpenAIChatStream (fixtures)", () => {
     const events = await replayChat("chat-structured-output.sse")
     expect(joinedText(events).length).toBeGreaterThan(0)
     expect(() => JSON.parse(joinedText(events))).not.toThrow()
+  })
+
+  it("chat-reasoning-content: surfaces DeepSeek reasoning_content as thinking events", async () => {
+    const raw = [
+      `data: ${JSON.stringify({ id: "r1", object: "chat.completion.chunk", created: 1, model: "deepseek", choices: [{ index: 0, delta: { role: "assistant", content: null, reasoning_content: "Let me think" }, finish_reason: null }] })}\n`,
+      `data: ${JSON.stringify({ id: "r1", object: "chat.completion.chunk", created: 1, model: "deepseek", choices: [{ index: 0, delta: { reasoning_content: " about this" }, finish_reason: null }] })}\n`,
+      `data: ${JSON.stringify({ id: "r1", object: "chat.completion.chunk", created: 1, model: "deepseek", choices: [{ index: 0, delta: { content: "The answer is 42", reasoning_content: null }, finish_reason: "stop" }] })}\n`,
+      `data: ${JSON.stringify({ id: "r1", object: "chat.completion.chunk", created: 1, model: "deepseek", choices: [], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n`,
+      "data: [DONE]\n",
+    ].join("\n")
+    const events: CanonicalEvent[] = []
+    for await (const ev of translateOpenAIChatStream(parseSse<OpenAIChatChunk>(sseStream(raw)))) {
+      events.push(ev)
+    }
+    const thinkingStarts = events.filter((e) => isEvent(e, "thinking_start"))
+    expect(thinkingStarts).toHaveLength(1)
+    const thinkingText = events
+      .filter((e): e is CanonicalEvent & { type: "thinking_delta" } => isEvent(e, "thinking_delta"))
+      .map((e) => e.text)
+      .join("")
+    expect(thinkingText).toBe("Let me think about this")
+    const thinkingStops = events.filter((e) => isEvent(e, "thinking_stop"))
+    expect(thinkingStops).toHaveLength(1)
+    expect(joinedText(events)).toBe("The answer is 42")
   })
 })
 

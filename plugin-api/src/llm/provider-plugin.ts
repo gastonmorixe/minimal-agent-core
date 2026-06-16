@@ -230,7 +230,7 @@ export interface ProviderSessionContext {
 }
 
 // ---------------------------------------------------------------------------
-// Login (OAuth manual-paste flow) — provider-owned Strategy
+// Login (OAuth PKCE flow) — provider-owned Strategy
 // ---------------------------------------------------------------------------
 
 /** Provider-owned OAuth authorization settings for the host's PKCE flow. */
@@ -274,8 +274,17 @@ export interface OAuthLoginInstallResult {
   }
 }
 
+/** JSON-serializable value allowed in a persisted provider credential bag. */
+export type AuthSecretValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AuthSecretValue[]
+  | { [k: string]: AuthSecretValue }
+
 /** Opaque credential bag owned by a provider strategy and persisted by host core. */
-export type AuthSecretBag = Record<string, unknown>
+export type AuthSecretBag = { [k: string]: AuthSecretValue }
 
 /** Provider-built credential write. Host core persists it; plugins do not touch host storage. */
 export interface AuthCredentialWrite {
@@ -284,15 +293,71 @@ export interface AuthCredentialWrite {
   secrets: AuthSecretBag
 }
 
+/** Safe credential diagnostics providers may expose for host status UIs. */
+export interface AuthCredentialInfo {
+  /** Whether the stored credential can be decoded into runtime auth. */
+  usable: boolean
+  /** OAuth/API-key label for diagnostics. Defaults to the strategy display name. */
+  label?: string
+  /** Absolute expiry timestamp in ms since epoch, when known. */
+  expiresAt?: number
+  /** Whether a refresh token is present, when applicable. */
+  hasRefreshToken?: boolean
+  /** Provider-owned account/workspace identifiers safe to display. */
+  accountId?: string
+  organizationId?: string
+  /** Display-safe scopes or capability names, when known. */
+  scopes?: readonly string[]
+}
+
 export interface OAuthLoginBuildResult {
   credential: AuthCredentialWrite
   result: OAuthLoginInstallResult
 }
 
 /**
- * Provider hook for the host's generic OAuth PKCE/manual-paste orchestrator.
+ * Context passed to provider-owned credential refresh hooks.
+ *
+ * The network client is intentionally `unknown` here so the leaf contract does
+ * not depend on the host's concrete transport package. Provider plugins cast it
+ * to the narrow request interface they already use elsewhere.
+ */
+export interface OAuthCredentialRefreshContext {
+  networkClient?: unknown
+}
+
+/** Provider-owned device-code prompt metadata shown by the host. */
+export interface OAuthDeviceCodeChallenge {
+  verificationUrl: string
+  userCode: string
+  expiresInMs?: number
+  pollIntervalMs?: number
+  providerData?: AuthSecretBag
+}
+
+/** Context passed to provider-owned device-code hooks. */
+export interface OAuthDeviceCodeContext {
+  networkClient?: unknown
+  signal?: AbortSignal
+}
+
+/**
+ * Provider-owned non-local-server code flow. The provider owns endpoint shape
+ * and polling rules; the host owns display, browser opening, and persistence.
+ */
+export interface OAuthDeviceCodeLogin {
+  request(ctx: OAuthDeviceCodeContext): Promise<OAuthDeviceCodeChallenge>
+  complete(
+    challenge: OAuthDeviceCodeChallenge,
+    ctx: OAuthDeviceCodeContext,
+  ): Promise<OAuthLoginBuildResult>
+}
+
+/**
+ * Provider hook for the host's generic OAuth PKCE orchestrator.
  * The host owns browser/stdin/network mechanics; the provider owns endpoints,
- * scopes, authorize-query extras, and credential encoding.
+ * scopes, authorize-query extras, optional device-code strategy, and
+ * credential encoding.
  */
 export interface OAuthLoginProvider {
   /** Stable credential-service id in the host auth store. */
@@ -301,10 +366,19 @@ export interface OAuthLoginProvider {
   displayName: string
   /** Resolve current authorize/token settings. */
   config(): OAuthLoginConfig
+  /** Optional provider-owned device-code flow; preferred when present. */
+  deviceCode?: OAuthDeviceCodeLogin
   /** Convert the raw token response into a host-persistable credential write. */
   buildCredential(response: Record<string, unknown>): OAuthLoginBuildResult
   /** Decode a stored credential bag into runtime auth, when this OAuth credential is usable. */
   readAuth?(secrets: AuthSecretBag): ProviderAuth | null
+  /** Optional safe metadata for auth-status diagnostics. */
+  inspectCredential?(secrets: AuthSecretBag): AuthCredentialInfo
+  /** Refresh an existing OAuth credential bag and return the updated credential write. */
+  refreshCredential?(
+    secrets: AuthSecretBag,
+    ctx: OAuthCredentialRefreshContext,
+  ): Promise<OAuthLoginBuildResult>
 }
 
 /** Provider-owned API-key credential strategy. */
@@ -317,6 +391,8 @@ export interface ApiKeyAuthProvider {
   buildCredential(apiKey: string): AuthCredentialWrite
   /** Decode this provider's API key from its stored opaque secret bag. */
   readApiKey(secrets: AuthSecretBag): string | null
+  /** Optional safe metadata for auth-status diagnostics. */
+  inspectCredential?(secrets: AuthSecretBag): AuthCredentialInfo
 }
 
 /**
@@ -357,6 +433,14 @@ export interface ProviderPlugin {
    * any of them.
    */
   onStartupProbe?(ctx: ProviderStartupContext): void
+
+  /**
+   * Optional host hook for one-off model ids the static catalog does not know
+   * yet. Providers like OpenRouter can proxy arbitrary upstream slugs; when
+   * the host needs to accept one, it can ask the provider to register a
+   * synthetic local entry.
+   */
+  registerAdHocModel?(modelId: string): void
 
   /**
    * Optional: fetch this provider's LIVE model catalog (the authoritative

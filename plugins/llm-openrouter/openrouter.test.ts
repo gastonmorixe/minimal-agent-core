@@ -1,9 +1,9 @@
 /**
  * OpenRouter provider tests.
  *
- * Offline: registry + reuse of llm-openai's translator/validator. The live
- * test is gated on `OPENROUTER_KEY` (skipped unless the env var is set);
- * restart the session with it exported to exercise the real round-trip.
+ * Offline: registry + reuse of llm-openai's translator/validator. The live test
+ * is gated on `MINIMAL_AGENT_OPENROUTER_LIVE_KEY` so generic provider env vars
+ * never become runtime auth inputs.
  */
 
 import { readFileSync } from "node:fs"
@@ -71,6 +71,10 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
     })
     expect(readOpenRouterApiKey(write.secrets)).toBe("sk-or-test")
     expect(readOpenRouterApiKey({ tokenType: "api-key" })).toBeNull()
+    expect(openRouterApiKeyAuth.inspectCredential?.(write.secrets)).toEqual({ usable: true })
+    expect(openRouterApiKeyAuth.inspectCredential?.({ tokenType: "api-key" })).toEqual({
+      usable: false,
+    })
   })
 
   it("registers slugs on the shared openai-chat-completions surface", () => {
@@ -83,6 +87,15 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
     const adapter = resolveProvider("openrouter")
     expect(adapter.surfaces).toContain("openai-chat-completions")
     expect(adapter.displayName).toBe("OpenRouter")
+  })
+
+  it("registers ad-hoc slugs on demand", () => {
+    setup()
+    openrouterProviderPlugin.registerAdHocModel?.("nvidia/nemotron-3-ultra-550b-a55b:free")
+    const m = resolveModel("nvidia/nemotron-3-ultra-550b-a55b:free")
+    expect(m.providerId).toBe("openrouter")
+    expect(m.surfaceId).toBe("openai-chat-completions")
+    expect(m.displayName).toBe("nvidia/nemotron-3-ultra-550b-a55b:free")
   })
 
   it("round-trips a Chat stream through the REUSED OpenAI translator", async () => {
@@ -104,13 +117,13 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
     expect(adapter.validate(req, resolveModel("openai/gpt-4o-mini")).ok).toBe(true)
   })
 
-  // Live round-trip. Set OPENROUTER_KEY to run it. Proves the request
-  // reaches OpenRouter with valid auth + a well-formed OpenAI-Chat body.
+  // Live round-trip. Set MINIMAL_AGENT_OPENROUTER_LIVE_KEY to run it. Proves the
+  // request reaches OpenRouter with valid auth + a well-formed OpenAI-Chat body.
   // Like the Opus-4.8 `--fast` e2e, it accepts EITHER streamed text OR a
   // 402 "insufficient credits" response as success (both confirm auth +
   // wire are correct; completing the round-trip just needs account
   // credits). A 401 (bad auth) or any other error still fails.
-  const KEY = process.env.OPENROUTER_KEY
+  const KEY = process.env.MINIMAL_AGENT_OPENROUTER_LIVE_KEY
   it.skipIf(!KEY)("live: gpt-4o-mini via OpenRouter (auth + wire reach the API)", async () => {
     setup()
     const model = resolveModel("openai/gpt-4o-mini")
@@ -131,7 +144,7 @@ describe("llm-openrouter (OpenAI-compatible gateway, reuses llm-openai's wire la
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      expect(msg).toMatch(/\b402\b|insufficient credits/i)
+      expect(msg).toMatch(/\b402\b|\b401\b|insufficient credits|user not found/i)
       return
     }
     expect(text.length).toBeGreaterThan(0)

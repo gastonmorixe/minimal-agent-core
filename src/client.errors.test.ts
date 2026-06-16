@@ -386,19 +386,7 @@ describe("client", () => {
       expect(scripted.calls).toBe(2)
     }, 15_000)
 
-    it("invalid_request_error uses slow-curve retry (still retries — harness never gives up)", async () => {
-      // Harness principle (revised 2026-05-26): the agent loop NEVER
-      // gives up on a tagged stream error. Validation errors used to
-      // fail-fast, but a misconfigured request might be fixable
-      // out-of-band (a human edits a config while the harness waits),
-      // so the new policy is "everything retries, with different
-      // backoff curves". invalid_request_error gets the slow curve
-      // (RETRY_SLOW_BASE_DELAY_MS = 30_000) so we don't spam.
-      //
-      // This test verifies: when invalid_request_error fires once and
-      // the next attempt succeeds, the harness made it through. We
-      // force Math.random()→0 so the slow backoff is effectively zero
-      // (the random factor multiplies the base, not adds to it).
+    it("invalid_request_error propagates without retrying", async () => {
       const auth: AuthResult = { type: "oauth", token: "test-token" }
       const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
       const scripted = scriptedNetworkClient([
@@ -411,26 +399,10 @@ describe("client", () => {
             },
           },
         ]),
-        sseResponse([
-          {
-            type: "content_block_start",
-            index: 0,
-            content_block: { type: "text", text: "" },
-          },
-          {
-            type: "content_block_delta",
-            index: 0,
-            delta: { type: "text_delta", text: "ok" },
-          },
-          { type: "content_block_stop", index: 0 },
-          { type: "message_delta", delta: { stop_reason: "end_turn" } },
-        ]),
       ])
 
-      const originalRandom = Math.random
-      Math.random = () => 0
+      let caught = ""
       try {
-        const yields: string[] = []
         const gen = sendMessage({
           auth,
           messages,
@@ -438,14 +410,15 @@ describe("client", () => {
           stream: true,
           networkClient: scripted.client,
         })
-        for await (const chunk of gen) yields.push(chunk)
-        expect(yields.join("")).toContain("ok")
-      } finally {
-        Math.random = originalRandom
+        for await (const _chunk of gen) {
+          // drain until the stream error propagates
+        }
+      } catch (err) {
+        caught = err instanceof Error ? err.message : String(err)
       }
 
-      // Both attempts ran — the slow-curve retry kicked in.
-      expect(scripted.calls).toBe(2)
+      expect(caught).toContain("invalid_request_error")
+      expect(scripted.calls).toBe(1)
     }, 15_000)
 
     it("rate_limit_error retries on the slow curve and recovers (does NOT stop the agent)", async () => {

@@ -131,7 +131,7 @@ Core commands:
 
 Useful flags:
 
-- **Model:** `--model <id>` (alias `-m`)
+- **Model:** `--model <id>` (alias `-m`, requires `--provider <id>`)
 - **Effort:** `--effort <low|medium|high|xhigh|max>` (alias `-e`)
 - **Fast mode:** `--fast` (alias `-F`)
 - **Thinking display:** `--thinking-display summarized`
@@ -143,7 +143,8 @@ Useful flags:
 
 ### Models
 
-Pick a model with `--model <id>` (or set `MINIMAL_AGENT_MODEL` / `model` in
+Pick a model with `--model <id>` plus `--provider <id>` (or set
+`MINIMAL_AGENT_MODEL` / `MINIMAL_AGENT_PROVIDER`, or `model` / `provider` in
 config). The default is `claude-sonnet-4-6`. `--list-models` prints the full
 live catalog, including the `[1m]` 1M-context aliases and older tiers
 (`claude-opus-4-6`, `claude-sonnet-4-5`). `claude-fable-5` is the current
@@ -182,6 +183,7 @@ Example:
 ```jsonc
 {
   "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
   "effort": "high",
   "thinkingDisplay": "summarized",
   "spinner": "breathing-dot",
@@ -237,6 +239,7 @@ Common environment variables:
 - **`MINIMAL_AGENT_NET_DBG=1`:** Mirror raw HTTP traffic to `.net-dbg/`.
 - **`MINIMAL_AGENT_SPINNER`:** Select the spinner preset.
 - **`MINIMAL_AGENT_MODEL`:** Select the model (same as `--model`).
+- **`MINIMAL_AGENT_PROVIDER`:** Select the provider (same as `--provider`).
 - **`MINIMAL_AGENT_EFFORT`:** Set reasoning effort (`low`…`max`).
 - **`MINIMAL_AGENT_FAST=1`:** Opt into fast-mode dispatch (Opus 4.8).
 - **`MINIMAL_AGENT_THINKING_DISPLAY`:** Set `summarized` or `omitted`.

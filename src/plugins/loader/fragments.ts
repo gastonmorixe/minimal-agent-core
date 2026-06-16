@@ -18,6 +18,7 @@
 import { existsSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 
+import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 
 import { createPluginLogger } from "../../diagnostic-bus.ts"
@@ -164,7 +165,14 @@ async function runFragment(
   })
   // Empty stdin — fragments don't get a trigger envelope (there is none).
   void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
+  const MAX_STDOUT_BYTES = 5 * 1024 * 1024 // 5MB cap
+  let out: string
+  try {
+    out = await consumeStreamBounded(proc.stdout, MAX_STDOUT_BYTES)
+  } catch (err: any) {
+    proc.kill("SIGKILL")
+    throw new Error(`subprocess output exceeded max length: ${err.message}`, { cause: err })
+  }
   const code = await proc.exited
   if (code !== 0) throw new Error(`exited with code ${code}`)
   return out

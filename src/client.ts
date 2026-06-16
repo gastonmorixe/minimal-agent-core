@@ -270,7 +270,7 @@ export async function* sendMessageOnce(
   // plugins/llm-anthropic/{validate,request-body,beta-flags}.ts.
   const modelEntry = findModel(rawModel)
   const fastRequested = speed === "fast"
-  const fastSupported = modelEntry ? modelEntry.capabilities.speedFast : true
+  const fastSupported = modelEntry ? (modelEntry.capabilities?.speedFast ?? true) : true
   const sendFast = fastRequested && fastSupported
   if (fastRequested && !sendFast) {
     diag.warn(
@@ -603,22 +603,19 @@ export async function* sendMessageOnce(
       // server rejects BEFORE opening the SSE stream — the in-stream
       // `event: error` path (handled below) never fires for these. Without
       // a `streamErrorType` tag the retry loop treats them as a genuine bug
-      // and re-throws. Map the status (and the Anthropic error body's
-      // `error.type` when present) to the same tags the in-stream path uses.
+      // and re-throws. Map the status (and the upstream `error.type` when
+      // present) to the same tags the in-stream path uses.
       const upstreamType = parseUpstreamErrorType(errorBody)
       const streamErrType = httpStatusToStreamErrorType(response.status, upstreamType)
       const httpErr = new Error(`API ${response.status}: ${errorBody}`) as Error & {
         streamErrorType?: string
         retryable?: boolean
       }
-      // Honor the server's explicit verdict. Anthropic sends
-      // `x-should-retry: false` on deterministic failures (a malformed
-      // request, an oversize image: 400s that will fail identically on every
-      // resend). Without this, a tagged-but-deterministic error like
-      // `invalid_request_error` matched SLOW_RETRY_TYPES and the harness
-      // retry-stormed a 400 on the 30s→5min curve forever. `retryable:false`
-      // is checked first by the retry coordinator and wins over tag-based
-      // classification, so the error propagates instead of looping.
+      // Honor the server's explicit verdict. Some deterministic failures
+      // (a malformed request, an oversize image) will fail identically on
+      // every resend. `retryable:false` is checked first by the retry
+      // coordinator and wins over tag-based classification, so the error
+      // propagates instead of looping.
       if (response.headers.get("x-should-retry") === "false") {
         httpErr.retryable = false
       } else if (streamErrType) {
@@ -1219,19 +1216,16 @@ function httpStatusToStreamErrorType(
  * indefinitely (the outer loop has no max-attempts, no deadline) — this
  * set just decides the BACKOFF CURVE, not whether to give up.
  *
- *   - `overloaded_error` / `api_error`: Anthropic emits these as
- *     `event: error` SSE frames over HTTP 200 (see the `case "error":`
- *     arm in `sendMessageOnce`). Transient capacity / dispatcher.
+ *   - `overloaded_error` / `api_error`: providers can emit these as
+ *     in-stream error frames over HTTP 200. Transient capacity / dispatcher.
  *   - `stream_idle` / `stream_truncated` / `attempt_too_long`:
  *     synthesized by our stream watchdog (see `sendMessageOnce`) when
  *     the server stops sending events without a `message_stop`
  *     terminator. Observed 2026-05-25 as the actual root cause of
  *     hour-long agent hangs.
  *
- * "Hard" error types (validation, auth, not-found) get a SLOWER curve
- * (`SLOW_RETRY_TYPES` below) so a code-level bug doesn't burn through
- * retries — but they still retry, because a human might fix the
- * config while the harness waits patiently.
+ * Rate limits get a SLOWER curve (`SLOW_RETRY_TYPES` below) because they
+ * can clear on their own once the provider window rolls.
  */
 const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   "overloaded_error",
@@ -1262,12 +1256,7 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
  * instead of stopping the agent. Observed 2026-05-30 as a hard stop
  * (`rate_limit_error: Rate limited`) because it matched neither set.
  */
-const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set([
-  "invalid_request_error",
-  "permission_error",
-  "not_found_error",
-  "rate_limit_error",
-])
+const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set(["rate_limit_error"])
 
 /**
  * Retry timing.
@@ -1384,15 +1373,12 @@ export async function* sendMessage(
       const streamErrType = errObj.streamErrorType
       const elapsedMs = Date.now() - startedAt
       // An explicit `retryable: false` from the provider wins over tag-based
-      // classification. The server sets it (via `x-should-retry: false`) on
-      // deterministic failures — a malformed request, an oversize image — that
-      // will fail identically on every resend. Without this, a 400
-      // `invalid_request_error` matched SLOW_RETRY_TYPES and the harness
-      // retry-stormed it forever instead of surfacing it. Mirrors the
-      // canonical coordinator in llm/transport/retry.ts.
+      // classification. Servers can set it on deterministic failures that
+      // will fail identically on every resend. Mirrors the canonical
+      // coordinator in llm/transport/retry.ts.
       //
-      // Otherwise: every tagged stream error is retryable forever (untagged
-      // errors — programmer bugs, kernel panics, OOM — re-throw).
+      // Otherwise: known retryable tags retry forever. Untagged errors
+      // re-throw.
       const retryable =
         errObj.retryable !== false &&
         streamErrType !== undefined &&
@@ -1401,10 +1387,10 @@ export async function* sendMessage(
       if (!retryable) throw err
       lastStreamErrType = streamErrType
 
-      // Slow curve for hard errors (validation, auth, not-found) so a
-      // code-level bug doesn't blast the API. Slow base × 2^attempt,
-      // capped at 5min. Full-jitter random in [0, ideal) so concurrent
-      // agents desynchronize.
+      // Slow curve for rate limits so we wait the window out instead of
+      // hammering a closed quota bucket. Slow base × 2^attempt, capped at
+      // 5min. Full-jitter random in [0, ideal) so concurrent agents
+      // desynchronize.
       const slow = SLOW_RETRY_TYPES.has(streamErrType)
       const base = slow ? RETRY_SLOW_BASE_DELAY_MS : RETRY_FAST_BASE_DELAY_MS
       // Cap the exponent so 2^N doesn't overflow on attempt 50.

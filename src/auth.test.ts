@@ -157,7 +157,7 @@ describe("auth", () => {
       await expect(auth.refresh!()).rejects.toThrow(/invalid_grant/)
       // Hint points at our own `minimal-agent --login`; we no longer mention
       // the official `claude` CLI since storage is fully independent.
-      await expect(auth.refresh!()).rejects.toThrow(/minimal-agent --login/)
+      await expect(auth.refresh!()).rejects.toThrow(/minimal-agent provider /)
     })
 
     it("doRefresh skips the server call when credential store already has a fresher token", async () => {

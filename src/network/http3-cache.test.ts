@@ -49,8 +49,9 @@ describe("parseAltSvc", () => {
     expect(r.maxAgeSec).toBeUndefined()
   })
 
-  test("rejects ma=0 and non-numeric ma", () => {
-    expect(parseAltSvc('h3=":443"; ma=0').maxAgeSec).toBeUndefined()
+  test("accepts ma=0 and rejects non-numeric ma", () => {
+    expect(parseAltSvc('h3=":443"; ma=0').maxAgeSec).toBe(0)
+    expect(parseAltSvc('h3=":443"; ma=-1').maxAgeSec).toBeUndefined()
     expect(parseAltSvc('h3=":443"; ma=foo').maxAgeSec).toBeUndefined()
   })
 

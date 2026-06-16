@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+// import { createHash } from "node:crypto"
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
@@ -9,7 +9,7 @@ import { BinaryStore, classify, defaultBinDir, isArchive } from "./store.ts"
 import type { BinarySpec, InstalledBinary, InstallProgress } from "./types.ts"
 
 function sha256(bytes: Uint8Array | string): string {
-  return createHash("sha256").update(bytes).digest("hex")
+  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
 }
 
 /** A fetch fake that returns fixed bytes with a streaming body. */

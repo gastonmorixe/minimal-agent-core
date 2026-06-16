@@ -197,15 +197,6 @@ export async function* canonicalSendFn(
       // rate-limit *header* broadcast — broadcastResponseRateLimits — needs
       // the raw response headers, which canonical events don't carry; that
       // stays on the legacy path until Phase 3 threads it through.)
-      onUsage: (u) => {
-        addSessionUsage({
-          input_tokens: u.inputTokens,
-          output_tokens: u.outputTokens,
-          cache_read_input_tokens: u.cacheReadTokens,
-          cache_creation_input_tokens: u.cacheCreationTokens,
-        })
-        rebroadcastQuotaForSessionUpdate()
-      },
     })
   }
 
@@ -220,7 +211,17 @@ export async function* canonicalSendFn(
   // The status handle stays bound for the WHOLE send (across retries) and is
   // torn down in finally, mirroring the legacy client's outer try/finally.
   try {
-    return yield* withRetry(makeAuthRefreshedAttempt, { signal: opts.signal })
+    const finalStream = yield* withRetry(makeAuthRefreshedAttempt, { signal: opts.signal })
+    if (finalStream.usage) {
+      addSessionUsage({
+        input_tokens: finalStream.usage.input_tokens ?? 0,
+        output_tokens: finalStream.usage.output_tokens ?? 0,
+        cache_read_input_tokens: finalStream.usage.cache_read_input_tokens ?? 0,
+        cache_creation_input_tokens: finalStream.usage.cache_creation_input_tokens ?? 0,
+      })
+      rebroadcastQuotaForSessionUpdate()
+    }
+    return finalStream
   } finally {
     requestStatus.clear()
     networkActivityObserver.detach(reqId)

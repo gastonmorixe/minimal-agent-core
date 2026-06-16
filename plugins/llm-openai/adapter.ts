@@ -48,6 +48,7 @@ import { validateOpenAIRequest } from "./validate.ts"
 import {
   CHAT_COMPLETIONS_PATH,
   CHAT_COMPLETIONS_URL,
+  CHATGPT_CODEX_RESPONSES_PATH,
   RESPONSES_PATH,
   RESPONSES_URL,
 } from "./wire-constants.ts"
@@ -122,7 +123,11 @@ export const openaiAdapter: ProviderAdapter = {
 
     if (model.surfaceId === "openai-responses") {
       const body = buildOpenAIResponsesBody(req, model)
-      const url = openAIUrl(auth, RESPONSES_PATH, RESPONSES_URL)
+      if (auth.kind === "oauth") {
+        body.store = false
+        delete body.max_output_tokens
+      }
+      const url = openAIUrl(auth, RESPONSES_PATH, RESPONSES_URL, CHATGPT_CODEX_RESPONSES_PATH)
       ctx.debug?.header(`POST ${url}`)
       ctx.debug?.kv("model", body.model)
       ctx.debug?.kv("surface", "responses")
@@ -178,9 +183,9 @@ export const openaiAdapter: ProviderAdapter = {
   },
 }
 
-function openAIUrl(auth: ProviderAuth, path: string, fallback: string): string {
+function openAIUrl(auth: ProviderAuth, path: string, fallback: string, oauthPath = path): string {
   if (auth.kind !== "oauth" || !auth.baseUrl) return fallback
-  return `${auth.baseUrl.replace(/\/+$/, "")}${path}`
+  return `${auth.baseUrl.replace(/\/+$/, "")}${oauthPath}`
 }
 
 /**

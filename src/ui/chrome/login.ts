@@ -45,12 +45,23 @@ export function renderOAuthLoginSuccess(result: LoginInstallResult): string[] {
 }
 
 /** Success rows for API-key login. */
-export function renderApiKeyLoginSuccess(displayName: string): string[] {
-  return [
+export function renderApiKeyLoginSuccess(
+  displayName: string,
+  providerId: string,
+  modelHint?: string,
+): string[] {
+  const rows = [
     ``,
     `  ${c.boldGreen("✔")} ${c.bold("Login successful")}`,
     `  ${c.dim(`stored: ${displayName}`)}`,
   ]
+  if (modelHint) {
+    rows.push(
+      `  ${c.dim(`next: add "model": "${modelHint}" and "provider": "${providerId}" to ~/.minimal-agent/config.jsonc`)}`,
+    )
+    rows.push(`  ${c.dim(`or run: minimal-agent --provider ${providerId} --model ${modelHint}`)}`)
+  }
+  return rows
 }
 
 /** Failure rows for either login strategy. */

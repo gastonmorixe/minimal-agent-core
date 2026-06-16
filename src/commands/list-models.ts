@@ -12,7 +12,7 @@
  * @module commands/list-models
  */
 
-import type { AuthResult } from "../auth.ts"
+import { tryResolveProviderAuth } from "../auth-strategies.ts"
 import { listRegisteredModels } from "../llm/model-registry.ts"
 import type { ProviderAuth } from "../llm/provider.ts"
 import { listProviderPlugins } from "../llm/provider-plugin.ts"
@@ -27,13 +27,6 @@ interface ModelRow {
   date?: string
 }
 
-/** Project the CLI's resolved auth into the neutral provider-auth shape. */
-function toProviderAuth(auth: AuthResult): ProviderAuth {
-  return auth.type === "oauth"
-    ? { kind: "oauth", token: auth.token }
-    : { kind: "api-key", key: auth.token }
-}
-
 /**
  * Implements `minimal-agent list-models`: merges live model catalogs from
  * every provider plugin (queried in parallel, fault-isolated so one outage
@@ -41,7 +34,6 @@ function toProviderAuth(auth: AuthResult): ProviderAuth {
  * then prints a deduplicated table, optionally filtered to one provider.
  */
 export async function runListModelsCommand(
-  auth: AuthResult,
   providerFilter?: string,
   deps: {
     output?: { write(s: string): unknown }
@@ -53,10 +45,14 @@ export async function runListModelsCommand(
   // Live catalogs, one hook call per provider plugin that implements it.
   // Parallel, individually fault-isolated: one provider's outage must not
   // hide another's rows (nor the registry fallback below).
-  const providerAuth = toProviderAuth(auth)
   const plugins = listProviderPlugins().filter((p) => typeof p.listLiveModels === "function")
   const results = await Promise.allSettled(
-    plugins.map(async (p) => ({ plugin: p, rows: await p.listLiveModels?.(providerAuth) })),
+    plugins.map(async (p) => {
+      const providerAuth: ProviderAuth | null = tryResolveProviderAuth(p.id, "")
+      if (!providerAuth)
+        return { plugin: p, rows: [] as Awaited<ReturnType<NonNullable<typeof p.listLiveModels>>> }
+      return { plugin: p, rows: await p.listLiveModels?.(providerAuth) }
+    }),
   )
   for (const r of results) {
     if (r.status === "rejected") {

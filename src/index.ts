@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+/* eslint-disable max-lines */
 
 /**
  * Minimal Claude agent — entry point.
@@ -52,7 +53,11 @@ import {
 } from "./agent/turn-attachments.ts"
 import { Agent, c, runRepl } from "./agent.ts"
 import { publishAgentHomeEnv, resolveSessionsDir } from "./agent-paths.ts"
-import { getAuth } from "./auth.ts"
+import {
+  discoverCredentialedProviders,
+  storedProvidersHint,
+  suggestModelForProvider,
+} from "./auth-strategies.ts"
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
@@ -75,13 +80,10 @@ import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { setGlobalEventBus } from "./global-bus.ts"
-import {
-  activateDiscoveredProviders,
-  getDefaultModelId,
-  registerDiscoveredProviders,
-  resolveModel,
-} from "./llm/index.ts"
+import { activateDiscoveredProviders, registerDiscoveredProviders } from "./llm/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
+import { findModel } from "./llm/model-registry.ts"
+import { findProviderPlugin } from "./llm/provider-plugin.ts"
 import { resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -106,6 +108,10 @@ import {
   providerWantsQuotaProbe,
   signInStepLabel,
 } from "./startup/provider-presentation.ts"
+import {
+  resolveBootModel,
+  resolveSingleStoredProviderBootModel,
+} from "./startup/resolve-boot-model.ts"
 import { bootSessionStores } from "./startup/session-store-boot.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
@@ -157,6 +163,11 @@ if (args.includes("--show-hidden-chars")) {
 
 const modelIdx = args.indexOf("--model")
 const model = modelIdx !== -1 && args[modelIdx + 1] ? args[modelIdx + 1] : undefined // config.model applied later (after loadUserConfig is called)
+const providerIdx = args.indexOf("--provider")
+const provider =
+  providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1].startsWith("-")
+    ? args[providerIdx + 1]
+    : undefined
 
 const wantListModels = args.includes("--list-models")
 const wantListProviders = args.includes("--list-providers")
@@ -421,8 +432,7 @@ async function main() {
       runListSpinnersCommand()
       return
     case "list-models": {
-      const auth = await getAuth()
-      await runListModelsCommand(auth, listModelsProvider)
+      await runListModelsCommand(listModelsProvider)
       return
     }
     case "list-providers": {
@@ -450,7 +460,12 @@ async function main() {
       process.exit(code)
     }
     case "logout": {
-      const code = await runLogoutCommand()
+      const providerIdx = args.indexOf("--provider")
+      const logoutProviderId =
+        providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1].startsWith("-")
+          ? args[providerIdx + 1]
+          : undefined
+      const code = await runLogoutCommand({ providerId: logoutProviderId })
       process.exit(code)
     }
     case "auth-status": {
@@ -541,17 +556,44 @@ async function main() {
     }
   }
 
-  // Resolve the SELECTED model's provider once, up front. Everything that
-  // is provider-specific (startup probe, quota) keys off this so a session
-  // started with e.g. `--model gpt-5.5` never contacts Anthropic.
-  const selectedModel =
-    model ?? process.env.MINIMAL_AGENT_MODEL ?? userConfig.model ?? getDefaultModelId()
+  // Resolve the boot selection once, up front. Everything that is
+  // provider-specific (startup probe, quota) keys off this so a session
+  // started with an explicit provider/model pair never contacts the wrong host.
+  const bootModel = resolveBootModel({
+    cliModel: model,
+    cliProvider: provider,
+    envModel: process.env.MINIMAL_AGENT_MODEL,
+    envProvider: process.env.MINIMAL_AGENT_PROVIDER,
+    configModel: userConfig.model,
+    configProvider: userConfig.provider,
+  })
+
+  if (bootModel.kind === "invalid") {
+    throw new Error(bootModel.reason)
+  }
+
+  const selected =
+    bootModel.kind === "explicit"
+      ? bootModel
+      : resolveSingleStoredProviderBootModel(
+          discoverCredentialedProviders(),
+          suggestModelForProvider,
+        )
+  if (selected.kind === "invalid") {
+    throw new Error(`${selected.reason}. ${storedProvidersHint()}`)
+  }
+  const selectedModel = selected.model
   const selectedModelBase = selectedModel.replace(/\[(1|2)m\]/gi, "")
-  let selectedProviderId: string | undefined
-  try {
-    selectedProviderId = resolveModel(selectedModelBase).providerId
-  } catch {
-    selectedProviderId = undefined
+  const selectedProviderId = selected.provider
+  const plugin = findProviderPlugin(selectedProviderId)
+  if (!plugin) {
+    throw new Error(`unknown provider "${selectedProviderId}"`)
+  }
+  if (!findModel(selectedModelBase)) {
+    plugin.registerAdHocModel?.(selectedModelBase)
+  }
+  if (!findModel(selectedModelBase)) {
+    throw new Error(`unknown model "${selectedModelBase}" for provider "${selectedProviderId}"`)
   }
 
   const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase)

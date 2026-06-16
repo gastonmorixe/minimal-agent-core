@@ -43,13 +43,13 @@ by the model's registered `providerId` (`resolveProviderAuth`):
 | provider | credential |
 | --- | --- |
 | `anthropic` | the OAuth session (keeps the keychain-first / peer-token 401 recovery) |
-| `openai` | `OPENAI_API_KEY` |
-| `openrouter` | `OPENROUTER_KEY` |
+| `openai` | minimal-agent provider auth store |
+| `openrouter` | minimal-agent provider auth store |
 
-If the required env var is missing, the transport throws a clear error
-naming the variable and never hits the network: there is no silent
-fallback to the Anthropic token. So **to use `--model gpt-5.5` you must
-export `OPENAI_API_KEY`** (and `OPENROUTER_KEY` for OpenRouter models).
+If the required stored provider credential is missing, the transport throws a
+clear error and never hits the network: there is no silent fallback to the
+Anthropic token. To use `--model gpt-5.5`, run
+`minimal-agent provider openai login`.
 
 ### The canonical transport
 
@@ -102,10 +102,11 @@ guard against drift.
   and recovers via retry, proven through `canonicalSendFn`.
 - **The payoff, proven through the agent.** A real `Agent.run` turn with
   `--model gpt-5.5` (no injected `sendFn`) lands on
-  `https://api.openai.com/v1/responses` authenticated with `OPENAI_API_KEY`,
-  NOT the Anthropic session token (asserted against a sentinel); a missing
-  `OPENAI_API_KEY` throws a clear error and never reaches the network; an
-  Anthropic model still lands on `api.anthropic.com` with the OAuth session.
+  `https://api.openai.com/v1/responses` authenticated with the stored OpenAI
+  provider credential, NOT the Anthropic session token (asserted against a
+  sentinel); a missing stored OpenAI credential throws a clear error and never
+  reaches the network; an Anthropic model still lands on `api.anthropic.com`
+  with the OAuth session.
 
 ## Also in this batch
 

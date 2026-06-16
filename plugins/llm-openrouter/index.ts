@@ -13,5 +13,9 @@ export {
   readOpenRouterApiKey,
 } from "./auth.ts"
 export { CAPS_OPENROUTER_CHAT } from "./capabilities.ts"
-export { registerOpenRouterModels } from "./models.ts"
-export { PRICING_OR_CLAUDE_35_SONNET, PRICING_OR_GPT_4O_MINI } from "./pricing.ts"
+export { registerOpenRouterModel, registerOpenRouterModels } from "./models.ts"
+export {
+  PRICING_OR_CLAUDE_35_SONNET,
+  PRICING_OR_GENERIC,
+  PRICING_OR_GPT_4O_MINI,
+} from "./pricing.ts"

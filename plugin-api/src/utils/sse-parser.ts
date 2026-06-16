@@ -32,6 +32,7 @@ export async function* parseSse<T>(body: ReadableStream<Uint8Array>): AsyncItera
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
+  const MAX_BUFFER_LENGTH = 5 * 1024 * 1024 // 5MB limit to prevent OOM
 
   try {
     while (true) {
@@ -39,10 +40,16 @@ export async function* parseSse<T>(body: ReadableStream<Uint8Array>): AsyncItera
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
 
-      for (const line of lines) {
+      if (buffer.length > MAX_BUFFER_LENGTH) {
+        throw new Error(`stream_error: SSE line exceeded maximum length of ${MAX_BUFFER_LENGTH} bytes`)
+      }
+
+      let newlineIndex
+      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newlineIndex)
+        buffer = buffer.slice(newlineIndex + 1)
+
         if (!line.startsWith("data: ")) continue
         const data = line.slice(6).trim()
         if (data === "[DONE]") return

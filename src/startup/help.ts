@@ -66,7 +66,10 @@ function buildHelpSections(): HelpSection[] {
       title: c.bold("Options"),
       rows: [
         row(`${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}`, "Select model", [
-          "else MINIMAL_AGENT_MODEL, config model, provider default",
+          "requires --provider; else MINIMAL_AGENT_MODEL, config model",
+        ]),
+        row(`${c.cyan("--provider")} ${c.dim("<id>")}`, "Select provider for --model", [
+          "else MINIMAL_AGENT_PROVIDER, config provider",
         ]),
         row(
           `${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}`,
@@ -199,6 +202,7 @@ function buildHelpSections(): HelpSection[] {
           "default: ~/.minimal-agent/config.jsonc",
         ]),
         row(c.cyan("MINIMAL_AGENT_MODEL"), "Default model id", ["same as --model"]),
+        row(c.cyan("MINIMAL_AGENT_PROVIDER"), "Default provider id", ["same as --provider"]),
         row(
           c.cyan("MINIMAL_AGENT_MEMORY_NAMESPACE"),
           "Namespace memory paths under namespaces/<ns>/",

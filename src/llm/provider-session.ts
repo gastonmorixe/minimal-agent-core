@@ -24,7 +24,7 @@ import { findProviderPlugin, type ProviderSessionInfo } from "./provider-plugin.
 /** Model context window (tokens) from the registry, or `undefined` if unknown. */
 export function contextWindowForModel(modelId: string): number | undefined {
   try {
-    return resolveModel(modelId).capabilities.contextWindow
+    return resolveModel(modelId).capabilities?.contextWindow
   } catch {
     return undefined
   }

@@ -95,7 +95,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "dump-command.e2e.test.ts",
   "e2e-smoke.test.ts",
   "jsonc.test.ts",
-  "llm/errors.test.ts",
   "llm/adapter-legacy-media.test.ts",
   "llm/adapter-legacy-salvage.test.ts",
   "llm/adapter-legacy-usage.test.ts",

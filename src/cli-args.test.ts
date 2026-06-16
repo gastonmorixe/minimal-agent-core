@@ -14,6 +14,7 @@ describe("normalizeArgs", () => {
   test("expands short flags", () => {
     expect(normalizeArgs(["-m", "opus", "-p", "hi"])).toEqual(["--model", "opus", "--prompt", "hi"])
     expect(normalizeArgs(["-d", "-v"])).toEqual(["--debug", "--verbose"])
+    expect(normalizeArgs(["-F"])).toEqual(["--fast"])
     expect(normalizeArgs(["-h"])).toEqual(["--help"])
     expect(normalizeArgs(["-r", "last"])).toEqual(["--resume", "last"])
     expect(normalizeArgs(["-f", "cat", "-e", "high", "-s", "dots"])).toEqual([

@@ -19,6 +19,7 @@
     "./utils/usage-render": "./src/utils/usage-render.ts",
     "./utils/sse-parser": "./src/utils/sse-parser.ts",
     "./utils/unified-diff": "./src/utils/unified-diff.ts",
+    "./utils/bounded-drain": "./src/utils/bounded-drain.ts",
     "./types/plugin": "./src/types/plugin.ts",
     "./net/types": "./src/net/types.ts",
     "./llm/capabilities": "./src/llm/capabilities.ts",
