@@ -9,8 +9,9 @@
 import { c } from "../style/ansi.ts"
 
 /** Rows shown before credential removal runs. */
-export function renderLogoutStartRows(): string[] {
-  return [`  ${c.bold(c.pink("⊖"))} ${c.bold("Sign out")}`]
+export function renderLogoutStartRows(providerId?: string): string[] {
+  const scope = providerId ? ` ${c.dim(`(${providerId})`)}` : ""
+  return [`  ${c.bold(c.pink("⊖"))} ${c.bold("Sign out")}${scope}`]
 }
 
 /** Rows shown when credential removal throws but logout continues. */
@@ -19,9 +20,10 @@ export function renderLogoutWarningRows(message: string): string[] {
 }
 
 /** Rows shown after credential removal finishes. */
-export function renderLogoutResultRows(removed: boolean): string[] {
+export function renderLogoutResultRows(removed: boolean, providerId?: string): string[] {
+  const scope = providerId ? ` for ${providerId}` : ""
   return [
-    `  ${c.faintWhite("╰")} credentials  ${removed ? c.boldGreen("removed") : c.dim("(no entry)")}`,
+    `  ${c.faintWhite("╰")} credentials${scope}  ${removed ? c.boldGreen("removed") : c.dim("(no entry)")}`,
     ``,
     `  ${c.boldGreen("✔")} ${c.bold("Logged out")}`,
   ]

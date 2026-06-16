@@ -40,6 +40,12 @@ export class Http2Transport implements NetworkTransport {
     const reused = entry.requestCount > 0
     entry.requestCount++
 
+    let signal = req.signal
+    if (req.timeoutMs) {
+      const timeoutSignal = AbortSignal.timeout(req.timeoutMs)
+      signal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+    }
+
     return new Promise<NetworkResponse>((resolve, reject) => {
       const headers = buildHttp2Headers(req, url)
       const stream = entry.session.request(headers)
@@ -66,7 +72,7 @@ export class Http2Transport implements NetworkTransport {
         if (!entry.session.destroyed) entry.session.destroy()
       }
 
-      const cleanupAbort = attachAbort(req, stream, fail, poisonSession)
+      const cleanupAbort = attachAbort(signal, stream, fail, poisonSession)
 
       stream.once("response", (rawHeaders) => {
         const status = rawHeaders[":status"] ?? 0
@@ -220,6 +226,9 @@ function nodeStreamToWeb(
     start(controller) {
       stream.on("data", (chunk: Uint8Array) => {
         controller.enqueue(new Uint8Array(chunk))
+        if (controller.desiredSize != null && controller.desiredSize <= 0) {
+          stream.pause()
+        }
       })
       stream.once("end", () => {
         onDone()
@@ -233,6 +242,9 @@ function nodeStreamToWeb(
         onDone()
         controller.error(new Error("HTTP/2 stream aborted"))
       })
+    },
+    pull() {
+      stream.resume()
     },
     cancel() {
       onDone()
@@ -251,12 +263,11 @@ function nodeStreamToWeb(
 const ABORT_ESCALATE_MS = 2_000
 
 function attachAbort(
-  req: NetworkRequest,
+  signal: AbortSignal | undefined,
   stream: ClientHttp2Stream,
   reject: (err: unknown) => void,
   poisonSession: () => void,
 ): () => void {
-  const signal = req.signal
   if (!signal) return () => {}
 
   const onAbort = () => {

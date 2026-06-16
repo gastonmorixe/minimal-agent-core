@@ -146,6 +146,10 @@ export interface LockHandle {
    * matches us (someone broke the lock and now owns it).
    */
   release: () => void
+  /**
+   * Disposable support for `using` syntax.
+   */
+  [Symbol.dispose]: () => void
 }
 
 /**
@@ -370,7 +374,18 @@ export function tryAcquireOnce(
       }
       opts.onRelease?.(lockPath)
     }
-    return { ok: true, handle: { filePath, lockPath, holder, release } }
+    return {
+      ok: true,
+      handle: {
+        filePath,
+        lockPath,
+        holder,
+        release,
+        [Symbol.dispose]() {
+          release()
+        },
+      },
+    }
   } catch (e) {
     if (fd !== null) {
       try {
@@ -587,6 +602,9 @@ export async function acquireLock(
           // the original holder's `release` will clean it up. Calling
           // unlink here would yank the lock out from under the original
           // holder.
+        },
+        [Symbol.dispose]() {
+          // No-op
         },
       }
     }

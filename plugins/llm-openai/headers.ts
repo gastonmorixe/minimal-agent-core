@@ -31,9 +31,8 @@ export function buildOpenAIHeaders(opts: OpenAIHeadersOpts): Record<string, stri
       if (opts.auth.project) headers["openai-project"] = opts.auth.project
       break
     case "oauth":
-      // OpenAI doesn't ship an OAuth flow for its public API. We accept
-      // it for symmetry with Anthropic; treat the token as a bearer.
       headers.authorization = `Bearer ${opts.auth.token}`
+      if (opts.auth.headers) Object.assign(headers, opts.auth.headers)
       break
     case "custom":
       Object.assign(headers, opts.auth.headers)

@@ -1,0 +1,8 @@
+{
+  "id": "opencode",
+  "name": "LLM Provider: OpenCode Go",
+  "version": "0.1.0",
+  "description": "OpenCode Go (opencode.ai/go) — low-cost access to open-weight models via both OpenAI Chat Completions and Anthropic Messages wire formats. Reuses plugins/llm-openai and plugins/llm-anthropic wire layers; auth via minimal-agent's provider auth store.",
+  "entry": "./index.ts",
+  "export": "opencodeProviderPlugin"
+}

@@ -105,7 +105,7 @@ describe("withRetry", () => {
     expect(success?.structuredData?.retries).toBe(1)
   })
 
-  it("uses the SLOW curve for hard error types (e.g. invalid_request_error)", async () => {
+  it("uses the SLOW curve for rate_limit_error", async () => {
     const origRandom = Math.random
     Math.random = () => 0
     const { events, dispose } = collectDiag()
@@ -114,7 +114,7 @@ describe("withRetry", () => {
       await drain(
         withRetry(async function* () {
           calls++
-          if (calls === 1) throw tagged("invalid_request_error")
+          if (calls === 1) throw tagged("rate_limit_error")
           yield "ok"
           return resp("ok")
         }),
@@ -151,6 +151,31 @@ describe("withRetry", () => {
     expect(retry?.structuredData?.["error-type"]).toBe("rate_limit_error")
     expect(retry?.structuredData?.curve).toBe("slow")
     expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
+  })
+
+  it("propagates not_found_error without retrying", async () => {
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    let caught = ""
+    try {
+      await drain(
+        withRetry(async function* () {
+          calls++
+          throw tagged("not_found_error")
+          // biome-ignore lint/correctness/useYield: throw-only attempt
+          // oxlint-disable-next-line no-unreachable -- yield satisfies the generator type
+          yield ""
+        }),
+      )
+    } catch (e) {
+      caught = (e as Error).message
+    } finally {
+      dispose()
+    }
+
+    expect(caught).toContain("not_found_error")
+    expect(calls).toBe(1)
+    expect(events.some((e) => e.source === "api.retry")).toBe(false)
   })
 
   it("retries an UNTAGGED connection-level failure (the 2026-06-01 connect-timeout hard stop)", async () => {

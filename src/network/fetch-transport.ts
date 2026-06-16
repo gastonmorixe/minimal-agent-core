@@ -5,11 +5,18 @@ export class FetchTransport implements NetworkTransport {
   readonly id = "fetch"
 
   async request(req: NetworkRequest): Promise<NetworkResponse> {
+    let signal = req.signal
+    if (req.timeoutMs) {
+      const timeoutSignal = AbortSignal.timeout(req.timeoutMs)
+      signal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+    }
+
     const response = await fetch(req.url, {
       method: req.method,
       headers: req.headers,
       body: toFetchBody(req.body),
-      signal: req.signal,
+      signal,
+      redirect: "manual",
     })
     const origin = new URL(req.url).origin
     return new NetworkResponse({

@@ -3,11 +3,7 @@ import { readFileSync } from "node:fs"
 import { beforeEach, describe, expect, it } from "bun:test"
 
 import { PROVIDER_TOKEN_RE, stripComments } from "../architecture/provider-scan.ts"
-import {
-  clearModelRegistry,
-  clearProviderRegistry,
-  setDefaultModelId,
-} from "../llm/model-registry.ts"
+import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import {
   clearProviderPlugins,
   type ProviderPlugin,
@@ -36,15 +32,7 @@ describe("C-2: provider-presentation seams", () => {
   })
 
   describe("signInStepLabel", () => {
-    it("uses the default provider's declared displayName", () => {
-      registerTestProvider({ displayName: "Acme Models", models: [{ id: "test-model-1" }] })
-      setDefaultModelId("test-model-1")
-      const label = signInStepLabel()
-      expect(label).toContain("Acme Models")
-      expect(label.toLowerCase()).toContain("sign in")
-    })
-
-    it("falls back to a neutral, provider-free label with no provider registered", () => {
+    it("falls back to a neutral, provider-free label with no credentials", () => {
       const label = signInStepLabel()
       expect(label.toLowerCase()).toContain("sign in")
       expect(PROVIDER_TOKEN_RE.test(label)).toBe(false)

@@ -79,11 +79,19 @@ export class Http3NegotiationCache {
   private readonly positiveTtlMs: number
   private readonly negativeTtlMs: number
   private readonly now: () => number
+  private readonly MAX_SIZE = 1000
 
   constructor(opts: Http3CacheOptions = {}) {
     this.positiveTtlMs = opts.positiveTtlMs ?? DEFAULT_POSITIVE_TTL_MS
     this.negativeTtlMs = opts.negativeTtlMs ?? DEFAULT_NEGATIVE_TTL_MS
     this.now = opts.now ?? Date.now
+  }
+
+  private enforceLimit() {
+    if (this.map.size > this.MAX_SIZE) {
+      const firstKey = this.map.keys().next().value
+      if (firstKey !== undefined) this.map.delete(firstKey)
+    }
   }
 
   /**
@@ -131,6 +139,7 @@ export class Http3NegotiationCache {
       verdict: "supported",
       expiresAt: this.now() + ttlMs,
     })
+    this.enforceLimit()
   }
 
   /**
@@ -152,6 +161,7 @@ export class Http3NegotiationCache {
       verdict: "unsupported",
       expiresAt: this.now() + this.negativeTtlMs,
     })
+    this.enforceLimit()
   }
 
   /**
@@ -174,6 +184,7 @@ export class Http3NegotiationCache {
       verdict,
       expiresAt: this.now() + ttl,
     })
+    this.enforceLimit()
   }
 
   /** Empty the cache. Returns the number of entries removed. */
@@ -241,7 +252,7 @@ export function parseAltSvc(value: string): AltSvcSummary {
       const v = param.slice(pEq + 1).trim()
       if (k !== "ma") continue
       const n = Number.parseInt(v, 10)
-      if (!Number.isFinite(n) || n <= 0) continue
+      if (!Number.isFinite(n) || n < 0) continue
       minMaxAge = minMaxAge === undefined ? n : Math.min(minMaxAge, n)
     }
   }

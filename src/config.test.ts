@@ -37,6 +37,7 @@ describe("loadUserConfig", () => {
       path,
       JSON.stringify({
         model: "claude-opus-4-7",
+        provider: "anthropic",
         effort: "high",
         thinkingDisplay: "summarized",
         spinner: "dots",
@@ -44,6 +45,7 @@ describe("loadUserConfig", () => {
     )
     expect(loadUserConfig()).toEqual({
       model: "claude-opus-4-7",
+      provider: "anthropic",
       effort: "high",
       thinkingDisplay: "summarized",
       spinner: "dots",
@@ -193,33 +195,19 @@ describe("loadUserConfig", () => {
     })
   })
 
-  it("parses apiKeys (openai + openrouter)", () => {
+  it("ignores apiKeys because provider auth belongs in the auth store", () => {
     writeFileSync(path, JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } }))
-    expect(loadUserConfig()).toEqual({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } })
-  })
-
-  it("drops non-string / empty apiKeys entries, keeps the valid ones", () => {
-    writeFileSync(
-      path,
-      JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "", other: 42, nope: null } }),
-    )
-    expect(loadUserConfig()).toEqual({ apiKeys: { openai: "sk-openai" } })
-  })
-
-  it("omits apiKeys when the map is empty / all-invalid / not an object", () => {
-    writeFileSync(path, JSON.stringify({ apiKeys: {} }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ apiKeys: { openai: "", openrouter: 7 } }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ apiKeys: "sk-openai" }))
-    expect(loadUserConfig()).toEqual({})
-    writeFileSync(path, JSON.stringify({ apiKeys: ["sk-openai"] }))
     expect(loadUserConfig()).toEqual({})
   })
 
-  it("omits apiKeys when the key is absent entirely", () => {
+  it("loads model when apiKeys is absent", () => {
     writeFileSync(path, JSON.stringify({ model: "x" }))
     expect(loadUserConfig()).toEqual({ model: "x" })
+  })
+
+  it("loads provider when model is absent", () => {
+    writeFileSync(path, JSON.stringify({ provider: "openrouter" }))
+    expect(loadUserConfig()).toEqual({ provider: "openrouter" })
   })
 })
 

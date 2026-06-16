@@ -22,9 +22,15 @@ import {
   findOAuthLoginProvider,
   listApiKeyAuthProviders,
   listOAuthLoginProviderEntries,
+  suggestModelForProvider,
 } from "../auth-strategies.ts"
 import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../llm/provider-plugin.ts"
-import { type LoginOutcome, runOAuthLogin } from "../oauth-login.ts"
+import {
+  isLoginAborted,
+  LoginAbortedError,
+  type LoginOutcome,
+  runOAuthLogin,
+} from "../oauth-login.ts"
 import {
   renderApiKeyLoginSuccess,
   renderLoginBanner,
@@ -171,7 +177,7 @@ export async function readLine(
   input: NodeJS.ReadableStream & { isTTY?: boolean } = process.stdin,
   output: NodeJS.WritableStream = process.stderr,
 ): Promise<string> {
-  return new Promise<string>((resolve) => {
+  return new Promise<string>((resolve, reject) => {
     // Output the prompt + read from stdin via readline. We aim the
     // readline output at stderr to match the rest of our UI rows (the
     // banner, the orchestrator's `display(...)` calls, etc.). stdout is
@@ -203,6 +209,11 @@ export async function readLine(
       resolve(line)
       rl.close()
     })
+    rl.once("SIGINT", () => {
+      settled = true
+      reject(new LoginAbortedError())
+      rl.close()
+    })
     rl.once("close", () => {
       if (!settled) resolve("")
     })
@@ -219,23 +230,34 @@ export async function readSecretLine(
   output: NodeJS.WritableStream = process.stderr,
 ): Promise<string> {
   output.write(promptText)
-  return new Promise<string>((resolve) => {
+  return new Promise<string>((resolve, reject) => {
     let value = ""
+    let settled = false
     const wasRaw = input.isRaw
+    const settleResolve = (next: string) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      output.write("\n")
+      resolve(next)
+    }
+    const settleReject = (err: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      output.write("\n")
+      reject(err)
+    }
     const onData = (chunk: Buffer | string) => {
       const text = chunk.toString("utf8")
       for (const ch of text) {
         const code = ch.charCodeAt(0)
         if (ch === "\r" || ch === "\n") {
-          cleanup()
-          output.write("\n")
-          resolve(value)
+          settleResolve(value)
           return
         }
         if (code === 3) {
-          cleanup()
-          output.write("\n")
-          process.kill(process.pid, "SIGINT")
+          settleReject(new LoginAbortedError())
           return
         }
         if (code === 127 || code === 8) {
@@ -308,9 +330,17 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
       }
       const write = method.provider.buildCredential(key.trim())
       defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
-      writeCommandRows(renderApiKeyLoginSuccess(write.displayName), output)
+      const modelHint = suggestModelForProvider(method.providerId)
+      writeCommandRows(
+        renderApiKeyLoginSuccess(write.displayName, method.providerId, modelHint),
+        output,
+      )
       return 0
     } catch (err) {
+      if (isLoginAborted(err)) {
+        writeCommandRows(renderLoginFailure("aborted"), output)
+        return 130
+      }
       const msg = err instanceof Error ? err.message : String(err)
       writeCommandRows(renderLoginFailure(msg), output)
       return 1
@@ -318,6 +348,9 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
   }
 
   let outcome: LoginOutcome
+  const abortController = new AbortController()
+  const onSigint = () => abortController.abort()
+  process.once("SIGINT", onSigint)
   try {
     outcome = await runOAuthLogin({
       provider: method.provider,
@@ -337,11 +370,18 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
           input,
           output,
         ),
+      signal: abortController.signal,
     })
   } catch (err) {
+    if (isLoginAborted(err)) {
+      writeCommandRows(renderLoginFailure("aborted"), output)
+      return 130
+    }
     const msg = err instanceof Error ? err.message : String(err)
     writeCommandRows(renderLoginFailure(msg), output)
     return 1
+  } finally {
+    process.off("SIGINT", onSigint)
   }
 
   if (!outcome.ok) {

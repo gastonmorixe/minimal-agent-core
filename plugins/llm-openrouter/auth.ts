@@ -6,6 +6,7 @@
 
 import type {
   ApiKeyAuthProvider,
+  AuthCredentialInfo,
   AuthSecretBag,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
@@ -37,8 +38,17 @@ export function readOpenRouterApiKey(secrets: AuthSecretBag): string | null {
   return str(secrets.apiKey) ?? null
 }
 
+/** Inspect stored OpenRouter API-key metadata without exposing the secret. */
+export function inspectOpenRouterApiKeyCredential(secrets: AuthSecretBag): AuthCredentialInfo {
+  const apiKey = readOpenRouterApiKey(secrets)
+  return {
+    usable: Boolean(apiKey && apiKey.trim().length > 0),
+  }
+}
+
 export const openRouterApiKeyAuth: ApiKeyAuthProvider = {
   ...OPENROUTER_API_KEY_AUTH,
   buildCredential: buildOpenRouterApiKeyCredential,
   readApiKey: readOpenRouterApiKey,
+  inspectCredential: inspectOpenRouterApiKeyCredential,
 }

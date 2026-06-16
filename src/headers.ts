@@ -41,7 +41,7 @@ function wants1mContext(modelId: string | undefined): boolean {
   if (!modelId) return false
   if (/\[1m\]/i.test(modelId)) return true
   const entry = findModel(modelId)
-  if (entry) return entry.capabilities.contextWindow >= 1_000_000
+  if (entry) return (entry.capabilities?.contextWindow ?? 0) >= 1_000_000
   return (
     modelId.includes("opus-4-6") ||
     modelId.includes("opus-4-7") ||

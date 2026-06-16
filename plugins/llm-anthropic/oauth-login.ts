@@ -8,12 +8,16 @@
  * @module llm/providers/anthropic/oauth-login
  */
 
+import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
 import type {
+  AuthCredentialInfo,
   AuthSecretBag,
+  OAuthCredentialRefreshContext,
   OAuthLoginBuildResult,
   OAuthLoginConfig,
   OAuthLoginProvider,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
 
 /**
  * Manual-flow redirect URL. Matches the prod config in Claude Code:
@@ -84,6 +88,14 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined
 }
 
+function stringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.every((item) => typeof item === "string") ? v : undefined
+}
+
+function num(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined
+}
+
 function requiredString(obj: Record<string, unknown>, key: string): string {
   const value = str(obj[key])
   if (!value) throw new Error(`Anthropic OAuth token response missing ${key}`)
@@ -117,6 +129,12 @@ function parseTokenResponse(resp: Record<string, unknown>): AnthropicTokenExchan
     ...(account ? { account } : {}),
     ...(organization ? { organization } : {}),
   }
+}
+
+function network(ctx: OAuthCredentialRefreshContext): NetworkClient {
+  const client = ctx.networkClient as NetworkClient | undefined
+  if (!client) throw new Error("Anthropic OAuth refresh: missing network client")
+  return client
 }
 
 /** Encode Anthropic OAuth credentials into this provider's opaque secret bag. */
@@ -176,6 +194,77 @@ export function buildAnthropicOAuthCredential(raw: Record<string, unknown>): OAu
   }
 }
 
+/** Read Anthropic OAuth credentials. */
+export function readAnthropicOAuthAuth(secrets: AuthSecretBag): ProviderAuth | null {
+  const accessToken = str(secrets.accessToken)
+  if (!accessToken) return null
+  return { kind: "oauth", token: accessToken }
+}
+
+/** Inspect stored Anthropic OAuth metadata without exposing bearer tokens. */
+export function inspectAnthropicOAuthCredential(secrets: AuthSecretBag): AuthCredentialInfo {
+  return {
+    usable: Boolean(str(secrets.accessToken)),
+    expiresAt: num(secrets.expiresAt),
+    hasRefreshToken: Boolean(str(secrets.refreshToken)),
+    accountId: str(secrets.accountUuid),
+    organizationId: str(secrets.organizationUuid),
+    scopes: stringArray(secrets.scopes),
+  }
+}
+
+/** Refresh Anthropic OAuth credentials. */
+export async function refreshAnthropicOAuthCredential(
+  secrets: AuthSecretBag,
+  ctx: OAuthCredentialRefreshContext,
+): Promise<OAuthLoginBuildResult> {
+  const refreshToken = str(secrets.refreshToken)
+  if (!refreshToken) throw new Error("Anthropic OAuth credential has no refresh token")
+  const config = anthropicOAuthLoginConfig()
+  const response = await network(ctx).request({
+    label: "anthropic.oauth.refresh",
+    method: "POST",
+    url: config.tokenUrl,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: config.clientId,
+      scope: LOGIN_SCOPES.filter((scope) => scope !== "org:create_api_key").join(" "),
+    }),
+    capture: { requestBody: "[REDACTED OAUTH REFRESH BODY]", responseBody: false },
+  })
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Anthropic OAuth refresh failed (${response.status}): ${body}`)
+  }
+  const raw = await response.json<Record<string, unknown>>()
+  const refreshed = buildAnthropicOAuthCredential({
+    ...raw,
+    refresh_token: str(raw.refresh_token) ?? refreshToken,
+  })
+  const accountUuid = str(secrets.accountUuid)
+  const emailAddress = str(secrets.emailAddress)
+  const organizationUuid = str(secrets.organizationUuid)
+
+  if (accountUuid && str(refreshed.credential.secrets.accountUuid) === undefined) {
+    refreshed.credential.secrets.accountUuid = accountUuid
+  }
+  if (emailAddress && str(refreshed.credential.secrets.emailAddress) === undefined) {
+    refreshed.credential.secrets.emailAddress = emailAddress
+  }
+  if (organizationUuid && str(refreshed.credential.secrets.organizationUuid) === undefined) {
+    refreshed.credential.secrets.organizationUuid = organizationUuid
+  }
+  if (!refreshed.result.account && accountUuid && emailAddress) {
+    refreshed.result.account = { uuid: accountUuid, emailAddress }
+  }
+  if (!refreshed.result.organization && organizationUuid) {
+    refreshed.result.organization = { uuid: organizationUuid }
+  }
+  return refreshed
+}
+
 /** Resolve Anthropic OAuth login settings, including supported env overrides. */
 export function anthropicOAuthLoginConfig(): OAuthLoginConfig {
   const clientId = process.env.CLAUDE_CODE_OAUTH_CLIENT_ID?.trim() || DEFAULT_OAUTH_CLIENT_ID
@@ -195,4 +284,7 @@ export const anthropicOAuthLogin: OAuthLoginProvider = {
   displayName: ANTHROPIC_PLAN_OAUTH.name,
   config: anthropicOAuthLoginConfig,
   buildCredential: buildAnthropicOAuthCredential,
+  readAuth: readAnthropicOAuthAuth,
+  inspectCredential: inspectAnthropicOAuthCredential,
+  refreshCredential: refreshAnthropicOAuthCredential,
 }

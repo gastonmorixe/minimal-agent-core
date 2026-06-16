@@ -79,6 +79,55 @@ describe("extractPromptFromArgs", () => {
     })
   })
 
+  // ---- regression: --provider must consume its value ------------------
+
+  test("--provider value with --model value enters interactive REPL", () => {
+    expect(
+      extractPromptFromArgs(["--model", "vendor/flexible-model:free", "--provider", "gateway"]),
+    ).toEqual({ kind: "none" })
+  })
+
+  test("--provider=value with --model=value enters interactive REPL after normalization", () => {
+    expect(
+      extractPromptFromArgs(
+        normalizeArgs(["--model=vendor/flexible-model:free", "--provider=gateway"]),
+      ),
+    ).toEqual({ kind: "none" })
+  })
+
+  test("--provider/model flags plus bare positional still use the positional prompt", () => {
+    expect(
+      extractPromptFromArgs([
+        "--provider",
+        "gateway",
+        "--model",
+        "vendor/flexible-model:free",
+        "say hi",
+      ]),
+    ).toEqual({ kind: "literal", text: "say hi" })
+  })
+
+  test("--session-id value with --provider and --model enters interactive REPL", () => {
+    expect(
+      extractPromptFromArgs(
+        normalizeArgs([
+          "--session-id",
+          "sid-123",
+          "--model=vendor/flexible-model:free",
+          "--provider=gateway",
+        ]),
+      ),
+    ).toEqual({ kind: "none" })
+  })
+
+  test("normalized -F does not become a positional prompt", () => {
+    expect(
+      extractPromptFromArgs(normalizeArgs(["-F", "--model", "model-a", "--provider", "p"])),
+    ).toEqual({
+      kind: "none",
+    })
+  })
+
   // ---- precedence ------------------------------------------------------
 
   test("--prompt wins over --resume's value", () => {

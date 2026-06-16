@@ -20,6 +20,7 @@
 import type {
   CanonicalBlock,
   CanonicalMessage,
+  ToolResultBlock,
 } from "@minimal-agent/plugin-api/llm/canonical-messages"
 import type {
   CanonicalToolDefinition,
@@ -173,7 +174,33 @@ function buildChatMessages(req: CanonicalRequest): OpenAIChatMessage[] {
       .join("\n\n")
     if (text) out.push({ role: "system", content: text })
   }
-  for (const msg of req.messages) out.push(canonicalMessageToChat(msg))
+  for (const msg of req.messages) {
+    // Canonical form embeds tool results as tool_result blocks inside
+    // role:"user" messages. The OpenAI Chat API requires them as
+    // separate role:"tool" messages with matching tool_call_id.
+    const toolResultBlocks = msg.content.filter(
+      (b): b is ToolResultBlock => b.type === "tool_result",
+    )
+    if (toolResultBlocks.length > 0) {
+      for (const tr of toolResultBlocks) {
+        const text = tr.content
+          .map((c) => (c.type === "text" ? c.text : ""))
+          .filter(Boolean)
+          .join("\n")
+        out.push({ role: "tool", tool_call_id: tr.toolUseId, content: text })
+      }
+      // If the message also has non-tool-result content, emit it as a
+      // user message. The agent loop typically creates a dedicated user
+      // message for tool results, so non-result content is rare, but
+      // handle it for correctness.
+      const nonResultBlocks = msg.content.filter((b) => b.type !== "tool_result")
+      if (nonResultBlocks.length > 0) {
+        out.push(canonicalMessageToChat({ ...msg, content: nonResultBlocks }))
+      }
+    } else {
+      out.push(canonicalMessageToChat(msg))
+    }
+  }
   return out
 }
 

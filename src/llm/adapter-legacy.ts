@@ -826,6 +826,32 @@ export async function* canonicalEventsToLegacyStream(
     | null
   let cur: Cur = null
 
+  const MAX_BLOCK_BYTES = 5 * 1024 * 1024 // 5MB cap
+  const checkCap = (len: number, add: number) => {
+    if (len + add > MAX_BLOCK_BYTES) {
+      throw new Error(`stream_error: Block accumulated size exceeded ${MAX_BLOCK_BYTES} bytes cap`)
+    }
+  }
+
+  const flushCur = () => {
+    if (!cur) return
+    if (cur.kind === "text") {
+      blocks.push({ type: "text", text: cur.text })
+    } else if (cur.kind === "thinking") {
+      if (cur.signature) {
+        blocks.push({ type: "thinking", thinking: cur.thinking, signature: cur.signature })
+      }
+    } else if (cur.kind === "tool_use") {
+      blocks.push({
+        type: "tool_use",
+        id: cur.id,
+        name: cur.name,
+        input: safeParseToolInput(cur.json),
+      })
+    }
+    cur = null
+  }
+
   for await (const ev of events) {
     switch (ev.type) {
       case "message_start":
@@ -836,53 +862,59 @@ export async function* canonicalEventsToLegacyStream(
         turnUsage = canonicalUsageToWire(ev.initialUsage)
         break
       case "text_start":
+        flushCur()
         cur = { kind: "text", text: "" }
         break
       case "text_delta":
-        if (cur?.kind === "text") cur.text += ev.text
+        checkCap(fullText.length, ev.text.length)
+        if (cur?.kind === "text") {
+          checkCap(cur.text.length, ev.text.length)
+          cur.text += ev.text
+        }
         fullText += ev.text
         yield ev.text
         break
       case "text_stop": {
         const text = cur?.kind === "text" ? cur.text : (ev.finalText ?? "")
-        blocks.push({ type: "text", text })
-        cur = null
+        if (cur?.kind === "text") flushCur()
+        else blocks.push({ type: "text", text }) // empty text fallback
         await cb.onTextStop?.()
         break
       }
       case "thinking_start":
+        flushCur()
         cur = { kind: "thinking", thinking: "", signature: "" }
         await cb.onThinkingStart?.()
         break
       case "thinking_delta":
-        if (cur?.kind === "thinking") cur.thinking += ev.text
+        if (cur?.kind === "thinking") {
+          checkCap(cur.thinking.length, ev.text.length)
+          cur.thinking += ev.text
+        }
         await cb.onThinkingDelta?.(ev.text)
         break
       case "thinking_signature":
         if (cur?.kind === "thinking") cur.signature = ev.signature
         break
       case "thinking_stop":
-        if (cur?.kind === "thinking") {
-          blocks.push({ type: "thinking", thinking: cur.thinking, signature: cur.signature })
-        }
-        cur = null
+        if (cur?.kind === "thinking") flushCur()
         await cb.onThinkingStop?.()
         break
       case "tool_use_start":
+        flushCur()
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(ev.id) || !/^[a-zA-Z0-9_-]{1,64}$/.test(ev.name)) {
+          throw new Error(`stream_error: Invalid tool_use id or name`)
+        }
         cur = { kind: "tool_use", id: ev.id, name: ev.name, json: "" }
         break
       case "tool_use_input_delta":
-        if (cur?.kind === "tool_use") cur.json += ev.partialJson
+        if (cur?.kind === "tool_use") {
+          checkCap(cur.json.length, ev.partialJson.length)
+          cur.json += ev.partialJson
+        }
         break
       case "tool_use_stop": {
-        if (cur?.kind === "tool_use") {
-          const input =
-            ev.input !== undefined && ev.input !== null
-              ? (ev.input as Record<string, unknown>)
-              : safeParseToolInput(cur.json)
-          blocks.push({ type: "tool_use", id: cur.id, name: cur.name, input })
-        }
-        cur = null
+        if (cur?.kind === "tool_use") flushCur()
         break
       }
       case "refusal_delta":
@@ -918,26 +950,7 @@ export async function* canonicalEventsToLegacyStream(
   // thinking) block was silently dropped and the agent loop mistook a
   // budget-capped turn for a clean finish. Finalize it the same way the
   // stop events do so the partial tool call still reaches the loop.
-  if (cur) {
-    if (cur.kind === "text") {
-      blocks.push({ type: "text", text: cur.text })
-    } else if (cur.kind === "thinking") {
-      // Skip a thinking block truncated before its signature arrived: the API
-      // rejects an unsigned latest-turn thinking block on the continuation
-      // request. It's the trailing, unpaired block, so dropping is order-safe.
-      if (cur.signature) {
-        blocks.push({ type: "thinking", thinking: cur.thinking, signature: cur.signature })
-      }
-    } else if (cur.kind === "tool_use") {
-      blocks.push({
-        type: "tool_use",
-        id: cur.id,
-        name: cur.name,
-        input: safeParseToolInput(cur.json),
-      })
-    }
-    cur = null
-  }
+  if (cur) flushCur()
 
   return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage }
 }

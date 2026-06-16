@@ -25,7 +25,7 @@
  * @module binaries/store
  */
 
-import { createHash } from "node:crypto"
+// import { createHash } from "node:crypto"
 import {
   chmodSync,
   existsSync,
@@ -741,7 +741,7 @@ export function sourceLabel(source: BinarySource): string {
 
 /** sha256 hex of a file's bytes. */
 export function sha256File(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex")
+  return new Bun.CryptoHasher("sha256").update(readFileSync(path)).digest("hex")
 }
 
 /** Recursively find a file named `member` under `root`. Returns abs path or null. */

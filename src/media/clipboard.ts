@@ -13,8 +13,6 @@
  * @module media/clipboard
  */
 
-import { spawnSync } from "node:child_process"
-
 const MAX = 64 * 1024 * 1024
 
 /** A Bun.Image-like handle (structural, so this file doesn't hard-depend on Bun types). */
@@ -36,8 +34,8 @@ function bunImageStatics(): BunImageStatics | null {
 /** Run a helper command, returning its stdout bytes or `null` (missing/empty/failed). */
 function run(cmd: string, args: string[]): Uint8Array | null {
   try {
-    const r = spawnSync(cmd, args, { maxBuffer: MAX })
-    if (r.status === 0 && r.stdout && r.stdout.length > 0) return new Uint8Array(r.stdout)
+    const r = Bun.spawnSync([cmd, ...args], { maxBuffer: MAX })
+    if (r.exitCode === 0 && r.stdout && r.stdout.length > 0) return r.stdout
   } catch {
     // command missing / not executable
   }

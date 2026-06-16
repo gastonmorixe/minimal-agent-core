@@ -22,13 +22,13 @@ describe("classifyUpstreamError", () => {
     expect(r.retryable).toBe(true)
   })
 
-  it("maps Anthropic `rate_limit_error` code to rate_limit_error", () => {
+  it("maps `rate_limit_error` code to rate_limit_error", () => {
     expect(classifyUpstreamError({ upstreamCode: "rate_limit_error" }).streamErrorType).toBe(
       "rate_limit_error",
     )
   })
 
-  it("maps OpenAI `rate_limit_exceeded` to the retryable rate_limit_error", () => {
+  it("maps `rate_limit_exceeded` to the retryable rate_limit_error", () => {
     const r = classifyUpstreamError({ upstreamCode: "rate_limit_exceeded" })
     expect(r.streamErrorType).toBe("rate_limit_error")
     expect(r.category).toBe("rate_limit")
@@ -36,9 +36,9 @@ describe("classifyUpstreamError", () => {
   })
 
   it("treats `insufficient_quota` / billing exhaustion as TERMINAL (untagged, retryable:false)", () => {
-    // Regression for 2026-05-30 (session 50efb996): OpenAI returns
-    // `insufficient_quota` over a 200 SSE error frame when the account is out
-    // of credit. It repeats on every request and waiting never clears it, so
+    // Regression for 2026-05-30 (session 50efb996): one provider returned
+    // `insufficient_quota` over a 200 SSE error frame when the account was
+    // out of credit. It repeats on every request and waiting never clears it, so
     // it must NOT retry — neither on the fast nor the slow curve. A prior fix
     // lumped it into rate_limit_error and the agent spun for an hour.
     const quota = classifyUpstreamError({ upstreamCode: "insufficient_quota" })
@@ -75,16 +75,32 @@ describe("classifyUpstreamError", () => {
     expect(r.retryable).toBe(false)
   })
 
-  it("maps 400 / invalid_request to the slow-curve invalid_request_error", () => {
-    expect(classifyUpstreamError({ httpStatus: 400 }).streamErrorType).toBe("invalid_request_error")
-    expect(classifyUpstreamError({ upstreamCode: "invalid_request_error" }).streamErrorType).toBe(
-      "invalid_request_error",
-    )
+  it("treats 400 / invalid_request as terminal", () => {
+    const badStatus = classifyUpstreamError({ httpStatus: 400 })
+    expect(badStatus.streamErrorType).toBeUndefined()
+    expect(badStatus.category).toBe("api")
+    expect(badStatus.retryable).toBe(false)
+
+    const badCode = classifyUpstreamError({ upstreamCode: "invalid_request_error" })
+    expect(badCode.streamErrorType).toBeUndefined()
+    expect(badCode.category).toBe("api")
+    expect(badCode.retryable).toBe(false)
   })
 
-  it("maps 404 / 403 to their slow-curve tags", () => {
-    expect(classifyUpstreamError({ httpStatus: 404 }).streamErrorType).toBe("not_found_error")
-    expect(classifyUpstreamError({ httpStatus: 403 }).streamErrorType).toBe("permission_error")
+  it("treats 403 / 404 / not_found_error as terminal", () => {
+    const forbidden = classifyUpstreamError({ httpStatus: 403 })
+    expect(forbidden.streamErrorType).toBeUndefined()
+    expect(forbidden.category).toBe("api")
+    expect(forbidden.retryable).toBe(false)
+
+    const missing = classifyUpstreamError({ httpStatus: 404 })
+    expect(missing.streamErrorType).toBeUndefined()
+    expect(missing.category).toBe("api")
+    expect(missing.retryable).toBe(false)
+
+    const missingCode = classifyUpstreamError({ upstreamCode: "not_found_error" })
+    expect(missingCode.streamErrorType).toBeUndefined()
+    expect(missingCode.retryable).toBe(false)
   })
 
   it("leaves an unknown error untagged so it propagates (does not silently retry forever)", () => {

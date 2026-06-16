@@ -9,6 +9,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { isAbsolute, join, resolve } from "node:path"
 
+import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
+
 import type {
   LoadedPlugin,
   ManifestHandler,
@@ -314,7 +316,16 @@ export async function invokeSubprocess(
   })
 
   const completion = (async (): Promise<TUIResult> => {
-    const out = await new Response(proc.stdout).text()
+    const MAX_STDOUT_BYTES = 5 * 1024 * 1024 // 5MB cap
+    let out: string
+    try {
+      out = await consumeStreamBounded(proc.stdout, MAX_STDOUT_BYTES)
+    } catch (err: any) {
+      killTree("SIGKILL")
+      out = `Error: Subprocess output exceeded maximum length of ${MAX_STDOUT_BYTES} bytes. Details: ${err.message}`
+      if (isTool) return { kind: "tool_result", content: out, is_error: true }
+      return { kind: "rendered", ansi: out }
+    }
     const code = await proc.exited
     if (isTool) return { kind: "tool_result", content: out, is_error: code !== 0 }
     return { kind: "rendered", ansi: out }

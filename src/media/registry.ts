@@ -12,7 +12,6 @@
  */
 
 import { readFileSync } from "node:fs"
-import { readFile, stat } from "node:fs/promises"
 
 import { mediaId, sha256Hex } from "./id.ts"
 import { imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
@@ -79,11 +78,11 @@ export function createMediaRegistry(): MediaRegistry {
 
   return {
     async registerPath(path, origin = "drop") {
-      const bytes = new Uint8Array(await readFile(path))
+      const bytes = await Bun.file(path).bytes()
       const sha = sha256Hex(bytes)
       // Path items re-read lazily; we do NOT keep the buffer alive.
       const item = buildItem(bytes, origin, path, sha, undefined, async () => {
-        return new Uint8Array(await readFile(path))
+        return await Bun.file(path).bytes()
       })
       return intern(item)
     },
@@ -120,5 +119,7 @@ export function createMediaRegistry(): MediaRegistry {
 
 /** Stat a path's byte size without reading it (cheap pre-check before register). */
 export async function fileSize(path: string): Promise<number> {
-  return (await stat(path)).size
+  const file = Bun.file(path)
+  if (!(await file.exists())) throw new Error(`ENOENT: ${path}`)
+  return file.size
 }

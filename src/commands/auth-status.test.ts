@@ -1,12 +1,9 @@
 import { describe, expect, it } from "bun:test"
 
-import { renderAuthStatus, runAuthStatusCommand } from "./auth-status.ts"
+import { runAuthStatusCommand } from "./auth-status.ts"
 
 /**
- * Strip ANSI for stable string assertions. The renderer uses our `c.*`
- * helpers (sky / bold / dim / etc.) which all wrap text in `\x1b[…m`
- * escape sequences; tests don't care which color was used, only the
- * final visible content.
+ * Strip ANSI for stable string assertions.
  */
 function noAnsi(s: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI is the point
@@ -24,105 +21,86 @@ function captureOut(): { out: { write: (s: string) => void }; lines: string[]; t
   }
 }
 
-describe("renderAuthStatus", () => {
+describe("runAuthStatusCommand", () => {
   it("reports not-logged-in (and exit code 1) when keychain is empty", async () => {
     const cap = captureOut()
-    const code = await runAuthStatusCommand({ read: () => null, output: cap.out })
+    const code = await runAuthStatusCommand({
+      discover: () => [],
+      resolveAuth: () => null,
+      output: cap.out,
+    })
     expect(code).toBe(1)
     expect(cap.text()).toContain("not logged in")
   })
 
-  it("reports api-key auth when creds.apiKey is set", () => {
+  it("reports api-key auth when resolved auth returns api key", async () => {
     const cap = captureOut()
-    const ok = renderAuthStatus({
-      read: () => ({ apiKey: "sk-ant-…" }),
+    const code = await runAuthStatusCommand({
+      discover: () => [
+        {
+          providerId: "test-provider",
+          displayName: "Test Provider",
+          authKind: "api-key",
+          source: "store",
+        },
+      ],
+      resolveAuth: () => ({ kind: "api-key", key: "sk-ant-…" }),
       output: cap.out,
     })
-    expect(ok).toBe(true)
-    expect(cap.text()).toContain("type     api-key")
-    expect(cap.text()).toContain("logged in via API key")
+    expect(code).toBe(0)
+    expect(cap.text()).toContain("api-key")
   })
 
-  it("renders OAuth status with all common fields", () => {
+  it("renders OAuth status", async () => {
     const cap = captureOut()
-    const now = 1_700_000_000_000
-    const ok = renderAuthStatus({
-      read: () => ({
-        claudeAiOauth: {
-          accessToken: "AT",
-          refreshToken: "RT",
-          expiresAt: now + 8 * 3600_000, // 8h from now
-          scopes: ["user:profile", "user:inference"],
-          subscriptionType: "max",
-          rateLimitTier: "default_claude_max_20x",
+    const code = await runAuthStatusCommand({
+      discover: () => [
+        {
+          providerId: "test-provider",
+          displayName: "Test Provider",
+          authKind: "oauth",
+          source: "store",
         },
-        oauthAccount: {
-          accountUuid: "abcdef01-2345-6789-abcd-ef0123456789",
-          organizationUuid: "11111111-2222-3333-4444-555555555555",
-        },
+      ],
+      resolveAuth: () => ({
+        kind: "oauth",
+        token: "AT",
       }),
       output: cap.out,
-      now: () => now,
+      now: () => 1_700_000_000_000,
     })
-    expect(ok).toBe(true)
-    const t = cap.text()
-    expect(t).toContain("type     oauth")
-    expect(t).toContain("account  abcdef01-2345-6789-abcd-ef0123456789")
-    expect(t).toContain("org      11111111-2222-3333-4444-555555555555")
-    expect(t).toContain("plan     max")
-    expect(t).toContain("default_claude_max_20x")
-    expect(t).toContain("scopes   user:profile user:inference")
-    expect(t).toContain("refresh  present")
-    expect(t).toContain("logged in")
-    expect(t).toContain("in 8h") // formatRelative output
-    expect(t).not.toContain("expired")
+    expect(code).toBe(0)
+    expect(cap.text()).toContain("oauth")
   })
 
-  it("flags an expired token but still returns logged-in (refresh handles it)", () => {
+  it("passes provider credential diagnostics through to the renderer", async () => {
     const cap = captureOut()
-    const now = 1_700_000_000_000
-    const ok = renderAuthStatus({
-      read: () => ({
-        claudeAiOauth: {
-          accessToken: "AT",
-          refreshToken: "RT",
-          expiresAt: now - 60_000, // 1 min ago
-          scopes: [],
+    const code = await runAuthStatusCommand({
+      discover: () => [
+        {
+          providerId: "test-provider",
+          displayName: "Test Provider",
+          authKind: "oauth",
+          source: "store",
+          credentialInfo: {
+            usable: true,
+            expiresAt: 1_700_000_060_000,
+            hasRefreshToken: false,
+            accountId: "acct-1",
+          },
         },
+      ],
+      resolveAuth: () => ({
+        kind: "oauth",
+        token: "AT",
       }),
       output: cap.out,
-      now: () => now,
+      now: () => 1_700_000_000_000,
     })
-    expect(ok).toBe(true) // stale-but-present is still logged in
-    const t = cap.text()
-    expect(t).toContain("expired")
-    expect(t).toContain("token expired")
-  })
 
-  it("reports missing refresh token in yellow", () => {
-    const cap = captureOut()
-    const ok = renderAuthStatus({
-      read: () => ({
-        claudeAiOauth: {
-          accessToken: "AT",
-          // no refreshToken
-          expiresAt: Date.now() + 3600_000,
-          scopes: [],
-        },
-      }),
-      output: cap.out,
-    })
-    expect(ok).toBe(true)
+    expect(code).toBe(0)
+    expect(cap.text()).toContain("account  acct-1")
     expect(cap.text()).toContain("refresh  missing")
-  })
-
-  it("treats keychain-with-no-access-token as not logged in", () => {
-    const cap = captureOut()
-    const ok = renderAuthStatus({
-      read: () => ({ claudeAiOauth: { accessToken: "" } }),
-      output: cap.out,
-    })
-    expect(ok).toBe(false)
-    expect(cap.text()).toContain("has no access token")
+    expect(cap.text()).not.toContain("AT")
   })
 })

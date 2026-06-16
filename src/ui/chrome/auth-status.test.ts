@@ -6,92 +6,95 @@ import { formatRelative, renderAuthStatusRows } from "./auth-status.ts"
 
 describe("auth-status chrome", () => {
   it("renders not-logged-in rows", () => {
-    const text = renderAuthStatusRows({ credentials: null, now: 1 }).map(stripAnsi).join("\n")
+    const text = renderAuthStatusRows({ providers: [], now: 1 }).map(stripAnsi).join("\n")
     expect(text).toContain("Auth status")
     expect(text).toContain("not logged in")
-    expect(text).toContain("run `minimal-agent --login` to sign in.")
+    expect(text).toContain("run `minimal-agent provider <id> login`")
   })
 
   it("renders api-key auth", () => {
     const text = renderAuthStatusRows({
-      credentials: { apiKey: "sk-ant-..." },
+      providers: [
+        {
+          providerId: "test-provider",
+          displayName: "Test Provider",
+          authKind: "api-key",
+          source: "store",
+          auth: { kind: "api-key", key: "sk-ant-..." },
+        },
+      ],
       now: 1,
     })
       .map(stripAnsi)
       .join("\n")
-    expect(text).toContain("type     api-key")
-    expect(text).toContain("logged in via API key")
+    expect(text).toContain("api-key")
+    expect(text).toContain("✔")
   })
 
-  it("renders OAuth status with all common fields", () => {
-    const now = 1_700_000_000_000
+  it("renders OAuth status", () => {
     const text = renderAuthStatusRows({
-      credentials: {
-        claudeAiOauth: {
-          accessToken: "AT",
-          refreshToken: "RT",
-          expiresAt: now + 8 * 3600_000,
-          scopes: ["user:profile", "user:inference"],
-          subscriptionType: "max",
-          rateLimitTier: "default_claude_max_20x",
+      providers: [
+        {
+          providerId: "test-provider",
+          displayName: "Test Provider",
+          authKind: "oauth",
+          source: "store",
+          auth: {
+            kind: "oauth",
+            token: "AT",
+          },
         },
-        oauthAccount: {
-          accountUuid: "abcdef01-2345-6789-abcd-ef0123456789",
-          organizationUuid: "11111111-2222-3333-4444-555555555555",
-        },
-      },
-      now,
+      ],
+      now: 1,
     })
       .map(stripAnsi)
       .join("\n")
 
-    expect(text).toContain("type     oauth")
-    expect(text).toContain("account  abcdef01-2345-6789-abcd-ef0123456789")
-    expect(text).toContain("org      11111111-2222-3333-4444-555555555555")
-    expect(text).toContain("plan     max")
-    expect(text).toContain("default_claude_max_20x")
-    expect(text).toContain("scopes   user:profile user:inference")
+    expect(text).toContain("oauth")
+    expect(text).toContain("✔")
+  })
+
+  it("renders safe credential metadata and unreadable credentials", () => {
+    const text = renderAuthStatusRows({
+      providers: [
+        {
+          providerId: "test-provider",
+          displayName: "Test Provider",
+          authKind: "oauth",
+          source: "store",
+          credentialInfo: {
+            usable: true,
+            expiresAt: 1_700_000_060_000,
+            hasRefreshToken: true,
+            accountId: "acct-1",
+            organizationId: "org-1",
+            scopes: ["scope:a", "scope:b"],
+          },
+          auth: {
+            kind: "oauth",
+            token: "AT",
+          },
+        },
+        {
+          providerId: "broken-provider",
+          displayName: "Broken Provider",
+          authKind: "api-key",
+          source: "store",
+          credentialInfo: { usable: false },
+          auth: null,
+        },
+      ],
+      now: 1_700_000_000_000,
+    })
+      .map(stripAnsi)
+      .join("\n")
+
+    expect(text).toContain("account  acct-1")
+    expect(text).toContain("org      org-1")
+    expect(text).toContain("scopes   scope:a scope:b")
     expect(text).toContain("refresh  present")
-    expect(text).toContain("logged in")
-    expect(text).toContain("in 8h")
-    expect(text).not.toContain("expired")
-  })
-
-  it("flags expired OAuth tokens", () => {
-    const now = 1_700_000_000_000
-    const text = renderAuthStatusRows({
-      credentials: {
-        claudeAiOauth: {
-          accessToken: "AT",
-          refreshToken: "RT",
-          expiresAt: now - 60_000,
-          scopes: [],
-        },
-      },
-      now,
-    })
-      .map(stripAnsi)
-      .join("\n")
-    expect(text).toContain("expired")
-    expect(text).toContain("token expired")
-  })
-
-  it("renders missing refresh token and malformed credential rows", () => {
-    const missingRefresh = renderAuthStatusRows({
-      credentials: { claudeAiOauth: { accessToken: "AT", expiresAt: Date.now() + 3600_000 } },
-      now: Date.now(),
-    })
-      .map(stripAnsi)
-      .join("\n")
-    expect(missingRefresh).toContain("refresh  missing")
-
-    const malformed = renderAuthStatusRows({
-      credentials: { claudeAiOauth: { accessToken: "" } },
-      now: Date.now(),
-    })
-      .map(stripAnsi)
-      .join("\n")
-    expect(malformed).toContain("has no access token")
+    expect(text).toContain("credential unreadable")
+    expect(text).not.toContain("AT")
   })
 
   it("formats relative durations compactly", () => {

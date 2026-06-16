@@ -17,7 +17,11 @@ import { makeCharRatioEstimator } from "@minimal-agent/plugin-api/llm/token-esti
 import { registerModel } from "../../src/llm/model-registry.ts"
 
 import { CAPS_OPENROUTER_CHAT } from "./capabilities.ts"
-import { PRICING_OR_CLAUDE_35_SONNET, PRICING_OR_GPT_4O_MINI } from "./pricing.ts"
+import {
+  PRICING_OR_CLAUDE_35_SONNET,
+  PRICING_OR_GENERIC,
+  PRICING_OR_GPT_4O_MINI,
+} from "./pricing.ts"
 
 /**
  * Token estimator for OpenRouter. OpenRouter proxies many upstream models
@@ -29,27 +33,52 @@ const estimateOpenRouterTokens = makeCharRatioEstimator(3.8)
 
 /** Populate the registry with a representative OpenRouter catalog. */
 export function registerOpenRouterModels(): string[] {
-  registerModel({
+  registerOpenRouterModel({
     id: "openai/gpt-4o-mini",
-    providerId: "openrouter",
-    surfaceId: "openai-chat-completions",
     displayName: "GPT-4o mini (OpenRouter)",
     tags: ["openrouter", "openai-compatible", "cheap"],
-    capabilities: CAPS_OPENROUTER_CHAT,
-    estimateTokens: estimateOpenRouterTokens,
     pricing: PRICING_OR_GPT_4O_MINI,
-    vendorIds: { firstParty: "openai/gpt-4o-mini" },
   })
-  registerModel({
+  registerOpenRouterModel({
     id: "anthropic/claude-3.5-sonnet",
-    providerId: "openrouter",
-    surfaceId: "openai-chat-completions",
     displayName: "Claude 3.5 Sonnet (OpenRouter)",
     tags: ["openrouter", "openai-compatible"],
-    capabilities: CAPS_OPENROUTER_CHAT,
-    estimateTokens: estimateOpenRouterTokens,
     pricing: PRICING_OR_CLAUDE_35_SONNET,
-    vendorIds: { firstParty: "anthropic/claude-3.5-sonnet" },
   })
   return ["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"]
+}
+
+export interface OpenRouterModelSpec {
+  id: string
+  displayName?: string
+  tags?: string[]
+  pricing?: OpenRouterPricing
+}
+
+interface OpenRouterPricing {
+  inputUSD: number
+  outputUSD: number
+  cacheWriteUSD: number
+  cacheReadUSD: number
+  webSearchPerCallUSD: number
+  reasoningUSD?: number
+}
+
+/**
+ * Register a single OpenRouter slug. Used for the built-in catalog and for
+ * ad-hoc upstream slugs that the static snapshot does not know yet.
+ */
+export function registerOpenRouterModel(spec: OpenRouterModelSpec): string {
+  registerModel({
+    id: spec.id,
+    providerId: "openrouter",
+    surfaceId: "openai-chat-completions",
+    displayName: spec.displayName ?? spec.id,
+    tags: spec.tags ?? ["openrouter", "openai-compatible"],
+    capabilities: CAPS_OPENROUTER_CHAT,
+    estimateTokens: estimateOpenRouterTokens,
+    pricing: spec.pricing ?? PRICING_OR_GENERIC,
+    vendorIds: { firstParty: spec.id },
+  })
+  return spec.id
 }

@@ -1,37 +1,19 @@
 /**
- * OAuth login: PKCE authorization-code flow, manual-paste variant.
- *
- * Mirrors the official `claude` CLI's OAuth flow (see
- * `cc-03312026-2.1.88/src/services/oauth/{client,index,crypto}.ts` and the
- * pretty-bundle dump at L136230 / L469290) but trimmed to the **manual paste**
- * path only:
+ * OAuth login: provider-owned PKCE authorization-code flows.
  *
  *   1. Generate PKCE `code_verifier` (32-byte random, base64url-encoded).
  *   2. Compute `code_challenge = base64url(sha256(code_verifier))`.
  *   3. Generate `state` (32-byte random, base64url-encoded).
- *   4. Build the authorize URL with `redirect_uri = MANUAL_REDIRECT_URL`
- *      (`https://platform.claude.com/oauth/code/callback`) so the auth server
- *      shows a paste-back page instead of bouncing to a localhost listener.
+ *   4. Build the authorize URL with the provider's manual redirect URI.
  *   5. Open the user's browser at that URL (best-effort).
  *   6. User signs in, copies the displayed code in `<authorizationCode>#<state>`
  *      format from the success page, and pastes it back at our prompt.
  *   7. POST to the token endpoint with `grant_type=authorization_code`,
  *      `code`, `redirect_uri`, `client_id`, `code_verifier`, `state`.
- *   8. Persist the resulting tokens — access/refresh/expiry/scopes plus the
- *      account+org uuids and email from the exchange response — into
- *      minimal-agent's OWN credential store (`~/.minimal-agent/auth.jsonc`,
- *      see `../auth-store.ts`). We do NOT write the macOS Keychain or
- *      `~/.claude.json`; minimal-agent is fully independent of the official
- *      `claude` CLI's storage.
- *
- * Why manual-paste only:
- *   - No localhost HTTP listener → works inside SSH, headless containers,
- *     port-restricted networks; nothing to clean up if the user Ctrl-Cs.
- *   - One code path is simpler to reason about and test.
- *   - The browser still opens automatically; the only thing the user does
- *     differently from the official CLI is paste a string instead of having
- *     the localhost callback close the loop. The trade-off is small — one
- *     copy/paste — and the simplicity gain is real.
+ *   8. Persist the provider-built credential into minimal-agent's own
+ *      credential store (`~/.minimal-agent/auth.jsonc`, see
+ *      `../auth-store.ts`). Providers own the credential shape; host core
+ *      only stores the opaque bag and later asks the provider to decode it.
  *
  * This module is deliberately pure-ish: I/O is taken via injectable deps
  * (`LoginDeps`) so unit tests can drive every branch deterministically.
@@ -39,7 +21,7 @@
  * @module oauth-login
  */
 
-import { createHash, randomBytes } from "node:crypto"
+import { randomBytes } from "node:crypto"
 
 import { type AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import {
@@ -49,14 +31,44 @@ import {
 } from "./llm/provider-plugin.ts"
 import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
+/** Error raised when the user cancels login. */
+export class LoginAbortedError extends Error {
+  constructor(message = "login aborted") {
+    super(message)
+    this.name = "LoginAbortedError"
+  }
+}
+
+/** True when an error represents user-initiated login cancellation. */
+export function isLoginAborted(err: unknown): boolean {
+  return err instanceof LoginAbortedError || (err instanceof Error && err.name === "AbortError")
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new LoginAbortedError()
+}
+
+async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  throwIfAborted(signal)
+  if (!signal) return promise
+  let cleanup = () => {}
+  const abort = new Promise<never>((_resolve, reject) => {
+    const onAbort = () => reject(new LoginAbortedError())
+    cleanup = () => signal.removeEventListener("abort", onAbort)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([promise, abort])
+  } finally {
+    cleanup()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // PKCE / state helpers
 // ---------------------------------------------------------------------------
 
-/**
- * RFC 4648 §5 base64url encoding (no padding). Matches the implementation
- * at `cc-03312026-2.1.88/src/services/oauth/crypto.ts:3-9`.
- */
+/** RFC 4648 §5 base64url encoding (no padding). */
 export function base64UrlEncode(buf: Uint8Array | Buffer): string {
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf)
   return b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
@@ -67,20 +79,14 @@ export function base64UrlEncode(buf: Uint8Array | Buffer): string {
  */
 export type RandomBytesFn = (len: number) => Buffer
 
-/**
- * 32-byte random PKCE `code_verifier`, base64url-encoded.
- * Matches `generateCodeVerifier()` upstream.
- */
+/** 32-byte random PKCE `code_verifier`, base64url-encoded. */
 export function generateCodeVerifier(rand: RandomBytesFn = randomBytes): string {
   return base64UrlEncode(rand(32))
 }
 
-/**
- * `code_challenge = base64url(sha256(code_verifier))`. Matches
- * `generateCodeChallenge()` upstream.
- */
+/** `code_challenge = base64url(sha256(code_verifier))`. */
 export function generateCodeChallenge(verifier: string): string {
-  const digest = createHash("sha256").update(verifier).digest()
+  const digest = new Bun.CryptoHasher("sha256").update(verifier).digest()
   return base64UrlEncode(digest)
 }
 
@@ -112,12 +118,8 @@ export interface BuildAuthUrlInput {
 /**
  * Build the OAuth authorize URL the user opens in their browser.
  *
- * Replicates `buildAuthUrl()` in `services/oauth/client.ts:46-105`, with a
- * few simplifications: we always use the manual redirect URL (no port arg)
- * and never set `loginMethod` / `orgUUID` (no enterprise SSO routing yet).
- *
- * The `code=true` query param is what the upstream comments call out as
- * "tells the login page to show Claude Max upsell" — kept for parity.
+ * Providers supply endpoint URLs, scopes, and extra query parameters. The host
+ * supplies only the generic PKCE parameters and optional login hint.
  */
 export function buildAuthUrl(input: BuildAuthUrlInput): string {
   const url = new URL(input.authorizeUrl)
@@ -148,16 +150,13 @@ export type ParsedPaste =
 /**
  * Parse the user-pasted callback payload.
  *
- * The success page on `MANUAL_REDIRECT_URL` shows
- * `<authorizationCode>#<state>` (matches upstream `ConsoleOAuthFlow.tsx:158`
- * comment: "Expecting format `authorizationCode#state` from the
- * authorization callback URL"). Whitespace around the paste is forgiven —
- * users hitting Enter after a paste invariably include a trailing newline.
+ * Manual success pages commonly show `<authorizationCode>#<state>`.
+ * Whitespace around the paste is forgiven because users hitting Enter after a
+ * paste invariably include a trailing newline.
  *
  * Some paste paths include the full callback URL by accident
- * (`https://platform.claude.com/oauth/code/callback?code=…&state=…`); we
- * accept that too by extracting the query params. A bare `?code=X&state=Y`
- * also works.
+ * (`https://provider.example/callback?code=...&state=...`); we accept that
+ * too by extracting the query params. A bare `?code=X&state=Y` also works.
  */
 export function parsePastedCode(raw: string): ParsedPaste {
   const trimmed = raw.trim()
@@ -232,13 +231,11 @@ export type LoginInstallResult = OAuthLoginInstallResult
 /**
  * Exchange the pasted authorization code for tokens.
  *
- * Mirrors `exchangeCodeForTokens()` upstream. Returns the raw server response
- * shape; persistence is the caller's job (see `installCredentials`).
+ * Returns the raw server response shape; persistence is the caller's job (see
+ * `installCredentials`).
  *
  * @throws `Error` with a structured message on non-200. The 401 path uses
- *   the same wording the official CLI does ("Authentication failed: Invalid
- *   authorization code") so users who see it cross-referenced with web docs
- *   recognize it.
+ *   a stable message for invalid authorization codes.
  */
 export async function exchangeCodeForTokens(
   input: TokenExchangeInput,
@@ -292,21 +289,9 @@ export interface InstallCredentialsDeps {
 
 /**
  * Persist a successful token-exchange result into minimal-agent's own
- * credential store (`../auth-store.ts`). Captures everything we need to
- * run independently of the official `claude` CLI — tokens, expiry, scopes,
- * and the account/org uuids + email from the exchange response — so there is
- * no dependency on the macOS Keychain or `~/.claude.json`.
- *
- * The assembled in-memory shape is:
- *
- * ```json
- * {
- *   "claudeAiOauth": { "accessToken": "...", "refreshToken": "...", "expiresAt": ..., "scopes": [...] },
- *   "oauthAccount":  { "accountUuid": "...", "organizationUuid": "...", "emailAddress": "..." }
- * }
- * ```
- *
- * which `writeCredentials` packs into the store's opaque secret bag.
+ * credential store (`../auth-store.ts`). The provider builds the opaque
+ * credential bag; the host writes it without inspecting provider-specific
+ * fields.
  */
 export function installCredentials(
   resp: TokenExchangeResponse,
@@ -314,6 +299,19 @@ export function installCredentials(
   provider: OAuthLoginProvider = resolveDefaultOAuthLoginProvider(),
 ): LoginInstallResult {
   const built = provider.buildCredential(resp)
+  const store = deps.store ?? defaultAuthStore()
+  store.set(
+    built.credential.serviceId,
+    built.credential.displayName,
+    built.credential.secrets as SecretBag,
+  )
+  return built.result
+}
+
+function installBuiltCredential(
+  built: ReturnType<OAuthLoginProvider["buildCredential"]>,
+  deps: InstallCredentialsDeps = {},
+): LoginInstallResult {
   const store = deps.store ?? defaultAuthStore()
   store.set(
     built.credential.serviceId,
@@ -360,6 +358,8 @@ export interface LoginDeps {
   install?: InstallCredentialsDeps
   /** Maximum number of paste attempts before giving up. Default 3. */
   maxAttempts?: number
+  /** Abort the login flow, including provider-owned device-code polling. */
+  signal?: AbortSignal
 }
 
 export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: false; reason: string }
@@ -386,6 +386,7 @@ export function resolveDefaultOAuthLoginProvider(): OAuthLoginProvider {
  */
 export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   const provider = deps.provider ?? resolveDefaultOAuthLoginProvider()
+  throwIfAborted(deps.signal)
   const config = provider.config()
   const clientId = deps.clientId ?? config.clientId
   const tokenUrl = deps.tokenUrl ?? config.tokenUrl
@@ -394,6 +395,24 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   const network = deps.networkClient ?? defaultNetworkClient
   const display = deps.display ?? (() => {})
   const maxAttempts = deps.maxAttempts ?? 3
+
+  if (provider.deviceCode) {
+    const ctx = { networkClient: network, signal: deps.signal }
+    const challenge = await abortable(provider.deviceCode.request(ctx), deps.signal)
+    display(
+      `Open this page to sign in:\n  ${challenge.verificationUrl}\nEnter this one-time code:\n  ${challenge.userCode}\nNever share this code with anyone.`,
+    )
+    if (deps.openUrl) {
+      try {
+        await deps.openUrl(challenge.verificationUrl)
+      } catch {
+        // Best-effort; the displayed URL and code are enough.
+      }
+    }
+    display(`Waiting for sign-in to finish…`)
+    const built = await abortable(provider.deviceCode.complete(challenge, ctx), deps.signal)
+    return { ok: true, result: installBuiltCredential(built, deps.install) }
+  }
 
   const codeVerifier = generateCodeVerifier(deps.randomBytes)
   const codeChallenge = generateCodeChallenge(codeVerifier)
@@ -427,7 +446,9 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   // user retry is friendlier than aborting on the first miss.
   let lastReason = "no paste received"
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    throwIfAborted(deps.signal)
     const raw = await deps.readPaste()
+    throwIfAborted(deps.signal)
     const parsed = parsePastedCode(raw)
     if (!parsed.ok) {
       lastReason = parsed.reason === "empty" ? "no code pasted" : "could not parse pasted code"

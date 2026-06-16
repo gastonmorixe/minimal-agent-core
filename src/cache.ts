@@ -150,7 +150,7 @@ interface ObservedTurn {
  * common floor (1024) so the detector still educates rather than spams.
  */
 const MIN_TOKENS_FOR_CACHE = (model: string): number =>
-  findModel(model)?.capabilities.caching.minPrefixTokens ?? 1024
+  findModel(model)?.capabilities?.caching?.minPrefixTokens ?? 1024
 const MIN_CHARS_FOR_CACHE = (model: string): number => MIN_TOKENS_FOR_CACHE(model) * 4
 
 /**

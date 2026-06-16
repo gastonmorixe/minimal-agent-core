@@ -41,6 +41,7 @@ const SHORT_TO_LONG: Record<string, string> = {
   "-e": "--effort",
   "-s": "--spinner",
   "-r": "--resume",
+  "-F": "--fast",
   "-d": "--debug",
   "-v": "--verbose",
   "-h": "--help",

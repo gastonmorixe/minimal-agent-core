@@ -10,7 +10,6 @@
  *   - runOAuthLogin orchestrator: success, retries, state mismatch, exhaustion
  */
 
-import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -196,7 +195,7 @@ describe("generateCodeVerifier / generateCodeChallenge", () => {
 
   it("produces challenge = base64url(sha256(verifier)) — verified manually", () => {
     const v = "abc123"
-    const expected = base64UrlEncode(createHash("sha256").update(v).digest())
+    const expected = base64UrlEncode(new Bun.CryptoHasher("sha256").update(v).digest())
     expect(generateCodeChallenge(v)).toBe(expected)
   })
 
@@ -783,5 +782,48 @@ describe("runOAuthLogin", () => {
       install: { store: tempStore("ma-oauth-run-") },
     })
     expect(outcome.ok).toBe(true)
+  })
+
+  it("aborts provider-owned device-code completion", async () => {
+    const ac = new AbortController()
+    let completeSawSignal = false
+    const deviceProvider: OAuthLoginProvider = {
+      ...fakeOAuthProvider,
+      deviceCode: {
+        request: async (ctx) => {
+          expect(ctx.signal).toBe(ac.signal)
+          return {
+            verificationUrl: "https://login.example.test/device",
+            userCode: "ABCD-EFGH",
+            pollIntervalMs: 50,
+          }
+        },
+        complete: (_challenge, ctx) =>
+          new Promise((_resolve, reject) => {
+            completeSawSignal = ctx.signal === ac.signal
+            ctx.signal?.addEventListener(
+              "abort",
+              () => {
+                const err = new Error("aborted")
+                err.name = "AbortError"
+                reject(err)
+              },
+              { once: true },
+            )
+          }),
+      },
+    }
+
+    const promise = runOAuthLogin({
+      provider: deviceProvider,
+      readPaste: async () => "",
+      signal: ac.signal,
+      install: { store: tempStore("ma-oauth-device-") },
+    })
+    await Promise.resolve()
+    ac.abort()
+
+    await expect(promise).rejects.toThrow("login aborted")
+    expect(completeSawSignal).toBe(true)
   })
 })

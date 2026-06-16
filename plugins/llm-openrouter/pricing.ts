@@ -12,6 +12,15 @@
 
 import type { MTokRate } from "../../src/llm/pricing.ts"
 
+/** Neutral placeholder for OpenRouter slugs without local pricing. */
+export const PRICING_OR_GENERIC: MTokRate = {
+  inputUSD: 0,
+  outputUSD: 0,
+  cacheWriteUSD: 0,
+  cacheReadUSD: 0,
+  webSearchPerCallUSD: 0,
+}
+
 /** openai/gpt-4o-mini via OpenRouter. */
 export const PRICING_OR_GPT_4O_MINI: MTokRate = {
   inputUSD: 0.15,

@@ -13,6 +13,7 @@
  */
 
 import { getAuth } from "../auth.ts"
+import { discoverCredentialedProviders } from "../auth-strategies.ts"
 import { runLoginCommand } from "../commands/login.ts"
 import {
   renderStartupAuthPromptAborted,
@@ -63,7 +64,13 @@ export async function getAuthWithFirstTimePrompt(
   const auth = deps.getAuth ?? getAuth
   const input = deps.input ?? process.stdin
   const output = deps.output ?? process.stderr
-  const runLogin = deps.runLogin ?? (() => runLoginCommand())
+  const runLogin =
+    deps.runLogin ??
+    (() => {
+      const credentialed = discoverCredentialedProviders()
+      const providerId = credentialed.length === 1 ? credentialed[0]!.providerId : undefined
+      return runLoginCommand({ providerId })
+    })
   try {
     return await auth()
   } catch (err) {

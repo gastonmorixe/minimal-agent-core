@@ -18,7 +18,7 @@
  * will mistake the flag's value for the user's prompt and the agent will
  * silently enter non-interactive mode. Tests in
  * `src/extract-prompt.test.ts` pin this for the regression-prone flags
- * (`--resume`, `--model`, etc).
+ * (`--resume`, `--model`, `--provider`, etc).
  *
  * @module extract-prompt
  */
@@ -34,6 +34,8 @@
  */
 export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--model",
+  "--provider",
+  "--session-id",
   "--prompt",
   "--resume",
   "--formatter",
@@ -46,6 +48,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   // pre-fills the login form. Both forms accept the same value semantics.
   "--email",
   "--email-hint",
+  "--auth-method",
 ])
 
 /**

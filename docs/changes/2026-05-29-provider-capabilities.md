@@ -119,9 +119,9 @@ the manager reviewed reports + diffs, ran the full gate, and committed.
   provider-session path (Anthropic populates it; render shares one
   `overageTailText` with the legacy path, pinned byte-identical). Reverses the
   earlier deferral note.
-- **API keys via config** (`UserConfig.apiKeys`): `OPENAI_API_KEY` /
-  `OPENROUTER_KEY` now have a `config.jsonc` fallback. Precedence env > config >
-  throw; the throw names both surfaces; Anthropic OAuth unchanged.
+- **Provider API keys**: superseded by the provider auth store. API keys are
+  written through `minimal-agent provider <id> login`; generic provider env vars
+  and `config.jsonc` are not runtime credential sources.
 - **OpenAI session metadata** (`plugins/llm-openai/session-info.ts`): the second
   provider now implements `fetchSessionInfo`. The adapter caches `x-ratelimit-*`
   on each 2xx response (plugin-local cache; non-throwing; no stream change) and

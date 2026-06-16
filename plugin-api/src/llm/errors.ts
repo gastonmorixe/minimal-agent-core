@@ -180,9 +180,10 @@ export type StreamErrorCategory =
  *   - `rate_limit_error` — 429 / `rate_limit_*` / `*_quota_*` (slow curve).
  *   - `overloaded_error` — 5xx / `overloaded` / `server_error` (fast curve).
  *   - `api_error`        — 408 / `timeout` (fast curve).
- *   - `invalid_request_error` — 400 / `invalid_request_*` (slow curve).
- *   - `not_found_error`  — 404 (slow curve).
- *   - `permission_error` — 403 (slow curve).
+ *   - `rate_limit_error` — 429 / `rate_limit_*` / `*_quota_*` (slow curve).
+ * 400/403/404 are intentionally NOT retryable: malformed requests, missing
+ * permissions, and missing endpoint/resource/model errors are deterministic
+ * until the caller changes configuration or provider routing.
  * 401 is intentionally NOT mapped: the auth-refresh layer owns it, and a
  * retry tag would mask a real auth failure.
  */
@@ -240,20 +241,14 @@ export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode
     return { streamErrorType: undefined, category: "auth", retryable: false }
   }
 
-  // Slow-curve hard errors: retried (a human may fix the config) but on the
-  // patient curve so a code-level bug doesn't blast the API.
   if (status === 400 || code === "invalid_request_error" || code?.startsWith("invalid_request")) {
-    return {
-      streamErrorType: "invalid_request_error",
-      category: "api",
-      retryable: true,
-    }
+    return { streamErrorType: undefined, category: "api", retryable: false }
   }
   if (status === 404 || code === "not_found_error") {
-    return { streamErrorType: "not_found_error", category: "api", retryable: true }
+    return { streamErrorType: undefined, category: "api", retryable: false }
   }
   if (status === 403 || code === "permission_error") {
-    return { streamErrorType: "permission_error", category: "api", retryable: true }
+    return { streamErrorType: undefined, category: "api", retryable: false }
   }
 
   return { streamErrorType: undefined, category: "unknown", retryable: false }

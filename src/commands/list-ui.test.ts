@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../auth-store.ts"
 import { BETA_FLAGS_DETAILED } from "../headers.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
@@ -23,6 +24,7 @@ describe("list UI commands", () => {
     clearModelRegistry()
     clearProviderRegistry()
     clearProviderPlugins()
+    resetDefaultAuthStoreForTests()
   })
 
   it("renders spinner presets through injected output", () => {
@@ -43,7 +45,7 @@ describe("list UI commands", () => {
     registerTestProvider({
       id: "test-provider",
       displayName: "Test Provider",
-      models: [{ id: "test-model" }],
+      models: [{ id: "list-ui-model" }],
     })
 
     const out = capture(runListProvidersCommand)
@@ -65,13 +67,24 @@ describe("list UI commands", () => {
       displayName: "Live",
       shortCode: "li",
       register() {},
+      apiKeyAuth: {
+        serviceId: "live",
+        displayName: "Live",
+        buildCredential: (key) => ({
+          serviceId: "live",
+          displayName: "Live",
+          secrets: { apiKey: key },
+        }),
+        readApiKey: (secrets) => (typeof secrets.apiKey === "string" ? secrets.apiKey : null),
+      },
       async listLiveModels() {
         return [{ id: "live-model", displayName: "Live Model", createdAt: "2026-01-01" }]
       },
     })
+    defaultAuthStore().set("live", "Live", { apiKey: "dummy" })
 
     let out = ""
-    await runListModelsCommand({ type: "api-key", token: "test" }, undefined, {
+    await runListModelsCommand(undefined, {
       output: { write: (s) => (out += s) },
     })
 
@@ -82,5 +95,6 @@ describe("list UI commands", () => {
     expect(stripped).toContain("custom")
     expect(stripped).toContain("2026-01-01")
     expect(stripped).toContain("1 models available")
+    delete process.env.TEST_LIVE_KEY
   })
 })

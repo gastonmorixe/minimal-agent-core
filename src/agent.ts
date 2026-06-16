@@ -509,7 +509,7 @@ export class Agent {
    */
   private resolveMaxOutputTokens(): number | undefined {
     const entry = findModel(normalizeModelForAPI(this.model))
-    return entry?.capabilities.maxOutputTokens
+    return entry?.capabilities?.maxOutputTokens
   }
 
   /**

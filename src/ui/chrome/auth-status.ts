@@ -7,99 +7,95 @@
  * @module ui/chrome/auth-status
  */
 
+import type { ProviderAuth } from "../../llm/provider.ts"
+import type { AuthCredentialInfo } from "../../llm/provider-plugin.ts"
 import { c } from "../style/ansi.ts"
 
-export interface AuthStatusCredentialsView {
-  readonly apiKey?: string
-  readonly claudeAiOauth?: {
-    readonly accessToken?: string
-    readonly refreshToken?: string
-    readonly expiresAt?: number
-    readonly scopes?: readonly string[]
-    readonly subscriptionType?: string
-    readonly rateLimitTier?: string
-  }
-  readonly oauthAccount?: {
-    readonly accountUuid?: string
-    readonly organizationUuid?: string
-  }
+export interface AuthStatusProviderView {
+  readonly providerId: string
+  readonly displayName: string
+  readonly authKind: "oauth" | "api-key"
+  readonly source: "store"
+  readonly credentialLabel?: string
+  readonly credentialInfo?: AuthCredentialInfo
+  readonly auth: ProviderAuth | null
 }
 
 export interface AuthStatusRenderInput {
-  readonly credentials: AuthStatusCredentialsView | null
+  readonly providers: readonly AuthStatusProviderView[]
   readonly now: number
 }
 
 /** Render the `minimal-agent --auth-status` rows. */
 export function renderAuthStatusRows(input: AuthStatusRenderInput): string[] {
-  const creds = input.credentials
   const rows = [`  ${c.bold(c.pink("ⓘ"))} ${c.bold("Auth status")}`]
 
-  if (!creds) {
+  if (input.providers.length === 0) {
     rows.push(`  ${c.faintWhite("╰")} ${c.dim("not logged in")} ${c.boldYellow("✗")}`)
-    rows.push(``, `  ${c.dim("run `minimal-agent --login` to sign in.")}`)
-    return rows
-  }
-
-  if (creds.apiKey) {
-    rows.push(`  ${c.faintWhite("│")} ${c.sky("type")}     api-key`)
-    rows.push(`  ${c.faintWhite("╰")} ${c.boldGreen("✔")} ${c.dim("logged in via API key")}`)
-    return rows
-  }
-
-  const oauth = creds.claudeAiOauth
-  if (!oauth?.accessToken) {
     rows.push(
-      `  ${c.faintWhite("╰")} ${c.dim("credential entry exists but has no access token")} ${c.boldRed("✗")}`,
+      ``,
+      `  ${c.dim("run `minimal-agent provider <id> login` (e.g. `minimal-agent provider example-provider login`).")}`,
     )
     return rows
   }
 
-  const accountUuid = creds.oauthAccount?.accountUuid
-  const orgUuid = creds.oauthAccount?.organizationUuid
-  const sub = oauth.subscriptionType
-  const tier = oauth.rateLimitTier
-  const scopes = oauth.scopes ?? []
-  const expiresAt = oauth.expiresAt
-  const expired = typeof expiresAt === "number" ? expiresAt < input.now : false
-  const expiresInMs = typeof expiresAt === "number" ? expiresAt - input.now : null
-  const expiryLabel =
-    expiresAt == null
-      ? c.dim("(no expiry recorded)")
-      : expired
-        ? c.boldRed(`expired ${formatRelative(input.now - expiresAt)} ago`)
-        : `${new Date(expiresAt).toISOString().replace("T", " ").slice(0, 19)} UTC ${c.dim(
-            `(in ${formatRelative(expiresInMs!)})`,
-          )}`
+  for (let i = 0; i < input.providers.length; i++) {
+    const p = input.providers[i]!
+    const isLast = i === input.providers.length - 1
+    const branch = isLast ? "╰" : "│"
+    const prefix = `  ${c.faintWhite(branch)}`
+    const info = p.credentialInfo
 
-  rows.push(`  ${c.faintWhite("│")} ${c.sky("type")}     oauth`)
-  if (accountUuid) {
-    rows.push(`  ${c.faintWhite("│")} ${c.sky("account")}  ${c.dim(accountUuid)}`)
-  }
-  if (orgUuid) {
-    rows.push(`  ${c.faintWhite("│")} ${c.sky("org")}      ${c.dim(orgUuid)}`)
-  }
-  if (sub) {
-    rows.push(
-      `  ${c.faintWhite("│")} ${c.sky("plan")}     ${c.bold(sub)}${tier ? ` ${c.dim(`(${tier})`)}` : ""}`,
-    )
-  }
-  if (scopes.length > 0) {
-    rows.push(`  ${c.faintWhite("│")} ${c.sky("scopes")}   ${c.dim(scopes.join(" "))}`)
-  }
-  rows.push(`  ${c.faintWhite("│")} ${c.sky("expires")}  ${expiryLabel}`)
-  rows.push(
-    `  ${c.faintWhite("│")} ${c.sky("refresh")}  ${
-      oauth.refreshToken ? c.boldGreen("present") : c.boldYellow("missing")
-    }`,
-  )
+    if (!p.auth || info?.usable === false) {
+      rows.push(
+        `${prefix} ${c.sky(p.providerId)} ${c.dim("— credential unreadable")} ${c.boldRed("✗")}`,
+      )
+      rows.push(...renderCredentialDetails(prefix, info, input.now))
+      continue
+    }
 
-  if (expired) {
+    if (p.auth.kind === "api-key") {
+      const via = p.credentialLabel ?? "api-key"
+      rows.push(`${prefix} ${c.sky(p.providerId)} ${c.dim(`— ${via}`)} ${c.boldGreen("✔")}`)
+      rows.push(...renderCredentialDetails(prefix, info, input.now))
+      continue
+    }
+
+    const via = p.credentialLabel ?? "oauth"
+    rows.push(`${prefix} ${c.sky(p.providerId)} ${c.dim(`— ${via}`)} ${c.boldGreen("✔")} oauth`)
+    rows.push(...renderCredentialDetails(prefix, info, input.now))
+  }
+
+  return rows
+}
+
+function renderCredentialDetails(
+  prefix: string,
+  info: AuthCredentialInfo | undefined,
+  now: number,
+): string[] {
+  if (!info) return []
+  const rows: string[] = []
+  if (info.accountId) rows.push(`${prefix} ${c.sky("account")}  ${c.dim(info.accountId)}`)
+  if (info.organizationId) rows.push(`${prefix} ${c.sky("org")}      ${c.dim(info.organizationId)}`)
+  if (info.scopes && info.scopes.length > 0) {
+    rows.push(`${prefix} ${c.sky("scopes")}   ${c.dim(info.scopes.join(" "))}`)
+  }
+  if (typeof info.expiresAt === "number") {
+    const expired = info.expiresAt < now
+    const expiryLabel = expired
+      ? c.boldRed(`expired ${formatRelative(now - info.expiresAt)} ago`)
+      : `${new Date(info.expiresAt).toISOString().replace("T", " ").slice(0, 19)} UTC ${c.dim(
+          `(in ${formatRelative(info.expiresAt - now)})`,
+        )}`
+    rows.push(`${prefix} ${c.sky("expires")}  ${expiryLabel}`)
+  }
+  if (typeof info.hasRefreshToken === "boolean") {
     rows.push(
-      `  ${c.faintWhite("╰")} ${c.boldYellow("⚠")} ${c.bold("token expired")} — minimal-agent will auto-refresh on next request, or run \`--login\` to re-issue.`,
+      `${prefix} ${c.sky("refresh")}  ${
+        info.hasRefreshToken ? c.boldGreen("present") : c.boldYellow("missing")
+      }`,
     )
-  } else {
-    rows.push(`  ${c.faintWhite("╰")} ${c.boldGreen("✔")} ${c.bold("logged in")}`)
   }
   return rows
 }

@@ -123,15 +123,9 @@ export function buildOpenAIResponsesBody(
 ): OpenAIResponsesRequestBody {
   const body: OpenAIResponsesRequestBody = {
     model: model.vendorIds?.firstParty ?? req.modelId,
+    instructions: buildInstructions(req),
     input: buildInputItems(req),
-  }
-
-  // instructions = system prefix as a single string.
-  if (req.system && req.system.length > 0) {
-    body.instructions = req.system
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .filter(Boolean)
-      .join("\n\n")
+    store: false,
   }
 
   // Stateful mode: client sends only the new turn(s); server replays the chain.
@@ -195,6 +189,14 @@ export function buildOpenAIResponsesBody(
   if (req.metadata?.custom) body.metadata = { ...req.metadata.custom }
 
   return body
+}
+
+function buildInstructions(req: CanonicalRequest): string {
+  if (!req.system || req.system.length === 0) return ""
+  return req.system
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
+    .join("\n\n")
 }
 
 function buildInputItems(req: CanonicalRequest): OpenAIResponsesInputItem[] {

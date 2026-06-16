@@ -25,7 +25,7 @@
  * @module blob-store
  */
 
-import { createHash } from "node:crypto"
+// import { createHash } from "node:crypto"
 import {
   appendFileSync,
   existsSync,
@@ -236,7 +236,7 @@ export function defaultBlobsDir(sid: string, root: string = defaultSessionsDir()
  * care about.
  */
 export function shortSha256(input: string | Uint8Array): string {
-  const h = createHash("sha256")
+  const h = new Bun.CryptoHasher("sha256")
   h.update(input)
   return h.digest("hex").slice(0, 16)
 }

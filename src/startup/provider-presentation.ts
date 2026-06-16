@@ -21,7 +21,8 @@
  * @module startup/provider-presentation
  */
 
-import { findModel, getDefaultModelId } from "../llm/model-registry.ts"
+import { discoverCredentialedProviders } from "../auth-strategies.ts"
+import { findModel } from "../llm/model-registry.ts"
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
 
 /** Strip the optional `[1m]` / `[2m]` context-window variant suffix. */
@@ -30,17 +31,16 @@ function baseModelId(modelId: string): string {
 }
 
 /**
- * Label for the first-run welcome card's sign-in step. Reads the DEFAULT
- * provider's declared `displayName` (the provider a no-model session boots
- * with) so the copy names the right provider without core hardcoding one.
- * Falls back to neutral "sign in to your account" when no provider is
- * registered (degraded startup, no plugins) — never a provider literal.
+ * Label for the first-run welcome card's sign-in step. When exactly one
+ * provider already has credentials, names that provider; otherwise stays
+ * neutral so core never hardcodes a vendor.
  */
 export function signInStepLabel(): string {
-  const defaultModel = baseModelId(getDefaultModelId())
-  const providerId = findModel(defaultModel)?.providerId
-  const displayName = providerId ? findProviderPlugin(providerId)?.displayName : undefined
-  return displayName ? `sign in to your ${displayName} account` : "sign in to your account"
+  const credentialed = discoverCredentialedProviders()
+  if (credentialed.length === 1) {
+    return `sign in to your ${credentialed[0]!.displayName} account`
+  }
+  return "sign in to your account"
 }
 
 /**

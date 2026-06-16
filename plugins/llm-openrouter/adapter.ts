@@ -5,10 +5,10 @@
  * gateway to many upstream models, so this adapter REUSES
  * `plugins/llm-openai`'s wire layer wholesale (`buildOpenAIChatBody`,
  * `translateOpenAIChatStream`, `buildOpenAIHeaders`, `validateOpenAIRequest`).
- * Only the endpoint, model catalog, auth env var, and the optional
+ * Only the endpoint, model catalog, auth strategy, and the optional
  * OpenRouter attribution header differ.
  *
- * Auth: a Bearer key from `OPENROUTER_KEY`, passed via
+ * Auth: a Bearer key from minimal-agent's provider auth store, passed via
  * `RunContext.auth = { kind: "api-key", key }`.
  *
  * @module llm/providers/openrouter/adapter
@@ -33,7 +33,7 @@ import {
 } from "../llm-openai/index.ts"
 
 import { openRouterApiKeyAuth } from "./auth.ts"
-import { registerOpenRouterModels } from "./models.ts"
+import { registerOpenRouterModel, registerOpenRouterModels } from "./models.ts"
 import { fetchOpenRouterSessionInfo, setOpenRouterRateLimits } from "./session-info.ts"
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -55,7 +55,9 @@ export const openrouterAdapter: ProviderAdapter = {
   ): AsyncIterable<CanonicalEvent> {
     const auth = ctx.auth
     if (auth.kind === "api-key" && !auth.key) {
-      throw new Error("OpenRouter adapter: missing api-key (set OPENROUTER_KEY)")
+      throw new Error(
+        "OpenRouter adapter: missing api-key (run minimal-agent provider openrouter login)",
+      )
     }
 
     const headers = buildOpenAIHeaders({ auth })
@@ -115,12 +117,18 @@ export function bootstrapOpenRouter(): void {
   registerProvider(openrouterAdapter)
 }
 
+/** Register a one-off OpenRouter slug that is not in the built-in catalog. */
+export function registerOpenRouterAdHocModel(modelId: string): void {
+  registerOpenRouterModel({ id: modelId })
+}
+
 /** This provider packaged for the {@link ProviderPlugin} registry. */
 export const openrouterProviderPlugin: ProviderPlugin = {
   id: "openrouter",
   displayName: "OpenRouter",
   shortCode: "or",
   register: bootstrapOpenRouter,
+  registerAdHocModel: registerOpenRouterAdHocModel,
   apiKeyAuth: openRouterApiKeyAuth,
   fetchSessionInfo: fetchOpenRouterSessionInfo,
 }

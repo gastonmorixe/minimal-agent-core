@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+// import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -11,7 +11,7 @@ import { inventoryAdapter, provisionSetups, toBinarySpec } from "./provision.ts"
 import { BinaryStore } from "./store.ts"
 
 function sha256(s: string): string {
-  return createHash("sha256").update(s).digest("hex")
+  return new Bun.CryptoHasher("sha256").update(s).digest("hex")
 }
 
 function fakeFetch(body: string): typeof fetch {

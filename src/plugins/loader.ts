@@ -534,23 +534,27 @@ export class PluginLoader {
             rejectReason = `tool name "${name}" collides with another loaded plugin`
             break
           }
+          const validAliases: string[] = []
           for (const alias of h.trigger.tool.aliases ?? []) {
             if (coreToolNames.has(alias)) {
-              packageRejected = true
-              rejectReason = `tool alias "${alias}" collides with a core tool`
-              break
+              logger(`dropping alias "${alias}" for tool "${name}": collides with a core tool`)
+              continue
             }
             if (toolIndex.has(alias)) {
-              packageRejected = true
-              rejectReason = `tool alias "${alias}" collides with another plugin's canonical tool`
-              break
+              logger(
+                `dropping alias "${alias}" for tool "${name}": collides with another plugin's canonical tool`,
+              )
+              continue
             }
             if (aliasIndex.has(alias)) {
-              packageRejected = true
-              rejectReason = `tool alias "${alias}" collides with another plugin's alias`
-              break
+              logger(
+                `dropping alias "${alias}" for tool "${name}": collides with another plugin's alias`,
+              )
+              continue
             }
+            validAliases.push(alias)
           }
+          h.trigger.tool.aliases = validAliases
           if (packageRejected) break
         } else if (h.trigger.type === "inline_tag") {
           const tag = h.trigger.tag
@@ -991,7 +995,7 @@ export class PluginLoader {
    */
   private availabilityContext(): ToolAvailabilityContext {
     return {
-      env: process.env,
+      env: { ...process.env } as Record<string, string>,
       cwd: process.cwd(),
       ...(this.agent ? { agent: this.agent } : {}),
     }

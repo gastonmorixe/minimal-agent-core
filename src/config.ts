@@ -17,6 +17,7 @@
  * ```jsonc
  * {
  *   "model": "<model-id>[1m]",
+ *   "provider": "<provider-id>",
  *
  *   // Show plaintext/summarized thinking when the model's server
  *   // default streams only encrypted signatures.
@@ -38,6 +39,7 @@ import { parseFormatterCommand } from "./ui/formatter/formatter.ts"
 
 export interface UserConfig {
   model?: string
+  provider?: string
   /** Reasoning effort. Pass-through to `output_config.effort` on the wire;
    *  the server validates. Common values: `"low" | "medium" | "high" | "max"`. */
   effort?: string
@@ -147,29 +149,6 @@ export interface UserConfig {
     segments?: string[]
     script?: string
   }
-  /**
-   * Per-provider API keys, as a fallback for the environment variables the
-   * canonical transport reads. Lets a user keep keys in config instead of
-   * exporting env vars every session.
-   *
-   * ```jsonc
-   * "apiKeys": {
-   *   "openai":     "sk-...",
-   *   "openrouter": "sk-or-..."
-   * }
-   * ```
-   *
-   * Precedence (highest wins): `env var > config file > (throw)`. So
-   * `export OPENAI_API_KEY=...` still wins over `apiKeys.openai`, and CI
-   * keeps working unchanged. The Anthropic path is OAuth-based and is NOT
-   * affected by this map.
-   *
-   * Parsed leniently: non-string / empty values are dropped; an empty (or
-   * all-invalid) map is omitted entirely. Keys are provider ids matching
-   * each provider plugin's id (the canonical transport resolves
-   * `apiKeys.<providerId>`); core does not enumerate providers here.
-   */
-  apiKeys?: Record<string, string>
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -222,6 +201,7 @@ export function loadUserConfig(): UserConfig {
   const out: UserConfig = {}
 
   if (typeof obj.model === "string" && obj.model.length > 0) out.model = obj.model
+  if (typeof obj.provider === "string" && obj.provider.length > 0) out.provider = obj.provider
   // Effort is pass-through: any non-empty string forwards to the server,
   // which is the source of truth on accepted levels.
   if (typeof obj.effort === "string" && obj.effort.length > 0) {
@@ -272,20 +252,6 @@ export function loadUserConfig(): UserConfig {
     }
     if (statusBar.segments || statusBar.script) out.statusBar = statusBar
   }
-  // apiKeys: a provider-id → key map (env-var fallback for the canonical
-  // transport). Keep only string non-empty values; an empty / all-invalid
-  // map is omitted. We don't restrict the key set here — each provider
-  // plugin's resolver reads only its own id, so an unknown key is
-  // harmless and a typo never breaks parsing.
-  if (obj.apiKeys && typeof obj.apiKeys === "object" && !Array.isArray(obj.apiKeys)) {
-    const raw = obj.apiKeys as Record<string, unknown>
-    const apiKeys: Record<string, string> = {}
-    for (const [provider, key] of Object.entries(raw)) {
-      if (typeof key === "string" && key.length > 0) apiKeys[provider] = key
-    }
-    if (Object.keys(apiKeys).length > 0) out.apiKeys = apiKeys
-  }
-
   return out
 }
 

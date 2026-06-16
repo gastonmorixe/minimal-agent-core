@@ -27,12 +27,12 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname } from "node:path"
 
 import { configPath as userConfigPath } from "./config.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
-import { acquireLock, LockAbortedError, type LockHandle, LockTimeoutError } from "./file-lock.ts"
+import { acquireLock, LockAbortedError, LockTimeoutError } from "./file-lock.ts"
 import { parseJsonc } from "./jsonc.ts"
 import type { ImageBlock } from "./llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
@@ -729,9 +729,8 @@ async function withFileLock(
     // Let the executor return its own validation error : we've nothing to lock.
     return run()
   }
-  let handle: LockHandle | null = null
   try {
-    handle = await acquireLock(
+    using _handle = await acquireLock(
       filePath,
       { sessionId: getSessionId(), tool },
       {
@@ -752,8 +751,6 @@ async function withFileLock(
     // a tool error rather than letting it crash the dispatch loop.
     const msg = e instanceof Error ? e.message : String(e)
     return { content: `${tool} error: lock acquire failed: ${msg}`, is_error: true }
-  } finally {
-    handle?.release()
   }
 }
 
@@ -1131,16 +1128,16 @@ async function execRead(
   // straight to the text path so text-only hosts and existing tests are
   // unaffected.
   if (opts.media) {
-    let bytes: Buffer
+    let bytes: Uint8Array
     try {
-      bytes = readFileSync(filePath)
+      bytes = await Bun.file(filePath).bytes()
     } catch (e) {
       return {
         content: `Read error: ${e instanceof Error ? e.message : String(e)}`,
         is_error: true,
       }
     }
-    const decision = await decideReadFile(new Uint8Array(bytes), opts.media)
+    const decision = await decideReadFile(bytes, opts.media)
     if (decision.kind === "image") {
       return { content: healedNote + decision.summary, blocks: [decision.block] }
     }
@@ -1151,11 +1148,11 @@ async function execRead(
     }
     // decision.kind === "text": fall through, decoding the bytes we already
     // hold instead of re-reading from disk.
-    return renderTextRead(bytes.toString("utf-8"), offset, limit, healedNote)
+    return renderTextRead(new TextDecoder().decode(bytes), offset, limit, healedNote)
   }
 
   try {
-    const content = readFileSync(filePath, "utf-8")
+    const content = await Bun.file(filePath).text()
     return renderTextRead(content, offset, limit, healedNote)
   } catch (e) {
     return {
@@ -1215,8 +1212,9 @@ async function execWrite(
     const { mkdirSync } = require("node:fs")
     mkdirSync(dirname(filePath), { recursive: true })
 
-    const before = existsSync(filePath) ? readFileSync(filePath, "utf-8") : ""
-    writeFileSync(filePath, content)
+    const file = Bun.file(filePath)
+    const before = (await file.exists()) ? await file.text() : ""
+    await Bun.write(filePath, content)
     const isNew = before === ""
     const patch = isNew
       ? buildFileDiff(filePath, "", content)
@@ -1260,7 +1258,7 @@ async function execEdit(
   const filePath = resolveWhitespaceConfusablePath(requestedPath) ?? requestedPath
 
   try {
-    let content = readFileSync(filePath, "utf-8")
+    let content = await Bun.file(filePath).text()
     const count = content.split(oldString).length - 1
 
     if (count === 0) {
@@ -1284,7 +1282,7 @@ async function execEdit(
       content = content.replace(oldString, newString)
     }
 
-    writeFileSync(filePath, content)
+    await Bun.write(filePath, content)
     const patch = buildEditDiff(filePath, before, oldString, newString, replaceAll)
     const display = patch ? renderUnifiedDiff(patch) : undefined
     return {

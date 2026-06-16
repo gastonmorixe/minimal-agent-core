@@ -12,9 +12,15 @@
 
 import { PassThrough } from "node:stream"
 
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 
-import { readLine, runLoginCommand } from "./login.ts"
+import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
+
+import { readLine, readSecretLine, runLoginCommand } from "./login.ts"
+
+afterEach(() => {
+  clearProviderPlugins()
+})
 
 describe("commands/login module shape", () => {
   it("exports runLoginCommand as an async function", async () => {
@@ -36,6 +42,48 @@ describe("runLoginCommand", () => {
 
     expect(code).toBe(1)
     expect(out).toContain("--login requires an interactive terminal")
+  })
+
+  it("returns 130 when API-key entry is aborted with Ctrl+C", async () => {
+    registerProviderPlugin({
+      id: "test-provider",
+      displayName: "Test Provider",
+      shortCode: "test",
+      register() {},
+      apiKeyAuth: {
+        serviceId: "test-api-key",
+        displayName: "Test API Key",
+        buildCredential: (apiKey) => ({
+          serviceId: "test-api-key",
+          displayName: "Test API Key",
+          secrets: { apiKey },
+        }),
+        readApiKey: (secrets) => (typeof secrets.apiKey === "string" ? secrets.apiKey : null),
+      },
+    })
+    const input = new PassThrough() as PassThrough & {
+      isRaw?: boolean
+      isTTY?: boolean
+      setRawMode?: (mode: boolean) => void
+    }
+    input.isTTY = true
+    input.isRaw = false
+    input.setRawMode = (mode) => {
+      input.isRaw = mode
+    }
+    let out = ""
+
+    const promise = runLoginCommand({
+      providerId: "test-provider",
+      authMethod: "api-key",
+      input,
+      output: { write: (s: string) => ((out += s), true) } as NodeJS.WritableStream,
+    })
+    input.write("\x03")
+
+    expect(await promise).toBe(130)
+    expect(input.isRaw).toBe(false)
+    expect(out).toContain("aborted")
   })
 })
 
@@ -79,5 +127,36 @@ describe("readLine line/close ordering", () => {
     input.end()
 
     expect(await promise).toBe("")
+  })
+
+  it("rejects when readline receives SIGINT", async () => {
+    const input = new PassThrough() as PassThrough & { isTTY?: boolean }
+    input.isTTY = true
+    const output = new PassThrough()
+
+    const promise = readLine("> ", input, output)
+    input.write("\x03")
+
+    await expect(promise).rejects.toThrow("login aborted")
+  })
+})
+
+describe("readSecretLine", () => {
+  it("rejects on Ctrl+C and restores raw mode", async () => {
+    const input = new PassThrough() as PassThrough & {
+      isRaw?: boolean
+      setRawMode?: (mode: boolean) => void
+    }
+    input.isRaw = false
+    input.setRawMode = (mode) => {
+      input.isRaw = mode
+    }
+    const output = new PassThrough()
+
+    const promise = readSecretLine("> ", input, output)
+    input.write("\x03")
+
+    await expect(promise).rejects.toThrow("login aborted")
+    expect(input.isRaw).toBe(false)
   })
 })

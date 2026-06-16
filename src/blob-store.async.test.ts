@@ -1,7 +1,7 @@
 /**
  * Async blob write: Bug 4 (UI-thread responsiveness).
  *
- * `BlobStore.write` does `writeFileSync` + a synchronous `createHash`
+ * `BlobStore.write` does `writeFileSync` + a synchronous `Bun.CryptoHasher`
  * over the whole body. On the plugin result path the agent persists the
  * FULL (potentially multi-MB) tool body, so that sync fs + hash runs on
  * the same single thread that paints the TUI and processes keystrokes —

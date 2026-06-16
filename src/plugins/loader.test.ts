@@ -728,7 +728,7 @@ describe("PluginLoader", () => {
     rmSync(join(HOME, "plugins", "aliased_pkg"), { recursive: true })
   })
 
-  it("alias collision: alias collides with another plugin's canonical → reject", async () => {
+  it("alias collision: alias collides with another plugin's canonical → drop alias", async () => {
     // Plugin A claims canonical "Tool_A". Plugin B aliases "Tool_A" — collision.
     writePackage(HOME, "pkg_a", toolManifest("pkg_a", "Tool_A", "./h.ts"), {
       "h.ts": TOOL_HANDLER_BODY,
@@ -755,13 +755,13 @@ describe("PluginLoader", () => {
         .getExtraTools()
         .map((t) => t.name)
         .sort(),
-    ).toEqual(["Tool_A"])
+    ).toEqual(["Tool_A", "Tool_B"])
     expect(logs.some((l) => l.includes('alias "Tool_A"') && l.includes("canonical"))).toBe(true)
     rmSync(join(HOME, "plugins", "pkg_a"), { recursive: true })
     rmSync(join(HOME, "plugins", "pkg_b"), { recursive: true })
   })
 
-  it("alias collision: alias collides with another plugin's alias → reject", async () => {
+  it("alias collision: alias collides with another plugin's alias → drop alias", async () => {
     const m1 = toolManifest("pkg_x", "Tool_X", "./h.ts")
     m1.tuis![0].trigger = {
       type: "tool",
@@ -790,20 +790,20 @@ describe("PluginLoader", () => {
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),
     })
-    // First-loaded plugin keeps its alias; second is rejected entirely.
+    // First-loaded plugin keeps its alias; second plugin drops the alias but is still loaded.
     expect(
       loader
         .getExtraTools()
         .map((t) => t.name)
         .sort(),
-    ).toEqual(["Tool_X"])
+    ).toEqual(["Tool_X", "Tool_Y"])
     expect(loader.getToolAliases().has("legacy")).toBe(true)
     expect(logs.some((l) => l.includes('alias "legacy"'))).toBe(true)
     rmSync(join(HOME, "plugins", "pkg_x"), { recursive: true })
     rmSync(join(HOME, "plugins", "pkg_y"), { recursive: true })
   })
 
-  it("alias collision: alias collides with a core tool name → reject plugin", async () => {
+  it("alias collision: alias collides with a core tool name → drop alias", async () => {
     const m = toolManifest("alias_core", "Tool_Z", "./h.ts")
     m.tuis![0].trigger = {
       type: "tool",
@@ -821,8 +821,14 @@ describe("PluginLoader", () => {
       coreToolNames: CORE_TOOLS,
       logger: (msg) => logs.push(msg),
     })
-    expect(loader.getExtraTools()).toEqual([])
-    expect(logs.some((l) => l.includes('alias "Bash"') && l.includes("core tool"))).toBe(true)
+    expect(
+      loader
+        .getExtraTools()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["Tool_Z"])
+    expect(loader.getToolAliases().has("Bash")).toBe(false)
+    expect(logs.some((l) => l.includes('alias "Bash"'))).toBe(true)
     rmSync(join(HOME, "plugins", "alias_core"), { recursive: true })
   })
 
