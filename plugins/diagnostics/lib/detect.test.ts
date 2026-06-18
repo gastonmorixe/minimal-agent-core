@@ -5,7 +5,7 @@
  * so it tests against temp fixtures with no spawning.
  */
 
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -115,6 +115,116 @@ describe("detectTools", () => {
       writeFileSync(join(root, "package.json"), "{ this is not json")
       expect(() => detectTools(root)).not.toThrow()
       expect(byId(detectTools(root), "oxlint")).toBeDefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("resolves a PATH-based binary via options.path", () => {
+    const root = scratch()
+    const pathDir = join(root, "my-bin")
+    mkdirSync(pathDir, { recursive: true })
+    const binPath = join(pathDir, "sourcekit-lsp")
+    writeFileSync(binPath, "#!/bin/sh\nexit 0\n")
+    chmodSync(binPath, 0o755)
+    writeFileSync(join(root, "Package.swift"), '// swift-tools-version: 5.9\n')
+    try {
+      const tools = detectTools(root, { path: pathDir })
+      const sk = byId(tools, "sourcekit-lsp")
+      expect(sk).toBeDefined()
+      expect(sk?.kind).toBe("apple")
+      expect(sk?.bin).toBe(binPath)
+      expect(sk?.persistent).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("detects sourcekit-lsp from PATH with Package.swift signal", () => {
+    const root = scratch()
+    const pathDir = join(root, "my-bin")
+    mkdirSync(pathDir, { recursive: true })
+    const binPath = join(pathDir, "sourcekit-lsp")
+    writeFileSync(binPath, "#!/bin/sh\nexit 0\n")
+    chmodSync(binPath, 0o755)
+    writeFileSync(join(root, "Package.swift"), '// swift-tools-version: 5.9\n')
+    try {
+      const tools = detectTools(root, { path: pathDir })
+      expect(byId(tools, "sourcekit-lsp")).toBeDefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("detects sourcekit-lsp from PATH with .xcodeproj directory signal", () => {
+    const root = scratch()
+    const pathDir = join(root, "my-bin")
+    mkdirSync(pathDir, { recursive: true })
+    const binPath = join(pathDir, "sourcekit-lsp")
+    writeFileSync(binPath, "#!/bin/sh\nexit 0\n")
+    chmodSync(binPath, 0o755)
+    mkdirSync(join(root, "MyApp.xcodeproj"), { recursive: true })
+    try {
+      const tools = detectTools(root, { path: pathDir })
+      expect(byId(tools, "sourcekit-lsp")).toBeDefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("detects sourcekit-lsp from PATH with .xcworkspace directory signal", () => {
+    const root = scratch()
+    const pathDir = join(root, "my-bin")
+    mkdirSync(pathDir, { recursive: true })
+    const binPath = join(pathDir, "sourcekit-lsp")
+    writeFileSync(binPath, "#!/bin/sh\nexit 0\n")
+    chmodSync(binPath, 0o755)
+    mkdirSync(join(root, "MyApp.xcworkspace"), { recursive: true })
+    try {
+      const tools = detectTools(root, { path: pathDir })
+      expect(byId(tools, "sourcekit-lsp")).toBeDefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("does NOT detect sourcekit-lsp from PATH without a project signal", () => {
+    const root = scratch()
+    const pathDir = join(root, "my-bin")
+    mkdirSync(pathDir, { recursive: true })
+    const binPath = join(pathDir, "sourcekit-lsp")
+    writeFileSync(binPath, "#!/bin/sh\nexit 0\n")
+    chmodSync(binPath, 0o755)
+    // No Package.swift, no .xcodeproj, no .xcworkspace
+    try {
+      const tools = detectTools(root, { path: pathDir })
+      expect(byId(tools, "sourcekit-lsp")).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("does NOT detect sourcekit-lsp without the binary on PATH even with Package.swift", () => {
+    const root = scratch()
+    // sourcekit-lsp binary does NOT exist on PATH
+    writeFileSync(join(root, "Package.swift"), '// swift-tools-version: 5.9\n')
+    try {
+      const tools = detectTools(root, { path: join(root, "empty-bin") })
+      expect(byId(tools, "sourcekit-lsp")).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("still finds node_modules/.bin tools when options.path is set", () => {
+    const root = scratch()
+    makeBin(root, "biome")
+    writeFileSync(join(root, "biome.json"), "{}")
+    try {
+      const tools = detectTools(root, { path: "/nonexistent" })
+      const biome = byId(tools, "biome")
+      expect(biome).toBeDefined()
+      expect(biome?.kind).toBe("format")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

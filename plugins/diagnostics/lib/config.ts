@@ -23,6 +23,8 @@ export interface DiagnosticsConfig {
   format: boolean
   /** Run the linter provider (oxlint). Off by default (startup-heavy). */
   lint: boolean
+  /** Run the Apple language provider (sourcekit-lsp for Swift/Obj-C/C). Off by default (startup-heavy). */
+  apple: boolean
   /** Minimum severity surfaced to the model + panel. */
   severityFloor: FindingSeverity
   /** Max diagnostics rendered inline / sent to the model. */
@@ -36,6 +38,7 @@ export const DEFAULT_CONFIG: DiagnosticsConfig = {
   type: true,
   format: true,
   lint: false,
+  apple: false,
   severityFloor: "warning",
   maxInline: 8,
   timeoutMs: 2000,
@@ -64,6 +67,7 @@ export function resolveConfig(raw: unknown): DiagnosticsConfig {
     type: boolOr(r.type, DEFAULT_CONFIG.type),
     format: boolOr(r.format, DEFAULT_CONFIG.format),
     lint: boolOr(r.lint, DEFAULT_CONFIG.lint),
+    apple: boolOr(r.apple, DEFAULT_CONFIG.apple),
     severityFloor,
     maxInline: posIntOr(r.maxInline, DEFAULT_CONFIG.maxInline),
     timeoutMs: posIntOr(r.timeoutMs, DEFAULT_CONFIG.timeoutMs),

@@ -16,7 +16,7 @@
 import type { Finding } from "./types.ts"
 
 /** What signal a provider produces (used for ordering + config gating). */
-export type ProviderKind = "type" | "lint" | "format"
+export type ProviderKind = "type" | "lint" | "format" | "apple"
 
 export interface DiagnosticProvider {
   /** Stable id, matches the detected tool id (`"tsgo"`, `"biome"`, ...). */

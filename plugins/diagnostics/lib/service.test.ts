@@ -20,9 +20,20 @@ function project(tools: string[]): string {
   const bin = join(root, "node_modules", ".bin")
   mkdirSync(bin, { recursive: true })
   for (const t of tools) {
-    const p = join(bin, t)
-    writeFileSync(p, "#!/bin/sh\nexit 0\n")
-    chmodSync(p, 0o755)
+    if (t === "sourcekit-lsp") {
+      // sourcekit-lsp is resolved from PATH, not node_modules/.bin
+      const pathBin = join(root, "path-bin")
+      mkdirSync(pathBin, { recursive: true })
+      const p = join(pathBin, "sourcekit-lsp")
+      writeFileSync(p, "#!/bin/sh\nexit 0\n")
+      chmodSync(p, 0o755)
+      // Create a project signal for detection
+      writeFileSync(join(root, "Package.swift"), '// swift-tools-version: 5.9\n')
+    } else {
+      const p = join(bin, t)
+      writeFileSync(p, "#!/bin/sh\nexit 0\n")
+      chmodSync(p, 0o755)
+    }
   }
   if (tools.includes("tsgo")) writeFileSync(join(root, "tsconfig.json"), "{}")
   if (tools.includes("biome")) writeFileSync(join(root, "biome.json"), "{}")
@@ -31,13 +42,16 @@ function project(tools: string[]): string {
 
 function fakeProvider(
   id: string,
-  kind: "type" | "lint" | "format",
+  kind: "type" | "lint" | "format" | "apple",
   out: Finding[],
 ): DiagnosticProvider {
   return {
     id,
     kind,
-    handles: (p) => p.endsWith(".ts"),
+    handles: (p) => {
+      if (id === "sourcekit-lsp") return /\.(swift|h|m|mm|c|cpp)$/.test(p)
+      return p.endsWith(".ts")
+    },
     async check() {
       return out
     },
@@ -50,6 +64,7 @@ function factories(map: Record<string, Finding[]>): ProviderFactories {
     makeTsgo: () => fakeProvider("tsgo", "type", map.tsgo ?? []),
     makeBiome: () => fakeProvider("biome", "format", map.biome ?? []),
     makeOxlint: () => fakeProvider("oxlint", "lint", map.oxlint ?? []),
+    makeSourceKit: () => fakeProvider("sourcekit-lsp", "apple", map.sourcekit ?? []),
   }
 }
 
@@ -144,6 +159,60 @@ describe("DiagnosticsService", () => {
       const res = await svc.check(join(root, "x.ts"), "code")
       expect(res.findings).toHaveLength(1)
       expect(res.findings[0]?.severity).toBe("error")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("does NOT wire sourcekit-lsp when apple:false (default)", async () => {
+    const root = project(["sourcekit-lsp"])
+    try {
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1" })] }),
+      )
+      // sourcekit-lsp is detected but disabled by default → no provider built
+      const res = await svc.check(join(root, "Test.swift"), "let x = 42\n")
+      expect(res.findings).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("wires sourcekit-lsp when apple:true", async () => {
+    const root = project(["sourcekit-lsp"])
+    try {
+      const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, apple: true }
+      const svc = new DiagnosticsService(
+        root,
+        cfg,
+        factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1", message: "err" })] }),
+      )
+      const res = await svc.check(join(root, "Test.swift"), "let x = 42\n")
+      const sources = res.findings.map((d) => d.source)
+      expect(sources).toEqual(["sourcekit-lsp"])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("sourcekit-lsp handles .swift but not .ts files", async () => {
+    const root = project(["sourcekit-lsp"])
+    try {
+      const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, apple: true }
+      const svc = new DiagnosticsService(
+        root,
+        cfg,
+        factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1", message: "swift err" })] }),
+      )
+      // .swift file should be handled
+      const swiftRes = await svc.check(join(root, "Test.swift"), "let x = 42\n")
+      expect(swiftRes.findings.length).toBeGreaterThan(0)
+
+      // .ts file should NOT be handled by sourcekit-lsp
+      const tsRes = await svc.check(join(root, "Test.ts"), "let x = 42\n")
+      expect(tsRes.findings).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

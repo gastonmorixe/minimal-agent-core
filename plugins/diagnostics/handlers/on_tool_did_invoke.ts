@@ -25,6 +25,7 @@ import { loadConfig } from "../lib/config.ts"
 import { DiagnosticsService, type ProviderFactories } from "../lib/service.ts"
 import { BiomeProvider } from "../providers/biome-provider.ts"
 import { OxlintProvider } from "../providers/oxlint-provider.ts"
+import { SourceKitLspProvider } from "../providers/sourcekit-lsp-provider.ts"
 import { TsgoLspProvider } from "../providers/tsgo-provider.ts"
 
 /** Minimal payload view (structural mirror of the agent's ToolDidInvokePayload). */
@@ -49,6 +50,7 @@ const REAL_FACTORIES: ProviderFactories = {
   makeTsgo: (bin, root) => new TsgoLspProvider(bin, root),
   makeBiome: (bin, root) => new BiomeProvider(bin, root),
   makeOxlint: (bin, root) => new OxlintProvider(bin, root),
+  makeSourceKit: (bin, root) => new SourceKitLspProvider(bin, root),
 }
 
 /** Per-root service cache so the persistent tsgo LSP is reused across edits. */
