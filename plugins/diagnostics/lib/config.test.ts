@@ -13,18 +13,25 @@ describe("resolveConfig", () => {
     expect(resolveConfig({})).toEqual(DEFAULT_CONFIG)
   })
 
-  it("defaults: enabled, type+format on, lint off", () => {
+  it("defaults: enabled, type+format on, lint+apple off", () => {
     expect(DEFAULT_CONFIG.enabled).toBe(true)
     expect(DEFAULT_CONFIG.type).toBe(true)
     expect(DEFAULT_CONFIG.format).toBe(true)
     expect(DEFAULT_CONFIG.lint).toBe(false)
+    expect(DEFAULT_CONFIG.apple).toBe(false)
   })
 
   it("honors explicit overrides", () => {
-    const c = resolveConfig({ enabled: true, lint: true, severityFloor: "error", maxInline: 3 })
+    const c = resolveConfig({ enabled: true, lint: true, apple: true, severityFloor: "error", maxInline: 3 })
     expect(c.lint).toBe(true)
+    expect(c.apple).toBe(true)
     expect(c.severityFloor).toBe("error")
     expect(c.maxInline).toBe(3)
+  })
+
+  it("turns apple on via config", () => {
+    const c = resolveConfig({ apple: true })
+    expect(c.apple).toBe(true)
   })
 
   it("ignores malformed values and falls back to defaults", () => {

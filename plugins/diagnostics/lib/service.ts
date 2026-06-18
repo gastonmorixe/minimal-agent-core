@@ -25,6 +25,7 @@ export interface ProviderFactories {
   makeTsgo(bin: string, root: string): DiagnosticProvider
   makeBiome(bin: string, root: string): DiagnosticProvider
   makeOxlint(bin: string, root: string): DiagnosticProvider
+  makeSourceKit(bin: string, root: string): DiagnosticProvider
 }
 
 export interface ServiceCheckResult {
@@ -65,6 +66,8 @@ export class DiagnosticsService {
         providers.push(this.factories.makeBiome(t.bin, this.root))
       } else if (t.id === "oxlint" && this.config.lint) {
         providers.push(this.factories.makeOxlint(t.bin, this.root))
+      } else if (t.id === "sourcekit-lsp" && this.config.apple) {
+        providers.push(this.factories.makeSourceKit(t.bin, this.root))
       }
     }
     this.runner =

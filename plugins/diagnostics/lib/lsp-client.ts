@@ -233,9 +233,13 @@ export class LspClient {
   }
 }
 
-function languageIdFor(path: string): string {
+/** Map a file path to its LSP language identifier. */
+export function languageIdFor(path: string): string {
   if (path.endsWith(".tsx")) return "typescriptreact"
   if (path.endsWith(".jsx")) return "javascriptreact"
+  if (path.endsWith(".swift")) return "swift"
+  if (path.endsWith(".mm")) return "objective-cpp"
+  if (/\.(h|m)$/.test(path)) return "objective-c"
   if (/\.(js|mjs|cjs)$/.test(path)) return "javascript"
   return "typescript"
 }
