@@ -450,6 +450,7 @@ export async function executeToolRound(
         const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
         let streamedLineCount = 0
         let bufferedLastLine: string | null = null
+        let bufferedLastLineRaw: string | null = null
         let pendingChunk = ""
         let didStream = false
 
@@ -481,6 +482,7 @@ export async function executeToolRound(
             expandTabs(raw, TOOL_PREVIEW_GUTTER_WIDTH),
             effectiveBodyLineWidth(),
           )
+          bufferedLastLineRaw = raw
           streamedLineCount++
         }
 
@@ -567,11 +569,13 @@ export async function executeToolRound(
           // below still happens.
           renderStreamedTail({
             bufferedLastLine,
+            bufferedLastLineRaw,
             streamedLineCount,
             budget: STREAM_BUDGET,
             truncInfo,
             isError,
             writeTranscript,
+            cols: renderCols,
           })
           streamedRendered = true
         }

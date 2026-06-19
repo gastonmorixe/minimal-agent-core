@@ -209,6 +209,84 @@ describe("pure helpers", () => {
     expect(t).toBe("inner text")
   })
 
+  it("recordBodyText strips every runtime attachment category from user content", () => {
+    // Regression: blocksToText was passing runtime attachment blocks
+    // through verbatim, leaking XML into SessionHistory previews and the
+    // TUI scrollback.  session-replay.ts already filters these via
+    // isRuntimeAttachmentBlock from the shared runtime-attachments.ts
+    // module; blocksToText imports isRuntimeAttachmentText (same regex
+    // list) and must match.
+    //
+    // Every attachment the agent prepends to a user message is tested
+    // here.  When agent.ts gains a new attachment type and its opener
+    // regex is added to runtime-attachments.ts, this test will fail if
+    // blocksToText isn't aware of it — the shared module ensures the two
+    // code paths stay in sync.
+    const t = recordBodyText({
+      kind: "user",
+      ts: "2026-01-01T00:00:00Z",
+      content: [
+        // --- <ma::agent::*> canonical schema ---
+        {
+          type: "text",
+          text: '<ma::agent::tasks total="3" done="2" doing="0" todo="1" canceled="0">\n1  #abc  done  step\n</ma::agent::tasks>',
+        },
+        {
+          type: "text",
+          text: "<ma::agent::short-term-memory>\n[#1] active hypothesis\n</ma::agent::short-term-memory>",
+        },
+        {
+          type: "text",
+          text: '<ma::agent::memory-saved scope="project" id="x-1234">pinned\n</ma::agent::memory-saved>',
+        },
+        { type: "text", text: "<ma::agent::subagents>live fleet digest</ma::agent::subagents>" },
+        { type: "text", text: '<ma::agent::mode-change from="default" to="ask" at="..." />' },
+        { type: "text", text: '<ma::agent::mode-active id="ask" since="..." />' },
+        {
+          type: "text",
+          text: '<ma::agent::reflection-checkpoint round="50" cooldown-applied-seconds="60" />',
+        },
+        { type: "text", text: '<ma::agent::emergency-cap-triggered round="200" />' },
+        { type: "text", text: "<ma::agent::turn-aborted />\nThe previous turn was interrupted..." },
+        {
+          type: "text",
+          text: "<ma::agent::output-truncated />\nThe response was truncated due to token limits...",
+        },
+        // --- <ma::plugin::*> ---
+        { type: "text", text: '<ma::plugin::diagnostics count="3">...</ma::plugin::diagnostics>' },
+        { type: "text", text: '<ma::plugins>\n  <skill name="finder">...</skill>\n</ma::plugins>' },
+        // --- Legacy bare forms (migration window compat) ---
+        { type: "text", text: '<mode-change from="default" to="ask" />' },
+        { type: "text", text: '<ma::mode-active id="plan" since="..." />' },
+        { type: "text", text: "<short-term-memory>\n[#1] old-form\n</short-term-memory>" },
+        { type: "text", text: '<memory-saved scope="global" id="g">old form</memory-saved>' },
+        { type: "text", text: '<ma::reflection-ack silence-for="2" reason="batch" />' },
+        // --- Edge cases ---
+        { type: "text", text: '  <ma::agent::tasks foo="bar">  ' }, // leading whitespace
+        { type: "text", text: '<MA::AGENT::TASKS total="1">...</MA::AGENT::TASKS>' }, // case-insensitive
+        { type: "text", text: "" }, // empty block — not an attachment
+        { type: "text", text: "real user question here" }, // kept verbatim
+        { type: "text", text: "  trimmed but not an attachment" }, // whitespace only, no tag
+      ],
+    })
+    // No runtime attachment text should leak through.
+    expect(t).not.toContain("<ma::agent::")
+    expect(t).not.toContain("<ma::plugin::")
+    expect(t).not.toContain("<ma::plugins>")
+    expect(t).not.toContain("<mode-change")
+    expect(t).not.toContain("<ma::mode-active")
+    expect(t).not.toContain("<short-term-memory")
+    expect(t).not.toContain("<memory-saved")
+    expect(t).not.toContain("<ma::reflection-ack")
+    // Real user content must survive.
+    expect(t).toContain("real user question here")
+    expect(t).toContain("trimmed but not an attachment")
+    // Empty text blocks produce no separators — they're skipped by the
+    // empty-string guard, not by attachment detection.  Verify there's
+    // no trailing/leading whitespace artifact from the empty block.
+    expect(t).not.toMatch(/\n\s*\n\s*$/)
+  })
+
   it("buildWindow clamps limit and handles empty record lists", () => {
     const w = buildWindow("x", [], { anchor: "end" })
     expect(w.total).toBe(0)

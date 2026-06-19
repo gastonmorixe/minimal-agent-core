@@ -406,7 +406,28 @@ describe("formatToolPreview — display channel (Edit/Write diffs)", () => {
     for (const line of plain) {
       expect(displayWidth(line)).toBeLessThan(65)
     }
-    expect(plain[0]).toContain("...")
+    expect(plain[0]).toMatch(/^\s*│\s/)
+    expect(plain.at(-1)).toMatch(/^\s*╰\s/)
+  })
+
+  it("word-wraps prose display lines for non-structured tools", () => {
+    // Tools like AgentResult/SpawnAgent (not in STRUCTURED_DISPLAY_TOOLS)
+    // should word-wrap long prose lines instead of truncating.
+    const display =
+      "Bun's tsconfig paths research: Bun natively reads the `paths` field in tsconfig.json " +
+      "to re-write import paths at runtime. This works for both `bun run` and `bun test`."
+    const lines = formatToolPreview("compact for model", false, display, {
+      tool: "AgentResult",
+      cols: 40,
+    })
+    const plain = lines.map(stripAnsi)
+    // Should NOT contain truncation marker — should word-wrap instead
+    for (const line of plain) {
+      expect(displayWidth(line)).toBeLessThan(40)
+    }
+    expect(plain.some((l) => l.includes("..."))).toBe(false)
+    // Should have multiple lines from wrapping
+    expect(lines.length).toBeGreaterThan(1)
     expect(plain[0]).toMatch(/^\s*│\s/)
     expect(plain.at(-1)).toMatch(/^\s*╰\s/)
   })

@@ -8,6 +8,7 @@ import {
   expandTabs,
   stripAnsi,
   truncateDisplayWidth,
+  wordWrap,
   wrapRows,
 } from "@minimal-agent/plugin-api/utils/term-width"
 
@@ -128,6 +129,106 @@ describe("term-width", () => {
     expect(displayWidth(out)).toBe(8)
     expect(out).toContain("\x1b[31m")
     expect(out).toContain("\x1b[0m")
+  })
+})
+
+describe("wordWrap", () => {
+  it("returns the text as a single line when it fits", () => {
+    expect(wordWrap("hello world", 80)).toEqual(["hello world"])
+  })
+
+  it("splits on word boundaries", () => {
+    const result = wordWrap("the quick brown fox jumps over the lazy dog", 12)
+    for (const line of result) expect(displayWidth(line)).toBeLessThanOrEqual(12)
+    expect(result.join(" ")).toBe("the quick brown fox jumps over the lazy dog")
+  })
+
+  it("returns an empty string for empty input", () => {
+    expect(wordWrap("", 80)).toEqual([""])
+  })
+
+  it("handles a single word longer than width", () => {
+    // With hard-breaking, a word wider than width is split into chunks.
+    // "supercalifragilistic" = 20 chars, width=10 → two 10-char chunks.
+    const result = wordWrap("supercalifragilistic", 10)
+    expect(result.length).toBeGreaterThan(1)
+    for (const line of result) expect(displayWidth(line)).toBeLessThanOrEqual(10)
+    expect(result.join("")).toBe("supercalifragilistic")
+  })
+
+  it("preserves ANSI codes across wrapped lines", () => {
+    const result = wordWrap("\x1b[32mthe quick brown fox\x1b[0m", 12)
+    // At width 12, "the quick" fits (~9), "brown" starts new line (5)
+    // Each continuation should carry the green ANSI prefix.
+    for (const line of result) {
+      if (line.length > 0) {
+        expect(line.startsWith("\x1b[32m") || line.startsWith("the")).toBe(true)
+      }
+    }
+    expect(result.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("handles width <= 0 by returning the text as-is", () => {
+    const input = "some text"
+    expect(wordWrap(input, 0)).toEqual([input])
+    expect(wordWrap(input, -1)).toEqual([input])
+  })
+
+  it("pads nothing if the text displayWidth is <= width", () => {
+    expect(wordWrap("short", 100)).toEqual(["short"])
+  })
+
+  it("handles text with multiple spaces between words", () => {
+    const result = wordWrap("a   b    c", 80)
+    // Multiple whitespace should be collapsed
+    expect(result.join(" ").replace(/\s+/g, " ")).toBe("a b c")
+  })
+
+  it("places consecutive lines within width even for complex inputs", () => {
+    // Long text that wraps many times; verify every line fits
+    const text = Array.from({ length: 20 }, (_, i) => `word${i}`).join(" ")
+    const result = wordWrap(text, 30)
+    for (const line of result) {
+      expect(displayWidth(line)).toBeLessThanOrEqual(30)
+    }
+  })
+
+  it("handles mixed CJK and ASCII", () => {
+    const result = wordWrap("hello 世界 world foo bar", 10)
+    for (const line of result) expect(displayWidth(line)).toBeLessThanOrEqual(10)
+    // All tokens preserved in order
+    const joined = result.join(" ").replace(/\s+/g, " ")
+    expect(joined).toContain("hello")
+    expect(joined).toContain("世界")
+    expect(joined).toContain("world")
+    expect(joined).toContain("foo")
+    expect(joined).toContain("bar")
+  })
+
+  it("handles ANSI appearing mid-word-token (ANSI boundary is a word boundary)", () => {
+    // The tokenizer treats ANSI sequences as word boundaries because ANSI
+    // between text characters flushes the preceding word. "he\x1b[31mllo"
+    // tokenizes as ["he", "\x1b[31mllo"] — both tokens are short enough
+    // that they should fit even at width=10.
+    const result = wordWrap("he\x1b[31mllo", 10)
+    expect(result.length).toBe(1)
+    expect(result[0]).toContain("\x1b[31m")
+  })
+
+  it("handles width boundary case: width=1", () => {
+    const result = wordWrap("a b c", 1)
+    for (const line of result) expect(displayWidth(line)).toBeLessThanOrEqual(1)
+    expect(result.length).toBe(3)
+    expect(result.join("")).toBe("abc")
+  })
+
+  it("handles width boundary case: width equal to a word", () => {
+    const result = wordWrap("hello world foo", 5)
+    for (const line of result) expect(displayWidth(line)).toBeLessThanOrEqual(5)
+    // Each word is exactly 5 or 3 chars, so they should each fit
+    expect(result).toContain("hello")
+    expect(result).toContain("world")
+    expect(result).toContain("foo")
   })
 })
 

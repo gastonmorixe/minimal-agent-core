@@ -22,6 +22,7 @@
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
 import type { ModeManager } from "./modes.ts"
+import { isRuntimeAttachmentBlock } from "./runtime-attachments"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
@@ -684,53 +685,6 @@ function parseDate(ts: string): Date | null {
 }
 
 /**
- * Openers for the runtime-injected attachment blocks the agent
- * prepends to user messages (see `Agent.run` in `src/agent.ts`). When
- * a user-role text block starts with one of these, it has no
- * user-visible payload : it's a transport detail aimed at the model
- * (live context: tasks, scratchpad, save echoes, reflection
- * checkpoints, mode toggles) and must NOT be replayed verbatim into
- * the scrollback on `--resume`.
- *
- * The match is anchored at the start of the (trimmed) block. Each
- * attachment is emitted by the agent as its own dedicated text block
- * (verified at every push site in agent.ts), so a starts-with check
- * is sufficient : we don't need to validate the closing tag. A user
- * who pastes one of these openers as the FIRST non-whitespace of
- * their own prompt is the only false-positive scenario, which is
- * acceptable (they're typing a tag that, by convention, belongs to
- * the agent runtime, not the user).
- */
-const RUNTIME_ATTACHMENT_OPENERS: readonly RegExp[] = [
-  // New schema (canonical): every agent/plugin attachment opens with
-  // `<ma::agent::*>` or `<ma::plugin::*>`. One regex covers them all.
-  /^\s*<ma::(?:agent|plugin|plugins)::/i,
-  // Bare `<ma::plugins>` system-prompt wrapper (also a legitimate
-  // top-level emission, though it doesn't ride per-turn attachments).
-  /^\s*<ma::plugins\b/,
-  // Legacy forms accepted during the migration window so sessions
-  // started before this refactor still resume cleanly. Drop these once
-  // older session files are no longer in circulation.
-  /^\s*<(?:ma::)?mode-change\b/,
-  /^\s*<ma::(?:mode-active|reflection-checkpoint|reflection-ack|emergency-cap-triggered|tui-preview|tui::[a-z][a-z0-9_-]*)\b/i,
-  /^\s*<short-term-memory\b/,
-  /^\s*<memory-saved\b/,
-]
-
-/**
- * True iff `b` is a text content block that the agent runtime
- * prepended to a user message: any `<ma::agent::*>` or
- * `<ma::plugin::*>` attachment, plus the legacy bare forms
- * (`<mode-change>`, `<short-term-memory>`, `<memory-saved>`,
- * `<ma::*>`) accepted during the migration window. These have no
- * user-visible payload and must be skipped during replay.
- */
-function isRuntimeAttachmentBlock(b: ContentBlock): boolean {
-  if (b.type !== "text") return false
-  return RUNTIME_ATTACHMENT_OPENERS.some((re) => re.test(b.text))
-}
-
-/**
  * If `b` is a mode-change activation block, return its `to=` value
  * (`"ask"`, `"default"`, …). Otherwise return `undefined`.
  */
@@ -761,7 +715,7 @@ function readModeChangeFromTo(b: ContentBlock): { from: string; to: string } | u
  * @param initialModeId - Mode id active at the START of this message,
  *   carried over from earlier turns.
  */
-function stringifyUserText(
+export function stringifyUserText(
   content: string | ContentBlock[],
   initialModeId: string | null,
 ): { text: string; modeAfter: string | null } {

@@ -253,6 +253,245 @@ export function expandTabs(text: string, startCol: number, tabSize = 8): string 
 }
 
 /**
+ * Word-wrap `text` to fit within `width` display cells.
+ *
+ * Splits on whitespace boundaries. Each output line fits within `width`
+ * cells (measured by `displayWidth`). ANSI SGR sequences are preserved:
+ * the last style-setting code is re-anchored at the start of each
+ * continuation line so coloring is not lost across a wrap.
+ *
+ * A word that itself exceeds `width` is hard-broken at character
+ * boundaries (preserving ANSI style on each fragment), so no output
+ * line is ever wider than `width` unless `width <= 0`.
+ *
+ * Returns the original text as a single element when it already fits.
+ * Always returns at least one element (never an empty array).
+ */
+export function wordWrap(text: string, width: number): string[] {
+  if (width <= 0) return [text]
+  if (displayWidth(text) <= width) return [text]
+
+  // --- Tokenize into [ANSI* + word] segments ---
+  // Split on whitespace, attaching any ANSI sequences that immediately
+  // precede a word as its prefix.
+  const words: string[] = []
+  let ansiBuf = ""
+  let wordBuf = ""
+
+  for (let i = 0; i < text.length; ) {
+    // ANSI escape sequence
+    if (text.charCodeAt(i) === 0x1b && text[i + 1] === "[") {
+      let j = i + 2
+      while (j < text.length) {
+        const c = text.charCodeAt(j)
+        j += 1
+        if (c >= 0x40 && c <= 0x7e) break
+      }
+      const seq = text.slice(i, j)
+      // Flush accumulated word *before* this ANSI so the sequence
+      // attaches to the *next* word.
+      if (wordBuf) {
+        words.push(ansiBuf + wordBuf)
+        wordBuf = ""
+        ansiBuf = ""
+      }
+      ansiBuf += seq
+      i = j
+      continue
+    }
+
+    const cp = text.codePointAt(i)
+    if (cp === undefined) break
+    const ch = String.fromCodePoint(cp)
+    i += ch.length
+
+    // Whitespace: flush any accumulated word
+    if (ch === " " || ch === "\t") {
+      if (wordBuf) {
+        words.push(ansiBuf + wordBuf)
+        wordBuf = ""
+        ansiBuf = ""
+      }
+      continue
+    }
+
+    wordBuf += ch
+  }
+  // Flush trailing word. If only bare ANSI remains (no word text),
+  // drop it: a style sequence floating unanchored has no visible effect
+  // and emitting it as a zero-width word corrupts the layout.
+  if (wordBuf) words.push(ansiBuf + wordBuf)
+  else if (ansiBuf) {
+    // Trailing-only ANSI (e.g. "text\x1b[0m" → after flushing "text",
+    // ansiBuf="\x1b[0m"). Skip: the style was already applied to the
+    // last word and the next line starts fresh.
+  }
+
+  if (words.length === 0) return [""]
+
+  // --- Lay out words into lines ---
+  const lines: string[] = []
+  let cur = ""
+  let curW = 0
+
+  for (const w of words) {
+    const wW = displayWidth(w)
+
+    if (curW === 0) {
+      // Start a fresh line. If the word itself is wider than width,
+      // hard-break it into chunks.
+      if (wW > width) {
+        const chunks = hardBreakWord(w, width)
+        for (let ci = 0; ci < chunks.length; ci++) {
+          if (ci === 0) {
+            cur = chunks[ci]
+            curW = displayWidth(chunks[ci])
+          } else {
+            lines.push(cur)
+            cur = chunks[ci]
+            curW = displayWidth(chunks[ci])
+          }
+        }
+      } else {
+        cur = w
+        curW = wW
+      }
+      continue
+    }
+
+    const spaceW = 1
+    if (curW + spaceW + wW <= width) {
+      cur += " " + w
+      curW += spaceW + wW
+    } else {
+      lines.push(cur)
+      // Carry the active style forward so the continuation line isn't
+      // left unstyled. Build the set of *all* open SGR sequences from
+      // the line we just closed (minus reset codes), so stacked
+      // attributes like bold+red survive correctly.
+      const carry = activeSgr(cur)
+      if (wW > width) {
+        // Word itself exceeds width; hard-break it into chunks.
+        // The first chunk gets the carry style; subsequent chunks get
+        // the carry too (if they don't already carry their own style).
+        const chunks = hardBreakWord(w, width)
+        for (let ci = 0; ci < chunks.length; ci++) {
+          if (ci === 0) {
+            cur = carry.length > 0 && !chunks[ci].startsWith("\x1b[") ? carry + chunks[ci] : chunks[ci]
+            curW = displayWidth(cur)
+          } else {
+            lines.push(cur)
+            cur = carry.length > 0 && !chunks[ci].startsWith("\x1b[") ? carry + chunks[ci] : chunks[ci]
+            curW = displayWidth(cur)
+          }
+        }
+      } else {
+        cur = carry.length > 0 && !w.startsWith("\x1b[") ? carry + w : w
+        curW = wW
+      }
+    }
+  }
+  if (cur.length > 0) lines.push(cur)
+
+  return lines
+}
+
+/**
+ * Hard-break a word (single token with no whitespace) at `width` display
+ * cells. ANSI SGR sequences are carried to each continuation fragment so
+ * styling is preserved.
+ *
+ * The caller ensures `width > 0` so this helper never enters an infinite
+ * loop. Always returns at least one element.
+ */
+function hardBreakWord(word: string, width: number): string[] {
+  if (displayWidth(word) <= width) return [word]
+  const chunks: string[] = []
+  let cur = ""
+  let curW = 0
+  let ansiState = ""
+
+  for (let i = 0; i < word.length; ) {
+    if (word.charCodeAt(i) === 0x1b && word[i + 1] === "[") {
+      let j = i + 2
+      while (j < word.length) {
+        const c = word.charCodeAt(j)
+        j += 1
+        if (c >= 0x40 && c <= 0x7e) break
+      }
+      const seq = word.slice(i, j)
+      cur += seq
+      if (seq.endsWith("m")) {
+        if (seq === "\x1b[0m" || seq === "\x1b[m") ansiState = ""
+        else ansiState += seq
+      }
+      i = j
+      continue
+    }
+
+    const cp = word.codePointAt(i)
+    if (cp === undefined) break
+    const ch = String.fromCodePoint(cp)
+    const w = codePointWidth(cp)
+    i += ch.length
+
+    if (curW + w > width) {
+      chunks.push(cur)
+      cur = ansiState
+      curW = 0
+    }
+    cur += ch
+    curW += w
+  }
+  if (cur.length > 0) chunks.push(cur)
+  return chunks
+}
+
+/**
+ * Collect all currently-open SGR sequences in `s`, skipping reset codes
+ * (`\x1b[0m` / `\x1b[m`) which clear the accumulator.
+ *
+ * Used by {@link wordWrap} to re-anchor terminal styling on wrapped
+ * continuation lines. Unlike the simpler `lastStyleSgr` heuristic this
+ * correctly handles:
+ *
+ *   - Stacked attributes: `\x1b[1m\x1b[31mtext` → both bold (1) and
+ *     foreground (31) are captured, not just the last one.
+ *   - Reset codes: `\x1b[32mtext\x1b[0m` → the reset clears the
+ *     accumulator so the continuation line starts with no style.
+ */
+function activeSgr(s: string): string {
+  const seqs: string[] = []
+  for (let i = 0; i < s.length; ) {
+    if (s.charCodeAt(i) === 0x1b && s[i + 1] === "[") {
+      let j = i + 2
+      while (j < s.length) {
+        const c = s.charCodeAt(j)
+        j += 1
+        if (c >= 0x40 && c <= 0x7e) break
+      }
+      const seq = s.slice(i, j)
+      if (seq.endsWith("m")) {
+        // \x1b[0m or \x1b[m: reset all attributes.
+        if (seq === "\x1b[0m" || seq === "\x1b[m") {
+          seqs.length = 0
+        } else {
+          seqs.push(seq)
+        }
+      }
+      // Non-SGR CSI sequences (cursor moves, etc.) are ignored for style
+      // carry purposes — they have no persistent state.
+      i = j
+    } else {
+      const cp = s.codePointAt(i)
+      if (cp === undefined) break
+      i += String.fromCodePoint(cp).length
+    }
+  }
+  return seqs.join("")
+}
+
+/**
  * How many physical rows a string of given display width occupies in a
  * terminal of `columns` cells.
  *

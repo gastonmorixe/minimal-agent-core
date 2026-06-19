@@ -12,7 +12,7 @@
 import { shouldSoftSplit, splitBashSegments } from "../../bash-split.ts"
 import type { ToolUseBlock } from "../../client.ts"
 import type { Finding, FindingSeverity } from "../../plugins/hooks/tool-lifecycle.ts"
-import { displayWidth, expandTabs, truncateDisplayWidth } from "../../term-width.ts"
+import { displayWidth, expandTabs, truncateDisplayWidth, wordWrap } from "../../term-width.ts"
 import { countLines, type TruncationInfo } from "../../tools/truncation.ts"
 import { truncHint } from "../../truncate-hint.ts"
 import { c } from "../style/ansi.ts"
@@ -794,6 +794,22 @@ export function formatToolPreview(
     const out: string[] = []
     const footer = opts?.footer
     const bodyWidth = toolPreviewBodyWidth(opts?.cols)
+    // Tools whose display channel carries structured/table content (task
+    // trees, fleet listings, diff hunks, lock tables) where word-wrapping
+    // would destroy column alignment or tree connectors. These keep the
+    // old per-line clamp behavior (truncate with `...(+Nch)`). All other
+    // display content (prose tasks, agent summaries, schedule prompts)
+    // gets word-wrapped so long lines are readable without truncation.
+    const STRUCTURED_DISPLAY_TOOLS = new Set([
+      "Task",
+      "ListAgents",
+      "ShowDiff",
+      "LockStatus",
+      "Edit",
+      "Write",
+    ])
+    const shouldWrapDisplay =
+      bodyWidth !== undefined && !STRUCTURED_DISPLAY_TOOLS.has(opts?.tool ?? "")
     const body = footer === undefined ? display.replace(/\n$/, "") : display
     const dlines = body.length === 0 ? [] : body.split("\n")
     if (dlines.length === 0 && footer === undefined) {
@@ -801,11 +817,18 @@ export function formatToolPreview(
       return out
     }
     for (let i = 0; i < dlines.length; i++) {
-      const connector = footer === undefined && i === dlines.length - 1 ? "╰" : "│"
-      const line = clampToolPreviewBodyLine(dlines[i], bodyWidth)
-      out.push(
-        line.length === 0 ? `  ${c.dimCyan(connector)}` : `  ${c.dimCyan(connector)} ${line}`,
-      )
+      const fragments = shouldWrapDisplay
+        ? wordWrap(dlines[i], bodyWidth).map((f) => clampToolPreviewBodyLine(f, bodyWidth))
+        : [clampToolPreviewBodyLine(dlines[i], bodyWidth)]
+      for (let fi = 0; fi < fragments.length; fi++) {
+        const isLastLine = i === dlines.length - 1
+        const isLastFrag = fi === fragments.length - 1
+        const conn = footer === undefined && isLastLine && isLastFrag ? "╰" : "│"
+        const fragLine = fragments[fi]
+        out.push(
+          fragLine.length === 0 ? `  ${c.dimCyan(conn)}` : `  ${c.dimCyan(conn)} ${fragLine}`,
+        )
+      }
     }
     if (footer !== undefined) {
       const footerLine = clampToolPreviewBodyLine(footer, bodyWidth)
@@ -919,13 +942,24 @@ export function formatToolPreview(
  */
 export function renderStreamedTail(opts: {
   bufferedLastLine: string | null
+  bufferedLastLineRaw?: string | null
   streamedLineCount: number
   budget: number
   truncInfo?: TruncationInfo
   isError?: boolean
   writeTranscript: (line: string) => void
+  cols?: number
 }): void {
-  const { bufferedLastLine, streamedLineCount, budget, truncInfo, isError, writeTranscript } = opts
+  const {
+    bufferedLastLine,
+    bufferedLastLineRaw,
+    streamedLineCount,
+    budget,
+    truncInfo,
+    isError,
+    writeTranscript,
+    cols,
+  } = opts
   const visibleCount = Math.min(streamedLineCount, budget)
   const color = isError ? c.red : c.dim
 
@@ -937,22 +971,42 @@ export function renderStreamedTail(opts: {
     footer = `shown ${visibleCount}/${totalLines} L`
   }
 
+  // Helper: write word-wrapped fragments of the raw last line.
+  // When cols is available AND bufferedLastLineRaw is set, word-wrap
+  // the raw line (then per-fragment clamp as safety net) so the last
+  // line renders without truncation. Otherwise fall back to the
+  // pre-clamped bufferedLastLine.
+  const writeLastLine = (connector: string) => {
+    const bodyWidth = toolPreviewBodyWidth(cols)
+    const raw = bufferedLastLineRaw ?? bufferedLastLine
+    if (raw === null) {
+      writeTranscript(`  ${c.dimCyan(connector)}`)
+      return
+    }
+    const fragments =
+      bodyWidth !== undefined && bufferedLastLineRaw !== null
+        ? wordWrap(raw, bodyWidth).map((f) => clampBodyWithHint(f, bodyWidth))
+        : [bufferedLastLine ?? raw]
+    for (let fi = 0; fi < fragments.length; fi++) {
+      const conn = fi === fragments.length - 1 ? connector : "\u2502"
+      const line = fragments[fi]
+      writeTranscript(
+        line.length === 0 ? `  ${c.dimCyan(conn)}` : `  ${c.dimCyan(conn)} ${color(line)}`,
+      )
+    }
+  }
+
   if (bufferedLastLine === null) {
-    // Stream produced nothing (shouldn't happen : caller only invokes us
-    // when didStream=true, which implies at least one flushLineToBuffer
-    // call). Defensive close glyph anyway. Skip the `┊` separator: with
-    // zero body rows above it, a dotted divider has nothing to "cut from"
-    // and would just look like floating noise.
     writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(footer ?? "(no output)")}`)
     return
   }
 
   if (footer === null) {
-    writeTranscript(`  ${c.dimCyan("╰")} ${color(bufferedLastLine)}`)
+    writeLastLine("\u2570")
     return
   }
 
-  writeTranscript(`  ${c.dimCyan("│")} ${color(bufferedLastLine)}`)
+  writeLastLine("\u2502")
   writeTranscript(`  ${c.dimCyan("┊")}`)
   writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(footer)}`)
 }

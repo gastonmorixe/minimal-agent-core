@@ -20,6 +20,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../client.ts"
+import { isRuntimeAttachmentText } from "../../../runtime-attachments"
 import { formatSessionAsMarkdown, formatSessionAsXml } from "../../../session-dump.ts"
 import { getSessionLiveness, type Liveness } from "../../../session-liveness.ts"
 import { firstUserPromptSnippet, loadSession } from "../../../session-restore.ts"
@@ -361,6 +362,13 @@ function blocksToText(blocks: ContentBlock[]): string {
   for (const b of blocks) {
     switch (b.type) {
       case "text":
+        // Skip runtime attachment blocks the agent prepends to user
+        // messages (tasks, scratchpad, save echoes, mode toggles,
+        // reflection checkpoints, sub-agents digest).  These carry
+        // model-facing context and must not leak into SessionHistory
+        // previews or the TUI scrollback.  See runtime-attachments.ts
+        // (canonical definition shared with session-replay.ts).
+        if (isRuntimeAttachmentText(b.text)) break
         parts.push(b.text)
         break
       case "thinking":
