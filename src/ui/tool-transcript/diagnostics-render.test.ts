@@ -91,6 +91,21 @@ describe("formatDiagnosticsAnnotation", () => {
     expect(out.includes("</ma::agent::diagnostics>")).toBe(true)
     expect(out).toContain("TS2322")
   })
+
+  it("includes scope='ad-hoc' attribute when scope is ad-hoc", () => {
+    const out = formatDiagnosticsAnnotation(["12:5 error TS2322 nope"], "ad-hoc")
+    expect(out).toContain('scope="ad-hoc"')
+  })
+
+  it("omits scope attribute when scope is absent", () => {
+    const out = formatDiagnosticsAnnotation(["12:5 error TS2322 nope"])
+    expect(out).not.toContain("scope=")
+  })
+
+  it("omits scope attribute when scope is project", () => {
+    const out = formatDiagnosticsAnnotation(["12:5 error TS2322 nope"], "project")
+    expect(out).not.toContain("scope=")
+  })
 })
 
 describe("audience split: the annotation is stripped from the human preview", () => {

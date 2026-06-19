@@ -55,6 +55,28 @@ describe("shortModel", () => {
 })
 
 describe("renderSpawnDisplay", () => {
+  function spawned(label: string, task: string): SubagentRecord {
+    return {
+      id: subagentId("A9"),
+      sid: sessionId("9c1a4f2e-0b3d-4a6c-8e1f-2d3c4b5a6978"),
+      label,
+      type: label,
+      model: "claude-sonnet-4-6",
+      task,
+      isolation: "fork",
+      workspace: "inherit-cwd",
+      spawnedAt: "2026-05-30T11:58:00.000Z",
+      status: {
+        kind: "running",
+        pid: 48213,
+        startedAt: "t",
+        progress: { tools: 0, tokens: 0 },
+      },
+      depth: 1,
+      leadSid: sessionId("11111111-1111-4111-8111-111111111111"),
+    }
+  }
+
   it("shows id · type · model · isolation and a background handle footer", () => {
     const r = rec("A2", "worker", {
       kind: "running",
@@ -68,6 +90,62 @@ describe("renderSpawnDisplay", () => {
     expect(d.footer).toContain("running in background")
     expect(d.footer).toContain("pid 48213")
     expect(d.footer).toContain("session 9c1a4f…")
+  })
+
+  it("preserves paragraph structure in the task body", () => {
+    const r = spawned("worker", "line one\n\nline two\nline three")
+    const d = renderSpawnDisplay(r, false)
+    const lines = d.body.split("\n")
+    expect(lines).toEqual(["line one", "", "line two", "line three"])
+  })
+
+  it("collapses intra-line whitespace but preserves newlines", () => {
+    const r = spawned("worker", "first   line\n\nsecond\t\tline  with   spaces")
+    const d = renderSpawnDisplay(r, false)
+    const lines = d.body.split("\n")
+    expect(lines).toEqual(["first line", "", "second line with spaces"])
+  })
+
+  it("drops leading and trailing blank lines", () => {
+    const r = spawned("worker", "\n\n\na single line\n\n\n")
+    const d = renderSpawnDisplay(r, false)
+    expect(d.body).toBe("a single line")
+  })
+
+  it("caps body at 20 display lines with an elision marker", () => {
+    const many = Array.from({ length: 25 }, (_, i) => `line ${i}`).join("\n")
+    const r = spawned("worker", many)
+    const d = renderSpawnDisplay(r, false)
+    const lines = d.body.split("\n")
+    expect(lines).toHaveLength(21) // 20 visible + 1 elision marker
+    expect(lines[0]).toBe("line 0")
+    expect(lines[19]).toBe("line 19")
+    expect(lines[20]).toBe("… +5 more lines")
+  })
+
+  it("includes blank lines in the line count for the cap", () => {
+    // 23 pairs of ("line N", "") + 3 final lines, no leading/trailing blanks
+    // → 23*2 + 3 = 49 total → elides 29
+    const pairs: string[] = []
+    for (let i = 0; i < 23; i++) {
+      pairs.push(`line ${i}`, "")
+    }
+    pairs.push("line a", "line b", "line c")
+    const task = pairs.join("\n")
+    const r = spawned("worker", task)
+    const d = renderSpawnDisplay(r, false)
+    const lines = d.body.split("\n")
+    expect(lines).toHaveLength(21) // 20 visible + marker
+    expect(lines[20]).toBe("… +29 more lines")
+  })
+
+  it("passes through when exactly at the line cap", () => {
+    const exact = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")
+    const r = spawned("worker", exact)
+    const d = renderSpawnDisplay(r, false)
+    const lines = d.body.split("\n")
+    expect(lines).toHaveLength(20)
+    expect(lines[19]).toBe("line 19")
   })
 })
 

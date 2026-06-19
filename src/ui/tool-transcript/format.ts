@@ -1094,9 +1094,10 @@ export function renderFindingsPanel(
  * </ma::agent::diagnostics>
  * ```
  */
-export function formatDiagnosticsAnnotation(notes: string[]): string {
+export function formatDiagnosticsAnnotation(notes: string[], scope?: string): string {
   const clean = notes.filter((n) => typeof n === "string" && n.trim().length > 0)
   if (clean.length === 0) return ""
   const inner = clean.join("\n")
-  return `\n\n<ma::agent::diagnostics count="${clean.length}">\n${inner}\n</ma::agent::diagnostics>`
+  const scopeAttr = scope === "ad-hoc" ? ' scope="ad-hoc"' : ""
+  return `\n\n<ma::agent::diagnostics count="${clean.length}"${scopeAttr}>\n${inner}\n</ma::agent::diagnostics>`
 }

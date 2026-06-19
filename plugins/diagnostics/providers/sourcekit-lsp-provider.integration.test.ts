@@ -118,15 +118,15 @@ describe("SourceKitLspProvider (real sourcekit-lsp)", () => {
     "warm loop is reasonably fast (sub-second after first boot)",
     async () => {
       const probe = join(tmpdir(), "__diag_swift_warm.swift")
-      writeFileSync(probe, "let y = \"hello\"\n")
+      writeFileSync(probe, 'let y = "hello"\n')
       try {
         const provider = new SourceKitLspProvider(SRCKIT_BIN!, "/tmp")
         try {
           // First call to boot the server
-          await provider.check(probe, "let y = \"hello\"\n")
+          await provider.check(probe, 'let y = "hello"\n')
           // Warm call
           const t0 = performance.now()
-          await provider.check(probe, "let y = \"hello\"\n")
+          await provider.check(probe, 'let y = "hello"\n')
           const warmMs = performance.now() - t0
           // sourcekit-lsp is heavier than tsgo but sub-second is reasonable
           expect(warmMs).toBeLessThan(1500)

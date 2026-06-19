@@ -31,6 +31,21 @@ describe("formatNote", () => {
   it("omits the code when absent", () => {
     expect(formatNote(f({ line: 3, col: 1, message: "x" }))).toBe("3:1 error x")
   })
+
+  it("prefixes [ad-hoc] for out-of-scope findings", () => {
+    const finding = f({ line: 10, col: 3, code: "TS2532", message: "undefined", scope: "ad-hoc" })
+    expect(formatNote(finding)).toBe("[ad-hoc] 10:3 error TS2532 undefined")
+  })
+
+  it("no prefix when scope is project", () => {
+    expect(formatNote(f({ line: 1, col: 1, message: "err", scope: "project" }))).toBe(
+      "1:1 error err",
+    )
+  })
+
+  it("no prefix when scope is absent", () => {
+    expect(formatNote(f({ line: 1, col: 1, message: "err" }))).toBe("1:1 error err")
+  })
 })
 
 describe("filterFindings", () => {

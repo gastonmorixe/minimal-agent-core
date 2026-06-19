@@ -46,8 +46,9 @@ export function filterFindings(findings: Finding[], opts: FilterOptions): Findin
   return kept.slice(0, Math.max(0, opts.max))
 }
 
-/** Render one finding as `[line:col] severity [code] message`. */
+/** Render one finding as `[scope] [line:col] severity [code] message`. */
 export function formatNote(f: Finding): string {
+  const scope = f.scope === "ad-hoc" ? "[ad-hoc] " : ""
   const loc =
     typeof f.line === "number"
       ? typeof f.col === "number"
@@ -55,5 +56,5 @@ export function formatNote(f: Finding): string {
         : `${f.line} `
       : ""
   const code = f.code ? `${f.code} ` : ""
-  return `${loc}${f.severity} ${code}${f.message}`
+  return `${scope}${loc}${f.severity} ${code}${f.message}`
 }

@@ -166,9 +166,10 @@ async function runToolDidInvokeChain(
   if (findings.length === 0 && notes.length === 0) return null
 
   const renderCols = process.stdout.columns
+  const diagScope = findings.find((f) => f.scope)?.scope
   return {
     panel: renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
-    annotation: formatDiagnosticsAnnotation(notes),
+    annotation: formatDiagnosticsAnnotation(notes, diagScope),
   }
 }
 

@@ -22,10 +22,13 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { loadConfig } from "../lib/config.ts"
+import { findProjectRoot } from "../lib/detect.ts"
 import { DiagnosticsService, type ProviderFactories } from "../lib/service.ts"
 import { BiomeProvider } from "../providers/biome-provider.ts"
 import { OxlintProvider } from "../providers/oxlint-provider.ts"
 import { SourceKitLspProvider } from "../providers/sourcekit-lsp-provider.ts"
+import { TscDirectProvider } from "../providers/tsc-direct-provider.ts"
+import { TscSpawnProvider } from "../providers/tsc-provider.ts"
 import { TsgoLspProvider } from "../providers/tsgo-provider.ts"
 
 /** Minimal payload view (structural mirror of the agent's ToolDidInvokePayload). */
@@ -48,6 +51,8 @@ interface ChainCtx {
 /** Real provider factories (spawn / LSP). Swapped for fakes in tests. */
 const REAL_FACTORIES: ProviderFactories = {
   makeTsgo: (bin, root) => new TsgoLspProvider(bin, root),
+  makeTsc: (bin, root) => new TscSpawnProvider(bin, root),
+  makeTscDirect: (bin, root) => new TscDirectProvider(bin, root),
   makeBiome: (bin, root) => new BiomeProvider(bin, root),
   makeOxlint: (bin, root) => new OxlintProvider(bin, root),
   makeSourceKit: (bin, root) => new SourceKitLspProvider(bin, root),
@@ -55,6 +60,18 @@ const REAL_FACTORIES: ProviderFactories = {
 
 /** Per-root service cache so the persistent tsgo LSP is reused across edits. */
 const services = new Map<string, DiagnosticsService>()
+
+/**
+ * Collect active persistent LSP provider ids across all cached roots.
+ * Used by the live-area slot to render the LSP indicator in the TUI.
+ */
+export function getActivePersistentProviders(): string[] {
+  const seen = new Set<string>()
+  for (const svc of services.values()) {
+    for (const id of svc.getActivePersistentProviders()) seen.add(id)
+  }
+  return [...seen].sort()
+}
 let exitHookInstalled = false
 
 /** Tolerant JSONC-ish parse (strip // and /* *​/ comments) without a dependency. */
@@ -128,7 +145,14 @@ export default async function onToolDidInvoke(
     if (!filePath || !existsSync(filePath)) return
 
     const root = ctx.cwd || payload.cwd || process.cwd()
-    const svc = serviceFor(root)
+
+    // Auto-detect project root from the file's location so that
+    // diagnostics work even when the agent's cwd is not the project
+    // directory (e.g. editing a .swift file from a different workspace).
+    const projectRoot = findProjectRoot(filePath)
+    const effectiveRoot = projectRoot && projectRoot !== root ? projectRoot : root
+
+    const svc = serviceFor(effectiveRoot)
     if (!svc.handles(filePath)) return
 
     // The Edit/Write already wrote the file: disk == proposed text.

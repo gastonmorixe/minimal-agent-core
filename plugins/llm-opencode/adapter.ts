@@ -29,23 +29,23 @@ import { findModelByTags, type ModelEntry, registerProvider } from "../../src/ll
 import type { ProviderAdapter, SurfaceId, ValidationResult } from "../../src/llm/provider.ts"
 import { defaultNetworkClient } from "../../src/network/index.ts"
 import {
+  type AnthropicStreamEvent,
+  buildAnthropicRequestBody,
+  translateAnthropicStream,
+  validateAnthropicRequest,
+} from "../llm-anthropic/index.ts"
+import {
   buildOpenAIChatBody,
   buildOpenAIHeaders,
   type OpenAIChatChunk,
   translateOpenAIChatStream,
   validateOpenAIRequest,
 } from "../llm-openai/index.ts"
-import {
-  buildAnthropicRequestBody,
-  type AnthropicStreamEvent,
-  translateAnthropicStream,
-  validateAnthropicRequest,
-} from "../llm-anthropic/index.ts"
 
 import { opencodeApiKeyAuth } from "./auth.ts"
 import { CAPS_OPENCODE_CHAT } from "./capabilities.ts"
-import { PRICING_OPENCODE_GENERIC } from "./pricing.ts"
 import { registerOpencodeModel, registerOpencodeModels } from "./models.ts"
+import { PRICING_OPENCODE_GENERIC } from "./pricing.ts"
 
 const OPENCODE_CHAT_URL = "https://opencode.ai/zen/go/v1/chat/completions"
 const OPENCODE_MESSAGES_URL = "https://opencode.ai/zen/go/v1/messages"

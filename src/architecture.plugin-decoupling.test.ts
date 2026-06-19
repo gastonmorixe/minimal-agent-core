@@ -118,6 +118,12 @@ const BASELINE = new Map<string, number>([
   ["llm-openrouter/models.ts", 1], // D-2: makeCharRatioEstimator → @minimal-agent/plugin-api; registerModel stays (no-arg register())
   ["llm-openrouter/openrouter.test.ts", 2], // [surfaced by FIX-i3] +1: multi-line clause
   ["llm-openrouter/pricing.ts", 1],
+  // Pre-existing provider plugin — needs src/ imports for model registration,
+  // canonical request types, and pricing (host-side types not yet in plugin-api).
+  ["llm-opencode/adapter.ts", 4],
+  ["llm-opencode/models.ts", 2],
+  ["llm-opencode/opencode.test.ts", 2],
+  ["llm-opencode/pricing.ts", 1],
   // Wave D-7: memory swept to its residual. Only summarize.ts keeps two
   // src/ sites — the summary pipeline needs an authenticated LLM call at
   // prompt-fragment time (getAuth + canonicalSendFn) and there is no

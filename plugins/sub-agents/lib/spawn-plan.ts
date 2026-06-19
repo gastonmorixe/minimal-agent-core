@@ -36,6 +36,15 @@ export interface SpawnInput {
    * self-resolves its own default. Never a hardcoded vendor SKU.
    */
   readonly model: string
+  /**
+   * Resolved provider id for the model, e.g. `"opencode"`. When set alongside a
+   * non-empty model, the spawn passes `--provider` so the child can resolve the
+   * model without re-deriving the provider from its own registry. Optional: when
+   * omitted and `model` is set, the child MUST have the provider configured
+   * independently (config, env), or boot will fail with "model requires an
+   * explicit provider".
+   */
+  readonly provider?: string
   /** Optional reasoning effort. */
   readonly effort?: string
   /** Writable mode for the child. Non-interactive defaults to read-only ASK, so workers that edit need `"none"` (or another writable mode). */
@@ -131,8 +140,13 @@ export function buildSpawnPlan(input: SpawnInput): Result<SpawnPlan> {
   flags.push("--session-id", input.childSid, "--no-header", "--mode", input.mode)
   // Omit `--model` when empty: the child self-resolves its own default model.
   // This keeps the plugin model-agnostic (see the empty-model note above).
+  // When model IS set, also pass `--provider` if we know it, so the child can
+  // resolve the model without re-deriving the provider from its own registry.
   if (input.model.trim().length > 0) {
     flags.push("--model", input.model.trim())
+    if (input.provider && input.provider.trim().length > 0) {
+      flags.push("--provider", input.provider.trim())
+    }
   }
   if (input.effort && input.effort.trim().length > 0) {
     flags.push("--effort", input.effort.trim())

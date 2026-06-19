@@ -13,25 +13,31 @@ describe("resolveConfig", () => {
     expect(resolveConfig({})).toEqual(DEFAULT_CONFIG)
   })
 
-  it("defaults: enabled, type+format on, lint+apple off", () => {
+  it("defaults: enabled, type+format on, lint off, apple on", () => {
     expect(DEFAULT_CONFIG.enabled).toBe(true)
     expect(DEFAULT_CONFIG.type).toBe(true)
     expect(DEFAULT_CONFIG.format).toBe(true)
     expect(DEFAULT_CONFIG.lint).toBe(false)
-    expect(DEFAULT_CONFIG.apple).toBe(false)
+    expect(DEFAULT_CONFIG.apple).toBe(true)
   })
 
   it("honors explicit overrides", () => {
-    const c = resolveConfig({ enabled: true, lint: true, apple: true, severityFloor: "error", maxInline: 3 })
+    const c = resolveConfig({
+      enabled: true,
+      lint: true,
+      apple: false,
+      severityFloor: "error",
+      maxInline: 3,
+    })
     expect(c.lint).toBe(true)
-    expect(c.apple).toBe(true)
+    expect(c.apple).toBe(false)
     expect(c.severityFloor).toBe("error")
     expect(c.maxInline).toBe(3)
   })
 
-  it("turns apple on via config", () => {
-    const c = resolveConfig({ apple: true })
-    expect(c.apple).toBe(true)
+  it("turns apple off via config", () => {
+    const c = resolveConfig({ apple: false })
+    expect(c.apple).toBe(false)
   })
 
   it("ignores malformed values and falls back to defaults", () => {
@@ -43,5 +49,20 @@ describe("resolveConfig", () => {
 
   it("respects enabled:false", () => {
     expect(resolveConfig({ enabled: false }).enabled).toBe(false)
+  })
+
+  it("outOfScope defaults to enabled", () => {
+    expect(DEFAULT_CONFIG.outOfScope.enabled).toBe(true)
+    expect(resolveConfig({}).outOfScope.enabled).toBe(true)
+  })
+
+  it("outOfScope can be disabled", () => {
+    const c = resolveConfig({ outOfScope: { enabled: false } })
+    expect(c.outOfScope.enabled).toBe(false)
+  })
+
+  it("outOfScope tolerates malformed sub-object", () => {
+    const c = resolveConfig({ outOfScope: "not an object" })
+    expect(c.outOfScope.enabled).toBe(DEFAULT_CONFIG.outOfScope.enabled)
   })
 })

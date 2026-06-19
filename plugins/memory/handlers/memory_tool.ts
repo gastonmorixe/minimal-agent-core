@@ -138,7 +138,10 @@ function validateInput(raw: Record<string, unknown>): Validation {
     }
     id = raw.id.trim()
   } else if (raw.id !== undefined) {
-    return { ok: false, error: `\`id\` is not used for action="${action}"` }
+    // Silently ignore `id` when it's not needed. The JSON Schema declares
+    // `id` as always-optional, which means some models include it with an
+    // empty-string or unused value on every call. Rejecting it here would
+    // cause an infinite retry loop, so we just discard it.
   }
 
   let body: string | undefined
@@ -148,7 +151,8 @@ function validateInput(raw: Record<string, unknown>): Validation {
     }
     body = raw.body
   } else if (raw.body !== undefined) {
-    return { ok: false, error: `\`body\` is not used for action="${action}"` }
+    // Silently ignored when not applicable (same reasoning as `id` above —
+    // the schema advertises it as always-optional, so models may include it).
   }
 
   let query: string | undefined

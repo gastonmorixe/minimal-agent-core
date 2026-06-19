@@ -15,8 +15,8 @@ import type {
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 import { makeCharRatioEstimator } from "@minimal-agent/plugin-api/llm/token-estimate"
 
-import type { SurfaceId } from "../../src/llm/provider.ts"
 import { registerModel } from "../../src/llm/model-registry.ts"
+import type { SurfaceId } from "../../src/llm/provider.ts"
 
 import {
   CAPS_OPENCODE_CHAT,

@@ -32,6 +32,7 @@ interface AgentFinding {
   code?: string
   message: string
   path?: string
+  scope?: string
 }
 
 // Compile-time assignability both ways. `satisfies` forces the check; the

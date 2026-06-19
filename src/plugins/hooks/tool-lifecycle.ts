@@ -47,6 +47,8 @@ export interface Finding {
   message: string
   /** Absolute or repo-relative path, when it differs from the tool's file. */
   path?: string
+  /** When set, the scope: "project" (in-project linter) or "ad-hoc" (harness out-of-scope fallback). */
+  scope?: string
 }
 
 /**

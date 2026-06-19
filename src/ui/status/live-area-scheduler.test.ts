@@ -12,12 +12,18 @@
  * minimum shape `LiveAreaScheduler` reads.
  */
 
-import { describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+
+import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
 
 import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
 import { LiveAreaScheduler } from "./live-area-scheduler.ts"
 
 // --------------------------------- tests ----------------------------------
+
+// The decoration-suffix singleton is global mutable state. Reset it before
+// every test so non-suffix tests don't see a suffix from a prior file.
+beforeEach(() => setDecorationSuffix(""))
 
 describe("LiveAreaScheduler — first-tick semantics", () => {
   it("invokes every slot at t=0 with tick=0", async () => {
@@ -220,6 +226,97 @@ describe("LiveAreaScheduler — repaint dedup & routing", () => {
     await clock.tick(1_000)
     expect(sink.decorationCalls.at(-1)).toEqual([])
     expect(sink.footerCalls).toEqual([])
+    sched.stop()
+  })
+})
+
+describe("LiveAreaScheduler — decoration suffix", () => {
+  beforeEach(() => setDecorationSuffix(""))
+  afterEach(() => setDecorationSuffix(""))
+
+  it("appends the decoration suffix to the first footer line (intercom roster)", async () => {
+    const slot = makeSlot({
+      id: "f",
+      position: "footer",
+      refreshMs: 1_000,
+      invoke: async () => "⇆ intercom · 8 online · 5 gone",
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    setDecorationSuffix("  · ♻ sk-lsp · ⌢ tsgo")
+    sched.start()
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual(["⇆ intercom · 8 online · 5 gone  · ♻ sk-lsp · ⌢ tsgo"])
+    sched.stop()
+  })
+
+  it("does not append suffix when no footer lines exist", async () => {
+    const slot = makeSlot({
+      id: "f",
+      position: "footer",
+      refreshMs: 1_000,
+      invoke: async () => null,
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    setDecorationSuffix("  · ♻ sk-lsp")
+    sched.start()
+    await clock.tick(0)
+    // No footer lines → no suffix
+    expect(sink.footerCalls.at(-1)).toBeUndefined()
+    sched.stop()
+  })
+
+  it("does not append an empty suffix", async () => {
+    const slot = makeSlot({
+      id: "f",
+      position: "footer",
+      refreshMs: 1_000,
+      invoke: async () => "roster",
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    // Leave suffix empty (default)
+    sched.start()
+    await clock.tick(0)
+    expect(sink.footerCalls.at(-1)).toEqual(["roster"])
+    sched.stop()
+  })
+
+  it("suffix is NOT added to header/decoration lines", async () => {
+    const slot = makeSlot({
+      id: "h",
+      position: "header",
+      refreshMs: 1_000,
+      invoke: async () => "header content",
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    setDecorationSuffix("  · ♻ sk-lsp")
+    sched.start()
+    await clock.tick(0)
+    // Header/decoration lines should NOT have the suffix
+    expect(sink.decorationCalls.at(-1)).toEqual(["header content"])
     sched.stop()
   })
 })
