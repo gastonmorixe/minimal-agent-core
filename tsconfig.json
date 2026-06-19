@@ -8,7 +8,10 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "paths": {
+      "@minimal-agent/plugin-api/*": ["./plugin-api/src/*"]
+    }
   },
-  "include": ["src", "plugins"]
+  "include": ["src", "plugins", "plugin-api"]
 }
