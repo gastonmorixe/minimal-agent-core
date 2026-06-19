@@ -283,36 +283,54 @@ describe("scanSourceForPluginImports (import-site extraction)", () => {
   })
 })
 
-// m3 (phase1 review): TRIPWIRE, not a behavior test. The scanner's
-// violation predicate ignores non-relative specifiers (a bare specifier is
-// assumed to be a package), and the I2 lint rule's globs match `../plugins`
-// ladders only. Both assumptions hold ONLY while tsconfig has no path
-// aliases: a future `"paths": {"@plugins/*": ["plugins/*"]}` would let
+// m3 (phase1 review): The scanner's violation predicate ignores
+// non-relative specifiers (a bare specifier is assumed to be a package),
+// and the I2 lint rule's globs match `../plugins` ladders only. Both
+// assumptions hold ONLY while tsconfig has no path aliases into src/ or
+// plugins/: a future `"paths": {"@plugins/*": ["plugins/*"]}` would let
 // `import "@plugins/x"` resolve into the plugins tree while looking like a
-// bare package specifier — blinding the scanner AND the lint rule
-// simultaneously, with no failure anywhere. This test makes that hole
-// self-announcing. It passes today (red is impossible: the repo has no
-// `paths`); it exists to fail loudly the moment one appears, pointing
-// whoever added it at the scanner work that must accompany it.
+// bare package specifier, blinding the scanner AND the lint rule.
+//
+// The one allowed exception: paths mapping `@minimal-agent/plugin-api/*` to
+// `./plugin-api/src/*`. This is the leaf contract package (no src/ imports,
+// enforced by src/architecture.plugin-api-leaf.test.ts). A plugin importing
+// from it is NOT reaching into host code. And it is needed for the bunx
+// no-install flow: without `bun install`, the workspace symlink at
+// node_modules/@minimal-agent/plugin-api does not exist, so Bun must resolve
+// those imports via tsconfig paths.
 describe("tsconfig alias tripwire (m3)", () => {
-  it("tsconfig.json declares NO compilerOptions.paths (aliases would blind the I2 scanner + lint globs)", () => {
+  it("tsconfig.json contains NO compilerOptions.baseUrl (baseUrl would blind the I2 scanner + lint globs)", () => {
     const raw = readFileSync(join(import.meta.dir, "..", "..", "tsconfig.json"), "utf8")
     const tsconfig = JSON.parse(raw) as {
       compilerOptions?: { paths?: unknown; baseUrl?: unknown }
     }
     expect(
-      tsconfig.compilerOptions?.paths,
-      "tsconfig.json gained compilerOptions.paths. Path aliases can map bare-looking " +
-        "specifiers into plugins/, which the I2 scanner (relative-only resolution in " +
-        "core-plugin-import-scan.ts) and the no-restricted-imports lint globs CANNOT see. " +
-        "Before adding aliases, teach resolvesToPluginRoot() to expand them and extend the " +
-        "lint rule. See private/decoupling-refactor-work/reports/phase1-review.md (m3).",
-    ).toBeUndefined()
-    expect(
       tsconfig.compilerOptions?.baseUrl,
-      "tsconfig.json gained compilerOptions.baseUrl — the prerequisite for paths aliases. " +
-        "Same risk as paths: see phase1-review.md (m3) before proceeding.",
+      "tsconfig.json gained compilerOptions.baseUrl — the prerequisite for global paths aliases. " +
+        "See src/architecture/core-plugin-import-scan.test.ts (m3).",
     ).toBeUndefined()
+  })
+
+  it("tsconfig.json paths, if any, only map into plugin-api/ (the leaf contract), never into src/ or plugins/", () => {
+    const raw = readFileSync(join(import.meta.dir, "..", "..", "tsconfig.json"), "utf8")
+    const tsconfig = JSON.parse(raw) as {
+      compilerOptions?: { paths?: Record<string, string[]>; baseUrl?: unknown }
+    }
+    const paths = tsconfig.compilerOptions?.paths
+    if (!paths) return
+
+    for (const [alias, targets] of Object.entries(paths)) {
+      for (const target of targets) {
+        expect(
+          target,
+          `tsconfig paths alias "${alias}" maps to "${target}" which points into src/ or plugins/. ` +
+            "Paths aliasing into src/ or plugins/ can let plugins import host code through a bare specifier, " +
+            "blinding the I2 scanner (which matches relative imports) and the lint globs. " +
+            "Only plugin-api/ paths are allowed (leaf contract, no src/ imports). " +
+            "See src/architecture/core-plugin-import-scan.test.ts (m3).",
+        ).not.toMatch(/^\.\/(src|plugins)\//)
+      }
+    }
   })
 })
 
