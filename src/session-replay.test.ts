@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { Message } from "./client.ts"
-import { buildResumeHeader, replayToScrollback } from "./session-replay.ts"
+import { buildResumeHeader, replayToScrollback, stringifyUserText } from "./session-replay.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 
 class CaptureSink {
@@ -368,6 +368,53 @@ describe("replayToScrollback", () => {
     expect(plain).toContain("❯ all done?")
     const arrows = plain.match(/❯ /g)?.length ?? 0
     expect(arrows).toBe(1)
+  })
+
+  // Regression: stringifyUserText must filter the CURRENT canonical
+  // <ma::agent::tasks> schema (not just the old <ma::plugin::tasks> one).
+  // A user message with a prepended tasks block should render only the
+  // user's text in scrollback during --resume.
+  it("stringifyUserText strips <ma::agent::tasks> (the live schema)", () => {
+    const { text } = stringifyUserText(
+      [
+        {
+          type: "text",
+          text: '<ma::agent::tasks total="3" done="3" doing="0" todo="0" canceled="0">\n1  #94b14e   done   Investigate display-override path\n2  #1cf3c6   done   Investigate the normal content path\n3  #faaabe   done   Catalog all callers\n</ma::agent::tasks>',
+        },
+        { type: "text", text: "real user question" },
+      ],
+      null,
+    )
+    expect(text).not.toContain("<ma::agent::")
+    expect(text).not.toContain("#94b14e")
+    expect(text).not.toContain("display-override path")
+    expect(text).toContain("real user question")
+  })
+
+  // Also verify the full integration: replayToScrollback with the live schema.
+  it("replayToScrollback strips <ma::agent::tasks> blocks from user messages", async () => {
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              '<ma::agent::tasks total="1" done="0" doing="0" todo="1" canceled="0">\n' +
+              "1  #abc123  todo  do the thing\n" +
+              "</ma::agent::tasks>",
+          },
+          { type: "text", text: "carry on" },
+        ],
+      },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink)
+    const plain = stripAnsi(sink.out)
+    expect(plain).not.toContain("<ma::agent::tasks")
+    expect(plain).not.toContain("#abc123")
+    expect(plain).not.toContain("do the thing")
+    expect(plain).toContain("carry on")
   })
 
   // ──────────────────────────────────────────────────────────────────
