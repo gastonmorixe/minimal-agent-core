@@ -112,6 +112,23 @@ describe("buildSpawnPlan — fresh", () => {
     expect(r.value.argv[r.value.argv.length - 2]).toBe("--prompt")
   })
 
+  it("passes --provider alongside --model when provider is known", () => {
+    const r = buildSpawnPlan(input({ model: "deepseek-v4-pro", provider: "opencode" }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { argv } = r.value
+    expect(argv[argv.indexOf("--model") + 1]).toBe("deepseek-v4-pro")
+    expect(argv[argv.indexOf("--provider") + 1]).toBe("opencode")
+  })
+
+  it("omits --provider when model is set but provider is empty", () => {
+    const r = buildSpawnPlan(input({ model: "claude-sonnet-4-6", provider: "" }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.argv).toContain("--model")
+    expect(r.value.argv).not.toContain("--provider")
+  })
+
   it("honors a custom agentBin (injected, never hardcoded)", () => {
     const r = buildSpawnPlan(input({ agentBin: ["bun", "run", "/x/src/index.ts"] }))
     expect(r.ok && r.value.argv.slice(0, 3)).toEqual(["bun", "run", "/x/src/index.ts"])

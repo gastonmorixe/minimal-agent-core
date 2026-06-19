@@ -104,6 +104,7 @@ export function serviceDepsFromCtx(ctx: TUIContext): ServiceDeps | null {
     now: () => new Date(),
     resolveDefinition,
     ...(recommendForRole ? { recommendForRole } : {}),
+    resolveProvider: (modelId: string) => ctx.host?.models?.find(modelId)?.providerId,
     policy: resolvePolicy(ctx.env),
   }
 }

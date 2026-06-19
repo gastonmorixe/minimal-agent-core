@@ -32,4 +32,12 @@ export interface DiagnosticProvider {
   check(path: string, text: string, signal?: AbortSignal): Promise<Finding[]>
   /** Release any held resources (e.g. a persistent LSP child). Idempotent. */
   dispose(): void
+  /**
+   * Optional: returns true when a persistent LSP server is currently booted
+   * and alive. Used by the TUI to show which language servers are running.
+   * Non-persistent providers can omit or return false.
+   */
+  isActive?(): boolean
+  /** Return true when `path` is inside this provider's project scope. */
+  inScope?(path: string): boolean
 }

@@ -140,4 +140,8 @@ export class TsgoLspProvider implements DiagnosticProvider {
     this.client?.dispose()
     this.client = null
   }
+
+  isActive(): boolean {
+    return this.client !== null && !this.client.dead
+  }
 }

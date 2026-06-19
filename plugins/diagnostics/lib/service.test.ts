@@ -28,7 +28,7 @@ function project(tools: string[]): string {
       writeFileSync(p, "#!/bin/sh\nexit 0\n")
       chmodSync(p, 0o755)
       // Create a project signal for detection
-      writeFileSync(join(root, "Package.swift"), '// swift-tools-version: 5.9\n')
+      writeFileSync(join(root, "Package.swift"), "// swift-tools-version: 5.9\n")
     } else {
       const p = join(bin, t)
       writeFileSync(p, "#!/bin/sh\nexit 0\n")
@@ -36,6 +36,7 @@ function project(tools: string[]): string {
     }
   }
   if (tools.includes("tsgo")) writeFileSync(join(root, "tsconfig.json"), "{}")
+  if (tools.includes("tsc")) writeFileSync(join(root, "tsconfig.json"), "{}")
   if (tools.includes("biome")) writeFileSync(join(root, "biome.json"), "{}")
   return root
 }
@@ -56,12 +57,17 @@ function fakeProvider(
       return out
     },
     dispose() {},
+    // Fake type providers report out of scope by default, so the
+    // isInTypeScope gate correctly lets the out-of-scope fallback fire.
+    ...(kind === "type" ? { inScope: () => false } : {}),
   }
 }
 
 function factories(map: Record<string, Finding[]>): ProviderFactories {
   return {
     makeTsgo: () => fakeProvider("tsgo", "type", map.tsgo ?? []),
+    makeTsc: () => fakeProvider("tsc", "type", map.tsc ?? []),
+    makeTscDirect: () => fakeProvider("tsc-direct", "type", map["tsc-direct"] ?? []),
     makeBiome: () => fakeProvider("biome", "format", map.biome ?? []),
     makeOxlint: () => fakeProvider("oxlint", "lint", map.oxlint ?? []),
     makeSourceKit: () => fakeProvider("sourcekit-lsp", "apple", map.sourcekit ?? []),
@@ -93,6 +99,46 @@ describe("DiagnosticsService", () => {
       const sources = res.findings.map((d) => d.source).sort()
       expect(sources).toEqual(["biome", "tsgo"])
       expect(res.notes.length).toBe(2)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("wires tsc provider when tsc is detected and tsgo is absent", async () => {
+    const root = project(["tsc"])
+    try {
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({
+          tsc: [
+            f({ source: "tsc", code: "TS2532", line: 35, col: 12, message: "possibly undefined" }),
+          ],
+        }),
+      )
+      const res = await svc.check(join(root, "x.ts"), "code")
+      expect(res.findings.map((d) => d.source)).toEqual(["tsc"])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("detection suppresses tsc when tsgo is also present (tsgo wired, tsc not)", async () => {
+    // Both binaries exist, tsconfig.json exists → detection finds tsgo first,
+    // then skips tsc because of suppressedBy: ["tsgo"].
+    const root = project(["tsgo", "tsc"])
+    try {
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({
+          tsgo: [f({ source: "tsgo", code: "TS1" })],
+          tsc: [f({ source: "tsc", code: "TS9999", message: "should not appear" })],
+        }),
+      )
+      const res = await svc.check(join(root, "x.ts"), "code")
+      const sources = res.findings.map((d) => d.source)
+      expect(sources).toEqual(["tsgo"])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -164,29 +210,12 @@ describe("DiagnosticsService", () => {
     }
   })
 
-  it("does NOT wire sourcekit-lsp when apple:false (default)", async () => {
+  it("wires sourcekit-lsp by default (apple:true is default)", async () => {
     const root = project(["sourcekit-lsp"])
     try {
       const svc = new DiagnosticsService(
         root,
         DEFAULT_CONFIG,
-        factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1" })] }),
-      )
-      // sourcekit-lsp is detected but disabled by default → no provider built
-      const res = await svc.check(join(root, "Test.swift"), "let x = 42\n")
-      expect(res.findings).toEqual([])
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it("wires sourcekit-lsp when apple:true", async () => {
-    const root = project(["sourcekit-lsp"])
-    try {
-      const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, apple: true }
-      const svc = new DiagnosticsService(
-        root,
-        cfg,
         factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1", message: "err" })] }),
       )
       const res = await svc.check(join(root, "Test.swift"), "let x = 42\n")
@@ -197,14 +226,31 @@ describe("DiagnosticsService", () => {
     }
   })
 
-  it("sourcekit-lsp handles .swift but not .ts files", async () => {
+  it("respects apple:false to disable sourcekit-lsp", async () => {
     const root = project(["sourcekit-lsp"])
     try {
-      const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, apple: true }
+      const cfg: DiagnosticsConfig = { ...DEFAULT_CONFIG, apple: false }
       const svc = new DiagnosticsService(
         root,
         cfg,
-        factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1", message: "swift err" })] }),
+        factories({ sourcekit: [f({ source: "sourcekit-lsp", code: "E1" })] }),
+      )
+      const res = await svc.check(join(root, "Test.swift"), "let x = 42\n")
+      expect(res.findings).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("sourcekit-lsp handles .swift but not .ts files", async () => {
+    const root = project(["sourcekit-lsp"])
+    try {
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({
+          sourcekit: [f({ source: "sourcekit-lsp", code: "E1", message: "swift err" })],
+        }),
       )
       // .swift file should be handled
       const swiftRes = await svc.check(join(root, "Test.swift"), "let x = 42\n")
@@ -213,6 +259,66 @@ describe("DiagnosticsService", () => {
       // .ts file should NOT be handled by sourcekit-lsp
       const tsRes = await svc.check(join(root, "Test.ts"), "let x = 42\n")
       expect(tsRes.findings).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("runs tsc-direct fallback when normal check returns empty and outOfScope enabled", async () => {
+    const root = project(["tsc"])
+    try {
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({
+          tsc: [],
+          "tsc-direct": [
+            f({ source: "tsc-direct", code: "TS2322", message: "type err", scope: "ad-hoc" }),
+          ],
+        }),
+      )
+      const res = await svc.check(join(root, "x.ts"), "code")
+      expect(res.findings.map((d) => d.source)).toEqual(["tsc-direct"])
+      expect(res.findings[0].scope).toBe("ad-hoc")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("skips tsc-direct fallback when outOfScope is disabled", async () => {
+    const root = project(["tsc"])
+    try {
+      const cfg = { ...DEFAULT_CONFIG, outOfScope: { enabled: false } }
+      const svc = new DiagnosticsService(
+        root,
+        cfg,
+        factories({
+          tsc: [],
+          "tsc-direct": [f({ source: "tsc-direct", code: "TS9999", message: "should not appear" })],
+        }),
+      )
+      const res = await svc.check(join(root, "x.ts"), "code")
+      expect(res.findings).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("skips tsc-direct fallback when normal check already has findings", async () => {
+    const root = project(["tsc"])
+    try {
+      const svc = new DiagnosticsService(
+        root,
+        DEFAULT_CONFIG,
+        factories({
+          tsc: [f({ source: "tsc", code: "TS1", message: "in-scope err" })],
+          "tsc-direct": [f({ source: "tsc-direct", code: "TS9999", message: "should not appear" })],
+        }),
+      )
+      const res = await svc.check(join(root, "x.ts"), "code")
+      expect(res.findings.map((d) => d.source)).toEqual(["tsc"])
+      // No ad-hoc scope — the fallback never ran
+      expect(res.findings.every((d) => d.scope !== "ad-hoc")).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

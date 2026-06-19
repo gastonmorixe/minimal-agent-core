@@ -2,6 +2,7 @@
   "id": "sub-agents",
   "name": "Sub-agents",
   "version": "0.1.0",
+  "capabilities": ["models:read"],
   "description": "Delegation: spawn background minimal-agent workers, steer them, review their work, fold results back. A worker is a real headless agent process with its own session id, supervised by a 1s heartbeat that reaps exits, paints a live fleet widget, and injects each finished worker's distilled result between turns. State lives at ~/.minimal-agent/sessions/<leadSid>.subagents.jsonl. Disable with MINIMAL_AGENT_DISABLE_SUBAGENTS=1.",
   "tuis": [
     {

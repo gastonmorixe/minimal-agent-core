@@ -25,6 +25,8 @@ export interface Finding {
   code?: string
   message: string
   path?: string
+  /** Scope: "project" (normal) or "ad-hoc" (harness out-of-scope fallback). */
+  scope?: string
 }
 
 /** Outcome of one provider run. A Result-ish discriminated shape: never throw. */

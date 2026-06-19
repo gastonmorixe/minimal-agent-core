@@ -18,6 +18,8 @@
  * @module ui/status/live-area-scheduler
  */
 
+import { getDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
+
 import {
   createPluginLogger,
   type DiagnosticBus,
@@ -505,13 +507,18 @@ export class LiveAreaScheduler {
   }
 
   private flushFooter(footer: string[]): void {
+    // Append any plugin-contributed decoration suffix (e.g. LSP status)
+    // to the first footer line so it shares the same row as the intercom
+    // roster text.
+    const suffix = getDecorationSuffix()
+    const modified = suffix && footer.length > 0 ? [footer[0] + suffix, ...footer.slice(1)] : footer
     if (
-      footer.length === this.lastFooter.length &&
-      footer.every((l, i) => l === this.lastFooter[i])
+      modified.length === this.lastFooter.length &&
+      modified.every((l, i) => l === this.lastFooter[i])
     ) {
       return
     }
-    this.lastFooter = footer.slice()
-    if (this.sink.setFooterLines) this.sink.setFooterLines(footer)
+    this.lastFooter = modified.slice()
+    if (this.sink.setFooterLines) this.sink.setFooterLines(modified)
   }
 }

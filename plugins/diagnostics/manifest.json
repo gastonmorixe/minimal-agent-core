@@ -13,7 +13,21 @@
         "export": "default"
       },
       "priority": 50,
-      "timeoutMs": 4000
+      "timeoutMs": 15000
+    }
+  ],
+  "liveAreaSlots": [
+    {
+      "id": "lsp-status",
+      "handler": {
+        "type": "module",
+        "path": "./handlers/lsp-status-slot.ts",
+        "export": "default"
+      },
+      "position": "header",
+      "refreshMs": 3000,
+      "timeoutMs": 1000,
+      "placeholder": ""
     }
   ],
   "permissions": ["hooks:tool.didInvoke"]

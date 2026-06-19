@@ -174,24 +174,28 @@ describe("MemoryTool: input validation", () => {
     expect(r.is_error).toBe(true)
   })
 
-  it("rejects extra id on list/add/clear", async () => {
+  it("silently ignores extra id on list", async () => {
+    // Models sometimes pass `id: ""` (or any unused value) because the JSON
+    // Schema declares `id` as always-optional. The tool now ignores extras
+    // rather than erroring, avoiding infinite retry loops.
     const r = await memoryToolHandler(
       makeToolCtx({ input: { action: "list", scope: "project", id: "stray" } }),
     )
     if (r.kind !== "tool_result") return
-    expect(r.is_error).toBe(true)
-    expect(r.content).toContain("`id` is not used")
+    expect(r.is_error).toBeFalsy()
+    expect(r.content).toContain("project (no entries)")
   })
 
-  it("rejects body on read/remove/list/clear", async () => {
+  it("silently ignores extra body on remove", async () => {
     const r = await memoryToolHandler(
       makeToolCtx({
         input: { action: "remove", scope: "project", id: "x", body: "stray" },
       }),
     )
     if (r.kind !== "tool_result") return
+    // The id lookup fails first (no "x" exists), not the body check.
     expect(r.is_error).toBe(true)
-    expect(r.content).toContain("`body` is not used")
+    expect(r.content).toContain('no bullet with id="x"')
   })
 
   it("rejects query/limit outside list", async () => {

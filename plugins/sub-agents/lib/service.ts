@@ -116,6 +116,14 @@ export interface ServiceDeps {
    * (the lead's own model).
    */
   readonly recommendForRole?: (role: string) => { modelId: string; effort?: string } | undefined
+  /**
+   * Resolve the provider id that owns a given model id (e.g. `"deepseek-v4-pro"`
+   * → `"opencode"`). Injected at the host level so the plugin stays model- and
+   * provider-agnostic. When the model is not in the registry, returns `undefined`
+   * and the model flag is still passed — the child will fail at boot and surface
+   * the real error (same as today for an unknown model).
+   */
+  readonly resolveProvider?: (modelId: string) => string | undefined
   readonly policy?: GuardPolicy
 }
 
@@ -151,6 +159,12 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
   // for unless the user opts into auto-tiering or names a model per spawn.
   const rec = !req.model && !def?.model && def?.role ? deps.recommendForRole?.(def.role) : undefined
   const model = (req.model ?? def?.model ?? rec?.modelId ?? deps.defaultModel).trim()
+  // Provider follows the model: the resolved model determines which provider
+  // owns it. We ask `deps.resolveProvider` (wired at the host level from the
+  // model registry) so the plugin stays provider-agnostic. An unresolvable
+  // provider yields `undefined`, which means we omit `--provider` — the child
+  // will fail at boot if it can't self-resolve, surfacing the real error.
+  const provider = model ? deps.resolveProvider?.(model)?.trim() : undefined
   // Effort follows the same source as the model: an explicit request/def effort
   // wins, else the role recommendation's effort (only when we actually took the
   // recommended model), else unset (the model's own default applies).
@@ -188,6 +202,7 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
     id,
     task,
     model,
+    ...(provider ? { provider } : {}),
     ...(effort ? { effort } : {}),
     mode: "none",
     isolation,

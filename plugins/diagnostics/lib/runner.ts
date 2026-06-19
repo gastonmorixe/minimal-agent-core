@@ -109,4 +109,24 @@ export class DiagnosticsRunner {
   dispose(): void {
     for (const p of this.providers) p.dispose()
   }
+
+  /** Returns ids of persistent providers whose server is currently booted and alive. */
+  getActivePersistentProviders(): string[] {
+    return this.providers.filter((p) => p.isActive?.() ?? false).map((p) => p.id)
+  }
+
+  /**
+   * True when a type provider considers `path` to be inside its project scope.
+   * Defaults to false when no provider implements inScope, erring on the side of
+   * running the out-of-scope fallback (a wasted spawn is better than a missed error).
+   */
+  isInTypeScope(path: string): boolean {
+    const typeProviders = this.providers.filter((p) => p.kind === "type")
+    if (typeProviders.length === 0) return true
+    const answers = typeProviders
+      .map((p) => p.inScope?.(path))
+      .filter((a): a is boolean => a !== undefined)
+    if (answers.length === 0) return false // nobody implemented inScope → can't tell, allow fallback
+    return answers.some((a) => a)
+  }
 }

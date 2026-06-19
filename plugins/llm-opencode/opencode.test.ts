@@ -15,9 +15,12 @@ import {
   resolveModel,
   resolveProvider,
 } from "../../src/llm/index.ts"
-import { buildOpenAIChatBody } from "../llm-openai/index.ts"
-import { type OpenAIChatChunk, translateOpenAIChatStream } from "../llm-openai/index.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "../llm-anthropic/index.ts"
+import {
+  buildOpenAIChatBody,
+  type OpenAIChatChunk,
+  translateOpenAIChatStream,
+} from "../llm-openai/index.ts"
 
 import { bootstrapOpencode, opencodeProviderPlugin } from "./adapter.ts"
 import {

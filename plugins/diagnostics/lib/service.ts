@@ -13,6 +13,9 @@
  * @module plugins/diagnostics/lib/service
  */
 
+import { existsSync } from "node:fs"
+import { join } from "node:path"
+
 import type { DiagnosticsConfig } from "./config.ts"
 import { detectTools } from "./detect.ts"
 import { filterFindings, formatNote } from "./format-notes.ts"
@@ -25,6 +28,8 @@ export interface ProviderFactories {
   makeTsgo(bin: string, root: string): DiagnosticProvider
   makeBiome(bin: string, root: string): DiagnosticProvider
   makeOxlint(bin: string, root: string): DiagnosticProvider
+  makeTsc(bin: string, root: string): DiagnosticProvider
+  makeTscDirect(bin: string, root: string): DiagnosticProvider
   makeSourceKit(bin: string, root: string): DiagnosticProvider
 }
 
@@ -46,6 +51,7 @@ export interface ServiceCheckResult {
 export class DiagnosticsService {
   private runner: DiagnosticsRunner | null = null
   private built = false
+  private tscBin: string | null = null
 
   constructor(
     private readonly root: string,
@@ -62,6 +68,9 @@ export class DiagnosticsService {
     for (const t of detected) {
       if (t.id === "tsgo" && this.config.type) {
         providers.push(this.factories.makeTsgo(t.bin, this.root))
+      } else if (t.id === "tsc" && this.config.type) {
+        providers.push(this.factories.makeTsc(t.bin, this.root))
+        this.tscBin = t.bin
       } else if (t.id === "biome" && this.config.format) {
         providers.push(this.factories.makeBiome(t.bin, this.root))
       } else if (t.id === "oxlint" && this.config.lint) {
@@ -74,6 +83,15 @@ export class DiagnosticsService {
       providers.length > 0
         ? new DiagnosticsRunner(providers, { timeoutMs: this.config.timeoutMs })
         : null
+
+    // Stash tsc bin for the out-of-scope fallback. The detection loop may have
+    // skipped tsc when tsgo was present (suppressedBy), so probe the binary
+    // independently of detection.
+    if (!this.tscBin) {
+      const tscPath = join(this.root, "node_modules", ".bin", "tsc")
+      if (existsSync(tscPath)) this.tscBin = tscPath
+    }
+
     return this.runner
   }
 
@@ -94,15 +112,45 @@ export class DiagnosticsService {
     if (!runner || !runner.handles(path)) return { findings: [], notes: [], degraded: [] }
 
     const report = await runner.check(path, text)
-    const kept = filterFindings(report.findings, {
+    let findings = report.findings
+    let degraded = report.degraded
+
+    // Out-of-scope fallback: if the normal providers returned nothing,
+    // the file is outside project scope, and outOfScope is enabled, try
+    // tsc-direct which bypasses the project config. Skip when the file
+    // IS in type scope (clean file, not excluded) to avoid a wasted spawn.
+    if (
+      findings.length === 0 &&
+      this.config.type &&
+      this.config.outOfScope.enabled &&
+      this.tscBin &&
+      !runner.isInTypeScope(path)
+    ) {
+      const directProvider = this.factories.makeTscDirect(this.tscBin, this.root)
+      if (directProvider.handles(path)) {
+        try {
+          const directFindings = await directProvider.check(path, text)
+          findings = [...findings, ...directFindings]
+        } catch {
+          // direct provider failure: degrade silently
+        }
+      }
+    }
+
+    const kept = filterFindings(findings, {
       severityFloor: this.config.severityFloor,
       max: this.config.maxInline,
     })
-    return { findings: kept, notes: kept.map(formatNote), degraded: report.degraded }
+    return { findings: kept, notes: kept.map(formatNote), degraded }
   }
 
   dispose(): void {
     this.runner?.dispose()
     this.runner = null
+  }
+
+  /** Returns ids of persistent LSP providers whose server is currently booted and alive. */
+  getActivePersistentProviders(): string[] {
+    return this.runner?.getActivePersistentProviders() ?? []
   }
 }

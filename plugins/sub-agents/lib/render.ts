@@ -37,6 +37,35 @@ function clip(s: string, max: number): string {
   return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`
 }
 
+/**
+ * Trim and line-cap a spawn task for the transcript display block.
+ *
+ * Each line's whitespace runs are collapsed to single spaces, but newlines
+ * are PRESERVED so the task's paragraph / list structure survives. Leading
+ * and trailing blank lines are dropped. When the line count exceeds
+ * `maxLines` the excess is replaced with a `… +N more lines` marker row.
+ *
+ * The compositor's display channel ({@link formatToolPreview}) handles
+ * per-line width clamping via {@link clampBodyWithHint} with the live
+ * terminal width, so this function intentionally does NOT cap individual
+ * line length.
+ */
+function clipTask(s: string, maxLines: number): string {
+  const raw = s.split("\n")
+  // Collapse in-line whitespace (preserve newlines).
+  const clean = raw.map((l) => l.replace(/[ \t]+/g, " ").trim())
+  // Drop leading/trailing blank lines.
+  let start = 0
+  while (start < clean.length && clean[start].length === 0) start++
+  let end = clean.length
+  while (end > start && clean[end - 1].length === 0) end--
+  const trimmed = clean.slice(start, end)
+  if (trimmed.length <= maxLines) return trimmed.join("\n")
+  const visible = trimmed.slice(0, maxLines)
+  const elided = trimmed.length - maxLines
+  return `${visible.join("\n")}\n… +${elided} more lines`
+}
+
 // ---------------------------------------------------------------------------
 // SpawnAgent
 // ---------------------------------------------------------------------------
@@ -63,7 +92,7 @@ export function renderSpawnDisplay(r: SubagentRecord, ansi: boolean): DisplayPar
   const dot = color(ansi, ANSI.DIM, GLYPHS.bullet)
   return {
     header: renderSpawnHeader(r, ansi),
-    body: color(ansi, ANSI.DIM, clip(r.task, 200)),
+    body: color(ansi, ANSI.DIM, clipTask(r.task, 20)),
     footer: ` ${footerBits.join(` ${dot} `)}`,
   }
 }

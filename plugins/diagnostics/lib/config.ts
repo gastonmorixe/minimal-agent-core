@@ -15,6 +15,11 @@ import { existsSync, readFileSync } from "node:fs"
 
 import type { FindingSeverity } from "./types.ts"
 
+export interface OutOfScopeConfig {
+  /** Run a direct fallback check on files outside the project's include scope. */
+  enabled: boolean
+}
+
 export interface DiagnosticsConfig {
   enabled: boolean
   /** Run the persistent type provider (tsgo). */
@@ -25,6 +30,8 @@ export interface DiagnosticsConfig {
   lint: boolean
   /** Run the Apple language provider (sourcekit-lsp for Swift/Obj-C/C). Off by default (startup-heavy). */
   apple: boolean
+  /** Out-of-scope diagnostics: check files even when excluded by tsconfig/biome/oxlint. */
+  outOfScope: OutOfScopeConfig
   /** Minimum severity surfaced to the model + panel. */
   severityFloor: FindingSeverity
   /** Max diagnostics rendered inline / sent to the model. */
@@ -38,7 +45,8 @@ export const DEFAULT_CONFIG: DiagnosticsConfig = {
   type: true,
   format: true,
   lint: false,
-  apple: false,
+  apple: true,
+  outOfScope: { enabled: true },
   severityFloor: "warning",
   maxInline: 8,
   timeoutMs: 2000,
@@ -62,12 +70,17 @@ export function resolveConfig(raw: unknown): DiagnosticsConfig {
     typeof r.severityFloor === "string" && SEVERITIES.has(r.severityFloor)
       ? (r.severityFloor as FindingSeverity)
       : DEFAULT_CONFIG.severityFloor
+  const outOfScopeRaw = (r.outOfScope as Record<string, unknown> | undefined) ?? {}
+  const outOfScope = {
+    enabled: boolOr(outOfScopeRaw.enabled, DEFAULT_CONFIG.outOfScope.enabled),
+  }
   return {
     enabled: boolOr(r.enabled, DEFAULT_CONFIG.enabled),
     type: boolOr(r.type, DEFAULT_CONFIG.type),
     format: boolOr(r.format, DEFAULT_CONFIG.format),
     lint: boolOr(r.lint, DEFAULT_CONFIG.lint),
     apple: boolOr(r.apple, DEFAULT_CONFIG.apple),
+    outOfScope,
     severityFloor,
     maxInline: posIntOr(r.maxInline, DEFAULT_CONFIG.maxInline),
     timeoutMs: posIntOr(r.timeoutMs, DEFAULT_CONFIG.timeoutMs),
