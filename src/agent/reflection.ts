@@ -225,6 +225,6 @@ export function buildReflectionCheckpointBlock(round: number, cooldownMs: number
     text:
       `<ma::agent::reflection-checkpoint round="${round}" cooldown-applied-seconds="${cooldownSec}" />\n` +
       `Soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user. ` +
-      `Emit \`<ma::agent::reflection-ack silence-for="K" reason="..." />\` anywhere in your response to suppress the next K checkpoints (skipping both the cooldown and this attachment).`,
+      `Write \`<ma::agent::reflection-ack silence-for="K" reason="..." />\` as inline text anywhere in your response body (not a tool call) to suppress the next K checkpoints (skipping both the cooldown and this attachment).`,
   }
 }

@@ -79,13 +79,16 @@ import { withStreamWatchdog } from "./watchdog.ts"
  * reaches a real non-Anthropic endpoint).
  */
 function resolveProviderAuth(opts: SendOptions): ProviderAuth {
-  let providerId: string
-  try {
-    providerId = resolveModel(opts.model ?? "").providerId
-  } catch {
-    return legacyAuthToProviderAuth(opts.auth)
-  }
   const modelId = opts.model ?? ""
+  let providerId: string | undefined = opts.selectedProviderId
+  // When no provider was explicitly selected, derive it from model registry.
+  if (!providerId) {
+    try {
+      providerId = resolveModel(modelId).providerId
+    } catch {
+      return legacyAuthToProviderAuth(opts.auth)
+    }
+  }
   switch (providerId) {
     case "anthropic":
       return legacyAuthToProviderAuth(opts.auth)

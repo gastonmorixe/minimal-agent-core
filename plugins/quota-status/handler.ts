@@ -67,6 +67,10 @@ function currentModelId(): string {
   return (process.env.MINIMAL_AGENT_MODEL ?? "").replace(/\[(1|2)m\]/gi, "")
 }
 
+function currentProviderId(): string | undefined {
+  return process.env.MINIMAL_AGENT_PROVIDER || undefined
+}
+
 /**
  * Resolved reasoning-effort level being sent on the wire, surfaced by
  * the agent on `process.env.MINIMAL_AGENT_EFFORT` after resolution
@@ -150,7 +154,10 @@ export default async function handle(ctx: LiveAreaHandlerContext): Promise<strin
   // abort escalation evicts a wedged HTTP/2 session), releasing the `inFlight`
   // gate for the next heartbeat / `quota.headersReceived` refresh. Long-
   // running sessions never wedge the footer.
-  const info = await resolveProviderSessionInfo(currentModelId(), { signal: ctx.abort })
+  const info = await resolveProviderSessionInfo(currentModelId(), {
+    signal: ctx.abort,
+    providerId: currentProviderId(),
+  })
   const sessionTokens = getSessionTokens()
 
   // Full-custom renderer escape hatch: hand the session metadata to the user's

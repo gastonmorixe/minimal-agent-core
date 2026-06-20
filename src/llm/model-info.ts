@@ -24,10 +24,10 @@ const DOCUMENT_FORMATS = ["pdf", "txt"]
  * a provider plugin isn't loaded), returns a best-effort snapshot with
  * `resolved:false` and conservative defaults so callers always get a value.
  */
-export function buildModelInfoSnapshot(modelId: string): ModelInfoSnapshot {
+export function buildModelInfoSnapshot(modelId: string, providerId?: string): ModelInfoSnapshot {
   let entry: ReturnType<typeof resolveModel> | undefined
   try {
-    entry = resolveModel(modelId)
+    entry = resolveModel(modelId, providerId)
   } catch {
     entry = undefined
   }

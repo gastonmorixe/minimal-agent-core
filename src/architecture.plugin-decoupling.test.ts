@@ -124,6 +124,17 @@ const BASELINE = new Map<string, number>([
   ["llm-opencode/models.ts", 2],
   ["llm-opencode/opencode.test.ts", 2],
   ["llm-opencode/pricing.ts", 1],
+  // Wafer provider plugin — same pre-existing provider pattern as llm-opencode
+  // and llm-openrouter: needs src/ imports for model registration, canonical
+  // request types, pricing types, provider adapter types, network client, and
+  // session-info (resolveModel, modelShortLabel). Tests drive real registries.
+  ["llm-wafer/adapter.ts", 4],
+  ["llm-wafer/models.ts", 1],
+  ["llm-wafer/pricing.ts", 1],
+  ["llm-wafer/session-info.ts", 3],
+  ["llm-wafer/wafer-disambiguation.test.ts", 1],
+  ["llm-wafer/wafer-dispatch.test.ts", 6],
+  ["llm-wafer/wafer.test.ts", 3],
   // Wave D-7: memory swept to its residual. Only summarize.ts keeps two
   // src/ sites — the summary pipeline needs an authenticated LLM call at
   // prompt-fragment time (getAuth + canonicalSendFn) and there is no
@@ -139,6 +150,9 @@ const BASELINE = new Map<string, number>([
   // provider-session capability — loadUserConfig, getSessionTokens, and
   // resolveProviderSessionInfo stay host imports until such a seam exists.
   ["quota-status/handler.ts", 3],
+  // Integration test driving the real provider registries end-to-end to prove
+  // provider-scoped model resolution (the deepseek-v4-flash disambiguation fix).
+  ["quota-status/render.provider-scoping.test.ts", 3],
   // D-quota-schedule: the two host-runtime integration tests keep their src/
   // imports — they drive the REAL PluginLoader / REPL / Compositor / agent
   // run() end-to-end, which is the whole point of the test, so they are not

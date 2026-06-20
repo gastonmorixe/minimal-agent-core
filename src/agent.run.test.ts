@@ -60,6 +60,62 @@ describe("Agent.run transcript", () => {
     expect(joined).toContain("Unknown tool")
   })
 
+  it("applies reflection-ack silence when flash model emits it as a tool_use", async () => {
+    // Flash/small models confuse the inline XML tag for a tool call.
+    // The agent loop should parse the tool_use input, apply the silence,
+    // and return a success result (not "Unknown tool").
+    let round = 0
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      if (round === 1) {
+        return {
+          blocks: [
+            {
+              type: "tool_use" as const,
+              id: "call-ack-1",
+              name: "reflection-ack",
+              input: { "silence-for": "3", reason: "batch refactor" },
+            },
+          ],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+
+    const auth: AuthResult = { type: "api-key", token: "test-token" }
+    const agent = new Agent({
+      auth,
+      model: "test-model",
+      sendFn,
+      reflectionInterval: 50,
+      reflectionCooldownMs: 0,
+    })
+
+    const transcript: string[] = []
+    const gen = agent.run("go", {
+      onTranscriptLine: (line: string) => transcript.push(line),
+    })
+
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    const joined = transcript.join("\n")
+    expect(joined).toContain("reflection-ack")
+    expect(joined).toContain(
+      "reflection ack: silencing next 3 checkpoints — batch refactor (from tool_use fallback)",
+    )
+    expect(joined).not.toContain("Unknown tool")
+  })
+
   it("renders Task plugin header and footer through the host tool frame", async () => {
     const tmpHome = mkdtempSync(join(tmpdir(), "task-transcript-test-"))
     const oldHome = process.env.HOME

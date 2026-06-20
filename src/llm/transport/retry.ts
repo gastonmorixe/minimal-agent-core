@@ -46,7 +46,13 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   "overloaded_error",
   "api_error",
   "stream_idle",
-  "stream_truncated",
+  // NOTE: stream_truncated is intentionally NOT retried. When the server
+  // closes the SSE stream without a terminator (message_stop / [DONE]),
+  // the cause is usually an intentional model refusal or content filter
+  // decision, not a transient network failure. Retrying the same prompt
+  // produces the same refusal, freezing the agent in an infinite retry
+  // loop (session 81adb696, 2026-06-19). The error must propagate so the
+  // agent surfaces partial output and moves on.
   "attempt_too_long",
   // Connection-level transient failures thrown out of the transport before
   // any response exists (connect timeout, reset socket, DNS blip, GOAWAY).

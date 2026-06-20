@@ -143,6 +143,13 @@ export class Agent {
   private auth: AuthResult
   /** Model ID for all requests in this agent's lifetime. */
   private model: string
+  /**
+   * Provider selected at boot (e.g. `--provider wafer`). When set,
+   * dispatch resolves model entries scoped to this provider, so two
+   * providers that register the same bare model ID are disambiguated.
+   * `undefined` for legacy code paths (Anthropic-only transport).
+   */
+  private providerId?: string
   /** Effort level for output_config.effort. Pass-through string; server validates. */
   private effort: string | undefined
   /**
@@ -333,6 +340,14 @@ export class Agent {
   constructor(opts: {
     auth: AuthResult
     model?: string
+    /**
+     * The provider selected at boot time (e.g. `--provider opencode`).
+     * Stored alongside the model so dispatch can disambiguate when two
+     * providers register the same bare model ID. Optional for backwards
+     * compatibility with code paths that only use the legacy Anthropic
+     * transport (no provider registry concept).
+     */
+    providerId?: string
     effort?: string
     /**
      * Speed mode for the response dispatch tier. `"fast"` opts the
@@ -431,6 +446,7 @@ export class Agent {
     // (or config) declares that default at registration time; core names no
     // SKU here. See `getDefaultModelId` (src/llm/model-registry.ts).
     this.model = opts.model ?? getDefaultModelId()
+    this.providerId = opts.providerId
     this.effort = opts.effort
     this.speed = opts.speed ?? "normal"
     this.thinkingDisplay = opts.thinkingDisplay
@@ -1003,6 +1019,7 @@ export class Agent {
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages),
         model: this.model,
+        selectedProviderId: this.providerId,
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         tools: mergedTools,
         system,
@@ -1083,6 +1100,35 @@ export class Agent {
 
       // Check for tool use blocks
       const toolBlocks = lastResponse.blocks.filter((b): b is ToolUseBlock => b.type === "tool_use")
+
+      // Reflection-ack tool_use fallback. Flash / small models sometimes
+      // confuse the inline XML tag for a tool call. The text scan above
+      // covers the canonical path; this branch catches the tool_use
+      // mistake and applies the silence from the tool input. The tool
+      // executor returns a corrective hint in the tool_result content;
+      // the silence counter set here is the same one the cooldown gate
+      // reads a few lines down, so the model gets the silence it asked
+      // for even though it used the wrong channel.
+      if (this.reflectionSilenceRemaining === 0 && this.reflectionInterval > 0) {
+        const ackTool = toolBlocks.find((b) => b.name === "reflection-ack")
+        if (ackTool) {
+          const silenceForRaw = ackTool.input["silence-for"]
+          const reason = typeof ackTool.input.reason === "string" ? ackTool.input.reason : ""
+          const silenceFor =
+            typeof silenceForRaw === "string"
+              ? Number.parseInt(silenceForRaw, 10)
+              : typeof silenceForRaw === "number"
+                ? Math.floor(silenceForRaw)
+                : 1 // default to 1 when absent, matching text-scan parseReflectionAck
+          if (Number.isFinite(silenceFor) && silenceFor > 0) {
+            this.reflectionSilenceRemaining = silenceFor
+            const reasonSuffix = reason.length > 0 ? ` — ${reason}` : ""
+            writeTranscript(
+              `  ${c.dim("›")} ${c.dim(`reflection ack: silencing next ${silenceFor} checkpoint${silenceFor === 1 ? "" : "s"}${reasonSuffix} (from tool_use fallback)`)}`,
+            )
+          }
+        }
+      }
 
       // max_tokens handling (Fix B + D). The response hit the output-token
       // ceiling. Two shapes:

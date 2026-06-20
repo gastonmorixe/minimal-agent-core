@@ -272,6 +272,14 @@ export interface SendOptions {
   system?: SystemBlock[]
   /** Model ID. Defaults to {@link DEFAULT_MODEL}. */
   model?: string
+  /**
+   * Provider selected at boot, for scoped model resolution. When set,
+   * the canonical transport uses it to disambiguate model entries when
+   * two providers register the same bare model ID (e.g. both OpenCode
+   * and Wafer serve `deepseek-v4-flash`). Optional for backwards
+   * compatibility with the legacy Anthropic-only transport.
+   */
+  selectedProviderId?: string
   /** Max output tokens. Default: 64000 (matches v2.1.91 opus conversation). */
   maxTokens?: number
   /** Stream the response via SSE. Default: true. */

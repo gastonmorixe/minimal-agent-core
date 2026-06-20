@@ -279,6 +279,50 @@ describe("withRetry", () => {
     expect(calls).toBe(1)
   })
 
+  it("propagates stream_truncated WITHOUT retrying (model refusal must never freeze the agent)", async () => {
+    // Regression for session 81adb696 (2026-06-19): a model refusal
+    // (output "Blocked") with no finish_reason caused the server to close
+    // the SSE stream without message_stop. The watchdog threw
+    // `stream_truncated`, which was classified as retryable, causing
+    // the agent to retry FOREVER with no cap — the session froze for
+    // 7+ minutes until killed externally.
+    //
+    // `stream_truncated` is NOT a transient network failure: the server
+    // made an intentional decision (content filter, refusal, early stop)
+    // and retrying with the same prompt will produce the same result.
+    // The error must propagate so the agent surfaces whatever partial
+    // text was produced and moves on.
+    let calls = 0
+    let caught: Error | undefined
+    const yields: string[] = []
+    try {
+      const gen = withRetry(async function* () {
+        calls++
+        if (calls === 1) {
+          yield "Block"
+          yield "ed"
+          throw tagged("stream_truncated")
+        }
+        // Should never reach here
+        yield "should-not-exist"
+        return resp("should-not-exist")
+      })
+      let r: IteratorResult<string, StreamedResponse>
+      // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
+      while (!(r = await gen.next()).done) yields.push(r.value)
+    } catch (e) {
+      caught = e as Error
+    }
+
+    // The error propagated rather than being retried forever.
+    expect(caught).toBeDefined()
+    expect(caught?.message).toContain("stream_truncated")
+    expect(calls).toBe(1) // never retried
+
+    // The partial text that was yielded BEFORE the truncation is preserved.
+    expect(yields.join("")).toBe("Blocked")
+  })
+
   it("respects signal: an abort during backoff stops the loop", async () => {
     const ac = new AbortController()
     let calls = 0

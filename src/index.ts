@@ -796,6 +796,7 @@ async function main() {
   // ctx.env, but those values are scoped to one handler call and don't
   // reach a `process.env`-only reader.
   process.env.MINIMAL_AGENT_MODEL = selectedModel
+  process.env.MINIMAL_AGENT_PROVIDER = selectedProviderId
   process.env.MINIMAL_AGENT_SESSION_ID = agentContext.sessionId
   process.env.MINIMAL_AGENT_PID = String(agentContext.pid)
   process.env.MINIMAL_AGENT_VERSION = agentContext.version
@@ -839,6 +840,7 @@ async function main() {
   // preflight switch) or differ on resume, so the ModelInfo tool must read the
   // current value, never the boot value. Rebound to `agent.getModel()` below.
   let getLiveModelId: () => string = () => selectedModel
+  let getLiveProviderId: () => string | undefined = () => selectedProviderId
   const loader = await PluginLoader.load({
     embeddedDir,
     userDir,
@@ -851,7 +853,7 @@ async function main() {
     // Live current-model snapshot for the decoupled `ModelInfo` tool. Reads the
     // agent's CURRENT model (via the late-bound getter) + the shared registry,
     // so it stays correct across mid-session switches and resume.
-    modelInfoProvider: () => buildModelInfoSnapshot(getLiveModelId()),
+    modelInfoProvider: () => buildModelInfoSnapshot(getLiveModelId(), getLiveProviderId()),
     // Active-provider sub-agent model recommendations (role → concrete model),
     // read live so a delegation plugin maps roles without importing a provider.
     recommendSubagentModels: () => buildSubagentModelRecommendations(getLiveModelId()),
@@ -880,6 +882,14 @@ async function main() {
     (m) => diag.notice("turn-attachments", m),
   )
   const saveEcho = combineTurnDrains(turnAttachmentSeam.drains)
+  // Resolve async prompt fragments BEFORE querying getExtraTools().
+  // The skills plugin's fragment calls registerDynamicTools() to
+  // push skill-declared tools (like police_911) into the loader's
+  // tool index.  If we query too early those tools are missing from
+  // the startup banner, the tool hash, and the first turn's API
+  // request.  getPromptBlockAsync() awaits all fragment promises,
+  // then memoizes; subsequent calls (sync and async) return cached.
+  void (await loader.getPromptBlockAsync())
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
   const hasPromptBlock = loader.getPromptBlock() !== null
@@ -1001,7 +1011,9 @@ async function main() {
     // renders those (Phase 14 — header-name knowledge left core).
     let quotaSegment = ""
     try {
-      const info = await resolveProviderSessionInfo(selectedModel)
+      const info = await resolveProviderSessionInfo(selectedModel, {
+        providerId: selectedProviderId,
+      })
       quotaSegment = formatQuotaWindows(info.quota?.windows ?? [], {
         leadSpaces: 2,
         showOverage: process.env.MINIMAL_AGENT_QUOTA_OVERAGE === "1",
@@ -1214,6 +1226,7 @@ async function main() {
     sid,
     resumeSid,
     selectedModel,
+    providerId: selectedProviderId,
     systemHash,
     toolsHash,
   })
@@ -1229,6 +1242,7 @@ async function main() {
   const agent = new Agent({
     auth,
     model: selectedModel,
+    providerId: selectedProviderId,
     effort,
     speed,
     thinkingDisplay,

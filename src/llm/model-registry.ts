@@ -2,9 +2,19 @@
  * Model + provider registries.
  *
  * `ModelEntry` is the per-model record (id, provider id, surface id,
- * capabilities, pricing, display metadata). The registry is a flat
- * map keyed by canonical id. Aliases (`claude-opus-4-8[1m]`, dated
- * variants) resolve to the same entry.
+ * capabilities, pricing, display metadata). The registry supports two
+ * lookup modes:
+ *
+ * - **Global** (`findModel(id)`): returns the last-registered entry for
+ *   backwards compatibility. Call sites without provider context (legacy
+ *   label formatting, stats) use this.
+ * - **Scoped** (`findModelForProvider(id, providerId)`): returns the
+ *   entry registered by the specified provider. Used at dispatch sites
+ *   where the caller knows which provider was selected (agent booted
+ *   with `--provider <id>`, REPL `.model` switch). When two providers
+ *   register the same bare model ID (e.g. both OpenCode and Wafer claim
+ *   `deepseek-v4-flash`), the scoped lookup disambiguates. Without it,
+ *   last-write-wins silently routes to the wrong adapter.
  *
  * `ProviderAdapter` instances register themselves separately. `run()`
  * (`src/llm/run.ts`) joins the two: resolve `modelId` → `ModelEntry`,
@@ -12,9 +22,7 @@
  *
  * Both registries are module-level singletons. Providers register on
  * import. Models register on import of the provider's `models.ts`.
- * Re-registration with the same id is a no-op (last-write-wins is a
- * common Node-test hazard); call `clearModelRegistry()` /
- * `clearProviderRegistry()` between tests.
+ * Re-registration with the same (id, providerId) is last-write-wins.
  *
  * @module llm/model-registry
  */
@@ -90,6 +98,13 @@ const models = new Map<string, ModelEntry>()
 const aliases = new Map<string, string>()
 
 /**
+ * Per-model-ID map of provider → entry. Used by
+ * {@link findModelForProvider} to disambiguate when two providers
+ * register the same bare model ID.
+ */
+const modelsByProvider = new Map<string, Map<string, ModelEntry>>()
+
+/**
  * Neutral, provider-free fallback id used by {@link getDefaultModelId} when
  * the registry is empty AND no default was declared. It is deliberately NOT
  * a provider SKU : core must name no provider token. A boot path that reaches
@@ -118,7 +133,17 @@ export function registerModel(entry: ModelEntry): void {
       `model id "${entry.id}" collides with an existing alias pointing to "${aliases.get(entry.id)}"`,
     )
   }
+  // Global registry: last write wins (backwards compatible for
+  // un-scoped callers — they get whichever provider registered last).
   models.set(entry.id, entry)
+  // Scoped registry: per-provider entries never collide cross-provider.
+  let perModel = modelsByProvider.get(entry.id)
+  if (!perModel) {
+    perModel = new Map()
+    modelsByProvider.set(entry.id, perModel)
+  }
+  perModel.set(entry.providerId, entry)
+
   if (entry.aliases) {
     for (const alias of entry.aliases) {
       if (alias === entry.id) continue
@@ -145,11 +170,63 @@ export function findModel(idOrAlias: string): ModelEntry | undefined {
  * Look up a model by id or alias. Throws when not registered. Use this
  * at dispatch sites where "unknown model" is a programmer error.
  */
-export function resolveModel(idOrAlias: string): ModelEntry {
+export function resolveModel(idOrAlias: string, providerId?: string): ModelEntry {
+  if (providerId) {
+    const entry = findModelForProvider(idOrAlias, providerId)
+    if (entry) return entry
+    throw new Error(
+      `unknown model "${idOrAlias}" for provider "${providerId}". ` +
+        `Registered: ${[...models.keys()].sort().join(", ")}`,
+    )
+  }
   const entry = findModel(idOrAlias)
   if (!entry) {
     throw new Error(
       `unknown model "${idOrAlias}". Registered: ${[...models.keys()].sort().join(", ")}`,
+    )
+  }
+  return entry
+}
+
+/**
+ * Look up a model by id, scoped to a specific provider. Returns the
+ * entry registered by `providerId` when present; otherwise falls back
+ * to the global last-write-wins entry. Use this at dispatch sites that
+ * have explicit provider context (agent booted with --provider, REPL
+ * .model switch).
+ *
+ * Aliases are resolved through the global alias table (they are
+ * provider-independent — an alias like `opus` always maps to one
+ * canonical id).
+ */
+export function findModelForProvider(
+  idOrAlias: string,
+  providerId: string,
+): ModelEntry | undefined {
+  // Resolve alias first.
+  const directId = aliases.get(idOrAlias) ?? idOrAlias
+  // Provider-scoped lookup: only return the entry from THIS provider.
+  const perModel = modelsByProvider.get(directId)
+  if (perModel) {
+    const scoped = perModel.get(providerId)
+    if (scoped) return scoped
+  }
+  // No entry for this provider → not found. Do NOT fall back to
+  // another provider's entry: the caller explicitly asked for this
+  // provider, and a silent cross-provider return would route to the
+  // wrong adapter.
+  return undefined
+}
+
+/**
+ * Like {@link findModelForProvider} but throws on a miss.
+ */
+export function resolveModelForProvider(idOrAlias: string, providerId: string): ModelEntry {
+  const entry = findModelForProvider(idOrAlias, providerId)
+  if (!entry) {
+    throw new Error(
+      `unknown model "${idOrAlias}" for provider "${providerId}". ` +
+        `Registered: ${[...models.keys()].sort().join(", ")}`,
     )
   }
   return entry
@@ -213,6 +290,7 @@ export function getDefaultModelId(): string {
 export function clearModelRegistry(): void {
   models.clear()
   aliases.clear()
+  modelsByProvider.clear()
   declaredDefaultModelId = null
 }
 
