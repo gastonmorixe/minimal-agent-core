@@ -15,7 +15,7 @@
  * @module llm/model-label
  */
 
-import { findModel } from "./model-registry.ts"
+import { findModel, findModelForProvider } from "./model-registry.ts"
 import { findProviderPlugin, listProviderPlugins } from "./provider-plugin.ts"
 
 /** Generic fallback token: the id minus a trailing date-ish suffix. */
@@ -28,14 +28,15 @@ function genericToken(modelId: string): string {
  * provider short code when no distinct version token can be parsed,
  * and `""` for an empty input.
  */
-export function modelShortLabel(modelId: string): string {
+export function modelShortLabel(modelId: string, providerId?: string): string {
   if (!modelId) return ""
 
   // Registered id: its provider owns both the tag and the token scheme.
-  const providerId = findModel(modelId)?.providerId
-  if (providerId) {
-    const plugin = findProviderPlugin(providerId)
-    const short = plugin?.shortCode ?? providerId
+  const entry = providerId ? findModelForProvider(modelId, providerId) : findModel(modelId)
+  const modelProviderId = entry?.providerId
+  if (modelProviderId) {
+    const plugin = findProviderPlugin(modelProviderId)
+    const short = plugin?.shortCode ?? modelProviderId
     const version = plugin?.modelVersionToken?.(modelId) ?? genericToken(modelId)
     return version && version !== short ? `${short}-${version}` : short
   }

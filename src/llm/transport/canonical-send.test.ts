@@ -389,70 +389,54 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
 // ---------------------------------------------------------------------------
 
 describe("canonicalSendFn — resilience middleware is wired end-to-end", () => {
-  it("recovers from a truncated stream: watchdog trips → retry → fresh attempt", async () => {
+  it("propagates a truncated stream: watchdog trips → error yields to caller (never retries)", async () => {
+    // stream_truncated is NOT retryable (it signals an intentional model
+    // decision, not a transient network failure). The partial text must
+    // still be yielded before the error propagates.
     const origRandom = Math.random
-    Math.random = () => 0 // instant backoff
+    Math.random = () => 0 // instant backoff (shouldn't matter -- no retry)
     let calls = 0
     const networkClient = fakeNetworkClient(() => {
       calls++
-      if (calls === 1) {
-        // Truncated: streams a partial text block then closes WITHOUT
-        // message_stop → the watchdog throws stream_truncated.
-        return sseFromEvents([
-          {
-            type: "message_start",
-            messageId: "m1",
-            modelId: "claude-opus-4-8",
-            initialUsage: { inputTokens: 1, outputTokens: 0 },
-          },
-          { type: "text_start", index: 0 },
-          { type: "text_delta", index: 0, text: "partial" },
-        ])
-      }
-      // Recovery: a complete stream.
+      // Truncated: streams a partial text block then closes WITHOUT
+      // message_stop → the watchdog throws stream_truncated.
       return sseFromEvents([
         {
           type: "message_start",
-          messageId: "m2",
+          messageId: "m1",
           modelId: "claude-opus-4-8",
           initialUsage: { inputTokens: 1, outputTokens: 0 },
         },
         { type: "text_start", index: 0 },
-        { type: "text_delta", index: 0, text: "recovered" },
-        { type: "text_stop", index: 0 },
-        {
-          type: "message_delta",
-          stopReason: "end_turn",
-          usage: { inputTokens: 1, outputTokens: 1 },
-        },
-        { type: "message_stop" },
+        { type: "text_delta", index: 0, text: "partial" },
       ])
     })
 
     const auth: AuthResult = { type: "oauth", token: "test-token" }
     const yields: string[] = []
-    let res: IteratorResult<string, StreamedResponse>
-    const gen = canonicalSendFn({
-      auth,
-      messages,
-      model: "claude-opus-4-8",
-      stream: true,
-      networkClient,
-    })
-    // biome-ignore lint/suspicious/noAssignInExpressions: drain pattern
-    while (!(res = await gen.next()).done) yields.push(res.value)
-    const response = res.value
+    let caught: Error | undefined
+    try {
+      const gen = canonicalSendFn({
+        auth,
+        messages,
+        model: "claude-opus-4-8",
+        stream: true,
+        networkClient,
+      })
+      for await (const chunk of gen) yields.push(chunk)
+    } catch (err) {
+      caught = err as Error
+    } finally {
+      Math.random = origRandom
+    }
 
-    Math.random = origRandom
-
-    expect(calls).toBe(2) // tripped once, recovered on retry
-    const joined = yields.join("")
-    expect(joined).toContain("partial")
-    expect(joined).toContain("↳ stream stalled — retrying")
-    expect(joined).toContain("recovered")
-    // Final structured response is from the successful attempt.
-    expect(response.text).toBe("recovered")
-    expect(response.stopReason).toBe("end_turn")
+    // The partial text was yielded before the truncation.
+    expect(yields.join("")).toBe("partial")
+    // The error propagated (not retried forever).
+    expect(caught).toBeDefined()
+    expect(caught?.message).toContain("server truncated")
+    // Only one attempt was made.
+    expect(calls).toBe(1)
   }, 15_000)
 })
 

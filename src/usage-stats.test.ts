@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { clearModelRegistry, registerModel } from "./llm/model-registry.ts"
+import { clearModelRegistry, findModel, registerModel } from "./llm/model-registry.ts"
 import { ANTHROPIC_OPUS_4X_STANDARD } from "./llm/pricing.ts"
 import { makeCharRatioEstimator } from "./llm/token-estimate.ts"
 import type { SessionRecord } from "./session-store.ts"
@@ -145,6 +145,103 @@ describe("collectSessionEvents", () => {
     const ev = collectSessionEvents(recs)
     expect(ev[0].providerId).toBe("unknown")
     expect(ev[0].modelId).toBe("mystery-model")
+  })
+
+  it("uses meta.provider to disambiguate when multiple providers register the same model", () => {
+    // Register the same model under two providers — last-write-wins globally
+    // would be "wafer", but the meta record pins it to "opencode".
+    registerModel({
+      id: "deepseek-v4-flash",
+      providerId: "opencode",
+      surfaceId: "custom",
+      displayName: "DS v4 Flash (OpenCode)",
+      capabilities: {} as any,
+      pricing: {
+        inputUSD: 0.15,
+        outputUSD: 0.6,
+        cacheReadUSD: 0.075,
+        cacheWriteUSD: 0.15,
+        webSearchPerCallUSD: 0,
+      },
+      estimateTokens: makeCharRatioEstimator(3.5),
+    })
+    registerModel({
+      id: "deepseek-v4-flash",
+      providerId: "wafer",
+      surfaceId: "custom",
+      displayName: "DS v4 Flash (Wafer)",
+      capabilities: {} as any,
+      pricing: {
+        inputUSD: 0.15,
+        outputUSD: 0.6,
+        cacheReadUSD: 0.075,
+        cacheWriteUSD: 0.15,
+        webSearchPerCallUSD: 0,
+      },
+      estimateTokens: makeCharRatioEstimator(3.5),
+    })
+    // Global (last-write-wins) returns Wafer
+    expect(findModel("deepseek-v4-flash")?.providerId).toBe("wafer")
+
+    // But the meta provider record should give us Opencode
+    const recs = [
+      {
+        kind: "meta",
+        formatVersion: 1,
+        sid: "s",
+        createdAt: "2026-06-01T00:00:00.000Z",
+        model: "deepseek-v4-flash",
+        cwd: "/x",
+        systemHash: "h",
+        toolsHash: "t",
+        agentVersion: "test",
+        provider: "opencode",
+      } as SessionRecord,
+      assistant("2026-06-01T01:00:00.000Z", { input_tokens: 100 }),
+    ]
+    const ev = collectSessionEvents(recs)
+    expect(ev[0].providerId).toBe("opencode")
+    expect(ev[0].modelId).toBe("deepseek-v4-flash")
+  })
+
+  it("falls back to global lookup when meta.provider is absent (backward compat)", () => {
+    registerModel({
+      id: "deepseek-v4-flash",
+      providerId: "opencode",
+      surfaceId: "custom",
+      displayName: "DS v4 Flash (OpenCode)",
+      capabilities: {} as any,
+      pricing: {
+        inputUSD: 0.15,
+        outputUSD: 0.6,
+        cacheReadUSD: 0.075,
+        cacheWriteUSD: 0.15,
+        webSearchPerCallUSD: 0,
+      },
+      estimateTokens: makeCharRatioEstimator(3.5),
+    })
+    registerModel({
+      id: "deepseek-v4-flash",
+      providerId: "wafer",
+      surfaceId: "custom",
+      displayName: "DS v4 Flash (Wafer)",
+      capabilities: {} as any,
+      pricing: {
+        inputUSD: 0.15,
+        outputUSD: 0.6,
+        cacheReadUSD: 0.075,
+        cacheWriteUSD: 0.15,
+        webSearchPerCallUSD: 0,
+      },
+      estimateTokens: makeCharRatioEstimator(3.5),
+    })
+    // No provider in meta → global last-write-wins → Wafer
+    const recs = [
+      meta("deepseek-v4-flash"),
+      assistant("2026-06-01T01:00:00.000Z", { input_tokens: 100 }),
+    ]
+    const ev = collectSessionEvents(recs)
+    expect(ev[0].providerId).toBe("wafer")
   })
 })
 

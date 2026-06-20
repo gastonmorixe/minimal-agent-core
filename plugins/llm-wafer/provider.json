@@ -1,0 +1,8 @@
+{
+  "id": "wafer",
+  "name": "LLM Provider: Wafer (Serverless)",
+  "version": "0.1.0",
+  "description": "Wafer Serverless (pass.wafer.ai) — an OpenAI Chat Completions-compatible gateway to many upstream models (GLM, Kimi, Qwen, DeepSeek, MiniMax). Reuses plugins/llm-openai's wire layer; auth via minimal-agent's provider auth store.",
+  "entry": "./index.ts",
+  "export": "waferProviderPlugin"
+}

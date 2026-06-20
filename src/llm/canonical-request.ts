@@ -142,6 +142,15 @@ export interface CanonicalRequest {
   modelId: string
 
   /**
+   * Provider selected at boot, for scoped model resolution. When set,
+   * `run()` resolves the model via `resolveModelForProvider(modelId, providerId)`
+   * instead of the un-scoped global lookup. This disambiguates when two
+   * providers register the same bare model ID (e.g. both OpenCode and
+   * Wafer serve `deepseek-v4-flash`).
+   */
+  providerId?: string
+
+  /**
    * System prefix. Array of blocks so the caller can attach per-block
    * cache hints. The adapter renders to the provider's system field
    * (Anthropic `system: []`, OpenAI Chat first message, OpenAI

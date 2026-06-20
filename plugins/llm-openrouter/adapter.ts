@@ -14,7 +14,8 @@
  * @module llm/providers/openrouter/adapter
  */
 
-import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import { type CanonicalEvent, isEvent } from "@minimal-agent/plugin-api/llm/canonical-events"
+import { classifyUpstreamError } from "@minimal-agent/plugin-api/llm/errors"
 import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
 import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plugin"
 import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/types/plugin"
@@ -34,7 +35,11 @@ import {
 
 import { openRouterApiKeyAuth } from "./auth.ts"
 import { registerOpenRouterModel, registerOpenRouterModels } from "./models.ts"
-import { fetchOpenRouterSessionInfo, setOpenRouterRateLimits } from "./session-info.ts"
+import {
+  accumulateOpenRouterUsage,
+  fetchOpenRouterSessionInfo,
+  setOpenRouterRateLimits,
+} from "./session-info.ts"
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -81,7 +86,7 @@ export const openrouterAdapter: ProviderAdapter = {
 
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`OpenRouter API ${response.status}: ${text}`)
+      throw taggedHttpError("OpenRouter API", response.status, text)
     }
     // Capture rate-limit headers for the status-bar footer. Best-effort +
     // non-throwing; no behavior change to the stream below.
@@ -89,7 +94,14 @@ export const openrouterAdapter: ProviderAdapter = {
     if (!response.body) {
       throw new Error("OpenRouter API: empty response body for stream")
     }
-    yield* translateOpenAIChatStream(parseSse<OpenAIChatChunk>(response.body))
+    // Accumulate usage from the stream's terminal message_delta event so the
+    // footer displays per-session token totals and estimated cost.
+    for await (const ev of translateOpenAIChatStream(parseSse<OpenAIChatChunk>(response.body))) {
+      if (isEvent(ev, "message_delta")) {
+        accumulateOpenRouterUsage(ev.usage)
+      }
+      yield ev
+    }
   },
 
   /**
@@ -109,6 +121,40 @@ export const openrouterAdapter: ProviderAdapter = {
     if (balancedPick) recs.push({ role: "balanced", modelId: balancedPick.id })
     return recs
   },
+}
+
+/**
+ * Parse the OpenRouter error code out of a non-2xx JSON body. OpenRouter
+ * returns the standard OpenAI error shape:
+ * `{"error":{"message":"…","type":"…","code":"…"}}`.
+ */
+function parseOpenRouterErrorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: string; type?: string } }
+    return parsed?.error?.code ?? parsed?.error?.type ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Build a tagged HTTP error so the provider-neutral retry coordinator can
+ * recover from a pre-stream rejection (429 rate limit, 5xx overload, 503
+ * capacity shedding, …) instead of stopping the agent.
+ *
+ * The `streamErrorType` property is what `src/llm/run.ts` checks to decide
+ * whether to retry. Without it, every non-2xx from OpenRouter is fatal.
+ */
+function taggedHttpError(
+  label: string,
+  status: number,
+  body: string,
+): Error & { streamErrorType?: string } {
+  const upstreamCode = parseOpenRouterErrorCode(body)
+  const { streamErrorType } = classifyUpstreamError({ httpStatus: status, upstreamCode })
+  const err = new Error(`${label} ${status}: ${body}`) as Error & { streamErrorType?: string }
+  if (streamErrorType) err.streamErrorType = streamErrorType
+  return err
 }
 
 /** Register the OpenRouter adapter + catalog. Idempotent. */

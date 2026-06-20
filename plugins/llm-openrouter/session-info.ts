@@ -34,6 +34,14 @@ export interface CachedOpenRouterRateLimits {
 
 let cache: { rateLimits: Map<string, string>; at: number } | null = null
 
+/** Accumulated usage from this session's responses. */
+let sessionUsage: {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  at: number
+} | null = null
+
 /**
  * Copy the `x-ratelimit-*` entries from a successful response's headers into the
  * module cache. Non-throwing (must never break the request path). Empty captures
@@ -54,14 +62,45 @@ export function setOpenRouterRateLimits(headers: Headers): void {
   }
 }
 
+/**
+ * Accumulate token usage from a completed response. Called by the adapter
+ * after each successful stream. The usage feeds the footer's session-cost
+ * display.
+ */
+export function accumulateOpenRouterUsage(usage: {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens?: number
+}): void {
+  if (sessionUsage) {
+    sessionUsage.inputTokens += usage.inputTokens
+    sessionUsage.outputTokens += usage.outputTokens
+    sessionUsage.cacheReadTokens += usage.cacheReadTokens ?? 0
+    sessionUsage.at = Date.now()
+  } else {
+    sessionUsage = {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens ?? 0,
+      at: Date.now(),
+    }
+  }
+}
+
 /** Read the latest snapshot, or `null` if nothing has been cached this session. */
 export function getOpenRouterRateLimits(): CachedOpenRouterRateLimits | null {
   return cache
 }
 
+/** Read accumulated session usage. */
+export function getOpenRouterSessionUsage(): typeof sessionUsage {
+  return sessionUsage
+}
+
 /** Reset the cache. Tests call this between cases so fixtures don't leak. */
 export function clearOpenRouterRateLimits(): void {
   cache = null
+  sessionUsage = null
 }
 
 /**

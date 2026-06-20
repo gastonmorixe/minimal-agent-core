@@ -220,3 +220,31 @@ describe("executeTool — whitespace-confusable path self-heal", () => {
     expect(readFileSync(onDisk, "utf-8")).toContain("beta")
   })
 })
+
+describe("executeTool — reflection-ack (model-as-tool fallback)", () => {
+  it("returns success with corrective hint so flash models learn the right syntax", async () => {
+    const r = await executeTool("reflection-ack", {
+      "silence-for": "2",
+      reason: "batch ops",
+    })
+    expect(r.is_error).toBe(false)
+    expect(r.content).toContain("reflection-ack applied")
+    expect(r.content).toContain("not as a tool call")
+    expect(r.content).toContain("inline text")
+    expect(r.content).not.toContain("Unknown tool")
+  })
+
+  it("returns success even with minimal input (no silence-for)", async () => {
+    const r = await executeTool("reflection-ack", {
+      reason: "sustained work",
+    })
+    expect(r.is_error).toBe(false)
+    expect(r.content).toContain("reflection-ack applied")
+  })
+
+  it("returns success with empty input", async () => {
+    const r = await executeTool("reflection-ack", {})
+    expect(r.is_error).toBe(false)
+    expect(r.content).toContain("reflection-ack applied")
+  })
+})

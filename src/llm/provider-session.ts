@@ -22,9 +22,9 @@ import { resolveModel } from "./model-registry.ts"
 import { findProviderPlugin, type ProviderSessionInfo } from "./provider-plugin.ts"
 
 /** Model context window (tokens) from the registry, or `undefined` if unknown. */
-export function contextWindowForModel(modelId: string): number | undefined {
+export function contextWindowForModel(modelId: string, providerId?: string): number | undefined {
   try {
-    return resolveModel(modelId).capabilities?.contextWindow
+    return resolveModel(modelId, providerId).capabilities?.contextWindow
   } catch {
     return undefined
   }
@@ -35,10 +35,10 @@ export function contextWindowForModel(modelId: string): number | undefined {
  * without asking its provider (used as the fallback when a provider declares
  * no `fetchSessionInfo`, or fails, or the model is unknown).
  */
-function contextOnly(modelId: string): ProviderSessionInfo {
+function contextOnly(modelId: string, providerId?: string): ProviderSessionInfo {
   return {
-    contextWindow: contextWindowForModel(modelId),
-    modelLabel: modelShortLabel(modelId),
+    contextWindow: contextWindowForModel(modelId, providerId),
+    modelLabel: modelShortLabel(modelId, providerId),
   }
 }
 
@@ -58,17 +58,18 @@ export interface ResolveSessionInfoOptions {
  */
 export async function resolveProviderSessionInfo(
   modelId: string,
-  opts: ResolveSessionInfoOptions = {},
+  opts: ResolveSessionInfoOptions & { providerId?: string } = {},
 ): Promise<ProviderSessionInfo> {
-  let providerId: string | undefined
+  const providerId = opts.providerId
+  let resolvedProviderId: string | undefined
   try {
-    providerId = resolveModel(modelId).providerId
+    resolvedProviderId = resolveModel(modelId, providerId).providerId
   } catch {
-    return contextOnly(modelId)
+    return contextOnly(modelId, providerId)
   }
 
-  const plugin = findProviderPlugin(providerId)
-  if (!plugin?.fetchSessionInfo) return contextOnly(modelId)
+  const plugin = findProviderPlugin(resolvedProviderId)
+  if (!plugin?.fetchSessionInfo) return contextOnly(modelId, providerId)
 
   try {
     const info = await plugin.fetchSessionInfo({
@@ -76,17 +77,14 @@ export async function resolveProviderSessionInfo(
       signal: opts.signal,
       networkClient: opts.networkClient,
     })
-    if (!info) return contextOnly(modelId)
-    // Backfill anything the provider left blank from the registry, so the
-    // context segment + label never go dark just because a provider only
-    // cared about quota.
+    if (!info) return contextOnly(modelId, providerId)
     return {
-      contextWindow: info.contextWindow ?? contextWindowForModel(modelId),
-      modelLabel: info.modelLabel ?? modelShortLabel(modelId),
+      contextWindow: info.contextWindow ?? contextWindowForModel(modelId, providerId),
+      modelLabel: info.modelLabel ?? modelShortLabel(modelId, providerId),
       quota: info.quota,
     }
   } catch {
-    return contextOnly(modelId)
+    return contextOnly(modelId, providerId)
   }
 }
 
@@ -103,15 +101,16 @@ export async function resolveProviderSessionInfo(
  */
 export async function primeProviderSessionInfo(
   modelId: string,
-  opts: ResolveSessionInfoOptions = {},
+  opts: ResolveSessionInfoOptions & { providerId?: string } = {},
 ): Promise<void> {
-  let providerId: string | undefined
+  const providerId = opts.providerId
+  let resolvedProviderId: string | undefined
   try {
-    providerId = resolveModel(modelId).providerId
+    resolvedProviderId = resolveModel(modelId, providerId).providerId
   } catch {
     return
   }
-  const plugin = findProviderPlugin(providerId)
+  const plugin = findProviderPlugin(resolvedProviderId)
   if (!plugin?.primeSessionInfo) return
   try {
     await plugin.primeSessionInfo({

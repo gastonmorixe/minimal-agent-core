@@ -697,6 +697,9 @@ export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalReques
     messages: opts.messages.map(legacyMessageToCanonical),
     stream: opts.stream ?? true,
   }
+  if (opts.selectedProviderId) {
+    req.providerId = opts.selectedProviderId
+  }
   if (opts.system) req.system = opts.system.map(systemBlockToCanonical)
   if (opts.tools && opts.tools.length > 0) {
     req.tools = opts.tools.map((t) => ({

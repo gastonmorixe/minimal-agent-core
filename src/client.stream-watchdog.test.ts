@@ -330,31 +330,18 @@ describe("client.streamWatchdog", () => {
     expect(calls).toBe(1)
   }, 10_000)
 
-  it("throws stream_truncated when body closes cleanly but never sent message_stop", async () => {
+  it("throws stream_truncated when body closes cleanly but never sent message_stop — error propagates, never retries", async () => {
     // The classic 2026-05-25 bug shape: a perfectly-formed-looking stream
-    // that just stops short of message_stop. The body close path takes
-    // this path; the idle watchdog isn't what catches it (the body
-    // closes before idle timeout would fire).
+    // that just stops short of message_stop. stream_truncated is NOT a
+    // retryable error (it signals an intentional model refusal or content
+    // filter decision, not a transient network failure), so the error must
+    // propagate to the caller after yielding whatever partial text arrived.
     let calls = 0
     const networkClient = fakeNetworkClient(() => {
       calls++
-      if (calls === 1) {
-        return rawSseResponse([
-          // Note: NO message_stop at the end.
-          { type: "message_start", message: { id: "msg_x", usage: { input_tokens: 1 } } },
-          {
-            type: "content_block_start",
-            index: 0,
-            content_block: { type: "text", text: "" },
-          },
-          {
-            type: "content_block_delta",
-            index: 0,
-            delta: { type: "text_delta", text: "incomplete" },
-          },
-        ])
-      }
       return rawSseResponse([
+        // Note: NO message_stop at the end.
+        { type: "message_start", message: { id: "msg_x", usage: { input_tokens: 1 } } },
         {
           type: "content_block_start",
           index: 0,
@@ -363,19 +350,13 @@ describe("client.streamWatchdog", () => {
         {
           type: "content_block_delta",
           index: 0,
-          delta: { type: "text_delta", text: "fresh" },
+          delta: { type: "text_delta", text: "incomplete" },
         },
-        { type: "content_block_stop", index: 0 },
-        { type: "message_delta", delta: { stop_reason: "end_turn" } },
-        { type: "message_stop" },
       ])
     })
 
     const { events: diagEvents, dispose } = collectDiag()
     try {
-      // The retry yields the partial `incomplete`, then the marker, then
-      // the new `fresh` text. We collect the generator yields to assert
-      // ordering AND that the marker landed between them.
       const yielded: string[] = []
       const gen = sendMessage({
         auth,
@@ -386,17 +367,21 @@ describe("client.streamWatchdog", () => {
         streamIdleTimeoutMs: 30_000, // not relevant for this test
       })
       for await (const chunk of gen) yielded.push(chunk)
-
-      const joined = yielded.join("")
-      // Marker appears between the two attempts' text.
-      expect(joined).toContain("incomplete")
-      expect(joined).toContain("↳ stream stalled — retrying")
-      expect(joined.indexOf("incomplete")).toBeLessThan(joined.indexOf("↳"))
-      expect(joined.indexOf("↳")).toBeLessThan(joined.indexOf("fresh"))
+      // Should never reach here — the error must propagate.
+      expect("unreachable").toBe("stream_truncated should have propagated")
+    } catch (err) {
+      const msg = (err as Error).message
+      expect(msg).toContain("stream_truncated")
+      expect(msg).toContain("server truncated")
     } finally {
       dispose()
     }
 
+    // Only one attempt: the truncated stream was NOT retried.
+    expect(calls).toBe(1)
+
+    // The partial text that arrived before the truncation is preserved
+    // in the yielded stream.
     const stalled = diagEvents.find((e) => e.source === "api.stream-stalled")
     expect(stalled).toBeDefined()
     expect(stalled?.structuredData?.["error-type"]).toBe("stream_truncated")
@@ -404,7 +389,7 @@ describe("client.streamWatchdog", () => {
   }, 30_000)
 
   it("emits api.retry-sustained warning at every 12th retry", async () => {
-    // Force the first 13 attempts to fail with stream_truncated, then
+    // Force the first 13 attempts to fail with overloaded_error, then
     // succeed on the 14th. The sustained-retry warning fires on attempt
     // 13 (after 12 retries since attempt 1). Then a retry-success.
     let calls = 0
@@ -412,7 +397,7 @@ describe("client.streamWatchdog", () => {
       calls++
       if (calls <= 13) {
         return rawSseResponse([
-          { type: "message_start", message: { id: "x", usage: { input_tokens: 1 } } },
+          { type: "error", error: { type: "overloaded_error", message: "overloaded" } },
         ])
       }
       return rawSseResponse([

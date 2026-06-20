@@ -30,6 +30,7 @@ import type {
   ModelInfoSnapshot,
   PromptFragmentContext,
   PromptFragmentHandler,
+  ResolvedHandler,
 } from "../types.ts"
 
 import { resolvePath } from "./helpers.ts"
@@ -80,8 +81,16 @@ export function startFragment(
   agent: AgentContext | undefined,
   pluginId: string,
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
+  registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
 ): Promise<string | null> {
-  return runFragment(frag, packageDir, agent, pluginId, modelInfoProvider).catch((e) => {
+  return runFragment(
+    frag,
+    packageDir,
+    agent,
+    pluginId,
+    modelInfoProvider,
+    registerDynamicTools,
+  ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
     )
@@ -100,6 +109,7 @@ async function runFragment(
   agent: AgentContext | undefined,
   pluginId: string,
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
+  registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -140,6 +150,10 @@ async function runFragment(
       // `tools.userDefined`). Subprocess fragments don't get this (no JSON
       // round-trip wired); they remain `queryModelInfo`-less.
       ...(modelInfoProvider ? { queryModelInfo: modelInfoProvider } : {}),
+      // Dynamic tool registration so prompt-fragment producers (e.g. the
+      // skills plugin) can push skill-declared tools into the loader's tool
+      // index. Absent for subprocess fragments; the Module path only.
+      ...(registerDynamicTools ? { registerDynamicTools } : {}),
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null

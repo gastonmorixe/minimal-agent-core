@@ -1231,7 +1231,8 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   "overloaded_error",
   "api_error",
   "stream_idle",
-  "stream_truncated",
+  // NOTE: stream_truncated is intentionally NOT retried. See
+  // llm/transport/retry.ts for the rationale — same applies here.
   "attempt_too_long",
   // Connection-level transient failures (TCP connect timeout, reset socket,
   // DNS blip, HTTP/2 GOAWAY mid-dial). These throw out of the transport

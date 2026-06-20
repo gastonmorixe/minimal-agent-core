@@ -70,6 +70,13 @@ export interface MetaRecord {
   parentSid?: string
   /** ISO 8601 timestamp the fork was created. Pairs with {@link parentSid}. */
   forkedAt?: string
+  /**
+   * Provider id that ran this session (e.g. `"anthropic"`, `"opencode"`,
+   * `"wafer"`). Written at session open/fork time so usage-stats can
+   * disambiguate models registered by multiple providers. Absent on old
+   * sessions written before this field existed.
+   */
+  provider?: string
 }
 
 export interface UserRecord {
@@ -433,6 +440,7 @@ export class SessionStore {
     argv?: string[]
     dir?: string
     existsOk?: boolean
+    provider?: string
     /** Override the timestamp; tests use this for determinism. */
     now?: () => Date
   }): SessionStore {
@@ -468,6 +476,7 @@ export class SessionStore {
         systemHash: opts.systemHash,
         toolsHash: opts.toolsHash,
         agentVersion: opts.agentVersion,
+        ...(opts.provider ? { provider: opts.provider } : {}),
       }
       writeFileSync(store.path, `${JSON.stringify(meta)}\n`, { flag: "wx" })
 
@@ -532,6 +541,7 @@ export class SessionStore {
     agentVersion: string
     argv?: string[]
     dir?: string
+    provider?: string
     /** Allow forking onto an existing dstSid file. Default false. */
     existsOk?: boolean
     /** Override the timestamp; tests use this for determinism. */
@@ -580,6 +590,7 @@ export class SessionStore {
       agentVersion: opts.agentVersion,
       parentSid: opts.srcSid,
       forkedAt: createdAt,
+      ...(opts.provider ? { provider: opts.provider } : {}),
     }
     const lines: string[] = [JSON.stringify(meta)]
     for (const r of srcRecords) {

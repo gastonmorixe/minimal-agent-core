@@ -32,6 +32,8 @@ export interface SessionStoreBootOptions {
   resumeSid: string | null
   /** The resolved model id recorded in the meta record. */
   selectedModel: string
+  /** The resolved provider id recorded in the meta record. */
+  providerId: string
   /** Hash of the system-prompt recipe (resume drift detection). */
   systemHash: string
   /** Hash of the advertised tool set (resume drift detection). */
@@ -57,7 +59,7 @@ export interface SessionStoreBootResult {
 export async function bootSessionStores(
   opts: SessionStoreBootOptions,
 ): Promise<SessionStoreBootResult> {
-  const { sid, resumeSid, selectedModel, systemHash, toolsHash } = opts
+  const { sid, resumeSid, selectedModel, providerId, systemHash, toolsHash } = opts
   const output = opts.output ?? process.stderr
 
   // Open the session store. Two paths:
@@ -99,6 +101,7 @@ export async function bootSessionStores(
           toolsHash,
           agentVersion: VERSION,
           argv: process.argv,
+          provider: providerId,
         })
       : SessionStore.open({
           sid,
@@ -108,6 +111,7 @@ export async function bootSessionStores(
           toolsHash,
           agentVersion: VERSION,
           argv: process.argv,
+          provider: providerId,
         })
   } catch (err) {
     // Persistence is best-effort; never block startup on it. The agent

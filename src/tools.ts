@@ -27,8 +27,8 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { basename, dirname } from "node:path"
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { basename, dirname, resolve } from "node:path"
 
 import { configPath as userConfigPath } from "./config.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
@@ -609,6 +609,19 @@ async function dispatch(
           "the agent loop. File a bug : see `agent.ts` Mode interceptor.",
         is_error: true,
       }
+    case "reflection-ack":
+      // Model confused the inline XML tag for a tool call (common with
+      // flash/small models that interpret "emit" as "call a tool").
+      // Return a neutral success: the agent loop reads the tool input
+      // and applies the silence there. The content doubles as a
+      // corrective hint so the model learns to write the tag as text
+      // next time.
+      return {
+        content:
+          "reflection-ack applied. Next time, write this tag as inline text " +
+          "in your response body, not as a tool call.",
+        is_error: false,
+      }
     default:
       return { content: `Unknown tool: ${name}`, is_error: true }
   }
@@ -797,7 +810,6 @@ async function execBash(
     // Regression test: src/tools-bash-cd.test.ts.
     const cdMatch = command.match(/^cd\s+(.+?)\s*$/)
     if (cdMatch && !/[;&|<>`$()]/.test(cdMatch[1])) {
-      const { resolve } = require("node:path")
       const raw = cdMatch[1].trim()
       // Strip a single matched pair of surrounding quotes.
       const unquoted =
@@ -830,13 +842,11 @@ async function execBash(
     // ANSI escapes that would corrupt our tool-output rendering. Size
     // belongs to env vars; capabilities belong to TERM.
     const env: Record<string, string> = { ...process.env, TERM: "dumb" }
-    const stdoutCols = process.stdout.columns
-    const stdoutRows = process.stdout.rows
-    if (typeof stdoutCols === "number" && stdoutCols > 0) {
-      env.COLUMNS = String(Math.floor(stdoutCols))
+    if (typeof process.stdout.columns === "number" && process.stdout.columns > 0) {
+      env.COLUMNS = String(Math.floor(process.stdout.columns))
     }
-    if (typeof stdoutRows === "number" && stdoutRows > 0) {
-      env.LINES = String(Math.floor(stdoutRows))
+    if (typeof process.stdout.rows === "number" && process.stdout.rows > 0) {
+      env.LINES = String(Math.floor(process.stdout.rows))
     }
     const proc = Bun.spawn(["bash", "-c", command], {
       cwd: bashCwd,
@@ -1208,8 +1218,6 @@ async function execWrite(
 
   try {
     // Ensure parent directory exists
-    const { dirname } = require("node:path")
-    const { mkdirSync } = require("node:fs")
     mkdirSync(dirname(filePath), { recursive: true })
 
     const file = Bun.file(filePath)

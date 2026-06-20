@@ -29,7 +29,7 @@ import { defaultNetworkClient } from "../network/index.ts"
 import type { CanonicalEvent } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { UnsupportedCapabilityError } from "./errors.ts"
-import { resolveModel, resolveProvider } from "./model-registry.ts"
+import { resolveModel, resolveModelForProvider, resolveProvider } from "./model-registry.ts"
 import type { RunContext } from "./provider.ts"
 
 /** Options that don't belong on `CanonicalRequest`. */
@@ -55,7 +55,9 @@ export interface RunOptions {
  * a provider-specific error shape.
  */
 export async function* run(req: CanonicalRequest, opts: RunOptions): AsyncIterable<CanonicalEvent> {
-  const model = resolveModel(req.modelId)
+  const model = req.providerId
+    ? resolveModelForProvider(req.modelId, req.providerId)
+    : resolveModel(req.modelId)
   const adapter = resolveProvider(model.providerId)
   const validation = adapter.validate(req, model)
   let effective: CanonicalRequest = req

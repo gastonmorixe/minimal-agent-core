@@ -674,6 +674,25 @@ export interface PromptFragmentContext {
    * `const info = ctx.queryModelInfo?.()`.
    */
   queryModelInfo?: () => ModelInfoSnapshot | undefined
+  /**
+   * Register dynamic tool handlers into the PluginLoader's tool index.
+   *
+   * Exposed to prompt-fragment producers so the skills plugin can push
+   * skill-declared tools (from SKILL.md `metadata.tools` or from
+   * `scripts/register.ts`) into the loader's tool index at boot time
+   * — before any turn starts. Handlers registered here appear in
+   * {@link PluginLoader.getExtraTools} and are dispatched by
+   * {@link PluginLoader.dispatch} alongside manifest-declared tools.
+   *
+   * A handler that collides with an existing tool name (core built-in
+   * or already-registered plugin tool) is dropped with a diagnostic.
+   * The fragment handler owns validation of the raw ToolSpec before
+   * conversion to {@link ResolvedHandler}.
+   *
+   * Present only for in-process fragments; absent for subprocess
+   * fragments. Consumers must narrow: `ctx.registerDynamicTools?.(...)`.
+   */
+  registerDynamicTools?: (handlers: ResolvedHandler[]) => void
 }
 
 /**

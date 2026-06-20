@@ -671,6 +671,66 @@ describe("MetaRecord (parentSid / forkedAt)", () => {
     expect(records).toHaveLength(1)
     expect((records[0] as MetaRecord).sid).toBe(sid)
   })
+
+  it("open() stores provider when passed", () => {
+    const dir = tmp()
+    const store = SessionStore.open({
+      ...baseOpenOpts,
+      sid: "ma-provider-open",
+      dir,
+      provider: "opencode",
+    })
+    const meta = readJsonl(store.path)[0] as MetaRecord
+    expect(meta.provider).toBe("opencode")
+  })
+
+  it("open() omits provider when not passed (backward compat)", () => {
+    const dir = tmp()
+    const store = SessionStore.open({ ...baseOpenOpts, sid: "ma-no-provider-open", dir })
+    const meta = readJsonl(store.path)[0] as MetaRecord
+    expect(meta.provider).toBeUndefined()
+  })
+
+  it("fork() stores provider when passed", () => {
+    const dir = tmp()
+    const srcSid = "ma-provider-fork-src"
+    const dstSid = "ma-provider-fork-dst"
+    SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir, provider: "opencode" })
+    const meta = readJsonl(sessionFilePath(dstSid, dir))[0] as MetaRecord
+    expect(meta.provider).toBe("opencode")
+  })
+
+  it("fork() omits provider when not passed (backward compat)", () => {
+    const dir = tmp()
+    const srcSid = "ma-no-provider-fork-src"
+    const dstSid = "ma-no-provider-fork-dst"
+    SessionStore.open({ ...baseOpenOpts, sid: srcSid, dir })
+    SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
+    const meta = readJsonl(sessionFilePath(dstSid, dir))[0] as MetaRecord
+    expect(meta.provider).toBeUndefined()
+  })
+
+  it("old session files (no provider field) still parse cleanly (backward compat)", () => {
+    const dir = tmp()
+    const sid = "ma-legacy-provider"
+    const path = join(dir, `${sid}.jsonl`)
+    const legacyMeta = {
+      kind: "meta",
+      formatVersion: 1,
+      sid,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      model: "claude-sonnet-4-6",
+      cwd: "/tmp",
+      systemHash: "deadbeef",
+      toolsHash: "cafebabe",
+      agentVersion: "legacy",
+    }
+    writeFileSync(path, `${JSON.stringify(legacyMeta)}\n`)
+    const { records, dropped } = parseLines(readFileSync(path, "utf-8"))
+    expect(dropped).toHaveLength(0)
+    expect((records[0] as MetaRecord).provider).toBeUndefined()
+  })
 })
 
 describe("SessionStore.cleanupIfUnused", () => {

@@ -277,6 +277,7 @@ export class PluginLoader {
    */
   private readonly aliasIndex: Map<string, string>
   private readonly tagIndex: Map<string, ResolvedHandler>
+  private readonly coreToolNames: Set<string>
   private readonly modes: LoadedMode[]
   private readonly defaultModeId: string | null
   private readonly timeoutMs: number
@@ -346,11 +347,13 @@ export class PluginLoader {
     modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
     recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined,
     hostOptions: { sessionsDir?: string } | undefined,
+    coreToolNames: Set<string> = new Set(),
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
     this.aliasIndex = aliasIndex
     this.tagIndex = tagIndex
+    this.coreToolNames = coreToolNames
     this.modes = modes
     this.defaultModeId = defaultModeId
     this.timeoutMs = timeoutMs
@@ -768,6 +771,9 @@ export class PluginLoader {
           agent,
           pkg.manifest.id,
           opts.modelInfoProvider,
+          (handlers: ResolvedHandler[]) => {
+            loaderRef?.registerDynamicTools(pkg.manifest.id, handlers)
+          },
         )
         pendingFrags.push({
           pluginId: pkg.manifest.id,
@@ -802,6 +808,7 @@ export class PluginLoader {
       opts.modelInfoProvider,
       opts.recommendSubagentModels,
       opts.hostOptions,
+      coreToolNames,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -1241,6 +1248,39 @@ export class PluginLoader {
    */
   hasTool(name: string): boolean {
     return this.toolIndex.has(name) || this.aliasIndex.has(name)
+  }
+
+  /**
+   * Register dynamic tool handlers into the loader's tool index.
+   *
+   * Called by prompt-fragment producers (e.g. the skills plugin) to push
+   * skill-declared tools into the model's function list at boot time —
+   * before any turn starts. Handlers registered here appear in
+   * {@link getExtraTools} and are dispatched by {@link dispatch} alongside
+   * manifest-declared tools.
+   *
+   * A handler whose name collides with an existing tool (core built-in
+   * or already-registered plugin tool) is dropped with a diagnostic.
+   *
+   * @param pluginId - The plugin that owns these dynamic handlers.
+   * @param handlers - ResolvedHandler objects to register.
+   */
+  registerDynamicTools(pluginId: string, handlers: ResolvedHandler[]): void {
+    for (const h of handlers) {
+      const name = h.definition.trigger.type === "tool" ? h.definition.trigger.tool.name : undefined
+      if (!name) continue
+      if (this.coreToolNames.has(name)) {
+        this.logger(`dynamic tool "${name}" from ${pluginId} collides with a core tool; skipping`)
+        continue
+      }
+      if (this.toolIndex.has(name) || this.aliasIndex.has(name)) {
+        this.logger(`dynamic tool "${name}" from ${pluginId} collides with existing tool; skipping`)
+        continue
+      }
+      this.toolIndex.set(name, h)
+      const pkg = this.plugins.find((p) => p.manifest.id === pluginId)
+      if (pkg) pkg.handlers.push(h)
+    }
   }
 
   /**

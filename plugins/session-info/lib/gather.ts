@@ -104,6 +104,7 @@ function resolveFastState(ctx: TUIContext, modelId: string): boolean {
 function resolveModelBits(ctx: TUIContext): ModelBits {
   const seam = (ctx as { queryModelInfo?: () => LiveModelInfo | undefined }).queryModelInfo
   const info = seam?.()
+  const _providerId = info?.providerId ?? process.env.MINIMAL_AGENT_PROVIDER
   if (info) {
     return {
       modelId: info.modelId,
@@ -166,7 +167,7 @@ export async function gatherSessionInfo(ctx: TUIContext): Promise<SessionInfoSna
   let quota: QuotaLine[] = []
   let contextWindow = bits.contextWindow
   try {
-    const sess = await resolveProviderSessionInfo(bits.modelId)
+    const sess = await resolveProviderSessionInfo(bits.modelId, { providerId: bits.providerId })
     if (!contextWindow && sess.contextWindow) contextWindow = sess.contextWindow
     quota = (sess.quota?.windows ?? []).map((w) => ({
       label: w.id,

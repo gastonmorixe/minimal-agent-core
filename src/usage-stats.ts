@@ -34,7 +34,7 @@ import {
 } from "@minimal-agent/plugin-api/utils/usage-report"
 
 import type { CanonicalUsage } from "./llm/canonical-events.ts"
-import { findModel } from "./llm/model-registry.ts"
+import { findModel, findModelForProvider } from "./llm/model-registry.ts"
 import { calculateUsageCost } from "./llm/pricing.ts"
 import { estimateTokensForModel } from "./llm/token-estimate.ts"
 import {
@@ -216,13 +216,19 @@ function hasRealUsage(u: ReturnType<typeof billedUsageOf>): boolean {
 export function collectSessionEvents(records: SessionRecord[], modelHint?: string): UsageEvent[] {
   const meta = records.find((r): r is MetaRecord => r.kind === "meta")
   const rawModelId = modelHint ?? meta?.model ?? "unknown"
-  const entry = findModel(rawModelId)
+  // When the session logged a specific provider, use scoped lookup to
+  // disambiguate models registered by multiple providers (e.g. opencode
+  // and wafer both register deepseek-v4-flash). Fall back to the global
+  // last-write-wins lookup when no provider is stored (legacy sessions).
+  const entry = meta?.provider
+    ? (findModelForProvider(rawModelId, meta.provider) ?? findModel(rawModelId))
+    : findModel(rawModelId)
   // Normalize to the canonical registered id so aliases merge in the
   // breakdown (e.g. `claude-opus-4-8[1m]` → `claude-opus-4-8`, and the
   // `claude-sonnet-4-5` alias → its dated canonical id). Unregistered /
   // forward-compat ids pass through verbatim.
   const modelId = entry?.id ?? rawModelId
-  const providerId = entry?.providerId ?? "unknown"
+  const providerId = entry?.providerId ?? meta?.provider ?? "unknown"
   const pricing = entry?.pricing
   const createdMs = tsToMs(meta?.createdAt, Date.now())
 
