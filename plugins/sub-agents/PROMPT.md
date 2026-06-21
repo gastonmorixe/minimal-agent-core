@@ -43,7 +43,7 @@ Never spawn make-work agents to look busy. One capable worker beats five redunda
   (post/read). Opt-in: only when workers must avoid clobbering each other (claim a file, flag a
   blocker). Don't chatter.
 
-(Workers also get a `ReportResult` tool to hand their result back. It is not in your tool list:
+(Workers also get a `SubAgentsReportResult` tool to hand their result back. It is not in your tool list:
 it only appears inside a worker process. See "How a worker finishes" below.)
 
 Link a worker to a todo with `SpawnAgent({task, taskId: "#hash"})`. When it finishes, the todo is
@@ -51,7 +51,7 @@ ticked done automatically (or canceled with a reason if the worker fails). Plan 
 then delegate each unit.
 
 When a worker finishes you get a one-line digest automatically between turns, then call
-`AgentResult` to read the full summary. You don't need to poll in a busy loop.
+`SubAgentsAgentResult` to read the full summary. You don't need to poll in a busy loop.
 
 ## Specialists (the `agent` param)
 
@@ -74,17 +74,17 @@ When a worker finishes you get a one-line digest automatically between turns, th
 
 ## How a worker finishes
 
-A worker hands its result back by calling `ReportResult` as its final action. That tool writes
+A worker hands its result back by calling `SubAgentsReportResult` as its final action. That tool writes
 the worker's result record for it, so the worker never hand-writes a status file or worries
-about its path or format. You read the result with `AgentResult` once the worker is `done`.
+about its path or format. You read the result with `SubAgentsAgentResult` once the worker is `done`.
 
-There is a layered fallback if a worker never calls `ReportResult`: the supervisor distills the
+There is a layered fallback if a worker never calls `SubAgentsReportResult`: the supervisor distills the
 worker's final assistant message instead, and marks it `done (distilled)`. A worker that exits
 with no result at all, or that was told to produce a file and didn't, lands as `incomplete`.
 
 ## Discipline
 
-- Review, don't trust. Read a worker's `AgentResult` (and, for code, the actual diff) before
+- Review, don't trust. Read a worker's `SubAgentsAgentResult` (and, for code, the actual diff) before
   acting on it.
 - **Verify the deliverable exists before you mark a todo done.** When a worker's job was to
   produce a file, `stat`/`ls` it (or grep its content) first. A worker reporting `done` with a
@@ -93,7 +93,7 @@ with no result at all, or that was told to produce a file and didn't, lands as `
   did not meet its deliverable contract (no result captured, or a required `expectArtifacts` file
   is missing/empty), so the system has already refused to tick its todo green. Pull `AgentResult
   <id>` and read why. When a worker produced a summary but not the required FILE, its findings are
-  salvaged onto the `incomplete` result and `AgentResult` shows them under "salvaged findings".
+  salvaged onto the `incomplete` result and `SubAgentsAgentResult` shows them under "salvaged findings".
   Read those first. Often you can use the work directly, or just write the file yourself from it,
   rather than paying for a full re-run. Re-spawn (with a sharper task and `expectArtifacts`) only
   when the salvaged work is genuinely insufficient. Do not paper over it.

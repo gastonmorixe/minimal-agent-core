@@ -68,7 +68,9 @@
             },
             "required": ["action", "scope"],
             "additionalProperties": false
-          }
+          },
+          "explicitName": true,
+          "reason": "tool name already includes plugin identity (Memory)"
         }
       },
       "handler": {

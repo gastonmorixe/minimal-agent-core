@@ -887,6 +887,10 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
         name: tool.name as string,
         description: tool.description as string,
         input_schema: tool.input_schema as Record<string, unknown>,
+        ...(typeof tool.explicitName === "boolean" ? { explicitName: tool.explicitName } : {}),
+        ...(typeof tool.reason === "string" && tool.reason.length > 0
+          ? { reason: tool.reason }
+          : {}),
         ...(aliases ? { aliases } : {}),
       },
     }

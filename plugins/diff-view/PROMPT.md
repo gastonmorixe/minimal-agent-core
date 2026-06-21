@@ -1,6 +1,6 @@
 Render a unified diff with ANSI colors two ways:
 
-1. **`ShowDiff` tool** when the diff is the primary content of a reply. Pass the full unified diff as `patch` (output of `git diff`, `diff -u`, etc.); the tool result is the rendered diff, so you don't reproduce it yourself.
+1. **`DiffViewerShowDiff` tool** when the diff is the primary content of a reply. Pass the full unified diff as `patch` (output of `git diff`, `diff -u`, etc.); the tool result is the rendered diff, so you don't reproduce it yourself.
 
 2. **Inline `<ma::emit::diff>` tag** when you want a rendered hunk embedded mid-explanation, inside your own prose. Wrap the diff text in the tag and it is replaced with the colored render in place:
 

@@ -62,7 +62,9 @@
             },
             "required": ["query"],
             "additionalProperties": false
-          }
+          },
+          "explicitName": true,
+          "reason": "perfect collision: plugin IS the tool name"
         }
       },
       "handler": {
