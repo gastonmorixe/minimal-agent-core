@@ -92,8 +92,7 @@ describe("ModeManager.isToolAllowed", () => {
     const r = m.isToolAllowed("Bash")
     expect(r.allowed).toBe(false)
     if (!r.allowed) {
-      // Whole message is just the head line; no trailing space or hint.
-      expect(r.message).toBe('Tool "Bash" is denied in PLAN mode.')
+      expect(r.message).toBe('Tool "Bash" is not permitted in PLAN mode.')
     }
   })
 
@@ -277,72 +276,106 @@ describe("ModeManager deprecated surfaces", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Permissions model (allow + deny, deny wins, * wildcard, user overlay)
+// Permissions model (ToolPermission[], backward compat, user overlay)
 // ---------------------------------------------------------------------------
 
 describe("buildEffectiveModePermissions", () => {
-  test("returns defaults when manifest is silent and no user override", async () => {
+  test("returns default wildcard when manifest is silent and no user override", async () => {
     const { buildEffectiveModePermissions } = await import("./modes.ts")
     const eff = buildEffectiveModePermissions({ id: "noop" })
-    expect(eff.allow).toEqual(["*"])
-    expect(eff.deny).toEqual([])
-    expect(eff.source.allow).toBe("default")
-    expect(eff.source.deny).toBe("default")
+    expect(eff.tools).toEqual([{ tool: "*", allow: true }])
+    expect(eff.source).toBe("default")
   })
 
-  test("reads manifest.permissions when set", async () => {
+  test("reads new-style ToolPermission[] when set", async () => {
     const { buildEffectiveModePermissions } = await import("./modes.ts")
     const eff = buildEffectiveModePermissions({
       id: "ask",
-      permissions: { allow: ["*"], deny: ["Edit", "Write"] },
+      permissions: [
+        { tool: "*", allow: true },
+        { tool: "Edit", allow: false },
+      ],
     })
-    expect(eff.allow).toEqual(["*"])
-    expect(eff.deny).toEqual(["Edit", "Write"])
-    expect(eff.source.allow).toBe("manifest")
-    expect(eff.source.deny).toBe("manifest")
+    expect(eff.tools).toHaveLength(2)
+    expect(eff.tools[0]).toEqual({ tool: "*", allow: true })
+    expect(eff.tools[1]).toEqual({ tool: "Edit", allow: false })
+    expect(eff.source).toBe("manifest")
   })
 
-  test("legacy disallowedTools becomes permissions.deny when permissions absent", async () => {
+  test("converts old ModePermissions (allow/deny) to ToolPermission[]", async () => {
+    const { buildEffectiveModePermissions } = await import("./modes.ts")
+    const eff = buildEffectiveModePermissions({
+      id: "ask",
+      permissions: { allow: ["*"], deny: ["Edit", "Write"] } as any,
+    })
+    expect(eff.tools).toHaveLength(3)
+    expect(eff.tools[0]).toEqual({ tool: "*", allow: true })
+    expect(eff.tools[1]).toEqual({ tool: "Edit", allow: false })
+    expect(eff.tools[2]).toEqual({ tool: "Write", allow: false })
+    expect(eff.source).toBe("manifest")
+  })
+
+  test("legacy disallowedTools becomes ToolPermission deny rules", async () => {
     const { buildEffectiveModePermissions } = await import("./modes.ts")
     const eff = buildEffectiveModePermissions({
       id: "legacy",
       disallowedTools: ["Bash"],
     })
-    expect(eff.deny).toEqual(["Bash"])
-    expect(eff.source.deny).toBe("manifest")
+    expect(eff.tools).toHaveLength(2)
+    expect(eff.tools[0]).toEqual({ tool: "*", allow: true })
+    expect(eff.tools[1]).toEqual({ tool: "Bash", allow: false })
+    expect(eff.source).toBe("manifest")
   })
 
-  test("permissions.deny wins over disallowedTools on the same manifest", async () => {
+  test("permissions (new array) wins over disallowedTools", async () => {
     const { buildEffectiveModePermissions } = await import("./modes.ts")
     const eff = buildEffectiveModePermissions({
       id: "both",
-      permissions: { deny: ["Write"] },
-      disallowedTools: ["Edit"],
+      permissions: [{ tool: "Read", allow: true }],
+      disallowedTools: ["Bash"],
     })
-    expect(eff.deny).toEqual(["Write"])
+    expect(eff.tools).toHaveLength(1)
+    expect(eff.tools[0]).toEqual({ tool: "Read", allow: true })
   })
 
-  test("user override REPLACES (not merges) the deny list", async () => {
+  test("user override of deny adds to manifest allow", async () => {
     const { buildEffectiveModePermissions } = await import("./modes.ts")
     const eff = buildEffectiveModePermissions(
-      { id: "ask", permissions: { deny: ["Edit"] } },
+      {
+        id: "ask",
+        permissions: [
+          { tool: "*", allow: true },
+          { tool: "Edit", allow: false },
+        ],
+      },
       { permissions: { deny: ["Edit", "Write", "Bash"] } },
     )
-    expect(eff.deny).toEqual(["Edit", "Write", "Bash"])
-    expect(eff.source.deny).toBe("user-config")
-    expect(eff.source.allow).toBe("default")
+    // manifest allow wildcard is inherited, user deny rules are added
+    expect(eff.tools).toHaveLength(4)
+    expect(eff.tools[0]).toEqual({ tool: "*", allow: true })
+    expect(eff.tools[1]).toEqual({ tool: "Edit", allow: false })
+    expect(eff.tools[2]).toEqual({ tool: "Write", allow: false })
+    expect(eff.tools[3]).toEqual({ tool: "Bash", allow: false })
+    expect(eff.source).toBe("user-config")
   })
 
-  test("user override of allow leaves deny inherited from manifest", async () => {
+  test("user override of allow inherits manifest deny", async () => {
     const { buildEffectiveModePermissions } = await import("./modes.ts")
     const eff = buildEffectiveModePermissions(
-      { id: "ask", permissions: { allow: ["*"], deny: ["Edit"] } },
+      {
+        id: "ask",
+        permissions: [
+          { tool: "*", allow: true },
+          { tool: "Edit", allow: false },
+        ],
+      },
       { permissions: { allow: ["Read", "Glob"] } },
     )
-    expect(eff.allow).toEqual(["Read", "Glob"])
-    expect(eff.source.allow).toBe("user-config")
-    expect(eff.deny).toEqual(["Edit"])
-    expect(eff.source.deny).toBe("manifest")
+    // user allow rules + manifest deny rule
+    expect(eff.tools).toHaveLength(3)
+    expect(eff.tools[0]).toEqual({ tool: "Read", allow: true })
+    expect(eff.tools[1]).toEqual({ tool: "Glob", allow: true })
+    expect(eff.tools[2]).toEqual({ tool: "Edit", allow: false })
   })
 })
 
@@ -350,20 +383,21 @@ describe("isToolAllowedByPermissions", () => {
   test("deny wins over wildcard allow", async () => {
     const { isToolAllowedByPermissions } = await import("./modes.ts")
     const perms = {
-      allow: ["*"],
-      deny: ["Edit"],
-      source: { allow: "manifest" as const, deny: "manifest" as const },
+      tools: [
+        { tool: "*", allow: true },
+        { tool: "Edit", allow: false },
+      ],
+      source: "manifest" as const,
     }
     expect(isToolAllowedByPermissions("Edit", perms)).toBe(false)
     expect(isToolAllowedByPermissions("Read", perms)).toBe(true)
   })
 
-  test("wildcard in allow permits anything not denied", async () => {
+  test("wildcard allow permits anything not denied", async () => {
     const { isToolAllowedByPermissions } = await import("./modes.ts")
     const perms = {
-      allow: ["*"],
-      deny: [],
-      source: { allow: "default" as const, deny: "default" as const },
+      tools: [{ tool: "*", allow: true }],
+      source: "default" as const,
     }
     expect(isToolAllowedByPermissions("AnythingAtAll", perms)).toBe(true)
   })
@@ -371,9 +405,11 @@ describe("isToolAllowedByPermissions", () => {
   test("whitelist mode: only listed tools pass", async () => {
     const { isToolAllowedByPermissions } = await import("./modes.ts")
     const perms = {
-      allow: ["Read", "Grep"],
-      deny: [],
-      source: { allow: "manifest" as const, deny: "default" as const },
+      tools: [
+        { tool: "Read", allow: true },
+        { tool: "Grep", allow: true },
+      ],
+      source: "manifest" as const,
     }
     expect(isToolAllowedByPermissions("Read", perms)).toBe(true)
     expect(isToolAllowedByPermissions("Grep", perms)).toBe(true)
@@ -381,14 +417,42 @@ describe("isToolAllowedByPermissions", () => {
     expect(isToolAllowedByPermissions("Edit", perms)).toBe(false)
   })
 
-  test("deny wins on whitelist overlap", async () => {
+  test("first-match wins: earlier deny beats later allow", async () => {
     const { isToolAllowedByPermissions } = await import("./modes.ts")
     const perms = {
-      allow: ["Read", "Bash"],
-      deny: ["Bash"],
-      source: { allow: "manifest" as const, deny: "manifest" as const },
+      tools: [
+        { tool: "Bash", allow: false },
+        { tool: "*", allow: true },
+      ],
+      source: "manifest" as const,
     }
+    expect(isToolAllowedByPermissions("Bash", perms)).toBe(false)
     expect(isToolAllowedByPermissions("Read", perms)).toBe(true)
+  })
+
+  test("predicate match: allow when predicate returns true", async () => {
+    const { isToolAllowedByPermissions } = await import("./modes.ts")
+    const perms = {
+      tools: [
+        {
+          tool: "Bash",
+          allow: "match" as const,
+          predicate: (input: Record<string, unknown>) => input.command === "ls",
+        },
+        { tool: "*", allow: true },
+      ],
+      source: "manifest" as const,
+    }
+    expect(isToolAllowedByPermissions("Bash", perms, { command: "ls" })).toBe(true)
+    expect(isToolAllowedByPermissions("Bash", perms, { command: "rm -rf /" })).toBe(false)
+  })
+
+  test("no matching rule = denied", async () => {
+    const { isToolAllowedByPermissions } = await import("./modes.ts")
+    const perms = {
+      tools: [{ tool: "Read", allow: true }],
+      source: "manifest" as const,
+    }
     expect(isToolAllowedByPermissions("Bash", perms)).toBe(false)
   })
 })
@@ -396,7 +460,16 @@ describe("isToolAllowedByPermissions", () => {
 describe("ModeManager.isToolAllowed via permissions overlay", () => {
   test("user override that adds a deny is enforced", () => {
     const m = new ModeManager(
-      [{ id: "ask", label: "ASK", permissions: { allow: ["*"], deny: ["Edit"] } }],
+      [
+        {
+          id: "ask",
+          label: "ASK",
+          permissions: [
+            { tool: "*", allow: true },
+            { tool: "Edit", allow: false },
+          ],
+        },
+      ],
       "ask",
       undefined,
       undefined,
@@ -414,7 +487,7 @@ describe("ModeManager.isToolAllowed via permissions overlay", () => {
     expect(m.isToolAllowed("Read").allowed).toBe(true)
     expect(m.isToolAllowed("Bash").allowed).toBe(false)
     const r = m.isToolAllowed("Bash")
-    if (!r.allowed) expect(r.message).toContain("not on the allow list")
+    if (!r.allowed) expect(r.message).toContain("not permitted")
   })
 
   test("invalidatePermissions clears the cache", () => {
@@ -430,10 +503,27 @@ describe("ModeManager.isToolAllowed via permissions overlay", () => {
     )
     expect(m.isToolAllowed("Edit").allowed).toBe(false)
     override = { permissions: { deny: [] } }
-    // Cached: still blocked.
     expect(m.isToolAllowed("Edit").allowed).toBe(false)
     m.invalidatePermissions("ask")
     expect(m.isToolAllowed("Edit").allowed).toBe(true)
+  })
+})
+
+describe("isToolAllowed (ASK fixture keeps disallowedTools for backward compat)", () => {
+  test("Edit is denied in ASK mode via legacy disallowedTools", () => {
+    const m = new ModeManager([ASK_MODE], "ask")
+    const r = m.isToolAllowed("Edit")
+    expect(r.allowed).toBe(false)
+    if (!r.allowed) {
+      expect(r.message).toContain('Tool "Edit"')
+      expect(r.message).toContain("ASK")
+      expect(r.message).toContain("Present the change")
+    }
+  })
+
+  test("Read is allowed in ASK mode", () => {
+    const m = new ModeManager([ASK_MODE], "ask")
+    expect(m.isToolAllowed("Read").allowed).toBe(true)
   })
 })
 

@@ -43,7 +43,7 @@ import {
 } from "../llm-openai/index.ts"
 
 import { opencodeApiKeyAuth } from "./auth.ts"
-import { CAPS_OPENCODE_CHAT } from "./capabilities.ts"
+import { CAPS_OPENCODE_CHAT_FALLBACK } from "./capabilities.ts"
 import { registerOpencodeModel, registerOpencodeModels } from "./models.ts"
 import { PRICING_OPENCODE_GENERIC } from "./pricing.ts"
 
@@ -177,7 +177,7 @@ export function registerOpencodeAdHocModel(modelId: string): void {
     displayName: modelId,
     tags: ["opencode"],
     surfaceId: "openai-chat-completions",
-    capabilities: CAPS_OPENCODE_CHAT,
+    capabilities: CAPS_OPENCODE_CHAT_FALLBACK,
     pricing: PRICING_OPENCODE_GENERIC,
   })
 }

@@ -77,6 +77,39 @@
       "interactive": false,
       "icon": "⧗",
       "color": "gold"
+    },
+    {
+      "id": "cron_reschedule",
+      "trigger": {
+        "type": "tool",
+        "tool": {
+          "name": "CronReschedule",
+          "description": "Adjust the next fire time for a scheduled task (e.g. a /loop). Provide EITHER `every` (a human interval like \"30s\", \"10m\", \"2h\") to set a new steady cadence, OR `nextAtMs` (an absolute epoch-ms timestamp) for a one-shot delay. The task is switched to dynamic pacing so the next heartbeat fires at the new time.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The 8-char task id to reschedule (required)."
+              },
+              "every": {
+                "type": "string",
+                "description": "A human interval like \"30s\", \"5m\", \"2h\". Sets a new recurring cadence. Mutually exclusive with `nextAtMs`."
+              },
+              "nextAtMs": {
+                "type": "number",
+                "description": "Absolute epoch-ms timestamp for the next fire. Single-use: the task re-arms with its existing cadence after firing. Mutually exclusive with `every`."
+              }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "handler": { "type": "module", "path": "./handlers/cron_reschedule.ts", "export": "default" },
+      "interactive": false,
+      "icon": "⧗",
+      "color": "gold"
     }
   ],
   "liveAreaSlots": [

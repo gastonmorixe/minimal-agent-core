@@ -105,9 +105,10 @@ describe("llm-opencode (dual-surface provider: OpenAI Chat + Anthropic Messages)
     const ids = [
       "deepseek-v4-pro",
       "deepseek-v4-flash",
+      "glm-5.2",
       "glm-5.1",
       "glm-5",
-      "kimi-k2.7",
+      "kimi-k2.7-code",
       "kimi-k2.6",
       "mimo-v2.5",
       "mimo-v2.5-pro",

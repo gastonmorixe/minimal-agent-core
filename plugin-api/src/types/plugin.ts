@@ -1107,29 +1107,55 @@ export interface CommandInfo {
 }
 
 /**
- * Tool-permissions policy for a mode.
+ * Tool permission predicate. A function that receives the tool's input
+ * object and returns `true` to allow or `false` to deny.
  *
- * Two complementary lists, both array-of-tool-name strings (or the
- * wildcard `"*"`):
+ * Used with {@link ToolPermission.allow} `= "match"` for context-sensitive
+ * ACL (e.g. allow `Bash` only when `command` matches a safe pattern).
  *
- * - `allow`: only these tools may run. Default `["*"]` (everything).
- * - `deny`:  these tools may NOT run. Default `[]` (nothing).
+ * Not serializable in JSON manifests — intended for programmatic mode
+ * builders.
+ */
+export type ToolPermissionPredicate = (input: Record<string, unknown>) => boolean
+
+/**
+ * One ACL rule for a mode's tool-permissions policy.
  *
- * **Deny wins** on overlap. Combined with the wildcard, three common
- * shapes cover most real cases:
+ * An ordered list of these on {@link ManifestMode.permissions} replaces
+ * the old `ModePermissions` allow/deny model. First-match-wins semantics.
  *
- * | Goal                            | `allow`       | `deny`               |
- * |---------------------------------|---------------|----------------------|
- * | Unrestricted (same as no mode)  | `["*"]`       | `[]`                 |
- * | Block a few tools               | `["*"]`       | `["Edit","Write"]`   |
- * | Whitelist (only these tools)    | `["Read",...]`| `[]`                 |
+ * Three shapes:
+ * - `{ tool: "Bash", allow: true }` — always allows Bash
+ * - `{ tool: "Bash", allow: false }` — always denies Bash
+ * - `{ tool: "Bash", allow: "match", predicate: fn }` — defers to predicate
  *
- * Per-tool argument predicates (e.g. allow `Bash` only when the command
- * matches a regex) are NOT in this primitive. That's the future
- * per-tool ACL work tracked in `TODOS.md#T-e7ce6f`.
+ * If no rule matches, the default is deny (unlike the old model's wildcard
+ * allow-all). Express wildcard allow explicitly as `{ tool: "*", allow: true }`.
  *
- * @see ManifestMode.permissions for usage on a mode declaration.
- * @see buildEffectiveModePermissions for user-config overlay rules.
+ * @see ManifestMode.permissions
+ */
+export interface ToolPermission {
+  /** Tool name to match (or `"*"` for wildcard). */
+  tool: string
+  /**
+   * `true`: always allow. `false`: always deny. `"match"`: defer to
+   * {@link predicate}. Without a predicate function at runtime, a
+   * `"match"` rule behaves as deny.
+   */
+  allow: boolean | "match"
+  /** Optional teaching hint shown on denial. */
+  refusalHint?: string
+  /**
+   * Predicate evaluated at dispatch time when `allow === "match"`.
+   * Receives `tool_use.input`. Not serializable in JSON manifests.
+   */
+  predicate?: ToolPermissionPredicate
+}
+
+/**
+ * @deprecated Use {@link ManifestMode.permissions} (an array of
+ * {@link ToolPermission}) instead. This interface is kept for one
+ * release so existing user configs keep type-checking.
  */
 export interface ModePermissions {
   /**
@@ -1241,38 +1267,23 @@ export interface ManifestMode {
    *
    * @example ASK mode (no Edit/Write):
    * ```ts
-   * permissions: { deny: ["Edit", "Write"] }
+   * permissions: [{ tool: "*", allow: true }, { tool: "Edit", allow: false }, { tool: "Write", allow: false }]
    * ```
    *
    * @example read-only mode (only these tools allowed):
    * ```ts
-   * permissions: { allow: ["Read", "Glob", "Grep", "WebSearch"] }
+   * permissions: [{ tool: "Read", allow: true }, { tool: "Glob", allow: true }, { tool: "Grep", allow: true }]
    * ```
    *
-   * @since 0.3.0 (replaces {@link disallowedTools}, which still works
-   * as sugar for `permissions: { deny: [...] }`).
+   * @see ToolPermission
+   * @since 0.4.0 (replaces the old `ModePermissions` allow/deny model)
    */
-  permissions?: ModePermissions
+  permissions?: ToolPermission[]
   /**
-   * Tool names the harness will refuse to execute while this mode is
-   * active. The tools STAY REGISTERED in the request : the model still
-   * sees them in its tool list : but
-   * {@link ModeManager.isToolAllowed} returns `allowed: false` for
-   * them and the agent's tool-dispatch loop synthesizes a structured
-   * `is_error: true` tool_result instead of running the tool.
-   *
-   * Why "registered + refused" rather than "filtered out": removing a
-   * tool from the request changes the `tools` array bytes, which sits
-   * in the cached request prefix; that invalidates the prompt cache on
-   * every mode toggle. Keeping the array byte-stable preserves the
-   * cache. Mode mechanics live in code (the dispatch gate), not in
-   * the wire shape.
-   *
-   * Use exact tool names (e.g. `["Edit", "Write"]`).
-   *
-   * @deprecated Use {@link permissions} instead. This field is sugar
-   * for `permissions: { deny: [...] }` and is kept for one release so
-   * existing manifests keep working. Will be removed in v0.4.
+   * @deprecated Use {@link permissions} (an array of {@link ToolPermission})
+   * instead. This field is sugar for each entry in disallowedTools becoming
+   * `{ tool: x, allow: false }` in the new format. Kept for one release so
+   * existing manifests keep working. Will be removed in v0.5.
    */
   disallowedTools?: string[]
   /**

@@ -29,7 +29,6 @@
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
-import { parseCommandLine } from "../slash-command-parse.ts"
 
 import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
@@ -39,7 +38,6 @@ import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
 import type {
   AgentContext,
-  CommandContext,
   CommandInfo,
   CommandResult,
   LoadedPlugin,
@@ -318,8 +316,11 @@ export class PluginLoader {
    * Built in the constructor from each plugin's resolved `commands` with
    * first-wins collision handling. The host's `dispatchCommand` and the
    * `slash-menu` overlay (via `listCommandInfo`) read it.
+   *
+   * Lives in {@link CommandRegistry} (extracted to `./loader/commands.ts`
+   * for T-8a0c44).
    */
-  private readonly commandIndex: Map<string, ResolvedCommand>
+  private readonly commands: CommandRegistry
   /**
    * Per-plugin capability hosts, memoized by plugin id. Built lazily on
    * first dispatch to a handler whose manifest declared `capabilities`.
@@ -348,6 +349,8 @@ export class PluginLoader {
     recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined,
     hostOptions: { sessionsDir?: string } | undefined,
     coreToolNames: Set<string> = new Set(),
+    /** Pre-built command registry (T-8a0c44). */
+    commands: CommandRegistry,
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
@@ -365,25 +368,7 @@ export class PluginLoader {
     this.modelInfoProvider = modelInfoProvider
     this.recommendSubagentModels = recommendSubagentModels
     this.hostOptions = hostOptions
-
-    // Build the global command index, first-wins on cross-plugin name
-    // collision (mirrors mode-id dedupe). A colliding command is dropped
-    // with a diagnostic; the rest of the plugin is unaffected.
-    this.commandIndex = new Map<string, ResolvedCommand>()
-    for (const pkg of plugins) {
-      for (const cmd of pkg.commands) {
-        const name = cmd.spec.name
-        const existing = this.commandIndex.get(name)
-        if (existing) {
-          logger(
-            `command "/${name}" from "${cmd.pluginId}" collides with "${existing.pluginId}"; ` +
-              `keeping the first and skipping`,
-          )
-          continue
-        }
-        this.commandIndex.set(name, cmd)
-      }
-    }
+    this.commands = commands
   }
 
   /**
@@ -792,6 +777,22 @@ export class PluginLoader {
         a.fragmentId.localeCompare(b.fragmentId),
     )
 
+    // Collect resolved commands from every plugin and build the
+    // command registry (T-8a0c44).
+    const allCommands: ResolvedCommand[] = []
+    for (const pkg of finalPlugins) {
+      for (const cmd of pkg.commands) {
+        allCommands.push(cmd)
+      }
+    }
+    const commandRegistry = new CommandRegistry(allCommands, {
+      timeoutMs,
+      agent,
+      eventBus,
+      hooksFacade,
+      logger,
+    })
+
     const loader = new PluginLoader(
       finalPlugins,
       toolIndex,
@@ -809,6 +810,7 @@ export class PluginLoader {
       opts.recommendSubagentModels,
       opts.hostOptions,
       coreToolNames,
+      commandRegistry,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -825,9 +827,11 @@ export class PluginLoader {
    * All registered slash commands (post collision-dedupe), sorted by
    * name for stable display. The host's command dispatcher and the
    * `slash-menu` overlay both read this.
+   *
+   * Delegates to {@link CommandRegistry.getCommands}.
    */
   getCommands(): ReadonlyArray<ResolvedCommand> {
-    return [...this.commandIndex.values()].sort((a, b) => a.spec.name.localeCompare(b.spec.name))
+    return this.commands.getCommands()
   }
 
   /**
@@ -836,26 +840,22 @@ export class PluginLoader {
    * a command (dispatch it) or just text (queue it as a prompt).
    *
    * @param name - Command name without the leading slash.
+   *
+   * Delegates to {@link CommandRegistry.hasCommand}.
    */
   hasCommand(name: string): boolean {
-    return this.commandIndex.has(name)
+    return this.commands.hasCommand(name)
   }
 
   /**
    * Read-only metadata view of every registered command. This is the
    * shape exposed to plugin handler contexts via `listCommands()` so the
    * `slash-menu` overlay can render/filter without importing the loader.
+   *
+   * Delegates to {@link CommandRegistry.listCommandInfo}.
    */
   listCommandInfo(): CommandInfo[] {
-    return this.getCommands().map((c) => {
-      const info: CommandInfo = {
-        name: c.spec.name,
-        summary: c.spec.summary,
-        pluginId: c.pluginId,
-      }
-      if (c.spec.argHint != null) info.argHint = c.spec.argHint
-      return info
-    })
+    return this.commands.listCommandInfo()
   }
 
   /**
@@ -872,81 +872,14 @@ export class PluginLoader {
    * optional external abort `signal` composed with the per-call timeout.
    *
    * @param line - Raw submitted text.
+   *
+   * Delegates to {@link CommandRegistry.dispatchCommand}.
    */
   async dispatchCommand(
     line: string,
     opts: { cwd?: string; signal?: AbortSignal } = {},
   ): Promise<CommandResult | null> {
-    const parsed = parseCommandLine(line)
-    if (!parsed) return null
-    const cmd = this.commandIndex.get(parsed.name)
-    if (!cmd) return null
-
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs)
-    timer.unref?.()
-    let externalAbortListener: (() => void) | undefined
-    if (opts.signal) {
-      if (opts.signal.aborted) ctrl.abort()
-      else {
-        externalAbortListener = () => ctrl.abort()
-        opts.signal.addEventListener("abort", externalAbortListener, { once: true })
-      }
-    }
-
-    const ctx: CommandContext = {
-      name: parsed.name,
-      argv: parsed.argv,
-      rawLine: line,
-      cwd: opts.cwd ?? process.cwd(),
-      env: {
-        ...process.env,
-        TUI_PLUGIN_PROTOCOL: "1",
-        ...(this.agent ? agentContextToEnv(this.agent) : {}),
-      } as Record<string, string>,
-      abort: ctrl.signal,
-      log: createPluginLogger(cmd.pluginId),
-      // Shape-aware emit so a command can fan out to ANY channel
-      // regardless of bus. Declared channels route via the channel
-      // catalog's shape: `broadcast-async` (and ad-hoc, undeclared
-      // names) go straight to the EventBus; `broadcast-sync` / `chain`
-      // / `stream` route through the Hooks facade onto the HookBus.
-      // Without this an interactive command (e.g. `/config` painting
-      // its overlay via `editor.footer.set`, a broadcast-sync channel)
-      // would silently emit into the void — the host listener lives on
-      // the HookBus, not the EventBus. Mirrors the event-sub / hook-sub
-      // emit in `src/plugins/loader/event-subs.ts`.
-      emit: (channel: string, payload?: unknown) => {
-        const shape = CHANNEL_BY_NAME.get(channel)?.shape
-        try {
-          if (shape === "broadcast-async" || shape === undefined) {
-            this.eventBus.emit(channel, payload)
-            return
-          }
-          this.hooksFacade.emitSync(channel, payload)
-        } catch (e) {
-          diag.warn(
-            "plugins",
-            `command "/${parsed.name}" emit("${channel}") failed: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-          )
-        }
-      },
-      agent: this.agent,
-    }
-
-    try {
-      return await cmd.invoke(ctx)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return { kind: "error", message: `/${parsed.name} failed: ${msg}` }
-    } finally {
-      clearTimeout(timer)
-      if (opts.signal && externalAbortListener) {
-        opts.signal.removeEventListener("abort", externalAbortListener)
-      }
-    }
+    return this.commands.dispatchCommand(line, opts)
   }
 
   /** Mode id flagged `default: true`, or `null` if none. */
@@ -1467,6 +1400,9 @@ export class PluginLoader {
 //   ./loader/turn-attachments.ts — per-turn attachment factory seam
 //   ./loader/setups.ts           — plugin setup() execution
 // ---------------------------------------------------------------------------
+
+// Global slash-command registry (extracted T-8a0c44).
+import { CommandRegistry } from "./loader/commands.ts"
 
 // Package discovery + manifest parsing (the four-root walk, realpath
 // dedupe, enable/disable gates, PROMPT.md resolution) lives in
