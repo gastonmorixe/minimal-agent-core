@@ -5,25 +5,28 @@
  * mechanism). Returns a chunk of markdown that gets appended to the
  * system prompt.
  *
- * ## Default behavior: NO injection
+ * ## Default behavior: latest N injection
  *
- * As of this version the plugin does NOT dump memory contents into the
- * system prompt by default. The `inject` mode is `"none"`, and this
- * handler returns an empty string. Memories saturate the context window
- * if they grow large, and the model already knows about the
- * `MemoryTool` from the plugin's static `PROMPT.md` (which is loaded
- * separately). The model is taught to query memory on demand.
+ * As of this version the plugin injects the N most-recent bullets from
+ * global and project scopes (default N=10), formatted as `MemoryTool.list`
+ * output so the model sees the exact same shape it would get from a
+ * `MemoryTool({action: "list", ...})` call. This keeps the system prompt
+ * bounded while giving the model visibility into recent memories.
  *
- * Users who want the old verbatim dump (or the experimental summary
- * mode) opt in via `~/.minimal-agent/config.jsonc`:
+ * Users who want no injection, full verbatim dump, or the experimental
+ * summary mode opt in via `~/.minimal-agent/config.jsonc`:
  *
  * ```jsonc
+ * { "plugins": { "memory": { "inject": "none" } } }
  * { "plugins": { "memory": { "inject": "verbatim" } } }
+ * { "plugins": { "memory": { "inject": "summary" } } }
  * ```
  *
- * Three modes are supported:
+ * Four modes are supported:
  *
- *   - `"none"`     (default): return empty string. PROMPT.md still loads.
+ *   - `"latest"`   (default): injects the N most-recent bullets per scope
+ *                    formatted as `MemoryTool.list` output.
+ *   - `"none"`: return empty string. PROMPT.md still loads.
  *   - `"verbatim"`: full memory.md text, formatted as a
  *                    `## Saved memories` block.
  *   - `"summary"` : LLM-derived condensed view via
@@ -49,8 +52,11 @@ import { existsSync, readFileSync } from "node:fs"
 
 import type { PromptFragmentContext } from "@minimal-agent/plugin-api/types/plugin"
 
+import { formatList } from "../lib/format.ts"
 import { loadMemoryConfig, type MemoryConfig, type MemoryInjectMode } from "../lib/memory-config.ts"
 import {
+  MemoryStore,
+  type StoreKind,
   globalMemoryPath as storeGlobalMemoryPath,
   projectMemoryPath as storeProjectMemoryPath,
 } from "../lib/store.ts"
@@ -137,10 +143,36 @@ const summaryStrategy: InjectStrategy = async ({ label, memoryPath, scope, cfg, 
   return [`### ${label} (\`${memoryPath}\`)`, "", result.text, ""]
 }
 
+/**
+ * Strategy: inject the N most-recent bullets per scope, formatted as
+ * `MemoryTool.list` output so the model sees the exact tool-result shape
+ * embedded in its system prompt. Default N = 10.
+ */
+const latestStrategy: InjectStrategy = async ({ label, memoryPath, scope, cfg }) => {
+  const top = cfg.latest.top
+  const kind: StoreKind = scope
+  const store = new MemoryStore(memoryPath, kind, null)
+  const all = store.list()
+  if (all.length === 0) return []
+  const take = Math.min(top, all.length)
+  const latest = all.slice(-take)
+  const formatted = formatList(latest, {
+    scope,
+    ansi: false,
+    total: all.length,
+  })
+  return [
+    `### ${label} (latest ${take} of ${all.length}, \`${memoryPath}\`)`,
+    "",
+    formatted.trimEnd(),
+  ]
+}
+
 const STRATEGIES: Readonly<Record<MemoryInjectMode, InjectStrategy>> = {
   none: noneStrategy,
   verbatim: verbatimStrategy,
   summary: summaryStrategy,
+  latest: latestStrategy,
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +257,14 @@ function composeFragment(
       "For the full body of any bullet referenced by id, call",
       '`MemoryTool({action: "read", scope, id})`. Bullets added since the',
       'last regen are listed verbatim under "Recent saves".',
+      "",
+    )
+  } else if (mode === "latest") {
+    out.push(
+      "Latest entries per scope, formatted as `MemoryTool.list` output",
+      "(id, timestamp, body). These are the most recent bullets only.",
+      "For older entries, the full history, or mid-session changes, call",
+      '`MemoryTool({action: "list", scope: ...})`.',
       "",
     )
   } else {

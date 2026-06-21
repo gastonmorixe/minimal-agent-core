@@ -16,10 +16,13 @@
  * controls whether (and how) the plugin injects memory bullets into the
  * system prompt at session start:
  *
- *   - `"none"` (default): no bullet dump. The plugin's `PROMPT.md` and
+ *   - `"none"`: no bullet dump. The plugin's `PROMPT.md` and
  *     the `MemoryTool` schema still load, so the model knows the tool
  *     exists and is taught to query it on demand. Keeps the system
- *     prompt small.
+ *     prompt minimal.
+ *   - `"latest"` (default): injects the N most-recent bullets from
+ *     global and project scopes, formatted as `MemoryTool.list` output
+ *     so the model sees the exact tool result embedded in its context.
  *   - `"verbatim"`: legacy behavior: full `memory.md` injected as a
  *     `## Saved memories` block.
  *   - `"summary"`: LLM-derived condensed view via `summary-refresh.ts`.
@@ -31,7 +34,8 @@
  * sole gate (default false → verbatim). Users who set that to `true`
  * are silently migrated to `inject: "summary"` when `inject` itself is
  * unset. Users who were on the default (false) are migrated to the new
- * default `inject: "none"` (the explicit intent of this change).
+ * default `inject: "latest"` (the explicit intent of this change — a
+ * lightweight, bounded memory injection that doesn't blow up context).
  *
  * Lenient parsing: unknown keys ignored, invalid types fall back to
  * defaults. Never throws.
@@ -87,10 +91,15 @@ export function defaultSummaryModel(resolveByTags?: CheapTierResolver): string {
  * How (or whether) memories are injected into the system prompt at
  * session start. See module docstring for semantics.
  */
-export type MemoryInjectMode = "none" | "verbatim" | "summary"
+export type MemoryInjectMode = "none" | "verbatim" | "summary" | "latest"
 
 /** Whitelist of accepted string values for {@link MemoryInjectMode}. */
-const VALID_INJECT_MODES: ReadonlySet<MemoryInjectMode> = new Set(["none", "verbatim", "summary"])
+const VALID_INJECT_MODES: ReadonlySet<MemoryInjectMode> = new Set([
+  "none",
+  "verbatim",
+  "summary",
+  "latest",
+])
 
 /**
  * Parameters used by the optional LLM-summary pipeline. Only consulted
@@ -123,19 +132,36 @@ export interface MemorySummaryParams {
 }
 
 /**
+ * Parameters for the `"latest"` inject mode. Only consulted when
+ * {@link MemoryConfig.inject} === "latest".
+ */
+export interface MemoryLatestParams {
+  /**
+   * Number of most-recent bullets to inject per scope (global + project).
+   * Default: 10.
+   */
+  top: number
+}
+
+/**
  * Resolved, fully-defaulted memory-plugin config. Returned by
  * {@link loadMemoryConfig}.
  */
 export interface MemoryConfig {
   /** How (or whether) to inject memories at session start. */
   inject: MemoryInjectMode
+  /** Latest-mode params. Only used when {@link inject} === "latest". */
+  latest: MemoryLatestParams
   /** Summary-mode params. Only used when {@link inject} === "summary". */
   summary: MemorySummaryParams
 }
 
 /** Built-in defaults, applied per-key when missing or malformed. */
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
-  inject: "none",
+  inject: "latest",
+  latest: {
+    top: 10,
+  },
   summary: {
     model: defaultSummaryModel(),
     minBullets: 30,
@@ -175,6 +201,7 @@ export function memoryConfigPath(opts: { home?: string; env?: NodeJS.ProcessEnv 
 interface RawMemorySlice {
   inject?: unknown
   summary?: Record<string, unknown>
+  latest?: Record<string, unknown>
 }
 
 /**
@@ -205,6 +232,7 @@ export function loadMemoryConfig(
 export function resolveMemoryConfig(raw: RawMemorySlice | null): MemoryConfig {
   const cfg: MemoryConfig = {
     inject: DEFAULT_MEMORY_CONFIG.inject,
+    latest: { ...DEFAULT_MEMORY_CONFIG.latest },
     summary: { ...DEFAULT_MEMORY_CONFIG.summary },
   }
   if (!raw) return cfg
@@ -241,6 +269,14 @@ export function resolveMemoryConfig(raw: RawMemorySlice | null): MemoryConfig {
       s.dirtyBullets >= 0
     ) {
       cfg.summary.dirtyBullets = Math.floor(s.dirtyBullets)
+    }
+  }
+
+  // 3. Latest sub-slice.
+  const l = raw.latest
+  if (l && typeof l === "object" && !Array.isArray(l)) {
+    if (typeof l.top === "number" && Number.isFinite(l.top) && l.top >= 1) {
+      cfg.latest.top = Math.floor(l.top)
     }
   }
 
