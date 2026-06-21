@@ -6,12 +6,12 @@ a deploy, babysits a PR, or reminds the user without you having to busy-wait.
 ## When to schedule
 
 - The user says "remind me at 3pm to push the release": one-shot:
-  `CronCreate({ cron: "0 15 * * *", prompt: "Remind me to push the release.", recurs: false })`.
+  `ScheduleCronCreate({ cron: "0 15 * * *", prompt: "Remind me to push the release.", recurs: false })`.
 - "in 45 minutes, check whether the integration tests passed": one-shot with an
-  interval: `CronCreate({ every: "45m", prompt: "Check whether the integration tests passed.", recurs: false })`.
+  interval: `ScheduleCronCreate({ every: "45m", prompt: "Check whether the integration tests passed.", recurs: false })`.
 - "every 5 minutes, check if the deploy finished": recurring:
-  `CronCreate({ every: "5m", prompt: "Check if the deploy finished and tell me what happened." })`.
-- "weekdays at 9am, summarize overnight CI": `CronCreate({ cron: "0 9 * * 1-5", prompt: "Summarize overnight CI." })`.
+  `ScheduleCronCreate({ every: "5m", prompt: "Check if the deploy finished and tell me what happened." })`.
+- "weekdays at 9am, summarize overnight CI": `ScheduleCronCreate({ cron: "0 9 * * 1-5", prompt: "Summarize overnight CI." })`.
 
 ## Rules
 

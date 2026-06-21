@@ -26,27 +26,27 @@ Never spawn make-work agents to look busy. One capable worker beats five redunda
 
 ## The tools
 
-- **SpawnAgent** `{task, agent?, system?, model?, effort?, isolation?, label?, budget?}`:
+- **SubAgentsSpawnAgent** `{task, agent?, system?, model?, effort?, isolation?, label?, budget?}`:
   delegate and get an immediate handle. You are not blocked; it runs in the background. Give
   a detailed `task`: the objective, the exact scope/file boundaries, and the output you want
   back. Vague tasks cause duplicated work and gaps. Pick a named `agent` specialist when one
   fits, otherwise describe an inline `system`.
-- **ListAgents**: the fleet at a glance. Cheap, no transcript.
-- **AgentStatus** `{id?}`: one worker's detail, or the whole fleet.
-- **AgentResult** `{id}`: pull a finished worker's distilled deliverable into your context.
+- **SubAgentsListAgents**: the fleet at a glance. Cheap, no transcript.
+- **SubAgentsAgentStatus** `{id?}`: one worker's detail, or the whole fleet.
+- **SubAgentsAgentResult** `{id}`: pull a finished worker's distilled deliverable into your context.
   This is the only tool that brings worker content back, and it is bounded.
-- **AgentOutput** `{id}`: tail a worker's recent activity (its latest tool calls and notes) for
+- **SubAgentsAgentOutput** `{id}`: tail a worker's recent activity (its latest tool calls and notes) for
   "what is it doing right now" beyond the one-line widget. Use sparingly.
-- **StopAgent** `{id, reason?}`: cancel a worker that's no longer needed or going off track. This
-  plus a corrected SpawnAgent is how you steer.
-- **Mailbox** `{action, to?, kind?, body?}`: coordinate with sibling workers over a shared board
+- **SubAgentsStopAgent** `{id, reason?}`: cancel a worker that's no longer needed or going off track. This
+  plus a corrected SubAgentsSpawnAgent is how you steer.
+- **SubAgentsMailbox** `{action, to?, kind?, body?}`: coordinate with sibling workers over a shared board
   (post/read). Opt-in: only when workers must avoid clobbering each other (claim a file, flag a
   blocker). Don't chatter.
 
 (Workers also get a `SubAgentsReportResult` tool to hand their result back. It is not in your tool list:
 it only appears inside a worker process. See "How a worker finishes" below.)
 
-Link a worker to a todo with `SpawnAgent({task, taskId: "#hash"})`. When it finishes, the todo is
+Link a worker to a todo with `SubAgentsSpawnAgent({task, taskId: "#hash"})`. When it finishes, the todo is
 ticked done automatically (or canceled with a reason if the worker fails). Plan with the Task tool,
 then delegate each unit.
 
@@ -91,7 +91,7 @@ with no result at all, or that was told to produce a file and didn't, lands as `
   placeholder or distilled summary may not have produced the artifact at all.
 - **Treat `incomplete` as a red flag, never a pass.** An `incomplete` worker exited cleanly but
   did not meet its deliverable contract (no result captured, or a required `expectArtifacts` file
-  is missing/empty), so the system has already refused to tick its todo green. Pull `AgentResult
+  is missing/empty), so the system has already refused to tick its todo green. Pull `SubAgentsAgentResult
   <id>` and read why. When a worker produced a summary but not the required FILE, its findings are
   salvaged onto the `incomplete` result and `SubAgentsAgentResult` shows them under "salvaged findings".
   Read those first. Often you can use the work directly, or just write the file yourself from it,
