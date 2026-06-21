@@ -62,122 +62,136 @@ function captureAfter(session: string, ms: number): string {
   return cap.stdout?.toString() ?? ""
 }
 
+const TMUX_TIMEOUT = 15000
+
 desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", () => {
-  it("kitty CSI-u Ctrl+C (\\x1b[99;5u) while working → abort echo + armed footer (Bug A)", () => {
-    const session = `abort-ctrl-c-${Date.now()}`
-    killSession(session)
-    const start = spawnSync("tmux", [
-      "new-session",
-      "-d",
-      "-s",
-      session,
-      "-x",
-      "120",
-      "-y",
-      "30",
-      "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
-    ])
-    expect(start.status).toBe(0)
-
-    try {
-      // Wait for the REPL to come up.
-      Bun.sleepSync(800)
-      spawnSync("tmux", ["send-keys", "-t", session, "first prompt", "Enter"])
-      Bun.sleepSync(600)
-      pasteBytes(session, "\x1b[99;5u")
-      const pane = captureAfter(session, 800)
-
-      // Pre-fix this assertion FAILED - the path bypassed the FSM and the
-      // REPL quit silently with no echo.
-      expect(pane).toContain("✘ ABORTED")
-      // Buffer was restored (not cleared, which was the legacy bug).
-      expect(pane).toContain("first prompt")
-      // Armed footer reflects post-abort source. `⌃C to quit` is the
-      // post-abort verb (idle-confirm would say `⌃C confirm` instead),
-      // so this substring is source-discriminating as well as
-      // presence-asserting.
-      expect(pane).toContain("⌃C to quit")
-      // Did NOT print the goodbye banner: a single Ctrl+C never quits.
-      expect(pane).not.toContain("thanks for using minimal-agent")
-    } finally {
+  it(
+    "kitty CSI-u Ctrl+C (\\x1b[99;5u) while working → abort echo + armed footer (Bug A)",
+    () => {
+      const session = `abort-ctrl-c-${Date.now()}`
       killSession(session)
-    }
-  })
+      const start = spawnSync("tmux", [
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-x",
+        "120",
+        "-y",
+        "30",
+        "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
+      ])
+      expect(start.status).toBe(0)
 
-  it("kitty CSI-u ESC (\\x1b[27u) while working → abort echo, NO banner, agent alive (Bug B)", () => {
-    const session = `abort-esc-${Date.now()}`
-    killSession(session)
-    const start = spawnSync("tmux", [
-      "new-session",
-      "-d",
-      "-s",
-      session,
-      "-x",
-      "120",
-      "-y",
-      "30",
-      "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
-    ])
-    expect(start.status).toBe(0)
+      try {
+        // Wait for the REPL to come up.
+        Bun.sleepSync(800)
+        spawnSync("tmux", ["send-keys", "-t", session, "first prompt", "Enter"])
+        Bun.sleepSync(600)
+        pasteBytes(session, "\x1b[99;5u")
+        const pane = captureAfter(session, 800)
 
-    try {
-      Bun.sleepSync(800)
-      spawnSync("tmux", ["send-keys", "-t", session, "first prompt", "Enter"])
-      Bun.sleepSync(600)
-      pasteBytes(session, "\x1b[27u")
-      const pane1 = captureAfter(session, 800)
+        // Pre-fix this assertion FAILED - the path bypassed the FSM and the
+        // REPL quit silently with no echo.
+        expect(pane).toContain("✘ ABORTED")
+        // Buffer was restored (not cleared, which was the legacy bug).
+        expect(pane).toContain("first prompt")
+        // Armed footer reflects post-abort source. `⌃C to quit` is the
+        // post-abort verb (idle-confirm would say `⌃C confirm` instead),
+        // so this substring is source-discriminating as well as
+        // presence-asserting.
+        expect(pane).toContain("⌃C to quit")
+        // Did NOT print the goodbye banner: a single Ctrl+C never quits.
+        expect(pane).not.toContain("thanks for using minimal-agent")
+      } finally {
+        killSession(session)
+      }
+    },
+    TMUX_TIMEOUT,
+  )
 
-      // ESC abort echo present, buffer restored.
-      expect(pane1).toContain("✘ ABORTED")
-      expect(pane1).toContain("first prompt")
-      // ESC never arms (rule 4): no armed footer. We check for `⌃C` itself
-      // (the only place it appears is the armed footer) rather than a verb
-      // substring, so an accidental layout shift can't sneak past.
-      expect(pane1).not.toContain("⌃C")
-      // ESC never quits: no banner.
-      expect(pane1).not.toContain("thanks for using minimal-agent")
-
-      // Agent is still alive - submit a second prompt and verify it gets
-      // processed.
-      spawnSync("tmux", ["send-keys", "-t", session, " - second", "Enter"])
-      const pane2 = captureAfter(session, 800)
-      expect(pane2).toContain("working on: first prompt - second")
-    } finally {
+  it(
+    "kitty CSI-u ESC (\\x1b[27u) while working → abort echo, NO banner, agent alive (Bug B)",
+    () => {
+      const session = `abort-esc-${Date.now()}`
       killSession(session)
-    }
-  })
+      const start = spawnSync("tmux", [
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-x",
+        "120",
+        "-y",
+        "30",
+        "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
+      ])
+      expect(start.status).toBe(0)
 
-  it("bare ESC (\\x1b) while working: same UX as kitty ESC (parity)", () => {
-    const session = `abort-esc-bare-${Date.now()}`
-    killSession(session)
-    const start = spawnSync("tmux", [
-      "new-session",
-      "-d",
-      "-s",
-      session,
-      "-x",
-      "120",
-      "-y",
-      "30",
-      "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
-    ])
-    expect(start.status).toBe(0)
+      try {
+        Bun.sleepSync(800)
+        spawnSync("tmux", ["send-keys", "-t", session, "first prompt", "Enter"])
+        Bun.sleepSync(600)
+        pasteBytes(session, "\x1b[27u")
+        const pane1 = captureAfter(session, 800)
 
-    try {
-      Bun.sleepSync(800)
-      spawnSync("tmux", ["send-keys", "-t", session, "bare esc test", "Enter"])
-      Bun.sleepSync(600)
-      // tmux send-keys `Escape` literally sends the bare \x1b byte.
-      spawnSync("tmux", ["send-keys", "-t", session, "Escape"])
-      const pane = captureAfter(session, 800)
+        // ESC abort echo present, buffer restored.
+        expect(pane1).toContain("✘ ABORTED")
+        expect(pane1).toContain("first prompt")
+        // ESC never arms (rule 4): no armed footer. We check for `⌃C` itself
+        // (the only place it appears is the armed footer) rather than a verb
+        // substring, so an accidental layout shift can't sneak past.
+        expect(pane1).not.toContain("⌃C")
+        // ESC never quits: no banner.
+        expect(pane1).not.toContain("thanks for using minimal-agent")
 
-      expect(pane).toContain("✘ ABORTED")
-      expect(pane).toContain("bare esc test")
-      // No armed footer: same rationale as the kitty-ESC parity above.
-      expect(pane).not.toContain("⌃C")
-      expect(pane).not.toContain("thanks for using minimal-agent")
-    } finally {
+        // Agent is still alive - submit a second prompt and verify it gets
+        // processed.
+        spawnSync("tmux", ["send-keys", "-t", session, " - second", "Enter"])
+        const pane2 = captureAfter(session, 800)
+        expect(pane2).toContain("working on: first prompt - second")
+      } finally {
+        killSession(session)
+      }
+    },
+    TMUX_TIMEOUT,
+  )
+
+  it(
+    "bare ESC (\\x1b) while working: same UX as kitty ESC (parity)",
+    () => {
+      const session = `abort-esc-bare-${Date.now()}`
       killSession(session)
-    }
-  })
+      const start = spawnSync("tmux", [
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-x",
+        "120",
+        "-y",
+        "30",
+        "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
+      ])
+      expect(start.status).toBe(0)
+
+      try {
+        Bun.sleepSync(800)
+        spawnSync("tmux", ["send-keys", "-t", session, "bare esc test", "Enter"])
+        Bun.sleepSync(600)
+        // tmux send-keys `Escape` literally sends the bare \x1b byte.
+        spawnSync("tmux", ["send-keys", "-t", session, "Escape"])
+        const pane = captureAfter(session, 800)
+
+        expect(pane).toContain("✘ ABORTED")
+        expect(pane).toContain("bare esc test")
+        // No armed footer: same rationale as the kitty-ESC parity above.
+        expect(pane).not.toContain("⌃C")
+        expect(pane).not.toContain("thanks for using minimal-agent")
+      } finally {
+        killSession(session)
+      }
+    },
+    TMUX_TIMEOUT,
+  )
 })

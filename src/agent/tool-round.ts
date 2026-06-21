@@ -261,7 +261,10 @@ export async function executeToolRound(
   // The synthesized error tool_result teaches the model how to
   // adapt : see ManifestMode.refusalHint. No spinner, no execution
   // side effects.
-  const gate = ctx.modeManager?.isToolAllowed(tool.name) ?? { allowed: true as const }
+  const gate = ctx.modeManager?.isToolAllowed(
+    tool.name,
+    tool.input as Record<string, unknown> | undefined,
+  ) ?? { allowed: true as const }
   if (!gate.allowed) {
     writeToolHeader()
     content = gate.message
@@ -294,11 +297,14 @@ export async function executeToolRound(
       since: since ? since.toISOString() : null,
       permissions: perms
         ? {
-            allow: perms.allow,
-            deny: perms.deny,
+            tools: perms.tools.map((t) => {
+              const entry: Record<string, unknown> = { tool: t.tool, allow: t.allow }
+              if (t.refusalHint) entry.refusalHint = t.refusalHint
+              return entry
+            }),
             source: perms.source,
           }
-        : { allow: ["*"], deny: [], source: { allow: "default", deny: "default" } },
+        : { tools: [{ tool: "*", allow: true }], source: "default" },
     }
     content = JSON.stringify(result, null, 2)
     isError = false

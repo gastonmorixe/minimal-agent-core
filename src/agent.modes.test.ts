@@ -112,7 +112,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     ) as Record<string, unknown>
     expect(tr).toBeDefined()
     expect(tr.is_error).toBe(true)
-    expect(String(tr.content)).toContain('Tool "Edit" is denied in ASK mode.')
+    expect(String(tr.content)).toContain('Tool "Edit" is not permitted in ASK mode.')
     expect(String(tr.content)).toContain("unified diff")
 
     // Transcript must show the denial line so the user sees what was blocked.

@@ -29,7 +29,7 @@
 
 import { c } from "./agent.ts"
 import type { ContentBlock } from "./client.ts"
-import type { ManifestMode, ModePermissions } from "./plugins/types.ts"
+import type { ManifestMode, ModePermissions, ToolPermission } from "./plugins/types.ts"
 import {
   clampLabel,
   detectStyleEnv,
@@ -42,122 +42,173 @@ import {
 } from "./ui/style/mode.ts"
 
 /**
- * Resolved (allow, deny) lists for a mode, with all defaults filled in.
+ * Resolved tool-permission rules for a mode.
  *
- * - `allow` is never empty: at minimum it is `["*"]` (everything).
- * - `deny`  is `[]` when nothing is denied.
- * - `source` records which layer the values came from. Useful for the
- *   `Mode` tool and config diagnostics.
- *
- * Built by {@link buildEffectiveModePermissions}.
+ * `tools` is an ordered list of {@link ToolPermission}. First-match wins.
+ * An explicit `{ tool: "*", allow: true }` entry acts as the wildcard
+ * allow-all. `source` records which layer the rules came from.
  */
 export interface EffectiveModePermissions {
-  allow: string[]
-  deny: string[]
-  source: {
-    /** `"manifest"`, `"user-config"`, `"default"`. */
-    allow: "manifest" | "user-config" | "default"
-    deny: "manifest" | "user-config" | "default"
-  }
+  tools: ToolPermission[]
+  source: "manifest" | "user-config" | "default"
 }
 
 /**
- * One mode's user-config override. Top-level shape:
+ * One mode's user-config override.
  *
  *   plugins.<plugin-id>.modes.<mode-id>: ModeUserOverride
- *
- * The mode is identified by its `id`; the plugin namespace is just a
- * filing cabinet, not part of the lookup key (mode ids are globally
- * unique within a session : the loader rejects duplicates).
  */
 export interface ModeUserOverride {
   permissions?: ModePermissions
 }
 
 /**
- * Resolve effective \{allow, deny\} for a mode by overlaying user config
+ * Convert a `ManifestMode` into a canonical `ToolPermission[]`, handling
+ * the new `ToolPermission[]`, the old `ModePermissions`, and the legacy
+ * `disallowedTools` sugar. Returns the default `[{ tool: "*", allow: true }]`
+ * when nothing is set.
+ */
+function toolPermissionsFromMode(mode: ManifestMode): ToolPermission[] {
+  // New-style: array of ToolPermission
+  if (Array.isArray(mode.permissions) && mode.permissions.length > 0) {
+    return [...mode.permissions]
+  }
+  // Old-style: ModePermissions object
+  const mp = mode.permissions as ModePermissions | undefined
+  if (
+    mp &&
+    typeof mp === "object" &&
+    !Array.isArray(mp) &&
+    (Array.isArray(mp.allow) || Array.isArray(mp.deny))
+  ) {
+    return modePermissionsToTools(mp)
+  }
+  // Back-compat: disallowedTools → deny rules
+  if (mode.disallowedTools && mode.disallowedTools.length > 0) {
+    return [
+      { tool: "*", allow: true },
+      ...mode.disallowedTools.map((t) => ({ tool: t, allow: false as const })),
+    ]
+  }
+  return [{ tool: "*", allow: true }]
+}
+
+/**
+ * Convert old {@link ModePermissions} into {@link ToolPermission}[].
+ */
+function modePermissionsToTools(mp: ModePermissions): ToolPermission[] {
+  const tools: ToolPermission[] = []
+  if (mp.allow && mp.allow.length > 0) {
+    if (mp.allow.includes("*")) {
+      tools.push({ tool: "*", allow: true })
+    } else {
+      for (const t of mp.allow) tools.push({ tool: t, allow: true })
+    }
+  } else if (!mp.deny || mp.deny.length === 0) {
+    tools.push({ tool: "*", allow: true })
+  }
+  if (mp.deny && mp.deny.length > 0) {
+    for (const t of mp.deny) tools.push({ tool: t, allow: false })
+  }
+  return tools
+}
+
+/**
+ * Resolve effective tool permissions for a mode by overlaying user config
  * on top of the manifest, with hard defaults underneath.
  *
- * Resolution order (later wins, array-level replacement, not merge):
+ * Resolution order (later wins, allow/deny resolve independently):
+ *   1. defaults: `[{ tool: "*", allow: true }]`
+ *   2. manifest: new `ToolPermission[]`, old `ModePermissions`, then back-compat `disallowedTools`
+ *   3. user config: old `ModePermissions` shape, converted to `ToolPermission[]`
  *
- *   1. defaults: `{ allow: ["*"], deny: [] }`
- *   2. manifest: `mode.permissions`, then back-compat `mode.disallowedTools`
- *      (the legacy field becomes `{ deny: [...] }` when `permissions` is
- *      absent).
- *   3. user config: `userOverride.permissions`.
- *
- * Each list resolves independently: a user override that sets only
- * `allow` inherits `deny` from the manifest (or default), and vice
- * versa. This matches every other "tuple of overridable knobs" pattern
- * in the agent's config surface.
- *
- * Pure : no I/O, no closure state. Cheap to call on every dispatch (the
- * caller is encouraged to cache by `(modeId, configHash)`).
- *
- * @param mode - The mode whose permissions we want.
- * @param userOverride - Optional user-config overlay (one mode's slice).
+ * Allow and deny resolve independently: a user override that sets only
+ * `allow` inherits `deny` from the manifest (or default), and vice versa.
  */
 export function buildEffectiveModePermissions(
   mode: ManifestMode,
   userOverride?: ModeUserOverride | null,
 ): EffectiveModePermissions {
-  const userAllow = userOverride?.permissions?.allow
-  const userDeny = userOverride?.permissions?.deny
-  const manifestAllow = mode.permissions?.allow
-  // disallowedTools is back-compat sugar for permissions.deny.
-  // permissions.deny wins if both are set on the same manifest.
-  const manifestDeny = mode.permissions?.deny ?? mode.disallowedTools
+  const hasPermissions =
+    (Array.isArray(mode.permissions) && mode.permissions.length > 0) ||
+    (mode.permissions as ModePermissions | undefined)?.allow != null ||
+    (mode.permissions as ModePermissions | undefined)?.deny != null ||
+    (mode.disallowedTools != null && mode.disallowedTools.length > 0)
 
-  let allow: string[]
-  let allowSource: EffectiveModePermissions["source"]["allow"]
-  if (userAllow != null) {
-    allow = [...userAllow]
-    allowSource = "user-config"
-  } else if (manifestAllow != null) {
-    allow = [...manifestAllow]
-    allowSource = "manifest"
-  } else {
-    allow = ["*"]
-    allowSource = "default"
+  const manifestTools = hasPermissions
+    ? toolPermissionsFromMode(mode)
+    : [{ tool: "*", allow: true }]
+
+  if (!userOverride?.permissions) {
+    return { tools: manifestTools, source: hasPermissions ? "manifest" : "default" }
   }
 
-  let deny: string[]
-  let denySource: EffectiveModePermissions["source"]["deny"]
-  if (userDeny != null) {
-    deny = [...userDeny]
-    denySource = "user-config"
-  } else if (manifestDeny != null) {
-    deny = [...manifestDeny]
-    denySource = "manifest"
-  } else {
-    deny = []
-    denySource = "default"
+  if (!userOverride?.permissions) {
+    return { tools: manifestTools, source: "manifest" }
   }
 
-  return { allow, deny, source: { allow: allowSource, deny: denySource } }
+  // User config: resolve allow and deny independently.
+  const userAllow = userOverride.permissions.allow
+  const userDeny = userOverride.permissions.deny
+  const manifestAllowTools = manifestTools.filter((t) => t.allow === true)
+  const manifestDenyTools = manifestTools.filter((t) => t.allow === false || t.allow === "match")
+
+  let resultTools: ToolPermission[]
+
+  if (userAllow != null && userDeny != null) {
+    // Both set → user replaces entirely
+    resultTools = modePermissionsToTools(userOverride.permissions)
+  } else if (userAllow != null) {
+    // Only allow set → user allow + manifest deny
+    const userAllowTools = userAllow.includes("*")
+      ? [{ tool: "*", allow: true }]
+      : userAllow.map((t) => ({ tool: t, allow: true }))
+    resultTools = [...userAllowTools, ...manifestDenyTools]
+  } else if (userDeny != null) {
+    // Only deny set → manifest allow + user deny
+    const userDenyTools = userDeny.map((t) => ({ tool: t, allow: false }))
+    resultTools = [...manifestAllowTools, ...userDenyTools]
+  } else {
+    resultTools = manifestTools
+  }
+
+  return { tools: resultTools, source: "user-config" }
 }
 
 /**
  * Evaluate a tool name against an effective permissions policy.
  *
- * Algorithm (deny wins, wildcard supported in `allow`):
+ * First-match wins by rule priority: exact tool name rules are checked
+ * BEFORE wildcard `"*"` rules. Within each group, rule order in
+ * `perms.tools` determines priority.
  *
- *   1. If `tool` is in `deny`, return `false`.
- *   2. If `allow` contains `"*"`, return `true`.
- *   3. If `tool` is in `allow`, return `true`.
- *   4. Otherwise return `false`.
- *
- * Pure. Constant in policy size for typical (under 20 entries) lists; we
- * use `Array.includes` rather than a `Set` to keep the no-mode hot path
- * allocation-free.
- *
- * @param tool - Tool name (e.g. `"Edit"`).
- * @param perms - Effective permissions for the active mode.
+ *   - `allow: true` → allowed.
+ *   - `allow: false` → denied.
+ *   - `allow: "match"` → defer to `rule.predicate(input)`. No predicate = deny.
+ *   - No matching rule → denied.
  */
-export function isToolAllowedByPermissions(tool: string, perms: EffectiveModePermissions): boolean {
-  if (perms.deny.includes(tool)) return false
-  if (perms.allow.includes("*")) return true
-  return perms.allow.includes(tool)
+export function isToolAllowedByPermissions(
+  tool: string,
+  perms: EffectiveModePermissions,
+  input?: Record<string, unknown>,
+): boolean {
+  // Phase 1: exact tool name match (checked before wildcard)
+  for (const rule of perms.tools) {
+    if (rule.tool !== tool) continue
+    if (rule.allow === true) return true
+    if (rule.allow === false) return false
+    if (rule.predicate) return rule.predicate(input ?? {})
+    return false
+  }
+  // Phase 2: wildcard "*" fallback
+  for (const rule of perms.tools) {
+    if (rule.tool !== "*") continue
+    if (rule.allow === true) return true
+    if (rule.allow === false) return false
+    if (rule.predicate) return rule.predicate(input ?? {})
+    return false
+  }
+  return false
 }
 
 /**
@@ -545,37 +596,32 @@ export class ModeManager {
   /**
    * Dispatch-time tool gate.
    *
-   * Tools are ALWAYS registered in the request body (removing them
-   * would mutate the cached `tools` array bytes and bust the prompt
-   * cache on every mode toggle). The agent's tool loop calls this
-   * method right before invoking each `tool_use` block; on
-   * `allowed: false` the loop synthesizes a structured `is_error: true`
-   * `tool_result` with the returned `message` and skips execution.
-   * The model sees the rejection on its next round and adapts.
+   * Tools are ALWAYS registered in the request body. The agent's tool
+   * loop calls this before invoking each `tool_use` block; on `allowed:false`
+   * it synthesizes an `is_error: true` result with the refusal
+   * message.
    *
-   * Evaluation order:
-   *   1. No active mode → allowed.
-   *   2. Effective `deny` contains the tool → denied (deny wins).
-   *   3. Effective `allow` contains `"*"` → allowed.
-   *   4. Effective `allow` contains the tool → allowed.
-   *   5. Otherwise → denied (not on the whitelist).
+   * Evaluation iterates the mode's `ToolPermission[]` rules in order,
+   * first-match wins. See {@link isToolAllowedByPermissions}.
    *
-   * Effective permissions are built by overlaying user config on the
-   * manifest; see {@link buildEffectiveModePermissions}.
+   * @param toolName - Tool name (e.g. `"Bash"`).
+   * @param toolInput - Optional tool input for predicate evaluation.
    */
-  isToolAllowed(toolName: string): { allowed: true } | { allowed: false; message: string } {
+  isToolAllowed(
+    toolName: string,
+    toolInput?: Record<string, unknown>,
+  ): { allowed: true } | { allowed: false; message: string } {
     const m = this.active()
     if (!m) return { allowed: true }
     const perms = this.effectivePermissions(m.id)
     if (!perms) return { allowed: true }
-    if (isToolAllowedByPermissions(toolName, perms)) return { allowed: true }
+    if (isToolAllowedByPermissions(toolName, perms, toolInput)) return { allowed: true }
     const label = (m.label ?? m.id).toUpperCase()
-    const denied = perms.deny.includes(toolName)
-    const head = denied
-      ? `Tool "${toolName}" is denied in ${label} mode.`
-      : `Tool "${toolName}" is not on the allow list for ${label} mode.`
     const tail = m.refusalHint ? ` ${m.refusalHint}` : ""
-    return { allowed: false, message: `${head}${tail}` }
+    return {
+      allowed: false,
+      message: `Tool "${toolName}" is not permitted in ${label} mode.${tail}`,
+    }
   }
 
   /**
