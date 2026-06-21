@@ -258,6 +258,54 @@ interface PendingFragment {
 }
 
 /**
+ * Derive CamelCase prefix from a plugin's display name.
+ *
+ * Splits on word boundaries (spaces and hyphens), capitalizes each token,
+ * and joins. The plugin author can override this via `manifest.camelName`.
+ *
+ * Examples:
+ *   "Background Jobs"  → "BackgroundJobs"
+ *   "Sub-agents"       → "SubAgents"
+ *   "Diff Viewer"      → "DiffViewer"
+ */
+function deriveCamelName(name: string): string {
+  return name
+    .split(/[\s-]+/)
+    .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
+    .join("")
+}
+
+/**
+ * Compute the effective canonical tool name after applying the auto-prefix
+ * convention.
+ *
+ * Rules:
+ * 1. If `explicitName` is `true`, the tool name passes through unchanged.
+ * 2. Otherwise, the name is prefixed with the plugin's CamelCase name
+ *    (from `manifest.camelName` if set, else derived from `manifest.name`).
+ * 3. Automated migration alias: the ORIGINAL `tool.name` is returned as
+ *    `migrationAlias` so the loader can register it as a deprecation alias.
+ */
+function computeEffectiveName(
+  toolName: string,
+  explicitName: boolean | undefined,
+  manifestName: string,
+  camelNameOverride: string | undefined,
+): { canonical: string; migrationAlias: string | null } {
+  if (explicitName === true) {
+    return { canonical: toolName, migrationAlias: null }
+  }
+  const prefix = camelNameOverride ?? deriveCamelName(manifestName)
+  const canonical = `${prefix}${toolName}`
+  if (canonical === toolName) {
+    // Perfect collision — the tool name already matches the convention.
+    // Don't rewrite, don't alias.
+    return { canonical: toolName, migrationAlias: null }
+  }
+  return { canonical, migrationAlias: toolName }
+}
+
+/**
  * Loaded collection of plugins with a dispatch entry point.
  *
  * Call {@link load} once at agent startup. The resulting loader is
@@ -578,7 +626,21 @@ export class PluginLoader {
       // Commit to global indexes.
       for (const r of accepted) {
         if (r.definition.trigger.type === "tool") {
-          const canonical = r.definition.trigger.tool.name
+          // Apply CamelCase prefix convention.
+          const { canonical, migrationAlias } = computeEffectiveName(
+            r.definition.trigger.tool.name,
+            r.definition.trigger.tool.explicitName,
+            pkg.manifest.name,
+            pkg.manifest.camelName,
+          )
+          r.definition.trigger.tool.name = canonical
+          if (migrationAlias) {
+            // Register old name as a deprecation alias for migration.
+            const existing = r.definition.trigger.tool.aliases ?? []
+            if (!existing.includes(migrationAlias)) {
+              r.definition.trigger.tool.aliases = [...existing, migrationAlias]
+            }
+          }
           toolIndex.set(canonical, r)
           for (const alias of r.definition.trigger.tool.aliases ?? []) {
             aliasIndex.set(alias, canonical)
@@ -1403,7 +1465,6 @@ export class PluginLoader {
 
 // Global slash-command registry (extracted T-8a0c44).
 import { CommandRegistry } from "./loader/commands.ts"
-
 // Package discovery + manifest parsing (the four-root walk, realpath
 // dedupe, enable/disable gates, PROMPT.md resolution) lives in
 // `src/plugins/loader/discovery.ts`.

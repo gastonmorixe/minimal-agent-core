@@ -1,4 +1,4 @@
-Use the `CronCreate`, `CronList`, and `CronDelete` tools to run a prompt on a
+Use the `ScheduleCronCreate`, `ScheduleCronList`, and `ScheduleCronDelete` tools to run a prompt on a
 schedule, poll something repeatedly, or set a one-time reminder. A scheduled
 prompt is injected as a user turn BETWEEN turns (never mid-response), so it polls
 a deploy, babysits a PR, or reminds the user without you having to busy-wait.
@@ -23,8 +23,8 @@ a deploy, babysits a PR, or reminds the user without you having to busy-wait.
 - A session can hold up to 50 tasks. Recurring tasks auto-expire after 7 days
   (they fire a final time, then delete). Tasks are session-scoped and restored on
   `--resume` if unexpired.
-- To answer "what scheduled tasks do I have?" call `CronList`. To cancel one, call
-  `CronDelete` with its 8-character id (from `CronList` or the create confirmation).
+- To answer "what scheduled tasks do I have?" call `ScheduleCronList`. To cancel one, call
+  `ScheduleCronDelete` with its 8-character id (from `ScheduleCronList` or the create confirmation).
 - Don't schedule irreversible actions (push, delete, deploy) unless the user
   already authorized them in this conversation.
 
@@ -34,12 +34,12 @@ The user can also type `/loop` and `/schedule` directly:
 
 - `/loop 5m check the deploy`: recurring loop on a fixed interval.
 - `/loop check CI and address review comments`: a loop whose prompt runs at a
-  default cadence (the user can stop it with Esc or `CronDelete`).
+  default cadence (the user can stop it with Esc or `ScheduleCronDelete`).
 - `/loop`: runs a built-in maintenance prompt (or the project's `.claude/loop.md`).
 - `/schedule "0 9 * * 1-5" run the morning report`: schedule by raw cron.
 - `/schedule list` / `/schedule cancel <id>`: manage tasks.
 
-These write tasks to the same store your `Cron*` tools use, so `CronList` shows
-them and `CronDelete` cancels them.
+These write tasks to the same store your `Cron*` tools use, so `ScheduleCronList` shows
+them and `ScheduleCronDelete` cancels them.
 
 Scheduling can be disabled entirely with `MINIMAL_AGENT_DISABLE_CRON=1`.

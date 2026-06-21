@@ -2,7 +2,7 @@
   "id": "schedule",
   "name": "Schedule",
   "version": "0.1.0",
-  "description": "Run prompts on a schedule. Adds the CronCreate/CronList/CronDelete tools (the model schedules tasks from natural language like 'remind me at 3pm' or 'every 5 minutes check the deploy'), a 1-second heartbeat that injects each due task's prompt between turns via the prompt.inject port, and the /loop and /schedule commands. Tasks are session-scoped at ~/.minimal-agent/sessions/<sid>.cron.json and restored (unexpired) on --resume. Disable with MINIMAL_AGENT_DISABLE_CRON=1.",
+  "description": "Run prompts on a schedule. Adds the ScheduleCronCreate/ScheduleCronList/ScheduleCronDelete tools (the model schedules tasks from natural language like 'remind me at 3pm' or 'every 5 minutes check the deploy'), a 1-second heartbeat that injects each due task's prompt between turns via the prompt.inject port, and the /loop and /schedule commands. Tasks are session-scoped at ~/.minimal-agent/sessions/<sid>.cron.json and restored (unexpired) on --resume. Disable with MINIMAL_AGENT_DISABLE_CRON=1.",
   "tuis": [
     {
       "id": "cron_create",
@@ -10,7 +10,7 @@
         "type": "tool",
         "tool": {
           "name": "CronCreate",
-          "description": "Schedule a prompt to run on a cron schedule or interval. The prompt is injected as a user turn BETWEEN turns each time the task is due (never mid-response). Use for polling a deploy, babysitting a PR, or one-time reminders ('remind me at 3pm to push'). Provide EITHER `cron` (a 5-field expression, local time) OR `every` (a human interval like '5m', '2h', '1d'). Set `recurs:false` for a one-shot that deletes itself after firing. Times are local. Max 50 tasks/session; recurring tasks auto-expire after 7 days. Cancel with CronDelete.",
+          "description": "Schedule a prompt to run on a cron schedule or interval. The prompt is injected as a user turn BETWEEN turns each time the task is due (never mid-response). Use for polling a deploy, babysitting a PR, or one-time reminders ('remind me at 3pm to push'). Provide EITHER `cron` (a 5-field expression, local time) OR `every` (a human interval like '5m', '2h', '1d'). Set `recurs:false` for a one-shot that deletes itself after firing. Times are local. Max 50 tasks/session; recurring tasks auto-expire after 7 days. Cancel with ScheduleCronDelete.",
           "input_schema": {
             "type": "object",
             "properties": {
@@ -62,7 +62,7 @@
         "type": "tool",
         "tool": {
           "name": "CronDelete",
-          "description": "Cancel a scheduled task by its 8-character id (from CronList or the CronCreate confirmation).",
+          "description": "Cancel a scheduled task by its 8-character id (from ScheduleCronList or the ScheduleCronCreate confirmation).",
           "input_schema": {
             "type": "object",
             "properties": {

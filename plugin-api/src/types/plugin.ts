@@ -430,6 +430,15 @@ export type ToolAvailability = (ctx: ToolAvailabilityContext) => boolean
 export interface ManifestFile {
   id: string
   name: string
+  /**
+   * Optional override for the CamelCase prefix derived from `name`.
+   * When set, this value is used verbatim as the tool-name prefix
+   * instead of auto-deriving from `name` by word-boundary splitting.
+   *
+   * Example: `"name": "Chrome CDP"` would derive `ChromeCdp`, but the
+   * author can set `camelName: "ChromeCDP"` to keep the acronym uppercase.
+   */
+  camelName?: string
   version: string
   description: string
   /** Optional relative path to a PROMPT.md file (default: `./PROMPT.md`). */
@@ -1460,6 +1469,24 @@ export type ManifestTrigger =
          * another alias, alias vs core tool name) is checked at load time
          * in the loader and rejects the offending plugin entirely.
          */
+        /**
+         * When `true`, the tool's canonical name passes through the loader
+         * unchanged — no `PluginName + ToolName` CamelCase prefix is applied.
+         * Default `false`: the loader auto-prefixes every tool name with the
+         * owning plugin's CamelCase name.
+         *
+         * Use this when the tool name already carries the plugin's identity
+         * (e.g. `WebSearch` owned by the `Web Search` plugin) or when the
+         * auto-prefixed result would produce a stutter (e.g. `TasksTask`).
+         */
+        explicitName?: boolean
+        /**
+         * Short explanation for WHY this tool opted out of auto-prefixing.
+         * The loader logs a warning when `explicitName` is `true` and
+         * `reason` is empty or missing. Purely diagnostic; never sent to
+         * the model.
+         */
+        reason?: string
         aliases?: string[]
       }
     }

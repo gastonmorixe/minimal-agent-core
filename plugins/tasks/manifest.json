@@ -50,7 +50,9 @@
               },
               "titles": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Multiple task titles, created in order. Use for the initial plan dump at the start of a multi-step change. Required for: add_many."
               },
               "parent": {
@@ -98,7 +100,9 @@
             },
             "required": ["action"],
             "additionalProperties": false
-          }
+          },
+          "explicitName": true,
+          "reason": "TasksTask is a stutter"
         }
       },
       "handler": {
@@ -115,14 +119,22 @@
     {
       "id": "subagent_task_link",
       "on": "subagent.taskUpdate",
-      "handler": { "type": "module", "path": "./handlers/task_link.ts", "export": "default" }
+      "handler": {
+        "type": "module",
+        "path": "./handlers/task_link.ts",
+        "export": "default"
+      }
     }
   ],
   "replayRenderers": [
     {
       "id": "task_replay",
       "tool": "Task",
-      "handler": { "type": "module", "path": "./handlers/replay_render.ts", "export": "default" }
+      "handler": {
+        "type": "module",
+        "path": "./handlers/replay_render.ts",
+        "export": "default"
+      }
     }
   ],
   "turnAttachments": [

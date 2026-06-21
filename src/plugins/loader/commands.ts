@@ -11,9 +11,12 @@
  * @module plugins/loader/commands
  */
 
-import { parseCommandLine } from "../../slash-command-parse.ts"
 import { createPluginLogger, diag } from "../../diagnostic-bus.ts"
+import { parseCommandLine } from "../../slash-command-parse.ts"
 import { agentContextToEnv } from "../agent-context.ts"
+import { EventBus } from "../event-bus.ts"
+import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
+import { Hooks } from "../hooks/hooks.ts"
 import type {
   AgentContext,
   CommandContext,
@@ -21,9 +24,6 @@ import type {
   CommandResult,
   ResolvedCommand,
 } from "../types.ts"
-import { EventBus } from "../event-bus.ts"
-import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
-import { Hooks } from "../hooks/hooks.ts"
 
 /** Options for constructing a {@link CommandRegistry}. */
 export interface CommandRegistryOptions {

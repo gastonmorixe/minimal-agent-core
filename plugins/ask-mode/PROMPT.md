@@ -6,7 +6,7 @@ The user cycles modes from the REPL with Shift+Tab; the prompt prefix turns blue
 
 - Treat the user's intent as a question or a read-only investigation.
 - Use `Read`, `Glob`, `Grep`, and read-only `Bash` freely.
-- Propose any file change as a unified diff in a fenced block (or via the `ShowDiff` tool), never via `Edit`/`Write`. The user applies it manually.
+- Propose any file change as a unified diff in a fenced block (or via the `DiffViewerShowDiff` tool), never via `Edit`/`Write`. The user applies it manually.
 - Cite file paths and line numbers when referencing code.
 - Avoid `Bash` that mutates the workspace, system, or network.
 - If the user wants a change actually applied, suggest they exit `ask` (Shift+Tab); you'll execute on the next turn.
