@@ -63,11 +63,12 @@ describe("loadMemoryConfig: defaults", () => {
     expect(cfg).toEqual(DEFAULT_MEMORY_CONFIG)
   })
 
-  it("default inject mode is 'none'", () => {
-    // Regression guard: the whole point of this rewrite is to flip
-    // the default from verbatim → none. If this ever flips back
-    // accidentally, system-prompt context bloat returns silently.
-    expect(DEFAULT_MEMORY_CONFIG.inject).toBe("none")
+  it("default inject mode is 'latest'", () => {
+    // Regression guard: the default from v0.4+ is "latest" — inject the
+    // N most-recent bullets per scope so the model has memory access
+    // without blowing up context. If this ever flips back accidentally,
+    // the system prompt silently loses pre-loaded memories.
+    expect(DEFAULT_MEMORY_CONFIG.inject).toBe("latest")
   })
 
   it("returns defaults when file has no plugins section", () => {
@@ -125,9 +126,9 @@ describe("resolveMemoryConfig: inject mode", () => {
     expect(cfg.inject).toBe(DEFAULT_MEMORY_CONFIG.inject)
   })
 
-  it("returns default 'none' when nothing is set", () => {
+  it("returns default 'latest' when nothing is set", () => {
     const cfg = resolveMemoryConfig({})
-    expect(cfg.inject).toBe("none")
+    expect(cfg.inject).toBe("latest")
   })
 })
 
@@ -141,12 +142,12 @@ describe("resolveMemoryConfig: legacy summary.enabled back-compat", () => {
     expect(cfg.inject).toBe("summary")
   })
 
-  it("legacy summary.enabled=false with no inject keeps default 'none'", () => {
+  it("legacy summary.enabled=false with no inject keeps default 'latest'", () => {
     // The old default was verbatim under enabled=false. The new default
-    // is `none`. Existing users who never touched the knob are migrated
-    // into the no-injection world: that's the explicit intent.
+    // is `latest`. Existing users who never touched the knob are migrated
+    // into the lightweight injection world: that's the explicit intent.
     const cfg = resolveMemoryConfig({ summary: { enabled: false } })
-    expect(cfg.inject).toBe("none")
+    expect(cfg.inject).toBe("latest")
   })
 
   it("explicit inject='verbatim' overrides legacy summary.enabled=true", () => {
@@ -170,7 +171,7 @@ describe("resolveMemoryConfig: legacy summary.enabled back-compat", () => {
     // `"enabled": "true"` falls through to the new default instead of
     // silently re-enabling old behavior.
     const cfg = resolveMemoryConfig({ summary: { enabled: "true" } })
-    expect(cfg.inject).toBe("none")
+    expect(cfg.inject).toBe("latest")
   })
 })
 

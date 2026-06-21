@@ -325,3 +325,197 @@ describe("loadMemories: inject='summary'", () => {
     expect(seenCfg).toEqual(cfg.summary)
   })
 })
+
+// ---------------------------------------------------------------------------
+// inject="latest": default (top-N injection, formatted as MemoryTool.list)
+// ---------------------------------------------------------------------------
+
+/** Helper: build properly-formatted bullet lines for memory file fixtures. */
+function bulletLine(id: string, ts: string, body: string): string {
+  return `- [#${id}] [${ts}] ${body}`
+}
+
+describe("loadMemories: inject='latest'", () => {
+  it("injects both scopes formatted as MemoryTool.list output", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, {
+      global: [
+        bulletLine("g-001", "2026-06-20T10:00:00-04:00", "global bullet one"),
+        bulletLine("g-002", "2026-06-20T11:00:00-04:00", "global bullet two"),
+        bulletLine("g-003", "2026-06-20T12:00:00-04:00", "global bullet three"),
+      ].join("\n"),
+      project: [
+        bulletLine("p-001", "2026-06-20T09:00:00-04:00", "project bullet one"),
+        bulletLine("p-002", "2026-06-20T10:30:00-04:00", "project bullet two"),
+      ].join("\n"),
+    })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("latest"),
+    })
+
+    expect(out).toContain("## Saved memories")
+    expect(out).toContain("formatted as `MemoryTool.list` output")
+    // Global scope: should show the header from formatList
+    expect(out).toContain("### Global")
+    expect(out).toContain("global (3 entries)")
+    expect(out).toContain("#g-001")
+    expect(out).toContain("global bullet one")
+    expect(out).toContain("#g-003")
+    expect(out).toContain("global bullet three")
+    // Project scope
+    expect(out).toContain("### Project")
+    expect(out).toContain("project (2 entries)")
+    expect(out).toContain("#p-001")
+    expect(out).toContain("project bullet one")
+  })
+
+  it("omits empty scopes silently", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    // Only project has bullets; global file is absent.
+    primeNamespaced(home, cwd, {
+      project: bulletLine("p-001", "2026-06-20T10:00:00-04:00", "only project"),
+    })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("latest"),
+    })
+
+    expect(out).toContain("## Saved memories")
+    expect(out).not.toContain("### Global")
+    expect(out).toContain("### Project")
+    expect(out).toContain("project (1 entry)")
+    expect(out).toContain("#p-001")
+  })
+
+  it("returns empty string when both scopes are absent", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    // No primeNamespaced call — both files absent.
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("latest"),
+    })
+
+    expect(out).toBe("")
+  })
+
+  it("returns empty string when both files exist but are empty", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: "", project: "" })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("latest"),
+    })
+
+    expect(out).toBe("")
+  })
+
+  it("respects cfg.latest.top — shows only the N most-recent bullets", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    // 7 bullets, top=3 → only the 3 latest should appear.
+    const bullets: string[] = []
+    for (let i = 1; i <= 7; i++) {
+      bullets.push(
+        bulletLine(
+          `g-${String(i).padStart(2, "0")}`,
+          `2026-06-20T0${i}:00:00-04:00`,
+          `bullet ${i}`,
+        ),
+      )
+    }
+    primeNamespaced(home, cwd, { global: bullets.join("\n") })
+
+    const cfg = cfgWith("latest")
+    cfg.latest.top = 3
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfg,
+    })
+
+    expect(out).toContain("global (showing 3 of 7 entries")
+    // Should contain bullets 5, 6, 7 (the latest 3) but not 1-4.
+    expect(out).toContain("bullet 5")
+    expect(out).toContain("bullet 6")
+    expect(out).toContain("bullet 7")
+    expect(out).not.toContain("bullet 1")
+    expect(out).not.toContain("bullet 2")
+    expect(out).not.toContain("bullet 4")
+
+    // Should NOT have a next-page hint when top >= total bullets.
+    // (Here top=3 < total=7, so we do get the hint from formatList
+    // because it only shows a subset. Actually formatList shows a hint when
+    // nextOffset is set — which happens when there are more bullets beyond
+    // the shown page. In this case we're not paginating through formatList,
+    // we're just taking the last N and formatting them. So we need to check
+    // what happens.)
+    // When we pass total: 7 but only 3 bullets in the array, formatList
+    // sees shown=3, total=7 and renders "showing 3 of 7 entries, offset 0"
+    // and a next-page hint. This is correct — the model sees that there
+    // are more entries it can query.
+  })
+
+  it("when top >= total bullets, shows all without pagination hint", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, {
+      global: [
+        bulletLine("g-001", "2026-06-20T10:00:00-04:00", "one"),
+        bulletLine("g-002", "2026-06-20T11:00:00-04:00", "two"),
+      ].join("\n"),
+    })
+
+    const cfg = cfgWith("latest")
+    cfg.latest.top = 10 // way more than the 2 bullets that exist
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfg,
+    })
+
+    expect(out).toContain("global (2 entries)") // no "showing X of Y" — fits in one page
+    expect(out).not.toContain("next: MemoryTool")
+  })
+
+  it("does NOT invoke refreshAndRender (summary is a separate mode)", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: bulletLine("g-001", "2026-06-20T10:00:00-04:00", "test") })
+
+    let called = false
+    const fakeRefresh: typeof refreshAndRender = async () => {
+      called = true
+      return { text: "should not run", regenerated: false, reason: "n/a" }
+    }
+    await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("latest"),
+      refresh: fakeRefresh,
+    })
+    expect(called).toBe(false)
+  })
+
+  it("includes the latest-mode framing (not summary or verbatim)", async () => {
+    process.env.MINIMAL_AGENT_MEMORY_NAMESPACE = "loadtest"
+    const home = makeTempDir()
+    const cwd = "/Users/x/proj"
+    primeNamespaced(home, cwd, { global: bulletLine("g-001", "2026-06-20T10:00:00-04:00", "test") })
+
+    const out = await loadMemories(makeCtx(home, cwd), {
+      loadConfig: () => cfgWith("latest"),
+    })
+
+    expect(out).toContain("formatted as `MemoryTool.list` output")
+    expect(out).not.toContain("CONDENSED summary") // not summary mode
+    expect(out).not.toContain("Snapshot taken at session start") // not verbatim mode
+  })
+})

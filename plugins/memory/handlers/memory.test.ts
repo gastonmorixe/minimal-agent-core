@@ -517,26 +517,31 @@ function makeLoadCtx(cwd: string): PromptFragmentContext {
   }
 }
 
-describe("memory: load fragment (default: inject='none')", () => {
+describe("memory: load fragment (default: inject='latest')", () => {
   it("returns empty string when neither file exists (default mode)", async () => {
     const out = await loadMemories(makeLoadCtx("/p"))
     expect(out).toBe("")
   })
 
-  it("returns empty string EVEN WHEN files exist (default no-injection mode)", async () => {
-    // Regression guard: the whole point of the v0.4 rewrite is that
-    // memories are NOT in the system prompt by default. They must be
-    // queried via MemoryTool. If this ever flips back, context
-    // saturation returns silently.
+  it("returns latest-N formatted output when files exist (default latest-N injection)", async () => {
+    // With the default "latest" inject mode, existing memory files
+    // should surface their most-recent bullets formatted as
+    // MemoryTool.list output.
     const gp = globalMemoryPath(tmpHome)
     const pp = projectMemoryPath("/p", tmpHome)
     require("node:fs").mkdirSync(require("node:path").dirname(gp), { recursive: true })
     require("node:fs").mkdirSync(require("node:path").dirname(pp), { recursive: true })
-    writeFileSync(gp, "- some global lesson\n")
-    writeFileSync(pp, "- some project lesson\n")
+    writeFileSync(gp, "- [#g-001] [2026-06-20T10:00:00-04:00] [session:test] global lesson\n")
+    writeFileSync(pp, "- [#p-001] [2026-06-20T10:00:00-04:00] [session:test] project lesson\n")
 
     const out = await loadMemories(makeLoadCtx("/p"))
-    expect(out).toBe("")
+    expect(out).toContain("## Saved memories")
+    expect(out).toContain("### Global")
+    expect(out).toContain("#g-001")
+    expect(out).toContain("global lesson")
+    expect(out).toContain("### Project")
+    expect(out).toContain("#p-001")
+    expect(out).toContain("project lesson")
   })
 
   it("skips both file reads entirely on the fast path", async () => {

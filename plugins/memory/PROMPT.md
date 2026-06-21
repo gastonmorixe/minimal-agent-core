@@ -1,14 +1,15 @@
 Use `MemoryTool` for durable, per-user notes that persist across sessions, plus a per-session scratchpad. Two write paths (the inline `<ma::emit::memory>` tag and `MemoryTool.add`) and one read/edit/remove path (`MemoryTool`).
 
-## You have memories. They are not in your context by default.
+## You have memories. The latest ones are pre-loaded.
 
-Persistent memories (`global` and `project` scopes) used to be dumped verbatim into the system prompt at session start. That ate ~13% of a 200k context window and only got worse as the file grew. As of v0.4 the dump is OFF by default.
+Persistent memories (`global` and `project` scopes) had their full history dumped verbatim into the system prompt in older versions, consuming ~13% of a 200k context window. As of v0.4 the default injects only the 10 most-recent bullets per scope, formatted as `MemoryTool.list` output (the exact shape you see when calling the tool). This gives you quick access to recent memories without burning context on the full history.
 
 What this means for you:
 
-- **The `MemoryTool` is always registered.** You can call it whenever you want, no flag, no opt-in.
-- **Bullet contents are not in this prompt.** Asking yourself "what do I remember about X?" should make you reach for the tool, not recite.
+- **The latest 10 `global` and `project` bullets are in your prompt** under `## Saved memories`. They include ids, so you can `MemoryTool.read` any one for the full body.
+- **For older memories or any you don't see listed**, call `MemoryTool({action: "list", ...})` the same way you always have. The tool is always registered.
 - **Saves still work the same way.** The inline `<ma::emit::memory>` tag appends to the file, and the next-turn `<ma::agent::memory-saved id="...">` attachment hands you the bullet's id.
+- **The user can configure the injection mode** via `~/.minimal-agent/config.jsonc`: `"latest"` (default, N most-recent with configurable `top`), `"none"` (query-only), `"verbatim"` (full dump), or `"summary"` (LLM-compressed).
 
 The short-term scratchpad (`short-term` scope) is the exception. It still rides every turn as a `<ma::agent::short-term-memory>` attachment, so what you wrote there last turn is right above this paragraph in your next user message.
 
@@ -150,7 +151,7 @@ Schema: `{action, scope, id?, body?, query?, limit?, offset?, format?}`. `scope`
 
 ## When memories appear in context directly
 
-By default persistent memories are not in your context; you query them with `MemoryTool.list`. If the user has opted into pre-loading, a `## Saved memories` section appears above in your system prompt (sometimes a compressed summary with `Sources: #id` citations). Even then, `MemoryTool.read` by id fetches the full body when the summary is lossy.
+The latest N persistent memories (default 10) are pre-loaded at session start under a `## Saved memories` section in your system prompt, formatted as `MemoryTool.list` output. If the user has opted into a different inject mode, a `## Saved memories` section may also appear containing a compressed summary (with `Sources: #id` citations) or the full verbatim dump. In any case, `MemoryTool.read` by id fetches the full body when the pre-loaded preview or summary is lossy.
 
 ## Id formats
 
