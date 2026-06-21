@@ -49,7 +49,7 @@ export interface OpenAIChatRequestBody {
   stop?: string | string[]
   stream?: boolean
   stream_options?: { include_usage: boolean }
-  reasoning_effort?: "low" | "medium" | "high"
+  reasoning_effort?: "low" | "medium" | "high" | "max"
   metadata?: Record<string, string>
   user?: string
   store?: boolean
@@ -136,7 +136,7 @@ export function buildOpenAIChatBody(
 
   // Reasoning effort (reasoning models only)
   if (req.effort && isReasoningModel && model.capabilities.effort.levels.includes(req.effort)) {
-    body.reasoning_effort = req.effort as "low" | "medium" | "high"
+    body.reasoning_effort = req.effort as OpenAIChatRequestBody["reasoning_effort"]
   }
 
   // Output format
