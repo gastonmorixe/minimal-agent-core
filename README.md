@@ -1,4 +1,13 @@
-# minimal-agent
+<p>
+   <h1 align="center">
+      <img  height="200" alt="minimal-agent" src="https://github.com/user-attachments/assets/b3b96374-88d2-4a92-9a13-d21ebe127732" /> <br> minimal-agent <br> <br>
+   </h1>
+</p>
+
+
+[![CI](https://github.com/gastonmorixe/minimal-agent-dev-private/actions/workflows/ci.yml/badge.svg)](https://github.com/gastonmorixe/minimal-agent-dev-private/actions/workflows/ci.yml)
+[![License: CopyRight](https://img.shields.io/badge/License-CopyRight-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20iOS%20%7C%20tvOS-lightgrey)
 
 `minimal-agent` is a tiny, beautiful, composable agent harness. 
 
