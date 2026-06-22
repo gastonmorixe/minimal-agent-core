@@ -199,6 +199,26 @@ describe("registerOpenAIModels", () => {
     expect(chat.capabilities.thinking.visible).toBe(false)
     expect(chat.capabilities.serverSideHistory).toBe(false)
   })
+
+  it("marks every OpenAI model as sharing one context window for input + output", () => {
+    // OpenAI validates `input_tokens + max_output_tokens <= context_window`
+    // and rejects over-budget requests with `context_length_exceeded`. The
+    // agent's output-budget clamp keys off this capability flag, so EVERY
+    // OpenAI surface (Chat AND Responses, including the gpt-5.5 flagship
+    // that triggered the original incident) must declare it. A missing flag
+    // on a Responses table silently disables the clamp for that model.
+    clearModelRegistry()
+    clearProviderRegistry()
+    const ids = registerOpenAIModels()
+
+    for (const id of ids) {
+      const m = resolveModel(id)
+      expect(
+        m.capabilities.outputTokensShareContextWindow,
+        `${id} must set outputTokensShareContextWindow`,
+      ).toBe(true)
+    }
+  })
 })
 
 describe("bootstrapOpenAI", () => {

@@ -56,8 +56,14 @@ import {
   type ToolResultBlock,
   type ToolUseBlock,
 } from "./client.ts"
+import type { SystemBlock } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
-import { findModel, getDefaultModelId } from "./llm/model-registry.ts"
+import {
+  clampMaxOutputTokens,
+  type EstimableTool,
+  estimateRequestInputTokens,
+} from "./llm/context-budget.ts"
+import { findModel, findModelForProvider, getDefaultModelId } from "./llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
 import { resolveUserTurnContent } from "./media/ingest.ts"
@@ -522,10 +528,42 @@ export class Agent {
    * and request that, so the model gets its full budget. Falls back to
    * `undefined` (let the transport apply its own default) for an unregistered
    * model id, so a bad/aliased id never throws here.
+   *
+   * Some providers validate that input plus requested output fits one
+   * shared context window and reject over-budget requests with
+   * `context_length_exceeded`, so on a near-full transcript we must
+   * reserve less output than the model's raw ceiling. Others treat the
+   * output budget as separate from the input window, so their behavior is
+   * unchanged. The distinction is provider data, exposed as
+   * `outputTokensShareContextWindow`, not a core provider-name branch.
+   * When `system`/`tools` are omitted (legacy callers) the input estimate
+   * covers messages only.
+   *
+   * `ctx` can include optional system blocks + tool schemas to fold into
+   * the input-size estimate. Omit for a messages-only estimate.
    */
-  private resolveMaxOutputTokens(): number | undefined {
-    const entry = findModel(normalizeModelForAPI(this.model))
-    return entry?.capabilities?.maxOutputTokens
+  private resolveMaxOutputTokens(ctx?: {
+    system?: SystemBlock[]
+    tools?: EstimableTool[]
+  }): number | undefined {
+    const apiModel = normalizeModelForAPI(this.model)
+    const entry = this.providerId
+      ? (findModelForProvider(apiModel, this.providerId) ?? findModel(apiModel))
+      : findModel(apiModel)
+    if (!entry) return undefined
+    const modelMax = entry.capabilities.maxOutputTokens
+
+    const contextWindow = entry.capabilities.contextWindow
+    if (!entry.capabilities.outputTokensShareContextWindow) return modelMax
+
+    const inputTokens = estimateRequestInputTokens({
+      modelId: apiModel,
+      estimateTokens: entry.estimateTokens,
+      messages: this.messages,
+      ...(ctx?.system ? { system: ctx.system } : {}),
+      ...(ctx?.tools ? { tools: ctx.tools } : {}),
+    })
+    return clampMaxOutputTokens({ modelMax, contextWindow, inputTokens })
   }
 
   /**
@@ -1013,8 +1051,11 @@ export class Agent {
 
       // Send messages to API. Mark the last block of the last message with a
       // rolling cache_control breakpoint so the growing transcript stays cached
-      // across turns (see withRollingCacheBreakpoint).
-      const maxOutputTokens = this.resolveMaxOutputTokens()
+      // across turns (see withRollingCacheBreakpoint). The output budget is
+      // clamped to the room left in the context window using the SAME system
+      // prompt + tool schemas we are about to send, so the estimate matches
+      // the real payload (see resolveMaxOutputTokens / context-budget.ts).
+      const maxOutputTokens = this.resolveMaxOutputTokens({ system, tools: mergedTools })
       const gen = this.sendFn({
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages),
@@ -1398,9 +1439,10 @@ export class Agent {
         // tools intentionally omitted : the model cannot call tools on
         // this final turn, so it MUST write text and finish.
         system,
-        ...(this.resolveMaxOutputTokens() !== undefined
-          ? { maxTokens: this.resolveMaxOutputTokens() }
-          : {}),
+        ...((): { maxTokens?: number } => {
+          const mt = this.resolveMaxOutputTokens({ system })
+          return mt !== undefined ? { maxTokens: mt } : {}
+        })(),
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.thinkingDisplay

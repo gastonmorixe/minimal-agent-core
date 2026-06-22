@@ -40,3 +40,41 @@ export function parseModelUnavailableError(
   if (message.includes("long context beta is not yet available")) return currentModel
   return null
 }
+
+/**
+ * Detect provider errors that mean the outgoing request exceeded the
+ * model's context window. This usually happens after a long autonomous
+ * loop or when resuming an already-large transcript under a smaller or
+ * stricter model.
+ *
+ * Stateful "responses"-style APIs commonly emit a code-tagged message:
+ * "context_length_exceeded - Your input exceeds the context window of
+ * this model." Chat-style APIs may instead say "maximum context length"
+ * or "reduce the length of the messages". The parser intentionally stays
+ * broad but requires context/window wording so random network errors
+ * don't match. Kept provider-neutral on purpose: matching keys off the
+ * error shape, never a vendor name.
+ */
+export function parseContextLengthExceededError(message: string): boolean {
+  const lower = message.toLowerCase()
+  if (lower.includes("context_length_exceeded")) return true
+  if (lower.includes("maximum context length")) return true
+  if (lower.includes("context window") && lower.includes("exceed")) return true
+  if (lower.includes("reduce the length") && lower.includes("message")) return true
+  return false
+}
+
+/**
+ * User-facing recovery guidance for context-window failures. The failed
+ * user turn has already been rolled back by the caller, so the next step
+ * must be to shrink or reset history. Retrying the same oversized
+ * transcript will fail again.
+ */
+export function contextLengthExceededAdvice(currentModel: string | undefined): string {
+  const modelSuffix = currentModel ? ` for ${currentModel}` : ""
+  return (
+    `Context window exceeded${modelSuffix}. The failed user turn was rolled back. ` +
+    "Start a fresh session, compact the transcript, or prune old history before retrying. " +
+    "Resuming the same oversized transcript will fail again."
+  )
+}

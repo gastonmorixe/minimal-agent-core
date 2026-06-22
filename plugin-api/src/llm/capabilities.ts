@@ -145,6 +145,12 @@ export interface Capabilities {
   contextWindow: number
   /** Max output tokens per response (synchronous Messages API). */
   maxOutputTokens: number
+  /**
+   * True when the provider validates input + requested output against one
+   * shared context window. When true, callers must clamp `maxOutputTokens`
+   * to the room left after the request input.
+   */
+  outputTokensShareContextWindow: boolean
   /** Max output tokens via batch endpoints. `null` when no batch. */
   maxOutputTokensBatch: number | null
 
@@ -213,6 +219,7 @@ export function defaultCapabilities(): Capabilities {
   return {
     contextWindow: 8_192,
     maxOutputTokens: 4_096,
+    outputTokensShareContextWindow: false,
     maxOutputTokensBatch: null,
     thinking: { adaptive: false, extended: false, visible: false, interleaved: false },
     effort: { levels: [], default: "medium" },

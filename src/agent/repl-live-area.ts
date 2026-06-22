@@ -34,6 +34,7 @@ import { c, faintThinkingChunk, formatAbortedEcho } from "../ui/style/ansi.ts"
 import { isOuterFrameClose } from "../ui/tool-transcript/format.ts"
 
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
+import { contextLengthExceededAdvice, parseContextLengthExceededError } from "./model-error.ts"
 import type { AskUserFn } from "./preflight-pipeline.ts"
 import type {
   ReplAgentLike,
@@ -1329,6 +1330,11 @@ export async function runReplLiveArea(
         // the user's signal that this turn failed.
         if (!isErrorDiagEmitted(turnError)) {
           compositor.writeStream(`\n  ${c.boldRed("error")} ${msg}\n`)
+        }
+        if (parseContextLengthExceededError(msg)) {
+          compositor.writeStream(
+            `  ${c.boldYellow("!")} ${c.yellow(contextLengthExceededAdvice(agent.getModel?.()))}\n`,
+          )
         }
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
       } else if (wroteOutput && !lastChunkEndedWithNewline) {
