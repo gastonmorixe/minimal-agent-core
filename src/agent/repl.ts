@@ -35,7 +35,12 @@ import type { Spinner } from "../ui/spinner/index.ts"
 import { StatusRenderer, type StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 import { c, faintThinkingChunk } from "../ui/style/ansi.ts"
 
-import { parseModelNotFoundError, parseModelUnavailableError } from "./model-error.ts"
+import {
+  contextLengthExceededAdvice,
+  parseContextLengthExceededError,
+  parseModelNotFoundError,
+  parseModelUnavailableError,
+} from "./model-error.ts"
 import { runReplLiveArea } from "./repl-live-area.ts"
 
 type MaybePromise<T> = T | Promise<T>
@@ -584,6 +589,12 @@ export async function runRepl(
         // Discard the failed user turn so the next attempt doesn't send
         // two back-to-back user messages (the API rejects that).
         if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
+
+        if (parseContextLengthExceededError(msg)) {
+          errOutput.write(
+            `  ${c.boldYellow("!")} ${c.yellow(contextLengthExceededAdvice(agent.getModel?.()))}\n`,
+          )
+        }
 
         // Detect errors that indicate the current model selection won't
         // work for this account (unknown model, or a beta the subscription
