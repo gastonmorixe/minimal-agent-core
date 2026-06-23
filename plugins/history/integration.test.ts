@@ -63,7 +63,7 @@ beforeEach(() => {
 })
 
 const CORE = new Set(["Bash", "Read", "Write", "Edit", "Grep", "Glob"])
-const EMBEDDED = "/Users/gaston/Projects/minimal-agent"
+const EMBEDDED = import.meta.dir + "/../.."
 
 async function load() {
   return PluginLoader.load({
