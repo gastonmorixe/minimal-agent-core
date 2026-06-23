@@ -41,25 +41,25 @@ describe("plugins: end-to-end integration with diff-view", () => {
   })
 
   it("discovers the diff-view plugin from the project root", () => {
-    // Canonical tool name is now ShowDiff; show_diff is a back-compat alias.
-    expect(loader.hasTool("ShowDiff")).toBe(true)
+    // Canonical tool name is now DiffViewerShowDiff; show_diff is a back-compat alias.
+    expect(loader.hasTool("DiffViewerShowDiff")).toBe(true)
     expect(loader.hasTool("show_diff")).toBe(true) // alias
     expect(loader.hasInlineTag("diff")).toBe(true)
     const tools = loader.getExtraTools()
-    expect(tools.map((t) => t.name)).toContain("ShowDiff")
+    expect(tools.map((t) => t.name)).toContain("DiffViewerShowDiff")
     // Aliases must NOT appear in the model-facing tool list.
     expect(tools.map((t) => t.name)).not.toContain("show_diff")
     // Alias index reflects the back-compat mapping.
-    expect(loader.getToolAliases().get("show_diff")).toBe("ShowDiff")
+    expect(loader.getToolAliases().get("show_diff")).toBe("DiffViewerShowDiff")
   })
 
   it("composes diff-view into a role-named tool section (no plugin framing)", () => {
     const block = loader.getPromptBlock()
     expect(block).toBeString()
-    // diff-view contributes a tool (ShowDiff) + an inline tag (diff); the
+    // diff-view contributes a tool (DiffViewerShowDiff) + an inline tag (diff); the
     // tool framing wins and the section is keyed by the tool name. The word
     // "plugin" and the plugin id never reach the model.
-    expect(block).toContain('<ma::sys::tool name="ShowDiff">')
+    expect(block).toContain('<ma::sys::tool name="DiffViewerShowDiff">')
     expect(block).toContain("</ma::sys::tool>")
     // The old structural wrappers are gone: no outer <ma::plugins> envelope,
     // no per-plugin <ma::plugin id="..."> block, no overview boilerplate.
