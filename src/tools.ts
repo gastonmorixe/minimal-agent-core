@@ -1425,6 +1425,13 @@ async function execGrep(
       maxBuffer: 2 * 1024 * 1024,
     })
 
+    if (result.error) {
+      return {
+        content: `Grep error: ${result.error.message}`,
+        is_error: true,
+      }
+    }
+
     const raw = (result.stdout ?? "").trim()
     if (!raw) {
       return { content: "No matches found." }

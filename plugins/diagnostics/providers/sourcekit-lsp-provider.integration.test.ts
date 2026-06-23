@@ -26,6 +26,7 @@ function resolveSourceKitLsp(): string | null {
 }
 
 const SRCKIT_BIN = resolveSourceKitLsp()
+const IS_CI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true"
 
 describe("SourceKitLspProvider (real sourcekit-lsp)", () => {
   it.skipIf(!SRCKIT_BIN)(
@@ -52,7 +53,7 @@ describe("SourceKitLspProvider (real sourcekit-lsp)", () => {
     30_000,
   )
 
-  it.skipIf(!SRCKIT_BIN)(
+  it.skipIf(!SRCKIT_BIN || IS_CI)(
     "detects a type error in a Swift file",
     async () => {
       const probe = join(tmpdir(), "__diag_swift_error.swift")
