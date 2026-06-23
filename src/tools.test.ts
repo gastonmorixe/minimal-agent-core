@@ -67,7 +67,9 @@ describe("executeTool — universal clamp wiring", () => {
       command: `yes ABC | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
     })
     expect(r.content).toContain("[truncated:")
-    expect(r.content).toMatch(/head -c|sed -n|awk/)
+    // Bash hint warns front-keep drops trailing errors, steers to tail/grep
+    // + the recoverable raw-output blob (see truncation.ts defaultHint).
+    expect(r.content).toMatch(/tail -n|grep -nE|FRONT was kept/)
     expect(r.content).toMatch(/of \d+ bytes/)
   })
 

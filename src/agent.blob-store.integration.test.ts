@@ -162,6 +162,30 @@ describe("Agent → BlobStore: built-in path (Bash, universal clamp fires)", () 
     expect(blobBytes.byteLength).toBeGreaterThan(r.toolResultContent.length)
     // e) The blob does NOT contain the [truncated:] notice (raw is pre-clamp)
     expect(blobBytes.toString("utf-8")).not.toContain("[truncated:")
+    // f) C1: the TUI-elision <ma::agent::output-preview> annotation carries the
+    //    blob's path as a machine-readable attribute (this run is > 64KB AND
+    //    > 1000 lines, so the Bash 10-line preview budget is exceeded and a
+    //    blob WAS written → the elision flag points at its own recovery
+    //    destination instead of stranding the model). Capture the attr value
+    //    and prove it both (i) equals the persisted blob path and (ii) is
+    //    repeated inside the human-readable hint prose.
+    const previewMatch = r.toolResultContent.match(
+      /<ma::agent::output-preview shown="\d+" total="\d+" tool="Bash" path="([^"]+\.raw)">/,
+    )
+    expect(previewMatch).not.toBeNull()
+    const previewPath = previewMatch![1]
+    // Assert the JSONL recorded a blob path before comparing, so the
+    // non-null assertion below is sound and a missing rawPath gives a clear
+    // failure (rawPath is typed `string | undefined`).
+    expect(r.jsonl[0].rawPath).toBeDefined()
+    expect(previewPath).toBe(r.jsonl[0].rawPath!)
+    // The same path appears in the hint body text, so a model reading only the
+    // prose (not parsing the attr) still learns where the full output lives.
+    const previewBlock = r.toolResultContent.slice(
+      r.toolResultContent.indexOf("<ma::agent::output-preview"),
+    )
+    expect(previewBlock).toContain(previewPath)
+    expect(previewBlock).toMatch(/Read that path/)
   })
 })
 

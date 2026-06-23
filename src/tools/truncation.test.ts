@@ -140,9 +140,16 @@ describe("truncateToolOutput — per-tool resume hints", () => {
     expect(content).toMatch(/narrow|head_limit/i)
   })
 
-  it("Bash hint suggests piping through head/sed/awk", () => {
+  it("Bash hint warns front-keep drops trailing errors and steers to tail/grep", () => {
     const { content } = truncateToolOutput(big, { tool: "Bash" })
-    expect(content).toMatch(/head -c|sed -n|awk/)
+    // The clamp keeps the FRONT of the body, so trailing build/test errors
+    // are exactly what got cut. The hint must say so and point at the tail
+    // (tail -n / grep -nE) plus the recoverable raw-output blob, NOT the old
+    // head -c/sed -n/awk bound-the-front advice.
+    expect(content).toMatch(/tail -n|grep -nE|FRONT was kept/)
+    expect(content).toContain("raw-output blob")
+    // Guard against regressing to the old front-bounding wording.
+    expect(content).not.toMatch(/head -c|sed -n|awk/)
   })
 
   it("Glob hint suggests narrowing pattern", () => {

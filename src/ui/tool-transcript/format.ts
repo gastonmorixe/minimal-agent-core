@@ -511,21 +511,34 @@ export function computeTuiElision(
  * even though the transcript clamps at 10 lines), so we point it at the
  * right channel explicitly. Other tools get a gentler "summarize for the
  * user" nudge.
+ *
+ * `rawPath`, when set, names the raw-output blob the agent wrote for this
+ * same result. The hint then tells the model the full body is one `Read`
+ * away, so an elided preview is never a dead end : without this, the
+ * `output-preview` tag told the model "the user saw less than you did" but
+ * never where the rest lived, and a separate `<ma::agent::raw-output …/>`
+ * footer carried the pointer in isolation. Folding the path into the hint
+ * makes the recovery local to the tag that flags the elision.
  */
-export function tuiPreviewHint(tool: string): string {
+export function tuiPreviewHint(tool: string, rawPath?: string): string {
+  const recover = rawPath
+    ? ` The full untruncated output is saved at ${rawPath} : Read that path (its tail for build/test errors) when this preview isn't enough.`
+    : ""
   switch (tool) {
     case "Bash":
       return (
         "the user only saw a fraction of this output. If you used Bash to " +
         "render visual content (ASCII art, ANSI TUI preview, formatted " +
         "tables) for the user, put it in your text reply instead : the " +
-        "user reads that in full."
+        "user reads that in full." +
+        recover
       )
     default:
       return (
         "the user only saw a fraction of this output. If you intended this " +
         "for the user, summarize the key parts in your text reply (the " +
-        "user reads it in full)."
+        "user reads it in full)." +
+        recover
       )
   }
 }
