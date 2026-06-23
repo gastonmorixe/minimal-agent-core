@@ -37,8 +37,8 @@ permissions:
 jobs:
   release:
     name: Build & publish release
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: macos-latest
+    timeout-minutes: 35
     # Fork PRs get a read-only token and cannot publish releases. Skip the whole
     # job for them (the CI workflow still gates the PR).
     if: >-

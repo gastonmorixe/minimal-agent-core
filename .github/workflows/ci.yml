@@ -26,8 +26,8 @@ permissions:
 jobs:
   check:
     name: bun run check
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
