@@ -538,6 +538,7 @@ describe("PluginLoader", () => {
         name: "Aliased",
         description: "Aliased tool",
         input_schema: { type: "object", properties: {} },
+        explicitName: true,
         aliases: ["old_aliased"],
       },
     }
@@ -569,6 +570,7 @@ describe("PluginLoader", () => {
         name: "Tool_B",
         description: "x",
         input_schema: { type: "object", properties: {} },
+        explicitName: true,
         aliases: ["Tool_A"],
       },
     }
@@ -596,6 +598,7 @@ describe("PluginLoader", () => {
         name: "Tool_X",
         description: "x",
         input_schema: { type: "object", properties: {} },
+        explicitName: true,
         aliases: ["legacy"],
       },
     }
@@ -606,6 +609,7 @@ describe("PluginLoader", () => {
         name: "Tool_Y",
         description: "y",
         input_schema: { type: "object", properties: {} },
+        explicitName: true,
         aliases: ["legacy"],
       },
     }
@@ -635,6 +639,7 @@ describe("PluginLoader", () => {
         name: "Tool_Z",
         description: "z",
         input_schema: { type: "object", properties: {} },
+        explicitName: true,
         aliases: ["Bash"],
       },
     }

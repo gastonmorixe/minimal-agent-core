@@ -309,6 +309,7 @@ describe("PluginLoader / liveAreaSlots", () => {
                 name: "tool_x",
                 description: "x",
                 input_schema: { type: "object", properties: {} },
+                explicitName: true,
               },
             },
             handler: { type: "module", path: "./h.ts", export: "default" },

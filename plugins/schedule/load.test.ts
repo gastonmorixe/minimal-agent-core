@@ -43,9 +43,9 @@ describe("schedule manifest loads", () => {
   it("registers the three cron tools", async () => {
     const loader = await loadSchedule()
     const names = loader.getExtraTools().map((t) => t.name)
-    expect(names).toContain("CronCreate")
-    expect(names).toContain("CronList")
-    expect(names).toContain("CronDelete")
+    expect(names).toContain("ScheduleCronCreate")
+    expect(names).toContain("ScheduleCronList")
+    expect(names).toContain("ScheduleCronDelete")
   })
 
   it("registers the heartbeat live-area slot", async () => {
@@ -60,7 +60,7 @@ describe("schedule manifest loads", () => {
     const loader = await loadSchedule()
     const block = loader.getPromptBlock()
     expect(block).not.toBeNull()
-    expect(block).toContain("CronCreate")
+    expect(block).toContain("ScheduleCronCreate")
   })
 
   it("registers the /loop and /schedule commands", async () => {

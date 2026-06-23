@@ -51,6 +51,7 @@ export function toolManifest(id: string, toolName: string, handlerPath: string):
             name: toolName,
             description: `Tool ${toolName}`,
             input_schema: { type: "object", properties: {} },
+            explicitName: true,
           },
         },
         handler: { type: "module", path: handlerPath, export: "default" },
