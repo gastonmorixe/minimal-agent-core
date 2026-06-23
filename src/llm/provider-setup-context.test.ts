@@ -20,12 +20,19 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 import type {
+  ProviderAdapterView,
   ProviderModelSpec,
   ProviderPlugin,
   ProviderSetupContext,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
-import { clearModelRegistry, findModel, getDefaultModelId } from "./model-registry.ts"
+import {
+  clearModelRegistry,
+  clearProviderRegistry,
+  findModel,
+  findProvider,
+  getDefaultModelId,
+} from "./model-registry.ts"
 import { activateDiscoveredProviders, buildProviderSetupContext } from "./provider-discovery.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "./provider-plugin.ts"
 
@@ -65,13 +72,30 @@ function fakePlugin(): ProviderPlugin {
   }
 }
 
+/** A fake adapter view, built only from contract types (no src import). */
+function fakeAdapter(): ProviderAdapterView {
+  return {
+    id: "test-provider",
+    displayName: "Test Provider",
+    surfaces: ["test-surface"],
+    validate() {
+      return { ok: true, errors: [] }
+    },
+    async *run() {
+      // no-op stream for the registration test
+    },
+  }
+}
+
 describe("provider setup-context (models:register seam)", () => {
   beforeEach(() => {
     clearModelRegistry()
+    clearProviderRegistry()
     clearProviderPlugins()
   })
   afterEach(() => {
     clearModelRegistry()
+    clearProviderRegistry()
     clearProviderPlugins()
   })
 
@@ -96,5 +120,30 @@ describe("provider setup-context (models:register seam)", () => {
     // seam works without a src/ registry import in the plugin.
     expect(findModel("test-model-1")?.displayName).toBe("Test Model 1")
     expect(getDefaultModelId()).toBe("test-model-1")
+  })
+
+  it("buildProviderSetupContext exposes a providers registrar bound to the live registry", () => {
+    const ctx = buildProviderSetupContext()
+    expect(ctx.providers).toBeDefined()
+    ctx.providers?.register(fakeAdapter())
+    expect(findProvider("test-provider")?.id).toBe("test-provider")
+  })
+
+  it("activateDiscoveredProviders registers a fake plugin's adapter via ctx.providers", () => {
+    // A plugin that contributes BOTH its catalog and its adapter purely
+    // through the setup ctx — the zero-src/-import provider shape.
+    registerProviderPlugin({
+      id: "test-provider",
+      displayName: "Test Provider",
+      shortCode: "test",
+      register(ctx?: ProviderSetupContext): void {
+        if (!ctx?.models || !ctx.providers) throw new Error("needs models + providers ctx")
+        ctx.models.register(fakeSpec())
+        ctx.providers.register(fakeAdapter())
+      },
+    })
+    activateDiscoveredProviders()
+    expect(findProvider("test-provider")?.id).toBe("test-provider")
+    expect(findModel("test-model-1")?.providerId).toBe("test-provider")
   })
 })

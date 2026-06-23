@@ -22,10 +22,14 @@
  * @module llm/provider-plugin
  */
 
-import type { ModelRate } from "../types/host-capabilities.ts"
+import type { ModelRate, ModelView } from "../types/host-capabilities.ts"
+import type { SubagentModelRecommendation } from "../types/plugin.ts"
 
 import type { Capabilities } from "./capabilities.ts"
-import type { ProviderAuth } from "./provider-auth.ts"
+import type { CanonicalEvent } from "./canonical-events.ts"
+import type { CanonicalRequest } from "./canonical-request.ts"
+import type { CapabilityViolation } from "./errors.ts"
+import type { ProviderAuth, RunContext } from "./provider-auth.ts"
 import type { TokenEstimator } from "./token-estimate.ts"
 
 /**
@@ -100,20 +104,83 @@ export interface ModelRegistrar {
 }
 
 /**
+ * Validation verdict a {@link ProviderAdapterView.validate} returns, the
+ * provider-neutral mirror of the host's `ValidationResult`. The host's real
+ * shape is structurally identical, so the host narrows this back to its own
+ * `ValidationResult` when it forwards a registered adapter.
+ */
+export interface ProviderValidationResult {
+  ok: boolean
+  errors: CapabilityViolation[]
+  /** Optional degraded request the caller can opt into instead of failing. */
+  degrade?: CanonicalRequest
+}
+
+/**
+ * Provider-neutral projection of the host's `ProviderAdapter` port — the slice
+ * a plugin actually implements, expressed entirely in leaf types so a provider
+ * plugin can declare its adapter without importing `src/llm/provider.ts`.
+ *
+ * `surfaces` is `ReadonlyArray<string>` here (the host's `SurfaceId` is a
+ * token-bearing union that stays in `src/`); `validate`/`run` take the read-only
+ * {@link ModelView} rather than the host's richer `ModelEntry`. The host's real
+ * `ProviderAdapter` is structurally compatible with this view, and the host's
+ * registrar narrows a registered adapter back to the token-bearing port as it
+ * forwards to the real `registerProvider` (the host is allowed to name surfaces;
+ * the contract package is not). Optional host-only hooks (`preflight`,
+ * `applyResolution`, `mediaLimits`, `prepareMedia`, `listModels`, `ping`) are
+ * omitted from the view — a provider that needs them implements the host port
+ * directly; OpenAI-compatible providers like this do not.
+ */
+export interface ProviderAdapterView {
+  /** Registry id, matching `ProviderPlugin.id` and `ModelView.providerId`. */
+  readonly id: string
+  /** Human-friendly name for diagnostics. */
+  readonly displayName: string
+  /** API surface names this adapter speaks (e.g. `"openai-chat-completions"`). */
+  readonly surfaces: ReadonlyArray<string>
+  /** Pure capability check, no network. Called before dispatch. */
+  validate(req: CanonicalRequest, model: ModelView): ProviderValidationResult
+  /** Stream the request, yielding canonical events. */
+  run(req: CanonicalRequest, model: ModelView, ctx: RunContext): AsyncIterable<CanonicalEvent>
+  /** Optional per-role sub-agent model recommendations from this provider's own catalog. */
+  recommendSubagentModels?(): SubagentModelRecommendation[]
+}
+
+/**
+ * Setup-time write access to the host provider registry. The host builds this
+ * and passes it to {@link ProviderPlugin.register} via {@link ProviderSetupContext},
+ * so a provider plugin contributes its adapter by calling `ctx.providers.register`
+ * instead of importing `registerProvider` from `src/`. Idempotent;
+ * last-registration-wins per id (mirrors the registry's own contract).
+ */
+export interface ProviderAdapterRegistrar {
+  /** Add or replace a provider adapter under its `id`. */
+  register(adapter: ProviderAdapterView): void
+}
+
+/**
  * Context handed to {@link ProviderPlugin.register} at activation. Carries the
- * host capabilities a provider needs at LOAD time — today just the model
- * {@link ModelRegistrar}. It is the provider-loader analogue of the TUI
- * `ctx.host`: the seam that lets a provider plugin reach host state (the model
- * registry) without a `src/` import.
+ * host capabilities a provider needs at LOAD time: the model
+ * {@link ModelRegistrar} and the provider-adapter {@link ProviderAdapterRegistrar}.
+ * It is the provider-loader analogue of the TUI `ctx.host`: the seam that lets a
+ * provider plugin reach host state (the model + provider registries) without a
+ * `src/` import.
  *
  * `register()` keeps a no-arg call path for back-compat (a plugin that hasn't
  * adopted the seam, or a host that hasn't wired it, still works); a plugin that
- * HAS adopted it reads `ctx?.models` and falls back to its own wiring when the
- * context is absent.
+ * HAS adopted it reads `ctx?.models` / `ctx?.providers` and falls back to its
+ * own wiring when the context is absent.
+ *
+ * `providers` is optional so older hosts that build a `{ models }`-only context
+ * stay valid; a plugin that needs it must defensively check
+ * (`if (!ctx?.providers) return`) before use.
  */
 export interface ProviderSetupContext {
   /** Setup-time model-registry writer (the `models:register` capability). */
   models: ModelRegistrar
+  /** Setup-time provider-adapter-registry writer (the `providers:register` capability). */
+  providers?: ProviderAdapterRegistrar
 }
 
 // ---------------------------------------------------------------------------

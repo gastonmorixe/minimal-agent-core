@@ -69,7 +69,11 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // (llm/transport/select-transport.ts ratcheted OUT at the B-0 flip: the
   // canonical-default routing needs no provider comparison in code.)
   "llm/adapter-legacy.ts",
-  "llm/canonical-request.ts",
+  // (llm/canonical-request.ts ratcheted OUT when the type surface MOVED to
+  // `@minimal-agent/plugin-api/llm/canonical-request` (Wave C-3): the src/ file
+  // is now a one-line re-export shim with zero provider tokens in code. The
+  // example slugs in the original doc comments rode along to the leaf package,
+  // which the provider-scan does not cover.)
   "llm/transport/canonical-send.ts",
   "media/ingest.ts", // deprecated buildAnthropicUserContent alias (one release)
   // (agent.ts + index.ts ratcheted OUT in Wave C C-1/C-2: agent.ts's default

@@ -25,12 +25,14 @@ import { join, resolve } from "node:path"
 
 import type {
   ModelRegistrar,
+  ProviderAdapterRegistrar,
+  ProviderAdapterView,
   ProviderModelSpec,
   ProviderSetupContext,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
-import { registerModel, setDefaultModelId } from "./model-registry.ts"
-import type { SurfaceId } from "./provider.ts"
+import { registerModel, registerProvider, setDefaultModelId } from "./model-registry.ts"
+import type { ProviderAdapter, SurfaceId } from "./provider.ts"
 import {
   listProviderPlugins,
   type ProviderPlugin,
@@ -155,7 +157,20 @@ export function buildProviderSetupContext(): ProviderSetupContext {
       setDefaultModelId(id)
     },
   }
-  return { models }
+  // Provider-adapter registrar: the `providers:register` capability. A plugin
+  // hands a provider-neutral `ProviderAdapterView` (leaf types, `surfaces` as
+  // plain strings); the host narrows it back to its token-bearing
+  // `ProviderAdapter` port as it forwards to the real `registerProvider`. The
+  // host is allowed to name surfaces; the contract package is not. The view is
+  // structurally a subset of `ProviderAdapter` (it omits host-only optional
+  // hooks), so the cast is a widening to the richer port — a bad surface id
+  // surfaces later at dispatch, identical to the direct-import path.
+  const providers: ProviderAdapterRegistrar = {
+    register(adapter: ProviderAdapterView): void {
+      registerProvider(adapter as unknown as ProviderAdapter)
+    },
+  }
+  return { models, providers }
 }
 
 /**

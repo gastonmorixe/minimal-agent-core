@@ -1,0 +1,8 @@
+{
+  "id": "ollama",
+  "name": "LLM Provider: Ollama Cloud",
+  "version": "0.1.0",
+  "description": "Ollama Cloud (ollama.com) — frontier open-weight models (DeepSeek, Qwen, GLM, gpt-oss, Kimi, MiniMax, Gemma) served over Ollama's native /api/chat NDJSON streaming protocol. Self-contained: imports only @minimal-agent/plugin-api and registers through the agent-loop setup context (no src/ or cross-plugin imports).",
+  "entry": "./index.ts",
+  "export": "ollamaProviderPlugin"
+}

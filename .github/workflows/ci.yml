@@ -1,0 +1,46 @@
+name: CI
+
+# Full gate on pull requests and on direct pushes to the long-lived branches.
+# `release.yml` also runs the gate before cutting a release, so this workflow
+# stays focused on fast feedback for everyday work.
+on:
+  push:
+    branches:
+      - dev-private
+      - main
+    tags-ignore:
+      - "**" # tag pushes are handled by release.yml, not here
+  pull_request:
+    branches:
+      - dev-private
+      - main
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: bun run check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The one gate: typecheck, lint, format, import-sort, docs, architecture
+      # invariants, then the full test suite. Stops at the first failure.
+      - name: Run check
+        run: bun run check

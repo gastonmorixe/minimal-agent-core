@@ -1,0 +1,124 @@
+name: Release
+
+# Two kinds of release come out of this workflow:
+#
+#   * Nightly pre-releases. Every push (and same-repo PR) to dev-private / main
+#     cuts a timestamped pre-release tagged `v<version>-nightly.<UTC-stamp>`,
+#     where <version> is the current package.json version and <UTC-stamp> is
+#     YYYYMMDDTHHMMSSZ (second resolution, so two pushes in the same minute do
+#     not collide). Marked as a GitHub pre-release.
+#
+#   * Stable releases. Pushing a `v*` tag (e.g. v0.2.0) cuts a normal,
+#     non-pre-release using that exact tag.
+#
+# Both build the same source tarball with scripts/build-tarball.sh and attach it
+# plus its SHA-256 checksum. The full gate (`bun run check`) runs first; a red
+# gate blocks the release.
+on:
+  push:
+    branches:
+      - dev-private
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - dev-private
+      - main
+
+# Serialize per ref so two quick pushes do not race on the same nightly tag.
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create tags + releases, upload assets
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Fork PRs get a read-only token and cannot publish releases. Skip the whole
+    # job for them (the CI workflow still gates the PR).
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # For PR events, check out the PR head (not the synthetic merge commit)
+          # so the tarball matches what is being proposed.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run check
+        run: bun run check
+
+      - name: Determine release identity
+        id: meta
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.version' package.json)"
+          if [[ -z "${VERSION}" || "${VERSION}" == "null" ]]; then
+            echo "could not read version from package.json" >&2
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # Stable release from a pushed tag.
+            TAG="${GITHUB_REF#refs/tags/}"
+            LABEL="${TAG#v}"
+            PRERELEASE=false
+            NAME="minimal-agent ${TAG}"
+          else
+            # Nightly pre-release from a branch push or same-repo PR.
+            STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"
+            LABEL="${VERSION}-nightly.${STAMP}"
+            TAG="v${LABEL}"
+            PRERELEASE=true
+            NAME="minimal-agent ${TAG} (nightly)"
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "label=${LABEL}"
+            echo "tag=${TAG}"
+            echo "prerelease=${PRERELEASE}"
+            echo "name=${NAME}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Release: ${NAME}  tag=${TAG}  prerelease=${PRERELEASE}  commit=${GITHUB_SHA}"
+
+      - name: Build source tarball
+        run: ./scripts/build-tarball.sh "${{ steps.meta.outputs.label }}" dist
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: minimal-agent-${{ steps.meta.outputs.label }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          target_commitish: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/minimal-agent-${{ steps.meta.outputs.label }}.tar.gz
+            dist/minimal-agent-${{ steps.meta.outputs.label }}.tar.gz.sha256

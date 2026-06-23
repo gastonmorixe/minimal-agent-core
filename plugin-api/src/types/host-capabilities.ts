@@ -312,6 +312,13 @@ export interface ModelView {
   tags?: ReadonlyArray<string>
   capabilities: Capabilities
   pricing: ModelRate
+  /**
+   * Per-cloud-vendor model ids (e.g. `{ firstParty: "deepseek-v4-flash" }`).
+   * Read-only projection of the host `ModelEntry.vendorIds`; a provider adapter
+   * reads `firstParty` to map a registry id onto the wire model id. Optional:
+   * absent when the model declares none.
+   */
+  vendorIds?: Readonly<Record<string, string>>
 }
 
 /**
