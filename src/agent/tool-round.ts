@@ -711,10 +711,19 @@ export async function executeToolRound(
     if (!display && !aborted) {
       const e = computeTuiElision(content, tool.name)
       if (e) {
-        const hint = tuiPreviewHint(tool.name)
+        // When a raw-output blob was written for this same result (above),
+        // thread its path into BOTH the hint prose and a machine-readable
+        // `path="…"` attribute, so the elision flag carries its own recovery
+        // pointer instead of stranding the model with "you saw less than the
+        // model did" and no destination. `blobWrite` is the write outcome
+        // from the blob-store hook a few lines up; null when nothing spilled
+        // (body under `minBytesToPersist`, store disabled, skip-listed tool).
+        const rawPath = blobWrite?.path
+        const hint = tuiPreviewHint(tool.name, rawPath)
+        const pathAttr = rawPath ? ` path="${rawPath}"` : ""
         content =
           `${content}\n\n<ma::agent::output-preview ` +
-          `shown="${e.shown}" total="${e.total}" tool="${tool.name}">` +
+          `shown="${e.shown}" total="${e.total}" tool="${tool.name}"${pathAttr}>` +
           hint +
           `</ma::agent::output-preview>`
       }

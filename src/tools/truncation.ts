@@ -142,7 +142,7 @@ export function truncateToolOutput(
   const cutLine = (ctx.startLine ?? 0) + shownLines
   const totalB = ctx.totalBytes != null ? String(ctx.totalBytes) : "unknown"
   const totalL = ctx.totalLines != null ? String(ctx.totalLines) : "unknown"
-  const hint = ctx.hint ?? defaultHint(ctx.tool, cutLine, shownBytes)
+  const hint = ctx.hint ?? defaultHint(ctx.tool, cutLine)
 
   const content =
     kept +
@@ -161,14 +161,26 @@ export function truncateToolOutput(
   return { content, info }
 }
 
-function defaultHint(tool: string | undefined, cutLine: number, shownBytes: number): string {
+function defaultHint(tool: string | undefined, cutLine: number): string {
   switch (tool) {
     case "Read":
       return `to continue, call Read with offset=${cutLine} (and limit as needed).`
     case "Grep":
       return `narrow with a more specific pattern, glob, or smaller -A/-B/-C; or raise head_limit explicitly.`
     case "Bash":
-      return `output exceeded ${MAX_TOOL_OUTPUT_BYTES} bytes; re-run piping through \`head -c ${shownBytes}\`, \`sed -n\`, or \`awk\` to bound output.`
+      // The clamp keeps the FRONT of the body, so a failing build/test run's
+      // diagnostics (which live at the END) are exactly what got dropped.
+      // Steer the model to the tail explicitly, and remind it the full body
+      // is recoverable from the raw-output blob the agent appends below.
+      //
+      // Deliberately NOT spelling the literal `<ma::agent::raw-output …/>`
+      // token here: this hint is inlined into the model-facing `[truncated:]`
+      // notice, and embedding the real annotation token inside body prose
+      // both pollutes the namespace `findAnnotationStart` scans and trips
+      // `not.toMatch(/<ma::agent::raw-output/)` invariants when the store is
+      // disabled and no footer is actually written. "raw-output blob" reads
+      // the same to the model without the machine token.
+      return `output exceeded ${MAX_TOOL_OUTPUT_BYTES} bytes and the FRONT was kept, so trailing errors/build failures may be cut. Re-run scoped to the tail (e.g. \`... 2>&1 | tail -n 100\`) or filtered (\`grep -nE 'error:|FAIL'\`); or Read the tail of the raw-output blob whose path is appended below, which holds the full output.`
     case "Glob":
       return `narrow the pattern or search a subdirectory.`
     case "Fetch":
