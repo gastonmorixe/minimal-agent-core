@@ -35,6 +35,7 @@ import {
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
+import { createTransportRegistryApi } from "./transport-registry.ts"
 
 /** Inputs for {@link buildPluginHost}. All injectable for tests. */
 export interface BuildHostOptions {
@@ -101,6 +102,10 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
             netDbgDir: () => resolveNetDbgDir(opts.env),
           }),
         }
+      : {}),
+    ...(has("transport:registry")
+      ? { transportRegistry: Object.freeze(createTransportRegistryApi()) }
+      : {}),
       : {}),
     ...(has("clock")
       ? {

@@ -25,6 +25,8 @@
 import type { PluginLogger } from "../../diagnostic-bus.ts"
 import type { ModelEntry } from "../../llm/model-registry.ts"
 
+import type { TransportRegistryApi } from "./transport-registry.ts"
+
 // ---------------------------------------------------------------------------
 // Capability tokens
 // ---------------------------------------------------------------------------
@@ -52,6 +54,7 @@ export type CapabilityToken =
   | "models:read"
   | "models:register"
   | "paths"
+  | "transport:registry"
   | "clock"
   | "logger"
 
@@ -66,6 +69,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "models:read",
   "models:register",
   "paths",
+  "transport:registry"
   "clock",
   "logger",
 ] as const
@@ -390,6 +394,15 @@ export interface PluginHost {
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
   readonly paths?: PathsApi
+  /**
+   * `transport:registry` — the host-brokered store a transport-PROVIDER plugin
+   * (e.g. `minimal-agent-cloud`) writes into and a CONSUMER plugin (Intercom)
+   * reads, so a remote transport reaches Intercom without either plugin
+   * importing the other (dependency inversion, mirroring `models:register` /
+   * `models:read`). Core treats a transport as opaque (`{id}`-only); the
+   * consumer re-declares the full shape locally. See `./transport-registry.ts`.
+   */
+  readonly transportRegistry?: TransportRegistryApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }
