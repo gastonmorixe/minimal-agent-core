@@ -45,7 +45,12 @@ export type CapabilityToken =
   | "presence:read"
   | "models:read"
   | "models:register"
+<<<<<<< HEAD
   | "paths"
+||||||| parent of 218feac (core: add transport:registry capability (host-brokered remote-transport injection seam))
+=======
+  | "transport:registry"
+>>>>>>> 218feac (core: add transport:registry capability (host-brokered remote-transport injection seam))
   | "clock"
   | "logger"
 
@@ -379,6 +384,40 @@ export interface ModelsRegisterApi {
 }
 
 // ---------------------------------------------------------------------------
+// transport:registry — host-brokered transport injection seam
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal contract core requires of a registered transport: a stable,
+ * non-empty `id`. Everything else is OPAQUE to the host — the consuming plugin
+ * (Intercom) re-declares the full transport shape (presence + messaging) as its
+ * own local structural interface and narrows the objects it reads back. Core is
+ * a neutral broker; this leaf type is its structural copy of the host's
+ * `RegisteredTransport`.
+ */
+export interface RegisteredTransport {
+  readonly id: string
+}
+
+/**
+ * `transport:registry` — the host-brokered store a transport-PROVIDER plugin
+ * (e.g. `minimal-agent-cloud`) writes into and a CONSUMER plugin (Intercom)
+ * reads, so a remote transport reaches the consumer WITHOUT either plugin
+ * importing the other (dependency inversion, same shape as `models:register` /
+ * `models:read`). The backing store is process-wide, so the provider's
+ * `register` and the consumer's `list` observe the same set even though each
+ * plugin gets its own frozen {@link PluginHost}.
+ */
+export interface TransportRegistryApi {
+  /** Register (or replace) a transport. Idempotent, last-write-wins per `id`. */
+  register(transport: RegisteredTransport): void
+  /** Remove a transport by id (provider teardown on disconnect). No-op when absent. */
+  unregister(id: string): void
+  /** Every currently-registered transport, in registration order. */
+  list(): RegisteredTransport[]
+}
+
+// ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------
 
@@ -396,6 +435,12 @@ export interface PluginHost {
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
   readonly paths?: PathsApi
+  /**
+   * `transport:registry` — host-brokered remote-transport injection seam (see
+   * {@link TransportRegistryApi}). A provider plugin registers a transport; a
+   * consumer plugin lists them. Decoupled: neither imports the other.
+   */
+  readonly transportRegistry?: TransportRegistryApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }
