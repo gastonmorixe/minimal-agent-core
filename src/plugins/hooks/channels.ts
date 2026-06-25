@@ -251,6 +251,24 @@ export const CHANNELS = [
       "(CI push, channels, a watcher). `source` is a free-form origin tag for " +
       'diagnostics (e.g. `"cron:a1b2c3d4"`).',
   },
+  {
+    name: "notification.emit",
+    shape: "broadcast-async",
+    permission: "hooks:notification.emit",
+    description:
+      "Plugin → host request to surface an async, between-turns notification to " +
+      "the USER (a framed scrollback toast), NOT to the model. Rides the same " +
+      "fire-and-forget EventBus as `prompt.inject`. Payload " +
+      "`{source?, block?, text?}`: `block` is a CommandNoticeBlock (icon/title/" +
+      "info/color/body[]/footer) the plugin styles and the HOST frames with its " +
+      "own tool-transcript chrome (so plugins never hand-draw ╭│╰ borders or " +
+      "write to a process stream); `text` is the plain, ANSI-free line the host " +
+      "persists to the session JSONL as a note record (audit/record, survives " +
+      "resume, never folded into model context); `source` is a free-form origin " +
+      'tag (e.g. `"intercom"`) for routing + future sinks. The intercom ' +
+      "arrival toast is the first consumer. Replaces the anti-pattern of a " +
+      "plugin writing its own frame to ctx.stderr.",
+  },
 
   // -- Sub-agent lifecycle (delegation plugins) ------------------------------
   // Generic delegation signals. The agent core never emits or consumes these;

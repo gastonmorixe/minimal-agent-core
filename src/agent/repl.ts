@@ -95,6 +95,14 @@ export interface ReplAgentLike {
    * mode-interrupt aborts (Alt+M).
    */
   notePreviousTurnAborted?(): void
+  /**
+   * Optional: append a free-form `note` record to the session JSONL. Used by
+   * the host's `notification.emit` listener to persist a user-facing toast
+   * (e.g. an intercom arrival) so it survives resume. Note records are
+   * metadata: they are NOT folded into the model's message history on replay.
+   * No-op when the agent has no session store (ad-hoc runs, tests).
+   */
+  appendNote?(text: string): void
 }
 
 export type ReplOutput = Pick<NodeJS.WriteStream, "write"> & {

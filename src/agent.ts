@@ -506,6 +506,17 @@ export class Agent {
     return this.modeManager
   }
 
+  /**
+   * Persist a free-form `note` record to the session log. Used by the REPL's
+   * `notification.emit` listener so a user-facing toast (intercom arrival,
+   * etc.) leaves a durable trace that survives resume. Note records are
+   * metadata and are NOT folded into the model's message history on replay.
+   * No-op when no store is attached.
+   */
+  appendNote(text: string): void {
+    this.store?.appendNote(text)
+  }
+
   /** Currently active mode, or null when none. Convenience for the REPL. */
   getActiveMode(): ManifestMode | null {
     return this.modeManager?.active() ?? null
