@@ -26,7 +26,7 @@ import { printGoodbye } from "../ui/chrome/goodbye-banner.ts"
 import { buildModeChangeChip } from "../ui/chrome/mode-change-chip.ts"
 import { buildPendingModeChangeDecoration } from "../ui/chrome/mode-change-pending-decoration.ts"
 import { buildQueueDecorationLines } from "../ui/chrome/queue-decoration.ts"
-import { renderCommandNoticeBlock } from "../ui/command-notice.ts"
+import { coerceNoticeBlock, renderCommandNoticeBlock } from "../ui/command-notice.ts"
 import { Formatter } from "../ui/formatter/formatter.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
@@ -758,6 +758,7 @@ export async function runReplLiveArea(
   // never touch the queue directly. Disposed in the `finally` below.
   let disposePromptInject: (() => void) | null = null
   let disposeCommandRun: (() => void) | null = null
+  let disposeNotification: (() => void) | null = null
   if (loader) {
     disposePromptInject = loader
       .bus()
@@ -765,6 +766,27 @@ export async function runReplLiveArea(
         const text = typeof ctx.payload?.text === "string" ? ctx.payload.text : ""
         // onSubmit already drops blank/whitespace-only text.
         onSubmit(text)
+      })
+
+    // Async, between-turns USER notification (a framed scrollback toast),
+    // NOT a model turn. Any plugin emits `notification.emit` with a
+    // CommandNoticeBlock the host frames with its own chrome (so plugins
+    // never hand-draw borders or write to ctx.stderr) plus an optional plain
+    // `text` the host persists as a session `note` record so the toast
+    // survives resume. The intercom arrival is the first consumer. We render
+    // straight to scrollback via the same `writeNoticeLines` path slash
+    // commands use; this fires off the agent turn loop, so it lands BETWEEN
+    // turns exactly like the old stderr write did, but framed + persisted +
+    // routed through the compositor (no live-area tearing).
+    disposeNotification = loader
+      .bus()
+      .on<{ block?: unknown; text?: unknown; source?: unknown }>("notification.emit", (ctx) => {
+        const block = coerceNoticeBlock(ctx.payload?.block)
+        if (block) writeNoticeLines(renderCommandNoticeBlock(block))
+        // Persist the plain-text form (audit / resume). Note records are
+        // metadata: never folded into the model's message history.
+        const text = typeof ctx.payload?.text === "string" ? ctx.payload.text.trim() : ""
+        if (text.length > 0) agent.appendNote?.(text)
       })
 
     // Direct command dispatch from an overlay (the slash-menu picks a
@@ -1355,6 +1377,7 @@ export async function runReplLiveArea(
     process.stdout.off("resize", onTerminalResize)
     disposePromptInject?.()
     disposeCommandRun?.()
+    disposeNotification?.()
     liveAreaScheduler?.stop()
     tuiDiagnosticSurface?.detach()
     statusRenderer?.stop()
