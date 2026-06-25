@@ -650,6 +650,9 @@ export async function runReplLiveArea(
     compositor.writeStream(`\n\n${lines.join("\n")}\n`)
   }
 
+  /** The live terminal width, for width-aware renderers (e.g. notice wrapping). */
+  const liveCols = (): number | undefined => opts.output?.columns ?? process.stdout.columns
+
   /** The normal "queue this text as a user prompt" path. */
   const enqueuePrompt = (text: string, commitLines: string[]): void => {
     queue.push({ text, commitLines })
@@ -704,9 +707,7 @@ export async function runReplLiveArea(
         break
       case "notice":
         writeNoticeLines([
-          ...(result.block
-            ? renderCommandNoticeBlock(result.block, opts.output?.columns ?? process.stdout.columns)
-            : []),
+          ...(result.block ? renderCommandNoticeBlock(result.block, liveCols()) : []),
           ...(result.lines ?? []),
         ])
         break
@@ -784,11 +785,7 @@ export async function runReplLiveArea(
       .bus()
       .on<{ block?: unknown; text?: unknown; source?: unknown }>("notification.emit", (ctx) => {
         const block = coerceNoticeBlock(ctx.payload?.block)
-        if (block) {
-          writeNoticeLines(
-            renderCommandNoticeBlock(block, opts.output?.columns ?? process.stdout.columns),
-          )
-        }
+        if (block) writeNoticeLines(renderCommandNoticeBlock(block, liveCols()))
         // Persist the plain-text form (audit / resume). Note records are
         // metadata: never folded into the model's message history.
         const text = typeof ctx.payload?.text === "string" ? ctx.payload.text.trim() : ""

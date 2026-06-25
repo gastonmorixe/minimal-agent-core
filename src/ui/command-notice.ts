@@ -73,6 +73,13 @@ function colorize(color: string | undefined): (s: string) => string {
  * Inner body width for a notice frame at terminal `cols`, or `undefined` when
  * width is unknown (non-TTY / tests) so callers fall back to no-wrap. Accounts
  * for the `"  │ "` gutter and a 1-cell right-edge safety margin.
+ *
+ * Sibling to `toolPreviewBodyWidth` in ui/tool-transcript/format.ts. They share
+ * the `cols - gutter - safety` arithmetic today but are INTENTIONALLY separate:
+ * the tool-preview width also applies a hard per-line cap and may evolve on its
+ * own rules. Coupling them behind one helper would be false DRY (same character
+ * sequence, different knowledge), so if the tool-preview cap changes the notice
+ * width must not move with it.
  */
 function noticeBodyWidth(cols: number | undefined): number | undefined {
   const raw = cols ?? process.stdout.columns
