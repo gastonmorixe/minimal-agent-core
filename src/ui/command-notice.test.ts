@@ -1,8 +1,28 @@
 import { describe, expect, it } from "bun:test"
 
-import { stripAnsi } from "../term-width.ts"
+import { displayWidth, stripAnsi } from "../term-width.ts"
 
 import { coerceNoticeBlock, renderCommandNoticeBlock } from "./command-notice.ts"
+
+/**
+ * Frame-integrity assertion: every interior row of a rendered notice must
+ * carry the `│` gutter (so a terminal-level wrap can never produce a
+ * gutterless orphan row), the block opens with `╭` and closes with `╰`, and
+ * no row exceeds `cols` in DISPLAY width (not char length: CJK is 2 cells,
+ * ANSI is 0). This is the mechanical check the toast tear bug needed.
+ */
+function assertFrameIntact(rows: string[], cols: number): void {
+  const plain = rows.map(stripAnsi)
+  expect(plain[0].startsWith("  ╭ ")).toBe(true)
+  expect(plain[plain.length - 1].startsWith("  ╰")).toBe(true)
+  for (let i = 1; i < plain.length - 1; i++) {
+    // Interior rows are gutter rows: "  │" or "  │ <content>".
+    expect(plain[i].startsWith("  │")).toBe(true)
+  }
+  for (const r of rows) {
+    expect(displayWidth(r)).toBeLessThanOrEqual(cols)
+  }
+}
 
 describe("renderCommandNoticeBlock", () => {
   it("renders host-owned frame chrome around semantic command notice data", () => {
@@ -106,5 +126,62 @@ describe("coerceNoticeBlock", () => {
       "  │",
       "  ╰",
     ])
+  })
+})
+
+describe("renderCommandNoticeBlock width wrapping (the toast frame-tear fix)", () => {
+  const COLS = 40
+
+  it("word-wraps a long body line so every fragment keeps the │ gutter", () => {
+    const long =
+      "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+    const rows = renderCommandNoticeBlock(
+      { icon: "⇆", title: "intercom", info: "1 new message", color: "magenta", body: [long] },
+      COLS,
+    )
+    // More than one body row => it actually wrapped (not emitted whole).
+    const bodyRows = rows.map(stripAnsi).filter((r) => r.startsWith("  │ "))
+    expect(bodyRows.length).toBeGreaterThan(1)
+    assertFrameIntact(rows, COLS)
+    // No content was lost: re-joining the wrapped fragments reproduces the text.
+    const rejoined = bodyRows.map((r) => r.slice("  │ ".length)).join(" ")
+    expect(rejoined).toBe(long)
+  })
+
+  it("hard-breaks a single unbreakable token longer than cols, gutter survives", () => {
+    // The nastiest tear case (Lautaro's refinement A): no spaces to wrap on.
+    const token = "x".repeat(80) // 80 > COLS, no break opportunity
+    const rows = renderCommandNoticeBlock({ title: "intercom", body: [token] }, COLS)
+    const bodyRows = rows.map(stripAnsi).filter((r) => r.startsWith("  │ "))
+    expect(bodyRows.length).toBeGreaterThan(1) // hard-broken into chunks
+    assertFrameIntact(rows, COLS)
+    // Every chunk reassembles to the original token (no chars dropped).
+    expect(bodyRows.map((r) => r.slice("  │ ".length)).join("")).toBe(token)
+  })
+
+  it("keeps frame intact with wide (CJK) glyphs measured by display width", () => {
+    // 30 CJK chars = 60 display cells, well over COLS=40.
+    const cjk = "你好世界".repeat(8)
+    const rows = renderCommandNoticeBlock({ title: "intercom", body: [cjk] }, COLS)
+    expect(rows.map(stripAnsi).filter((r) => r.startsWith("  │ ")).length).toBeGreaterThan(1)
+    assertFrameIntact(rows, COLS)
+  })
+
+  it("does NOT wrap when cols is omitted (legacy / non-TTY determinism)", () => {
+    const long = "a ".repeat(100).trim()
+    const rows = renderCommandNoticeBlock({ title: "intercom", body: [long] }).map(stripAnsi)
+    // Exactly one body content row, emitted verbatim.
+    expect(rows.filter((r) => r.startsWith("  │ "))).toEqual([`  │ ${long}`])
+  })
+
+  it("preserves blank body rows as bare gutter rows when wrapping", () => {
+    const rows = renderCommandNoticeBlock(
+      { title: "intercom", body: ["line one", "", "line two"] },
+      COLS,
+    ).map(stripAnsi)
+    // The empty body entry stays a bare "  │" (no trailing space, no content).
+    expect(rows).toContain("  │")
+    expect(rows).toContain("  │ line one")
+    expect(rows).toContain("  │ line two")
   })
 })
