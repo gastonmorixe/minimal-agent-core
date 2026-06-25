@@ -56,6 +56,22 @@ describe("planCommand", () => {
     )
   })
 
+  test("routes list-plugins as read-only (no auth/network)", () => {
+    const p = planCommand({ ...base, wantListPlugins: true })
+    expect(p.command).toBe("list-plugins")
+    expect(p.needsAuth).toBe(false)
+    expect(p.needsNetwork).toBe(false)
+    expect(p.needsStartupUi).toBe(false)
+    expect(p.needsFormatter).toBe(false)
+    expect(p.needsQuota).toBe(false)
+  })
+
+  test("list-plugins takes precedence over login", () => {
+    expect(planCommand({ ...base, wantListPlugins: true, wantLogin: true }).command).toBe(
+      "list-plugins",
+    )
+  })
+
   test("routes sessions/list-flags/list-spinners/list-models with expected profiles", () => {
     expect(planCommand({ ...base, wantListSessions: true }).command).toBe("sessions")
     expect(planCommand({ ...base, wantListFlags: true }).command).toBe("list-flags")

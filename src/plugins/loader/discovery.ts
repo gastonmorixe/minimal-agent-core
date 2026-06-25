@@ -215,10 +215,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     }
 
     if (disabledPluginIds.has(manifest.id)) {
-      logger(
-        `skipping ${dir}: plugin "${manifest.id}" is disabled in user config ` +
-          `(plugins.${manifest.id}.enabled = false)`,
-      )
+      logger(`skipping ${dir}: plugin "${manifest.id}" is explicitly disabled`)
       // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
       seenIds.add(manifest.id)
       continue

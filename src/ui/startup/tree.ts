@@ -20,7 +20,7 @@
 import { VERSION } from "../../headers.ts"
 import { displayWidth, truncateDisplayWidth, wrapRows } from "../../term-width.ts"
 import { catRows, DEFAULT_CAT } from "../chrome/mascot.ts"
-import { wrapStartupToolsRows } from "../chrome/startup-tools-row.ts"
+import { formatStartupToolsRow, wrapStartupToolsRows } from "../chrome/startup-tools-row.ts"
 import { BREATHING_DOT } from "../spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"
 import { c } from "../style/ansi.ts"
@@ -171,6 +171,33 @@ export function printStartupToolsRow(
     printed.push(row)
   })
   lastStartupRow = { lines: printed }
+}
+
+/**
+ * Close the startup tree with the tools list as the final row, using the
+ * `╰` closer directly. No cursor-up rewrite, no manual wrapping — the
+ * value is printed as a single line and the terminal handles any overflow.
+ *
+ * Because there is no cursor math, terminal resize between frame draw and
+ * close cannot misplace the closer. This replaces the previous pattern of
+ * printing a multiline `printStartupToolsRow` + `closeStartupTree()`, where
+ * the cursor-up math broke when the terminal width changed.
+ *
+ * When tools is empty this delegates to {@link closeStartupTree} so the
+ * tree still closes on whatever row was printed last.
+ */
+export function closeStartupTreeWithTools(
+  tools: ReadonlyArray<{ name: string; icon?: string; color?: string }>,
+): void {
+  if (!SHOW_HEADER) return
+  const value = formatStartupToolsRow(tools)
+  if (value === null) {
+    closeStartupTree()
+    return
+  }
+  const row = `  ${TREE_CLOSE_GUTTER} ${c.sky("tools".padEnd(9))}  ${value}`
+  console.error(row)
+  lastStartupRow = null
 }
 
 /**

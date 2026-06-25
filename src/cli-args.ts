@@ -16,6 +16,7 @@
  * ```text
  * models   [list]                  → --list-models
  * flags    [list]                  → --list-flags
+ * plugins  [list]                  → --list-plugins
  * spinners [list]                  → --list-spinners
  * sessions [list|<query>]          → --sessions [<query>]
  * sessions resume <sid|last>       → --resume <sid|last>
@@ -53,6 +54,8 @@ const LONG_ALIAS: Record<string, string> = {
   "--list-model": "--list-models",
   "--flags": "--list-flags",
   "--list-flag": "--list-flags",
+  "--plugins": "--list-plugins",
+  "--list-plugin": "--list-plugins",
   "--spinners": "--list-spinners",
   "--list-spinner": "--list-spinners",
   "--session": "--sessions",
@@ -70,10 +73,14 @@ const SUBCOMMANDS: Record<string, SubcommandSpec> = {
   models: { flag: "--list-models" },
   providers: { flag: "--list-providers" },
   flags: { flag: "--list-flags" },
+  plugins: { flag: "--list-plugins" },
   spinners: { flag: "--list-spinners" },
   sessions: { flag: "--sessions" },
   // `usage [<period>]` — optional period token (today/last-day/last-month/
   // ytd/year/all). takesValue consumes the next positional when present.
+  // `resume-same <sid|last>` is a subcommand alias for --resume-same-sid
+  // but needs the two-word sessions path below for actual dispatch.
+  "resume-same": { flag: "--resume-same-sid", takesValue: true },
   usage: { flag: "--usage", takesValue: true },
   resume: { flag: "--resume", takesValue: true },
   login: { flag: "--login" },
@@ -108,8 +115,22 @@ export function normalizeArgs(raw: string[]): string[] {
     // grammar more than the special case does.
     if (head === "sessions" && raw[1] !== undefined && !raw[1].startsWith("-")) {
       const second = raw[1]
-      if (second === "resume") {
+      if (second === "dump") {
+        out.push("--dump")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push(raw[2])
+          start = 3
+        }
+      } else if (second === "resume") {
         out.push("--resume")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push(raw[2])
+          start = 3
+        }
+      } else if (second === "resume-same") {
+        out.push("--resume-same-sid")
         start = 2
         if (raw[2] !== undefined && !raw[2].startsWith("-")) {
           out.push(raw[2])

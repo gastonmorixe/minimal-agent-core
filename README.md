@@ -247,7 +247,7 @@ Precedence is:
 CLI flag > env var > config file > built-in default
 ```
 
-Disable a plugin with its manifest id:
+Disable a plugin with its manifest id in config:
 
 ```jsonc
 {
@@ -258,6 +258,19 @@ Disable a plugin with its manifest id:
   }
 }
 ```
+
+For a single run, use CLI flags (same precedence as other options: CLI > env > config):
+
+```bash
+minimal-agent --disable-plugin web-search,memory -p "review this"
+minimal-agent --enable-plugin interleave-thinking
+minimal-agent plugins list    # discover installed plugin ids
+```
+
+Environment mirrors:
+
+- **`MINIMAL_AGENT_DISABLE_PLUGINS`:** Comma-separated ids to skip (same as `--disable-plugin`).
+- **`MINIMAL_AGENT_ENABLE_PLUGINS`:** Comma-separated ids to force on (same as `--enable-plugin`).
 
 ## Environment
 

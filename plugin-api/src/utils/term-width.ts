@@ -492,6 +492,145 @@ function activeSgr(s: string): string {
 }
 
 /**
+ * Word-wrap a pre-formatted, possibly-styled line to `width` cells while
+ * PRESERVING the line's leading indentation and internal column spacing on
+ * the first fragment, and hang-indenting the continuation fragments.
+ *
+ * This is the structured-row counterpart to {@link wordWrap}. `wordWrap`
+ * collapses every whitespace run to a single space, which is correct for
+ * prose but destroys column alignment in a pre-laid-out row (a task tree
+ * row, a fleet listing, etc.). `wrapIndented` instead keeps the first
+ * fragment byte-identical to the input up to the wrap point, so the row's
+ * `number · glyph · id` columns stay intact and only the trailing title
+ * text flows onto continuation lines. A row like:
+ *
+ *     "  ╰  ✔  #f998aec  scanner tests + integration test for emit-output 1m 33s"
+ *
+ * wraps (at width 60, leading indent preserved) to:
+ *
+ *     "  ╰  ✔  #f998aec  scanner tests + integration test for"
+ *     "      emit-output 1m 33s"
+ *
+ * Continuation fragments are prefixed with `hang` spaces. When `hang` is
+ * omitted it defaults to the display width of the line's own leading
+ * whitespace run, so a deeper-indented subtask row's continuations sit
+ * deeper than a top-level row's and the hierarchy survives the wrap. The
+ * indent is capped at `max(8, floor(width / 2))` so a continuation always
+ * keeps at least half the width to work with on a narrow terminal.
+ *
+ * ANSI SGR styling is preserved end to end: the style active at the wrap
+ * point is re-anchored on each continuation fragment (delegated to
+ * {@link wordWrap}), and any fragment left with an unclosed style gets a
+ * trailing reset so color never bleeds past the line into the next row's
+ * gutter.
+ *
+ * Returns the input as a single element when it already fits within
+ * `width`. Never returns an empty array. With `width <= 0` the input is
+ * returned unwrapped (matches {@link wordWrap}).
+ */
+export function wrapIndented(line: string, width: number, hang?: number): string[] {
+  if (width <= 0) return [line]
+  if (displayWidth(line) <= width) return [line]
+
+  const lead = hang ?? leadingSpaceWidth(line)
+  const indentCap = Math.max(8, Math.floor(width / 2))
+  const indent = Math.min(Math.max(0, lead), indentCap)
+
+  // Latest word boundary (start of a whitespace run that follows a word)
+  // whose preceding text still fits within `width`. ANSI sequences are
+  // copied through but contribute 0 cells.
+  const cut = lastWordBreakWithin(line, width)
+  if (cut < 0) {
+    // No clean break inside `width` : a single unbroken token, or a
+    // pathologically narrow terminal. Fall back to the collapsing wrap,
+    // which hard-breaks the over-long token. Leading indent is lost in
+    // this rare degenerate case, which is acceptable : the alternative is
+    // an overflowing row that soft-wraps into the gutter.
+    return wordWrap(line, width)
+  }
+
+  const raw = line.slice(0, cut)
+  const head = closeOpenSgr(raw)
+  const carry = activeSgr(raw)
+  const rest = line.slice(cut).replace(/^\s+/, "")
+  const indentStr = " ".repeat(indent)
+  // Re-tokenize only the TAIL (the title text), where collapsing internal
+  // whitespace is harmless : titles are already single-line / space
+  // normalized by the renderer. The carried style prefixes the tail so the
+  // continuation keeps the title's color.
+  const tailFrags = wordWrap(carry + rest, Math.max(1, width - indent))
+  const out: string[] = [head]
+  for (const frag of tailFrags) out.push(indentStr + closeOpenSgr(frag))
+  return out
+}
+
+/** Display width of the leading run of literal spaces (ANSI sequences skipped). */
+function leadingSpaceWidth(line: string): number {
+  let w = 0
+  for (let i = 0; i < line.length; ) {
+    if (line.charCodeAt(i) === 0x1b && line[i + 1] === "[") {
+      let j = i + 2
+      while (j < line.length) {
+        const c = line.charCodeAt(j)
+        j += 1
+        if (c >= 0x40 && c <= 0x7e) break
+      }
+      i = j
+      continue
+    }
+    if (line[i] === " ") {
+      w += 1
+      i += 1
+      continue
+    }
+    break
+  }
+  return w
+}
+
+/**
+ * Index of the latest whitespace run that follows a word and whose
+ * preceding text fits within `width` display cells. Returns `-1` when no
+ * such break exists (the first word already overflows, or the line has no
+ * internal whitespace). ANSI CSI sequences are skipped (0 cells). The
+ * returned index points at the FIRST space of the run, so slicing there
+ * yields a head with no trailing whitespace.
+ */
+function lastWordBreakWithin(line: string, width: number): number {
+  let w = 0
+  let breakAt = -1
+  let prevWasSpace = true
+  for (let i = 0; i < line.length; ) {
+    if (line.charCodeAt(i) === 0x1b && line[i + 1] === "[") {
+      let j = i + 2
+      while (j < line.length) {
+        const c = line.charCodeAt(j)
+        j += 1
+        if (c >= 0x40 && c <= 0x7e) break
+      }
+      i = j
+      continue
+    }
+    const cp = line.codePointAt(i)
+    if (cp === undefined) break
+    const ch = String.fromCodePoint(cp)
+    const cw = codePointWidth(cp)
+    if (w + cw > width) break
+    const isSpace = ch === " " || ch === "\t"
+    if (isSpace && !prevWasSpace) breakAt = i
+    prevWasSpace = isSpace
+    w += cw
+    i += ch.length
+  }
+  return breakAt
+}
+
+/** Append a reset when `s` ends with an unclosed SGR style, else return as-is. */
+function closeOpenSgr(s: string): string {
+  return activeSgr(s).length > 0 ? `${s}\x1b[0m` : s
+}
+
+/**
  * How many physical rows a string of given display width occupies in a
  * terminal of `columns` cells.
  *

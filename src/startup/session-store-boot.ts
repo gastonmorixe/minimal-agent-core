@@ -30,6 +30,13 @@ export interface SessionStoreBootOptions {
   sid: string
   /** Parent session id when resuming, else `null`. */
   resumeSid: string | null
+  /**
+   * When true, resume IN PLACE (same session id, no fork). The existing
+   * session file is opened with `existsOk:true` and appended to directly;
+   * sidecar files and blob directory are reused. Mutually implied with
+   * `resumeSid` (when set, `sid === resumeSid`).
+   */
+  resumeSameSid?: boolean
   /** The resolved model id recorded in the meta record. */
   selectedModel: string
   /** The resolved provider id recorded in the meta record. */
@@ -62,9 +69,11 @@ export async function bootSessionStores(
   const { sid, resumeSid, selectedModel, providerId, systemHash, toolsHash } = opts
   const output = opts.output ?? process.stderr
 
-  // Open the session store. Two paths:
+  // Open the session store. Three paths:
   //   - new session: SessionStore.open(getSessionId())
   //   - resume:      SessionStore.fork({ srcSid: resumeSid, dstSid: getSessionId() })
+  //   - same-sid resume: SessionStore.open(sid, existsOk: true) — append to
+  //     the existing file in place, no fork, no sidecar copy.
   //
   // Fork semantics matter: every other subsystem (banner, file log, plugin
   // sessionId, tasks/scratch files, goodbye banner's `--resume <id>` hint)
@@ -77,6 +86,12 @@ export async function bootSessionStores(
   // the parent untouched (non-destructive — re-resuming the parent works
   // forever).
   //
+  // `--resume-same-sid` opts back into the old append-to-existing behavior,
+  // which is useful for long-running agent loops in tmux where you WANT the
+  // session id to stay stable across restarts. The caller has already seeded
+  // the process sid to match the target via setSessionId(resolvedTarget),
+  // so sid === resumeSid here.
+  //
   // `SessionStore.fork` ALSO copies per-sid sidecar files (tasks plugin's
   // `<sid>.tasks.jsonl`, memory plugin's `<sid>.scratch.md`, draft store's
   // `<sid>.draft`, …) from `srcSid` to `dstSid`. Without this, sidecar
@@ -85,34 +100,38 @@ export async function bootSessionStores(
   // task #6 done but task #6 doesn't exist in the new file). The blob
   // DIRECTORY is the one exception — tool results carry absolute paths
   // into the parent's `<srcSid>.blobs/`, so blobs survive resume by
-  // reference without duplication.
+  // reference without duplication. On `--resume-same-sid`, sidecar files
+  // are already at the right path (same sid), so no copy is needed.
   //
   // Resume drift check emits a one-line yellow warning when system/tools
   // have changed since the parent was saved.
+  const resumeSame = opts.resumeSameSid === true
   let store: SessionStore | null = null
   try {
-    store = resumeSid
-      ? SessionStore.fork({
-          srcSid: resumeSid,
-          dstSid: sid,
-          model: selectedModel,
-          cwd: process.cwd(),
-          systemHash,
-          toolsHash,
-          agentVersion: VERSION,
-          argv: process.argv,
-          provider: providerId,
-        })
-      : SessionStore.open({
-          sid,
-          model: selectedModel,
-          cwd: process.cwd(),
-          systemHash,
-          toolsHash,
-          agentVersion: VERSION,
-          argv: process.argv,
-          provider: providerId,
-        })
+    store =
+      resumeSid && !resumeSame
+        ? SessionStore.fork({
+            srcSid: resumeSid,
+            dstSid: sid,
+            model: selectedModel,
+            cwd: process.cwd(),
+            systemHash,
+            toolsHash,
+            agentVersion: VERSION,
+            argv: process.argv,
+            provider: providerId,
+          })
+        : SessionStore.open({
+            sid,
+            model: selectedModel,
+            cwd: process.cwd(),
+            systemHash,
+            toolsHash,
+            agentVersion: VERSION,
+            argv: process.argv,
+            provider: providerId,
+            existsOk: resumeSame,
+          })
   } catch (err) {
     // Persistence is best-effort; never block startup on it. The agent
     // will work without a store (just no resume for THIS session).
@@ -150,7 +169,8 @@ export async function bootSessionStores(
   // Liveness is OS-probed (kill(0) + ps -o lstart=) so this catches the
   // common cases (running, dead, pid-reused) without relying on clean
   // detach markers. See `src/session-liveness.ts`.
-  if (resumeSid) {
+  // On `--resume-same-sid` we ARE the continuation — skip the warning.
+  if (resumeSid && !resumeSame) {
     try {
       const { getSessionLiveness } = await import("../session-liveness.ts")
       const live = getSessionLiveness(resumeSid)

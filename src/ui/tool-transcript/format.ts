@@ -12,7 +12,13 @@
 import { shouldSoftSplit, splitBashSegments } from "../../bash-split.ts"
 import type { ToolUseBlock } from "../../client.ts"
 import type { Finding, FindingSeverity } from "../../plugins/hooks/tool-lifecycle.ts"
-import { displayWidth, expandTabs, truncateDisplayWidth, wordWrap } from "../../term-width.ts"
+import {
+  displayWidth,
+  expandTabs,
+  truncateDisplayWidth,
+  wordWrap,
+  wrapIndented,
+} from "../../term-width.ts"
 import { countLines, type TruncationInfo } from "../../tools/truncation.ts"
 import { truncHint } from "../../truncate-hint.ts"
 import { c } from "../style/ansi.ts"
@@ -764,6 +770,73 @@ export function reopenFrameCloser(line: string): string {
 }
 
 /**
+ * How a tool's `display` channel reflows when a body line exceeds the
+ * visible width:
+ *
+ *  - `prose`      — collapse whitespace and word-wrap (default). For
+ *                   free-flowing display text (agent summaries, schedule
+ *                   prompts) where internal spacing carries no meaning.
+ *  - `structured` — word-wrap while preserving the line's leading
+ *                   indentation and first-fragment column spacing, with
+ *                   hang-indented continuations (see {@link wrapIndented}).
+ *                   For row-structured trees whose `col · col · title`
+ *                   layout must survive but whose trailing title should
+ *                   flow onto continuation lines instead of truncating.
+ *  - `truncate`   — clip the line at the width with a `...(+Nch)` marker.
+ *                   For genuinely tabular content (diff hunks, fleet
+ *                   tables, lock tables) where a wrap would shear columns
+ *                   apart mid-row.
+ *  - `none`       — no width signal (non-TTY / tests): emit verbatim.
+ */
+type DisplayWrapMode = "prose" | "structured" | "truncate" | "none"
+
+/**
+ * Tools whose `display` channel is a column-aligned table where wrapping
+ * a row would shear the columns apart. These keep per-line truncation.
+ * `Task` is intentionally NOT here: its rows are `col · col · title` with
+ * the title last, so {@link wrapIndented} can flow the title without
+ * disturbing the leading columns. See {@link DisplayWrapMode}.
+ */
+const TABULAR_DISPLAY_TOOLS = new Set(["ListAgents", "ShowDiff", "LockStatus", "Edit", "Write"])
+
+/** Tools whose `display` rows are structured (indent + columns + trailing title). */
+const STRUCTURED_DISPLAY_TOOLS = new Set(["Task"])
+
+/** Pick the reflow strategy for a tool's display body. */
+function displayWrapMode(tool: string | undefined, bodyWidth: number | undefined): DisplayWrapMode {
+  if (bodyWidth === undefined) return "none"
+  const name = tool ?? ""
+  if (TABULAR_DISPLAY_TOOLS.has(name)) return "truncate"
+  if (STRUCTURED_DISPLAY_TOOLS.has(name)) return "structured"
+  return "prose"
+}
+
+/** Reflow one display body line into fragments per the chosen {@link DisplayWrapMode}. */
+function wrapDisplayLine(
+  line: string,
+  mode: DisplayWrapMode,
+  bodyWidth: number | undefined,
+): string[] {
+  switch (mode) {
+    case "none":
+      return [clampToolPreviewBodyLine(line, bodyWidth)]
+    case "truncate":
+      return [clampToolPreviewBodyLine(line, bodyWidth)]
+    case "prose":
+      return wordWrap(line, bodyWidth!).map((f) => clampToolPreviewBodyLine(f, bodyWidth))
+    case "structured":
+      // `wrapIndented` already guarantees each fragment fits `bodyWidth`;
+      // the clamp is a no-op safety net for the rare degenerate fallback
+      // (single unbreakable token) and any wide-glyph off-by-one.
+      return wrapIndented(line, bodyWidth!).map((f) => clampToolPreviewBodyLine(f, bodyWidth))
+    default: {
+      void (mode satisfies never)
+      return [clampToolPreviewBodyLine(line, bodyWidth)]
+    }
+  }
+}
+
+/**
  * Render a tool's result block for the transcript: the rows between
  * `╭ <header>` (written separately by the caller) and the closing `╰`.
  * Inserts the `│ ` gutter on each row, applies the per-tool body line
@@ -807,22 +880,7 @@ export function formatToolPreview(
     const out: string[] = []
     const footer = opts?.footer
     const bodyWidth = toolPreviewBodyWidth(opts?.cols)
-    // Tools whose display channel carries structured/table content (task
-    // trees, fleet listings, diff hunks, lock tables) where word-wrapping
-    // would destroy column alignment or tree connectors. These keep the
-    // old per-line clamp behavior (truncate with `...(+Nch)`). All other
-    // display content (prose tasks, agent summaries, schedule prompts)
-    // gets word-wrapped so long lines are readable without truncation.
-    const STRUCTURED_DISPLAY_TOOLS = new Set([
-      "Task",
-      "ListAgents",
-      "ShowDiff",
-      "LockStatus",
-      "Edit",
-      "Write",
-    ])
-    const shouldWrapDisplay =
-      bodyWidth !== undefined && !STRUCTURED_DISPLAY_TOOLS.has(opts?.tool ?? "")
+    const wrapMode = displayWrapMode(opts?.tool, bodyWidth)
     const body = footer === undefined ? display.replace(/\n$/, "") : display
     const dlines = body.length === 0 ? [] : body.split("\n")
     if (dlines.length === 0 && footer === undefined) {
@@ -830,9 +888,7 @@ export function formatToolPreview(
       return out
     }
     for (let i = 0; i < dlines.length; i++) {
-      const fragments = shouldWrapDisplay
-        ? wordWrap(dlines[i], bodyWidth).map((f) => clampToolPreviewBodyLine(f, bodyWidth))
-        : [clampToolPreviewBodyLine(dlines[i], bodyWidth)]
+      const fragments = wrapDisplayLine(dlines[i], wrapMode, bodyWidth)
       for (let fi = 0; fi < fragments.length; fi++) {
         const isLastLine = i === dlines.length - 1
         const isLastFrag = fi === fragments.length - 1

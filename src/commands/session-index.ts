@@ -37,13 +37,50 @@ export function readSessionIndex(): IndexRecord[] {
 }
 
 /**
+ * Given a target string and session index records, try to resolve the target
+ * to a full session id using prefix matching.
+ *
+ * Rules:
+ * - Exactly one prefix match -\> return that sid.
+ * - Multiple prefix matches with one exact match -\> return the exact match.
+ * - Multiple prefix matches, no exact -\> return null (ambiguous).
+ * - No prefix match -\> return target unchanged (pass-through so the caller's
+ *   downstream lookup can produce a specific "no such session" error).
+ */
+export function resolveSidByPrefix(target: string, records: IndexRecord[]): string | null {
+  const needle = target.toLowerCase()
+  const matches = records.filter((e) => e.sid.toLowerCase().startsWith(needle))
+  if (matches.length === 1) return matches[0].sid
+  if (matches.length > 1) {
+    const exact = matches.find((e) => e.sid.toLowerCase() === needle)
+    if (exact) return exact.sid
+    // Multiple prefix matches but none is an exact match -> ambiguous.
+    return null
+  }
+  // No prefix match: pass through unchanged so the caller's downstream
+  // lookup can produce a specific "no such session" error.
+  return target
+}
+
+/**
  * Resolve `<sid|last>` to a concrete sid.
  *
- * For `last`, prefer the most recent session whose `cwd` matches the current
- * process cwd; fall back to the global most recent.
+ * Supports:
+ * - `"last"` — the most recent session whose `cwd` matches the current process
+ *   cwd; falls back to the global most recent.
+ * - A short prefix (e.g. `"260d72dd"`) — resolved against the session index
+ *   using {@link resolveSidByPrefix}.
+ * - A full sid — passes through unchanged.
+ *
+ * Returns `null` when "last" finds no sessions, or when a prefix is ambiguous
+ * (multiple matches, none exact). On no prefix match at all, the target is
+ * passed through unchanged so the caller's downstream filesystem lookup can
+ * produce a specific error.
  */
 export function resolveSessionTarget(target: string, cwd: string): string | null {
-  if (target !== "last") return target
+  if (target !== "last") {
+    return resolveSidByPrefix(target, readSessionIndex())
+  }
   const all = readSessionIndex()
   if (all.length === 0) return null
   for (let i = all.length - 1; i >= 0; i--) {
