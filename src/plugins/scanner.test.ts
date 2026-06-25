@@ -277,4 +277,67 @@ describe("TagScanner", () => {
     const e = drive([md])
     expect(e.tags).toHaveLength(0)
   })
+
+  // ---------------------------------------------------------------------
+  // emit-output tag shapes
+  //
+  // The emit-output plugin (plugins/emit-output) drives the scanner with
+  // self-closing `<ma::emit::output ... />` tags carrying a `tool=` blob
+  // pointer, a `path=` filesystem reference, and an optional `title=`. The
+  // scanner is tag-name agnostic, but these cases pin the EXACT attribute
+  // shapes that plugin depends on so a future scanner change can't silently
+  // break blob/file resolution (the value of `path` carries slashes + dots,
+  // which must survive the quoted-attribute parser verbatim).
+  // ---------------------------------------------------------------------
+
+  it("parses a self-closing emit-output tag with a tool= blob pointer", () => {
+    const e = drive(['<ma::emit::output tool="call_00_dMMw39hweiGAR2xNzEoG1240" />'])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].name).toBe("output")
+    expect(e.tags[0].self_closing).toBe(true)
+    expect(e.tags[0].body).toBe("")
+    expect(e.tags[0].attrs).toEqual({ tool: "call_00_dMMw39hweiGAR2xNzEoG1240" })
+  })
+
+  it("preserves slashes and dots in a path= attribute value verbatim", () => {
+    const e = drive(['before <ma::emit::output path="/tmp/render_tree.txt" /> after'])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].name).toBe("output")
+    expect(e.tags[0].attrs).toEqual({ path: "/tmp/render_tree.txt" })
+    // The tag span is consumed; only the surrounding prose reaches text.
+    expect(e.text.join("")).toBe("before  after")
+  })
+
+  it("parses path= together with an optional title=", () => {
+    const e = drive(['<ma::emit::output path="/tmp/out.txt" title="Tree view" />'])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].attrs).toEqual({ path: "/tmp/out.txt", title: "Tree view" })
+  })
+
+  it("parses tool= together with an optional title=", () => {
+    const e = drive(['<ma::emit::output tool="toolu_01abc" title="render" />'])
+    expect(e.tags[0].attrs).toEqual({ tool: "toolu_01abc", title: "render" })
+  })
+
+  it("handles an emit-output opener split across chunk boundaries", () => {
+    const e = drive(["see <ma::emit::out", 'put tool="toolu_01abc" />!'])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].name).toBe("output")
+    expect(e.tags[0].attrs).toEqual({ tool: "toolu_01abc" })
+    expect(e.text.join("")).toBe("see !")
+  })
+
+  it("splits an emit-output tag right inside the path= value across chunks", () => {
+    const e = drive(['<ma::emit::output path="/tmp/re', 'nder_tree.txt" />'])
+    expect(e.tags).toHaveLength(1)
+    expect(e.tags[0].attrs).toEqual({ path: "/tmp/render_tree.txt" })
+  })
+
+  it("does not fire emit-output inside backticked inline code (doc reference)", () => {
+    // PROMPT.md and prose reference the tag name in backticks; those must not
+    // trigger a real render.
+    const e = drive(['use `<ma::emit::output tool="..." />` for ascii art'])
+    expect(e.tags).toHaveLength(0)
+    expect(e.text.join("")).toBe('use `<ma::emit::output tool="..." />` for ascii art')
+  })
 })

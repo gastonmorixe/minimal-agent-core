@@ -129,10 +129,9 @@ export function renderSearch(
   offset: number,
 ): string {
   if (total === 0) return `No matches for ${JSON.stringify(query)} (scanned ${scanned} session(s)).`
-  const lines = [
-    `Matches for ${JSON.stringify(query)}: showing ${hits.length} of ${total} across ${scanned} session(s)`,
-    "",
-  ]
+  // The query and count live in the TUI displayHeader now — start directly
+  // with the hits. See handler's `displayHeader` for the search case.
+  const lines: string[] = []
   for (const h of hits) {
     lines.push(`${h.sid} [#${h.index}]${h.ts ? ` ${h.ts}` : ""} (${h.kind})`)
     lines.push(`    ${h.preview}`)

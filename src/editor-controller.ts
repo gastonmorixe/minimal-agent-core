@@ -308,6 +308,13 @@ export class EditorController extends EventEmitter {
         this.fsmState = { kind: "quitting", reason: "escape-hatch" }
         this.emit("quit", "escape-hatch" as QuitReason)
         this.emit("cancel", "escape-hatch" as QuitReason)
+        // Hard guarantee: rapid double-Ctrl+C ALWAYS quits.
+        // Cooperative cancellation (emit → REPL loop → cancelled check)
+        // can't break out of a hung transport (the inner gen.next() await
+        // never resolves). process.exit() tears through the event loop;
+        // the existing process.on("exit") handler in installCleanupHooksOnce
+        // still restores terminal settings first.
+        setImmediate(() => process.exit(0))
       },
       dispatchKeyHook: (key) => this.dispatchKeyHook(key),
       tryQueueNav: (key) => this.tryQueueNav(key),
@@ -486,6 +493,12 @@ export class EditorController extends EventEmitter {
           // For back-compat with consumers (draft-store cleanup, REPL
           // exit loop) that listen on the legacy "cancel" event.
           this.emit("cancel", e.reason)
+          // Hard guarantee: confirmed Ctrl+C×2 ALWAYS quits.
+          // Same rationale as forceQuitEscapeHatch above: cooperative
+          // cancellation can't break a hung transport. process.exit()
+          // tears through the event loop; the existing process.on("exit")
+          // handler in installCleanupHooksOnce still restores the terminal.
+          setImmediate(() => process.exit(0))
           break
         }
       }

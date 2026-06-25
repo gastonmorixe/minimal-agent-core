@@ -180,6 +180,85 @@ describe("dump command architecture", () => {
     }
   })
 
+  it("--dump with a short unique prefix resolves the sid", async () => {
+    // Use a sid with a long, distinctive prefix. The short "ea3" prefix is
+    // unique across the sessions in this test's home directory.
+    const sid = "ea3f1a2b-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    const home = createHomeWithSession(sid)
+
+    try {
+      const p = Bun.spawn(["bun", "run", "src/index.ts", "--dump", "ea3"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          HOME: home,
+          MINIMAL_AGENT_HOME: join(home, ".minimal-agent"),
+        },
+      })
+      const [code, stdout, stderr] = await Promise.all([
+        p.exited,
+        readStream(p.stdout),
+        readStream(p.stderr),
+      ])
+
+      expect(code).toBe(0)
+      expect(stdout).toContain(`# Session: ${sid}`)
+      expect(stderr.trim()).toBe("")
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("--dump with an ambiguous prefix exits with error", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ma-dump-ambig-e2e-"))
+    const sessionsDir = join(home, ".minimal-agent", "sessions")
+    const storeA = SessionStore.open({
+      sid: "ambig-a-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      model: "test",
+      cwd: process.cwd(),
+      systemHash: "sys",
+      toolsHash: "tools",
+      agentVersion: "test",
+      dir: sessionsDir,
+    })
+    storeA.appendUser("hello a")
+    storeA.appendAssistant([{ type: "text", text: "world a" }], "end_turn")
+    const storeB = SessionStore.open({
+      sid: "ambig-b-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      model: "test",
+      cwd: process.cwd(),
+      systemHash: "sys",
+      toolsHash: "tools",
+      agentVersion: "test",
+      dir: sessionsDir,
+    })
+    storeB.appendUser("hello b")
+    storeB.appendAssistant([{ type: "text", text: "world b" }], "end_turn")
+
+    try {
+      const p = Bun.spawn(["bun", "run", "src/index.ts", "--dump", "ambig"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          HOME: home,
+          MINIMAL_AGENT_HOME: join(home, ".minimal-agent"),
+        },
+      })
+      const [code, _stdout, stderr] = await Promise.all([
+        p.exited,
+        readStream(p.stdout),
+        readStream(p.stderr),
+      ])
+
+      expect(code).toBe(1)
+      expect(stderr).toMatch(/no saved sessions found|ambiguous/i)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("`sessions resume <sid>` rewrites to --resume <sid> (parser plumbing)", async () => {
     // The cli-args unit tests pin the exact rewrite. This e2e proves
     // the wiring downstream: when we hand the CLI `sessions resume

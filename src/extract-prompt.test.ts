@@ -63,6 +63,43 @@ describe("extractPromptFromArgs", () => {
     })
   })
 
+  // ---- regression: --resume-same-sid must consume its value -----------
+  //
+  // Same resume-then-exit footgun as --resume: a value-bearing flag missing
+  // from FLAGS_WITH_VALUES leaks its sid as a bare positional, which forces
+  // non-interactive mode (run one turn, exit). This is exactly what made a
+  // `tmux ... --resume-same-sid <sid>` relaunch run a single turn and die.
+
+  describe("--resume-same-sid must consume its value (resume-in-place stays interactive)", () => {
+    test("--resume-same-sid <sid> → none", () => {
+      expect(extractPromptFromArgs(["--resume-same-sid", "abc-123-deadbeef"])).toEqual({
+        kind: "none",
+      })
+    })
+
+    test("--resume-same-sid last → none", () => {
+      expect(extractPromptFromArgs(["--resume-same-sid", "last"])).toEqual({ kind: "none" })
+    })
+
+    test("--resume-same-sid <sid> + bare positional → that positional is the prompt", () => {
+      expect(extractPromptFromArgs(["--resume-same-sid", "abc-123", "follow-up question"])).toEqual(
+        { kind: "literal", text: "follow-up question" },
+      )
+    })
+
+    test("normalized subcommand `resume-same <sid>` → none", () => {
+      expect(extractPromptFromArgs(normalizeArgs(["resume-same", "abc-123"]))).toEqual({
+        kind: "none",
+      })
+    })
+
+    test("normalized `sessions resume-same <sid>` → none", () => {
+      expect(extractPromptFromArgs(normalizeArgs(["sessions", "resume-same", "abc-123"]))).toEqual({
+        kind: "none",
+      })
+    })
+  })
+
   // ---- regression: --mode must consume its value ----------------------
 
   test("--mode ask + bare positional → positional is the prompt", () => {
@@ -77,6 +114,17 @@ describe("extractPromptFromArgs", () => {
       kind: "literal",
       text: "do the thing",
     })
+  })
+
+  test("--disable-plugin value with bare positional uses the positional prompt", () => {
+    expect(extractPromptFromArgs(["--disable-plugin", "web-search", "do the thing"])).toEqual({
+      kind: "literal",
+      text: "do the thing",
+    })
+  })
+
+  test("--disable-plugin value alone does not become a prompt", () => {
+    expect(extractPromptFromArgs(["--disable-plugin", "web-search"])).toEqual({ kind: "none" })
   })
 
   // ---- regression: --provider must consume its value ------------------

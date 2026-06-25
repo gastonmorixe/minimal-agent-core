@@ -3,7 +3,7 @@
  * point.
  *
  * Split out of `src/index.ts` to keep that file under the `max-lines`
- * lint budget. Pure presentation + read-only fs; no startup state.
+ * lint budget. Pure presentation + read-only fs, no startup state.
  *
  * @module startup/help
  */
@@ -66,7 +66,7 @@ function buildHelpSections(): HelpSection[] {
       title: c.bold("Options"),
       rows: [
         row(`${c.cyan("-m")}, ${c.cyan("--model")} ${c.dim("<id>")}`, "Select model", [
-          "requires --provider; else MINIMAL_AGENT_MODEL, config model",
+          "requires --provider, else MINIMAL_AGENT_MODEL, config model",
         ]),
         row(`${c.cyan("--provider")} ${c.dim("<id>")}`, "Select provider for --model", [
           "else MINIMAL_AGENT_PROVIDER, config provider",
@@ -106,6 +106,12 @@ function buildHelpSections(): HelpSection[] {
         row(`${c.cyan("--mode")} ${c.dim("<id|none>")}`, "Initial mode", [
           "default: ask in non-interactive, plugin default otherwise",
         ]),
+        row(`${c.cyan("--disable-plugin")} ${c.dim("<id>")}`, "Skip a plugin for this run", [
+          "repeatable, comma-separated ok, see plugins list",
+        ]),
+        row(`${c.cyan("--enable-plugin")} ${c.dim("<id>")}`, "Force-enable a plugin for this run", [
+          "overrides config + manifest opt-out",
+        ]),
         row(
           `${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}`,
           "Force startup tree on/off",
@@ -124,7 +130,7 @@ function buildHelpSections(): HelpSection[] {
     },
     {
       title: c.bold("Auth"),
-      note: c.dim("(provider-owned auth flows; flags remain legacy aliases)"),
+      note: c.dim("(provider-owned auth flows, flags remain legacy aliases)"),
       rows: [
         row(
           `${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("login")} ${c.dim("[method]")}`,
@@ -140,13 +146,18 @@ function buildHelpSections(): HelpSection[] {
     },
     {
       title: c.bold("Info"),
-      note: c.dim("(also as subcommands: `models [list]`, `flags [list]`, ...)"),
+      note: c.dim("(also as subcommands: `models [list]`, `plugins [list]`, `flags [list]`, ...)"),
       rows: [
         row(c.cyan("providers"), "List registered providers", ["id · surfaces"]),
         row(
           `${c.cyan("providers models")} ${c.dim("[<id>]")}`,
           "List models, optionally one provider",
           ["alias: --list-models"],
+        ),
+        row(
+          `${c.cyan("plugins")} ${c.dim("[list]")}`,
+          "List installed plugins and effective on/off state",
+          ["alias: --list-plugins / --plugins"],
         ),
         row(
           `${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}`,
@@ -166,6 +177,11 @@ function buildHelpSections(): HelpSection[] {
           `${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}`,
           "Resume a saved session",
           ["`sessions resume <sid>`"],
+        ),
+        row(
+          `${c.cyan("--resume-same-sid")} ${c.dim("<sid|last>")}`,
+          "Resume in place, keeping the same session id",
+          ["no fork, appends to the existing log", "`resume-same <sid>`"],
         ),
         row(`${c.cyan("--dump")} ${c.dim("<sid|last>")}`, "Dump a full session history to stdout"),
         row(`${c.cyan("--dump-format")} ${c.dim("<md|xml>")}`, "Output format for --dump", [
@@ -225,6 +241,16 @@ function buildHelpSections(): HelpSection[] {
         ),
         row(c.cyan("MINIMAL_AGENT_SKIP_QUOTA=1"), "Skip startup quota check"),
         row(c.cyan("MINIMAL_AGENT_NO_PLUGIN_SYNC=1"), "Skip the first-run extended-plugins clone"),
+        row(
+          c.cyan("MINIMAL_AGENT_DISABLE_PLUGINS"),
+          "Comma-separated plugin ids to skip this run",
+          ["same as --disable-plugin"],
+        ),
+        row(
+          c.cyan("MINIMAL_AGENT_ENABLE_PLUGINS"),
+          "Comma-separated plugin ids to force on this run",
+          ["same as --enable-plugin"],
+        ),
         row(c.cyan("MINIMAL_AGENT_PLUGINS_REPO"), "Git URL for the extended plugins repo", [
           "fork/mirror",
         ]),
@@ -246,9 +272,13 @@ function buildHelpSections(): HelpSection[] {
     },
     {
       title: c.bold("Plugins"),
-      note: c.dim("(toggle via ~/.minimal-agent/config.jsonc)"),
+      note: c.dim("(enable/disable precedence: CLI → env → config → manifest)"),
       rows: [
-        row(c.dim("Opt out"), c.dim('{ "plugins": { "<id>": { "enabled": false } } }')),
+        row(c.dim("List"), c.dim("minimal-agent plugins list")),
+        row(c.dim("One-shot disable"), c.dim('minimal-agent --disable-plugin web-search -p "…"')),
+        row(c.dim("Disable many"), c.dim("minimal-agent --disable-plugin web-search,memory")),
+        row(c.dim("One-shot enable"), c.dim("minimal-agent --enable-plugin interleave-thinking")),
+        row(c.dim("Persistent"), c.dim('{ "plugins": { "<id>": { "enabled": false } } }')),
         row(c.dim("Opt in"), c.dim('{ "plugins": { "<id>": { "enabled": true } } }'), [
           "for plugins shipped disabled",
         ]),
@@ -278,6 +308,6 @@ function row(
 ): { term: string; summary: string } {
   return {
     term,
-    summary: notes.length > 0 ? `${summary} ${c.dim(`(${notes.join("; ")})`)}` : summary,
+    summary: notes.length > 0 ? `${summary} ${c.dim(`(${notes.join(", ")})`)}` : summary,
   }
 }

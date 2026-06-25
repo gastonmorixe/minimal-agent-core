@@ -6,6 +6,7 @@ export type CommandName =
   | "list-spinners"
   | "list-models"
   | "list-providers"
+  | "list-plugins"
   | "login"
   | "logout"
   | "auth-status"
@@ -34,6 +35,8 @@ export interface PlanCommandInput {
   wantListModels: boolean
   /** `providers` (bare): list registered providers from the canonical registry. */
   wantListProviders?: boolean
+  /** `plugins` / `--list-plugins`: list installed plugins and effective on/off. */
+  wantListPlugins?: boolean
   /**
    * Auth-related top-level commands. Routed BEFORE `run` so they bypass
    * credential acquisition — login can't depend on already being logged
@@ -52,6 +55,7 @@ function capabilities(command: CommandName): CommandCapabilities {
     case "list-flags":
     case "list-spinners":
     case "list-providers":
+    case "list-plugins":
     case "logout":
     case "auth-status":
       // usage scans session JSONL on disk + the in-process model registry
@@ -128,13 +132,15 @@ export function planCommand(input: PlanCommandInput): CommandPlan {
               ? "list-models"
               : input.wantListProviders
                 ? "list-providers"
-                : input.wantLogin
-                  ? "login"
-                  : input.wantLogout
-                    ? "logout"
-                    : input.wantAuthStatus
-                      ? "auth-status"
-                      : "run"
+                : input.wantListPlugins
+                  ? "list-plugins"
+                  : input.wantLogin
+                    ? "login"
+                    : input.wantLogout
+                      ? "logout"
+                      : input.wantAuthStatus
+                        ? "auth-status"
+                        : "run"
 
   return {
     command,

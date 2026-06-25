@@ -117,7 +117,7 @@ async function run(
       })
       return ok(
         renderSearch(hits, total, scannedSessions, req.query, req.offset),
-        `${total} match(es)`,
+        `${JSON.stringify(req.query)} · ${total} match(es)`,
       )
     }
 

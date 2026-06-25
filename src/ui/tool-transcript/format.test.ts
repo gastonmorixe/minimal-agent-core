@@ -294,32 +294,20 @@ describe("formatToolInput — Grep flags (Style A)", () => {
     // separate chunk. `/foo/i · in /src` — not `/foo/ · -i · in /src`.
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-i": true }))).toBe("/foo/i")
   })
-  it("`multiline` lifts to `m` flag (combinable with i → `im`)", () => {
+  it("`multiline` lifts to `m` flag (alone and combinable with `i`)", () => {
+    expect(formatToolInput(tu("Grep", { pattern: "foo", multiline: true }))).toBe("/foo/m")
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-i": true, multiline: true }))).toBe(
       "/foo/im",
     )
   })
-  it("multiline alone → `/foo/m`", () => {
-    expect(formatToolInput(tu("Grep", { pattern: "foo", multiline: true }))).toBe("/foo/m")
-  })
-  it("`-A N` → `· ↓N` (after)", () => {
+  it("`-A/-B/-C/context` context flags → `↓N`/`↑N`/`↕N`, -C beats -A/-B", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-A": 5 }))).toBe("/foo/ · ↓5")
-  })
-  it("`-B N` → `· ↑N` (before)", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-B": 2 }))).toBe("/foo/ · ↑2")
-  })
-  it("`-C N` → `· ↕N` (around)", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-C": 3 }))).toBe("/foo/ · ↕3")
-  })
-  it("`context` (alias for -C) → `· ↕N`", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", context: 3 }))).toBe("/foo/ · ↕3")
-  })
-  it("`-C` takes precedence when both -C and -A/-B set (symmetric beats asymmetric)", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-A": 5, "-B": 2, "-C": 3 }))).toBe(
       "/foo/ · ↕3",
     )
-  })
-  it("renders both ↓ and ↑ when -A and -B are set without -C", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", "-A": 5, "-B": 2 }))).toBe(
       "/foo/ · ↓5 · ↑2",
     )
@@ -327,17 +315,13 @@ describe("formatToolInput — Grep flags (Style A)", () => {
   it("`head_limit` → `· ≤N`", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", head_limit: 100 }))).toBe("/foo/ · ≤100")
   })
-  it("output_mode: count → `· count`", () => {
+  it("output_mode: count → `· count`, files_with_matches → `· paths`, content (default) → omitted", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", output_mode: "count" }))).toBe(
       "/foo/ · count",
     )
-  })
-  it("output_mode: files_with_matches → `· paths`", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", output_mode: "files_with_matches" }))).toBe(
       "/foo/ · paths",
     )
-  })
-  it("output_mode: content (default) → omitted from header", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo", output_mode: "content" }))).toBe("/foo/")
   })
   it("`glob` filter renders as a bare chunk after path", () => {
@@ -408,6 +392,53 @@ describe("formatToolPreview — display channel (Edit/Write diffs)", () => {
     }
     expect(plain[0]).toMatch(/^\s*│\s/)
     expect(plain.at(-1)).toMatch(/^\s*╰\s/)
+  })
+
+  it("word-wraps long Task rows (hang-indented) instead of truncating", () => {
+    // Task display rows are structured (col · col · title). A long title
+    // must flow onto a hang-indented continuation line, NOT get clipped
+    // with a `...(+Nch)` marker. Regression for the truncation the user
+    // reported (`...(+42ch)` tails on every long task title).
+    const display =
+      " 4  ✔  #77829c  Update prompts/templates where appropriate (careful not to encourage overuse) 17s\n"
+    const lines = formatToolPreview("compact for model", false, display, {
+      tool: "Task",
+      footer: "11 done · 0 doing · 0 todo",
+      cols: 60,
+    })
+    const plain = lines.map(stripAnsi)
+    // No truncation marker anywhere.
+    expect(plain.some((l) => /\.\.\.\(\+\d+ch\)/.test(l))).toBe(false)
+    // The single source row wrapped into 2+ body rows (+ footer).
+    const bodyRows = plain.filter((l) => /[│╰]\s+\S/.test(l) && !/done ·/.test(l))
+    expect(bodyRows.length).toBeGreaterThanOrEqual(2)
+    // Every rendered row fits the terminal width (no soft-wrap into gutter).
+    for (const line of plain) expect(displayWidth(line)).toBeLessThan(60)
+    // First body row keeps the leading `4 ✔ #77829c` columns intact.
+    expect(plain[0]).toMatch(/^\s*│\s+4\s+✔\s+#77829c\s+Update/)
+    // The continuation row is hang-indented (leading spaces before text),
+    // not flush against the gutter.
+    expect(plain[1]).toMatch(/^\s*│\s{2,}\S/)
+    // No title word is lost across the wrap.
+    const joined = bodyRows.join(" ").replace(/\s+/g, " ")
+    for (const word of ["Update", "prompts/templates", "appropriate", "encourage", "overuse"]) {
+      expect(joined).toContain(word)
+    }
+  })
+
+  it("still truncates genuinely tabular tools (ListAgents) with a marker", () => {
+    // Fleet/diff/lock tables stay on per-line truncation because a wrap
+    // would shear their columns apart. Confirms Task was carved out
+    // WITHOUT changing the tabular tools' behavior.
+    const display = `${"A1 worker running ".repeat(8)}tail\n`
+    const lines = formatToolPreview("compact for model", false, display, {
+      tool: "ListAgents",
+      cols: 40,
+    })
+    const plain = lines.map(stripAnsi)
+    // Tabular path clips to one row + marker, does not wrap into many rows.
+    expect(plain.some((l) => /\.\.\.\(\+\d+ch\)/.test(l))).toBe(true)
+    for (const line of plain) expect(displayWidth(line)).toBeLessThan(40)
   })
 
   it("word-wraps prose display lines for non-structured tools", () => {

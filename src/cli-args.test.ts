@@ -51,6 +51,7 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs(["--models"])).toEqual(["--list-models"])
     expect(normalizeArgs(["--flags"])).toEqual(["--list-flags"])
     expect(normalizeArgs(["--spinners"])).toEqual(["--list-spinners"])
+    expect(normalizeArgs(["--plugins"])).toEqual(["--list-plugins"])
     expect(normalizeArgs(["--session"])).toEqual(["--sessions"])
     expect(normalizeArgs(["--list-sessions"])).toEqual(["--sessions"])
   })
@@ -59,6 +60,7 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs(["models"])).toEqual(["--list-models"])
     expect(normalizeArgs(["flags"])).toEqual(["--list-flags"])
     expect(normalizeArgs(["spinners"])).toEqual(["--list-spinners"])
+    expect(normalizeArgs(["plugins"])).toEqual(["--list-plugins"])
     expect(normalizeArgs(["sessions"])).toEqual(["--sessions"])
     expect(normalizeArgs(["usage"])).toEqual(["--usage"])
     expect(normalizeArgs(["help"])).toEqual(["--help"])
@@ -78,12 +80,26 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs(["models", "list"])).toEqual(["--list-models"])
     expect(normalizeArgs(["flags", "list"])).toEqual(["--list-flags"])
     expect(normalizeArgs(["spinners", "list"])).toEqual(["--list-spinners"])
+    expect(normalizeArgs(["plugins", "list"])).toEqual(["--list-plugins"])
     expect(normalizeArgs(["sessions", "list"])).toEqual(["--sessions"])
   })
 
   test("subcommand syntax: `resume <sid>` consumes the next positional", () => {
     expect(normalizeArgs(["resume", "abc123"])).toEqual(["--resume", "abc123"])
     expect(normalizeArgs(["resume", "last"])).toEqual(["--resume", "last"])
+  })
+
+  test("subcommand syntax: `resume-same <sid>` → --resume-same-sid", () => {
+    expect(normalizeArgs(["resume-same", "abc123"])).toEqual(["--resume-same-sid", "abc123"])
+    expect(normalizeArgs(["resume-same", "last"])).toEqual(["--resume-same-sid", "last"])
+    // Missing value → bare flag (parsed later by the --resume-same-sid handler).
+    expect(normalizeArgs(["resume-same"])).toEqual(["--resume-same-sid"])
+    // Trailing flags.
+    expect(normalizeArgs(["resume-same", "abc", "--debug"])).toEqual([
+      "--resume-same-sid",
+      "abc",
+      "--debug",
+    ])
   })
 
   test("`sessions <query>` consumes the next positional as a fuzzy filter", () => {
@@ -111,6 +127,40 @@ describe("normalizeArgs", () => {
     // Missing sid → bare `--resume` (parity with `resume` alone).
     expect(normalizeArgs(["sessions", "resume"])).toEqual(["--resume"])
     expect(normalizeArgs(["sessions", "resume", "--debug"])).toEqual(["--resume", "--debug"])
+  })
+
+  test("`sessions dump <sid>` mirrors top-level `--dump <sid>`", () => {
+    expect(normalizeArgs(["sessions", "dump", "abc123"])).toEqual(["--dump", "abc123"])
+    expect(normalizeArgs(["sessions", "dump", "last"])).toEqual(["--dump", "last"])
+    // Trailing flags.
+    expect(normalizeArgs(["sessions", "dump", "abc", "--debug"])).toEqual([
+      "--dump",
+      "abc",
+      "--debug",
+    ])
+    // Missing sid → bare `--dump`.
+    expect(normalizeArgs(["sessions", "dump"])).toEqual(["--dump"])
+    expect(normalizeArgs(["sessions", "dump", "--debug"])).toEqual(["--dump", "--debug"])
+    // With --dump-format.
+    expect(normalizeArgs(["sessions", "dump", "abc", "--dump-format", "xml"])).toEqual([
+      "--dump",
+      "abc",
+      "--dump-format",
+      "xml",
+    ])
+  })
+
+  test("`sessions resume-same <sid>` → --resume-same-sid", () => {
+    expect(normalizeArgs(["sessions", "resume-same", "abc123"])).toEqual([
+      "--resume-same-sid",
+      "abc123",
+    ])
+    expect(normalizeArgs(["sessions", "resume-same", "last"])).toEqual([
+      "--resume-same-sid",
+      "last",
+    ])
+    // Missing sid.
+    expect(normalizeArgs(["sessions", "resume-same"])).toEqual(["--resume-same-sid"])
   })
 
   test("`sessions` followed by a flag is a bare list, not a query", () => {

@@ -9,6 +9,7 @@ import {
   stripAnsi,
   truncateDisplayWidth,
   wordWrap,
+  wrapIndented,
   wrapRows,
 } from "@minimal-agent/plugin-api/utils/term-width"
 
@@ -231,6 +232,110 @@ describe("wordWrap", () => {
     expect(result).toContain("foo")
   })
 })
+
+describe("wrapIndented", () => {
+  it("returns the line unchanged when it already fits", () => {
+    expect(wrapIndented("  ╰  ✔  #abc  short title", 80)).toEqual(["  ╰  ✔  #abc  short title"])
+  })
+
+  it("returns the line as-is for width <= 0", () => {
+    const line = "  ╰  ✔  #abc  a long title that would otherwise wrap"
+    expect(wrapIndented(line, 0)).toEqual([line])
+    expect(wrapIndented(line, -5)).toEqual([line])
+  })
+
+  it("preserves the leading column spacing on the first fragment", () => {
+    // A task-style row: 1 space + number col + glyph + id + title.
+    const line = " 4 ✔ #77829c Update prompts/templates where appropriate avoid overuse"
+    const result = wrapIndented(line, 40)
+    expect(result.length).toBeGreaterThan(1)
+    // First fragment keeps the exact leading "  4 ✔ ..." columns.
+    expect(result[0].startsWith(" 4 ✔ #77829c Update")).toBe(true)
+    // No fragment exceeds the width.
+    for (const frag of result) expect(displayWidth(frag)).toBeLessThanOrEqual(40)
+  })
+
+  it("hang-indents continuation fragments to the leading whitespace width", () => {
+    // 6 leading spaces (subtask-style indent). Continuations should be
+    // indented by 6 spaces too.
+    const line = "      ╰  ✔  #f998aec scanner tests plus integration test for emit output module"
+    const result = wrapIndented(line, 50)
+    expect(result.length).toBeGreaterThan(1)
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].startsWith("      ")).toBe(true)
+      // Indent is exactly the 6-space lead, not deeper.
+      expect(result[i].startsWith("       ")).toBe(false)
+    }
+  })
+
+  it("uses an explicit hang indent when provided", () => {
+    const line = "1 ✔ #abc the quick brown fox jumps over the lazy dog repeatedly today"
+    const result = wrapIndented(line, 30, 4)
+    expect(result.length).toBeGreaterThan(1)
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].startsWith("    ")).toBe(true)
+      expect(result[i].startsWith("     ")).toBe(false)
+    }
+  })
+
+  it("keeps every fragment within the width", () => {
+    const line =
+      " 14 ✔ #773988 Verify the build lint and full test suite all pass cleanly across the whole repository before declaring victory"
+    const result = wrapIndented(line, 40)
+    for (const frag of result) expect(displayWidth(frag)).toBeLessThanOrEqual(40)
+  })
+
+  it("loses no title words across the wrap", () => {
+    const line = " 3 ✔ #f998ae Add and update tests for the emit output feature end to end"
+    const result = wrapIndented(line, 28)
+    const flat = result.join(" ").replace(/\s+/g, " ").trim()
+    // Every original word survives (order preserved by join).
+    for (const word of line.trim().split(/\s+/)) {
+      expect(flat).toContain(word)
+    }
+  })
+
+  it("preserves ANSI styling and never leaves a style unclosed", () => {
+    // Title span is green; the wrap must re-anchor the color on the
+    // continuation and close it at each fragment end.
+    const line = "  ╰  #abc  \x1b[32mthe quick brown fox jumps over the lazy dog again\x1b[0m"
+    const result = wrapIndented(line, 24)
+    expect(result.length).toBeGreaterThan(1)
+    for (const frag of result) {
+      expect(displayWidth(frag)).toBeLessThanOrEqual(24)
+      // If a fragment opens a color, it must also reset it.
+      if (frag.includes("\x1b[32m")) expect(frag.includes("\x1b[0m")).toBe(true)
+    }
+    // The continuation fragment carries the green style forward.
+    expect(result.some((f, i) => i > 0 && f.includes("\x1b[32m"))).toBe(true)
+  })
+
+  it("falls back to hard-breaking a single unbreakable token", () => {
+    const line = "supercalifragilisticexpialidocious"
+    const result = wrapIndented(line, 10)
+    expect(result.length).toBeGreaterThan(1)
+    for (const frag of result) expect(displayWidth(frag)).toBeLessThanOrEqual(10)
+    expect(result.join("")).toBe(line)
+  })
+
+  it("caps the hang indent so narrow terminals keep usable width", () => {
+    // 20 leading spaces but width 16: indent must be capped (<= max(8, 8))
+    // so continuations still have room for text.
+    const line = `${" ".repeat(20)}alpha beta gamma delta epsilon zeta`
+    const result = wrapIndented(line, 16)
+    for (const frag of result) expect(displayWidth(frag)).toBeLessThanOrEqual(16)
+    // Continuation indent is capped at 8, not the full 20.
+    for (let i = 1; i < result.length; i++) {
+      expect(displayWidth(frag_lead(result[i]))).toBeLessThanOrEqual(8)
+    }
+  })
+})
+
+/** Helper: leading-space prefix of a fragment (for indent assertions). */
+function frag_lead(s: string): string {
+  const m = s.match(/^ */)
+  return m ? m[0] : ""
+}
 
 describe("expandTabs", () => {
   it("passes through text with no tabs verbatim", () => {

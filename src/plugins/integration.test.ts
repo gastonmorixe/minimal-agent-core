@@ -15,9 +15,11 @@
  * bytes, matching the scanner's fallback behavior.
  */
 
-import { resolve } from "node:path"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 
-import { beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { PluginLoader } from "./loader.ts"
 import { PluginStream } from "./stream.ts"
@@ -180,5 +182,161 @@ describe("plugins: end-to-end integration with diff-view", () => {
     if (result.kind !== "tool_result") throw new Error("wrong kind")
     expect(result.is_error).toBe(true)
     expect(result.content).toContain("patch")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// emit-output plugin: inline rendering of a tool's raw-output blob or a safe
+// filesystem path, with the bytes never round-tripping through the model.
+//
+// These exercise the real plugin loaded from PROJECT_ROOT (same as diff-view
+// above), driven through PluginStream. The `tool=` mode needs the blob store
+// wired, so this block loads its OWN loader with a temp `sessionsDir` (via
+// hostOptions) and a fixed `sessionId`, then plants a blob fixture on disk at
+// the convention `<sessionsDir>/<sid>.blobs/<tool_use_id>.raw`.
+// ---------------------------------------------------------------------------
+
+describe("plugins: end-to-end integration with emit-output", () => {
+  const SID = "emit-output-itest-session"
+  // ANSI + box-drawing content that would be mangled if the model hand-copied
+  // it — the exact thing the tag exists to protect.
+  const BLOB_BODY =
+    "\x1b[36m┌─────────┐\x1b[0m\n\x1b[36m│ hello   │\x1b[0m\n\x1b[36m└─────────┘\x1b[0m"
+
+  let sessionsDir: string
+  let workDir: string
+  let loader: PluginLoader
+
+  beforeAll(async () => {
+    sessionsDir = mkdtempSync(join(tmpdir(), "emit-output-sessions-"))
+    workDir = mkdtempSync(join(tmpdir(), "emit-output-cwd-"))
+
+    // Plant the blob fixture at the documented convention.
+    const blobsDir = join(sessionsDir, `${SID}.blobs`)
+    mkdirSync(blobsDir, { recursive: true })
+    writeFileSync(join(blobsDir, "toolu_01render.raw"), BLOB_BODY)
+    // A blob larger than the handler's 256 KiB cap so the clipped note fires.
+    writeFileSync(join(blobsDir, "toolu_01big.raw"), "x".repeat(300 * 1024))
+
+    loader = await PluginLoader.load({
+      embeddedDir: PROJECT_ROOT,
+      coreToolNames: CORE_TOOLS,
+      sessionId: SID,
+      hostOptions: { sessionsDir },
+    })
+  })
+
+  afterAll(() => {
+    rmSync(sessionsDir, { recursive: true, force: true })
+    rmSync(workDir, { recursive: true, force: true })
+  })
+
+  it("discovers the emit-output plugin and registers the inline tag", () => {
+    expect(loader.hasInlineTag("output")).toBe(true)
+    // Inline-tag-only plugin: it contributes NO model-facing tool.
+    expect(loader.getExtraTools().map((t) => t.name)).not.toContain("output")
+  })
+
+  it("renders a tool= blob inline with ANSI bytes intact, tag consumed", async () => {
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, 'rendered:\n<ma::emit::output tool="toolu_01render" />\ndone')
+    await stream.end()
+
+    const full = out.join("")
+    expect(full).toContain("rendered:")
+    expect(full).toContain("done")
+    // The raw tag must NOT survive to output.
+    expect(full).not.toContain("<ma::emit::output")
+    // The blob's ANSI + box-drawing bytes pass through verbatim.
+    expect(full).toContain(BLOB_BODY)
+  })
+
+  it("renders a title= heading above tool= content", async () => {
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, '<ma::emit::output tool="toolu_01render" title="Tree view" />')
+    await stream.end()
+    const full = out.join("")
+    expect(full).toContain("Tree view")
+    expect(full).toContain(BLOB_BODY)
+  })
+
+  it("appends a [clipped N bytes] note when the blob exceeds the cap", async () => {
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, '<ma::emit::output tool="toolu_01big" />')
+    await stream.end()
+    const full = out.join("")
+    expect(full).toContain("[clipped")
+    // Some of the actual content is still present (it's not all dropped).
+    expect(full).toContain("xxxxxxxx")
+  })
+
+  it("renders a graceful placeholder (no crash, no raw leak) for a missing blob", async () => {
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, 'pre <ma::emit::output tool="toolu_doesnotexist" /> post')
+    await stream.end()
+    const full = out.join("")
+    expect(full).toContain("pre ")
+    expect(full).toContain(" post")
+    // A dim placeholder, not the raw tag passed through.
+    expect(full).not.toContain("<ma::emit::output")
+    expect(full.toLowerCase()).toContain("not found")
+  })
+
+  it("renders a path= file under the agent cwd", async () => {
+    const filePath = join(workDir, "render.txt")
+    writeFileSync(filePath, BLOB_BODY)
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, `<ma::emit::output path="${filePath}" />`)
+    await stream.end()
+    const full = out.join("")
+    expect(full).not.toContain("<ma::emit::output")
+    expect(full).toContain(BLOB_BODY)
+  })
+
+  it("renders a path= file under /tmp (real ascii-renderer case, needs realpath-roots fix)", async () => {
+    // ascii-renderer writes to /tmp, which is a symlink to /private/tmp on
+    // macOS. The handler must realpath its ALLOWED ROOTS (not just the target)
+    // before the prefix check, or every /tmp file is wrongly refused. This is
+    // the regression guard for that fix.
+    const dir = mkdtempSync(join("/tmp", "emit-output-tmp-"))
+    try {
+      const filePath = join(dir, "render.txt")
+      writeFileSync(filePath, BLOB_BODY)
+      const out: string[] = []
+      const stream = new PluginStream((s) => out.push(s), loader, workDir)
+      await feed(stream, `<ma::emit::output path="${filePath}" />`)
+      await stream.end()
+      const full = out.join("")
+      expect(full).not.toContain("<ma::emit::output")
+      expect(full).toContain(BLOB_BODY)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a path= outside /tmp and the agent cwd", async () => {
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, '<ma::emit::output path="/etc/hosts" />')
+    await stream.end()
+    const full = out.join("")
+    // No file contents leak; a dim refusal placeholder instead of the raw tag.
+    expect(full).not.toContain("<ma::emit::output")
+    expect(full.toLowerCase()).toMatch(/not in|refus|project dir|not found/)
+  })
+
+  it("renders a placeholder when neither tool= nor path= is given", async () => {
+    const out: string[] = []
+    const stream = new PluginStream((s) => out.push(s), loader, workDir)
+    await feed(stream, "<ma::emit::output />")
+    await stream.end()
+    const full = out.join("")
+    expect(full).not.toContain("<ma::emit::output />")
+    expect(full.toLowerCase()).toContain("exactly one")
   })
 })

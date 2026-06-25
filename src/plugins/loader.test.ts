@@ -480,7 +480,7 @@ describe("PluginLoader", () => {
       disabledPluginIds: new Set(["dropped"]),
     })
     expect(loader.getExtraTools().map((t) => t.name)).toEqual(["tool_kept"])
-    expect(logs.some((l) => l.includes('"dropped" is disabled'))).toBe(true)
+    expect(logs.some((l) => l.includes('"dropped" is explicitly disabled'))).toBe(true)
   })
 
   it("manifest.enabled=false skips the plugin (author opt-out)", async () => {
@@ -527,7 +527,7 @@ describe("PluginLoader", () => {
       disabledPluginIds: new Set(["standoff"]),
     })
     expect(loader.getExtraTools()).toHaveLength(0)
-    expect(logs.some((l) => l.includes('"standoff" is disabled in user config'))).toBe(true)
+    expect(logs.some((l) => l.includes('"standoff" is explicitly disabled'))).toBe(true)
   })
 
   it("alias map: tool dispatch resolves alias on canonical-miss", async () => {

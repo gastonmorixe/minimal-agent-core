@@ -1,0 +1,22 @@
+{
+  "id": "emit-output",
+  "name": "Emit Output",
+  "version": "0.1.0",
+  "description": "Inline renders file/blob content in the response stream, without the model touching the bytes. Intended for the ascii-renderer skill and other tool output that would be truncated/mangled if hand-copied.",
+  "tuis": [
+    {
+      "id": "emit_output",
+      "trigger": {
+        "type": "inline_tag",
+        "tag": "output"
+      },
+      "handler": {
+        "type": "module",
+        "path": "./handlers/emit_output.ts",
+        "export": "default"
+      },
+      "interactive": false
+    }
+  ],
+  "capabilities": ["blobs:read"]
+}

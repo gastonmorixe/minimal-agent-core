@@ -80,6 +80,59 @@ describe("SessionStore.open", () => {
     expect((lines[1] as { kind: string }).kind).toBe("note")
     expect((lines[2] as { kind: string }).kind).toBe("note")
   })
+
+  // Underpins the `--resume-same-sid` flag: resuming in place reopens the
+  // SAME file with existsOk:true. open() must NOT rewrite the meta record
+  // even when the resuming process advertises a different model / prompt /
+  // tool set, otherwise the on-disk session history would gain a second
+  // meta line and the original creation metadata would be lost. The guard
+  // is the `if (!fileExists)` block: on an existing file open() writes
+  // nothing up front and only the append*() calls add records.
+  it("preserves the original meta on same-sid reopen even when resume opts differ", () => {
+    const dir = tmp()
+    const sid = "ma-same-sid"
+    const first = SessionStore.open({
+      ...baseOpenOpts,
+      sid,
+      dir,
+      model: "model-A",
+      systemHash: "sysA",
+      toolsHash: "toolA",
+    })
+    first.appendUser("original prompt")
+
+    // Reopen the same sid in place with a DIFFERENT model + hashes.
+    const second = SessionStore.open({
+      ...baseOpenOpts,
+      sid,
+      dir,
+      model: "model-B",
+      systemHash: "sysB",
+      toolsHash: "toolB",
+      existsOk: true,
+    })
+    second.appendUser("resumed prompt")
+
+    const lines = readJsonl(second.path)
+    // meta + 2 user records, exactly one meta line.
+    expect(lines).toHaveLength(3)
+    expect(lines.filter((l) => (l as { kind: string }).kind === "meta")).toHaveLength(1)
+
+    const meta = lines[0] as MetaRecord
+    expect(meta.kind).toBe("meta")
+    // Original creation metadata wins; the resume opts are ignored for meta.
+    expect(meta.model).toBe("model-A")
+    expect(meta.systemHash).toBe("sysA")
+    expect(meta.toolsHash).toBe("toolA")
+
+    // Both turns landed, in write order, on the one file.
+    expect((lines[1] as { kind: string }).kind).toBe("user")
+    expect((lines[2] as { kind: string }).kind).toBe("user")
+
+    // Reopening must not have written a duplicate index entry either.
+    const indexLines = readJsonl(indexFilePath(dir))
+    expect(indexLines.filter((l) => (l as IndexRecord).sid === sid)).toHaveLength(1)
+  })
 })
 
 describe("SessionStore.append*", () => {

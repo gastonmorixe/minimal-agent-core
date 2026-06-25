@@ -68,6 +68,7 @@ import { runAuthStatusCommand } from "./commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "./commands/dump.ts"
 import { runListFlagsCommand } from "./commands/list-flags.ts"
 import { runListModelsCommand } from "./commands/list-models.ts"
+import { runListPluginsCommand } from "./commands/list-plugins.ts"
 import { runListProvidersCommand } from "./commands/list-providers.ts"
 import { runListSpinnersCommand } from "./commands/list-spinners.ts"
 import { runLoginCommand } from "./commands/login.ts"
@@ -88,6 +89,7 @@ import { resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
+import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
 import { createAgentContext } from "./plugins/agent-context.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
@@ -123,9 +125,9 @@ import type { Spinner } from "./ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./ui/spinner/named-presets.ts"
 import {
   closeStartupTree,
+  closeStartupTreeWithTools,
   printStartupHeader,
   printStartupRow,
-  printStartupToolsRow,
   setStartupTreeVisible,
   startStartupRowSpinner,
 } from "./ui/startup/tree.ts"
@@ -179,6 +181,7 @@ const listModelsProvider =
     ? args[listModelsIdx + 1]
     : undefined
 const wantListFlags = args.includes("--list-flags")
+const wantListPlugins = args.includes("--list-plugins")
 const wantListSpinners = args.includes("--list-spinners")
 
 const spinnerIdx = args.indexOf("--spinner")
@@ -274,6 +277,16 @@ const formatterExtraArgs: string[] = (() => {
 const resumeIdx = args.indexOf("--resume")
 const resumeArg = resumeIdx !== -1 && args[resumeIdx + 1] ? args[resumeIdx + 1] : undefined
 
+// --resume-same-sid <sid>  resume a saved session IN PLACE (same session id,
+// no fork). The session file is appended to directly; sidecar files and blob
+// directory are reused. Use when you want --resume but want the session to
+// keep its original sid (e.g. for long-running agent loops in a tmux session).
+const resumeSameIdx = args.indexOf("--resume-same-sid")
+const resumeSameArg =
+  resumeSameIdx !== -1 && args[resumeSameIdx + 1] ? args[resumeSameIdx + 1] : undefined
+// When both flags are present, --resume-same-sid wins (it's more specific).
+const effectiveResumeArg = resumeSameArg ?? resumeArg
+
 // --session-id <uuid>  pin this run's session id instead of minting a random
 // one. Used by a supervising agent that spawns a headless child and needs to
 // know the child's sid up front (to locate its session files / lineage).
@@ -286,6 +299,25 @@ const sessionIdArg =
 if (sessionIdArg !== undefined) {
   try {
     setSessionId(sessionIdArg)
+  } catch (e) {
+    process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`)
+    process.exit(2)
+  }
+}
+// --resume-same-sid: pin this process's session id to the TARGET session's
+// sid BEFORE any getSessionId() call, so the session file, log file, blob
+// dir, and goodbye banner all share the original sid (no fork). Resolve
+// "last" via the same target resolver `--resume` uses.
+if (resumeSameArg !== undefined) {
+  try {
+    const resolved = resolveSessionTarget(resumeSameArg, process.cwd())
+    if (!resolved) {
+      process.stderr.write(
+        `error: no saved sessions found for --resume-same-sid ${resumeSameArg}\n`,
+      )
+      process.exit(1)
+    }
+    setSessionId(resolved)
   } catch (e) {
     process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`)
     process.exit(2)
@@ -332,6 +364,7 @@ const commandPlan = planCommand({
   wantListSpinners,
   wantListModels,
   wantListProviders,
+  wantListPlugins,
   wantLogin,
   wantLogout,
   wantAuthStatus,
@@ -437,6 +470,19 @@ async function main() {
     }
     case "list-providers": {
       runListProvidersCommand()
+      return
+    }
+    case "list-plugins": {
+      const repoRoot = dirname(srcDir)
+      runListPluginsCommand({
+        roots: {
+          embeddedDir: repoRoot,
+          userDir: process.env.HOME ? join(process.env.HOME, ".minimal-agent") : undefined,
+          homeDir: process.env.HOME ? join(process.env.HOME, ".agents") : undefined,
+          projectDir: process.cwd(),
+        },
+        cliArgs: args,
+      })
       return
     }
     case "login": {
@@ -834,7 +880,18 @@ async function main() {
   } else {
     delete process.env.MINIMAL_AGENT_FAST
   }
-  const pluginOverrides = loadPluginEnabledOverrides()
+  const configPluginOverrides = loadPluginEnabledOverrides()
+  const pluginOverrides = resolvePluginEnabledOverrides({
+    config: configPluginOverrides,
+    env: {
+      disable: process.env.MINIMAL_AGENT_DISABLE_PLUGINS,
+      enable: process.env.MINIMAL_AGENT_ENABLE_PLUGINS,
+    },
+    cli: {
+      disable: collectFlagValues(args, "--disable-plugin"),
+      enable: collectFlagValues(args, "--enable-plugin"),
+    },
+  })
   // Late-bound getter for the agent's LIVE model id. The loader loads before
   // the Agent is constructed, and the model can change mid-session (/model,
   // preflight switch) or differ on resume, so the ModelInfo tool must read the
@@ -857,11 +914,10 @@ async function main() {
     // Active-provider sub-agent model recommendations (role → concrete model),
     // read live so a delegation plugin maps roles without importing a provider.
     recommendSubagentModels: () => buildSubagentModelRecommendations(getLiveModelId()),
-    // Universal opt-out: any plugin with `plugins.<id>.enabled === false`
-    // in ~/.minimal-agent/config.jsonc is dropped before validation.
-    // The matching `enabled === true` set overrides a manifest-level
-    // `enabled: false` author opt-out, so users can flip on a plugin
-    // shipped disabled by default.
+    // Universal opt-out: `plugins.<id>.enabled === false` in config, env
+    // (`MINIMAL_AGENT_DISABLE_PLUGINS`), or CLI (`--disable-plugin`).
+    // The matching enable set overrides a manifest-level `enabled: false`
+    // author opt-out (config, env, or `--enable-plugin`).
     disabledPluginIds: pluginOverrides.forceDisabled,
     enabledPluginIds: pluginOverrides.forceEnabled,
   })
@@ -904,15 +960,15 @@ async function main() {
   // we don't duplicate it here. Modes that exist but aren't active are
   // intentionally not surfaced — discoverable via Shift+Tab.
   //
-  // The tools row is the one row that WRAPS rather than truncates: the
-  // full inventory stays visible, flowing onto continuation lines under
-  // the value column when it overruns the terminal width.
-  if (loadedTools.length > 0) {
-    printStartupToolsRow(loadedTools)
-  } else if (hasPromptBlock || loadedModes.length > 0) {
-    // Plugins ran but contribute only prompt fragments / live-area
-    // slots / modes — keep a quiet row so it's visible the layer is
-    // wired without bragging about it.
+  // The tools row is deferred — it will be printed last, as the closer
+  // row (with `╰` gutter), via `closeStartupTreeWithTools` right before
+  // the REPL boots. Deferring avoids the fragile cursor-up rewrite math
+  // that broke on terminal resize when the full tool inventory wrapped
+  // across many continuation lines.
+  //
+  // Plugins that contribute only prompt fragments / live-area slots /
+  // modes still get a quiet acknowledgement row here.
+  if (loadedTools.length === 0 && (hasPromptBlock || loadedModes.length > 0)) {
     printStartupRow("plugins", c.dim("loaded"))
   }
   // Plugin setup phase: binary provisioning. Each plugin's optional `setup()`
@@ -1059,9 +1115,10 @@ async function main() {
   // edit / clear) instead of losing their draft to the void. See
   // `extractPendingDraft` in `./session-restore.ts`.
   let pendingDraft: string | null = null
-  if (resumeArg) {
+  const resumeSameSid = resumeSameArg !== undefined
+  if (effectiveResumeArg) {
     try {
-      resumeSid = resolveSessionTarget(resumeArg, process.cwd())
+      resumeSid = resolveSessionTarget(effectiveResumeArg, process.cwd())
       if (!resumeSid) {
         console.error(`  ${c.boldRed("error")} no saved sessions found to --resume last`)
         process.exit(1)
@@ -1143,12 +1200,16 @@ async function main() {
       // Hash drift: compute below once we have system+tools.
     } catch (err) {
       console.error(
-        `  ${c.boldRed("error")} could not resume session ${resumeArg}: ${err instanceof Error ? err.message : String(err)}`,
+        `  ${c.boldRed("error")} could not resume session ${effectiveResumeArg}: ${err instanceof Error ? err.message : String(err)}`,
       )
       process.exit(1)
     }
   }
-  closeStartupTree()
+  if (loadedTools.length > 0) {
+    closeStartupTreeWithTools(loadedTools)
+  } else {
+    closeStartupTree()
+  }
 
   // Flush any diagnostics that fired during the banner draw. The
   // scrollback sink was put into buffering mode right after construction
@@ -1225,6 +1286,7 @@ async function main() {
   const { store, blobStore } = await bootSessionStores({
     sid,
     resumeSid,
+    resumeSameSid,
     selectedModel,
     providerId: selectedProviderId,
     systemHash,
