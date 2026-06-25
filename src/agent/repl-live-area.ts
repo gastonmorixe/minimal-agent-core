@@ -704,7 +704,9 @@ export async function runReplLiveArea(
         break
       case "notice":
         writeNoticeLines([
-          ...(result.block ? renderCommandNoticeBlock(result.block) : []),
+          ...(result.block
+            ? renderCommandNoticeBlock(result.block, opts.output?.columns ?? process.stdout.columns)
+            : []),
           ...(result.lines ?? []),
         ])
         break
@@ -782,7 +784,11 @@ export async function runReplLiveArea(
       .bus()
       .on<{ block?: unknown; text?: unknown; source?: unknown }>("notification.emit", (ctx) => {
         const block = coerceNoticeBlock(ctx.payload?.block)
-        if (block) writeNoticeLines(renderCommandNoticeBlock(block))
+        if (block) {
+          writeNoticeLines(
+            renderCommandNoticeBlock(block, opts.output?.columns ?? process.stdout.columns),
+          )
+        }
         // Persist the plain-text form (audit / resume). Note records are
         // metadata: never folded into the model's message history.
         const text = typeof ctx.payload?.text === "string" ? ctx.payload.text.trim() : ""
