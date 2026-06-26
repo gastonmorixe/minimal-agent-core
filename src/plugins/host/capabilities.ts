@@ -69,7 +69,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "models:read",
   "models:register",
   "paths",
-  "transport:registry"
+  "transport:registry",
   "clock",
   "logger",
 ] as const
