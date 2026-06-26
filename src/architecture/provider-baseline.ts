@@ -75,7 +75,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // example slugs in the original doc comments rode along to the leaf package,
   // which the provider-scan does not cover.)
   "llm/transport/canonical-send.ts",
-  "media/ingest.ts", // deprecated buildAnthropicUserContent alias (one release)
   // (agent.ts + index.ts ratcheted OUT in Wave C C-1/C-2: agent.ts's default
   // model now comes from the registry default (`getDefaultModelId`), and
   // index.ts's startup-banner decisions (sign-in label, reasoning rows, quota
