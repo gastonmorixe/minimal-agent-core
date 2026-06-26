@@ -45,12 +45,8 @@ export type CapabilityToken =
   | "presence:read"
   | "models:read"
   | "models:register"
-<<<<<<< HEAD
   | "paths"
-||||||| parent of 218feac (core: add transport:registry capability (host-brokered remote-transport injection seam))
-=======
   | "transport:registry"
->>>>>>> 218feac (core: add transport:registry capability (host-brokered remote-transport injection seam))
   | "clock"
   | "logger"
 
