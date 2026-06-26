@@ -46,16 +46,6 @@ import {
 import { executeToolRound } from "./agent/tool-round.ts"
 import type { AuthResult } from "./auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
-import {
-  type ContentBlock,
-  type Message,
-  normalizeModelForAPI,
-  type SendOptions,
-  type StreamedResponse,
-  sendMessage,
-  type ToolResultBlock,
-  type ToolUseBlock,
-} from "./client.ts"
 import type { SystemBlock } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import {
@@ -63,9 +53,16 @@ import {
   type EstimableTool,
   estimateRequestInputTokens,
 } from "./llm/context-budget.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./llm/messages.ts"
 import { findModel, findModelForProvider, getDefaultModelId } from "./llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
+import {
+  normalizeModelForAPI,
+  type SendOptions,
+  type StreamedResponse,
+  type TransportFn,
+} from "./llm/transport/types.ts"
 import { resolveUserTurnContent } from "./media/ingest.ts"
 import { ModeManager } from "./modes.ts"
 import type { NetworkClient } from "./network/index.ts"
@@ -224,7 +221,7 @@ export class Agent {
    * Primary purpose is a testing seam so suites can drive tool_use flows
    * without making live API calls.
    */
-  private sendFn: typeof sendMessage
+  private sendFn: TransportFn
   /** Optional network client forwarded into every `sendFn` call. */
   private networkClient: NetworkClient | undefined
   /**
@@ -390,7 +387,7 @@ export class Agent {
      * Open extension point for plugins beyond the two named producers.
      */
     turnAttachments?: Array<{ toAttachment(): ContentBlock | null }>
-    sendFn?: typeof sendMessage
+    sendFn?: TransportFn
     /**
      * Network client forwarded to the transport (`sendFn`). Lets the host
      * inject a configured/mocked client; defaults inside each transport to
