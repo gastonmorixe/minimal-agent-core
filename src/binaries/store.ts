@@ -38,8 +38,10 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { homedir, tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { acquireLock, type LockHandle } from "../file-lock.ts"
 import { parseJsonc } from "../jsonc.ts"
@@ -72,9 +74,9 @@ const MANIFEST_VERSION = 1
  */
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
-/** Default managed bin dir: `~/.minimal-agent/bin`. */
+/** Default managed bin dir: `<agent-home>/bin` (honors `MINIMAL_AGENT_HOME`). */
 export function defaultBinDir(): string {
-  return join(homedir(), ".minimal-agent", "bin")
+  return join(resolveAgentHome(), "bin")
 }
 
 /** Shape of the on-disk manifest. */

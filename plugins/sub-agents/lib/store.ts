@@ -16,8 +16,9 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { type SubagentId, type SubagentRecord, subagentId } from "./types.ts"
 
@@ -79,8 +80,7 @@ export interface StoreDeps {
 
 /** Default sessions directory, honoring `MINIMAL_AGENT_HOME` if set. */
 export function defaultSessionsDir(env: NodeJS.ProcessEnv = process.env): string {
-  const base = env.MINIMAL_AGENT_HOME?.trim() || join(homedir(), ".minimal-agent")
-  return join(base, "sessions")
+  return join(resolveAgentHome(env), "sessions")
 }
 
 /**

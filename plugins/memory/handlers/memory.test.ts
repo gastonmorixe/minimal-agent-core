@@ -98,12 +98,19 @@ const PLUGIN_DIR = resolve(__dirname, "..")
 
 let tmpHome: string
 let savedHome: string | undefined
+let savedMaHome: string | undefined
 let savedSid: string | undefined
 
 beforeEach(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "memory-test-"))
   savedHome = process.env.HOME
   process.env.HOME = tmpHome
+  // Clear an inherited MINIMAL_AGENT_HOME so the store's home resolver
+  // falls back to the sandbox `$HOME` we just set. Without this, an
+  // ambient override (the harness exports one) would win over `HOME`
+  // and route writes at the user's real ~/.minimal-agent.
+  savedMaHome = process.env.MINIMAL_AGENT_HOME
+  delete process.env.MINIMAL_AGENT_HOME
   // Clear inherited MINIMAL_AGENT_SESSION_ID so tests that exercise
   // the "no sid in env" branch (no `[session:<sid>]` tag on the bullet)
   // are deterministic when the test runner inherits a parent agent's
@@ -116,6 +123,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedHome === undefined) delete process.env.HOME
   else process.env.HOME = savedHome
+  if (savedMaHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+  else process.env.MINIMAL_AGENT_HOME = savedMaHome
   if (savedSid === undefined) delete process.env.MINIMAL_AGENT_SESSION_ID
   else process.env.MINIMAL_AGENT_SESSION_ID = savedSid
   rmSync(tmpHome, { recursive: true, force: true })

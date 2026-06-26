@@ -10,7 +10,9 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+
+import { AGENT_HOME_ENV } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import {
   _clearAll,
@@ -34,6 +36,7 @@ const TEST_HOME = join(tmpdir(), `minimal-agent-history-tests-${process.pid}`)
 // homedir() reads from $HOME on POSIX (the underlying npm/Bun semantics
 // match `os.homedir()`). We point it at a tmp dir and clean up at end.
 const ORIGINAL_HOME = process.env.HOME
+const ORIGINAL_MA_HOME = process.env.MINIMAL_AGENT_HOME
 
 function envWithNs(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = {
@@ -52,9 +55,18 @@ function envWithNs(extra: Record<string, string | undefined> = {}): NodeJS.Proce
 beforeAll(() => {
   process.env.HOME = TEST_HOME
   process.env[HISTORY_NAMESPACE_ENV] = NS
+  // Clear an inherited MINIMAL_AGENT_HOME so the store's home resolver
+  // falls back to the sandbox `$HOME` we just set. The harness exports
+  // a real MINIMAL_AGENT_HOME, which would otherwise win over HOME and
+  // route history paths at the user's real ~/.minimal-agent. Because
+  // `envWithNs` spreads `process.env`, clearing it here also cleans the
+  // env objects those opt-out tests build.
+  delete process.env[AGENT_HOME_ENV]
 })
 afterAll(() => {
   if (ORIGINAL_HOME !== undefined) process.env.HOME = ORIGINAL_HOME
+  if (ORIGINAL_MA_HOME === undefined) delete process.env[AGENT_HOME_ENV]
+  else process.env[AGENT_HOME_ENV] = ORIGINAL_MA_HOME
   delete process.env[HISTORY_NAMESPACE_ENV]
   delete process.env[HISTORY_DISABLE_ENV]
   // Tear down the sandbox dir.
@@ -279,5 +291,57 @@ describe("history store / cap rotation", () => {
 describe("history store / MAX_FILE_BYTES default sanity", () => {
   it("default cap is 10 MB (regression guard against accidental tightening)", () => {
     expect(MAX_FILE_BYTES).toBe(10 * 1024 * 1024)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MINIMAL_AGENT_HOME override
+//
+// `maHome` now routes the `.minimal-agent` base through the shared
+// `resolveAgentHome` resolver, which treats `MINIMAL_AGENT_HOME` as
+// authoritative (it wins over `$HOME`). A relocated agent home must
+// therefore become the base of every history path; the namespace suffix
+// is still composed on top. The surrounding `beforeAll` cleared any
+// inherited override, so this block sets one explicitly and restores it.
+// ---------------------------------------------------------------------------
+
+describe("history store / MINIMAL_AGENT_HOME override", () => {
+  let savedMaHome: string | undefined
+  let savedNs: string | undefined
+
+  beforeEach(() => {
+    savedMaHome = process.env[AGENT_HOME_ENV]
+    // Drop the test namespace so the override base is asserted bare.
+    savedNs = process.env[HISTORY_NAMESPACE_ENV]
+    delete process.env[HISTORY_NAMESPACE_ENV]
+  })
+
+  afterEach(() => {
+    if (savedMaHome === undefined) delete process.env[AGENT_HOME_ENV]
+    else process.env[AGENT_HOME_ENV] = savedMaHome
+    if (savedNs === undefined) delete process.env[HISTORY_NAMESPACE_ENV]
+    else process.env[HISTORY_NAMESPACE_ENV] = savedNs
+  })
+
+  it("history paths land under MINIMAL_AGENT_HOME when set (wins over $HOME)", () => {
+    const relocated = join(tmpdir(), `ma-history-relocated-${process.pid}`)
+    process.env[AGENT_HOME_ENV] = relocated
+    // The override IS the agent-home base — used verbatim, not joined
+    // with a further `.minimal-agent` segment, and it beats the
+    // `HOME=TEST_HOME` set in beforeAll.
+    expect(globalHistoryPath()).toBe(join(relocated, "history.jsonl"))
+    expect(projectHistoryPath("/Users/gaston/Projects/foo")).toBe(
+      join(relocated, "projects", "Users/gaston/Projects/foo", "history.jsonl"),
+    )
+    // A real append lands under the relocated home and reads back.
+    const p = globalHistoryPath()
+    try {
+      const e = buildEntry({ text: "under relocated home", cwd: "/x", sid: null })
+      appendOne(p, e)
+      expect(existsSync(p)).toBe(true)
+      expect(loadEntries(p).map((x) => x.text)).toContain("under relocated home")
+    } finally {
+      rmSync(relocated, { recursive: true, force: true })
+    }
   })
 })

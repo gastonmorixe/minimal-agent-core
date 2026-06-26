@@ -33,8 +33,29 @@ describe("defaultBinDir", () => {
   // (see src/index.ts). Plugins resolve `<binDir>/<backend>` from it and must
   // never hard-code a home path of their own. Pinning the shape here guards the
   // host/plugin contract that fixed the ma-fetch "obscura on PATH" regression.
-  it("is <home>/.minimal-agent/bin", () => {
-    expect(defaultBinDir()).toBe(join(homedir(), ".minimal-agent", "bin"))
+  //
+  // The dir now resolves through the shared agent-home resolver
+  // (`resolveAgentHome`, honoring `MINIMAL_AGENT_HOME`), so these cases drive
+  // the env explicitly and restore it, rather than depending on whatever the
+  // test harness happens to have published.
+  const prevHome = process.env.MINIMAL_AGENT_HOME
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+    else process.env.MINIMAL_AGENT_HOME = prevHome
+  })
+
+  it("is <agent-home>/bin under the default home", () => {
+    delete process.env.MINIMAL_AGENT_HOME
+    const home = process.env.HOME?.trim()
+    const expected = home
+      ? join(home, ".minimal-agent", "bin")
+      : join(homedir(), ".minimal-agent", "bin")
+    expect(defaultBinDir()).toBe(expected)
+  })
+
+  it("honors a relocated MINIMAL_AGENT_HOME", () => {
+    process.env.MINIMAL_AGENT_HOME = "/tmp/ma-bin-reloc"
+    expect(defaultBinDir()).toBe("/tmp/ma-bin-reloc/bin")
   })
 
   it("is an absolute path (plugins reject a relative bin dir)", () => {

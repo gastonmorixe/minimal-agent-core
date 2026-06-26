@@ -5,6 +5,7 @@ import {
   formatSessionDirName,
   formatTzOffset,
   netDbgEnabled,
+  netDbgSessionDir,
   redactHeaders,
   warnLoggerErrorOnce,
 } from "./net-dbg.ts"
@@ -158,6 +159,45 @@ describe("net-dbg", () => {
       })
       const name = formatSessionDirName(1778109912827, d, SID)
       expect(name).toContain(`-minimal-agent-${SID}`)
+    })
+  })
+
+  describe("netDbgSessionDir", () => {
+    const SID = "34b34421-3b9d-48a0-8807-9e48f0046e03"
+    const d = {
+      getFullYear: () => 2026,
+      getMonth: () => 4,
+      getDate: () => 6,
+      getDay: () => 3,
+      getHours: () => 19,
+      getMinutes: () => 25,
+      getSeconds: () => 12,
+      getTimezoneOffset: () => 240,
+    } as unknown as Date
+
+    it("places the recording under <agent-home>/net-dbg, NOT the cwd", () => {
+      // Regression: net-dbg historically wrote to `${cwd}/.net-dbg`, which
+      // scattered captures across every project dir. It now lives under the
+      // resolved agent home so all captures collect in one place.
+      const dir = netDbgSessionDir(1778109912827, d, SID, {
+        MINIMAL_AGENT_HOME: "/tmp/ma-home",
+      })
+      expect(dir).toBe(
+        `/tmp/ma-home/net-dbg/1778109912827-06-MAY-2026-WEDNESDAY--19h25m12s-0400-minimal-agent-${SID}`,
+      )
+      expect(dir.startsWith("/tmp/ma-home/net-dbg/")).toBe(true)
+      expect(dir).not.toContain(`${process.cwd()}/.net-dbg`)
+    })
+
+    it("honors MINIMAL_AGENT_HOME relocation for the base", () => {
+      const dir = netDbgSessionDir(1, d, SID, { MINIMAL_AGENT_HOME: "/relocated/ma" })
+      expect(dir.startsWith("/relocated/ma/net-dbg/")).toBe(true)
+    })
+
+    it("composes the leaf name from formatSessionDirName verbatim", () => {
+      const env = { MINIMAL_AGENT_HOME: "/tmp/ma" }
+      const dir = netDbgSessionDir(42, d, SID, env)
+      expect(dir).toBe(`/tmp/ma/net-dbg/${formatSessionDirName(42, d, SID)}`)
     })
   })
 

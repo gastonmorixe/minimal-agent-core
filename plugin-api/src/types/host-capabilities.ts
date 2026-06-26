@@ -45,6 +45,7 @@ export type CapabilityToken =
   | "presence:read"
   | "models:read"
   | "models:register"
+  | "paths"
   | "clock"
   | "logger"
 
@@ -275,6 +276,27 @@ export interface ClockApi {
   iso(): string
 }
 
+/**
+ * `paths` — the host's resolved storage locations, so a plugin reaches the
+ * SAME agent-home resolver the core uses WITHOUT importing it. Each method
+ * returns an absolute path already resolved against the boot-published
+ * `MINIMAL_AGENT_HOME`, so a relocated home is honored uniformly.
+ *
+ * A plugin that takes a workspace dependency could import
+ * `@minimal-agent/plugin-api/utils/agent-paths` directly; this capability is
+ * the decoupled alternative for plugins living in their own repo (which must
+ * NOT import the package at runtime) and for code that already has `ctx.host`.
+ * Read-only; pure path math, no IO.
+ */
+export interface PathsApi {
+  /** The agent home directory (`MINIMAL_AGENT_HOME` or `~/.minimal-agent`). */
+  home(): string
+  /** The sessions directory (`<home>/sessions`). */
+  sessionsDir(): string
+  /** The network-debug capture directory (`<home>/net-dbg`). */
+  netDbgDir(): string
+}
+
 // ---------------------------------------------------------------------------
 // models:read / models:register (Wave D-2)
 // ---------------------------------------------------------------------------
@@ -373,6 +395,7 @@ export interface PluginHost {
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
+  readonly paths?: PathsApi
   readonly clock?: ClockApi
   readonly logger?: PluginLogger
 }

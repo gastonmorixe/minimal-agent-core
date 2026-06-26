@@ -113,6 +113,15 @@ const BASELINE = new Map<string, number>([
   ["llm-openai/openai.test.ts", 1],
   ["llm-openai/pricing.ts", 1],
   ["llm-openai/responses/request-body.ts", 2],
+  // Host-runtime integration test for the gpt-5.5 resume stall (session
+  // 7919d877): it drives the REAL production stream pipeline end-to-end
+  // (parseSse → translateOpenAIResponsesStream → withStreamWatchdog →
+  // canonicalEventsToLegacyStream) over captured wire bytes to prove the
+  // watchdog/keepalive + no-terminal-close fix. The two src/ imports
+  // (transport/watchdog.ts, llm/adapter-legacy.ts) ARE the pipeline under
+  // test, so they are not decouplable — same category as schedule/fire-e2e
+  // and file-lock/integration.
+  ["llm-openai/stall-repro.test.ts", 2],
   ["llm-openai/validate.ts", 3], // D-net-seam: errors + modality-check → plugin-api. Left: canonical-request, model-registry, provider.ts (all deferred)
   ["llm-openrouter/adapter.ts", 4],
   ["llm-openrouter/models.ts", 1], // D-2: makeCharRatioEstimator → @minimal-agent/plugin-api; registerModel stays (no-arg register())

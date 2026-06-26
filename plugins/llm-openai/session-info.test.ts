@@ -15,6 +15,7 @@ import {
   clearOpenAIRateLimits,
   fetchOpenAISessionInfo,
   getOpenAIRateLimits,
+  parseCodexQuotaWindows,
   parseOpenAIQuotaWindows,
   parseOpenAIResetMs,
   setOpenAIRateLimits,
@@ -138,6 +139,86 @@ describe("parseOpenAIQuotaWindows", () => {
 })
 
 // ---------------------------------------------------------------------------
+// parseCodexQuotaWindows (ChatGPT/Codex plan family — x-codex-*)
+// ---------------------------------------------------------------------------
+
+describe("parseCodexQuotaWindows", () => {
+  it("builds 5h + 7d windows from primary/secondary headers (live header shape)", () => {
+    const before = Date.now()
+    // Shape captured live from chatgpt.com/backend-api/codex/responses.
+    const windows = parseCodexQuotaWindows(
+      rl({
+        "x-codex-primary-used-percent": "96",
+        "x-codex-primary-window-minutes": "300",
+        "x-codex-primary-reset-after-seconds": "16884",
+        "x-codex-secondary-used-percent": "39",
+        "x-codex-secondary-window-minutes": "10080",
+        "x-codex-secondary-reset-after-seconds": "323959",
+      }),
+    )
+    const after = Date.now()
+
+    expect(windows.map((w) => w.id)).toEqual(["5h", "7d"])
+
+    const primary = windows.find((w) => w.id === "5h")!
+    expect(primary.utilization).toBeCloseTo(0.96, 10)
+    expect(primary.resetAtMs!).toBeGreaterThanOrEqual(before + 16884 * 1000)
+    expect(primary.resetAtMs!).toBeLessThanOrEqual(after + 16884 * 1000)
+
+    const secondary = windows.find((w) => w.id === "7d")!
+    expect(secondary.utilization).toBeCloseTo(0.39, 10)
+  })
+
+  it("prefers absolute reset-at (unix seconds) over reset-after-seconds", () => {
+    const windows = parseCodexQuotaWindows(
+      rl({
+        "x-codex-primary-used-percent": "10",
+        "x-codex-primary-window-minutes": "300",
+        "x-codex-primary-reset-at": "1782406189",
+        "x-codex-primary-reset-after-seconds": "16918",
+      }),
+    )
+    expect(windows).toHaveLength(1)
+    expect(windows[0]!.resetAtMs).toBe(1782406189 * 1000)
+  })
+
+  it("humanizes window-minutes (1440 → 1d, 90 → 90m) and falls back per slot", () => {
+    const dayWin = parseCodexQuotaWindows(
+      rl({ "x-codex-primary-used-percent": "5", "x-codex-primary-window-minutes": "1440" }),
+    )
+    expect(dayWin[0]!.id).toBe("1d")
+
+    const oddWin = parseCodexQuotaWindows(
+      rl({ "x-codex-secondary-used-percent": "5", "x-codex-secondary-window-minutes": "90" }),
+    )
+    expect(oddWin[0]!.id).toBe("90m")
+
+    // No window-minutes header → conventional per-slot fallback id.
+    const noMinutes = parseCodexQuotaWindows(rl({ "x-codex-primary-used-percent": "5" }))
+    expect(noMinutes[0]!.id).toBe("5h")
+  })
+
+  it("clamps utilization into [0,1] and omits resetAtMs when no reset header parses", () => {
+    const windows = parseCodexQuotaWindows(
+      rl({ "x-codex-primary-used-percent": "150", "x-codex-primary-window-minutes": "300" }),
+    )
+    expect(windows).toHaveLength(1)
+    expect(windows[0]!.utilization).toBe(1)
+    expect(windows[0]!.resetAtMs).toBeUndefined()
+  })
+
+  it("skips a slot whose used-percent header is absent or unparseable", () => {
+    expect(parseCodexQuotaWindows(rl({ "x-codex-primary-window-minutes": "300" }))).toEqual([])
+    expect(parseCodexQuotaWindows(rl({ "x-codex-primary-used-percent": "n/a" }))).toEqual([])
+  })
+
+  it("returns [] for an empty / non-codex map", () => {
+    expect(parseCodexQuotaWindows(rl({}))).toEqual([])
+    expect(parseCodexQuotaWindows(rl({ "x-ratelimit-limit-requests": "100" }))).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // setOpenAIRateLimits / cache
 // ---------------------------------------------------------------------------
 
@@ -162,6 +243,21 @@ describe("setOpenAIRateLimits", () => {
     setOpenAIRateLimits(new Headers({ "content-type": "application/json" }))
     expect(getOpenAIRateLimits()!.rateLimits.get("x-ratelimit-limit-requests")).toBe("5")
   })
+
+  it("captures the x-codex-* plan family (ChatGPT OAuth traffic)", () => {
+    setOpenAIRateLimits(
+      new Headers({
+        "x-codex-primary-used-percent": "96",
+        "x-codex-primary-window-minutes": "300",
+        "x-codex-plan-type": "plus",
+        "content-type": "text/event-stream",
+      }),
+    )
+    const cached = getOpenAIRateLimits()!
+    expect(cached.rateLimits.get("x-codex-primary-used-percent")).toBe("96")
+    expect(cached.rateLimits.get("x-codex-plan-type")).toBe("plus")
+    expect(cached.rateLimits.has("content-type")).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -183,6 +279,34 @@ describe("fetchOpenAISessionInfo", () => {
     const info = await fetchOpenAISessionInfo(ctx)
     expect(info).not.toBeNull()
     expect(info!.quota?.windows.map((w) => w.id)).toEqual(["req", "tok"])
+  })
+
+  it("returns 5h/7d quota.windows from cached x-codex-* headers (OAuth path)", async () => {
+    setOpenAIRateLimits(
+      new Headers({
+        "x-codex-primary-used-percent": "96",
+        "x-codex-primary-window-minutes": "300",
+        "x-codex-primary-reset-after-seconds": "16884",
+        "x-codex-secondary-used-percent": "39",
+        "x-codex-secondary-window-minutes": "10080",
+      }),
+    )
+    const info = await fetchOpenAISessionInfo(ctx)
+    expect(info!.quota?.windows.map((w) => w.id)).toEqual(["5h", "7d"])
+    expect(info!.quota?.windows[0]!.utilization).toBeCloseTo(0.96, 10)
+  })
+
+  it("prefers Codex 5h/7d windows over req/tok when both families are cached", async () => {
+    setOpenAIRateLimits(
+      new Headers({
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests": "80",
+        "x-codex-primary-used-percent": "50",
+        "x-codex-primary-window-minutes": "300",
+      }),
+    )
+    const info = await fetchOpenAISessionInfo(ctx)
+    expect(info!.quota?.windows.map((w) => w.id)).toEqual(["5h"])
   })
 
   it("returns {} with no cache (no quota — core backfills context/label)", async () => {

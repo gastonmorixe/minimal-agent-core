@@ -4,8 +4,18 @@
  * Implements the provider-neutral `ProviderPlugin.fetchSessionInfo` seam for
  * OpenAI. Unlike Anthropic — which exposes a dedicated `checkQuota` probe — the
  * OpenAI API has NO cheap separate quota endpoint. Instead, every successful
- * response carries `x-ratelimit-*` headers describing the requests/tokens
- * windows. So the data path is cache-only:
+ * response carries rate-limit headers describing the windows. TWO families are
+ * observed, depending on how the session authenticates:
+ *
+ *   - `x-ratelimit-*` — public api.openai.com (API-key) per-minute RPM/TPM
+ *     windows. Mapped to neutral ids `req` / `tok`.
+ *   - `x-codex-*` — ChatGPT/Codex plan-limit windows sent by ChatGPT OAuth
+ *     traffic (`chatgpt.com/backend-api/codex`). These are the 5h / 7d plan
+ *     windows the user actually cares about; the public `x-ratelimit-*` family
+ *     is ABSENT on that endpoint, so OAuth sessions previously showed no quota
+ *     at all. Mapped to neutral ids `5h` / `7d` (parallel to Anthropic).
+ *
+ * Either way the data path is cache-only:
  *
  *   1. The adapter (`adapter.ts`) calls {@link setOpenAIRateLimits} after each
  *      successful `networkClient.request(...)`, copying the `x-ratelimit-*`
@@ -42,18 +52,23 @@ export interface CachedOpenAIRateLimits {
 let cache: { rateLimits: Map<string, string>; at: number } | null = null
 
 /**
- * Copy the `x-ratelimit-*` entries from a successful response's headers into
- * the module cache, stamped with `Date.now()`. Non-throwing: a parse failure
- * on the hot request path must never break the stream. Headers with no
- * `x-ratelimit-*` entries (e.g. the fake test transport) are ignored so the
- * cache isn't blanked by traffic that carries no quota signal.
+ * Copy the rate-limit headers from a successful response into the module cache,
+ * stamped with `Date.now()`. BOTH families are captured: the public-API
+ * `x-ratelimit-*` (RPM/TPM) and the ChatGPT/Codex plan family `x-codex-*`
+ * (5h/7d windows, plan, credits) — see {@link parseCodexQuotaWindows}. The two
+ * never co-occur (different endpoints), so capturing both is safe and lets the
+ * fetch path pick whichever the session actually receives.
+ *
+ * Non-throwing: a parse failure on the hot request path must never break the
+ * stream. Headers carrying neither family (e.g. the fake test transport) are
+ * ignored so the cache isn't blanked by traffic that carries no quota signal.
  */
 export function setOpenAIRateLimits(headers: Headers): void {
   try {
     const copy = new Map<string, string>()
     headers.forEach((value, key) => {
       const lk = key.toLowerCase()
-      if (lk.startsWith("x-ratelimit-")) copy.set(lk, value)
+      if (lk.startsWith("x-ratelimit-") || lk.startsWith("x-codex-")) copy.set(lk, value)
     })
     if (copy.size === 0) return
     cache = { rateLimits: copy, at: Date.now() }
@@ -157,6 +172,65 @@ export function parseOpenAIQuotaWindows(rl: ReadonlyMap<string, string>): QuotaW
 }
 
 /**
+ * Build neutral {@link QuotaWindow}s from the ChatGPT/Codex plan-limit header
+ * family (`x-codex-*`), present on `chatgpt.com/backend-api/codex` OAuth
+ * traffic. Up to two windows, mirroring Anthropic's 5h/7d shape:
+ *
+ *   - primary   → the short rolling window (`x-codex-primary-*`, typically
+ *                 300 minutes = 5h)
+ *   - secondary → the long rolling window (`x-codex-secondary-*`, typically
+ *                 10080 minutes = 7d)
+ *
+ * `utilization = clamp(used_percent / 100, 0, 1)`. The window id is humanized
+ * from `*-window-minutes` (300 → "5h", 10080 → "7d", else "Nm"/"Nh"/"Nd") so
+ * the footer reads `5h`/`7d` like Anthropic; if that header is absent it falls
+ * back to the slot's conventional id. `resetAtMs` prefers the absolute
+ * `*-reset-at` (unix seconds), falling back to `now + *-reset-after-seconds`.
+ * A window is skipped when its `*-used-percent` header is absent or unparseable.
+ *
+ * Header names + semantics verified against the OpenAI Codex client
+ * (`openai/codex` → `codex-rs/codex-api/src/rate_limits.rs`): `used_percent` is
+ * a float, `window_minutes` / `reset_at` are integers. Exported for unit testing.
+ */
+export function parseCodexQuotaWindows(rl: ReadonlyMap<string, string>): QuotaWindow[] {
+  const now = Date.now()
+  const out: QuotaWindow[] = []
+
+  const humanizeWindow = (minutes: number): string | undefined => {
+    if (!Number.isFinite(minutes) || minutes <= 0) return undefined
+    if (minutes % (60 * 24) === 0) return `${minutes / (60 * 24)}d`
+    if (minutes % 60 === 0) return `${minutes / 60}h`
+    return `${minutes}m`
+  }
+
+  const build = (slot: "primary" | "secondary", fallbackId: string): void => {
+    const usedRaw = rl.get(`x-codex-${slot}-used-percent`)
+    if (usedRaw == null) return
+    const used = Number(usedRaw)
+    if (!Number.isFinite(used)) return
+    let utilization = used / 100
+    if (utilization < 0) utilization = 0
+    if (utilization > 1) utilization = 1
+
+    const id = humanizeWindow(Number(rl.get(`x-codex-${slot}-window-minutes`))) ?? fallbackId
+
+    const resetAtSec = Number(rl.get(`x-codex-${slot}-reset-at`))
+    const resetAfterSec = Number(rl.get(`x-codex-${slot}-reset-after-seconds`))
+    let resetAtMs: number | undefined
+    if (Number.isFinite(resetAtSec) && resetAtSec > 0) resetAtMs = resetAtSec * 1000
+    else if (Number.isFinite(resetAfterSec) && resetAfterSec > 0) {
+      resetAtMs = now + resetAfterSec * 1000
+    }
+
+    out.push({ id, utilization, resetAtMs })
+  }
+
+  build("primary", "5h")
+  build("secondary", "7d")
+  return out
+}
+
+/**
  * Resolve OpenAI session metadata for the status bar. Reads the module cache
  * written by real traffic (no network: OpenAI has no cheap probe). When a fresh
  * snapshot yields windows, returns `{ quota: { windows } }` and lets the core
@@ -170,7 +244,11 @@ export async function fetchOpenAISessionInfo(
   if (ctx.signal?.aborted) return {}
   const cached = getOpenAIRateLimits()
   if (!cached || Date.now() - cached.at >= FRESHNESS_MS) return {}
-  const windows = parseOpenAIQuotaWindows(cached.rateLimits)
+  // Prefer the ChatGPT/Codex plan windows (5h/7d) when present — that's what an
+  // OAuth session receives. Fall back to the public-API per-minute RPM/TPM
+  // windows (req/tok) for API-key sessions.
+  const codex = parseCodexQuotaWindows(cached.rateLimits)
+  const windows = codex.length > 0 ? codex : parseOpenAIQuotaWindows(cached.rateLimits)
   if (windows.length === 0) return {}
   return { quota: { windows } }
 }

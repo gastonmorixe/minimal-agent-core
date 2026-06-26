@@ -573,3 +573,64 @@ describe("MemoryStore — non-bullet content preservation", () => {
     expect(after).not.toContain("- two")
   })
 })
+
+// ---------------------------------------------------------------------------
+// MINIMAL_AGENT_HOME override
+//
+// Path resolution now routes through the shared `resolveAgentHome`
+// resolver, which treats `MINIMAL_AGENT_HOME` as authoritative. When no
+// `home` dep is injected, the path helpers read `process.env`, so a
+// relocated agent home must win and land every store under it. Tests
+// that DO inject `{ home }` are unaffected (covered above) — the
+// injected home maps to `join(home, ".minimal-agent")` exactly as
+// before.
+// ---------------------------------------------------------------------------
+
+describe("MINIMAL_AGENT_HOME override (no injected home)", () => {
+  let savedMaHome: string | undefined
+  let savedNs: string | undefined
+
+  beforeEach(() => {
+    savedMaHome = process.env.MINIMAL_AGENT_HOME
+    // The namespace env, if inherited, would reroute under namespaces/<ns>/
+    // and break the bare-path assertion. Clear it for this block.
+    savedNs = process.env[MEMORY_NAMESPACE_ENV]
+    delete process.env[MEMORY_NAMESPACE_ENV]
+  })
+
+  afterEach(() => {
+    if (savedMaHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+    else process.env.MINIMAL_AGENT_HOME = savedMaHome
+    if (savedNs === undefined) delete process.env[MEMORY_NAMESPACE_ENV]
+    else process.env[MEMORY_NAMESPACE_ENV] = savedNs
+  })
+
+  it("routes every store path under MINIMAL_AGENT_HOME when set", () => {
+    const relocated = mkdtempSync(join(tmpdir(), "ma-relocated-"))
+    try {
+      process.env.MINIMAL_AGENT_HOME = relocated
+      // The override IS the agent-home base — used verbatim, not joined
+      // with a further `.minimal-agent` segment.
+      expect(globalMemoryPath()).toBe(join(relocated, "memory.md"))
+      expect(projectMemoryPath("/Users/a/proj")).toBe(
+        join(relocated, "projects", "Users/a/proj", "memory.md"),
+      )
+      expect(shortTermMemoryPath("abc-123")).toBe(join(relocated, "sessions", "abc-123.scratch.md"))
+      // And a real write lands under the relocated home, nowhere else.
+      const store = MemoryStore.global()
+      const { bullet } = store.add("lives under MINIMAL_AGENT_HOME")
+      expect(store.path).toBe(join(relocated, "memory.md"))
+      expect(existsSync(join(relocated, "memory.md"))).toBe(true)
+      expect(readFileSync(join(relocated, "memory.md"), "utf-8")).toContain(bullet.id)
+    } finally {
+      rmSync(relocated, { recursive: true, force: true })
+    }
+  })
+
+  it("an explicit `home` dep still wins over the env override (test-injection preserved)", () => {
+    process.env.MINIMAL_AGENT_HOME = "/tmp/should-be-ignored-when-home-injected"
+    // Injected home maps to <home>/.minimal-agent exactly as before the
+    // resolver refactor — the env override is not consulted.
+    expect(globalMemoryPath({ home: "/h" })).toBe("/h/.minimal-agent/memory.md")
+  })
+})

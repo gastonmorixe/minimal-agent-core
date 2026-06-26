@@ -22,8 +22,9 @@
  */
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import type { MemorySummaryParams } from "./memory-config.ts"
 import { type Bullet, parseFile } from "./parse.ts"
@@ -43,15 +44,30 @@ export function summaryPathFor(memoryPath: string): string {
   return memoryPath.replace(/memory\.md$/, "memory.summary.md")
 }
 
+/**
+ * Resolve the `.minimal-agent` data root, honoring `MINIMAL_AGENT_HOME`.
+ *
+ * Routes through the shared single-source-of-truth resolver
+ * ({@link resolveAgentHome}) rather than open-coding
+ * `join(home, ".minimal-agent")`. When an explicit OS-home is passed we
+ * hand the resolver `{ HOME: home }` so the result is exactly
+ * `join(home, ".minimal-agent")` (preserving the old behavior for
+ * callers that pin a home); with no argument we pass `process.env` so a
+ * relocated `MINIMAL_AGENT_HOME` wins in production.
+ */
+function agentHome(home?: string): string {
+  return home !== undefined ? resolveAgentHome({ HOME: home }) : resolveAgentHome(process.env)
+}
+
 /** Global summary path: `~/.minimal-agent/memory.summary.md`. */
-export function globalSummaryPath(home: string = homedir()): string {
-  return join(home, ".minimal-agent", "memory.summary.md")
+export function globalSummaryPath(home?: string): string {
+  return join(agentHome(home), "memory.summary.md")
 }
 
 /** Project summary path: `~/.minimal-agent/projects/<cwd>/memory.summary.md`. */
-export function projectSummaryPath(cwd: string, home: string = homedir()): string {
+export function projectSummaryPath(cwd: string, home?: string): string {
   const rel = cwd.replace(/^\/+/, "")
-  return join(home, ".minimal-agent", "projects", rel, "memory.summary.md")
+  return join(agentHome(home), "projects", rel, "memory.summary.md")
 }
 
 // ---------------------------------------------------------------------------

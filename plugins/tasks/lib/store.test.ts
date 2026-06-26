@@ -52,6 +52,34 @@ describe("TaskStore constructor", () => {
   test("path follows ~/.minimal-agent/sessions/<sid>.tasks.jsonl", () => {
     expect(store.path).toBe(join(tmpHome, ".minimal-agent", "sessions", `${sid}.tasks.jsonl`))
   })
+  test("relocates under MINIMAL_AGENT_HOME when no home dep is injected", () => {
+    // No `deps.home` → the path resolver reads live env, where
+    // MINIMAL_AGENT_HOME is authoritative (the shared agent-paths resolver).
+    const prev = process.env.MINIMAL_AGENT_HOME
+    const relocated = mkdtempSync(join(tmpdir(), "tasks-relocate-"))
+    try {
+      process.env.MINIMAL_AGENT_HOME = relocated
+      const relocatedStore = new TaskStore(sid, {})
+      expect(relocatedStore.path).toBe(join(relocated, "sessions", `${sid}.tasks.jsonl`))
+    } finally {
+      if (prev === undefined) delete process.env.MINIMAL_AGENT_HOME
+      else process.env.MINIMAL_AGENT_HOME = prev
+      rmSync(relocated, { recursive: true, force: true })
+    }
+  })
+  test("explicit home dep overrides any ambient MINIMAL_AGENT_HOME", () => {
+    // The injected `deps.home` is mapped to HOME, which the resolver honors
+    // ahead of homedir() but BEHIND MINIMAL_AGENT_HOME — so clear the latter
+    // to keep this default-home assertion robust against an ambient var.
+    const prev = process.env.MINIMAL_AGENT_HOME
+    try {
+      delete process.env.MINIMAL_AGENT_HOME
+      const scoped = new TaskStore(sid, { home: tmpHome })
+      expect(scoped.path).toBe(join(tmpHome, ".minimal-agent", "sessions", `${sid}.tasks.jsonl`))
+    } finally {
+      if (prev !== undefined) process.env.MINIMAL_AGENT_HOME = prev
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

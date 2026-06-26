@@ -713,9 +713,11 @@ describe("translateOpenAIResponsesStream — truncated stream (no terminal event
       'event: keepalive\ndata: {"type":"keepalive","sequence_number":3}\n\n',
     ].join("")
     const events = await replayRaw(raw)
+    expect(events.some((e) => isEvent(e, "ping"))).toBe(true)
     const err = firstOf(events, "stream_error")
     expect(err).toBeDefined()
     expect(err?.retryable).toBe(true)
+    expect(err?.upstreamType).toBe("stream_closed_without_terminal")
     // Must NOT emit a clean end_turn message_delta : that's what made the loop
     // exit silently. The truncation guard returns before the message_delta.
     expect(finalDelta(events)).toBeUndefined()

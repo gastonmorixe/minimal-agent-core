@@ -52,21 +52,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 
-/**
- * Resolve the user's home directory, preferring `$HOME` over `os.homedir()`.
- * Matches the convention every CLI tool uses (bash, git, ssh, …) — and
- * crucially makes paths testable by exporting `HOME=/tmp/something`.
- *
- * `os.homedir()` on POSIX calls `getpwuid(getuid()).pw_dir`, which ignores
- * `$HOME`. We want the env var to win so tests / sandboxes can redirect
- * the entire data tree.
- */
-function userHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.HOME && env.HOME.length > 0 ? env.HOME : homedir()
-}
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 /** Environment variable that disables ALL reads and writes when set to `"1"`. */
 export const HISTORY_DISABLE_ENV = "MINIMAL_AGENT_NO_HISTORY"
@@ -109,14 +97,21 @@ export interface HistoryEntry {
  * Resolve the user's minimal-agent home, honoring the namespace env var.
  * Internal — callers should use {@link globalHistoryPath} /
  * {@link projectHistoryPath}.
+ *
+ * The `.minimal-agent` base is computed by the shared single-source-of-
+ * truth resolver ({@link resolveAgentHome}) rather than open-coded here,
+ * so a relocated `MINIMAL_AGENT_HOME` is honored. `resolveAgentHome`
+ * already prefers `$HOME` over `os.homedir()`, which keeps the prior
+ * testability contract (export `HOME=/tmp/something` to redirect the
+ * whole data tree). Only the namespace suffix is composed locally.
  */
 function maHome(env: NodeJS.ProcessEnv = process.env): string {
-  const home = userHome(env)
+  const home = resolveAgentHome(env)
   const ns = env[HISTORY_NAMESPACE_ENV]
   if (ns && ns.length > 0) {
-    return join(home, ".minimal-agent", "namespaces", ns)
+    return join(home, "namespaces", ns)
   }
-  return join(home, ".minimal-agent")
+  return home
 }
 
 /** Absolute path of the global history file. */

@@ -32,7 +32,7 @@ import { renderCommandNoticeBlock } from "./ui/command-notice.ts"
  * Feed a rendered notice through a real terminal at `cols`, then assert the
  * frame survived the terminal's own wrapping: every visible non-blank row
  * starts with a frame glyph in the gutter position. A row that starts with raw
- * body content is a gutterless orphan from a terminal-level wrap => torn frame.
+ * body content is a gutterless orphan from a terminal-level wrap =\> torn frame.
  */
 function assertNoTearOnScreen(rows: string[], cols: number): void {
   const term = new FakeTerminal({ cols, rows: 200 })
@@ -71,7 +71,7 @@ describe("notification toast frame tear (regression)", () => {
         title: "intercom",
         info: "1 new message",
         color: "magenta",
-        body: ["⇆ ◇ 39b09c02 (claude-opus-4-8) at 13:44:58", longLine],
+        body: ["⇆ ◇ 39b09c02 (test-model-x) at 13:44:58", longLine],
       },
       40,
     )
@@ -96,10 +96,10 @@ describe("notification toast frame tear (regression)", () => {
         info: "2 new messages",
         color: "magenta",
         body: [
-          "⇆ ◇ aaaa1111 (claude-opus-4-8) at 09:00:00",
+          "⇆ ◇ aaaa1111 (test-model-x) at 09:00:00",
           longLine,
           "",
-          "⇆ ◇ bbbb2222 (claude-opus-4-8) at 09:00:05",
+          "⇆ ◇ bbbb2222 (test-model-x) at 09:00:05",
           unbreakable,
         ],
       },

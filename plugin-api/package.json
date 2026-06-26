@@ -11,6 +11,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./utils/agent-paths": "./src/utils/agent-paths.ts",
     "./utils/term-width": "./src/utils/term-width.ts",
     "./utils/jsonc": "./src/utils/jsonc.ts",
     "./utils/palette": "./src/utils/palette.ts",

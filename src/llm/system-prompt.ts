@@ -30,13 +30,10 @@
  * @module llm/system-prompt
  */
 
-import {
-  buildInstructionsBlockText,
-  type InstructionsBlockOptions,
-  type SystemBlock,
-} from "../headers.ts"
+import type { SystemBlock } from "../headers.ts"
 import { promptPath, renderPrompt } from "../prompts.ts"
 
+import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
 import { resolveModel } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
 import {

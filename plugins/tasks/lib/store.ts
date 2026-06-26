@@ -31,8 +31,9 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { resolveSessionsDir } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import {
   isSubtaskId,
@@ -181,8 +182,8 @@ export interface StoreDeps {
 }
 
 function resolveTasksPath(sid: string, deps: StoreDeps): string {
-  const home = deps.home ?? homedir()
-  return join(home, ".minimal-agent", "sessions", `${sid}.tasks.jsonl`)
+  const env = deps.home ? { HOME: deps.home } : process.env
+  return join(resolveSessionsDir(env), `${sid}.tasks.jsonl`)
 }
 
 /**

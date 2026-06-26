@@ -34,13 +34,23 @@ import {
   renameSync as realRename,
   statSync as realStat,
 } from "node:fs"
-import { homedir, hostname as osHostname } from "node:os"
+import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { type DiagnosticBus, type LogEvent, Severity } from "./diagnostic-bus.ts"
 import { formatRfc5424 } from "./syslog.ts"
 
-const DEFAULT_PATH = join(homedir(), ".minimal-agent", "ma.log")
+/**
+ * Default global log path: `<agent-home>/ma.log`. Resolved lazily (per
+ * construction) so it honors a `MINIMAL_AGENT_HOME` relocation published at
+ * boot, instead of capturing `homedir()` at module-load time.
+ */
+function defaultGlobalLogPath(): string {
+  return join(resolveAgentHome(), "ma.log")
+}
+
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024 // 10 MiB durable cap
 
 export interface GlobalLogSinkFs {
@@ -97,7 +107,7 @@ export class GlobalLogSink {
   private disposeFn: (() => void) | null = null
 
   constructor(opts: GlobalLogSinkOptions = {}) {
-    this.path = opts.path ?? DEFAULT_PATH
+    this.path = opts.path ?? defaultGlobalLogPath()
     this.opts = {
       sessionId: opts.sessionId,
       level: opts.level ?? Severity.Notice,

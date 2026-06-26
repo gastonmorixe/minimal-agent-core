@@ -19,6 +19,7 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
 
 import { startStartupProgressSpinner } from "../startup/progress-spinner.ts"
@@ -107,8 +108,9 @@ export async function resolveFormatter(explicitCmd?: string[]): Promise<Formatte
     return { cmd: ["mdstream"], label: `mdstream${verLabel}` }
   }
 
-  // 2. Previously downloaded binary
-  const binDir = join(process.env.HOME ?? "~", ".minimal-agent", "bin")
+  // 2. Previously downloaded binary (same dir as binaries/store.ts:defaultBinDir,
+  //    honoring MINIMAL_AGENT_HOME via the shared resolver).
+  const binDir = join(resolveAgentHome(), "bin")
   const cachedBin = join(binDir, "mdstream")
   if (existsSync(cachedBin)) {
     const ver = await queryMdstreamVersion(cachedBin)

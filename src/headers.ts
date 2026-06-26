@@ -9,6 +9,10 @@
 import { randomUUID } from "node:crypto"
 
 import type { AuthResult } from "./auth.ts"
+// Back-compat: the legacy `buildSystemPrompt` (below) still assembles the
+// instructions block via the now-relocated neutral builder (core->core,
+// I2-legal). The builder moved to `./llm/instructions-block.ts` in Wave 4.
+import { buildInstructionsBlockText } from "./llm/instructions-block.ts"
 import { findModel } from "./llm/model-registry.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
 
@@ -517,119 +521,22 @@ export {
   DEFAULT_REFLECTION_COOLDOWN_MS,
   DEFAULT_REFLECTION_INTERVAL,
 } from "./agent/reflection.ts"
-
-import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "./agent/reflection.ts"
-
 /**
- * Build the harness-safety paragraph appended to `system[2]` so the model
- * knows about the reflection checkpoint, the cooldown, the ack/silence
- * opt-out, and (when configured) the emergency hard cap.
- *
- * Text is stable as a function of inputs, so the prompt cache key only
- * changes when the configuration changes : default-config sessions all
- * share the same cached prefix.
- *
- * The emergency-cap paragraph is OMITTED when `maxToolRounds` is
- * non-finite (the default, `Infinity`), so a default-configured session
- * sees no mention of a hard cap : there isn't one.
+ * Neutral system-prompt builders (the cached instructions block, the
+ * loop-safety paragraph, the tool-output-conventions paragraph, and the
+ * default instructions text) moved to `src/llm/instructions-block.ts` in the
+ * Wave 4 dissolution: that content is provider-NEUTRAL and has no business in
+ * this Anthropic-flavored wire module. Re-exported here so existing importers
+ * keep resolving until the legacy module fully dissolves. New code: import
+ * from `./llm/instructions-block.ts`.
  */
-export function buildLoopSafetyParagraph(opts: {
-  reflectionInterval: number
-  reflectionCooldownMs: number
-  maxToolRounds: number
-}): string {
-  const { reflectionInterval, reflectionCooldownMs, maxToolRounds } = opts
-  const hasReflection = reflectionInterval > 0
-  const hasCooldown = hasReflection && reflectionCooldownMs > 0
-  const hasEmergencyCap = Number.isFinite(maxToolRounds)
-  if (!hasReflection && !hasEmergencyCap) return ""
-
-  const cooldownSec = Math.round(reflectionCooldownMs / 1000)
-  // Prose lives in `prompts/loop-safety/*`; the conditional assembly (which
-  // fragment, in what order) stays here. The structure mirrors the original
-  // string-literal build 1:1 so the rendered output is byte-identical.
-  const lp = (file: string): string => corePrompt("loop-safety", file)
-  const parts: string[] = [renderPrompt(lp("heading.md")), ""]
-
-  if (hasReflection) {
-    parts.push(renderPrompt(lp("intro.md")), "")
-    parts.push(
-      hasCooldown
-        ? renderPrompt(lp("checkpoint-cooldown.tmpl.md"), {
-            interval: reflectionInterval,
-            cooldownSec,
-          })
-        : renderPrompt(lp("checkpoint-plain.tmpl.md"), { interval: reflectionInterval }),
-    )
-    parts.push("", renderPrompt(lp("ack.md")))
-  }
-
-  if (hasEmergencyCap) {
-    parts.push("", renderPrompt(lp("emergency-cap.tmpl.md"), { maxToolRounds }))
-  }
-
-  return parts.join("\n")
-}
-
-/**
- * Build the "Tool output conventions" paragraph appended to `system[2]`
- * so the model knows about the per-session raw-output blob store and
- * the `<ma::agent::raw-output …/>` pointer footer convention. One short section,
- * tool-agnostic: every tool that returns a large or clamped body lands
- * a full copy at `<sid>.blobs/<tool_use_id>.raw` and the path is
- * appended to the model-visible `tool_result.content`. The model uses
- * `Read` (or `Bash`) on that path when the inline body isn't enough.
- *
- * Returns an empty string when the blob store is disabled, so the
- * cache key is identical to a session without the feature.
- *
- * Pure function of `opts.blobStoreEnabled` (and a stable copy text):
- * default-config sessions all share the same cached prefix.
- */
-export function buildToolOutputConventionsParagraph(opts: { blobStoreEnabled: boolean }): string {
-  if (!opts.blobStoreEnabled) return ""
-  return renderPrompt(corePrompt("tool-output-conventions.md"))
-}
-
-/**
- * Options shared by the instructions-block text builder. Pulled out so the
- * provider-neutral system-prompt builder (`src/llm/system-prompt.ts`) and the
- * legacy {@link buildSystemPrompt} produce a byte-identical instructions block.
- */
-export interface InstructionsBlockOptions {
-  instructions?: string
-  reflectionInterval?: number
-  reflectionCooldownMs?: number
-  maxToolRounds?: number
-  blobStoreEnabled?: boolean
-}
-
-/**
- * Assemble the text of the cached instructions block (the big system[2]
- * block): the base instructions, then the loop-safety paragraph, then the
- * tool-output-conventions paragraph. Empty fragments are dropped so the
- * "everything-off" case is byte-stable (the cache key depends on it).
- *
- * This is the provider-NEUTRAL portion of the system prompt. The leading
- * identity/billing blocks differ per provider and are resolved separately
- * (see `src/llm/system-prompt.ts` + each provider's `resolveSystemPrompt`).
- */
-export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): string {
-  const reflectionInterval = opts?.reflectionInterval ?? DEFAULT_REFLECTION_INTERVAL
-  const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
-  const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
-  const blobStoreEnabled = opts?.blobStoreEnabled ?? false
-  const instructionsBase = opts?.instructions ?? DEFAULT_INSTRUCTIONS
-  const safetyParagraph = buildLoopSafetyParagraph({
-    reflectionInterval,
-    reflectionCooldownMs,
-    maxToolRounds,
-  })
-  const conventionsParagraph = buildToolOutputConventionsParagraph({ blobStoreEnabled })
-  return [instructionsBase, safetyParagraph, conventionsParagraph]
-    .filter((s) => s.length > 0)
-    .join("\n\n")
-}
+export {
+  buildInstructionsBlockText,
+  buildLoopSafetyParagraph,
+  buildToolOutputConventionsParagraph,
+  DEFAULT_INSTRUCTIONS,
+  type InstructionsBlockOptions,
+} from "./llm/instructions-block.ts"
 
 /**
  * LEGACY / Anthropic-shaped system prompt builder. Hardcodes the Anthropic
@@ -748,14 +655,6 @@ export function buildSystemPrompt(opts?: {
 
   return blocks
 }
-
-/**
- * Minimal instructions block for system[2], rendered from
- * `src/prompts/instructions.md`. The real CLI sends ~11K chars of detailed
- * behavioral instructions; this is a minimal version for research use.
- * Override via `buildSystemPrompt({ instructions: … })`.
- */
-const DEFAULT_INSTRUCTIONS = renderPrompt(corePrompt("instructions.md"))
 
 /**
  * Legacy: flat system prompt for backward compatibility.

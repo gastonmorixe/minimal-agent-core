@@ -59,7 +59,7 @@ describe("coerceNoticeBlock", () => {
       title: "intercom",
       info: "1 new message",
       color: "magenta",
-      body: ["⇆ ◇ b052aedf (claude-opus-4-8) at 00:10:30", "Done on my side, all green."],
+      body: ["⇆ ◇ b052aedf (test-model-x) at 00:10:30", "Done on my side, all green."],
       footer: "from b052aedf",
     })
     expect(block).not.toBeNull()
@@ -67,7 +67,7 @@ describe("coerceNoticeBlock", () => {
     expect(block?.icon).toBe("⇆")
     expect(block?.color).toBe("magenta")
     expect(block?.body).toEqual([
-      "⇆ ◇ b052aedf (claude-opus-4-8) at 00:10:30",
+      "⇆ ◇ b052aedf (test-model-x) at 00:10:30",
       "Done on my side, all green.",
     ])
   })

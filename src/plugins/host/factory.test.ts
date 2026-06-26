@@ -66,4 +66,29 @@ describe("buildPluginHost", () => {
     const host = buildPluginHost({ capabilities: ["sessions:read", "bogus:cap"] })
     expect(host.sessions).toBeDefined()
   })
+
+  describe("paths capability", () => {
+    it("is undefined unless granted (deny-by-default)", () => {
+      const host = buildPluginHost({ capabilities: ["clock"] })
+      expect(host.paths).toBeUndefined()
+    })
+
+    it("exposes home / sessionsDir / netDbgDir resolved from the injected env", () => {
+      const host = buildPluginHost({
+        capabilities: ["paths"],
+        env: { MINIMAL_AGENT_HOME: "/tmp/ma-host" },
+      })
+      expect(host.paths?.home()).toBe("/tmp/ma-host")
+      expect(host.paths?.sessionsDir()).toBe("/tmp/ma-host/sessions")
+      expect(host.paths?.netDbgDir()).toBe("/tmp/ma-host/net-dbg")
+    })
+
+    it("the paths API is frozen", () => {
+      const host = buildPluginHost({
+        capabilities: ["paths"],
+        env: { MINIMAL_AGENT_HOME: "/tmp/x" },
+      })
+      expect(Object.isFrozen(host.paths)).toBe(true)
+    })
+  })
 })

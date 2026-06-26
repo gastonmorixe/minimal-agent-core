@@ -446,7 +446,14 @@ export async function* translateOpenAIResponsesStream(
         }
         break
       }
-      // Ignore other event types (ping, audio, etc.) silently.
+      case "keepalive":
+        // OpenAI may emit keepalive events while a reasoning block is open but
+        // no text/tool deltas are ready yet. Surface them as canonical ping
+        // events so the provider-neutral watchdog sees real SSE activity and
+        // does not abort a healthy long-thinking stream.
+        yield { type: "ping" }
+        break
+      // Ignore other future event types (audio, etc.) silently.
       default:
         break
     }
@@ -455,17 +462,19 @@ export async function* translateOpenAIResponsesStream(
   // The upstream closed the SSE stream without ANY terminal event (no
   // response.completed / failed / incomplete). Observed on gpt-5.5: the
   // server sends response.created → output_item.added(reasoning) → keepalive,
-  // then closes the connection. HTTP 200, ~2.3s, no error frame. Falling
-  // through here with stopReason=null yields an empty response, which the
-  // agent loop reads as "no tool calls ⇒ model is done" and silently drops
-  // to the prompt mid-task (session 50efb996, 2026-05-30, turn 036). Treat a
-  // terminal-event-less close as a retryable truncation so the retry /
-  // watchdog path handles it instead of the loop exiting clean.
+  // then closes the connection. HTTP 200, no error frame. Falling through here
+  // with stopReason=null yields an empty response, which the agent loop reads
+  // as "no tool calls ⇒ model is done" and silently drops to the prompt mid-task
+  // (session 50efb996, 2026-05-30, turn 036). Treat a terminal-event-less close
+  // as retryable, but tag it separately from provider `api_error`: a reasoning
+  // stream that closes after ~30s should not hammer the same request on the
+  // fast 200ms retry curve (session 7919d877, 2026-06-26).
   if (!sawTerminal) {
     yield {
       type: "stream_error",
       retryable: true,
       category: "api",
+      upstreamType: "stream_closed_without_terminal",
       cause: new Error("OpenAI Responses stream closed without a terminal event (truncated)"),
     }
     return

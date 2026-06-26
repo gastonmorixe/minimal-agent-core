@@ -44,9 +44,9 @@
  */
 
 import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 import { parseJsonc } from "@minimal-agent/plugin-api/utils/jsonc"
 
 /**
@@ -187,8 +187,14 @@ export function memoryConfigPath(opts: { home?: string; env?: NodeJS.ProcessEnv 
   const env = opts.env ?? process.env
   const override = env.MINIMAL_AGENT_CONFIG
   if (override) return override
-  const home = opts.home ?? homedir()
-  const dir = join(home, ".minimal-agent")
+  // Route the data-root computation through the shared resolver so a
+  // relocated `MINIMAL_AGENT_HOME` is honored. When a test pins
+  // `opts.home`, hand the resolver `{ HOME: opts.home }` so the result is
+  // exactly `join(opts.home, ".minimal-agent")` — identical to the prior
+  // behavior. With no injected home, pass the resolved `env` so the
+  // override env var (and `$HOME`) win.
+  const dir =
+    opts.home !== undefined ? resolveAgentHome({ HOME: opts.home }) : resolveAgentHome(env)
   const jsoncPath = join(dir, "config.jsonc")
   if (existsSync(jsoncPath)) return jsoncPath
   return join(dir, "config.json")

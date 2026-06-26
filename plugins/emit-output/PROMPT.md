@@ -1,55 +1,54 @@
 # Emit Output
 
-Inline-render a tool call's raw output or a safe filesystem path directly in the response stream. The harness reads the bytes and renders them inline. The model never touches the content, so it arrives uncorrupted (ANSI escapes, box-drawing characters, alignment intact).
-
-## When to use
-
-Use `<ma::emit::output>` ONLY when both of these are true:
-
-1. A tool call's full stdout is needed verbatim and would otherwise be truncated or mangled if hand-copied into a response (e.g. the ascii-renderer skill's rich/tabulate output, or a large diagram).
-2. The tool's stdout already landed as a raw-output blob on disk (the `<ma::agent::raw-output ... />` footer confirms it), OR the content was written to a temp file under `/tmp/`.
-
-**Do NOT use this for normal tool calls.** The TUI's tool-output preview truncation is intentional. This tag is an escape hatch for specific cases where the model physically cannot reproduce the bytes faithfully (ASCII art, ANSI-colored tables, structured terminal graphics). For text you can summarize yourself, just summarize.
+Renders a tool call's raw output or a filesystem path inline in the response stream. Use the self-closing `<ma::emit::output />` tag. The harness reads the bytes from disk and drops them into your response. The content never passes through the model, so it arrives exactly as written (ANSI escapes, box-drawing characters, alignment all intact).
 
 ## Two source modes (mutually exclusive)
 
-1. **By tool call** — `tool="call_00_xxx"` where the value is the tool_use_id from the `<ma::agent::raw-output>` footer:
+1. **By tool call** — `tool="call_00_xxx"` using the tool_use_id from the `<ma::agent::raw-output>` footer:
    ```
    <ma::emit::output tool="call_00_dMMw39hweiGAR2xNzEoG1240" />
    ```
-   Resolves that tool call's raw-output blob from THIS session's blob store. The tool_use_id must match the footer exactly.
+   Resolves that tool call's raw-output blob from this session's blob store. The id must match the footer exactly.
 
 2. **By filesystem path** — `path="/tmp/render_table.txt"`:
    ```
    <ma::emit::output path="/tmp/render_table.txt" />
    ```
-   Only paths under `/tmp/` or within the agent's working directory are allowed. Symlinks are resolved before the prefix check.
+   Allowed under `/tmp/` or within the agent's working directory. Symlinks are resolved before the prefix check.
 
-## Worked example (ascii-renderer)
+Optional `title="..."` renders a dim heading above the content.
+
+## When to reach for it
+
+Good fits:
+
+- Tool output that is already formatted and would be tedious to restate yourself (tables, diagrams, charts, structured layouts with ANSI colors, generated reports). The bytes are on disk, use them.
+- Content whose alignment matters: box-drawing characters, columnar data, anything where hand-copying introduces drift.
+- A long tool result you would otherwise scroll past in the truncated preview.
+
+Don't reach for it:
+
+- On plain prose or code you can summarize in your own words. Summarize it.
+- On every tool call — the preview truncation is there for a reason. Reserve the tag for output where the verbatim form adds value.
+
+If a blob doesn't exist for a tool call (output was under 4 KiB, not persisted), fall back to `path=` after writing the content to a temp file.
+
+## Worked example
 
 ```
-# I run the script:
+# Run a script that produces formatted output:
 uv run /tmp/render_tree.py
 
-# Bash tool returns (truncated in TUI):
-# ...  <ma::agent::raw-output path=".../call_00_xyz.raw" ... />
+# Bash tool result is truncated in the TUI, but includes:
+# <ma::agent::raw-output path=".../call_00_xyz.raw" ... />
 
-# I emit the full output inline so the user sees it:
+# Render the full output inline:
 <ma::emit::output tool="call_00_xyz" />
 ```
 
-Or with a temp file:
+Or with an explicit temp file:
 
 ```
-# Script writes to /tmp/render_output.txt
-# Then:
-<ma::emit::output path="/tmp/render_output.txt" />
+uv run /tmp/render_table.py > /tmp/render_output.txt
+<ma::emit::output path="/tmp/render_output.txt" title="Query results" />
 ```
-
-## Don't
-
-- Don't emit after every tool call. This defeats the intentional tool-output preview limit.
-- Don't use for text you can summarize. If the content is plain prose, you can retell it.
-- Don't guess the tool_use_id. Only use the exact id from the `<ma::agent::raw-output>` footer.
-- Don't pass a path outside `/tmp/` or the project directory — it will be refused.
-- Don't emit binary files (images, PDFs) — they are detected and refused.

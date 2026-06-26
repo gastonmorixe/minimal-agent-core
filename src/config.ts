@@ -31,8 +31,9 @@
  * config (logged once to stderr in --debug mode, never fatal).
  */
 import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { parseJsonc } from "./jsonc.ts"
 import { parseFormatterCommand } from "./ui/formatter/formatter.ts"
@@ -160,7 +161,7 @@ const VALID_DISPLAY = new Set(["summarized", "omitted"])
  */
 export function configPath(): string {
   if (process.env.MINIMAL_AGENT_CONFIG) return process.env.MINIMAL_AGENT_CONFIG
-  const dir = join(homedir(), ".minimal-agent")
+  const dir = resolveAgentHome()
   const jsoncPath = join(dir, "config.jsonc")
   if (existsSync(jsoncPath)) return jsoncPath
   return join(dir, "config.json")
