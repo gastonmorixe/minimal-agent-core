@@ -41,6 +41,7 @@ import {
   type NetworkTransport,
 } from "../../network/index.ts"
 import { clearSessionTokens, getSessionTokens } from "../../session-tokens.ts"
+import { GLOBAL_STATUS_BUS } from "../../status.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import { registerDiscoveredProviders } from "../provider-discovery.ts"
 import type { ApiKeyAuthProvider } from "../provider-plugin.ts"
@@ -588,6 +589,46 @@ describe("canonicalSendFn — --debug request dump", () => {
     expect(out).toContain("message(s)")
     expect(out).toContain("Bash")
   }, 15_000)
+})
+
+// ---------------------------------------------------------------------------
+// Status-label lifecycle: "Sending request" → "Receiving stream" on first event.
+// Regression: canonical-send.ts never updated the label, so it stayed "Sending
+// request" even once response bytes were flowing in — the ↑/↓ arrow correctly
+// flipped to ↓ but the label was misleading.
+// ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — status label lifecycle", () => {
+  it("transitions label from 'Sending request' to 'Receiving stream' on message_start", async () => {
+    GLOBAL_STATUS_BUS.reset()
+    const labels: (string | null)[] = []
+    const unsub = GLOBAL_STATUS_BUS.subscribe((label) => labels.push(label))
+
+    const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
+    const auth: AuthResult = { type: "oauth", token: "test-token" }
+    const gen = canonicalSendFn({
+      auth,
+      messages,
+      model: "claude-opus-4-8",
+      stream: true,
+      networkClient,
+    })
+    while (!(await gen.next()).done) {
+      // drain
+    }
+    unsub()
+
+    // The subscription fires on subscribe (catches whatever is current—
+    // typically null after reset), then on every create/update/clear.
+    // We assert that "Sending request" and "Receiving stream" both
+    // appeared, proving the label transition happened.
+    expect(labels).toContain("Sending request")
+    expect(labels).toContain("Receiving stream")
+    // "Receiving stream" should appear after "Sending request"
+    const sendIdx = labels.indexOf("Sending request")
+    const recvIdx = labels.indexOf("Receiving stream")
+    expect(recvIdx).toBeGreaterThan(sendIdx)
+  }, 5_000)
 })
 
 // ---------------------------------------------------------------------------
