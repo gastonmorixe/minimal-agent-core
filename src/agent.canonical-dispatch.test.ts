@@ -166,40 +166,28 @@ describe("Agent default transport — multi-provider dispatch", () => {
     expect(out.join("")).toContain("pong")
   }, 20_000)
 
-  it("falls back to the legacy client for an unregistered model id (api.anthropic.com)", async () => {
-    let seenUrl = ""
+  it("raises an unknown-model error for an unregistered model id (no legacy fallback)", async () => {
+    let requested = false
     const networkClient = fakeNetworkClient((req) => {
-      seenUrl = req.url
-      return sseFromEvents([
-        {
-          type: "message_start",
-          messageId: "m",
-          modelId: "test-model-1",
-          initialUsage: { inputTokens: 1, outputTokens: 0 },
-        },
-        { type: "text_start", index: 0 },
-        { type: "text_delta", index: 0, text: "hi" },
-        { type: "text_stop", index: 0 },
-        {
-          type: "message_delta",
-          stopReason: "end_turn",
-          usage: { inputTokens: 1, outputTokens: 1 },
-        },
-        { type: "message_stop" },
-      ])
+      requested = true
+      return sseFromEvents(pongEvents())
     })
     const auth: AuthResult = { type: "oauth", token: "oauth-test" }
-    // "claude-opus-4-8" is NOT registered → pickTransport falls back to the
-    // legacy sendMessage, which targets api.anthropic.com (core's legacy
-    // client, dissolving in Wave B-5). The id is provider DATA, kept until
-    // the legacy stack leaves core.
-    const agent = new Agent({ auth, model: "claude-opus-4-8", networkClient })
-    const gen = agent.run("ping")
-    while (true) {
-      const { done } = await gen.next()
-      if (done) break
+    // An unregistered model id no longer falls back to a hard-wired vendor
+    // endpoint. Every request routes through the canonical run(), which fails
+    // to resolve the model and raises before any network call.
+    const agent = new Agent({ auth, model: "totally-unregistered-model", networkClient })
+    let threw = false
+    try {
+      const gen = agent.run("ping")
+      while (true) {
+        const { done } = await gen.next()
+        if (done) break
+      }
+    } catch {
+      threw = true
     }
-    expect(seenUrl).toContain("api.anthropic.com")
-    expect(seenUrl).not.toContain("openai")
+    expect(threw).toBe(true)
+    expect(requested).toBe(false)
   }, 20_000)
 })
