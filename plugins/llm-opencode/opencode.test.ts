@@ -8,12 +8,13 @@ import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
-import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import {
+  type CanonicalRequest,
   clearModelRegistry,
   clearProviderRegistry,
   resolveModel,
   resolveProvider,
+  run,
 } from "../../src/llm/index.ts"
 import { NetworkResponse } from "../../src/network/index.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "../llm-anthropic/index.ts"
@@ -234,8 +235,6 @@ describe("llm-opencode (dual-surface provider: OpenAI Chat + Anthropic Messages)
         }),
     } as unknown as import("@minimal-agent/plugin-api/net/types").NetworkClient
 
-    // Import run() and RunContext from core
-    const { run } = await import("../../src/llm/run.ts")
     const ctx: RunContext = {
       auth: { kind: "api-key", key: "test-key" },
       sessionId: "test",

@@ -28,11 +28,11 @@ import {
   clearProviderRegistry,
   findModel,
   isEvent,
+  type ModelEntry,
   resolveModel,
   resolveProvider,
   userText,
 } from "../../src/llm/index.ts"
-import type { ModelEntry } from "../../src/llm/model-registry.ts"
 
 import { bootstrapOpenAI, openaiAdapter, openaiProviderPlugin } from "./adapter.ts"
 import {
