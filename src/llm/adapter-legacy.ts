@@ -839,7 +839,15 @@ export async function* canonicalEventsToLegacyStream(
   const flushCur = () => {
     if (!cur) return
     if (cur.kind === "text") {
-      blocks.push({ type: "text", text: cur.text })
+      // Drop empty/whitespace-only text blocks. The Anthropic API rejects
+      // them ("messages: text content blocks must be non-empty"), and an
+      // OpenAI-compatible provider (Ollama/OpenAI) emits a trailing empty
+      // text block whenever it interleaves a `text_stop` after a `tool_use`
+      // (the deferred-stop pattern in those translators). Persisting one
+      // makes the SAME session fail to resume under Anthropic. The deltas
+      // were already yielded to the consumer, so dropping the empty block
+      // only keeps junk out of history.
+      if (cur.text.trim().length > 0) blocks.push({ type: "text", text: cur.text })
     } else if (cur.kind === "thinking") {
       if (cur.signature) {
         blocks.push({ type: "thinking", thinking: cur.thinking, signature: cur.signature })
@@ -878,9 +886,19 @@ export async function* canonicalEventsToLegacyStream(
         yield ev.text
         break
       case "text_stop": {
-        const text = cur?.kind === "text" ? cur.text : (ev.finalText ?? "")
-        if (cur?.kind === "text") flushCur()
-        else blocks.push({ type: "text", text }) // empty text fallback
+        if (cur?.kind === "text") {
+          // flushCur() drops empty/whitespace-only text (the API rejects it).
+          flushCur()
+        } else {
+          // No open text block: this is the deferred-stop pattern where the
+          // text was already flushed by an intervening tool_use/thinking
+          // start (e.g. the Ollama translator emits text_stop in its `done`
+          // handler, after the tool_use events). Only synthesize a block
+          // from finalText when it carries real content; never push a `""`
+          // block, which would 400 on the next Anthropic send / resume.
+          const text = ev.finalText ?? ""
+          if (text.trim().length > 0) blocks.push({ type: "text", text })
+        }
         await cb.onTextStop?.()
         break
       }

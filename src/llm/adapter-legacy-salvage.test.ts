@@ -147,6 +147,67 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
     ])
   })
 
+  // Cross-provider resume regression. An OpenAI-compatible translator (Ollama)
+  // defers its text_stop to the stream's `done` handler, so the order is
+  // text_start → text_delta → tool_use_* → text_stop. The bridge's single
+  // `cur` slot already flushed the real text on tool_use_start, so the trailing
+  // text_stop has no open text block and must NOT manufacture a `{text:""}`
+  // block — the Anthropic API rejects empty text blocks on a later resend /
+  // resume ("text content blocks must be non-empty").
+  it("does not synthesize an empty text block from a deferred text_stop after tool_use", async () => {
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "m7",
+        modelId: "deepseek-v4-pro",
+        initialUsage: { inputTokens: 10, outputTokens: 0 },
+      },
+      { type: "text_start", index: 0 },
+      { type: "text_delta", index: 0, text: "Running the command." },
+      { type: "tool_use_start", index: 1, id: "call_0", name: "Bash" },
+      { type: "tool_use_input_delta", index: 1, partialJson: '{"command":"ls"}' },
+      { type: "tool_use_stop", index: 1, input: { command: "ls" } },
+      // Deferred text_stop for the already-flushed text block (Ollama pattern).
+      { type: "text_stop", index: 0, finalText: "" },
+      {
+        type: "message_delta",
+        stopReason: "tool_use",
+        usage: { inputTokens: 10, outputTokens: 30 },
+      },
+      { type: "message_stop" },
+    ])
+
+    expect(response.stopReason).toBe("tool_use")
+    expect(response.blocks).toEqual([
+      { type: "text", text: "Running the command." },
+      { type: "tool_use", id: "call_0", name: "Bash", input: { command: "ls" } },
+    ])
+    // No empty text block anywhere.
+    expect(
+      response.blocks.some((b) => b.type === "text" && (b as { text: string }).text === ""),
+    ).toBe(false)
+  })
+
+  it("drops an empty text block that closes normally (start → stop, no deltas)", async () => {
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "m8",
+        modelId: "claude-opus-4-8",
+        initialUsage: { inputTokens: 10, outputTokens: 0 },
+      },
+      { type: "text_start", index: 0 },
+      { type: "text_stop", index: 0, finalText: "" },
+      {
+        type: "message_delta",
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+      { type: "message_stop" },
+    ])
+    expect(response.blocks).toEqual([])
+  })
+
   it("does not double-push when the block closed normally", async () => {
     const response = await drain([
       {

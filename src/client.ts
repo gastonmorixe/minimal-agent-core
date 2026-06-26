@@ -1006,7 +1006,19 @@ export async function* sendMessageOnce(
                   ;(currentBlock as ToolUseBlock).input = { _raw: toolJsonParts }
                 }
               }
-              blocks.push(currentBlock as ContentBlock)
+              // Drop empty/whitespace-only text blocks: the Anthropic API
+              // rejects them ("messages: text content blocks must be
+              // non-empty"). A model can emit a `content_block_start` +
+              // immediate `content_block_stop` for text with no deltas (or
+              // only whitespace), most visibly a trailing empty text block
+              // after a tool_use. Persisting one breaks a later resend /
+              // resume. The deltas (if any) were already streamed to the
+              // consumer, so skipping the block only keeps junk out of
+              // history. onTextStop still fires below so formatter teardown
+              // is unaffected.
+              const isEmptyText =
+                stoppedText && (currentBlock as TextBlock).text.trim().length === 0
+              if (!isEmptyText) blocks.push(currentBlock as ContentBlock)
               if (stoppedThinking) await onThinkingStop?.()
               // Fire onTextStop AFTER the block is pushed onto `blocks`, so
               // a handler that walks `blocks[]` sees the just-finished text
@@ -1125,7 +1137,12 @@ export async function* sendMessageOnce(
       // signed thinking block, text, or tool_use is salvaged as-is.
       const isUnsignedThinking =
         currentBlock.type === "thinking" && !(currentBlock as ThinkingBlock).signature
-      if (isUnsignedThinking) {
+      // An empty/whitespace-only text block is also unsalvageable: the API
+      // rejects it ("text content blocks must be non-empty"). This guards the
+      // truncation path the same way `content_block_stop` guards the normal one.
+      const isEmptyText =
+        currentBlock.type === "text" && (currentBlock as TextBlock).text.trim().length === 0
+      if (isUnsignedThinking || isEmptyText) {
         currentBlock = null
       } else {
         if (currentBlock.type === "tool_use" && toolJsonParts) {

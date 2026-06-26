@@ -110,6 +110,17 @@ export function foldRecords(records: SessionRecord[]): Message[] {
 // ---------------------------------------------------------------------------
 
 /**
+ * True for a `text` content block whose text is empty (or whitespace-only /
+ * missing). The Anthropic Messages API rejects these with "messages: text
+ * content blocks must be non-empty"; OpenAI-compatible providers emit them
+ * (see step 4 of {@link repairMessages}). Non-text blocks are never empty by
+ * this definition.
+ */
+function isEmptyTextBlock(b: ContentBlock): boolean {
+  return b.type === "text" && (b.text ?? "").trim().length === 0
+}
+
+/**
  * Repair the message list so the Messages API accepts it. Three classes
  * of problems are removed:
  *
@@ -136,8 +147,22 @@ export function foldRecords(records: SessionRecord[]): Message[] {
  *    was at the FIRST resume via `pendingDraft`. Surfacing it at run 3
  *    would be wrong because the user already chose to move on.
  *
- * Walks the list in passes (assistant drop, tool_result filter,
- * consecutive-user collapse). Idempotent: running repair on an
+ * 4. Empty `text` content blocks (`{type:"text", text:""}`). The
+ *    Anthropic API rejects these with "messages: text content blocks
+ *    must be non-empty". They are emitted by OpenAI-compatible stream
+ *    assemblers (Ollama/OpenAI) whenever a model interleaves a trailing
+ *    empty text block after a `tool_use` — the bridge's single-`cur`
+ *    model flushes the real text on the `tool_use_start`, then the
+ *    deferred `text_stop` manufactures a `""` block (see the "empty text
+ *    fallback" in adapter-legacy.ts and client.ts). Those providers
+ *    tolerate the empty block, so it lands in the persisted assistant
+ *    record; resuming the SAME session under Anthropic then 400s. We
+ *    drop every empty text block here so a transcript written under a
+ *    permissive provider resumes cleanly under a strict one. If dropping
+ *    empties a message entirely, the whole message is dropped too.
+ *
+ * Walks the list in passes (assistant drop, tool_result + empty-text
+ * filter, consecutive-user collapse). Idempotent: running repair on an
  * already-clean list is a no-op.
  *
  * Renamed from `repairTrailingTurn` (which only handled the tail). The
@@ -186,7 +211,9 @@ export function repairMessages(input: Message[]): Message[] {
     const msg = input[i]
     if (msg.role === "user" && Array.isArray(msg.content)) {
       const filtered = msg.content.filter(
-        (b) => b.type !== "tool_result" || liveIds.has((b as ToolResultBlock).tool_use_id),
+        (b) =>
+          !isEmptyTextBlock(b) &&
+          (b.type !== "tool_result" || liveIds.has((b as ToolResultBlock).tool_use_id)),
       )
       if (filtered.length === 0) continue
       // Step 3b: REORDER so all tool_result blocks come first within the
@@ -209,12 +236,20 @@ export function repairMessages(input: Message[]): Message[] {
         ...filtered.filter((b) => b.type !== "tool_result"),
       ]
       out.push({ role: "user", content: ordered })
+    } else if (Array.isArray(msg.content)) {
+      // Assistant (or any array-content) message: strip empty text blocks
+      // the API rejects ("text content blocks must be non-empty"). These
+      // arise as a trailing `{type:"text", text:""}` after a tool_use when
+      // the source was an OpenAI-compatible provider; see step 4 in the
+      // function doc. If the message empties out entirely, drop it (step 4's
+      // consecutive-user collapse then handles any [user, user] adjacency
+      // the drop exposes).
+      const filtered = msg.content.filter((b) => !isEmptyTextBlock(b))
+      if (filtered.length === 0) continue
+      out.push({ ...msg, content: filtered })
     } else {
-      // Defensive copy of arrays so callers can mutate freely.
-      out.push({
-        ...msg,
-        content: typeof msg.content === "string" ? msg.content : [...msg.content],
-      })
+      // Defensive copy so callers can mutate freely (string content).
+      out.push({ ...msg, content: msg.content })
     }
   }
 
