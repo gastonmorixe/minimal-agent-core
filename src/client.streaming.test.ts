@@ -571,4 +571,80 @@ describe("client", () => {
       }
     })
   })
+
+  describe("empty text block stripping", () => {
+    const auth: AuthResult = { type: "oauth", token: "test-token" }
+    const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "go" }] }]
+
+    // Regression: a trailing empty text block after a tool_use (some models
+    // emit content_block_start+stop for text with no deltas) must NOT be
+    // persisted. The Anthropic API rejects empty text blocks on the next
+    // resend / resume with "text content blocks must be non-empty".
+    it("drops a trailing empty text block that follows a tool_use", async () => {
+      const networkClient = fakeNetworkClient(() =>
+        sseResponse([
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "Running it." },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "tool_use", id: "tu_1", name: "Bash", input: {} },
+          },
+          {
+            type: "content_block_delta",
+            index: 1,
+            delta: { type: "input_json_delta", partial_json: '{"command":"ls"}' },
+          },
+          { type: "content_block_stop", index: 1 },
+          // The trailing empty text block.
+          { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+          { type: "content_block_stop", index: 2 },
+          { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null } },
+        ]),
+      )
+
+      const response = await sendMessageFull({
+        auth,
+        messages,
+        model: "claude-opus-4-8",
+        stream: true,
+        networkClient,
+      })
+
+      expect(response.blocks).toEqual([
+        { type: "text", text: "Running it." },
+        { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+      ])
+    })
+
+    it("still fires onTextStop for an empty text block even though it is not persisted", async () => {
+      let textStops = 0
+      const networkClient = fakeNetworkClient(() =>
+        sseResponse([
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+        ]),
+      )
+
+      const response = await sendMessageFull({
+        auth,
+        messages,
+        model: "claude-haiku-4-5-20251001",
+        stream: true,
+        networkClient,
+        onTextStop: () => {
+          textStops++
+        },
+      })
+
+      expect(textStops).toBe(1)
+      expect(response.blocks).toEqual([])
+    })
+  })
 })
