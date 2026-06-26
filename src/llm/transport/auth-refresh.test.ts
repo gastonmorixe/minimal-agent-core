@@ -11,10 +11,10 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { StreamedResponse } from "../../client/types.ts"
 import type { ProviderAuth } from "../provider.ts"
 
 import { type AuthRefreshState, is401, withAuthRefresh } from "./auth-refresh.ts"
+import type { StreamedResponse } from "./types.ts"
 
 function resp(text: string): StreamedResponse {
   return { blocks: [{ type: "text", text }], text, stopReason: "end_turn" }

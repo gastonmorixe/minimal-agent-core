@@ -28,7 +28,6 @@
  * @module llm/transport/retry
  */
 
-import type { StreamedResponse } from "../../client/types.ts"
 import { diag } from "../../diagnostic-bus.ts"
 import {
   TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
@@ -36,6 +35,8 @@ import {
 } from "../../network/index.ts"
 import { abortableSleep } from "../../retry.ts"
 import { GLOBAL_STATUS_BUS } from "../../status.ts"
+
+import type { StreamedResponse } from "./types.ts"
 
 /**
  * Stream-error types that retry on the FAST curve. Mirrors

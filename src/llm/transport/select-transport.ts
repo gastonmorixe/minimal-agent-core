@@ -36,11 +36,11 @@
  * @module llm/transport/select-transport
  */
 
-import type { SendOptions, StreamedResponse } from "../../client/types.ts"
 import { sendMessage } from "../../client.ts"
 import { resolveModel } from "../model-registry.ts"
 
 import { canonicalSendFn } from "./canonical-send.ts"
+import type { SendOptions, StreamedResponse } from "./types.ts"
 
 export type TransportMode = "auto" | "all" | "off"
 
