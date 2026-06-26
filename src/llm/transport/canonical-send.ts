@@ -55,6 +55,7 @@ import {
   legacyAuthToProviderAuth,
   sendOptionsToCanonical,
 } from "../adapter-legacy.ts"
+import type { CanonicalEvent } from "../canonical-events.ts"
 import { resolveModel } from "../model-registry.ts"
 import type { ProviderAuth, RunContext } from "../provider.ts"
 import { run } from "../run.ts"
@@ -62,6 +63,38 @@ import { run } from "../run.ts"
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
 import { withRetry } from "./retry.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
+
+/**
+ * Intercept the canonical event stream to drive the status-label lifecycle.
+ *
+ * The legacy `client.ts` updates the label through explicit calls after
+ * each SSE-parser stage: "Waiting for response" when headers arrive, then
+ * "Receiving stream" on the first data chunk. The canonical path never did
+ * this, so the initial "Sending request" label persisted even once response
+ * bytes were flowing in — the ↑/↓ arrow would correctly flip to ↓ but the
+ * label stayed misleading.
+ *
+ * This wrapper fires label transitions at the corresponding canonical-event
+ * boundaries:
+ *
+ *   - `message_start` → `"Receiving stream"` (response content has begun)
+ *
+ * Additional transitions ("Thinking", "Writing response") are handled by
+ * the client.ts SSE parser for the legacy Anthropic path; they are not
+ * reproduced here because the canonical event bridge delegates those
+ * lifecycle callbacks to the caller's own hooks.
+ */
+async function* updateLabelsFromEvents(
+  events: AsyncIterable<CanonicalEvent>,
+  statusHandle: { update(label: string): void },
+): AsyncGenerator<CanonicalEvent> {
+  for await (const ev of events) {
+    if (ev.type === "message_start") {
+      statusHandle.update("Receiving stream")
+    }
+    yield ev
+  }
+}
 
 /**
  * Resolve the credential for the request's PROVIDER, not the host's single
@@ -188,7 +221,8 @@ export async function* canonicalSendFn(
         },
       },
     )
-    return canonicalEventsToLegacyStream(events, {
+    const labelledEvents = updateLabelsFromEvents(events, requestStatus)
+    return canonicalEventsToLegacyStream(labelledEvents, {
       onThinkingStart: opts.onThinkingStart,
       onThinkingDelta: opts.onThinkingDelta,
       onThinkingStop: opts.onThinkingStop,
