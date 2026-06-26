@@ -107,7 +107,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "llm/transport/auth-refresh.test.ts",
   "llm/transport/canonical-send.test.ts",
   "llm/transport/retry.test.ts",
-  "llm/transport/select-transport.test.ts",
   "llm/transport/watchdog.test.ts",
   "net-dbg.test.ts",
   "network/network.test.ts",

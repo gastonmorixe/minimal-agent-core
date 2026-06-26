@@ -459,9 +459,9 @@ export class Agent {
     this.shortTermSnapshot = opts.shortTermSnapshot ?? null
     this.tasksAttachment = opts.tasksAttachment ?? null
     this.turnAttachments = opts.turnAttachments ?? []
-    // Default transport dispatches per-model: Anthropic → legacy sendMessage,
-    // others → canonical run() (so --model gpt-* actually reaches its vendor).
-    // Callers/tests can still inject any sendFn. See select-transport.ts.
+    // Default transport routes every request through the canonical run() so
+    // each model reaches its own provider adapter. Callers/tests can still
+    // inject any sendFn. See select-transport.ts.
     this.sendFn = opts.sendFn ?? selectedTransport
     this.networkClient = opts.networkClient
     this.store = opts.store ?? null
