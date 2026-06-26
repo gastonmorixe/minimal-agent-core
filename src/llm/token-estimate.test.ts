@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { defaultCapabilities } from "./capabilities.ts"
 import { clearModelRegistry, type ModelEntry, registerModel } from "./model-registry.ts"
-import { ANTHROPIC_OPUS_4X_STANDARD } from "./pricing.ts"
+import type { MTokRate } from "./pricing.ts"
 import {
   DEFAULT_CHARS_PER_TOKEN,
   estimateTokensForModel,
@@ -12,6 +12,14 @@ import {
 
 afterEach(() => clearModelRegistry())
 
+const TEST_RATE: MTokRate = {
+  inputUSD: 5,
+  outputUSD: 25,
+  cacheWriteUSD: 6.25,
+  cacheReadUSD: 0.5,
+  webSearchPerCallUSD: 0.01,
+}
+
 function buildEntry(overrides: Partial<ModelEntry> = {}): ModelEntry {
   return {
     id: "test-model",
@@ -19,7 +27,7 @@ function buildEntry(overrides: Partial<ModelEntry> = {}): ModelEntry {
     surfaceId: "custom",
     displayName: "Test Model",
     capabilities: defaultCapabilities(),
-    pricing: ANTHROPIC_OPUS_4X_STANDARD,
+    pricing: TEST_RATE,
     ...overrides,
   }
 }

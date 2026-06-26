@@ -20,15 +20,7 @@ import { makeCharRatioEstimator } from "@minimal-agent/plugin-api/llm/token-esti
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { registerModel } from "../../src/llm/model-registry.ts"
-import {
-  ANTHROPIC_FABLE_5,
-  ANTHROPIC_HAIKU_45,
-  ANTHROPIC_OPUS_4X_FAST_LEGACY,
-  ANTHROPIC_OPUS_4X_STANDARD,
-  ANTHROPIC_OPUS_48_FAST,
-  ANTHROPIC_SONNET_STANDARD,
-  type MTokRate,
-} from "../../src/llm/pricing.ts"
+import type { MTokRate } from "../../src/llm/pricing.ts"
 
 import {
   CAPS_FABLE_5,
@@ -39,6 +31,14 @@ import {
   CAPS_SONNET_45,
   CAPS_SONNET_46,
 } from "./capabilities.ts"
+import {
+  ANTHROPIC_FABLE_5,
+  ANTHROPIC_HAIKU_45,
+  ANTHROPIC_OPUS_4X_FAST_LEGACY,
+  ANTHROPIC_OPUS_4X_STANDARD,
+  ANTHROPIC_OPUS_48_FAST,
+  ANTHROPIC_SONNET_STANDARD,
+} from "./pricing.ts"
 
 /**
  * The neutral {@link ProviderModelSpec} plus the optional per-request pricing

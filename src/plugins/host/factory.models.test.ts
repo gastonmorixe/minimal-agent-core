@@ -19,7 +19,7 @@ import {
   registerModel,
   setDefaultModelId,
 } from "../../llm/model-registry.ts"
-import { ANTHROPIC_OPUS_4X_STANDARD } from "../../llm/pricing.ts"
+import type { MTokRate } from "../../llm/pricing.ts"
 
 import { buildPluginHost } from "./factory.ts"
 
@@ -30,6 +30,14 @@ import { buildPluginHost } from "./factory.ts"
 beforeEach(() => clearModelRegistry())
 afterEach(() => clearModelRegistry())
 
+const TEST_RATE: MTokRate = {
+  inputUSD: 5,
+  outputUSD: 25,
+  cacheWriteUSD: 6.25,
+  cacheReadUSD: 0.5,
+  webSearchPerCallUSD: 0.01,
+}
+
 function entry(overrides: Partial<ModelEntry> = {}): ModelEntry {
   return {
     id: "test-model-1",
@@ -38,7 +46,7 @@ function entry(overrides: Partial<ModelEntry> = {}): ModelEntry {
     displayName: "Test Model 1",
     tags: ["cheap", "production"],
     capabilities: defaultCapabilities(),
-    pricing: ANTHROPIC_OPUS_4X_STANDARD,
+    pricing: TEST_RATE,
     ...overrides,
   }
 }
