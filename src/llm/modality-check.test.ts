@@ -77,10 +77,7 @@ describe("stripUnsupportedModalities", () => {
     imageMsg,
     {
       role: "user",
-      content: [
-        { type: "text", text: "an image:" },
-        imageMsg.content[0]!,
-      ],
+      content: [{ type: "text", text: "an image:" }, imageMsg.content[0]!],
     },
   ]
 

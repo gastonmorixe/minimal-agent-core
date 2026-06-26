@@ -65,7 +65,10 @@ export async function* run(req: CanonicalRequest, opts: RunOptions): AsyncIterab
   let effective: CanonicalRequest = req
   if (!validation.ok) {
     if (opts.acceptDegrade && validation.degrade) {
-      diag.warn("capability.degrade", `model ${model.id} downgraded by stripping ${validation.errors.length} unsupported feature(s): ${validation.errors.map((e) => e.capability).join(", ")}`)
+      diag.warn(
+        "capability.degrade",
+        `model ${model.id} downgraded by stripping ${validation.errors.length} unsupported feature(s): ${validation.errors.map((e) => e.capability).join(", ")}`,
+      )
       effective = validation.degrade
     } else {
       throw new UnsupportedCapabilityError(validation.errors, validation.degrade)
