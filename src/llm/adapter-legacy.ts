@@ -29,14 +29,6 @@
  */
 
 import type { AuthResult } from "../auth.ts"
-import type {
-  ContentBlock as LegacyContentBlock,
-  DocumentBlock as LegacyDocumentBlock,
-  ImageBlock as LegacyImageBlock,
-  Message as LegacyMessage,
-  SendOptions as LegacySendOptions,
-  StreamedResponse as LegacyStreamedResponse,
-} from "../client.ts"
 import type { SystemBlock } from "../headers.ts"
 
 import type { CanonicalEvent, CanonicalUsage, StopDetails, StopReason } from "./canonical-events.ts"
@@ -50,7 +42,17 @@ import type {
 import type { CanonicalRequest, ThinkingConfig } from "./canonical-request.ts"
 import type { CanonicalToolDefinition } from "./canonical-tools.ts"
 import type { EffortLevel } from "./capabilities.ts"
+import type {
+  ContentBlock as LegacyContentBlock,
+  DocumentBlock as LegacyDocumentBlock,
+  ImageBlock as LegacyImageBlock,
+  Message as LegacyMessage,
+} from "./messages.ts"
 import type { ProviderAuth } from "./provider.ts"
+import type {
+  SendOptions as LegacySendOptions,
+  StreamedResponse as LegacyStreamedResponse,
+} from "./transport/types.ts"
 
 // ---------------------------------------------------------------------------
 // canonical → legacy SendOptions

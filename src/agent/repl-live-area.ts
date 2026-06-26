@@ -12,9 +12,9 @@
 
 import { type AbortReason, abortBus } from "../abort-bus.ts"
 import type { AuthResult } from "../auth.ts"
-import type { ModelInfo } from "../client.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
 import type { QueueKeyHandler } from "../editor/types.ts"
+import type { ModelInfo } from "../llm/transport/types.ts"
 import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"

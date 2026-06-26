@@ -20,7 +20,7 @@
  * transcripts) before the resumed REPL prompt.
  */
 
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./llm/messages.ts"
 import type { ModeManager } from "./modes.ts"
 import { isRuntimeAttachmentBlock } from "./runtime-attachments"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"

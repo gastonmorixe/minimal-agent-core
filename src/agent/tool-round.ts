@@ -20,7 +20,7 @@
  */
 
 import { type BlobStore, type BlobWriteResult, formatRawOutputFooter } from "../blob-store.ts"
-import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../client.ts"
+import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes.ts"
 import {

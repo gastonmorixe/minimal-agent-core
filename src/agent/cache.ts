@@ -8,7 +8,7 @@
  * @module agent/cache
  */
 
-import type { ContentBlock, Message } from "../client.ts"
+import type { ContentBlock, Message } from "../llm/messages.ts"
 
 /**
  * Returns a defensive copy of `messages` with the rolling tail

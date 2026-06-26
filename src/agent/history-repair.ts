@@ -11,7 +11,7 @@
  * @module agent/history-repair
  */
 
-import type { Message, ToolResultBlock, ToolUseBlock } from "../client.ts"
+import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
 /**
  * Minimal structural view of the session store this module touches: it only

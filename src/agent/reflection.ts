@@ -19,8 +19,8 @@
  * @module agent/reflection
  */
 
-import type { ContentBlock } from "../client.ts"
 import type { InputCaptureStack } from "../input-capture-stack.ts"
+import type { ContentBlock } from "../llm/messages.ts"
 import type { StatusBus } from "../status.ts"
 
 /**
