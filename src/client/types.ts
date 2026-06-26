@@ -13,248 +13,34 @@
 
 import type { AuthResult } from "../auth.ts"
 import type { RequestType, SystemBlock } from "../headers.ts"
+import type { BlockCacheControl, ContentBlock, Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
 // ---------------------------------------------------------------------------
-// Content block types (matching v2.1.118 traffic)
+// Conversation types (re-exported from the neutral home)
 // ---------------------------------------------------------------------------
 
 /**
- * A plain text content block.
- *
- * Used in user messages (input prose) and assistant messages (response text).
- * The smallest unit of conversation content.
- *
- * @example
- * ```ts
- * { type: "text", text: "Hello, world!" }
- * ```
+ * The conversation message + content-block vocabulary now lives in the
+ * provider-neutral `src/llm/messages.ts`. Re-exported here so existing
+ * importers that reach these through the `client.ts` barrel keep resolving
+ * while the legacy transport is dissolved. New code: import from
+ * `src/llm/messages.ts` directly.
  */
-/**
- * `cache_control` shape accepted on individual content blocks. Live 2.1.118
- * traffic puts this on the LAST block of the LAST message every conversation
- * turn (rolling-tail breakpoint) with `ttl:"1h"` and no `scope`.
- */
-export type BlockCacheControl = {
-  type: "ephemeral"
-  ttl?: "5m" | "1h"
-  scope?: "global"
-}
-
-export interface TextBlock {
-  type: "text"
-  text: string
-  cache_control?: BlockCacheControl
-}
-
-/**
- * An assistant thinking block. Required by `redact-thinking-2026-02-12` beta.
- *
- * In v2.1.91 the `thinking` field is empty (the model's reasoning is
- * server-side only) but the `signature` field contains a cryptographic
- * proof that the model emitted thinking. Both fields must be preserved
- * verbatim in conversation history for subsequent turns : the server
- * verifies the signature on every request.
- *
- * @example
- * ```ts
- * { type: "thinking", thinking: "", signature: "EpUCClkIDBgC..." }
- * ```
- */
-export interface ThinkingBlock {
-  type: "thinking"
-  /** Visible reasoning text. Empty when redact-thinking is active. */
-  thinking: string
-  /** Cryptographic signature verifying the thinking happened. */
-  signature: string
-  cache_control?: BlockCacheControl
-}
-
-/**
- * An encrypted ("redacted") reasoning block. The API emits these instead of a
- * plain {@link ThinkingBlock} when its safety systems encrypt the model's
- * reasoning. The `data` payload is opaque : we never introspect it, but we
- * MUST round-trip it verbatim. The Messages API rejects any request whose
- * latest assistant turn dropped or altered a `thinking`/`redacted_thinking`
- * block ("blocks ... cannot be modified. These blocks must remain as they were
- * in the original response."), so the SSE parser stores these blocks and the
- * send path re-emits them unchanged. See `src/client.ts` content_block_start.
- */
-export interface RedactedThinkingBlock {
-  type: "redacted_thinking"
-  /** Opaque encrypted reasoning payload. Re-sent verbatim, never parsed. */
-  data: string
-  cache_control?: BlockCacheControl
-}
-
-/**
- * A tool invocation requested by the assistant.
- *
- * The model emits these when it wants to call a tool. The agent should
- * execute the tool, then send back a {@link ToolResultBlock} with the same
- * `tool_use_id` to keep the conversation paired up.
- *
- * **`caller` field** (new in v2.1.91): indicates whether the tool call
- * originated from the model directly or from a sub-agent / nested context.
- * Currently always `{type:"direct"}` in observed traffic.
- *
- * @example
- * ```ts
- * {
- *   type: "tool_use",
- *   id: "toolu_01ABC...",
- *   name: "Bash",
- *   input: { command: "ls -la" },
- *   caller: { type: "direct" }
- * }
- * ```
- */
-export interface ToolUseBlock {
-  type: "tool_use"
-  /** Unique ID for this call. Used to pair with the matching tool_result. */
-  id: string
-  /** Tool name (must match a {@link ToolDefinition.name}). */
-  name: string
-  /** Parsed JSON input matching the tool's `input_schema`. */
-  input: Record<string, unknown>
-  /** Origin of the call (currently always `{type:"direct"}`). */
-  caller?: { type: string }
-  cache_control?: BlockCacheControl
-}
-
-/**
- * A tool execution result sent back from the user (agent) to the model.
- *
- * Must reference the original `tool_use` block via `tool_use_id`. The
- * `content` field is the tool's stdout/output as a string. Set `is_error`
- * to true if the tool failed : the model uses this to decide whether to
- * retry, pick a different tool, or give up.
- *
- * @example
- * ```ts
- * {
- *   type: "tool_result",
- *   tool_use_id: "toolu_01ABC...",
- *   content: "total 24\ndrwxr-xr-x 5 user  staff   160 Apr  6 02:18 src\n..."
- * }
- * ```
- */
-export interface ToolResultBlock {
-  type: "tool_result"
-  /** The `id` from the `tool_use` block this result corresponds to. */
-  tool_use_id: string
-  /** Tool output. Can be a plain string or nested content blocks. */
-  content: string | ContentBlock[]
-  /** True if the tool failed. */
-  is_error?: boolean
-  cache_control?: BlockCacheControl
-}
-
-/**
- * An image input block (Anthropic `vision`). One of three mutually-exclusive
- * `source` shapes:
- *
- * - `base64`: inline bytes + `media_type` (e.g. `image/jpeg`). What the CLI
- *   sends today; verified on the wire.
- * - `url`: Anthropic fetches the image (not available on Bedrock/Vertex).
- * - `file`: a Files API `file_id` (beta `files-api-2025-04-14`). Note the wire
- *   `source.type` is `"file"`, not `"file_id"`.
- *
- * Accepted formats: JPEG, PNG, GIF, WebP. See
- * `private/multimodality-ingestion/anthropic/10-anthropic-image-ingestion.md`.
- */
-export interface ImageBlock {
-  type: "image"
-  source:
-    | { type: "base64"; media_type: string; data: string }
-    | { type: "url"; url: string }
-    | { type: "file"; file_id: string }
-  cache_control?: BlockCacheControl
-}
-
-/**
- * A document input block (Anthropic PDF / plain-text support). Same `source`
- * trichotomy as {@link ImageBlock} plus an inline `text` source for plain text.
- * Optional `title` / `context` / `citations` mirror the Files API doc.
- */
-export interface DocumentBlock {
-  type: "document"
-  source:
-    | { type: "base64"; media_type: string; data: string }
-    | { type: "url"; url: string }
-    | { type: "file"; file_id: string }
-    | { type: "text"; media_type: "text/plain"; data: string }
-  title?: string
-  context?: string
-  citations?: { enabled: boolean }
-  cache_control?: BlockCacheControl
-}
-
-/**
- * Union of all content block types observed in v2.1.91 traffic.
- *
- * Used as the element type of {@link Message.content} when content is an
- * array (block-based mode). Plain string content is also still supported
- * for simple user messages but the API normalizes it to a single text block.
- */
-export type ContentBlock =
-  | TextBlock
-  | ThinkingBlock
-  | RedactedThinkingBlock
-  | ToolUseBlock
-  | ToolResultBlock
-  | ImageBlock
-  | DocumentBlock
-
-// ---------------------------------------------------------------------------
-// Message and options types
-// ---------------------------------------------------------------------------
-
-/**
- * A single conversation turn.
- *
- * Plain `string` content is supported for simple user messages but the API
- * normalizes it to `[{type:"text", text:"..."}]` internally. New code should
- * always use the array form for consistency with the v2.1.91 wire format.
- *
- * @example
- * ```ts
- * // Simple text message:
- * { role: "user", content: [{ type: "text", text: "hi" }] }
- *
- * // Assistant with thinking and tool call:
- * {
- *   role: "assistant",
- *   content: [
- *     { type: "thinking", thinking: "", signature: "..." },
- *     { type: "tool_use", id: "toolu_01...", name: "Bash", input: {command: "ls"} }
- *   ]
- * }
- *
- * // Tool result follow-up:
- * {
- *   role: "user",
- *   content: [{ type: "tool_result", tool_use_id: "toolu_01...", content: "..." }]
- * }
- * ```
- */
-export interface Message {
-  /**
-   * Conversation role.
-   *
-   * - `"user"`, `"assistant"`: the bread-and-butter pair every model
-   *   supports.
-   * - `"system"`: **mid-conversation** operator message, gated by the
-   *   `mid-conversation-system-2026-04-07` beta (opus-4-6+ / sonnet-4-6).
-   *   Distinct from the TOP-LEVEL `system` field on the request body
-   *   (which is the system prompt prefix). When the beta isn't sent,
-   *   the server 400s on a `role:"system"` entry inside `messages[]`.
-   */
-  role: "user" | "assistant" | "system"
-  content: string | ContentBlock[]
-}
+export type {
+  BlockCacheControl,
+  ContentBlock,
+  DocumentBlock,
+  ImageBlock,
+  Message,
+  RedactedThinkingBlock,
+  TextBlock,
+  ThinkingBlock,
+  ToolResultBlock,
+  ToolUseBlock,
+} from "../llm/messages.ts"
 
 /**
  * Options for {@link sendMessage} and friends.
