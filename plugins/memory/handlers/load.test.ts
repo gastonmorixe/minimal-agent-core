@@ -15,7 +15,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import type { PromptFragmentContext } from "@minimal-agent/plugin-api/types/plugin"
 
@@ -91,6 +91,15 @@ function primeNamespaced(home: string, cwd: string, opts: { global?: string; pro
 
 const ORIGINAL_NAMESPACE = process.env.MINIMAL_AGENT_MEMORY_NAMESPACE
 const ORIGINAL_HOME = process.env.HOME
+const ORIGINAL_MA_HOME = process.env.MINIMAL_AGENT_HOME
+
+beforeEach(() => {
+  // These tests redirect the data tree via `process.env.HOME`. An
+  // inherited MINIMAL_AGENT_HOME (the harness exports one) would win
+  // over HOME in the store's home resolver and route reads at the
+  // user's real ~/.minimal-agent, so clear it for the duration.
+  delete process.env.MINIMAL_AGENT_HOME
+})
 
 afterEach(() => {
   if (ORIGINAL_NAMESPACE === undefined) {
@@ -100,6 +109,8 @@ afterEach(() => {
   }
   if (ORIGINAL_HOME === undefined) delete process.env.HOME
   else process.env.HOME = ORIGINAL_HOME
+  if (ORIGINAL_MA_HOME === undefined) delete process.env.MINIMAL_AGENT_HOME
+  else process.env.MINIMAL_AGENT_HOME = ORIGINAL_MA_HOME
 })
 
 /** Build a config with the given inject mode + summary defaults. */

@@ -14,4 +14,4 @@ You are minimal-agent, an interactive CLI agent that helps users with software e
 
 # minimal-agent's own files
 - Config and state live under `~/.minimal-agent/`. This session's transcript is `~/.minimal-agent/sessions/<session_id>.jsonl`.
-- With `MINIMAL_AGENT_NET_DBG=1`, network request/response logs land under `<cwd>/.net-dbg/`, in a dated folder whose name ends with `-minimal-agent-<session_id>`.
+- With `MINIMAL_AGENT_NET_DBG=1`, network request/response logs land under `~/.minimal-agent/net-dbg/` (honoring `MINIMAL_AGENT_HOME`), in a dated folder whose name ends with `-minimal-agent-<session_id>`.

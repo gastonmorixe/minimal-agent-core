@@ -105,7 +105,10 @@ describe("withRetry", () => {
     expect(success?.structuredData?.retries).toBe(1)
   })
 
-  it("uses the SLOW curve for rate_limit_error", async () => {
+  it.each([
+    "rate_limit_error",
+    "stream_closed_without_terminal",
+  ])("uses the SLOW curve for %s", async (tag) => {
     const origRandom = Math.random
     Math.random = () => 0
     const { events, dispose } = collectDiag()
@@ -114,7 +117,7 @@ describe("withRetry", () => {
       await drain(
         withRetry(async function* () {
           calls++
-          if (calls === 1) throw tagged("rate_limit_error")
+          if (calls === 1) throw tagged(tag)
           yield "ok"
           return resp("ok")
         }),
@@ -123,7 +126,9 @@ describe("withRetry", () => {
       Math.random = origRandom
       dispose()
     }
-    expect(events.find((e) => e.source === "api.retry")?.structuredData?.curve).toBe("slow")
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.["error-type"]).toBe(tag)
+    expect(retry?.structuredData?.curve).toBe("slow")
   })
 
   it("retries rate_limit_error on the SLOW curve and recovers (does not stop the agent)", async () => {

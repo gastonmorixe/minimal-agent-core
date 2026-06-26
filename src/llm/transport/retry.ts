@@ -69,7 +69,10 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
  * window sub-second. It retries forever because the window can clear on
  * its own. Keep in sync with `client.ts`'s `SLOW_RETRY_TYPES`.
  */
-const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set(["rate_limit_error"])
+const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set([
+  "rate_limit_error",
+  "stream_closed_without_terminal",
+])
 
 const RETRY_FAST_BASE_DELAY_MS = 200
 const RETRY_SLOW_BASE_DELAY_MS = 30_000

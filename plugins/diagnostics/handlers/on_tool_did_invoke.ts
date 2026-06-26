@@ -18,8 +18,9 @@
  * @module plugins/diagnostics/handlers/on_tool_did_invoke
  */
 import { existsSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { loadConfig } from "../lib/config.ts"
 import { findProjectRoot } from "../lib/detect.ts"
@@ -87,7 +88,7 @@ function parseJsoncish(raw: string): unknown {
 function configPath(): string {
   const override = process.env.MINIMAL_AGENT_CONFIG_PATH
   if (override) return override
-  return join(homedir(), ".minimal-agent", "config.jsonc")
+  return join(resolveAgentHome(), "config.jsonc")
 }
 
 function serviceFor(root: string): DiagnosticsService {

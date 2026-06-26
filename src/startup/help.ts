@@ -199,7 +199,10 @@ function buildHelpSections(): HelpSection[] {
           c.cyan("MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1"),
           "Allow fetch fallback after HTTP/2 failure",
         ),
-        row(c.cyan("MINIMAL_AGENT_NET_DBG=1"), "Mirror raw HTTP req/res to ./.net-dbg/"),
+        row(
+          c.cyan("MINIMAL_AGENT_NET_DBG=1"),
+          "Mirror raw HTTP req/res to ~/.minimal-agent/net-dbg/",
+        ),
         row(c.cyan("CLAUDE_CODE_EXTRA_METADATA"), "JSON object merged into metadata.user_id"),
         row(c.cyan("MINIMAL_AGENT_SPINNER"), "Spinner preset id", ["same values as --spinner"]),
         row(c.cyan("MINIMAL_AGENT_EFFORT"), "Reasoning effort", [

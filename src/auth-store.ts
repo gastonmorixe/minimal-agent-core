@@ -109,8 +109,9 @@
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { parseJsonc } from "./jsonc.ts"
 
@@ -245,7 +246,7 @@ function describe(v: unknown): string {
 export function defaultAuthFilePath(): string {
   const override = process.env.MINIMAL_AGENT_AUTH_FILE?.trim()
   if (override) return override
-  return join(homedir(), ".minimal-agent", "auth.jsonc")
+  return join(resolveAgentHome(), "auth.jsonc")
 }
 
 /** Leading banner regenerated into the file on every save. */

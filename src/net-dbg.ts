@@ -3,8 +3,11 @@
  * file-quad scheme (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
  *
  * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1`. Logs go to
- * `${cwd}/.net-dbg/${epoch}-${human-date}/`. Each call produces four
- * files keyed by a per-process sequence number.
+ * `<agent-home>/net-dbg/${epoch}-${human-date}/` (honoring
+ * `MINIMAL_AGENT_HOME`), so captures from every project land in one
+ * relocation-correct place instead of scattering `.net-dbg/` dirs across
+ * working directories. Each call produces four files keyed by a per-process
+ * sequence number.
  *
  * Designed to be called from {@link sendMessage} in client.ts. The response
  * body is tee'd so the caller still gets a readable stream for SSE parsing.
@@ -12,6 +15,8 @@
 
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { resolveNetDbgDir } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { getSessionId } from "./session-id.ts"
 
@@ -76,15 +81,28 @@ export function formatSessionDirName(epoch: number, d: Date, sessionId: string):
   return `${epoch}-${human}-minimal-agent-${sessionId}`
 }
 
+/**
+ * Pure: the absolute leaf directory one recording session writes into,
+ * `<agent-home>/net-dbg/<formatSessionDirName(...)>`. The base resolves
+ * against the agent home ({@link resolveNetDbgDir}, honoring
+ * `MINIMAL_AGENT_HOME`), NOT the cwd. Exported and env-injected so the
+ * placement logic is testable without touching the filesystem or the real
+ * environment.
+ */
+export function netDbgSessionDir(
+  epoch: number,
+  d: Date,
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(resolveNetDbgDir(env), formatSessionDirName(epoch, d, sessionId))
+}
+
 function ensureSessionDir(): string | null {
   if (!ENABLED) return null
   if (SESSION_DIR && existsSync(SESSION_DIR)) return SESSION_DIR
 
-  const dir = join(
-    process.cwd(),
-    ".net-dbg",
-    formatSessionDirName(Date.now(), new Date(), getSessionId()),
-  )
+  const dir = netDbgSessionDir(Date.now(), new Date(), getSessionId())
   mkdirSync(dir, { recursive: true })
   SESSION_DIR = dir
   return dir

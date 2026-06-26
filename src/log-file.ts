@@ -48,13 +48,23 @@
  */
 
 import { appendFileSync as realAppend, mkdirSync as realMkdir } from "node:fs"
-import { homedir, hostname as osHostname } from "node:os"
+import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { type DiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
 import { formatRfc5424 } from "./syslog.ts"
 
-const DEFAULT_DIR = join(homedir(), ".minimal-agent", "logs")
+/**
+ * Default logs directory: `<agent-home>/logs`. Resolved lazily (per
+ * construction) so it honors a `MINIMAL_AGENT_HOME` relocation the host
+ * published at boot, instead of capturing `homedir()` at module-load time.
+ */
+function defaultLogsDir(): string {
+  return join(resolveAgentHome(), "logs")
+}
+
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024 // 50 MiB
 
 export interface FileLogSinkFs {
@@ -121,7 +131,7 @@ export class FileLogSink {
   private disposeFn: (() => void) | null = null
 
   constructor(sid: string, opts: FileLogSinkOptions = {}) {
-    const dir = opts.dir ?? DEFAULT_DIR
+    const dir = opts.dir ?? defaultLogsDir()
     this.path = join(dir, `ma-session-${sid}.log`)
     this.opts = {
       fs: opts.fs ?? REAL_FS,

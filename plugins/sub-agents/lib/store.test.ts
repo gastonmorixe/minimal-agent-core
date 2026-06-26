@@ -4,7 +4,13 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { nextId, parseRecords, SubagentStore, serializeRecords } from "./store.ts"
+import {
+  defaultSessionsDir,
+  nextId,
+  parseRecords,
+  SubagentStore,
+  serializeRecords,
+} from "./store.ts"
 import { type SubagentRecord, sessionId, subagentId } from "./types.ts"
 
 function rec(id: string): SubagentRecord {
@@ -98,5 +104,31 @@ describe("SubagentStore", () => {
     store.upsert(rec("A1"))
     store.replaceAll([rec("A9")])
     expect(store.all().map((r) => r.id)).toEqual([subagentId("A9")])
+  })
+})
+
+describe("defaultSessionsDir", () => {
+  it("relocates the sessions dir under MINIMAL_AGENT_HOME (resolver honors the override)", () => {
+    const relocated = join(tmpdir(), "subagents-relocate-home")
+    expect(defaultSessionsDir({ MINIMAL_AGENT_HOME: relocated } as NodeJS.ProcessEnv)).toBe(
+      join(relocated, "sessions"),
+    )
+  })
+
+  it("falls back to $HOME/.minimal-agent/sessions when no override is set", () => {
+    // No MINIMAL_AGENT_HOME in the passed env → resolver uses HOME. Passing an
+    // explicit env keeps this assertion robust against the harness's ambient var.
+    const home = join(tmpdir(), "subagents-home-fallback")
+    expect(defaultSessionsDir({ HOME: home } as NodeJS.ProcessEnv)).toBe(
+      join(home, ".minimal-agent", "sessions"),
+    )
+  })
+
+  it("MINIMAL_AGENT_HOME wins over HOME", () => {
+    const override = join(tmpdir(), "subagents-override-wins")
+    const home = join(tmpdir(), "subagents-home-loses")
+    expect(
+      defaultSessionsDir({ MINIMAL_AGENT_HOME: override, HOME: home } as NodeJS.ProcessEnv),
+    ).toBe(join(override, "sessions"))
   })
 })

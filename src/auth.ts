@@ -54,8 +54,9 @@
  * @module auth
  */
 
-import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import { clearProviderCredentials } from "./auth-strategies.ts"
@@ -496,11 +497,7 @@ export async function getAuth(
   let lastIssuedToken = oauth.accessToken
   let lastIssuedRefreshToken = oauth.refreshToken
   let lastIssuedExpiresAt = oauth.expiresAt ?? 0
-  const lockPath = join(
-    homedir(),
-    ".minimal-agent",
-    `.refresh-${sanitizeForFilename(service)}.lock`,
-  )
+  const lockPath = join(resolveAgentHome(), `.refresh-${sanitizeForFilename(service)}.lock`)
 
   const doRefreshUnlocked = async (): Promise<AuthResult> => {
     const current = read(service) ?? creds

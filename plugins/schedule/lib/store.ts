@@ -20,8 +20,9 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { resolveSessionsDir } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { generateId } from "./id.ts"
 
@@ -96,7 +97,7 @@ export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 export function defaultCronDir(): string {
   const override = process.env.MINIMAL_AGENT_CRON_DIR
   if (override && override.length > 0) return override
-  return join(homedir(), ".minimal-agent", "sessions")
+  return resolveSessionsDir()
 }
 
 /** On-disk path for a session's cron file. */

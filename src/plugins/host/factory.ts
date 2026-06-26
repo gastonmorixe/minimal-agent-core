@@ -15,6 +15,12 @@
  * @module plugins/host/factory
  */
 
+import {
+  resolveAgentHome,
+  resolveNetDbgDir,
+  resolveSessionsDir,
+} from "@minimal-agent/plugin-api/utils/agent-paths"
+
 import type { PluginLogger } from "../../diagnostic-bus.ts"
 import {
   findModel,
@@ -40,6 +46,13 @@ export interface BuildHostOptions {
   sessionsDir?: string
   /** Clock override (tests). */
   now?: () => number
+  /**
+   * Environment the `paths` capability resolves against. Defaults to
+   * `process.env`, which carries the boot-published `MINIMAL_AGENT_HOME`.
+   * Injectable so a test can drive path resolution without mutating the real
+   * environment.
+   */
+  env?: NodeJS.ProcessEnv
 }
 
 /**
@@ -77,6 +90,15 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           modelsRegistry: Object.freeze({
             register: registerModel,
             setDefault: setDefaultModelId,
+          }),
+        }
+      : {}),
+    ...(has("paths")
+      ? {
+          paths: Object.freeze({
+            home: () => resolveAgentHome(opts.env),
+            sessionsDir: () => resolveSessionsDir(opts.env),
+            netDbgDir: () => resolveNetDbgDir(opts.env),
           }),
         }
       : {}),

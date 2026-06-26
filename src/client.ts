@@ -786,7 +786,7 @@ export async function* sendMessageOnce(
             // returned an empty { blocks: [], text: "", stopReason: null },
             // and the agent loop (agent.ts ~L1017) treated the empty
             // blocks as a natural end-of-turn — no scrollback, no
-            // warning, no retry. See `~/.minimal-agent/.net-dbg/.../*-04-res-body.txt`
+            // warning, no retry. See `~/.minimal-agent/net-dbg/.../*-04-res-body.txt`
             // for the wire shape.
             //
             // We `diag.error(...)` first so all decoupled sinks
@@ -1257,7 +1257,10 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
  * instead of stopping the agent. Observed 2026-05-30 as a hard stop
  * (`rate_limit_error: Rate limited`) because it matched neither set.
  */
-const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set(["rate_limit_error"])
+const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set([
+  "rate_limit_error",
+  "stream_closed_without_terminal",
+])
 
 /**
  * Retry timing.

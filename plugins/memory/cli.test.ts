@@ -32,12 +32,18 @@ import {
 
 let tmpHome: string
 let savedHome: string | undefined
+let savedMaHome: string | undefined
 let savedSid: string | undefined
 
 beforeEach(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "memory-cli-test-"))
   savedHome = process.env.HOME
   process.env.HOME = tmpHome
+  // Clear an inherited MINIMAL_AGENT_HOME so the store's home resolver
+  // falls back to the sandbox `$HOME` we just set instead of the
+  // harness-exported override (which would route at the real home).
+  savedMaHome = process.env.MINIMAL_AGENT_HOME
+  delete process.env.MINIMAL_AGENT_HOME
   // The CLI defaults `--sid` to `$MINIMAL_AGENT_SESSION_ID`. Clear it
   // so the "short-term requires --sid" tests are deterministic when
   // the test runner inherits a parent agent's session id.
@@ -48,6 +54,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedHome === undefined) delete process.env.HOME
   else process.env.HOME = savedHome
+  if (savedMaHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+  else process.env.MINIMAL_AGENT_HOME = savedMaHome
   if (savedSid === undefined) delete process.env.MINIMAL_AGENT_SESSION_ID
   else process.env.MINIMAL_AGENT_SESSION_ID = savedSid
   rmSync(tmpHome, { recursive: true, force: true })

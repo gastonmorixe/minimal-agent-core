@@ -15,8 +15,9 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { type SubagentRecord, type SubagentStatus } from "./types.ts"
 
@@ -43,8 +44,7 @@ export const STALE_MS = 30_000
 
 /** The mesh directory (honors `MINIMAL_AGENT_HOME`). */
 export function presenceDir(env: NodeJS.ProcessEnv = process.env): string {
-  const base = env.MINIMAL_AGENT_HOME?.trim() || join(homedir(), ".minimal-agent")
-  return join(base, "presence")
+  return join(resolveAgentHome(env), "presence")
 }
 
 /** Map a worker's lifecycle kind to a mesh status. */

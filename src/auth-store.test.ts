@@ -26,14 +26,40 @@ afterEach(() => {
 })
 
 describe("defaultAuthFilePath (token-store path — byte-pinned)", () => {
-  it("defaults to ~/.minimal-agent/auth.jsonc", () => {
-    const prev = process.env.MINIMAL_AGENT_AUTH_FILE
+  it("defaults to <agent-home>/auth.jsonc", () => {
+    // The default home now resolves through `resolveAgentHome` (honoring
+    // MINIMAL_AGENT_HOME), so clear BOTH the file override and the home
+    // override to pin the true default, then restore.
+    const prevFile = process.env.MINIMAL_AGENT_AUTH_FILE
+    const prevHome = process.env.MINIMAL_AGENT_HOME
     delete process.env.MINIMAL_AGENT_AUTH_FILE
+    delete process.env.MINIMAL_AGENT_HOME
     try {
-      expect(defaultAuthFilePath()).toBe(join(homedir(), ".minimal-agent", "auth.jsonc"))
+      const home = process.env.HOME?.trim()
+      const expected = home
+        ? join(home, ".minimal-agent", "auth.jsonc")
+        : join(homedir(), ".minimal-agent", "auth.jsonc")
+      expect(defaultAuthFilePath()).toBe(expected)
     } finally {
-      if (prev === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
-      else process.env.MINIMAL_AGENT_AUTH_FILE = prev
+      if (prevFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+      else process.env.MINIMAL_AGENT_AUTH_FILE = prevFile
+      if (prevHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+      else process.env.MINIMAL_AGENT_HOME = prevHome
+    }
+  })
+
+  it("honors a relocated MINIMAL_AGENT_HOME for the default", () => {
+    const prevFile = process.env.MINIMAL_AGENT_AUTH_FILE
+    const prevHome = process.env.MINIMAL_AGENT_HOME
+    delete process.env.MINIMAL_AGENT_AUTH_FILE
+    process.env.MINIMAL_AGENT_HOME = "/tmp/ma-auth-reloc"
+    try {
+      expect(defaultAuthFilePath()).toBe("/tmp/ma-auth-reloc/auth.jsonc")
+    } finally {
+      if (prevFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+      else process.env.MINIMAL_AGENT_AUTH_FILE = prevFile
+      if (prevHome === undefined) delete process.env.MINIMAL_AGENT_HOME
+      else process.env.MINIMAL_AGENT_HOME = prevHome
     }
   })
 

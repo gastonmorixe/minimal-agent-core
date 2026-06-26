@@ -10,6 +10,8 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+
 import type { DiscoverDeps } from "../lib/discovery.ts"
 import type { FsDeps } from "../lib/model.ts"
 
@@ -26,8 +28,7 @@ export function resolveConfigPath(
 ): string {
   const override = env.MINIMAL_AGENT_CONFIG
   if (override) return override
-  const home = env.HOME || homedir()
-  const dir = join(home, ".minimal-agent")
+  const dir = resolveAgentHome(env)
   const jsonc = join(dir, "config.jsonc")
   if (existsSync(jsonc)) return jsonc
   // Prefer writing the documented `.jsonc` form for a fresh file even though

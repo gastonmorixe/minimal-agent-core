@@ -7,10 +7,16 @@ import {
   AGENT_HOME_ENV,
   publishAgentHomeEnv,
   resolveAgentHome,
+  resolveNetDbgDir,
   resolveSessionsDir,
 } from "./agent-paths.ts"
 
-describe("resolveAgentHome", () => {
+// The deep resolution semantics are pinned in the leaf package's own test
+// (`plugin-api/src/utils/agent-paths.test.ts`). These cases verify the host
+// re-export surface is wired (the same functions reach `src/` callers) and
+// cover the host-only `publishAgentHomeEnv`.
+
+describe("resolveAgentHome (re-exported from leaf)", () => {
   it("defaults to ~/.minimal-agent when no override", () => {
     expect(resolveAgentHome({})).toBe(join(homedir(), ".minimal-agent"))
   })
@@ -18,19 +24,17 @@ describe("resolveAgentHome", () => {
   it("honors MINIMAL_AGENT_HOME override", () => {
     expect(resolveAgentHome({ [AGENT_HOME_ENV]: "/tmp/ma-relocated" })).toBe("/tmp/ma-relocated")
   })
+})
 
-  it("trims whitespace in the override", () => {
-    expect(resolveAgentHome({ [AGENT_HOME_ENV]: "  /tmp/x  " })).toBe("/tmp/x")
-  })
-
-  it("ignores a blank override", () => {
-    expect(resolveAgentHome({ [AGENT_HOME_ENV]: "   " })).toBe(join(homedir(), ".minimal-agent"))
+describe("resolveSessionsDir (re-exported from leaf)", () => {
+  it("is <home>/sessions", () => {
+    expect(resolveSessionsDir({ [AGENT_HOME_ENV]: "/tmp/ma" })).toBe("/tmp/ma/sessions")
   })
 })
 
-describe("resolveSessionsDir", () => {
-  it("is <home>/sessions", () => {
-    expect(resolveSessionsDir({ [AGENT_HOME_ENV]: "/tmp/ma" })).toBe("/tmp/ma/sessions")
+describe("resolveNetDbgDir (re-exported from leaf)", () => {
+  it("is <home>/net-dbg", () => {
+    expect(resolveNetDbgDir({ [AGENT_HOME_ENV]: "/tmp/ma" })).toBe("/tmp/ma/net-dbg")
   })
 })
 

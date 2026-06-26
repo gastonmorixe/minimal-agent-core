@@ -1,6 +1,15 @@
 /**
  * Cache observability: debug formatting and live anomaly detection.
  *
+ * ⚠️ TRANSITION NOTE (WORK3 cache decoupling): everything in THIS module is
+ * REQUEST-side Anthropic-shaped cache observability and is consumed ONLY by
+ * the legacy Anthropic client (`src/client.ts`). It is slated to relocate
+ * into the Anthropic provider plugin / die with `client.ts` in WORK1 Phase D.
+ * The provider-NEUTRAL {@link CacheUsage} accounting type moved OUT to
+ * `src/cache-usage.ts` (it must outlive this file because the surviving core
+ * consumer `src/session-tokens.ts` depends on it); it is re-exported here for
+ * back-compat with `client.ts` + this module's own tests.
+ *
  * Two responsibilities, one module so the rendering and the heuristics share
  * a single understanding of the `usage` payload shape:
  *
@@ -26,26 +35,17 @@
  *     \}
  */
 
+import type { CacheUsage } from "./cache-usage.ts"
 import { findModel } from "./llm/model-registry.ts"
+
+// Re-export the neutral accounting type for back-compat: callers that did
+// `import { CacheUsage } from "./cache.ts"` keep resolving while the
+// Anthropic-specific observability below relocates in WORK1 Phase D.
+export type { CacheUsage } from "./cache-usage.ts"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/**
- * The slice of the `usage` payload this module cares about. Extra fields on
- * the wire (e.g. `service_tier`, `inference_geo`) are intentionally ignored.
- */
-export interface CacheUsage {
-  input_tokens?: number
-  output_tokens?: number
-  cache_creation_input_tokens?: number
-  cache_read_input_tokens?: number
-  cache_creation?: {
-    ephemeral_5m_input_tokens?: number
-    ephemeral_1h_input_tokens?: number
-  }
-}
 
 /**
  * Snapshot of the request that produced the observed `usage`. The detector

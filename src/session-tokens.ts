@@ -14,7 +14,7 @@
  * @module session-tokens
  */
 
-import type { CacheUsage } from "./cache.ts"
+import type { CacheUsage } from "./cache-usage.ts"
 
 export interface SessionTokens {
   /** New input tokens (not served from cache). Cumulative across turns. */

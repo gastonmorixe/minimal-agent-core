@@ -52,7 +52,7 @@ import {
   parseReplaySidecarTasks,
 } from "./agent/turn-attachments.ts"
 import { Agent, c, runRepl } from "./agent.ts"
-import { publishAgentHomeEnv, resolveSessionsDir } from "./agent-paths.ts"
+import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent-paths.ts"
 import {
   discoverCredentialedProviders,
   storedProvidersHint,
@@ -477,7 +477,7 @@ async function main() {
       runListPluginsCommand({
         roots: {
           embeddedDir: repoRoot,
-          userDir: process.env.HOME ? join(process.env.HOME, ".minimal-agent") : undefined,
+          userDir: resolveAgentHome(),
           homeDir: process.env.HOME ? join(process.env.HOME, ".agents") : undefined,
           projectDir: process.cwd(),
         },
@@ -770,7 +770,7 @@ async function main() {
   // box. Sits above embedded built-ins but below the user's hand-curated
   // ~/.agents/plugins and <cwd>/.agents/plugins roots. See `userDir` in
   // PluginLoaderOptions for the precedence rationale.
-  const userDir = process.env.HOME ? join(process.env.HOME, ".minimal-agent") : undefined
+  const userDir = resolveAgentHome()
 
   // First-run plugin bootstrap. On a freshly-installed box the extended
   // first-party plugins (Fetch, Skill, slash-menu, …) aren't present; clone

@@ -29,8 +29,9 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import {
   type Bullet,
@@ -138,8 +139,24 @@ export interface StoreDeps {
 // the CLI to share a single source of truth on layout).
 // ---------------------------------------------------------------------------
 
-function resolveHome(deps?: StoreDeps): string {
-  return deps?.home ?? process.env.HOME ?? homedir()
+/**
+ * Resolve the `.minimal-agent` data root, honoring `MINIMAL_AGENT_HOME`.
+ *
+ * Routes through the shared single-source-of-truth resolver
+ * ({@link resolveAgentHome}) instead of open-coding
+ * `join(home, ".minimal-agent")`, so a relocated home
+ * (`MINIMAL_AGENT_HOME`) is respected in production.
+ *
+ * Test injection is preserved: when `deps.home` is set we hand the
+ * resolver `{ HOME: deps.home }`, which yields exactly
+ * `join(deps.home, ".minimal-agent")` — identical to the previous
+ * behavior, so existing path expectations keep passing. With no
+ * injection we pass `process.env` so the override env var wins.
+ */
+function agentHome(deps?: StoreDeps): string {
+  return deps?.home !== undefined
+    ? resolveAgentHome({ HOME: deps.home })
+    : resolveAgentHome(process.env)
 }
 
 /**
@@ -192,10 +209,10 @@ export function resolveNamespace(deps?: StoreDeps): string | null {
  * from this root.
  */
 function rootDir(deps?: StoreDeps): string {
-  const home = resolveHome(deps)
+  const home = agentHome(deps)
   const ns = resolveNamespace(deps)
-  if (ns === null) return join(home, ".minimal-agent")
-  return join(home, ".minimal-agent", "namespaces", ns)
+  if (ns === null) return home
+  return join(home, "namespaces", ns)
 }
 
 /** Absolute path of the cross-project (global) memory file. */
