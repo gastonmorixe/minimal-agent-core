@@ -11,11 +11,12 @@
  *   {@link UnsupportedCapabilityError}. The caller hasn't asked for
  *   a fallback so we surface the issue.
  * - `acceptDegrade:true`: when the adapter offers `validation.degrade`,
- *   we yield a one-shot `StreamErrorEvent` with `retryable:false` and
- *   `category:"unknown"` (carrying the violations as the cause), then
- *   continue with the degraded request. Callers parse the cause to
- *   surface the downgrade to the user. When no degrade is offered,
- *   we still throw.
+ *   we surface a diag notice (so the user sees the downgrade), then
+ *   continue with the degraded request. This is the key enabler for
+ *   --resume with a different model: a session created under a vision
+ *   model can resume under a text-only model because unsupported
+ *   media blocks are stripped before the first send. When no degrade
+ *   is offered, we still throw.
  *
  * The streaming watchdog (idle / hard timeout) lives in
  * `streaming/stream-watchdog.ts` and wraps the inner adapter stream
@@ -24,6 +25,7 @@
  * @module llm/run
  */
 
+import { diag } from "../diagnostic-bus.ts"
 import { defaultNetworkClient } from "../network/index.ts"
 
 import type { CanonicalEvent } from "./canonical-events.ts"
@@ -63,12 +65,7 @@ export async function* run(req: CanonicalRequest, opts: RunOptions): AsyncIterab
   let effective: CanonicalRequest = req
   if (!validation.ok) {
     if (opts.acceptDegrade && validation.degrade) {
-      yield {
-        type: "stream_error",
-        retryable: false,
-        category: "unknown",
-        cause: new UnsupportedCapabilityError(validation.errors, validation.degrade),
-      }
+      diag.warn("capability.degrade", `model ${model.id} downgraded by stripping ${validation.errors.length} unsupported feature(s): ${validation.errors.map((e) => e.capability).join(", ")}`)
       effective = validation.degrade
     } else {
       throw new UnsupportedCapabilityError(validation.errors, validation.degrade)

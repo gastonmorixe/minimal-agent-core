@@ -8,6 +8,7 @@ import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
+import { NetworkResponse } from "../../src/network/index.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import {
   clearModelRegistry,
@@ -170,6 +171,83 @@ describe("llm-opencode (dual-surface provider: OpenAI Chat + Anthropic Messages)
     const adapter = resolveProvider("opencode")
     const req: CanonicalRequest = { modelId: "qwen3.7-max", messages: [userText("hi")] }
     expect(adapter.validate(req, resolveModel("qwen3.7-max")).ok).toBe(true)
+  })
+
+  it("acceptDegrade strips images for text-only model (end-to-end via run)", async () => {
+    setup()
+    const req: CanonicalRequest = {
+      modelId: "deepseek-v4-pro",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            { type: "image", source: { kind: "url", url: "https://x/img.png" } },
+          ],
+        },
+      ],
+    }
+
+    // A minimal OpenAI Chat pong SSE mock so the adapter doesn't hit the network.
+    const pongSse = [
+      `data: ${JSON.stringify({
+        id: "chatcmpl-test",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "deepseek-v4-pro",
+        choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
+      })}`,
+      "",
+      `data: ${JSON.stringify({
+        id: "chatcmpl-test",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "deepseek-v4-pro",
+        choices: [{ index: 0, delta: { content: "pong" }, finish_reason: null }],
+      })}`,
+      "",
+      `data: ${JSON.stringify({
+        id: "chatcmpl-test",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "deepseek-v4-pro",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n")
+
+    const encoder = new TextEncoder()
+    const mockNetwork = {
+      request: async () =>
+        new NetworkResponse({
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          transport: { id: "fake", protocol: "h2" },
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(pongSse))
+              controller.close()
+            },
+          }),
+        }),
+    } as unknown as import("@minimal-agent/plugin-api/net/types").NetworkClient
+
+    // Import run() and RunContext from core
+    const { run } = await import("../../src/llm/run.ts")
+    const ctx: RunContext = {
+      auth: { kind: "api-key", key: "test-key" },
+      sessionId: "test",
+      networkClient: mockNetwork,
+    }
+
+    // Should NOT throw — the degrade strips images before sending.
+    let text = ""
+    for await (const ev of run(req, { context: ctx, acceptDegrade: true })) {
+      if (isEvent(ev, "text_delta")) text += ev.text
+    }
+    expect(text).toBe("pong")
   })
 
   it("rejects missing API key on run", async () => {

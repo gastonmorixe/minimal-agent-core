@@ -15,7 +15,7 @@
  * @module llm/modality-check
  */
 
-import type { CanonicalMessage } from "./canonical-messages.ts"
+import type { CanonicalBlock, CanonicalMessage, ToolResultBlock } from "./canonical-messages.ts"
 import type { Capabilities } from "./capabilities.ts"
 import { CapabilityViolation } from "./errors.ts"
 
@@ -77,4 +77,51 @@ export function modalityViolations(
     )
   }
   return errors
+}
+
+/**
+ * Return a deep-copied message list with unsupported multimodal blocks
+ * (image, audio, file) removed. When a block inside a `tool_result` is
+ * stripped, the empty tool_result block is kept so the tool_use / tool_result
+ * pairing stays valid.
+ *
+ * Designed as the `degrade` payload for validators to offer when the ONLY
+ * violations are modality mismatches: the caller can accept the degrade
+ * and the conversation continues with images/audio/files silently removed
+ * instead of failing the whole request.
+ */
+export function stripUnsupportedModalities(
+  messages: CanonicalMessage[],
+  caps: Capabilities,
+): CanonicalMessage[] {
+  const stripImage = !caps.modalities.image
+  const stripAudio = !caps.modalities.audio
+  const stripFile = !caps.modalities.pdf
+
+  if (!stripImage && !stripAudio && !stripFile) return messages
+
+  return messages.map((msg) => {
+    const filtered = msg.content
+      .map((block) => {
+        if (block.type === "image" && stripImage) return null
+        if (block.type === "audio" && stripAudio) return null
+        if (block.type === "file" && stripFile) return null
+        if (block.type === "tool_result") {
+          const cleaned = (block as ToolResultBlock).content.filter((inner) => {
+            if (inner.type === "image" && stripImage) return false
+            return true
+          })
+          // Keep the tool_result even if all inner blocks were stripped:
+          // an empty tool_result is a valid response for a tool_use whose
+          // output was just an image the model can't see. Dropping the
+          // tool_result would orphan the preceding assistant's tool_use
+          // and cause an API reject.
+          return { ...block, content: cleaned } as CanonicalBlock
+        }
+        return block
+      })
+      .filter((b): b is CanonicalBlock => b !== null)
+
+    return { ...msg, content: filtered }
+  })
 }

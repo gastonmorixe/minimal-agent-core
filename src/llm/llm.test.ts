@@ -266,8 +266,9 @@ describe("run() validation", () => {
     for await (const ev of run(buildRequest(), { context: ctx, acceptDegrade: true })) {
       got.push(ev)
     }
-    expect(got[0]?.type).toBe("stream_error")
-    expect(got[1]?.type).toBe("message_stop")
+    // No stream_error yielded — the degrade is surfaced via diag and the
+    // adapter's degraded stream begins immediately.
+    expect(got[0]?.type).toBe("message_stop")
   })
 })
 

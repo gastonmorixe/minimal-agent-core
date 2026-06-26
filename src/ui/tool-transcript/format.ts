@@ -224,9 +224,60 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number, headerKey?: s
     else if (input.output_mode === "files_with_matches") parts.push("paths")
     return parts.join(" · ")
   }
-  const json = JSON.stringify(input)
-  const charsCut = json.length > HEADER_JSON_MAX ? json.length - HEADER_JSON_MAX : 0
-  return charsCut > 0 ? `${json.slice(0, HEADER_JSON_MAX)}${truncHint(charsCut, "ch")}` : json
+  // Option A: compact key:value pairs joined by " · ". Replaces the old
+  // JSON.stringify fallback that dumped raw JSON into the header (e.g.
+  // `{"action":"meta","sid":"019ec3a9"}`) for any tool without a dedicated
+  // input branch.
+  //
+  // Renders as:
+  //   action:meta · sid:019ec3a9
+  //   action:search · query:"provider login auth…" · limit:20
+  //   pattern:"/foo/" · path:src · i
+  //
+  // Booleans where true → bare key as a flag (e.g. "i" for `-i: true`).
+  // Booleans where false → skipped.
+  // Short alphanumeric strings → key:value (no quotes).
+  // Strings with spaces/special chars → key:"quoted".
+  // Long strings → key:"prefix…" (truncated at 60 chars).
+  // Objects/arrays → key:{…} / key:[N].
+  const parts: string[] = []
+  for (const [key, val] of Object.entries(input)) {
+    if (val === null || val === undefined) continue
+    if (typeof val === "boolean") {
+      if (val) parts.push(key)
+      continue
+    }
+    if (typeof val === "number") {
+      parts.push(`${key}:${val}`)
+      continue
+    }
+    if (typeof val === "string") {
+      const MAX_VAL_CHARS = 60
+      const truncated = val.length > MAX_VAL_CHARS ? val.slice(0, MAX_VAL_CHARS) + "…" : val
+      const needsQuotes = /[^a-zA-Z0-9_.\-/]/.test(truncated)
+      if (needsQuotes) {
+        parts.push(`${key}:${JSON.stringify(truncated)}`)
+      } else {
+        parts.push(`${key}:${truncated}`)
+      }
+      continue
+    }
+    // Arrays: `key:[N]` where N is length
+    if (Array.isArray(val)) {
+      parts.push(`${key}:[${val.length}]`)
+      continue
+    }
+    // Other objects: `key:{…}`
+    if (typeof val === "object") {
+      parts.push(`${key}:{…}`)
+      continue
+    }
+  }
+  const formatted = parts.join(" · ")
+  const charsCut = formatted.length > HEADER_JSON_MAX ? formatted.length - HEADER_JSON_MAX : 0
+  return charsCut > 0
+    ? `${formatted.slice(0, HEADER_JSON_MAX)}${truncHint(charsCut, "ch")}`
+    : formatted
 }
 
 /**
