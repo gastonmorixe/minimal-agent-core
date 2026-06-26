@@ -64,7 +64,6 @@ import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
 import { planCommand } from "./cli/command-plan.ts"
 import { normalizeArgs } from "./cli-args.ts"
-import { checkQuota } from "./client.ts"
 import { runAuthStatusCommand } from "./commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "./commands/dump.ts"
 import { runListFlagsCommand } from "./commands/list-flags.ts"
@@ -86,7 +85,7 @@ import { activateDiscoveredProviders, registerDiscoveredProviders } from "./llm/
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { findModel } from "./llm/model-registry.ts"
 import { findProviderPlugin } from "./llm/provider-plugin.ts"
-import { resolveProviderSessionInfo } from "./llm/provider-session.ts"
+import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
@@ -1072,18 +1071,18 @@ async function main() {
 
   if (!shouldSkipQuota) {
     const quotaSpinner = startStartupRowSpinner("quota", c.dim("checking..."))
-    const result = await checkQuota(auth)
-    if (!result.ok) {
-      quotaSpinner.fail(`${c.boldRed("failed")} ${c.boldRed("✗")}`)
-      console.error(
-        `  ${c.boldRed("error")} quota check failed. Account may not have quota or token is invalid.`,
-      )
-      process.exit(1)
-    }
-    // Banner quota summary: provider-NEUTRAL path. checkQuota's broadcast
-    // just populated the quota cache; the provider plugin's session-info
-    // seam parses its own header shapes into neutral QuotaWindows, and core
-    // renders those (Phase 14 — header-name knowledge left core).
+    // Warm the selected provider's quota cache via its own session-prime seam
+    // (the canonical, provider-neutral probe). Blocking-but-bounded: the prime
+    // never throws and self-bounds its deadline, so a slow/unreachable provider
+    // degrades to an empty banner segment rather than stalling boot. The old
+    // path issued a provider-specific quota POST here and hard-exited on a bad
+    // token; that boot-time, single-provider gate is intentionally gone — auth
+    // failures now surface on the first real turn with a proper error.
+    await primeProviderSessionInfo(selectedModel, { providerId: selectedProviderId })
+    // Banner quota summary: provider-NEUTRAL path. The prime above populated the
+    // quota cache; the provider plugin's session-info seam parses its own header
+    // shapes into neutral QuotaWindows, and core renders those (header-name
+    // knowledge stays out of core).
     let quotaSegment = ""
     try {
       const info = await resolveProviderSessionInfo(selectedModel, {
