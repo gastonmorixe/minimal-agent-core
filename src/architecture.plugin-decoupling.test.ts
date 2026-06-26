@@ -94,6 +94,8 @@ const BASELINE = new Map<string, number>([
   // [surfaced by FIX-i3] +2: two multi-line clauses (canonical-request type,
   // model-registry).
   ["llm-anthropic/opus-48-features.test.ts", 2],
+  ["llm-anthropic/pricing.test.ts", 1],
+  ["llm-anthropic/pricing.ts", 1],
   ["llm-anthropic/quota-probe.test.ts", 2],
   ["llm-anthropic/quota-probe.ts", 5],
   ["llm-anthropic/request-body.ts", 2],

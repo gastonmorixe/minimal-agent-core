@@ -31,11 +31,11 @@ const TEST_RATE: MTokRate = {
 
 function registerTestModel(): void {
   registerModel({
-    id: "claude-opus-4-8",
-    aliases: ["claude-opus-4-8[1m]"],
-    providerId: "anthropic",
-    surfaceId: "anthropic-messages",
-    displayName: "Opus 4.8",
+    id: "acme-large-1",
+    aliases: ["acme-large-1[1m]"],
+    providerId: "acme",
+    surfaceId: "custom",
+    displayName: "Acme Large 1",
     // biome-ignore lint/suspicious/noExplicitAny: minimal caps stub for the test
     capabilities: {} as any,
     pricing: TEST_RATE,
@@ -43,7 +43,7 @@ function registerTestModel(): void {
   })
 }
 
-function meta(model = "claude-opus-4-8", createdAt = "2026-05-30T00:00:00.000Z"): SessionRecord {
+function meta(model = "acme-large-1", createdAt = "2026-05-30T00:00:00.000Z"): SessionRecord {
   return {
     kind: "meta",
     formatVersion: 1,
@@ -122,8 +122,8 @@ describe("collectSessionEvents", () => {
     expect(ev).toHaveLength(1)
     expect(ev[0].estimated).toBe(false)
     expect(ev[0].tokens).toBe(100 + 50 + 1000 + 200)
-    expect(ev[0].providerId).toBe("anthropic")
-    expect(ev[0].modelId).toBe("claude-opus-4-8")
+    expect(ev[0].providerId).toBe("acme")
+    expect(ev[0].modelId).toBe("acme-large-1")
     // Cost = (100*5 + 50*25 + 1000*0.5 + 200*6.25) / 1e6
     expect(ev[0].costUSD).toBeCloseTo((100 * 5 + 50 * 25 + 1000 * 0.5 + 200 * 6.25) / 1e6, 9)
   })
@@ -141,11 +141,11 @@ describe("collectSessionEvents", () => {
   it("normalizes the [1m] alias to the canonical model id", () => {
     registerTestModel()
     const recs = [
-      meta("claude-opus-4-8[1m]"),
+      meta("acme-large-1[1m]"),
       assistant("2026-05-30T01:00:00.000Z", { input_tokens: 5 }),
     ]
     const ev = collectSessionEvents(recs)
-    expect(ev[0].modelId).toBe("claude-opus-4-8")
+    expect(ev[0].modelId).toBe("acme-large-1")
   })
 
   it("maps an unregistered model to provider 'unknown'", () => {
@@ -257,8 +257,8 @@ describe("aggregateUsage", () => {
   const base = (): UsageEvent[] => [
     {
       tsMs: new Date("2026-05-30T10:00:00.000Z").getTime(),
-      modelId: "claude-opus-4-8",
-      providerId: "anthropic",
+      modelId: "acme-large-1",
+      providerId: "acme",
       input: 100,
       output: 50,
       cacheRead: 0,
@@ -269,8 +269,8 @@ describe("aggregateUsage", () => {
     },
     {
       tsMs: new Date("2026-05-30T11:00:00.000Z").getTime(),
-      modelId: "gpt-5.5",
-      providerId: "openai",
+      modelId: "globex-mini",
+      providerId: "globex",
       input: 0,
       output: 0,
       cacheRead: 0,
@@ -281,8 +281,8 @@ describe("aggregateUsage", () => {
     },
     {
       tsMs: new Date("2020-01-01T00:00:00.000Z").getTime(), // old, outside short windows
-      modelId: "claude-opus-4-8",
-      providerId: "anthropic",
+      modelId: "acme-large-1",
+      providerId: "acme",
       input: 10,
       output: 5,
       cacheRead: 0,
@@ -310,9 +310,9 @@ describe("aggregateUsage", () => {
 
   it("breaks down by provider and model, sorted by tokens desc", () => {
     const r = aggregateUsage(base(), "all", now)
-    expect(r.byProvider.map((x) => x.key)).toEqual(["anthropic", "openai"])
+    expect(r.byProvider.map((x) => x.key)).toEqual(["acme", "globex"])
     expect(r.byProvider[0].totals.tokens).toBe(150 + 15)
-    expect(r.byModel[0].key).toBe("claude-opus-4-8")
+    expect(r.byModel[0].key).toBe("acme-large-1")
     expect(r.byModel[0].totals.tokens).toBe(165)
   })
 
