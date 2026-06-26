@@ -16,10 +16,10 @@
  */
 
 import type { AuthResult } from "../auth.ts"
-import { listModels as defaultListModels } from "../client.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
 import type { QueueKeyHandler } from "../editor/types.ts"
 import { RawInput } from "../input.ts"
+import { listLiveModelsForPicker } from "../llm/list-models.ts"
 import type { ModelInfo, StreamedResponse } from "../llm/transport/types.ts"
 import { ModeManager } from "../modes.ts"
 import { PluginLoader } from "../plugins/loader.ts"
@@ -325,7 +325,7 @@ export async function runRepl(
      * the error and continue.
      */
     auth?: AuthResult
-    /** Override for testing : defaults to the real listModels client call. */
+    /** Override for testing: defaults to the provider plugins' live catalogs. */
     listModels?: (auth: AuthResult) => Promise<ModelInfo[]>
     /**
      * Enable the persistent live-area UI: the multiline input is pinned to
@@ -607,7 +607,7 @@ export async function runRepl(
         const modelErr =
           parseModelNotFoundError(msg) ?? parseModelUnavailableError(msg, agent.getModel?.())
         if (modelErr && opts?.auth && agent.setModel) {
-          const lister = opts.listModels ?? defaultListModels
+          const lister = opts.listModels ?? (() => listLiveModelsForPicker())
           try {
             const models = await lister(opts.auth)
             const picked = await promptModelPicker(
