@@ -258,6 +258,13 @@ describe("setOpenAIRateLimits", () => {
     expect(cached.rateLimits.get("x-codex-plan-type")).toBe("plus")
     expect(cached.rateLimits.has("content-type")).toBe(false)
   })
+
+  // The emit-on-cache contract (setOpenAIRateLimits → quota.headersReceived,
+  // so the footer repaints this turn instead of on the 5-min heartbeat) is
+  // pinned in src/quota-broadcast.test.ts via `announceQuotaRefresh`, which
+  // setOpenAIRateLimits calls. Asserting the bus wiring here would force a new
+  // plugin→src import (EventBus/global-bus) and trip the decoupling ratchet,
+  // so the emit pin lives on the core side where the bus already lives.
 })
 
 // ---------------------------------------------------------------------------

@@ -113,6 +113,14 @@ const BASELINE = new Map<string, number>([
   ["llm-openai/openai.test.ts", 1],
   ["llm-openai/pricing.ts", 1],
   ["llm-openai/responses/request-body.ts", 2],
+  // session-info.ts imports `announceQuotaRefresh` from src/quota-broadcast.ts
+  // to emit `quota.headersReceived` after caching the provider's rate-limit
+  // headers, so the `quota-status` footer repaints on EVERY turn instead of
+  // only on its 5-minute heartbeat. Symmetric with `llm-anthropic/adapter.ts`,
+  // which imports `broadcastResponseRateLimits` from the same module for the
+  // identical reason. Drops to 0 once the bus emit is exposed as a ctx/host
+  // capability (same convergence as the other quota-broadcast couplings).
+  ["llm-openai/session-info.ts", 1],
   // Host-runtime integration test for the gpt-5.5 resume stall (session
   // 7919d877): it drives the REAL production stream pipeline end-to-end
   // (parseSse → translateOpenAIResponsesStream → withStreamWatchdog →

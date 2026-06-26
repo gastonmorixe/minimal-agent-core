@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
 import { EventBus } from "./plugins/event-bus.ts"
 import {
+  announceQuotaRefresh,
   broadcastResponseRateLimits,
   QUOTA_HEADERS_RECEIVED,
   type QuotaHeadersReceivedPayload,
@@ -124,5 +125,32 @@ describe("quota-broadcast", () => {
     expect(received.length).toBe(2)
     expect(received[0]!.rateLimits.get("acme-ratelimit-unified-7d-utilization")).toBe("0.08")
     expect(received[1]!.rateLimits.get("acme-ratelimit-unified-7d-utilization")).toBe("0.08")
+  })
+
+  // announceQuotaRefresh: the announce-only path for providers (OpenAI) that
+  // keep their OWN cache. It must emit the event WITHOUT touching the core
+  // quota-cache, so the footer repaints this turn instead of on the 5-min
+  // heartbeat.
+  it("announceQuotaRefresh emits the event without writing the core cache", async () => {
+    const rl = new Map<string, string>([["x-codex-primary-used-percent", "96"]])
+    announceQuotaRefresh(rl)
+    await flush()
+    expect(received.length).toBe(1)
+    expect(received[0]!.rateLimits.get("x-codex-primary-used-percent")).toBe("96")
+    // Crucially, the core Anthropic cache stays empty — this is provider-local.
+    expect(getLastRateLimits()).toBeNull()
+  })
+
+  it("announceQuotaRefresh is a no-op for an empty map", async () => {
+    announceQuotaRefresh(new Map())
+    await flush()
+    expect(received.length).toBe(0)
+  })
+
+  it("announceQuotaRefresh is a harmless no-op with no bus installed", async () => {
+    setGlobalEventBus(null)
+    expect(() =>
+      announceQuotaRefresh(new Map([["x-codex-primary-used-percent", "1"]])),
+    ).not.toThrow()
   })
 })
