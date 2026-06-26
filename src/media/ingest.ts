@@ -163,13 +163,6 @@ export async function ingestUserText(
 }
 
 /**
- * @deprecated Renamed to {@link buildUserContent}: the function was never
- * Anthropic-specific (limits/modalities are parameters). Shim kept one
- * release for out-of-tree callers.
- */
-export const buildAnthropicUserContent = buildUserContent
-
-/**
  * The single call the agent's submit path makes: resolve the prompt against the
  * shared session registry, warn (transient live-area) on rejected/missing
  * attachments, and return the content blocks to push onto the user turn.
