@@ -16,14 +16,11 @@
  */
 
 import type { AuthResult } from "../auth.ts"
-import {
-  listModels as defaultListModels,
-  type ModelInfo,
-  type StreamedResponse,
-} from "../client.ts"
+import { listModels as defaultListModels } from "../client.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
 import type { QueueKeyHandler } from "../editor/types.ts"
 import { RawInput } from "../input.ts"
+import type { ModelInfo, StreamedResponse } from "../llm/transport/types.ts"
 import { ModeManager } from "../modes.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { PluginStream } from "../plugins/stream.ts"

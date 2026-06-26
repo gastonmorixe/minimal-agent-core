@@ -8,8 +8,8 @@
  * @module ui/model-picker
  */
 
-import type { ModelInfo } from "../client.ts"
 import { RawInput } from "../input.ts"
+import type { ModelInfo } from "../llm/transport/types.ts"
 
 import { c } from "./style/ansi.ts"
 

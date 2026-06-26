@@ -21,10 +21,10 @@
  * @module agent/preflight-pipeline
  */
 
-import type { Message } from "../client.ts"
 import { canonicalMessageToLegacy, legacyMessageToCanonical } from "../llm/adapter-legacy.ts"
 import type { CanonicalMessage } from "../llm/canonical-messages.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
+import type { Message } from "../llm/messages.ts"
 import { applyPreflightResolution, runPreflight } from "../llm/preflight.ts"
 import type { PreflightIssue } from "../llm/provider.ts"
 

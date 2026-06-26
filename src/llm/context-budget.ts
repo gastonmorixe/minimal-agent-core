@@ -21,9 +21,9 @@
  * @module llm/context-budget
  */
 
-import type { ContentBlock, Message } from "../client.ts"
 import type { SystemBlock } from "../headers.ts"
 
+import type { ContentBlock, Message } from "./messages.ts"
 import { estimateTokensForModel, type TokenEstimator } from "./token-estimate.ts"
 
 /**

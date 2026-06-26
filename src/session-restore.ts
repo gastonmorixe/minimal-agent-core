@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs"
 
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./llm/messages.ts"
 import {
   type MetaRecord,
   parseLines,

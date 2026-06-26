@@ -1,4 +1,4 @@
-import type { ContentBlock, TextBlock } from "./client.ts"
+import type { ContentBlock, TextBlock } from "./llm/messages.ts"
 import type { LoadedSession } from "./session-restore.ts"
 
 /**

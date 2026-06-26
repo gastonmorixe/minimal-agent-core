@@ -28,7 +28,7 @@
  */
 
 import { c } from "./agent.ts"
-import type { ContentBlock } from "./client.ts"
+import type { ContentBlock } from "./llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "./plugins/types.ts"
 import {
   clampLabel,
