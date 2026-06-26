@@ -12,8 +12,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
 import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
+import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
 import type {
   NetworkClient,
   NetworkRequestInput,
@@ -21,7 +21,6 @@ import type {
 } from "@minimal-agent/plugin-api/net/types"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
-import type { ModelEntry } from "../../src/llm/model-registry.ts"
 import {
   type CanonicalEvent,
   type CanonicalRequest,
@@ -33,9 +32,9 @@ import {
   resolveProvider,
   userText,
 } from "../../src/llm/index.ts"
+import type { ModelEntry } from "../../src/llm/model-registry.ts"
 
 import { bootstrapOpenAI, openaiAdapter, openaiProviderPlugin } from "./adapter.ts"
-import { validateOpenAIRequest } from "./validate.ts"
 import {
   buildOpenAIApiKeyCredential,
   OPENAI_API_KEY_AUTH,
@@ -51,6 +50,7 @@ import {
   type OpenAIResponsesEvent,
   translateOpenAIResponsesStream,
 } from "./responses/response-stream.ts"
+import { validateOpenAIRequest } from "./validate.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -8,7 +8,6 @@ import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
-import { NetworkResponse } from "../../src/network/index.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import {
   clearModelRegistry,
@@ -16,6 +15,7 @@ import {
   resolveModel,
   resolveProvider,
 } from "../../src/llm/index.ts"
+import { NetworkResponse } from "../../src/network/index.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "../llm-anthropic/index.ts"
 import {
   buildOpenAIChatBody,
