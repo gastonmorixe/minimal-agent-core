@@ -12,11 +12,6 @@ import type { ToolUseBlock } from "../../client.ts"
 
 import { formatToolInput, formatToolInputContinuation } from "./format.ts"
 
-/** Strip ANSI escapes so assertions don't fight against the SGR wrap. */
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
-}
-
 function tu(name: string, input: Record<string, unknown>): ToolUseBlock {
   return { type: "tool_use", id: "test", name, input } as ToolUseBlock
 }
