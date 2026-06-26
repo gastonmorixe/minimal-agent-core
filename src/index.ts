@@ -52,6 +52,7 @@ import {
   parseReplaySidecarTasks,
 } from "./agent/turn-attachments.ts"
 import { Agent, c, runRepl } from "./agent.ts"
+import { resolveAgentName } from "./agent-name.ts"
 import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent-paths.ts"
 import {
   discoverCredentialedProviders,
@@ -846,6 +847,24 @@ async function main() {
   process.env.MINIMAL_AGENT_SESSION_ID = agentContext.sessionId
   process.env.MINIMAL_AGENT_PID = String(agentContext.pid)
   process.env.MINIMAL_AGENT_VERSION = agentContext.version
+  // Resolve the opt-in per-session agent name ONCE, here at boot, and
+  // publish it for the `agent-identity` plugin to read (the loader spreads
+  // process.env into every prompt-fragment ctx.env). Priority: the
+  // MINIMAL_AGENT_AGENT_NAME env override, then config `agentName`. The name
+  // is frozen for the session: it lands in the system prompt, so changing it
+  // mid-run would bust the conversation's prompt cache. Off by default
+  // (resolver returns undefined → we clear the env so the plugin emits
+  // nothing and the system prompt is byte-identical to today's).
+  const resolvedAgentName = resolveAgentName({
+    sessionId: agentContext.sessionId,
+    configName: userConfig.agentName,
+    envName: process.env.MINIMAL_AGENT_AGENT_NAME,
+  })
+  if (resolvedAgentName) {
+    process.env.MINIMAL_AGENT_AGENT_NAME = resolvedAgentName
+  } else {
+    delete process.env.MINIMAL_AGENT_AGENT_NAME
+  }
   // Advertise the managed-binary directory (`~/.minimal-agent/bin`) to every
   // plugin, every session. The host OWNS this dir and provisions binaries into
   // it (see `binaries/store.ts`); plugins must NOT scan the filesystem or

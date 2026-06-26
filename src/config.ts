@@ -109,6 +109,19 @@ export interface UserConfig {
    */
   mode?: string
   /**
+   * Opt-in per-session agent name, surfaced as one line in the system
+   * prompt (e.g. "You are working as Laura."). Off by default.
+   *
+   *   - a literal like `"Laura"` names the agent that, every session;
+   *   - `"auto"` derives a STABLE name from the session id (so a fleet of
+   *     sub-agents gets distinct, resume-stable names with no config);
+   *   - `"off"` / `"none"` (or omitting the key) disables naming.
+   *
+   * Override at runtime via `MINIMAL_AGENT_AGENT_NAME` (which also accepts
+   * `auto` / a literal / `off`, and takes precedence over this value).
+   */
+  agentName?: string
+  /**
    * Visual cell width of a Nerd Font PUA glyph in the user's terminal,
    * used to size the gap between the spinner icon and the label on the
    * live-area status row. PUA codepoints are UAX-#11 "Ambiguous"; each
@@ -231,6 +244,12 @@ export function loadUserConfig(): UserConfig {
   }
   if (typeof obj.header === "boolean") out.header = obj.header
   if (typeof obj.mode === "string" && obj.mode.length > 0) out.mode = obj.mode
+  // agentName: any non-empty string (a literal, "auto", or an off sentinel).
+  // The resolver in `agent-name.ts` interprets the value; here we only
+  // shape-check and pass it through.
+  if (typeof obj.agentName === "string" && obj.agentName.trim().length > 0) {
+    out.agentName = obj.agentName.trim()
+  }
   // nerdGlyphCells: literal 1 or 2 numbers, or string "auto". Anything else
   // (including "1" / "2" as strings) is rejected to keep the surface tight.
   if (obj.nerdGlyphCells === 1 || obj.nerdGlyphCells === 2) {
