@@ -11,7 +11,10 @@
  */
 
 import { CapabilityViolation } from "@minimal-agent/plugin-api/llm/errors"
-import { modalityViolations } from "@minimal-agent/plugin-api/llm/modality-check"
+import {
+  modalityViolations,
+  stripUnsupportedModalities,
+} from "@minimal-agent/plugin-api/llm/modality-check"
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
@@ -163,11 +166,26 @@ export function validateAnthropicRequest(
   // model with no fast tier, the same request without `speed` is valid.
   // Mirrors the legacy transport's behavior (client.ts drops the field +
   // beta with a diag.warn) so flipping transports never turns a sticky
-  // --fast into a hard failure. Single-violation guard on purpose: a
-  // request that is broken in other ways should still fail loudly.
+  // --fast into a hard failure.
   if (errors.length === 1 && errors[0]?.capability === "speedFast") {
     const { speed: _dropped, ...rest } = req
     return { ok: false, errors, degrade: rest }
+  }
+
+  // Degrade offer: when the ONLY violations are modality mismatches, offer a
+  // message list with those blocks stripped so the caller can continue the
+  // conversation instead of hard-failing. This is the key enabler for
+  // --resume with a different model: a session created with a vision model
+  // can resume under a text-only model because images are stripped before
+  // the first send.
+  const allModality = errors.every((e) => e.capability === "modalities")
+  if (allModality) {
+    const cleaned = stripUnsupportedModalities(req.messages, caps)
+    return {
+      ok: false,
+      errors,
+      degrade: { ...req, messages: cleaned },
+    }
   }
 
   return { ok: false, errors }

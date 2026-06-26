@@ -9,7 +9,10 @@
  */
 
 import { CapabilityViolation } from "@minimal-agent/plugin-api/llm/errors"
-import { modalityViolations } from "@minimal-agent/plugin-api/llm/modality-check"
+import {
+  modalityViolations,
+  stripUnsupportedModalities,
+} from "@minimal-agent/plugin-api/llm/modality-check"
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
@@ -141,5 +144,22 @@ export function validateOpenAIRequest(req: CanonicalRequest, model: ModelEntry):
   // Multimodal input gating (image/audio/file) — shared across providers.
   errors.push(...modalityViolations(req.messages, caps, model.id))
 
-  return { ok: errors.length === 0, errors }
+  if (errors.length === 0) return { ok: true, errors }
+
+  // Degrade offer: when the ONLY violations are modality mismatches, offer a
+  // message list with those blocks stripped so the caller can continue the
+  // conversation instead of hard-failing. The same principle as the speedFast
+  // degrade in the Anthropic adapter: the request is valid once the feature
+  // the model doesn't support is removed.
+  const allModality = errors.every((e) => e.capability === "modalities")
+  if (allModality) {
+    const cleaned = stripUnsupportedModalities(req.messages, caps)
+    return {
+      ok: false,
+      errors,
+      degrade: { ...req, messages: cleaned },
+    }
+  }
+
+  return { ok: false, errors }
 }

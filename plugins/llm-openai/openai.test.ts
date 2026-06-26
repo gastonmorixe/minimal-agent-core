@@ -13,6 +13,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
+import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 import type {
   NetworkClient,
   NetworkRequestInput,
@@ -20,6 +21,7 @@ import type {
 } from "@minimal-agent/plugin-api/net/types"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
+import type { ModelEntry } from "../../src/llm/model-registry.ts"
 import {
   type CanonicalEvent,
   type CanonicalRequest,
@@ -33,6 +35,7 @@ import {
 } from "../../src/llm/index.ts"
 
 import { bootstrapOpenAI, openaiAdapter, openaiProviderPlugin } from "./adapter.ts"
+import { validateOpenAIRequest } from "./validate.ts"
 import {
   buildOpenAIApiKeyCredential,
   OPENAI_API_KEY_AUTH,
@@ -599,6 +602,59 @@ describe("validateOpenAIRequest — modality gating", () => {
     )
     expect(res.ok).toBe(false)
     expect(res.errors.some((e) => e.capability === "modalities")).toBe(true)
+  })
+})
+
+describe("validateOpenAIRequest — modality degrade", () => {
+  it("offers a degrade with images stripped for a text-only model", () => {
+    const caps = defaultCapabilities()
+    caps.modalities.image = false
+    caps.modalities.audio = false
+    caps.modalities.pdf = false
+    const model = { id: "test-text-only", capabilities: caps } as ModelEntry
+
+    const req: CanonicalRequest = {
+      modelId: "test-text-only",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            { type: "image", source: { kind: "url", url: "https://x/y.png" } },
+          ],
+        },
+      ],
+    }
+
+    const res = validateOpenAIRequest(req, model)
+    expect(res.ok).toBe(false)
+    expect(res.errors.some((e) => e.capability === "modalities")).toBe(true)
+    expect(res.degrade).toBeDefined()
+    const degraded = res.degrade!
+    expect(degraded.messages).toHaveLength(1)
+    const blocks = degraded.messages[0]!.content
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]!.type).toBe("text")
+    expect((blocks[0] as { text: string }).text).toBe("what is this?")
+  })
+
+  it("returns ok when all modalities match the model", () => {
+    const caps = defaultCapabilities()
+    caps.modalities.image = true
+    const model = { id: "test-vision", capabilities: caps } as ModelEntry
+
+    const req: CanonicalRequest = {
+      modelId: "test-vision",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "what is this?" }],
+        },
+      ],
+    }
+
+    const res = validateOpenAIRequest(req, model)
+    expect(res.ok).toBe(true)
   })
 })
 
