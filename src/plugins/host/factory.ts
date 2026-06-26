@@ -106,7 +106,6 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
     ...(has("transport:registry")
       ? { transportRegistry: Object.freeze(createTransportRegistryApi()) }
       : {}),
-      : {}),
     ...(has("clock")
       ? {
           clock: Object.freeze({
