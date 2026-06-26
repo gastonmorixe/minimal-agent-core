@@ -40,6 +40,8 @@ import type {
   QuotaWindow,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
+import { announceQuotaRefresh } from "../../src/quota-broadcast.ts"
+
 /** Trust a cached snapshot newer than this without treating it as stale. */
 const FRESHNESS_MS = 5 * 60_000
 
@@ -72,6 +74,13 @@ export function setOpenAIRateLimits(headers: Headers): void {
     })
     if (copy.size === 0) return
     cache = { rateLimits: copy, at: Date.now() }
+    // Announce so the `quota-status` footer repaints THIS turn instead of
+    // waiting for its 5-minute heartbeat. Anthropic gets this for free via
+    // `broadcastResponseRateLimits` (which both caches + emits); OpenAI keeps
+    // its own cache here, so we emit the same `quota.headersReceived` event
+    // explicitly. The slot listener re-fires and reads our cache via
+    // `fetchOpenAISessionInfo`. Best-effort: a missing bus (pre-load) is a no-op.
+    announceQuotaRefresh(copy)
   } catch {
     // Best-effort capture; never throw on the request path.
   }

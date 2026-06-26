@@ -106,3 +106,29 @@ export function rebroadcastQuotaForSessionUpdate(): void {
   const payload: QuotaHeadersReceivedPayload = { rateLimits: snap.rateLimits }
   getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
 }
+
+/**
+ * Emit {@link QUOTA_HEADERS_RECEIVED} WITHOUT touching the core
+ * (`quota-cache.ts`) cache — the announce-only counterpart to
+ * {@link broadcastResponseRateLimits}.
+ *
+ * Why this exists: {@link broadcastResponseRateLimits} both writes the core
+ * Anthropic cache AND emits the bus event. A provider that keeps its OWN cache
+ * (OpenAI's `x-codex-*` / `x-ratelimit-*` snapshot lives in
+ * `plugins/llm-openai/session-info.ts`, not the core cache) still needs the
+ * footer to repaint immediately on each turn. Without an emit the `quota-status`
+ * slot only refreshes on its 5-minute heartbeat, so a fresh OpenAI/Codex session
+ * shows `0%` until the timer ticks — exactly the "not fixed" symptom.
+ *
+ * The payload mirrors the cache-coupled path so existing listeners are
+ * shape-compatible, but for these providers the listener just re-fires the slot
+ * (which reads the provider's own cache via `fetchSessionInfo`), so only the
+ * emit matters. No-op (and harmless) when the bus isn't installed yet.
+ *
+ * @param rl - The rate-limit map the caller just cached (for payload parity).
+ */
+export function announceQuotaRefresh(rl: ReadonlyMap<string, string>): void {
+  if (rl.size === 0) return
+  const payload: QuotaHeadersReceivedPayload = { rateLimits: rl }
+  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
+}
