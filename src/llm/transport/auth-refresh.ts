@@ -32,9 +32,10 @@
  * @module llm/transport/auth-refresh
  */
 
-import type { StreamedResponse } from "../../client/types.ts"
 import { diag } from "../../diagnostic-bus.ts"
 import type { ProviderAuth } from "../provider.ts"
+
+import type { StreamedResponse } from "./types.ts"
 
 /** Mutable auth holder. `auth.token` is updated in place on refresh. */
 export interface AuthRefreshState {

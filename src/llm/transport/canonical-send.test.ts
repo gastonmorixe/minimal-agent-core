@@ -33,7 +33,6 @@ import {
   resetDefaultAuthStoreForTests,
   type SecretBag,
 } from "../../auth-store.ts"
-import type { Message, StreamedResponse } from "../../client/types.ts"
 import {
   NetworkClient,
   type NetworkRequest,
@@ -43,12 +42,14 @@ import {
 import { clearSessionTokens, getSessionTokens } from "../../session-tokens.ts"
 import { GLOBAL_STATUS_BUS } from "../../status.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
+import type { Message } from "../messages.ts"
 import { registerDiscoveredProviders } from "../provider-discovery.ts"
 import type { ApiKeyAuthProvider } from "../provider-plugin.ts"
 import { activateProviderPlugins } from "../provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../test-fixtures.ts"
 
 import { canonicalSendFn } from "./canonical-send.ts"
+import type { StreamedResponse } from "./types.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -12,10 +12,10 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import type { StreamedResponse } from "../../client/types.ts"
 import { getDiagnosticBus, type LogEvent, resetDiagnosticBus } from "../../diagnostic-bus.ts"
 
 import { withRetry } from "./retry.ts"
+import type { StreamedResponse } from "./types.ts"
 
 function resp(text: string): StreamedResponse {
   return { blocks: [{ type: "text", text }], text, stopReason: "end_turn" }
