@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { clearModelRegistry, findModel, registerModel } from "./llm/model-registry.ts"
-import { ANTHROPIC_OPUS_4X_STANDARD } from "./llm/pricing.ts"
+import type { MTokRate } from "./llm/pricing.ts"
 import { makeCharRatioEstimator } from "./llm/token-estimate.ts"
 import type { SessionRecord } from "./session-store.ts"
 import {
@@ -21,6 +21,14 @@ import {
 
 afterEach(() => clearModelRegistry())
 
+const TEST_RATE: MTokRate = {
+  inputUSD: 5,
+  outputUSD: 25,
+  cacheWriteUSD: 6.25,
+  cacheReadUSD: 0.5,
+  webSearchPerCallUSD: 0.01,
+}
+
 function registerTestModel(): void {
   registerModel({
     id: "claude-opus-4-8",
@@ -30,7 +38,7 @@ function registerTestModel(): void {
     displayName: "Opus 4.8",
     // biome-ignore lint/suspicious/noExplicitAny: minimal caps stub for the test
     capabilities: {} as any,
-    pricing: ANTHROPIC_OPUS_4X_STANDARD,
+    pricing: TEST_RATE,
     estimateTokens: makeCharRatioEstimator(3.5),
   })
 }

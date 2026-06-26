@@ -101,7 +101,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "llm/adapter-legacy-media.test.ts",
   "llm/adapter-legacy-salvage.test.ts",
   "llm/adapter-legacy-usage.test.ts",
-  "llm/llm.test.ts",
   "llm/model-info.test.ts",
   "llm/model-label.test.ts",
   "llm/provider-discovery.test.ts",

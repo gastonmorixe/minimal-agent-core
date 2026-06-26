@@ -24,13 +24,21 @@ import {
   registerProvider,
 } from "./model-registry.ts"
 import { applyPreflightResolution, runPreflight } from "./preflight.ts"
-import { ANTHROPIC_OPUS_4X_STANDARD } from "./pricing.ts"
+import type { MTokRate } from "./pricing.ts"
 import {
   type PreflightIssue,
   type PreflightResolution,
   type ProviderAdapter,
   type RunContext,
 } from "./provider.ts"
+
+const TEST_RATE: MTokRate = {
+  inputUSD: 5,
+  outputUSD: 25,
+  cacheWriteUSD: 6.25,
+  cacheReadUSD: 0.5,
+  webSearchPerCallUSD: 0.01,
+}
 
 function makeModel(): ModelEntry {
   return {
@@ -39,7 +47,7 @@ function makeModel(): ModelEntry {
     surfaceId: "custom",
     displayName: "Preflight Test Model",
     capabilities: defaultCapabilities(),
-    pricing: ANTHROPIC_OPUS_4X_STANDARD,
+    pricing: TEST_RATE,
   }
 }
 

@@ -10,8 +10,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
 import {
-  ANTHROPIC_OPUS_4X_STANDARD,
-  ANTHROPIC_OPUS_48_FAST,
   type CanonicalEvent,
   type CanonicalRequest,
   type Capabilities,
@@ -24,6 +22,7 @@ import {
   isEvent,
   isServerTool,
   type ModelEntry,
+  type MTokRate,
   mergeUsage,
   type ProviderAdapter,
   type RunContext,
@@ -38,6 +37,14 @@ import {
   UnsupportedCapabilityError,
   userText,
 } from "./index.ts"
+
+const TEST_RATE: MTokRate = {
+  inputUSD: 5,
+  outputUSD: 25,
+  cacheWriteUSD: 6.25,
+  cacheReadUSD: 0.5,
+  webSearchPerCallUSD: 0.01,
+}
 
 const ctx: RunContext = {
   auth: { kind: "api-key", key: "sk-test" },
@@ -55,7 +62,7 @@ function buildEntry(overrides: Partial<ModelEntry> = {}): ModelEntry {
     surfaceId: "custom",
     displayName: "Test Model",
     capabilities: buildCapabilities(),
-    pricing: ANTHROPIC_OPUS_4X_STANDARD,
+    pricing: TEST_RATE,
     ...overrides,
   }
 }
@@ -130,7 +137,7 @@ describe("canonical-tools.isServerTool", () => {
 })
 
 describe("pricing", () => {
-  it("calculateUsageCost matches the documented Anthropic Fp rate", () => {
+  it("calculateUsageCost applies each per-MTok rate to its token bucket", () => {
     const cost = calculateUsageCost(
       {
         inputTokens: 1_000_000,
@@ -138,18 +145,13 @@ describe("pricing", () => {
         cacheReadTokens: 1_000_000,
         cacheCreationTokens: 1_000_000,
       },
-      ANTHROPIC_OPUS_4X_STANDARD,
+      TEST_RATE,
     )
     expect(cost.inputUSD).toBeCloseTo(5)
     expect(cost.outputUSD).toBeCloseTo(25)
     expect(cost.cacheReadUSD).toBeCloseTo(0.5)
     expect(cost.cacheCreationUSD).toBeCloseTo(6.25)
     expect(cost.totalUSD).toBeCloseTo(36.75)
-  })
-
-  it("Opus 4.8 fast rate is 2x standard input/output", () => {
-    expect(ANTHROPIC_OPUS_48_FAST.inputUSD).toBe(ANTHROPIC_OPUS_4X_STANDARD.inputUSD * 2)
-    expect(ANTHROPIC_OPUS_48_FAST.outputUSD).toBe(ANTHROPIC_OPUS_4X_STANDARD.outputUSD * 2)
   })
 
   it("mergeUsage sums defined fields, preserves undefined", () => {
