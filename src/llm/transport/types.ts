@@ -197,6 +197,14 @@ export interface StreamedResponse {
 }
 
 /**
+ * The agent's injectable transport: streams text deltas while running, then
+ * returns the assembled {@link StreamedResponse}. This is the `Agent.sendFn`
+ * seam. The default implementation routes each request to its model's
+ * provider adapter; tests inject their own.
+ */
+export type TransportFn = (opts: SendOptions) => AsyncGenerator<string, StreamedResponse, undefined>
+
+/**
  * A single raw streaming event, as a provider's stream parser sees it before
  * translation to canonical events. Kept as a loose shape for the assemblers
  * that still consume raw events directly.
