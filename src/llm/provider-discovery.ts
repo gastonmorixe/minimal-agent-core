@@ -32,7 +32,7 @@ import type {
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
 import { registerModel, registerProvider, setDefaultModelId } from "./model-registry.ts"
-import type { ProviderAdapter, SurfaceId } from "./provider.ts"
+import type { ProviderAdapter } from "./provider.ts"
 import {
   listProviderPlugins,
   type ProviderPlugin,
@@ -132,10 +132,9 @@ export async function registerDiscoveredProviders(pluginsDir: string): Promise<s
  *
  * This is the provider-loader analogue of `buildPluginHost` (the TUI
  * `ctx.host`): the host owns the registry singleton and the registrar is a thin
- * provider-neutral facade over it. The registrar narrows the spec's plain
- * `surfaceId` string back to the host's token-bearing `SurfaceId` union as it
- * forwards to the real `registerModel` (the host is allowed to name surfaces;
- * the contract package is not).
+ * provider-neutral facade over it. `surfaceId` is an opaque provider-defined
+ * string on both sides, so the registrar forwards the spec straight through to
+ * the real `registerModel`.
  *
  * Keeping this here (rather than in `buildPluginHost`) is deliberate: provider
  * plugins load through this dedicated early loader, NOT the TUI loader, and they
@@ -147,11 +146,10 @@ export async function registerDiscoveredProviders(pluginsDir: string): Promise<s
 export function buildProviderSetupContext(): ProviderSetupContext {
   const models: ModelRegistrar = {
     register(spec: ProviderModelSpec): void {
-      // The contract package carries no `SurfaceId` token union, so the spec's
-      // `surfaceId` is a plain string; the host narrows it here as it forwards
-      // to the real registry. A bad surface id surfaces later at dispatch
-      // (`adapter.run`), identical to the direct-import path.
-      registerModel({ ...spec, surfaceId: spec.surfaceId as SurfaceId })
+      // `surfaceId` is an opaque provider-defined string on both sides. A bad
+      // surface id surfaces later at dispatch (`adapter.run`), identical to the
+      // direct-import path.
+      registerModel(spec)
     },
     setDefault(id: string | null): void {
       setDefaultModelId(id)

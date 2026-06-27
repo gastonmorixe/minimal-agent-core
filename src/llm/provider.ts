@@ -31,9 +31,8 @@ import type { ModelEntry } from "./model-registry.ts"
  * `@minimal-agent/plugin-api/llm/provider-auth`. It carries no provider
  * fingerprint, so it is safe in the leaf package both core and plugins depend
  * on. This re-export keeps `src/llm/provider.ts` the single import surface for
- * core (and any not-yet-swept plugin): the token-bearing port below
- * (`SurfaceId`, `ProviderAdapter`, validation/preflight) STAYS here in `src/`,
- * so this file remains an I1 baseline member until Wave C scrubs those tokens.
+ * core (and any not-yet-swept plugin): the `ProviderAdapter` port +
+ * validation/preflight stay here in `src/`. The port names no provider.
  */
 import type {
   DebugSink,
@@ -134,17 +133,16 @@ export type PreflightResolution =
 // ---------------------------------------------------------------------------
 
 /**
- * Names of the API surfaces an adapter can speak. Multiple per
- * provider is the norm (OpenAI exposes both Chat and Responses).
+ * Name of an API surface an adapter can speak. A provider may serve several
+ * surfaces (a chat-completions surface and a responses surface, say); each
+ * model declares the one it uses via `ModelEntry.surfaceId`.
  *
- * Adapters dispatch by `ModelEntry.surfaceId`.
+ * Open by design: the surface vocabulary is provider-defined, so this is an
+ * opaque string the core never compares against a literal. Each provider
+ * plugin owns its own surface names (e.g. `"<vendor>-messages"`); the adapter
+ * dispatches on its own values internally.
  */
-export type SurfaceId =
-  | "anthropic-messages"
-  | "openai-chat-completions"
-  | "openai-responses"
-  | "openai-realtime"
-  | "custom"
+export type SurfaceId = string
 
 // ---------------------------------------------------------------------------
 // Adapter port

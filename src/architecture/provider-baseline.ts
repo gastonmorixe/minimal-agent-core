@@ -54,7 +54,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // Anthropic rate tables + registry vendor-extension keys pending
   // extraction to the plugin.
   "llm/model-registry.ts",
-  "llm/provider.ts",
   // Neutral seams still carrying provider defaults/heuristics in code.
   // (llm/transport/select-transport.ts ratcheted OUT at the B-0 flip: the
   // canonical-default routing needs no provider comparison in code.)
