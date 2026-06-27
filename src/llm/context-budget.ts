@@ -21,10 +21,9 @@
  * @module llm/context-budget
  */
 
-import type { SystemBlock } from "../headers.ts"
-
 import type { ContentBlock, Message } from "./messages.ts"
 import { estimateTokensForModel, type TokenEstimator } from "./token-estimate.ts"
+import type { SystemBlock } from "./transport/types.ts"
 
 /**
  * Floor for the clamped output budget. Even on a near-full window we

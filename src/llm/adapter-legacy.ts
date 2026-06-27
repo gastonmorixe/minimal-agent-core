@@ -29,7 +29,6 @@
  */
 
 import type { AuthResult } from "../auth.ts"
-import type { SystemBlock } from "../headers.ts"
 
 import type { CanonicalEvent, CanonicalUsage, StopDetails, StopReason } from "./canonical-events.ts"
 import type {
@@ -52,6 +51,7 @@ import type { ProviderAuth } from "./provider.ts"
 import type {
   SendOptions as LegacySendOptions,
   StreamedResponse as LegacyStreamedResponse,
+  SystemBlock,
 } from "./transport/types.ts"
 
 // ---------------------------------------------------------------------------
