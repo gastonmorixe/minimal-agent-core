@@ -47,88 +47,13 @@ import type {
   ImageBlock as LegacyImageBlock,
   Message as LegacyMessage,
 } from "./messages.ts"
+import { getDefaultModelId } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
 import type {
   SendOptions as LegacySendOptions,
   StreamedResponse as LegacyStreamedResponse,
   SystemBlock,
 } from "./transport/types.ts"
-
-// ---------------------------------------------------------------------------
-// canonical → legacy SendOptions
-// ---------------------------------------------------------------------------
-
-export interface CanonicalToLegacyOpts {
-  /** Authenticated credentials in the legacy shape. */
-  auth: AuthResult
-  /** Pre-built system prompt (legacy `SystemBlock[]`). */
-  system?: SystemBlock[]
-  /** Optional network client override (tests). */
-  networkClient?: LegacySendOptions["networkClient"]
-  /** Optional cancellation signal forwarded to the transport. */
-  signal?: AbortSignal
-}
-
-/**
- * Build a legacy `SendOptions` from a `CanonicalRequest`. Used when
- * the canonical layer wants to delegate transport to `sendMessage`.
- *
- * NOT a perfect 1:1 conversion — provider-neutral fields the legacy
- * client doesn't understand (e.g. `previousResponseId`, OpenAI-only
- * vendor opts) are silently dropped. The Anthropic-specific
- * `vendor.anthropic.*` opts are forwarded via the closest legacy
- * equivalent (e.g. `contextManagement` → `SendOptions.contextManagement`).
- */
-export function canonicalToSendOptions(
-  req: CanonicalRequest,
-  opts: CanonicalToLegacyOpts,
-): LegacySendOptions {
-  const out: LegacySendOptions = {
-    auth: opts.auth,
-    messages: req.messages.map(canonicalMessageToLegacy),
-    model: req.modelId,
-    stream: req.stream ?? true,
-  }
-  if (opts.system) out.system = opts.system
-  if (req.tools && req.tools.length > 0) out.tools = req.tools.map(canonicalToolToLegacy)
-  if (req.generation?.maxOutputTokens !== undefined) {
-    out.maxTokens = req.generation.maxOutputTokens
-  }
-  if (req.generation?.temperature !== undefined) {
-    out.temperature = req.generation.temperature
-  }
-  // Thinking → legacy `{type:"adaptive", display?}` shape. Legacy doesn't
-  // accept the canonical "off"/"extended" union directly; we map.
-  if (req.thinking) {
-    if (req.thinking.mode === "off") {
-      out.thinking = false
-    } else if (req.thinking.mode === "adaptive") {
-      out.thinking = {
-        type: "adaptive",
-        display: req.thinking.display === "omitted" ? "omitted" : "summarized",
-      }
-    } else {
-      // Extended-budget mode isn't representable in legacy SendOptions
-      // beyond {type:"adaptive"}. Drop the budget hint with a debug log.
-      out.thinking = { type: "adaptive" }
-    }
-  }
-  if (req.effort) out.outputConfig = { effort: req.effort }
-  if (req.outputFormat?.type === "json_schema") {
-    out.outputConfig = {
-      ...(out.outputConfig ?? {}),
-      format: { type: "json_schema", schema: req.outputFormat.schema },
-    }
-  }
-  if (req.vendor?.anthropic?.contextManagement !== undefined) {
-    out.contextManagement = req.vendor.anthropic.contextManagement
-  }
-  if (opts.networkClient) out.networkClient = opts.networkClient
-  if (opts.signal) out.signal = opts.signal
-  if (req.streamIdleTimeoutMs !== undefined) out.streamIdleTimeoutMs = req.streamIdleTimeoutMs
-  if (req.attemptHardTimeoutMs !== undefined) out.attemptHardTimeoutMs = req.attemptHardTimeoutMs
-  return out
-}
 
 // ---------------------------------------------------------------------------
 // legacy StreamedResponse → canonical events
@@ -357,18 +282,6 @@ function fileSourceToLegacy(source: FileSource): LegacyDocumentBlock["source"] {
     default: {
       throw new Error(`unhandled media source: ${JSON.stringify(source satisfies never)}`)
     }
-  }
-}
-
-function canonicalToolToLegacy(tool: CanonicalToolDefinition): {
-  name: string
-  description: string
-  input_schema: unknown
-} {
-  return {
-    name: tool.name,
-    description: tool.description,
-    input_schema: tool.inputSchema,
   }
 }
 
@@ -695,7 +608,7 @@ export function legacyAuthToProviderAuth(auth: AuthResult): ProviderAuth {
  */
 export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalRequest {
   const req: CanonicalRequest = {
-    modelId: opts.model ?? "claude-opus-4-8",
+    modelId: opts.model ?? getDefaultModelId(),
     messages: opts.messages.map(legacyMessageToCanonical),
     stream: opts.stream ?? true,
   }
@@ -724,9 +637,6 @@ export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalReques
     }
   }
   if (opts.speed) req.speed = opts.speed
-  if (opts.contextManagement !== undefined) {
-    req.vendor = { anthropic: { contextManagement: opts.contextManagement } }
-  }
   if (opts.signal) req.signal = opts.signal
   if (opts.streamIdleTimeoutMs !== undefined) req.streamIdleTimeoutMs = opts.streamIdleTimeoutMs
   if (opts.attemptHardTimeoutMs !== undefined) req.attemptHardTimeoutMs = opts.attemptHardTimeoutMs
