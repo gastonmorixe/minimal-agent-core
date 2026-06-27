@@ -26,7 +26,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test
 
 import { Agent } from "../agent.ts"
 import type { AuthResult } from "../auth.ts"
-import type { ContentBlock, SendOptions, StreamedResponse } from "../client.ts"
+import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
 import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "../plugins/loader.fixtures.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 

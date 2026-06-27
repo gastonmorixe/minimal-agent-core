@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { Message as LegacyMessage } from "../client.ts"
+import type { Message as LegacyMessage } from "../client/types.ts"
 
 import { canonicalMessageToLegacy, legacyMessageToCanonical } from "./adapter-legacy.ts"
 import type { CanonicalMessage } from "./canonical-messages.ts"

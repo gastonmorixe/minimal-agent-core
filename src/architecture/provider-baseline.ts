@@ -35,22 +35,12 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "headers.ts",
   "headers.test.ts",
   "headers.characterization.test.ts",
-  // Legacy Anthropic client stack.
-  "client.ts",
-  "client.test.ts",
-  // Fragments of client.test.ts produced by the max-lines<=800 split
-  // (2026-06-10). NOT new coupling: renamed pieces of the frozen entry
-  // above; they dissolve with the same Wave-4 stack.
-  "client.errors.test.ts",
-  "client.quota.test.ts",
-  "client.streaming.test.ts",
-  "client.max-tokens-salvage.test.ts",
-  "client.stream-watchdog.test.ts",
-  "client.text-stop.test.ts",
-  "client.transport-contract.test.ts",
-  "client/debug.ts",
-  "client/list-models.ts",
-  "client/quota.ts",
+  // (The legacy Anthropic client stack — client.ts, client/{debug,list-models,
+  // quota,auth-401}.ts + the client.*.test.ts files — was DELETED in the
+  // provider-decoupling final wave. The default transport is now always the
+  // canonical run()-backed path; conversation/transport types live in the
+  // neutral src/llm/messages.ts + src/llm/transport/types.ts; the Anthropic
+  // model-list GET moved into plugins/llm-anthropic/list-models.ts.)
   // OAuth/identity for claude.ai plan auth (dissolves with the stack).
   "auth.ts",
   "auth.test.ts",

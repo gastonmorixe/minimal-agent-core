@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { ToolUseBlock } from "../../client.ts"
+import type { ToolUseBlock } from "../../client/types.ts"
 import { displayWidth } from "../../term-width.ts"
 
 import {

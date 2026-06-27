@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import { describe, expect, it } from "bun:test"
 
 import { type ReplAgentLike, runRepl } from "./agent.ts"
-import type { StreamedResponse } from "./client.ts"
+import type { StreamedResponse } from "./client/types.ts"
 import { StatusBus } from "./status.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")

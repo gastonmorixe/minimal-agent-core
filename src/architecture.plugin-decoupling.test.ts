@@ -81,7 +81,7 @@ const BASELINE = new Map<string, number>([
   // See reports/D-anthropic.md.
   ["llm-anthropic/adapter.broadcast.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
   ["llm-anthropic/adapter.preflight.test.ts", 2],
-  ["llm-anthropic/adapter.ts", 6], // [surfaced by FIX-i3] +1: multi-line clause
+  ["llm-anthropic/adapter.ts", 5], // dropped client/list-models import (provider-decoupling final wave)
   ["llm-anthropic/anthropic.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
   ["llm-anthropic/beta-flags.characterization.test.ts", 3],
   ["llm-anthropic/beta-flags.ts", 2],
@@ -89,6 +89,7 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/bootstrap.ts", 3],
   ["llm-anthropic/forked-session.e2e.test.ts", 3],
   ["llm-anthropic/headers.ts", 2],
+  ["llm-anthropic/list-models.ts", 3], // GET /v1/models moved out of core (provider-decoupling final wave)
   ["llm-anthropic/media-limits.ts", 1],
   ["llm-anthropic/models.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
   // [surfaced by FIX-i3] +2: two multi-line clauses (canonical-request type,

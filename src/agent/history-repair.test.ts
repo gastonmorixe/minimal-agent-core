@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { Message, ToolResultBlock } from "../client.ts"
+import type { Message, ToolResultBlock } from "../client/types.ts"
 
 import {
   repairOrphanedToolUse,

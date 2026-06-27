@@ -21,7 +21,7 @@ import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
-import type { StreamedResponse } from "./client.ts"
+import type { StreamedResponse } from "./client/types.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 

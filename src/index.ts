@@ -1102,7 +1102,7 @@ async function main() {
   // We resolve the sid, load the session, hash-check against current
   // system/tools, and prepare `initialMessages` to seed the new agent.
   let resumeSid: string | null = null
-  let initialMessages: import("./client.ts").Message[] = []
+  let initialMessages: import("./llm/messages.ts").Message[] = []
   let resumeBanner: string | null = null
   // tool_use_id → epoch ms, derived from each AssistantRecord's `ts` field
   // for the tool_use blocks it contained. Threaded through replayToScrollback
@@ -1157,7 +1157,7 @@ async function main() {
         if (Number.isNaN(ms)) continue
         for (const blk of r.content) {
           if (blk.type === "tool_use") {
-            toolStartTimes.set((blk as import("./client.ts").ToolUseBlock).id, ms)
+            toolStartTimes.set((blk as import("./llm/messages.ts").ToolUseBlock).id, ms)
           }
         }
       }
