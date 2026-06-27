@@ -168,7 +168,7 @@ describe("Agent default transport — multi-provider dispatch", () => {
 
   it("raises an unknown-model error for an unregistered model id (no legacy fallback)", async () => {
     let requested = false
-    const networkClient = fakeNetworkClient((req) => {
+    const networkClient = fakeNetworkClient(() => {
       requested = true
       return sseFromEvents(pongEvents())
     })
