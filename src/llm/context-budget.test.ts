@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { Message } from "../client.ts"
+import type { Message } from "../client/types.ts"
 
 import {
   clampMaxOutputTokens,

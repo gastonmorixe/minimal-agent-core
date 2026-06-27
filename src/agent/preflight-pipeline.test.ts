@@ -23,7 +23,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 
-import type { Message } from "../client.ts"
+import type { Message } from "../client/types.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import { defaultCapabilities } from "../llm/capabilities.ts"
 import {

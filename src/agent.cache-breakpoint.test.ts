@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { withRollingCacheBreakpoint } from "./agent.ts"
-import type { ContentBlock, Message } from "./client.ts"
+import type { ContentBlock, Message } from "./client/types.ts"
 
 describe("withRollingCacheBreakpoint", () => {
   const tail = (msgs: Message[]) => {

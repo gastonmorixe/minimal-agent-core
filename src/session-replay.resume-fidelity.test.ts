@@ -31,7 +31,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { StreamedResponse } from "./client.ts"
+import type { StreamedResponse } from "./client/types.ts"
 import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"
 import { loadSession } from "./session-restore.ts"
 import { SessionStore } from "./session-store.ts"
@@ -60,7 +60,7 @@ class CaptureSink {
  * computes the actual unified diff and the agent persists it as
  * `display` on the tool_result record.
  */
-function singleEditRoundSendFn(filePath: string): typeof import("./client.ts").sendMessage {
+function singleEditRoundSendFn(filePath: string): import("./llm/transport/types.ts").TransportFn {
   let round = 0
   return async function* (): AsyncGenerator<unknown, StreamedResponse> {
     if (round === 0) {
@@ -90,7 +90,7 @@ function singleEditRoundSendFn(filePath: string): typeof import("./client.ts").s
       stopReason: "end_turn",
     } as StreamedResponse
     // biome-ignore lint/suspicious/noExplicitAny: test seam
-  } as any as typeof import("./client.ts").sendMessage
+  } as any as import("./llm/transport/types.ts").TransportFn
 }
 
 describe("--resume fidelity: tool display payload survives the JSONL round-trip", () => {

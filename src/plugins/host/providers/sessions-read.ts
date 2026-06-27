@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../client.ts"
+import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../llm/messages.ts"
 import { isRuntimeAttachmentText } from "../../../runtime-attachments"
 import { formatSessionAsMarkdown, formatSessionAsXml } from "../../../session-dump.ts"
 import { getSessionLiveness, type Liveness } from "../../../session-liveness.ts"

@@ -24,7 +24,6 @@ import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
 import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/types/plugin"
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
-import { listModels } from "../../src/client/list-models.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
 import {
@@ -38,6 +37,7 @@ import { broadcastResponseRateLimits } from "../../src/quota-broadcast.ts"
 
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
+import { listAnthropicModels } from "./list-models.ts"
 import { anthropicMediaLimits } from "./media-limits.ts"
 import { registerAnthropicModels } from "./models.ts"
 import { anthropicOAuthLogin } from "./oauth-login.ts"
@@ -274,7 +274,7 @@ export const anthropicProviderPlugin: ProviderPlugin = {
       auth.kind === "oauth"
         ? ({ type: "oauth", token: auth.token } as const)
         : ({ type: "api-key", token: auth.key } as const)
-    const models = await listModels(legacyAuth)
+    const models = await listAnthropicModels(legacyAuth)
     return models.map((m) => ({
       id: m.id,
       displayName: m.display_name,
