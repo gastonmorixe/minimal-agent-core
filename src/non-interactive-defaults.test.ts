@@ -23,7 +23,7 @@ describe("isNonInteractive", () => {
     expect(isNonInteractive(["do the thing"])).toBe(true)
   })
   test("flag-with-value does not count as bare positional", () => {
-    expect(isNonInteractive(["--model", "claude-opus-4-7"])).toBe(false)
+    expect(isNonInteractive(["--model", "test-model-1"])).toBe(false)
   })
 })
 

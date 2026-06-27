@@ -42,7 +42,7 @@ function attempt(
 const START: CanonicalEvent = {
   type: "message_start",
   messageId: "m",
-  modelId: "claude-opus-4-8",
+  modelId: "test-model-large",
   initialUsage: { inputTokens: 1, outputTokens: 0 },
 }
 

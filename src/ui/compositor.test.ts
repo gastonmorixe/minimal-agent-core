@@ -732,7 +732,7 @@ describe("Compositor (eraseLiveSeq wrap-aware walk-up)", () => {
     c.mount()
     // ~63-cell status row — fits in cols=100 (1 row), wraps to 2
     // rows under cols=40.
-    const wideStatus = "Sending request ↑ 266.1 KB · 181.0 KB/s · api.anthropic.com (1s)"
+    const wideStatus = "Sending request ↑ 266.1 KB · 181.0 KB/s · api.example.com (1s)"
     c.setLiveArea([wideStatus, "", "", "❯ abc"], { row: 3, col: 5 })
     expect(c.liveHeight).toBe(4)
 

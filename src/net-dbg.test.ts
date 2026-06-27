@@ -220,11 +220,11 @@ describe("net-dbg", () => {
 
     it("preserves non-secret headers verbatim", () => {
       const out = redactHeaders({
-        "user-agent": "claude-cli/2.1.118 (external, cli)",
-        "x-stainless-os": "MacOS",
+        "user-agent": "test-cli/2.1.118 (external, cli)",
+        "x-test-os": "MacOS",
       })
-      expect(out["user-agent"]).toBe("claude-cli/2.1.118 (external, cli)")
-      expect(out["x-stainless-os"]).toBe("MacOS")
+      expect(out["user-agent"]).toBe("test-cli/2.1.118 (external, cli)")
+      expect(out["x-test-os"]).toBe("MacOS")
     })
 
     it("leaves non-Bearer authorization values alone", () => {

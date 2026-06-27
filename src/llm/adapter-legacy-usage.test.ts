@@ -30,7 +30,7 @@ const finalUsage: CanonicalUsage = {
 describe("canonicalEventsToLegacyStream usage capture", () => {
   it("surfaces merged usage (incl. final output_tokens) on StreamedResponse.usage", async () => {
     const response = await drain([
-      { type: "message_start", messageId: "m1", modelId: "claude-opus-4-8", initialUsage },
+      { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
       { type: "text_start", index: 0 },
       { type: "text_delta", index: 0, text: "hi" },
       { type: "text_stop", index: 0, finalText: "hi" },
@@ -50,7 +50,7 @@ describe("canonicalEventsToLegacyStream usage capture", () => {
       {
         type: "message_start",
         messageId: "m2",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 5, outputTokens: 0 },
       },
       { type: "text_start", index: 0 },

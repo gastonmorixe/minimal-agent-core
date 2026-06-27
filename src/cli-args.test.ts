@@ -4,15 +4,20 @@ import { normalizeArgs } from "./cli-args.ts"
 
 describe("normalizeArgs", () => {
   test("passes through canonical long flags unchanged", () => {
-    expect(normalizeArgs(["--model", "claude-opus-4-7", "--debug"])).toEqual([
+    expect(normalizeArgs(["--model", "test-model-1", "--debug"])).toEqual([
       "--model",
-      "claude-opus-4-7",
+      "test-model-1",
       "--debug",
     ])
   })
 
   test("expands short flags", () => {
-    expect(normalizeArgs(["-m", "opus", "-p", "hi"])).toEqual(["--model", "opus", "--prompt", "hi"])
+    expect(normalizeArgs(["-m", "premium", "-p", "hi"])).toEqual([
+      "--model",
+      "premium",
+      "--prompt",
+      "hi",
+    ])
     expect(normalizeArgs(["-d", "-v"])).toEqual(["--debug", "--verbose"])
     expect(normalizeArgs(["-F"])).toEqual(["--fast"])
     expect(normalizeArgs(["-h"])).toEqual(["--help"])
@@ -29,13 +34,13 @@ describe("normalizeArgs", () => {
 
   test("preserves the bare `-` stdin sentinel", () => {
     expect(normalizeArgs(["-"])).toEqual(["-"])
-    expect(normalizeArgs(["-m", "opus", "-"])).toEqual(["--model", "opus", "-"])
+    expect(normalizeArgs(["-m", "premium", "-"])).toEqual(["--model", "premium", "-"])
   })
 
   test("expands --flag=value form", () => {
-    expect(normalizeArgs(["--model=opus", "--effort=high"])).toEqual([
+    expect(normalizeArgs(["--model=premium", "--effort=high"])).toEqual([
       "--model",
-      "opus",
+      "premium",
       "--effort",
       "high",
     ])
@@ -200,49 +205,41 @@ describe("normalizeArgs", () => {
   })
 
   test("provider login command grammar maps to provider-selected OAuth login", () => {
-    expect(normalizeArgs(["provider", "openai", "login"])).toEqual([
+    expect(normalizeArgs(["provider", "acme", "login"])).toEqual(["--login", "--provider", "acme"])
+    expect(normalizeArgs(["providers", "login", "acme"])).toEqual(["--login", "--provider", "acme"])
+    expect(normalizeArgs(["login", "acme"])).toEqual(["--login", "--provider", "acme"])
+    expect(normalizeArgs(["provider", "acme", "login", "oauth"])).toEqual([
       "--login",
       "--provider",
-      "openai",
-    ])
-    expect(normalizeArgs(["providers", "login", "openai"])).toEqual([
-      "--login",
-      "--provider",
-      "openai",
-    ])
-    expect(normalizeArgs(["login", "openai"])).toEqual(["--login", "--provider", "openai"])
-    expect(normalizeArgs(["provider", "openai", "login", "oauth"])).toEqual([
-      "--login",
-      "--provider",
-      "openai",
+      "acme",
       "--auth-method",
       "oauth",
     ])
-    expect(normalizeArgs(["provider", "openai", "login", "api-key"])).toEqual([
+    expect(normalizeArgs(["provider", "acme", "login", "api-key"])).toEqual([
       "--login",
       "--provider",
-      "openai",
+      "acme",
       "--auth-method",
       "api-key",
     ])
-    expect(normalizeArgs(["providers", "login", "openai", "api-key"])).toEqual([
+    expect(normalizeArgs(["providers", "login", "acme", "api-key"])).toEqual([
       "--login",
       "--provider",
-      "openai",
+      "acme",
       "--auth-method",
       "api-key",
     ])
-    expect(normalizeArgs(["login", "openai", "oauth"])).toEqual([
+    expect(normalizeArgs(["login", "acme", "oauth"])).toEqual([
       "--login",
       "--provider",
-      "openai",
+      "acme",
       "--auth-method",
       "oauth",
     ])
   })
 
   test("provider model command grammar maps to provider-filtered model list", () => {
-    expect(normalizeArgs(["provider", "openai", "models"])).toEqual(["--list-models", "openai"])
+    expect(normalizeArgs(["provider", "acme", "models"])).toEqual(["--list-models", "acme"])
   })
 
   test("auth subcommands keep trailing flags after the verb", () => {

@@ -11,7 +11,7 @@ function tmp(): string {
   return mkdtempSync(join(tmpdir(), "ma-session-usage-"))
 }
 
-function meta(model = "claude-opus-4-8"): SessionRecord {
+function meta(model = "test-model-large"): SessionRecord {
   return {
     kind: "meta",
     formatVersion: 1,
@@ -150,7 +150,7 @@ describe("computeSessionUsage", () => {
     const sid = "usage-roundtrip"
     const store = SessionStore.open({
       sid,
-      model: "claude-opus-4-8",
+      model: "test-model-large",
       cwd: "/tmp/example",
       systemHash: "h",
       toolsHash: "t",

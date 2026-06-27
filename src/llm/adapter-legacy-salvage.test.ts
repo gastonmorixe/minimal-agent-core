@@ -30,7 +30,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m1",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "tool_use_start", index: 0, id: "tu_1", name: "Bash" },
@@ -55,7 +55,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m2",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "tool_use_start", index: 0, id: "tu_2", name: "Write" },
@@ -83,7 +83,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m3",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "text_start", index: 0 },
@@ -105,7 +105,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m5",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "thinking_start", index: 0 },
@@ -127,7 +127,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m6",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "thinking_start", index: 0 },
@@ -193,7 +193,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m8",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "text_start", index: 0 },
@@ -213,7 +213,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
       {
         type: "message_start",
         messageId: "m4",
-        modelId: "claude-opus-4-8",
+        modelId: "test-model-large",
         initialUsage: { inputTokens: 10, outputTokens: 0 },
       },
       { type: "tool_use_start", index: 0, id: "tu_4", name: "Bash" },

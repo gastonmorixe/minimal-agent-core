@@ -10,7 +10,7 @@ function makeRequest(overrides: Partial<NetworkRequest> = {}): NetworkRequest {
     id: "req-1",
     label: "messages.send",
     method: "POST",
-    url: "https://api.anthropic.com/v1/messages?beta=true",
+    url: "https://api.example.com/v1/messages?beta=true",
     headers: { authorization: "Bearer redacted" },
     body: '{"hello":"world"}',
     ...overrides,
@@ -57,7 +57,7 @@ describe("NetworkActivityObserver", () => {
     const activity = snap?.activity
     expect(activity?.direction).toBe("up")
     expect(activity?.sentBytes).toBe(Buffer.byteLength(body, "utf8"))
-    expect(activity?.target?.host).toBe("api.anthropic.com")
+    expect(activity?.target?.host).toBe("api.example.com")
 
     handle.clear()
   })
@@ -89,7 +89,7 @@ describe("NetworkActivityObserver", () => {
   it("onResponse fills in target.protocol", () => {
     const bus = new StatusBus()
     const handle = bus.create("Sending", {
-      activity: { target: { host: "api.anthropic.com" } },
+      activity: { target: { host: "api.example.com" } },
     })
     const obs = new NetworkActivityObserver()
     obs.attach("req-1", handle)
@@ -97,7 +97,7 @@ describe("NetworkActivityObserver", () => {
     obs.onResponse(makeRequest({ id: "req-1" }), makeResponse({ protocol: "h2" }))
 
     const target = bus.currentStatus()?.activity?.target
-    expect(target?.host).toBe("api.anthropic.com")
+    expect(target?.host).toBe("api.example.com")
     expect(target?.protocol).toBe("h2")
     handle.clear()
   })
@@ -269,7 +269,7 @@ describe("NetworkActivityObserver", () => {
   it("onResponse without a protocol does not overwrite an existing target", () => {
     const bus = new StatusBus()
     const handle = bus.create("Sending", {
-      activity: { target: { host: "api.anthropic.com", model: "opus-4-7" } },
+      activity: { target: { host: "api.example.com", model: "test-model-1" } },
     })
     const obs = new NetworkActivityObserver()
     obs.attach("req-1", handle)
@@ -277,8 +277,8 @@ describe("NetworkActivityObserver", () => {
     obs.onResponse(makeRequest({ id: "req-1" }), makeResponse({ protocol: undefined }))
 
     const target = bus.currentStatus()?.activity?.target
-    expect(target?.host).toBe("api.anthropic.com")
-    expect(target?.model).toBe("opus-4-7")
+    expect(target?.host).toBe("api.example.com")
+    expect(target?.model).toBe("test-model-1")
     expect(target?.protocol).toBeUndefined()
 
     handle.clear()

@@ -79,10 +79,10 @@ describe("snapshotRequest", () => {
         },
       ],
     }
-    const snap = snapshotRequest(body, "claude-sonnet-4-6")
+    const snap = snapshotRequest(body, "test-model-1")
     expect(snap.breakpoints).toBe(2)
     expect(snap.approxPrefixChars).toBe(100 + 200 + 2 + 4)
-    expect(snap.model).toBe("claude-sonnet-4-6")
+    expect(snap.model).toBe("test-model-1")
   })
 })
 
@@ -90,7 +90,7 @@ describe("CacheAnomalyDetector", () => {
   const sonnetCtx = (breakpoints: number, chars: number): RequestContextSnapshot => ({
     breakpoints,
     approxPrefixChars: chars,
-    model: "claude-sonnet-4-6",
+    model: "test-model-1",
   })
 
   const usage = (read: number, create: number): CacheUsage => ({

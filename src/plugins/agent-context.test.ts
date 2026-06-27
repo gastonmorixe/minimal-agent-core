@@ -24,12 +24,12 @@ describe("createAgentContext", () => {
     const a = createAgentContext({
       sessionId: SID,
       pid: 12345,
-      model: "claude-opus-4-7[1m]",
+      model: "test-model-1[1m]",
       version: "0.1.0",
     })
     expect(a.sessionId).toBe(SID)
     expect(a.pid).toBe(12345)
-    expect(a.model).toBe("claude-opus-4-7[1m]")
+    expect(a.model).toBe("test-model-1[1m]")
     expect(a.version).toBe("0.1.0")
     expect(Object.isFrozen(a)).toBe(true)
   })
@@ -212,7 +212,7 @@ describe("env adapter round-trip", () => {
     const a = createAgentContext({
       sessionId: SID,
       pid: 7777,
-      model: "claude-opus-4-7[1m]",
+      model: "test-model-1[1m]",
       version: "0.1.0",
     })
     const round = agentContextFromEnv(agentContextToEnv(a))

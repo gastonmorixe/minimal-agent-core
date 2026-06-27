@@ -20,7 +20,7 @@ function tmp(): string {
 }
 
 const baseOpenOpts = {
-  model: "claude-sonnet-4-6",
+  model: "test-model-1",
   cwd: "/tmp/example",
   systemHash: "deadbeef",
   toolsHash: "cafebabe",

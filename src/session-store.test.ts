@@ -30,7 +30,7 @@ function readJsonl(path: string): unknown[] {
 }
 
 const baseOpenOpts = {
-  model: "claude-sonnet-4-6",
+  model: "test-model-1",
   cwd: "/tmp/example",
   systemHash: "deadbeef",
   toolsHash: "cafebabe",
@@ -712,7 +712,7 @@ describe("MetaRecord (parentSid / forkedAt)", () => {
       formatVersion: 1,
       sid,
       createdAt: "2026-01-01T00:00:00.000Z",
-      model: "claude-sonnet-4-6",
+      model: "test-model-1",
       cwd: "/tmp",
       systemHash: "deadbeef",
       toolsHash: "cafebabe",
@@ -773,7 +773,7 @@ describe("MetaRecord (parentSid / forkedAt)", () => {
       formatVersion: 1,
       sid,
       createdAt: "2026-01-01T00:00:00.000Z",
-      model: "claude-sonnet-4-6",
+      model: "test-model-1",
       cwd: "/tmp",
       systemHash: "deadbeef",
       toolsHash: "cafebabe",

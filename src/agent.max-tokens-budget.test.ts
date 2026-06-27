@@ -25,7 +25,7 @@ function registerModelWithCap(
   id: string,
   cap: number,
   contextWindow = 1_000_000,
-  surfaceId: "anthropic-messages" | "openai-responses" = "anthropic-messages",
+  surfaceId: "surface-separate-budget" | "surface-shared-window" = "surface-separate-budget",
   charsPerToken?: number,
 ): void {
   registerModel({
@@ -38,10 +38,11 @@ function registerModelWithCap(
       ...defaultCapabilities(),
       contextWindow,
       maxOutputTokens: cap,
-      // OpenAI surfaces validate input + output against one shared window;
-      // Anthropic treats the output budget as separate. Mirror that here so
-      // the clamp fires for openai-responses and stays off for anthropic.
-      outputTokensShareContextWindow: surfaceId === "openai-responses",
+      // Some surfaces validate input + output against one shared window;
+      // others treat the output budget as separate. Mirror that here so the
+      // clamp fires for the shared-window surface and stays off for the
+      // separate-budget one.
+      outputTokensShareContextWindow: surfaceId === "surface-shared-window",
     },
     ...(charsPerToken ? { estimateTokens: makeCharRatioEstimator(charsPerToken) } : {}),
     pricing: {
@@ -86,12 +87,12 @@ describe("Agent requests the model's full output budget (Fix C)", () => {
     expect(sink.opts?.maxTokens).toBe(128_000)
   })
 
-  it("does not clamp Anthropic-style surfaces, preserving their full output budget", async () => {
-    registerModelWithCap("anthropic-like", 128_000, 1_050_000, "anthropic-messages")
+  it("does not clamp separate-budget surfaces, preserving their full output budget", async () => {
+    registerModelWithCap("separate-budget-model", 128_000, 1_050_000, "surface-separate-budget")
     const sink: { opts?: SendOptions } = {}
     const agent = new Agent({
       auth,
-      model: "anthropic-like",
+      model: "separate-budget-model",
       sendFn: captureSendFn(sink),
       initialMessages: [{ role: "user", content: "x".repeat(3_500_000) }],
     })
@@ -122,11 +123,11 @@ describe("Agent requests the model's full output budget (Fix C)", () => {
     // This model uses a 1-char-per-token estimator. If Agent ignored the
     // resolved entry and fell back to the global registry estimator, this
     // history would look tiny and the clamp would not fire.
-    registerModelWithCap("openai-like", 128_000, 1_050_000, "openai-responses", 1)
+    registerModelWithCap("shared-window-model", 128_000, 1_050_000, "surface-shared-window", 1)
     const sink: { opts?: SendOptions } = {}
     const agent = new Agent({
       auth,
-      model: "openai-like",
+      model: "shared-window-model",
       sendFn: captureSendFn(sink),
       initialMessages: [
         {
