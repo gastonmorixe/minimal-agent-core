@@ -55,10 +55,11 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // Anthropic rate tables + registry vendor-extension keys pending
   // extraction to the plugin.
   "llm/model-registry.ts",
-  // Neutral seams still carrying provider defaults/heuristics in code.
-  // (llm/transport/select-transport.ts ratcheted OUT at the B-0 flip: the
-  // canonical-default routing needs no provider comparison in code.)
-  "llm/adapter-legacy.ts",
+  // (llm/adapter-legacy.ts ratcheted OUT in the provider-decoupling final wave:
+  // the default-model literal now comes from getDefaultModelId(), the dead
+  // canonical→legacy bridge that carried a vendor.anthropic accessor was
+  // deleted, and the contextManagement-packing line was removed. The codec is
+  // provider-neutral in code.)
   // (llm/canonical-request.ts ratcheted OUT when the type surface MOVED to
   // `@minimal-agent/plugin-api/llm/canonical-request` (Wave C-3): the src/ file
   // is now a one-line re-export shim with zero provider tokens in code. The
