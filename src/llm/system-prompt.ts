@@ -30,7 +30,6 @@
  * @module llm/system-prompt
  */
 
-import type { SystemBlock } from "../headers.ts"
 import { promptPath, renderPrompt } from "../prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
@@ -42,6 +41,7 @@ import {
   type SystemPromptBlock,
   type SystemPromptContext,
 } from "./provider-plugin.ts"
+import type { SystemBlock } from "./transport/types.ts"
 
 /**
  * Default identity for every provider that doesn't override it. Deliberately

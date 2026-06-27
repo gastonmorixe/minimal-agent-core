@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { VERSION } from "../headers.ts"
+import { AGENT_VERSION } from "../build-info.ts"
 import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 import { type HelpSection, renderHelpSections } from "../ui/help/render.ts"
 import { c } from "../ui/style/ansi.ts"
@@ -43,7 +43,7 @@ export function readEmbeddedPackageVersion(embeddedDir: string): string {
 /** Render the full `--help` usage text without writing to stdout. */
 export function renderHelp(): string[] {
   return [
-    `  ${c.bold("minimal-agent")} ${c.dim(`v${VERSION}`)}`,
+    `  ${c.bold("minimal-agent")} ${c.dim(`v${AGENT_VERSION}`)}`,
     `  ${c.faintWhite(c.italic("by Gaston Morixe"))} ${c.faintWhite("·")} ${c.faintWhite(c.italic("github.com/gastonmorixe/minimal-agent"))}`,
     "",
     `  ${c.bold("Usage")}`,

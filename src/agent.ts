@@ -46,7 +46,6 @@ import {
 import { executeToolRound } from "./agent/tool-round.ts"
 import type { AuthResult } from "./auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
-import type { SystemBlock } from "./headers.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import {
   clampMaxOutputTokens,
@@ -57,6 +56,7 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./llm
 import { findModel, findModelForProvider, getDefaultModelId } from "./llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
 import { selectedTransport } from "./llm/transport/select-transport.ts"
+import type { SystemBlock } from "./llm/transport/types.ts"
 import {
   normalizeModelForAPI,
   type SendOptions,

@@ -13,11 +13,41 @@
  */
 
 import type { AuthResult } from "../../auth.ts"
-import type { RequestType, SystemBlock } from "../../headers.ts"
 import type { NetworkClient } from "../../network/index.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
 type MaybePromise<T> = T | Promise<T>
+
+/**
+ * Request-kind classifier. Controls the request's feature set and gating:
+ * - `"conversation"`: full agentic feature set.
+ * - `"quota"`: minimal probe (no thinking/effort), for cheap quota checks.
+ * - `"title"`: structured-output, no thinking, for title generation.
+ *
+ * Provider-neutral: each adapter maps the kind onto its own wire knobs.
+ */
+export type RequestType = "quota" | "title" | "conversation"
+
+/**
+ * A top-level system-prompt block carried on {@link SendOptions.system}. The
+ * `cache_control` shape mirrors the persisted block cache hint (snake_case,
+ * unchanged for resume compatibility). This is the request-level system shape,
+ * distinct from {@link ContentBlock} conversation content inside `messages[]`.
+ */
+export interface SystemBlock {
+  /** Always `"text"` for the standard flow. */
+  type: "text"
+  /** Block content. */
+  text: string
+  /** Prompt caching control. */
+  cache_control?: {
+    type: "ephemeral"
+    /** Cache TTL. Defaults to 5m when omitted. */
+    ttl?: "5m" | "1h"
+    /** "global" shares the cache org-wide; omit for per-session caching. */
+    scope?: "global"
+  }
+}
 
 /**
  * Options for one streaming completion handed to the agent's transport

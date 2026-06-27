@@ -14,7 +14,7 @@
  */
 
 import { BlobStore, loadBlobStoreConfig } from "../blob-store.ts"
-import { VERSION } from "../headers.ts"
+import { AGENT_VERSION } from "../build-info.ts"
 import { loadSession } from "../session-restore.ts"
 import { SessionStore } from "../session-store.ts"
 import {
@@ -117,7 +117,7 @@ export async function bootSessionStores(
             cwd: process.cwd(),
             systemHash,
             toolsHash,
-            agentVersion: VERSION,
+            agentVersion: AGENT_VERSION,
             argv: process.argv,
             provider: providerId,
           })
@@ -127,7 +127,7 @@ export async function bootSessionStores(
             cwd: process.cwd(),
             systemHash,
             toolsHash,
-            agentVersion: VERSION,
+            agentVersion: AGENT_VERSION,
             argv: process.argv,
             provider: providerId,
             existsOk: resumeSame,

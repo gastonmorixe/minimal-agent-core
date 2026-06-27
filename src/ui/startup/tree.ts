@@ -17,7 +17,7 @@
  * @module ui/startup/tree
  */
 
-import { VERSION } from "../../headers.ts"
+import { AGENT_VERSION } from "../../build-info.ts"
 import { displayWidth, truncateDisplayWidth, wrapRows } from "../../term-width.ts"
 import { catRows, DEFAULT_CAT } from "../chrome/mascot.ts"
 import { formatStartupToolsRow, wrapStartupToolsRows } from "../chrome/startup-tools-row.ts"
@@ -96,7 +96,7 @@ export function printStartupHeader(): void {
   // Standard Unicode has no rounded ├ tee, so we drop the middle tee
   // entirely and rely on the first/last rounded corners to give the
   // tree a softer, more curved feel.
-  const line1 = `  ${c.faintWhite("╭")} ${c.bold(c.pink("minimal-agent"))} ${c.faintWhite(`v${VERSION}`)}`
+  const line1 = `  ${c.faintWhite("╭")} ${c.bold(c.pink("minimal-agent"))} ${c.faintWhite(`v${AGENT_VERSION}`)}`
   // Truncate line2 to terminal width so it never wraps and leaves an
   // unstyled continuation on narrow terminals (e.g. mobile-sized 52-col).
   const cols = stderrCols()
