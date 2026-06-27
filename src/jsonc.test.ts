@@ -10,10 +10,10 @@ describe("jsonc", () => {
   it("strips line comments", () => {
     const src = `{
       // model to use by default
-      "model": "claude-opus-4-7", // 1m context flavor
+      "model": "test-model-1", // 1m context flavor
       "effort": "high"
     }`
-    expect(parseJsonc(src)).toEqual({ model: "claude-opus-4-7", effort: "high" })
+    expect(parseJsonc(src)).toEqual({ model: "test-model-1", effort: "high" })
   })
 
   it("strips block comments", () => {

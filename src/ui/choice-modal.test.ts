@@ -163,7 +163,7 @@ describe("ChoiceModal", () => {
 
   test("long body word-wraps to width", () => {
     const longBody =
-      "The session inherited thinking blocks from claude-opus-4-7 but the current request targets claude-opus-4-8."
+      "The session inherited thinking blocks from test-model-1 but the current request targets test-model-2."
     const m = new ChoiceModal({ title: "T", body: longBody, options: SAMPLE_OPTS })
     const out = m.render(40)
     // Each rendered line should fit (interior content ≤ width-4 cells).

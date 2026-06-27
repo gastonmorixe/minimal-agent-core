@@ -36,16 +36,16 @@ describe("loadUserConfig", () => {
     writeFileSync(
       path,
       JSON.stringify({
-        model: "claude-opus-4-7",
-        provider: "anthropic",
+        model: "test-model-1",
+        provider: "test-provider",
         effort: "high",
         thinkingDisplay: "summarized",
         spinner: "dots",
       }),
     )
     expect(loadUserConfig()).toEqual({
-      model: "claude-opus-4-7",
-      provider: "anthropic",
+      model: "test-model-1",
+      provider: "test-provider",
       effort: "high",
       thinkingDisplay: "summarized",
       spinner: "dots",
@@ -58,11 +58,11 @@ describe("loadUserConfig", () => {
       JSON.stringify({
         effort: "ludicrous", // pass-through: server validates, not us
         thinkingDisplay: "encrypted", // invalid enum, dropped
-        model: "claude-opus-4-7", // valid
+        model: "test-model-1", // valid
       }),
     )
     expect(loadUserConfig()).toEqual({
-      model: "claude-opus-4-7",
+      model: "test-model-1",
       effort: "ludicrous",
     })
   })
@@ -181,22 +181,22 @@ describe("loadUserConfig", () => {
       path,
       `{
         // model preference
-        "model": "claude-opus-4-7", // 1m flavor was tested
-        /* opus-4.7 needs this to stream visible thinking,
+        "model": "test-model-1", // large-context flavor was tested
+        /* test-model-1 needs this to stream visible thinking,
            because its server default is "omitted" */
         "thinkingDisplay": "summarized",
         "effort": "high", // trailing comma allowed
       }`,
     )
     expect(loadUserConfig()).toEqual({
-      model: "claude-opus-4-7",
+      model: "test-model-1",
       thinkingDisplay: "summarized",
       effort: "high",
     })
   })
 
   it("ignores apiKeys because provider auth belongs in the auth store", () => {
-    writeFileSync(path, JSON.stringify({ apiKeys: { openai: "sk-openai", openrouter: "sk-or" } }))
+    writeFileSync(path, JSON.stringify({ apiKeys: { acme: "sk-acme", globex: "sk-glx" } }))
     expect(loadUserConfig()).toEqual({})
   })
 
@@ -206,8 +206,8 @@ describe("loadUserConfig", () => {
   })
 
   it("loads provider when model is absent", () => {
-    writeFileSync(path, JSON.stringify({ provider: "openrouter" }))
-    expect(loadUserConfig()).toEqual({ provider: "openrouter" })
+    writeFileSync(path, JSON.stringify({ provider: "test-gateway" }))
+    expect(loadUserConfig()).toEqual({ provider: "test-gateway" })
   })
 })
 

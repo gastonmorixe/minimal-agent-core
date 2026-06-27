@@ -21,7 +21,7 @@ function resp(text: string): StreamedResponse {
 }
 
 function err401(): Error {
-  return new Error("Anthropic API 401: authentication_error")
+  return new Error("Provider API 401: authentication_error")
 }
 
 async function drain(

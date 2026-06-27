@@ -19,7 +19,7 @@ function registerVisionModel(id: string, image: boolean): void {
   registerModel({
     id,
     providerId: "testprov",
-    surfaceId: "anthropic-messages",
+    surfaceId: "test-surface",
     displayName: id,
     capabilities: {
       ...defaultCapabilities(),

@@ -198,7 +198,7 @@ describe("withRetry", () => {
           calls++
           if (calls === 1) {
             // No streamErrorType — exactly what http2-transport throws.
-            throw new Error("HTTP/2 connect timeout for https://api.anthropic.com")
+            throw new Error("HTTP/2 connect timeout for https://api.example.com")
           }
           yield "back"
           return resp("back")

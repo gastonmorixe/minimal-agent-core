@@ -70,7 +70,7 @@ describe("canonical media block -> legacy wire", () => {
     expect(block?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
-  it("drops an audio block (Anthropic has no audio input)", () => {
+  it("drops an audio block (provider has no audio input)", () => {
     const msg: CanonicalMessage = {
       role: "user",
       content: [

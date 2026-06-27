@@ -146,7 +146,7 @@ describe("matchesQuery", () => {
     sid: "4c2e3c84-e659-4793-93dc-38e2028413dc",
     createdAt: "2026-04-28T05:24:32.231Z",
     cwd: "/Users/gaston/Projects/minimal-agent",
-    model: "claude-opus-4-7",
+    model: "test-model-1",
   }
 
   test("empty query matches every record", () => {
@@ -180,7 +180,7 @@ describe("matchesQuery", () => {
     // User explicitly scoped this to date/sid/cwd. The model column
     // can be filtered with a downstream pipe if anyone needs it.
     expect(
-      matchesQuery({ ...rec, cwd: "/x", sid: "00000000-0000-0000-0000-000000000000" }, "opus"),
+      matchesQuery({ ...rec, cwd: "/x", sid: "00000000-0000-0000-0000-000000000000" }, "tests"),
     ).toBe(false)
   })
 

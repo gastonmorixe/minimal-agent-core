@@ -10,7 +10,7 @@ function registerVisionModel(over: Partial<ModelEntry> = {}): void {
   registerModel({
     id: "test-vision",
     providerId: "testprov",
-    surfaceId: "anthropic-messages",
+    surfaceId: "test-surface-a",
     displayName: "Test Vision",
     knowledgeCutoff: "2025-01",
     capabilities: {
@@ -49,7 +49,7 @@ describe("buildModelInfoSnapshot", () => {
     registerModel({
       id: "text-only",
       providerId: "testprov",
-      surfaceId: "openai-chat-completions",
+      surfaceId: "test-surface-b",
       displayName: "Text Only",
       capabilities: { ...defaultCapabilities() }, // all modalities false
       pricing: {

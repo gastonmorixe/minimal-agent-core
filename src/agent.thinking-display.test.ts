@@ -42,7 +42,7 @@ describe("Agent: thinkingDisplay flag", () => {
   it("does NOT pass `thinking` when thinkingDisplay is unset (server default)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
-    const agent = new Agent({ auth, model: "claude-opus-4-7", sendFn })
+    const agent = new Agent({ auth, model: "test-model-1", sendFn })
 
     for await (const _ of agent.run("hi", { onTranscriptLine: () => {} })) {
       // drain
@@ -57,7 +57,7 @@ describe("Agent: thinkingDisplay flag", () => {
     const sendFn = makeRecordingSendFn(records)
     const agent = new Agent({
       auth,
-      model: "claude-opus-4-7",
+      model: "test-model-1",
       sendFn,
       thinkingDisplay: "summarized",
     })
@@ -72,12 +72,12 @@ describe("Agent: thinkingDisplay flag", () => {
     })
   })
 
-  it("passes `display:'omitted'` when explicitly forced (e.g. on sonnet)", async () => {
+  it("passes `display:'omitted'` when explicitly forced (e.g. on a summarizing model)", async () => {
     const records: Array<Record<string, unknown>> = []
     const sendFn = makeRecordingSendFn(records)
     const agent = new Agent({
       auth,
-      model: "claude-sonnet-4-6",
+      model: "test-model-2",
       sendFn,
       thinkingDisplay: "omitted",
     })

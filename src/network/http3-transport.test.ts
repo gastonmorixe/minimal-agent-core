@@ -241,7 +241,7 @@ describe.skipIf(process.env.MINIMAL_AGENT_LIVE_H3 !== "1")(
           id: "live-h3-fail",
           label: "live",
           method: "GET",
-          url: "https://api.anthropic.com/v1/messages",
+          url: "https://api.example.com/v1/messages",
         }),
       ).rejects.toThrow(/HTTP3HandshakeFailed/)
     }, 15_000)

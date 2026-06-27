@@ -19,19 +19,19 @@ import {
 describe("isTransientNetworkError", () => {
   it("classifies our transport's HTTP/2 connect timeout (the 2026-06-01 hard stop)", () => {
     // The exact string thrown by waitForSession in http2-transport.ts.
-    const err = new Error("HTTP/2 connect timeout for https://api.anthropic.com")
+    const err = new Error("HTTP/2 connect timeout for https://api.example.com")
     expect(isTransientNetworkError(err)).toBe(true)
   })
 
   it("classifies the other thrown http2-transport strings", () => {
     expect(
       isTransientNetworkError(
-        new Error("HTTP/2 session closed before connect for https://api.anthropic.com"),
+        new Error("HTTP/2 session closed before connect for https://api.example.com"),
       ),
     ).toBe(true)
     expect(
       isTransientNetworkError(
-        new Error("HTTP/2 ALPN negotiation failed for https://api.anthropic.com: null"),
+        new Error("HTTP/2 ALPN negotiation failed for https://api.example.com: null"),
       ),
     ).toBe(true)
   })
@@ -89,7 +89,7 @@ describe("isTransientNetworkError", () => {
 
 describe("tagTransientNetworkError", () => {
   it("tags a transient error with network_error in place", () => {
-    const err = new Error("HTTP/2 connect timeout for https://api.anthropic.com")
+    const err = new Error("HTTP/2 connect timeout for https://api.example.com")
     const out = tagTransientNetworkError(err)
     expect(out).toBe(err) // same object, mutated in place
     expect((out as { streamErrorType?: string }).streamErrorType).toBe(

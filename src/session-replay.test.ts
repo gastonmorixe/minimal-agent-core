@@ -17,11 +17,11 @@ function stripAnsi(s: string): string {
 
 describe("buildResumeHeader", () => {
   it("includes sid, turn count, and model", () => {
-    const h = buildResumeHeader({ sid: "demo-1", turns: 3, model: "claude-sonnet-4-6" })
+    const h = buildResumeHeader({ sid: "demo-1", turns: 3, model: "test-model-1" })
     const plain = stripAnsi(h)
     expect(plain).toContain("demo-1")
     expect(plain).toContain("3 messages")
-    expect(plain).toContain("claude-sonnet-4-6")
+    expect(plain).toContain("test-model-1")
   })
   it("singularizes 1 message", () => {
     const h = buildResumeHeader({ sid: "x", turns: 1, model: "m" })
