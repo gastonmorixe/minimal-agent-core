@@ -39,7 +39,6 @@ import { randomUUID } from "node:crypto"
 
 import { readCredentials } from "../../auth.ts"
 import { resolveStoredProviderAuth } from "../../auth-strategies.ts"
-import { debugRequestOptions } from "../../client/debug.ts"
 import { diag } from "../../diagnostic-bus.ts"
 import {
   defaultNetworkClient,
@@ -60,6 +59,7 @@ import type { ProviderAuth, RunContext } from "../provider.ts"
 import { run } from "../run.ts"
 
 import { type AuthRefreshState, withAuthRefresh } from "./auth-refresh.ts"
+import { debugRequestOptions } from "./debug.ts"
 import { withRetry } from "./retry.ts"
 import type { SendOptions, StreamedResponse } from "./types.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
