@@ -35,6 +35,7 @@ import {
 } from "../../src/llm/provider.ts"
 import { broadcastResponseRateLimits } from "../../src/quota-broadcast.ts"
 
+import { ANTHROPIC_BETA_FLAGS_CATALOG } from "./beta-flags-catalog.ts"
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { listAnthropicModels } from "./list-models.ts"
@@ -258,6 +259,14 @@ export const anthropicProviderPlugin: ProviderPlugin = {
     const m = modelId.match(/^claude-(?:opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/)
     if (!m) return undefined
     return m[2] !== undefined ? `${m[1]}.${m[2]}` : m[1]
+  },
+  /**
+   * Beta-flag taxonomy for the neutral `--list-flags` command. Returns the
+   * documented catalog of protocol flags this provider can send; core renders
+   * the union across providers without naming any of them.
+   */
+  listBetaFlags() {
+    return [...ANTHROPIC_BETA_FLAGS_CATALOG]
   },
   /**
    * Live catalog via GET /v1/models?beta=true (incl. the synthesized

@@ -83,7 +83,7 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/adapter.preflight.test.ts", 2],
   ["llm-anthropic/adapter.ts", 5], // dropped client/list-models import (provider-decoupling final wave)
   ["llm-anthropic/anthropic.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
-  ["llm-anthropic/beta-flags.characterization.test.ts", 3],
+  ["llm-anthropic/beta-flags.characterization.test.ts", 2],
   ["llm-anthropic/beta-flags.ts", 2],
   ["llm-anthropic/beta-gates.ts", 1],
   ["llm-anthropic/bootstrap.ts", 3],
@@ -108,7 +108,6 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/validate.degrade.test.ts", 2],
   ["llm-anthropic/validate.ts", 3],
   // [surfaced by FIX-i3] +1: multi-line `} from "../../src/headers.ts"`.
-  ["llm-anthropic/wire-constants.ts", 1],
   ["llm-openai/adapter.ts", 3], // D-net-seam: network singleton → ctx.networkClient (port); classifyUpstreamError → plugin-api. Left: canonical-request, model-registry, provider.ts (all C-3 / port-split deferred)
   ["llm-openai/chat/request-body.ts", 2],
   ["llm-openai/models.ts", 1], // D-2: makeCharRatioEstimator → plugin-api. D-net-seam: registerModel now a ctx.models fallback (registrar adopted via register(ctx)); import drops to 0 once activateDiscoveredProviders is the live path (convergence)

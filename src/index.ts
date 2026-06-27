@@ -1253,7 +1253,7 @@ async function main() {
           ? modeAddition
           : null
   const { DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } = await import(
-    "./headers.ts"
+    "./agent/reflection.ts"
   )
   const { resolveSystemPromptForModel } = await import("./llm/system-prompt.ts")
   // Mirror Agent's runtime defaults explicitly so the systemHash captured
