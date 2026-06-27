@@ -1,23 +1,28 @@
-import { BETA_FLAGS_DETAILED } from "../headers.ts"
+import { listProviderPlugins } from "../llm/provider-plugin.ts"
 import { writeCommandList } from "../ui/command-list.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /**
- * Implements `minimal-agent list-flags`: prints every beta feature flag the
- * client sends with Messages API requests, including each flag's source and
- * the condition under which it is attached.
+ * Implements `minimal-agent list-flags`: prints every protocol beta/feature
+ * flag the registered provider plugins can send, including each flag's source
+ * and the condition under which it is attached.
+ *
+ * Provider-NEUTRAL by construction (OCP): the rows come from each registered
+ * `ProviderPlugin.listBetaFlags` hook, so adding a provider extends the listing
+ * with zero edits here and the command names no provider itself.
  */
 export function runListFlagsCommand(deps: { output?: { write(s: string): unknown } } = {}): void {
+  const flags = listProviderPlugins().flatMap((p) => p.listBetaFlags?.() ?? [])
   writeCommandList(
     {
       title: "Beta feature flags",
-      subtitle: "Sent with every Messages API request",
-      items: BETA_FLAGS_DETAILED.map((flag) => ({
+      subtitle: "Protocol opt-in flags the provider sends with requests",
+      items: flags.map((flag) => ({
         title: flag.id,
-        body: [flag.description, c.dim(`source: ${flag.source}`)],
-        footer: `when:   ${flag.condition}`,
+        body: [flag.description, ...(flag.source ? [c.dim(`source: ${flag.source}`)] : [])],
+        footer: flag.condition ? `when:   ${flag.condition}` : undefined,
       })),
-      summary: `${BETA_FLAGS_DETAILED.length} flags total`,
+      summary: `${flags.length} flags total`,
     },
     deps.output,
   )

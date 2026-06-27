@@ -1,27 +1,19 @@
 /**
- * Wave-0 characterization snapshots for the CANONICAL Anthropic beta-flag
- * assembler (`./beta-flags.ts`), plus the cross-transport divergence
- * contract against the legacy builder (`src/headers.ts`).
+ * Characterization snapshots for the Anthropic beta-flag assembler
+ * (`./beta-flags.ts`): pin what it emits over the model × auth × kind × fast
+ * matrix so a silent change fails here and forces a reviewed edit.
  *
- * Purpose (see the Phase-3 provider-decoupling plan): before any wave
- * moves code, pin what BOTH builders emit today over the same
- * model × auth × kind × fast matrix, and pin their KNOWN divergences
- * explicitly. A wave that silently changes either side, or silently
- * closes/opens a divergence, fails here and forces a reviewed edit.
- *
- * Known divergences pinned at the bottom (from the Phase-2 review):
- *  - redact-thinking: UNIFIED by the B-0 flip (decision B3a, 2026-06-09
- *    package): BOTH builders now omit it from conversations (thinking
- *    stays visible — a product feature) and include it in probes. The
- *    former divergence pin is now an agreement pin.
- *  - api-key auth: canonical still emits most flags; legacy emits NONE.
- *  - fast-mode: canonical gates on capabilities.speedFast inside the
- *    builder; legacy trusts the caller (gate lives in client.ts).
+ * Invariants pinned at the bottom:
+ *  - redact-thinking: omitted from conversations (thinking stays visible — a
+ *    product feature), included in the quota/title probe sets.
+ *  - api-key auth: drops the oauth-coupled flags, keeps the rest.
+ *  - context-1m: attached for every registered 1M model (the fable-5 P0 guard).
+ *  - interleaved-thinking: omitted on opus-4-8 (parallel-tool-batch pathology),
+ *    kept elsewhere.
  */
 
 import { beforeAll, describe, expect, it } from "bun:test"
 
-import { buildBetaFlags as legacyBuildBetaFlags } from "../../src/headers.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { resolveModel } from "../../src/llm/model-registry.ts"
 
@@ -156,33 +148,27 @@ describe("characterization: canonical buildBetaFlags (conversation, oauth)", () 
   })
 })
 
-describe("characterization: cross-transport divergence contract", () => {
+describe("characterization: beta-flag invariants per model/auth", () => {
   // These pin the DIFFERENCES between the two builders. When a wave of
   // the decoupling refactor intentionally unifies one of these, it must
   // edit this block in the same commit, which is exactly the review
   // visibility we want.
 
   it("redact-thinking: BOTH transports omit it from conversations, keep it in probes (B3a)", () => {
-    // Former divergence pin, flipped to an AGREEMENT pin by the B-0 flip
-    // (decision B3a, option (a) of the 2026-06-09 decision package): the
-    // canonical builder aligned to legacy — conversations keep thinking
-    // visible; the quota/title probe sets still carry the redact flag.
+    // Conversations keep thinking visible (a product feature), so the redact
+    // flag is omitted there; the quota/title probe sets still carry it.
     const model = resolveModel("claude-opus-4-7")
     const req = conversationReq("claude-opus-4-7")
     const canonical = buildBetaFlags({ kind: "conversation", req, model, authKind: "oauth" })
-    const legacy = legacyBuildBetaFlags("conversation", "claude-opus-4-7")
     expect(canonical).not.toContain(F.REDACT_THINKING)
-    expect(legacy.map(String)).not.toContain(F.REDACT_THINKING)
-    // Probe kinds keep the flag on both sides (unchanged by B3a).
+    // Probe kinds keep the flag.
     const canonicalQuota = buildBetaFlags({ kind: "quota", req, model, authKind: "oauth" })
     const canonicalTitle = buildBetaFlags({ kind: "title", req, model, authKind: "oauth" })
     expect(canonicalQuota).toContain(F.REDACT_THINKING)
     expect(canonicalTitle).toContain(F.REDACT_THINKING)
-    expect(legacyBuildBetaFlags("quota").map(String)).toContain(F.REDACT_THINKING)
-    expect(legacyBuildBetaFlags("title").map(String)).toContain(F.REDACT_THINKING)
   })
 
-  it("api-key: canonical still emits flags, legacy emits none (B2)", () => {
+  it("api-key: drops only the oauth-coupled flags, keeps the rest", () => {
     const model = resolveModel("claude-fable-5")
     const canonical = buildBetaFlags({
       kind: "conversation",
@@ -195,51 +181,50 @@ describe("characterization: cross-transport divergence contract", () => {
     expect(canonical).not.toContain(F.PROMPT_CACHING_SCOPE)
     expect(canonical).toContain(F.CLAUDE_CODE)
     expect(canonical).toContain(F.CONTEXT_1M)
-    // Legacy: buildHeaders attaches NO anthropic-beta header for api-key
-    // (pinned in src/headers.characterization.test.ts). Cross-referenced
-    // here so the two snapshots can't drift apart unnoticed.
   })
 
-  it("context-1m: both transports agree for every registered 1M model", () => {
-    // The fable-5 P0 was exactly this matrix cell drifting. Walk every
-    // registered Anthropic model and assert legacy and canonical agree
-    // on context-1m membership.
-    for (const modelId of [
-      "claude-fable-5",
-      "claude-opus-4-8",
-      "claude-opus-4-7",
-      "claude-opus-4-6",
-      "claude-sonnet-4-6",
-      "claude-sonnet-4-5-20250929",
-      "claude-haiku-4-5-20251001",
-    ]) {
+  it("context-1m membership tracks each model's context window (the fable-5 P0 guard)", () => {
+    // The fable-5 P0 was exactly this matrix cell drifting. context-1m is
+    // attached iff the registered model is 1M-capable: opus/fable/sonnet-4-6
+    // are 1M; sonnet-4-5 and haiku-4-5 are 200K and must NOT carry the flag.
+    const expected: Record<string, boolean> = {
+      "claude-fable-5": true,
+      "claude-opus-4-8": true,
+      "claude-opus-4-7": true,
+      "claude-opus-4-6": true,
+      "claude-sonnet-4-6": true,
+      "claude-sonnet-4-5-20250929": false,
+      "claude-haiku-4-5-20251001": false,
+    }
+    for (const modelId of Object.keys(expected)) {
       const model = resolveModel(modelId)
-      const canonical = buildBetaFlags({
+      const hasContext1m = buildBetaFlags({
         kind: "conversation",
         req: conversationReq(modelId),
         model,
         authKind: "oauth",
       }).includes(F.CONTEXT_1M)
-      const legacy = legacyBuildBetaFlags("conversation", modelId)
-        .map(String)
-        .includes(F.CONTEXT_1M)
-      expect({ modelId, canonical, legacy }).toEqual({ modelId, canonical, legacy: canonical })
+      expect({ modelId, hasContext1m }).toEqual({ modelId, hasContext1m: expected[modelId] })
     }
   })
 
-  it("interleaved-thinking: the opus-4-8 omission gate matches across transports", () => {
-    for (const modelId of ["claude-opus-4-8", "claude-opus-4-7", "claude-fable-5"]) {
+  it("interleaved-thinking: the opus-4-8 omission gate holds", () => {
+    // opus-4-8 omits interleaved-thinking (the parallel-tool-batch pathology);
+    // opus-4-7 and fable-5 keep it.
+    const expected: Record<string, boolean> = {
+      "claude-opus-4-8": false,
+      "claude-opus-4-7": true,
+      "claude-fable-5": true,
+    }
+    for (const modelId of Object.keys(expected)) {
       const model = resolveModel(modelId)
-      const canonical = buildBetaFlags({
+      const hasInterleaved = buildBetaFlags({
         kind: "conversation",
         req: conversationReq(modelId),
         model,
         authKind: "oauth",
       }).includes(F.INTERLEAVED_THINKING)
-      const legacy = legacyBuildBetaFlags("conversation", modelId)
-        .map(String)
-        .includes(F.INTERLEAVED_THINKING)
-      expect({ modelId, canonical, legacy }).toEqual({ modelId, canonical, legacy: canonical })
+      expect({ modelId, hasInterleaved }).toEqual({ modelId, hasInterleaved: expected[modelId] })
     }
   })
 })

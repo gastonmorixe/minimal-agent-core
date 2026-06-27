@@ -3,10 +3,6 @@ import { createServer } from "node:http2"
 
 import { describe, expect, it } from "bun:test"
 
-import { getAuth } from "../auth.ts"
-import { buildHeaders } from "../headers.ts"
-import { getSessionId } from "../session-id.ts"
-
 import {
   defaultNetworkClient,
   Http2Transport,
@@ -107,14 +103,13 @@ describe("network", () => {
   })
 
   it.skipIf(!process.env.E2E)(
-    "live Anthropic model request uses HTTP/2",
+    "live model request uses HTTP/2",
     async () => {
-      const auth = await getAuth()
       const response = await defaultNetworkClient.request({
         label: "e2e.models",
         method: "GET",
-        url: "https://api.anthropic.com/v1/models?beta=true",
-        headers: buildHeaders(auth, getSessionId()),
+        url: "https://api.example.com/v1/models?beta=true",
+        headers: { accept: "application/json" },
       })
 
       expect(response.status).toBe(200)

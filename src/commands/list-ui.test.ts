@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../auth-store.ts"
-import { BETA_FLAGS_DETAILED } from "../headers.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
 import { registerTestProvider } from "../llm/test-fixtures.ts"
@@ -34,11 +33,22 @@ describe("list UI commands", () => {
     expect(out).toContain(`${SPINNER_PRESETS.length} presets total`)
   })
 
-  it("renders beta flags through injected output", () => {
+  it("renders beta flags from registered provider plugins", () => {
+    // The command iterates each provider plugin's listBetaFlags() hook (OCP);
+    // register a fake provider so the test owns the expected rows.
+    registerProviderPlugin({
+      id: "flag-test-provider",
+      displayName: "Flag Test Provider",
+      shortCode: "ftp",
+      register() {},
+      listBetaFlags: () => [
+        { id: "demo-flag-2026-01-01", description: "A demo flag", condition: "always" },
+      ],
+    })
     const out = capture(runListFlagsCommand)
     expect(out).toContain("Beta feature flags")
-    expect(out).toContain(BETA_FLAGS_DETAILED[0]!.id)
-    expect(out).toContain(`${BETA_FLAGS_DETAILED.length} flags total`)
+    expect(out).toContain("demo-flag-2026-01-01")
+    expect(out).toContain("1 flags total")
   })
 
   it("renders providers through injected output", () => {

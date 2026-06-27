@@ -28,15 +28,33 @@ import {
   type SystemPromptContext,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
-import { buildBillingHeaderText, CLAUDE_CODE_IDENTITY } from "../../src/headers.ts"
+import { promptPath, renderPrompt } from "../../src/prompts.ts"
+
+import { BUILD_HASH, VERSION } from "./wire-constants.ts"
+
+/** Resolve a prompt file under this plugin's own `prompts/` directory. */
+function pluginPrompt(...segments: string[]): string {
+  return promptPath(import.meta, "prompts", ...segments)
+}
 
 /**
- * The exact Claude-Code identity line the server validates (plan auth).
- * Single source of truth lives in core (`src/headers.ts`, rendered from
- * `src/prompts/anthropic/identity.claude-code.md`); re-exported here so the
- * provider and existing importers keep one canonical value.
+ * The exact Claude-Code identity line Anthropic's server validates on plan
+ * (OAuth) auth (system[1]). Rendered from this plugin's
+ * `prompts/identity.claude-code.md`. Single source of truth for the value.
  */
-export { CLAUDE_CODE_IDENTITY }
+export const CLAUDE_CODE_IDENTITY: string = renderPrompt(pluginPrompt("identity.claude-code.md"))
+
+/**
+ * Build the billing-attribution header text (system[0] on plan auth). Rendered
+ * from `prompts/billing.tmpl.md` with the live CLI version + build hash. The
+ * server parses this for billing/attribution.
+ */
+export function buildBillingHeaderText(): string {
+  return renderPrompt(pluginPrompt("billing.tmpl.md"), {
+    version: VERSION,
+    buildHash: BUILD_HASH,
+  })
+}
 
 /**
  * Build the billing attribution block (system[0] on plan auth). The text is

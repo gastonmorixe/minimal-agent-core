@@ -57,6 +57,24 @@ export interface LiveModelRow {
   createdAt?: string
 }
 
+/**
+ * One beta/feature-flag descriptor returned by
+ * {@link ProviderPlugin.listBetaFlags}. Provider-neutral projection of "what
+ * protocol opt-in flags this provider can send and when", for the
+ * `--list-flags` command. The `id` is the wire flag value; the rest is
+ * human-facing documentation.
+ */
+export interface BetaFlagInfo {
+  /** The flag value sent on the wire (e.g. in a provider-specific header). */
+  id: string
+  /** What the flag enables. */
+  description: string
+  /** Where the flag was sourced from (reverse-engineering provenance). */
+  source?: string
+  /** The condition under which the provider attaches the flag. */
+  condition?: string
+}
+
 // ---------------------------------------------------------------------------
 // Setup-time model registration (Wave D net/registry seam)
 // ---------------------------------------------------------------------------
@@ -520,6 +538,15 @@ export interface ProviderPlugin {
    * provider never edits the listing command).
    */
   listLiveModels?(auth: ProviderAuth): Promise<LiveModelRow[]>
+
+  /**
+   * Optional: describe the protocol beta/feature flags this provider can send,
+   * for the `--list-flags` command. Pure; no I/O. Each {@link BetaFlagInfo}
+   * documents one flag's wire value, effect, and attach condition. Core renders
+   * the union across every registered provider, so adding a provider extends
+   * the listing with zero edits to the command (OCP).
+   */
+  listBetaFlags?(): BetaFlagInfo[]
 
   /**
    * Optional: parse a compact VERSION token from one of this provider's

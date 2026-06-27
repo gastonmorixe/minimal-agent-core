@@ -31,10 +31,11 @@ export const PROVIDER_SCAN_EXEMPT: ReadonlySet<string> = new Set([
  * code goes in the provider's plugin.
  */
 export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
-  // The legacy Anthropic wire module + its direct tests.
-  "headers.ts",
-  "headers.test.ts",
-  "headers.characterization.test.ts",
+  // (The legacy Anthropic wire module headers.ts + its direct tests were
+  // DELETED in W3: the wire constants/billing/identity moved into
+  // plugins/llm-anthropic, the neutral RequestType/SystemBlock types into
+  // src/llm/transport/types.ts, and --list-flags now reads each provider's
+  // listBetaFlags() hook.)
   // (The legacy Anthropic client stack — client.ts, client/{debug,list-models,
   // quota,auth-401}.ts + the client.*.test.ts files — was DELETED in the
   // provider-decoupling final wave. The default transport is now always the
@@ -98,7 +99,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   "llm/transport/retry.test.ts",
   "llm/transport/watchdog.test.ts",
   "net-dbg.test.ts",
-  "network/network.test.ts",
   "network/activity-observer.test.ts",
   "network/http3-transport.test.ts",
   "network/transient-error.test.ts",
