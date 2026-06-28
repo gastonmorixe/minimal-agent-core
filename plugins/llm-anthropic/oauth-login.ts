@@ -52,6 +52,14 @@ export const ANTHROPIC_PLAN_OAUTH = {
 const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 const DEFAULT_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 
+/**
+ * Fallback access-token lifetime (seconds) used when a refresh response omits
+ * or malforms `expires_in`. Mirrors the legacy refresher's
+ * `DEFAULT_TOKEN_LIFETIME_SECONDS` so a non-finite expiry can never make
+ * `expiresAt` NaN (which would silently disable proactive refresh forever).
+ */
+const REFRESH_FALLBACK_EXPIRES_IN_SEC = 3600
+
 export interface AnthropicTokenExchangeResponse {
   access_token: string
   refresh_token: string
@@ -239,9 +247,22 @@ export async function refreshAnthropicOAuthCredential(
     throw new Error(`Anthropic OAuth refresh failed (${response.status}): ${body}`)
   }
   const raw = await response.json<Record<string, unknown>>()
+  // Tolerate a non-rotating / partial refresh response the same way the
+  // legacy refresher does, so a 200 can NEVER yield a credential that drops
+  // the refresh token or carries a non-finite expiry:
+  //   - refresh_token: the server may omit it when it doesn't rotate; reuse
+  //     the one we sent so the stored bag always keeps a usable RT.
+  //   - expires_in: fall back to a finite default when absent/non-numeric,
+  //     otherwise buildAnthropicOAuthCredential's required-number check would
+  //     throw and the caller would surface a hard auth failure.
+  const refreshExpiresIn =
+    typeof raw.expires_in === "number" && Number.isFinite(raw.expires_in)
+      ? raw.expires_in
+      : REFRESH_FALLBACK_EXPIRES_IN_SEC
   const refreshed = buildAnthropicOAuthCredential({
     ...raw,
     refresh_token: str(raw.refresh_token) ?? refreshToken,
+    expires_in: refreshExpiresIn,
   })
   const accountUuid = str(secrets.accountUuid)
   const emailAddress = str(secrets.emailAddress)

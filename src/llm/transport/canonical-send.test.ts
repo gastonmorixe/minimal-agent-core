@@ -25,7 +25,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
 import { type AuthResult, getAuth } from "../../auth.ts"
 import {
@@ -44,7 +44,7 @@ import { GLOBAL_STATUS_BUS } from "../../status.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
 import { registerDiscoveredProviders } from "../provider-discovery.ts"
-import type { ApiKeyAuthProvider } from "../provider-plugin.ts"
+import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../provider-plugin.ts"
 import { activateProviderPlugins } from "../provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../test-fixtures.ts"
 
@@ -111,20 +111,94 @@ const openAITestApiKeyAuth: ApiKeyAuthProvider = {
   },
 }
 
+// A minimal OAuth strategy for the "anthropic" test provider. The transport
+// resolves EVERY provider's credential from the store (no provider gets a
+// special-cased branch), so the anthropic-model tests register + store an OAuth
+// credential here exactly like a real provider plugin would.
+const anthropicTestOAuth: OAuthLoginProvider = {
+  serviceId: "anthropic-plan-oauth",
+  displayName: "Anthropic Plan (OAuth)",
+  config: () => ({
+    clientId: "test",
+    tokenUrl: "https://example.test/token",
+    authorizeUrl: "https://example.test/authorize",
+    redirectUri: "https://example.test/callback",
+    scopes: ["test"],
+  }),
+  buildCredential(raw) {
+    const token = typeof raw.access_token === "string" ? raw.access_token : ""
+    return {
+      credential: {
+        serviceId: this.serviceId,
+        displayName: this.displayName,
+        secrets: { tokenType: "oauth", accessToken: token, refreshToken: `${token}-refresh` },
+      },
+      result: {
+        accessToken: token,
+        // Defense in depth: a seeded test credential carries a refresh token
+        // so that, even if it ever leaks into a real store, the refresh path
+        // cannot fail with "no refresh token".
+        refreshToken: `${token}-refresh`,
+        expiresAt: 0,
+        scopes: [],
+      },
+    }
+  },
+  readAuth(secrets) {
+    const token = secrets.accessToken
+    return typeof token === "string" && token ? { kind: "oauth", token } : null
+  },
+}
+
+function writeStoredAnthropicToken(token: string): void {
+  const write = anthropicTestOAuth.buildCredential({ access_token: token })
+  defaultAuthStore().set(
+    write.credential.serviceId,
+    write.credential.displayName,
+    write.credential.secrets as SecretBag,
+  )
+}
+
+// Module-scope auth-store sandbox. The seeding below writes to
+// `defaultAuthStore()`, which resolves to the REAL `~/.minimal-agent/auth.jsonc`
+// unless `MINIMAL_AGENT_AUTH_FILE` is redirected. This hook runs at module load,
+// BEFORE the per-suite `beforeEach` sandboxes further down, so without this the
+// `writeStoredAnthropicToken` seed would overwrite the user's live Anthropic
+// credential with a synthetic token-only bag (no refresh token), breaking the
+// real refresh path. Redirect to a temp file FIRST, then seed.
+const prevModuleAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
+let moduleAuthDir: string
+
 // Synthetic registrations replace the real adapter bootstraps. The fake
 // providers REUSE the real provider ids as test data; each id's model set
 // and auth strategy mirrors what the tests dispatch without importing
 // provider plugins into core.
 beforeAll(() => {
+  // Sandbox the store BEFORE any write so the real credential is never touched.
+  moduleAuthDir = mkdtempSync(join(tmpdir(), "minimal-agent-cs-auth-"))
+  process.env.MINIMAL_AGENT_AUTH_FILE = join(moduleAuthDir, "auth.jsonc")
+  resetDefaultAuthStoreForTests()
+
   registerTestProvider({
     id: "anthropic",
     models: [{ id: "claude-opus-4-8", aliases: ["claude-opus-4-8[1m]"] }],
+    oauthLogin: anthropicTestOAuth,
   })
+  // The transport resolves the anthropic credential from the store (no
+  // special-cased branch), so seed it for the module-level store tests.
+  writeStoredAnthropicToken("test-token")
   registerTestProvider({
     id: "openai",
     models: [{ id: "gpt-4o" }, { id: "gpt-5.5" }],
     apiKeyAuth: openAITestApiKeyAuth,
   })
+})
+
+afterAll(() => {
+  if (prevModuleAuthFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+  else process.env.MINIMAL_AGENT_AUTH_FILE = prevModuleAuthFile
+  resetDefaultAuthStoreForTests()
+  if (moduleAuthDir) rmSync(moduleAuthDir, { recursive: true, force: true })
 })
 
 function writeStoredOpenAIKey(apiKey: string): void {

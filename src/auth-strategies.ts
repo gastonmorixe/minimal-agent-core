@@ -98,6 +98,30 @@ function readApiKeyFromStore(apiKey: ApiKeyAuthProvider, store: AuthStore): Prov
   return null
 }
 
+/**
+ * Store-first peer-rotation read for the transport's 401 recovery: return
+ * the provider's CURRENT stored OAuth access token (re-read from the store, so
+ * a peer process's rotation is picked up) WITHOUT a network refresh, or
+ * undefined when there is none.
+ *
+ * Provider-neutral: it asks the resolved provider's own OAuth strategy
+ * (`serviceId` + `readAuth`) for the token, so core never reads any single
+ * provider's credential shape. This is the host-side half of the multi-process
+ * race fix the canonical transport's `withAuthRefresh` consumes via its
+ * injected `peerToken` hook.
+ */
+export function providerPeerToken(
+  providerId: string,
+  store: AuthStore = defaultAuthStore(),
+): string | undefined {
+  const oauth = findProviderPlugin(providerId)?.oauthLogin
+  if (!oauth?.readAuth) return undefined
+  const secrets = store.getSecrets(oauth.serviceId, oauth.displayName)
+  if (!secrets) return undefined
+  const auth = oauth.readAuth(secrets)
+  return auth?.kind === "oauth" ? auth.token : undefined
+}
+
 /** Try to resolve runtime auth for a provider from minimal-agent's auth store only. */
 export function tryResolveProviderAuth(providerId: string, _modelId = ""): ProviderAuth | null {
   const plugin = findProviderPlugin(providerId)
