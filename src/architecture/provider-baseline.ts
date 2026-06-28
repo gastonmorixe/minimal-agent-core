@@ -78,9 +78,5 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // DATA (resolveProviderAuth keys credentials by provider id until C-5; the
   // legacy-fallback assertion targets api.anthropic.com until the legacy
   // stack leaves core in B-5).
-  "agent.canonical-dispatch.test.ts",
-  "e2e-smoke.test.ts",
-  "llm/model-label.test.ts",
-  "llm/provider-discovery.test.ts",
   "llm/transport/canonical-send.test.ts",
 ])
