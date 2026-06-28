@@ -23,13 +23,11 @@ describe("CLI smoke", () => {
         "bun",
         "run",
         "src/index.ts",
-        "--provider",
-        "anthropic",
-        "--model",
-        "claude-opus-4-7[1m]",
         "--skip-quota",
         // Force the startup tree on so the assertions below can verify
-        // its contents — non-interactive mode hides it by default.
+        // its contents — non-interactive mode hides it by default. The
+        // model/provider default to the registry default; the boot path is
+        // what this test pins, not a specific vendor.
         "--header",
         "--prompt",
         "Reply with exactly: PONG",
@@ -58,7 +56,9 @@ describe("CLI smoke", () => {
     expect(stdout).toContain("PONG")
     expect(stderr).toContain("minimal-agent")
     expect(stderr).toContain("oauth")
-    expect(stderr).toContain("claude-opus-4-7[1m]")
+    // The startup tree renders a `model` row (the registry default); pin its
+    // presence without naming a vendor.
+    expect(stderr).toMatch(/model\s/)
     expect(stderr).not.toContain("cache anomaly")
     // Non-interactive defaults: ASK mode is auto-applied. The mode row
     // is only printed when the header is shown — which it is here via
@@ -75,18 +75,7 @@ describe("CLI smoke", () => {
 
   it("hides the startup tree by default in non-interactive mode", async () => {
     const p = Bun.spawn(
-      [
-        "bun",
-        "run",
-        "src/index.ts",
-        "--provider",
-        "anthropic",
-        "--model",
-        "claude-opus-4-7[1m]",
-        "--skip-quota",
-        "--prompt",
-        "Reply with exactly: PONG",
-      ],
+      ["bun", "run", "src/index.ts", "--skip-quota", "--prompt", "Reply with exactly: PONG"],
       {
         stdout: "pipe",
         stderr: "pipe",

@@ -1,23 +1,18 @@
 /**
- * Phase 3 proof: the agent's DEFAULT transport dispatches each model to the
- * provider that OWNS it, with that provider's own credential.
+ * Proof: the agent's DEFAULT transport dispatches each model to the provider
+ * that OWNS it, with that provider's OWN credential — never the host's session
+ * token meant for a different provider.
  *
- * Before this work `--model gpt-5.5` was listed + registered but, at
- * runtime through the agent loop, the legacy Anthropic-only `sendMessage`
- * would have sent it to api.anthropic.com. Now the default
- * `selectedTransport` routes any REGISTERED model through the canonical
- * `run()` to its owning adapter, and falls back to the legacy client only
- * for unregistered ids.
+ * The default `selectedTransport` routes any REGISTERED model through the
+ * canonical `run()` to its owning adapter; an unregistered id raises an
+ * unknown-model error rather than falling back to a hard-wired vendor.
  *
- * Core-side seam test (Wave A unit A-4): drives a real `Agent.run` turn
- * with NO injected `sendFn` (so the production default transport is
- * exercised) against a SYNTHETIC in-test provider registered straight
- * into the canonical registries — no real provider import (invariant I2).
- * The fake provider REUSES the real provider id "openai" AS DATA because
- * `resolveProviderAuth` (core, pending C-5) selects the credential
- * strategy by provider id; the real OpenAI Responses endpoint + wire
- * shape is owned by `plugins/llm-openai/` (wire-constants.ts + its adapter
- * suite), not pinned here.
+ * Core-side seam test: drives a real `Agent.run` turn with NO injected `sendFn`
+ * (so the production default transport is exercised) against a SYNTHETIC in-test
+ * provider registered straight into the canonical registries — no real provider
+ * import (invariant I2). The fake provider uses a neutral id ("acme") because
+ * credential resolution selects the strategy by provider id; a real provider's
+ * endpoint + wire shape is owned by its own plugin, not pinned here.
  *
  * @module agent.canonical-dispatch.test
  */
@@ -80,9 +75,9 @@ function pongEvents(): CanonicalEvent[] {
   ]
 }
 
-const openAITestApiKeyAuth: ApiKeyAuthProvider = {
-  serviceId: "openai-api-key",
-  displayName: "OpenAI API Key",
+const acmeTestApiKeyAuth: ApiKeyAuthProvider = {
+  serviceId: "acme-api-key",
+  displayName: "Acme API Key",
   buildCredential(apiKey) {
     return {
       serviceId: this.serviceId,
@@ -103,9 +98,9 @@ const openAITestApiKeyAuth: ApiKeyAuthProvider = {
 // so the dispatch falls back to the legacy client (the second case below).
 beforeAll(() => {
   registerTestProvider({
-    id: "openai",
-    models: [{ id: "gpt-5.5" }],
-    apiKeyAuth: openAITestApiKeyAuth,
+    id: "acme",
+    models: [{ id: "acme-model-1" }],
+    apiKeyAuth: acmeTestApiKeyAuth,
   })
 })
 
@@ -115,8 +110,8 @@ afterAll(() => {
   clearProviderPlugins()
 })
 
-function writeStoredOpenAIKey(apiKey: string): void {
-  const write = openAITestApiKeyAuth.buildCredential(apiKey)
+function writeStoredAcmeKey(apiKey: string): void {
+  const write = acmeTestApiKeyAuth.buildCredential(apiKey)
   defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
 }
 
@@ -137,9 +132,9 @@ describe("Agent default transport — multi-provider dispatch", () => {
     resetDefaultAuthStoreForTests()
   })
 
-  it("routes a registered non-Anthropic model to its owner with stored provider auth, never the Anthropic token", async () => {
-    const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
-    writeStoredOpenAIKey("sk-openai-real-key")
+  it("routes a registered model to its owner with stored provider auth, never the host session token", async () => {
+    const HOST_SESSION_SECRET = "host-session-secret-DO-NOT-LEAK"
+    writeStoredAcmeKey("sk-acme-real-key")
     let seenUrl = ""
     let seenAuth = ""
     const networkClient = fakeNetworkClient((req) => {
@@ -148,8 +143,8 @@ describe("Agent default transport — multi-provider dispatch", () => {
       return sseFromEvents(pongEvents())
     })
 
-    const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
-    const agent = new Agent({ auth, model: "gpt-5.5", networkClient })
+    const auth: AuthResult = { type: "oauth", token: HOST_SESSION_SECRET }
+    const agent = new Agent({ auth, model: "acme-model-1", networkClient })
 
     const out: string[] = []
     const gen = agent.run("ping")
@@ -159,10 +154,9 @@ describe("Agent default transport — multi-provider dispatch", () => {
       if (typeof value === "string") out.push(value)
     }
 
-    expect(seenUrl).toBe(testProviderUrl("openai"))
-    expect(seenUrl).not.toContain("anthropic")
-    expect(seenAuth).toBe("Bearer sk-openai-real-key")
-    expect(seenAuth).not.toContain(ANTHROPIC_SECRET)
+    expect(seenUrl).toBe(testProviderUrl("acme"))
+    expect(seenAuth).toBe("Bearer sk-acme-real-key")
+    expect(seenAuth).not.toContain(HOST_SESSION_SECRET)
     expect(out.join("")).toContain("pong")
   }, 20_000)
 
