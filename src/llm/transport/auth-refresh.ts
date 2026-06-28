@@ -6,13 +6,13 @@
  * `sendMessageOnce` but driven entirely through the `ProviderAuth.refresh`
  * hook so it works for any OAuth provider:
  *
- *   1. **keychain-first (multi-process race fix).** When many agents share
- *      one keychain entry, server-side refresh-token rotation invalidates
- *      every OTHER process's cached access token, so they all 401 at once.
- *      Before paying for a network refresh, re-read the local credential
- *      store (via the injected `peerToken` hook): if a peer already rotated
- *      the token, adopt it and retry. Collapses N concurrent refreshes per
- *      true-expiry event into ~1.
+ *   1. **store-first (multi-process race fix).** When many agents share
+ *      one credential-store entry, server-side refresh-token rotation
+ *      invalidates every OTHER process's cached access token, so they all
+ *      401 at once. Before paying for a network refresh, re-read the local
+ *      credential store (via the injected `peerToken` hook): if a peer
+ *      already rotated the token, adopt it and retry. Collapses N concurrent
+ *      refreshes per true-expiry event into ~1.
  *   2. **network refresh.** Otherwise call `auth.refresh()`, adopt the new
  *      token, and retry.
  *   3. **give up.** If a 401 persists after both, rethrow (the host should
@@ -22,9 +22,9 @@
  * retried attempt (which rebuilds its request from the same auth object)
  * picks up the fresh token.
  *
- * Provider-neutral by construction: the only Anthropic-ish bit (reading the
- * local keychain for peer rotation) is an INJECTED `peerToken` callback, not
- * a hard import. `client.ts` is untouched.
+ * Provider-neutral by construction: the only provider-specific bit (reading
+ * the local credential store for peer rotation) is an INJECTED `peerToken`
+ * callback, not a hard import.
  *
  * **Assumption:** a 401 surfaces BEFORE any stream output (it's an HTTP
  * status error, pre-SSE), so retrying never double-emits text.
@@ -44,10 +44,10 @@ export interface AuthRefreshState {
 
 export interface AuthRefreshOptions {
   /**
-   * Keychain-first peer-rotation read: returns a token discovered locally
-   * WITHOUT a network refresh (e.g.
-   * `readCredentials()?.claudeAiOauth?.accessToken`), or undefined/null when none. Injected so the middleware
-   * stays provider-neutral. Omit to skip straight to network refresh.
+   * Store-first peer-rotation read: returns a token discovered locally in
+   * the credential store WITHOUT a network refresh, or undefined/null when
+   * none. Injected so the middleware stays provider-neutral. Omit to skip
+   * straight to network refresh.
    */
   peerToken?: () => string | undefined | null
 }
@@ -62,7 +62,7 @@ export function is401(err: unknown): boolean {
 }
 
 /**
- * Run `makeAttempt`, recovering once from a 401 via keychain-first then
+ * Run `makeAttempt`, recovering once from a 401 via store-first then
  * network refresh. Non-401 errors (and 401s with no refresh available)
  * propagate unchanged for the outer retry coordinator to classify.
  *
@@ -88,15 +88,12 @@ export async function* withAuthRefresh(
       // (non-401, api-key, no refresh, already-exhausted) propagates.
       if (!is401(err) || auth.kind !== "oauth" || !auth.refresh) throw err
 
-      // 1) keychain-first: adopt a peer-rotated token without a refresh.
+      // 1) store-first: adopt a peer-rotated token without a refresh.
       if (!triedPeer) {
         triedPeer = true
         const peer = opts.peerToken?.()
         if (peer && peer !== auth.token) {
-          diag.info(
-            "auth.refresh",
-            "peer-process rotated token; retrying with fresh keychain value",
-          )
+          diag.info("auth.refresh", "peer-process rotated token; retrying with fresh stored value")
           auth.token = peer
           continue
         }

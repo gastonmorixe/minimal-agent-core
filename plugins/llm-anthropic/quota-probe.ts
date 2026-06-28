@@ -13,7 +13,7 @@
  *     (classifies as `kind:"quota"` → the minimal beta-flag set);
  *   - hard {@link QUOTA_PROBE_TIMEOUT_MS} deadline composed with the
  *     caller's signal — the probe can never hang a caller;
- *   - 401 → keychain-first peer-token adoption, then network refresh
+ *   - 401 → store-first peer-token adoption, then network refresh
  *     (same two-step policy as the transport's `withAuthRefresh`,
  *     inlined here because the probe is a single bounded request, not a
  *     stream);
@@ -61,7 +61,7 @@ function probeModelId(): string {
  */
 /** Injectable seams (tests). Production callers omit. */
 export interface QuotaProbeDeps {
-  /** Keychain reader for peer-token adoption. Default: real keychain. */
+  /** Credential-store reader for peer-token adoption. Default: real store. */
   readCreds?: typeof readCredentials
 }
 
@@ -114,7 +114,7 @@ export async function probeQuota(
   try {
     let response = await doRequest(auth.token)
 
-    // 401 recovery: keychain-first peer adoption, then network refresh —
+    // 401 recovery: store-first peer adoption, then network refresh —
     // the same two-step policy as the canonical transport's withAuthRefresh.
     if (response.status === 401 && auth.type === "oauth" && auth.refresh) {
       let recovered = false

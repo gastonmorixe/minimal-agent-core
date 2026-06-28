@@ -92,8 +92,8 @@ describe("probeQuota", () => {
     const { client, requests } = fakeClient((req, n) =>
       n === 1 ? { status: 401 } : { status: 200, headers: new Headers() },
     )
-    // Empty keychain via the injected reader: forces the NETWORK refresh
-    // leg (on a dev machine the real keychain would satisfy peer adoption
+    // Empty store via the injected reader: forces the NETWORK refresh
+    // leg (on a dev machine the real store would satisfy peer adoption
     // first and the test would never exercise refresh()).
     const result = await probeQuota(auth, client, undefined, { readCreds: () => null })
     expect(refreshed).toBe(true)

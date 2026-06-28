@@ -4,23 +4,13 @@
  * ───────────────────────────────────────────────────────────────────────────
  *  WHY THIS EXISTS
  * ───────────────────────────────────────────────────────────────────────────
- * Historically minimal-agent piggy-backed on the official Claude Code CLI's
- * credential storage: the macOS Keychain generic-password entry
- * `Claude Code-credentials`, plus the `oauthAccount` block inside
- * `~/.claude.json`. That made minimal-agent a parasite on another tool's
- * storage — logging out of one logged you out of the other, a refresh by one
- * rotated tokens under the other, and there was no place to put credentials
- * for any provider that isn't "first-party Anthropic OAuth".
- *
- * This module replaces all of that with a self-owned file:
+ * minimal-agent owns its credentials in a single self-owned file:
  *
  *     ~/.minimal-agent/auth.jsonc
  *
- * minimal-agent no longer reads or writes the Keychain or `~/.claude.json`.
- * It is fully independent. (The cut-over is intentionally non-destructive:
- * the old shared entries are left untouched so the official `claude` CLI
- * keeps working; minimal-agent simply stops consulting them and starts from
- * an empty store until the next `--login`.)
+ * This is the sole credential source. It is not shared with, and does not
+ * read or fall back to, any other tool's storage. There is one place to put
+ * credentials for every provider, OAuth or API-key alike, keyed by slug.
  *
  * ───────────────────────────────────────────────────────────────────────────
  *  DESIGN GOALS (and the future this is built for)
@@ -92,11 +82,10 @@
  * Writes are atomic: serialize to a per-process temp file then `rename(2)`
  * into place (same-filesystem rename is atomic on POSIX), so a concurrent
  * reader sees either the whole old file or the whole new one, never a
- * half-written blob. The file is created mode 0600 (owner read/write only) —
- * the same protection the official CLI's plaintext fallback and Codex's
- * `auth.json` use. This is plaintext at rest by design (it must be a readable
- * `.jsonc`); the 0600 bit, not encryption, is the protection. A future
- * encrypted/OS-keychain-backed backend can slot in behind the same API.
+ * half-written blob. The file is created mode 0600 (owner read/write only).
+ * This is plaintext at rest by design (it must be a readable `.jsonc`); the
+ * 0600 bit, not encryption, is the protection. A future encrypted backend
+ * can slot in behind the same API.
  *
  * This store does NOT lock across processes — that is the caller's job where
  * it matters. `auth.ts` already serializes token refreshes through a

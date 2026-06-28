@@ -84,7 +84,7 @@ export interface SummarizeOptions {
 
 /**
  * Injectable dependencies. Production callers pass nothing; tests
- * inject fakes to avoid hitting the real keychain / API.
+ * inject fakes to avoid hitting the real credential store / API.
  */
 export interface SummarizeDeps {
   /** Returns auth credentials. Defaults to {@link getAuth}. */

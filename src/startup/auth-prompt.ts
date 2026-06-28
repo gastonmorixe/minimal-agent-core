@@ -117,8 +117,8 @@ export async function getAuthWithFirstTimePrompt(
         { cause: err },
       )
     }
-    // Login wrote the keychain; retry. If THIS still fails, surface
-    // the error — we're not going to loop.
+    // Login wrote the credential store; retry. If THIS still fails,
+    // surface the error — we're not going to loop.
     return await auth()
   }
 }

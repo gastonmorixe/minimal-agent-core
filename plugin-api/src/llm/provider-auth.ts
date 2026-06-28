@@ -27,8 +27,8 @@ import type { CanonicalUsage } from "./canonical-events.ts"
  * Provider-neutral auth descriptor.
  *
  * - `oauth`: OAuth bearer with optional refresh callback. The shared transport
- *   handles the 401-keychain-race fix and forwards refreshed tokens back into
- *   the same request without restarting the conversation.
+ *   handles the 401 multi-process refresh race and forwards refreshed tokens
+ *   back into the same request without restarting the conversation.
  * - `api-key`: header-token auth. No refresh.
  * - `custom`: arbitrary header bag for self-hosted gateways.
  */

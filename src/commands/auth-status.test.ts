@@ -22,7 +22,7 @@ function captureOut(): { out: { write: (s: string) => void }; lines: string[]; t
 }
 
 describe("runAuthStatusCommand", () => {
-  it("reports not-logged-in (and exit code 1) when keychain is empty", async () => {
+  it("reports not-logged-in (and exit code 1) when the credential store is empty", async () => {
     const cap = captureOut()
     const code = await runAuthStatusCommand({
       discover: () => [],
