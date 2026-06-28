@@ -67,6 +67,17 @@ describe("formatSessionInfo", () => {
     expect(formatSessionInfo(base({ fast: true }))).toContain("· fast ·")
   })
 
+  it("renders a Name line right after Session when agentName is set", () => {
+    const out = formatSessionInfo(base({ agentName: "Laura" }))
+    expect(out).toContain("\nName: Laura\n")
+    expect(out.indexOf("Name: Laura")).toBeGreaterThan(out.indexOf("Session:"))
+    expect(out.indexOf("Name: Laura")).toBeLessThan(out.indexOf("Model:"))
+  })
+
+  it("omits the Name line when agentName is unset (naming off)", () => {
+    expect(formatSessionInfo(base())).not.toContain("Name:")
+  })
+
   it("degrades to a window-less context line when contextWindow is unknown", () => {
     const out = formatSessionInfo(base({ contextWindow: undefined }))
     expect(out).toContain("Context: 50,000 tokens in context · 12 turns")

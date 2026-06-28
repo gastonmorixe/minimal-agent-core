@@ -549,6 +549,19 @@ async function main() {
   printStartupHeader()
   printStartupRow("session", c.dim(getSessionId()))
 
+  // Resolve the opt-in per-session agent name ONCE, here, and reuse the value
+  // for both the startup `name` row below and the env publication further down
+  // (the `agent-identity` plugin reads MINIMAL_AGENT_AGENT_NAME). Off by
+  // default: when naming is disabled the resolver returns undefined and no row
+  // is printed, so the banner is byte-identical to today's. See
+  // `src/agent-name.ts` for the resolution priority + the cache rationale.
+  const resolvedAgentName = resolveAgentName({
+    sessionId: getSessionId(),
+    configName: userConfig.agentName,
+    envName: process.env.MINIMAL_AGENT_AGENT_NAME,
+  })
+  if (resolvedAgentName) printStartupRow("name", c.dim(resolvedAgentName))
+
   // Diagnostic bus: attach the file sink as early as possible so even
   // plugin-load warnings land in `~/.minimal-agent/logs/ma-session-<sid>.log`.
   // The TUI surface attaches later from `runReplLiveArea` (it needs the
@@ -846,19 +859,13 @@ async function main() {
   process.env.MINIMAL_AGENT_SESSION_ID = agentContext.sessionId
   process.env.MINIMAL_AGENT_PID = String(agentContext.pid)
   process.env.MINIMAL_AGENT_VERSION = agentContext.version
-  // Resolve the opt-in per-session agent name ONCE, here at boot, and
-  // publish it for the `agent-identity` plugin to read (the loader spreads
-  // process.env into every prompt-fragment ctx.env). Priority: the
-  // MINIMAL_AGENT_AGENT_NAME env override, then config `agentName`. The name
-  // is frozen for the session: it lands in the system prompt, so changing it
-  // mid-run would bust the conversation's prompt cache. Off by default
-  // (resolver returns undefined → we clear the env so the plugin emits
-  // nothing and the system prompt is byte-identical to today's).
-  const resolvedAgentName = resolveAgentName({
-    sessionId: agentContext.sessionId,
-    configName: userConfig.agentName,
-    envName: process.env.MINIMAL_AGENT_AGENT_NAME,
-  })
+  // Publish the opt-in per-session agent name (resolved once up front, beside
+  // the startup `name` row) for the `agent-identity` plugin to read (the loader
+  // spreads process.env into every prompt-fragment ctx.env). The name is frozen
+  // for the session: it lands in the system prompt, so changing it mid-run would
+  // bust the conversation's prompt cache. Off by default (resolver returned
+  // undefined → we clear the env so the plugin emits nothing and the system
+  // prompt is byte-identical to today's).
   if (resolvedAgentName) {
     process.env.MINIMAL_AGENT_AGENT_NAME = resolvedAgentName
   } else {

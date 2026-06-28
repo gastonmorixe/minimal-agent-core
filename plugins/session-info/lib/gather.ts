@@ -183,6 +183,7 @@ export async function gatherSessionInfo(ctx: TUIContext): Promise<SessionInfoSna
     pid: process.pid,
     hostname: hostname(),
     agentVersion: process.env.MINIMAL_AGENT_VERSION || undefined,
+    agentName: process.env.MINIMAL_AGENT_AGENT_NAME || undefined,
     modelId: bits.modelId,
     modelLabel: bits.modelLabel,
     providerId: bits.providerId,
