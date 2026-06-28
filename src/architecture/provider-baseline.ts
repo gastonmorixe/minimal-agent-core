@@ -79,7 +79,6 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // legacy-fallback assertion targets api.anthropic.com until the legacy
   // stack leaves core in B-5).
   "agent.canonical-dispatch.test.ts",
-  "dump-command.e2e.test.ts",
   "e2e-smoke.test.ts",
   "llm/model-label.test.ts",
   "llm/provider-discovery.test.ts",
