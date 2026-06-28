@@ -40,9 +40,8 @@ import type { ProviderAdapter, SurfaceId } from "./provider.ts"
  * separately. `pricing` is the default rate; some models override at
  * runtime when `speed:"fast"` or other knobs flip.
  *
- * `vendorIds` is the per-deployment-vendor name map (Anthropic-only
- * concept right now : `firstParty`, `bedrock`, `vertex`, `foundry`,
- * `anthropicAws`, `mantle`, `gateway`).
+ * `vendorIds` is a provider-owned route-name map. Core treats the keys as
+ * opaque strings; each plugin decides which route labels it supports.
  */
 export interface ModelEntry {
   id: string
@@ -56,8 +55,8 @@ export interface ModelEntry {
   tags?: ReadonlyArray<string>
   capabilities: Capabilities
   pricing: MTokRate
-  /** Per-cloud-vendor model ids (Anthropic-only today). */
-  vendorIds?: Partial<Record<VendorRoute, string>>
+  /** Provider-owned route ids for wire-model selection. */
+  vendorIds?: Readonly<Record<string, string>>
   /**
    * Optional override: pick a different pricing rate based on the
    * request (e.g. Anthropic `speed:"fast"` switches Opus 4.8 to the
@@ -76,19 +75,6 @@ export interface ModelEntry {
    */
   estimateTokens?: import("./token-estimate.ts").TokenEstimator
 }
-
-/**
- * Per-cloud routing destination. Mirrors the claude-code constant
- * shapes (`fi_.firstParty`, `fi_.bedrock`, etc).
- */
-export type VendorRoute =
-  | "firstParty"
-  | "bedrock"
-  | "vertex"
-  | "foundry"
-  | "anthropicAws"
-  | "mantle"
-  | "gateway"
 
 // ---------------------------------------------------------------------------
 // Model registry

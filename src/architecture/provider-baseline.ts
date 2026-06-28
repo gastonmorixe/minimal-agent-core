@@ -52,9 +52,9 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // only coupling was incidental provider-token STRINGS (example slugs/names, a
   // callback-URL test fixture, a CLI banner), now neutralized to generic
   // placeholders. auth.ts itself STAYS pending B-6.
-  // Anthropic rate tables + registry vendor-extension keys pending
-  // extraction to the plugin.
-  "llm/model-registry.ts",
+  // (llm/model-registry.ts ratcheted OUT in W6d: provider-specific route
+  // labels are plugin-owned `vendorIds` keys; core now stores them as opaque
+  // strings and has no closed vendor-route vocabulary.)
   // (llm/adapter-legacy.ts ratcheted OUT in the provider-decoupling final wave:
   // the default-model literal now comes from getDefaultModelId(), the dead
   // canonical→legacy bridge that carried a vendor.anthropic accessor was
