@@ -5,10 +5,9 @@
  *  STORAGE: fully independent, no sharing with the official `claude` CLI
  * ───────────────────────────────────────────────────────────────────────────
  * minimal-agent stores credentials in its OWN file via {@link AuthStore}
- * (`~/.minimal-agent/auth.jsonc`). It does NOT touch the macOS Keychain entry
- * `Claude Code-credentials` nor the `oauthAccount` block in `~/.claude.json`
- * that the official CLI uses — that sharing is gone. The two tools log in,
- * refresh, and log out completely independently.
+ * (`~/.minimal-agent/auth.jsonc`). It is the sole credential source: there is
+ * no sharing with, or fallback to, any other tool's storage. Login, refresh,
+ * and logout all read and write this file and nothing else.
  *
  * This module is, for now, the sole consumer of the generic auth store and
  * effectively plays the role of the *one* provider that exists today:

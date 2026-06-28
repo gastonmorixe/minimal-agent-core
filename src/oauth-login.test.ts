@@ -6,7 +6,7 @@
  *   - URL building: required params, scope ordering, optional login_hint
  *   - Paste parsing: `code#state`, full URL, query-only, malformed, empty
  *   - Token exchange: happy path, 401, generic error
- *   - installCredentials: keychain shape, ~/.claude.json merge / new file
+ *   - installCredentials: store secret-bag shape, new-file creation
  *   - runOAuthLogin orchestrator: success, retries, state mismatch, exhaustion
  */
 

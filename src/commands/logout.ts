@@ -2,8 +2,8 @@
  * `minimal-agent --logout` command.
  *
  * Removes minimal-agent credentials from its independent store
- * (`~/.minimal-agent/auth.jsonc`, see `../auth-store.ts`). It does NOT
- * touch the macOS Keychain or `~/.claude.json`.
+ * (`~/.minimal-agent/auth.jsonc`, see `../auth-store.ts`), the sole
+ * credential source.
  *
  * Idempotent: running `--logout` twice in a row exits 0 the second time.
  *

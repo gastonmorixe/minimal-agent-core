@@ -36,8 +36,8 @@ The shared contract both sides depend on lives in a leaf package, `@minimal-agen
   release to install.
 - `git`, if you want the first-run bootstrap to fetch the extended plugins.
 - macOS or Linux. Credentials live in a plain `~/.minimal-agent/auth.jsonc`
-  (mode 0600), not the system keychain, so the same login works on a server,
-  a container, or your laptop.
+  (mode 0600), so the same login works on a server, a container, or your
+  laptop.
 - Optional: `mdstream` for Markdown rendering. The agent auto-downloads it on
   first run.
 - Optional: a `BRAVE_API_KEY` (or any provider key) for the plugins that need one.

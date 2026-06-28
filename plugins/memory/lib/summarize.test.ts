@@ -2,7 +2,7 @@
  * Tests for {@link summarize}.
  *
  * All tests inject `authProvider` and `sendFn` to avoid hitting the
- * real keychain / API. The system prompt and send options are
+ * real credential store / API. The system prompt and send options are
  * inspectable via a captured-args helper.
  */
 
@@ -124,7 +124,7 @@ describe("summarize — failure modes", () => {
         { model: "claude-haiku-test", scope: "project" },
         {
           authProvider: async () => {
-            throw new Error("no creds in keychain")
+            throw new Error("no creds in store")
           },
           sendFn,
         },

@@ -1,9 +1,9 @@
 /**
  * Tests for the provider-neutral 401 auth-refresh middleware.
  *
- * Mirrors the legacy `client.test.ts` "401 retry — keychain-first
+ * Mirrors the legacy `client.test.ts` "401 retry — store-first
  * multi-process race mitigation" coverage at the canonical layer:
- * keychain-first peer adoption, network refresh fallback, give-up after
+ * store-first peer adoption, network refresh fallback, give-up after
  * both, non-401 / api-key pass-through.
  *
  * @module llm/transport/auth-refresh.test
@@ -78,7 +78,7 @@ describe("withAuthRefresh", () => {
     expect((state.auth as { token: string }).token).toBe("fresh")
   })
 
-  it("keychain-first: adopts a peer-rotated token WITHOUT a network refresh", async () => {
+  it("store-first: adopts a peer-rotated token WITHOUT a network refresh", async () => {
     let refreshCalls = 0
     const state: AuthRefreshState = {
       auth: {

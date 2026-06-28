@@ -5,7 +5,7 @@
  * Why this exists: `client.ts` carries ~1500 lines of carefully tuned
  * cross-cutting infrastructure (stream-idle watchdog, hard-timeout
  * watchdog, retry coordinator with overloaded/api categorization,
- * 401 keychain-first refresh, network activity observer, cache anomaly
+ * 401 store-first refresh, network activity observer, cache anomaly
  * detector, status-bus updates, rate-limit broadcaster). Rewriting all
  * of that against the canonical layer is high-risk; this bridge lets
  * the legacy transport keep running while exposing a canonical
@@ -578,7 +578,7 @@ function legacyThinkingToCanonical(
 /**
  * Map the legacy `AuthResult` to the provider-neutral `ProviderAuth`. The
  * OAuth refresh callback is preserved (re-shaped to the `{token}` return
- * the canonical transport expects); the multi-process keychain-first race
+ * the canonical transport expects); the multi-process store-first race
  * fix lives in the transport middleware, not here.
  */
 export function legacyAuthToProviderAuth(auth: AuthResult): ProviderAuth {

@@ -129,7 +129,7 @@ later for tools / live-area slots; provider registration must happen earlier).
 The new canonical layer runs ALONGSIDE the legacy `src/client.ts`, it does not
 replace it. `Agent.send` / `Agent.run` still call `client.sendMessage`, which
 carries ~1500 lines of tuned cross-cutting infrastructure (idle/hard-timeout
-watchdogs, retry coordinator, 401 keychain-first refresh with a multi-process
+watchdogs, retry coordinator, 401 store-first refresh with a multi-process
 race fix, network observer, status bus). For Anthropic both paths emit identical
 bytes.
 
