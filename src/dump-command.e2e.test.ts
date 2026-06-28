@@ -16,7 +16,7 @@ function createHomeWithSession(sid: string): string {
   const sessionsDir = join(home, ".minimal-agent", "sessions")
   const store = SessionStore.open({
     sid,
-    model: "claude-opus-4-7",
+    model: "test-model-1",
     cwd: process.cwd(),
     systemHash: "sys-hash",
     toolsHash: "tools-hash",
@@ -129,7 +129,7 @@ describe("dump command architecture", () => {
     const sessionsDir = join(home, ".minimal-agent", "sessions")
     const storeA = SessionStore.open({
       sid: "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-      model: "claude-opus-4-7",
+      model: "test-model-1",
       cwd: "/tmp/project-alpha",
       systemHash: "sys",
       toolsHash: "tools",
@@ -140,7 +140,7 @@ describe("dump command architecture", () => {
     storeA.appendAssistant([{ type: "text", text: "alpha response" }], "end_turn")
     const storeB = SessionStore.open({
       sid: "bbbb2222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-      model: "claude-opus-4-7",
+      model: "test-model-1",
       cwd: "/tmp/project-beta",
       systemHash: "sys",
       toolsHash: "tools",
