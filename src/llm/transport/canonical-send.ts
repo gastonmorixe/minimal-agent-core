@@ -21,7 +21,7 @@
  *   one attempt's canonical event stream; throws tagged errors.
  * - **bridge**: canonical events → legacy shape
  *   (`yield string` / `return StreamedResponse`) + lifecycle callbacks.
- * - **auth-refresh**: on 401, keychain-first peer adoption then network
+ * - **auth-refresh**: on 401, store-first peer adoption then network
  *   refresh, retry once; provider-neutral via `ProviderAuth.refresh`.
  * - **retry** (outermost): retry tagged transient/hard errors forever with
  *   capped jittered backoff (the harness principle), user-abortable.
@@ -37,8 +37,7 @@
 
 import { randomUUID } from "node:crypto"
 
-import { readCredentials } from "../../auth.ts"
-import { resolveStoredProviderAuth } from "../../auth-strategies.ts"
+import { providerPeerToken, resolveStoredProviderAuth } from "../../auth-strategies.ts"
 import { diag } from "../../diagnostic-bus.ts"
 import {
   defaultNetworkClient,
@@ -97,36 +96,39 @@ async function* updateLabelsFromEvents(
 }
 
 /**
- * Resolve the credential for the request's PROVIDER, not the host's single
- * Anthropic session. This is the fix for the bug where every provider was
- * handed the Anthropic OAuth token (so gpt-5.5 reached OpenAI but 401'd):
+ * Resolve the credential for the request's PROVIDER from minimal-agent's own
+ * provider auth store, keyed by the model's provider (not the host's single
+ * session). This is the fix for the bug where every provider was handed one
+ * provider's OAuth token (so a request to a second provider 401'd).
  *
- * - anthropic  → the legacy `AuthResult` (OAuth keychain; keeps the
- *   keychain-first / peer-token 401 recovery wired in `canonicalSendFn`).
- * - openai/openrouter/etc. → minimal-agent's own provider auth store.
- * - missing credentials → THROW (no silent fallback to env/config or the
- *   Anthropic token).
+ * Every provider, including the one that ships an OAuth/plan login, resolves
+ * uniformly through {@link resolveStoredProviderAuth}: it reads the provider
+ * plugin's own credential (via its `oauthLogin`/`apiKeyAuth` strategy) and
+ * wires a `refresh` callback when the strategy declares `refreshCredential`, so
+ * the transport's 401 recovery works the same for all of them. Missing
+ * credentials THROW (no silent fallback to env/config or another provider's
+ * token).
  *
- * An unresolvable model id defers to the legacy credential so `run()` raises
- * its own "unknown model" error rather than this masking it (that path never
- * reaches a real non-Anthropic endpoint).
+ * An unresolvable model id defers to the caller-supplied credential so `run()`
+ * raises its own "unknown model" error rather than this masking it.
  */
 function resolveProviderAuth(opts: SendOptions): ProviderAuth {
-  const modelId = opts.model ?? ""
-  let providerId: string | undefined = opts.selectedProviderId
-  // When no provider was explicitly selected, derive it from model registry.
-  if (!providerId) {
-    try {
-      providerId = resolveModel(modelId).providerId
-    } catch {
-      return legacyAuthToProviderAuth(opts.auth)
-    }
-  }
-  switch (providerId) {
-    case "anthropic":
-      return legacyAuthToProviderAuth(opts.auth)
-    default:
-      return resolveStoredProviderAuth(providerId, modelId)
+  const providerId = resolveRequestProviderId(opts)
+  if (!providerId) return legacyAuthToProviderAuth(opts.auth)
+  return resolveStoredProviderAuth(providerId, opts.model ?? "")
+}
+
+/**
+ * The provider id for this request: the explicitly selected provider, else the
+ * model registry's mapping. Returns `undefined` for an unresolvable model id
+ * (the caller then falls back to the supplied credential).
+ */
+function resolveRequestProviderId(opts: SendOptions): string | undefined {
+  if (opts.selectedProviderId) return opts.selectedProviderId
+  try {
+    return resolveModel(opts.model ?? "").providerId
+  } catch {
+    return undefined
   }
 }
 
@@ -147,10 +149,15 @@ export async function* canonicalSendFn(
   debugRequestOptions(opts)
 
   const req = sendOptionsToCanonical(opts)
-  // Shared, mutable auth keyed by the model's PROVIDER (not the host's
-  // Anthropic session): OpenAI/OpenRouter get their own API key, Anthropic
-  // keeps the OAuth credential. auth-refresh updates `.token` in place so a
-  // refreshed token is picked up by the next attempt within this send.
+  // The model's provider, used to scope both the credential lookup and the
+  // store-first peer-token recovery to THIS request's provider (not the
+  // host's single session). Undefined only for an unresolvable model id, where
+  // resolveProviderAuth falls back to the caller-supplied credential.
+  const providerId = resolveRequestProviderId(opts)
+  // Shared, mutable auth keyed by the model's provider: each provider resolves
+  // its own credential through the provider auth store. auth-refresh updates
+  // `.token` in place so a refreshed token is picked up by the next attempt
+  // within this send.
   const authState: AuthRefreshState = { auth: resolveProviderAuth(opts) }
 
   // ------------------------------------------------------------------
@@ -237,11 +244,13 @@ export async function* canonicalSendFn(
     })
   }
 
-  // auth-refresh wraps the attempt (keychain-first peer adoption is the
-  // Anthropic multi-process race fix, injected as a provider-neutral hook).
+  // auth-refresh wraps the attempt. Store-first peer adoption (the
+  // multi-process token-rotation race fix) is injected as a provider-neutral
+  // hook: it re-reads THIS request's provider's stored OAuth token, so a peer
+  // process's rotation is adopted before falling back to a network refresh.
   const makeAuthRefreshedAttempt = () =>
     withAuthRefresh(makeWatchdoggedAttempt, authState, {
-      peerToken: () => readCredentials()?.claudeAiOauth?.accessToken,
+      peerToken: providerId ? () => providerPeerToken(providerId) : undefined,
     })
 
   // retry is the outermost layer: forever, capped backoff, user-abortable.

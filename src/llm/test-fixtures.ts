@@ -40,6 +40,7 @@ import type { MTokRate } from "./pricing.ts"
 import type { ProviderAdapter, ValidationResult } from "./provider.ts"
 import {
   type ApiKeyAuthProvider,
+  type OAuthLoginProvider,
   type ProviderPlugin,
   registerProviderPlugin,
 } from "./provider-plugin.ts"
@@ -98,6 +99,8 @@ export interface TestProviderOptions {
   modelVersionToken?: (modelId: string) => string | undefined
   /** Optional API-key auth strategy exposed through the provider plugin hook. */
   apiKeyAuth?: ApiKeyAuthProvider
+  /** Optional OAuth login strategy exposed through the provider plugin hook. */
+  oauthLogin?: OAuthLoginProvider
 }
 
 /** What {@link registerTestProvider} hands back for direct assertions. */
@@ -277,6 +280,7 @@ export function registerTestProvider(opts: TestProviderOptions = {}): TestProvid
     register,
     modelVersionToken: opts.modelVersionToken ?? defaultVersionToken,
     ...(opts.apiKeyAuth ? { apiKeyAuth: opts.apiKeyAuth } : {}),
+    ...(opts.oauthLogin ? { oauthLogin: opts.oauthLogin } : {}),
   }
 
   register()
