@@ -49,6 +49,8 @@ export interface SessionInfoSnapshot {
   pid: number
   hostname: string
   agentVersion?: string
+  /** Opt-in per-session agent display name (MINIMAL_AGENT_AGENT_NAME), when set. */
+  agentName?: string
 
   // Live model + settings --------------------------------------------------
   modelId: string
@@ -117,6 +119,8 @@ export function formatSessionInfo(s: SessionInfoSnapshot): string {
     .filter(Boolean)
     .join(" · ")
   lines.push(`Session: ${s.sessionId} · ${idTail}`)
+
+  if (s.agentName) lines.push(`Name: ${s.agentName}`)
 
   const modelTail = [
     s.effort ? `effort ${s.effort}` : null,
