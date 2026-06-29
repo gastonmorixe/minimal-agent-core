@@ -103,6 +103,24 @@ describe("loadUserConfig", () => {
     expect(loadUserConfig()).toEqual({})
   })
 
+  it("parses scrollback.submittedAt", () => {
+    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: "inline-locale" } }))
+    expect(loadUserConfig()).toEqual({ scrollback: { submittedAt: "inline-locale" } })
+    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: "off" } }))
+    expect(loadUserConfig()).toEqual({ scrollback: { submittedAt: "off" } })
+    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: false } }))
+    expect(loadUserConfig()).toEqual({ scrollback: { submittedAt: false } })
+  })
+
+  it("drops invalid scrollback.submittedAt", () => {
+    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: true } }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ scrollback: { submittedAt: "brackets" } }))
+    expect(loadUserConfig()).toEqual({})
+    writeFileSync(path, JSON.stringify({ scrollback: {} }))
+    expect(loadUserConfig()).toEqual({})
+  })
+
   it("returns {} on malformed JSON (does not throw)", () => {
     writeFileSync(path, "{not json")
     expect(loadUserConfig()).toEqual({})

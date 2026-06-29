@@ -150,7 +150,10 @@ export interface ReplEditor {
    * sits queued does not appear in both scrollback and the queue widget
    * (Bug 393). Listeners that only care about `text` can ignore it.
    */
-  on(event: "submit", listener: (text: string, commitLines?: string[]) => void): unknown
+  on(
+    event: "submit",
+    listener: (text: string, commitLines?: string[], submittedAt?: Date) => void,
+  ): unknown
   on(event: "cancel", listener: (reason?: string) => void): unknown
   /**
    * Emitted by the abort-quit FSM when the user has confirmed a quit
@@ -346,6 +349,8 @@ export async function runRepl(
      * resume hint with this id. Omit / empty → degraded copy.
      */
     sessionId?: string
+    /** Forwarded to live-area scrollback rendering. */
+    scrollbackSubmittedAt?: false | "off" | "inline-locale"
   },
 ): Promise<void> {
   if (opts?.useLiveArea) {

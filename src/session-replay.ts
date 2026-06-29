@@ -23,6 +23,11 @@
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./llm/messages.ts"
 import type { ModeManager } from "./modes.ts"
 import { isRuntimeAttachmentBlock } from "./runtime-attachments"
+import {
+  prefixSubmittedAtLines,
+  type SubmittedAtStyle,
+  submittedAtEnabled,
+} from "./scrollback-submitted-at.ts"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "./session-store.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
@@ -112,6 +117,12 @@ export interface ReplayOptions {
    * store's UserRecord `ts` values via {@link userTimestampsFromRecords}.
    */
   userTimestamps?: readonly (Date | null)[]
+
+  /**
+   * Submitted prompt timestamp display. `"inline-locale"` prefixes each
+   * replayed user prompt with the locale-native user record timestamp.
+   */
+  scrollbackSubmittedAt?: SubmittedAtStyle
 
   /**
    * Optional `tool_use_id → display overrides` lookup. When present,
@@ -208,6 +219,7 @@ export async function replayToScrollback(
   const toolTimeTracker = opts.toolTimeTracker ?? null
   const toolStartTimes = opts.toolStartTimes ?? null
   const userTimestamps = opts.userTimestamps ?? null
+  const showSubmittedAt = submittedAtEnabled(opts.scrollbackSubmittedAt)
   const toolDisplays = opts.toolDisplays ?? null
   const toolPresentation = opts.toolPresentation ?? null
 
@@ -313,7 +325,10 @@ export async function replayToScrollback(
         const arrow = modeManager
           ? modeManager.promptPrefixForId(activeModeId, baseArrow)
           : baseArrow
-        sink.write(`${arrow}${text}\n\n`)
+        const lines = [`${arrow}${text}`]
+        const renderedLines =
+          showSubmittedAt && msgTs ? prefixSubmittedAtLines(lines, msgTs) : lines
+        sink.write(`${renderedLines.join("\n")}\n\n`)
       }
       continue
     }

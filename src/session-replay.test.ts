@@ -48,6 +48,55 @@ describe("replayToScrollback", () => {
     expect(plain).toContain("hello there")
   })
 
+  it("prefixes replayed user prompts with submitted-at by default", async () => {
+    const at = new Date("2026-06-29T15:39:28.000Z")
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, { userTimestamps: [at, null] })
+    const plain = stripAnsi(sink.out)
+    const stamp = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "short",
+      timeStyle: "medium",
+    }).format(at)
+    expect(plain).toContain(`${stamp} ❯ hi`)
+  })
+
+  it("prefixes replayed user prompts with submitted-at when configured", async () => {
+    const at = new Date("2026-06-29T15:39:28.000Z")
+    const messages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, {
+      userTimestamps: [at, null],
+      scrollbackSubmittedAt: "inline-locale",
+    })
+    const plain = stripAnsi(sink.out)
+    const stamp = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "short",
+      timeStyle: "medium",
+    }).format(at)
+    expect(plain).toContain(`${stamp} ❯ hi`)
+    expect(plain).not.toContain(`[${stamp}]`)
+  })
+
+  it("does not prefix replayed user prompts when submitted-at is off", async () => {
+    const at = new Date("2026-06-29T15:39:28.000Z")
+    const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+    const sink = new CaptureSink()
+    await replayToScrollback(messages, sink, {
+      userTimestamps: [at],
+      scrollbackSubmittedAt: "off",
+    })
+    const plain = stripAnsi(sink.out)
+    expect(plain).toContain("❯ hi")
+    expect(plain).not.toContain(new Intl.DateTimeFormat(undefined).format(at))
+  })
+
   it("renders a tool_use under the assistant turn with its result preview", async () => {
     const messages: Message[] = [
       { role: "user", content: [{ type: "text", text: "list files" }] },

@@ -1242,7 +1242,7 @@ export class EditorController extends EventEmitter {
     this.buf.clear()
     this.viewportTop = 0
     this.repaint()
-    this.emit("submit", text, commitLines)
+    this.emit("submit", text, commitLines, new Date())
   }
 
   private repaint(): void {

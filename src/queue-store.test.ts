@@ -239,6 +239,22 @@ describe("loadQueue", () => {
     expect(loadQueue(sid, dir)).toEqual(items)
   })
 
+  it("round-trips submittedAt when present", async () => {
+    const dir = tmp()
+    const sid = "ma-queue-submitted-at"
+    const s = new QueueStore(sid, { dir })
+    const items: QueueItem[] = [
+      {
+        text: "first message",
+        commitLines: ["❯ first message"],
+        submittedAt: "2026-06-29T15:39:28.000Z",
+      },
+    ]
+    s.save(items)
+    await waitQuiet(s)
+    expect(loadQueue(sid, dir)).toEqual(items)
+  })
+
   it("returns [] on read errors (e.g. nonexistent directory) — best-effort", () => {
     expect(loadQueue("definitely-not-a-sid-at-all", "/nonexistent/path")).toEqual([])
   })

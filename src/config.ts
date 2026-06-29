@@ -36,6 +36,7 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { parseJsonc } from "./jsonc.ts"
+import { normalizeSubmittedAtStyle } from "./scrollback-submitted-at.ts"
 import { parseFormatterCommand } from "./ui/formatter/formatter.ts"
 
 export interface UserConfig {
@@ -163,6 +164,15 @@ export interface UserConfig {
     segments?: string[]
     script?: string
   }
+  /**
+   * Scrollback customization for submitted user prompts.
+   *
+   * `submittedAt: "inline-locale"` prefixes submitted prompts with a dim,
+   * locale-native timestamp. `false` or `"off"` disables it.
+   */
+  scrollback?: {
+    submittedAt?: false | "off" | "inline-locale"
+  }
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
@@ -271,6 +281,11 @@ export function loadUserConfig(): UserConfig {
       statusBar.script = sb.script
     }
     if (statusBar.segments || statusBar.script) out.statusBar = statusBar
+  }
+  if (obj.scrollback && typeof obj.scrollback === "object" && !Array.isArray(obj.scrollback)) {
+    const sb = obj.scrollback as Record<string, unknown>
+    const submittedAt = normalizeSubmittedAtStyle(sb.submittedAt)
+    if (submittedAt !== undefined) out.scrollback = { submittedAt }
   }
   return out
 }
