@@ -302,6 +302,17 @@ export interface IndexRecord {
 // Parse helpers (also used by session-restore)
 // ---------------------------------------------------------------------------
 
+/** Return whether a record counts as durable conversation content. */
+function isConversationRecord(rec: SessionRecord): boolean {
+  return (
+    rec.kind === "user" ||
+    rec.kind === "assistant" ||
+    rec.kind === "tool_result" ||
+    rec.kind === "note" ||
+    rec.kind === "rewind"
+  )
+}
+
 /**
  * Parse a JSONL blob into records. Lines that fail to parse are dropped
  * with a soft warning (returned in `dropped`); the *last* line is the
@@ -488,6 +499,10 @@ export class SessionStore {
         argv: opts.argv,
       }
       appendFileSync(indexFilePath(dir), `${JSON.stringify(indexRecord)}\n`)
+    } else if (opts.existsOk) {
+      const text = readFileSync(store.path, "utf-8")
+      const { records } = parseLines(text)
+      store.hasConversation = records.some(isConversationRecord)
     }
 
     return store
