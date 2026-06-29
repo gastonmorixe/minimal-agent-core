@@ -65,3 +65,46 @@ export function resolveEffort(input: ResolveEffortInput): ResolvedEffort {
   }
   return { effort: undefined, source: undefined }
 }
+
+// ---------------------------------------------------------------------------
+// Model-capability validation (startup-time, before the first request)
+// ---------------------------------------------------------------------------
+
+/** Result of validating a resolved effort against a model's declared levels. */
+export interface EffortValidation {
+  ok: boolean
+  /** Human-readable reason when `ok` is false. */
+  reason?: string
+}
+
+/**
+ * Check whether `effort` is compatible with `modelEffortLevels`.
+ *
+ * Pure: no I/O, no globals. Call this at startup so a misconfigured effort
+ * (e.g. `--effort low` on a model whose levels are `["high", "max"]`) fails
+ * fast with a clear message instead of surfacing as a cryptic
+ * "unsupported capabilities: effort" on the first request.
+ *
+ * When `effort` is `undefined` the model default applies, so validation
+ * always passes. When the model declares no effort levels at all (a cheap /
+ * fast-tier model), any explicit effort is a hard error.
+ */
+export function validateEffortForModel(
+  effort: string | undefined,
+  modelEffortLevels: readonly string[],
+): EffortValidation {
+  if (effort === undefined) return { ok: true }
+  if (modelEffortLevels.length === 0) {
+    return {
+      ok: false,
+      reason: `effort "${effort}" was requested but this model does not support reasoning effort`,
+    }
+  }
+  if (!modelEffortLevels.includes(effort)) {
+    return {
+      ok: false,
+      reason: `effort "${effort}" is not supported by this model (supported: ${modelEffortLevels.join(", ")})`,
+    }
+  }
+  return { ok: true }
+}

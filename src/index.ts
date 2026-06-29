@@ -78,7 +78,7 @@ import { runSessionsCommand } from "./commands/sessions.ts"
 import { runUsageCommand } from "./commands/usage.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
 import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
-import { resolveEffort } from "./effort-resolution.ts"
+import { resolveEffort, validateEffortForModel } from "./effort-resolution.ts"
 import { extractPromptFromArgs } from "./extract-prompt.ts"
 import { setGlobalEventBus } from "./global-bus.ts"
 import { activateDiscoveredProviders, registerDiscoveredProviders } from "./llm/index.ts"
@@ -746,6 +746,21 @@ async function main() {
       : `medium ${c.dim("(default)")}`
   printStartupRow("thinking", thinkingLabel)
   printStartupRow("effort", effortLabel)
+
+  // Validate the resolved effort against the selected model's declared
+  // capability levels at startup so a misconfigured effort (e.g.
+  // `--effort low` on a model whose levels are `["high", "max"]`) fails
+  // fast with a clear message instead of surfacing as a cryptic
+  // "unsupported capabilities: effort" on the first request.
+  if (!hidesReasoning) {
+    const modelEntry = findModel(selectedModelBase)
+    if (modelEntry) {
+      const validation = validateEffortForModel(effort, modelEntry.capabilities.effort.levels)
+      if (!validation.ok) {
+        throw new Error(validation.reason)
+      }
+    }
+  }
 
   // Terminal viewport the compositor / mdstream will use for partial-redraw
   // and wrap math. Mirror `Compositor.effectiveColumns()` (src/ui/compositor.ts):
