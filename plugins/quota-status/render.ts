@@ -176,6 +176,16 @@ export interface RenderOpts {
    */
   sid?: string
   /**
+   * Opt-in per-session agent display name (the host's resolved
+   * `MINIMAL_AGENT_AGENT_NAME`, e.g. `Jerry`). When set, it rides the
+   * trailing sid anchor as `<sid> (<name>)` — the dim hex stays the
+   * forensic reference, the name is a soft cyan label so a glance reads
+   * "this is the Jerry session" without hunting the id. Absent (naming
+   * off, the default) ⇒ the sid renders bare, byte-identical to before.
+   * Drops together with the sid under width pressure (they're one anchor).
+   */
+  name?: string
+  /**
    * What to do when even the leanest compressed candidate would exceed
    * `cols`. Rule 3 hard invariant: the footer must NEVER overflow a
    * single terminal line by default.
@@ -447,7 +457,7 @@ function renderEffortSegment(
 }
 
 /**
- * Build the trailing session-id anchor.
+ * Build the trailing session-id anchor, optionally carrying the agent name.
  *
  * Bare dim hex — no label, no separator beyond the standard 4-space
  * group gap the top-level builder will add. The 8-char hex pattern is
@@ -456,13 +466,21 @@ function renderEffortSegment(
  * could use). Dim because it never changes mid-session — it's a
  * reference for forensics, not a live reading.
  *
+ * When a `name` is present, it rides the anchor as `<sid> (<name>)`:
+ * the hex stays dim (forensic reference) and the name is a soft cyan
+ * parenthetical, so a glance reads "this is the Jerry session" without
+ * decoding the id. The parens themselves stay dim so the colour weight
+ * lands on the name, not the punctuation. Absent ⇒ bare hex, unchanged.
+ *
  * Pre-shortened by the caller; this function does NOT slice. The
  * quota-status handler takes the first 8 hex chars of the UUIDv4
  * before passing through.
  */
-function renderSidSegment(sid: string | undefined): string | null {
+function renderSidSegment(sid: string | undefined, name?: string): string | null {
   if (!sid) return null
-  return c.dim(sid)
+  const hex = c.dim(sid)
+  if (!name) return hex
+  return `${hex} ${c.dim("(")}${c.cyan(name)}${c.dim(")")}`
 }
 
 /**
@@ -624,8 +642,9 @@ export function renderQuotaFooter(
       }
       case "sid": {
         // Forensics anchor: drops early in the ladder (recoverable from logs).
+        // The agent name (when set) rides the anchor as `<sid> (<name>)`.
         if (!cfg.withSid || !opts.sid) return []
-        const seg = renderSidSegment(opts.sid)
+        const seg = renderSidSegment(opts.sid, opts.name)
         return seg ? [seg] : []
       }
       default:

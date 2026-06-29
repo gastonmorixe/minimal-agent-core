@@ -25,4 +25,6 @@ export const c = {
   boldRed: ansiStyle.boldRed,
   boldYellow: ansiStyle.boldYellow,
   faintWhite: ansiStyle.faintWhite,
+  cyan: ansiStyle.cyan,
+  dimCyan: ansiStyle.dimCyan,
 }

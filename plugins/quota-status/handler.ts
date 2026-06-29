@@ -112,6 +112,21 @@ function resolveSid(): string | undefined {
 const SID = resolveSid()
 
 /**
+ * Opt-in per-session agent display name, resolved by the host
+ * (`src/agent-name.ts`) and published on
+ * `process.env.MINIMAL_AGENT_AGENT_NAME`. When present + non-blank it
+ * rides the trailing sid anchor as `<sid> (<name>)`. Absent (naming off,
+ * the default) ⇒ the anchor stays bare hex. Snapshot-once at module
+ * load — the name is fixed for the run (changing it would invalidate the
+ * prompt cache), matching the other knobs above.
+ */
+function resolveAgentName(): string | undefined {
+  const v = process.env.MINIMAL_AGENT_AGENT_NAME
+  return v && v.trim() !== "" ? v.trim() : undefined
+}
+const AGENT_NAME = resolveAgentName()
+
+/**
  * User-configured status-bar segment order/visibility (`statusBar.segments`).
  * Snapshot-once at module load (same philosophy as the other knobs above).
  * `undefined` → renderer uses its default order. The renderer normalizes
@@ -173,6 +188,7 @@ export default async function handle(ctx: LiveAreaHandlerContext): Promise<strin
         sessionTokens,
         cols: cols(),
         sid: SID,
+        name: AGENT_NAME,
         effort: EFFORT,
         modelId: currentModelId(),
       },
@@ -190,6 +206,7 @@ export default async function handle(ctx: LiveAreaHandlerContext): Promise<strin
     effort: EFFORT,
     modelLabel: info.modelLabel,
     sid: SID,
+    name: AGENT_NAME,
     overflow: OVERFLOW,
     segments: STATUS_SEGMENTS,
   })
