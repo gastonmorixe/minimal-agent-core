@@ -127,6 +127,16 @@ export const openaiAdapter: ProviderAdapter = {
         body.store = false
         delete body.max_output_tokens
       }
+      // Invariant: `previous_response_id` only works when the server kept the
+      // prior turn (`store:true`). With `store:false` (the default, and forced
+      // on OAuth/ChatGPT-Codex) there is no server-side chain to resume, so a
+      // stray pointer would 400 or silently desync. Strip it rather than ship
+      // a request that can't succeed. See request-body.ts (maps previousResponseId)
+      // and validate.ts (gates it on serverSideHistory).
+      if (body.store !== true && body.previous_response_id !== undefined) {
+        delete body.previous_response_id
+        ctx.debug?.kv("previous_response_id", "dropped (store!=true)")
+      }
       const url = openAIUrl(auth, RESPONSES_PATH, RESPONSES_URL, CHATGPT_CODEX_RESPONSES_PATH)
       ctx.debug?.header(`POST ${url}`)
       ctx.debug?.kv("model", body.model)
