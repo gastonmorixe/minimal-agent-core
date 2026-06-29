@@ -37,7 +37,7 @@ export class UnsupportedCapabilityError extends ProviderError {
     public readonly degrade?: CanonicalRequest,
   ) {
     super(
-      `request requires unsupported capabilities: ${violations.map((v) => v.capability).join(", ")}`,
+      `request requires unsupported capabilities: ${violations.map((v) => `${v.capability} (${v.detail})`).join("; ")}`,
       "_canonical",
       { retryable: false },
     )
