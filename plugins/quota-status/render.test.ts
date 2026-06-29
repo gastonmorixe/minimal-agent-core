@@ -714,6 +714,69 @@ describe("renderQuotaFooter", () => {
     })
   })
 
+  describe("agent name (rides the sid anchor)", () => {
+    it("renders the name as `<sid> (<name>)` at the line end when set", () => {
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = stripAnsi(
+        renderQuotaFooter(windows, NO_TOKENS, {
+          contextWindow: 200_000,
+          effort: "medium",
+          sid: "4bbc45d6",
+          name: "Jerry",
+        }),
+      )
+      // The hex stays the anchor; the name follows in parens, absolute-trailing.
+      expect(out).toMatch(/ {4}4bbc45d6 \(Jerry\)$/)
+    })
+
+    it("paints the name cyan and the sid + parens dim", () => {
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = renderQuotaFooter(windows, NO_TOKENS, { sid: "4bbc45d6", name: "Jerry" }) ?? ""
+      // Dim hex (SGR 2/22), dim open paren, cyan name (SGR 36/39), dim close paren.
+      expect(out).toContain("\x1b[2m4bbc45d6\x1b[22m")
+      expect(out).toContain("\x1b[36mJerry\x1b[39m")
+      expect(out).toContain("\x1b[2m(\x1b[22m")
+      expect(out).toContain("\x1b[2m)\x1b[22m")
+    })
+
+    it("leaves the sid bare when no name is set (byte-identical to before)", () => {
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = stripAnsi(renderQuotaFooter(windows, NO_TOKENS, { sid: "4bbc45d6" }))
+      expect(out).toMatch(/ {4}4bbc45d6$/)
+      expect(out).not.toContain("(")
+    })
+
+    it("omits the name when there is no sid to anchor it", () => {
+      // The name rides the sid anchor; no sid ⇒ no anchor ⇒ no name.
+      const windows: QuotaWindow[] = [{ id: "5h", utilization: 0.1 }]
+      const out = stripAnsi(
+        renderQuotaFooter(windows, NO_TOKENS, { effort: "medium", name: "Jerry" }),
+      )
+      expect(out).not.toContain("Jerry")
+      expect(out).toMatch(/effort medium$/)
+    })
+
+    it("drops the name together with the sid under width pressure", () => {
+      // The name is part of the sid anchor, so when the ladder drops the
+      // sid the name goes with it (they're one unit, not two segments).
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
+      const out = stripAnsi(
+        renderQuotaFooter(windows, SOME_TOKENS, {
+          cols: 65,
+          contextWindow: 200_000,
+          effort: "medium",
+          sid: "4bbc45d6",
+          name: "Jerry",
+        }),
+      )
+      expect(out).not.toContain("4bbc45d6")
+      expect(out).not.toContain("Jerry")
+    })
+  })
+
   describe("Rule 3: single-line invariant", () => {
     it("never overflows cols in `truncate` mode (default) even at comically narrow widths", () => {
       // Every width from 1 cell up to the leanest fitting candidate
@@ -738,6 +801,29 @@ describe("renderQuotaFooter", () => {
         // Hard invariant: NEVER exceed cols. The whole renderer exists
         // so the live area can paint one row without wrapping the
         // prompt up.
+        expect(out.length).toBeLessThanOrEqual(cols)
+      }
+    })
+
+    it("never overflows cols even when an agent name widens the sid anchor", () => {
+      // The name rides the sid anchor, so it adds cells at the very
+      // tail. The ladder must still keep the line within cols at every
+      // width (the anchor drops as a unit before the line would wrap).
+      const windows: QuotaWindow[] = [
+        { id: "5h", utilization: 0.21 },
+        { id: "7d", utilization: 0.08 },
+      ]
+      const stripAnsiHere = (s: string | null) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "")
+      for (let cols = 1; cols <= 80; cols++) {
+        const out = stripAnsiHere(
+          renderQuotaFooter(windows, SOME_TOKENS, {
+            cols,
+            contextWindow: 200_000,
+            effort: "medium",
+            sid: "4bbc45d6",
+            name: "Bartholomew",
+          }),
+        )
         expect(out.length).toBeLessThanOrEqual(cols)
       }
     })
