@@ -897,6 +897,31 @@ describe("SessionStore.cleanupIfUnused", () => {
     expect(existsSync(fork.path)).toBe(true)
   })
 
+  it("same-sid reopen inherits hasConversation from the existing records", () => {
+    // Regression for --resume-same-sid: reopen uses SessionStore.open(...,
+    // existsOk:true), not fork(). If the user exits without submitting a new
+    // prompt, cleanupIfUnused() must preserve the existing conversation.
+    const dir = tmp()
+    const sid = "ma-same-cleanup"
+    const original = SessionStore.open({ ...baseOpenOpts, sid, dir })
+    original.appendUser("first user prompt")
+    original.appendAssistant([{ type: "text", text: "hi" }], "end_turn")
+
+    const reopened = SessionStore.open({ ...baseOpenOpts, sid, dir, existsOk: true })
+    expect(reopened.cleanupIfUnused()).toBe(false)
+    expect(existsSync(reopened.path)).toBe(true)
+  })
+
+  it("same-sid reopen of a meta-only session is still eligible for cleanup", () => {
+    const dir = tmp()
+    const sid = "ma-same-empty-cleanup"
+    SessionStore.open({ ...baseOpenOpts, sid, dir })
+
+    const reopened = SessionStore.open({ ...baseOpenOpts, sid, dir, existsOk: true })
+    expect(reopened.cleanupIfUnused()).toBe(true)
+    expect(existsSync(reopened.path)).toBe(false)
+  })
+
   it("an empty fork (meta-only parent) is still eligible for cleanup", () => {
     // The complementary case: forking a parent that itself had no
     // conversation produces a fork that also has no conversation, so

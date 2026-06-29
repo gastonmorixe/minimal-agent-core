@@ -18,23 +18,28 @@ const FORMATTER = new Intl.DateTimeFormat(undefined, {
   timeStyle: "medium",
 })
 
+/** Normalize the user config value for submitted prompt timestamps. */
 export function normalizeSubmittedAtStyle(value: unknown): SubmittedAtStyle | undefined {
   if (value === false || value === "off" || value === "inline-locale") return value
   return undefined
 }
 
+/** Return whether submitted prompt timestamps should be rendered. */
 export function submittedAtEnabled(style: SubmittedAtStyle | undefined): boolean {
   return (style ?? DEFAULT_SUBMITTED_AT_STYLE) === "inline-locale"
 }
 
+/** Format a submitted-at timestamp using the host locale and timezone. */
 export function formatSubmittedAt(at: Date): string {
   return FORMATTER.format(at)
 }
 
+/** Build the dim inline prefix placed before the prompt arrow. */
 export function buildSubmittedAtPrefix(at: Date): string {
   return `${c.dim(formatSubmittedAt(at))} `
 }
 
+/** Prefix the first rendered prompt line with the submitted-at timestamp. */
 export function prefixSubmittedAtLines(lines: readonly string[], at: Date): string[] {
   if (lines.length === 0) return []
   const out = lines.slice()
