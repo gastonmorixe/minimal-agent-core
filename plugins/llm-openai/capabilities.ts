@@ -195,6 +195,17 @@ export const CAPS_O4_MINI_RESPONSES: Capabilities = { ...CAPS_O3_RESPONSES }
  * `additional_speed_tiers`). Knowledge cutoff 2025-12. The OpenAI "fast"
  * speed tier (`additional_speed_tiers: ["fast"]`) is a vendor extension we
  * do not wire yet, so `speedFast` stays false (no silent wire field).
+ *
+ * NOTE on the Codex/ChatGPT-OAuth backend: that surface enforces a SMALLER
+ * effective window than the model's 1.05M. OpenAI's Codex manifest declares
+ * `"context_window": 272000` for gpt-5.5, and Codex defaults to that unless
+ * a client opts into the 1M window (model_context_window /
+ * model_auto_compact_token_limit). A session under ChatGPT-Codex OAuth hit
+ * `context_length_exceeded` at ~267k input tokens (session 870bda04,
+ * 2026-06-28) because this single capability value advertises the model's
+ * 1.05M to BOTH surfaces, so the budget clamp + context-% UI never saw the
+ * tighter 272k Codex ceiling. Fixing that needs a surface/auth-aware window,
+ * not a blanket downgrade of the model's true context.
  */
 export const CAPS_GPT_5_5_RESPONSES: Capabilities = {
   ...defaultCapabilities(),

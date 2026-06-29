@@ -274,6 +274,59 @@ describe("openaiAdapter request routing", () => {
     expect(body.store).toBe(false)
     expect(body.max_output_tokens).toBe(64)
   })
+
+  it("drops previous_response_id on the OAuth/store:false path (no server-side chain)", async () => {
+    // OAuth forces store:false. previous_response_id requires a stored prior
+    // turn, so shipping it would 400 / silently desync. The adapter must strip
+    // it. This is the combination the original incident ran under
+    // (ChatGPT-Codex OAuth, store:false), where stateful resend was never
+    // possible regardless of the canonical pointer.
+    const request = await captureOpenAIResponseRequest(
+      {
+        kind: "oauth",
+        token: "AT",
+        baseUrl: "https://chatgpt.com/backend-api/codex/",
+        headers: { "ChatGPT-Account-ID": "acct-1" },
+      },
+      { previousResponseId: "resp_prev" },
+    )
+
+    const body = JSON.parse(String(request.body))
+    expect(body.store).toBe(false)
+    expect(body.previous_response_id).toBeUndefined()
+  })
+
+  it("drops previous_response_id on the default API-key path (store defaults false)", async () => {
+    // Even on API-key auth, store defaults to false, so the same invariant
+    // holds: no server-side chain => no pointer. Closing the stateful loop
+    // would require deliberately setting vendor.openai.store=true AND a
+    // delta-resend agent loop, both out of scope here.
+    const request = await captureOpenAIResponseRequest(
+      { kind: "api-key", key: "sk-test" },
+      { previousResponseId: "resp_prev" },
+    )
+
+    const body = JSON.parse(String(request.body))
+    expect(body.store).toBe(false)
+    expect(body.previous_response_id).toBeUndefined()
+  })
+
+  it("keeps previous_response_id when store is explicitly true (vendor opt-in)", async () => {
+    // The pointer is honored only when the server actually kept the prior
+    // turn (store:true). In OpenAI's reference Codex client that is Azure-only
+    // (codex-rs/core/src/client.rs:883: store = is_azure_responses_endpoint());
+    // we additionally expose vendor.openai.store=true as an explicit opt-in.
+    // store:true is the precondition — NOT auth.kind. API-key alone is still
+    // store:false.
+    const request = await captureOpenAIResponseRequest(
+      { kind: "api-key", key: "sk-test" },
+      { previousResponseId: "resp_prev", vendor: { openai: { store: true } } },
+    )
+
+    const body = JSON.parse(String(request.body))
+    expect(body.store).toBe(true)
+    expect(body.previous_response_id).toBe("resp_prev")
+  })
 })
 
 describe("openaiProviderPlugin auth strategy", () => {
@@ -748,6 +801,65 @@ describe("multimodal request encoding", () => {
     expect(jf).toContain('"type":"input_image"')
     expect(jf).toContain('"file_id":"file_img_9"')
     expect(jf).not.toContain('"type":"input_file"')
+  })
+})
+
+describe("OpenAI — service_tier (provider-neutral serviceTier mapping)", () => {
+  const req = (serviceTier?: string, vendorTier?: string): CanonicalRequest => ({
+    modelId: "gpt-5.5",
+    messages: [userText("hi")],
+    ...(serviceTier ? { serviceTier } : {}),
+    ...(vendorTier ? { vendor: { openai: { serviceTier: vendorTier } } } : {}),
+  })
+
+  it("Responses: maps neutral serviceTier 'priority' to body.service_tier", () => {
+    bootstrap()
+    const body = buildOpenAIResponsesBody(req("priority"), resolveModel("gpt-5.5"))
+    expect(body.service_tier).toBe("priority")
+  })
+
+  it("Responses: accepts flex / scale / auto / default", () => {
+    bootstrap()
+    const m = resolveModel("gpt-5.5")
+    for (const t of ["flex", "scale", "auto", "default"]) {
+      expect(buildOpenAIResponsesBody(req(t), m).service_tier).toBe(t)
+    }
+  })
+
+  it("Responses: drops a value OpenAI doesn't accept (e.g. Anthropic's 'standard_only')", () => {
+    bootstrap()
+    const body = buildOpenAIResponsesBody(req("standard_only"), resolveModel("gpt-5.5"))
+    expect(body.service_tier).toBeUndefined()
+  })
+
+  it("Responses: omits service_tier when unset", () => {
+    bootstrap()
+    const body = buildOpenAIResponsesBody(req(), resolveModel("gpt-5.5"))
+    expect(body.service_tier).toBeUndefined()
+  })
+
+  it("Responses: vendor.openai.serviceTier wins over the neutral field", () => {
+    bootstrap()
+    const body = buildOpenAIResponsesBody(req("auto", "priority"), resolveModel("gpt-5.5"))
+    expect(body.service_tier).toBe("priority")
+  })
+
+  it("Chat: maps neutral serviceTier 'flex' to body.service_tier", () => {
+    bootstrap()
+    const body = buildOpenAIChatBody(
+      { modelId: "gpt-5.5-chat", messages: [userText("hi")], serviceTier: "flex" },
+      resolveModel("gpt-5.5-chat"),
+    )
+    expect(body.service_tier).toBe("flex")
+  })
+
+  it("Chat: drops an unrecognized value", () => {
+    bootstrap()
+    const body = buildOpenAIChatBody(
+      { modelId: "gpt-5.5-chat", messages: [userText("hi")], serviceTier: "standard_only" },
+      resolveModel("gpt-5.5-chat"),
+    )
+    expect(body.service_tier).toBeUndefined()
   })
 })
 

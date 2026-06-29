@@ -728,6 +728,10 @@ export async function* canonicalEventsToLegacyStream(
   let fullText = ""
   let stopReason: string | null = null
   let stopDetails: { type: string; message?: string } | null = null
+  // Provider response id from `message_start`. Surfaced on the returned
+  // StreamedResponse so a caller could thread it back via
+  // `previous_response_id` (OpenAI Responses) — previously dropped here.
+  let responseId: string | undefined
   // Billed usage for this turn, merged from the canonical usage snapshots
   // (initial at message_start, final at message_delta). Surfaced on the
   // returned StreamedResponse.usage so the agent loop persists the turn's
@@ -783,6 +787,9 @@ export async function* canonicalEventsToLegacyStream(
         // legacy client calls addSessionUsage.
         cb.onUsage?.(ev.initialUsage)
         turnUsage = canonicalUsageToWire(ev.initialUsage)
+        // Capture the provider response id (OpenAI Responses `response.id`).
+        // Kept on the returned StreamedResponse instead of being discarded.
+        if (ev.messageId) responseId = ev.messageId
         break
       case "text_start":
         flushCur()
@@ -885,7 +892,7 @@ export async function* canonicalEventsToLegacyStream(
   // stop events do so the partial tool call still reaches the loop.
   if (cur) flushCur()
 
-  return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage }
+  return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage, responseId }
 }
 
 /**

@@ -203,6 +203,22 @@ export interface StreamedResponse {
   /** Stop reason (e.g. `"end_turn"`, `"tool_use"`, `"max_tokens"`). */
   stopReason: string | null
   /**
+   * Provider-assigned id for THIS response, captured from the stream's
+   * `message_start` (`messageId`). On OpenAI Responses this is the
+   * `response.id` (e.g. `"resp_..."`) that a future request could thread
+   * back via `previous_response_id` to enable server-side history.
+   *
+   * Captured here so the id is no longer silently dropped at the canonical
+   * to legacy bridge. NOTE: populating this field does NOT by itself enable
+   * stateful resend; the agent loop still sends full history every turn (see
+   * `Agent` class doc). Closing that loop (delta-resend keyed off this id)
+   * is deliberately out of scope and is only viable on `store:true` requests
+   * (Azure-only in OpenAI's reference client; API-key alone is still
+   * `store:false`), never on OAuth/`store:false`. Absent when the stream
+   * reported no `message_start` id.
+   */
+  responseId?: string
+  /**
    * Stop-reason categorization. Populated on `stopReason: "refusal"` (and
    * other categorized stops). `null` on normal end_turn/tool_use/max_tokens.
    * Opaque `type` string the host can route on, optional `message` for

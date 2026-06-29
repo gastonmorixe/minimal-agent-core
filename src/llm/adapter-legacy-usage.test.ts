@@ -66,3 +66,48 @@ describe("canonicalEventsToLegacyStream usage capture", () => {
     expect(response.usage).toEqual({ input_tokens: 5, output_tokens: 0 })
   })
 })
+
+describe("canonicalEventsToLegacyStream responseId capture", () => {
+  it("surfaces the message_start messageId as StreamedResponse.responseId", async () => {
+    // Regression guard: the provider response id (e.g. a Responses-style
+    // `resp_...` from the OpenAI plugin) used to be read only for
+    // status/usage and was silently dropped, so nothing downstream could
+    // ever thread it back via previous_response_id. It must now ride the
+    // StreamedResponse.
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "resp_abc123",
+        modelId: "test-model-large",
+        initialUsage: { inputTokens: 10, outputTokens: 0 },
+      },
+      { type: "text_start", index: 0 },
+      { type: "text_delta", index: 0, text: "ok" },
+      { type: "text_stop", index: 0, finalText: "ok" },
+      {
+        type: "message_delta",
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 2 },
+      },
+      { type: "message_stop" },
+    ])
+    expect(response.responseId).toBe("resp_abc123")
+  })
+
+  it("leaves responseId undefined when no message_start id is present", async () => {
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "",
+        modelId: "test-model-large",
+        initialUsage: { inputTokens: 1, outputTokens: 0 },
+      },
+      { type: "text_start", index: 0 },
+      { type: "text_delta", index: 0, text: "x" },
+      { type: "text_stop", index: 0, finalText: "x" },
+      { type: "message_delta", stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } },
+      { type: "message_stop" },
+    ])
+    expect(response.responseId).toBeUndefined()
+  })
+})
