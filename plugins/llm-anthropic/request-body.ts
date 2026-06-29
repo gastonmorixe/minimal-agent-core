@@ -110,8 +110,20 @@ export interface AnthropicRequestBody {
   }
   stream?: boolean
   speed?: "normal" | "fast"
+  /** Capacity lane. Anthropic accepts `auto | standard_only`. */
+  service_tier?: "auto" | "standard_only"
   diagnostics?: { previous_message_id: string | null }
 }
+
+/**
+ * Service tiers Anthropic's Messages API accepts on the request. The neutral
+ * `req.serviceTier` (opaque string) is validated against this set; an
+ * unrecognized value is dropped (not sent), so a value meant for another
+ * provider (e.g. OpenAI's `priority`/`flex`) can't 400 here. `auto`
+ * opportunistically uses priority capacity when available; `standard_only`
+ * pins standard. NOTE: distinct from `speed`, the separate fast-dispatch flag.
+ */
+const ANTHROPIC_SERVICE_TIERS = new Set(["auto", "standard_only"])
 
 // ---------------------------------------------------------------------------
 // Build
@@ -178,6 +190,13 @@ export function buildAnthropicRequestBody(
 
   // speed: only emit "fast"; "normal" is the omit-default.
   if (req.speed === "fast" && model.capabilities.speedFast) body.speed = "fast"
+
+  // Provider-neutral service tier -> Anthropic `service_tier`. Validate
+  // against the accepted set; drop (don't send) anything else, so a value
+  // intended for a different provider can't 400 here.
+  if (req.serviceTier !== undefined && ANTHROPIC_SERVICE_TIERS.has(req.serviceTier)) {
+    body.service_tier = req.serviceTier as NonNullable<AnthropicRequestBody["service_tier"]>
+  }
 
   // diagnostics block (cache-diagnosis beta).
   if (req.vendor?.anthropic?.cacheDiagnostics) {

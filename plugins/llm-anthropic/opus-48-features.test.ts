@@ -97,6 +97,59 @@ describe("Opus 4.8 — fast mode", () => {
   })
 })
 
+describe("Anthropic — service_tier (provider-neutral serviceTier mapping)", () => {
+  it("maps neutral serviceTier 'auto' to body.service_tier", () => {
+    setup()
+    const model = resolveModel("claude-opus-4-8")
+    const req: CanonicalRequest = {
+      modelId: model.id,
+      messages: [userText("hi")],
+      serviceTier: "auto",
+    }
+    const body = buildAnthropicRequestBody(req, model)
+    expect(body.service_tier).toBe("auto")
+  })
+
+  it("maps 'standard_only'", () => {
+    setup()
+    const model = resolveModel("claude-opus-4-8")
+    const body = buildAnthropicRequestBody(
+      { modelId: model.id, messages: [userText("hi")], serviceTier: "standard_only" },
+      model,
+    )
+    expect(body.service_tier).toBe("standard_only")
+  })
+
+  it("drops a value Anthropic doesn't accept (e.g. OpenAI's 'priority')", () => {
+    setup()
+    const model = resolveModel("claude-opus-4-8")
+    const body = buildAnthropicRequestBody(
+      { modelId: model.id, messages: [userText("hi")], serviceTier: "priority" },
+      model,
+    )
+    // Cross-provider value must NOT reach the wire (would 400 on Anthropic).
+    expect(body.service_tier).toBeUndefined()
+  })
+
+  it("omits service_tier when serviceTier is unset", () => {
+    setup()
+    const model = resolveModel("claude-opus-4-8")
+    const body = buildAnthropicRequestBody({ modelId: model.id, messages: [userText("hi")] }, model)
+    expect(body.service_tier).toBeUndefined()
+  })
+
+  it("service_tier is independent of speed:fast (distinct fields)", () => {
+    setup()
+    const model = resolveModel("claude-opus-4-8")
+    const body = buildAnthropicRequestBody(
+      { modelId: model.id, messages: [userText("hi")], speed: "fast", serviceTier: "auto" },
+      model,
+    )
+    expect(body.speed).toBe("fast")
+    expect(body.service_tier).toBe("auto")
+  })
+})
+
 describe("Opus 4.8 — task budget", () => {
   it("task_budget surfaces on output_config and adds the beta flag", () => {
     setup()

@@ -29,6 +29,7 @@ import type {
 
 import type { CanonicalRequest } from "../../../src/llm/canonical-request.ts"
 import type { ModelEntry } from "../../../src/llm/model-registry.ts"
+import { OPENAI_SERVICE_TIERS } from "../responses/request-body.ts"
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -54,6 +55,7 @@ export interface OpenAIChatRequestBody {
   user?: string
   store?: boolean
   prediction?: { type: "content"; content: string }
+  service_tier?: "auto" | "default" | "flex" | "scale" | "priority"
 }
 
 export interface OpenAIChatMessage {
@@ -160,6 +162,13 @@ export function buildOpenAIChatBody(
 
   // Metadata: only flat string→string accepted on Chat.
   if (req.metadata?.custom) body.metadata = { ...req.metadata.custom }
+
+  // Provider-neutral service tier -> OpenAI `service_tier` (shared allowed
+  // set with the Responses surface). vendor.serviceTier wins; unknown dropped.
+  const tier = vendor?.serviceTier ?? req.serviceTier
+  if (tier !== undefined && OPENAI_SERVICE_TIERS.has(tier)) {
+    body.service_tier = tier as NonNullable<OpenAIChatRequestBody["service_tier"]>
+  }
 
   return body
 }
