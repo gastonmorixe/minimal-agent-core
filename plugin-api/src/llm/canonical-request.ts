@@ -193,6 +193,21 @@ export interface CanonicalRequest {
    */
   speed?: "normal" | "fast"
 
+  /**
+   * Provider-neutral service/capacity tier. An OPAQUE string the core never
+   * interprets: each provider plugin maps it to that provider's own wire
+   * field and validates it against that provider's allowed set, dropping a
+   * value it doesn't recognize (so one neutral value can't 400 a provider
+   * that doesn't accept it). Distinct from {@link speed}, which is a separate
+   * premium-dispatch flag (Anthropic's `speed` wire field), not the
+   * `service_tier` capacity lane.
+   *
+   * Known per-provider values (validated in the plugin, not here):
+   * - OpenAI: `auto | default | flex | scale | priority`
+   * - Anthropic: `auto | standard_only`
+   */
+  serviceTier?: string
+
   /** Last-mile per-provider knobs. */
   vendor?: {
     anthropic?: AnthropicVendorOpts

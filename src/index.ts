@@ -252,6 +252,16 @@ const thinkingDisplay: "summarized" | "omitted" | undefined =
 const speedFast = args.includes("--fast") || process.env.MINIMAL_AGENT_FAST === "1"
 const speed: "normal" | "fast" = speedFast ? "fast" : "normal"
 
+// Service tier: --service-tier <value>  >  MINIMAL_AGENT_SERVICE_TIER.
+// Provider-neutral, opaque pass-through: the value is forwarded to the
+// provider plugin verbatim, which maps it to its own `service_tier` wire
+// field and validates it (OpenAI: auto|default|flex|scale|priority;
+// Anthropic: auto|standard_only). A value the resolved provider doesn't
+// accept is dropped by that plugin, not here. Omitted when unset.
+const serviceTierIdx = args.indexOf("--service-tier")
+const serviceTier: string | undefined =
+  serviceTierIdx !== -1 ? args[serviceTierIdx + 1] : process.env.MINIMAL_AGENT_SERVICE_TIER
+
 const formatterExplicitIdx = args.indexOf("--formatter")
 const formatterExplicitArg: string[] | undefined =
   formatterExplicitIdx !== -1 && args[formatterExplicitIdx + 1]
@@ -717,7 +727,19 @@ async function main() {
     formatterCmd = undefined
   }
 
-  printStartupRow("model", c.boldCyan(selectedModel))
+  // Fast mode (`--fast` / `MINIMAL_AGENT_FAST=1`) gets a ⚡ on the model row so
+  // the premium dispatch tier is visible at a glance. Provider-neutral: the
+  // flag is capability-gated per provider downstream; the bolt reflects the
+  // resolved request intent, not whether a given model honors it.
+  printStartupRow(
+    "model",
+    speedFast
+      ? `${c.boldCyan(selectedModel)} ${c.boldYellow("⚡ fast")}`
+      : c.boldCyan(selectedModel),
+  )
+  if (serviceTier) {
+    printStartupRow("service tier", `${serviceTier} ${c.dim("(provider-mapped)")}`)
+  }
 
   // Thinking + effort: surface what we'll actually send on the wire. A
   // cheap/fast-tier model that supports neither thinking nor an effort
@@ -1347,6 +1369,7 @@ async function main() {
     providerId: selectedProviderId,
     effort,
     speed,
+    serviceTier,
     thinkingDisplay,
     loader: hasPlugins ? loader : null,
     modeManager,

@@ -163,6 +163,13 @@ export class Agent {
    */
   private speed: "normal" | "fast"
   /**
+   * Provider-neutral service-tier override (opaque string), threaded onto
+   * every API call as `serviceTier`. The provider plugin maps + validates it
+   * (OpenAI `service_tier`, Anthropic `service_tier`); the agent never
+   * interprets it. Omitted when unset.
+   */
+  private serviceTier: string | undefined
+  /**
    * Optional `thinking.display` override, threaded onto every API call.
    * `"summarized"` opts opus-4.7 / mythos into plaintext thinking_delta
    * streaming; `"omitted"` forces redaction on models that would otherwise
@@ -363,6 +370,12 @@ export class Agent {
      * entirely; server treats as normal).
      */
     speed?: "normal" | "fast"
+    /**
+     * Provider-neutral service-tier override (opaque string). Threaded to the
+     * provider plugin as `serviceTier`; the plugin maps + validates it
+     * (OpenAI/Anthropic `service_tier`). Omitted when unset.
+     */
+    serviceTier?: string
     thinkingDisplay?: "summarized" | "omitted"
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
@@ -452,6 +465,7 @@ export class Agent {
     this.providerId = opts.providerId
     this.effort = opts.effort
     this.speed = opts.speed ?? "normal"
+    this.serviceTier = opts.serviceTier
     this.thinkingDisplay = opts.thinkingDisplay
     this.loader = opts.loader ?? null
     this.modeManager = opts.modeManager ?? null
@@ -1078,6 +1092,7 @@ export class Agent {
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
+        ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
           ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
           : {}),
@@ -1453,6 +1468,7 @@ export class Agent {
         })(),
         ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
+        ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
           ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
           : {}),
@@ -1540,6 +1556,7 @@ export class Agent {
       ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),
       ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
       ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
+      ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
       ...(this.thinkingDisplay
         ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
         : {}),

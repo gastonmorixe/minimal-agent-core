@@ -55,10 +55,21 @@ export interface OpenAIResponsesRequestBody {
   max_output_tokens?: number
   stream?: boolean
   store?: boolean
+  /** Compute/capacity lane. `auto|default|flex|scale|priority`. */
+  service_tier?: "auto" | "default" | "flex" | "scale" | "priority"
   include?: string[]
   metadata?: Record<string, string>
   user?: string
 }
+
+/**
+ * Service tiers OpenAI's Responses API accepts. The neutral
+ * `req.serviceTier` (opaque string) is validated against this set in the
+ * plugin; an unrecognized value is dropped (not sent), so a value meant for
+ * a different provider can't 400 here. See OpenAI priority/flex-processing
+ * docs. `scale` is the enterprise Scale-tier value, kept for completeness.
+ */
+export const OPENAI_SERVICE_TIERS = new Set(["auto", "default", "flex", "scale", "priority"])
 
 export type OpenAIResponsesInputItem =
   | OpenAIResponsesMessageItem
@@ -187,6 +198,14 @@ export function buildOpenAIResponsesBody(
   if (vendor?.include) body.include = vendor.include
   if (vendor?.user) body.user = vendor.user
   if (req.metadata?.custom) body.metadata = { ...req.metadata.custom }
+
+  // Provider-neutral service tier -> OpenAI `service_tier`. Validate against
+  // the accepted set; drop (don't send) anything else. `vendor.serviceTier`
+  // wins over the neutral field when both are set (explicit last-mile knob).
+  const tier = vendor?.serviceTier ?? req.serviceTier
+  if (tier !== undefined && OPENAI_SERVICE_TIERS.has(tier)) {
+    body.service_tier = tier as NonNullable<OpenAIResponsesRequestBody["service_tier"]>
+  }
 
   return body
 }

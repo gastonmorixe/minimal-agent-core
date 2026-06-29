@@ -637,6 +637,7 @@ export function sendOptionsToCanonical(opts: LegacySendOptions): CanonicalReques
     }
   }
   if (opts.speed) req.speed = opts.speed
+  if (opts.serviceTier) req.serviceTier = opts.serviceTier
   if (opts.signal) req.signal = opts.signal
   if (opts.streamIdleTimeoutMs !== undefined) req.streamIdleTimeoutMs = opts.streamIdleTimeoutMs
   if (opts.attemptHardTimeoutMs !== undefined) req.attemptHardTimeoutMs = opts.attemptHardTimeoutMs

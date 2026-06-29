@@ -116,6 +116,13 @@ export interface SendOptions {
    */
   speed?: "normal" | "fast"
   /**
+   * Provider-neutral service/capacity tier (opaque string). Threaded to the
+   * provider plugin, which maps it to its own `service_tier` wire field and
+   * validates it. The core never interprets the value. Default: omitted.
+   * See {@link CanonicalRequest.serviceTier}.
+   */
+  serviceTier?: string
+  /**
    * Context-management edits sent at the top level where the provider
    * supports them. Pass `null` to opt out, or omit for the provider default
    * on `requestType:"conversation"`.

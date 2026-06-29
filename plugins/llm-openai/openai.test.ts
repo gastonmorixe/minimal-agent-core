@@ -805,6 +805,11 @@ describe("multimodal request encoding", () => {
 })
 
 describe("OpenAI — service_tier (provider-neutral serviceTier mapping)", () => {
+  function bootstrap() {
+    clearModelRegistry()
+    clearProviderRegistry()
+    bootstrapOpenAI()
+  }
   const req = (serviceTier?: string, vendorTier?: string): CanonicalRequest => ({
     modelId: "gpt-5.5",
     messages: [userText("hi")],
@@ -821,7 +826,7 @@ describe("OpenAI — service_tier (provider-neutral serviceTier mapping)", () =>
   it("Responses: accepts flex / scale / auto / default", () => {
     bootstrap()
     const m = resolveModel("gpt-5.5")
-    for (const t of ["flex", "scale", "auto", "default"]) {
+    for (const t of ["flex", "scale", "auto", "default"] as const) {
       expect(buildOpenAIResponsesBody(req(t), m).service_tier).toBe(t)
     }
   })
