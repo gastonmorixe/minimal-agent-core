@@ -263,6 +263,7 @@ export async function runLiveAreaRepl(opts: LiveAreaReplOptions): Promise<void> 
       // string when not yet initialized; runReplLiveArea degrades the
       // closer copy in that case.
       sessionId: getSessionId(),
+      scrollbackSubmittedAt: userConfig.scrollback?.submittedAt,
     })
   } finally {
     interceptor.uninstall()

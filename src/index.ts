@@ -1469,6 +1469,7 @@ async function main() {
         userTimestamps: userTimestamps ?? undefined,
         toolDisplays,
         toolPresentation,
+        scrollbackSubmittedAt: userConfig.scrollback?.submittedAt,
       })
       stdoutSink.write("\n")
     }

@@ -20,6 +20,11 @@ import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"
 import { formatRestoredMessages } from "../queue-restore.ts"
 import { loadQueue, QueueStore } from "../queue-store.ts"
+import {
+  prefixSubmittedAtLines,
+  type SubmittedAtStyle,
+  submittedAtEnabled,
+} from "../scrollback-submitted-at.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 import { printGoodbye } from "../ui/chrome/goodbye-banner.ts"
@@ -79,6 +84,7 @@ export async function runReplLiveArea(
      * scrollback. Omit / empty → degraded copy without the resume line.
      */
     sessionId?: string
+    scrollbackSubmittedAt?: SubmittedAtStyle
   },
 ): Promise<void> {
   if (!opts.compositor || !opts.editor) {
@@ -88,6 +94,7 @@ export async function runReplLiveArea(
   const editor = opts.editor
   const statusBus = opts.statusBus ?? GLOBAL_STATUS_BUS
   const modeManager = agent.modes?.() ?? null
+  const showSubmittedAt = submittedAtEnabled(opts.scrollbackSubmittedAt)
 
   // Wire mode cycling (Shift+Tab forward, Ctrl+Shift+Tab back) to the
   // editor. Mirrors the legacy `runRepl` wiring so users get the same UX
@@ -405,7 +412,7 @@ export async function runReplLiveArea(
   // deferred from EditorController.submit() to TURN START / drain time
   // here, so a queued prompt never appears in BOTH the scrollback and
   // the queue widget at the same time (Bug 393).
-  type QueueItem = { text: string; commitLines: string[] }
+  type QueueItem = { text: string; commitLines: string[]; submittedAt?: string }
   const queue: QueueItem[] = []
   // Persist the queue to <sid>.queue on every mutation so submits typed
   // during a busy turn survive process exit (clean Ctrl+C or crash). The
@@ -434,11 +441,15 @@ export async function runReplLiveArea(
   const flushQueueItemToScrollback = (item: QueueItem): void => {
     if (item.commitLines.length === 0) return
     if (typeof compositor.writeStream !== "function") return
+    const lines =
+      showSubmittedAt && item.submittedAt
+        ? prefixSubmittedAtLines(item.commitLines, new Date(item.submittedAt))
+        : item.commitLines
     // Matches the lead `EditorController.submit` used to emit before
     // the scrollback-write was deferred here : `\n\n\n` for two blank
     // rows of breathing room (capBlankLines collapses to ≤2 in actual
     // scrollback), trailing `\n` to terminate the prompt line.
-    compositor.writeStream(`\n\n\n${item.commitLines.join("\n")}\n`)
+    compositor.writeStream(`\n\n\n${lines.join("\n")}\n`)
   }
   /**
    * Subscriber that paints the mode-change scrollback chip the
@@ -654,8 +665,8 @@ export async function runReplLiveArea(
   const liveCols = (): number | undefined => opts.output?.columns ?? process.stdout.columns
 
   /** The normal "queue this text as a user prompt" path. */
-  const enqueuePrompt = (text: string, commitLines: string[]): void => {
-    queue.push({ text, commitLines })
+  const enqueuePrompt = (text: string, commitLines: string[], submittedAt?: Date): void => {
+    queue.push({ text, commitLines, submittedAt: (submittedAt ?? new Date()).toISOString() })
     // Persist BEFORE any other side effect so a crash between push and
     // the next instruction still recovers the submit on next resume.
     persistQueue()
@@ -685,9 +696,14 @@ export async function runReplLiveArea(
    * A null result (shouldn't happen — we pre-checked `hasCommand`) falls
    * back to treating the text as a normal prompt.
    */
-  const dispatchCommandAndApply = async (text: string, commitLines: string[]): Promise<void> => {
+  const dispatchCommandAndApply = async (
+    text: string,
+    commitLines: string[],
+    submittedAt?: Date,
+  ): Promise<void> => {
     if (!loader) return
-    flushQueueItemToScrollback({ text, commitLines })
+    const submittedAtIso = (submittedAt ?? new Date()).toISOString()
+    flushQueueItemToScrollback({ text, commitLines, submittedAt: submittedAtIso })
     let result: Awaited<ReturnType<typeof loader.dispatchCommand>>
     try {
       result = await loader.dispatchCommand(text, { cwd: process.cwd() })
@@ -696,7 +712,7 @@ export async function runReplLiveArea(
       return
     }
     if (!result) {
-      enqueuePrompt(text, commitLines)
+      enqueuePrompt(text, commitLines, submittedAt)
       return
     }
     switch (result.kind) {
@@ -722,7 +738,7 @@ export async function runReplLiveArea(
     }
   }
 
-  const onSubmit = (text: string, commitLines: string[] = []): void => {
+  const onSubmit = (text: string, commitLines: string[] = [], submittedAt?: Date): void => {
     if (!text.trim()) return
     // Slash-command interception (REPL-scoped). A submitted line that
     // parses as `/<name>` AND names a registered command is dispatched
@@ -733,11 +749,11 @@ export async function runReplLiveArea(
     if (loader) {
       const parsed = parseCommandLine(text)
       if (parsed && loader.hasCommand(parsed.name)) {
-        void dispatchCommandAndApply(text, commitLines)
+        void dispatchCommandAndApply(text, commitLines, submittedAt)
         return
       }
     }
-    enqueuePrompt(text, commitLines)
+    enqueuePrompt(text, commitLines, submittedAt)
   }
   const onCancel = (reason?: string): void => {
     cancelled = true

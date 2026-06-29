@@ -64,6 +64,8 @@ export type QueueItem = {
   text: string
   /** Pre-rendered scrollback lines to commit at drain time. May be empty. */
   commitLines: string[]
+  /** ISO wall-clock time captured when Enter was pressed. */
+  submittedAt?: string
 }
 
 /**
@@ -119,7 +121,12 @@ export function loadQueue(sid: string, dir?: string): QueueItem[] {
     const lines = obj.commitLines
     if (!Array.isArray(lines)) continue
     if (!lines.every((l) => typeof l === "string")) continue
-    out.push({ text: obj.text, commitLines: lines.slice() })
+    const submittedAt = typeof obj.submittedAt === "string" ? obj.submittedAt : undefined
+    out.push({
+      text: obj.text,
+      commitLines: lines.slice(),
+      ...(submittedAt ? { submittedAt } : {}),
+    })
   }
   return out
 }
@@ -187,6 +194,7 @@ export class QueueStore {
     this.latestPending = queue.map((q) => ({
       text: q.text,
       commitLines: q.commitLines.slice(),
+      ...(q.submittedAt ? { submittedAt: q.submittedAt } : {}),
     }))
     if (this.inFlight) return
     void this.flush()
