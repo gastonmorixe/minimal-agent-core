@@ -189,7 +189,7 @@ export function parseSchemaFile(raw: string): JsonSchema {
     parsed = JSON.parse(raw)
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
-    throw new Error(`--output-schema is not valid JSON: ${reason}`)
+    throw new Error(`--output-schema is not valid JSON: ${reason}`, { cause: err })
   }
   if (!isPlainObject(parsed)) {
     throw new Error(`--output-schema must be a JSON object, got ${jsonTypeOf(parsed)}`)

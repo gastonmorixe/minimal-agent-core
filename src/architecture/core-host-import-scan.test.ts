@@ -300,7 +300,7 @@ describe("core→host import ratchet (repo invariant)", () => {
         ? "core→host import ratchet TRIPPED — these core files gained host imports.\n" +
             "Core (src/ minus src/host/) must depend on SDK ports, not the host shell.\n" +
             "Move the shared code behind a port, or import from the host only in src/index.ts.\n" +
-            `${regressions.join("\n")}`
+            regressions.join("\n")
         : "",
     ).toEqual([])
   })
@@ -318,7 +318,7 @@ describe("core→host import ratchet (repo invariant)", () => {
       stale.length > 0
         ? "core→host baseline has STALE entries — progress was made, ratchet it down.\n" +
             "Regenerate with the one-liner in core-host-import-scan.ts's header.\n" +
-            `${stale.join("\n")}`
+            stale.join("\n")
         : "",
     ).toEqual([])
   })
