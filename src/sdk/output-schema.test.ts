@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { parseSchemaFile, validateAgainstSchema } from "./output-schema.ts"
+import { parseSchemaFile, validateAgainstSchema, validateJsonAnswer } from "./output-schema.ts"
 
 describe("validateAgainstSchema — type", () => {
   test("accepts a matching primitive type", () => {
@@ -150,6 +150,45 @@ describe("validateAgainstSchema — unsupported keywords are ignored, never fals
   test("anyOf is ignored (under-constrains rather than wrongly failing)", () => {
     const schema = { anyOf: [{ type: "string" }, { type: "number" }] }
     expect(validateAgainstSchema(true, schema).valid).toBe(true)
+  })
+})
+
+describe("validateJsonAnswer (string entrypoint: parse + validate, one branch)", () => {
+  const schema = {
+    type: "object",
+    required: ["answer"],
+    properties: { answer: { type: "string" } },
+  }
+
+  test("valid JSON answer matching the schema → valid, no errors", () => {
+    expect(validateJsonAnswer('{"answer":"yes"}', schema)).toEqual({ valid: true, errors: [] })
+  })
+
+  test("well-formed JSON that violates the schema → the schema errors", () => {
+    const r = validateJsonAnswer('{"answer":42}', schema)
+    expect(r.valid).toBe(false)
+    expect(r.errors[0]).toContain("/answer")
+    expect(r.errors[0]).toContain("expected type string")
+  })
+
+  test("missing required key surfaces as a schema error", () => {
+    const r = validateJsonAnswer("{}", schema)
+    expect(r.valid).toBe(false)
+    expect(r.errors[0]).toContain('missing required property "answer"')
+  })
+
+  test("unparseable answer folds into a single invalid result (not a throw)", () => {
+    const r = validateJsonAnswer("this is not json", schema)
+    expect(r.valid).toBe(false)
+    expect(r.errors).toHaveLength(1)
+    expect(r.errors[0]).toContain("final answer is not valid JSON")
+  })
+
+  test("a bare JSON scalar parses but fails an object schema (no false pass)", () => {
+    // JSON.parse("42") succeeds → must still be caught by the type check
+    const r = validateJsonAnswer("42", schema)
+    expect(r.valid).toBe(false)
+    expect(r.errors[0]).toContain("expected type object")
   })
 })
 

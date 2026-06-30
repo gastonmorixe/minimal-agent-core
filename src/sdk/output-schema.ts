@@ -196,3 +196,31 @@ export function parseSchemaFile(raw: string): JsonSchema {
   }
   return parsed
 }
+
+/**
+ * Validate the agent's FINAL ANSWER TEXT against a schema, parsing the answer
+ * as JSON first. The string-entrypoint the host wants for `--output-schema`
+ * validate-and-exit: it folds a JSON parse failure into the same
+ * {@link ValidationResult} as a schema mismatch, so the caller has ONE branch:
+ *
+ * ```ts
+ * const { valid, errors } = validateJsonAnswer(finalText, schema)
+ * if (!valid) { process.stderr.write(`${errors.join("\n")}\n`); process.exit(1) }
+ * ```
+ *
+ * Keeps the parse-vs-validate semantics owned here (one source of truth)
+ * rather than each call site re-deriving "unparseable answer = invalid".
+ */
+export function validateJsonAnswer(answerText: string, schema: object): ValidationResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(answerText)
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    return {
+      valid: false,
+      errors: [`(root): final answer is not valid JSON: ${reason}`],
+    }
+  }
+  return validateAgainstSchema(parsed, schema)
+}
