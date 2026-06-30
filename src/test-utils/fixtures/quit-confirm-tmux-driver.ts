@@ -7,10 +7,10 @@
  */
 import { EventEmitter } from "node:events"
 
-import { EditorController } from "../../editor-controller.ts"
-import { printGoodbye } from "../../ui/chrome/goodbye-banner.ts"
+import { EditorController } from "../../host/editor-controller.ts"
+import { printGoodbye } from "../../host/ui/chrome/goodbye-banner.ts"
 import { Compositor } from "../../ui/compositor.ts"
-import { StdioInterceptor } from "../../ui/stdio-interceptor.ts"
+import { StdioInterceptor } from "../../host/ui/stdio-interceptor.ts"
 
 let interceptorRef: StdioInterceptor | null = null
 const compositor = new Compositor({

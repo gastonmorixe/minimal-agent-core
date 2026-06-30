@@ -36,7 +36,7 @@ import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools.ts"
-import { c } from "../ui/style/ansi.ts"
+import { c } from "../host/ui/style/ansi.ts"
 import {
   clampBodyWithHint,
   computeTuiElision,
@@ -52,7 +52,7 @@ import {
   TOOL_PREVIEW_LINES_DEFAULT,
   type ToolPresentation,
   tuiPreviewHint,
-} from "../ui/tool-transcript/format.ts"
+} from "../host/ui/tool-transcript/format.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original

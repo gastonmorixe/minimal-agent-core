@@ -62,20 +62,20 @@ import {
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
-import { planCommand } from "./cli/command-plan.ts"
+import { planCommand } from "./host/cli/command-plan.ts"
 import { normalizeArgs } from "./cli-args.ts"
-import { runAuthStatusCommand } from "./commands/auth-status.ts"
-import { DumpCommandError, runDumpCommand } from "./commands/dump.ts"
-import { runListFlagsCommand } from "./commands/list-flags.ts"
-import { runListModelsCommand } from "./commands/list-models.ts"
-import { runListPluginsCommand } from "./commands/list-plugins.ts"
-import { runListProvidersCommand } from "./commands/list-providers.ts"
-import { runListSpinnersCommand } from "./commands/list-spinners.ts"
-import { runLoginCommand } from "./commands/login.ts"
-import { runLogoutCommand } from "./commands/logout.ts"
-import { resolveSessionTarget } from "./commands/session-index.ts"
-import { runSessionsCommand } from "./commands/sessions.ts"
-import { runUsageCommand } from "./commands/usage.ts"
+import { runAuthStatusCommand } from "./host/commands/auth-status.ts"
+import { DumpCommandError, runDumpCommand } from "./host/commands/dump.ts"
+import { runListFlagsCommand } from "./host/commands/list-flags.ts"
+import { runListModelsCommand } from "./host/commands/list-models.ts"
+import { runListPluginsCommand } from "./host/commands/list-plugins.ts"
+import { runListProvidersCommand } from "./host/commands/list-providers.ts"
+import { runListSpinnersCommand } from "./host/commands/list-spinners.ts"
+import { runLoginCommand } from "./host/commands/login.ts"
+import { runLogoutCommand } from "./host/commands/logout.ts"
+import { resolveSessionTarget } from "./host/commands/session-index.ts"
+import { runSessionsCommand } from "./host/commands/sessions.ts"
+import { runUsageCommand } from "./host/commands/usage.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
 import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort, validateEffortForModel } from "./effort-resolution.ts"
@@ -100,29 +100,29 @@ import {
   replayToScrollback,
   toolDisplaysFromRecords,
   userTimestampsFromRecords,
-} from "./session-replay.ts"
+} from "./host/session-replay.ts"
 import { loadSession } from "./session-restore.ts"
 import { shortHash } from "./session-store.ts"
-import { printHelp, readEmbeddedPackageVersion } from "./startup/help.ts"
-import { resolveStartupAuth, startupAuthLabel } from "./startup/provider-auth.ts"
+import { printHelp, readEmbeddedPackageVersion } from "./host/startup/help.ts"
+import { resolveStartupAuth, startupAuthLabel } from "./host/startup/provider-auth.ts"
 import {
   modelHidesReasoning,
   providerWantsQuotaProbe,
   signInStepLabel,
-} from "./startup/provider-presentation.ts"
+} from "./host/startup/provider-presentation.ts"
 import {
   resolveBootModel,
   resolveSingleStoredProviderBootModel,
-} from "./startup/resolve-boot-model.ts"
-import { bootSessionStores } from "./startup/session-store-boot.ts"
+} from "./host/startup/resolve-boot-model.ts"
+import { bootSessionStores } from "./host/startup/session-store-boot.ts"
 import { ToolTimeTracker } from "./tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools.ts"
-import { isColdStart, maybeShowFirstRunWelcome } from "./ui/chrome/first-run.ts"
-import { buildReadyBanner } from "./ui/chrome/ready-banner.ts"
-import { resolveFormatter } from "./ui/formatter/auto.ts"
-import { Formatter, parseFormatterCommand } from "./ui/formatter/formatter.ts"
-import type { Spinner } from "./ui/spinner/index.ts"
-import { getSpinnerPreset, type NamedSpinnerPreset } from "./ui/spinner/named-presets.ts"
+import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
+import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
+import { resolveFormatter } from "./host/ui/formatter/auto.ts"
+import { Formatter, parseFormatterCommand } from "./host/ui/formatter/formatter.ts"
+import type { Spinner } from "./host/ui/spinner/index.ts"
+import { getSpinnerPreset, type NamedSpinnerPreset } from "./host/ui/spinner/named-presets.ts"
 import {
   closeStartupTree,
   closeStartupTreeWithTools,
@@ -130,8 +130,8 @@ import {
   printStartupRow,
   setStartupTreeVisible,
   startStartupRowSpinner,
-} from "./ui/startup/tree.ts"
-import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
+} from "./host/ui/startup/tree.ts"
+import type { StatusSpinnerTheme } from "./host/ui/status/line-renderer.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -1047,7 +1047,7 @@ async function main() {
   // or grow the install set under the user's feet. Opt out entirely with
   // MINIMAL_AGENT_NO_BINARY_SETUP=1.
   if (SHOW_HEADER && process.env.MINIMAL_AGENT_NO_BINARY_SETUP !== "1") {
-    const { provisionPluginBinaries } = await import("./startup/provision-binaries.ts")
+    const { provisionPluginBinaries } = await import("./host/startup/provision-binaries.ts")
     await provisionPluginBinaries(loader)
   }
 
@@ -1223,7 +1223,7 @@ async function main() {
       // import out of core). See `toolDisplaysFromRecords` +
       // `deriveTaskDisplay` for the per-call cutoff semantics.
       const sidecarPath = join(resolveSessionsDir(), `${resumeSid}.tasks.jsonl`)
-      let sidecarTasks: import("./session-replay-derivers.ts").ReplaySidecarTask[] | null = null
+      let sidecarTasks: import("./host/session-replay-derivers.ts").ReplaySidecarTask[] | null = null
       try {
         if (existsSync(sidecarPath)) {
           const text = readFileSync(sidecarPath, "utf8")
@@ -1559,7 +1559,7 @@ async function main() {
     // interceptor, editor, resize fan-out, Auto-ASK) lives in
     // `src/startup/live-repl.ts`. `runRepl` is passed in as a value to
     // keep that module import-cycle-free with `../agent.ts`.
-    const { runLiveAreaRepl } = await import("./startup/live-repl.ts")
+    const { runLiveAreaRepl } = await import("./host/startup/live-repl.ts")
     await runLiveAreaRepl({
       agent,
       repl: runRepl,

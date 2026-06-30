@@ -30,7 +30,7 @@
 
 import { existsSync } from "node:fs"
 
-import { type ReplayToolRenderer, registerReplayRenderer } from "../../session-replay-derivers.ts"
+import { type ReplayToolRenderer, registerReplayRenderer } from "../../host/session-replay-derivers.ts"
 
 import { resolvePath } from "./helpers.ts"
 

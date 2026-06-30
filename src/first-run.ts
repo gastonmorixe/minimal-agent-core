@@ -8,4 +8,4 @@
  * @module first-run
  */
 
-export * from "./ui/chrome/first-run.ts"
+export * from "./host/ui/chrome/first-run.ts"

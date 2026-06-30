@@ -27,7 +27,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { abortBus as globalAbortBus } from "./abort-bus.ts"
 import { type ReplAgentLike, runRepl } from "./agent.ts"
-import type { QueueKeyContext, QueueKeyResult } from "./editor/types.ts"
+import type { QueueKeyContext, QueueKeyResult } from "./host/editor/types.ts"
 import { loadQueue, queueFilePath } from "./queue-store.ts"
 import { StatusBus } from "./status.ts"
 

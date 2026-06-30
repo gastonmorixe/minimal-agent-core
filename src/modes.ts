@@ -39,7 +39,7 @@ import {
   resolveModeStyle,
   type StyleEnv,
   styleFromLegacyColor,
-} from "./ui/style/mode.ts"
+} from "./host/ui/style/mode.ts"
 
 /**
  * Resolved tool-permission rules for a mode.

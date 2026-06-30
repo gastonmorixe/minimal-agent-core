@@ -36,6 +36,12 @@ import { stripComments, tsFilesUnder } from "./provider-scan.ts"
 export const DEFAULT_PLUGIN_ROOTS: readonly string[] = ["plugins"]
 
 /**
+ * Host trees a core import must never resolve into (repo-root-relative).
+ * The host/ package is the CLI/TUI shell; core must not depend on it.
+ */
+export const DEFAULT_HOST_ROOTS: readonly string[] = ["host"]
+
+/**
  * Files exempt from the repo scan: this scanner's own unit test must embed
  * plugin-escaping specifiers as string fixtures (same category as the
  * provider test naming provider tokens).

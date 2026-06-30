@@ -11,7 +11,7 @@ import { join } from "node:path"
 
 import { afterEach, beforeAll, describe, expect, it } from "bun:test"
 
-import { clearReplayRenderers, deriveDisplayFallback } from "../session-replay-derivers.ts"
+import { clearReplayRenderers, deriveDisplayFallback } from "../host/session-replay-derivers.ts"
 
 import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"

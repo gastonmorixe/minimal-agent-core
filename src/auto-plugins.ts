@@ -36,7 +36,7 @@ import { dirname, join } from "node:path"
 
 import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { startStartupProgressSpinner } from "./ui/startup/progress-spinner.ts"
+import { startStartupProgressSpinner } from "./host/ui/startup/progress-spinner.ts"
 
 /** Default remote for the extended first-party plugins. */
 export const DEFAULT_PLUGINS_REPO = "https://github.com/gastonmorixe/minimal-agent-plugins.git"
