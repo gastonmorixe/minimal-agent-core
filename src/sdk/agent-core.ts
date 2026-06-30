@@ -25,7 +25,6 @@ import {
   DEFAULT_REFLECTION_COOLDOWN_MS,
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
-  runReflectionCooldown,
 } from "../agent/reflection.ts"
 import type { AuthResult } from "../auth.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
@@ -35,7 +34,7 @@ import {
   estimateRequestInputTokens,
 } from "../llm/context-budget.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import { findModel, findModelForProvider, getDefaultModelId } from "../llm/model-registry.ts"
+import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
 import { selectedTransport } from "../llm/transport/select-transport.ts"
 import type { SystemBlock } from "../llm/transport/types.ts"
@@ -97,6 +96,16 @@ function toEventUsage(usage: StreamedResponse["usage"] | undefined): EventUsage 
   }
 }
 
+/**
+ * Terminal-agnostic agentic loop driven entirely by injected ports.
+ *
+ * Owns the append-only conversation history and the send/run loop, but depends
+ * only on the structural ports in {@link AgentCoreConfig} (tool registry/executor,
+ * transcript + event sinks, session persistence, prompt/mode/media providers).
+ * No CLI/TUI/plugin imports, no `process` globals. Hosts (CLI, SDK, tests) wire
+ * concrete adapters to the ports and construct the core; the same core powers an
+ * interactive REPL, a `--json` event stream, or an in-process SDK call.
+ */
 export class AgentCore {
   readonly messages: Message[] = []
   private model: string
@@ -329,7 +338,6 @@ export class AgentCore {
     })
 
     const allTools: ToolDefinition[] = this.toolRegistry.list()
-    const toolPresentation = this.toolRegistry.presentation?.() ?? new Map()
 
     const mergedTools: Array<{
       name: string
