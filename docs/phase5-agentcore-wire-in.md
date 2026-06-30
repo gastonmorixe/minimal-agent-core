@@ -141,6 +141,42 @@ The legacy `Agent` construction at L1397 stays; AgentCore is built only when
    It is the high-risk seam and gets a standalone review, never buried in the
    index.ts swap diff.
 
+### Gate ORDER (Betty, contract guardian) — supersedes the test-strategy numbering
+
+Run the gates in increasing depth/flakiness, not the order they were listed:
+
+- (a) event-stream JSONL correct at **SDK level** — DONE (`fc97e75`).
+- (b) event-stream correct at **CLI stdout level** — Betty's new test (events
+  reach real `process.stdout`). Depends only on emit seams already shipped, so
+  it greens early.
+- (c) **THEN** final-answer parity (`AgentCore` text === legacy `Agent` text) —
+  the deeper invariant but the LATER gate, because it depends on EVERY adapter
+  being faithful (prompt blocks, mode gating, tool dispatch). Do NOT block the
+  wire-up on it; it is the final acceptance gate, not the first.
+
+### Ownership split (with Betty)
+
+- Dorothy: `src/host/sdk-adapters/` + the `index.ts` `jsonMode` seam.
+- Betty: the event-stream wire contract — extend her golden from SDK-level to
+  CLI-level (events reach real `process.stdout`) + the golden-parity test.
+  Wire-format authority stays with Betty; adapter wiring with Dorothy. Betty
+  does NOT touch `index.ts` or `src/host/`.
+
+### The one never-break invariant
+
+`tool_result.id === item_started.id` (the call↔result join key). The single
+point it could silently break is the `ToolExecutor`-over-`executeToolRound`
+adapter when it maps `ToolResultBlock → ToolExecResult`: the `tool_use` id MUST
+flow through unchanged. Betty asserts it at CLI level too.
+
+### `--json` + `--output-schema` interaction (deliberate)
+
+If `outputSchema` is added to `AgentCoreConfig`, the JSONL event stream is
+UNAFFECTED (schema constrains generation, not events) — Betty's golden stays
+valid either way. The final answer is schema-JSON AND the event stream wraps it;
+the id-join invariant still holds. No contract change needed; noted so it is
+deliberate, not accidental.
+
 ## Open questions for Laura
 
 - `outputSchema` on `AgentCoreConfig`: add it now (mirror legacy threading) so
