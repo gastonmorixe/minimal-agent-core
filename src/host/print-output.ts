@@ -25,6 +25,7 @@
  */
 
 import type { AgentEvent } from "../sdk/events.ts"
+import { validateJsonAnswer } from "../sdk/output-schema.ts"
 import {
   formatFinalMessage,
   type OutputMode,
@@ -127,6 +128,40 @@ export class PrintOutput {
   schema(): object | undefined {
     return this.outputSchema
   }
+}
+
+/**
+ * The decision of an `--output-schema` enforcement check: whether the run may
+ * exit 0, and the diagnostic lines to write to stderr when it may not. A pure
+ * value so the host's exit path (`process.exit(1)`) stays at the edge and the
+ * decision is unit-testable without spawning a process.
+ */
+export interface SchemaEnforcement {
+  /** True when the final answer is valid JSON conforming to the schema. */
+  ok: boolean
+  /** Stderr diagnostic lines (empty when ok). */
+  diagnostics: string[]
+}
+
+/**
+ * Enforce the `--output-schema` contract on a run's final answer.
+ *
+ * The schema flag is a contract: the model was asked for JSON conforming to
+ * the schema, so a missing, non-JSON, or non-conforming answer is a failure
+ * (the host exits non-zero). Gated entirely by the caller passing a `schema`:
+ * with no schema this is never called. Delegates the parse + validate to the
+ * canonical {@link validateJsonAnswer} (one source of truth for the
+ * JSON-parse-vs-validate semantics, incl. the bare-scalar trap).
+ *
+ * Returns the decision; the host writes `diagnostics` to stderr and exits 1
+ * when `ok` is false. This function never touches streams or `process.exit`.
+ */
+export function enforceOutputSchema(finalAnswer: string, schema: object): SchemaEnforcement {
+  const { valid, errors } = validateJsonAnswer(finalAnswer, schema)
+  if (valid) return { ok: true, diagnostics: [] }
+  const diagnostics = ["--output-schema: final answer does not match schema"]
+  for (const e of errors) diagnostics.push(e)
+  return { ok: false, diagnostics }
 }
 
 /**
