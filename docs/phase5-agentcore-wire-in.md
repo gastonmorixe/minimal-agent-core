@@ -177,10 +177,21 @@ valid either way. The final answer is schema-JSON AND the event stream wraps it;
 the id-join invariant still holds. No contract change needed; noted so it is
 deliberate, not accidental.
 
-## Open questions for Laura
+## Scope decisions (Laura — RESOLVED, locked)
 
-- `outputSchema` on `AgentCoreConfig`: add it now (mirror legacy threading) so
-  `--json --output-schema` works through AgentCore too? Or defer.
-- Do we eventually converge the interactive REPL onto AgentCore, or is
-  non-interactive `--json` the permanent boundary? (Recommend: prove
-  non-interactive first, decide convergence later — out of Phase 5 scope.)
+- **`outputSchema` on `AgentCoreConfig`: DEFER. Do NOT add in P5.** P4 already
+  threads outputSchema through the legacy Agent path (`b4fcecb`). AgentCore does
+  not need schema knowledge to emit events; adding it now is speculative
+  coupling (YAGNI). If we later converge the schema path onto AgentCore, that is
+  its own task with its own test. **P5 = eventSink wiring only. One concern per
+  phase.**
+- **Non-interactive `--json` is the boundary FOR NOW.** REPL convergence is
+  explicitly OUT of P5 scope. The REPL is the highest-blast-radius surface
+  (live TUI, interactive editor, host loop); proving AgentCore on the narrow
+  non-interactive `--json` path first de-risks it. Revisit REPL convergence as a
+  SEPARATE future phase only after P5 ships and the adapter set is battle-tested.
+  Do not design P5 to FORCE eventual convergence, but do not preclude it: keep
+  adapters clean and host-injected (already the design). **Future, out of scope.**
+
+Net P5 scope: eventSink wiring into non-interactive `--json`, adapters host-side,
+NO outputSchema, NO REPL. Tightest possible scope.
