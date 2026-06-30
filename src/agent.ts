@@ -156,6 +156,13 @@ export class Agent {
   /** Effort level for output_config.effort. Pass-through string; server validates. */
   private effort: string | undefined
   /**
+   * Optional JSON Schema for structured output (`--output-schema`). When set,
+   * every request carries `outputConfig.format = { type: "json_schema",
+   * schema }` so the model constrains its final answer to the schema. Carried
+   * opaquely; the provider adapter maps it to its wire format. Unset → omitted.
+   */
+  private outputSchema: object | undefined
+  /**
    * Speed-mode dispatch tier. `"fast"` adds `speed:"fast"` to the
    * request body (Anthropic fast-mode-2026-02-01). `"normal"` omits
    * the field entirely. Capability-gating happens at the registry
@@ -360,6 +367,12 @@ export class Agent {
     providerId?: string
     effort?: string
     /**
+     * Optional JSON Schema object constraining the model's final structured
+     * answer (`--output-schema FILE`). Threaded onto every request as
+     * `outputConfig.format = { type: "json_schema", schema }`. Default: omitted.
+     */
+    outputSchema?: object
+    /**
      * Speed mode for the response dispatch tier. `"fast"` opts the
      * model into the `fast-mode-2026-02-01` beta and emits
      * `speed: "fast"` on the wire — ~2.5x output tok/s at premium
@@ -464,6 +477,7 @@ export class Agent {
     this.model = opts.model ?? getDefaultModelId()
     this.providerId = opts.providerId
     this.effort = opts.effort
+    this.outputSchema = opts.outputSchema
     this.speed = opts.speed ?? "normal"
     this.serviceTier = opts.serviceTier
     this.thinkingDisplay = opts.thinkingDisplay
@@ -1090,7 +1104,7 @@ export class Agent {
         // rather than the transport's conservative 64k default. Placed before
         // `...sendOpts` so an explicit caller override still wins.
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-        ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...this.outputConfigSpread(),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -1466,7 +1480,7 @@ export class Agent {
           const mt = this.resolveMaxOutputTokens({ system })
           return mt !== undefined ? { maxTokens: mt } : {}
         })(),
-        ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...this.outputConfigSpread(),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -1554,7 +1568,7 @@ export class Agent {
       model: this.model,
       ...(this.networkClient ? { networkClient: this.networkClient } : {}),
       ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),
-      ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+      ...this.outputConfigSpread(),
       ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
       ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
       ...(this.thinkingDisplay
@@ -1600,6 +1614,22 @@ export class Agent {
    */
   history(): Message[] {
     return [...this.messages]
+  }
+
+  /**
+   * Build the `outputConfig` for a request from the agent's effort + output
+   * schema. Returns `{ outputConfig: {...} }` to spread into a `sendFn` call,
+   * or `{}` when neither is set (so the field is omitted entirely). Merges
+   * both concerns: `effort` (computation budget) and `format` (the
+   * `--output-schema` JSON Schema, as `{ type: "json_schema", schema }`).
+   */
+  private outputConfigSpread(): {
+    outputConfig?: { effort?: string; format?: { type: string; schema?: unknown } }
+  } {
+    const cfg: { effort?: string; format?: { type: string; schema?: unknown } } = {}
+    if (this.effort) cfg.effort = this.effort
+    if (this.outputSchema) cfg.format = { type: "json_schema", schema: this.outputSchema }
+    return Object.keys(cfg).length > 0 ? { outputConfig: cfg } : {}
   }
 }
 
