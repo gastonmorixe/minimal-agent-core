@@ -17,7 +17,11 @@ import type { PreflightIssue } from "../llm/provider.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
 import { displayWidth, stripAnsi } from "../term-width.ts"
 
-import { type AskUserHostEditor, createAskUserHost, translateEditorKey } from "../host/ask-user-host.ts"
+import {
+  type AskUserHostEditor,
+  createAskUserHost,
+  translateEditorKey,
+} from "../host/ask-user-host.ts"
 
 // ---------------------------------------------------------------------------
 // Fakes
