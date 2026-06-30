@@ -236,8 +236,9 @@ export interface TerminalMetrics {
 
 /** Everything AgentCore needs from the host. */
 export interface AgentCoreConfig {
-  /** Transport function that sends messages to the model. */
-  sendFn: TransportFn
+  /** Transport function that sends messages to the model. Defaults to the
+   *  registry-selected transport when omitted. */
+  sendFn?: TransportFn
   /** Optional network client forwarded to the transport. */
   networkClient?: NetworkClient
   /** Tool registry (core + plugin tools). */
