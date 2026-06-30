@@ -14,7 +14,7 @@
  */
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
+import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
 
 import type { EventSink } from "./events.ts"
