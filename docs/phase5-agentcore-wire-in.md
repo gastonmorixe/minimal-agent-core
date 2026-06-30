@@ -129,6 +129,18 @@ The legacy `Agent` construction at L1397 stays; AgentCore is built only when
   (highest risk), behind a parity test, (2) the remaining adapters, (3) the
   index.ts seam guarded on `jsonMode`, (4) integration + golden tests.
 
+### Binding requirements (Laura, on P5 approval)
+
+1. **Golden-parity gate is MANDATORY** (not optional). Before the swap counts
+   as done, a test must prove `AgentCore` produces the **byte-identical** final
+   answer to legacy `Agent` for a fixed prompt + fixed fake transport. Swapping
+   the CLI's core path risks silent behavior drift; this test is the guardrail.
+   Pair with Betty (owns the wire-contract golden) on it.
+2. **The ToolExecutor / executeToolRound adapter lands as its OWN reviewed
+   commit FIRST**, in isolation with its own tests, BEFORE any index.ts wiring.
+   It is the high-risk seam and gets a standalone review, never buried in the
+   index.ts swap diff.
+
 ## Open questions for Laura
 
 - `outputSchema` on `AgentCoreConfig`: add it now (mirror legacy threading) so
