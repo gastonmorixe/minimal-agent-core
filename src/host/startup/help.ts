@@ -103,7 +103,7 @@ function buildHelpSections(): HelpSection[] {
           `${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}`,
           "Non-interactive: send prompt, print, exit",
         ),
-        row(`${c.cyan("--json")}`, "Non-interactive: emit the final answer as JSONL", [
+        row(c.cyan("--json"), "Non-interactive: emit the final answer as JSONL", [
           "final-answer JSONL, not a structured event stream",
         ]),
         row(
@@ -114,7 +114,7 @@ function buildHelpSections(): HelpSection[] {
             "enforces a SUBSET: type, required, properties,",
             "additionalProperties, items, enum (deep-equal)",
             "accepted but NOT enforced: minimum/maxLength/pattern/",
-            "anyOf/oneOf/allOf/not/$ref/format/const — don't rely on them",
+            "anyOf/oneOf/allOf/not/$ref/format/const, don't rely on them",
           ],
         ),
         row(`${c.cyan("--mode")} ${c.dim("<id|none>")}`, "Initial mode", [

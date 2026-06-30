@@ -46,6 +46,7 @@ import {
 import { executeToolRound } from "./agent/tool-round.ts"
 import type { AuthResult } from "./auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
+import { c, faintThinkingChunk, formatAbortedEcho } from "./host/ui/style/ansi.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import {
   clampMaxOutputTokens,
@@ -75,7 +76,6 @@ import { GLOBAL_STATUS_BUS } from "./status.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import { TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
-import { c, faintThinkingChunk, formatAbortedEcho } from "./host/ui/style/ansi.ts"
 
 export {
   c,
@@ -157,9 +157,10 @@ export class Agent {
   private effort: string | undefined
   /**
    * Optional JSON Schema for structured output (`--output-schema`). When set,
-   * every request carries `outputConfig.format = { type: "json_schema",
-   * schema }` so the model constrains its final answer to the schema. Carried
-   * opaquely; the provider adapter maps it to its wire format. Unset → omitted.
+   * every request carries an `outputConfig.format` of type `json_schema` whose
+   * `schema` is this object, so the model constrains its final answer to the
+   * schema. Carried opaquely; the provider adapter maps it to its wire format.
+   * Unset means the field is omitted entirely.
    */
   private outputSchema: object | undefined
   /**
@@ -368,8 +369,8 @@ export class Agent {
     effort?: string
     /**
      * Optional JSON Schema object constraining the model's final structured
-     * answer (`--output-schema FILE`). Threaded onto every request as
-     * `outputConfig.format = { type: "json_schema", schema }`. Default: omitted.
+     * answer (`--output-schema FILE`). Threaded onto every request as an
+     * `outputConfig.format` of type `json_schema`. Default: omitted.
      */
     outputSchema?: object
     /**

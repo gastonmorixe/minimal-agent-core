@@ -40,6 +40,16 @@ async function runCli(args: string[], response: string) {
       MINIMAL_AGENT_TEST_AUTH: "1",
       MINIMAL_AGENT_TRANSPORT: "test",
       MINIMAL_AGENT_TEST_RESPONSE: response,
+      // Pin a REAL provider + model so the spawned CLI is HERMETIC: under the
+      // gate's `env -u MINIMAL_AGENT_PROVIDER -u MINIMAL_AGENT_MODEL` a
+      // multi-credential machine would otherwise die on "multiple provider
+      // credentials found" BEFORE schema logic runs, making e1/e2/j1 fail and
+      // e3/e4 pass for the WRONG reason (cred-fatal exit 1, not schema exit 1).
+      // These must be a valid registry pair (an unknown id is itself fatal);
+      // MINIMAL_AGENT_TRANSPORT=test short-circuits the actual network call, so
+      // the values only satisfy the provider-selection guard, never dial out.
+      MINIMAL_AGENT_PROVIDER: "anthropic",
+      MINIMAL_AGENT_MODEL: "claude-opus-4-8",
     },
   })
   const [exitCode, stdout, stderr] = await Promise.all([
