@@ -75,7 +75,7 @@ import { GLOBAL_STATUS_BUS } from "./status.ts"
 import type { ToolTimeTracker } from "./tool-time.ts"
 import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
 import { TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
-import { c, faintThinkingChunk, formatAbortedEcho } from "./ui/style/ansi.ts"
+import { c, faintThinkingChunk, formatAbortedEcho } from "./host/ui/style/ansi.ts"
 
 export {
   c,
@@ -1617,9 +1617,9 @@ import {
   formatToolPreview,
   isOuterFrameClose,
   toolContinuationIndentCells,
-} from "./ui/tool-transcript/format.ts"
+} from "./host/ui/tool-transcript/format.ts"
 
-export type { ToolPresentation } from "./ui/tool-transcript/format.ts"
+export type { ToolPresentation } from "./host/ui/tool-transcript/format.ts"
 export {
   clampTranscriptRow,
   formatToolHeaderRows,
@@ -1637,7 +1637,7 @@ export {
 export {
   parseModelNotFoundError,
   parseModelUnavailableError,
-} from "./agent/model-error.ts"
+} from "./host/model-error.ts"
 // The REPL types, the `runRepl` orchestration shell, and the live-area
 // renderer live under `src/agent/` so this file stays under the
 // `max-lines` lint budget. The public surface
@@ -1649,5 +1649,5 @@ export type {
   ReplCompositor,
   ReplEditor,
   StatusController,
-} from "./agent/repl.ts"
-export { runRepl } from "./agent/repl.ts"
+} from "./host/repl.ts"
+export { runRepl } from "./host/repl.ts"

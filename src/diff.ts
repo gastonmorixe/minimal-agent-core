@@ -19,7 +19,7 @@
  * plugin's renderer).
  */
 
-export { renderUnifiedDiff } from "./ui/render/unified-diff.ts"
+export { renderUnifiedDiff } from "./host/ui/render/unified-diff.ts"
 
 interface Hunk {
   oldStart: number // 1-based line number in `before`

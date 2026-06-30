@@ -44,7 +44,7 @@
  */
 
 import type { ContentBlock } from "../llm/messages.ts"
-import type { ReplaySidecarTask } from "../session-replay-derivers.ts"
+import type { ReplaySidecarTask } from "../host/session-replay-derivers.ts"
 
 // ---------------------------------------------------------------------------
 // Contracts

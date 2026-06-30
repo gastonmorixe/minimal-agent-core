@@ -18,9 +18,9 @@ import { EventEmitter } from "node:events"
 import { describe, expect, it } from "bun:test"
 
 import { type ReplAgentLike, runRepl } from "./agent.ts"
-import { EditorController } from "./editor-controller.ts"
+import { EditorController } from "./host/editor-controller.ts"
 import { StatusBus } from "./status.ts"
-import { Compositor } from "./ui/compositor.ts"
+import { Compositor } from "./host/ui/compositor.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true
@@ -82,7 +82,7 @@ describe("live-area REPL (end to end) — stdio interception", () => {
     const stdin = new FakeTTYInput()
     const output = new FakeOutput()
     const { Compositor } = await import("./ui/compositor.ts")
-    const { StdioInterceptor } = await import("./ui/stdio-interceptor.ts")
+    const { StdioInterceptor } = await import("./host/ui/stdio-interceptor.ts")
 
     let interceptorRef: any = null
     const compositor = new Compositor({

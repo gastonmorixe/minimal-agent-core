@@ -24,12 +24,12 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { type ReplAgentLike, runRepl } from "./agent.ts"
-import { EditorController } from "./editor-controller.ts"
+import { EditorController } from "./host/editor-controller.ts"
 import { EventBus } from "./plugins/event-bus.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { queueFilePath } from "./queue-store.ts"
 import { StatusBus } from "./status.ts"
-import { Compositor } from "./ui/compositor.ts"
+import { Compositor } from "./host/ui/compositor.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true

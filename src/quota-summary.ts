@@ -19,7 +19,7 @@
  */
 
 import type { QuotaSnapshot, QuotaWindow } from "./llm/provider-plugin.ts"
-import { c } from "./ui/style/ansi.ts"
+import { c } from "./host/ui/style/ansi.ts"
 
 export interface QuotaSummaryOptions {
   /** Spaces before the first segment (banner alignment). */

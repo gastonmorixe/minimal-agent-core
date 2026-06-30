@@ -23,7 +23,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { DraftStore, draftFilePath } from "./draft-store.ts"
-import { EditorController } from "./editor-controller.ts"
+import { EditorController } from "./host/editor-controller.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true
