@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
 
-import { FakeCompositor, FakeOutput, FakeTTYInput, make } from "./editor-controller.fixtures.ts"
-import { EditorController } from "./editor-controller.ts"
 import { displayWidth } from "../term-width.ts"
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
+
+import { FakeCompositor, FakeOutput, FakeTTYInput, make } from "./editor-controller.fixtures.ts"
+import { EditorController } from "./editor-controller.ts"
 import { Compositor } from "./ui/compositor.ts"
 
 describe("EditorController — start/stop", () => {

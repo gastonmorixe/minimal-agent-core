@@ -26,9 +26,9 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { type ReplAgentLike, runRepl } from "./agent.ts"
 import { EditorController } from "./host/editor-controller.ts"
+import { Compositor } from "./host/ui/compositor.ts"
 import { loadQueue, type QueueItem, QueueStore, queueFilePath } from "./queue-store.ts"
 import { StatusBus } from "./status.ts"
-import { Compositor } from "./host/ui/compositor.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true

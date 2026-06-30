@@ -20,22 +20,6 @@
  */
 
 import { type BlobStore, type BlobWriteResult, formatRawOutputFooter } from "../blob-store.ts"
-import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import { resolveToolMediaContext } from "../media/tool-context.ts"
-import type { ModeManager } from "../modes.ts"
-import {
-  type Finding,
-  makeToolDidInvokePayload,
-  type ToolDidInvokePayload,
-} from "../plugins/hooks/tool-lifecycle.ts"
-import type { PluginLoader } from "../plugins/loader.ts"
-import type { SessionStore } from "../session-store.ts"
-import { GLOBAL_STATUS_BUS } from "../status.ts"
-import { expandTabs } from "../term-width.ts"
-import type { ToolTimeTracker } from "../tool-time.ts"
-import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
-import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
-import { executeTool, type ToolResultMediaBlock } from "../tools.ts"
 import { c } from "../host/ui/style/ansi.ts"
 import {
   clampBodyWithHint,
@@ -53,6 +37,22 @@ import {
   type ToolPresentation,
   tuiPreviewHint,
 } from "../host/ui/tool-transcript/format.ts"
+import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import { resolveToolMediaContext } from "../media/tool-context.ts"
+import type { ModeManager } from "../modes.ts"
+import {
+  type Finding,
+  makeToolDidInvokePayload,
+  type ToolDidInvokePayload,
+} from "../plugins/hooks/tool-lifecycle.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { SessionStore } from "../session-store.ts"
+import { GLOBAL_STATUS_BUS } from "../status.ts"
+import { expandTabs } from "../term-width.ts"
+import type { ToolTimeTracker } from "../tool-time.ts"
+import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
+import { executeTool, type ToolResultMediaBlock } from "../tools.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original

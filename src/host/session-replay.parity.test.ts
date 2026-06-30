@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { Message } from "../client/types.ts"
+
 import { replayToScrollback } from "./session-replay.ts"
 
 class CaptureSink {

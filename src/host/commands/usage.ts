@@ -20,7 +20,6 @@ import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
 
 import { modelShortLabel } from "../../llm/model-label.ts"
-import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 import {
   aggregateAllPeriods,
   aggregateUsage,
@@ -29,6 +28,7 @@ import {
   USAGE_PERIODS,
   type UsagePeriod,
 } from "../../usage-stats.ts"
+import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 
 export interface RunUsageOptions {
   /** Explicit period token from argv (e.g. `"month"`). Undefined ⇒ default. */

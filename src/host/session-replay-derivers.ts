@@ -40,6 +40,7 @@
  */
 
 import { buildEditDiff, buildFileDiff } from "../diff.ts"
+
 import { renderUnifiedDiff } from "./ui/render/unified-diff.ts"
 
 /**

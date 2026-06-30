@@ -43,8 +43,8 @@
  * @module agent/turn-attachments
  */
 
-import type { ContentBlock } from "../llm/messages.ts"
 import type { ReplaySidecarTask } from "../host/session-replay-derivers.ts"
+import type { ContentBlock } from "../llm/messages.ts"
 
 // ---------------------------------------------------------------------------
 // Contracts
