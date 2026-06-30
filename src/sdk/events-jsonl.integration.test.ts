@@ -1,16 +1,24 @@
 /**
- * End-to-end wire-format test for `--json` mode: AgentCore emits AgentEvents
- * through a real {@link JsonlEventSink}, and we assert the EXACT JSONL bytes
- * that land on stdout.
+ * End-to-end wire-format test for the AgentCore → JsonlEventSink event stream:
+ * AgentCore emits AgentEvents through a real {@link JsonlEventSink}, and we
+ * assert the EXACT JSONL bytes it produces.
+ *
+ * SCOPE (honest, per the P4 ruling): this is the Codex-style turn/item/tool
+ * EVENT stream. It is NOT yet what the live CLI `--json` flag emits — the
+ * non-interactive CLI path currently drives the legacy Agent and `--json`
+ * ships the "final answer as one JSONL line," not this event stream. Wiring
+ * AgentCore + this JsonlEventSink into the CLI's non-interactive path is
+ * PHASE 5 (owner: Dorothy). This test pins the event-stream contract NOW so
+ * that Phase 5 swap lands against a frozen, proven wire format instead of an
+ * unverified one. "Built, not yet shipped" — and tested either way.
  *
  * The unit tests elsewhere check the pieces in isolation:
  *   - agent-core.test.ts asserts the emitted event OBJECTS (Dorothy's seams).
  *   - events.test.ts asserts serializeEvent() on hand-built events (Betty).
  *
- * This test composes them: it drives a full AgentCore.run() with the SAME
- * JsonlEventSink the host wires for `--json`, captures the serialized lines,
- * and golden-asserts the stream. It is the contract `--json` stdout actually
- * ships — a field rename, an emit-order change, or a serialization regression
+ * This test composes them: it drives a full AgentCore.run() through the
+ * JsonlEventSink, captures the serialized lines, and golden-asserts the
+ * stream. A field rename, an emit-order change, or a serialization regression
  * anywhere in AgentCore → events.ts breaks it here.
  *
  * @module sdk/events-jsonl.integration.test
