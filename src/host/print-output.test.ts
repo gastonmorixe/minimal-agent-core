@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { AgentEvent } from "../sdk/events.ts"
 
-import { PrintOutput, resolvePrintModeOptions } from "./print-output.ts"
+import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "./print-output.ts"
 
 /** A capturing WriteStream for assertions. */
 function cap(isTTY = false) {
@@ -156,6 +156,38 @@ describe("PrintOutput — stream isolation", () => {
     p.finish("answer")
     p.finish("answer")
     expect(out.text()).toBe("answer\n")
+  })
+})
+
+describe("enforceOutputSchema — validate-and-exit decision", () => {
+  const objSchema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }
+
+  // e1: a conforming answer is accepted (host exits 0).
+  test("valid JSON matching the schema → ok, no diagnostics", () => {
+    const r = enforceOutputSchema('{"ok": true}', objSchema)
+    expect(r.ok).toBe(true)
+    expect(r.diagnostics).toEqual([])
+  })
+
+  // e2: well-formed JSON that violates the schema → reject (host exits 1).
+  test("JSON that violates the schema → not ok, with diagnostics", () => {
+    const r = enforceOutputSchema('{"ok": "not a boolean"}', objSchema)
+    expect(r.ok).toBe(false)
+    expect(r.diagnostics.length).toBeGreaterThan(0)
+    expect(r.diagnostics[0]).toContain("--output-schema")
+  })
+
+  // e3: a non-JSON answer when --output-schema is set → reject (host exits 1).
+  test("non-JSON answer → not ok (the schema flag implies JSON output)", () => {
+    const r = enforceOutputSchema("this is plain prose, not json", objSchema)
+    expect(r.ok).toBe(false)
+    expect(r.diagnostics.length).toBeGreaterThan(0)
+  })
+
+  // a bare scalar parses as JSON but fails an object schema → reject.
+  test("bare scalar (parses, wrong type) → not ok", () => {
+    const r = enforceOutputSchema("42", objSchema)
+    expect(r.ok).toBe(false)
   })
 })
 

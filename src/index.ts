@@ -62,8 +62,13 @@ import {
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
-import { planCommand } from "./host/cli/command-plan.ts"
 import { normalizeArgs } from "./cli-args.ts"
+import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
+import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
+import { resolveEffort, validateEffortForModel } from "./effort-resolution.ts"
+import { extractPromptFromArgs } from "./extract-prompt.ts"
+import { setGlobalEventBus } from "./global-bus.ts"
+import { planCommand } from "./host/cli/command-plan.ts"
 import { runAuthStatusCommand } from "./host/commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "./host/commands/dump.ts"
 import { runListFlagsCommand } from "./host/commands/list-flags.ts"
@@ -76,33 +81,13 @@ import { runLogoutCommand } from "./host/commands/logout.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { runSessionsCommand } from "./host/commands/sessions.ts"
 import { runUsageCommand } from "./host/commands/usage.ts"
-import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
-import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
-import { resolveEffort, validateEffortForModel } from "./effort-resolution.ts"
-import { extractPromptFromArgs } from "./extract-prompt.ts"
-import { setGlobalEventBus } from "./global-bus.ts"
-import { activateDiscoveredProviders, registerDiscoveredProviders } from "./llm/index.ts"
-import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
-import { findModel } from "./llm/model-registry.ts"
-import { findProviderPlugin } from "./llm/provider-plugin.ts"
-import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
-import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
-import { defaultNetworkClient } from "./network/index.ts"
-import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
-import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
-import { createAgentContext } from "./plugins/agent-context.ts"
-import { PluginLoader } from "./plugins/loader.ts"
-import { PluginStream } from "./plugins/stream.ts"
-import { formatQuotaWindows } from "./quota-summary.ts"
-import { getSessionId, setSessionId } from "./session-id.ts"
+import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "./host/print-output.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
   toolDisplaysFromRecords,
   userTimestampsFromRecords,
 } from "./host/session-replay.ts"
-import { loadSession } from "./session-restore.ts"
-import { shortHash } from "./session-store.ts"
 import { printHelp, readEmbeddedPackageVersion } from "./host/startup/help.ts"
 import { resolveStartupAuth, startupAuthLabel } from "./host/startup/provider-auth.ts"
 import {
@@ -115,8 +100,6 @@ import {
   resolveSingleStoredProviderBootModel,
 } from "./host/startup/resolve-boot-model.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
-import { ToolTimeTracker } from "./tool-time.ts"
-import { TOOL_DEFINITIONS } from "./tools.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
@@ -132,6 +115,25 @@ import {
   startStartupRowSpinner,
 } from "./host/ui/startup/tree.ts"
 import type { StatusSpinnerTheme } from "./host/ui/status/line-renderer.ts"
+import { activateDiscoveredProviders, registerDiscoveredProviders } from "./llm/index.ts"
+import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
+import { findModel } from "./llm/model-registry.ts"
+import { findProviderPlugin } from "./llm/provider-plugin.ts"
+import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
+import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
+import { defaultNetworkClient } from "./network/index.ts"
+import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
+import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
+import { createAgentContext } from "./plugins/agent-context.ts"
+import { PluginLoader } from "./plugins/loader.ts"
+import { PluginStream } from "./plugins/stream.ts"
+import { formatQuotaWindows } from "./quota-summary.ts"
+import { parseSchemaFile } from "./sdk/output-schema.ts"
+import { getSessionId, setSessionId } from "./session-id.ts"
+import { loadSession } from "./session-restore.ts"
+import { shortHash } from "./session-store.ts"
+import { ToolTimeTracker } from "./tool-time.ts"
+import { TOOL_DEFINITIONS } from "./tools.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -183,6 +185,17 @@ const listModelsProvider =
 const wantListFlags = args.includes("--list-flags")
 const wantListPlugins = args.includes("--list-plugins")
 const wantListSpinners = args.includes("--list-spinners")
+
+// Non-interactive output mode flags (Phase 4). `--json` selects a JSONL event
+// stream on stdout; `--output-schema FILE` constrains the model's final answer
+// to a JSON Schema and validates it post-hoc. Both only take effect on the
+// one-shot (non-interactive) path; in the REPL they are ignored.
+const wantJsonOutput = args.includes("--json")
+const outputSchemaIdx = args.indexOf("--output-schema")
+const outputSchemaPath =
+  outputSchemaIdx >= 0 && args[outputSchemaIdx + 1] && !args[outputSchemaIdx + 1].startsWith("-")
+    ? args[outputSchemaIdx + 1]
+    : undefined
 
 const spinnerIdx = args.indexOf("--spinner")
 // Global user config (~/.minimal-agent/config.json). Lowest precedence:
@@ -1223,7 +1236,8 @@ async function main() {
       // import out of core). See `toolDisplaysFromRecords` +
       // `deriveTaskDisplay` for the per-call cutoff semantics.
       const sidecarPath = join(resolveSessionsDir(), `${resumeSid}.tasks.jsonl`)
-      let sidecarTasks: import("./host/session-replay-derivers.ts").ReplaySidecarTask[] | null = null
+      let sidecarTasks: import("./host/session-replay-derivers.ts").ReplaySidecarTask[] | null =
+        null
       try {
         if (existsSync(sidecarPath)) {
           const text = readFileSync(sidecarPath, "utf8")
@@ -1363,11 +1377,29 @@ async function main() {
   // replayed tool to the first live tool.
   const toolTimeTracker = new ToolTimeTracker()
 
+  // --output-schema FILE (Phase 4): read + parse the JSON Schema so the agent
+  // can constrain its final structured answer. parseSchemaFile folds a
+  // malformed-JSON / non-object file into a thrown error we surface cleanly
+  // and exit 1 (a script passing a broken schema should fail loudly, not
+  // silently run unconstrained).
+  let outputSchema: object | undefined
+  if (outputSchemaPath !== undefined) {
+    try {
+      const raw = readFileSync(outputSchemaPath, "utf8")
+      outputSchema = parseSchemaFile(raw)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`--output-schema: ${msg}\n`)
+      process.exit(1)
+    }
+  }
+
   const agent = new Agent({
     auth,
     model: selectedModel,
     providerId: selectedProviderId,
     effort,
+    ...(outputSchema !== undefined ? { outputSchema } : {}),
     speed,
     serviceTier,
     thinkingDisplay,
@@ -1497,17 +1529,51 @@ async function main() {
     const formatter = formatterCmd ? new Formatter(formatterCmd, process.stdout) : null
     if (formatter) formatter.start()
 
+    // Phase 4 non-interactive output mode. `--json` selects a JSONL event
+    // stream; otherwise human mode (the legacy behavior). PrintOutput owns the
+    // stream-routing + final-answer pipe rule; it goes live here so the
+    // adapter is actually exercised, not dead code. The legacy agent.run()
+    // yields TEXT chunks (not structured AgentEvents), so in this path
+    // PrintOutput drives the final-answer pipe rule + schema; full JSONL event
+    // streaming arrives once AgentCore emits through an EventSink.
+    const stdoutIsTTY = process.stdout.isTTY === true
+    const printOpts = resolvePrintModeOptions({
+      jsonFlag: wantJsonOutput,
+      stdoutIsTTY,
+      ...(outputSchema !== undefined ? { outputSchema } : {}),
+    })
+    const printOut = new PrintOutput(printOpts, {
+      stdout: process.stdout,
+      stderr: process.stderr,
+      stdoutIsTTY,
+    })
+
+    // In human mode on a pipe we stream chunks straight to stdout (the live
+    // feel); the answer is also accumulated so --output-schema can validate it
+    // and PrintOutput.finish enforces the no-double-print rule. In json mode we
+    // suppress the raw stream (events are the only stdout) and emit the final
+    // answer as a terminal item_completed event via finish().
+    const jsonMode = printOut.outputMode() === "json"
+    // Suppress live streaming when output is BUFFERED: json mode (events are
+    // the only stdout) OR --output-schema (the answer must be validated before
+    // any byte reaches stdout, else a non-conforming answer would leak before
+    // the exit-1). A schema answer is JSON, not human-progressive, so nothing
+    // is lost by buffering it. Otherwise stream chunk-by-chunk (the live feel).
+    const buffered = jsonMode || outputSchema !== undefined
     const baseSink = (s: string) => {
+      if (buffered) return // buffered: stdout is written once, after validation
       if (formatter) formatter.write(s)
       else process.stdout.write(s)
     }
     const pluginStream = hasPlugins ? new PluginStream(baseSink, loader, process.cwd()) : null
 
+    let finalText = ""
     try {
       const gen = agent.run(prompt)
       while (true) {
         const { done, value } = await gen.next()
         if (done) break
+        finalText += value
         if (pluginStream) {
           const p = pluginStream.feed(value)
           if (p) await p
@@ -1520,7 +1586,27 @@ async function main() {
       if (formatter) await formatter.end()
     }
 
-    process.stdout.write("\n")
+    // --output-schema validate-and-exit: the final answer must be valid JSON
+    // matching the schema, else a diagnostic to stderr + exit 1. Runs BEFORE
+    // any stdout write so a failing run never leaks a non-conforming answer.
+    if (outputSchema !== undefined) {
+      const enforcement = enforceOutputSchema(finalText, outputSchema)
+      if (!enforcement.ok) {
+        for (const line of enforcement.diagnostics) process.stderr.write(`${line}\n`)
+        process.exit(1)
+      }
+    }
+
+    if (jsonMode) {
+      // Emit the validated final answer as the terminal item_completed event.
+      printOut.finish(finalText)
+    } else if (outputSchema !== undefined) {
+      // Buffered + validated human path: write the conforming answer once.
+      process.stdout.write(finalText.endsWith("\n") ? finalText : `${finalText}\n`)
+    } else {
+      // Live-streamed human path: chunks already went to stdout; just close.
+      process.stdout.write("\n")
+    }
     return
   }
 
