@@ -57,7 +57,7 @@ function registryOf(tools: ToolDefinition[]): ToolRegistry {
 
 class StubExecutor implements ToolExecutor {
   constructor(private readonly result: ToolExecResult) {}
-  async execute(toolUse: { name: string }): Promise<ToolExecResult> {
+  async execute(_toolUse: { name: string }): Promise<ToolExecResult> {
     return this.result
   }
 }

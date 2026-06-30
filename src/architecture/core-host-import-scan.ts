@@ -23,7 +23,7 @@
  * Regenerate the frozen baseline after an intentional cleanup (a shim
  * deleted, a core→host edge severed):
  *
- *   bun -e 'import("./src/architecture/core-host-import-scan.ts").then(m =>
+ *   bun -e 'import("./src/architecture/core-host-import-scan.ts").then(m =\>
  *     console.log(m.renderBaseline(m.scanCoreHostImports("src",
  *       m.DEFAULT_HOST_ROOTS, m.DEFAULT_BLESSED, m.DEFAULT_EXEMPT))))'
  *
