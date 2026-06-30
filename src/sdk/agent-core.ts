@@ -28,6 +28,7 @@ import {
   runReflectionCooldown,
 } from "../agent/reflection.ts"
 import type { AuthResult } from "../auth.ts"
+import type { StopReason } from "../llm/canonical-events.ts"
 import {
   clampMaxOutputTokens,
   type EstimableTool,
@@ -48,6 +49,7 @@ import { createReflectionAckStripper } from "../reflection-ack-stripper.ts"
 import { appendUserTurn } from "../session-restore.ts"
 
 import { c } from "./ansi.ts"
+import type { AgentEvent, EventSink, EventUsage } from "./events.ts"
 import type {
   AbortSignalProvider,
   AgentCoreConfig,
@@ -65,6 +67,35 @@ import type {
 type MaybePromise<T> = T | Promise<T>
 
 const MAX_TOKENS_CONTINUATION_CAP = 5
+
+/**
+ * Project a transport usage snapshot onto the host-facing {@link EventUsage}
+ * shape (the four counters a `--json` consumer reports). Missing counters
+ * default to 0 so `turn_completed.usage` is always a complete object, per the
+ * frozen event contract (usage is REQUIRED on turn_completed).
+ */
+/**
+ * Narrow the transport's free-form `string | null` stop reason to the
+ * canonical {@link StopReason} union the event surface expects. The transport
+ * already only emits canonical values; this is a type-level bridge, not a
+ * runtime validation (an unknown string passes through as the event's value).
+ */
+function toEventStopReason(stopReason: string | null): StopReason | null {
+  return stopReason as StopReason | null
+}
+
+function toEventUsage(usage: StreamedResponse["usage"] | undefined): EventUsage {
+  return {
+    inputTokens: usage?.input_tokens ?? 0,
+    outputTokens: usage?.output_tokens ?? 0,
+    ...(usage?.cache_read_input_tokens !== undefined
+      ? { cacheReadTokens: usage.cache_read_input_tokens }
+      : {}),
+    ...(usage?.cache_creation_input_tokens !== undefined
+      ? { cacheCreationTokens: usage.cache_creation_input_tokens }
+      : {}),
+  }
+}
 
 export class AgentCore {
   readonly messages: Message[] = []
@@ -91,6 +122,7 @@ export class AgentCore {
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   private reflectionSilenceRemaining = 0
   private previousTurnAborted = false
+  private eventSink: EventSink | null
 
   constructor(config: AgentCoreConfig) {
     this.model = config.model
@@ -107,6 +139,7 @@ export class AgentCore {
     this.mediaResolver = config.mediaResolver ?? null
     this.abortSignalProvider = config.abortSignalProvider ?? null
     this.terminalMetrics = config.terminalMetrics ?? null
+    this.eventSink = config.eventSink ?? null
     this.effort = config.effort
     this.speed = "normal"
     this.serviceTier = config.serviceTier
@@ -135,6 +168,23 @@ export class AgentCore {
 
   history(): Message[] {
     return [...this.messages]
+  }
+
+  /**
+   * Emit one structured {@link AgentEvent} to the configured sink, if any.
+   *
+   * Best-effort and NON-THROWING: a sink that throws must never abort the
+   * agent loop. `emit` is called from inside `run()` at the lifecycle seams,
+   * so a throwing consumer (a broken `--json` writer, a full pipe) is
+   * swallowed here. No-op when no sink was configured.
+   */
+  private emit(event: AgentEvent): void {
+    if (!this.eventSink) return
+    try {
+      this.eventSink.emit(event)
+    } catch {
+      // Best-effort: a throwing sink never breaks the run.
+    }
   }
 
   rollbackPendingTurn(): boolean {
@@ -293,9 +343,13 @@ export class AgentCore {
 
     while (rounds < this.maxToolRounds) {
       if (signal?.aborted) {
+        this.emit({ type: "error", message: "aborted" })
         throw Object.assign(new Error("aborted"), { name: "AbortError" })
       }
       rounds++
+      // A new assistant turn (one model response) begins. `turn` is the
+      // monotonic round index per the frozen event contract.
+      this.emit({ type: "turn_started", turn: rounds })
 
       if (askUser) {
         const preflightResult = await runPreflightPipeline({
@@ -304,6 +358,7 @@ export class AgentCore {
           askUser,
         })
         if (preflightResult.cancelled) {
+          this.emit({ type: "error", message: "aborted" })
           throw Object.assign(new Error("aborted"), { name: "AbortError" })
         }
         if (preflightResult.adoptModelId) {
@@ -362,6 +417,40 @@ export class AgentCore {
           lastResponse.stopReason,
           lastResponse.usage,
         )
+        // Structured per-item events. itemType maps the three content-block
+        // categories; the correlation id is the tool_use block id for a tool
+        // call (so the later tool_result joins on it), or an index-derived id
+        // `${rounds}:${i}` for text/thinking (which carry no native id).
+        for (let i = 0; i < lastResponse.blocks.length; i++) {
+          const block = lastResponse.blocks[i]
+          if (block === undefined) continue
+          if (block.type !== "text" && block.type !== "tool_use" && block.type !== "thinking") {
+            continue
+          }
+          const itemType = block.type
+          const id = block.type === "tool_use" ? block.id : `${rounds}:${i}`
+          const label = block.type === "tool_use" ? block.name : undefined
+          const text =
+            block.type === "tool_use"
+              ? block.name
+              : block.type === "text"
+                ? block.text
+                : block.type === "thinking"
+                  ? (block.thinking ?? "")
+                  : undefined
+          this.emit({
+            type: "item_started",
+            itemType,
+            id,
+            ...(label !== undefined ? { label } : {}),
+          })
+          this.emit({
+            type: "item_completed",
+            itemType,
+            id,
+            ...(text !== undefined ? { text } : {}),
+          })
+        }
       }
 
       if (this.reflectionInterval > 0 && lastResponse.text.length > 0) {
@@ -454,6 +543,14 @@ export class AgentCore {
           this.sessionPersistence?.appendUser(userContent)
           continue
         }
+        // Natural exit: the model returned no tool calls. The turn settled,
+        // so emit turn_completed with the final stop reason + usage.
+        this.emit({
+          type: "turn_completed",
+          turn: rounds,
+          stopReason: toEventStopReason(lastResponse.stopReason),
+          usage: toEventUsage(lastResponse.usage),
+        })
         exitedByCap = false
         break
       }
@@ -469,7 +566,23 @@ export class AgentCore {
         }
         toolResults.push(toolResult)
         this.sessionPersistence?.appendToolResult(toolResult)
+        // The tool result joins back to its item_started on the SAME id
+        // (the tool_use block id), per the frozen correlation contract.
+        this.emit({
+          type: "tool_result",
+          id: tool.id,
+          name: tool.name,
+          isError: result.isError,
+        })
       }
+      // A turn that executed tools also settled here (next iteration is a
+      // fresh model response). Emit turn_completed before looping.
+      this.emit({
+        type: "turn_completed",
+        turn: rounds,
+        stopReason: toEventStopReason(lastResponse.stopReason),
+        usage: toEventUsage(lastResponse.usage),
+      })
 
       const userContent: ContentBlock[] = []
       userContent.push(...toolResults)

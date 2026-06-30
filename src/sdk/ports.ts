@@ -17,6 +17,8 @@ import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../ll
 import type { SendOptions, StreamedResponse, TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
 
+import type { EventSink } from "./events.ts"
+
 // ---------------------------------------------------------------------------
 // Tool surface
 // ---------------------------------------------------------------------------
@@ -258,4 +260,12 @@ export interface AgentCoreConfig {
   reflectionInterval?: number
   /** Wall-clock cooldown (ms) at each reflection checkpoint. */
   reflectionCooldownMs?: number
+  /**
+   * Optional structured event sink (for `--json` mode / SDK streaming). When
+   * set, {@link AgentCoreConfig} consumers receive an {@link AgentEvent} stream
+   * at the run-loop seams. Emission is best-effort and non-throwing: a sink
+   * that throws never aborts the run. The canonical event surface lives in
+   * `./events.ts`.
+   */
+  eventSink?: EventSink
 }

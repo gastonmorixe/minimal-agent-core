@@ -4,6 +4,7 @@ import type { AuthResult } from "../auth.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"
+import type { AgentEvent, EventSink } from "./events.ts"
 import type {
   AgentCoreConfig,
   ToolDefinition,
@@ -186,5 +187,116 @@ describe("AgentCore.run — port injection", () => {
     await drain(core.run("next"))
     // 2 seeded + 1 user + 1 assistant
     expect(core.history().length).toBe(4)
+  })
+})
+
+/** Collects every emitted AgentEvent. */
+class CaptureEventSink implements EventSink {
+  events: AgentEvent[] = []
+  emit(event: AgentEvent): void {
+    this.events.push(event)
+  }
+}
+
+describe("AgentCore.run — structured event emission", () => {
+  it("emits turn_started / item_started+completed / turn_completed for a text-only turn", async () => {
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      yield "hi"
+      return {
+        blocks: [{ type: "text" as const, text: "hi" }],
+        text: "hi",
+        stopReason: "end_turn",
+        usage: { input_tokens: 5, output_tokens: 2 },
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await drain(core.run("go"))
+    const types = sink.events.map((e) => e.type)
+    expect(types).toEqual(["turn_started", "item_started", "item_completed", "turn_completed"])
+    const started = sink.events[0]
+    if (started?.type !== "turn_started") throw new Error("expected turn_started")
+    expect(started.turn).toBe(1)
+    const completed = sink.events[3]
+    if (completed?.type !== "turn_completed") throw new Error("expected turn_completed")
+    expect(completed.stopReason).toBe("end_turn")
+    expect(completed.usage).toEqual({ inputTokens: 5, outputTokens: 2 })
+  })
+
+  it("emits a tool_result whose id matches its tool_use item_started id", async () => {
+    let round = 0
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      if (round === 1) {
+        return {
+          blocks: [{ type: "tool_use" as const, id: "call-xyz", name: "DoThing", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(
+      baseConfig({
+        sendFn,
+        eventSink: sink,
+        toolExecutor: new StubExecutor({ content: "ok", isError: false }),
+        toolRegistry: registryOf([{ name: "DoThing", description: "d", input_schema: {} }]),
+      }),
+    )
+    await drain(core.run("do it"))
+    const toolStart = sink.events.find(
+      (e) => e.type === "item_started" && e.itemType === "tool_use",
+    )
+    const toolResult = sink.events.find((e) => e.type === "tool_result")
+    if (toolStart?.type !== "item_started") throw new Error("no tool_use item_started")
+    if (toolResult?.type !== "tool_result") throw new Error("no tool_result")
+    // The join key: tool_result.id === the tool_use item_started.id.
+    expect(toolResult.id).toBe(toolStart.id)
+    expect(toolResult.id).toBe("call-xyz")
+    expect(toolResult.name).toBe("DoThing")
+    expect(toolResult.isError).toBe(false)
+  })
+
+  it("a throwing EventSink never aborts the run (non-throwing contract)", async () => {
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      yield "still works"
+      return {
+        blocks: [{ type: "text" as const, text: "still works" }],
+        text: "still works",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const throwingSink: EventSink = {
+      emit() {
+        throw new Error("sink is broken")
+      },
+    }
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: throwingSink }))
+    const { text, final } = await drain(core.run("go"))
+    // Run completes normally despite every emit() throwing.
+    expect(text).toBe("still works")
+    expect(final.stopReason).toBe("end_turn")
+  })
+
+  it("emits no events when no eventSink is configured (back-compat)", async () => {
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    // No eventSink: must not throw, must complete.
+    const core = new AgentCore(baseConfig({ sendFn }))
+    const { text } = await drain(core.run("go"))
+    expect(text).toBe("ok")
   })
 })
