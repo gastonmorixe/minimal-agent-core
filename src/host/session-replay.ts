@@ -28,9 +28,10 @@ import {
   type SubmittedAtStyle,
   submittedAtEnabled,
 } from "../scrollback-submitted-at.ts"
-import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import type { SessionRecord } from "../session-store.ts"
 import type { ToolTimeTracker } from "../tool-time.ts"
+
+import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
 import { Formatter } from "./ui/formatter/formatter.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
 
 import { AbortBus } from "../abort-bus.ts"
+import { Hooks } from "../plugins/hooks/hooks.ts"
+
 import { make } from "./editor-controller.fixtures.ts"
 import type { EditorController, EditorKeyPayload } from "./editor-controller.ts"
-import { Hooks } from "../plugins/hooks/hooks.ts"
 
 // ---------------------------------------------------------------------------
 // editor.key hook integration (May 2026 — history plugin's intercept seam)

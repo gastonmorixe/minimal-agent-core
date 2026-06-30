@@ -28,12 +28,12 @@
  * @module agent/ask-user-host
  */
 
-import type { EditorKeyPayload } from "./editor-controller.ts"
+import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
+
+import type { EditorKeyPayload } from "./editor-controller.ts"
 import { ChoiceModal } from "./ui/choice-modal.ts"
 import type { OverlayKey } from "./ui/overlay.ts"
-
-import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 
 /**
  * Minimal slice of the editor controller the host overlay needs:

@@ -32,10 +32,11 @@ import { describe, expect, it } from "bun:test"
 
 import { Agent } from "../agent.ts"
 import type { StreamedResponse } from "../client/types.ts"
-import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"
 import { loadSession } from "../session-restore.ts"
 import { SessionStore } from "../session-store.ts"
 import { TOOL_DEFINITIONS } from "../tools.ts"
+
+import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 

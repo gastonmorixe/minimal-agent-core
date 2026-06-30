@@ -24,9 +24,9 @@
 
 import { describe, expect, it } from "bun:test"
 
+import { renderCommandNoticeBlock } from "./host/ui/command-notice.ts"
 import { stripAnsi } from "./term-width.ts"
 import { FakeTerminal } from "./test-utils/fake-terminal.ts"
-import { renderCommandNoticeBlock } from "./host/ui/command-notice.ts"
 
 /**
  * Feed a rendered notice through a real terminal at `cols`, then assert the

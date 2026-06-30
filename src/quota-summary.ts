@@ -18,8 +18,8 @@
  * @module quota-summary
  */
 
-import type { QuotaSnapshot, QuotaWindow } from "./llm/provider-plugin.ts"
 import { c } from "./host/ui/style/ansi.ts"
+import type { QuotaSnapshot, QuotaWindow } from "./llm/provider-plugin.ts"
 
 export interface QuotaSummaryOptions {
   /** Spaces before the first segment (banner alignment). */

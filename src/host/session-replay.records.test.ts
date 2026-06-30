@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { toolDisplaysFromRecords, userTimestampsFromRecords } from "./session-replay.ts"
 import type { SessionRecord } from "../session-store.ts"
+
+import { toolDisplaysFromRecords, userTimestampsFromRecords } from "./session-replay.ts"
 
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "")

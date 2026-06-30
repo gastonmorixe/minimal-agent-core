@@ -11,9 +11,9 @@
  */
 
 import { type AbortReason, abortBus } from "../abort-bus.ts"
+import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { AuthResult } from "../auth.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
-import type { QueueKeyHandler } from "./editor/types.ts"
 import type { ModelInfo } from "../llm/transport/types.ts"
 import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
@@ -27,6 +27,18 @@ import {
 } from "../scrollback-submitted-at.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
+
+import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
+import type { QueueKeyHandler } from "./editor/types.ts"
+import { contextLengthExceededAdvice, parseContextLengthExceededError } from "./model-error.ts"
+import type {
+  ReplAgentLike,
+  ReplCompositor,
+  ReplEditor,
+  ReplErrOutput,
+  ReplOutput,
+  StatusController,
+} from "./repl.ts"
 import { printGoodbye } from "./ui/chrome/goodbye-banner.ts"
 import { buildModeChangeChip } from "./ui/chrome/mode-change-chip.ts"
 import { buildPendingModeChangeDecoration } from "./ui/chrome/mode-change-pending-decoration.ts"
@@ -37,18 +49,6 @@ import type { Spinner } from "./ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "./ui/style/ansi.ts"
 import { isOuterFrameClose } from "./ui/tool-transcript/format.ts"
-
-import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
-import { contextLengthExceededAdvice, parseContextLengthExceededError } from "./model-error.ts"
-import type { AskUserFn } from "../agent/preflight-pipeline.ts"
-import type {
-  ReplAgentLike,
-  ReplCompositor,
-  ReplEditor,
-  ReplErrOutput,
-  ReplOutput,
-  StatusController,
-} from "./repl.ts"
 
 /**
  * Runs the interactive REPL on the compositor-based "live area" UI: a

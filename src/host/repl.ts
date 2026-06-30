@@ -17,7 +17,6 @@
 
 import type { AuthResult } from "../auth.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
-import type { QueueKeyHandler } from "./editor/types.ts"
 import { RawInput } from "../input.ts"
 import { listLiveModelsForPicker } from "../llm/list-models.ts"
 import type { ModelInfo, StreamedResponse } from "../llm/transport/types.ts"
@@ -26,12 +25,8 @@ import { PluginLoader } from "../plugins/loader.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
-import { Formatter } from "./ui/formatter/formatter.ts"
-import { promptModelPicker } from "./ui/model-picker.ts"
-import type { Spinner } from "./ui/spinner/index.ts"
-import { StatusRenderer, type StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
-import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
 
+import type { QueueKeyHandler } from "./editor/types.ts"
 import {
   contextLengthExceededAdvice,
   parseContextLengthExceededError,
@@ -39,6 +34,11 @@ import {
   parseModelUnavailableError,
 } from "./model-error.ts"
 import { runReplLiveArea } from "./repl-live-area.ts"
+import { Formatter } from "./ui/formatter/formatter.ts"
+import { promptModelPicker } from "./ui/model-picker.ts"
+import type { Spinner } from "./ui/spinner/index.ts"
+import { StatusRenderer, type StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
+import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
 
 type MaybePromise<T> = T | Promise<T>
 

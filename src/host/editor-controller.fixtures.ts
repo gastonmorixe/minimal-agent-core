@@ -8,8 +8,9 @@
 import { EventEmitter } from "node:events"
 
 import type { AbortBus } from "../abort-bus.ts"
-import { EditorController } from "./editor-controller.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
+
+import { EditorController } from "./editor-controller.ts"
 
 /** Fake raw-mode TTY stdin: records mode flips and lets tests inject bytes via `send`. */
 export class FakeTTYInput extends EventEmitter {
