@@ -82,39 +82,10 @@ export interface TranscriptSink {
 // Structured event sink (for --json / SDK streaming)
 // ---------------------------------------------------------------------------
 
-/** Structured event types for the agent loop. */
-export type AgentEvent =
-  | { type: "turn_started"; turnId: string }
-  | {
-      type: "turn_completed"
-      turnId: string
-      usage?: { inputTokens?: number; outputTokens?: number }
-    }
-  | { type: "turn_failed"; turnId: string; error: string }
-  | { type: "item_started"; itemId: string; kind: string; label?: string }
-  | { type: "item_completed"; itemId: string; kind: string; content?: string }
-  | { type: "item_updated"; itemId: string; content?: string }
-  | { type: "error"; message: string }
-  | { type: "warning"; message: string }
-  | { type: "model_rerouted"; from: string; to: string }
-  | { type: "tool_call"; toolUseId: string; toolName: string; input: unknown }
-  | {
-      type: "tool_result"
-      toolUseId: string
-      toolName: string
-      isError: boolean
-      contentLength: number
-    }
-  | { type: "reasoning"; text: string }
-  | { type: "agent_message"; text: string }
-
-/** Receives structured events from the agent loop. Used by --json mode and SDK consumers. */
-export interface EventSink {
-  /** Emit one structured event. */
-  emit(event: AgentEvent): void
-  /** Flush any buffered events. Optional. */
-  flush?(): void
-}
+// The canonical AgentEvent union + EventSink port live in ./events.ts (the
+// single source of truth, per the PM ruling). Re-exported here so consumers
+// that pull the event surface from the ports barrel keep working.
+export type { AgentEvent, AgentEventType, EventSink, EventUsage } from "./events.ts"
 
 // ---------------------------------------------------------------------------
 // Transcript formatter (decouples tool-round.ts from ui/tool-transcript/format.ts)
