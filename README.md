@@ -272,6 +272,31 @@ Environment mirrors:
 - **`MINIMAL_AGENT_DISABLE_PLUGINS`:** Comma-separated ids to skip (same as `--disable-plugin`).
 - **`MINIMAL_AGENT_ENABLE_PLUGINS`:** Comma-separated ids to force on (same as `--enable-plugin`).
 
+### Platform whitelists
+
+A plugin (or a single tool) can opt into a whitelist of platforms it works on
+via a `platforms` field in `manifest.json`. It defaults to all platforms when
+absent. Buckets are `macos`, `linux` (the POSIX/UNIX-like bucket, also covering
+the BSDs, illumos, AIX), and `windows`.
+
+```jsonc
+{
+  "id": "ma-chrome-cdp",
+  "platforms": ["macos"],        // whole plugin only loads on macOS
+  "tuis": [
+    { "id": "t", "platforms": ["macos", "linux"], /* this tool gates separately */ }
+  ]
+}
+```
+
+A plugin-level whitelist gates the whole package (tools, modes, hooks, prompt).
+A tool-level whitelist gates just that tool and is ANDed with the plugin's. The
+host detects the platform from `process.platform`; override it for a run with
+`--platform <macos|linux|windows|all>` or `MINIMAL_AGENT_PLATFORM` (CLI > env >
+detected). `all` (also `any`/`*`) bypasses gating entirely. Platform gating is a
+hard capability constraint, so unlike `--enable-plugin` it is not overridden by a
+force-enable; name the right platform or use `all`.
+
 ## Environment
 
 Common environment variables:

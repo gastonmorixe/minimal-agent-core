@@ -27,6 +27,7 @@
  */
 
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
+import type { NormalizedPlatform } from "@minimal-agent/plugin-api/utils/platform"
 
 import { createPluginLogger, diag } from "../diagnostic-bus.ts"
 
@@ -236,6 +237,15 @@ export interface PluginLoaderOptions {
    * behavior is identical to before this option existed.
    */
   enabledPluginIds?: Set<string>
+  /**
+   * The effective platform to gate manifest/tool `platforms` whitelists
+   * against. Omit to use the host's detected platform
+   * ({@link detectPlatform}). `src/index.ts` resolves an env
+   * (`MINIMAL_AGENT_PLATFORM`) / CLI (`--platform`) override and passes
+   * it here; the `all` bypass loads every plugin/tool regardless of
+   * whitelist. See `@minimal-agent/plugin-api/utils/platform`.
+   */
+  effectivePlatform?: NormalizedPlatform
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -516,6 +526,9 @@ export class PluginLoader {
       explicitLogger: opts.logger,
       disabledPluginIds,
       enabledPluginIds,
+      ...(opts.effectivePlatform !== undefined
+        ? { effectivePlatform: opts.effectivePlatform }
+        : {}),
     })
 
     // Resolve handlers, apply collision rules.

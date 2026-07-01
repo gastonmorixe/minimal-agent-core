@@ -18,6 +18,23 @@ export const ENV_DEPTH = "MINIMAL_AGENT_SUBAGENT_DEPTH"
 export const ENV_LEAD = "MINIMAL_AGENT_SUBAGENT_LEAD"
 export const ENV_ID = "MINIMAL_AGENT_SUBAGENT_ID"
 
+/**
+ * The plugin-disable env var the agent boot consumes
+ * (`resolvePluginEnabledOverrides`). The spawn plan injects a worker-scoped
+ * value into it so a child boots with these plugins off.
+ */
+export const ENV_DISABLE_PLUGINS = "MINIMAL_AGENT_DISABLE_PLUGINS"
+
+/**
+ * Plugins force-disabled for EVERY worker, regardless of role. `intercom` is a
+ * peer-to-peer mesh between top-level human-driven sessions; a worker is an
+ * internal leaf of one such session and must not appear on the roster or be
+ * able to message real peers. (A drifting worker broadcasting to other people's
+ * sessions is exactly the failure this prevents.) Sub-agents coordinate through
+ * the in-fleet `SubAgentsMailbox`, never intercom.
+ */
+export const SUBAGENT_DISABLED_PLUGINS: readonly string[] = ["intercom"]
+
 /** A validated request to launch one worker. */
 export interface SpawnInput {
   /** How to invoke the agent, e.g. `["minimal-agent"]` or `["bun","run","…/src/index.ts"]`. Injected, never hardcoded. */
@@ -68,6 +85,15 @@ export interface SpawnInput {
   readonly cwd: string
   /** Extra env to merge (e.g. tool allow/deny markers a future gate reads). */
   readonly extraEnv?: Record<string, string>
+  /**
+   * The lead's own `MINIMAL_AGENT_DISABLE_PLUGINS` value (raw, comma-separated),
+   * if any. The plan UNIONS it with {@link SUBAGENT_DISABLED_PLUGINS} so a
+   * worker inherits whatever the user already disabled AND the worker-only
+   * disables, instead of the spawn env silently clobbering the inherited list
+   * (the child's env overlay wins over the inherited process env, so the merge
+   * must happen here). Omit when the lead disabled nothing.
+   */
+  readonly inheritedDisabledPlugins?: string
 }
 
 /** The result of {@link buildSpawnPlan}: everything the shell needs to launch a worker. */
@@ -159,6 +185,11 @@ export function buildSpawnPlan(input: SpawnInput): Result<SpawnPlan> {
     [ENV_LEAD]: input.leadSid,
     [ENV_ID]: input.id,
     ...input.extraEnv,
+    // Union the lead's inherited disables with the worker-only set, deduped and
+    // order-stable, so the child boots with intercom (and anything the user
+    // already disabled) off. Spread LAST so the worker-disable contract can't be
+    // accidentally clobbered by an extraEnv entry for the same key.
+    [ENV_DISABLE_PLUGINS]: mergeDisabledPlugins(input.inheritedDisabledPlugins),
   }
 
   return ok({
@@ -167,4 +198,25 @@ export function buildSpawnPlan(input: SpawnInput): Result<SpawnPlan> {
     env,
     prompt,
   })
+}
+
+/**
+ * Union an inherited comma-separated `MINIMAL_AGENT_DISABLE_PLUGINS` value with
+ * {@link SUBAGENT_DISABLED_PLUGINS}, deduped and order-stable (inherited ids
+ * first, then the worker-only ids). Pure: string in, string out. The result is
+ * always non-empty (it always contains the worker-only set), so a worker can
+ * never end up with intercom enabled.
+ */
+export function mergeDisabledPlugins(inherited?: string): string {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string): void => {
+    const id = raw.trim()
+    if (id.length === 0 || seen.has(id)) return
+    seen.add(id)
+    ids.push(id)
+  }
+  if (inherited) for (const part of inherited.split(",")) add(part)
+  for (const id of SUBAGENT_DISABLED_PLUGINS) add(id)
+  return ids.join(",")
 }

@@ -150,6 +150,18 @@ describe("loadUserConfig", () => {
     }
   })
 
+  it("accepts both cacheTtl buckets", () => {
+    for (const t of ["5m", "1h"] as const) {
+      writeFileSync(path, JSON.stringify({ cacheTtl: t }))
+      expect(loadUserConfig().cacheTtl).toBe(t)
+    }
+  })
+
+  it("drops an invalid cacheTtl value", () => {
+    writeFileSync(path, JSON.stringify({ cacheTtl: "2h" }))
+    expect(loadUserConfig().cacheTtl).toBeUndefined()
+  })
+
   it("parses formatterArgs as a string array", () => {
     writeFileSync(path, JSON.stringify({ formatterArgs: ["--table-fit", "--foo"] }))
     expect(loadUserConfig()).toEqual({ formatterArgs: ["--table-fit", "--foo"] })

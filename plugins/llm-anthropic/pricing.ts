@@ -65,13 +65,37 @@ export const ANTHROPIC_OPUS_4X_FAST_LEGACY: MTokRate = {
 }
 
 /**
- * Anthropic's `vKH` rate : sonnet 3.5 / 3.7 / 4 / 4.5 / 4.6.
+ * Anthropic's `vKH` rate : sonnet 3.5 / 3.7 / 4 / 4.5 / 4.6, and the
+ * post-introductory standard rate for sonnet 5 (effective 2026-09-01).
+ * $3 / 1M input, $15 / 1M output.
  */
 export const ANTHROPIC_SONNET_STANDARD: MTokRate = {
   inputUSD: 3,
   outputUSD: 15,
   cacheWriteUSD: 3.75,
   cacheReadUSD: 0.3,
+  webSearchPerCallUSD: 0.01,
+}
+
+/**
+ * Claude Sonnet 5 INTRODUCTORY rate : $2 / 1M input, $10 / 1M output, in
+ * effect from launch (2026-06-30) through 2026-08-31. On 2026-09-01 the
+ * model reverts to {@link ANTHROPIC_SONNET_STANDARD} ($3 / $15). Per the
+ * launch announcement (https://www.anthropic.com/news/claude-sonnet-5):
+ * "introductory pricing of $2 per million input tokens and $10 per million
+ * output tokens through August 31, 2026, after which it will be priced at
+ * $3 per million input tokens and $15 per million output tokens."
+ *
+ * Cache multipliers follow Anthropic's standard schedule (cache-write =
+ * 1.25x input, cache-read = 0.1x input): $2.50 write, $0.20 read. The
+ * date-based switch between this and the standard rate is implemented by
+ * {@link sonnet5PricingFor} in `models.ts`.
+ */
+export const ANTHROPIC_SONNET_5_INTRO: MTokRate = {
+  inputUSD: 2,
+  outputUSD: 10,
+  cacheWriteUSD: 2.5,
+  cacheReadUSD: 0.2,
   webSearchPerCallUSD: 0.01,
 }
 

@@ -114,12 +114,29 @@ function contextWindowFor(modelId: string): number | undefined {
 }
 
 /**
- * Read Anthropic session metadata from the in-process cache. **Cache-only:**
- * no network, no `await getAuth()`, no blocking. Returns at least context +
- * label so the footer keeps the model identity even when the cache is cold;
- * `quota` is omitted on a cold/stale cache (the footer degrades to a
- * context-only view and refreshes on the next `quota.headersReceived`
- * broadcast). Cold-start cache population is {@link primeAnthropicSessionInfo}.
+ * Read Anthropic session metadata from the in-process cache. **Non-blocking:**
+ * no `await` on network — the only side effect is a fire-and-forget re-probe
+ * when the cache has aged out (see below). Returns at least context + label so
+ * the footer keeps the model identity even when the cache is cold.
+ *
+ * Cache freshness policy:
+ *
+ *   - **Fresh** (`< FRESHNESS_MS`): render the cached windows directly.
+ *   - **Stale** (`>= FRESHNESS_MS`, but populated at least once this session):
+ *     STILL render the last-known windows AND kick a bounded background
+ *     re-probe ({@link primeAnthropicSessionInfo}, fire-and-forget). The
+ *     probe broadcasts `quota.headersReceived` on success, which refires
+ *     this slot with fresh data within ~1s. Rendering stale-but-present
+ *     beats blanking: the bars degrade gracefully (absolute reset
+ *     timestamps keep counting down or simply drop) instead of the whole
+ *     quota group vanishing off the footer.
+ *   - **Cold** (never populated): no windows — the footer degrades to a
+ *     context-only view until the first prime/turn lands.
+ *
+ * This fixes the "quota disappears after a few idle minutes" bug: once the
+ * cold-start prime probe's headers aged past `FRESHNESS_MS`, the next
+ * heartbeat / resize tick used to read `null` and drop the 5h/7d windows
+ * with nothing to refresh them until the user's next API turn.
  */
 export async function fetchAnthropicSessionInfo(
   ctx: ProviderSessionContext,
@@ -128,7 +145,19 @@ export async function fetchAnthropicSessionInfo(
   const modelLabel = modelShortLabel(ctx.modelId)
 
   const cached = getLastRateLimits()
-  const rl = cached && Date.now() - cached.at < FRESHNESS_MS ? cached.rateLimits : null
+  const stale = cached != null && Date.now() - cached.at >= FRESHNESS_MS
+
+  // Cache aged out but populated before: trigger a bounded re-probe so the
+  // windows refresh. Fire-and-forget — the footer must stay non-blocking.
+  // `primeAnthropicSessionInfo` self-dedupes (one in-flight probe at a time),
+  // self-gates on missing auth, and re-checks freshness internally, so a
+  // burst of stale ticks collapses to a single probe.
+  if (stale) void primeAnthropicSessionInfo(ctx)
+
+  // Render from whatever snapshot we have. Stale-but-present beats blank;
+  // the background re-probe above refreshes it momentarily. A truly cold
+  // cache yields a context-only footer.
+  const rl = cached ? cached.rateLimits : null
 
   const windows = rl ? parseAnthropicQuotaWindows(rl) : []
   const overage = rl ? parseAnthropicOverage(rl) : undefined

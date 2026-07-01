@@ -19,6 +19,12 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { join } from "node:path"
 
+import {
+  detectPlatform,
+  type NormalizedPlatform,
+  platformAllowed,
+} from "@minimal-agent/plugin-api/utils/platform"
+
 import { diag } from "../../diagnostic-bus.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
@@ -52,6 +58,14 @@ export interface DiscoveryOptions {
   disabledPluginIds: Set<string>
   /** Plugin ids force-enabled by user config (revives `enabled: false` manifests). */
   enabledPluginIds: Set<string>
+  /**
+   * The effective platform to gate manifest `platforms` whitelists
+   * against. Defaults to the host's detected platform
+   * ({@link detectPlatform}); an env var / CLI flag override (resolved in
+   * `src/index.ts`) can change it, or set it to the `all` bypass to load
+   * every plugin regardless of its whitelist.
+   */
+  effectivePlatform?: NormalizedPlatform
 }
 
 /** Result of {@link discoverAndParsePackages}. */
@@ -87,6 +101,7 @@ export interface DiscoveryResult {
  */
 export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResult {
   const { logger, disabledPluginIds, enabledPluginIds } = opts
+  const effectivePlatform: NormalizedPlatform = opts.effectivePlatform ?? detectPlatform()
 
   // Discover packages in all four roots. Precedence on package-id
   // collision: project > home > user > embedded (closer-to-user wins).
@@ -243,6 +258,59 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
       // Reserve the id so a later (lower-precedence) copy doesn't sneak in.
       seenIds.add(manifest.id)
       continue
+    }
+
+    // Platform whitelist gate (plugin level). When a manifest declares a
+    // `platforms` whitelist that excludes the effective platform, skip the
+    // ENTIRE plugin — tools, modes, events, hooks, fragments, slots, and
+    // PROMPT.md. This is a hard capability constraint (the plugin's native
+    // helper/daemon simply isn't there), not a user preference, so a
+    // config/CLI force-enable does NOT revive it; only the `all` platform
+    // bypass (or naming the right platform) does. Routine + by-design, so
+    // emit as a notice (file log only) unless a test injected a logger.
+    if (!platformAllowed(manifest.platforms, effectivePlatform)) {
+      const msg =
+        `skipping ${dir}: plugin "${manifest.id}" is not available on this ` +
+        `platform (${effectivePlatform}); manifest.platforms = ` +
+        `[${(manifest.platforms ?? []).join(", ")}]`
+      if (opts.explicitLogger) {
+        opts.explicitLogger(msg)
+      } else {
+        diag.notice("plugin-loader", msg)
+      }
+      // Reserve the id so a lower-precedence copy doesn't sneak in.
+      seenIds.add(manifest.id)
+      continue
+    }
+
+    // Platform whitelist gate (tool level). A single tool handler may
+    // carry its own `platforms` whitelist; when it excludes the effective
+    // platform, drop just that tool (the rest of the plugin loads
+    // normally). Filtering here — before the loader's collision/resolve
+    // passes — means an excluded tool never reserves its name and never
+    // reaches the model's tool list or its system-prompt slot. Tool
+    // whitelist is ANDed with the plugin whitelist, which already passed
+    // above. Only `tool` triggers carry the field; `inline_tag` entries
+    // pass through untouched.
+    if (manifest.tuis && manifest.tuis.length > 0) {
+      const kept = manifest.tuis.filter((h) => {
+        if (h.trigger.type !== "tool") return true
+        if (platformAllowed(h.platforms, effectivePlatform)) return true
+        const toolName = h.trigger.tool.name
+        const msg =
+          `${dir}: tool "${toolName}" of plugin "${manifest.id}" is not ` +
+          `available on this platform (${effectivePlatform}); platforms = ` +
+          `[${(h.platforms ?? []).join(", ")}]`
+        if (opts.explicitLogger) {
+          opts.explicitLogger(msg)
+        } else {
+          diag.notice("plugin-loader", msg)
+        }
+        return false
+      })
+      if (kept.length !== manifest.tuis.length) {
+        manifest.tuis = kept
+      }
     }
 
     // Resolve prompt content.

@@ -4,7 +4,12 @@
  * @module llm/providers/anthropic
  */
 
-export { anthropicAdapter, anthropicProviderPlugin, bootstrapAnthropic } from "./adapter.ts"
+export {
+  anthropicAdapter,
+  anthropicProviderPlugin,
+  bootstrapAnthropic,
+  registerAnthropicAdHocModel,
+} from "./adapter.ts"
 export {
   ANTHROPIC_BETA_FLAGS,
   type AnthropicBetaFlag,
@@ -36,7 +41,11 @@ export {
   type IdentityAuth,
   loadExtraMetadata,
 } from "./identity.ts"
-export { registerAnthropicModels } from "./models.ts"
+export {
+  registerAnthropicAdHocModelInto,
+  registerAnthropicModels,
+  sonnet5RateForDate,
+} from "./models.ts"
 export {
   ANTHROPIC_PLAN_OAUTH,
   type AnthropicCredentialsData,

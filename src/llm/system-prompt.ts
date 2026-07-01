@@ -30,6 +30,7 @@
  * @module llm/system-prompt
  */
 
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
 import { promptPath, renderPrompt } from "../prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
@@ -56,27 +57,37 @@ export const NEUTRAL_IDENTITY: string = renderPrompt(
 export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
   /** Session-specific guidance block (env, CLAUDE.md, git status, …). */
   sessionContext?: string
+  /**
+   * TTL bucket for the ephemeral cache breakpoints placed on the system
+   * blocks. Defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`). Resolved upstream
+   * from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config; see
+   * `src/cache-ttl.ts`. The rolling tail breakpoint in `src/agent/cache.ts`
+   * must be given the SAME value so the whole cached prefix uses one TTL.
+   */
+  cacheTtl?: CacheTtl
 }
 
 /**
  * Build the provider-neutral BODY blocks (everything after the identity):
  * the cached instructions block, then the optional session-context block.
- * Cache-control mirrors live traffic (`ttl:"1h"`, `scope:"global"` on
- * instructions; per-session `ttl:"1h"` on session context).
+ * Cache-control mirrors live traffic (`scope:"global"` on instructions;
+ * per-session on session context). The `ttl` bucket is configurable via
+ * `opts.cacheTtl` and defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`).
  */
 export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPromptBlock[] {
+  const ttl = opts?.cacheTtl ?? DEFAULT_CACHE_TTL
   const blocks: SystemPromptBlock[] = [
     {
       type: "text",
       text: buildInstructionsBlockText(opts),
-      cache_control: { type: "ephemeral", ttl: "1h", scope: "global" },
+      cache_control: { type: "ephemeral", ttl, scope: "global" },
     },
   ]
   if (opts?.sessionContext) {
     blocks.push({
       type: "text",
       text: opts.sessionContext,
-      cache_control: { type: "ephemeral", ttl: "1h" },
+      cache_control: { type: "ephemeral", ttl },
     })
   }
   return blocks

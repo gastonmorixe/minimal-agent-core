@@ -48,7 +48,13 @@ export async function runListModelsCommand(
   const plugins = listProviderPlugins().filter((p) => typeof p.listLiveModels === "function")
   const results = await Promise.allSettled(
     plugins.map(async (p) => {
-      const providerAuth: ProviderAuth | null = tryResolveProviderAuth(p.id, "")
+      // Providers whose live catalog is public (e.g. HuggingFace's /v1/models)
+      // set `publicModelList`, so we can list them without a stored credential
+      // by passing an anonymous custom auth. Auth-required providers omit it and
+      // contribute no rows when unauthenticated (falling back to the registry).
+      const providerAuth: ProviderAuth | null =
+        tryResolveProviderAuth(p.id, "") ??
+        (p.publicModelList ? { kind: "custom", headers: {} } : null)
       if (!providerAuth)
         return { plugin: p, rows: [] as Awaited<ReturnType<NonNullable<typeof p.listLiveModels>>> }
       return { plugin: p, rows: await p.listLiveModels?.(providerAuth) }

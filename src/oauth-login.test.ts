@@ -536,6 +536,50 @@ describe("installCredentials", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it("a second login without a name auto-generates a slug and does NOT overwrite the first", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      const resp = (token: string): TokenExchangeResponse => ({
+        access_token: token,
+        refresh_token: "RT",
+        expires_in: 3600,
+      })
+      // First login → uses the provider displayName
+      installCredentials(resp("AT1"), { store }, fakeOAuthProvider)
+      // Second login without a name → auto-generated {serviceId}-2
+      installCredentials(resp("AT2"), { store }, fakeOAuthProvider)
+
+      const entries = store.list("test-oauth")
+      expect(entries).toHaveLength(2)
+      expect(store.getSecrets("test-oauth", "Test OAuth")!.accessToken).toBe("AT1")
+      expect(store.getSecrets("test-oauth", "test-oauth-2")!.accessToken).toBe("AT2")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("an explicit credentialName is honored (and upserts on collision)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      const resp = (token: string): TokenExchangeResponse => ({
+        access_token: token,
+        refresh_token: "RT",
+        expires_in: 3600,
+      })
+      installCredentials(resp("AT1"), { store }, fakeOAuthProvider, "Work")
+      expect(store.getSecrets("test-oauth", "Work")!.accessToken).toBe("AT1")
+
+      // Same explicit name → upsert (replace), not a second entry
+      installCredentials(resp("AT2"), { store }, fakeOAuthProvider, "Work")
+      expect(store.list("test-oauth")).toHaveLength(1)
+      expect(store.getSecrets("test-oauth", "Work")!.accessToken).toBe("AT2")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

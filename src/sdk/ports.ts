@@ -242,6 +242,12 @@ export interface AgentCoreConfig {
   effort?: "low" | "medium" | "high" | "max"
   /** Thinking display mode. */
   thinkingDisplay?: "summarized" | "omitted"
+  /**
+   * TTL bucket for the prompt-cache breakpoints (`"5m"` | `"1h"`). Default
+   * `"5m"` (see `src/cache-ttl.ts :: DEFAULT_CACHE_TTL`). Resolved upstream
+   * from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config.
+   */
+  cacheTtl?: import("../cache-ttl.ts").CacheTtl
   /** Pre-existing conversation to seed the agent (resume). */
   initialMessages?: Message[]
   /** Maximum tool rounds per turn (safety limit). */
@@ -254,6 +260,13 @@ export interface AgentCoreConfig {
   auth: import("../auth.ts").AuthResult
   /** Provider id for model disambiguation. */
   providerId?: string
+  /**
+   * Credential name selecting which stored credential to use for the provider
+   * when it has multiple (e.g. "Work" / "Personal"). Carried onto every send so
+   * mid-session requests resolve the same credential startup did. Omit for the
+   * provider's default displayName entry.
+   */
+  credentialName?: string
   /** Speed mode. */
   speed?: "normal" | "fast"
   /** Reflection checkpoint cadence in tool rounds. */

@@ -61,7 +61,7 @@ describe("list UI commands", () => {
     const out = capture(runListProvidersCommand)
     expect(out).toContain("test-provider")
     expect(out).toContain("custom")
-    expect(out).toContain("(1 models)")
+    expect(out).toContain("(1 model)")
     expect(out).toContain("1 providers")
   })
 
@@ -106,5 +106,56 @@ describe("list UI commands", () => {
     expect(stripped).toContain("2026-01-01")
     expect(stripped).toContain("1 models available")
     delete process.env.TEST_LIVE_KEY
+  })
+
+  it("lists a publicModelList provider's live catalog WITHOUT a stored credential", async () => {
+    // No credential is set for this provider. Because it declares
+    // `publicModelList`, the command must still invoke listLiveModels (with an
+    // anonymous auth) rather than falling back to the empty registry.
+    let sawAuthKind: string | undefined
+    registerProviderPlugin({
+      id: "pub",
+      displayName: "Public Gateway",
+      shortCode: "pub",
+      register() {},
+      publicModelList: true,
+      async listLiveModels(auth) {
+        sawAuthKind = auth.kind
+        return [{ id: "pub-live-model", displayName: "Pub Live", createdAt: "2026-02-02" }]
+      },
+    })
+
+    let out = ""
+    await runListModelsCommand("pub", { output: { write: (s) => (out += s) } })
+    const stripped = stripAnsi(out)
+
+    expect(sawAuthKind).toBe("custom") // anonymous auth was synthesized
+    expect(stripped).toContain("pub-live-model")
+    expect(stripped).toContain("Pub Live")
+    expect(stripped).toContain("1 models available")
+  })
+
+  it("does NOT list an auth-required provider's live catalog without a credential", async () => {
+    // Same setup but WITHOUT publicModelList: no credential means the hook is
+    // never called and the provider contributes zero rows.
+    let hookCalled = false
+    registerProviderPlugin({
+      id: "priv",
+      displayName: "Private Provider",
+      shortCode: "prv",
+      register() {},
+      async listLiveModels() {
+        hookCalled = true
+        return [{ id: "priv-live-model" }]
+      },
+    })
+
+    let out = ""
+    await runListModelsCommand("priv", { output: { write: (s) => (out += s) } })
+    const stripped = stripAnsi(out)
+
+    expect(hookCalled).toBe(false)
+    expect(stripped).not.toContain("priv-live-model")
+    expect(stripped).toContain('no models registered for provider "priv"')
   })
 })

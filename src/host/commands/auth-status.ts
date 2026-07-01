@@ -22,8 +22,8 @@ import { writeCommandRows } from "../ui/command-output.ts"
 export interface AuthStatusDeps {
   /** Override credential discovery (tests). */
   discover?: () => CredentialedProvider[]
-  /** Override per-provider auth resolution (tests). */
-  resolveAuth?: (providerId: string) => ProviderAuth | null
+  /** Override per-credential auth resolution (tests). */
+  resolveAuth?: (providerId: string, credentialName?: string) => ProviderAuth | null
   /** Where rows go (defaults to stderr). */
   output?: { write: (s: string) => void }
   /** Inject "now" for deterministic expiry rendering. */
@@ -36,7 +36,9 @@ export function renderAuthStatus(deps: AuthStatusDeps = {}): boolean {
   const now = deps.now ? deps.now() : Date.now()
   const discover = deps.discover ?? discoverCredentialedProviders
   const resolveAuth =
-    deps.resolveAuth ?? ((providerId: string) => tryResolveProviderAuth(providerId))
+    deps.resolveAuth ??
+    ((providerId: string, credentialName?: string) =>
+      tryResolveProviderAuth(providerId, "", credentialName))
 
   const providers = discover()
   writeCommandRows(
@@ -48,7 +50,7 @@ export function renderAuthStatus(deps: AuthStatusDeps = {}): boolean {
         source: p.source,
         credentialLabel: p.credentialLabel,
         credentialInfo: p.credentialInfo,
-        auth: resolveAuth(p.providerId),
+        auth: resolveAuth(p.providerId, p.credentialName),
       })),
       now,
     }),

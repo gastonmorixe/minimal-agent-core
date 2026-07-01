@@ -8,17 +8,20 @@
  * @module agent/cache
  */
 
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 
 /**
  * Returns a defensive copy of `messages` with the rolling tail
- * `cache_control: { type: "ephemeral", ttl: "1h" }` breakpoint placed on the
- * last cache-eligible block of the last message, and any earlier
- * `cache_control` markers in messages stripped. Live 2.1.118 traffic uses
- * exactly one rolling tail breakpoint per request; combined with the two
- * static system-prompt breakpoints (instructions + session guidance) this
- * stays under the API's 4-breakpoint limit while letting the cached prefix
- * grow turn-over-turn.
+ * `cache_control: { type: "ephemeral", ttl }` breakpoint placed on the last
+ * cache-eligible block of the last message, and any earlier `cache_control`
+ * markers in messages stripped. The `ttl` bucket is configurable via the
+ * second argument and defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`); it must
+ * match the TTL given to the system-prompt breakpoints so the whole cached
+ * prefix uses one bucket. Live 2.1.118 traffic uses exactly one rolling tail
+ * breakpoint per request; combined with the two static system-prompt
+ * breakpoints (instructions + session guidance) this stays under the API's
+ * 4-breakpoint limit while letting the cached prefix grow turn-over-turn.
  *
  * "Cache-eligible" excludes `thinking` / `redacted_thinking` blocks: the
  * Anthropic API forbids modifying those in the latest assistant message, and
@@ -29,10 +32,15 @@ import type { ContentBlock, Message } from "../llm/messages.ts"
  * whose last block is never thinking, so behavior there is unchanged.
  *
  * @param messages - Conversation history (not mutated).
+ * @param ttl - TTL bucket for the rolling breakpoint. Default
+ *   {@link DEFAULT_CACHE_TTL} (`"5m"`).
  * @returns A new array of messages with cache markers normalized for the
  *   next API call.
  */
-export function withRollingCacheBreakpoint(messages: Message[]): Message[] {
+export function withRollingCacheBreakpoint(
+  messages: Message[],
+  ttl: CacheTtl = DEFAULT_CACHE_TTL,
+): Message[] {
   if (messages.length === 0) return messages
   // Drop stale thinking from older assistant turns BEFORE building the request
   // (see stripStaleThinking). Re-sending every prior turn's thinking balloons
@@ -73,7 +81,7 @@ export function withRollingCacheBreakpoint(messages: Message[]): Message[] {
   if (idx < 0) return out
   const tail: ContentBlock = {
     ...blocks[idx],
-    cache_control: { type: "ephemeral", ttl: "1h" },
+    cache_control: { type: "ephemeral", ttl },
   }
   blocks[idx] = tail
   return out

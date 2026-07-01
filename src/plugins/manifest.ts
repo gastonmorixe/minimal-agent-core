@@ -12,6 +12,8 @@
  * @module plugins/manifest
  */
 
+import { KNOWN_PLATFORMS } from "@minimal-agent/plugin-api/utils/platform"
+
 import { diag } from "../diagnostic-bus.ts"
 
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
@@ -139,6 +141,7 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
       seenCaps.add(c as string)
     }
   }
+  const platforms = parsePlatforms(obj.platforms, "platforms", err)
   if (obj.requiresUnsafeHooks != null && typeof obj.requiresUnsafeHooks !== "boolean") {
     err("requiresUnsafeHooks must be a boolean if present")
   }
@@ -228,9 +231,50 @@ export function parseManifest(raw: unknown, manifestPath: string): ManifestFile 
     commands,
     permissions: (obj.permissions as string[] | undefined) ?? [],
     capabilities: (obj.capabilities as CapabilityToken[] | undefined) ?? [],
+    platforms,
     requiresUnsafeHooks: obj.requiresUnsafeHooks === true ? true : undefined,
     enabled: obj.enabled === false ? false : undefined,
   }
+}
+
+/**
+ * Validate an optional `platforms` whitelist (used at both the plugin
+ * level and the per-handler level). Returns the normalized string array
+ * when present, or `undefined` when absent (meaning "all platforms").
+ *
+ * Each entry must be one of {@link KNOWN_PLATFORMS} (`macos`, `linux`,
+ * `windows`). Aliases (`darwin`, `unix`, `win32`, …) are deliberately NOT
+ * accepted in a manifest: authors write the canonical bucket; aliases are
+ * only forgiven in the user-facing env/CLI override. Duplicates are
+ * rejected. An empty array is treated as `undefined` (all platforms).
+ */
+function parsePlatforms(
+  raw: unknown,
+  at: string,
+  err: (msg: string) => void,
+): string[] | undefined {
+  if (raw == null) return undefined
+  if (!Array.isArray(raw)) {
+    err(`${at} must be an array of platform names if present`)
+  }
+  const arr = raw as unknown[]
+  if (arr.length === 0) return undefined
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (let i = 0; i < arr.length; i++) {
+    const v = arr[i]
+    if (typeof v !== "string" || v.length === 0) {
+      err(`${at}[${i}] must be a non-empty string`)
+    }
+    const s = v as string
+    if (!(KNOWN_PLATFORMS as readonly string[]).includes(s)) {
+      err(`${at}[${i}] must be one of ${KNOWN_PLATFORMS.join(", ")} (got: ${JSON.stringify(s)})`)
+    }
+    if (seen.has(s)) err(`${at}[${i}] duplicate platform: ${JSON.stringify(s)}`)
+    seen.add(s)
+    out.push(s)
+  }
+  return out
 }
 
 /**
@@ -827,6 +871,8 @@ function parseHandler(
     headerKey = obj.headerKey as string
   }
 
+  const platforms = parsePlatforms(obj.platforms, `${at}.platforms`, err)
+
   return {
     id,
     trigger,
@@ -835,6 +881,7 @@ function parseHandler(
     ...(icon ? { icon } : {}),
     ...(color ? { color } : {}),
     ...(headerKey ? { headerKey } : {}),
+    ...(platforms ? { platforms } : {}),
   }
 }
 

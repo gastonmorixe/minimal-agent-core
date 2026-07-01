@@ -25,7 +25,12 @@ import type { SubagentModelRecommendation } from "@minimal-agent/plugin-api/type
 import { parseSse } from "@minimal-agent/plugin-api/utils/sse-parser"
 
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
-import { findModelByTags, type ModelEntry, registerProvider } from "../../src/llm/model-registry.ts"
+import {
+  findModelByTags,
+  type ModelEntry,
+  registerModel,
+  registerProvider,
+} from "../../src/llm/model-registry.ts"
 import {
   type PreflightIssue,
   type PreflightResolution,
@@ -40,7 +45,7 @@ import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"
 import { buildAnthropicHeaders } from "./headers.ts"
 import { listAnthropicModels } from "./list-models.ts"
 import { anthropicMediaLimits } from "./media-limits.ts"
-import { registerAnthropicModels } from "./models.ts"
+import { registerAnthropicAdHocModelInto, registerAnthropicModels } from "./models.ts"
 import { anthropicOAuthLogin } from "./oauth-login.ts"
 import { buildAnthropicRequestBody } from "./request-body.ts"
 import { type AnthropicStreamEvent, translateAnthropicStream } from "./response-stream.ts"
@@ -220,6 +225,15 @@ export const anthropicAdapter: ProviderAdapter = {
 }
 
 /**
+ * Model registrar captured at activation so the host's no-arg
+ * `registerAdHocModel(modelId)` hook can still synthesize an unknown Claude id.
+ * When `bootstrapAnthropic` runs with a setup context (the decoupled loader
+ * path), this holds `ctx.models`; otherwise it stays undefined and the ad-hoc
+ * hook falls back to the direct `registerModel` import (see below).
+ */
+let capturedModels: ProviderSetupContext["models"] | undefined
+
+/**
  * Register the Anthropic adapter + its model catalog into the global
  * registry. Idempotent. Call once at application start (typically
  * from `src/index.ts` or test setup).
@@ -233,8 +247,32 @@ export const anthropicAdapter: ProviderAdapter = {
  * @param ctx - Optional host setup context carrying the model registrar.
  */
 export function bootstrapAnthropic(ctx?: ProviderSetupContext): void {
+  capturedModels = ctx?.models
   registerAnthropicModels(ctx?.models)
   registerProvider(anthropicAdapter)
+}
+
+/**
+ * Adapter from the host's direct `registerModel` import to the neutral
+ * {@link ModelRegistrar} shape, used as the fallback sink when the plugin was
+ * activated through the legacy no-context path (so `capturedModels` is unset).
+ * `setDefault` is a no-op here: an ad-hoc model never becomes the boot default.
+ */
+const directRegistrar: ProviderSetupContext["models"] = {
+  register: (spec) => registerModel(spec as Parameters<typeof registerModel>[0]),
+  setDefault: () => {},
+}
+
+/**
+ * Synthesize a registry entry for a Claude id the static catalog does not know
+ * (a SKU released after this build). Implements the optional
+ * {@link ProviderPlugin.registerAdHocModel} hook so `--model <new-claude-id>`
+ * boots with the capability + pricing profile of its closest known family
+ * sibling instead of failing with "unknown model". Routes through the registrar
+ * captured at activation, falling back to the direct registry import.
+ */
+export function registerAnthropicAdHocModel(modelId: string): void {
+  registerAnthropicAdHocModelInto(capturedModels ?? directRegistrar, modelId)
 }
 
 /** This provider packaged for the {@link ProviderPlugin} registry. */
@@ -243,6 +281,12 @@ export const anthropicProviderPlugin: ProviderPlugin = {
   displayName: "Anthropic",
   shortCode: "anth",
   register: bootstrapAnthropic,
+  /**
+   * Accept an uncataloged Claude id (a SKU newer than this build) by
+   * synthesizing a family-default entry, so `--model <new-id>` boots instead
+   * of hard-failing. See {@link registerAnthropicAdHocModel}.
+   */
+  registerAdHocModel: registerAnthropicAdHocModel,
   oauthLogin: anthropicOAuthLogin,
   /**
    * Plan-auth (OAuth) requests get the mandatory billing + Claude-Code

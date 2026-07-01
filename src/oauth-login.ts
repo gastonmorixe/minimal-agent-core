@@ -297,27 +297,27 @@ export function installCredentials(
   resp: TokenExchangeResponse,
   deps: InstallCredentialsDeps = {},
   provider: OAuthLoginProvider = resolveDefaultOAuthLoginProvider(),
+  credentialName?: string,
 ): LoginInstallResult {
   const built = provider.buildCredential(resp)
   const store = deps.store ?? defaultAuthStore()
-  store.set(
-    built.credential.serviceId,
-    built.credential.displayName,
-    built.credential.secrets as SecretBag,
-  )
+  const name =
+    credentialName ??
+    store.suggestCredentialName(built.credential.serviceId, built.credential.displayName)
+  store.set(built.credential.serviceId, name, built.credential.secrets as SecretBag)
   return built.result
 }
 
 function installBuiltCredential(
   built: ReturnType<OAuthLoginProvider["buildCredential"]>,
   deps: InstallCredentialsDeps = {},
+  credentialName?: string,
 ): LoginInstallResult {
   const store = deps.store ?? defaultAuthStore()
-  store.set(
-    built.credential.serviceId,
-    built.credential.displayName,
-    built.credential.secrets as SecretBag,
-  )
+  const name =
+    credentialName ??
+    store.suggestCredentialName(built.credential.serviceId, built.credential.displayName)
+  store.set(built.credential.serviceId, name, built.credential.secrets as SecretBag)
   return built.result
 }
 
@@ -360,6 +360,12 @@ export interface LoginDeps {
   maxAttempts?: number
   /** Abort the login flow, including provider-owned device-code polling. */
   signal?: AbortSignal
+  /**
+   * Optional human-facing credential name. When set, the credential is stored
+   * under this name instead of the provider's default displayName, allowing
+   * multiple credentials per provider (e.g. "Work" and "Personal").
+   */
+  credentialName?: string
 }
 
 export type LoginOutcome = { ok: true; result: LoginInstallResult } | { ok: false; reason: string }
@@ -411,7 +417,7 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
     }
     display(`Waiting for sign-in to finish…`)
     const built = await abortable(provider.deviceCode.complete(challenge, ctx), deps.signal)
-    return { ok: true, result: installBuiltCredential(built, deps.install) }
+    return { ok: true, result: installBuiltCredential(built, deps.install, deps.credentialName) }
   }
 
   const codeVerifier = generateCodeVerifier(deps.randomBytes)
@@ -481,7 +487,7 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
       },
       network,
     )
-    const result = installCredentials(tokens, deps.install, provider)
+    const result = installCredentials(tokens, deps.install, provider, deps.credentialName)
     return { ok: true, result }
   }
 

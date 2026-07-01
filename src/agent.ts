@@ -46,6 +46,7 @@ import {
 import { executeToolRound } from "./agent/tool-round.ts"
 import type { AuthResult } from "./auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "./cache-ttl.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "./host/ui/style/ansi.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import {
@@ -153,6 +154,12 @@ export class Agent {
    * `undefined` for legacy code paths (Anthropic-only transport).
    */
   private providerId?: string
+  /**
+   * Credential name selecting which stored credential to use when the provider
+   * has multiple (e.g. "Work" / "Personal"). Carried onto every send so
+   * mid-session requests resolve the same credential startup did.
+   */
+  private credentialName?: string
   /** Effort level for output_config.effort. Pass-through string; server validates. */
   private effort: string | undefined
   /**
@@ -184,6 +191,14 @@ export class Agent {
    * stream summaries. Unset → server default per model.
    */
   private thinkingDisplay: "summarized" | "omitted" | undefined
+  /**
+   * TTL bucket for every prompt-cache breakpoint this agent sets: the two
+   * static system-prompt breakpoints (via {@link resolveSystemPromptForModel})
+   * and the rolling tail breakpoint (via {@link withRollingCacheBreakpoint}).
+   * Resolved upstream from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config
+   * (`src/cache-ttl.ts`). Defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`).
+   */
+  private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
   /** Optional Plugin loader. When set, plugin tools merge with core tools. */
   private loader: PluginLoader | null
   /** Optional mode manager (mode-aware system prompt + tool filter). */
@@ -366,6 +381,8 @@ export class Agent {
      * transport (no provider registry concept).
      */
     providerId?: string
+    /** Credential name to select a specific stored credential for the provider. */
+    credentialName?: string
     effort?: string
     /**
      * Optional JSON Schema object constraining the model's final structured
@@ -391,6 +408,13 @@ export class Agent {
      */
     serviceTier?: string
     thinkingDisplay?: "summarized" | "omitted"
+    /**
+     * TTL bucket for the prompt-cache breakpoints. Default
+     * {@link DEFAULT_CACHE_TTL} (`"5m"`). Resolved upstream from
+     * `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config. See
+     * {@link Agent.cacheTtl}.
+     */
+    cacheTtl?: CacheTtl
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
     /**
@@ -477,11 +501,13 @@ export class Agent {
     // SKU here. See `getDefaultModelId` (src/llm/model-registry.ts).
     this.model = opts.model ?? getDefaultModelId()
     this.providerId = opts.providerId
+    this.credentialName = opts.credentialName
     this.effort = opts.effort
     this.outputSchema = opts.outputSchema
     this.speed = opts.speed ?? "normal"
     this.serviceTier = opts.serviceTier
     this.thinkingDisplay = opts.thinkingDisplay
+    this.cacheTtl = opts.cacheTtl ?? DEFAULT_CACHE_TTL
     this.loader = opts.loader ?? null
     this.modeManager = opts.modeManager ?? null
     this.saveEcho = opts.saveEcho ?? null
@@ -1005,6 +1031,7 @@ export class Agent {
       // null disables it (matches the pre-blob-store prompt shape exactly).
       blobStoreEnabled: this.blobStore !== null,
       authKind: this.auth.type,
+      cacheTtl: this.cacheTtl,
     })
     const allTools: ToolDefinition[] = this.loader
       ? [...TOOL_DEFINITIONS, ...(this.loader.getExtraTools() as ToolDefinition[])]
@@ -1095,9 +1122,10 @@ export class Agent {
       const maxOutputTokens = this.resolveMaxOutputTokens({ system, tools: mergedTools })
       const gen = this.sendFn({
         auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages),
+        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
         model: this.model,
         selectedProviderId: this.providerId,
+        ...(this.credentialName ? { credentialName: this.credentialName } : {}),
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         tools: mergedTools,
         system,
@@ -1471,7 +1499,7 @@ export class Agent {
 
       const wrapGen = this.sendFn({
         auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages),
+        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
         model: this.model,
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         // tools intentionally omitted : the model cannot call tools on
@@ -1565,7 +1593,7 @@ export class Agent {
     const sendMaxTokens = this.resolveMaxOutputTokens()
     const gen = this.sendFn({
       auth: this.auth,
-      messages: withRollingCacheBreakpoint(this.messages),
+      messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
       model: this.model,
       ...(this.networkClient ? { networkClient: this.networkClient } : {}),
       ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),

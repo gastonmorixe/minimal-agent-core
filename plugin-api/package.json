@@ -22,6 +22,7 @@
     "./utils/unified-diff": "./src/utils/unified-diff.ts",
     "./utils/bounded-drain": "./src/utils/bounded-drain.ts",
     "./utils/decoration-suffix": "./src/utils/decoration-suffix.ts",
+    "./utils/platform": "./src/utils/platform.ts",
     "./types/plugin": "./src/types/plugin.ts",
     "./types/host-capabilities": "./src/types/host-capabilities.ts",
     "./net/types": "./src/net/types.ts",

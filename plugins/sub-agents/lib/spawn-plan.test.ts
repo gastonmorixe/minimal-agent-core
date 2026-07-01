@@ -5,9 +5,12 @@ import {
   buildSpawnPlan,
   composePrompt,
   ENV_DEPTH,
+  ENV_DISABLE_PLUGINS,
   ENV_ID,
   ENV_LEAD,
+  mergeDisabledPlugins,
   type SpawnInput,
+  SUBAGENT_DISABLED_PLUGINS,
 } from "./spawn-plan.ts"
 import { sessionId, subagentId } from "./types.ts"
 
@@ -58,6 +61,52 @@ describe("composePrompt", () => {
     expect(composePrompt("do X", "You are Explorer.")).toBe(
       composePrompt("do X", "You are Explorer.", undefined),
     )
+  })
+})
+
+describe("mergeDisabledPlugins (worker plugin-disable union)", () => {
+  it("always disables the worker-only set (intercom) even with no inherited value", () => {
+    const out = mergeDisabledPlugins(undefined)
+    for (const id of SUBAGENT_DISABLED_PLUGINS) expect(out.split(",")).toContain(id)
+    expect(out).toContain("intercom")
+  })
+
+  it("unions the inherited list with the worker-only set, inherited first", () => {
+    const out = mergeDisabledPlugins("memory,web-search")
+    expect(out).toBe("memory,web-search,intercom")
+  })
+
+  it("dedups when the inherited list already names a worker-only plugin", () => {
+    const out = mergeDisabledPlugins("intercom,memory")
+    expect(out).toBe("intercom,memory")
+    expect(out.match(/intercom/g)?.length).toBe(1)
+  })
+
+  it("ignores blank/whitespace entries in the inherited list", () => {
+    expect(mergeDisabledPlugins(" , memory , ")).toBe("memory,intercom")
+  })
+})
+
+describe("buildSpawnPlan disables intercom for every worker", () => {
+  it("stamps MINIMAL_AGENT_DISABLE_PLUGINS with intercom by default", () => {
+    const r = buildSpawnPlan(input())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.env[ENV_DISABLE_PLUGINS]).toBe("intercom")
+  })
+
+  it("unions the lead's inherited disables with intercom", () => {
+    const r = buildSpawnPlan(input({ inheritedDisabledPlugins: "memory,web-search" }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.env[ENV_DISABLE_PLUGINS]).toBe("memory,web-search,intercom")
+  })
+
+  it("cannot be clobbered by an extraEnv entry for the same key", () => {
+    const r = buildSpawnPlan(input({ extraEnv: { [ENV_DISABLE_PLUGINS]: "nothing" } }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.env[ENV_DISABLE_PLUGINS]).toContain("intercom")
   })
 })
 

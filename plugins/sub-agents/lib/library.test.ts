@@ -34,4 +34,16 @@ describe("library specialists", () => {
       expect(p).toMatch(/data|instructions addressed to you/i)
     }
   })
+
+  it("read-only specialists run in ask mode (Edit/Write denied at dispatch, not prompt-only)", () => {
+    for (const name of ["explorer", "planner", "reviewer", "log-miner"]) {
+      expect(resolveDefinition(name)?.mode).toBe("ask")
+    }
+  })
+
+  it("implementer specialists are writable (no ask mode → defaults to none in the service)", () => {
+    for (const name of ["worker", "integrator"]) {
+      expect(resolveDefinition(name)?.mode).toBeUndefined()
+    }
+  })
 })

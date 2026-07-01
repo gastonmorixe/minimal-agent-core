@@ -50,6 +50,17 @@ export interface WorkerDefinition {
   readonly isolation?: Isolation
   readonly color?: string
   readonly budget?: SubagentRecord["budget"]
+  /**
+   * Operating mode the worker boots in (e.g. `"ask"` to deny Edit/Write at
+   * dispatch, `"none"` for an unrestricted writer). READ-ONLY specialists
+   * (explorer, planner, reviewer, log-miner) set `"ask"` so the harness refuses
+   * mutating tools even though the prompt also tells them not to edit: defense
+   * in depth, not prompt-only. Implementers (worker, integrator) leave this
+   * unset and the service defaults them to `"none"` (writable). The mode id must
+   * match a loaded mode plugin; an unknown id is a silent no-op (the worker runs
+   * unrestricted), so only reference modes that ship.
+   */
+  readonly mode?: string
 }
 
 /**
@@ -102,6 +113,14 @@ export interface ServiceDeps {
   readonly sessionsDir: string
   /** Default model when neither request nor definition specifies one. */
   readonly defaultModel: string
+  /**
+   * The lead's own `MINIMAL_AGENT_DISABLE_PLUGINS` value (raw, comma-separated),
+   * if set. Threaded into the spawn plan so a worker inherits the lead's
+   * disables AND the worker-only ones (intercom). Injected (read from the host's
+   * process env) so the plugin stays testable without touching globals. Omit
+   * when the lead disabled nothing.
+   */
+  readonly disabledPlugins?: string
   /** Mint a fresh child session id (uuid). Injected for determinism in tests. */
   readonly newSid: () => string
   readonly now: () => Date
@@ -204,13 +223,23 @@ export function spawnAgent(req: SpawnRequest, deps: ServiceDeps): Result<Subagen
     model,
     ...(provider ? { provider } : {}),
     ...(effort ? { effort } : {}),
-    mode: "none",
+    // A read-only specialist (explorer/planner/reviewer/log-miner) carries
+    // mode:"ask" so the harness denies Edit/Write at dispatch; an implementer
+    // leaves it unset and defaults to "none" (writable). This is the enforcement
+    // layer behind each role's "read-only" prompt — a drifting worker that tries
+    // to edit is refused by the mode gate, not just discouraged by its prompt.
+    mode: def?.mode ?? "none",
     isolation,
     ...(systemPreamble ? { systemPreamble } : {}),
     resultProtocol,
     depth: childDepth,
     cwd: deps.cwd,
     extraEnv: { [ENV_RESULT_PATH]: resultPath },
+    // Carry the lead's own plugin-disable list so the plan can UNION it with the
+    // worker-only disables (intercom) instead of dropping it. Read from the live
+    // process env: whatever disabled the lead's plugins should still apply to
+    // its workers.
+    ...(deps.disabledPlugins ? { inheritedDisabledPlugins: deps.disabledPlugins } : {}),
   })
   if (!planResult.ok) return err(planResult.error)
 

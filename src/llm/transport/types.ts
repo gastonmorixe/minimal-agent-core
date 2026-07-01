@@ -72,6 +72,16 @@ export interface SendOptions {
    * upstream model). Optional.
    */
   selectedProviderId?: string
+  /**
+   * Credential name to resolve for this request's provider. When the provider
+   * has multiple stored credentials (e.g. "Work" and "Personal"), this selects
+   * which one the transport reads from the auth store. Omit to use the
+   * provider's default displayName entry (the single-credential common case).
+   * Set at boot from CLI `--credential-name` / config `credentialName` and
+   * carried on every request so mid-session sends resolve the same credential
+   * that startup did.
+   */
+  credentialName?: string
   /** Max output tokens. */
   maxTokens?: number
   /** Stream the response. Default: true. */

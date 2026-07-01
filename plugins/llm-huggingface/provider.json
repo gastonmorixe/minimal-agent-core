@@ -1,0 +1,8 @@
+{
+  "id": "huggingface",
+  "name": "LLM Provider: HuggingFace Inference Providers (gateway)",
+  "version": "0.1.0",
+  "description": "HuggingFace Inference Providers — an OpenAI Chat Completions-compatible gateway to 15+ backend providers (Cerebras, Groq, Together, etc.). Reuses plugins/llm-openai's wire layer; auth via API key (stored credential).",
+  "entry": "./index.ts",
+  "export": "huggingfaceProviderPlugin"
+}

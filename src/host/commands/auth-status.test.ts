@@ -99,8 +99,8 @@ describe("runAuthStatusCommand", () => {
     })
 
     expect(code).toBe(0)
-    expect(cap.text()).toContain("account  acct-1")
-    expect(cap.text()).toContain("refresh  missing")
+    expect(cap.text()).toContain("account acct-1")
+    expect(cap.text()).toContain("refresh missing")
     expect(cap.text()).not.toContain("AT")
   })
 })

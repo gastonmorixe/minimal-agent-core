@@ -44,6 +44,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--effort",
   "--spinner",
   "--thinking-display",
+  "--cache-ttl",
   "--mode",
   "--disable-plugin",
   "--enable-plugin",

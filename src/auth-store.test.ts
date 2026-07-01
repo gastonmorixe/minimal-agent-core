@@ -195,6 +195,39 @@ describe("AuthStore multi-entry / same-slug semantics", () => {
   })
 })
 
+describe("AuthStore.suggestCredentialName (auto-naming)", () => {
+  it("returns the base name as-is when the slug has no entries", () => {
+    const s = freshStore()
+    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("Service A")
+  })
+
+  it("returns the base name when it is free (first login)", () => {
+    const s = freshStore()
+    s.set("svc-a", "Some Other Name", { v: 1 })
+    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("Service A")
+  })
+
+  it("auto-generates {serviceId}-2 when the base name is taken", () => {
+    const s = freshStore()
+    s.set("svc-a", "Service A", { v: 1 })
+    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("svc-a-2")
+  })
+
+  it("increments the suffix past existing generated names", () => {
+    const s = freshStore()
+    s.set("svc-a", "Service A", { v: 1 })
+    s.set("svc-a", "svc-a-2", { v: 2 })
+    expect(s.suggestCredentialName("svc-a", "Service A")).toBe("svc-a-3")
+  })
+
+  it("collision check is case-insensitive", () => {
+    const s = freshStore()
+    s.set("p", "MyName", { v: 1 })
+    // "myname" collides with "MyName" — suggest the slug-based fallback
+    expect(s.suggestCredentialName("p", "myname")).toBe("p-2")
+  })
+})
+
 describe("AuthStore validation", () => {
   it("rejects non-object secrets", () => {
     const s = freshStore()

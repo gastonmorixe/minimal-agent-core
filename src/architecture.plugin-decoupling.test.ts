@@ -143,6 +143,14 @@ const BASELINE = new Map<string, number>([
   ["llm-opencode/models.ts", 2],
   ["llm-opencode/opencode.test.ts", 2],
   ["llm-opencode/pricing.ts", 1],
+  // HuggingFace provider plugin — same pre-existing provider pattern as
+  // llm-openrouter: reuses llm-openai's wire layer, needs src/ imports for
+  // model registration, canonical request types, pricing types, provider
+  // adapter types, and network client.
+  ["llm-huggingface/adapter.ts", 4],
+  ["llm-huggingface/hf.test.ts", 2],
+  ["llm-huggingface/models.ts", 1],
+  ["llm-huggingface/pricing.ts", 1],
   // Wafer provider plugin — same pre-existing provider pattern as llm-opencode
   // and llm-openrouter: needs src/ imports for model registration, canonical
   // request types, pricing types, provider adapter types, network client, and

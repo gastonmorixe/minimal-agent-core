@@ -248,10 +248,10 @@ describe("LiveAreaScheduler — decoration suffix", () => {
       clearTimeout: clock.clearTimeout,
       logger: () => {},
     })
-    setDecorationSuffix("  · ♻ sk-lsp · ⌢ tsgo")
+    setDecorationSuffix("  · ♻ sk-lsp · · tsgo")
     sched.start()
     await clock.tick(0)
-    expect(sink.footerCalls.at(-1)).toEqual(["⇆ intercom · 8 online · 5 gone  · ♻ sk-lsp · ⌢ tsgo"])
+    expect(sink.footerCalls.at(-1)).toEqual(["⇆ intercom · 8 online · 5 gone  · ♻ sk-lsp · · tsgo"])
     sched.stop()
   })
 

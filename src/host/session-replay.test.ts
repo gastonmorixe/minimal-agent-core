@@ -58,10 +58,10 @@ describe("replayToScrollback", () => {
     const sink = new CaptureSink()
     await replayToScrollback(messages, sink, { userTimestamps: [at, null] })
     const plain = stripAnsi(sink.out)
-    const stamp = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "short",
-      timeStyle: "medium",
-    }).format(at)
+    const stamp = [
+      new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(at),
+      new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(at),
+    ].join(" ")
     expect(plain).toContain(`${stamp} ❯ hi`)
   })
 
@@ -77,10 +77,10 @@ describe("replayToScrollback", () => {
       scrollbackSubmittedAt: "inline-locale",
     })
     const plain = stripAnsi(sink.out)
-    const stamp = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "short",
-      timeStyle: "medium",
-    }).format(at)
+    const stamp = [
+      new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(at),
+      new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(at),
+    ].join(" ")
     expect(plain).toContain(`${stamp} ❯ hi`)
     expect(plain).not.toContain(`[${stamp}]`)
   })

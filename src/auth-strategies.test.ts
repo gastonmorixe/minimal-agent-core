@@ -8,6 +8,7 @@ import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts
 import {
   clearProviderCredentials,
   discoverCredentialedProviders,
+  resolveStoredProviderAuth,
   storedProvidersHint,
   tryResolveProviderAuth,
 } from "./auth-strategies.ts"
@@ -157,5 +158,123 @@ describe("auth-strategies", () => {
     })
     expect(clearProviderCredentials("test-provider")).toBe(true)
     expect(discoverCredentialedProviders()).toHaveLength(0)
+  })
+
+  // ── Multi-credential tests ──────────────────────────────────────────────
+
+  it("discovers multiple credentials per provider with different names", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Test API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-default",
+    })
+    defaultAuthStore().set("test-api-key", "Work", {
+      tokenType: "api-key",
+      apiKey: "sk-work",
+    })
+    defaultAuthStore().set("test-api-key", "Personal", {
+      tokenType: "api-key",
+      apiKey: "sk-personal",
+    })
+
+    const found = discoverCredentialedProviders()
+    expect(found).toHaveLength(3)
+    expect(found.map((f) => f.credentialName)).toEqual(
+      expect.arrayContaining(["Test API Key", "Work", "Personal"]),
+    )
+    expect(found.every((f) => f.providerId === "test-provider")).toBe(true)
+  })
+
+  it("resolves auth by credentialName when multiple credentials exist", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Test API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-default",
+    })
+    defaultAuthStore().set("test-api-key", "Work", {
+      tokenType: "api-key",
+      apiKey: "sk-work",
+    })
+
+    // Without credentialName, uses the default displayName
+    const defaultAuth = tryResolveProviderAuth("test-provider")
+    expect(defaultAuth).not.toBeNull()
+    if (defaultAuth?.kind === "api-key") expect(defaultAuth.key).toBe("sk-default")
+
+    // With credentialName, resolves the named entry
+    const workAuth = tryResolveProviderAuth("test-provider", "", "Work")
+    expect(workAuth).not.toBeNull()
+    if (workAuth?.kind === "api-key") expect(workAuth.key).toBe("sk-work")
+
+    // Non-existent credentialName returns null
+    const missingAuth = tryResolveProviderAuth("test-provider", "", "NonExistent")
+    expect(missingAuth).toBeNull()
+  })
+
+  it("clearProviderCredentials with credentialName removes only that entry", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Test API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-default",
+    })
+    defaultAuthStore().set("test-api-key", "Work", {
+      tokenType: "api-key",
+      apiKey: "sk-work",
+    })
+
+    expect(clearProviderCredentials("test-provider", defaultAuthStore(), "Work")).toBe(true)
+    const remaining = discoverCredentialedProviders()
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0]?.credentialName).toBe("Test API Key")
+  })
+
+  it("storedProvidersHint shows all credential names per provider", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Test API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-default",
+    })
+    defaultAuthStore().set("test-api-key", "Work", {
+      tokenType: "api-key",
+      apiKey: "sk-work",
+    })
+
+    const hint = storedProvidersHint()
+    expect(hint).toContain("Test API Key")
+    expect(hint).toContain("Work")
+  })
+
+  it("resolveStoredProviderAuth resolves the named credential when given", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Test API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-default",
+    })
+    defaultAuthStore().set("test-api-key", "Work", {
+      tokenType: "api-key",
+      apiKey: "sk-work",
+    })
+
+    // No credentialName → default displayName entry
+    const def = resolveStoredProviderAuth("test-provider", "auth-test-model")
+    expect(def.kind).toBe("api-key")
+    if (def.kind === "api-key") expect(def.key).toBe("sk-default")
+
+    // Explicit credentialName → the named entry
+    const work = resolveStoredProviderAuth("test-provider", "auth-test-model", "Work")
+    expect(work.kind).toBe("api-key")
+    if (work.kind === "api-key") expect(work.key).toBe("sk-work")
+  })
+
+  it("resolveStoredProviderAuth throws for an unknown credential name", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Test API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-default",
+    })
+
+    expect(() =>
+      resolveStoredProviderAuth("test-provider", "auth-test-model", "NonExistent"),
+    ).toThrow(/no credentials/)
   })
 })
