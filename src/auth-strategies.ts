@@ -31,6 +31,8 @@ export interface CredentialedProvider {
   source: "store"
   /** Human label of the stored entry, when `source === "store"`. */
   credentialLabel?: string
+  /** The stored credential name (disambiguates multiple entries per provider). */
+  credentialName?: string
   /** Provider-supplied safe diagnostic metadata, when available. */
   credentialInfo?: AuthCredentialInfo
 }
@@ -73,9 +75,11 @@ export function findApiKeyAuthProvider(providerId: string): ApiKeyAuthProvider |
 function readOAuthFromStore(
   oauth: OAuthLoginProvider,
   store: AuthStore,
+  credentialName?: string,
 ): { auth: ProviderAuth; secrets: AuthSecretBag } | null {
   if (!oauth.readAuth) return null
-  const storedSecrets = store.getSecrets(oauth.serviceId, oauth.displayName)
+  const name = credentialName ?? oauth.displayName
+  const storedSecrets = store.getSecrets(oauth.serviceId, name)
   if (!storedSecrets) return null
   const auth = oauth.readAuth(storedSecrets)
   if (!auth) return null
@@ -83,7 +87,11 @@ function readOAuthFromStore(
     return {
       auth: {
         ...auth,
-        refresh: buildStoredOAuthRefresh({ provider: oauth, initialSecrets: storedSecrets }),
+        refresh: buildStoredOAuthRefresh({
+          provider: oauth,
+          initialSecrets: storedSecrets,
+          credentialName: name,
+        }),
       },
       secrets: storedSecrets,
     }
@@ -91,8 +99,13 @@ function readOAuthFromStore(
   return { auth, secrets: storedSecrets }
 }
 
-function readApiKeyFromStore(apiKey: ApiKeyAuthProvider, store: AuthStore): ProviderAuth | null {
-  const storedSecrets = store.getSecrets(apiKey.serviceId, apiKey.displayName)
+function readApiKeyFromStore(
+  apiKey: ApiKeyAuthProvider,
+  store: AuthStore,
+  credentialName?: string,
+): ProviderAuth | null {
+  const name = credentialName ?? apiKey.displayName
+  const storedSecrets = store.getSecrets(apiKey.serviceId, name)
   const stored = storedSecrets ? apiKey.readApiKey(storedSecrets) : null
   if (stored && stored.trim().length > 0) return { kind: "api-key", key: stored }
   return null
@@ -113,17 +126,29 @@ function readApiKeyFromStore(apiKey: ApiKeyAuthProvider, store: AuthStore): Prov
 export function providerPeerToken(
   providerId: string,
   store: AuthStore = defaultAuthStore(),
+  credentialName?: string,
 ): string | undefined {
   const oauth = findProviderPlugin(providerId)?.oauthLogin
   if (!oauth?.readAuth) return undefined
-  const secrets = store.getSecrets(oauth.serviceId, oauth.displayName)
+  const name = credentialName ?? oauth.displayName
+  const secrets = store.getSecrets(oauth.serviceId, name)
   if (!secrets) return undefined
   const auth = oauth.readAuth(secrets)
   return auth?.kind === "oauth" ? auth.token : undefined
 }
 
-/** Try to resolve runtime auth for a provider from minimal-agent's auth store only. */
-export function tryResolveProviderAuth(providerId: string, _modelId = ""): ProviderAuth | null {
+/**
+ * Try to resolve runtime auth for a provider from minimal-agent's auth store only.
+ * When `credentialName` is omitted, the provider's default displayName is used
+ * as the credential name (backward compatible with single-credential setups).
+ * When `credentialName` is given, only that named credential is resolved.
+ * Returns `null` when no matching credential exists.
+ */
+export function tryResolveProviderAuth(
+  providerId: string,
+  _modelId = "",
+  credentialName?: string,
+): ProviderAuth | null {
   const plugin = findProviderPlugin(providerId)
   if (!plugin) return null
 
@@ -131,13 +156,13 @@ export function tryResolveProviderAuth(providerId: string, _modelId = ""): Provi
 
   const oauth = plugin.oauthLogin
   if (oauth) {
-    const fromStore = readOAuthFromStore(oauth, store)
+    const fromStore = readOAuthFromStore(oauth, store, credentialName)
     if (fromStore) return fromStore.auth
   }
 
   const apiKey = plugin.apiKeyAuth
   if (apiKey) {
-    const fromStore = readApiKeyFromStore(apiKey, store)
+    const fromStore = readApiKeyFromStore(apiKey, store, credentialName)
     if (fromStore) return fromStore
   }
 
@@ -145,7 +170,11 @@ export function tryResolveProviderAuth(providerId: string, _modelId = ""): Provi
 }
 
 /** Resolve runtime auth for a provider or throw with a provider-specific hint. */
-export function resolveStoredProviderAuth(providerId: string, modelId: string): ProviderAuth {
+export function resolveStoredProviderAuth(
+  providerId: string,
+  modelId: string,
+  credentialName?: string,
+): ProviderAuth {
   const plugin = findProviderPlugin(providerId)
   if (!plugin) {
     throw new Error(
@@ -154,7 +183,7 @@ export function resolveStoredProviderAuth(providerId: string, modelId: string): 
     )
   }
 
-  const auth = tryResolveProviderAuth(providerId, modelId)
+  const auth = tryResolveProviderAuth(providerId, modelId, credentialName)
   if (auth) return auth
 
   const others = discoverCredentialedProviders().filter((p) => p.providerId !== providerId)
@@ -170,7 +199,13 @@ export function resolveStoredProviderAuth(providerId: string, modelId: string): 
   )
 }
 
-/** Providers with credentials stored in minimal-agent's auth store. */
+/**
+ * Providers with credentials stored in minimal-agent's auth store.
+ *
+ * Lists ALL stored entries per provider, not just the default displayName.
+ * Multiple entries for the same provider (disambiguated by credentialName)
+ * each produce a separate CredentialedProvider entry.
+ */
 export function discoverCredentialedProviders(
   store: AuthStore = defaultAuthStore(),
 ): CredentialedProvider[] {
@@ -179,8 +214,11 @@ export function discoverCredentialedProviders(
   for (const plugin of listProviderPlugins()) {
     const oauth = plugin.oauthLogin
     if (oauth?.readAuth) {
-      const storedSecrets = store.getSecrets(oauth.serviceId, oauth.displayName)
-      if (storedSecrets) {
+      // List ALL store entries matching this provider's serviceId
+      const allEntries = store.list(oauth.serviceId)
+      for (const entry of allEntries) {
+        const storedSecrets = store.getSecrets(oauth.serviceId, entry.name)
+        if (!storedSecrets) continue
         const auth = oauth.readAuth(storedSecrets)
         const info = oauth.inspectCredential?.(storedSecrets)
         out.push({
@@ -188,18 +226,22 @@ export function discoverCredentialedProviders(
           displayName: plugin.displayName,
           authKind: "oauth",
           source: "store",
-          credentialLabel: oauth.displayName,
+          credentialLabel: entry.name,
+          credentialName: entry.name,
           credentialInfo: info ?? { usable: Boolean(auth) },
         })
-        continue
       }
+      continue
     }
 
     const apiKey = plugin.apiKeyAuth
     if (!apiKey) continue
 
-    const storedSecrets = store.getSecrets(apiKey.serviceId, apiKey.displayName)
-    if (storedSecrets) {
+    // List ALL store entries matching this provider's serviceId
+    const allEntries = store.list(apiKey.serviceId)
+    for (const entry of allEntries) {
+      const storedSecrets = store.getSecrets(apiKey.serviceId, entry.name)
+      if (!storedSecrets) continue
       const stored = apiKey.readApiKey(storedSecrets)
       const usable = Boolean(stored && stored.trim().length > 0)
       out.push({
@@ -207,7 +249,8 @@ export function discoverCredentialedProviders(
         displayName: plugin.displayName,
         authKind: "api-key",
         source: "store",
-        credentialLabel: apiKey.displayName,
+        credentialLabel: entry.name,
+        credentialName: entry.name,
         credentialInfo: apiKey.inspectCredential?.(storedSecrets) ?? { usable },
       })
     }
@@ -270,20 +313,44 @@ export function storedProvidersHint(): string {
   )
 }
 
-/** Remove all credential store entries owned by a provider plugin. */
+/**
+ * Remove all credential store entries owned by a provider plugin.
+ * When `credentialName` is given, only that specific entry is removed.
+ * When omitted, ALL entries for the provider are removed.
+ */
 export function clearProviderCredentials(
   providerId: string,
   store: AuthStore = defaultAuthStore(),
+  credentialName?: string,
 ): boolean {
   const plugin = findProviderPlugin(providerId)
   if (!plugin) return false
   let removed = false
-  if (plugin.oauthLogin) {
-    removed = store.remove(plugin.oauthLogin.serviceId, plugin.oauthLogin.displayName) || removed
+
+  if (credentialName) {
+    // Remove a specific named credential
+    if (plugin.oauthLogin) {
+      removed = store.remove(plugin.oauthLogin.serviceId, credentialName) || removed
+    }
+    if (plugin.apiKeyAuth) {
+      removed = store.remove(plugin.apiKeyAuth.serviceId, credentialName) || removed
+    }
+  } else {
+    // Remove ALL entries for this provider's service ids
+    if (plugin.oauthLogin) {
+      const entries = store.list(plugin.oauthLogin.serviceId)
+      for (const entry of entries) {
+        removed = store.remove(plugin.oauthLogin.serviceId, entry.name) || removed
+      }
+    }
+    if (plugin.apiKeyAuth) {
+      const entries = store.list(plugin.apiKeyAuth.serviceId)
+      for (const entry of entries) {
+        removed = store.remove(plugin.apiKeyAuth.serviceId, entry.name) || removed
+      }
+    }
   }
-  if (plugin.apiKeyAuth) {
-    removed = store.remove(plugin.apiKeyAuth.serviceId, plugin.apiKeyAuth.displayName) || removed
-  }
+
   return removed
 }
 
@@ -297,21 +364,19 @@ export function clearAllCredentials(store: AuthStore = defaultAuthStore()): bool
 function buildStoredOAuthRefresh(opts: {
   provider: OAuthLoginProvider
   initialSecrets: AuthSecretBag
+  credentialName?: string
 }): () => Promise<{ token: string }> {
   const { provider } = opts
+  const credentialName = opts.credentialName ?? provider.displayName
   let lastSecrets = opts.initialSecrets
   return async () => {
     const store = defaultAuthStore()
-    const currentSecrets = store.getSecrets(provider.serviceId, provider.displayName) ?? lastSecrets
+    const currentSecrets = store.getSecrets(provider.serviceId, credentialName) ?? lastSecrets
     const refreshed = await provider.refreshCredential?.(currentSecrets, {
       networkClient: defaultNetworkClient,
     })
     if (!refreshed) throw new Error(`provider "${provider.serviceId}" does not support refresh`)
-    store.set(
-      refreshed.credential.serviceId,
-      refreshed.credential.displayName,
-      refreshed.credential.secrets,
-    )
+    store.set(refreshed.credential.serviceId, credentialName, refreshed.credential.secrets)
     lastSecrets = refreshed.credential.secrets
     const nextAuth = provider.readAuth?.(lastSecrets)
     if (!nextAuth || nextAuth.kind !== "oauth" || !nextAuth.token) {

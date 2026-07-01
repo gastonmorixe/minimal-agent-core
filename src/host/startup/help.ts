@@ -84,6 +84,9 @@ function buildHelpSections(): HelpSection[] {
           "Force thinking display: summarized or omitted",
           ["or MINIMAL_AGENT_THINKING_DISPLAY"],
         ),
+        row(`${c.cyan("--cache-ttl")} ${c.dim("<5m|1h>")}`, "Prompt-cache breakpoint TTL", [
+          "default: 5m, or MINIMAL_AGENT_CACHE_TTL, config cacheTtl",
+        ]),
         row(
           `${c.cyan("-f")}, ${c.cyan("--formatter")} ${c.dim("<cmd>")}`,
           "Pipe output through formatter",

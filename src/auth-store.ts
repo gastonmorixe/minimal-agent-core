@@ -330,6 +330,36 @@ export class AuthStore {
   // ── writes ───────────────────────────────────────────────────────────
 
   /**
+   * Suggest a free credential name for `providerId` based on `baseName`.
+   *
+   * When `baseName` is not taken, returns it as-is (first login uses the
+   * provider's displayName). When taken, generates `{serviceId}-2`,
+   * `{serviceId}-3`, etc. using the provider slug (already a clean
+   * dash-separated identifier) so auto-generated names are CLI-friendly.
+   *
+   * Case-insensitive collision check (uses `sameName`).
+   */
+  suggestCredentialName(providerId: string, baseName: string): string {
+    const id = normalizeProviderId(providerId)
+    const base = normalizeName(baseName)
+    const file = this.load()
+    const taken = new Set<string>()
+    for (const e of file.entries) {
+      if (e.id === id) taken.add(e.name.toLowerCase())
+    }
+    // First login: use the displayName if free
+    if (!taken.has(base.toLowerCase())) return base
+    // Subsequent: use {serviceId}-2, {serviceId}-3, ...
+    // Cap at 100 to avoid unbounded loops; if someone has 100+ credentials
+    // for one provider the fallback uses a timestamp suffix.
+    for (let i = 2; i <= 100; i++) {
+      const candidate = `${id}-${i}`
+      if (!taken.has(candidate.toLowerCase())) return candidate
+    }
+    return `${id}-${Date.now()}`
+  }
+
+  /**
    * Upsert an entry. Creates `(id, name)` if absent, or replaces the secret
    * bag of an existing one (preserving its `createdAt`). The `(id, name)`
    * pair is the unique key: two entries may share a slug only if their names

@@ -11,7 +11,9 @@ describe("CLI smoke", () => {
     const p = Bun.spawn(["bun", "run", "src/index.ts", "--help"], {
       stdout: "pipe",
       stderr: "pipe",
-      timeout: 5000,
+      // Generous spawn ceiling so the subprocess isn't SIGKILLed under heavy
+      // parallel test load (the timing budget is asserted separately below).
+      timeout: 20000,
     })
     await p.exited
     expect(performance.now() - t0).toBeLessThan(2000)
@@ -35,7 +37,8 @@ describe("CLI smoke", () => {
       {
         stdout: "pipe",
         stderr: "pipe",
-        timeout: 5000,
+        // Generous ceiling so the child isn't SIGKILLed under parallel load.
+        timeout: 20000,
         env: {
           ...process.env,
           NODE_ENV: "test",
@@ -79,13 +82,20 @@ describe("CLI smoke", () => {
       {
         stdout: "pipe",
         stderr: "pipe",
-        timeout: 5000,
+        // Generous ceiling so the child isn't SIGKILLed under parallel load.
+        timeout: 20000,
         env: {
           ...process.env,
           NODE_ENV: "test",
           MINIMAL_AGENT_TEST_AUTH: "1",
           MINIMAL_AGENT_TRANSPORT: "test",
           MINIMAL_AGENT_TEST_RESPONSE: "PONG",
+          // Isolate plugin discovery from the developer's real ~/.minimal-agent
+          // plugins dir. Without this, the loader warns about the user's locally
+          // disabled plugins and the warning PATH (…/.minimal-agent/plugins/…)
+          // leaks the substring "minimal-agent" into stderr, tripping the
+          // negative assertion below on a real machine.
+          MINIMAL_AGENT_DISABLE_PLUGINS: "1",
         },
       },
     )

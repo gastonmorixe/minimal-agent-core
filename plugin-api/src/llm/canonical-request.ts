@@ -121,6 +121,21 @@ export interface OpenAIVendorOpts {
 }
 
 /**
+ * HuggingFace Inference Providers vendor knobs.
+ *
+ * HuggingFace is a gateway that proxies to multiple backend providers
+ * (Cerebras, Groq, Together, etc.). The `provider` field selects which
+ * backend to use: `"auto"` (default, fastest), a specific provider id
+ * (`"groq"`, `"cerebras"`, `"together"`), or a policy (`"fastest"`,
+ * `"cheapest"`, `"preferred"`). When set, the adapter appends
+ * `:<provider>` to the model id on the wire.
+ */
+export interface HuggingFaceVendorOpts {
+  /** Backend provider or selection policy. Defaults to `"auto"` (fastest). */
+  provider?: string
+}
+
+/**
  * Metadata threaded to the provider's metadata field. Anthropic
  * serializes `{deviceId, accountUuid, sessionId}` into a JSON string
  * under `metadata.user_id`; OpenAI accepts a flat `metadata` map
@@ -212,6 +227,7 @@ export interface CanonicalRequest {
   vendor?: {
     anthropic?: AnthropicVendorOpts
     openai?: OpenAIVendorOpts
+    huggingface?: HuggingFaceVendorOpts
   }
 
   metadata?: RequestMetadata

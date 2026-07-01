@@ -42,10 +42,24 @@ import { normalizeSubmittedAtStyle } from "./scrollback-submitted-at.ts"
 export interface UserConfig {
   model?: string
   provider?: string
+  /**
+   * Credential name to use for the selected provider. When the provider has
+   * multiple stored credentials (e.g. "Work" and "Personal"), this selects
+   * which one to use. Omit to use the provider's default displayName.
+   */
+  credentialName?: string
   /** Reasoning effort. Pass-through to `output_config.effort` on the wire;
    *  the server validates. Common values: `"low" | "medium" | "high" | "max"`. */
   effort?: string
   thinkingDisplay?: "summarized" | "omitted"
+  /**
+   * Prompt-cache TTL bucket for the agent's cache breakpoints. One of
+   * `"5m"` (default) or `"1h"` — the two buckets Anthropic's
+   * `cache_control.ttl` accepts. A longer TTL keeps the cached prefix warm
+   * across slower turn cadences at a higher cache-write cost. Override at
+   * runtime via `--cache-ttl <5m|1h>` or `MINIMAL_AGENT_CACHE_TTL`.
+   */
+  cacheTtl?: "5m" | "1h"
   spinner?: string
   formatter?: string
   /**
@@ -176,6 +190,7 @@ export interface UserConfig {
 }
 
 const VALID_DISPLAY = new Set(["summarized", "omitted"])
+const VALID_CACHE_TTL = new Set(["5m", "1h"])
 
 /**
  * Resolve the config path. Override via `MINIMAL_AGENT_CONFIG` (used by
@@ -226,6 +241,9 @@ export function loadUserConfig(): UserConfig {
 
   if (typeof obj.model === "string" && obj.model.length > 0) out.model = obj.model
   if (typeof obj.provider === "string" && obj.provider.length > 0) out.provider = obj.provider
+  if (typeof obj.credentialName === "string" && obj.credentialName.length > 0) {
+    out.credentialName = obj.credentialName
+  }
   // Effort is pass-through: any non-empty string forwards to the server,
   // which is the source of truth on accepted levels.
   if (typeof obj.effort === "string" && obj.effort.length > 0) {
@@ -233,6 +251,9 @@ export function loadUserConfig(): UserConfig {
   }
   if (typeof obj.thinkingDisplay === "string" && VALID_DISPLAY.has(obj.thinkingDisplay)) {
     out.thinkingDisplay = obj.thinkingDisplay as UserConfig["thinkingDisplay"]
+  }
+  if (typeof obj.cacheTtl === "string" && VALID_CACHE_TTL.has(obj.cacheTtl)) {
+    out.cacheTtl = obj.cacheTtl as UserConfig["cacheTtl"]
   }
   if (typeof obj.spinner === "string" && obj.spinner.length > 0) out.spinner = obj.spinner
   if (typeof obj.formatter === "string" && obj.formatter.length > 0) out.formatter = obj.formatter

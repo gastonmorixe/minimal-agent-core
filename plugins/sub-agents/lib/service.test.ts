@@ -185,6 +185,36 @@ describe("spawnAgent", () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toMatch(/unknown sub-agent/i)
   })
+
+  it("launches a read-only specialist with --mode ask (Edit/Write denied at dispatch)", () => {
+    const readonly: WorkerDefinition = { name: "explorer", role: "scout", mode: "ask" }
+    const deps = makeDeps(dir, {
+      resolveDefinition: (n) => (n === "explorer" ? readonly : undefined),
+    })
+    const r = spawnAgent({ task: "find the bug", agent: "explorer" }, deps)
+    expect(r.ok).toBe(true)
+    const argv = deps.launched[0] ?? []
+    expect(argv[argv.indexOf("--mode") + 1]).toBe("ask")
+  })
+
+  it("launches an implementer with --mode none (writable) when the definition sets no mode", () => {
+    const writer: WorkerDefinition = { name: "worker", role: "balanced" }
+    const deps = makeDeps(dir, {
+      resolveDefinition: (n) => (n === "worker" ? writer : undefined),
+    })
+    const r = spawnAgent({ task: "implement it", agent: "worker" }, deps)
+    expect(r.ok).toBe(true)
+    const argv = deps.launched[0] ?? []
+    expect(argv[argv.indexOf("--mode") + 1]).toBe("none")
+  })
+
+  it("defaults an inline (definition-less) worker to --mode none", () => {
+    const deps = makeDeps(dir)
+    const r = spawnAgent({ task: "inline work" }, deps)
+    expect(r.ok).toBe(true)
+    const argv = deps.launched[0] ?? []
+    expect(argv[argv.indexOf("--mode") + 1]).toBe("none")
+  })
 })
 
 describe("stopAgent", () => {

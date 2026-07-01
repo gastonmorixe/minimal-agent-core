@@ -27,6 +27,7 @@ import {
   parseReflectionAck,
 } from "../agent/reflection.ts"
 import type { AuthResult } from "../auth.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
 import {
   clampMaxOutputTokens,
@@ -110,6 +111,7 @@ export class AgentCore {
   readonly messages: Message[] = []
   private model: string
   private providerId?: string
+  private credentialName?: string
   private auth: AuthResult
   private effort: string | undefined
   private speed: "normal" | "fast"
@@ -129,6 +131,7 @@ export class AgentCore {
   private maxToolRounds: number = Number.POSITIVE_INFINITY
   private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
+  private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
   private reflectionSilenceRemaining = 0
   private previousTurnAborted = false
   private eventSink: EventSink | null
@@ -136,6 +139,7 @@ export class AgentCore {
   constructor(config: AgentCoreConfig) {
     this.model = config.model
     this.providerId = config.providerId
+    this.credentialName = config.credentialName
     this.auth = config.auth
     this.sendFn = config.sendFn ?? selectedTransport
     this.networkClient = config.networkClient
@@ -153,6 +157,7 @@ export class AgentCore {
     this.speed = "normal"
     this.serviceTier = config.serviceTier
     this.thinkingDisplay = config.thinkingDisplay
+    this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
     if (typeof config.reflectionInterval === "number" && config.reflectionInterval >= 0) {
       this.reflectionInterval = Math.floor(config.reflectionInterval)
     }
@@ -335,6 +340,7 @@ export class AgentCore {
       reflectionCooldownMs: this.reflectionCooldownMs,
       maxToolRounds: this.maxToolRounds,
       blobStoreEnabled: false,
+      cacheTtl: this.cacheTtl,
     })
 
     const allTools: ToolDefinition[] = this.toolRegistry.list()
@@ -381,9 +387,10 @@ export class AgentCore {
       const maxOutputTokens = this.resolveMaxOutputTokens({ system, tools: mergedTools })
       const gen = this.sendFn({
         auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages),
+        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
         model: this.model,
         selectedProviderId: this.providerId,
+        ...(this.credentialName ? { credentialName: this.credentialName } : {}),
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         tools: mergedTools,
         system,
@@ -639,7 +646,7 @@ export class AgentCore {
 
       const wrapGen = this.sendFn({
         auth: this.auth,
-        messages: withRollingCacheBreakpoint(this.messages),
+        messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
         model: this.model,
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
         system,
@@ -701,7 +708,7 @@ export class AgentCore {
     const sendMaxTokens = this.resolveMaxOutputTokens()
     const gen = this.sendFn({
       auth: this.auth,
-      messages: withRollingCacheBreakpoint(this.messages),
+      messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
       model: this.model,
       ...(this.networkClient ? { networkClient: this.networkClient } : {}),
       ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),

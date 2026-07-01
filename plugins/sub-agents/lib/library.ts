@@ -30,6 +30,8 @@ const BASE_LIBRARY: readonly WorkerDefinition[] = [
     role: "scout",
     isolation: "fresh",
     color: "sky",
+    // Read-only: deny Edit/Write at dispatch, not just by prompt.
+    mode: "ask",
     systemPrompt:
       "You are Explorer: a fast, read-only codebase scout. Search and read only, " +
       "never edit or write. Return ONLY what matters: the handful of files/lines " +
@@ -47,6 +49,8 @@ const BASE_LIBRARY: readonly WorkerDefinition[] = [
     role: "balanced",
     isolation: "fork",
     color: "purple",
+    // Read-only: research + plan, never implement. Deny Edit/Write at dispatch.
+    mode: "ask",
     systemPrompt:
       "You are Planner: you research the codebase and produce a concrete, ordered " +
       "plan. Read-only. Do not implement. Return the plan as numbered steps with " +
@@ -70,6 +74,8 @@ const BASE_LIBRARY: readonly WorkerDefinition[] = [
     role: "deep",
     isolation: "fresh",
     color: "gold",
+    // Read-only: review diffs, never edit. Deny Edit/Write at dispatch.
+    mode: "ask",
     systemPrompt:
       "You are Reviewer: a strict, read-only code reviewer. Run git diff, focus on " +
       "the changed files, and report issues by priority (critical / warning / " +
@@ -97,6 +103,8 @@ const BASE_LIBRARY: readonly WorkerDefinition[] = [
     role: "deep",
     isolation: "fresh",
     color: "purple",
+    // Read-only: forensic analysis only. Deny Edit/Write at dispatch.
+    mode: "ask",
     systemPrompt:
       "You are Log-Miner: a careful, read-only forensic analyst of large log/data " +
       "corpora. Work in passes: first SCOPE (how many files, how big, what shape), " +
@@ -135,6 +143,7 @@ export const LIBRARY: readonly WorkerDefinition[] = (() => {
       ...(d.isolation ? { isolation: d.isolation } : {}),
       ...(d.color ? { color: d.color } : {}),
       ...(d.budget ? { budget: d.budget } : {}),
+      ...(d.mode ? { mode: d.mode } : {}),
     }
   }
   return BASE_LIBRARY.map(withClause)

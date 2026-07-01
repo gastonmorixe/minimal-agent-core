@@ -62,6 +62,55 @@ describe("fetchAnthropicSessionInfo (cache-only)", () => {
     expect(info!.quota?.windows).toEqual([])
   })
 
+  it("keeps rendering stale windows AND kicks a background re-probe", async () => {
+    // Regression: the "quota disappears after a few idle minutes" bug. Once the
+    // cold-start prime headers aged past FRESHNESS_MS, the next heartbeat/resize
+    // tick used to read the cache as `null` and DROP the 5h/7d windows, with
+    // nothing to refresh them until the user's next API turn. The fix renders
+    // the last-known windows on a stale cache AND fires a bounded re-probe.
+    setLastRateLimits(
+      new Map<string, string>([
+        ["anthropic-ratelimit-unified-5h-utilization", "0.64"],
+        ["anthropic-ratelimit-unified-7d-utilization", "0.16"],
+      ]),
+    )
+
+    // Age the cache past the freshness window by advancing the clock the
+    // fetch path reads (`Date.now`). The cache's `at` was stamped at the real
+    // now; +61s makes it stale without a real wait.
+    const realNow = Date.now
+    Date.now = () => realNow() + 61_000
+
+    const prevTestAuth = process.env.MINIMAL_AGENT_TEST_AUTH
+    process.env.MINIMAL_AGENT_TEST_AUTH = "1" // getAuth() → synthetic oauth (test env)
+    let probed = false
+    try {
+      const networkClient = {
+        request: async () => {
+          probed = true
+          return new Response("{}", {
+            status: 200,
+            headers: { "anthropic-ratelimit-unified-5h-utilization": "0.65" },
+          })
+        },
+      }
+      const info = await fetchAnthropicSessionInfo({
+        modelId: "claude-opus-4-8",
+        networkClient,
+      })
+      // Stale-but-present: the windows still render (not blanked).
+      expect(info!.quota?.windows.map((w) => w.id)).toEqual(["5h", "7d"])
+      expect(info!.quota?.windows[0]?.utilization).toBeCloseTo(0.64)
+      // Let the fire-and-forget prime probe settle.
+      await new Promise((r) => setTimeout(r, 0))
+      expect(probed).toBe(true)
+    } finally {
+      Date.now = realNow
+      if (prevTestAuth === undefined) delete process.env.MINIMAL_AGENT_TEST_AUTH
+      else process.env.MINIMAL_AGENT_TEST_AUTH = prevTestAuth
+    }
+  })
+
   it("does NOT block on an aborted signal — cache-only, no I/O to cancel", async () => {
     // Pre-aborted signal: the cache-only fetch must resolve, not throw, because
     // there is no in-flight I/O to honor the cancellation.

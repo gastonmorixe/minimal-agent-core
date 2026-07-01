@@ -49,6 +49,7 @@ export function wants1mContext(modelId: string | undefined): boolean {
     modelId.includes("opus-4-7") ||
     modelId.includes("opus-4-8") ||
     modelId.includes("sonnet-4-6") ||
+    modelId.includes("sonnet-5") ||
     modelId.includes("fable-5")
   )
 }

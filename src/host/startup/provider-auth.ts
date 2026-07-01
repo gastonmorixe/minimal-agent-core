@@ -39,10 +39,17 @@ export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
  *
  * Requires a registered model with a known provider. Missing credentials
  * throw with provider-specific login guidance.
+ *
+ * @param providerId - Provider slug to resolve.
+ * @param modelId - Normalized model id (no `[1m]`/`[2m]` suffix).
+ * @param credentialName - Optional credential name to disambiguate when the
+ *   provider has multiple stored credentials. When omitted, the provider's
+ *   default displayName is used.
  */
 export async function resolveStartupAuth(
   providerId: string | undefined,
   modelId: string,
+  credentialName?: string,
 ): Promise<AuthResult> {
   if (process.env.MINIMAL_AGENT_TEST_AUTH === "1") {
     return { type: "oauth", token: "test-token", accountUuid: "test-account" }
@@ -52,7 +59,7 @@ export async function resolveStartupAuth(
     throw new Error(`no provider selected for model "${modelId}". ${storedProvidersHint()}`)
   }
 
-  const auth = tryResolveProviderAuth(providerId, modelId)
+  const auth = tryResolveProviderAuth(providerId, modelId, credentialName)
   if (!auth) {
     const hint = storedProvidersHint()
     throw new Error(

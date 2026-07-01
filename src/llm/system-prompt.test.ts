@@ -18,7 +18,11 @@ import {
   registerProviderPlugin,
   type SystemPromptContext,
 } from "./provider-plugin.ts"
-import { NEUTRAL_IDENTITY, resolveSystemPromptForModel } from "./system-prompt.ts"
+import {
+  buildAgentSystemBody,
+  NEUTRAL_IDENTITY,
+  resolveSystemPromptForModel,
+} from "./system-prompt.ts"
 
 const CAPS: Capabilities = {
   contextWindow: 200_000,
@@ -96,6 +100,26 @@ describe("resolveSystemPromptForModel", () => {
     expect(out[0].text).toBe(NEUTRAL_IDENTITY)
     // instructions block always present after the identity
     expect(out).toHaveLength(2)
+    expect(out[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m", scope: "global" })
+  })
+})
+
+describe("buildAgentSystemBody cache TTL", () => {
+  it("defaults both breakpoints to 5m (instructions scoped global, session per-session)", () => {
+    const body = buildAgentSystemBody({ sessionContext: "ENV" })
+    expect(body).toHaveLength(2)
+    expect(body[0].cache_control).toEqual({ type: "ephemeral", ttl: "5m", scope: "global" })
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+  })
+
+  it("applies an explicit cacheTtl (1h) to both breakpoints", () => {
+    const body = buildAgentSystemBody({ sessionContext: "ENV", cacheTtl: "1h" })
+    expect(body[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h", scope: "global" })
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+  })
+
+  it("threads cacheTtl through resolveSystemPromptForModel to the instructions block", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", { cacheTtl: "1h" })
     expect(out[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h", scope: "global" })
   })
 })

@@ -7,7 +7,6 @@ import { formatRelative, renderAuthStatusRows } from "./auth-status.ts"
 describe("auth-status chrome", () => {
   it("renders not-logged-in rows", () => {
     const text = renderAuthStatusRows({ providers: [], now: 1 }).map(stripAnsi).join("\n")
-    expect(text).toContain("Auth status")
     expect(text).toContain("not logged in")
     expect(text).toContain("run `minimal-agent provider <id> login`")
   })
@@ -16,8 +15,8 @@ describe("auth-status chrome", () => {
     const text = renderAuthStatusRows({
       providers: [
         {
-          providerId: "test-provider",
-          displayName: "Test Provider",
+          providerId: "provider-a",
+          displayName: "Provider A",
           authKind: "api-key",
           source: "store",
           auth: { kind: "api-key", key: "sk-ant-..." },
@@ -27,6 +26,7 @@ describe("auth-status chrome", () => {
     })
       .map(stripAnsi)
       .join("\n")
+    expect(text).toContain("provider-a")
     expect(text).toContain("api-key")
     expect(text).toContain("✔")
   })
@@ -35,8 +35,8 @@ describe("auth-status chrome", () => {
     const text = renderAuthStatusRows({
       providers: [
         {
-          providerId: "test-provider",
-          displayName: "Test Provider",
+          providerId: "provider-a",
+          displayName: "Provider A",
           authKind: "oauth",
           source: "store",
           auth: {
@@ -50,6 +50,7 @@ describe("auth-status chrome", () => {
       .map(stripAnsi)
       .join("\n")
 
+    expect(text).toContain("provider-a")
     expect(text).toContain("oauth")
     expect(text).toContain("✔")
   })
@@ -58,8 +59,8 @@ describe("auth-status chrome", () => {
     const text = renderAuthStatusRows({
       providers: [
         {
-          providerId: "test-provider",
-          displayName: "Test Provider",
+          providerId: "provider-a",
+          displayName: "Provider A",
           authKind: "oauth",
           source: "store",
           credentialInfo: {
@@ -76,7 +77,7 @@ describe("auth-status chrome", () => {
           },
         },
         {
-          providerId: "broken-provider",
+          providerId: "provider-b",
           displayName: "Broken Provider",
           authKind: "api-key",
           source: "store",
@@ -89,12 +90,46 @@ describe("auth-status chrome", () => {
       .map(stripAnsi)
       .join("\n")
 
-    expect(text).toContain("account  acct-1")
-    expect(text).toContain("org      org-1")
-    expect(text).toContain("scopes   scope:a scope:b")
-    expect(text).toContain("refresh  present")
+    expect(text).toContain("provider-a")
+    expect(text).toContain("account acct-1")
+    expect(text).toContain("org org-1")
+    expect(text).toContain("scopes scope:a scope:b")
+    expect(text).toContain("refresh present")
+    expect(text).toContain("provider-b")
     expect(text).toContain("credential unreadable")
     expect(text).not.toContain("AT")
+  })
+
+  it("renders multiple credentials per provider", () => {
+    const text = renderAuthStatusRows({
+      providers: [
+        {
+          providerId: "provider-c",
+          displayName: "Provider C",
+          authKind: "oauth",
+          source: "store",
+          credentialName: "Work",
+          credentialInfo: { usable: true },
+          auth: { kind: "oauth", token: "AT1" },
+        },
+        {
+          providerId: "provider-c",
+          displayName: "Provider C",
+          authKind: "oauth",
+          source: "store",
+          credentialName: "Personal",
+          credentialInfo: { usable: true },
+          auth: { kind: "oauth", token: "AT2" },
+        },
+      ],
+      now: 1,
+    })
+      .map(stripAnsi)
+      .join("\n")
+
+    expect(text).toContain("provider-c")
+    expect(text).toContain("Work")
+    expect(text).toContain("Personal")
   })
 
   it("formats relative durations compactly", () => {

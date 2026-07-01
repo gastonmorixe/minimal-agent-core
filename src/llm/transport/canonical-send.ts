@@ -115,7 +115,7 @@ async function* updateLabelsFromEvents(
 function resolveProviderAuth(opts: SendOptions): ProviderAuth {
   const providerId = resolveRequestProviderId(opts)
   if (!providerId) return legacyAuthToProviderAuth(opts.auth)
-  return resolveStoredProviderAuth(providerId, opts.model ?? "")
+  return resolveStoredProviderAuth(providerId, opts.model ?? "", opts.credentialName)
 }
 
 /**
@@ -250,7 +250,9 @@ export async function* canonicalSendFn(
   // process's rotation is adopted before falling back to a network refresh.
   const makeAuthRefreshedAttempt = () =>
     withAuthRefresh(makeWatchdoggedAttempt, authState, {
-      peerToken: providerId ? () => providerPeerToken(providerId) : undefined,
+      peerToken: providerId
+        ? () => providerPeerToken(providerId, undefined, opts.credentialName)
+        : undefined,
     })
 
   // retry is the outermost layer: forever, capped backoff, user-abortable.

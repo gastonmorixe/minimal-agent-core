@@ -94,6 +94,12 @@ export interface LoginCommandOptions {
   providerId?: string
   /** Auth method to run for the provider. Defaults to OAuth when available, else API key. */
   authMethod?: string
+  /**
+   * Human-facing credential name. When set, the credential is stored under
+   * this name instead of the provider's default displayName, allowing
+   * multiple credentials per provider (e.g. "Work" and "Personal").
+   */
+  credentialName?: string
   /** Override the maximum number of paste attempts (default 3). */
   maxAttempts?: number
   /** Input stream; tests inject a fake TTY/non-TTY stream. */
@@ -329,12 +335,12 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
         return 1
       }
       const write = method.provider.buildCredential(key.trim())
-      defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
+      const store = defaultAuthStore()
+      const name =
+        opts.credentialName ?? store.suggestCredentialName(write.serviceId, write.displayName)
+      store.set(write.serviceId, name, write.secrets as SecretBag)
       const modelHint = suggestModelForProvider(method.providerId)
-      writeCommandRows(
-        renderApiKeyLoginSuccess(write.displayName, method.providerId, modelHint),
-        output,
-      )
+      writeCommandRows(renderApiKeyLoginSuccess(name, method.providerId, modelHint), output)
       return 0
     } catch (err) {
       if (isLoginAborted(err)) {
@@ -356,6 +362,7 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
       provider: method.provider,
       loginHint: opts.loginHint,
       maxAttempts: opts.maxAttempts,
+      credentialName: opts.credentialName,
       openUrl: openBrowser,
       display: (msg) => {
         // The orchestrator emits "Opening browser…", "If the browser

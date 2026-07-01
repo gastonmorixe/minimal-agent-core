@@ -171,6 +171,48 @@ export const CAPS_OPUS_46: Capabilities = {
 }
 
 // ---------------------------------------------------------------------------
+// Sonnet 5 (most-agentic Sonnet; adaptive thinking, effort incl. xhigh)
+// ---------------------------------------------------------------------------
+
+/**
+ * Claude Sonnet 5 (`claude-sonnet-5`), launched 2026-06-30. Positioned as
+ * the most agentic Sonnet, with performance close to Opus 4.8 at lower cost
+ * (https://www.anthropic.com/news/claude-sonnet-5).
+ *
+ * Request surface mirrors Sonnet 4.6 (1M-native context, adaptive-only
+ * thinking, no `speed:"fast"` tier, image + pdf input, structured outputs,
+ * full tools + caching) with one documented difference: the launch
+ * cost-performance charts plot Sonnet 5 at an `xhigh` effort level, so the
+ * effort ladder gains `xhigh` over Sonnet 4.6's `low|medium|high`. The
+ * default stays `medium` (the Sonnet-family default); callers opt up to
+ * `high`/`xhigh` for harder agentic work. The model also ships an updated
+ * tokenizer (≈1.0-1.35x token expansion vs Sonnet 4.6), which the
+ * introductory pricing offsets to stay roughly cost-neutral.
+ */
+export const CAPS_SONNET_5: Capabilities = {
+  ...defaultCapabilities(),
+  contextWindow: 1_000_000,
+  maxOutputTokens: 64_000,
+  maxOutputTokensBatch: 300_000,
+  thinking: { adaptive: true, extended: false, visible: true, interleaved: true },
+  effort: { levels: ["low", "medium", "high", "xhigh"], default: "medium" },
+  acceptsTemperature: false,
+  acceptsTopP: false,
+  acceptsTopK: false,
+  acceptsSeed: false,
+  acceptsStopSequences: true,
+  speedFast: false,
+  caching: { ...CACHING_FULL },
+  tools: { ...TOOLS_FULL },
+  midConversationSystem: true,
+  structuredOutputs: true,
+  assistantPrefill: false,
+  modalities: { ...MODALITIES_TEXT_IMAGE_PDF },
+  serverSideHistory: false,
+  serverTools: [...SERVER_TOOLS_FULL],
+}
+
+// ---------------------------------------------------------------------------
 // Sonnet 4.6 (effort-supporting, no fast mode, no xhigh)
 // ---------------------------------------------------------------------------
 

@@ -14,7 +14,7 @@
  *
  *   // In the diagnostics plugin's LSP-status updater:
  *   import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
- *   setDecorationSuffix("· ♻ sk-lsp · ⌢ tsgo")
+ *   setDecorationSuffix("· ♻ sk-lsp · · tsgo")
  *
  * The suffix is a single styled string. Empty / null means append nothing.
  */

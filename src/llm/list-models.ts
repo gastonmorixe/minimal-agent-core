@@ -29,7 +29,12 @@ export async function listLiveModelsForPicker(providerId?: string): Promise<Mode
   )
   const results = await Promise.allSettled(
     plugins.map(async (p) => {
-      const auth = tryResolveProviderAuth(p.id, "")
+      // Public-catalog providers (e.g. HuggingFace) list without a credential
+      // via an anonymous custom auth; auth-required providers contribute no
+      // rows when unauthenticated. Mirrors src/host/commands/list-models.ts.
+      const auth =
+        tryResolveProviderAuth(p.id, "") ??
+        (p.publicModelList ? ({ kind: "custom", headers: {} } as const) : null)
       if (!auth) return []
       return (await p.listLiveModels?.(auth)) ?? []
     }),

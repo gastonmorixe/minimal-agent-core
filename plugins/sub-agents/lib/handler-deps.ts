@@ -106,6 +106,11 @@ export function serviceDepsFromCtx(ctx: TUIContext): ServiceDeps | null {
     ...(recommendForRole ? { recommendForRole } : {}),
     resolveProvider: (modelId: string) => ctx.host?.models?.find(modelId)?.providerId,
     policy: resolvePolicy(ctx.env),
+    // Pass the lead's own plugin-disable list through so the spawn plan unions
+    // it with the worker-only disables (intercom) rather than dropping it.
+    ...(ctx.env.MINIMAL_AGENT_DISABLE_PLUGINS
+      ? { disabledPlugins: ctx.env.MINIMAL_AGENT_DISABLE_PLUGINS }
+      : {}),
   }
 }
 

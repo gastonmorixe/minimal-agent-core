@@ -14,10 +14,18 @@ describe("withRollingCacheBreakpoint", () => {
     expect(withRollingCacheBreakpoint([])).toEqual([])
   })
 
-  it("stamps the last block of the last message with a 1h ephemeral marker", () => {
+  it("stamps the last block of the last message with a 5m ephemeral marker by default", () => {
     const out = withRollingCacheBreakpoint([
       { role: "user", content: [{ type: "text", text: "hi" }] },
     ])
+    expect(tail(out)?.cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+  })
+
+  it("honors an explicit ttl override (1h) on the rolling breakpoint", () => {
+    const out = withRollingCacheBreakpoint(
+      [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      "1h",
+    )
     expect(tail(out)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
@@ -38,14 +46,14 @@ describe("withRollingCacheBreakpoint", () => {
     ])
     const firstBlock = (out[0].content as Array<{ cache_control?: unknown }>)[0]
     expect(firstBlock.cache_control).toBeUndefined()
-    expect(tail(out)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect(tail(out)?.cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
   })
 
   it("normalizes a string-content tail into a one-block array before stamping", () => {
     const out = withRollingCacheBreakpoint([{ role: "user", content: "hello" }])
     const last = out[out.length - 1]
     expect(Array.isArray(last.content)).toBe(true)
-    expect(tail(out)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect(tail(out)?.cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
   })
 
   it("does not mutate the caller's messages array", () => {
@@ -82,7 +90,7 @@ describe("withRollingCacheBreakpoint", () => {
     expect(lastBlocks[2].cache_control).toBeUndefined()
     // ...and the breakpoint moves to the last NON-thinking block.
     expect(lastBlocks[1].type).toBe("text")
-    expect(lastBlocks[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect(lastBlocks[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
     // The earlier thinking block is also left alone.
     expect(lastBlocks[0].cache_control).toBeUndefined()
   })
@@ -115,7 +123,7 @@ describe("withRollingCacheBreakpoint", () => {
     ])
     // The breakpoint landed on the only non-thinking block (the tool_use).
     const toolUse = sent.find((b) => b.type === "tool_use") as { cache_control?: unknown }
-    expect(toolUse.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect(toolUse.cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
   })
 
   it("skips the breakpoint entirely when the last message is all thinking", () => {
@@ -203,6 +211,6 @@ describe("withRollingCacheBreakpoint", () => {
     }>
     expect(lastBlocks[1].type).toBe("redacted_thinking")
     expect(lastBlocks[1].cache_control).toBeUndefined()
-    expect(lastBlocks[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect(lastBlocks[0].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
   })
 })

@@ -62,6 +62,7 @@ import {
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
+import { resolveCacheTtl } from "./cache-ttl.ts"
 import { normalizeArgs } from "./cli-args.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
 import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
@@ -124,6 +125,7 @@ import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defaults.ts"
 import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
+import { resolveEffectivePlatform } from "./plugin-platform-resolution.ts"
 import { createAgentContext } from "./plugins/agent-context.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
@@ -171,6 +173,19 @@ const providerIdx = args.indexOf("--provider")
 const provider =
   providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1].startsWith("-")
     ? args[providerIdx + 1]
+    : undefined
+const credentialNameIdx = args.indexOf("--credential-name")
+// Flag naming: `--name` (short, user-facing) is used during login to label
+// a credential. `--credential-name` (long, explicit) is used at startup to
+// select which stored credential to use. They differ because `--name` in
+// the login context is unambiguous (you're naming the new credential),
+// while `--credential-name` at startup avoids ambiguity with any future
+// `--name` flag for other purposes.
+const cliCredentialName =
+  credentialNameIdx !== -1 &&
+  args[credentialNameIdx + 1] &&
+  !args[credentialNameIdx + 1].startsWith("-")
+    ? args[credentialNameIdx + 1]
     : undefined
 
 const wantListModels = args.includes("--list-models")
@@ -274,6 +289,19 @@ const speed: "normal" | "fast" = speedFast ? "fast" : "normal"
 const serviceTierIdx = args.indexOf("--service-tier")
 const serviceTier: string | undefined =
   serviceTierIdx !== -1 ? args[serviceTierIdx + 1] : process.env.MINIMAL_AGENT_SERVICE_TIER
+
+// Prompt-cache TTL: --cache-ttl <5m|1h>  >  MINIMAL_AGENT_CACHE_TTL  >  config
+// file  >  built-in default ("5m"). Closed set validated in resolveCacheTtl;
+// an unrecognized value at any layer is ignored and the next source wins. The
+// resolved bucket is applied to ALL cache breakpoints the agent sets (the two
+// static system-prompt breakpoints + the rolling tail), so the whole cached
+// prefix uses one TTL. Threaded to BOTH the Agent and the resume-drift
+// systemHash below, which must stay byte-consistent.
+const { ttl: cacheTtl, source: cacheTtlSource } = resolveCacheTtl({
+  cli: readFlagValue("--cache-ttl"),
+  env: process.env.MINIMAL_AGENT_CACHE_TTL,
+  config: userConfig.cacheTtl,
+})
 
 const formatterExplicitIdx = args.indexOf("--formatter")
 const formatterExplicitArg: string[] | undefined =
@@ -525,7 +553,12 @@ async function main() {
           ? args[providerIdx + 1]
           : undefined
       const authMethod = readFlagValue("--auth-method")
-      const code = await runLoginCommand({ loginHint, providerId, authMethod })
+      const nameIdx = args.indexOf("--name")
+      const credentialName =
+        nameIdx !== -1 && args[nameIdx + 1] && !args[nameIdx + 1].startsWith("-")
+          ? args[nameIdx + 1]
+          : undefined
+      const code = await runLoginCommand({ loginHint, providerId, authMethod, credentialName })
       process.exit(code)
     }
     case "logout": {
@@ -678,7 +711,8 @@ async function main() {
     throw new Error(`unknown model "${selectedModelBase}" for provider "${selectedProviderId}"`)
   }
 
-  const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase)
+  const credentialName = cliCredentialName ?? userConfig.credentialName
+  const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase, credentialName)
   printStartupRow("auth", startupAuthLabel(auth, selectedProviderId))
 
   // Provider startup probe (fire-and-forget) for the SELECTED provider only.
@@ -781,6 +815,15 @@ async function main() {
       : `medium ${c.dim("(default)")}`
   printStartupRow("thinking", thinkingLabel)
   printStartupRow("effort", effortLabel)
+  const cacheTtlProvenance =
+    cacheTtlSource === "cli"
+      ? "(--cache-ttl)"
+      : cacheTtlSource === "env"
+        ? "(env)"
+        : cacheTtlSource === "config"
+          ? "(config)"
+          : "(default)"
+  printStartupRow("cache ttl", `${cacheTtl} ${c.dim(cacheTtlProvenance)}`)
 
   // Validate the resolved effort against the selected model's declared
   // capability levels at startup so a misconfigured effort (e.g.
@@ -955,6 +998,22 @@ async function main() {
   } else {
     delete process.env.MINIMAL_AGENT_FAST
   }
+  // Effective platform for plugin/tool `platforms` whitelist gating:
+  // --platform > MINIMAL_AGENT_PLATFORM > detected (process.platform).
+  // `all` (or `any`/`*`) bypasses gating for the session.
+  const platformIdx = args.indexOf("--platform")
+  const resolvedPlatform = resolveEffectivePlatform({
+    cli: platformIdx !== -1 ? args[platformIdx + 1] : undefined,
+    env: process.env.MINIMAL_AGENT_PLATFORM,
+  })
+  if (resolvedPlatform.invalid !== undefined) {
+    diag.warn(
+      "plugin-loader",
+      `ignoring unrecognized platform override ${JSON.stringify(resolvedPlatform.invalid)}; ` +
+        `using ${resolvedPlatform.platform} (${resolvedPlatform.source}). ` +
+        `Valid: macos, linux, windows, all.`,
+    )
+  }
   const configPluginOverrides = loadPluginEnabledOverrides()
   const pluginOverrides = resolvePluginEnabledOverrides({
     config: configPluginOverrides,
@@ -995,6 +1054,8 @@ async function main() {
     // author opt-out (config, env, or `--enable-plugin`).
     disabledPluginIds: pluginOverrides.forceDisabled,
     enabledPluginIds: pluginOverrides.forceEnabled,
+    // Effective platform for `platforms` whitelist gating (CLI/env/detected).
+    effectivePlatform: resolvedPlatform.platform,
   })
   // Expose the loader's event bus to deep emit-points (notably
   // `client.ts`, which broadcasts `quota.headersReceived` after every
@@ -1339,6 +1400,7 @@ async function main() {
           maxToolRounds: Number.POSITIVE_INFINITY,
           blobStoreEnabled,
           authKind: auth.type,
+          cacheTtl,
         }),
       )
     : ""
@@ -1398,11 +1460,13 @@ async function main() {
     auth,
     model: selectedModel,
     providerId: selectedProviderId,
+    ...(credentialName ? { credentialName } : {}),
     effort,
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     speed,
     serviceTier,
     thinkingDisplay,
+    cacheTtl,
     loader: hasPlugins ? loader : null,
     modeManager,
     saveEcho,

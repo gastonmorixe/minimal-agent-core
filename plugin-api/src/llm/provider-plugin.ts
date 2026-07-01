@@ -540,6 +540,18 @@ export interface ProviderPlugin {
   listLiveModels?(auth: ProviderAuth): Promise<LiveModelRow[]>
 
   /**
+   * Optional: declare that {@link listLiveModels} works WITHOUT stored
+   * credentials (the provider's model-list endpoint is public). When `true`,
+   * `--list-models` / the picker still invoke `listLiveModels` for this
+   * provider when no credential is stored, passing an anonymous
+   * `{ kind: "custom", headers: {} }` auth. Providers whose catalog needs auth
+   * (the default) omit this, so an unauthenticated listing skips them and
+   * falls back to the static registry. Gateways like HuggingFace, whose
+   * `/v1/models` is public, set it so the full live catalog shows before login.
+   */
+  publicModelList?: boolean
+
+  /**
    * Optional: describe the protocol beta/feature flags this provider can send,
    * for the `--list-flags` command. Pure; no I/O. Each {@link BetaFlagInfo}
    * documents one flag's wire value, effect, and attach condition. Core renders

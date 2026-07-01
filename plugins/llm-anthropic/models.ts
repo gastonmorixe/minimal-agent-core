@@ -12,6 +12,7 @@
  * @module llm/providers/anthropic/models
  */
 
+import type { Capabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 import type {
   ModelRegistrar,
   ProviderModelSpec,
@@ -28,6 +29,7 @@ import {
   CAPS_OPUS_46,
   CAPS_OPUS_47,
   CAPS_OPUS_48,
+  CAPS_SONNET_5,
   CAPS_SONNET_45,
   CAPS_SONNET_46,
 } from "./capabilities.ts"
@@ -37,6 +39,7 @@ import {
   ANTHROPIC_OPUS_4X_FAST_LEGACY,
   ANTHROPIC_OPUS_4X_STANDARD,
   ANTHROPIC_OPUS_48_FAST,
+  ANTHROPIC_SONNET_5_INTRO,
   ANTHROPIC_SONNET_STANDARD,
 } from "./pricing.ts"
 
@@ -60,6 +63,33 @@ const opus48PricingFor = (req: CanonicalRequest): MTokRate =>
 
 const legacyOpusFastPricingFor = (req: CanonicalRequest): MTokRate =>
   req.speed === "fast" ? ANTHROPIC_OPUS_4X_FAST_LEGACY : ANTHROPIC_OPUS_4X_STANDARD
+
+/**
+ * First instant (UTC) at which Claude Sonnet 5 leaves introductory pricing.
+ * The launch post promises intro rates "through August 31, 2026", so the
+ * standard rate applies from 2026-09-01T00:00:00Z onward.
+ */
+const SONNET_5_STANDARD_PRICING_FROM = Date.UTC(2026, 8, 1) // month is 0-based: 8 = September
+
+/**
+ * Pure date-gated rate selector for Sonnet 5: the introductory $2/$10 rate
+ * before the cutover, the standard $3/$15 rate on/after it. Exported for
+ * unit testing so the boundary is pinned without mocking the clock.
+ *
+ * @param nowMs - epoch milliseconds to evaluate against (defaults to now).
+ */
+export function sonnet5RateForDate(nowMs: number = Date.now()): MTokRate {
+  return nowMs < SONNET_5_STANDARD_PRICING_FROM
+    ? ANTHROPIC_SONNET_5_INTRO
+    : ANTHROPIC_SONNET_STANDARD
+}
+
+/**
+ * Per-request pricing picker for Sonnet 5. Pricing depends on the wall clock
+ * (intro vs standard), not the request shape, so the request is ignored; the
+ * date gate lives in {@link sonnet5RateForDate}.
+ */
+const sonnet5PricingFor = (_req: CanonicalRequest): MTokRate => sonnet5RateForDate()
 
 /**
  * Token estimator for Anthropic's tokenizer family. ~3.5 chars/token is the
@@ -195,6 +225,31 @@ export function registerAnthropicModels(registrar?: ModelRegistrar): string[] {
   })
 
   register({
+    id: "claude-sonnet-5",
+    aliases: ["claude-sonnet-5[1m]"],
+    providerId: "anthropic",
+    surfaceId: "anthropic-messages",
+    displayName: "Claude Sonnet 5",
+    knowledgeCutoff: "2026-01",
+    tags: ["sonnet", "1m-context", "flagship", "production"],
+    capabilities: CAPS_SONNET_5,
+    estimateTokens: estimateAnthropicTokens,
+    // Base rate is the introductory $2/$10; the date-gated picker swaps to
+    // the $3/$15 standard rate on 2026-09-01 (see sonnet5PricingFor).
+    pricing: ANTHROPIC_SONNET_5_INTRO,
+    pricingForRequest: sonnet5PricingFor,
+    vendorIds: {
+      firstParty: "claude-sonnet-5",
+      bedrock: "us.anthropic.claude-sonnet-5",
+      vertex: "claude-sonnet-5",
+      foundry: "claude-sonnet-5",
+      anthropicAws: "claude-sonnet-5",
+      mantle: "anthropic.claude-sonnet-5",
+      gateway: "claude-sonnet-5",
+    },
+  })
+
+  register({
     id: "claude-sonnet-4-6",
     aliases: ["claude-sonnet-4-6[1m]"],
     providerId: "anthropic",
@@ -263,8 +318,97 @@ export function registerAnthropicModels(registrar?: ModelRegistrar): string[] {
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5-20250929",
     "claude-haiku-4-5-20251001",
   ]
+}
+
+// ---------------------------------------------------------------------------
+// Ad-hoc registration (unknown / not-yet-cataloged Claude ids)
+// ---------------------------------------------------------------------------
+
+/**
+ * Family-default profile for an unknown Claude id: the capability table and
+ * base pricing to assume. Each maps to an EXISTING, tested table so an ad-hoc
+ * model behaves like the closest known sibling of its family rather than a
+ * generic guess. The default rung is the latest production member of the
+ * family (e.g. a future `claude-opus-4-9` inherits Opus 4.8's surface).
+ */
+interface FamilyDefault {
+  capabilities: Capabilities
+  pricing: MTokRate
+  tags: ReadonlyArray<string>
+}
+
+/**
+ * Infer the {@link FamilyDefault} for an arbitrary Claude id by family token.
+ * Order matters only in that each branch is mutually exclusive on the family
+ * word. Falls back to the Sonnet profile (the mid-tier, most-common default)
+ * for an id that names no recognized family. The returned tables are the same
+ * objects the static catalog uses, so ad-hoc models stay consistent with their
+ * cataloged siblings and cost accounting is as accurate as the family allows.
+ */
+function familyDefaultFor(modelId: string): FamilyDefault {
+  if (modelId.includes("opus")) {
+    return {
+      capabilities: CAPS_OPUS_48,
+      pricing: ANTHROPIC_OPUS_4X_STANDARD,
+      tags: ["opus", "adhoc"],
+    }
+  }
+  if (modelId.includes("haiku")) {
+    return { capabilities: CAPS_HAIKU_45, pricing: ANTHROPIC_HAIKU_45, tags: ["haiku", "adhoc"] }
+  }
+  if (modelId.includes("fable") || modelId.includes("mythos")) {
+    return { capabilities: CAPS_FABLE_5, pricing: ANTHROPIC_FABLE_5, tags: ["fable", "adhoc"] }
+  }
+  // Default + explicit "sonnet": assume the current Sonnet-class surface.
+  return {
+    capabilities: CAPS_SONNET_5,
+    pricing: ANTHROPIC_SONNET_5_INTRO,
+    tags: ["sonnet", "adhoc"],
+  }
+}
+
+/**
+ * Register a synthetic entry for a Claude id the static catalog does not know
+ * yet (e.g. a brand-new SKU announced after this build). The host calls this
+ * via {@link ProviderPlugin.registerAdHocModel} when a `--model <id>` selection
+ * misses the registry, so an as-yet-uncataloged Claude model boots with the
+ * capability + pricing profile of its closest known family sibling instead of
+ * hard-failing with "unknown model".
+ *
+ * Idempotent (last-write-wins). Marked with an `adhoc` tag and a `displayName`
+ * suffix so it is visibly distinct from a first-class cataloged entry. Pricing
+ * is a best-effort family default and may not match the real SKU rate; a model
+ * that warrants accurate accounting should get a real catalog entry.
+ *
+ * @param registrar - The host model registrar (captured at activation).
+ * @param modelId - The unknown Claude id to synthesize.
+ * @returns the registered id, for testability.
+ */
+export function registerAnthropicAdHocModelInto(
+  registrar: ModelRegistrar,
+  modelId: string,
+): string {
+  // Strip a client-side [1m] suffix for the canonical id; re-add as alias when
+  // present so `--model claude-foo[1m]` still resolves to the bare entry.
+  const bare = modelId.replace(/\[1m\]$/i, "")
+  const wants1m = bare !== modelId
+  const { capabilities, pricing, tags } = familyDefaultFor(bare)
+  registrar.register({
+    id: bare,
+    aliases: wants1m ? [`${bare}[1m]`] : undefined,
+    providerId: "anthropic",
+    surfaceId: "anthropic-messages",
+    displayName: `${bare} (ad-hoc)`,
+    capabilities,
+    pricing,
+    estimateTokens: estimateAnthropicTokens,
+    tags: [...tags],
+    vendorIds: { firstParty: bare },
+  })
+  return bare
 }

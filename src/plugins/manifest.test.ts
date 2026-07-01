@@ -131,6 +131,60 @@ describe("parseManifest", () => {
     })
   })
 
+  describe("platforms (whitelist)", () => {
+    it("defaults to undefined when omitted (= all platforms)", () => {
+      const m = parseManifest(valid, "/x")
+      expect(m.platforms).toBeUndefined()
+    })
+
+    it("accepts a canonical platform whitelist", () => {
+      const m = parseManifest({ ...valid, platforms: ["macos"] }, "/x")
+      expect(m.platforms).toEqual(["macos"])
+    })
+
+    it("accepts all three canonical buckets", () => {
+      const m = parseManifest({ ...valid, platforms: ["macos", "linux", "windows"] }, "/x")
+      expect(m.platforms).toEqual(["macos", "linux", "windows"])
+    })
+
+    it("treats an empty array as undefined (= all platforms)", () => {
+      const m = parseManifest({ ...valid, platforms: [] }, "/x")
+      expect(m.platforms).toBeUndefined()
+    })
+
+    it("rejects a non-array platforms", () => {
+      expect(() => parseManifest({ ...valid, platforms: "macos" }, "/x")).toThrow(/array/i)
+    })
+
+    it("rejects unknown platform names (aliases not allowed in manifests)", () => {
+      expect(() => parseManifest({ ...valid, platforms: ["darwin"] }, "/x")).toThrow(ManifestError)
+      expect(() => parseManifest({ ...valid, platforms: ["bsd"] }, "/x")).toThrow(/macos/i)
+    })
+
+    it("rejects duplicate platform entries", () => {
+      expect(() => parseManifest({ ...valid, platforms: ["macos", "macos"] }, "/x")).toThrow(
+        /duplicate/i,
+      )
+    })
+
+    it("accepts a tool-level platforms whitelist", () => {
+      const m = parseManifest(
+        {
+          ...valid,
+          tuis: [{ ...valid.tuis[0], platforms: ["macos"] }],
+        },
+        "/x",
+      )
+      expect(m.tuis![0].platforms).toEqual(["macos"])
+    })
+
+    it("rejects an unknown tool-level platform", () => {
+      expect(() =>
+        parseManifest({ ...valid, tuis: [{ ...valid.tuis[0], platforms: ["plan9"] }] }, "/x"),
+      ).toThrow(ManifestError)
+    })
+  })
+
   it("rejects unknown trigger.type", () => {
     const bad = {
       ...valid,

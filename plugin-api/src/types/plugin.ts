@@ -560,6 +560,27 @@ export interface ManifestFile {
    */
   capabilities?: string[]
   /**
+   * Platform whitelist for the WHOLE plugin (opt-in). When present, the
+   * loader skips the entire plugin — every tool, mode, event, hook,
+   * fragment, live-area slot, and its PROMPT.md — unless the effective
+   * platform is in the list. When absent or empty, the plugin loads on
+   * all platforms (the default).
+   *
+   * Each entry is one of the canonical buckets in `KNOWN_PLATFORMS`
+   * (`"macos"`, `"linux"`, `"windows"`); `linux` is the POSIX/UNIX-like
+   * bucket and also covers the BSDs, illumos, AIX, etc. The host detects
+   * the running platform from `process.platform`; an env var
+   * (`MINIMAL_AGENT_PLATFORM`) or CLI flag (`--platform`) overrides the
+   * detected value, and `all` bypasses gating entirely.
+   *
+   * Distinct from {@link ManifestHandler.platforms}: this gates the whole
+   * package; that gates a single tool. A tool's own whitelist is ANDed
+   * with this one (both must admit the platform for the tool to appear).
+   *
+   * Optional. Default: all platforms.
+   */
+  platforms?: string[]
+  /**
    * If `true`, this plugin needs `UNSAFE_HOOKS=1` in the environment
    * to load. The loader skips the plugin (with a clear log) when the
    * env var is unset. Use sparingly — meant for plugins that genuinely
@@ -1437,6 +1458,22 @@ export interface ManifestHandler {
    * (OCP) while each plugin opens up the one field worth showing.
    */
   headerKey?: string
+  /**
+   * Platform whitelist for THIS handler alone (opt-in). Only meaningful
+   * for `trigger.type === "tool"`: when present, the loader drops this one
+   * tool (and its system-prompt slot) unless the effective platform is in
+   * the list, while the rest of the plugin loads normally. When absent or
+   * empty, the tool is available on all platforms (the default).
+   *
+   * Entries use the same canonical buckets as
+   * {@link ManifestFile.platforms} (`"macos"`, `"linux"`, `"windows"`),
+   * and the same env/CLI override + `all` bypass applies. A tool whitelist
+   * is ANDed with the plugin-level whitelist: a tool appears only when
+   * BOTH admit the effective platform.
+   *
+   * Optional. Default: all platforms.
+   */
+  platforms?: string[]
 }
 
 /** Trigger variant tag. */

@@ -177,17 +177,36 @@ export function normalizeArgs(raw: string[]): string[] {
       }
     } else if (head === "provider" && raw[1] !== undefined && !raw[1].startsWith("-")) {
       // Singular provider grammar:
-      //   provider <providerId> login  → --login --provider <providerId>
+      //   provider <providerId> login [--name <name>]  → --login --provider <providerId> [--name <name>]
       //   provider <providerId> models → --list-models <providerId>
       const providerId = raw[1]
       const action = raw[2]
       if (action === "login") {
         out.push("--login", "--provider", providerId)
         start = 3
+        // Consume positional auth-method (e.g. `provider acme login oauth`)
         if (raw[3] !== undefined && !raw[3].startsWith("-")) {
           out.push("--auth-method", raw[3])
           start = 4
         }
+        // Also consume --name <name> and --auth-method <method> flags in any order
+        let i = start
+        while (i < raw.length && raw[i] !== undefined && raw[i].startsWith("--")) {
+          if (raw[i] === "--name" && raw[i + 1] !== undefined && !raw[i + 1].startsWith("-")) {
+            out.push("--name", raw[i + 1])
+            i += 2
+          } else if (
+            raw[i] === "--auth-method" &&
+            raw[i + 1] !== undefined &&
+            !raw[i + 1].startsWith("-")
+          ) {
+            out.push("--auth-method", raw[i + 1])
+            i += 2
+          } else {
+            break
+          }
+        }
+        start = i
       } else if (action === "models") {
         out.push("--list-models", providerId)
         start = 3
