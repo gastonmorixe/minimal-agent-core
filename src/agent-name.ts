@@ -8,7 +8,8 @@
  *      first names baked into the binary. minimal-agent ships no runtime
  *      deps, so the corpus is a plain `const`, not an npm package.
  *   2. {@link resolveAgentName} — the boot-time resolver. Priority:
- *      `MINIMAL_AGENT_AGENT_NAME` env then config `agentName` then off. The
+ *      `MINIMAL_AGENT_AGENT_NAME` env then config `agentName`, defaulting to
+ *      `"auto"` when neither is set (an OFF sentinel opts out). The
  *      sentinel `"auto"` derives a STABLE name from the session id via
  *      {@link autoName} (FNV-1a hash, same primitive as
  *      `session-store.ts#shortHash`), so a resumed session keeps its name
@@ -307,22 +308,28 @@ export interface ResolveAgentNameOptions {
 }
 
 /**
- * Resolve the session's agent name, or `undefined` when naming is off
- * (the default — this feature is fully opt-in).
+ * Resolve the session's agent name, or `undefined` only when naming is
+ * explicitly turned off. Naming is now ON by default: when no source
+ * supplies a value the resolver behaves as if `"auto"` were requested and
+ * derives a deterministic name from `sessionId`.
  *
  * Priority, highest first: `envName` (`MINIMAL_AGENT_AGENT_NAME`), then
  * `configName` (`agentName`). The first source that carries a non-empty
  * value decides, and:
  *
  *   - an OFF sentinel (`"off"`, `"none"`, `"false"`, …) → `undefined`,
- *     so a higher-priority source can veto a lower one
- *     (`MINIMAL_AGENT_AGENT_NAME=off` disables even if config names one);
+ *     so a higher-priority source can veto a lower one and opt out of the
+ *     default (`MINIMAL_AGENT_AGENT_NAME=off` disables even if config names one);
  *   - `"auto"` → {@link autoName} (deterministic from `sessionId`);
  *   - anything else → that literal, sanitized.
  *
  * An empty / whitespace-only source is treated as absent and falls through
  * to the next source (rather than disabling), so `MINIMAL_AGENT_AGENT_NAME=""`
  * doesn't override a configured name.
+ *
+ * If neither source supplies a value, the default is `"auto"` — every
+ * session gets a stable name unless the user explicitly opts out with an
+ * OFF sentinel.
  */
 export function resolveAgentName(opts: ResolveAgentNameOptions): string | undefined {
   for (const candidate of [opts.envName, opts.configName]) {
@@ -334,5 +341,6 @@ export function resolveAgentName(opts: ResolveAgentNameOptions): string | undefi
     if (lower === "auto") return autoName(opts.sessionId)
     return sanitizeLiteral(v)
   }
-  return undefined
+  // No source supplied a value: default to "auto" (naming is on by default).
+  return autoName(opts.sessionId)
 }

@@ -124,13 +124,15 @@ export interface UserConfig {
    */
   mode?: string
   /**
-   * Opt-in per-session agent name, surfaced as one line in the system
-   * prompt (e.g. "You are working as Laura."). Off by default.
+   * Per-session agent name, surfaced as one line in the system
+   * prompt (e.g. "You are working as Laura."). On by default: when the key
+   * is omitted the resolver behaves as `"auto"`.
    *
    *   - a literal like `"Laura"` names the agent that, every session;
-   *   - `"auto"` derives a STABLE name from the session id (so a fleet of
-   *     sub-agents gets distinct, resume-stable names with no config);
-   *   - `"off"` / `"none"` (or omitting the key) disables naming.
+   *   - `"auto"` (the default) derives a STABLE name from the session id (so
+   *     a fleet of sub-agents gets distinct, resume-stable names with no
+   *     config);
+   *   - `"off"` / `"none"` disables naming (the only way to opt out).
    *
    * Override at runtime via `MINIMAL_AGENT_AGENT_NAME` (which also accepts
    * `auto` / a literal / `off`, and takes precedence over this value).

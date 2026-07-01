@@ -1,6 +1,6 @@
 # agent-identity plugin
 
-Gives the agent an opt-in, per-session **display name**, injected as a
+Gives the agent a per-session **display name**, injected as a
 single line in the system prompt:
 
 ```
@@ -8,24 +8,28 @@ You are working as Laura. It is the name people use to refer to you in
 this session; answer to it naturally when addressed.
 ```
 
-Off by default. The agent has no name unless you ask for one.
+On by default. When nothing is configured the agent behaves as if
+`agentName: "auto"` were set and gets a stable name derived from its
+session id. Opt out with an `off` sentinel.
 
-## Turning it on
+## Configuring it
 
 Pick a source (env wins over config):
 
 | Source | Value | Effect |
 |---|---|---|
 | env `MINIMAL_AGENT_AGENT_NAME` | `Laura` | names the agent `Laura` this run |
-| env `MINIMAL_AGENT_AGENT_NAME` | `auto` | a stable name derived from the session id |
+| env `MINIMAL_AGENT_AGENT_NAME` | `auto` | a stable name derived from the session id (the default) |
 | env `MINIMAL_AGENT_AGENT_NAME` | `off` | force-disable (vetoes a configured name) |
 | config `agentName` | `"Laura"` / `"auto"` / `"off"` | same, lower priority than the env var |
+| (nothing set) | | defaults to `auto` |
 
 `~/.minimal-agent/config.jsonc`:
 
 ```jsonc
 {
-  // a literal name, "auto" for a per-session derived name, or "off"
+  // a literal name, "auto" for a per-session derived name (the default),
+  // or "off" to disable naming entirely
   "agentName": "auto"
 }
 ```
@@ -92,5 +96,8 @@ feature is off, defeating the zero-impact-when-off guarantee.
 ## Disabling
 
 `plugins["agent-identity"].enabled = false` in
-`~/.minimal-agent/config.jsonc`, or just leave `agentName` unset (the
-default): with no name resolved, the plugin already emits nothing.
+`~/.minimal-agent/config.jsonc`, or set `agentName` (or
+`MINIMAL_AGENT_AGENT_NAME`) to an off sentinel (`"off"`, `"none"`, …):
+with no name resolved, the plugin emits nothing and the system prompt is
+byte-identical to a build without it. Note that leaving `agentName` unset
+no longer disables naming, it defaults to `auto`.

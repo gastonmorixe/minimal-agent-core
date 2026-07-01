@@ -2,7 +2,7 @@
   "id": "agent-identity",
   "name": "Agent Identity",
   "version": "0.1.0",
-  "description": "Gives the agent an opt-in per-session display name, injected as one line in the system prompt. Off unless `agentName` (config) or MINIMAL_AGENT_AGENT_NAME (env) is set.",
+  "description": "Gives the agent a per-session display name, injected as one line in the system prompt. On by default (defaults to `auto`, a stable name derived from the session id); set `agentName` (config) or MINIMAL_AGENT_AGENT_NAME (env) to a literal, or to an off sentinel to disable.",
   "promptFragments": [
     {
       "id": "name",
