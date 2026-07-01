@@ -69,8 +69,8 @@ describe("autoName", () => {
 })
 
 describe("resolveAgentName", () => {
-  test("is OFF by default (no env, no config)", () => {
-    expect(resolveAgentName({ sessionId: SID })).toBeUndefined()
+  test("defaults to auto when neither env nor config is set", () => {
+    expect(resolveAgentName({ sessionId: SID })).toBe(autoName(SID))
   })
 
   test("env beats config", () => {

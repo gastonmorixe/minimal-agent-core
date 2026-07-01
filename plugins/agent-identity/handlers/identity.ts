@@ -5,7 +5,8 @@
  *
  *   You are working as Laura.
  *
- * or nothing at all when no name is configured (the default). The name is
+ * or nothing at all when naming is explicitly disabled (an off sentinel;
+ * naming is otherwise on by default and resolves to `auto`). The name is
  * resolved once at boot in `src/index.ts` (`resolveAgentName`) and published
  * as `MINIMAL_AGENT_AGENT_NAME`; the loader spreads `process.env` into this
  * fragment's `ctx.env`, so we just read the already-resolved value here. No

@@ -605,12 +605,13 @@ async function main() {
   printStartupHeader()
   printStartupRow("session", c.dim(getSessionId()))
 
-  // Resolve the opt-in per-session agent name ONCE, here, and reuse the value
+  // Resolve the per-session agent name ONCE, here, and reuse the value
   // for both the startup `name` row below and the env publication further down
-  // (the `agent-identity` plugin reads MINIMAL_AGENT_AGENT_NAME). Off by
-  // default: when naming is disabled the resolver returns undefined and no row
-  // is printed, so the banner is byte-identical to today's. See
-  // `src/agent-name.ts` for the resolution priority + the cache rationale.
+  // (the `agent-identity` plugin reads MINIMAL_AGENT_AGENT_NAME). On by
+  // default (as if "auto"): every session gets a stable derived name unless
+  // the user opts out with an OFF sentinel, in which case the resolver returns
+  // undefined and no row is printed. See `src/agent-name.ts` for the
+  // resolution priority + the cache rationale.
   const resolvedAgentName = resolveAgentName({
     sessionId: getSessionId(),
     configName: userConfig.agentName,
