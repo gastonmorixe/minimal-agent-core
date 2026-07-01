@@ -14,6 +14,7 @@
  * @module llm/providers/huggingface/models
  */
 
+import type { Capabilities } from "@minimal-agent/plugin-api/llm/capabilities"
 import type {
   ModelRegistrar,
   ProviderModelSpec,
@@ -104,6 +105,14 @@ export interface HuggingFaceModelSpec {
   displayName?: string
   tags?: string[]
   pricing?: typeof PRICING_HF_GENERIC
+  /**
+   * Per-model capabilities. Defaults to the permissive
+   * {@link CAPS_HUGGINGFACE_CHAT}; pass caps derived from the live
+   * `/v1/models` entry (via `deriveHuggingFaceCapabilities`) to narrow tools /
+   * structured outputs / context window / image modality to what the model's
+   * backends actually offer.
+   */
+  capabilities?: Capabilities
 }
 
 /**
@@ -117,7 +126,7 @@ export function registerHuggingFaceModel(spec: HuggingFaceModelSpec): string {
     surfaceId: "openai-chat-completions",
     displayName: spec.displayName ?? spec.id,
     tags: spec.tags ?? ["huggingface", "openai-compatible"],
-    capabilities: CAPS_HUGGINGFACE_CHAT,
+    capabilities: spec.capabilities ?? CAPS_HUGGINGFACE_CHAT,
     estimateTokens: estimateHuggingFaceTokens,
     pricing: spec.pricing ?? PRICING_HF_GENERIC,
     vendorIds: { firstParty: spec.id },

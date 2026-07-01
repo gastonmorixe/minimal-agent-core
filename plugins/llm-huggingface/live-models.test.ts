@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import {
   epochToIsoDate,
+  fetchHuggingFaceModelCapabilities,
   listHuggingFaceLiveModels,
   mapHuggingFaceLiveModels,
 } from "./live-models.ts"
@@ -99,5 +100,53 @@ describe("listHuggingFaceLiveModels (stubbed fetch)", () => {
     globalThis.fetch = (async () =>
       new Response("<html>not json</html>", { status: 200 })) as unknown as typeof fetch
     expect(await listHuggingFaceLiveModels({ kind: "api-key", key: "x" })).toEqual([])
+  })
+})
+
+describe("fetchHuggingFaceModelCapabilities (stubbed fetch)", () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it("derives caps for the matched model, stripping a :provider suffix", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "meta-llama/Llama-3.1-8B-Instruct",
+              architecture: { input_modalities: ["text"] },
+              providers: [
+                {
+                  provider: "novita",
+                  status: "live",
+                  context_length: 131072,
+                  supports_tools: false,
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch
+    const caps = await fetchHuggingFaceModelCapabilities(
+      { kind: "api-key", key: "x" },
+      "meta-llama/Llama-3.1-8B-Instruct:novita",
+    )
+    expect(caps?.tools.userDefined).toBe(false) // this is the Llama fix
+    expect(caps?.contextWindow).toBe(131072)
+  })
+
+  it("returns null when the model is absent or the fetch fails", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ data: [] }), { status: 200 })) as unknown as typeof fetch
+    expect(
+      await fetchHuggingFaceModelCapabilities({ kind: "api-key", key: "x" }, "nope/nope"),
+    ).toBeNull()
+    globalThis.fetch = (async () => new Response("err", { status: 503 })) as unknown as typeof fetch
+    expect(
+      await fetchHuggingFaceModelCapabilities({ kind: "api-key", key: "x" }, "any/any"),
+    ).toBeNull()
   })
 })
