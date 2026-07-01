@@ -25,7 +25,12 @@ import {
 } from "../../src/llm/index.ts"
 import { type OpenAIChatChunk, translateOpenAIChatStream } from "../llm-openai/index.ts"
 
-import { bootstrapHuggingFace, huggingfaceProviderPlugin, resolveWireModelId } from "./adapter.ts"
+import {
+  bootstrapHuggingFace,
+  huggingfaceProviderPlugin,
+  isToolsUnsupportedError,
+  resolveWireModelId,
+} from "./adapter.ts"
 import {
   buildHuggingfaceApiKeyCredential,
   HUGGINGFACE_API_KEY_AUTH,
@@ -186,5 +191,31 @@ describe("llm-huggingface (OpenAI-compatible gateway, reuses llm-openai's wire l
       return
     }
     expect(text.length).toBeGreaterThan(0)
+  })
+})
+
+describe("isToolsUnsupportedError (retry-without-tools trigger)", () => {
+  it("matches HF's 400/UNSUPPORTED_OPENAI_PARAMS tools rejection", () => {
+    expect(
+      isToolsUnsupportedError(
+        400,
+        '{"error":{"code":"422","error_type":"UNSUPPORTED_OPENAI_PARAMS","message":"The following parameters are not supported for this model: tools","param":"tools"}}',
+      ),
+    ).toBe(true)
+  })
+  it("matches a 405 'Tool calling is not supported' shape", () => {
+    expect(
+      isToolsUnsupportedError(
+        405,
+        '{"error":{"message":"Tool calling is not supported for model: microsoft/phi-4"}}',
+      ),
+    ).toBe(true)
+  })
+  it("does NOT match unrelated errors or non-tool 400s", () => {
+    expect(
+      isToolsUnsupportedError(400, '{"error":{"message":"bad request: temperature out of range"}}'),
+    ).toBe(false)
+    expect(isToolsUnsupportedError(429, "rate limited, please retry")).toBe(false)
+    expect(isToolsUnsupportedError(500, "internal error")).toBe(false)
   })
 })

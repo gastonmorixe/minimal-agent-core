@@ -17,7 +17,12 @@ export {
   huggingfaceApiKeyToSecrets,
   readHuggingfaceApiKey,
 } from "./auth.ts"
-export { CAPS_HUGGINGFACE_CHAT } from "./capabilities.ts"
+export {
+  CAPS_HUGGINGFACE_CHAT,
+  deriveHuggingFaceCapabilities,
+  type HuggingFaceModelCapabilityInfo,
+  type HuggingFaceProviderEntry,
+} from "./capabilities.ts"
 export {
   epochToIsoDate,
   listHuggingFaceLiveModels,
