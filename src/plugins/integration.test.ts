@@ -21,6 +21,8 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
+import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+
 import { PluginLoader } from "./loader.ts"
 import { PluginStream } from "./stream.ts"
 
@@ -29,8 +31,11 @@ const PROJECT_ROOT = resolve(__dirname, "../..")
 // sibling `../minimal-agent-plugins/` repo, discovered via the loader's
 // `siblingDirs` seam (the same path production uses through the cloned
 // `~/.minimal-agent/plugins`). Point the e2e loader at the sibling so these
-// tests exercise the real, migrated plugins from their new home.
+// tests exercise the real, migrated plugins from their new home. On a bare
+// host checkout the sibling is absent, so these suites skip cleanly.
 const SIBLING_ROOT = resolve(PROJECT_ROOT, "..", "minimal-agent-plugins")
+const HAVE_DIFF_VIEW = siblingPluginPresent("ma-diff-view-plugin")
+const HAVE_EMIT_OUTPUT = siblingPluginPresent("ma-emit-output-plugin")
 const CORE_TOOLS = new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"])
 
 async function feed(stream: PluginStream, chunk: string): Promise<void> {
@@ -38,10 +43,11 @@ async function feed(stream: PluginStream, chunk: string): Promise<void> {
   if (p) await p
 }
 
-describe("plugins: end-to-end integration with diff-view", () => {
+describe.skipIf(!HAVE_DIFF_VIEW)("plugins: end-to-end integration with diff-view", () => {
   let loader: PluginLoader
 
   beforeAll(async () => {
+    if (!HAVE_DIFF_VIEW) return
     loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
       siblingDirs: [SIBLING_ROOT],
@@ -203,7 +209,7 @@ describe("plugins: end-to-end integration with diff-view", () => {
 // the convention `<sessionsDir>/<sid>.blobs/<tool_use_id>.raw`.
 // ---------------------------------------------------------------------------
 
-describe("plugins: end-to-end integration with emit-output", () => {
+describe.skipIf(!HAVE_EMIT_OUTPUT)("plugins: end-to-end integration with emit-output", () => {
   const SID = "emit-output-itest-session"
   // ANSI + box-drawing content that would be mangled if the model hand-copied
   // it — the exact thing the tag exists to protect.
@@ -215,6 +221,7 @@ describe("plugins: end-to-end integration with emit-output", () => {
   let loader: PluginLoader
 
   beforeAll(async () => {
+    if (!HAVE_EMIT_OUTPUT) return
     sessionsDir = mkdtempSync(join(tmpdir(), "emit-output-sessions-"))
     workDir = mkdtempSync(join(tmpdir(), "emit-output-cwd-"))
 
