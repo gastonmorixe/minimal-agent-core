@@ -13,6 +13,8 @@
  * @module llm/providers/anthropic/beta-flags
  */
 
+import type { AnthropicRequestKind } from "@minimal-agent/plugin-api/llm/anthropic-request"
+
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import type { ModelEntry } from "../../src/llm/model-registry.ts"
 
@@ -60,31 +62,15 @@ export type AnthropicBetaFlag = (typeof ANTHROPIC_BETA_FLAGS)[keyof typeof ANTHR
  *   `extended-cache-ttl`.
  * - `"conversation"`: full agentic loop with 1h cache + multi-tool.
  */
-export type AnthropicRequestKind = "quota" | "title" | "subtask" | "conversation"
-
-/** Classify the canonical request into one of the kinds above. */
-export function classifyRequest(req: CanonicalRequest): AnthropicRequestKind {
-  // Quota probe: max_tokens 1, string content, no tools, no system.
-  const onlyMsg = req.messages.length === 1 ? req.messages[0] : undefined
-  if (
-    req.generation?.maxOutputTokens === 1 &&
-    !req.tools?.length &&
-    !req.system?.length &&
-    onlyMsg?.role === "user"
-  ) {
-    return "quota"
-  }
-  // Title: structured json_schema output, no thinking, no tools, simple system.
-  if (req.outputFormat?.type === "json_schema" && (req.tools?.length ?? 0) === 0) {
-    return "title"
-  }
-  // Subtask: one user-defined tool, no 1h-ttl breakpoints.
-  const has1hCache = hasAny1hTtl(req)
-  if ((req.tools?.length ?? 0) <= 1 && !has1hCache) {
-    return "subtask"
-  }
-  return "conversation"
-}
+// `classifyRequest` + `AnthropicRequestKind` moved to the leaf anthropic-request
+// wire contract (they are pure canonical-read, shared by any Anthropic-compatible
+// gateway). Re-exported here so this plugin's other importers (headers,
+// quota-probe, index, tests) keep the same import path. The registry-coupled
+// `buildBetaFlags` below stays local.
+export {
+  type AnthropicRequestKind,
+  classifyRequest,
+} from "@minimal-agent/plugin-api/llm/anthropic-request"
 
 function hasAny1hTtl(req: CanonicalRequest): boolean {
   const checkBlocks = (blocks?: { cache?: { ttl?: string } }[]) =>
