@@ -19,6 +19,7 @@ import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { SessionStore } from "../session-store.ts"
+import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"
 
@@ -26,8 +27,10 @@ import { PluginLoader } from "./loader.ts"
 // repo (Wave G physical move), discovered via the loader's `siblingDirs` seam —
 // the same path production uses through the cloned `~/.minimal-agent/plugins`.
 // Point the e2e loader at the sibling so this test exercises the real, migrated
-// plugin from its new home.
+// plugin from its new home. On a bare host checkout the sibling is absent, so
+// this suite skips cleanly (see describe.skipIf below).
 const SIBLING_ROOT = resolve(import.meta.dirname, "..", "..", "..", "minimal-agent-plugins")
+const HAVE_PLUGIN = siblingPluginPresent("ma-session-history-plugin")
 
 const sessionsDir = mkdtempSync(join(tmpdir(), "session-history-e2e-"))
 afterAll(() => rmSync(sessionsDir, { recursive: true, force: true }))
@@ -35,6 +38,10 @@ afterAll(() => rmSync(sessionsDir, { recursive: true, force: true }))
 let loader: PluginLoader
 
 beforeAll(async () => {
+  // Bare host checkout: the sibling plugin is absent, the suite below is
+  // skipped, so this setup would only build a loader that can't find the
+  // plugin. Skip it too.
+  if (!HAVE_PLUGIN) return
   const store = SessionStore.open({
     sid: "e2e-sid",
     model: "test-model",
@@ -81,7 +88,7 @@ async function callTool(input: Record<string, unknown>): Promise<{
   return r
 }
 
-describe("SessionHistory end-to-end through the real loader + store", () => {
+describe.skipIf(!HAVE_PLUGIN)("SessionHistory end-to-end through the real loader + store", () => {
   it("the tool is advertised from the manifest", () => {
     const tools = loader.getExtraTools()
     const tool = tools.find((t) => t.name === "SessionHistory")
