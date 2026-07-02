@@ -12,13 +12,14 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { clearModelRegistry, clearProviderRegistry } from "../../src/llm/model-registry.ts"
-import { clearProviderPlugins, registerProviderPlugin } from "../../src/llm/provider-plugin.ts"
-import { resolveProviderSessionInfo } from "../../src/llm/provider-session.ts"
-import { waferProviderPlugin } from "../llm-wafer/adapter.ts"
+import { waferProviderPlugin } from "../../plugins/llm-wafer/adapter.ts"
+
+import { clearModelRegistry, clearProviderRegistry } from "./model-registry.ts"
+import { clearProviderPlugins, registerProviderPlugin } from "./provider-plugin.ts"
+import { resolveProviderSessionInfo } from "./provider-session.ts"
 
 async function getOpencodePlugin() {
-  const mod = await import("../llm-opencode/adapter.ts")
+  const mod = await import("../../plugins/llm-opencode/adapter.ts")
   return mod.opencodeProviderPlugin
 }
 
@@ -37,7 +38,7 @@ describe("resolveProviderSessionInfo with providerId scoping", () => {
     ocPlugin.register()
     registerProviderPlugin(ocPlugin)
 
-    const { bootstrapWafer } = await import("../llm-wafer/adapter.ts")
+    const { bootstrapWafer } = await import("../../plugins/llm-wafer/adapter.ts")
     bootstrapWafer()
     registerProviderPlugin(waferProviderPlugin)
 
