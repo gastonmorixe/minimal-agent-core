@@ -723,6 +723,18 @@ export interface PromptFragmentContext {
    * fragments. Consumers must narrow: `ctx.registerDynamicTools?.(...)`.
    */
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void
+  /**
+   * Frozen capability host carrying ONLY the namespaces this plugin's
+   * manifest declared in `capabilities: [...]` (deny-by-default). Lets a
+   * prompt-fragment producer read host data or run a host-brokered action
+   * (e.g. `memory`'s summary regen calling `ctx.host.llm.complete(...)`)
+   * WITHOUT importing `src/...`. Mirrors {@link TUIContext.host}.
+   *
+   * Optional + in-process only: `undefined` for a plugin that declared no
+   * capabilities, for subprocess fragments, and for back-compat callers.
+   * Consumers MUST narrow (`if (!ctx.host?.llm) return`).
+   */
+  host?: PluginHost
 }
 
 /**

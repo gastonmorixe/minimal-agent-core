@@ -21,6 +21,7 @@ import {
   resolveSessionsDir,
 } from "@minimal-agent/plugin-api/utils/agent-paths"
 
+import { getAuth } from "../../auth.ts"
 import type { PluginLogger } from "../../diagnostic-bus.ts"
 import {
   findModel,
@@ -32,6 +33,7 @@ import {
   setDefaultModelId,
 } from "../../llm/model-registry.ts"
 import { resolveProviderSessionInfo } from "../../llm/provider-session.ts"
+import { canonicalSendFn } from "../../llm/transport/canonical-send.ts"
 import { getSessionTokens } from "../../session-tokens.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
@@ -118,6 +120,52 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
                 turns: t.turns,
                 contextSize: t.contextSize,
               }
+            },
+          }),
+        }
+      : {}),
+    ...(has("llm:complete")
+      ? {
+          llm: Object.freeze({
+            // One-shot, non-streaming completion. Resolve credentials, build a
+            // non-streaming SendOptions, run the transport, and drain the
+            // generator to a single string. The plugin never touches auth,
+            // canonicalSendFn, or the SendOptions shape.
+            complete: async (req: {
+              model?: string
+              system: string
+              userText: string
+              maxTokens?: number
+              timeoutMs?: number
+            }): Promise<string> => {
+              const auth = await getAuth()
+              const gen = canonicalSendFn({
+                auth,
+                ...(req.model ? { model: req.model } : {}),
+                system: [{ type: "text", text: req.system }],
+                messages: [{ role: "user", content: [{ type: "text", text: req.userText }] }],
+                maxTokens: req.maxTokens ?? 8192,
+                stream: false,
+                requestType: "title",
+              })
+              let text = ""
+              const run = (async () => {
+                while (true) {
+                  const { value, done } = await gen.next()
+                  if (done) return text
+                  text += value
+                }
+              })()
+              if (req.timeoutMs === undefined) return run
+              return await Promise.race([
+                run,
+                new Promise<string>((_, reject) =>
+                  setTimeout(
+                    () => reject(new Error(`llm.complete timed out after ${req.timeoutMs}ms`)),
+                    req.timeoutMs,
+                  ),
+                ),
+              ])
             },
           }),
         }

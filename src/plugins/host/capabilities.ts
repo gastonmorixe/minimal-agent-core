@@ -56,6 +56,7 @@ export type CapabilityToken =
   | "models:read"
   | "models:register"
   | "session-info:read"
+  | "llm:complete"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -72,6 +73,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "models:read",
   "models:register",
   "session-info:read",
+  "llm:complete",
   "paths",
   "transport:registry",
   "clock",
@@ -434,6 +436,43 @@ export interface SessionInfoReadApi {
 }
 
 // ---------------------------------------------------------------------------
+// llm:complete (Wave G)
+// ---------------------------------------------------------------------------
+
+/**
+ * A one-shot, non-streaming LLM completion request. Provider-neutral: the
+ * plugin supplies a system prompt + a single user text and gets the model's
+ * full response as a string. The host resolves credentials (`getAuth`),
+ * builds the wire request, runs the transport (`canonicalSendFn`), and drains
+ * the stream to text — the plugin never touches auth, the transport, or the
+ * `SendOptions` shape.
+ */
+export interface LlmCompleteRequest {
+  /** Model id to complete against. Absent ⇒ the host's default summary model. */
+  model?: string
+  /** System prompt text. */
+  system: string
+  /** The single user turn's text. */
+  userText: string
+  /** Max output tokens. Host applies a sensible default when absent. */
+  maxTokens?: number
+  /** Per-call timeout in ms. Host applies a default when absent. */
+  timeoutMs?: number
+}
+
+/**
+ * `llm:complete` — a host-run, one-shot text completion so a plugin (e.g.
+ * `memory`'s summary regen) can call the model WITHOUT importing
+ * `getAuth` / `canonicalSendFn` from `src/`. The whole auth → send → drain
+ * pipeline stays host-side; the plugin passes content and receives text.
+ * Reserved for background, non-interactive completions (summaries, titles).
+ */
+export interface LlmCompleteApi {
+  /** Run a one-shot completion; resolves to the model's full text response. */
+  complete(req: LlmCompleteRequest): Promise<string>
+}
+
+// ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------
 
@@ -451,6 +490,7 @@ export interface PluginHost {
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
   readonly sessionInfo?: SessionInfoReadApi
+  readonly llm?: LlmCompleteApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — the host-brokered store a transport-PROVIDER plugin

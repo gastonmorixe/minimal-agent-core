@@ -23,6 +23,7 @@ import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 
 import { createPluginLogger } from "../../diagnostic-bus.ts"
 import { agentContextToEnv } from "../agent-context.ts"
+import type { PluginHost } from "../host/capabilities.ts"
 import type {
   AgentContext,
   LoadedPlugin,
@@ -82,6 +83,7 @@ export function startFragment(
   pluginId: string,
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
+  host?: PluginHost,
 ): Promise<string | null> {
   return runFragment(
     frag,
@@ -90,6 +92,7 @@ export function startFragment(
     pluginId,
     modelInfoProvider,
     registerDynamicTools,
+    host,
   ).catch((e) => {
     logger(
       `${packageDir}: prompt fragment "${frag.id}" failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -110,6 +113,7 @@ async function runFragment(
   pluginId: string,
   modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined,
   registerDynamicTools?: (handlers: ResolvedHandler[]) => void,
+  host?: PluginHost,
 ): Promise<string | null> {
   const ctrl = new AbortController()
   // The loader-level timeout in resolveFragments races this; if it wins,
@@ -154,6 +158,11 @@ async function runFragment(
       // skills plugin) can push skill-declared tools into the loader's tool
       // index. Absent for subprocess fragments; the Module path only.
       ...(registerDynamicTools ? { registerDynamicTools } : {}),
+      // Capability host for THIS plugin (deny-by-default: undefined when the
+      // plugin declared no `capabilities`). Lets a fragment producer run a
+      // host-brokered action (e.g. memory's `ctx.host.llm.complete`) without
+      // importing `src/`. Module fragments only.
+      ...(host ? { host } : {}),
     }
     const out = await fn(ctx)
     return typeof out === "string" ? out : null

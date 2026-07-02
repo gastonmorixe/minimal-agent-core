@@ -60,6 +60,7 @@ import {
   globalMemoryPath as storeGlobalMemoryPath,
   projectMemoryPath as storeProjectMemoryPath,
 } from "../lib/store.ts"
+import type { CompleteFn } from "../lib/summarize.ts"
 import { refreshAndRender, summaryPathFor } from "../lib/summary-refresh.ts"
 
 // ---------------------------------------------------------------------------
@@ -117,6 +118,8 @@ type InjectStrategy = (args: {
   scope: "global" | "project"
   cfg: MemoryConfig
   refresh: typeof refreshAndRender
+  /** Host-brokered one-shot completion (`ctx.host.llm.complete`), or undefined. */
+  completeFn?: CompleteFn
 }) => Promise<string[]>
 
 /** Strategy: emit nothing. The model relies on `MemoryTool` to query. */
@@ -130,7 +133,14 @@ const verbatimStrategy: InjectStrategy = async ({ label, memoryPath }) => {
 }
 
 /** Strategy: invoke the LLM-derived summary pipeline. Opt-in. */
-const summaryStrategy: InjectStrategy = async ({ label, memoryPath, scope, cfg, refresh }) => {
+const summaryStrategy: InjectStrategy = async ({
+  label,
+  memoryPath,
+  scope,
+  cfg,
+  refresh,
+  completeFn,
+}) => {
   // refreshAndRender reads the file itself, so we don't pre-read here.
   // It also already short-circuits if the file is missing/empty.
   const result = await refresh({
@@ -138,6 +148,7 @@ const summaryStrategy: InjectStrategy = async ({ label, memoryPath, scope, cfg, 
     memoryPath,
     summaryPath: summaryPathFor(memoryPath),
     cfg: cfg.summary,
+    ...(completeFn ? { completeFn } : {}),
   })
   if (!result.text) return []
   return [`### ${label} (\`${memoryPath}\`)`, "", result.text, ""]
@@ -215,12 +226,21 @@ export default async function loadMemories(
   const gPath = globalMemoryPath()
   const pPath = projectMemoryPath(ctx.cwd)
 
+  // Host-brokered LLM completion for the summary-regen strategy (the
+  // `llm:complete` capability). Deny-by-default: `undefined` when the plugin
+  // didn't declare the capability or the host doesn't grant it, in which case
+  // the summary strategy skips regen and uses the last-good summary.
+  const completeFn = ctx.host?.llm?.complete
+    ? (req: Parameters<CompleteFn>[0]) => ctx.host!.llm!.complete(req)
+    : undefined
+
   const globalSection = await strategy({
     label: "Global",
     memoryPath: gPath,
     scope: "global",
     cfg,
     refresh,
+    ...(completeFn ? { completeFn } : {}),
   })
   const projectSection = await strategy({
     label: "Project",
@@ -228,6 +248,7 @@ export default async function loadMemories(
     scope: "project",
     cfg,
     refresh,
+    ...(completeFn ? { completeFn } : {}),
   })
 
   if (globalSection.length === 0 && projectSection.length === 0) return ""
