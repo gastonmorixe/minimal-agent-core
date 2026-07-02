@@ -22,6 +22,8 @@ import type { CanonicalEvent } from "@minimal-agent/plugin-api/llm/canonical-eve
 import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
 
+import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
+
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { clearModelRegistry, clearProviderRegistry, resolveModelForProvider } from "./index.ts"
 import {
@@ -32,7 +34,12 @@ import {
 import { clearProviderPlugins } from "./provider-plugin.ts"
 import { run } from "./run.ts"
 
-const PLUGINS_DIR = join(import.meta.dir, "../../plugins")
+// Wave G: the ollama provider migrated to the sibling ../minimal-agent-plugins
+// repo. Discover from BOTH the embedded plugins dir and the sibling roots (the
+// same resolution the bootstrap uses), so this integration test exercises the
+// migrated provider.json from its new home.
+const EMBEDDED_DIR = join(import.meta.dir, "../..")
+const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
 
 /** A canned Ollama `/api/chat` NDJSON response (thinking + content + usage). */
 const OLLAMA_NDJSON = [
@@ -94,7 +101,7 @@ describe("ollama provider integration (discovered plugin through host run())", (
     clearProviderRegistry()
     clearProviderPlugins()
 
-    const ids = await registerDiscoveredProviders(PLUGINS_DIR)
+    const ids = await registerDiscoveredProviders(PLUGIN_ROOTS)
     expect(ids).toContain("ollama")
     // Activate through the real ctx (models:register + providers:register).
     activateDiscoveredProviders(buildProviderSetupContext())
@@ -113,7 +120,7 @@ describe("ollama provider integration (discovered plugin through host run())", (
     clearModelRegistry()
     clearProviderRegistry()
     clearProviderPlugins()
-    await registerDiscoveredProviders(PLUGINS_DIR)
+    await registerDiscoveredProviders(PLUGIN_ROOTS)
     activateDiscoveredProviders(buildProviderSetupContext())
 
     const captured: { url?: string; body?: string; auth?: string } = {}
