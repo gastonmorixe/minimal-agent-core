@@ -34,6 +34,8 @@
     "./llm/token-estimate": "./src/llm/token-estimate.ts",
     "./llm/modality-check": "./src/llm/modality-check.ts",
     "./llm/canonical-events": "./src/llm/canonical-events.ts",
+    "./llm/openai-chat": "./src/llm/openai-chat.ts",
+    "./llm/anthropic-stream": "./src/llm/anthropic-stream.ts",
     "./llm/canonical-request": "./src/llm/canonical-request.ts",
     "./llm/canonical-messages": "./src/llm/canonical-messages.ts",
     "./llm/canonical-tools": "./src/llm/canonical-tools.ts",
