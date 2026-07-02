@@ -18,6 +18,7 @@
     "./utils/ansi": "./src/utils/ansi.ts",
     "./utils/shell-args": "./src/utils/shell-args.ts",
     "./utils/mode-style": "./src/utils/mode-style.ts",
+    "./utils/file-lock": "./src/utils/file-lock.ts",
     "./utils/usage-report": "./src/utils/usage-report.ts",
     "./utils/usage-render": "./src/utils/usage-render.ts",
     "./utils/sse-parser": "./src/utils/sse-parser.ts",
