@@ -23,6 +23,7 @@ import { userText } from "@minimal-agent/plugin-api/llm/canonical-messages"
 import type { RunContext } from "@minimal-agent/plugin-api/llm/provider-auth"
 
 import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
+import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
 import { clearModelRegistry, clearProviderRegistry, resolveModelForProvider } from "./index.ts"
@@ -40,6 +41,12 @@ import { run } from "./run.ts"
 // migrated provider.json from its new home.
 const EMBEDDED_DIR = join(import.meta.dir, "../..")
 const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
+
+// The ollama provider now lives in the sibling ../minimal-agent-plugins repo.
+// On a bare host checkout without that repo, discovery finds no ollama, so this
+// integration test skips cleanly rather than failing. (Shared helper from
+// src/test-utils/sibling-repo.ts.)
+const HAVE_OLLAMA = siblingPluginPresent("ma-llm-ollama-plugin")
 
 /** A canned Ollama `/api/chat` NDJSON response (thinking + content + usage). */
 const OLLAMA_NDJSON = [
@@ -95,81 +102,86 @@ async function collect(stream: AsyncIterable<CanonicalEvent>): Promise<Canonical
   return out
 }
 
-describe("ollama provider integration (discovered plugin through host run())", () => {
-  it("discovers + registers the plugin via the setup-context seams", async () => {
-    clearModelRegistry()
-    clearProviderRegistry()
-    clearProviderPlugins()
+describe.skipIf(!HAVE_OLLAMA)(
+  "ollama provider integration (discovered plugin through host run())",
+  () => {
+    it("discovers + registers the plugin via the setup-context seams", async () => {
+      clearModelRegistry()
+      clearProviderRegistry()
+      clearProviderPlugins()
 
-    const ids = await registerDiscoveredProviders(PLUGIN_ROOTS)
-    expect(ids).toContain("ollama")
-    // Activate through the real ctx (models:register + providers:register).
-    activateDiscoveredProviders(buildProviderSetupContext())
+      const ids = await registerDiscoveredProviders(PLUGIN_ROOTS)
+      expect(ids).toContain("ollama")
+      // Activate through the real ctx (models:register + providers:register).
+      activateDiscoveredProviders(buildProviderSetupContext())
 
-    // The model + adapter landed in the canonical registries via ctx alone.
-    const model = resolveModelForProvider("deepseek-v4-flash", "ollama")
-    expect(model.providerId).toBe("ollama")
-    expect(model.surfaceId).toBe("custom")
-    expect(model.capabilities.contextWindow).toBe(1_000_000)
-    expect(model.capabilities.thinking.adaptive).toBe(true)
+      // The model + adapter landed in the canonical registries via ctx alone.
+      const model = resolveModelForProvider("deepseek-v4-flash", "ollama")
+      expect(model.providerId).toBe("ollama")
+      expect(model.surfaceId).toBe("custom")
+      expect(model.capabilities.contextWindow).toBe(1_000_000)
+      expect(model.capabilities.thinking.adaptive).toBe(true)
 
-    clearProviderPlugins()
-  })
-
-  it("runs a request end-to-end: builds the native body, streams NDJSON back", async () => {
-    clearModelRegistry()
-    clearProviderRegistry()
-    clearProviderPlugins()
-    await registerDiscoveredProviders(PLUGIN_ROOTS)
-    activateDiscoveredProviders(buildProviderSetupContext())
-
-    const captured: { url?: string; body?: string; auth?: string } = {}
-    const ctx: RunContext = {
-      auth: { kind: "api-key", key: "ollama-test-key" },
-      sessionId: "test-session",
-      networkClient: fakeNetworkClient(captured),
-    }
-
-    const req: CanonicalRequest = {
-      modelId: "deepseek-v4-flash",
-      providerId: "ollama",
-      messages: [userText("Hi")],
-      thinking: { mode: "adaptive" },
-      effort: "high",
-    }
-
-    const events = await collect(run(req, { context: ctx }))
-
-    // Request reached the native Ollama endpoint with Bearer auth + native body.
-    expect(captured.url).toBe("https://ollama.com/api/chat")
-    expect(captured.auth).toBe("Bearer ollama-test-key")
-    const body = JSON.parse(captured.body ?? "{}")
-    expect(body.model).toBe("deepseek-v4-flash")
-    expect(body.stream).toBe(true)
-    // DeepSeek V4 advertises discrete reasoning levels, so an explicit
-    // effort is forwarded on the native `think` field as the level string.
-    expect(body.think).toBe("high")
-    expect(body.messages).toEqual([{ role: "user", content: "Hi" }])
-
-    // The NDJSON translated into canonical events: thinking → text → usage.
-    const types = events.map((e) => e.type)
-    expect(types[0]).toBe("message_start")
-    expect(types).toContain("thinking_delta")
-    expect(types).toContain("text_delta")
-    expect(types.at(-1)).toBe("message_stop")
-
-    const text = events
-      .filter((e): e is Extract<CanonicalEvent, { type: "text_delta" }> => e.type === "text_delta")
-      .map((e) => e.text)
-      .join("")
-    expect(text).toBe("Hello world")
-
-    const delta = events.find((e) => e.type === "message_delta")
-    expect(delta).toMatchObject({
-      stopReason: "end_turn",
-      usage: { inputTokens: 12, outputTokens: 4 },
+      clearProviderPlugins()
     })
 
-    clearProviderPlugins()
-  })
-})
+    it("runs a request end-to-end: builds the native body, streams NDJSON back", async () => {
+      clearModelRegistry()
+      clearProviderRegistry()
+      clearProviderPlugins()
+      await registerDiscoveredProviders(PLUGIN_ROOTS)
+      activateDiscoveredProviders(buildProviderSetupContext())
+
+      const captured: { url?: string; body?: string; auth?: string } = {}
+      const ctx: RunContext = {
+        auth: { kind: "api-key", key: "ollama-test-key" },
+        sessionId: "test-session",
+        networkClient: fakeNetworkClient(captured),
+      }
+
+      const req: CanonicalRequest = {
+        modelId: "deepseek-v4-flash",
+        providerId: "ollama",
+        messages: [userText("Hi")],
+        thinking: { mode: "adaptive" },
+        effort: "high",
+      }
+
+      const events = await collect(run(req, { context: ctx }))
+
+      // Request reached the native Ollama endpoint with Bearer auth + native body.
+      expect(captured.url).toBe("https://ollama.com/api/chat")
+      expect(captured.auth).toBe("Bearer ollama-test-key")
+      const body = JSON.parse(captured.body ?? "{}")
+      expect(body.model).toBe("deepseek-v4-flash")
+      expect(body.stream).toBe(true)
+      // DeepSeek V4 advertises discrete reasoning levels, so an explicit
+      // effort is forwarded on the native `think` field as the level string.
+      expect(body.think).toBe("high")
+      expect(body.messages).toEqual([{ role: "user", content: "Hi" }])
+
+      // The NDJSON translated into canonical events: thinking → text → usage.
+      const types = events.map((e) => e.type)
+      expect(types[0]).toBe("message_start")
+      expect(types).toContain("thinking_delta")
+      expect(types).toContain("text_delta")
+      expect(types.at(-1)).toBe("message_stop")
+
+      const text = events
+        .filter(
+          (e): e is Extract<CanonicalEvent, { type: "text_delta" }> => e.type === "text_delta",
+        )
+        .map((e) => e.text)
+        .join("")
+      expect(text).toBe("Hello world")
+
+      const delta = events.find((e) => e.type === "message_delta")
+      expect(delta).toMatchObject({
+        stopReason: "end_turn",
+        usage: { inputTokens: 12, outputTokens: 4 },
+      })
+
+      clearProviderPlugins()
+    })
+  },
+)
