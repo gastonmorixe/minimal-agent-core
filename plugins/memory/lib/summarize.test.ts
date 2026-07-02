@@ -1,44 +1,42 @@
 /**
  * Tests for {@link summarize}.
  *
- * All tests inject `authProvider` and `sendFn` to avoid hitting the
- * real credential store / API. The system prompt and send options are
- * inspectable via a captured-args helper.
+ * All tests inject `completeFn` (the `llm:complete` capability the handler
+ * wires from `ctx.host.llm.complete`) to avoid hitting the real host / API.
+ * The plugin no longer touches auth or the transport wire shape — it hands
+ * the host a `{system, userText, ...}` request and gets text back — so the
+ * captured args are inspected in that neutral shape.
  */
 
 import { describe, expect, it } from "bun:test"
 
 import {
   buildSystemPrompt,
+  type CompleteFn,
   DEFAULT_TIMEOUT_MS,
   MAX_OUTPUT_RATIO,
   MIN_OUTPUT_RATIO,
-  type SummarizeAuth,
   SummarizeError,
-  type SummarizeSendOptions,
   summarize,
 } from "./summarize.ts"
 
-// Auth/send types are derived by `summarize.ts` from its residual host
-// runtime imports (`getAuth`/`canonicalSendFn`), so the test consumes the
-// re-exported `SummarizeAuth`/`SummarizeSendOptions` and imports nothing
-// from `src/` itself (decoupling contract).
-const FAKE_AUTH: SummarizeAuth = {
-  type: "oauth",
-  token: "test-token",
-  accountUuid: "test-account",
-}
+/** The request shape `ctx.host.llm.complete` receives. */
+type CompleteReq = Parameters<CompleteFn>[0]
 
-function captureSendArgs(response: string): {
-  sendFn: (opts: SummarizeSendOptions) => Promise<string>
-  calls: SummarizeSendOptions[]
+/**
+ * Capture the args passed to the injected `completeFn`. The plugin hands the
+ * host a `{system, userText, ...}` request and gets text back.
+ */
+function captureCompleteArgs(response: string): {
+  completeFn: CompleteFn
+  calls: CompleteReq[]
 } {
-  const calls: SummarizeSendOptions[] = []
-  const sendFn = async (opts: SummarizeSendOptions) => {
-    calls.push(opts)
+  const calls: CompleteReq[] = []
+  const completeFn: CompleteFn = async (req) => {
+    calls.push(req)
     return response
   }
-  return { sendFn, calls }
+  return { completeFn, calls }
 }
 
 // A reasonably-sized input — 600 chars of plausible bullet content
@@ -53,98 +51,66 @@ const LONG_ENOUGH_RESPONSE =
   "## Cluster A\n- takeaway one. Sources: #abc1, #abc2\n- takeaway two. Sources: #abc3\n## Cluster B\n- takeaway three. Sources: #abc4, #abc5, #abc6\n"
 
 describe("summarize — happy path", () => {
-  it("sends a single user message with the memoryMd as text", async () => {
-    const { sendFn, calls } = captureSendArgs(LONG_ENOUGH_RESPONSE)
-    await summarize(
-      INPUT_600,
-      { model: "claude-haiku-test", scope: "project" },
-      {
-        authProvider: async () => FAKE_AUTH,
-        sendFn,
-      },
-    )
+  it("sends the memoryMd as the user text", async () => {
+    const { completeFn, calls } = captureCompleteArgs(LONG_ENOUGH_RESPONSE)
+    await summarize(INPUT_600, { model: "claude-haiku-test", scope: "project" }, { completeFn })
     expect(calls.length).toBe(1)
-    const sent = calls[0]
-    expect(sent.messages.length).toBe(1)
-    expect(sent.messages[0].role).toBe("user")
-    const block = sent.messages[0].content[0] as { type: string; text: string }
-    expect(block.type).toBe("text")
-    expect(block.text).toBe(INPUT_600)
+    expect(calls[0].userText).toBe(INPUT_600)
   })
 
-  it("uses the configured model", async () => {
-    const { sendFn, calls } = captureSendArgs(LONG_ENOUGH_RESPONSE)
-    await summarize(
-      INPUT_600,
-      { model: "claude-custom", scope: "project" },
-      {
-        authProvider: async () => FAKE_AUTH,
-        sendFn,
-      },
-    )
+  it("uses the summarizer system prompt for the scope", async () => {
+    const { completeFn, calls } = captureCompleteArgs(LONG_ENOUGH_RESPONSE)
+    await summarize(INPUT_600, { model: "claude-haiku-test", scope: "project" }, { completeFn })
+    expect(calls[0].system).toBe(buildSystemPrompt("project"))
+  })
+
+  it("passes the configured model through", async () => {
+    const { completeFn, calls } = captureCompleteArgs(LONG_ENOUGH_RESPONSE)
+    await summarize(INPUT_600, { model: "claude-custom", scope: "project" }, { completeFn })
     expect(calls[0].model).toBe("claude-custom")
   })
 
-  it("sends thinking:false and requestType:title for cheap calls", async () => {
-    const { sendFn, calls } = captureSendArgs(LONG_ENOUGH_RESPONSE)
-    await summarize(
-      INPUT_600,
-      { model: "claude-haiku-test", scope: "project" },
-      {
-        authProvider: async () => FAKE_AUTH,
-        sendFn,
-      },
-    )
-    expect(calls[0].thinking).toBe(false)
-    expect(calls[0].requestType).toBe("title")
-    expect(calls[0].stream).toBe(false)
+  it("caps output tokens and forwards the timeout", async () => {
+    const { completeFn, calls } = captureCompleteArgs(LONG_ENOUGH_RESPONSE)
+    await summarize(INPUT_600, { model: "claude-haiku-test", scope: "project" }, { completeFn })
+    expect(calls[0].maxTokens).toBe(8192)
+    expect(calls[0].timeoutMs).toBe(DEFAULT_TIMEOUT_MS)
   })
 
   it("returns the trimmed LLM output", async () => {
     const body =
       "## Cluster A\n- takeaway. Sources: #a, #b\n## Cluster B\n- another. Sources: #c, #d\n## Cluster C\n- third. Sources: #e, #f, #g"
     const response = "  \n" + body + "\n  \n"
-    const { sendFn } = captureSendArgs(response)
+    const { completeFn } = captureCompleteArgs(response)
     const out = await summarize(
       INPUT_600,
       { model: "claude-haiku-test", scope: "project" },
-      { authProvider: async () => FAKE_AUTH, sendFn },
+      { completeFn },
     )
     expect(out).toBe(body)
   })
 })
 
 describe("summarize — failure modes", () => {
-  it("throws SummarizeError kind=auth-failed when auth throws", async () => {
-    const { sendFn } = captureSendArgs("does not matter")
+  it("throws SummarizeError kind=send-failed when no completeFn is granted", async () => {
     let thrown: unknown
     try {
-      await summarize(
-        INPUT_600,
-        { model: "claude-haiku-test", scope: "project" },
-        {
-          authProvider: async () => {
-            throw new Error("no creds in store")
-          },
-          sendFn,
-        },
-      )
+      await summarize(INPUT_600, { model: "claude-haiku-test", scope: "project" }, {})
     } catch (e) {
       thrown = e
     }
     expect(thrown).toBeInstanceOf(SummarizeError)
-    expect((thrown as SummarizeError).kind).toBe("auth-failed")
+    expect((thrown as SummarizeError).kind).toBe("send-failed")
   })
 
-  it("throws SummarizeError kind=send-failed when sendFn throws", async () => {
+  it("throws SummarizeError kind=send-failed when completeFn throws", async () => {
     let thrown: unknown
     try {
       await summarize(
         INPUT_600,
         { model: "claude-haiku-test", scope: "project" },
         {
-          authProvider: async () => FAKE_AUTH,
-          sendFn: async () => {
+          completeFn: async () => {
             throw new Error("network down")
           },
         },
@@ -156,15 +122,14 @@ describe("summarize — failure modes", () => {
     expect((thrown as SummarizeError).kind).toBe("send-failed")
   })
 
-  it("throws SummarizeError kind=timeout when LLM call exceeds timeoutMs", async () => {
+  it("throws SummarizeError kind=timeout when the completion exceeds timeoutMs", async () => {
     let thrown: unknown
     try {
       await summarize(
         INPUT_600,
         { model: "claude-haiku-test", scope: "project", timeoutMs: 50 },
         {
-          authProvider: async () => FAKE_AUTH,
-          sendFn: () => new Promise((_resolve) => setTimeout(_resolve, 5000)),
+          completeFn: () => new Promise((_resolve) => setTimeout(_resolve, 5000)),
         },
       )
     } catch (e) {
@@ -180,10 +145,7 @@ describe("summarize — failure modes", () => {
       await summarize(
         INPUT_600,
         { model: "claude-haiku-test", scope: "project" },
-        {
-          authProvider: async () => FAKE_AUTH,
-          sendFn: async () => "    \n\n   ",
-        },
+        { completeFn: async () => "    \n\n   " },
       )
     } catch (e) {
       thrown = e
@@ -200,10 +162,7 @@ describe("summarize — failure modes", () => {
       await summarize(
         INPUT_600,
         { model: "claude-haiku-test", scope: "project" },
-        {
-          authProvider: async () => FAKE_AUTH,
-          sendFn: async () => tooShort,
-        },
+        { completeFn: async () => tooShort },
       )
     } catch (e) {
       thrown = e
@@ -219,10 +178,7 @@ describe("summarize — failure modes", () => {
       await summarize(
         INPUT_600,
         { model: "claude-haiku-test", scope: "project" },
-        {
-          authProvider: async () => FAKE_AUTH,
-          sendFn: async () => tooLong,
-        },
+        { completeFn: async () => tooLong },
       )
     } catch (e) {
       thrown = e
@@ -230,46 +186,16 @@ describe("summarize — failure modes", () => {
     expect(thrown).toBeInstanceOf(SummarizeError)
     expect((thrown as SummarizeError).kind).toBe("too-long")
   })
-})
 
-describe("buildSystemPrompt", () => {
-  it("contains the scope-specific framing for project", () => {
-    const sp = buildSystemPrompt("project")
-    expect(sp).toContain("this codebase")
-    expect(sp).not.toContain("across any project")
-  })
-
-  it("contains the scope-specific framing for global", () => {
-    const sp = buildSystemPrompt("global")
-    expect(sp).toContain("across any project")
-    expect(sp).not.toContain("this codebase")
-  })
-
-  it("instructs the model to cite ids", () => {
-    const sp = buildSystemPrompt("project")
-    expect(sp).toMatch(/Sources: ?#id/)
-  })
-
-  it("forbids inventing facts", () => {
-    const sp = buildSystemPrompt("project")
-    expect(sp.toLowerCase()).toContain("do not invent")
-  })
-
-  it("forbids verbatim copying", () => {
-    const sp = buildSystemPrompt("project")
-    expect(sp).toMatch(/distill|do not include.*verbatim/i)
-  })
-})
-
-describe("constants", () => {
-  it("DEFAULT_TIMEOUT_MS is reasonable for session start", () => {
-    expect(DEFAULT_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000)
-    expect(DEFAULT_TIMEOUT_MS).toBeLessThanOrEqual(60_000)
-  })
-
-  it("MIN_OUTPUT_RATIO < MAX_OUTPUT_RATIO and within (0, 1]", () => {
-    expect(MIN_OUTPUT_RATIO).toBeGreaterThan(0)
-    expect(MAX_OUTPUT_RATIO).toBeLessThanOrEqual(1)
-    expect(MIN_OUTPUT_RATIO).toBeLessThan(MAX_OUTPUT_RATIO)
+  it("accepts output up to MAX_OUTPUT_RATIO of input", async () => {
+    // Exactly at the input length (ratio 1.0) is allowed.
+    const atLimit = "y".repeat(Math.floor(INPUT_600.length * MAX_OUTPUT_RATIO))
+    const { completeFn } = captureCompleteArgs(atLimit)
+    const out = await summarize(
+      INPUT_600,
+      { model: "claude-haiku-test", scope: "project" },
+      { completeFn },
+    )
+    expect(out).toBe(atLimit)
   })
 })

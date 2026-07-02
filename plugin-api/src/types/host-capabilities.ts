@@ -47,6 +47,7 @@ export type CapabilityToken =
   | "models:read"
   | "models:register"
   | "session-info:read"
+  | "llm:complete"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -422,6 +423,36 @@ export interface SessionInfoReadApi {
 }
 
 // ---------------------------------------------------------------------------
+// llm:complete (Wave G)
+// ---------------------------------------------------------------------------
+
+/** A one-shot, non-streaming LLM completion request. See {@link LlmCompleteApi}. */
+export interface LlmCompleteRequest {
+  /** Model id to complete against. Absent ⇒ the host's default summary model. */
+  model?: string
+  /** System prompt text. */
+  system: string
+  /** The single user turn's text. */
+  userText: string
+  /** Max output tokens. Host applies a sensible default when absent. */
+  maxTokens?: number
+  /** Per-call timeout in ms. Host applies a default when absent. */
+  timeoutMs?: number
+}
+
+/**
+ * `llm:complete` — a host-run, one-shot text completion so a plugin (e.g.
+ * `memory`'s summary regen) can call the model WITHOUT importing `getAuth` /
+ * `canonicalSendFn` from `src/`. The whole auth → send → drain pipeline stays
+ * host-side; the plugin passes content and receives text. Reserved for
+ * background, non-interactive completions (summaries, titles).
+ */
+export interface LlmCompleteApi {
+  /** Run a one-shot completion; resolves to the model's full text response. */
+  complete(req: LlmCompleteRequest): Promise<string>
+}
+
+// ---------------------------------------------------------------------------
 // transport:registry — host-brokered transport injection seam
 // ---------------------------------------------------------------------------
 
@@ -473,6 +504,7 @@ export interface PluginHost {
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
   readonly sessionInfo?: SessionInfoReadApi
+  readonly llm?: LlmCompleteApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — host-brokered remote-transport injection seam (see

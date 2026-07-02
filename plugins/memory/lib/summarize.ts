@@ -28,41 +28,24 @@
 // imported from `src/` until that capability lands. Their TYPES are
 // DERIVED from the runtime values (`ReturnType`/`Parameters`) below, so
 // the plugin re-declares no host wire-types and adds no extra src/ site.
-import { getAuth } from "../../../src/auth.ts"
-import { canonicalSendFn } from "../../../src/llm/transport/canonical-send.ts"
-
 import { defaultSummaryModel } from "./memory-config.ts"
 import { promptPath, renderPrompt } from "./prompt-io.ts"
 
 /**
- * Auth credential shape the summarizer threads to the transport. Derived
- * from the host's {@link getAuth} so the plugin re-declares no host type
- * (structural-typing decoupling: the residual runtime import carries the
- * type for free).
+ * One-shot host-brokered completion, matching the `llm:complete` capability
+ * (`ctx.host.llm.complete`). The plugin passes a system prompt + a single
+ * user text and gets the model's full response back, WITHOUT importing
+ * `getAuth` / `canonicalSendFn` from `src/` — the host owns the whole
+ * auth → send → drain pipeline. The handler injects the real
+ * `ctx.host.llm.complete`; tests inject a fake.
  */
-export type SummarizeAuth = Awaited<ReturnType<typeof getAuth>>
-
-/**
- * Send-options shape the canonical transport consumes. Derived from
- * {@link canonicalSendFn} for the same reason as {@link SummarizeAuth}.
- */
-export type SummarizeSendOptions = Parameters<typeof canonicalSendFn>[0]
-
-/**
- * Drain `canonicalSendFn` into the flat string the summarizer consumes.
- * Same contract as the old legacy text sender: concatenated text deltas.
- * Kept tiny + local so the `deps.sendFn` seam (tests inject fakes) keeps
- * its `(opts) => Promise<string>` shape across the transport port.
- */
-async function canonicalSendText(opts: SummarizeSendOptions): Promise<string> {
-  let text = ""
-  const gen = canonicalSendFn(opts)
-  while (true) {
-    const { value, done } = await gen.next()
-    if (done) return text
-    text += value
-  }
-}
+export type CompleteFn = (req: {
+  model?: string
+  system: string
+  userText: string
+  maxTokens?: number
+  timeoutMs?: number
+}) => Promise<string>
 
 /** Configuration for one summarize() call. */
 export interface SummarizeOptions {
@@ -87,13 +70,14 @@ export interface SummarizeOptions {
  * inject fakes to avoid hitting the real credential store / API.
  */
 export interface SummarizeDeps {
-  /** Returns auth credentials. Defaults to {@link getAuth}. */
-  authProvider?: () => Promise<SummarizeAuth>
   /**
-   * Sends a one-shot LLM request and returns the text response.
-   * Defaults to {@link canonicalSendText} (the canonical transport). Tests inject a fake.
+   * One-shot host-brokered completion (the `llm:complete` capability, i.e.
+   * `ctx.host.llm.complete`). Required in production — the handler injects
+   * `ctx.host.llm.complete`; tests inject a fake. When absent (an older host
+   * that didn't grant the capability), {@link summarize} throws `send-failed`
+   * so the caller falls back to the last-good summary.
    */
-  sendFn?: (opts: SummarizeSendOptions) => Promise<string>
+  completeFn?: CompleteFn
 }
 
 /**
@@ -179,39 +163,28 @@ export async function summarize(
   opts: SummarizeOptions,
   deps: SummarizeDeps = {},
 ): Promise<string> {
-  const authProvider = deps.authProvider ?? (() => getAuth())
-  const sendFn = deps.sendFn ?? canonicalSendText
+  const complete = deps.completeFn
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
-  let auth: SummarizeAuth
-  try {
-    auth = await authProvider()
-  } catch (e) {
-    throw new SummarizeError("auth-failed", `auth failed: ${(e as Error).message}`)
-  }
-
-  const sendOpts: SummarizeSendOptions = {
-    auth,
-    model: opts.model ?? defaultSummaryModel(),
-    messages: [
-      {
-        role: "user",
-        content: [{ type: "text", text: memoryMd }],
-      },
-    ],
-    system: [{ type: "text", text: buildSystemPrompt(opts.scope) }],
-    maxTokens: 8192,
-    stream: false,
-    // "title" requestType maps to the cheapest beta-flag set for
-    // non-conversation use (the canonical classifier derives the same
-    // kind from the request shape; the field is advisory there).
-    requestType: "title",
-    thinking: false,
+  if (!complete) {
+    throw new SummarizeError(
+      "send-failed",
+      "no llm:complete capability granted (host.llm.complete missing)",
+    )
   }
 
   let output: string
   try {
-    output = await withTimeout(sendFn(sendOpts), timeoutMs)
+    output = await withTimeout(
+      complete({
+        model: opts.model ?? defaultSummaryModel(),
+        system: buildSystemPrompt(opts.scope),
+        userText: memoryMd,
+        maxTokens: 8192,
+        timeoutMs,
+      }),
+      timeoutMs,
+    )
   } catch (e) {
     if (e instanceof SummarizeError) throw e
     throw new SummarizeError("send-failed", `LLM call failed: ${(e as Error).message}`)

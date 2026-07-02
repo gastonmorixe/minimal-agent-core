@@ -848,6 +848,19 @@ export class PluginLoader {
           (handlers: ResolvedHandler[]) => {
             loaderRef?.registerDynamicTools(pkg.manifest.id, handlers)
           },
+          // Capability host for THIS plugin (deny-by-default: undefined when it
+          // declared none), so a prompt fragment can run a host-brokered action
+          // like memory's `ctx.host.llm.complete`. Built directly here because
+          // fragments start before `loaderRef` is assigned; mirrors `hostFor`.
+          (pkg.manifest.capabilities?.length ?? 0) > 0
+            ? buildPluginHost({
+                capabilities: pkg.manifest.capabilities ?? [],
+                logger: createPluginLogger(pkg.manifest.id),
+                ...(opts.hostOptions?.sessionsDir
+                  ? { sessionsDir: opts.hostOptions.sessionsDir }
+                  : {}),
+              })
+            : undefined,
         )
         pendingFrags.push({
           pluginId: pkg.manifest.id,

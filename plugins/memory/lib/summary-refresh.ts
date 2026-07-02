@@ -28,7 +28,7 @@ import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import type { MemorySummaryParams } from "./memory-config.ts"
 import { type Bullet, parseFile } from "./parse.ts"
-import { summarize as realSummarize, SummarizeError } from "./summarize.ts"
+import { type CompleteFn, summarize as realSummarize, SummarizeError } from "./summarize.ts"
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -219,6 +219,13 @@ export interface RefreshAndRenderOpts {
    * summary mode is active.
    */
   cfg: MemorySummaryParams
+  /**
+   * Host-brokered one-shot completion (`ctx.host.llm.complete`), threaded
+   * from the prompt-fragment handler where `ctx.host` is available. When
+   * absent (no `llm:complete` grant), a regen is skipped and the last-good
+   * summary is used. See {@link CompleteFn}.
+   */
+  completeFn?: CompleteFn
 }
 
 export interface RefreshAndRenderDeps {
@@ -348,7 +355,11 @@ export async function refreshAndRender(
   let regenerated = false
   if (needRegen) {
     try {
-      const newSummaryBody = await summarize(memoryContent, { model: cfg.model, scope })
+      const newSummaryBody = await summarize(
+        memoryContent,
+        { model: cfg.model, scope },
+        { ...(opts.completeFn ? { completeFn: opts.completeFn } : {}) },
+      )
       const newCutoff = now().toISOString()
       summaryContent = withCutoffHeader(newSummaryBody, newCutoff)
       atomicWrite(summaryPath, summaryContent)
