@@ -143,6 +143,19 @@ export interface PluginLoaderOptions {
    */
   projectDir?: string
   /**
+   * Absolute dirs that DIRECTLY contain plugin package dirs (each an
+   * immediate subdir with a `manifest.json`), NOT under a `plugins/`
+   * subdir. This is the dev-time seam for the sibling
+   * `../minimal-agent-plugins` checkout, whose plugin dirs live at its
+   * ROOT. Their packages enter at the lowest ("embedded") precedence tier,
+   * so user/home/project shadow them on package-id collision. Wired from
+   * `src/index.ts` (a computed sibling path or the
+   * `MINIMAL_AGENT_PLUGIN_SIBLINGS` override) only when the dir exists.
+   * Production leaves this unset — the sibling repo is cloned into
+   * `userDir` there.
+   */
+  siblingDirs?: string[]
+  /**
    * Core tool names that must never be overridden. The loader rejects any
    * plugin tool whose `name` is in this set.
    */
@@ -522,6 +535,7 @@ export class PluginLoader {
       ...(opts.userDir !== undefined ? { userDir: opts.userDir } : {}),
       ...(opts.homeDir !== undefined ? { homeDir: opts.homeDir } : {}),
       ...(opts.projectDir !== undefined ? { projectDir: opts.projectDir } : {}),
+      ...(opts.siblingDirs !== undefined ? { siblingDirs: opts.siblingDirs } : {}),
       logger,
       explicitLogger: opts.logger,
       disabledPluginIds,

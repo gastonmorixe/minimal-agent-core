@@ -42,7 +42,7 @@
  * @module index
  */
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -922,6 +922,28 @@ async function main() {
   const thisFileDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
   const embeddedDir = dirname(thisFileDir)
 
+  // Dev-time sibling plugin repo. In production the `minimal-agent-plugins`
+  // repo is git-cloned into `~/.minimal-agent/plugins` (the loader's userDir
+  // root), so it loads with no special handling. When running from the
+  // monorepo SOURCE, though, that sibling checkout lives next to this repo
+  // at `<parent>/minimal-agent-plugins` and is NOT under any scanned root.
+  // Compute it and hand it to the loader as a sibling dir (its plugin dirs
+  // sit at the repo root, not under a `plugins/` subdir) so first-party
+  // plugins load at dev time too. `MINIMAL_AGENT_PLUGIN_SIBLINGS`
+  // (colon-separated absolute paths) overrides the default when set. Each
+  // candidate is included only when it EXISTS and is a directory.
+  const siblingEnv = process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
+  const siblingCandidates = siblingEnv
+    ? siblingEnv.split(":").filter((p) => p.length > 0)
+    : [join(dirname(embeddedDir), "minimal-agent-plugins")]
+  const siblingDirs = siblingCandidates.filter((p) => {
+    try {
+      return existsSync(p) && statSync(p).isDirectory()
+    } catch {
+      return false
+    }
+  })
+
   // Construct the single AgentContext shared across every plugin
   // dispatch path (tool handlers, prompt fragments, event subs, hook
   // subs, live-area slots, plus their subprocess counterparts). The
@@ -1040,6 +1062,9 @@ async function main() {
     userDir,
     homeDir,
     projectDir: process.cwd(),
+    // Dev-time sibling plugin repo (../minimal-agent-plugins). Empty in
+    // production and when the sibling checkout is absent.
+    ...(siblingDirs.length > 0 ? { siblingDirs } : {}),
     coreToolNames,
     // Single AgentContext shared with every plugin dispatch path.
     // Frozen value object; see createAgentContext + AgentContext docs.

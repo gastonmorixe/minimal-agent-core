@@ -25,6 +25,12 @@ import { PluginLoader } from "./loader.ts"
 import { PluginStream } from "./stream.ts"
 
 const PROJECT_ROOT = resolve(__dirname, "../..")
+// Wave G: first-party plugins (diff-view, emit-output, …) now live in the
+// sibling `../minimal-agent-plugins/` repo, discovered via the loader's
+// `siblingDirs` seam (the same path production uses through the cloned
+// `~/.minimal-agent/plugins`). Point the e2e loader at the sibling so these
+// tests exercise the real, migrated plugins from their new home.
+const SIBLING_ROOT = resolve(PROJECT_ROOT, "..", "minimal-agent-plugins")
 const CORE_TOOLS = new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"])
 
 async function feed(stream: PluginStream, chunk: string): Promise<void> {
@@ -38,6 +44,7 @@ describe("plugins: end-to-end integration with diff-view", () => {
   beforeAll(async () => {
     loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
+      siblingDirs: [SIBLING_ROOT],
       coreToolNames: CORE_TOOLS,
     })
   })
@@ -220,6 +227,7 @@ describe("plugins: end-to-end integration with emit-output", () => {
 
     loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
+      siblingDirs: [SIBLING_ROOT],
       coreToolNames: CORE_TOOLS,
       sessionId: SID,
       hostOptions: { sessionsDir },

@@ -44,6 +44,18 @@ export interface DiscoveryOptions {
   homeDir?: string
   /** Project root (scanned at `<dir>/.agents/plugins`); highest precedence. */
   projectDir?: string
+  /**
+   * Absolute dirs that DIRECTLY contain plugin package dirs (each an
+   * immediate subdir with a `manifest.json`) — NOT under a `plugins/`
+   * subdir. This is the dev-time seam for the sibling
+   * `../minimal-agent-plugins` checkout, whose plugin dirs (`ma-*-plugin/`)
+   * live at its ROOT. Each sibling dir is scanned directly and its packages
+   * enter at `root: "embedded"` (lowest precedence — same tier as embedded
+   * built-ins, so user/home/project always shadow them). In production the
+   * sibling repo is cloned to `~/.minimal-agent/plugins` and picked up via
+   * {@link userDir}; this covers running from the monorepo source instead.
+   */
+  siblingDirs?: string[]
   /** Effective diagnostic sink (the loader's resolved logger). */
   logger: (msg: string) => void
   /**
@@ -103,7 +115,8 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   const { logger, disabledPluginIds, enabledPluginIds } = opts
   const effectivePlatform: NormalizedPlatform = opts.effectivePlatform ?? detectPlatform()
 
-  // Discover packages in all four roots. Precedence on package-id
+  // Discover packages in all roots (embedded / user / home / project, plus
+  // any sibling dirs at the embedded tier). Precedence on package-id
   // collision: project > home > user > embedded (closer-to-user wins).
   const packages: { dir: string; root: PkgRoot }[] = []
   if (opts.embeddedDir) {
@@ -124,6 +137,18 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
   if (opts.projectDir) {
     for (const d of discoverPackageDirs(opts.projectDir, ".agents/plugins")) {
       packages.push({ dir: d, root: "project" })
+    }
+  }
+  // Sibling dirs hold plugin package dirs at their ROOT (no `plugins/`
+  // subdir), so scan each dir directly — `discoverPackageDirs(x, "")` joins
+  // to `x` (join(x, "") === x). These are first-party built-ins, so they
+  // enter at the lowest precedence tier ("embedded") and are shadowed by
+  // user/home/project on package-id collision.
+  if (opts.siblingDirs) {
+    for (const siblingDir of opts.siblingDirs) {
+      for (const d of discoverPackageDirs(siblingDir, "")) {
+        packages.push({ dir: d, root: "embedded" })
+      }
     }
   }
 
