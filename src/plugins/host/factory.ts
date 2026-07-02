@@ -31,6 +31,8 @@ import {
   resolveModel,
   setDefaultModelId,
 } from "../../llm/model-registry.ts"
+import { resolveProviderSessionInfo } from "../../llm/provider-session.ts"
+import { getSessionTokens } from "../../session-tokens.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
@@ -91,6 +93,32 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           modelsRegistry: Object.freeze({
             register: registerModel,
             setDefault: setDefaultModelId,
+          }),
+        }
+      : {}),
+    ...(has("session-info:read")
+      ? {
+          sessionInfo: Object.freeze({
+            providerInfo: (modelId: string, o?: { signal?: AbortSignal; providerId?: string }) =>
+              resolveProviderSessionInfo(modelId, {
+                ...(o?.signal ? { signal: o.signal } : {}),
+                ...(o?.providerId ? { providerId: o.providerId } : {}),
+              }),
+            // Project the core SessionTokens onto the neutral view (identical
+            // shape minus the doc-only intent; explicit field copy keeps the
+            // capability's surface pinned even if core adds internal fields).
+            tokens: () => {
+              const t = getSessionTokens()
+              return {
+                input: t.input,
+                output: t.output,
+                cacheRead: t.cacheRead,
+                cacheCreate: t.cacheCreate,
+                total: t.total,
+                turns: t.turns,
+                contextSize: t.contextSize,
+              }
+            },
           }),
         }
       : {}),

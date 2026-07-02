@@ -1346,6 +1346,17 @@ export class PluginLoader {
   }
 
   /**
+   * Public accessor for a plugin's frozen capability host (delegates to the
+   * memoized {@link hostFor}). The live-area scheduler uses this to thread
+   * `ctx.host` into live-area slot handlers, so a slot (e.g. `quota-status`)
+   * reads host data via `ctx.host.sessionInfo` without importing `src/`.
+   * Returns `undefined` when the plugin declared no `capabilities`.
+   */
+  capabilityHostFor(pluginId: string): PluginHost | undefined {
+    return this.hostFor(pluginId)
+  }
+
+  /**
    * Route a trigger to the matching handler and return its result.
    *
    * Handler exceptions and timeouts are converted to either

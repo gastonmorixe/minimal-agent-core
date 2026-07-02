@@ -32,6 +32,7 @@ import {
 } from "../../../diagnostic-bus.ts"
 import { agentContextToEnv } from "../../../plugins/agent-context.ts"
 import type { EventBus } from "../../../plugins/event-bus.ts"
+import type { PluginHost } from "../../../plugins/host/capabilities.ts"
 import type { AgentContext, ResolvedLiveAreaSlot } from "../../../plugins/types.ts"
 
 /** Sink the scheduler writes into. Mirrors the `ReplEditor` shape. */
@@ -101,6 +102,15 @@ export interface LiveAreaSchedulerDeps {
    * preserves the historical "env is just process.env" behaviour.
    */
   agent?: AgentContext
+  /**
+   * Resolver for a slot plugin's frozen capability host, keyed by plugin id
+   * (the loader's `hostFor`). When provided, each slot's `ctx.host` is the
+   * host built from THAT plugin's declared `capabilities` (deny-by-default:
+   * `undefined` when the plugin declared none). Lets a live-area slot read
+   * host data (e.g. `quota-status` via `ctx.host.sessionInfo`) without
+   * importing `src/`. Omitted in tests that don't exercise the capability.
+   */
+  hostFor?: (pluginId: string) => PluginHost | undefined
 }
 
 interface SlotState {
@@ -136,6 +146,7 @@ export class LiveAreaScheduler {
   private readonly legacyLogger: ((msg: string) => void) | null
   private readonly bus: EventBus | null
   private readonly agent: AgentContext | undefined
+  private readonly hostFor: ((pluginId: string) => PluginHost | undefined) | undefined
   /** Listener disposers (one per `(slot, event)` pair). Walked at `stop()`. */
   private readonly busDisposers: Array<() => void> = []
   private stopped = false
@@ -165,6 +176,7 @@ export class LiveAreaScheduler {
     this.diagnosticBus = deps.diagnosticBus ?? getDiagnosticBus()
     this.legacyLogger = deps.logger ?? null
     this.agent = deps.agent
+    this.hostFor = deps.hostFor
   }
 
   // ---------- diagnostic emit helpers ------------------------------------
@@ -351,6 +363,11 @@ export class LiveAreaScheduler {
       // the scheduler was built without a bus (back-compat tests).
       emit: (channel: string, payload?: unknown) => this.bus?.emit(channel, payload),
       agent: this.agent,
+      // Capability host for THIS slot's plugin (deny-by-default: undefined
+      // when the plugin declared no `capabilities`). Lets a slot read host
+      // data via `ctx.host.*` without importing `src/`. See `hostFor` in
+      // the loader (memoized per plugin id).
+      host: this.hostFor?.(s.slot.pluginId),
       // Decoration-suffix seam: the host owns the singleton (read back in
       // `flushFooter` via `getDecorationSuffix`); the slot handler publishes
       // its badge through this function instead of importing the shared
