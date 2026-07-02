@@ -22,6 +22,13 @@ import { SessionStore } from "../session-store.ts"
 
 import { PluginLoader } from "./loader.ts"
 
+// The session-history plugin now lives in the sibling `../minimal-agent-plugins/`
+// repo (Wave G physical move), discovered via the loader's `siblingDirs` seam —
+// the same path production uses through the cloned `~/.minimal-agent/plugins`.
+// Point the e2e loader at the sibling so this test exercises the real, migrated
+// plugin from its new home.
+const SIBLING_ROOT = resolve(import.meta.dirname, "..", "..", "..", "minimal-agent-plugins")
+
 const sessionsDir = mkdtempSync(join(tmpdir(), "session-history-e2e-"))
 afterAll(() => rmSync(sessionsDir, { recursive: true, force: true }))
 
@@ -56,6 +63,7 @@ beforeAll(async () => {
 
   loader = await PluginLoader.load({
     embeddedDir: resolve(import.meta.dirname, "..", ".."),
+    siblingDirs: [SIBLING_ROOT],
     logger: () => {},
     hostOptions: { sessionsDir },
   })
