@@ -34,8 +34,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+import { parseFormatterCommand } from "@minimal-agent/plugin-api/utils/shell-args"
 
-import { parseFormatterCommand } from "./host/ui/formatter/formatter.ts"
 import { parseJsonc } from "./jsonc.ts"
 import { normalizeSubmittedAtStyle } from "./scrollback-submitted-at.ts"
 

@@ -107,6 +107,7 @@ import { resolveFormatter } from "./host/ui/formatter/auto.ts"
 import { Formatter, parseFormatterCommand } from "./host/ui/formatter/formatter.ts"
 import type { Spinner } from "./host/ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./host/ui/spinner/named-presets.ts"
+import { startStartupProgressSpinner } from "./host/ui/startup/progress-spinner.ts"
 import {
   closeStartupTree,
   closeStartupTreeWithTools,
@@ -899,6 +900,7 @@ async function main() {
       enabled: pluginSyncEnabled,
       repoUrl: pluginsRepo,
       showSpinner: true,
+      spinnerFactory: startStartupProgressSpinner,
     })
     // Only surface a startup row when something meaningful happened: a fresh
     // clone, or a failed/skipped attempt the operator may want to know about.

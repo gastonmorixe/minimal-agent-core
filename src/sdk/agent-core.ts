@@ -26,6 +26,7 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
 } from "../agent/reflection.ts"
+import { formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
@@ -48,7 +49,6 @@ import {
 import { createReflectionAckStripper } from "../reflection-ack-stripper.ts"
 import { appendUserTurn } from "../session-restore.ts"
 
-import { c } from "./ansi.ts"
 import type { AgentEvent, EventSink, EventUsage } from "./events.ts"
 import type {
   AbortSignalProvider,
@@ -270,6 +270,16 @@ export class AgentCore {
     const writeTranscript = (line: string): void => {
       this.transcriptSink.write(line)
     }
+    // Surface a semantic {@link TurnNotice}: emit it on the structured
+    // event stream (so `--json` consumers get category / attempt / message
+    // as data) AND write a style-free one-liner to the transcript sink
+    // (the human progress channel). The core writes NO ANSI here : any
+    // terminal styling is a host concern, applied by whoever renders the
+    // event or transcript downstream.
+    const emitNotice = (notice: TurnNotice): void => {
+      this.emit({ type: "notice", notice })
+      writeTranscript(`\n  ${formatTurnNoticePlain(notice)}`)
+    }
 
     const initialUserContent: ContentBlock[] = []
 
@@ -472,10 +482,13 @@ export class AgentCore {
         const ack = parseReflectionAck(lastResponse.text)
         if (ack !== null && ack.silenceFor > 0) {
           this.reflectionSilenceRemaining = ack.silenceFor
-          const reasonSuffix = ack.reason.length > 0 ? ` — ${ack.reason}` : ""
-          writeTranscript(
-            `  ${c.dim("›")} ${c.dim(`reflection ack: silencing next ${ack.silenceFor} checkpoint${ack.silenceFor === 1 ? "" : "s"}${reasonSuffix}`)}`,
-          )
+          emitNotice({
+            kind: "reflection_ack",
+            severity: "info",
+            silenceFor: ack.silenceFor,
+            reason: ack.reason,
+            fromToolFallback: false,
+          })
         }
       }
 
@@ -494,10 +507,13 @@ export class AgentCore {
                 : 1
           if (Number.isFinite(silenceFor) && silenceFor > 0) {
             this.reflectionSilenceRemaining = silenceFor
-            const reasonSuffix = reason.length > 0 ? ` — ${reason}` : ""
-            writeTranscript(
-              `  ${c.dim("›")} ${c.dim(`reflection ack: silencing next ${silenceFor} checkpoint${silenceFor === 1 ? "" : "s"}${reasonSuffix} (from tool_use fallback)`)}`,
-            )
+            emitNotice({
+              kind: "reflection_ack",
+              severity: "info",
+              silenceFor,
+              reason,
+              fromToolFallback: true,
+            })
           }
         }
       }
@@ -505,15 +521,16 @@ export class AgentCore {
       if (lastResponse.stopReason === "max_tokens") {
         if (toolBlocks.length > 0) {
           maxTokensStreak = 0
-          writeTranscript(
-            `\n  ${c.boldYellow("!")} ${c.yellow("Response hit the max_tokens ceiling mid tool-call — salvaged the in-flight call and continuing")}`,
-          )
+          emitNotice({ kind: "max_tokens_salvaged", severity: "warn" })
         } else {
           maxTokensStreak++
           if (maxTokensStreak <= MAX_TOKENS_CONTINUATION_CAP) {
-            writeTranscript(
-              `\n  ${c.boldYellow("!")} ${c.yellow(`Response hit the max_tokens ceiling — auto-continuing (${maxTokensStreak}/${MAX_TOKENS_CONTINUATION_CAP})`)}`,
-            )
+            emitNotice({
+              kind: "max_tokens_continuing",
+              severity: "warn",
+              attempt: maxTokensStreak,
+              cap: MAX_TOKENS_CONTINUATION_CAP,
+            })
             if (lastResponse.blocks.length === 0) {
               const placeholder: ContentBlock[] = [
                 {
@@ -540,9 +557,11 @@ export class AgentCore {
             this.sessionPersistence?.appendUser(cont)
             continue
           }
-          writeTranscript(
-            `\n  ${c.boldYellow("!")} ${c.yellow(`Response hit the max_tokens ceiling ${MAX_TOKENS_CONTINUATION_CAP} times in a row — stopping. Consider narrowing the request or raising max_tokens.`)}`,
-          )
+          emitNotice({
+            kind: "max_tokens_capped",
+            severity: "warn",
+            cap: MAX_TOKENS_CONTINUATION_CAP,
+          })
           exitedByCap = false
           break
         }
@@ -626,9 +645,11 @@ export class AgentCore {
     }
 
     if (exitedByCap && Number.isFinite(this.maxToolRounds)) {
-      writeTranscript(
-        `\n  ${c.boldYellow("!")} ${c.yellow(`Emergency cap reached (${this.maxToolRounds} tool rounds) — sending final tools-disabled wrap-up`)}`,
-      )
+      emitNotice({
+        kind: "tool_rounds_capped",
+        severity: "warn",
+        cap: this.maxToolRounds,
+      })
 
       const lastMsg = this.messages[this.messages.length - 1]
       if (lastMsg && lastMsg.role === "user") {

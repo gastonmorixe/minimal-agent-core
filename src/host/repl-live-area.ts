@@ -12,6 +12,7 @@
 
 import { type AbortReason, abortBus } from "../abort-bus.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
+import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
 import type { ModelInfo } from "../llm/transport/types.ts"
@@ -49,6 +50,7 @@ import type { Spinner } from "./ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "./ui/style/ansi.ts"
 import { isOuterFrameClose } from "./ui/tool-transcript/format.ts"
+import { renderTurnNotice } from "./ui/turn-notice.ts"
 
 /**
  * Runs the interactive REPL on the compositor-based "live area" UI: a
@@ -1143,6 +1145,13 @@ export async function runReplLiveArea(
         await endThinkingFormatter()
         writeDirectSink("\n")
       }
+      // Abnormal termination (refusal / content filter): the core hands
+      // us the semantic notice; render it as a loud banner through the
+      // same transcript writer tool blocks use so boundary/newline
+      // bookkeeping (lastKind, pending trailing newlines) stays correct.
+      const onNotice = (notice: TurnNotice): void => {
+        onTranscriptLine(renderTurnNotice(notice))
+      }
       // Mark the turn as running so submits arriving from this point on are
       // captured as queued user input rather than racing into the next
       // queue.shift() iteration. The decoration is rendered on every queue
@@ -1244,6 +1253,7 @@ export async function runReplLiveArea(
           onThinkingChunk,
           onThinkingStop,
           onTextStop,
+          onNotice,
           drainQueuedUserText,
           onQueueInject,
           ...(askUser ? { askUser } : {}),

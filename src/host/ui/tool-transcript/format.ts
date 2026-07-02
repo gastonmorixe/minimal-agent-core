@@ -1040,6 +1040,40 @@ export function formatToolPreview(
 }
 
 /**
+ * Render the two-row transcript block for a tool the active mode REFUSED to
+ * run: a `│ ⊘ <message>` row (dim message behind the bold-red deny glyph)
+ * and a `╰ (refused by <mode>)` closer. The core tool loop owns the semantic
+ * decision (which tool, which mode, what message); the box-drawing frame and
+ * palette live here so `agent/tool-round.ts` never imports the ANSI helpers.
+ */
+export function formatRefusalRows(message: string, refusedBy: string): string[] {
+  return [
+    `  ${c.dimCyan("│")} ${c.boldRed("⊘")} ${c.dim(message)}`,
+    `  ${c.dimCyan("╰")} ${c.dim(`(refused by ${refusedBy})`)}`,
+  ]
+}
+
+/**
+ * Render the single closing row for the built-in `Mode` tool:
+ * `╰ active mode: <label>`. The structured JSON result goes to the model;
+ * this row just shows the user the mode was checked. Presentation-only, so
+ * it lives in the host next to the rest of the tool-block chrome.
+ */
+export function formatModeCloseRow(labelDisplay: string): string {
+  return `  ${c.dimCyan("╰")} ${c.dim(`active mode: ${labelDisplay}`)}`
+}
+
+/**
+ * Render one streamed body row (`│ <line>`) for the live Bash stream path.
+ * The core streamer buffers the previous line and emits it through this
+ * helper before buffering the next, so the box-drawing gutter + dim styling
+ * stay in the host instead of being hand-built in `agent/tool-round.ts`.
+ */
+export function formatStreamBodyRow(line: string): string {
+  return `  ${c.dimCyan("│")} ${c.dim(line)}`
+}
+
+/**
  * Emit the closing rows for a tool whose body was already streamed `│`-line
  * by `│`-line into scrollback (live, while the child process ran). We held
  * back the LAST emitted line so we can either:

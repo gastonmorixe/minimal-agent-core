@@ -228,35 +228,13 @@ export class Formatter {
 /**
  * Parse a formatter command string into a `Bun.spawn`-compatible argv array.
  *
- * Supports simple shell-like splitting: whitespace separates tokens, but
- * single and double quoted strings are treated as one token. Does NOT
- * support backslash escaping, variable expansion, pipes, or redirects —
- * if you need those, do shell parsing yourself.
+ * Re-exported from the leaf `@minimal-agent/plugin-api` package so the host
+ * formatter, the CLI entry, and core config tokenize identically. Kept on
+ * this path for back-compat with existing importers.
  *
- * @param cmd - Shell-style command string
- * @returns argv array suitable for `Bun.spawn` or `Formatter` constructor
- *
- * @example
- * ```ts
- * parseFormatterCommand("mdstream")
- * // ["mdstream"]
- *
- * parseFormatterCommand("bat --language=md --paging=never")
- * // ["bat", "--language=md", "--paging=never"]
- *
- * parseFormatterCommand("/path/to/fmt --title 'My Doc'")
- * // ["/path/to/fmt", "--title", "My Doc"]
- * ```
+ * @see parseFormatterCommand in `@minimal-agent/plugin-api/utils/shell-args`
  */
-export function parseFormatterCommand(cmd: string): string[] {
-  const args: string[] = []
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
-  let match
-  while ((match = re.exec(cmd)) !== null) {
-    args.push(match[1] ?? match[2] ?? match[3])
-  }
-  return args
-}
+export { parseFormatterCommand } from "@minimal-agent/plugin-api/utils/shell-args"
 
 /**
  * Build the env passed to the formatter subprocess. We export `COLUMNS`

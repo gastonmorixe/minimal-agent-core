@@ -36,10 +36,28 @@ import { dirname, join } from "node:path"
 
 import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { startStartupProgressSpinner } from "./host/ui/startup/progress-spinner.ts"
-
 /** Default remote for the extended first-party plugins. */
 export const DEFAULT_PLUGINS_REPO = "https://github.com/gastonmorixe/minimal-agent-plugins.git"
+
+/**
+ * Minimal progress-spinner surface this bootstrap drives. Structural, so the
+ * host's `StartupProgressSpinner` (which has these plus `setPhase`) satisfies
+ * it without this core module importing the host renderer. The seam keeps
+ * spinner presentation in the host; core just calls `done`/`fail`.
+ */
+export interface BootstrapSpinner {
+  done(finalLine: string): void
+  fail(errorLine: string): void
+}
+
+/** Factory the caller injects to draw a real spinner (blessed `index.ts`). */
+export type BootstrapSpinnerFactory = (
+  initialLabel: string,
+  opts: { enabled: boolean },
+) => BootstrapSpinner
+
+/** No-op spinner used when the caller injects no factory (tests, non-TTY). */
+const NOOP_BOOTSTRAP_SPINNER: BootstrapSpinner = { done() {}, fail() {} }
 
 /**
  * Resolve a GitHub token for cloning a PRIVATE repo, or `null` for the public
@@ -145,6 +163,13 @@ export interface PluginsSyncOptions {
   enabled?: boolean
   /** Render the breathing-dot spinner on stderr while cloning. */
   showSpinner?: boolean
+  /**
+   * Factory that draws the startup progress spinner. Injected by the blessed
+   * CLI entry (`src/index.ts`) with the host renderer so this core module
+   * never imports host UI. Omitted in tests / non-interactive callers, which
+   * get a silent no-op spinner.
+   */
+  spinnerFactory?: BootstrapSpinnerFactory
   /**
    * Injectable git runner (tests). Defaults to a real `git` subprocess via
    * Bun.spawn. Receives argv (without the leading `git`), an optional cwd, and
@@ -276,7 +301,7 @@ export async function bootstrapUserPlugins(opts: PluginsSyncOptions): Promise<Pl
   const token = opts.token !== undefined ? opts.token : await resolveGithubToken(process.env, true)
 
   // 5. Clone into a temp sibling, then atomically swap into place.
-  const spinner = startStartupProgressSpinner(
+  const spinner = (opts.spinnerFactory ?? (() => NOOP_BOOTSTRAP_SPINNER))(
     `${A.dim("fetching")}  ${A.bold("minimal-agent-plugins")}${token ? A.dim("  (auth)") : ""}`,
     { enabled: opts.showSpinner ?? false },
   )

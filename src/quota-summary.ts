@@ -18,7 +18,8 @@
  * @module quota-summary
  */
 
-import { c } from "./host/ui/style/ansi.ts"
+import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+
 import type { QuotaSnapshot, QuotaWindow } from "./llm/provider-plugin.ts"
 
 export interface QuotaSummaryOptions {

@@ -20,12 +20,25 @@
  */
 
 import { type BlobStore, type BlobWriteResult, formatRawOutputFooter } from "../blob-store.ts"
-import { c } from "../host/ui/style/ansi.ts"
+// P4 FOLLOW-UP (core→host decoupling): this is the LAST host import in this
+// module. The raw box-drawing glyphs + palette were already pushed into the
+// host (formatRefusalRows / formatModeCloseRow / formatStreamBodyRow, plus
+// the header/preview/stream/findings formatters live here). What remains is
+// the whole tool-block RENDER PIPELINE, which core drives inline. Killing it
+// to zero means inverting `executeToolRound`'s render path behind a
+// host-provided renderer port threaded through ToolRoundContext (the
+// onStopNotice pattern), which belongs to Jacob's Phase-4 host-adapter /
+// SDK-port wiring — not a reactive rewrite here. `format.ts` itself can't
+// move to the leaf: it depends on core modules (bash-split, tools/truncation,
+// truncate-hint, term-width).
 import {
   clampBodyWithHint,
   computeTuiElision,
   effectiveBodyLineWidth,
   formatDiagnosticsAnnotation,
+  formatModeCloseRow,
+  formatRefusalRows,
+  formatStreamBodyRow,
   formatToolHeaderRows,
   formatToolPreview,
   renderFindingsPanel,
@@ -269,12 +282,12 @@ export async function executeToolRound(
     writeToolHeader()
     content = gate.message
     isError = true
-    // Render a denial line in the transcript so the user sees what
-    // got blocked. ⊘ glyph + dim red label + the refusal message.
-    writeTranscript(`  ${c.dimCyan("│")} ${c.boldRed("⊘")} ${c.dim(content)}`)
-    writeTranscript(
-      `  ${c.dimCyan("╰")} ${c.dim(`(refused by ${ctx.modeManager?.activeId() ?? "mode"})`)}`,
-    )
+    // Render a denial block in the transcript so the user sees what
+    // got blocked. The host owns the ⊘ glyph + frame + palette; core
+    // supplies the message and the refusing mode's id.
+    for (const row of formatRefusalRows(content, ctx.modeManager?.activeId() ?? "mode")) {
+      writeTranscript(row)
+    }
   } else if (tool.name === "Mode" && ctx.modeManager) {
     // Built-in `Mode` tool. Returns the live mode + effective
     // permissions as a small JSON blob. Intercepted here (not in
@@ -312,7 +325,7 @@ export async function executeToolRound(
     // id is enough : the model gets the structured details, the
     // user just needs to see that the model checked.
     const labelDisplay = active ? (active.label ?? active.id) : "default"
-    writeTranscript(`  ${c.dimCyan("╰")} ${c.dim(`active mode: ${labelDisplay}`)}`)
+    writeTranscript(formatModeCloseRow(labelDisplay))
   } else {
     // Header-timing is a per-tool STRATEGY, because scrollback is
     // append-only: a tool can either paint its header NOW (from data
@@ -467,7 +480,7 @@ export async function executeToolRound(
             return
           }
           if (bufferedLastLine !== null) {
-            writeTranscript(`  ${c.dimCyan("│")} ${c.dim(bufferedLastLine)}`)
+            writeTranscript(formatStreamBodyRow(bufferedLastLine))
           }
           // Per-line width clamp : `min(terminal_cols - gutter,
           // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is

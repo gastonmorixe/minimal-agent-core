@@ -44,6 +44,7 @@ import {
   runReflectionCooldown,
 } from "./agent/reflection.ts"
 import { executeToolRound } from "./agent/tool-round.ts"
+import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./agent/turn-notice.ts"
 import type { AuthResult } from "./auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "./cache-ttl.ts"
@@ -793,6 +794,18 @@ export class Agent {
        */
       onTextStop?: () => MaybePromise<void>
       /**
+       * Optional. Fires for out-of-band conditions the loop surfaces:
+       * provider refusal / content filter, output-budget events
+       * (max_tokens salvage / auto-continue / cap), the tool-rounds
+       * emergency cap, and reflection-ack confirmations. Receives the
+       * semantic {@link TurnNotice} : pure data, no ANSI. The host owns
+       * the visual treatment (the TUI renders a red banner / yellow bang
+       * / dim marker keyed off `severity`). When omitted, the core falls
+       * back to writing a style-free one-liner through `onTranscriptLine`
+       * so headless callers never lose the signal.
+       */
+      onNotice?: (notice: TurnNotice) => MaybePromise<void>
+      /**
        * Optional. Called at each tool-loop boundary (right after tool
        * results are computed, before the next API request). Returns text
        * the host wants to inject into the *current* turn as a follow-up
@@ -850,6 +863,7 @@ export class Agent {
       onThinkingChunk,
       onThinkingStop,
       onTextStop,
+      onNotice,
       drainQueuedUserText,
       onQueueInject,
       signal,
@@ -863,6 +877,15 @@ export class Agent {
     const writeTranscript = (line: string): void => {
       if (onTranscriptLine) onTranscriptLine(line)
       else console.error(line)
+    }
+    // Surface a semantic {@link TurnNotice} to the host. When the host
+    // wired `onNotice`, hand it the pure value (it renders its own
+    // treatment). Otherwise fall back to a style-free one-liner through
+    // the transcript writer so headless callers never lose the signal.
+    // The core writes NO ANSI on this path : all styling lives host-side.
+    const emitNotice = async (notice: TurnNotice): Promise<void> => {
+      if (onNotice) await onNotice(notice)
+      else writeTranscript(`\n  ${formatTurnNoticePlain(notice)}`)
     }
 
     // Initial user message. If a mode toggle is pending advertisement,
@@ -1198,10 +1221,13 @@ export class Agent {
         const ack = parseReflectionAck(lastResponse.text)
         if (ack !== null && ack.silenceFor > 0) {
           this.reflectionSilenceRemaining = ack.silenceFor
-          const reasonSuffix = ack.reason.length > 0 ? ` — ${ack.reason}` : ""
-          writeTranscript(
-            `  ${c.dim("›")} ${c.dim(`reflection ack: silencing next ${ack.silenceFor} checkpoint${ack.silenceFor === 1 ? "" : "s"}${reasonSuffix}`)}`,
-          )
+          await emitNotice({
+            kind: "reflection_ack",
+            severity: "info",
+            silenceFor: ack.silenceFor,
+            reason: ack.reason,
+            fromToolFallback: false,
+          })
         }
       }
 
@@ -1229,12 +1255,34 @@ export class Agent {
                 : 1 // default to 1 when absent, matching text-scan parseReflectionAck
           if (Number.isFinite(silenceFor) && silenceFor > 0) {
             this.reflectionSilenceRemaining = silenceFor
-            const reasonSuffix = reason.length > 0 ? ` — ${reason}` : ""
-            writeTranscript(
-              `  ${c.dim("›")} ${c.dim(`reflection ack: silencing next ${silenceFor} checkpoint${silenceFor === 1 ? "" : "s"}${reasonSuffix} (from tool_use fallback)`)}`,
-            )
+            await emitNotice({
+              kind: "reflection_ack",
+              severity: "info",
+              silenceFor,
+              reason,
+              fromToolFallback: true,
+            })
           }
         }
+      }
+
+      // Refusal / content-filter surfacing. When the provider's safety
+      // layer kills the stream (`stop_reason: "refusal"` on Anthropic,
+      // `"content_filter"` on OpenAI-compatible providers), the turn ends
+      // with little or no text and, without this, NOTHING visible in the
+      // TUI : the user just sees the agent go silent and has to dig the
+      // stop reason out of the raw SSE frames. The core stays
+      // presentation-free: it detects the condition (pure projection in
+      // src/agent/turn-notice.ts) and hands the semantic value to the
+      // host via `emitNotice` → `onNotice`. Hosts render their own
+      // treatment (the TUI paints a red banner). Headless callers get a
+      // style-free one-liner fallback so the signal is never silently
+      // dropped. No retry, no history mutation : purely a notification
+      // seam. This is the same seam every max_tokens / tool-cap /
+      // reflection-ack notice above routes through.
+      {
+        const notice = detectStopNotice(lastResponse.stopReason, lastResponse.stopDetails)
+        if (notice) await emitNotice(notice)
       }
 
       // max_tokens handling (Fix B + D). The response hit the output-token
@@ -1257,15 +1305,16 @@ export class Agent {
       if (lastResponse.stopReason === "max_tokens") {
         if (toolBlocks.length > 0) {
           maxTokensStreak = 0
-          writeTranscript(
-            `\n  ${c.boldYellow("!")} ${c.yellow("Response hit the max_tokens ceiling mid tool-call — salvaged the in-flight call and continuing")}`,
-          )
+          await emitNotice({ kind: "max_tokens_salvaged", severity: "warn" })
         } else {
           maxTokensStreak++
           if (maxTokensStreak <= MAX_TOKENS_CONTINUATION_CAP) {
-            writeTranscript(
-              `\n  ${c.boldYellow("!")} ${c.yellow(`Response hit the max_tokens ceiling — auto-continuing (${maxTokensStreak}/${MAX_TOKENS_CONTINUATION_CAP})`)}`,
-            )
+            await emitNotice({
+              kind: "max_tokens_continuing",
+              severity: "warn",
+              attempt: maxTokensStreak,
+              cap: MAX_TOKENS_CONTINUATION_CAP,
+            })
             // Keep the assistant→user alternation valid even in the degenerate
             // case where the whole budget went to (now-dropped) unsigned
             // thinking and no block was appended at all.
@@ -1294,9 +1343,11 @@ export class Agent {
           // Streak cap hit: stop auto-continuing and hand back cleanly rather
           // than loop on a turn that truncates every time. Surfaced loudly so
           // the user knows why we stopped and can raise the budget / re-scope.
-          writeTranscript(
-            `\n  ${c.boldYellow("!")} ${c.yellow(`Response hit the max_tokens ceiling ${MAX_TOKENS_CONTINUATION_CAP} times in a row — stopping. Consider narrowing the request or raising max_tokens.`)}`,
-          )
+          await emitNotice({
+            kind: "max_tokens_capped",
+            severity: "warn",
+            cap: MAX_TOKENS_CONTINUATION_CAP,
+          })
           exitedByCap = false
           break
         }
@@ -1479,9 +1530,11 @@ export class Agent {
     // summary text. We update `lastResponse` so the caller sees that
     // clean final response instead of the orphaned tool_use round.
     if (exitedByCap && Number.isFinite(this.maxToolRounds)) {
-      writeTranscript(
-        `\n  ${c.boldYellow("!")} ${c.yellow(`Emergency cap reached (${this.maxToolRounds} tool rounds) — sending final tools-disabled wrap-up`)}`,
-      )
+      await emitNotice({
+        kind: "tool_rounds_capped",
+        severity: "warn",
+        cap: this.maxToolRounds,
+      })
 
       const lastMsg = this.messages[this.messages.length - 1]
       if (lastMsg && lastMsg.role === "user") {
