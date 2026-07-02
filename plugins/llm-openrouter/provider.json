@@ -1,8 +1,0 @@
-{
-  "id": "openrouter",
-  "name": "LLM Provider: OpenRouter (gateway)",
-  "version": "0.1.0",
-  "description": "OpenRouter (openrouter.ai) — an OpenAI Chat Completions-compatible gateway to many upstream models. Reuses plugins/llm-openai's wire layer; auth via minimal-agent's provider auth store.",
-  "entry": "./index.ts",
-  "export": "openrouterProviderPlugin"
-}
