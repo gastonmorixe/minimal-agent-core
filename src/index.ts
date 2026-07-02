@@ -42,7 +42,7 @@
  * @module index
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -128,6 +128,7 @@ import { resolveInitialModeId, resolveShowHeader } from "./non-interactive-defau
 import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
 import { resolveEffectivePlatform } from "./plugin-platform-resolution.ts"
 import { createAgentContext } from "./plugins/agent-context.ts"
+import { resolveSiblingPluginRoots } from "./plugins/loader/helpers.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaWindows } from "./quota-summary.ts"
@@ -477,7 +478,16 @@ async function main() {
   // no provider by name. Idempotent; a missing plugins dir yields no providers
   // rather than throwing.
   const srcDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
-  await registerDiscoveredProviders(join(dirname(srcDir), "plugins"))
+  const providerEmbeddedDir = dirname(srcDir)
+  // Wave G: provider plugins (provider.json) migrate to the sibling
+  // ../minimal-agent-plugins repo alongside manifest plugins. Discover from
+  // BOTH the embedded plugins dir and the sibling roots (same resolution the
+  // TUI loader uses) so a migrated provider is still found. Embedded wins on
+  // id collision during a mid-migration window.
+  await registerDiscoveredProviders([
+    join(providerEmbeddedDir, "plugins"),
+    ...resolveSiblingPluginRoots(providerEmbeddedDir),
+  ])
   activateDiscoveredProviders()
 
   switch (commandPlan.command) {
@@ -932,17 +942,7 @@ async function main() {
   // plugins load at dev time too. `MINIMAL_AGENT_PLUGIN_SIBLINGS`
   // (colon-separated absolute paths) overrides the default when set. Each
   // candidate is included only when it EXISTS and is a directory.
-  const siblingEnv = process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
-  const siblingCandidates = siblingEnv
-    ? siblingEnv.split(":").filter((p) => p.length > 0)
-    : [join(dirname(embeddedDir), "minimal-agent-plugins")]
-  const siblingDirs = siblingCandidates.filter((p) => {
-    try {
-      return existsSync(p) && statSync(p).isDirectory()
-    } catch {
-      return false
-    }
-  })
+  const siblingDirs = resolveSiblingPluginRoots(embeddedDir)
 
   // Construct the single AgentContext shared across every plugin
   // dispatch path (tool handlers, prompt fragments, event subs, hook
