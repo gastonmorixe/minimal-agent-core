@@ -878,6 +878,11 @@ export async function runReplLiveArea(
           // other plugin context. Live-area slots see `ctx.agent` with
           // the SAME values as a TUI handler in the same session.
           agent: loader?.agentContext(),
+          // Per-plugin capability host resolver, so a live-area slot's
+          // `ctx.host` carries exactly the namespaces THAT plugin declared
+          // (deny-by-default). Lets `quota-status` read the provider + token
+          // snapshot via `ctx.host.sessionInfo` without importing `src/`.
+          ...(loader ? { hostFor: (id: string) => loader.capabilityHostFor(id) } : {}),
           // Singleton diagnostic bus picks up the scheduler's own
           // timeout / failure / recovery events. Tests inject an
           // isolated bus; production defaults to the singleton.

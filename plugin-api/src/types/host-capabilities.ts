@@ -19,6 +19,7 @@
  */
 
 import type { Capabilities } from "../llm/capabilities.ts"
+import type { ProviderSessionInfo } from "../llm/provider-plugin.ts"
 
 import type { PluginLogger } from "./logger.ts"
 
@@ -45,6 +46,7 @@ export type CapabilityToken =
   | "presence:read"
   | "models:read"
   | "models:register"
+  | "session-info:read"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -380,6 +382,46 @@ export interface ModelsRegisterApi {
 }
 
 // ---------------------------------------------------------------------------
+// session-info:read (Wave G)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cumulative token counters for the current session. A provider-neutral,
+ * read-only view of core's `SessionTokens` (`src/session-tokens.ts`) so a
+ * plugin renders the "tokens this session" / context-size footer WITHOUT
+ * importing `getSessionTokens` from `src/`. Display `contextSize`; the
+ * cumulative `cacheRead` / `total` are inflated for cache-heavy providers.
+ */
+export interface SessionTokensView {
+  readonly input: number
+  readonly output: number
+  readonly cacheRead: number
+  readonly cacheCreate: number
+  readonly total: number
+  readonly turns: number
+  readonly contextSize: number
+}
+
+/**
+ * `session-info:read` — the live per-session provider + token snapshot the
+ * `quota-status` / `session-info` footers render. `providerInfo(modelId)`
+ * routes to the active provider's `fetchSessionInfo` (core
+ * `resolveProviderSessionInfo`), returning the leaf {@link ProviderSessionInfo}
+ * (quota windows, context window, model label). `tokens()` reads the
+ * process-wide session counters as a {@link SessionTokensView}. Both are host
+ * reads a plugin must not do itself once it lives in its own repo.
+ */
+export interface SessionInfoReadApi {
+  /** Resolve the active provider's session snapshot for `modelId`. */
+  providerInfo(
+    modelId: string,
+    opts?: { signal?: AbortSignal; providerId?: string },
+  ): Promise<ProviderSessionInfo>
+  /** Read the cumulative session token counters. */
+  tokens(): SessionTokensView
+}
+
+// ---------------------------------------------------------------------------
 // transport:registry — host-brokered transport injection seam
 // ---------------------------------------------------------------------------
 
@@ -430,6 +472,7 @@ export interface PluginHost {
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
+  readonly sessionInfo?: SessionInfoReadApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — host-brokered remote-transport injection seam (see

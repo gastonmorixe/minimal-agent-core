@@ -22,6 +22,8 @@
  * @module plugins/host/capabilities
  */
 
+import type { ProviderSessionInfo } from "@minimal-agent/plugin-api/llm/provider-plugin"
+
 import type { PluginLogger } from "../../diagnostic-bus.ts"
 import type { ModelEntry } from "../../llm/model-registry.ts"
 
@@ -53,6 +55,7 @@ export type CapabilityToken =
   | "presence:read"
   | "models:read"
   | "models:register"
+  | "session-info:read"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -68,6 +71,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "presence:read",
   "models:read",
   "models:register",
+  "session-info:read",
   "paths",
   "transport:registry",
   "clock",
@@ -377,6 +381,59 @@ export interface ModelsRegisterApi {
 }
 
 // ---------------------------------------------------------------------------
+// session-info:read (Wave G)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cumulative token counters for the current session. A provider-neutral,
+ * read-only view of core's `SessionTokens` (`src/session-tokens.ts`) so a
+ * plugin renders the "tokens this session" / context-size footer WITHOUT
+ * importing `getSessionTokens` from `src/`.
+ *
+ * `contextSize` is the field to display (latest-turn input footprint); the
+ * cumulative `cacheRead` / `total` are inflated for cache-heavy providers and
+ * kept for debug parity, not user display. See the field notes on core's
+ * `SessionTokens` for the inflation rationale.
+ */
+export interface SessionTokensView {
+  readonly input: number
+  readonly output: number
+  readonly cacheRead: number
+  readonly cacheCreate: number
+  readonly total: number
+  readonly turns: number
+  readonly contextSize: number
+}
+
+/**
+ * `session-info:read` — the live per-session provider + token snapshot the
+ * `quota-status` / `session-info` footers render. Both pieces are host reads
+ * the plugin must not do itself once it lives in its own repo:
+ *
+ *  - `providerInfo(modelId)` routes to the ACTIVE provider plugin's
+ *    `fetchSessionInfo` (core `resolveProviderSessionInfo` in
+ *    `src/llm/provider-session.ts`), returning the provider-neutral
+ *    {@link ProviderSessionInfo} (quota windows, context window, model label).
+ *    Async because a provider may probe the network; honors `signal`.
+ *  - `tokens()` reads the process-wide session token counters (core
+ *    `getSessionTokens` in `src/session-tokens.ts`) as a {@link SessionTokensView}.
+ *
+ * `ProviderSessionInfo` is already a leaf type
+ * (`@minimal-agent/plugin-api/llm/provider-plugin`), so a plugin imports it
+ * from the leaf and consumes it directly; `tokens()` returns the neutral view
+ * above so no core `SessionTokens` import is needed.
+ */
+export interface SessionInfoReadApi {
+  /** Resolve the active provider's session snapshot for `modelId`. */
+  providerInfo(
+    modelId: string,
+    opts?: { signal?: AbortSignal; providerId?: string },
+  ): Promise<ProviderSessionInfo>
+  /** Read the cumulative session token counters. */
+  tokens(): SessionTokensView
+}
+
+// ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------
 
@@ -393,6 +450,7 @@ export interface PluginHost {
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi
   readonly modelsRegistry?: ModelsRegisterApi
+  readonly sessionInfo?: SessionInfoReadApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — the host-brokered store a transport-PROVIDER plugin

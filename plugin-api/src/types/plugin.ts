@@ -996,6 +996,20 @@ export interface LiveAreaHandlerContext {
    * Consumers MUST narrow (`ctx.setDecorationSuffix?.(badge)`).
    */
   setDecorationSuffix?: (suffix: string) => void
+  /**
+   * Frozen capability host carrying ONLY the namespaces this plugin's
+   * manifest declared in `capabilities: [...]` (deny-by-default; see
+   * {@link ManifestFile.capabilities}). The decoupled way for a live-area
+   * slot to read host data (e.g. `quota-status` reading the provider +
+   * token snapshot via `ctx.host.sessionInfo`): instead of importing
+   * `src/...`, the plugin re-declares the slice it consumes as a local
+   * structural interface and narrows at runtime before use.
+   *
+   * Optional + in-process only: `undefined` for a plugin that declared no
+   * capabilities, and for back-compat callers / tests that build the
+   * scheduler without a `hostFor` resolver. Mirrors {@link TUIContext.host}.
+   */
+  host?: PluginHost
 }
 
 // ---------------------------------------------------------------------------
