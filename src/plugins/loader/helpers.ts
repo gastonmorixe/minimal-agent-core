@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs"
-import { isAbsolute, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
 
@@ -24,6 +24,36 @@ import type {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve the sibling plugin-repo roots for dev-time discovery.
+ *
+ * The `../minimal-agent-plugins` checkout is a separate repo whose plugin
+ * dirs sit at its ROOT (not under a `plugins/` subdir). In production it is
+ * cloned into `~/.minimal-agent/plugins` (a scanned root already); this
+ * helper closes the DEV-time gap when running from the monorepo source.
+ *
+ * `MINIMAL_AGENT_PLUGIN_SIBLINGS` (colon-separated absolute paths) overrides
+ * the default. Each candidate is returned only when it exists and is a
+ * directory. Shared by BOTH the TUI PluginLoader (manifest plugins) and the
+ * provider-discovery bootstrap (provider.json plugins) so the two discovery
+ * paths agree on where the sibling repo lives.
+ *
+ * @param embeddedDir - the agent install dir (`<repo>`, parent of `src/`).
+ */
+export function resolveSiblingPluginRoots(embeddedDir: string): string[] {
+  const env = process.env.MINIMAL_AGENT_PLUGIN_SIBLINGS
+  const candidates = env
+    ? env.split(":").filter((p) => p.length > 0)
+    : [join(dirname(embeddedDir), "minimal-agent-plugins")]
+  return candidates.filter((p) => {
+    try {
+      return existsSync(p) && statSync(p).isDirectory()
+    } catch {
+      return false
+    }
+  })
+}
 
 /**
  * Lists plugin package directories under `rootDir/sub`: every immediate

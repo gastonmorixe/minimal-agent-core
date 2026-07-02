@@ -109,14 +109,34 @@ export async function discoverProviderPlugins(pluginsDir: string): Promise<Provi
 }
 
 /**
- * Discover + register (NOT activate) every provider plugin under
- * `pluginsDir`. Call `activateProviderPlugins()` afterward to populate
- * the canonical registries. Returns the registered provider ids.
+ * Discover + register (NOT activate) every provider plugin under one or
+ * more roots. Call `activateProviderPlugins()` afterward to populate the
+ * canonical registries. Returns the registered provider ids.
+ *
+ * Accepts a single dir (back-compat) or an array of dirs. Multiple roots
+ * support Wave G: provider plugins (provider.json) migrate from the
+ * embedded `<repo>/plugins` to the sibling `../minimal-agent-plugins`
+ * checkout, exactly as the TUI PluginLoader's `siblingDirs` does for
+ * manifest plugins. Roots are scanned in order; the FIRST occurrence of a
+ * provider id wins and later duplicates are skipped, so an embedded copy
+ * shadows a sibling one during a mid-migration window (mirrors the
+ * loader's id-collision precedence). A missing root contributes nothing.
  */
-export async function registerDiscoveredProviders(pluginsDir: string): Promise<string[]> {
-  const plugins = await discoverProviderPlugins(pluginsDir)
-  for (const plugin of plugins) registerProviderPlugin(plugin)
-  return plugins.map((p) => p.id)
+export async function registerDiscoveredProviders(
+  pluginsDirs: string | readonly string[],
+): Promise<string[]> {
+  const roots = typeof pluginsDirs === "string" ? [pluginsDirs] : pluginsDirs
+  const registered: string[] = []
+  const seen = new Set<string>()
+  for (const root of roots) {
+    for (const plugin of await discoverProviderPlugins(root)) {
+      if (seen.has(plugin.id)) continue
+      seen.add(plugin.id)
+      registerProviderPlugin(plugin)
+      registered.push(plugin.id)
+    }
+  }
+  return registered
 }
 
 // ---------------------------------------------------------------------------

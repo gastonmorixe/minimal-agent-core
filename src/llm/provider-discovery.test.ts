@@ -113,4 +113,54 @@ describe("provider discovery", () => {
   it("returns empty for a non-existent dir", () => {
     expect(findProviderPluginDirs(join(tmpdir(), "minimal-agent-does-not-exist"))).toEqual([])
   })
+
+  it("registers providers across MULTIPLE roots (Wave G sibling repo)", async () => {
+    // A second root standing in for the sibling ../minimal-agent-plugins repo,
+    // holding a provider not present in the embedded root.
+    const siblingDir = mkdtempSync(join(tmpdir(), "minimal-agent-discovery-sibling-"))
+    writeFakeProvider(siblingDir, "vendorc", "vc", "vendorc-model-1")
+    try {
+      clearModelRegistry()
+      clearProviderRegistry()
+      clearProviderPlugins()
+
+      const ids = await registerDiscoveredProviders([pluginsDir, siblingDir])
+      expect(ids).toEqual(expect.arrayContaining(["vendora", "vendorb", "vendorc"]))
+      activateDiscoveredProviders()
+      // The sibling-root provider resolves like any embedded one.
+      expect(resolveProvider("vendorc").id).toBe("vendorc")
+      expect(resolveModel("vendorc-model-1").providerId).toBe("vendorc")
+    } finally {
+      rmSync(siblingDir, { recursive: true, force: true })
+      clearProviderPlugins()
+    }
+  })
+
+  it("dedupes by provider id across roots (first root wins, mid-migration window)", async () => {
+    // Same id in both roots (a provider mid-move: present in embedded AND
+    // sibling for one commit). The FIRST root's copy must win exactly once,
+    // no double-registration.
+    const siblingDir = mkdtempSync(join(tmpdir(), "minimal-agent-discovery-dup-"))
+    writeFakeProvider(siblingDir, "vendora", "va", "vendora-model-1")
+    try {
+      clearModelRegistry()
+      clearProviderRegistry()
+      clearProviderPlugins()
+
+      const ids = await registerDiscoveredProviders([pluginsDir, siblingDir])
+      expect(ids.filter((id) => id === "vendora")).toEqual(["vendora"])
+    } finally {
+      rmSync(siblingDir, { recursive: true, force: true })
+      clearProviderPlugins()
+    }
+  })
+
+  it("accepts a single dir string (back-compat)", async () => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+    const ids = await registerDiscoveredProviders(pluginsDir)
+    expect(ids).toEqual(expect.arrayContaining(["vendora", "vendorb"]))
+    clearProviderPlugins()
+  })
 })
