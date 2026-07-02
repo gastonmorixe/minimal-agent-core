@@ -22,6 +22,7 @@
  * @module sdk/events
  */
 
+import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
 
 // ---------------------------------------------------------------------------
@@ -108,6 +109,21 @@ export interface TurnCompletedEvent {
   usage: EventUsage
 }
 
+/**
+ * An out-of-band condition the loop surfaced mid-run: a provider refusal /
+ * content filter, an output-budget event (max_tokens salvage / continue /
+ * cap), the tool-rounds emergency cap, or a reflection-ack confirmation.
+ * Non-terminal: the run continues (or settles via a following
+ * {@link TurnCompletedEvent}). Carries the full semantic {@link TurnNotice}
+ * so a `--json` consumer gets the category / attempt / message structurally
+ * instead of parsing a rendered string. Its `kind` and `severity` are the
+ * fields most consumers route on.
+ */
+export interface NoticeEvent {
+  type: "notice"
+  notice: TurnNotice
+}
+
 /** A fatal error aborted the run. Terminal: no further events follow. */
 export interface ErrorEvent {
   type: "error"
@@ -134,6 +150,7 @@ export type AgentEvent =
   | ItemCompletedEvent
   | ToolResultEvent
   | TurnCompletedEvent
+  | NoticeEvent
   | ErrorEvent
 
 /** Every `AgentEvent["type"]` tag, for exhaustiveness checks and routing. */

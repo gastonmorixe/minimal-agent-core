@@ -15,6 +15,7 @@
  * @module agent/repl
  */
 
+import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth.ts"
 import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
 import { RawInput } from "../input.ts"
@@ -39,6 +40,7 @@ import { promptModelPicker } from "./ui/model-picker.ts"
 import type { Spinner } from "./ui/spinner/index.ts"
 import { StatusRenderer, type StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
+import { renderTurnNotice } from "./ui/turn-notice.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -56,6 +58,14 @@ export interface ReplAgentLike {
       onThinkingChunk?: (chunk: string) => MaybePromise<void>
       onThinkingStop?: () => MaybePromise<void>
       onTextStop?: () => MaybePromise<void>
+      /**
+       * Optional. Fires for out-of-band conditions (refusal / content
+       * filter, output-budget events, tool-rounds cap, reflection acks)
+       * with the semantic {@link TurnNotice}. The REPLs render each kind
+       * via `renderTurnNotice`; when a host omits the hook the agent core
+       * falls back to a style-free `onTranscriptLine` one-liner.
+       */
+      onNotice?: (notice: TurnNotice) => MaybePromise<void>
       drainQueuedUserText?: () => string | null
       onQueueInject?: (text: string) => void
       /**
@@ -565,6 +575,9 @@ export async function runRepl(
           onThinkingChunk,
           onThinkingStop,
           onTextStop,
+          onNotice: (notice: TurnNotice) => {
+            onTranscriptLine(renderTurnNotice(notice))
+          },
         })
         while (true) {
           const { done, value } = await gen.next()

@@ -115,4 +115,10 @@ export const ansiStyle = {
   sky: fg(PALETTE.sky),
   violet: fg(PALETTE.violet),
   gold: fg(PALETTE.gold),
+  /**
+   * High-visibility "pill": bold bright-white on a red background, padded
+   * with one space each side. For terminal states the user must not miss
+   * (e.g. an upstream refusal killing the stream).
+   */
+  redPill: (s: string) => `\x1b[1;41;97m ${s} \x1b[0m`,
 } as const

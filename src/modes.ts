@@ -27,7 +27,6 @@
  * @module modes
  */
 
-import { c } from "./agent.ts"
 import {
   clampLabel,
   detectStyleEnv,
@@ -37,7 +36,9 @@ import {
   resolveModeStyle,
   type StyleEnv,
   styleFromLegacyColor,
-} from "./host/ui/style/mode.ts"
+} from "@minimal-agent/plugin-api/utils/mode-style"
+
+import { c } from "./agent.ts"
 import type { ContentBlock } from "./llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "./plugins/types.ts"
 

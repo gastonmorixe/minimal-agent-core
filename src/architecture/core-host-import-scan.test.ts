@@ -227,12 +227,18 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // after an intentional cleanup with the one-liner in the module header, and
 // lower the numbers.
 //
-// BASELINE IS DEBT — must only shrink. These 60 sites are real core→host
+// BASELINE IS DEBT — must only shrink. These 53 sites are real core→host
 // decoupling debt (the P3 re-export shims). They are scheduled for removal in
 // Phase 4: Jacob's host adapter replaces the shims with SDK port wiring, at
 // which point each entry burns down to zero. Burned down by Phase 4 port
 // wiring. Do not regenerate upward — a growing count means new core→host
 // coupling crept in, which is exactly what this test exists to stop.
+//
+// Last ratcheted down 2026-07-02 (turn-notice decoupling, Mia + Veronica):
+// tool-round.ts 2→1 (glyphs extracted to host renderers; the remaining
+// format.ts pipeline import is a documented Phase-4 follow-up), and
+// auto-plugins/config/diff/first-run/modes/quota-summary burned to 0
+// (host-ansi/formatter imports repointed to the plugin-api leaf package).
 // ---------------------------------------------------------------------------
 const BASELINE = new Map<string, number>([
   ["abort-quit-keystroke.test.ts", 1],
@@ -241,23 +247,17 @@ const BASELINE = new Map<string, number>([
   ["agent.ts", 6],
   ["agent/ask-user-host.test.ts", 3],
   ["agent/model-error.test.ts", 1],
-  ["agent/tool-round.ts", 2],
+  ["agent/tool-round.ts", 1],
   ["agent/turn-attachments.ts", 1],
-  ["auto-plugins.ts", 1],
   ["command-repl-e2e.test.ts", 2],
-  ["config.ts", 1],
-  ["diff.ts", 1],
   ["draft-store-editor.integration.test.ts", 1],
   ["first-run.test.ts", 1],
-  ["first-run.ts", 1],
   ["live-area-e2e.test.ts", 3],
-  ["modes.ts", 1],
   ["notification-frame-tear.e2e.test.ts", 1],
   ["plugins/loader.replay-renderers.test.ts", 1],
   ["plugins/loader/replay-renderers.ts", 1],
   ["prompt-inject-e2e.test.ts", 2],
   ["queue-persist-e2e.test.ts", 2],
-  ["quota-summary.ts", 1],
   ["test-utils/fixtures/quit-confirm-tmux-driver.ts", 3],
   ["ui/choice-modal.ts", 1],
   ["ui/chrome/first-run.ts", 1],

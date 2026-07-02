@@ -26,6 +26,8 @@
  * @module sdk/print-mode
  */
 
+import { formatTurnNoticePlain } from "../agent/turn-notice.ts"
+
 import type { AgentEvent } from "./events.ts"
 import { serializeEvent } from "./events.ts"
 
@@ -155,6 +157,12 @@ export function renderHumanProgressLine(event: AgentEvent): string {
       const { inputTokens, outputTokens } = event.usage
       const stop = event.stopReason ?? "—"
       return `· turn ${event.turn} done (${stop}; in ${inputTokens} / out ${outputTokens})`
+    }
+    case "notice": {
+      // Reuse the core's style-free one-liner: `human` progress lines are
+      // plain text, and the fallback formatter is exactly that.
+      const marker = event.notice.severity === "error" ? "✗" : "·"
+      return `${marker} ${formatTurnNoticePlain(event.notice)}`
     }
     case "error":
       return `✗ ${event.message}`

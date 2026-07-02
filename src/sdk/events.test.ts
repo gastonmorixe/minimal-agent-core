@@ -105,6 +105,8 @@ describe("AgentEvent exhaustiveness", () => {
         return e.type
       case "turn_completed":
         return e.type
+      case "notice":
+        return e.type
       case "error":
         return e.type
       default: {
@@ -125,6 +127,10 @@ describe("AgentEvent exhaustiveness", () => {
         turn: 0,
         stopReason: "end_turn",
         usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        type: "notice",
+        notice: { kind: "refusal", severity: "error", category: null, message: null },
       },
       { type: "error", message: "x" },
     ]
