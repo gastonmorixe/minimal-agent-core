@@ -30,6 +30,7 @@
  *     console.log(m.renderBaseline(m.scanPluginSrcImports("plugins"))))'
  */
 
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
@@ -37,6 +38,23 @@ import { describe, expect, it } from "bun:test"
 import { countByFile, scanPluginSrcImports } from "./architecture/plugin-import-scan.ts"
 
 const PLUGINS_ROOT = join(import.meta.dirname, "..", "plugins")
+
+/**
+ * Wave-G roots the I3 ratchet enforces across. Embedded `plugins/` PLUS the
+ * sibling `../minimal-agent-plugins/` checkout (where migrated plugins live),
+ * so a plugin that moves out of the monorepo does NOT escape the coupling
+ * ratchet — it must stay `src/`-free in its new home too. The sibling is
+ * scanned only when present (a bare host checkout without the plugins repo
+ * still runs this test green). File keys stay distinct across roots: embedded
+ * plugins use bare dir names (`memory/...`), migrated ones use `ma-*-plugin/`.
+ */
+const SIBLING_ROOT = join(import.meta.dirname, "..", "..", "minimal-agent-plugins")
+const PLUGIN_ROOTS = [PLUGINS_ROOT, ...(existsSync(SIBLING_ROOT) ? [SIBLING_ROOT] : [])]
+
+/** Scan every enforced root and concatenate the sites (keys are root-relative, disjoint). */
+function scanAllRoots(): ReturnType<typeof scanPluginSrcImports> {
+  return PLUGIN_ROOTS.flatMap((root) => scanPluginSrcImports(root))
+}
 
 /**
  * Frozen legacy violations: `plugins/<...>.ts` → number of `src/` import
@@ -214,7 +232,7 @@ const BASELINE = new Map<string, number>([
 ])
 
 describe("architecture: plugin decoupling (plugins never import src/)", () => {
-  const counts = countByFile(scanPluginSrcImports(PLUGINS_ROOT))
+  const counts = countByFile(scanAllRoots())
 
   it("no NEW src/ imports beyond the frozen baseline (ratchet up-direction)", () => {
     const regressions: string[] = []
