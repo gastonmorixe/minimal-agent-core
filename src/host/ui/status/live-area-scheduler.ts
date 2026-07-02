@@ -18,7 +18,10 @@
  * @module ui/status/live-area-scheduler
  */
 
-import { getDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
+import {
+  getDecorationSuffix,
+  setDecorationSuffix,
+} from "@minimal-agent/plugin-api/utils/decoration-suffix"
 
 import {
   createPluginLogger,
@@ -348,6 +351,12 @@ export class LiveAreaScheduler {
       // the scheduler was built without a bus (back-compat tests).
       emit: (channel: string, payload?: unknown) => this.bus?.emit(channel, payload),
       agent: this.agent,
+      // Decoration-suffix seam: the host owns the singleton (read back in
+      // `flushFooter` via `getDecorationSuffix`); the slot handler publishes
+      // its badge through this function instead of importing the shared
+      // module directly. Keeps the state host-side so a moved (external)
+      // plugin never gets a divergent second copy of the holder.
+      setDecorationSuffix: (suffix: string) => setDecorationSuffix(suffix),
     }
 
     // Single-fire latch shared between the timeout path and the

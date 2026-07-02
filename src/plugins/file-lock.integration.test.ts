@@ -14,10 +14,16 @@ import { join, resolve } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { buildHolder, lockPathFor, serializeHolder } from "../../src/file-lock.ts"
-import { PluginLoader } from "../../src/plugins/loader.ts"
+import { buildHolder, lockPathFor, serializeHolder } from "../file-lock.ts"
 
-const PROJECT_ROOT = resolve(__dirname, "../..")
+import { PluginLoader } from "./loader.ts"
+
+// The file-lock plugin now lives in the sibling `../minimal-agent-plugins/`
+// repo (Wave G physical move), discovered via the loader's `siblingDirs` seam.
+// Point the e2e loader at the sibling so this test exercises the real,
+// migrated plugin from its new home.
+const PROJECT_ROOT = resolve(__dirname, "..", "..")
+const SIBLING_ROOT = resolve(PROJECT_ROOT, "..", "minimal-agent-plugins")
 
 let dir: string
 
@@ -33,6 +39,7 @@ describe("PluginLoader picks up plugins/file-lock/", () => {
   it("advertises LockStatus as a tool", async () => {
     const loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
+      siblingDirs: [SIBLING_ROOT],
       coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
       sessionId: "test-session-flock",
     })
@@ -50,6 +57,7 @@ describe("PluginLoader picks up plugins/file-lock/", () => {
   it("dispatch LockStatus action=list returns tool_result", async () => {
     const loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
+      siblingDirs: [SIBLING_ROOT],
       coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
       sessionId: "test-session-flock-2",
     })
@@ -80,6 +88,7 @@ describe("PluginLoader picks up plugins/file-lock/", () => {
   it("dispatch LockStatus action=clear-stale prunes a stale lock", async () => {
     const loader = await PluginLoader.load({
       embeddedDir: PROJECT_ROOT,
+      siblingDirs: [SIBLING_ROOT],
       coreToolNames: new Set(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]),
       sessionId: "test-session-flock-3",
     })

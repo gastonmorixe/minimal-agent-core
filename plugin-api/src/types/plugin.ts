@@ -982,6 +982,20 @@ export interface LiveAreaHandlerContext {
    * always carry it.
    */
   agent?: AgentContext
+  /**
+   * Publish a short decoration-line suffix (e.g. an LSP-status badge) onto
+   * the host's live-area footer. The host owns the actual storage + the
+   * reader that appends it to the footer row; a slot handler calls this to
+   * set (or clear, with `""`) its badge WITHOUT importing a shared host
+   * module. This is the decoupled replacement for the module-level
+   * `setDecorationSuffix` singleton in `plugin-api/utils/decoration-suffix`:
+   * the state stays host-side, the plugin only holds a function.
+   *
+   * Optional + best-effort: `undefined` when the scheduler was built
+   * without decoration support (some tests) and for non-slot contexts.
+   * Consumers MUST narrow (`ctx.setDecorationSuffix?.(badge)`).
+   */
+  setDecorationSuffix?: (suffix: string) => void
 }
 
 // ---------------------------------------------------------------------------
