@@ -136,23 +136,11 @@ const BASELINE = new Map<string, number>([
   // and file-lock/integration.
   ["llm-openai/stall-repro.test.ts", 2],
   ["llm-openai/validate.ts", 3], // D-net-seam: errors + modality-check → plugin-api. Left: canonical-request, model-registry, provider.ts (all deferred)
-  // Pre-existing provider plugin — needs src/ imports for model registration,
-  // canonical request types, and pricing (host-side types not yet in plugin-api).
-  ["llm-opencode/adapter.ts", 4],
-  ["llm-opencode/models.ts", 2],
-  ["llm-opencode/opencode.test.ts", 2],
-  ["llm-opencode/pricing.ts", 1],
-  // Wafer provider plugin — same pre-existing provider pattern as llm-opencode
-  // and llm-openrouter: needs src/ imports for model registration, canonical
-  // request types, pricing types, provider adapter types, network client, and
-  // session-info (resolveModel, modelShortLabel). Tests drive real registries.
-  ["llm-wafer/adapter.ts", 4],
-  ["llm-wafer/models.ts", 1],
-  ["llm-wafer/pricing.ts", 1],
-  ["llm-wafer/session-info.ts", 3],
-  ["llm-wafer/wafer-disambiguation.test.ts", 1],
-  ["llm-wafer/wafer-dispatch.test.ts", 6],
-  ["llm-wafer/wafer.test.ts", 3],
+  // Wave G phase 4: llm-opencode + llm-wafer physically moved to the sibling
+  // ../minimal-agent-plugins/ repo (coordinated dual-removal), so they no longer
+  // appear here. Their cross-provider disambiguation/dispatch tests were adopted
+  // into src/llm/wafer-opencode-{disambiguation,dispatch}.integration.test.ts,
+  // which discover both providers from the sibling.
   // D-quota-schedule: the two host-runtime integration tests keep their src/
   // imports — they drive the REAL PluginLoader / REPL / Compositor / agent
   // run() end-to-end, which is the whole point of the test, so they are not
@@ -170,14 +158,11 @@ const BASELINE = new Map<string, number>([
   ["usage/handlers/cmd_usage.ts", 1],
   ["usage/lib/overlay.test.ts", 1],
   ["usage/lib/state.test.ts", 1],
-  // D-quickwins: residual. `brave.ts` imports `retry` + `type RetryOptions`
-  // from `src/retry.ts`. That module is PURE (zero host state, injectable
-  // sleep/now/random) and belongs in `@minimal-agent/plugin-api/utils/retry`,
-  // but no such export exists yet and plugin-api/ is out of this unit's
-  // allowlist. Re-point mechanically once a plugin-api unit adds the export
-  // (trivial pure-util move). Inlining a 250-line fork here was rejected as a
-  // maintenance/behavior risk, not a mechanical re-point.
-  ["web-search/providers/brave.ts", 1],
+  // D-quickwins: RESOLVED (Scott, Wave G). `brave.ts` used to import `retry` +
+  // `type RetryOptions` from `src/utils/retry.ts`. That module is PURE (zero
+  // host state, injectable sleep/now/random), so it was leaf-extracted to
+  // `@minimal-agent/plugin-api/utils/retry` and brave now imports the leaf.
+  // Baseline entry removed (0 sites).
 ])
 
 describe("architecture: plugin decoupling (plugins never import src/)", () => {
