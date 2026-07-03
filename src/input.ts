@@ -17,7 +17,7 @@ import {
   cursorVisualCol,
   displayWidth,
   wrapRows,
-} from "./term-width.ts"
+} from "./terminal/term-width.ts"
 
 type ReadOutcome = { kind: "continue" } | { kind: "submit"; value: string | null }
 

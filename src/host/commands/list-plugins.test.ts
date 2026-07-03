@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { describe, expect, test } from "bun:test"
 
-import { stripAnsi } from "../../term-width.ts"
+import { stripAnsi } from "../../terminal/term-width.ts"
 
 import { runListPluginsCommand } from "./list-plugins.ts"
 

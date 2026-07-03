@@ -8,7 +8,7 @@
  * @module ui/help/render
  */
 
-import { displayWidth } from "../../../term-width.ts"
+import { displayWidth } from "../../../terminal/term-width.ts"
 
 export interface HelpRow {
   term: string

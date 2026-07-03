@@ -13,7 +13,7 @@
  */
 
 import type { EditorBuffer } from "../../editor-buffer.ts"
-import { displayWidth } from "../../term-width.ts"
+import { displayWidth } from "../../terminal/term-width.ts"
 import { computeCursorVisualPos, findColAtVisualPos } from "../ui/editor/renderer.ts"
 
 /**

@@ -30,7 +30,7 @@
  * @module ui/compositor
  */
 
-import { cursorVisualCol, displayWidth } from "../../term-width.ts"
+import { cursorVisualCol, displayWidth } from "../../terminal/term-width.ts"
 
 import { AnsiStreamBuffer } from "./terminal/ansi-stream.ts"
 

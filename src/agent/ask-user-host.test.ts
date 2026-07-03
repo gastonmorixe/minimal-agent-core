@@ -20,7 +20,7 @@ import { FOOTER_LAYER_OVERLAY } from "../host/editor/types.ts"
 import type { EditorKeyPayload } from "../host/editor-controller.ts"
 import type { PreflightIssue } from "../llm/provider.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
-import { displayWidth, stripAnsi } from "../term-width.ts"
+import { displayWidth, stripAnsi } from "../terminal/term-width.ts"
 
 // ---------------------------------------------------------------------------
 // Fakes

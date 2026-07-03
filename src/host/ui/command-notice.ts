@@ -12,7 +12,7 @@
 
 import type { CommandNoticeBlock } from "@minimal-agent/plugin-api/types/plugin"
 
-import { displayWidth, wordWrap } from "../../term-width.ts"
+import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 
 import { c } from "./style/ansi.ts"
 

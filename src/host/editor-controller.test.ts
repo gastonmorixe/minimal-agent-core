@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { displayWidth } from "../term-width.ts"
+import { displayWidth } from "../terminal/term-width.ts"
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
 
 import { FakeCompositor, FakeOutput, FakeTTYInput, make } from "./editor-controller.fixtures.ts"

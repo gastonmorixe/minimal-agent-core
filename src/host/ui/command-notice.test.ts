@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { displayWidth, stripAnsi } from "../../term-width.ts"
+import { displayWidth, stripAnsi } from "../../terminal/term-width.ts"
 
 import { coerceNoticeBlock, renderCommandNoticeBlock } from "./command-notice.ts"
 

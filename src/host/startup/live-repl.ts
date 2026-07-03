@@ -79,7 +79,9 @@ export async function runLiveAreaRepl(opts: LiveAreaReplOptions): Promise<void> 
   const { EditorController } = await import("../editor-controller.ts")
   const { StdioInterceptor } = await import("../ui/stdio-interceptor.ts")
   const { detectSynchronizedOutput } = await import("../ui/term-caps.ts")
-  const { probeNerdGlyphCells, setNerdGlyphCells } = await import("../../nerd-glyph-width.ts")
+  const { probeNerdGlyphCells, setNerdGlyphCells } = await import(
+    "../../terminal/nerd-glyph-width.ts"
+  )
 
   // Probe the terminal for DEC mode 2026 (synchronized output) BEFORE
   // creating the editor. Detection puts stdin into raw mode briefly,

@@ -1,7 +1,7 @@
 import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
 import type { StatusActivity, StatusDirection } from "../../../bus/status.ts"
-import { displayWidth } from "../../../term-width.ts"
+import { displayWidth } from "../../../terminal/term-width.ts"
 
 export const LABEL_BYTES_RE = /\(\d+(?:\.\d+)?\s?(?:B|KB|MB)\)\s*$/
 

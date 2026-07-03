@@ -19,7 +19,7 @@
  */
 
 import type { ModeManager } from "../../../modes.ts"
-import { displayWidth } from "../../../term-width.ts"
+import { displayWidth } from "../../../terminal/term-width.ts"
 import { c } from "../style/ansi.ts"
 
 /** Separator between hint chunks: two spaces, a mid-dot, two spaces. */

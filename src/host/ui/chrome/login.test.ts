@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { stripAnsi } from "../../../term-width.ts"
+import { stripAnsi } from "../../../terminal/term-width.ts"
 
 import {
   renderApiKeyLoginSuccess,

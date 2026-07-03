@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { type StatusActivity, StatusBus } from "../../../bus/status.ts"
-import { stripAnsi } from "../../../term-width.ts"
+import { stripAnsi } from "../../../terminal/term-width.ts"
 import type { Spinner } from "../spinner/index.ts"
 
 import {

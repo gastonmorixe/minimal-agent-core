@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
-import { effectiveDisplayWidth } from "../../../nerd-glyph-width.ts"
-import { displayWidth } from "../../../term-width.ts"
+import { effectiveDisplayWidth } from "../../../terminal/nerd-glyph-width.ts"
+import { displayWidth } from "../../../terminal/term-width.ts"
 
 import type { Spinner } from "./index.ts"
 import { BlinkingNerdSpinner, SpinnerManager } from "./index.ts"

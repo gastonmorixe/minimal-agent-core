@@ -18,7 +18,7 @@ import {
   truncateDisplayWidth,
   wordWrap,
   wrapIndented,
-} from "../../../term-width.ts"
+} from "../../../terminal/term-width.ts"
 import { countLines, type TruncationInfo } from "../../../tools/truncation.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"
 import { c } from "../style/ansi.ts"
