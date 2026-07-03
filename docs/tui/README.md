@@ -40,12 +40,12 @@ There is **no full-screen TUI**. The agent is a scrolling REPL with a small bloc
 | File | LOC | Role |
 |---|---:|---|
 | `src/ui/compositor.ts` | 787 | the only thing that writes the live area |
-| `src/editor-controller.ts` | 2096 | persistent multiline editor, drives setLiveArea |
-| `src/input.ts` | 1420 | RawInput keymap + escape parsing (legacy, partly superseded) |
-| `src/editor-renderer.ts` | 438 | EditorBuffer → physical rows + cursor (with wrap) |
-| `src/editor-buffer.ts` | 312 | pure multiline text model |
-| `src/term-width.ts` | 241 | display-width / wrap math (single source of truth) |
-| `src/input-capture-stack.ts` | 224 | LIFO transient overlays in front of the hook chain |
+| `src/host/editor-controller.ts` | 2096 | persistent multiline editor, drives setLiveArea |
+| `src/input/input.ts` | 1420 | RawInput keymap + escape parsing (legacy, partly superseded) |
+| `src/host/ui/editor/renderer.ts` | 438 | EditorBuffer → physical rows + cursor (with wrap) |
+| `src/input/editor-buffer.ts` | 312 | pure multiline text model |
+| `src/terminal/term-width.ts` | 241 | display-width / wrap math (single source of truth) |
+| `src/input/input-capture-stack.ts` | 224 | LIFO transient overlays in front of the hook chain |
 | `src/ui/picker.ts` | 173 | generic vertical picker primitive |
 | `src/ui/stdio-interceptor.ts` | 155 | re-routes all writes through the compositor |
 | `src/ui/term-caps.ts` | 138 | DECRPM probe for synchronized output (mode 2026) |

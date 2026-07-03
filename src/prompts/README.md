@@ -3,7 +3,7 @@
 Every model-facing prompt in minimal-agent lives in a markdown file, not in a
 TypeScript string literal. This directory holds the **core** prompts; plugins
 keep theirs next to the plugin (see below). The loader + templating engine is
-[`src/prompts.ts`](../prompts.ts).
+[`src/prompts/prompts.ts`](./prompts.ts).
 
 ## Why
 
@@ -61,8 +61,9 @@ const billing = renderPrompt(promptPath(import.meta, "prompts", "anthropic", "bi
 The rule of thumb: **prose goes in markdown; control flow stays in TypeScript.**
 Conditional assembly (which fragment, in what order, under what condition) is
 logic and belongs in `.ts`. The sentences themselves belong here. For an
-example, see how `buildLoopSafetyParagraph` in `src/headers.ts` composes the
-`loop-safety/*` fragments.
+example, see how `buildLoopSafetyParagraph` composes the `loop-safety/*`
+fragments (it lived in the now-removed `src/headers.ts`; the Anthropic header
+logic moved into `plugins/llm-anthropic/`).
 
 ## Layout
 
@@ -95,6 +96,6 @@ Plugin prompts live next to the plugin, not here:
 
 `anthropic/identity.claude-code.md` and `anthropic/billing.tmpl.md` are the
 exact blocks Anthropic's server validates for plan/OAuth auth. They are the
-single source of truth: both `src/headers.ts` (legacy shim) and the
-`plugins/llm-anthropic` provider render from these files. Keep them byte-exact.
+single source of truth: the `plugins/llm-anthropic` provider renders from these
+files (the former `src/headers.ts` legacy shim has been removed). Keep them byte-exact.
 Reword `instructions.md` freely; do **not** reword these two.

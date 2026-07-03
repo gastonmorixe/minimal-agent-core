@@ -432,7 +432,7 @@ Assistant turns are persisted as the full `ContentBlock[]` array, including
 thinking blocks with their cryptographic signatures. Restore is lossless: on
 resume those thinking blocks ride back into history unchanged, so signature
 verification keeps working across reloads. See `AssistantRecord` in
-`src/session-store.ts` for the schema-level note.
+`src/session/session-store.ts` for the schema-level note.
 
 Commands:
 
@@ -472,14 +472,14 @@ a provider's prefix cache can pay off across turns in one process.
 Start here:
 
 - **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch.
-- **`src/agent.ts`:** Agent loop, message history, tool execution, cache markers, and streamed assistant turns.
+- **`src/agent/agent.ts`:** Agent loop, message history, tool execution, cache markers, and streamed assistant turns.
 - **`src/llm/`:** The provider-agnostic core: canonical request/event types, the capability schema, the model registry, the provider port, and the orchestrator.
 - **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and the test transport.
 - **`src/plugins/`:** Plugin scanner, loader, manifest types, capability host, stream handling, events, and hooks.
 - **`src/ui/`:** Live terminal compositor, input overlays, modal UI, and terminal capability handling.
-- **`src/session-store.ts`:** JSONL writer and session index.
-- **`src/session-restore.ts`:** Session folding and repair.
-- **`src/session-replay.ts`:** Resume header and scrollback replay.
+- **`src/session/session-store.ts`:** JSONL writer and session index.
+- **`src/session/session-restore.ts`:** Session folding and repair.
+- **`src/host/session-replay.ts`:** Resume header and scrollback replay.
 - **`plugin-api/`:** The leaf contract package (`@minimal-agent/plugin-api`): shared types and pure utilities both core and plugins depend on.
 - **`plugins/`:** Bundled provider, tool, mode, and UI plugins.
 - **`docs/internal/`:** Notes for the parts that are easiest to break by guessing.
@@ -491,7 +491,7 @@ The repo works best when changes stay small and observable:
 - **Zero runtime dependencies.** `package.json` ships an empty `dependencies` block and stays that way. The agent runs on Bun's standard library and the TypeScript source alone, with no npm packages pulled at runtime. The only entries are `devDependencies`: the toolchain (Bun types, Biome, oxlint, typedoc, TypeScript) that lints, formats, type-checks, and tests the source. New features add a file you can read, not a transitive dependency tree you can't. Optional external binaries (`mdstream`, `git`) are fetched on demand and degrade gracefully when absent.
 - **Keep the core provider-agnostic.** Provider names, model ids, and wire details live in a provider plugin, never in `src/`. Three fitness tests enforce this and ratchet down only.
 - **Capabilities are data, not branching.** Ask a `Capabilities` record what a model supports; never match a model id in control flow.
-- **Prompts live in markdown, not string literals.** Every model-facing prompt is a `.md`/`.tmpl.md` file loaded through `src/prompts.ts`. Prose in markdown, control flow in TypeScript.
+- **Prompts live in markdown, not string literals.** Every model-facing prompt is a `.md`/`.tmpl.md` file loaded through `src/prompts/prompts.ts`. Prose in markdown, control flow in TypeScript.
 - **Keep terminal rendering under tests.** ANSI output bugs are visual bugs. Treat formatter lifecycle and rendered output as separate checks.
 - **Keep session writes at turn boundaries.** Do not write partial token streams as durable history.
 - **Prefer process-level smoke tests** when changing startup, transport, auth, plugins, or terminal paths.
