@@ -75,7 +75,7 @@ import { EventEmitter } from "node:events"
 import { describe, expect, it } from "bun:test"
 
 import { EditorController, type EditorKeyPayload } from "../host/editor-controller.ts"
-import { InputCaptureStack } from "../input-capture-stack.ts"
+import { InputCaptureStack } from "../input/input-capture-stack.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
 
 import { AbortBus, type AbortReason } from "./abort-bus.ts"

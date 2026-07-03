@@ -28,7 +28,7 @@ import {
   type SystemPromptContext,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
-import { promptPath, renderPrompt } from "../../src/prompts.ts"
+import { promptPath, renderPrompt } from "../../src/prompts/prompts.ts"
 
 import { BUILD_HASH, VERSION } from "./wire-constants.ts"
 

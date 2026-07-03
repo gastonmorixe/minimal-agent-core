@@ -8,14 +8,13 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import type { PluginEnableOverrideSets } from "../plugin-enable-resolution.ts"
+import { discoverPackageDirs } from "./loader/helpers.ts"
+import type { PluginEnableOverrideSets } from "./plugin-enable-resolution.ts"
 import {
   collectFlagValues,
   parseCommaSeparatedIds,
   resolvePluginEnabledOverrides,
-} from "../plugin-enable-resolution.ts"
-
-import { discoverPackageDirs } from "./loader/helpers.ts"
+} from "./plugin-enable-resolution.ts"
 
 export type CatalogRoot = "embedded" | "user" | "home" | "project"
 

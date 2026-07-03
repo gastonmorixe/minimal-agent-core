@@ -8,7 +8,7 @@
  * @module ui/model-picker
  */
 
-import { RawInput } from "../../input.ts"
+import { RawInput } from "../../input/input.ts"
 import type { ModelInfo } from "../../llm/transport/types.ts"
 
 import { c } from "./style/ansi.ts"

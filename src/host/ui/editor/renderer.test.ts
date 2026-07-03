@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { EditorBuffer } from "../../../editor-buffer.ts"
+import { EditorBuffer } from "../../../input/editor-buffer.ts"
 
 import { EditorRenderer } from "./renderer.ts"
 

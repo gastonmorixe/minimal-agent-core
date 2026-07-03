@@ -59,7 +59,6 @@ import {
   storedProvidersHint,
   suggestModelForProvider,
 } from "./auth/auth-strategies.ts"
-import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { diag, getDiagnosticBus } from "./bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "./bus/global-bus.ts"
@@ -128,11 +127,15 @@ import { findProviderPlugin } from "./llm/provider-plugin.ts"
 import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes/modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
-import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
-import { resolveEffectivePlatform } from "./plugin-platform-resolution.ts"
 import { createAgentContext } from "./plugins/agent-context.ts"
+import { bootstrapUserPlugins } from "./plugins/auto-plugins.ts"
 import { resolveSiblingPluginRoots } from "./plugins/loader/helpers.ts"
 import { PluginLoader } from "./plugins/loader.ts"
+import {
+  collectFlagValues,
+  resolvePluginEnabledOverrides,
+} from "./plugins/plugin-enable-resolution.ts"
+import { resolveEffectivePlatform } from "./plugins/plugin-platform-resolution.ts"
 import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaWindows } from "./quota/quota-summary.ts"
 import { parseSchemaFile } from "./sdk/output-schema.ts"
@@ -140,8 +143,8 @@ import { loadBlobStoreConfig } from "./session/blob-store.ts"
 import { getSessionId, setSessionId } from "./session/session-id.ts"
 import { loadSession } from "./session/session-restore.ts"
 import { shortHash } from "./session/session-store.ts"
-import { ToolTimeTracker } from "./tool-time.ts"
-import { TOOL_DEFINITIONS } from "./tools.ts"
+import { ToolTimeTracker } from "./tools/tool-time.ts"
+import { TOOL_DEFINITIONS } from "./tools/tools.ts"
 
 // ---------------------------------------------------------------------------
 // Argument parsing

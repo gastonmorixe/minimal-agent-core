@@ -12,7 +12,7 @@
  * @module editor/vertical-nav
  */
 
-import type { EditorBuffer } from "../../editor-buffer.ts"
+import type { EditorBuffer } from "../../input/editor-buffer.ts"
 import { displayWidth } from "../../terminal/term-width.ts"
 import { computeCursorVisualPos, findColAtVisualPos } from "../ui/editor/renderer.ts"
 

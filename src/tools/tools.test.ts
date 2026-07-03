@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./tools/truncation.ts"
 import { executeTool, stripInternalFields, type ToolExecResult } from "./tools.ts"
+import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./truncation.ts"
 
 let dir: string
 beforeAll(() => {

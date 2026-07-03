@@ -23,13 +23,13 @@
 import { isRuntimeAttachmentBlock } from "../agent/runtime-attachments.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import type { ModeManager } from "../modes/modes.ts"
+import type { SessionRecord } from "../session/session-store.ts"
+import type { ToolTimeTracker } from "../tools/tool-time.ts"
 import {
   prefixSubmittedAtLines,
   type SubmittedAtStyle,
   submittedAtEnabled,
-} from "../scrollback-submitted-at.ts"
-import type { SessionRecord } from "../session/session-store.ts"
-import type { ToolTimeTracker } from "../tool-time.ts"
+} from "../ui/scrollback-submitted-at.ts"
 
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"

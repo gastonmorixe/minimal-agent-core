@@ -23,8 +23,8 @@ import {
   initialState as initialFsmState,
   type QuitReason,
 } from "../bus/abort-quit-fsm.ts"
-import { EditorBuffer } from "../editor-buffer.ts"
-import { type InputCaptureStack, inputCaptureStack } from "../input-capture-stack.ts"
+import { EditorBuffer } from "../input/editor-buffer.ts"
+import { type InputCaptureStack, inputCaptureStack } from "../input/input-capture-stack.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
 import { truncateDisplayWidth } from "../terminal/term-width.ts"
 

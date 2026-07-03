@@ -14,7 +14,7 @@
 
 import type { AbortBus } from "../../bus/abort-bus.ts"
 import type { FsmOptions } from "../../bus/abort-quit-fsm.ts"
-import type { InputCaptureStack } from "../../input-capture-stack.ts"
+import type { InputCaptureStack } from "../../input/input-capture-stack.ts"
 import type { Hooks } from "../../plugins/hooks/hooks.ts"
 
 /**

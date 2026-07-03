@@ -16,7 +16,7 @@
 
 import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
-import type { EditorBuffer } from "../../../editor-buffer.ts"
+import type { EditorBuffer } from "../../../input/editor-buffer.ts"
 import {
   codePointWidth,
   cursorRowOffset,

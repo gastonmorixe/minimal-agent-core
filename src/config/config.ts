@@ -36,7 +36,7 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 import { parseFormatterCommand } from "@minimal-agent/plugin-api/utils/shell-args"
 
-import { normalizeSubmittedAtStyle } from "../scrollback-submitted-at.ts"
+import { normalizeSubmittedAtStyle } from "../ui/scrollback-submitted-at.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
 export interface UserConfig {

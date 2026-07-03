@@ -30,15 +30,16 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 
-import { configPath as userConfigPath } from "./config/config.ts"
-import { acquireLock, LockAbortedError, LockTimeoutError } from "./infra/file-lock.ts"
-import type { ImageBlock } from "./llm/canonical-messages.ts"
-import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
-import { promptPath, renderPrompt } from "./prompts.ts"
-import { getSessionId } from "./session/session-id.ts"
-import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
-import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./utils/diff.ts"
-import { parseJsonc } from "./utils/jsonc.ts"
+import { configPath as userConfigPath } from "../config/config.ts"
+import { acquireLock, LockAbortedError, LockTimeoutError } from "../infra/file-lock.ts"
+import type { ImageBlock } from "../llm/canonical-messages.ts"
+import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
+import { promptPath, renderPrompt } from "../prompts/prompts.ts"
+import { getSessionId } from "../session/session-id.ts"
+import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.ts"
+import { parseJsonc } from "../utils/jsonc.ts"
+
+import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./truncation.ts"
 
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 

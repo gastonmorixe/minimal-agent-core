@@ -20,7 +20,7 @@
  */
 
 import type { StatusBus } from "../bus/status.ts"
-import type { InputCaptureStack } from "../input-capture-stack.ts"
+import type { InputCaptureStack } from "../input/input-capture-stack.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 
 /**

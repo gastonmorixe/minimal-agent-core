@@ -14,7 +14,7 @@
 import { describe, expect, it } from "bun:test"
 
 import type { StreamedResponse } from "../client/types.ts"
-import { ToolTimeTracker } from "../tool-time.ts"
+import { ToolTimeTracker } from "../tools/tool-time.ts"
 
 import { Agent } from "./agent.ts"
 
