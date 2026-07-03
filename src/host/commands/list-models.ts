@@ -12,7 +12,7 @@
  * @module commands/list-models
  */
 
-import { tryResolveProviderAuth } from "../../auth-strategies.ts"
+import { tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
 import { listRegisteredModels } from "../../llm/model-registry.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { listProviderPlugins } from "../../llm/provider-plugin.ts"

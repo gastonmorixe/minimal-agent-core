@@ -12,7 +12,7 @@
 
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
-import type { AuthResult } from "../auth.ts"
+import type { AuthResult } from "../auth/auth.ts"
 import { type AbortReason, abortBus } from "../bus/abort-bus.ts"
 import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"

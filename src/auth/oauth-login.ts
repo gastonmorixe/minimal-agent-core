@@ -23,13 +23,14 @@
 
 import { randomBytes } from "node:crypto"
 
-import { type AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import {
   listProviderPlugins,
   type OAuthLoginInstallResult,
   type OAuthLoginProvider,
-} from "./llm/provider-plugin.ts"
-import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
+} from "../llm/provider-plugin.ts"
+import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
+
+import { type AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 
 /** Error raised when the user cancels login. */
 export class LoginAbortedError extends Error {

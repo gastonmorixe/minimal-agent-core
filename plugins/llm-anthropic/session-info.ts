@@ -41,7 +41,7 @@ import type {
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
 
-import { getAuth } from "../../src/auth.ts"
+import { getAuth } from "../../src/auth/auth.ts"
 import { modelShortLabel } from "../../src/llm/model-label.ts"
 import { resolveModel } from "../../src/llm/model-registry.ts"
 import { getLastRateLimits } from "../../src/quota/quota-cache.ts"

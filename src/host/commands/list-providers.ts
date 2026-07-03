@@ -1,4 +1,4 @@
-import { discoverCredentialedProviders } from "../../auth-strategies.ts"
+import { discoverCredentialedProviders } from "../../auth/auth-strategies.ts"
 import { listRegisteredModels, listRegisteredProviders } from "../../llm/model-registry.ts"
 import { writeCommandTable } from "../ui/command-table.ts"
 

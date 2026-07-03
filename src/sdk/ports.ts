@@ -257,7 +257,7 @@ export interface AgentCoreConfig {
   /** Service tier string forwarded to the provider. */
   serviceTier?: string
   /** Auth credentials for API calls. */
-  auth: import("../auth.ts").AuthResult
+  auth: import("../auth/auth.ts").AuthResult
   /** Provider id for model disambiguation. */
   providerId?: string
   /**

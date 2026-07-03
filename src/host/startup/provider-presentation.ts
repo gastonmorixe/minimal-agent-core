@@ -21,7 +21,7 @@
  * @module startup/provider-presentation
  */
 
-import { discoverCredentialedProviders } from "../../auth-strategies.ts"
+import { discoverCredentialedProviders } from "../../auth/auth-strategies.ts"
 import { findModel } from "../../llm/model-registry.ts"
 import { findProviderPlugin } from "../../llm/provider-plugin.ts"
 

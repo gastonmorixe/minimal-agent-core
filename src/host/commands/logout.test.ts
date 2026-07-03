@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { ANTHROPIC_PLAN_OAUTH, clearCredentials, writeCredentials } from "../../auth.ts"
-import { AuthStore } from "../../auth-store.ts"
+import { ANTHROPIC_PLAN_OAUTH, clearCredentials, writeCredentials } from "../../auth/auth.ts"
+import { AuthStore } from "../../auth/auth-store.ts"
 
 import { runLogoutCommand } from "./logout.ts"
 

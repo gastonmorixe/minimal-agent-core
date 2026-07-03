@@ -28,7 +28,7 @@
  * @module llm/adapter-legacy
  */
 
-import type { AuthResult } from "../auth.ts"
+import type { AuthResult } from "../auth/auth.ts"
 
 import type { CanonicalEvent, CanonicalUsage, StopDetails, StopReason } from "./canonical-events.ts"
 import type {

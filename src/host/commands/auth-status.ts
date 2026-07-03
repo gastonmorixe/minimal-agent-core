@@ -14,7 +14,7 @@ import {
   type CredentialedProvider,
   discoverCredentialedProviders,
   tryResolveProviderAuth,
-} from "../../auth-strategies.ts"
+} from "../../auth/auth-strategies.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { renderAuthStatusRows } from "../ui/chrome/auth-status.ts"
 import { writeCommandRows } from "../ui/command-output.ts"

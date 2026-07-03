@@ -12,7 +12,7 @@
 import type { CanonicalRequest } from "@minimal-agent/plugin-api/llm/canonical-request"
 import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
 
-import type { AuthResult } from "../../src/auth.ts"
+import type { AuthResult } from "../../src/auth/auth.ts"
 import { resolveModel } from "../../src/llm/model-registry.ts"
 import { defaultNetworkClient } from "../../src/network/index.ts"
 

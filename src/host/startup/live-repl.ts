@@ -16,7 +16,7 @@
  */
 
 import type { Agent, runRepl } from "../../agent.ts"
-import type { AuthResult } from "../../auth.ts"
+import type { AuthResult } from "../../auth/auth.ts"
 import { getGlobalEventBus } from "../../bus/global-bus.ts"
 import type { UserConfig } from "../../config/config.ts"
 import { clipboardText } from "../../media/clipboard.ts"

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
 import { PROVIDER_TOKEN_RE, stripComments } from "./architecture/provider-scan.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import {
   clearModelRegistry,
   clearProviderRegistry,

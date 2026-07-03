@@ -10,7 +10,7 @@
  * @module commands/logout
  */
 
-import { clearAllCredentials, clearProviderCredentials } from "../../auth-strategies.ts"
+import { clearAllCredentials, clearProviderCredentials } from "../../auth/auth-strategies.ts"
 import {
   renderLogoutResultRows,
   renderLogoutStartRows,

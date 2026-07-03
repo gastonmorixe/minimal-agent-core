@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import type { SendOptions, StreamedResponse } from "./llm/transport/types.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }

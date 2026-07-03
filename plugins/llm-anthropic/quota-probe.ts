@@ -28,7 +28,7 @@
 
 import type { NetworkClient } from "@minimal-agent/plugin-api/net/types"
 
-import { type AuthResult, readCredentials } from "../../src/auth.ts"
+import { type AuthResult, readCredentials } from "../../src/auth/auth.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, resolveModel } from "../../src/llm/model-registry.ts"
 import { defaultNetworkClient } from "../../src/network/index.ts"

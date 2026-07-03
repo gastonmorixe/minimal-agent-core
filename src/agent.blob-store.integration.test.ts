@@ -21,7 +21,7 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import { BlobStore } from "./blob-store.ts"
 import type { SendOptions, StreamedResponse } from "./client/types.ts"
 import type { PluginLoader } from "./plugins/loader.ts"

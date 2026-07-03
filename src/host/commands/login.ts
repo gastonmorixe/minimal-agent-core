@@ -16,21 +16,21 @@
 
 import { createInterface } from "node:readline"
 
-import { defaultAuthStore, type SecretBag } from "../../auth-store.ts"
+import { defaultAuthStore, type SecretBag } from "../../auth/auth-store.ts"
 import {
   findApiKeyAuthProvider,
   findOAuthLoginProvider,
   listApiKeyAuthProviders,
   listOAuthLoginProviderEntries,
   suggestModelForProvider,
-} from "../../auth-strategies.ts"
-import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../../llm/provider-plugin.ts"
+} from "../../auth/auth-strategies.ts"
 import {
   isLoginAborted,
   LoginAbortedError,
   type LoginOutcome,
   runOAuthLogin,
-} from "../../oauth-login.ts"
+} from "../../auth/oauth-login.ts"
+import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../../llm/provider-plugin.ts"
 import {
   renderApiKeyLoginSuccess,
   renderLoginBanner,

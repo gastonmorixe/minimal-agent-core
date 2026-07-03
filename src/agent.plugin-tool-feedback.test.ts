@@ -21,7 +21,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import { GLOBAL_STATUS_BUS, type StatusActivity } from "./bus/status.ts"
 import type { SendOptions, StreamedResponse } from "./client/types.ts"
 import { formatActivityInfix } from "./host/ui/status/format.ts"

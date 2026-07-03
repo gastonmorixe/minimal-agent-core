@@ -16,10 +16,11 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import type { OAuthLoginProvider } from "../llm/provider-plugin.ts"
+import { NetworkClient, type NetworkRequest, NetworkResponse } from "../network/index.ts"
+import type { NetworkTransport } from "../network/types.ts"
+
 import { AuthStore } from "./auth-store.ts"
-import type { OAuthLoginProvider } from "./llm/provider-plugin.ts"
-import { NetworkClient, type NetworkRequest, NetworkResponse } from "./network/index.ts"
-import type { NetworkTransport } from "./network/types.ts"
 import {
   base64UrlEncode,
   buildAuthUrl,

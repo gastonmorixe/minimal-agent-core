@@ -5,7 +5,7 @@ import { join, resolve } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import type { ContentBlock, Message, SendOptions, StreamedResponse } from "./client/types.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 

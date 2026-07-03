@@ -37,7 +37,7 @@
 
 import { randomUUID } from "node:crypto"
 
-import { providerPeerToken, resolveStoredProviderAuth } from "../../auth-strategies.ts"
+import { providerPeerToken, resolveStoredProviderAuth } from "../../auth/auth-strategies.ts"
 import { diag } from "../../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
