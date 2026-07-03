@@ -35,9 +35,9 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { countByFile, scanPluginSrcImports } from "./architecture/plugin-import-scan.ts"
+import { countByFile, scanPluginSrcImports } from "./plugin-import-scan.ts"
 
-const PLUGINS_ROOT = join(import.meta.dirname, "..", "plugins")
+const PLUGINS_ROOT = join(import.meta.dirname, "..", "..", "plugins")
 
 /**
  * Wave-G roots the I3 ratchet enforces across. Embedded `plugins/` PLUS the
@@ -48,7 +48,7 @@ const PLUGINS_ROOT = join(import.meta.dirname, "..", "plugins")
  * still runs this test green). File keys stay distinct across roots: embedded
  * plugins use bare dir names (`memory/...`), migrated ones use `ma-*-plugin/`.
  */
-const SIBLING_ROOT = join(import.meta.dirname, "..", "..", "minimal-agent-plugins")
+const SIBLING_ROOT = join(import.meta.dirname, "..", "..", "..", "minimal-agent-plugins")
 const PLUGIN_ROOTS = [PLUGINS_ROOT, ...(existsSync(SIBLING_ROOT) ? [SIBLING_ROOT] : [])]
 
 /** Scan every enforced root and concatenate the sites (keys are root-relative, disjoint). */

@@ -27,9 +27,9 @@ import {
   reachesHostTree,
   scanPackageHostImports,
   scanSourceForHostImports,
-} from "./architecture/plugin-api-leaf-scan.ts"
+} from "./plugin-api-leaf-scan.ts"
 
-const REPO_ROOT = join(import.meta.dirname, "..")
+const REPO_ROOT = join(import.meta.dirname, "..", "..")
 const PKG_FS_ROOT = join(REPO_ROOT, "plugin-api")
 const PKG_ROOT_REL = "plugin-api"
 

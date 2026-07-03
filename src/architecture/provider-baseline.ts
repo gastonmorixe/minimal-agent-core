@@ -13,10 +13,10 @@
  * scanner itself.
  */
 export const PROVIDER_SCAN_EXEMPT: ReadonlySet<string> = new Set([
-  "architecture.provider-decoupling.test.ts",
+  "architecture/architecture.provider-decoupling.test.ts",
   "architecture/provider-baseline.ts",
   "architecture/provider-scan.ts",
-  "architecture.plugin-decoupling.test.ts",
+  "architecture/architecture.plugin-decoupling.test.ts",
   // Import-scan tests use plugin paths (`plugins/llm-anthropic/...`) as
   // fixture specifiers — same category, same exemption.
   "architecture/core-plugin-import-scan.test.ts",

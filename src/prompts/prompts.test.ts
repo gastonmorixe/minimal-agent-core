@@ -148,8 +148,8 @@ describe("loadPromptText / renderPrompt / promptPath", () => {
   })
 
   it("promptPath resolves relative to the calling module dir", () => {
-    // This test file lives in src/, so prompts/ resolves under src/.
-    const p = promptPath(import.meta, "prompts", "instructions.md")
+    // This test file lives in src/prompts/, so "../prompts" resolves under src/.
+    const p = promptPath(import.meta, "..", "prompts", "instructions.md")
     expect(p.endsWith(join("src", "prompts", "instructions.md"))).toBe(true)
   })
 })

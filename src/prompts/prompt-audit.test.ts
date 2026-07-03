@@ -3,7 +3,7 @@ import { basename, join, relative, resolve } from "node:path"
 
 import { describe, expect, test } from "bun:test"
 
-const ROOT = resolve(import.meta.dir, "..")
+const ROOT = resolve(import.meta.dir, "..", "..")
 
 interface PromptFile {
   rel: string

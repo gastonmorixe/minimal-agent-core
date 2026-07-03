@@ -39,17 +39,10 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import {
-  LEGACY_PROVIDER_TOKEN_BASELINE,
-  PROVIDER_SCAN_EXEMPT,
-} from "./architecture/provider-baseline.ts"
-import {
-  PROVIDER_NAME_RE,
-  scanProviderTokenViolations,
-  tsFilesUnder,
-} from "./architecture/provider-scan.ts"
+import { LEGACY_PROVIDER_TOKEN_BASELINE, PROVIDER_SCAN_EXEMPT } from "./provider-baseline.ts"
+import { PROVIDER_NAME_RE, scanProviderTokenViolations, tsFilesUnder } from "./provider-scan.ts"
 
-const SRC_ROOT = join(import.meta.dirname)
+const SRC_ROOT = join(import.meta.dirname, "..")
 
 function providerTokenViolations(): string[] {
   return scanProviderTokenViolations(SRC_ROOT, PROVIDER_SCAN_EXEMPT)

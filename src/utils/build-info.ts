@@ -20,7 +20,7 @@ import { join } from "node:path"
  */
 function readAgentVersion(): string {
   try {
-    const raw = readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")
+    const raw = readFileSync(join(import.meta.dirname, "..", "..", "package.json"), "utf8")
     const parsed: unknown = JSON.parse(raw)
     if (
       parsed &&
