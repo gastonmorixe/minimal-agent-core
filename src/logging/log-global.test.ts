@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./bus/diagnostic-bus.ts"
+import { createDiagnosticBus, Facility, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
+
 import { GlobalLogSink, type GlobalLogSinkFs } from "./log-global.ts"
 
 function memFs(): { fs: GlobalLogSinkFs; files: Map<string, string>; renames: string[] } {
