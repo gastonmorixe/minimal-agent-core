@@ -30,7 +30,7 @@
  * @module llm/system-prompt
  */
 
-import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { promptPath, renderPrompt } from "../prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"

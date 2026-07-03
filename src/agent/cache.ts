@@ -8,7 +8,7 @@
  * @module agent/cache
  */
 
-import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 
 /**

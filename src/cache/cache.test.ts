@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
+import { registerTestProvider } from "../llm/test-fixtures.ts"
+
 import {
   CacheAnomalyDetector,
   type CacheUsage,
@@ -7,7 +9,6 @@ import {
   type RequestContextSnapshot,
   snapshotRequest,
 } from "./cache.ts"
-import { registerTestProvider } from "./llm/test-fixtures.ts"
 
 const ANSI = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const strip = (s: string) => s.replace(ANSI, "")

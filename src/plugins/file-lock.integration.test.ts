@@ -14,7 +14,7 @@ import { join, resolve } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { buildHolder, lockPathFor, serializeHolder } from "../file-lock.ts"
+import { buildHolder, lockPathFor, serializeHolder } from "../infra/file-lock.ts"
 
 import { PluginLoader } from "./loader.ts"
 

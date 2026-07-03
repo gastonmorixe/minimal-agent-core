@@ -247,7 +247,7 @@ export interface AgentCoreConfig {
    * `"5m"` (see `src/cache-ttl.ts :: DEFAULT_CACHE_TTL`). Resolved upstream
    * from `--cache-ttl` / `MINIMAL_AGENT_CACHE_TTL` / config.
    */
-  cacheTtl?: import("../cache-ttl.ts").CacheTtl
+  cacheTtl?: import("../cache/cache-ttl.ts").CacheTtl
   /** Pre-existing conversation to seed the agent (resume). */
   initialMessages?: Message[]
   /** Maximum tool rounds per turn (safety limit). */

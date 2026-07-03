@@ -35,13 +35,13 @@
  *     \}
  */
 
-import { findModel } from "./llm/model-registry.ts"
-import type { CacheUsage } from "./quota/cache-usage.ts"
+import { findModel } from "../llm/model-registry.ts"
+import type { CacheUsage } from "../quota/cache-usage.ts"
 
 // Re-export the neutral accounting type for back-compat: callers that did
-// `import { CacheUsage } from "./cache.ts"` keep resolving while the
+// `import { CacheUsage } from "../cache.ts"` keep resolving while the
 // Anthropic-specific observability below relocates in WORK1 Phase D.
-export type { CacheUsage } from "./quota/cache-usage.ts"
+export type { CacheUsage } from "../quota/cache-usage.ts"
 
 // ---------------------------------------------------------------------------
 // Types

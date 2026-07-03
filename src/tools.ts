@@ -31,7 +31,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node
 import { basename, dirname, resolve } from "node:path"
 
 import { configPath as userConfigPath } from "./config/config.ts"
-import { acquireLock, LockAbortedError, LockTimeoutError } from "./file-lock.ts"
+import { acquireLock, LockAbortedError, LockTimeoutError } from "./infra/file-lock.ts"
 import type { ImageBlock } from "./llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
