@@ -73,7 +73,6 @@ import {
   loadPluginEnabledOverrides,
   loadUserConfig,
 } from "./config/config.ts"
-import { validateEffortForModel } from "./config/effort-resolution.ts"
 import { planCommand } from "./host/cli/command-plan.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "./host/print-output.ts"
@@ -97,6 +96,12 @@ import {
 } from "./host/startup/resolve-boot-model.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
+import {
+  printStartupConfigRows,
+  printTerminalViewportRow,
+  publishResolvedRequestEnv,
+  validateStartupEffort,
+} from "./host/startup/startup-rows.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
@@ -538,97 +543,24 @@ async function main() {
     formatterCmd = undefined
   }
 
-  // Fast mode (`--fast` / `MINIMAL_AGENT_FAST=1`) gets a ⚡ on the model row so
-  // the premium dispatch tier is visible at a glance. Provider-neutral: the
-  // flag is capability-gated per provider downstream; the bolt reflects the
-  // resolved request intent, not whether a given model honors it.
-  printStartupRow(
-    "model",
-    speedFast
-      ? `${c.boldCyan(selectedModel)} ${c.boldYellow("⚡ fast")}`
-      : c.boldCyan(selectedModel),
-  )
-  if (serviceTier) {
-    printStartupRow("service tier", `${serviceTier} ${c.dim("(provider-mapped)")}`)
-  }
-
-  // Thinking + effort: surface what we'll actually send on the wire. A
-  // cheap/fast-tier model that supports neither thinking nor an effort
-  // parameter gets neither field, so we show "off" for both. This is a
-  // capability-driven test (registry flags), not a model-name substring
-  // match, so any provider's cheap tier reads correctly. See
-  // `modelHidesReasoning` in src/startup/provider-presentation.ts.
+  // Print the model / service-tier / thinking / effort / cache-ttl banner
+  // rows (pure presentation + provenance labels, in host/startup/startup-rows).
+  printStartupConfigRows({
+    selectedModel,
+    speedFast,
+    serviceTier,
+    thinkingDisplay,
+    effort,
+    effortSource,
+    cacheTtl,
+    cacheTtlSource,
+  })
   const hidesReasoning = modelHidesReasoning(selectedModel)
-  const thinkingLabel = hidesReasoning
-    ? c.dim("off")
-    : thinkingDisplay
-      ? `adaptive ${c.dim(`(display=${thinkingDisplay})`)}`
-      : "adaptive"
-  const effortProvenance =
-    effortSource === "cli"
-      ? "(--effort)"
-      : effortSource === "env"
-        ? "(env)"
-        : effortSource === "config"
-          ? "(config)"
-          : ""
-  const effortLabel = hidesReasoning
-    ? c.dim("off")
-    : effort
-      ? `${effort} ${c.dim(effortProvenance)}`
-      : `medium ${c.dim("(default)")}`
-  printStartupRow("thinking", thinkingLabel)
-  printStartupRow("effort", effortLabel)
-  const cacheTtlProvenance =
-    cacheTtlSource === "cli"
-      ? "(--cache-ttl)"
-      : cacheTtlSource === "env"
-        ? "(env)"
-        : cacheTtlSource === "config"
-          ? "(config)"
-          : "(default)"
-  printStartupRow("cache ttl", `${cacheTtl} ${c.dim(cacheTtlProvenance)}`)
+  // Fail fast if the resolved effort isn't among the model's declared levels.
+  validateStartupEffort(hidesReasoning, selectedModelBase, effort)
 
-  // Validate the resolved effort against the selected model's declared
-  // capability levels at startup so a misconfigured effort (e.g.
-  // `--effort low` on a model whose levels are `["high", "max"]`) fails
-  // fast with a clear message instead of surfacing as a cryptic
-  // "unsupported capabilities: effort" on the first request.
-  if (!hidesReasoning) {
-    const modelEntry = findModel(selectedModelBase)
-    if (modelEntry) {
-      const validation = validateEffortForModel(effort, modelEntry.capabilities.effort.levels)
-      if (!validation.ok) {
-        throw new Error(validation.reason)
-      }
-    }
-  }
-
-  // Terminal viewport the compositor / mdstream will use for partial-redraw
-  // and wrap math. Mirror `Compositor.effectiveColumns()` (src/ui/compositor.ts):
-  // fall back to `$COLUMNS` / `$LINES` when stdout reports 0 or undefined
-  // (most commonly: macOS BSD `script(1)` allocating a slave PTY without
-  // propagating WINSZ). Surfacing this at boot makes width/height surprises
-  // visible before they cause duplicated-paragraph or stuck-prompt artifacts.
-  const envCols = Number.parseInt(process.env.COLUMNS ?? "", 10)
-  const envRows = Number.parseInt(process.env.LINES ?? "", 10)
-  const effCols =
-    typeof process.stdout.columns === "number" && process.stdout.columns > 0
-      ? process.stdout.columns
-      : Number.isFinite(envCols) && envCols > 0
-        ? envCols
-        : 0
-  const effRows =
-    typeof process.stdout.rows === "number" && process.stdout.rows > 0
-      ? process.stdout.rows
-      : Number.isFinite(envRows) && envRows > 0
-        ? envRows
-        : 0
-  const termLabel =
-    effCols > 0 && effRows > 0
-      ? `${effCols} × ${effRows} ${c.dim("(cols × rows)")}`
-      : c.dim("unknown")
-  printStartupRow("term", termLabel)
+  // Terminal viewport row (cols × rows) for the compositor / mdstream.
+  printTerminalViewportRow(process.env, process.stdout)
 
   // Load Plugins from ~/.agents/plugins and <cwd>/plugins.
   // Core tool names must always win over plugin names.
@@ -752,29 +684,9 @@ async function main() {
   // provisioning): a previously-installed binary must still resolve on a
   // scripted `--prompt` run where the provisioning phase is skipped.
   process.env.MINIMAL_AGENT_BIN_DIR = defaultBinDir()
-  // Expose the resolved effort to the live-area quota-status plugin so
-  // it can surface "effort <level>" as a trailing footer segment. Same
-  // overwrite-with-resolved-value pattern as MINIMAL_AGENT_MODEL above:
-  // the env var was a user-facing INPUT during resolution (read once at
-  // module load, line 161); after this point we own it as the OUTPUT
-  // "what we'll actually send on the wire". For a cheap/fast-tier model with
-  // no reasoning fields the wire field is suppressed entirely, so we clear
-  // the env so the footer doesn't lie.
-  if (hidesReasoning) {
-    delete process.env.MINIMAL_AGENT_EFFORT
-  } else {
-    process.env.MINIMAL_AGENT_EFFORT = effort ?? "medium"
-  }
-  // Mirror the RESOLVED fast-mode state the same way (output, not input):
-  // `--fast` on the CLI never wrote the env var, so `process.env`-only
-  // readers (session-info's `fast:` line) reported "not fast" for CLI-flag
-  // sessions. One source of truth after this point: env reflects what the
-  // request path will actually attempt.
-  if (speedFast) {
-    process.env.MINIMAL_AGENT_FAST = "1"
-  } else {
-    delete process.env.MINIMAL_AGENT_FAST
-  }
+  // Publish the RESOLVED effort + fast-mode state into process.env as the
+  // authoritative output the quota-status footer / session-info read.
+  publishResolvedRequestEnv(hidesReasoning, effort, speedFast)
   // Effective platform for plugin/tool `platforms` whitelist gating:
   // --platform > MINIMAL_AGENT_PLATFORM > detected (process.platform).
   // `all` (or `any`/`*`) bypasses gating for the session.
