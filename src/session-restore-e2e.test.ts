@@ -16,7 +16,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import type { StreamedResponse } from "./client/types.ts"
 import { loadSession } from "./session-restore.ts"
 import { SessionStore } from "./session-store.ts"

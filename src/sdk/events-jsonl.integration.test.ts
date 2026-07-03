@@ -26,7 +26,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import type { AuthResult } from "../auth.ts"
+import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import { AgentCore } from "./agent-core.ts"

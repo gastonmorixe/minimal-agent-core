@@ -12,7 +12,7 @@ import type {
   NetworkResponse,
 } from "@minimal-agent/plugin-api/net/types"
 
-import type { AuthResult } from "../../src/auth.ts"
+import type { AuthResult } from "../../src/auth/auth.ts"
 import { getLastRateLimits } from "../../src/quota/quota-cache.ts"
 
 import { registerAnthropicModels } from "./models.ts"

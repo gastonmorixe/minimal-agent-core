@@ -45,7 +45,7 @@ import {
 } from "./agent/reflection.ts"
 import { executeToolRound } from "./agent/tool-round.ts"
 import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./agent/turn-notice.ts"
-import type { AuthResult } from "./auth.ts"
+import type { AuthResult } from "./auth/auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { GLOBAL_STATUS_BUS } from "./bus/status.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "./cache/cache-ttl.ts"

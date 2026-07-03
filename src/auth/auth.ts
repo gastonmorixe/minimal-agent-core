@@ -57,10 +57,11 @@ import { join } from "node:path"
 
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
+import { withLock } from "../infra/lockfile.ts"
+import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
+
 import { AuthStore, defaultAuthStore, type SecretBag } from "./auth-store.ts"
 import { clearProviderCredentials } from "./auth-strategies.ts"
-import { withLock } from "./infra/lockfile.ts"
-import { defaultNetworkClient, type NetworkClient } from "./network/index.ts"
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -7,7 +7,7 @@
  * @module ui/chrome/login
  */
 
-import type { LoginInstallResult } from "../../../oauth-login.ts"
+import type { LoginInstallResult } from "../../../auth/oauth-login.ts"
 import { c } from "../style/ansi.ts"
 
 /** Banner rows shown before resolving/running a login strategy. */

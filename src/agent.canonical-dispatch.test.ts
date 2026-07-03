@@ -24,8 +24,12 @@ import { join } from "node:path"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth.ts"
-import { defaultAuthStore, resetDefaultAuthStoreForTests, type SecretBag } from "./auth-store.ts"
+import type { AuthResult } from "./auth/auth.ts"
+import {
+  defaultAuthStore,
+  resetDefaultAuthStoreForTests,
+  type SecretBag,
+} from "./auth/auth-store.ts"
 import type { CanonicalEvent } from "./llm/canonical-events.ts"
 import { clearModelRegistry, clearProviderRegistry } from "./llm/model-registry.ts"
 import { type ApiKeyAuthProvider, clearProviderPlugins } from "./llm/provider-plugin.ts"

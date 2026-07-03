@@ -8,10 +8,8 @@
  * @module auth-strategies
  */
 
-import type { AuthStore } from "./auth-store.ts"
-import { defaultAuthStore } from "./auth-store.ts"
-import { findModelByTags, listRegisteredModels } from "./llm/model-registry.ts"
-import type { ProviderAuth } from "./llm/provider.ts"
+import { findModelByTags, listRegisteredModels } from "../llm/model-registry.ts"
+import type { ProviderAuth } from "../llm/provider.ts"
 import {
   type ApiKeyAuthProvider,
   type AuthCredentialInfo,
@@ -19,8 +17,11 @@ import {
   findProviderPlugin,
   listProviderPlugins,
   type OAuthLoginProvider,
-} from "./llm/provider-plugin.ts"
-import { defaultNetworkClient } from "./network/index.ts"
+} from "../llm/provider-plugin.ts"
+import { defaultNetworkClient } from "../network/index.ts"
+
+import type { AuthStore } from "./auth-store.ts"
+import { defaultAuthStore } from "./auth-store.ts"
 
 /** Summary of a provider the host can authenticate against. */
 export interface CredentialedProvider {

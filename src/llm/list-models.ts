@@ -9,7 +9,7 @@
  * @module llm/list-models
  */
 
-import { tryResolveProviderAuth } from "../auth-strategies.ts"
+import { tryResolveProviderAuth } from "../auth/auth-strategies.ts"
 
 import { listProviderPlugins } from "./provider-plugin.ts"
 import type { ModelInfo } from "./transport/types.ts"

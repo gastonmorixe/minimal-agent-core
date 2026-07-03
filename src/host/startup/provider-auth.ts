@@ -8,8 +8,8 @@
  * @module startup/provider-auth
  */
 
-import type { AuthResult } from "../../auth.ts"
-import { storedProvidersHint, tryResolveProviderAuth } from "../../auth-strategies.ts"
+import type { AuthResult } from "../../auth/auth.ts"
+import { storedProvidersHint, tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { findProviderPlugin } from "../../llm/provider-plugin.ts"
 import { c } from "../ui/style/ansi.ts"

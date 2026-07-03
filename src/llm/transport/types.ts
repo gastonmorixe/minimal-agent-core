@@ -12,7 +12,7 @@
  * @module llm/transport/types
  */
 
-import type { AuthResult } from "../../auth.ts"
+import type { AuthResult } from "../../auth/auth.ts"
 import type { NetworkClient } from "../../network/index.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 

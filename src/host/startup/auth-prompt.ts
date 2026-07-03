@@ -12,8 +12,8 @@
  * @module startup/auth-prompt
  */
 
-import { getAuth } from "../../auth.ts"
-import { discoverCredentialedProviders } from "../../auth-strategies.ts"
+import { getAuth } from "../../auth/auth.ts"
+import { discoverCredentialedProviders } from "../../auth/auth-strategies.ts"
 import { runLoginCommand } from "../commands/login.ts"
 import {
   renderStartupAuthPromptAborted,

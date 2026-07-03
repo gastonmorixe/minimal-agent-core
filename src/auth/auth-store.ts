@@ -102,7 +102,7 @@ import { dirname, join } from "node:path"
 
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
-import { parseJsonc } from "./utils/jsonc.ts"
+import { parseJsonc } from "../utils/jsonc.ts"
 
 // ---------------------------------------------------------------------------
 // Types

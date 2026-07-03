@@ -4,6 +4,13 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { clearModelRegistry, clearProviderRegistry, registerModel } from "../llm/model-registry.ts"
+import {
+  type ApiKeyAuthProvider,
+  clearProviderPlugins,
+  registerProviderPlugin,
+} from "../llm/provider-plugin.ts"
+
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "./auth-store.ts"
 import {
   clearProviderCredentials,
@@ -12,12 +19,6 @@ import {
   storedProvidersHint,
   tryResolveProviderAuth,
 } from "./auth-strategies.ts"
-import { clearModelRegistry, clearProviderRegistry, registerModel } from "./llm/model-registry.ts"
-import {
-  type ApiKeyAuthProvider,
-  clearProviderPlugins,
-  registerProviderPlugin,
-} from "./llm/provider-plugin.ts"
 
 const TEST_API_KEY_AUTH: ApiKeyAuthProvider = {
   serviceId: "test-api-key",

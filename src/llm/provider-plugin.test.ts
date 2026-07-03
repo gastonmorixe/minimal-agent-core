@@ -5,7 +5,7 @@ import {
   findOAuthLoginProvider,
   listApiKeyAuthProviders,
   listOAuthLoginProviders,
-} from "../auth-strategies.ts"
+} from "../auth/auth-strategies.ts"
 
 import {
   type ApiKeyAuthProvider,

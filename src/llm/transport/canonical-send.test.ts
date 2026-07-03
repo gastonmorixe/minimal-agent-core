@@ -27,12 +27,12 @@ import { join } from "node:path"
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
-import { type AuthResult, getAuth } from "../../auth.ts"
+import { type AuthResult, getAuth } from "../../auth/auth.ts"
 import {
   defaultAuthStore,
   resetDefaultAuthStoreForTests,
   type SecretBag,
-} from "../../auth-store.ts"
+} from "../../auth/auth-store.ts"
 import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
   NetworkClient,

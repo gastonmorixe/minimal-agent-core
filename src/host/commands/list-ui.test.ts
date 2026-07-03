@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth-store.ts"
+import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth-store.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 import { registerTestProvider } from "../../llm/test-fixtures.ts"

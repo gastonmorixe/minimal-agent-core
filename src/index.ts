@@ -58,7 +58,7 @@ import {
   discoverCredentialedProviders,
   storedProvidersHint,
   suggestModelForProvider,
-} from "./auth-strategies.ts"
+} from "./auth/auth-strategies.ts"
 import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
