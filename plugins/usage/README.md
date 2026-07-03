@@ -38,7 +38,7 @@ slash command plus a footer overlay. Same data + renderer as the top-level
 
 ## How it works
 
-The data engine (`src/usage-stats.ts`) is host-owned because it scans session
+The data engine (`src/quota/usage-stats.ts`) is host-owned because it scans session
 history and model metadata. The renderer is the shared
 `@minimal-agent/plugin-api/utils/usage-render` leaf utility, reused by both this
 overlay and the `usage` CLI command without importing host UI modules. This

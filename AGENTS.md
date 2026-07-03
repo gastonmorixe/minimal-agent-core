@@ -49,13 +49,14 @@ every plugin is zero-dependency.
   X?" by reading a `Capabilities` record, never "is this opus-4-7?".
 - **Prompts live in markdown, not string literals.** Every model-facing prompt
   (system prompt, tool descriptions, sub-prompts) is a `.md`/`.tmpl.md` file
-  loaded through [`src/prompts.ts`](src/prompts.ts). Core prompts are under
+  loaded through [`src/prompts/prompts.ts`](src/prompts/prompts.ts). Core prompts are under
   [`src/prompts/`](src/prompts/README.md); plugin prompts sit next to the plugin
   (`PROMPT.md`, or `plugins/<id>/prompts/*`). Templates use `%%name%%` (required,
   throws if unwired) and `%%name?%%` (optional). The rule: prose in markdown,
   control flow (which fragment, what order) in TypeScript. See
-  `buildLoopSafetyParagraph` in `src/headers.ts` for the worked example, and
-  `docs/changes/2026-05-30-prompts-as-markdown.md` for the rationale.
+  `buildLoopSafetyParagraph` (formerly in the now-removed `src/headers.ts`; the
+  Anthropic header logic moved to `plugins/llm-anthropic/`) for the worked
+  example, and `docs/changes/2026-05-30-prompts-as-markdown.md` for the rationale.
 
 ## How the LLM layer is structured
 
@@ -126,7 +127,7 @@ later for tools / live-area slots; provider registration must happen earlier).
 
 ### Coexistence with the legacy client (important)
 
-The new canonical layer runs ALONGSIDE the legacy `src/client.ts`, it does not
+The new canonical layer runs ALONGSIDE the legacy `src/network/client.ts`, it does not
 replace it. `Agent.send` / `Agent.run` still call `client.sendMessage`, which
 carries ~1500 lines of tuned cross-cutting infrastructure (idle/hard-timeout
 watchdogs, retry coordinator, 401 store-first refresh with a multi-process
@@ -162,7 +163,7 @@ array (`{name, summary, argHint?, handler}`), mirroring `tuis`/`modes`/
 `liveAreaSlots`. The loader collects them into a host-owned registry
 (`getCommands` / `hasCommand` / `listCommandInfo` / `dispatchCommand`,
 first-wins on cross-plugin name collision). `runReplLiveArea.onSubmit`
-intercepts a registered `/<name>` (parsed by the pure `src/slash-command-parse.ts`)
+intercepts a registered `/<name>` (parsed by the pure `src/cli/slash-command-parse.ts`)
 and acts on the handler's `CommandResult` union (`expand` → model turn,
 `notice`/`error` → scrollback, `none` → nothing). Commands work headlessly; the
 `slash-menu` plugin is just an autocomplete overlay over the registry (it reads
