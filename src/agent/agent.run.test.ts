@@ -4,10 +4,11 @@ import { join, resolve } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { ContentBlock, Message, SendOptions, StreamedResponse } from "../client/types.ts"
+import { PluginLoader } from "../plugins/loader.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { ContentBlock, Message, SendOptions, StreamedResponse } from "./client/types.ts"
-import { PluginLoader } from "./plugins/loader.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -438,8 +439,8 @@ describe("Agent + SessionStore", () => {
     const { mkdtempSync } = await import("node:fs")
     const { tmpdir } = await import("node:os")
     const { join } = await import("node:path")
-    const { SessionStore } = await import("./session/session-store.ts")
-    const { loadSession } = await import("./session/session-restore.ts")
+    const { SessionStore } = await import("../session/session-store.ts")
+    const { loadSession } = await import("../session/session-restore.ts")
 
     let round = 0
     const sendFn = async function* () {

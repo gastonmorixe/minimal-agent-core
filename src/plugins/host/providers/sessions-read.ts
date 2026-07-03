@@ -19,8 +19,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { isRuntimeAttachmentText } from "../../../agent/runtime-attachments.ts"
 import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../llm/messages.ts"
-import { isRuntimeAttachmentText } from "../../../runtime-attachments"
 import { formatSessionAsMarkdown, formatSessionAsXml } from "../../../session/session-dump.ts"
 import { getSessionLiveness, type Liveness } from "../../../session/session-liveness.ts"
 import { firstUserPromptSnippet, loadSession } from "../../../session/session-restore.ts"

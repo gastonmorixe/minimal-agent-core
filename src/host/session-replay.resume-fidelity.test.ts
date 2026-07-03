@@ -30,7 +30,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { Agent } from "../agent.ts"
+import { Agent } from "../agent/agent.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import { loadSession } from "../session/session-restore.ts"
 import { SessionStore } from "../session/session-store.ts"

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
 
-import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./agent/turn-notice.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import type { SendOptions, StreamedResponse } from "../client/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { SendOptions, StreamedResponse } from "./client/types.ts"
+import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn-notice.ts"
 
 /**
  * TurnNotice seam (CORE side). Out-of-band conditions the agent loop

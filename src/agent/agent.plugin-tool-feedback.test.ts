@@ -20,13 +20,14 @@
  */
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import { GLOBAL_STATUS_BUS, type StatusActivity } from "../bus/status.ts"
+import type { SendOptions, StreamedResponse } from "../client/types.ts"
+import { formatActivityInfix } from "../host/ui/status/format.ts"
+import type { PluginLoader } from "../plugins/loader.ts"
+import type { TUIResult } from "../plugins/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import { GLOBAL_STATUS_BUS, type StatusActivity } from "./bus/status.ts"
-import type { SendOptions, StreamedResponse } from "./client/types.ts"
-import { formatActivityInfix } from "./host/ui/status/format.ts"
-import type { PluginLoader } from "./plugins/loader.ts"
-import type { TUIResult } from "./plugins/types.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")

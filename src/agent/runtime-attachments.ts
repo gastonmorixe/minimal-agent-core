@@ -31,7 +31,7 @@
  * @module runtime-attachments
  */
 
-import type { ContentBlock } from "./llm/messages.ts"
+import type { ContentBlock } from "../llm/messages.ts"
 
 /**
  * Regex list matching the opening-tag prefix of every text block the

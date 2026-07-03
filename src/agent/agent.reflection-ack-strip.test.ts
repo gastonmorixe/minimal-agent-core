@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { SendOptions, StreamedResponse } from "../client/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { SendOptions, StreamedResponse } from "./client/types.ts"
 
 /**
  * Agent-level contract for the reflection-ack stripper wiring (the unit

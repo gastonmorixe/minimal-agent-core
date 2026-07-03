@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { Message, SendOptions, StreamedResponse } from "./client/types.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -82,7 +83,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   }
 
   it("refuses a disallowed tool at dispatch (no executeTool call) and synthesizes is_error tool_result", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST], "ask")
 
     const records: Array<Record<string, unknown>> = []
@@ -122,7 +123,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   })
 
   it("keeps the tools array byte-stable across mode toggles (Edit always advertised)", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST])
     // Start with no mode active.
     expect(modeManager.activeId()).toBeNull()
@@ -166,7 +167,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   })
 
   it("attaches a <mode-change> block to the next user message after a toggle, then stops on steady state", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST], null, undefined, fixedNow)
 
     // 3-turn sendFn: each turn just emits text and ends.
@@ -257,7 +258,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   })
 
   it("does NOT couple mode addendum into the system prompt (sys[3] is mode-independent)", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST])
 
     const records: Array<Record<string, unknown>> = []
@@ -312,7 +313,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   // to discard any user message that contains tool_result blocks.
   // --------------------------------------------------------------------------
   it("places tool_result FIRST and <mode-change> AFTER when a toggle happens mid-tool-loop", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST], null, undefined, fixedNow)
 
     let round = 0
@@ -435,7 +436,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
   // tool_use naturally). No more orphans.
   // --------------------------------------------------------------------------
   it("loops synthetic mode-change turn through tool execution (no orphan tool_use)", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST], "ask", undefined, fixedNow)
 
     // 3-round sendFn:
@@ -536,7 +537,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     // Steady-state: assistant ends with text only and the mode hasn't
     // changed since the last advertisement. The loop must exit cleanly
     // after one round, not synthesize a phantom user turn.
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST], "ask", undefined, fixedNow)
 
     const records: Array<Record<string, unknown>> = []
@@ -585,7 +586,7 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     // the time the loop exits. ModeManager.consumePendingAttachment
     // returns null in that case (active === lastAdvertised), so no
     // synthetic turn fires.
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST], "ask", undefined, fixedNow)
 
     let round = 0

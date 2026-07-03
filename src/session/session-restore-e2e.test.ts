@@ -15,7 +15,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { Agent } from "../agent.ts"
+import { Agent } from "../agent/agent.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
 

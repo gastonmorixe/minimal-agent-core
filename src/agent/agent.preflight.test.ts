@@ -26,24 +26,25 @@
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { Message, SendOptions, StreamedResponse } from "./client/types.ts"
-import type { CanonicalRequest } from "./llm/canonical-request.ts"
-import { defaultCapabilities } from "./llm/capabilities.ts"
+import type { AuthResult } from "../auth/auth.ts"
+import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
+import type { CanonicalRequest } from "../llm/canonical-request.ts"
+import { defaultCapabilities } from "../llm/capabilities.ts"
 import {
   clearModelRegistry,
   clearProviderRegistry,
   type ModelEntry,
   registerModel,
   registerProvider,
-} from "./llm/model-registry.ts"
+} from "../llm/model-registry.ts"
 import type {
   PreflightIssue,
   PreflightResolution,
   ProviderAdapter,
   ValidationResult,
-} from "./llm/provider.ts"
+} from "../llm/provider.ts"
+
+import { Agent } from "./agent.ts"
 
 // ---------------------------------------------------------------------------
 // Synthetic preflight provider (neutral — I1/I2 clean)

@@ -13,9 +13,10 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { StreamedResponse } from "../client/types.ts"
+import { ToolTimeTracker } from "../tool-time.ts"
+
 import { Agent } from "./agent.ts"
-import type { StreamedResponse } from "./client/types.ts"
-import { ToolTimeTracker } from "./tool-time.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -28,7 +29,7 @@ function stripAnsi(s: string): string {
  * trivial end-turn. Lets us exercise writeToolHeader with the real
  * executeTool path (which spawns `bash -c true` synchronously-fast).
  */
-function singleBashRoundSendFn(): import("./llm/transport/types.ts").TransportFn {
+function singleBashRoundSendFn(): import("../llm/transport/types.ts").TransportFn {
   let round = 0
   return async function* (): AsyncGenerator<unknown, StreamedResponse> {
     if (round === 0) {
@@ -54,7 +55,7 @@ function singleBashRoundSendFn(): import("./llm/transport/types.ts").TransportFn
       stopReason: "end_turn",
     } as StreamedResponse
     // biome-ignore lint/suspicious/noExplicitAny: test seam
-  } as any as import("./llm/transport/types.ts").TransportFn
+  } as any as import("../llm/transport/types.ts").TransportFn
 }
 
 const TIME_RE = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2}/
@@ -146,7 +147,7 @@ describe("Agent tool header — time-hint suffix", () => {
         stopReason: "end_turn",
       } as StreamedResponse
       // biome-ignore lint/suspicious/noExplicitAny: test seam
-    } as any as import("./llm/transport/types.ts").TransportFn
+    } as any as import("../llm/transport/types.ts").TransportFn
 
     const agent = new Agent({
       auth: { type: "api-key", token: "test-token" },

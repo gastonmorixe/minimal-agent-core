@@ -37,7 +37,7 @@ import {
 import { hostname as osHostname } from "node:os"
 import { join } from "node:path"
 
-import { resolveSessionsDir } from "../agent-paths.ts"
+import { resolveSessionsDir } from "../agent/agent-paths.ts"
 import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 
 // ---------------------------------------------------------------------------
