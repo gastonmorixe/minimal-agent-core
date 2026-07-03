@@ -101,6 +101,69 @@ function resolveSpec(fromFileDir: string, spec: string): string | null {
 
 const IMPORT_RE = /(\bfrom\s*|\bimport\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)(["'])([^"']+)\2/g
 
+// Mark every character offset that lives inside a string literal, template
+// literal, or comment. A REAL import/from/require keyword is bare code; an
+// import-like string embedded in a TEST FIXTURE (e.g. scanner tests that pass
+// `import x from "../../src/foo.ts"` as a template-literal argument) sits inside
+// a string and must NOT be rewritten. We test the KEYWORD's offset against this
+// mask: if the keyword is inside a string/comment, skip the rewrite.
+function computeMask(text: string): Uint8Array {
+  const mask = new Uint8Array(text.length) // 1 = inside string/template/comment
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const c = text[i]
+    const c2 = text[i + 1]
+    // line comment
+    if (c === "/" && c2 === "/") {
+      while (i < n && text[i] !== "\n") {
+        mask[i] = 1
+        i++
+      }
+      continue
+    }
+    // block comment
+    if (c === "/" && c2 === "*") {
+      mask[i] = 1
+      mask[i + 1] = 1
+      i += 2
+      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) {
+        mask[i] = 1
+        i++
+      }
+      if (i < n) {
+        mask[i] = 1
+        mask[i + 1] = 1
+        i += 2
+      }
+      continue
+    }
+    // string / template literal
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c
+      mask[i] = 1
+      i++
+      while (i < n) {
+        if (text[i] === "\\") {
+          mask[i] = 1
+          mask[i + 1] = 1
+          i += 2
+          continue
+        }
+        mask[i] = 1
+        if (text[i] === quote) {
+          i++
+          break
+        }
+        i++
+      }
+      continue
+    }
+    i++
+  }
+  return mask
+}
+
 function main() {
   const { srcFile, targetDir, root, dry, git, biome } = parseArgs(process.argv.slice(2))
   if (!existsSync(srcFile)) {
@@ -125,8 +188,11 @@ function main() {
     if (resolve(f) === srcFile) continue
     const fromDir = dirname(f)
     const text = readFileSync(f, "utf8")
+    const mask = computeMask(text)
     let changed = false
-    const next = text.replace(IMPORT_RE, (m, kw, q, spec) => {
+    const next = text.replace(IMPORT_RE, (m, kw, q, spec, offset) => {
+      // Skip import-like text embedded in a string/template/comment (test fixtures).
+      if (mask[offset]) return m
       const resolved = resolveSpec(fromDir, spec)
       if (resolved && resolve(resolved) === srcFile) {
         const newSpec = relSpec(fromDir, newAbs)
@@ -147,8 +213,10 @@ function main() {
 
   // 2. Rewrite the moved file's OWN outgoing relative imports (dir changed).
   const movedText = readFileSync(srcFile, "utf8")
+  const movedMask = computeMask(movedText)
   let selfEdits = 0
-  const movedNext = movedText.replace(IMPORT_RE, (m, kw, q, spec) => {
+  const movedNext = movedText.replace(IMPORT_RE, (m, kw, q, spec, offset) => {
+    if (movedMask[offset]) return m
     if (!spec.startsWith(".")) return m
     const resolved = resolveSpec(oldDir, spec)
     if (!resolved) return m
