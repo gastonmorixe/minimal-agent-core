@@ -34,7 +34,7 @@ import {
   TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
   tagTransientNetworkError,
 } from "../../network/index.ts"
-import { abortableSleep } from "../../utils/retry.ts"
+import { abortableSleep } from "@minimal-agent/plugin-api/utils/retry"
 
 import type { StreamedResponse } from "./types.ts"
 
