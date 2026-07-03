@@ -52,7 +52,7 @@
  */
 import { ANSI_CODES, bgRgb, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { displayWidth, truncateDisplayWidth } from "../../../term-width.ts"
+import { displayWidth, truncateDisplayWidth } from "../../../terminal/term-width.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"
 
 /**

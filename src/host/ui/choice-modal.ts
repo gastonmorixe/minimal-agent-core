@@ -20,7 +20,7 @@
 import { ANSI_CODES, color as colorText } from "@minimal-agent/plugin-api/utils/ansi"
 import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
-import { displayWidth } from "../../term-width.ts"
+import { displayWidth } from "../../terminal/term-width.ts"
 
 import type { LiveOverlay, OverlayKey } from "./overlay.ts"
 

@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { StatusBus } from "../../../bus/status.ts"
-import { _resetNerdGlyphCellsForTest, setNerdGlyphCells } from "../../../nerd-glyph-width.ts"
-import { displayWidth } from "../../../term-width.ts"
+import {
+  _resetNerdGlyphCellsForTest,
+  setNerdGlyphCells,
+} from "../../../terminal/nerd-glyph-width.ts"
+import { displayWidth } from "../../../terminal/term-width.ts"
 import { BlinkingNerdSpinner, type Spinner } from "../spinner/index.ts"
 
 import { LiveAreaStatusController } from "./live-area-controller.ts"

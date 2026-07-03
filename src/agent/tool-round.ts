@@ -61,7 +61,7 @@ import {
 } from "../plugins/hooks/tool-lifecycle.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { SessionStore } from "../session-store.ts"
-import { expandTabs } from "../term-width.ts"
+import { expandTabs } from "../terminal/term-width.ts"
 import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"

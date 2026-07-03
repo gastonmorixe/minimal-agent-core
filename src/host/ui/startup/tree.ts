@@ -17,7 +17,7 @@
  * @module ui/startup/tree
  */
 
-import { displayWidth, truncateDisplayWidth, wrapRows } from "../../../term-width.ts"
+import { displayWidth, truncateDisplayWidth, wrapRows } from "../../../terminal/term-width.ts"
 import { AGENT_VERSION } from "../../../utils/build-info.ts"
 import { catRows, DEFAULT_CAT } from "../chrome/mascot.ts"
 import { formatStartupToolsRow, wrapStartupToolsRows } from "../chrome/startup-tools-row.ts"

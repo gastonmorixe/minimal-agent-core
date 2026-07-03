@@ -36,7 +36,7 @@
  * @module startup-tools-row
  */
 
-import { displayWidth } from "../../../term-width.ts"
+import { displayWidth } from "../../../terminal/term-width.ts"
 import { c } from "../style/ansi.ts"
 
 /**

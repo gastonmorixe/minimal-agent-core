@@ -31,7 +31,7 @@
  * @module test-utils/fake-terminal
  */
 
-import { codePointWidth } from "../term-width.ts"
+import { codePointWidth } from "../terminal/term-width.ts"
 
 export interface FakeTerminalOptions {
   cols?: number

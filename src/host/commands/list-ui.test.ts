@@ -4,7 +4,7 @@ import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth-stor
 import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 import { registerTestProvider } from "../../llm/test-fixtures.ts"
-import { stripAnsi } from "../../term-width.ts"
+import { stripAnsi } from "../../terminal/term-width.ts"
 import { SPINNER_PRESETS } from "../ui/spinner/named-presets.ts"
 
 import { runListFlagsCommand } from "./list-flags.ts"

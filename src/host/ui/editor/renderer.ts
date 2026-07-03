@@ -23,7 +23,7 @@ import {
   cursorVisualCol,
   displayWidth,
   wrapRows,
-} from "../../../term-width.ts"
+} from "../../../terminal/term-width.ts"
 
 export interface EditorRendererOptions {
   prompt: string
