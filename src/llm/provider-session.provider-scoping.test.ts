@@ -1,27 +1,18 @@
 /**
- * Test: resolveProviderSessionInfo respects providerId for scoped label.
+ * Test: resolveProviderSessionInfo respects providerId for scoped labels.
  *
- * Proves that when both OpenCode and Wafer register deepseek-v4-flash,
- * calling resolveProviderSessionInfo with providerId:"opencode" returns
- * a label from OpenCode's scoped model entry, not from the global
- * last-write-wins entry (which would be Wafer).
- *
- * This is the bug the user hit: footer showed wf-v4-flash despite
- * --provider opencode.
+ * Proves that when two providers register the same model id, calling
+ * resolveProviderSessionInfo with an explicit providerId returns the label
+ * from that provider's scoped model entry, not the global last-write-wins
+ * entry.
  */
 
 import { describe, expect, it } from "bun:test"
 
-import { waferProviderPlugin } from "../../plugins/llm-wafer/adapter.ts"
-
 import { clearModelRegistry, clearProviderRegistry } from "./model-registry.ts"
-import { clearProviderPlugins, registerProviderPlugin } from "./provider-plugin.ts"
+import { clearProviderPlugins } from "./provider-plugin.ts"
 import { resolveProviderSessionInfo } from "./provider-session.ts"
-
-async function getOpencodePlugin() {
-  const mod = await import("../../plugins/llm-opencode/adapter.ts")
-  return mod.opencodeProviderPlugin
-}
+import { registerTestProvider } from "./test-fixtures.ts"
 
 function setup() {
   clearModelRegistry()
@@ -30,36 +21,37 @@ function setup() {
 }
 
 describe("resolveProviderSessionInfo with providerId scoping", () => {
-  it("produces different labels for deepseek-v4-flash under opencode vs wafer", async () => {
+  it("produces different labels for a duplicate model id under different providers", async () => {
     setup()
 
-    // Register both providers fully (adapters + plugins)
-    const ocPlugin = await getOpencodePlugin()
-    ocPlugin.register()
-    registerProviderPlugin(ocPlugin)
-
-    const { bootstrapWafer } = await import("../../plugins/llm-wafer/adapter.ts")
-    bootstrapWafer()
-    registerProviderPlugin(waferProviderPlugin)
-
-    // Unscoped: resolves via global = last-registered (Wafer alphabetically)
-    const unscoped = await resolveProviderSessionInfo("deepseek-v4-flash")
-    expect(unscoped.modelLabel).toBeDefined()
-
-    // Scoped to opencode
-    const scopedOc = await resolveProviderSessionInfo("deepseek-v4-flash", {
-      providerId: "opencode",
+    const modelId = "shared-model"
+    registerTestProvider({
+      id: "provider-a",
+      shortCode: "pa",
+      models: [{ id: modelId }],
+      modelVersionToken: () => "one",
     })
-    expect(scopedOc.modelLabel).toBeDefined()
-
-    // The two labels must be different because they come from different providers
-    // with different shortCodes and modelVersionToken functions.
-    expect(scopedOc.modelLabel).not.toBe(unscoped.modelLabel)
-
-    // Scoped to wafer: must match unscoped (since Wafer is last-registered globally)
-    const scopedWf = await resolveProviderSessionInfo("deepseek-v4-flash", {
-      providerId: "wafer",
+    registerTestProvider({
+      id: "provider-b",
+      shortCode: "pb",
+      models: [{ id: modelId }],
+      modelVersionToken: () => "two",
     })
-    expect(scopedWf.modelLabel).toBe(unscoped.modelLabel)
+
+    // Unscoped: resolves via global = last-registered provider.
+    const unscoped = await resolveProviderSessionInfo(modelId)
+    expect(unscoped.modelLabel).toBe("pb-two")
+
+    // Scoped to the first provider: must not leak through to the last global entry.
+    const scopedA = await resolveProviderSessionInfo(modelId, {
+      providerId: "provider-a",
+    })
+    expect(scopedA.modelLabel).toBe("pa-one")
+
+    // Scoped to the second provider: must match the unscoped last-write-wins entry.
+    const scopedB = await resolveProviderSessionInfo(modelId, {
+      providerId: "provider-b",
+    })
+    expect(scopedB.modelLabel).toBe(unscoped.modelLabel)
   })
 })

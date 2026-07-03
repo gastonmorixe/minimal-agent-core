@@ -94,6 +94,93 @@ const SUBCOMMANDS: Record<string, SubcommandSpec> = {
 }
 
 /**
+ * Non-ASCII dash-like codepoints that a "smart dashes" / autocorrect
+ * feature (macOS text substitution, some editors, copy-paste from rich
+ * text) silently swaps in for a plain ASCII hyphen-minus (`-`, U+002D):
+ *
+ *   U+2010 HYPHEN            U+2011 NON-BREAKING HYPHEN
+ *   U+2012 FIGURE DASH       U+2013 EN DASH
+ *   U+2014 EM DASH           U+2015 HORIZONTAL BAR
+ *   U+2212 MINUS SIGN        U+FE58 SMALL EM DASH
+ *   U+FE63 SMALL HYPHEN-MINUS  U+FF0D FULLWIDTH HYPHEN-MINUS
+ *
+ * These look almost identical to `-` in a terminal but are different
+ * bytes, so a flag like `--resume–same-sid` (en-dash in the middle)
+ * silently fails to match `args.indexOf("--resume-same-sid")` and the
+ * value gets misparsed as a positional prompt.
+ */
+const UNICODE_DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D"
+const UNICODE_DASH_RE = new RegExp(`[${UNICODE_DASHES}]`)
+const UNICODE_DASH_RE_G = new RegExp(`[${UNICODE_DASHES}]`, "g")
+
+export interface DashTypo {
+  /** The offending argv token, verbatim. */
+  arg: string
+  /** Its position in the raw argv array (0-based). */
+  index: number
+  /** The token with every unicode dash rewritten to an ASCII hyphen. */
+  suggestion: string
+  /** The first offending codepoint, as `U+XXXX`, for the error message. */
+  codepoint: string
+}
+
+/**
+ * Scan raw argv for flag-position tokens that contain a non-ASCII dash.
+ *
+ * A token is flagged when it *looks like a flag* (its first character is
+ * an ASCII hyphen or one of the unicode dash lookalikes) AND it contains
+ * at least one unicode dash. Plain values (a prompt, a path, a sid) don't
+ * start with a dash, so they're never flagged — a prompt like
+ * `"cost–benefit analysis"` is a separate non-dash token and passes
+ * through untouched.
+ *
+ * Pure function — no env, stdin, or time. Detection runs on the RAW argv
+ * (before {@link normalizeArgs}) since a mangled flag survives
+ * normalization unchanged and would otherwise be silently misparsed.
+ */
+export function findDashTypos(raw: string[]): DashTypo[] {
+  const out: DashTypo[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i]
+    if (a === undefined || a.length < 2) continue
+    const first = a[0]
+    const startsLikeFlag = first === "-" || UNICODE_DASHES.includes(first)
+    if (!startsLikeFlag) continue
+    const m = a.match(UNICODE_DASH_RE)
+    if (!m) continue
+    out.push({
+      arg: a,
+      index: i,
+      suggestion: a.replace(UNICODE_DASH_RE_G, "-"),
+      codepoint: `U+${m[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`,
+    })
+  }
+  return out
+}
+
+/**
+ * Render a friendly, actionable CLI error for one or more dash typos.
+ * Returns a multi-line string (no trailing newline) suitable for writing
+ * to stderr before exiting non-zero.
+ */
+export function formatDashTypoError(typos: DashTypo[]): string {
+  const lines: string[] = [
+    typos.length === 1
+      ? "error: an argument contains a non-ASCII dash character"
+      : `error: ${typos.length} arguments contain non-ASCII dash characters`,
+  ]
+  for (const t of typos) {
+    lines.push(`  ${t.arg}`)
+    lines.push(`    has ${t.codepoint} (a dash lookalike), not an ASCII hyphen '-'`)
+    lines.push(`    did you mean:  ${t.suggestion}`)
+  }
+  lines.push("")
+  lines.push("This usually comes from \"smart dashes\"/autocorrect turning '-' into '–' or '—'.")
+  lines.push("Retype the flag by hand (don't copy-paste the old line) using plain hyphens.")
+  return lines.join("\n")
+}
+
+/**
  * Normalize a raw `process.argv.slice(2)` array into canonical long-form
  * flags. Pure function — does not read environment, stdin, or time.
  */

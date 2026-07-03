@@ -55,6 +55,11 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--email",
   "--email-hint",
   "--auth-method",
+  "--credential-name",
+  "--name",
+  "--output-schema",
+  "--service-tier",
+  "--platform",
 ])
 
 /**

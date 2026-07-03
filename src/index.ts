@@ -63,7 +63,7 @@ import { bootstrapUserPlugins } from "./auto-plugins.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { loadBlobStoreConfig } from "./blob-store.ts"
 import { resolveCacheTtl } from "./cache-ttl.ts"
-import { normalizeArgs } from "./cli-args.ts"
+import { findDashTypos, formatDashTypoError, normalizeArgs } from "./cli-args.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
 import { diag, getDiagnosticBus } from "./diagnostic-bus.ts"
 import { resolveEffort, validateEffortForModel } from "./effort-resolution.ts"
@@ -143,7 +143,18 @@ import { TOOL_DEFINITIONS } from "./tools.ts"
 // Argument parsing
 // ---------------------------------------------------------------------------
 
-const args = normalizeArgs(process.argv.slice(2))
+const rawArgv = process.argv.slice(2)
+
+// Catch flags mangled by "smart dashes"/autocorrect (e.g. `--resume–same-sid`
+// with a U+2013 en-dash) BEFORE normalization silently drops them and their
+// value gets misparsed as a positional prompt. Fail loud with a fix-it hint.
+const dashTypos = findDashTypos(rawArgv)
+if (dashTypos.length > 0) {
+  process.stderr.write(`${formatDashTypoError(dashTypos)}\n`)
+  process.exit(2)
+}
+
+const args = normalizeArgs(rawArgv)
 
 // Provider plugins (plugins/llm-*) are discovered + registered at the top
 // of main() via the provider loader, before any model resolution. The
