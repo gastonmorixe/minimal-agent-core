@@ -61,7 +61,7 @@
  * @module bash-split
  */
 
-import { displayWidth } from "./terminal/term-width.ts"
+import { displayWidth } from "../terminal/term-width.ts"
 
 /**
  * Default cell budget consumed by the bordered Bash tool header before
