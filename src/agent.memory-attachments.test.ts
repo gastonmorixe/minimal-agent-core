@@ -297,7 +297,7 @@ describe("Agent.run — memory attachments (combined order)", () => {
   })
 
   it("when mode-change is also pending, mode-change is FIRST", async () => {
-    const { ModeManager } = await import("./modes.ts")
+    const { ModeManager } = await import("./modes/modes.ts")
     const modeManager = new ModeManager(
       [{ id: "ask", label: "ASK", disallowedTools: [] }],
       "ask", // initial — mode-change attachment will fire on first consume

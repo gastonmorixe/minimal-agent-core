@@ -4,7 +4,7 @@
  * @module commands/list-plugins
  */
 
-import { loadPluginEnabledOverrides } from "../../config.ts"
+import { loadPluginEnabledOverrides } from "../../config/config.ts"
 import {
   buildPluginCatalog,
   type CatalogRoots,

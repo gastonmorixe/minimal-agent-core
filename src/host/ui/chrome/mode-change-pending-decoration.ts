@@ -45,7 +45,7 @@
 
 import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
-import type { PendingModeAttachment } from "../../../modes.ts"
+import type { PendingModeAttachment } from "../../../modes/modes.ts"
 
 // ---------------------------------------------------------------------------
 // Public renderer

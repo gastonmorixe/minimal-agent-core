@@ -53,7 +53,7 @@ import {
 } from "../host/ui/tool-transcript/format.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
-import type { ModeManager } from "../modes.ts"
+import type { ModeManager } from "../modes/modes.ts"
 import {
   type Finding,
   makeToolDidInvokePayload,
