@@ -9,8 +9,8 @@
  * `--help` short-circuit, `setSessionId`, `setStartupTreeVisible`, env-var
  * propagation) stay in the entry point, keyed off these resolved values.
  *
- * The precedence ladder is uniform across options: CLI flag > env var >
- * config file > built-in default.
+ * The precedence ladder is uniform across options: CLI flag then env var
+ * then config file then built-in default.
  *
  * @module cli/parse-argv
  */
@@ -18,13 +18,18 @@
 import { type CacheTtl, type CacheTtlSource, resolveCacheTtl } from "../cache/cache-ttl.ts"
 import type { UserConfig } from "../config/config.ts"
 import { type EffortSource, resolveEffort } from "../config/effort-resolution.ts"
-import { type CommandPlan, planCommand } from "../host/cli/command-plan.ts"
-import { parseFormatterCommand } from "../host/ui/formatter/formatter.ts"
 
 import { resolveShowHeader } from "./non-interactive-defaults.ts"
 
 /** A minimal view of the process environment this resolver reads. */
 export type EnvLike = Record<string, string | undefined>
+
+/**
+ * Parse a formatter command string into argv. Injected by the caller so this
+ * pure `cli/` module never imports the host tree (keeps the core→host ratchet
+ * green). The entry point passes the host's `parseFormatterCommand`.
+ */
+export type FormatterParser = (raw: string) => string[]
 
 /**
  * Every CLI/env/config-derived value the entry point needs, fully resolved.
@@ -68,7 +73,6 @@ export interface CliOptions {
   readonly wantLogin: boolean
   readonly wantLogout: boolean
   readonly wantAuthStatus: boolean
-  readonly commandPlan: CommandPlan
 }
 
 /**
@@ -104,12 +108,15 @@ function rawAfter(args: readonly string[], flag: string): string | undefined {
  * @param args - Normalized argv (post `normalizeArgs`, sans `node`/script).
  * @param userConfig - The loaded `~/.minimal-agent/config.json` values.
  * @param env - The process environment (only read).
+ * @param parseFormatter - Host-provided formatter-command parser (injected so
+ *   this module stays host-free).
  * @returns The fully-resolved option struct.
  */
 export function parseCliOptions(
   args: readonly string[],
   userConfig: UserConfig,
   env: EnvLike,
+  parseFormatter: FormatterParser,
 ): CliOptions {
   const readFlagValue = makeReadFlagValue(args)
 
@@ -165,14 +172,14 @@ export function parseCliOptions(
 
   const formatterExplicitArg: string[] | undefined = (() => {
     const raw = rawAfter(args, "--formatter")
-    return raw ? parseFormatterCommand(raw) : undefined
+    return raw ? parseFormatter(raw) : undefined
   })()
 
   const formatterArgsCli = readFlagValue("--formatter-args")
   const formatterExtraArgs: string[] = (() => {
-    if (formatterArgsCli !== undefined) return parseFormatterCommand(formatterArgsCli)
+    if (formatterArgsCli !== undefined) return parseFormatter(formatterArgsCli)
     const envVal = env.MINIMAL_AGENT_FORMATTER_ARGS
-    if (envVal && envVal.length > 0) return parseFormatterCommand(envVal)
+    if (envVal && envVal.length > 0) return parseFormatter(envVal)
     return userConfig.formatterArgs ?? []
   })()
 
@@ -194,20 +201,6 @@ export function parseCliOptions(
   const wantLogin = args.includes("--login")
   const wantLogout = args.includes("--logout")
   const wantAuthStatus = args.includes("--auth-status")
-
-  const commandPlan = planCommand({
-    dumpArg,
-    wantListSessions,
-    wantUsage,
-    wantListFlags,
-    wantListSpinners,
-    wantListModels,
-    wantListProviders,
-    wantListPlugins,
-    wantLogin,
-    wantLogout,
-    wantAuthStatus,
-  })
 
   return {
     model,
@@ -246,6 +239,5 @@ export function parseCliOptions(
     wantLogin,
     wantLogout,
     wantAuthStatus,
-    commandPlan,
   }
 }
