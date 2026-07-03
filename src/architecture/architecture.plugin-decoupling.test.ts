@@ -110,32 +110,14 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/thinking-preflight.test.ts", 1],
   ["llm-anthropic/thinking-preflight.ts", 2],
   ["llm-anthropic/validate.degrade.test.ts", 2],
-  // [surfaced by FIX-i3] +1: multi-line `} from "../../src/headers.ts"`.
-  ["llm-openai/adapter.ts", 3], // D-net-seam: network singleton → ctx.networkClient (port); classifyUpstreamError → plugin-api. Left: canonical-request, model-registry, provider.ts (all C-3 / port-split deferred)
-  ["llm-openai/chat/request-body.ts", 2],
-  ["llm-openai/models.ts", 1], // D-2: makeCharRatioEstimator → plugin-api. D-net-seam: registerModel now a ctx.models fallback (registrar adopted via register(ctx)); import drops to 0 once activateDiscoveredProviders is the live path (convergence)
-  // [surfaced by FIX-i3] +1: multi-line `} from "../../src/llm/index.ts"`.
-  ["llm-openai/openai.test.ts", 1],
-  ["llm-openai/pricing.ts", 1],
-  ["llm-openai/responses/request-body.ts", 2],
-  // session-info.ts imports `announceQuotaRefresh` from src/quota-broadcast.ts
-  // to emit `quota.headersReceived` after caching the provider's rate-limit
-  // headers, so the `quota-status` footer repaints on EVERY turn instead of
-  // only on its 5-minute heartbeat. Symmetric with `llm-anthropic/adapter.ts`,
-  // which imports `broadcastResponseRateLimits` from the same module for the
-  // identical reason. Drops to 0 once the bus emit is exposed as a ctx/host
-  // capability (same convergence as the other quota-broadcast couplings).
-  ["llm-openai/session-info.ts", 1],
-  // Host-runtime integration test for the gpt-5.5 resume stall (session
-  // 7919d877): it drives the REAL production stream pipeline end-to-end
-  // (parseSse → translateOpenAIResponsesStream → withStreamWatchdog →
-  // canonicalEventsToLegacyStream) over captured wire bytes to prove the
-  // watchdog/keepalive + no-terminal-close fix. The two src/ imports
-  // (transport/watchdog.ts, llm/adapter-legacy.ts) ARE the pipeline under
-  // test, so they are not decouplable — same category as schedule/fire-e2e
-  // and file-lock/integration.
-  ["llm-openai/stall-repro.test.ts", 2],
-  ["llm-openai/validate.ts", 3], // D-net-seam: errors + modality-check → plugin-api. Left: canonical-request, model-registry, provider.ts (all deferred)
+  // Wave G: the llm-openai provider physically moved to the sibling
+  // ../minimal-agent-plugins/ma-llm-openai-plugin (its plugin-local tests ride
+  // along). The stall-repro capstone (a host watchdog/adapter-legacy stream
+  // regression built on captured wire bytes) is NOT relocated this wave: it
+  // needs the plugin's OWN Responses translator, which from core would require
+  // a cross-repo import (core->sibling) the arch scan forbids. The translator's
+  // own leaf tests + the plugin's suite cover it; a core-importable relocation
+  // (move the Responses translator to the plugin-api leaf) is a follow-up.
   // Wave G phase 4: llm-opencode + llm-wafer physically moved to the sibling
   // ../minimal-agent-plugins/ repo (coordinated dual-removal), so they no longer
   // appear here. Their cross-provider disambiguation/dispatch tests were adopted
