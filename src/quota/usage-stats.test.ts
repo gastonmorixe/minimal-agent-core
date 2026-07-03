@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { clearModelRegistry, findModel, registerModel } from "../llm/model-registry.ts"
 import type { MTokRate } from "../llm/pricing.ts"
 import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
-import type { SessionRecord } from "../session-store.ts"
+import type { SessionRecord } from "../session/session-store.ts"
 
 import {
   aggregateAllPeriods,

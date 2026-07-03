@@ -22,11 +22,11 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
 import { Agent } from "./agent.ts"
 import type { AuthResult } from "./auth/auth.ts"
-import { BlobStore } from "./blob-store.ts"
 import type { SendOptions, StreamedResponse } from "./client/types.ts"
 import type { PluginLoader } from "./plugins/loader.ts"
 import type { TUIResult } from "./plugins/types.ts"
-import { SessionStore, type ToolResultRecord } from "./session-store.ts"
+import { BlobStore } from "./session/blob-store.ts"
+import { SessionStore, type ToolResultRecord } from "./session/session-store.ts"
 import { MAX_TOOL_OUTPUT_BYTES } from "./tools/truncation.ts"
 
 let workDir: string

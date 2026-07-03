@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import { SessionStore } from "../../session-store.ts"
+import { SessionStore } from "../../session/session-store.ts"
 
 import { buildPluginHost } from "./factory.ts"
 

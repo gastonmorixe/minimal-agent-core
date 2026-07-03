@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { IndexRecord } from "../../session-store.ts"
+import type { IndexRecord } from "../../session/session-store.ts"
 
 import { resolveSidByPrefix } from "./session-index.ts"
 

@@ -29,7 +29,7 @@ import { EditorController } from "./host/editor-controller.ts"
 import { Compositor } from "./host/ui/compositor.ts"
 import { EventBus } from "./plugins/event-bus.ts"
 import { PluginLoader } from "./plugins/loader.ts"
-import { queueFilePath } from "./queue-store.ts"
+import { queueFilePath } from "./session/queue-store.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true

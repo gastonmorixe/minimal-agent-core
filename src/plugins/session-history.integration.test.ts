@@ -18,7 +18,7 @@ import { join, resolve } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import { SessionStore } from "../session-store.ts"
+import { SessionStore } from "../session/session-store.ts"
 import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import { PluginLoader } from "./loader.ts"

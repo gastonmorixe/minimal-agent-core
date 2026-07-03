@@ -40,7 +40,7 @@ import {
   NetworkResponse,
   type NetworkTransport,
 } from "../../network/index.ts"
-import { clearSessionTokens, getSessionTokens } from "../../session-tokens.ts"
+import { clearSessionTokens, getSessionTokens } from "../../session/session-tokens.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
 import { registerDiscoveredProviders } from "../provider-discovery.ts"

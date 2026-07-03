@@ -32,8 +32,8 @@ import { describe, expect, it } from "bun:test"
 
 import { Agent } from "../agent.ts"
 import type { StreamedResponse } from "../client/types.ts"
-import { loadSession } from "../session-restore.ts"
-import { SessionStore } from "../session-store.ts"
+import { loadSession } from "../session/session-restore.ts"
+import { SessionStore } from "../session/session-store.ts"
 import { TOOL_DEFINITIONS } from "../tools.ts"
 
 import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import type { IndexRecord } from "../../session-store.ts"
-import type { SessionUsage } from "../../session-usage.ts"
+import type { IndexRecord } from "../../session/session-store.ts"
+import type { SessionUsage } from "../../session/session-usage.ts"
 import {
   formatBytes,
   formatTokenCell,

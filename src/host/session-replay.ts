@@ -28,7 +28,7 @@ import {
   type SubmittedAtStyle,
   submittedAtEnabled,
 } from "../scrollback-submitted-at.ts"
-import type { SessionRecord } from "../session-store.ts"
+import type { SessionRecord } from "../session/session-store.ts"
 import type { ToolTimeTracker } from "../tool-time.ts"
 
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"

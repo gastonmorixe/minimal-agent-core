@@ -1,13 +1,17 @@
 import { readFileSync, statSync } from "node:fs"
 
-import { firstUserPromptSnippet } from "../../session-restore.ts"
+import { firstUserPromptSnippet } from "../../session/session-restore.ts"
 import {
   defaultSessionsDir,
   type IndexRecord,
   parseLines as parseSessionLines,
   sessionFilePath,
-} from "../../session-store.ts"
-import { computeSessionUsage, type SessionUsage, ZERO_SESSION_USAGE } from "../../session-usage.ts"
+} from "../../session/session-store.ts"
+import {
+  computeSessionUsage,
+  type SessionUsage,
+  ZERO_SESSION_USAGE,
+} from "../../session/session-usage.ts"
 import { renderSessionsCommandRows, type SessionCommandRow } from "../ui/chrome/sessions-command.ts"
 import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 

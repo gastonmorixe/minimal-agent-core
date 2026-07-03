@@ -28,8 +28,9 @@
  * @module session-usage
  */
 
-import type { ContentBlock } from "./llm/messages.ts"
-import { estimateTokensForModel } from "./llm/token-estimate.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import { estimateTokensForModel } from "../llm/token-estimate.ts"
+
 import type { AssistantRecord, MetaRecord, SessionRecord } from "./session-store.ts"
 
 /**

@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { SessionStore } from "./session-store.ts"
+import { SessionStore } from "./session/session-store.ts"
 
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) return ""

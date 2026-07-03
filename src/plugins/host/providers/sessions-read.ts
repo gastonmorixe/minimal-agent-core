@@ -21,9 +21,9 @@ import { join } from "node:path"
 
 import type { ContentBlock, TextBlock, ToolUseBlock } from "../../../llm/messages.ts"
 import { isRuntimeAttachmentText } from "../../../runtime-attachments"
-import { formatSessionAsMarkdown, formatSessionAsXml } from "../../../session-dump.ts"
-import { getSessionLiveness, type Liveness } from "../../../session-liveness.ts"
-import { firstUserPromptSnippet, loadSession } from "../../../session-restore.ts"
+import { formatSessionAsMarkdown, formatSessionAsXml } from "../../../session/session-dump.ts"
+import { getSessionLiveness, type Liveness } from "../../../session/session-liveness.ts"
+import { firstUserPromptSnippet, loadSession } from "../../../session/session-restore.ts"
 import {
   defaultSessionsDir,
   type IndexRecord,
@@ -32,7 +32,7 @@ import {
   parseLines,
   type SessionRecord,
   sessionFilePath,
-} from "../../../session-store.ts"
+} from "../../../session/session-store.ts"
 import type {
   RecordView,
   RecordWindow,

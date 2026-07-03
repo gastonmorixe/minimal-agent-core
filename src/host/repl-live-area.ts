@@ -21,13 +21,13 @@ import type { ModelInfo } from "../llm/transport/types.ts"
 import type { ModeDeliveryEvent } from "../modes/modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ResolvedLiveAreaSlot } from "../plugins/types.ts"
-import { formatRestoredMessages } from "../queue-restore.ts"
-import { loadQueue, QueueStore } from "../queue-store.ts"
 import {
   prefixSubmittedAtLines,
   type SubmittedAtStyle,
   submittedAtEnabled,
 } from "../scrollback-submitted-at.ts"
+import { formatRestoredMessages } from "../session/queue-restore.ts"
+import { loadQueue, QueueStore } from "../session/queue-store.ts"
 
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"

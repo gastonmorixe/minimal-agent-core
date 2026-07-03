@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client/types.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../client/types.ts"
+
 import {
   appendUserTurn,
   extractPendingDraft,

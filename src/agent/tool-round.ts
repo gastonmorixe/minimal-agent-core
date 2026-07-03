@@ -19,7 +19,6 @@
  * @module agent/tool-round
  */
 
-import { type BlobStore, type BlobWriteResult, formatRawOutputFooter } from "../blob-store.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 // P4 FOLLOW-UP (core→host decoupling): this is the LAST host import in this
 // module. The raw box-drawing glyphs + palette were already pushed into the
@@ -60,7 +59,12 @@ import {
   type ToolDidInvokePayload,
 } from "../plugins/hooks/tool-lifecycle.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
-import type { SessionStore } from "../session-store.ts"
+import {
+  type BlobStore,
+  type BlobWriteResult,
+  formatRawOutputFooter,
+} from "../session/blob-store.ts"
+import type { SessionStore } from "../session/session-store.ts"
 import { expandTabs } from "../terminal/term-width.ts"
 import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
