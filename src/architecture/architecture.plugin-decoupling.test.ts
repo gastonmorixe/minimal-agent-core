@@ -147,14 +147,13 @@ const BASELINE = new Map<string, number>([
   // The load-integration test was adopted into
   // src/plugins/schedule.load.integration.test.ts, which discovers the plugin
   // from the sibling via siblingDirs + siblingPluginPresent.
-  // D-usage-render: usage renderers + report shapes moved to plugin-api. The
-  // remaining handler src/ import is the host usage DATA ENGINE
-  // (scanUsageEvents / aggregate* / parseUsagePeriod), which scans the session
-  // store + reads the model registry. It stays until a `usage:read` capability
-  // exists.
-  ["usage/handlers/cmd_usage.ts", 1],
-  ["usage/lib/overlay.test.ts", 1],
-  ["usage/lib/state.test.ts", 1],
+  // D-usage: RESOLVED (Scott, Wave G). The usage DATA ENGINE
+  // (scanUsageEvents / aggregate* — which scan the session store + price
+  // against the model registry) now sits behind the `usage:read` host
+  // capability: cmd_usage reads folded reports via `ctx.host.usage`, and
+  // `parseUsagePeriod` + an `emptyUsageReports` fixture helper moved to the
+  // leaf `@minimal-agent/plugin-api/utils/usage-report`. All three usage
+  // files now have 0 src/ imports; baseline entries removed.
   // D-quickwins: RESOLVED (Scott, Wave G). `brave.ts` used to import `retry` +
   // `type RetryOptions` from `src/utils/retry.ts`. That module is PURE (zero
   // host state, injectable sleep/now/random), so it was leaf-extracted to

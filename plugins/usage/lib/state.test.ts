@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { aggregateAllPeriods } from "../../../src/quota/usage-stats.ts"
+import { emptyUsageReports } from "@minimal-agent/plugin-api/utils/usage-report"
 
 import { DEFAULT_PERIOD_INDEX } from "./overlay.ts"
 import { _resetForTests, closeOverlay, getOverlayState, openOverlay } from "./state.ts"
@@ -14,7 +14,7 @@ describe("usage overlay state singleton", () => {
   })
 
   it("openOverlay stores reports + resets selection by default", () => {
-    const reports = aggregateAllPeriods([], Date.now())
+    const reports = emptyUsageReports(Date.now())
     openOverlay(reports)
     const s = getOverlayState()
     expect(s.open).toBe(true)
@@ -23,12 +23,12 @@ describe("usage overlay state singleton", () => {
   })
 
   it("openOverlay honors an explicit start index", () => {
-    openOverlay(aggregateAllPeriods([], Date.now()), 2)
+    openOverlay(emptyUsageReports(Date.now()), 2)
     expect(getOverlayState().index).toBe(2)
   })
 
   it("closeOverlay clears reports + open flag", () => {
-    openOverlay(aggregateAllPeriods([], Date.now()))
+    openOverlay(emptyUsageReports(Date.now()))
     closeOverlay()
     const s = getOverlayState()
     expect(s.open).toBe(false)

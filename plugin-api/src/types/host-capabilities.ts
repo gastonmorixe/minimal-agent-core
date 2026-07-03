@@ -20,6 +20,7 @@
 
 import type { Capabilities } from "../llm/capabilities.ts"
 import type { ProviderSessionInfo } from "../llm/provider-plugin.ts"
+import type { UsagePeriod, UsageReport } from "../utils/usage-report.ts"
 
 import type { PluginLogger } from "./logger.ts"
 
@@ -48,6 +49,7 @@ export type CapabilityToken =
   | "models:register"
   | "session-info:read"
   | "llm:complete"
+  | "usage:read"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -453,6 +455,25 @@ export interface LlmCompleteApi {
 }
 
 // ---------------------------------------------------------------------------
+// usage:read (Wave G)
+// ---------------------------------------------------------------------------
+
+/**
+ * `usage:read` — folded token/cost usage reports for the `/usage` overlay. The
+ * heavy work (scanning the sessions dir, decoding events, pricing them against
+ * the model registry) stays host-side; only the bounded {@link UsageReport}
+ * crosses into the plugin, so the usage plugin never imports `scanUsageEvents`
+ * / `aggregateUsage` from `src/`. `UsageReport` / `UsagePeriod` are sibling leaf
+ * types (`../utils/usage-report`), so results are consumed directly.
+ */
+export interface UsageReadApi {
+  /** Fold usage for ONE period (single scan). */
+  report(period: UsagePeriod): UsageReport
+  /** Fold usage for EVERY period from one scan (for the overlay's switcher). */
+  reports(): Record<UsagePeriod, UsageReport>
+}
+
+// ---------------------------------------------------------------------------
 // transport:registry — host-brokered transport injection seam
 // ---------------------------------------------------------------------------
 
@@ -505,6 +526,7 @@ export interface PluginHost {
   readonly modelsRegistry?: ModelsRegisterApi
   readonly sessionInfo?: SessionInfoReadApi
   readonly llm?: LlmCompleteApi
+  readonly usage?: UsageReadApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — host-brokered remote-transport injection seam (see

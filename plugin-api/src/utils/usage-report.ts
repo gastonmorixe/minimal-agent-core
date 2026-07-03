@@ -21,6 +21,48 @@ export const USAGE_PERIODS: ReadonlyArray<{ id: UsagePeriod; label: string }> = 
   { id: "all", label: "All time" },
 ]
 
+/**
+ * Map a free-form CLI token to a {@link UsagePeriod}. Returns null on no match.
+ * Pure string→enum helper (zero host state), so it lives on the leaf next to
+ * {@link USAGE_PERIODS} and a plugin can parse its own `/usage <period>` argv
+ * without reaching into `src/`.
+ */
+export function parseUsagePeriod(raw: string | undefined): UsagePeriod | null {
+  if (!raw) return null
+  const s = raw.trim().toLowerCase()
+  switch (s) {
+    case "today":
+    case "day0":
+      return "today"
+    case "last-day":
+    case "lastday":
+    case "24h":
+    case "1d":
+    case "day":
+      return "last-day"
+    case "last-month":
+    case "lastmonth":
+    case "month":
+    case "30d":
+    case "1m":
+      return "last-month"
+    case "ytd":
+    case "year-to-date":
+      return "ytd"
+    case "year":
+    case "1y":
+    case "365d":
+    case "last-year":
+      return "year"
+    case "all":
+    case "alltime":
+    case "all-time":
+      return "all"
+    default:
+      return null
+  }
+}
+
 /** Folded token/cost totals for a set of usage events. */
 export interface UsageTotals {
   input: number
@@ -58,4 +100,47 @@ export interface UsageReport {
   byModel: UsageBreakdownRow[]
   /** True when ANY counted turn was estimated. Drives the `[E]`/mixed marker. */
   estimated: boolean
+}
+
+/** Zeroed {@link UsageTotals}. */
+function emptyUsageTotals(): UsageTotals {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreate: 0,
+    tokens: 0,
+    costUSD: 0,
+    turns: 0,
+    estimatedTurns: 0,
+  }
+}
+
+/**
+ * An empty (zeroed) {@link UsageReport} for one period — no events, no
+ * breakdowns. Pure + host-free, so a test or a plugin can build the
+ * "nothing recorded yet" shape without scanning disk or importing `src/`.
+ * `startMs` is left 0 (the report is empty regardless of the window bound).
+ */
+export function emptyUsageReport(period: UsagePeriod, nowMs: number = Date.now()): UsageReport {
+  return {
+    period,
+    startMs: 0,
+    nowMs,
+    totals: emptyUsageTotals(),
+    byProvider: [],
+    byModel: [],
+    estimated: false,
+  }
+}
+
+/**
+ * Empty reports for EVERY period (the zeroed analog of the host's
+ * `aggregateAllPeriods([])`). Lets the overlay/state tests build fixtures
+ * without reaching into `src/quota/usage-stats`.
+ */
+export function emptyUsageReports(nowMs: number = Date.now()): Record<UsagePeriod, UsageReport> {
+  const out = {} as Record<UsagePeriod, UsageReport>
+  for (const { id } of USAGE_PERIODS) out[id] = emptyUsageReport(id, nowMs)
+  return out
 }

@@ -50,6 +50,7 @@ import { billedUsageOf } from "../session/session-usage.ts"
 // ---------------------------------------------------------------------------
 
 export {
+  parseUsagePeriod,
   USAGE_PERIODS,
   type UsageBreakdownRow,
   type UsagePeriod,
@@ -58,41 +59,10 @@ export {
 } from "@minimal-agent/plugin-api/utils/usage-report"
 
 /** Map a free-form CLI token to a {@link UsagePeriod}. Returns null on no match. */
-export function parseUsagePeriod(raw: string | undefined): UsagePeriod | null {
-  if (!raw) return null
-  const s = raw.trim().toLowerCase()
-  switch (s) {
-    case "today":
-    case "day0":
-      return "today"
-    case "last-day":
-    case "lastday":
-    case "24h":
-    case "1d":
-    case "day":
-      return "last-day"
-    case "last-month":
-    case "lastmonth":
-    case "month":
-    case "30d":
-    case "1m":
-      return "last-month"
-    case "ytd":
-    case "year-to-date":
-      return "ytd"
-    case "year":
-    case "1y":
-    case "365d":
-    case "last-year":
-      return "year"
-    case "all":
-    case "alltime":
-    case "all-time":
-      return "all"
-    default:
-      return null
-  }
-}
+// `parseUsagePeriod` moved to the leaf (`@minimal-agent/plugin-api/utils/usage-report`)
+// next to USAGE_PERIODS — it's a pure string→enum helper with zero host state, so
+// a plugin can parse its own `/usage <period>` argv without importing `src/`.
+// Re-exported below for existing core call sites.
 
 /**
  * Inclusive lower bound (epoch ms) for a period's window, given "now".

@@ -1149,6 +1149,16 @@ export interface CommandContext {
    * {@link AgentContext}. Optional only for back-compat test callers.
    */
   agent?: AgentContext
+  /**
+   * Capability host for THIS plugin, populated ONLY with the namespaces its
+   * manifest declared (deny-by-default: `undefined` when it declared none).
+   * A command handler uses it for host-brokered reads it must not do itself
+   * once the plugin lives in its own repo, e.g. `/usage` reading folded token
+   * stats via `ctx.host.usage.reports()` instead of importing
+   * `src/quota/usage-stats`. Mirrors the `host` field on {@link TUIContext} /
+   * {@link PromptFragmentContext} / {@link LiveAreaHandlerContext}.
+   */
+  host?: PluginHost
 }
 
 /**

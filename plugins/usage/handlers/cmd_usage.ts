@@ -21,14 +21,8 @@
 
 import type { CommandContext, CommandResult } from "@minimal-agent/plugin-api/types/plugin"
 import { renderUsageReport } from "@minimal-agent/plugin-api/utils/usage-render"
+import { parseUsagePeriod, USAGE_PERIODS } from "@minimal-agent/plugin-api/utils/usage-report"
 
-import {
-  aggregateAllPeriods,
-  aggregateUsage,
-  parseUsagePeriod,
-  scanUsageEvents,
-  USAGE_PERIODS,
-} from "../../../src/quota/usage-stats.ts"
 import { DEFAULT_PERIOD_INDEX, renderOverlayFrame } from "../lib/overlay.ts"
 import { openOverlay, USAGE_OVERLAY_OWNER } from "../lib/state.ts"
 
@@ -46,6 +40,17 @@ function terminalCols(): number {
 export default function cmdUsage(ctx: CommandContext): CommandResult {
   const argv = ctx.argv.trim()
 
+  // Host-brokered usage reads (the scanning + pricing pipeline stays host-side;
+  // see the `usage:read` capability). Deny-by-default: absent when the manifest
+  // didn't declare the capability, so fail loudly rather than crash.
+  const usage = ctx.host?.usage
+  if (!usage) {
+    return {
+      kind: "error",
+      message: "usage stats unavailable: the plugin is missing the 'usage:read' capability",
+    }
+  }
+
   // Headless path: an explicit period prints once, no overlay.
   if (argv.length > 0) {
     const period = parseUsagePeriod(argv)
@@ -55,12 +60,12 @@ export default function cmdUsage(ctx: CommandContext): CommandResult {
         message: `unknown period "${argv}". Valid: ${USAGE_PERIODS.map((p) => p.id).join(", ")}`,
       }
     }
-    const report = aggregateUsage(scanUsageEvents(), period)
+    const report = usage.report(period)
     return { kind: "notice", lines: renderUsageReport(report, { cols: terminalCols() }) }
   }
 
-  // Interactive path: scan once, precompute every period, open the overlay.
-  const reports = aggregateAllPeriods(scanUsageEvents())
+  // Interactive path: one host scan precomputes every period, open the overlay.
+  const reports = usage.reports()
   openOverlay(reports, DEFAULT_PERIOD_INDEX)
 
   // Take MODAL ownership of the input line: the host hides the prompt row +

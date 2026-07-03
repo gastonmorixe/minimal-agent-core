@@ -893,6 +893,10 @@ export class PluginLoader {
       eventBus,
       hooksFacade,
       logger,
+      // Resolve a command's plugin capability host lazily via the forward-ref
+      // (the loader is constructed just below), so `/usage` can read folded
+      // token stats through `ctx.host.usage` without importing usage-stats.
+      hostFor: (pluginId: string) => loaderRef?.capabilityHostFor(pluginId),
     })
 
     const loader = new PluginLoader(

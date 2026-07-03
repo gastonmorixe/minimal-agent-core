@@ -1,8 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { stripAnsi } from "@minimal-agent/plugin-api/utils/term-width"
-
-import { aggregateAllPeriods } from "../../../src/quota/usage-stats.ts"
+import { emptyUsageReports } from "@minimal-agent/plugin-api/utils/usage-report"
 
 import {
   DEFAULT_PERIOD_INDEX,
@@ -46,7 +45,7 @@ describe("jumpIndex", () => {
 
 describe("renderOverlayFrame", () => {
   it("renders the active period's overlay from precomputed reports", () => {
-    const reports = aggregateAllPeriods([], Date.now())
+    const reports = emptyUsageReports(Date.now())
     const lines = renderOverlayFrame(reports, DEFAULT_PERIOD_INDEX, 80, 6)
     const text = stripAnsi(lines.join("\n"))
     expect(text).toContain("[All time]")
