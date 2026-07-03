@@ -17,10 +17,10 @@ import { EventEmitter } from "node:events"
 
 import { describe, expect, it } from "bun:test"
 
-import { type ReplAgentLike, runRepl } from "./agent/agent.ts"
-import { StatusBus } from "./bus/status.ts"
-import { EditorController } from "./host/editor-controller.ts"
-import { Compositor } from "./host/ui/compositor.ts"
+import { type ReplAgentLike, runRepl } from "../agent/agent.ts"
+import { StatusBus } from "../bus/status.ts"
+import { EditorController } from "../host/editor-controller.ts"
+import { Compositor } from "../host/ui/compositor.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true
@@ -81,8 +81,8 @@ describe("live-area REPL (end to end) — stdio interception", () => {
   it("intercepted console.error writes do NOT cause stale prompt repaints", async () => {
     const stdin = new FakeTTYInput()
     const output = new FakeOutput()
-    const { Compositor } = await import("./ui/compositor.ts")
-    const { StdioInterceptor } = await import("./host/ui/stdio-interceptor.ts")
+    const { Compositor } = await import("../ui/compositor.ts")
+    const { StdioInterceptor } = await import("../host/ui/stdio-interceptor.ts")
 
     let interceptorRef: any = null
     const compositor = new Compositor({
