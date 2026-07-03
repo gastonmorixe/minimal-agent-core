@@ -21,7 +21,8 @@
  * @module quota-broadcast
  */
 
-import { getGlobalEventBus } from "./bus/global-bus.ts"
+import { getGlobalEventBus } from "../bus/global-bus.ts"
+
 import { getLastRateLimits, setLastRateLimits } from "./quota-cache.ts"
 
 /**

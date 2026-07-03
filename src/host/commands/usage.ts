@@ -27,7 +27,7 @@ import {
   scanUsageEvents,
   USAGE_PERIODS,
   type UsagePeriod,
-} from "../../usage-stats.ts"
+} from "../../quota/usage-stats.ts"
 import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 
 export interface RunUsageOptions {

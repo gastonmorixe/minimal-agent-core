@@ -38,7 +38,7 @@ import {
   type SurfaceId,
   type ValidationResult,
 } from "../../src/llm/provider.ts"
-import { broadcastResponseRateLimits } from "../../src/quota-broadcast.ts"
+import { broadcastResponseRateLimits } from "../../src/quota/quota-broadcast.ts"
 
 import { ANTHROPIC_BETA_FLAGS_CATALOG } from "./beta-flags-catalog.ts"
 import { applyBootstrapOverrides, fetchBootstrap } from "./bootstrap.ts"

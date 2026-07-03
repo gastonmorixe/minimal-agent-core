@@ -36,7 +36,7 @@ import {
   clearProviderRegistry,
   resolveModel,
 } from "../../src/llm/model-registry.ts"
-import { clearLastRateLimits, getLastRateLimits } from "../../src/quota-cache.ts"
+import { clearLastRateLimits, getLastRateLimits } from "../../src/quota/quota-cache.ts"
 
 import { anthropicAdapter, bootstrapAnthropic } from "./adapter.ts"
 

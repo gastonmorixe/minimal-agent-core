@@ -32,7 +32,7 @@ import { type AuthResult, readCredentials } from "../../src/auth.ts"
 import type { CanonicalRequest } from "../../src/llm/canonical-request.ts"
 import { findModelByTags, resolveModel } from "../../src/llm/model-registry.ts"
 import { defaultNetworkClient } from "../../src/network/index.ts"
-import { broadcastResponseRateLimits } from "../../src/quota-broadcast.ts"
+import { broadcastResponseRateLimits } from "../../src/quota/quota-broadcast.ts"
 
 import { buildAnthropicHeaders } from "./headers.ts"
 import { registerAnthropicModels } from "./models.ts"

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import { stripAnsi } from "@minimal-agent/plugin-api/utils/term-width"
 
-import { aggregateAllPeriods } from "../../../src/usage-stats.ts"
+import { aggregateAllPeriods } from "../../../src/quota/usage-stats.ts"
 
 import {
   DEFAULT_PERIOD_INDEX,
