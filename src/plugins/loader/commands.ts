@@ -12,7 +12,7 @@
  */
 
 import { createPluginLogger, diag } from "../../bus/diagnostic-bus.ts"
-import { parseCommandLine } from "../../slash-command-parse.ts"
+import { parseCommandLine } from "../../cli/slash-command-parse.ts"
 import { agentContextToEnv } from "../agent-context.ts"
 import { EventBus } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"

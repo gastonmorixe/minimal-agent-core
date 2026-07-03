@@ -16,6 +16,7 @@ import type { AuthResult } from "../auth.ts"
 import { type AbortReason, abortBus } from "../bus/abort-bus.ts"
 import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
+import { parseCommandLine } from "../cli/slash-command-parse.ts"
 import type { ModelInfo } from "../llm/transport/types.ts"
 import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
@@ -27,7 +28,6 @@ import {
   type SubmittedAtStyle,
   submittedAtEnabled,
 } from "../scrollback-submitted-at.ts"
-import { parseCommandLine } from "../slash-command-parse.ts"
 
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
