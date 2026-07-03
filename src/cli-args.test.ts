@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { normalizeArgs } from "./cli-args.ts"
+import { findDashTypos, formatDashTypoError, normalizeArgs } from "./cli-args.ts"
 
 describe("normalizeArgs", () => {
   test("passes through canonical long flags unchanged", () => {
@@ -252,5 +252,78 @@ describe("normalizeArgs", () => {
       "--email",
       "foo@bar",
     ])
+  })
+})
+
+describe("findDashTypos", () => {
+  test("flags a long flag with an en-dash (the reported bug)", () => {
+    const typos = findDashTypos(["--resume\u2013same-sid", "abc123"])
+    expect(typos).toHaveLength(1)
+    expect(typos[0]).toMatchObject({
+      arg: "--resume\u2013same-sid",
+      index: 0,
+      suggestion: "--resume-same-sid",
+      codepoint: "U+2013",
+    })
+  })
+
+  test("rewrites every unicode dash in the suggestion", () => {
+    // em-dash prefix + en-dash inside → all become ASCII hyphens.
+    const typos = findDashTypos(["\u2014\u2014resume\u2013same\u2013sid"])
+    expect(typos[0].suggestion).toBe("--resume-same-sid")
+  })
+
+  test("recognizes the full family of dash lookalikes", () => {
+    for (const dash of [
+      "\u2010",
+      "\u2011",
+      "\u2012",
+      "\u2013",
+      "\u2014",
+      "\u2015",
+      "\u2212",
+      "\uFE58",
+      "\uFE63",
+      "\uFF0D",
+    ]) {
+      expect(findDashTypos([`-${dash}model`])).toHaveLength(1)
+    }
+  })
+
+  test("leaves clean ASCII flags alone", () => {
+    expect(findDashTypos(["--resume-same-sid", "abc", "--model", "test-model-1"])).toEqual([])
+    expect(findDashTypos(["-m", "test-model-1", "--fast"])).toEqual([])
+  })
+
+  test("does not flag non-flag positionals containing a dash", () => {
+    // A prompt value that happens to contain an en-dash is not a flag
+    // (doesn't start with a dash), so it's left untouched.
+    expect(findDashTypos(["--prompt", "cost\u2013benefit analysis"])).toEqual([])
+    expect(findDashTypos(["a\u2013b"])).toEqual([])
+  })
+
+  test("ignores the bare '-' stdin sentinel and empty tokens", () => {
+    expect(findDashTypos(["-"])).toEqual([])
+    expect(findDashTypos([""])).toEqual([])
+  })
+
+  test("reports multiple mangled flags in order", () => {
+    const typos = findDashTypos(["\u2013\u2013model", "x", "\u2014\u2014fast"])
+    expect(typos.map((t) => t.index)).toEqual([0, 2])
+    expect(typos.map((t) => t.suggestion)).toEqual(["--model", "--fast"])
+  })
+})
+
+describe("formatDashTypoError", () => {
+  test("names the codepoint and suggests the ASCII fix", () => {
+    const msg = formatDashTypoError(findDashTypos(["--resume\u2013same-sid"]))
+    expect(msg).toContain("U+2013")
+    expect(msg).toContain("--resume-same-sid")
+    expect(msg).toContain("did you mean")
+  })
+
+  test("pluralizes the header for multiple typos", () => {
+    const msg = formatDashTypoError(findDashTypos(["\u2013\u2013a", "\u2013\u2013b"]))
+    expect(msg).toContain("2 arguments contain")
   })
 })

@@ -237,4 +237,47 @@ describe("extractPromptFromArgs", () => {
       expect(got).toEqual({ kind: "none" })
     }
   })
+
+  // ---- regression: --credential-name must not leak into prompt ----------
+
+  describe("--credential-name must consume its value (regression for broken live area on resume)", () => {
+    test("--credential-name <name> alone → none (interactive REPL)", () => {
+      expect(extractPromptFromArgs(["--credential-name", "work-credential-2"])).toEqual({
+        kind: "none",
+      })
+    })
+
+    test("--credential-name <name> with --resume → none (interactive REPL)", () => {
+      expect(
+        extractPromptFromArgs(["--resume", "last", "--credential-name", "work-credential-2"]),
+      ).toEqual({ kind: "none" })
+    })
+
+    test("--credential-name + bare positional → that positional is the prompt", () => {
+      expect(extractPromptFromArgs(["--credential-name", "work", "say hi"])).toEqual({
+        kind: "literal",
+        text: "say hi",
+      })
+    })
+  })
+
+  // ---- regression: --output-schema must consume its value ---------------
+
+  test("--output-schema <file> alone → none", () => {
+    expect(extractPromptFromArgs(["--output-schema", "/tmp/schema.json"])).toEqual({
+      kind: "none",
+    })
+  })
+
+  // ---- regression: --service-tier must consume its value ----------------
+
+  test("--service-tier <tier> alone → none", () => {
+    expect(extractPromptFromArgs(["--service-tier", "flex"])).toEqual({ kind: "none" })
+  })
+
+  // ---- regression: --platform must consume its value --------------------
+
+  test("--platform <os> alone → none", () => {
+    expect(extractPromptFromArgs(["--platform", "macos"])).toEqual({ kind: "none" })
+  })
 })

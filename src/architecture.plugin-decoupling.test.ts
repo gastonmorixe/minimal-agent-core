@@ -77,19 +77,6 @@ function scanAllRoots(): ReturnType<typeof scanPluginSrcImports> {
  * site-by-site list in reports/FIX-i3.md.
  */
 const BASELINE = new Map<string, number>([
-  ["file-lock/cli.test.ts", 1],
-  ["file-lock/cli.ts", 2],
-  // [surfaced by FIX-i3] +1: multi-line `} from "../../../src/file-lock.ts"`.
-  ["file-lock/handlers/lock_status.test.ts", 1],
-  // [surfaced by FIX-i3] 1→3: multi-line `} from "../../../src/file-lock.ts"`
-  // clause plus `require("../../../src/config.ts")`.
-  ["file-lock/handlers/lock_status.ts", 3],
-  ["file-lock/integration.test.ts", 2],
-  // D-quickwins: residual. This is a host-runtime integration test that drives
-  // the REAL PluginLoader (`src/plugins/loader.ts`) end-to-end to prove the
-  // plugin loads + wires through the live loader — that import IS the point of
-  // the test, so it is not decouplable (same category as schedule/fire-e2e).
-  ["history/integration.test.ts", 1],
   // Wave D-anthropic: §5 net/registry/pure-neutral re-point sweep (76→51).
   // Residual src sites are all blocked type families: canonical-request (C-3),
   // model-registry runtime + ModelEntry, provider.ts port (post-C-3), pricing
@@ -117,14 +104,12 @@ const BASELINE = new Map<string, number>([
   ["llm-anthropic/pricing.ts", 1],
   ["llm-anthropic/quota-probe.test.ts", 2],
   ["llm-anthropic/quota-probe.ts", 5],
-  ["llm-anthropic/request-body.ts", 2],
   ["llm-anthropic/session-info.cache.test.ts", 1],
   ["llm-anthropic/session-info.ts", 4],
   ["llm-anthropic/system-prompt.ts", 1],
   ["llm-anthropic/thinking-preflight.test.ts", 1],
   ["llm-anthropic/thinking-preflight.ts", 2],
   ["llm-anthropic/validate.degrade.test.ts", 2],
-  ["llm-anthropic/validate.ts", 3],
   // [surfaced by FIX-i3] +1: multi-line `} from "../../src/headers.ts"`.
   ["llm-openai/adapter.ts", 3], // D-net-seam: network singleton → ctx.networkClient (port); classifyUpstreamError → plugin-api. Left: canonical-request, model-registry, provider.ts (all C-3 / port-split deferred)
   ["llm-openai/chat/request-body.ts", 2],
@@ -151,24 +136,12 @@ const BASELINE = new Map<string, number>([
   // and file-lock/integration.
   ["llm-openai/stall-repro.test.ts", 2],
   ["llm-openai/validate.ts", 3], // D-net-seam: errors + modality-check → plugin-api. Left: canonical-request, model-registry, provider.ts (all deferred)
-  ["llm-openrouter/adapter.ts", 4],
-  ["llm-openrouter/models.ts", 1], // D-2: makeCharRatioEstimator → @minimal-agent/plugin-api; registerModel stays (no-arg register())
-  ["llm-openrouter/openrouter.test.ts", 2], // [surfaced by FIX-i3] +1: multi-line clause
-  ["llm-openrouter/pricing.ts", 1],
   // Pre-existing provider plugin — needs src/ imports for model registration,
   // canonical request types, and pricing (host-side types not yet in plugin-api).
   ["llm-opencode/adapter.ts", 4],
   ["llm-opencode/models.ts", 2],
   ["llm-opencode/opencode.test.ts", 2],
   ["llm-opencode/pricing.ts", 1],
-  // HuggingFace provider plugin — same pre-existing provider pattern as
-  // llm-openrouter: reuses llm-openai's wire layer, needs src/ imports for
-  // model registration, canonical request types, pricing types, provider
-  // adapter types, and network client.
-  ["llm-huggingface/adapter.ts", 4],
-  ["llm-huggingface/hf.test.ts", 2],
-  ["llm-huggingface/models.ts", 1],
-  ["llm-huggingface/pricing.ts", 1],
   // Wafer provider plugin — same pre-existing provider pattern as llm-opencode
   // and llm-openrouter: needs src/ imports for model registration, canonical
   // request types, pricing types, provider adapter types, network client, and
@@ -180,24 +153,6 @@ const BASELINE = new Map<string, number>([
   ["llm-wafer/wafer-disambiguation.test.ts", 1],
   ["llm-wafer/wafer-dispatch.test.ts", 6],
   ["llm-wafer/wafer.test.ts", 3],
-  // Wave D-7: memory swept to its residual. Only summarize.ts keeps two
-  // src/ sites — the summary pipeline needs an authenticated LLM call at
-  // prompt-fragment time (getAuth + canonicalSendFn) and there is no
-  // `auth`/`llm:send` capability on the plugin host yet, nor a `ctx.host` on
-  // the prompt-fragment context. See reports/D7-memory.md.
-  ["memory/lib/summarize.ts", 2],
-  // D-quota-schedule: render.ts/render*.test.ts/script-runner.ts swept to 0
-  // (QuotaWindow → plugin-api/llm/provider-plugin; stripAnsi/displayWidth →
-  // plugin-api/utils/term-width; SessionTokens → local structural slice; the
-  // `c` palette wrappers → local module over plugin-api/utils/palette;
-  // parseFormatterCommand inlined). handler.ts keeps 3: it is a live-area slot
-  // whose ctx has NO `ctx.host`, and there is no config / session-tokens /
-  // provider-session capability — loadUserConfig, getSessionTokens, and
-  // resolveProviderSessionInfo stay host imports until such a seam exists.
-  ["quota-status/handler.ts", 3],
-  // Integration test driving the real provider registries end-to-end to prove
-  // provider-scoped model resolution (the deepseek-v4-flash disambiguation fix).
-  ["quota-status/render.provider-scoping.test.ts", 3],
   // D-quota-schedule: the two host-runtime integration tests keep their src/
   // imports — they drive the REAL PluginLoader / REPL / Compositor / agent
   // run() end-to-end, which is the whole point of the test, so they are not
@@ -207,12 +162,6 @@ const BASELINE = new Map<string, number>([
   // utils/term-width).
   ["schedule/fire-e2e.test.ts", 6],
   ["schedule/load.test.ts", 1],
-  // D-quickwins: resolveModel → ctx.host.models.resolve (models:read; manifest
-  // grants it). The remaining 2 are residual: resolveProviderSessionInfo
-  // (provider-session) + getSessionTokens (session-tokens) have NO capability
-  // on the plugin host (same gap as quota-status/handler.ts), so they stay until a
-  // session-tokens / provider-session seam exists.
-  ["session-info/lib/gather.ts", 2],
   // D-usage-render: usage renderers + report shapes moved to plugin-api. The
   // remaining handler src/ import is the host usage DATA ENGINE
   // (scanUsageEvents / aggregate* / parseUsagePeriod), which scans the session

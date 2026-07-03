@@ -143,6 +143,24 @@ function buildHelpSections(): HelpSection[] {
         ]),
         row(c.cyan("--skip-quota"), "Skip startup quota check", ["or MINIMAL_AGENT_SKIP_QUOTA=1"]),
         row(c.cyan("--show-hidden-chars"), "Reveal spaces/tabs/newlines as faint glyphs"),
+        row(
+          `${c.cyan("--credential-name")} ${c.dim("<name>")}`,
+          "Select a stored credential by name",
+          [
+            "use when the provider has multiple credentials (e.g. Work and Personal)",
+            "or MINIMAL_AGENT_CREDENTIAL_NAME, config credentialName",
+          ],
+        ),
+        row(
+          `${c.cyan("--service-tier")} ${c.dim("<tier>")}`,
+          "Provider service tier (auto, default, flex, scale, priority)",
+          ["or MINIMAL_AGENT_SERVICE_TIER"],
+        ),
+        row(
+          `${c.cyan("--platform")} ${c.dim("<os>")}`,
+          "Override platform for plugin/tool gating: macos, linux, windows, all",
+          ["or MINIMAL_AGENT_PLATFORM"],
+        ),
       ],
     },
     {
@@ -159,6 +177,11 @@ function buildHelpSections(): HelpSection[] {
         ]),
         row(c.cyan("--logout"), "Clear minimal-agent credentials", ["~/.minimal-agent/auth.jsonc"]),
         row(c.cyan("--auth-status"), "Show login status, account, scopes, expiry"),
+        row(
+          `${c.cyan("--name")} ${c.dim("<label>")}`,
+          "Label a credential during login (e.g. Work or Personal)",
+          ["e.g. --name work-account"],
+        ),
       ],
     },
     {
