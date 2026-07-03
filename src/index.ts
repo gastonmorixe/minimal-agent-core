@@ -655,7 +655,7 @@ async function main() {
   // `⚠ warn ╰` chrome.
   let scrollbackSink: import("./ui/status/scrollback.ts").ScrollbackDiagnosticSink | null = null
   {
-    const { FileLogSink } = await import("./log-file.ts")
+    const { FileLogSink } = await import("./logging/log-file.ts")
     new FileLogSink(getSessionId()).attach(getDiagnosticBus())
     // Persistent, cross-session audit log (`~/.minimal-agent/ma.log`). Unlike
     // the per-session file sink above, this single durable log survives across
@@ -663,7 +663,7 @@ async function main() {
     // updates / removals first (see src/binaries/*), more later. Notice+ only,
     // session id stamped into every line so a global entry traces back to its
     // run. Best-effort; never throws into boot.
-    const { GlobalLogSink } = await import("./log-global.ts")
+    const { GlobalLogSink } = await import("./logging/log-global.ts")
     new GlobalLogSink({ sessionId: getSessionId() }).attach(getDiagnosticBus())
     // Scrollback sink — renders Warning+ events as gutter-bracketed
     // blocks (gold ⚠ warn / red ✗ error) in the persistent terminal
@@ -689,7 +689,7 @@ async function main() {
       // interceptor is installed below, we'd want `rawStderrWrite` to
       // avoid the compositor; we re-attach it from the live-area
       // bootstrap after `interceptor` exists.
-      const { StderrMirrorSink } = await import("./log-stderr.ts")
+      const { StderrMirrorSink } = await import("./logging/log-stderr.ts")
       new StderrMirrorSink().attach(getDiagnosticBus())
     }
   }

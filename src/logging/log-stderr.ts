@@ -23,7 +23,7 @@
  * @module log-stderr
  */
 
-import { type DiagnosticBus, type LogEvent, Severity } from "./bus/diagnostic-bus.ts"
+import { type DiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 
 export interface StderrMirrorSinkOptions {
   /**

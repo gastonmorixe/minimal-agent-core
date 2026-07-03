@@ -46,7 +46,7 @@
  * @module syslog
  */
 
-import type { LogEvent, StructuredData } from "./bus/diagnostic-bus.ts"
+import type { LogEvent, StructuredData } from "../bus/diagnostic-bus.ts"
 
 export interface SyslogFormatOptions {
   /** RFC 5424 HOSTNAME field. Defaults to NILVALUE `-`. */

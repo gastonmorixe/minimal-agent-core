@@ -18,7 +18,7 @@ import { join } from "node:path"
 
 import { resolveNetDbgDir } from "@minimal-agent/plugin-api/utils/agent-paths"
 
-import { getSessionId } from "./session-id.ts"
+import { getSessionId } from "../session-id.ts"
 
 /**
  * Captured at module load. Toggling MINIMAL_AGENT_NET_DBG at runtime does NOT
