@@ -16,11 +16,11 @@
  */
 import { readFileSync } from "node:fs"
 
-import { Agent } from "../src/agent.ts"
-import type { AuthResult } from "../src/auth.ts"
+import { Agent } from "../src/agent/agent.ts"
+import type { AuthResult } from "../src/auth/auth.ts"
 import type { StreamedResponse } from "../src/client.ts"
-import { loadSession } from "../src/session-restore.ts"
-import { SessionStore, sessionFilePath } from "../src/session-store.ts"
+import { loadSession } from "../src/session/session-restore.ts"
+import { SessionStore, sessionFilePath } from "../src/session/session-store.ts"
 
 const args = process.argv.slice(2)
 function arg(name: string, def?: string): string | undefined {
