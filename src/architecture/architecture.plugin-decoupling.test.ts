@@ -141,15 +141,12 @@ const BASELINE = new Map<string, number>([
   // appear here. Their cross-provider disambiguation/dispatch tests were adopted
   // into src/llm/wafer-opencode-{disambiguation,dispatch}.integration.test.ts,
   // which discover both providers from the sibling.
-  // D-quota-schedule: the two host-runtime integration tests keep their src/
-  // imports — they drive the REAL PluginLoader / REPL / Compositor / agent
-  // run() end-to-end, which is the whole point of the test, so they are not
-  // decouplable. Every other schedule file swept to 0 (TUIContext/TUIResult/
-  // CommandContext/CommandResult/LiveAreaHandlerContext → plugin-api/types/
-  // plugin; PALETTE → plugin-api/utils/palette; displayWidth → plugin-api/
-  // utils/term-width).
-  ["schedule/fire-e2e.test.ts", 6],
-  ["schedule/load.test.ts", 1],
+  // Wave G: the schedule plugin physically moved to the sibling
+  // ../minimal-agent-plugins/ma-schedule-plugin. Its production was already
+  // src/-clean (utils vendored to lib/, host types mirrored in lib/host-types.ts).
+  // The load-integration test was adopted into
+  // src/plugins/schedule.load.integration.test.ts, which discovers the plugin
+  // from the sibling via siblingDirs + siblingPluginPresent.
   // D-usage-render: usage renderers + report shapes moved to plugin-api. The
   // remaining handler src/ import is the host usage DATA ENGINE
   // (scanUsageEvents / aggregate* / parseUsagePeriod), which scans the session

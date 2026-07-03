@@ -1,45 +1,34 @@
 /**
  * Load-integration: the real schedule manifest resolves through the host
- * PluginLoader — its 3 tools and the heartbeat slot are wired, the command
- * registry is empty until P5 adds /loop + /schedule.
+ * PluginLoader from its migrated home. Its 3 cron tools, the heartbeat
+ * live-area slot, the PROMPT.md block, and the /loop + /schedule commands all
+ * wire up through the loader's manifest path.
  *
- * The plugin is symlinked into a temp root so ONLY `schedule` loads (and
- * its relative `import type ../../../src/plugins/types.ts` still resolves
- * via the symlink's real path).
+ * Wave G: the schedule plugin moved to the sibling ../minimal-agent-plugins/
+ * repo (ma-schedule-plugin), discovered via the loader's `siblingDirs` seam.
+ * On a bare host checkout without the sibling, this suite skips cleanly.
  *
- * @module schedule/load.test
+ * @module plugins/schedule.load.integration.test
  */
 
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, it } from "bun:test"
 
-import { afterEach, describe, expect, it } from "bun:test"
+import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
-import { PluginLoader } from "../../src/plugins/loader.ts"
+import { PluginLoader } from "./loader.ts"
 
-const roots: string[] = []
-afterEach(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true })
-  roots.length = 0
-})
+const HAVE_SCHEDULE = siblingPluginPresent("ma-schedule-plugin")
 
 async function loadSchedule(): Promise<PluginLoader> {
-  const root = mkdtempSync(join(tmpdir(), "ma-sched-load-"))
-  roots.push(root)
-  mkdirSync(join(root, "plugins"), { recursive: true })
-  // import.meta.dir is the real plugins/schedule dir (where this test lives).
-  symlinkSync(import.meta.dir, join(root, "plugins", "schedule"))
   return PluginLoader.load({
-    embeddedDir: root,
-    homeDir: root,
-    projectDir: root,
+    embeddedDir: SIBLING_REPO_ROOT,
+    siblingDirs: [SIBLING_REPO_ROOT],
     sessionId: "load-test",
     logger: () => {},
   })
 }
 
-describe("schedule manifest loads", () => {
+describe.skipIf(!HAVE_SCHEDULE)("schedule manifest loads", () => {
   it("registers the three cron tools", async () => {
     const loader = await loadSchedule()
     const names = loader.getExtraTools().map((t) => t.name)
