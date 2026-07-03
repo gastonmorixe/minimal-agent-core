@@ -35,7 +35,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { runPreflightPipeline } from "../../src/agent/preflight-pipeline.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../../src/llm/model-registry.ts"
-import { loadSessionFromText } from "../../src/session-restore.ts"
+import { loadSessionFromText } from "../../src/session/session-restore.ts"
 
 import { bootstrapAnthropic } from "./adapter.ts"
 import { extractModelFromSignature } from "./signature-model.ts"

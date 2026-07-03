@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 
-import { type IndexRecord, indexFilePath, sessionFilePath } from "../../session-store.ts"
+import { type IndexRecord, indexFilePath, sessionFilePath } from "../../session/session-store.ts"
 
 /**
  * Read the global sessions index. Returns one record per saved session,

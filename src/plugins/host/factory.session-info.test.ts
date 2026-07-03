@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { addSessionUsage, clearSessionTokens } from "../../session-tokens.ts"
+import { addSessionUsage, clearSessionTokens } from "../../session/session-tokens.ts"
 
 import { buildPluginHost } from "./factory.ts"
 

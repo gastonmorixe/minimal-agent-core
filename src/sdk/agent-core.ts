@@ -47,7 +47,7 @@ import {
   type TransportFn,
 } from "../llm/transport/types.ts"
 import { createReflectionAckStripper } from "../reflection-ack-stripper.ts"
-import { appendUserTurn } from "../session-restore.ts"
+import { appendUserTurn } from "../session/session-restore.ts"
 
 import type { AgentEvent, EventSink, EventUsage } from "./events.ts"
 import type {

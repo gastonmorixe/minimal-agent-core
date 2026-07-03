@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { SessionRecord } from "../session-store.ts"
+import type { SessionRecord } from "../session/session-store.ts"
 
 import { toolDisplaysFromRecords, userTimestampsFromRecords } from "./session-replay.ts"
 

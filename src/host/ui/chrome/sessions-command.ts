@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os"
 
-import type { SessionUsage } from "../../../session-usage.ts"
+import type { SessionUsage } from "../../../session/session-usage.ts"
 import { c } from "../style/ansi.ts"
 
 const PATH_COL_WIDTH = 30

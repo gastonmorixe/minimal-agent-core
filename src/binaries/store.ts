@@ -44,7 +44,7 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { acquireLock, type LockHandle } from "../infra/file-lock.ts"
-import { getSessionId } from "../session-id.ts"
+import { getSessionId } from "../session/session-id.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
 import type {

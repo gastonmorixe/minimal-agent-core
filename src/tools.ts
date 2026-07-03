@@ -35,7 +35,7 @@ import { acquireLock, LockAbortedError, LockTimeoutError } from "./infra/file-lo
 import type { ImageBlock } from "./llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
-import { getSessionId } from "./session-id.ts"
+import { getSessionId } from "./session/session-id.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./utils/diff.ts"
 import { parseJsonc } from "./utils/jsonc.ts"

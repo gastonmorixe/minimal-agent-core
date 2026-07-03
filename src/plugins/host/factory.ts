@@ -34,7 +34,7 @@ import {
 } from "../../llm/model-registry.ts"
 import { resolveProviderSessionInfo } from "../../llm/provider-session.ts"
 import { canonicalSendFn } from "../../llm/transport/canonical-send.ts"
-import { getSessionTokens } from "../../session-tokens.ts"
+import { getSessionTokens } from "../../session/session-tokens.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"

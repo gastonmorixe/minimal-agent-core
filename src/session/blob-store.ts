@@ -39,9 +39,9 @@ import {
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { resolveSessionsDir } from "./agent-paths.ts"
-import { configPath as userConfigPath } from "./config/config.ts"
-import { parseJsonc } from "./utils/jsonc.ts"
+import { resolveSessionsDir } from "../agent-paths.ts"
+import { configPath as userConfigPath } from "../config/config.ts"
+import { parseJsonc } from "../utils/jsonc.ts"
 
 // ---------------------------------------------------------------------------
 // Types

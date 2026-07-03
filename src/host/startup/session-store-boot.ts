@@ -13,9 +13,9 @@
  * @module startup/session-store-boot
  */
 
-import { BlobStore, loadBlobStoreConfig } from "../../blob-store.ts"
-import { loadSession } from "../../session-restore.ts"
-import { SessionStore } from "../../session-store.ts"
+import { BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
+import { loadSession } from "../../session/session-restore.ts"
+import { SessionStore } from "../../session/session-store.ts"
 import { AGENT_VERSION } from "../../utils/build-info.ts"
 import {
   renderLiveSessionWarning,
@@ -172,7 +172,7 @@ export async function bootSessionStores(
   // On `--resume-same-sid` we ARE the continuation — skip the warning.
   if (resumeSid && !resumeSame) {
     try {
-      const { getSessionLiveness } = await import("../../session-liveness.ts")
+      const { getSessionLiveness } = await import("../../session/session-liveness.ts")
       const live = getSessionLiveness(resumeSid)
       if (live.status === "live" && live.pid !== process.pid) {
         writeCommandRows(

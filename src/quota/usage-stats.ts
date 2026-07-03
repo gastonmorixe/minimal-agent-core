@@ -42,8 +42,8 @@ import {
   type MetaRecord,
   parseLines,
   type SessionRecord,
-} from "../session-store.ts"
-import { billedUsageOf } from "../session-usage.ts"
+} from "../session/session-store.ts"
+import { billedUsageOf } from "../session/session-usage.ts"
 
 // ---------------------------------------------------------------------------
 // Periods

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./client/types.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../client/types.ts"
+
 import { repairTrailingTurn } from "./session-restore.ts"
 
 // Split out of `session-restore.test.ts` (which exceeded the 810-line lint cap
