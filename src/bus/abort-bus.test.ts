@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { AbortBus, type AbortReason } from "./abort-bus"
+import { AbortBus, type AbortReason } from "./abort-bus.ts"
 
 describe("AbortBus", () => {
   it("requestAbort with no turn returns false and emits no event", () => {

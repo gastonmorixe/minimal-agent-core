@@ -11,7 +11,7 @@
  * @module plugins/loader/commands
  */
 
-import { createPluginLogger, diag } from "../../diagnostic-bus.ts"
+import { createPluginLogger, diag } from "../../bus/diagnostic-bus.ts"
 import { parseCommandLine } from "../../slash-command-parse.ts"
 import { agentContextToEnv } from "../agent-context.ts"
 import { EventBus } from "../event-bus.ts"

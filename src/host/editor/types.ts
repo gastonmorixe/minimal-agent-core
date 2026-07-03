@@ -12,8 +12,8 @@
  * @module editor/types
  */
 
-import type { AbortBus } from "../../abort-bus.ts"
-import type { FsmOptions } from "../../abort-quit-fsm.ts"
+import type { AbortBus } from "../../bus/abort-bus.ts"
+import type { FsmOptions } from "../../bus/abort-quit-fsm.ts"
 import type { InputCaptureStack } from "../../input-capture-stack.ts"
 import type { Hooks } from "../../plugins/hooks/hooks.ts"
 

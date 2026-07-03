@@ -18,9 +18,9 @@ import { EventEmitter } from "node:events"
 import { describe, expect, it } from "bun:test"
 
 import { type ReplAgentLike, runRepl } from "./agent.ts"
+import { StatusBus } from "./bus/status.ts"
 import { EditorController } from "./host/editor-controller.ts"
 import { Compositor } from "./host/ui/compositor.ts"
-import { StatusBus } from "./status.ts"
 
 class FakeTTYInput extends EventEmitter {
   isTTY = true

@@ -33,6 +33,7 @@ import {
   resetDefaultAuthStoreForTests,
   type SecretBag,
 } from "../../auth-store.ts"
+import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
   NetworkClient,
   type NetworkRequest,
@@ -40,7 +41,6 @@ import {
   type NetworkTransport,
 } from "../../network/index.ts"
 import { clearSessionTokens, getSessionTokens } from "../../session-tokens.ts"
-import { GLOBAL_STATUS_BUS } from "../../status.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
 import { registerDiscoveredProviders } from "../provider-discovery.ts"

@@ -16,7 +16,7 @@
  * @module startup/provision-binaries
  */
 
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { renderBinaryProvisionHalt } from "../ui/chrome/binary-provision.ts"
 import { writeCommandRows } from "../ui/command-output.ts"

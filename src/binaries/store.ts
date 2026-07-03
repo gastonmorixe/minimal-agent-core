@@ -44,8 +44,8 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { acquireLock, type LockHandle } from "../file-lock.ts"
-import { parseJsonc } from "../jsonc.ts"
 import { getSessionId } from "../session-id.ts"
+import { parseJsonc } from "../utils/jsonc.ts"
 
 import type {
   BinaryInventory,

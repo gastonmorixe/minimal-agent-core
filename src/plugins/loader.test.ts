@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 
-import { getDiagnosticBus, type LogEvent, Severity } from "../diagnostic-bus.ts"
+import { getDiagnosticBus, type LogEvent, Severity } from "../bus/diagnostic-bus.ts"
 
 import {
   CORE_TOOLS,

@@ -14,7 +14,7 @@
  * @module editor/key-dispatch
  */
 
-import type { EscapeHatch, FsmInput, FsmState } from "../../abort-quit-fsm.ts"
+import type { EscapeHatch, FsmInput, FsmState } from "../../bus/abort-quit-fsm.ts"
 import type { EditorBuffer } from "../../editor-buffer.ts"
 import {
   findCsiEnd,

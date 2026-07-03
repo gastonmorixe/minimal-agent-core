@@ -19,10 +19,10 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { type ReplAgentLike, runRepl } from "../../src/agent.ts"
+import { StatusBus } from "../../src/bus/status.ts"
 import { EditorController } from "../../src/host/editor-controller.ts"
 import { EventBus } from "../../src/plugins/event-bus.ts"
 import { PluginLoader } from "../../src/plugins/loader.ts"
-import { StatusBus } from "../../src/status.ts"
 import { Compositor } from "../../src/ui/compositor.ts"
 
 import { CronStore } from "./lib/store.ts"

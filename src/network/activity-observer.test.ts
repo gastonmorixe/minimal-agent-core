@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { type StatusActivity, StatusBus } from "../status.ts"
+import { type StatusActivity, StatusBus } from "../bus/status.ts"
 
 import { NetworkActivityObserver, NetworkActivityTracker } from "./activity-observer.ts"
 import { type NetworkRequest, NetworkResponse } from "./types.ts"

@@ -21,7 +21,7 @@ import { isAbsolute, resolve } from "node:path"
 import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 
-import { createPluginLogger } from "../../diagnostic-bus.ts"
+import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
 import { agentContextToEnv } from "../agent-context.ts"
 import type { PluginHost } from "../host/capabilities.ts"
 import type {

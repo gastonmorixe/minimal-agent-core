@@ -21,7 +21,7 @@ import { PluginLoader } from "./loader.ts"
  * scrollback + TUI surface); tests don't want that — they just need
  * the type to satisfy.
  */
-function noopLogger(): import("../diagnostic-bus.ts").PluginLogger {
+function noopLogger(): import("../bus/diagnostic-bus.ts").PluginLogger {
   const noop = () => {}
   return {
     emergency: noop,

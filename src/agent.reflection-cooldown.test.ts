@@ -25,8 +25,8 @@
 import { describe, expect, it } from "bun:test"
 
 import { runReflectionCooldown } from "./agent.ts"
+import { StatusBus } from "./bus/status.ts"
 import { InputCaptureStack } from "./input-capture-stack.ts"
-import { StatusBus } from "./status.ts"
 
 function newBus(): StatusBus {
   return new StatusBus()

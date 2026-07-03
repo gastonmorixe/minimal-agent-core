@@ -20,8 +20,8 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { diag } from "../bus/diagnostic-bus.ts"
 import type { ContentBlock as LegacyContentBlock } from "../client/types.ts"
-import { diag } from "../diagnostic-bus.ts"
 import { canonicalMessageToLegacy } from "../llm/adapter-legacy.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 

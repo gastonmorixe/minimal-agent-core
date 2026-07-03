@@ -23,7 +23,7 @@
 
 import { existsSync } from "node:fs"
 
-import { diag } from "../diagnostic-bus.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 
 import { clipboardImageSync } from "./clipboard.ts"
 import { defaultMediaLimits } from "./default-limits.ts"

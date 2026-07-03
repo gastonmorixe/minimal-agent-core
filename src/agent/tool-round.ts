@@ -20,6 +20,7 @@
  */
 
 import { type BlobStore, type BlobWriteResult, formatRawOutputFooter } from "../blob-store.ts"
+import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 // P4 FOLLOW-UP (core→host decoupling): this is the LAST host import in this
 // module. The raw box-drawing glyphs + palette were already pushed into the
 // host (formatRefusalRows / formatModeCloseRow / formatStreamBodyRow, plus
@@ -60,7 +61,6 @@ import {
 } from "../plugins/hooks/tool-lifecycle.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { SessionStore } from "../session-store.ts"
-import { GLOBAL_STATUS_BUS } from "../status.ts"
 import { expandTabs } from "../term-width.ts"
 import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"

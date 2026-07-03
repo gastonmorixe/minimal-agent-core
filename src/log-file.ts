@@ -53,7 +53,7 @@ import { join } from "node:path"
 
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
-import { type DiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
+import { type DiagnosticBus, Facility, type LogEvent, Severity } from "./bus/diagnostic-bus.ts"
 import { formatRfc5424 } from "./syslog.ts"
 
 /**

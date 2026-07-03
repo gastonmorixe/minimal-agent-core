@@ -36,7 +36,7 @@
  * @module network/activity-observer
  */
 
-import type { StatusActivityTarget, StatusHandle } from "../status.ts"
+import type { StatusActivityTarget, StatusHandle } from "../bus/status.ts"
 
 import type { NetworkObserver, NetworkRequest, NetworkResponse } from "./types.ts"
 

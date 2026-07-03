@@ -32,7 +32,7 @@
  * @module llm/transport/auth-refresh
  */
 
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
 import type { ProviderAuth } from "../provider.ts"
 
 import type { StreamedResponse } from "./types.ts"

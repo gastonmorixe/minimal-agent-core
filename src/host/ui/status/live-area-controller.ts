@@ -12,8 +12,8 @@
  */
 
 import type { StatusController } from "../../../agent.ts"
+import type { StatusBus, StatusSnapshot } from "../../../bus/status.ts"
 import { visualCellsForGlyph } from "../../../nerd-glyph-width.ts"
-import type { StatusBus, StatusSnapshot } from "../../../status.ts"
 import {
   BlinkingNerdSpinner,
   type Spinner,

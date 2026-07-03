@@ -241,7 +241,6 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // (host-ansi/formatter imports repointed to the plugin-api leaf package).
 // ---------------------------------------------------------------------------
 const BASELINE = new Map<string, number>([
-  ["abort-quit-keystroke.test.ts", 1],
   ["agent.plugin-tool-feedback.test.ts", 1],
   ["agent.queue-nav-repl.test.ts", 1],
   ["agent.ts", 6],
@@ -249,6 +248,7 @@ const BASELINE = new Map<string, number>([
   ["agent/model-error.test.ts", 1],
   ["agent/tool-round.ts", 1],
   ["agent/turn-attachments.ts", 1],
+  ["bus/abort-quit-keystroke.test.ts", 1],
   ["command-repl-e2e.test.ts", 2],
   ["draft-store-editor.integration.test.ts", 1],
   ["first-run.test.ts", 1],

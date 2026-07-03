@@ -17,7 +17,7 @@
 
 import { existsSync } from "node:fs"
 
-import { createPluginLogger } from "../../diagnostic-bus.ts"
+import { createPluginLogger } from "../../bus/diagnostic-bus.ts"
 import { agentContextToEnv } from "../agent-context.ts"
 import type {
   AgentContext,

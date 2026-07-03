@@ -28,7 +28,7 @@
  * @module plugins/hooks/hook-bus
  */
 
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
 
 import type {
   ChainEmitResult,

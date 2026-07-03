@@ -22,7 +22,7 @@
  * @module plugins/hooks/hooks
  */
 
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
 import { EventBus, type Listener as EventListener } from "../event-bus.ts"
 
 import { CHANNEL_BY_NAME } from "./channels.ts"

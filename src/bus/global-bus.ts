@@ -27,7 +27,7 @@
  * @module global-bus
  */
 
-import type { EventBus } from "./plugins/event-bus.ts"
+import type { EventBus } from "../plugins/event-bus.ts"
 
 let globalBus: EventBus | null = null
 

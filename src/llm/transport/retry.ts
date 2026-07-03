@@ -28,13 +28,13 @@
  * @module llm/transport/retry
  */
 
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
+import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
   TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
   tagTransientNetworkError,
 } from "../../network/index.ts"
-import { abortableSleep } from "../../retry.ts"
-import { GLOBAL_STATUS_BUS } from "../../status.ts"
+import { abortableSleep } from "../../utils/retry.ts"
 
 import type { StreamedResponse } from "./types.ts"
 

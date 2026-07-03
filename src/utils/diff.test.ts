@@ -4,8 +4,9 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { executeTool } from "../tools.ts"
+
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
-import { executeTool } from "./tools.ts"
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "diff-test-"))

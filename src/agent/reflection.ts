@@ -19,9 +19,9 @@
  * @module agent/reflection
  */
 
+import type { StatusBus } from "../bus/status.ts"
 import type { InputCaptureStack } from "../input-capture-stack.ts"
 import type { ContentBlock } from "../llm/messages.ts"
-import type { StatusBus } from "../status.ts"
 
 /**
  * Default interval (in tool-execution rounds) between reflection

@@ -19,7 +19,7 @@ import { LiveAreaScheduler } from "./live-area-scheduler.ts"
 
 describe("LiveAreaScheduler — diagnosticBus integration", () => {
   it("emits live-area.timeout (Warning) with slot + timeout-ms structured data", async () => {
-    const { createDiagnosticBus, Severity } = await import("../../../diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../../bus/diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -63,7 +63,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("emits live-area.handler-failed (Error) when the invoke rejects", async () => {
-    const { createDiagnosticBus, Severity } = await import("../../../diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../../bus/diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -101,7 +101,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("emits Notice with recovery=true after a healthy tick following a failure", async () => {
-    const { createDiagnosticBus, Severity } = await import("../../../diagnostic-bus.ts")
+    const { createDiagnosticBus, Severity } = await import("../../../bus/diagnostic-bus.ts")
     type LocalEvent = {
       // Keep `severity` typed as the enum here so the comparison below
       // doesn't trip oxlint's `no-unsafe-enum-comparison` (the bus's
@@ -148,7 +148,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("does NOT emit recovery when no prior failure occurred", async () => {
-    const { createDiagnosticBus } = await import("../../../diagnostic-bus.ts")
+    const { createDiagnosticBus } = await import("../../../bus/diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const events: Array<{
       severity: number
@@ -177,7 +177,7 @@ describe("LiveAreaScheduler — diagnosticBus integration", () => {
   })
 
   it("legacyLogger takes precedence over diagnosticBus", async () => {
-    const { createDiagnosticBus } = await import("../../../diagnostic-bus.ts")
+    const { createDiagnosticBus } = await import("../../../bus/diagnostic-bus.ts")
     const bus = createDiagnosticBus()
     const busEvents: unknown[] = []
     bus.on("*", (e) => busEvents.push(e))
