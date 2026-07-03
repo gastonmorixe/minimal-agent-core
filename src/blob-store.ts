@@ -41,7 +41,7 @@ import { join } from "node:path"
 
 import { resolveSessionsDir } from "./agent-paths.ts"
 import { configPath as userConfigPath } from "./config.ts"
-import { parseJsonc } from "./jsonc.ts"
+import { parseJsonc } from "./utils/jsonc.ts"
 
 // ---------------------------------------------------------------------------
 // Types

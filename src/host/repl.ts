@@ -17,7 +17,8 @@
 
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth.ts"
-import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
+import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
+import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
 import { RawInput } from "../input.ts"
 import { listLiveModelsForPicker } from "../llm/list-models.ts"
 import type { ModelInfo, StreamedResponse } from "../llm/transport/types.ts"
@@ -25,7 +26,6 @@ import { ModeManager } from "../modes.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ManifestMode } from "../plugins/types.ts"
-import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 
 import type { QueueKeyHandler } from "./editor/types.ts"
 import {

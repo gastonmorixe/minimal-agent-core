@@ -12,7 +12,7 @@
 
 import { ansiStyle } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { clampWithHint } from "../../truncate-hint.ts"
+import { clampWithHint } from "../../utils/truncate-hint.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
 import type { SendOptions } from "./types.ts"

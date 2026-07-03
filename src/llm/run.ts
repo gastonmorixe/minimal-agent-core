@@ -25,7 +25,7 @@
  * @module llm/run
  */
 
-import { diag } from "../diagnostic-bus.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 import { defaultNetworkClient } from "../network/index.ts"
 
 import type { CanonicalEvent } from "./canonical-events.ts"

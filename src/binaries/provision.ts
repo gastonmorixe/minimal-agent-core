@@ -21,7 +21,7 @@
  * @module binaries/provision
  */
 
-import { diag } from "../diagnostic-bus.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 import type { SetupBinaryInventory, SetupBinarySpec, SetupResult } from "../plugins/types.ts"
 
 import { BinaryStore } from "./store.ts"

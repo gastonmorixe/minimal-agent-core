@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
+import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./bus/diagnostic-bus.ts"
 import { StderrMirrorSink } from "./log-stderr.ts"
 
 function event(over: Partial<LogEvent> = {}): LogEvent {

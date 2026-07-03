@@ -35,11 +35,11 @@ import { EventEmitter } from "node:events"
 
 import { describe, expect, it } from "bun:test"
 
-import { abortBus as globalAbortBus } from "./abort-bus.ts"
 import { Agent, type ReplAgentLike, runRepl } from "./agent.ts"
 import type { AuthResult } from "./auth.ts"
+import { abortBus as globalAbortBus } from "./bus/abort-bus.ts"
+import { StatusBus } from "./bus/status.ts"
 import type { Message, SendOptions, StreamedResponse } from "./client/types.ts"
-import { StatusBus } from "./status.ts"
 
 // ----------------------------- fakes ---------------------------------------
 

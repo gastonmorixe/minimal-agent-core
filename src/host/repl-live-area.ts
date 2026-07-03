@@ -10,11 +10,12 @@
  * @module agent/repl-live-area
  */
 
-import { type AbortReason, abortBus } from "../abort-bus.ts"
 import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth.ts"
-import { isErrorDiagEmitted } from "../diagnostic-bus.ts"
+import { type AbortReason, abortBus } from "../bus/abort-bus.ts"
+import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
+import { GLOBAL_STATUS_BUS, StatusBus } from "../bus/status.ts"
 import type { ModelInfo } from "../llm/transport/types.ts"
 import type { ModeDeliveryEvent } from "../modes.ts"
 import { PluginStream } from "../plugins/stream.ts"
@@ -27,7 +28,6 @@ import {
   submittedAtEnabled,
 } from "../scrollback-submitted-at.ts"
 import { parseCommandLine } from "../slash-command-parse.ts"
-import { GLOBAL_STATUS_BUS, StatusBus } from "../status.ts"
 
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
@@ -848,7 +848,7 @@ export async function runReplLiveArea(
   if (typeof editor.setFooterLines === "function") {
     const { FooterAggregator } = await import("./ui/status/footer-aggregator.ts")
     const { TuiDiagnosticSurface } = await import("./ui/status/diagnostic-surface.ts")
-    const { getDiagnosticBus } = await import("../diagnostic-bus.ts")
+    const { getDiagnosticBus } = await import("../bus/diagnostic-bus.ts")
 
     const aggregator = new FooterAggregator(
       (lines) => editor.setFooterLines?.(lines),

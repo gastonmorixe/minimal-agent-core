@@ -39,7 +39,7 @@
  * @module session-replay-derivers
  */
 
-import { buildEditDiff, buildFileDiff } from "../diff.ts"
+import { buildEditDiff, buildFileDiff } from "../utils/diff.ts"
 
 import { renderUnifiedDiff } from "./ui/render/unified-diff.ts"
 

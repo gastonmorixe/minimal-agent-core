@@ -24,7 +24,7 @@
 
 import type { ProviderSessionInfo } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
-import type { PluginLogger } from "../../diagnostic-bus.ts"
+import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
 import type { ModelEntry } from "../../llm/model-registry.ts"
 
 import type { TransportRegistryApi } from "./transport-registry.ts"

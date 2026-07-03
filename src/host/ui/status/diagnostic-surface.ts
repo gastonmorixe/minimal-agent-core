@@ -50,7 +50,7 @@
  * @module ui/status/diagnostic-surface
  */
 
-import { type DiagnosticBus, type LogEvent, Severity } from "../../../diagnostic-bus.ts"
+import { type DiagnosticBus, type LogEvent, Severity } from "../../../bus/diagnostic-bus.ts"
 import { c } from "../style/ansi.ts"
 
 /**

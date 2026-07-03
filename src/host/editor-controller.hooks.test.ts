@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { AbortBus } from "../abort-bus.ts"
+import { AbortBus } from "../bus/abort-bus.ts"
 import { Hooks } from "../plugins/hooks/hooks.ts"
 
 import { make } from "./editor-controller.fixtures.ts"

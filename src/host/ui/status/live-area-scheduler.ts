@@ -29,7 +29,7 @@ import {
   Facility,
   getDiagnosticBus,
   Severity,
-} from "../../../diagnostic-bus.ts"
+} from "../../../bus/diagnostic-bus.ts"
 import { agentContextToEnv } from "../../../plugins/agent-context.ts"
 import type { EventBus } from "../../../plugins/event-bus.ts"
 import type { PluginHost } from "../../../plugins/host/capabilities.ts"

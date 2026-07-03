@@ -22,7 +22,7 @@ import {
 } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { getAuth } from "../../auth.ts"
-import type { PluginLogger } from "../../diagnostic-bus.ts"
+import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
 import {
   findModel,
   findModelByTags,

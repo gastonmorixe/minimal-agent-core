@@ -7,7 +7,7 @@
 
 import { EventEmitter } from "node:events"
 
-import type { AbortBus } from "../abort-bus.ts"
+import type { AbortBus } from "../bus/abort-bus.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
 
 import { EditorController } from "./editor-controller.ts"

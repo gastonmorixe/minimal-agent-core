@@ -250,7 +250,7 @@ function emitToSingleton(
  *
  * Anywhere in the codebase:
  *
- *   import \{ diag \} from "./diagnostic-bus.ts"
+ *   import \{ diag \} from "../diagnostic-bus.ts"
  *   diag.warn("live-area.timeout", "invoke did not resolve in time", \{
  *     slot: "quota-status/quota",
  *     "timeout-ms": 8000,

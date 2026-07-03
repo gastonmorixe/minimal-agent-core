@@ -29,7 +29,7 @@
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 import type { NormalizedPlatform } from "@minimal-agent/plugin-api/utils/platform"
 
-import { createPluginLogger, diag } from "../diagnostic-bus.ts"
+import { createPluginLogger, diag } from "../bus/diagnostic-bus.ts"
 
 import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"

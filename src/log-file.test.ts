@@ -19,7 +19,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
+import { createDiagnosticBus, Facility, type LogEvent, Severity } from "./bus/diagnostic-bus.ts"
 import { FileLogSink } from "./log-file.ts"
 
 function event(over: Partial<LogEvent> = {}): LogEvent {

@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { getDiagnosticBus, type LogEvent, resetDiagnosticBus } from "../../diagnostic-bus.ts"
+import { getDiagnosticBus, type LogEvent, resetDiagnosticBus } from "../../bus/diagnostic-bus.ts"
 
 import { withRetry } from "./retry.ts"
 import type { StreamedResponse } from "./types.ts"

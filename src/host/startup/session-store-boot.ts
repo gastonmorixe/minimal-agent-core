@@ -14,9 +14,9 @@
  */
 
 import { BlobStore, loadBlobStoreConfig } from "../../blob-store.ts"
-import { AGENT_VERSION } from "../../build-info.ts"
 import { loadSession } from "../../session-restore.ts"
 import { SessionStore } from "../../session-store.ts"
+import { AGENT_VERSION } from "../../utils/build-info.ts"
 import {
   renderLiveSessionWarning,
   renderSessionDriftWarning,

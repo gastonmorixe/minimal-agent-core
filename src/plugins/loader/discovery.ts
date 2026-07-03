@@ -25,7 +25,7 @@ import {
   platformAllowed,
 } from "@minimal-agent/plugin-api/utils/platform"
 
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 

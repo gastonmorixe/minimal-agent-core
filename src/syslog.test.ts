@@ -24,7 +24,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { Facility, type LogEvent, Severity } from "./diagnostic-bus.ts"
+import { Facility, type LogEvent, Severity } from "./bus/diagnostic-bus.ts"
 import { formatRfc5424 } from "./syslog.ts"
 
 function event(over: Partial<LogEvent> = {}): LogEvent {

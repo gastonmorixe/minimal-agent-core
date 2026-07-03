@@ -67,7 +67,7 @@ import {
   type LogEvent,
   Severity,
   type StructuredData,
-} from "../../../diagnostic-bus.ts"
+} from "../../../bus/diagnostic-bus.ts"
 
 // ---------------------------------------------------------------------------
 // SGR helpers (no `c` import; these compose raw palette opens with attributes).

@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { getGlobalEventBus, setGlobalEventBus } from "./global-bus.ts"
+import { getGlobalEventBus, setGlobalEventBus } from "./bus/global-bus.ts"
 import { EventBus } from "./plugins/event-bus.ts"
 import {
   announceQuotaRefresh,

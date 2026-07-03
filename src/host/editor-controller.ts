@@ -13,7 +13,7 @@
 
 import { EventEmitter } from "node:events"
 
-import { type AbortBus, abortBus } from "../abort-bus.ts"
+import { type AbortBus, abortBus } from "../bus/abort-bus.ts"
 import {
   EscapeHatch,
   type FsmEffect,
@@ -22,7 +22,7 @@ import {
   step as fsmStep,
   initialState as initialFsmState,
   type QuitReason,
-} from "../abort-quit-fsm.ts"
+} from "../bus/abort-quit-fsm.ts"
 import { EditorBuffer } from "../editor-buffer.ts"
 import { type InputCaptureStack, inputCaptureStack } from "../input-capture-stack.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"

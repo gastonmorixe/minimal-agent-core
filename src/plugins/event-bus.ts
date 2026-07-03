@@ -52,7 +52,7 @@
  * @module plugins/event-bus
  */
 
-import { diag } from "../diagnostic-bus.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 
 /**
  * Listener invocation context. Same shape regardless of event.

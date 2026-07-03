@@ -28,7 +28,12 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "../../../diagnostic-bus.ts"
+import {
+  createDiagnosticBus,
+  Facility,
+  type LogEvent,
+  Severity,
+} from "../../../bus/diagnostic-bus.ts"
 
 import { type DiagnosticLinesSink, TuiDiagnosticSurface } from "./diagnostic-surface.ts"
 

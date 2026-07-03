@@ -27,7 +27,12 @@ import { beforeEach, describe, expect, it } from "bun:test"
 
 import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
 
-import { createDiagnosticBus, Facility, type LogEvent, Severity } from "../../../diagnostic-bus.ts"
+import {
+  createDiagnosticBus,
+  Facility,
+  type LogEvent,
+  Severity,
+} from "../../../bus/diagnostic-bus.ts"
 
 import {
   formatScrollbackTs,

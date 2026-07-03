@@ -31,7 +31,7 @@
  * @module armed-footer
  */
 
-import type { ArmedSource } from "../../../abort-quit-fsm.ts"
+import type { ArmedSource } from "../../../bus/abort-quit-fsm.ts"
 import { c } from "../style/ansi.ts"
 
 export interface ArmedFooterOptions {

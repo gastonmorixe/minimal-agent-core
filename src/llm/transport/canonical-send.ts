@@ -38,7 +38,8 @@
 import { randomUUID } from "node:crypto"
 
 import { providerPeerToken, resolveStoredProviderAuth } from "../../auth-strategies.ts"
-import { diag } from "../../diagnostic-bus.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
+import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
   defaultNetworkClient,
   NetworkClient,
@@ -46,7 +47,6 @@ import {
 } from "../../network/index.ts"
 import { rebroadcastQuotaForSessionUpdate } from "../../quota-broadcast.ts"
 import { addSessionUsage } from "../../session-tokens.ts"
-import { GLOBAL_STATUS_BUS } from "../../status.ts"
 import {
   canonicalEventsToLegacyStream,
   legacyAuthToProviderAuth,

@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { AGENT_VERSION } from "../../build-info.ts"
+import { AGENT_VERSION } from "../../utils/build-info.ts"
 import { type CommandOutput, writeCommandRows } from "../ui/command-output.ts"
 import { type HelpSection, renderHelpSections } from "../ui/help/render.ts"
 import { c } from "../ui/style/ansi.ts"

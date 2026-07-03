@@ -31,14 +31,14 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node
 import { basename, dirname, resolve } from "node:path"
 
 import { configPath as userConfigPath } from "./config.ts"
-import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "./file-lock.ts"
-import { parseJsonc } from "./jsonc.ts"
 import type { ImageBlock } from "./llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"
 import { promptPath, renderPrompt } from "./prompts.ts"
 import { getSessionId } from "./session-id.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./tools/truncation.ts"
+import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./utils/diff.ts"
+import { parseJsonc } from "./utils/jsonc.ts"
 
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 
