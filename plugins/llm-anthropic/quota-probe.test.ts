@@ -13,7 +13,7 @@ import type {
 } from "@minimal-agent/plugin-api/net/types"
 
 import type { AuthResult } from "../../src/auth.ts"
-import { getLastRateLimits } from "../../src/quota-cache.ts"
+import { getLastRateLimits } from "../../src/quota/quota-cache.ts"
 
 import { registerAnthropicModels } from "./models.ts"
 import { probeQuota } from "./quota-probe.ts"

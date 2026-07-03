@@ -45,7 +45,7 @@ import {
   NetworkClient,
   networkActivityObserver,
 } from "../../network/index.ts"
-import { rebroadcastQuotaForSessionUpdate } from "../../quota-broadcast.ts"
+import { rebroadcastQuotaForSessionUpdate } from "../../quota/quota-broadcast.ts"
 import { addSessionUsage } from "../../session-tokens.ts"
 import {
   canonicalEventsToLegacyStream,

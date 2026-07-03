@@ -40,7 +40,7 @@ import type {
   QuotaWindow,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
-import { announceQuotaRefresh } from "../../src/quota-broadcast.ts"
+import { announceQuotaRefresh } from "../../src/quota/quota-broadcast.ts"
 
 /** Trust a cached snapshot newer than this without treating it as stale. */
 const FRESHNESS_MS = 5 * 60_000

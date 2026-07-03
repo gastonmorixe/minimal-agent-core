@@ -28,7 +28,7 @@ import {
   parseUsagePeriod,
   scanUsageEvents,
   USAGE_PERIODS,
-} from "../../../src/usage-stats.ts"
+} from "../../../src/quota/usage-stats.ts"
 import { DEFAULT_PERIOD_INDEX, renderOverlayFrame } from "../lib/overlay.ts"
 import { openOverlay, USAGE_OVERLAY_OWNER } from "../lib/state.ts"
 

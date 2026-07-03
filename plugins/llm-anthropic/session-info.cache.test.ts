@@ -15,7 +15,11 @@
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { clearLastRateLimits, getLastRateLimits, setLastRateLimits } from "../../src/quota-cache.ts"
+import {
+  clearLastRateLimits,
+  getLastRateLimits,
+  setLastRateLimits,
+} from "../../src/quota/quota-cache.ts"
 
 import {
   _resetAnthropicPrimeInFlight,

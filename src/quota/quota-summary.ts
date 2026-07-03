@@ -20,7 +20,7 @@
 
 import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
-import type { QuotaSnapshot, QuotaWindow } from "./llm/provider-plugin.ts"
+import type { QuotaSnapshot, QuotaWindow } from "../llm/provider-plugin.ts"
 
 export interface QuotaSummaryOptions {
   /** Spaces before the first segment (banner alignment). */
