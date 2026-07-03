@@ -68,8 +68,12 @@ import { resolveCacheTtl } from "./cache-ttl.ts"
 import { findDashTypos, formatDashTypoError, normalizeArgs } from "./cli/cli-args.ts"
 import { extractPromptFromArgs } from "./cli/extract-prompt.ts"
 import { resolveInitialModeId, resolveShowHeader } from "./cli/non-interactive-defaults.ts"
-import { loadModeUserOverrides, loadPluginEnabledOverrides, loadUserConfig } from "./config.ts"
-import { resolveEffort, validateEffortForModel } from "./effort-resolution.ts"
+import {
+  loadModeUserOverrides,
+  loadPluginEnabledOverrides,
+  loadUserConfig,
+} from "./config/config.ts"
+import { resolveEffort, validateEffortForModel } from "./config/effort-resolution.ts"
 import { planCommand } from "./host/cli/command-plan.ts"
 import { runAuthStatusCommand } from "./host/commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "./host/commands/dump.ts"
@@ -123,7 +127,7 @@ import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm
 import { findModel } from "./llm/model-registry.ts"
 import { findProviderPlugin } from "./llm/provider-plugin.ts"
 import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
-import { lastAdvertisedModeFromHistory, ModeManager } from "./modes.ts"
+import { lastAdvertisedModeFromHistory, ModeManager } from "./modes/modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
 import { collectFlagValues, resolvePluginEnabledOverrides } from "./plugin-enable-resolution.ts"
 import { resolveEffectivePlatform } from "./plugin-platform-resolution.ts"

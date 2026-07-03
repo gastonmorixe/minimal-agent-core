@@ -27,7 +27,7 @@
 
 import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
 
-import type { ModeChangeEvent, PendingModeAttachment } from "../../../modes.ts"
+import type { ModeChangeEvent, PendingModeAttachment } from "../../../modes/modes.ts"
 import type { ManifestMode } from "../../../plugins/types.ts"
 
 // ---------------------------------------------------------------------------

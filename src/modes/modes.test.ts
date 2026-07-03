@@ -18,8 +18,9 @@
 
 import { describe, expect, test } from "bun:test"
 
+import type { ManifestMode } from "../plugins/types.ts"
+
 import { ModeManager } from "./modes.ts"
-import type { ManifestMode } from "./plugins/types.ts"
 
 // ---------------------------------------------------------------------------
 // Fixtures

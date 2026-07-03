@@ -30,6 +30,8 @@
  * @module auto-ask
  */
 
+import type { ManifestMode } from "../plugins/types.ts"
+
 import {
   ASK_THRESHOLD,
   isActionConfident,
@@ -38,7 +40,6 @@ import {
   scoreQuestion,
 } from "./ask-mode-heuristic.ts"
 import type { ModeManager } from "./modes.ts"
-import type { ManifestMode } from "./plugins/types.ts"
 
 /** Subscribe-able shape — the public surface of EditorController we need. */
 export interface InputSource {

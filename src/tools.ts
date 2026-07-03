@@ -30,7 +30,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 
-import { configPath as userConfigPath } from "./config.ts"
+import { configPath as userConfigPath } from "./config/config.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "./file-lock.ts"
 import type { ImageBlock } from "./llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "./media/read-file.ts"

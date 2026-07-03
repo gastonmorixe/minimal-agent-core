@@ -38,9 +38,9 @@ import {
   styleFromLegacyColor,
 } from "@minimal-agent/plugin-api/utils/mode-style"
 
-import { c } from "./agent.ts"
-import type { ContentBlock } from "./llm/messages.ts"
-import type { ManifestMode, ModePermissions, ToolPermission } from "./plugins/types.ts"
+import { c } from "../agent.ts"
+import type { ContentBlock } from "../llm/messages.ts"
+import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 
 /**
  * Resolved tool-permission rules for a mode.

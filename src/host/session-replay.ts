@@ -21,7 +21,7 @@
  */
 
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
-import type { ModeManager } from "../modes.ts"
+import type { ModeManager } from "../modes/modes.ts"
 import { isRuntimeAttachmentBlock } from "../runtime-attachments"
 import {
   prefixSubmittedAtLines,

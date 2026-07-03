@@ -18,7 +18,7 @@
  * @module ready-banner
  */
 
-import type { ModeManager } from "../../../modes.ts"
+import type { ModeManager } from "../../../modes/modes.ts"
 import { displayWidth } from "../../../terminal/term-width.ts"
 import { c } from "../style/ansi.ts"
 

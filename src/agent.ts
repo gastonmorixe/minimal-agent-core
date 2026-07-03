@@ -68,7 +68,7 @@ import {
   type TransportFn,
 } from "./llm/transport/types.ts"
 import { resolveUserTurnContent } from "./media/ingest.ts"
-import { ModeManager } from "./modes.ts"
+import { ModeManager } from "./modes/modes.ts"
 import type { NetworkClient } from "./network/index.ts"
 import { PluginLoader } from "./plugins/loader.ts"
 import type { ManifestMode } from "./plugins/types.ts"

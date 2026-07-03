@@ -141,7 +141,7 @@ describe("replayToScrollback", () => {
   })
 
   it("strips <mode-change> activation blocks and uses the per-mode prompt prefix", async () => {
-    const { ModeManager } = await import("../modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const ASK_MANIFEST = { id: "ask", label: "ASK" }
     const modeManager = new ModeManager([ASK_MANIFEST])
     const messages: Message[] = [
@@ -183,7 +183,7 @@ describe("replayToScrollback", () => {
   it("parses <mode-change> blocks that include the at= timestamp attribute", async () => {
     // Forward-compat: new logs carry `at="..."`. The replay should treat
     // them identically to the legacy no-`at` form (strip + thread mode).
-    const { ModeManager } = await import("../modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const ASK_MANIFEST = { id: "ask", label: "ASK" }
     const modeManager = new ModeManager([ASK_MANIFEST])
     const messages: Message[] = [
@@ -206,7 +206,7 @@ describe("replayToScrollback", () => {
   })
 
   it("ignores a tool_result-only user message that also carries a <mode-change> block", async () => {
-    const { ModeManager } = await import("../modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const ASK_MANIFEST = { id: "ask", label: "ASK" }
     const modeManager = new ModeManager([ASK_MANIFEST])
     const messages: Message[] = [
@@ -697,7 +697,7 @@ describe("replayToScrollback", () => {
   })
 
   it("emits a mode-change chip with the user-record timestamp when replayed", async () => {
-    const { ModeManager } = await import("../modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const ASK_MANIFEST = { id: "ask", label: "ASK" }
     const modeManager = new ModeManager([ASK_MANIFEST])
     const at = new Date(2026, 4, 22, 17, 52, 30)
@@ -730,7 +730,7 @@ describe("replayToScrollback", () => {
   })
 
   it("emits a chip for a tool_result-only user message that carries a mode-change", async () => {
-    const { ModeManager } = await import("../modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const ASK_MANIFEST = { id: "ask", label: "ASK" }
     const modeManager = new ModeManager([ASK_MANIFEST])
     const messages: Message[] = [

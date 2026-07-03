@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test"
 
-import { ModeManager } from "../../../modes.ts"
+import { ModeManager } from "../../../modes/modes.ts"
 import type { ManifestMode } from "../../../plugins/types.ts"
 
 import {
