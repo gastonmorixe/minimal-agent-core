@@ -12,7 +12,7 @@ import {
   buildFirstRunCard,
   isColdStart,
   maybeShowFirstRunWelcome,
-} from "./host/ui/chrome/first-run.ts"
+} from "../host/ui/chrome/first-run.ts"
 
 /** Strip ANSI SGR sequences so assertions read against plain text. */
 function plain(s: string): string {
