@@ -62,7 +62,7 @@ import {
   suggestModelForProvider,
 } from "./auth/auth-strategies.ts"
 import { defaultBinDir } from "./binaries/store.ts"
-import { diag, getDiagnosticBus } from "./bus/diagnostic-bus.ts"
+import { diag } from "./bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "./bus/global-bus.ts"
 import { findDashTypos, formatDashTypoError, normalizeArgs } from "./cli/cli-args.ts"
 import { extractPromptFromArgs } from "./cli/extract-prompt.ts"
@@ -74,18 +74,8 @@ import {
   loadUserConfig,
 } from "./config/config.ts"
 import { validateEffortForModel } from "./config/effort-resolution.ts"
-import { runAuthStatusCommand } from "./host/commands/auth-status.ts"
-import { DumpCommandError, runDumpCommand } from "./host/commands/dump.ts"
-import { runListFlagsCommand } from "./host/commands/list-flags.ts"
-import { runListModelsCommand } from "./host/commands/list-models.ts"
-import { runListPluginsCommand } from "./host/commands/list-plugins.ts"
-import { runListProvidersCommand } from "./host/commands/list-providers.ts"
-import { runListSpinnersCommand } from "./host/commands/list-spinners.ts"
-import { runLoginCommand } from "./host/commands/login.ts"
-import { runLogoutCommand } from "./host/commands/logout.ts"
+import { planCommand } from "./host/cli/command-plan.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
-import { runSessionsCommand } from "./host/commands/sessions.ts"
-import { runUsageCommand } from "./host/commands/usage.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "./host/print-output.ts"
 import {
   buildResumeHeader,
@@ -93,6 +83,7 @@ import {
   toolDisplaysFromRecords,
   userTimestampsFromRecords,
 } from "./host/session-replay.ts"
+import { attachStartupDiagnosticSinks } from "./host/startup/diagnostic-sinks.ts"
 import { printHelp, readEmbeddedPackageVersion } from "./host/startup/help.ts"
 import { resolveStartupAuth, startupAuthLabel } from "./host/startup/provider-auth.ts"
 import {
@@ -104,11 +95,12 @@ import {
   resolveBootModel,
   resolveSingleStoredProviderBootModel,
 } from "./host/startup/resolve-boot-model.ts"
+import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
-import { Formatter } from "./host/ui/formatter/formatter.ts"
+import { Formatter, parseFormatterCommand } from "./host/ui/formatter/formatter.ts"
 import type { Spinner } from "./host/ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./host/ui/spinner/named-presets.ts"
 import { startStartupProgressSpinner } from "./host/ui/startup/progress-spinner.ts"
@@ -196,9 +188,7 @@ const userConfig = loadUserConfig()
 // flag/precedence logic lives in `src/cli/parse-argv.ts` (unit-tested); the
 // entry point keeps only the side-effecting startup bits (setSessionId,
 // setStartupTreeVisible, env-var propagation) that key off these values.
-const opts = parseCliOptions(args, userConfig, process.env)
-// `commandPlan` already folds in the want* / dump / resume booleans; the
-// entry point reads only the fields it needs directly below plus the plan.
+const opts = parseCliOptions(args, userConfig, process.env, parseFormatterCommand)
 const {
   model,
   provider,
@@ -225,8 +215,24 @@ const {
   usagePeriod,
   dumpArg,
   dumpFormatArg,
-  commandPlan,
 } = opts
+
+// Build the command plan from the resolved flags. `planCommand` lives in the
+// host tree, so it stays here (the blessed entry-point seam) rather than
+// inside the pure `cli/` resolver, keeping the core→host ratchet green.
+const commandPlan = planCommand({
+  dumpArg,
+  wantListSessions: opts.wantListSessions,
+  wantUsage: opts.wantUsage,
+  wantListFlags: opts.wantListFlags,
+  wantListSpinners: opts.wantListSpinners,
+  wantListModels: opts.wantListModels,
+  wantListProviders: opts.wantListProviders,
+  wantListPlugins: opts.wantListPlugins,
+  wantLogin: opts.wantLogin,
+  wantLogout: opts.wantLogout,
+  wantAuthStatus: opts.wantAuthStatus,
+})
 
 // The startup-tree renderer (src/ui/startup/tree.ts) holds the row-printing
 // state; arm its visibility gate once, here (SHOW_HEADER resolved above via
@@ -344,109 +350,23 @@ async function main() {
   ])
   activateDiscoveredProviders()
 
-  switch (commandPlan.command) {
-    case "dump": {
-      if (!dumpArg) {
-        console.error(`  ${c.boldRed("error")} --dump requires <sid|last>`)
-        process.exit(1)
-      }
-      try {
-        await runDumpCommand({
-          target: dumpArg,
-          format: dumpFormatArg,
-          cwd: process.cwd(),
-        })
-      } catch (err) {
-        if (err instanceof DumpCommandError) {
-          console.error(`  ${c.boldRed("error")} ${err.message}`)
-          process.exit(1)
-        }
-        console.error(
-          `  ${c.boldRed("error")} could not dump session ${dumpArg}: ${err instanceof Error ? err.message : String(err)}`,
-        )
-        process.exit(1)
-      }
-      return
-    }
-    case "sessions":
-      runSessionsCommand({ query: sessionsQuery })
-      return
-    case "usage":
-      await runUsageCommand({ period: usagePeriod })
-      return
-    case "list-flags":
-      runListFlagsCommand()
-      return
-    case "list-spinners":
-      runListSpinnersCommand()
-      return
-    case "list-models": {
-      await runListModelsCommand(listModelsProvider)
-      return
-    }
-    case "list-providers": {
-      runListProvidersCommand()
-      return
-    }
-    case "list-plugins": {
-      const repoRoot = dirname(srcDir)
-      runListPluginsCommand({
-        roots: {
-          embeddedDir: repoRoot,
-          userDir: resolveAgentHome(),
-          homeDir: process.env.HOME ? join(process.env.HOME, ".agents") : undefined,
-          projectDir: process.cwd(),
-        },
-        cliArgs: args,
-      })
-      return
-    }
-    case "login": {
-      // Provider login flow. Never reads existing credentials — the whole
-      // point of the command is to acquire (or replace) them. Email
-      // pre-fill: `--login --email foo@bar.com` (or `--email-hint` if you
-      // squint at the upstream CLI). We accept either form.
-      const emailIdx =
-        args.indexOf("--email") !== -1 ? args.indexOf("--email") : args.indexOf("--email-hint")
-      const loginHint =
-        emailIdx !== -1 && args[emailIdx + 1] && !args[emailIdx + 1].startsWith("-")
-          ? args[emailIdx + 1]
-          : undefined
-      const providerIdx = args.indexOf("--provider")
-      const providerId =
-        providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1].startsWith("-")
-          ? args[providerIdx + 1]
-          : undefined
-      const authMethod = readFlagValue("--auth-method")
-      const nameIdx = args.indexOf("--name")
-      const credentialName =
-        nameIdx !== -1 && args[nameIdx + 1] && !args[nameIdx + 1].startsWith("-")
-          ? args[nameIdx + 1]
-          : undefined
-      const code = await runLoginCommand({
-        loginHint,
-        providerId,
-        authMethod,
-        credentialName,
-      })
-      process.exit(code)
-    }
-    case "logout": {
-      const providerIdx = args.indexOf("--provider")
-      const logoutProviderId =
-        providerIdx !== -1 && args[providerIdx + 1] && !args[providerIdx + 1].startsWith("-")
-          ? args[providerIdx + 1]
-          : undefined
-      const code = await runLogoutCommand({ providerId: logoutProviderId })
-      process.exit(code)
-    }
-    case "auth-status": {
-      const code = await runAuthStatusCommand()
-      process.exit(code)
-    }
-    case "run":
-      break
-  }
+  // Dispatch one-shot subcommands (dump/sessions/usage/list-*/login/logout/
+  // auth-status). Returns true when handled (we return); login/logout/
+  // auth-status exit directly. `repoRoot` is computed HERE (this file lives at
+  // src/ and can trust import.meta.dirname) and passed in, so the dispatcher
+  // never derives fs roots from its own location.
+  const handledSubcommand = await runStartupSubcommand({
+    commandPlan,
+    args,
+    dumpArg,
+    dumpFormatArg,
+    sessionsQuery,
+    usagePeriod,
+    listModelsProvider,
+    repoRoot: dirname(srcDir),
+    readFlagValue,
+  })
+  if (handledSubcommand) return
 
   // Cold-start detection must happen BEFORE any subsystem creates
   // `~/.minimal-agent` (the file-log sink below does, on its first write).
@@ -503,46 +423,14 @@ async function main() {
   // auth / config) warning emitted mid-banner would tear through the
   // box mid-paint instead of landing cleanly below it with the proper
   // `⚠ warn ╰` chrome.
-  let scrollbackSink: import("./ui/status/scrollback.ts").ScrollbackDiagnosticSink | null = null
-  {
-    const { FileLogSink } = await import("./logging/log-file.ts")
-    new FileLogSink(getSessionId()).attach(getDiagnosticBus())
-    // Persistent, cross-session audit log (`~/.minimal-agent/ma.log`). Unlike
-    // the per-session file sink above, this single durable log survives across
-    // runs and records long-lived subsystem history — binary installs /
-    // updates / removals first (see src/binaries/*), more later. Notice+ only,
-    // session id stamped into every line so a global entry traces back to its
-    // run. Best-effort; never throws into boot.
-    const { GlobalLogSink } = await import("./logging/log-global.ts")
-    new GlobalLogSink({ sessionId: getSessionId() }).attach(getDiagnosticBus())
-    // Scrollback sink — renders Warning+ events as gutter-bracketed
-    // blocks (gold ⚠ warn / red ✗ error) in the persistent terminal
-    // transcript. Complements the file sink (full history, off-screen)
-    // and the TuiDiagnosticSurface footer slot (last 0..2 events,
-    // transient). Without it, mid-stream API errors (e.g. Anthropic's
-    // `event: error` overload, returned over HTTP 200) land ONLY in
-    // the file log — the user sees the status bar flash then silence,
-    // with no in-context signal that anything went wrong. Attached
-    // here, before any other subsystem can emit, so the first error
-    // of the session is captured.
-    const { ScrollbackDiagnosticSink } = await import("./ui/status/scrollback.ts")
-    scrollbackSink = new ScrollbackDiagnosticSink()
-    scrollbackSink.attach(getDiagnosticBus())
-    // Start buffering immediately. We're about to start drawing the
-    // startup banner; any diagnostic that fires during that window
-    // (plugin-loader warnings, auth refresh hints, formatter
-    // resolution gripes) gets queued and flushed below the banner
-    // once `closeStartupTree()` has committed the final `╰` row.
-    if (SHOW_HEADER) scrollbackSink.startBuffering()
-    if (process.env.MINIMAL_AGENT_LOG_STDERR === "1") {
-      // No interceptor yet — write straight to fd 2. Once the
-      // interceptor is installed below, we'd want `rawStderrWrite` to
-      // avoid the compositor; we re-attach it from the live-area
-      // bootstrap after `interceptor` exists.
-      const { StderrMirrorSink } = await import("./logging/log-stderr.ts")
-      new StderrMirrorSink().attach(getDiagnosticBus())
-    }
-  }
+  // Wire the process-wide diagnostic sinks (file log, global audit log,
+  // scrollback, opt-in stderr mirror). Returns the scrollback sink so we can
+  // drive its two-phase buffer lifecycle (startBuffering armed inside when
+  // SHOW_HEADER; flushBuffer below after closeStartupTree).
+  const scrollbackSink = await attachStartupDiagnosticSinks({
+    showHeader: SHOW_HEADER,
+    env: process.env,
+  })
 
   // Resolve the boot selection once, up front. Everything that is
   // provider-specific (startup probe, quota) keys off this so a session
