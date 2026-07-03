@@ -48,7 +48,7 @@ import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./agen
 import type { AuthResult } from "./auth.ts"
 import { type BlobStore, loadBlobStoreConfig } from "./blob-store.ts"
 import { GLOBAL_STATUS_BUS } from "./bus/status.ts"
-import { type CacheTtl, DEFAULT_CACHE_TTL } from "./cache-ttl.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "./cache/cache-ttl.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "./host/ui/style/ansi.ts"
 import { inputCaptureStack } from "./input-capture-stack.ts"
 import {

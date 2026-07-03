@@ -28,7 +28,7 @@ import {
 } from "../agent/reflection.ts"
 import { formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth.ts"
-import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache-ttl.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
 import {
   clampMaxOutputTokens,
