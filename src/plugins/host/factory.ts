@@ -20,6 +20,7 @@ import {
   resolveNetDbgDir,
   resolveSessionsDir,
 } from "@minimal-agent/plugin-api/utils/agent-paths"
+import type { UsagePeriod } from "@minimal-agent/plugin-api/utils/usage-report"
 
 import { getAuth } from "../../auth/auth.ts"
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
@@ -34,6 +35,7 @@ import {
 } from "../../llm/model-registry.ts"
 import { resolveProviderSessionInfo } from "../../llm/provider-session.ts"
 import { canonicalSendFn } from "../../llm/transport/canonical-send.ts"
+import { aggregateAllPeriods, aggregateUsage, scanUsageEvents } from "../../quota/usage-stats.ts"
 import { getSessionTokens } from "../../session/session-tokens.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
@@ -167,6 +169,19 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
                 ),
               ])
             },
+          }),
+        }
+      : {}),
+    ...(has("usage:read")
+      ? {
+          usage: Object.freeze({
+            // One disk scan per call; the host owns scanning + pricing so the
+            // plugin never imports usage-stats (which reaches pricing +
+            // model-registry + session store). `sessionsDir` override honored
+            // for tests via scanUsageEvents(dir).
+            report: (period: UsagePeriod) =>
+              aggregateUsage(scanUsageEvents(opts.sessionsDir), period),
+            reports: () => aggregateAllPeriods(scanUsageEvents(opts.sessionsDir)),
           }),
         }
       : {}),

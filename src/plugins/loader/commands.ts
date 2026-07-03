@@ -17,6 +17,7 @@ import { agentContextToEnv } from "../agent-context.ts"
 import { EventBus } from "../event-bus.ts"
 import { CHANNEL_BY_NAME } from "../hooks/channels.ts"
 import { Hooks } from "../hooks/hooks.ts"
+import type { PluginHost } from "../host/capabilities.ts"
 import type {
   AgentContext,
   CommandContext,
@@ -37,6 +38,14 @@ export interface CommandRegistryOptions {
   hooksFacade: Hooks
   /** Diagnostic sink for collision warnings. */
   logger: (msg: string) => void
+  /**
+   * Resolves a plugin's frozen capability host (deny-by-default: `undefined`
+   * when the plugin declared no `capabilities`). Threaded into every command
+   * context as `ctx.host` so a command can run a host-brokered read (e.g.
+   * `/usage` → `ctx.host.usage.reports()`) without importing `src/`. Optional
+   * for back-compat test callers that build a registry without a loader.
+   */
+  hostFor?: (pluginId: string) => PluginHost | undefined
 }
 
 /**
@@ -53,6 +62,7 @@ export class CommandRegistry {
   private readonly eventBus: EventBus
   private readonly hooksFacade: Hooks
   private readonly logger: (msg: string) => void
+  private readonly hostFor: ((pluginId: string) => PluginHost | undefined) | undefined
 
   constructor(
     /** Resolved commands from every loaded plugin (flattened). */
@@ -64,6 +74,7 @@ export class CommandRegistry {
     this.eventBus = opts.eventBus
     this.hooksFacade = opts.hooksFacade
     this.logger = opts.logger
+    this.hostFor = opts.hostFor
 
     // Build the global command index, first-wins on cross-plugin name
     // collision (mirrors mode-id dedupe). A colliding command is dropped
@@ -196,6 +207,7 @@ export class CommandRegistry {
         }
       },
       agent: this.agent,
+      ...(this.hostFor?.(cmd.pluginId) ? { host: this.hostFor(cmd.pluginId) } : {}),
     }
 
     try {

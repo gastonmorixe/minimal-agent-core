@@ -23,6 +23,7 @@
  */
 
 import type { ProviderSessionInfo } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { UsagePeriod, UsageReport } from "@minimal-agent/plugin-api/utils/usage-report"
 
 import type { PluginLogger } from "../../bus/diagnostic-bus.ts"
 import type { ModelEntry } from "../../llm/model-registry.ts"
@@ -57,6 +58,7 @@ export type CapabilityToken =
   | "models:register"
   | "session-info:read"
   | "llm:complete"
+  | "usage:read"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -74,6 +76,7 @@ export const KNOWN_CAPABILITIES: readonly CapabilityToken[] = [
   "models:register",
   "session-info:read",
   "llm:complete",
+  "usage:read",
   "paths",
   "transport:registry",
   "clock",
@@ -473,6 +476,32 @@ export interface LlmCompleteApi {
 }
 
 // ---------------------------------------------------------------------------
+// usage:read (Wave G)
+// ---------------------------------------------------------------------------
+
+/**
+ * `usage:read` — folded token/cost usage reports for the `/usage` overlay.
+ * The heavy work (scanning the whole sessions dir off disk, decoding events,
+ * pricing them against the model registry) stays host-side in
+ * `src/quota/usage-stats.ts`; only the bounded {@link UsageReport} crosses into
+ * the plugin. This lets the usage plugin live in its own repo without importing
+ * `scanUsageEvents` / `aggregateUsage` from `src/` (which reach
+ * `src/llm/pricing` + `src/llm/model-registry` + `src/session/*`).
+ *
+ * `UsageReport` / `UsagePeriod` are already leaf types
+ * (`@minimal-agent/plugin-api/utils/usage-report`), so the plugin consumes the
+ * results directly. One `scanUsageEvents()` backs both methods, so `reports()`
+ * costs the same single disk scan the interactive overlay needs to switch
+ * periods without re-reading.
+ */
+export interface UsageReadApi {
+  /** Fold usage for ONE period (single scan). */
+  report(period: UsagePeriod): UsageReport
+  /** Fold usage for EVERY period from one scan (for the overlay's switcher). */
+  reports(): Record<UsagePeriod, UsageReport>
+}
+
+// ---------------------------------------------------------------------------
 // The host
 // ---------------------------------------------------------------------------
 
@@ -491,6 +520,7 @@ export interface PluginHost {
   readonly modelsRegistry?: ModelsRegisterApi
   readonly sessionInfo?: SessionInfoReadApi
   readonly llm?: LlmCompleteApi
+  readonly usage?: UsageReadApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — the host-brokered store a transport-PROVIDER plugin
