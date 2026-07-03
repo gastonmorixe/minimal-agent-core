@@ -25,59 +25,60 @@
  * @module agent
  */
 
+import type { AuthResult } from "../auth/auth.ts"
+import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
+import { c, faintThinkingChunk, formatAbortedEcho } from "../host/ui/style/ansi.ts"
+import { inputCaptureStack } from "../input-capture-stack.ts"
+import {
+  clampMaxOutputTokens,
+  type EstimableTool,
+  estimateRequestInputTokens,
+} from "../llm/context-budget.ts"
+import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import { findModel, findModelForProvider, getDefaultModelId } from "../llm/model-registry.ts"
+import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
+import { selectedTransport } from "../llm/transport/select-transport.ts"
+import type { SystemBlock } from "../llm/transport/types.ts"
+import {
+  normalizeModelForAPI,
+  type SendOptions,
+  type StreamedResponse,
+  type TransportFn,
+} from "../llm/transport/types.ts"
+import { resolveUserTurnContent } from "../media/ingest.ts"
+import { ModeManager } from "../modes/modes.ts"
+import type { NetworkClient } from "../network/index.ts"
+import { PluginLoader } from "../plugins/loader.ts"
+import type { ManifestMode } from "../plugins/types.ts"
+import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
+import { appendUserTurn } from "../session/session-restore.ts"
+import type { SessionStore } from "../session/session-store.ts"
+import type { ToolTimeTracker } from "../tool-time.ts"
+import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import { TOOL_DEFINITIONS, type ToolDefinition } from "../tools.ts"
+
 // Reflection-checkpoint utilities and the rolling-cache breakpoint helper
 // live in `src/agent/` submodules to keep this file under the `max-lines`
 // lint budget. UI style helpers live under `src/ui` and are re-exported
 // below so external consumers can still
-// `import { c, runReflectionCooldown, ... } from "./agent.ts"`.
-import { withRollingCacheBreakpoint } from "./agent/cache.ts"
+// `import { c, runReflectionCooldown, ... } from "../agent.ts"`.
+import { withRollingCacheBreakpoint } from "./cache.ts"
 import {
   repairOrphanedToolUse as repairOrphanedToolUseImpl,
   rollbackPendingTurn as rollbackPendingTurnImpl,
-} from "./agent/history-repair.ts"
-import { type AskUserFn, runPreflightPipeline } from "./agent/preflight-pipeline.ts"
+} from "./history-repair.ts"
+import { type AskUserFn, runPreflightPipeline } from "./preflight-pipeline.ts"
 import {
   buildReflectionCheckpointBlock,
   DEFAULT_REFLECTION_COOLDOWN_MS,
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
   runReflectionCooldown,
-} from "./agent/reflection.ts"
-import { executeToolRound } from "./agent/tool-round.ts"
-import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./agent/turn-notice.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import { GLOBAL_STATUS_BUS } from "./bus/status.ts"
-import { type CacheTtl, DEFAULT_CACHE_TTL } from "./cache/cache-ttl.ts"
-import { c, faintThinkingChunk, formatAbortedEcho } from "./host/ui/style/ansi.ts"
-import { inputCaptureStack } from "./input-capture-stack.ts"
-import {
-  clampMaxOutputTokens,
-  type EstimableTool,
-  estimateRequestInputTokens,
-} from "./llm/context-budget.ts"
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "./llm/messages.ts"
-import { findModel, findModelForProvider, getDefaultModelId } from "./llm/model-registry.ts"
-import { resolveSystemPromptForModel } from "./llm/system-prompt.ts"
-import { selectedTransport } from "./llm/transport/select-transport.ts"
-import type { SystemBlock } from "./llm/transport/types.ts"
-import {
-  normalizeModelForAPI,
-  type SendOptions,
-  type StreamedResponse,
-  type TransportFn,
-} from "./llm/transport/types.ts"
-import { resolveUserTurnContent } from "./media/ingest.ts"
-import { ModeManager } from "./modes/modes.ts"
-import type { NetworkClient } from "./network/index.ts"
-import { PluginLoader } from "./plugins/loader.ts"
-import type { ManifestMode } from "./plugins/types.ts"
+} from "./reflection.ts"
 import { createReflectionAckStripper } from "./reflection-ack-stripper.ts"
-import { type BlobStore, loadBlobStoreConfig } from "./session/blob-store.ts"
-import { appendUserTurn } from "./session/session-restore.ts"
-import type { SessionStore } from "./session/session-store.ts"
-import type { ToolTimeTracker } from "./tool-time.ts"
-import { ToolFeedbackTracker } from "./tools/feedback-tracker.ts"
-import { TOOL_DEFINITIONS, type ToolDefinition } from "./tools.ts"
+import { executeToolRound } from "./tool-round.ts"
+import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "./turn-notice.ts"
 
 export {
   c,
@@ -1720,7 +1721,7 @@ export class Agent {
 // ---------------------------------------------------------------------------
 
 // Re-exported here so external consumers can keep
-// `import { formatToolInput, ... } from "./agent.ts"`.
+// `import { formatToolInput, ... } from "../agent.ts"`.
 import {
   clampTranscriptRow,
   formatToolHeaderRows,
@@ -1729,9 +1730,10 @@ import {
   formatToolPreview,
   isOuterFrameClose,
   toolContinuationIndentCells,
-} from "./host/ui/tool-transcript/format.ts"
+} from "../host/ui/tool-transcript/format.ts"
 
-export type { ToolPresentation } from "./host/ui/tool-transcript/format.ts"
+export type { ToolPresentation } from "../host/ui/tool-transcript/format.ts"
+
 export {
   clampTranscriptRow,
   formatToolHeaderRows,
@@ -1749,7 +1751,7 @@ export {
 export {
   parseModelNotFoundError,
   parseModelUnavailableError,
-} from "./host/model-error.ts"
+} from "../host/model-error.ts"
 // The REPL types, the `runRepl` orchestration shell, and the live-area
 // renderer live under `src/agent/` so this file stays under the
 // `max-lines` lint budget. The public surface
@@ -1761,5 +1763,5 @@ export type {
   ReplCompositor,
   ReplEditor,
   StatusController,
-} from "./host/repl.ts"
-export { runRepl } from "./host/repl.ts"
+} from "../host/repl.ts"
+export { runRepl } from "../host/repl.ts"

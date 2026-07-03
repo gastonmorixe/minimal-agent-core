@@ -12,12 +12,13 @@
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { SendOptions, StreamedResponse } from "../client/types.ts"
+import { defaultCapabilities } from "../llm/capabilities.ts"
+import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
+import { makeCharRatioEstimator } from "../llm/token-estimate.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { SendOptions, StreamedResponse } from "./client/types.ts"
-import { defaultCapabilities } from "./llm/capabilities.ts"
-import { clearModelRegistry, registerModel } from "./llm/model-registry.ts"
-import { makeCharRatioEstimator } from "./llm/token-estimate.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 

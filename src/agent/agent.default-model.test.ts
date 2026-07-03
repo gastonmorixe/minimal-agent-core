@@ -2,17 +2,18 @@ import { readFileSync } from "node:fs"
 
 import { beforeEach, describe, expect, it } from "bun:test"
 
-import { Agent } from "./agent.ts"
-import { PROVIDER_TOKEN_RE, stripComments } from "./architecture/provider-scan.ts"
-import type { AuthResult } from "./auth/auth.ts"
+import { PROVIDER_TOKEN_RE, stripComments } from "../architecture/provider-scan.ts"
+import type { AuthResult } from "../auth/auth.ts"
 import {
   clearModelRegistry,
   clearProviderRegistry,
   getDefaultModelId,
   setDefaultModelId,
-} from "./llm/model-registry.ts"
-import { clearProviderPlugins } from "./llm/provider-plugin.ts"
-import { registerTestProvider } from "./llm/test-fixtures.ts"
+} from "../llm/model-registry.ts"
+import { clearProviderPlugins } from "../llm/provider-plugin.ts"
+import { registerTestProvider } from "../llm/test-fixtures.ts"
+
+import { Agent } from "./agent.ts"
 
 /**
  * C-1 (Wave C, PLAN.md): the agent's no-model default must come from the

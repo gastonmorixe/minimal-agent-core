@@ -29,9 +29,10 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { ContentBlock, SendOptions, StreamedResponse } from "./client/types.ts"
 
 // ---------------------------------------------------------------------------
 // Test fakes
@@ -297,7 +298,7 @@ describe("Agent.run — memory attachments (combined order)", () => {
   })
 
   it("when mode-change is also pending, mode-change is FIRST", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager(
       [{ id: "ask", label: "ASK", disallowedTools: [] }],
       "ask", // initial — mode-change attachment will fire on first consume

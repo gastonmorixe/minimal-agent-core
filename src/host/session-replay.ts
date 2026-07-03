@@ -20,9 +20,9 @@
  * transcripts) before the resumed REPL prompt.
  */
 
+import { isRuntimeAttachmentBlock } from "../agent/runtime-attachments.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import type { ModeManager } from "../modes/modes.ts"
-import { isRuntimeAttachmentBlock } from "../runtime-attachments"
 import {
   prefixSubmittedAtLines,
   type SubmittedAtStyle,

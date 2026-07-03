@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 
-import { resolveSessionsDir } from "../../../agent-paths.ts"
+import { resolveSessionsDir } from "../../../agent/agent-paths.ts"
 import type { BlobMeta, BlobsReadApi } from "../capabilities.ts"
 
 const READ_DEFAULT_MAX_BYTES = 64 * 1024

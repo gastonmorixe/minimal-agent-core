@@ -26,6 +26,7 @@ import {
   DEFAULT_REFLECTION_INTERVAL,
   parseReflectionAck,
 } from "../agent/reflection.ts"
+import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts"
 import { formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
@@ -46,7 +47,6 @@ import {
   type StreamedResponse,
   type TransportFn,
 } from "../llm/transport/types.ts"
-import { createReflectionAckStripper } from "../reflection-ack-stripper.ts"
 import { appendUserTurn } from "../session/session-restore.ts"
 
 import type { AgentEvent, EventSink, EventUsage } from "./events.ts"

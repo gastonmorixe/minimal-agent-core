@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events"
 
 import { describe, expect, it } from "bun:test"
 
-import { type ReplAgentLike, runRepl } from "./agent.ts"
+import { type ReplAgentLike, runRepl } from "./agent/agent.ts"
 import { StatusBus } from "./bus/status.ts"
 import type { StreamedResponse } from "./client/types.ts"
 

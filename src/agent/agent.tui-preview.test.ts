@@ -20,9 +20,10 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { SendOptions, StreamedResponse } from "../client/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { SendOptions, StreamedResponse } from "./client/types.ts"
 
 interface CapturedMsg {
   role: string

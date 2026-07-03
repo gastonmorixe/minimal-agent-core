@@ -4,7 +4,7 @@ import {
   isRuntimeAttachmentBlock,
   isRuntimeAttachmentText,
   RUNTIME_ATTACHMENT_OPENERS,
-} from "./runtime-attachments"
+} from "./runtime-attachments.ts"
 
 describe("RUNTIME_ATTACHMENT_OPENERS", () => {
   it("covers every canonical <ma::agent::*> attachment", () => {

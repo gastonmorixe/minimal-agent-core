@@ -46,14 +46,14 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { Agent, c, runRepl } from "./agent/agent.ts"
+import { resolveAgentName } from "./agent/agent-name.ts"
+import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent/agent-paths.ts"
 import {
   combineTurnDrains,
   instantiateTurnAttachments,
   parseReplaySidecarTasks,
 } from "./agent/turn-attachments.ts"
-import { Agent, c, runRepl } from "./agent.ts"
-import { resolveAgentName } from "./agent-name.ts"
-import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent-paths.ts"
 import {
   discoverCredentialedProviders,
   storedProvidersHint,

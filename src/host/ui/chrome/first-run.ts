@@ -28,7 +28,7 @@ import { existsSync } from "node:fs"
 
 import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
 
-import { resolveAgentHome } from "../../../agent-paths.ts"
+import { resolveAgentHome } from "../../../agent/agent-paths.ts"
 
 // Keep this module free of agent runtime imports so the cold path stays light.
 

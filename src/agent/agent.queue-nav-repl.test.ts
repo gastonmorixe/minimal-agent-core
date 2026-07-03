@@ -25,11 +25,12 @@ import { existsSync, rmSync } from "node:fs"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { abortBus as globalAbortBus } from "../bus/abort-bus.ts"
+import { StatusBus } from "../bus/status.ts"
+import type { QueueKeyContext, QueueKeyResult } from "../host/editor/types.ts"
+import { loadQueue, queueFilePath } from "../session/queue-store.ts"
+
 import { type ReplAgentLike, runRepl } from "./agent.ts"
-import { abortBus as globalAbortBus } from "./bus/abort-bus.ts"
-import { StatusBus } from "./bus/status.ts"
-import type { QueueKeyContext, QueueKeyResult } from "./host/editor/types.ts"
-import { loadQueue, queueFilePath } from "./session/queue-store.ts"
 
 // ----------------------------- fakes ---------------------------------------
 

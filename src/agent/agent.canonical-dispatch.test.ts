@@ -23,23 +23,24 @@ import { join } from "node:path"
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
-import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
+import type { AuthResult } from "../auth/auth.ts"
 import {
   defaultAuthStore,
   resetDefaultAuthStoreForTests,
   type SecretBag,
-} from "./auth/auth-store.ts"
-import type { CanonicalEvent } from "./llm/canonical-events.ts"
-import { clearModelRegistry, clearProviderRegistry } from "./llm/model-registry.ts"
-import { type ApiKeyAuthProvider, clearProviderPlugins } from "./llm/provider-plugin.ts"
-import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "./llm/test-fixtures.ts"
+} from "../auth/auth-store.ts"
+import type { CanonicalEvent } from "../llm/canonical-events.ts"
+import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
+import { type ApiKeyAuthProvider, clearProviderPlugins } from "../llm/provider-plugin.ts"
+import { registerTestProvider, sseBodyFromEvents, testProviderUrl } from "../llm/test-fixtures.ts"
 import {
   NetworkClient,
   type NetworkRequest,
   NetworkResponse,
   type NetworkTransport,
-} from "./network/index.ts"
+} from "../network/index.ts"
+
+import { Agent } from "./agent.ts"
 
 function fakeNetworkClient(
   handler: (req: NetworkRequest) => NetworkResponse | Promise<NetworkResponse>,

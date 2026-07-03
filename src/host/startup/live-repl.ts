@@ -15,7 +15,7 @@
  * @module startup/live-repl
  */
 
-import type { Agent, runRepl } from "../../agent.ts"
+import type { Agent, runRepl } from "../../agent/agent.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import { getGlobalEventBus } from "../../bus/global-bus.ts"
 import type { UserConfig } from "../../config/config.ts"

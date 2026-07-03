@@ -32,9 +32,10 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { AuthResult } from "../auth/auth.ts"
+import type { ContentBlock, SendOptions, StreamedResponse } from "../client/types.ts"
+
 import { Agent } from "./agent.ts"
-import type { AuthResult } from "./auth/auth.ts"
-import type { ContentBlock, SendOptions, StreamedResponse } from "./client/types.ts"
 
 // ---------------------------------------------------------------------------
 // Test fakes
@@ -250,7 +251,7 @@ describe("Agent.run — tasks attachment (combined order)", () => {
   })
 
   it("full stack: mode → STM → tasks → echoes → user", async () => {
-    const { ModeManager } = await import("./modes/modes.ts")
+    const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([{ id: "ask", label: "ASK", disallowedTools: [] }], "ask")
 
     const records: Array<Record<string, unknown>> = []
