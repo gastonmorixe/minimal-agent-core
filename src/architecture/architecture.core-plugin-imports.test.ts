@@ -35,6 +35,8 @@
  *       m.DEFAULT_PLUGIN_ROOTS, m.DEFAULT_EXEMPT))))'
  */
 
+import { join } from "node:path"
+
 import { describe, expect, it } from "bun:test"
 
 import {
@@ -42,9 +44,9 @@ import {
   DEFAULT_EXEMPT,
   DEFAULT_PLUGIN_ROOTS,
   scanCorePluginImports,
-} from "./architecture/core-plugin-import-scan.ts"
+} from "./core-plugin-import-scan.ts"
 
-const SRC_ROOT = import.meta.dirname
+const SRC_ROOT = join(import.meta.dirname, "..")
 
 /**
  * Frozen legacy violations: `src/<...>.ts` → number of plugins/ import

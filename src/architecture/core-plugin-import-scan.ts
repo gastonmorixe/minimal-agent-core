@@ -48,6 +48,7 @@ export const DEFAULT_HOST_ROOTS: readonly string[] = ["host"]
  */
 export const DEFAULT_EXEMPT: ReadonlySet<string> = new Set([
   "architecture/core-plugin-import-scan.test.ts",
+  "architecture/architecture.plugin-api-leaf.test.ts",
 ])
 
 /** One plugins/ import site inside a core (`src/`) source file. */

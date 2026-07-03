@@ -83,7 +83,7 @@ export type ToolMediaContext = ReadFileMediaContext
  * @returns The rendered description text.
  */
 function toolDescription(name: string): string {
-  return renderPrompt(promptPath(import.meta, "prompts", "tools", `${name}.md`))
+  return renderPrompt(promptPath(import.meta, "..", "prompts", "tools", `${name}.md`))
 }
 
 /**
