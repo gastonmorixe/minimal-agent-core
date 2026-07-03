@@ -31,7 +31,7 @@
  */
 
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
-import { promptPath, renderPrompt } from "../prompts.ts"
+import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
 import { resolveModel } from "./model-registry.ts"

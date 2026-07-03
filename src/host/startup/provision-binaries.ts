@@ -36,7 +36,7 @@ import { c } from "../ui/style/ansi.ts"
  */
 export async function provisionPluginBinaries(loader: PluginLoader): Promise<void> {
   const { BinaryStore, inventoryAdapter, provisionSetups } = await import("../../binaries/index.ts")
-  const { resolveGithubToken } = await import("../../auto-plugins.ts")
+  const { resolveGithubToken } = await import("../../plugins/auto-plugins.ts")
   // Memoized token resolver (the user's own GitHub token), used as the
   // FALLBACK for `github-release` sources that ship no embedded credential.
   // A plugin that bakes in its own read-only token (so account-less copies

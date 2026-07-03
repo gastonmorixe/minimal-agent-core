@@ -34,7 +34,7 @@ import { Agent } from "../agent/agent.ts"
 import type { StreamedResponse } from "../client/types.ts"
 import { loadSession } from "../session/session-restore.ts"
 import { SessionStore } from "../session/session-store.ts"
-import { TOOL_DEFINITIONS } from "../tools.ts"
+import { TOOL_DEFINITIONS } from "../tools/tools.ts"
 
 import { replayToScrollback, toolDisplaysFromRecords } from "./session-replay.ts"
 

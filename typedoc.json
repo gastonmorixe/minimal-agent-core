@@ -3,10 +3,10 @@
   "tsconfig": "tsconfig.json",
   "entryPoints": [
     "src/index.ts",
-    "src/agent.ts",
-    "src/auth.ts",
+    "src/agent/agent.ts",
+    "src/auth/auth.ts",
     "src/ui/formatter/formatter.ts",
-    "src/tools.ts",
+    "src/tools/tools.ts",
     "src/plugins/loader.ts",
     "src/plugins/manifest.ts",
     "src/plugins/scanner.ts",
@@ -14,7 +14,7 @@
     "src/plugins/types.ts"
   ],
   "entryPointStrategy": "expand",
-  "exclude": ["src/**/*.test.ts", "src/test-utils.ts"],
+  "exclude": ["src/**/*.test.ts", "src/test-utils/**"],
   "skipErrorChecking": true,
   "disableSources": true,
   "excludePrivate": true,

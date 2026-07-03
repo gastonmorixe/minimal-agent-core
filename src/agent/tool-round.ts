@@ -66,10 +66,10 @@ import {
 } from "../session/blob-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import { expandTabs } from "../terminal/term-width.ts"
-import type { ToolTimeTracker } from "../tool-time.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import type { ToolTimeTracker } from "../tools/tool-time.ts"
+import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
-import { executeTool, type ToolResultMediaBlock } from "../tools.ts"
 
 /**
  * Everything {@link executeToolRound} needs from the agent. The original

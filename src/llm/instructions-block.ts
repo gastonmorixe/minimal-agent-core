@@ -19,7 +19,7 @@
  */
 
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
-import { promptPath, renderPrompt } from "../prompts.ts"
+import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 /**
  * Resolve a core prompt file under `src/prompts/`. Prose for the system

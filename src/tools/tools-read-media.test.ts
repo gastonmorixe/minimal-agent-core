@@ -4,8 +4,9 @@ import { join } from "node:path"
 
 import { afterAll, describe, expect, it } from "bun:test"
 
-import type { ModalitySupport } from "./llm/capabilities.ts"
-import { defaultMediaLimits } from "./media/default-limits.ts"
+import type { ModalitySupport } from "../llm/capabilities.ts"
+import { defaultMediaLimits } from "../media/default-limits.ts"
+
 import type { ToolMediaContext } from "./tools.ts"
 import { executeTool } from "./tools.ts"
 

@@ -23,7 +23,8 @@ import {
   lockPathFor,
   _resetForTests as resetLockLib,
   serializeHolder,
-} from "./infra/file-lock.ts"
+} from "../infra/file-lock.ts"
+
 import { _resetFileLockConfigForTests, executeTool } from "./tools.ts"
 
 let dir: string

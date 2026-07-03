@@ -15,7 +15,8 @@
  */
 
 import type { EscapeHatch, FsmInput, FsmState } from "../../bus/abort-quit-fsm.ts"
-import type { EditorBuffer } from "../../editor-buffer.ts"
+import type { EditorBuffer } from "../../input/editor-buffer.ts"
+import type { InputCaptureStack } from "../../input/input-capture-stack.ts"
 import {
   findCsiEnd,
   hasModifier,
@@ -25,7 +26,6 @@ import {
   parseXtermOtherKey,
   trailingPrefixLength,
 } from "../../input/key-codec.ts"
-import type { InputCaptureStack } from "../../input-capture-stack.ts"
 
 import { BRACKETED_PASTE_END, BRACKETED_PASTE_START } from "./types.ts"
 

@@ -1,6 +1,14 @@
 import { createInterface } from "node:readline"
 
 import {
+  codePointWidth,
+  cursorRowOffset,
+  cursorVisualCol,
+  displayWidth,
+  wrapRows,
+} from "../terminal/term-width.ts"
+
+import {
   findCsiEnd,
   hasModifier,
   isPrintableChar,
@@ -9,15 +17,8 @@ import {
   parseCsiUKey,
   parseXtermOtherKey,
   trailingPrefixLength,
-} from "./input/key-codec.ts"
-import { LineBuffer } from "./input/line-buffer.ts"
-import {
-  codePointWidth,
-  cursorRowOffset,
-  cursorVisualCol,
-  displayWidth,
-  wrapRows,
-} from "./terminal/term-width.ts"
+} from "./key-codec.ts"
+import { LineBuffer } from "./line-buffer.ts"
 
 type ReadOutcome = { kind: "continue" } | { kind: "submit"; value: string | null }
 

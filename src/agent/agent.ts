@@ -29,7 +29,7 @@ import type { AuthResult } from "../auth/auth.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "../host/ui/style/ansi.ts"
-import { inputCaptureStack } from "../input-capture-stack.ts"
+import { inputCaptureStack } from "../input/input-capture-stack.ts"
 import {
   clampMaxOutputTokens,
   type EstimableTool,
@@ -54,9 +54,9 @@ import type { ManifestMode } from "../plugins/types.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import { appendUserTurn } from "../session/session-restore.ts"
 import type { SessionStore } from "../session/session-store.ts"
-import type { ToolTimeTracker } from "../tool-time.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
-import { TOOL_DEFINITIONS, type ToolDefinition } from "../tools.ts"
+import type { ToolTimeTracker } from "../tools/tool-time.ts"
+import { TOOL_DEFINITIONS, type ToolDefinition } from "../tools/tools.ts"
 
 // Reflection-checkpoint utilities and the rolling-cache breakpoint helper
 // live in `src/agent/` submodules to keep this file under the `max-lines`

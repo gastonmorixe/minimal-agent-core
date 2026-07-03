@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
-import { executeTool } from "../tools.ts"
+import { executeTool } from "../tools/tools.ts"
 
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "./diff.ts"
 
