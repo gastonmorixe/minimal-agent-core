@@ -88,6 +88,48 @@ export interface ItemCompletedEvent {
   text?: string
 }
 
+/**
+ * An incremental assistant-text token, streamed live as the model produces it.
+ *
+ * Emitted ONLY on the realtime path (`--output-format stream-json`): the agent
+ * loop opts in per-run, so the buffered `json` mode and the frozen SDK golden
+ * (which do not opt in) never see deltas. Concatenating every `text_delta.text`
+ * for a turn reconstructs that turn's streamed assistant text; the turn's
+ * terminal {@link ItemCompletedEvent} (itemType `text`) still carries the whole
+ * accumulated body, so a consumer uses EITHER the deltas OR the terminal item,
+ * not both.
+ *
+ * `id` is a per-turn streaming id, `"<turn>:text"` (e.g. `"1:text"`), shared by
+ * every text_delta of that turn. It groups a turn's text deltas and separates
+ * them from that turn's {@link ThinkingDeltaEvent}s; it is deliberately NOT a
+ * block-index item id (the streamed text precedes block finalization, when the
+ * index is known), so do not join it to an `item_started.id`.
+ */
+export interface TextDeltaEvent {
+  type: "text_delta"
+  /** Per-turn streaming id `"<turn>:text"`, grouping this turn's text deltas. */
+  id: string
+  /** The incremental text chunk (a token or small run of tokens). */
+  text: string
+}
+
+/**
+ * An incremental model-reasoning token, streamed live as the model thinks.
+ *
+ * The reasoning counterpart to {@link TextDeltaEvent}: emitted only on the
+ * realtime `stream-json` path, forwarding the transport's `onThinkingDelta`
+ * callback as a structured event. Absent in buffered `json` and in the frozen
+ * golden. `id` is the per-turn streaming id `"<turn>:thinking"`, distinct from
+ * the turn's `text_delta` id so a consumer can separate the two live streams.
+ */
+export interface ThinkingDeltaEvent {
+  type: "thinking_delta"
+  /** Per-turn streaming id `"<turn>:thinking"`, grouping this turn's reasoning. */
+  id: string
+  /** The incremental reasoning chunk. */
+  text: string
+}
+
 /** The result of executing a tool call that the assistant requested. */
 export interface ToolResultEvent {
   type: "tool_result"
@@ -148,6 +190,8 @@ export type AgentEvent =
   | TurnStartedEvent
   | ItemStartedEvent
   | ItemCompletedEvent
+  | TextDeltaEvent
+  | ThinkingDeltaEvent
   | ToolResultEvent
   | TurnCompletedEvent
   | NoticeEvent

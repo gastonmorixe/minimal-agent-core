@@ -201,6 +201,28 @@ export class AgentCore {
     }
   }
 
+  /**
+   * Wrap the caller's `onThinkingDelta` so that, on the realtime path
+   * (`emitDeltas`), each streamed reasoning chunk is ALSO emitted as a
+   * `thinking_delta` event keyed to this turn. When `emitDeltas` is off (the
+   * default, buffered `json`, and the frozen golden) the original callback is
+   * returned untouched, so transport behavior and the golden event stream are
+   * byte-identical. Returns `undefined` when there is nothing to forward AND no
+   * deltas to emit, so the send options omit the callback entirely.
+   */
+  private wrapThinkingDelta(
+    inner: ((text: string) => MaybePromise<void>) | undefined,
+    emitDeltas: boolean | undefined,
+    round: number,
+  ): ((text: string) => MaybePromise<void>) | undefined {
+    if (!emitDeltas) return inner
+    const id = `${round}:thinking`
+    return (text: string): MaybePromise<void> => {
+      if (text.length > 0) this.emit({ type: "thinking_delta", id, text })
+      return inner?.(text)
+    }
+  }
+
   rollbackPendingTurn(): boolean {
     return rollbackPendingTurnImpl(this.messages)
   }
@@ -250,6 +272,14 @@ export class AgentCore {
       onQueueInject?: (text: string) => void
       signal?: AbortSignal
       askUser?: AskUserFn
+      /**
+       * Opt in to realtime token-delta events (`text_delta` / `thinking_delta`)
+       * on the {@link EventSink}. OFF by default so the buffered `json` mode and
+       * the frozen SDK golden (which do not opt in) see no deltas — only the
+       * live `stream-json` path passes `true`. Additive: when off, the emitted
+       * event stream is byte-identical to before Phase 3.
+       */
+      emitDeltas?: boolean
     },
   ): AsyncGenerator<string, StreamedResponse, undefined> {
     const {
@@ -261,6 +291,7 @@ export class AgentCore {
       onQueueInject,
       signal,
       askUser,
+      emitDeltas,
       ...sendOpts
     } = opts ?? {}
     const thinkingStart = onThinkingStart
@@ -395,6 +426,11 @@ export class AgentCore {
       }
 
       const maxOutputTokens = this.resolveMaxOutputTokens({ system, tools: mergedTools })
+      // On the realtime path, forward the transport's thinking chunks as
+      // `thinking_delta` events too (keyed to this turn). When emitDeltas is
+      // off this is exactly the original callback, so transport behavior and
+      // the frozen golden are unchanged.
+      const roundThinkingDelta = this.wrapThinkingDelta(onThinkingDelta, emitDeltas, rounds)
       const gen = this.sendFn({
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
@@ -413,7 +449,7 @@ export class AgentCore {
           : {}),
         ...sendOpts,
         ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
-        ...(onThinkingDelta ? { onThinkingDelta } : {}),
+        ...(roundThinkingDelta ? { onThinkingDelta: roundThinkingDelta } : {}),
         ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
         ...(textStop ? { onTextStop: textStop } : {}),
         ...(signal ? { signal } : {}),
@@ -426,11 +462,17 @@ export class AgentCore {
         if (done) {
           response = value as unknown as StreamedResponse
           const tail = ackStripper.flush()
-          if (tail.length > 0) yield tail
+          if (tail.length > 0) {
+            if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: tail })
+            yield tail
+          }
           break
         }
         const cleaned = ackStripper.write(value)
-        if (cleaned.length > 0) yield cleaned
+        if (cleaned.length > 0) {
+          if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: cleaned })
+          yield cleaned
+        }
       }
 
       lastResponse = response ?? { blocks: [], text: "", stopReason: null }
@@ -683,7 +725,9 @@ export class AgentCore {
           : {}),
         ...sendOpts,
         ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
-        ...(onThinkingDelta ? { onThinkingDelta } : {}),
+        ...(this.wrapThinkingDelta(onThinkingDelta, emitDeltas, rounds)
+          ? { onThinkingDelta: this.wrapThinkingDelta(onThinkingDelta, emitDeltas, rounds) }
+          : {}),
         ...(thinkingStop ? { onThinkingStop: thinkingStop } : {}),
         ...(textStop ? { onTextStop: textStop } : {}),
         ...(signal ? { signal } : {}),
@@ -695,11 +739,17 @@ export class AgentCore {
         if (done) {
           wrapResponse = value as unknown as StreamedResponse
           const tail = wrapAckStripper.flush()
-          if (tail.length > 0) yield tail
+          if (tail.length > 0) {
+            if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: tail })
+            yield tail
+          }
           break
         }
         const cleaned = wrapAckStripper.write(value)
-        if (cleaned.length > 0) yield cleaned
+        if (cleaned.length > 0) {
+          if (emitDeltas) this.emit({ type: "text_delta", id: `${rounds}:text`, text: cleaned })
+          yield cleaned
+        }
       }
       if (wrapResponse) {
         lastResponse = wrapResponse

@@ -23,6 +23,30 @@ describe("serializeEvent", () => {
     expect(parsed).toEqual(e)
   })
 
+  test("serializes a text_delta to one compact JSONL line", () => {
+    const e: AgentEvent = { type: "text_delta", id: "1:0", text: "hel" }
+    const line = serializeEvent(e)
+    expect(line).toBe('{"type":"text_delta","id":"1:0","text":"hel"}\n')
+    expect(JSON.parse(line.trimEnd())).toEqual(e)
+  })
+
+  test("serializes a thinking_delta to one compact JSONL line", () => {
+    const e: AgentEvent = { type: "thinking_delta", id: "1:0", text: "reason" }
+    const line = serializeEvent(e)
+    expect(line).toBe('{"type":"thinking_delta","id":"1:0","text":"reason"}\n')
+    expect(JSON.parse(line.trimEnd())).toEqual(e)
+  })
+
+  test("text_delta chunks sharing an id concatenate to the streamed text", () => {
+    const deltas: AgentEvent[] = [
+      { type: "text_delta", id: "1:0", text: "he" },
+      { type: "text_delta", id: "1:0", text: "ll" },
+      { type: "text_delta", id: "1:0", text: "o" },
+    ]
+    const joined = deltas.map((d) => (d.type === "text_delta" ? d.text : "")).join("")
+    expect(joined).toBe("hello")
+  })
+
   test("preserves a null stopReason", () => {
     const e: AgentEvent = {
       type: "turn_completed",
@@ -101,6 +125,10 @@ describe("AgentEvent exhaustiveness", () => {
         return e.type
       case "item_completed":
         return e.type
+      case "text_delta":
+        return e.type
+      case "thinking_delta":
+        return e.type
       case "tool_result":
         return e.type
       case "turn_completed":
@@ -121,6 +149,8 @@ describe("AgentEvent exhaustiveness", () => {
       { type: "turn_started", turn: 0 },
       { type: "item_started", itemType: "text", id: "0" },
       { type: "item_completed", itemType: "text", id: "0", text: "hi" },
+      { type: "text_delta", id: "0", text: "h" },
+      { type: "thinking_delta", id: "t0", text: "hm" },
       { type: "tool_result", id: "t1", name: "Read", isError: true },
       {
         type: "turn_completed",

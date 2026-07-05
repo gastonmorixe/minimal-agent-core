@@ -125,14 +125,22 @@ describe("--output-schema enforcement (e2e)", () => {
 })
 
 describe("--json final-answer JSONL (e2e)", () => {
-  it("j1: --json emits the final answer as one JSONL item_completed line, exit 0", async () => {
+  it("j1: --json emits the AgentCore event stream; the answer is a text item_completed, exit 0", async () => {
+    // Post agent-loop-refactor integration, `--json` drives AgentCore and emits
+    // the full structured event stream (turn_started → item_started →
+    // item_completed → turn_completed), not a single synthetic final-answer
+    // line. The answer arrives as the `item_completed` (itemType text) event;
+    // the stream settles on `turn_completed`.
     const { exitCode, stdout } = await runCli(["--json", "--prompt", "go"], "the answer")
     expect(exitCode).toBe(0)
-    const lines = stdout.trim().split("\n").filter(Boolean)
-    // The final answer is the terminal item_completed event.
-    const last = JSON.parse(lines[lines.length - 1])
-    expect(last.type).toBe("item_completed")
-    expect(last.itemType).toBe("text")
-    expect(last.text).toContain("the answer")
+    const events = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+    const answer = events.find((e) => e.type === "item_completed" && e.itemType === "text")
+    expect(answer).toBeDefined()
+    expect(answer.text).toContain("the answer")
+    expect(events[events.length - 1].type).toBe("turn_completed")
   })
 })

@@ -149,6 +149,12 @@ export function renderHumanProgressLine(event: AgentEvent): string {
       // text / thinking: a completed item is not itself progress-worthy
       return ""
     }
+    case "text_delta":
+    case "thinking_delta":
+      // Per-token deltas are the realtime `stream-json` surface, not a human
+      // progress line: rendering one line per token would flood stderr. The
+      // completed item (or the streamed stdout) carries the body.
+      return ""
     case "tool_result": {
       const status = event.isError ? "error" : "ok"
       return `· ${event.name} → ${status}`
