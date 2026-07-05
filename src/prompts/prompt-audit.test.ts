@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join, relative, resolve } from "node:path"
 
 import { describe, expect, test } from "bun:test"
@@ -13,6 +13,11 @@ interface PromptFile {
 
 function walk(dir: string): string[] {
   const out: string[] = []
+  // Missing root is not an error: Wave G moved every plugin (and its
+  // manifest/PROMPT.md prose) to the sibling ../minimal-agent-plugins repo, so
+  // the top-level ./plugins tree no longer exists in a bare core checkout. The
+  // sibling repo audits its own model-facing prose in its prompt-audit test.
+  if (!existsSync(dir)) return out
   for (const entry of readdirSync(dir)) {
     const abs = join(dir, entry)
     const stat = statSync(abs)

@@ -178,16 +178,18 @@ straight through.
 Run `./minimal-agent --list-models` for the live catalog, capabilities, context
 windows, and pricing of every registered model across every loaded provider.
 
-Provider plugins that ship in this repo:
+Provider plugins live in the sibling [`minimal-agent-plugins`][map] repo (cloned
+once into `~/.minimal-agent/plugins`; discovered next to the source tree at dev
+time):
 
 | Provider id | Plugin | Talks | Wire format |
 | --- | --- | --- | --- |
-| `anthropic` | `plugins/llm-anthropic` | Messages API | native |
-| `openai` | `plugins/llm-openai` | Chat Completions + Responses | native |
-| `ollama` | `plugins/llm-ollama` | Ollama Cloud open-weight models | native NDJSON |
-| `openrouter` | `plugins/llm-openrouter` | OpenRouter gateway | OpenAI-compatible |
-| `wafer` | `plugins/llm-wafer` | Wafer Serverless gateway | OpenAI-compatible |
-| `opencode` | `plugins/llm-opencode` | OpenCode gateway | OpenAI + Messages |
+| `anthropic` | `ma-llm-anthropic-plugin` | Messages API | native |
+| `openai` | `ma-llm-openai-plugin` | Chat Completions + Responses | native |
+| `ollama` | `ma-llm-ollama-plugin` | Ollama Cloud open-weight models | native NDJSON |
+| `openrouter` | `ma-llm-openrouter-plugin` | OpenRouter gateway | OpenAI-compatible |
+| `wafer` | `ma-llm-wafer-plugin` | Wafer Serverless gateway | OpenAI-compatible |
+| `opencode` | `ma-llm-opencode-plugin` | OpenCode gateway | OpenAI + Messages |
 
 Adding a backend is a directory, not a core change. A provider that speaks the
 OpenAI Chat protocol reuses `llm-openai`'s wire layer and lands in ~50 lines; one
@@ -339,25 +341,27 @@ The omission is intentional. The core ships no sub-agent tool, skill runner, or
 deferred tool loader: those are larger surfaces than the loop itself needs. Where
 one earns its place (delegation), it lands as a *plugin* the core knows nothing
 about. The `sub-agents` plugin adds `SpawnAgent` and friends on top of generic
-seams, and the agent loop never learns the word "sub-agent". See
-`plugins/sub-agents/` and `docs/changes/2026-05-30-sub-agents.md`.
+seams, and the agent loop never learns the word "sub-agent". See the
+`ma-sub-agents-plugin` in the sibling repo and `docs/changes/2026-05-30-sub-agents.md`.
 
 ## Plugins
 
 Everything beyond the loop is a plugin: providers, modes, extra tools, and UI
-overlays. Plugins are discovered from four roots, closest-to-user wins on a
+overlays. As of Wave G, every first-party plugin lives in the sibling
+[`minimal-agent-plugins`][map] repo (the core tree ships no bundled `plugins/`
+dir). Plugins are discovered from these roots, closest-to-user wins on a
 package-id collision:
 
 ```txt
 <cwd>/.agents/plugins/      project-local (highest precedence)
 ~/.agents/plugins/          your hand-curated home plugins
-~/.minimal-agent/plugins/   extended first-party plugins (auto-cloned on first run)
-<install>/plugins/          bundled built-ins (lowest precedence)
+~/.minimal-agent/plugins/   first-party plugins (auto-cloned from minimal-agent-plugins on first run)
+../minimal-agent-plugins/   the sibling repo, discovered next to the source tree at dev time
 ```
 
 Each plugin has a manifest, optional prompt text, and optional handlers.
 
-### Bundled plugins
+### First-party plugins (sibling repo)
 
 - **Provider plugins** (`llm-anthropic`, `llm-openai`, `llm-ollama`, `llm-openrouter`, `llm-wafer`, `llm-opencode`): each registers its models on the shared registry and exposes an adapter that translates canonical requests to its wire format.
 - **Ask Mode:** A read-only `ASK` mode. Edit and Write are refused at dispatch time and the model proposes diffs instead.
@@ -379,15 +383,15 @@ Each plugin has a manifest, optional prompt text, and optional handlers.
 - **Usage:** A token-usage overlay via `/usage`.
 - **Web Search:** Search the web through a provider chain. Brave is the shipped provider.
 
-### Extended plugins (separate repo)
+### How the sibling repo is provisioned
 
-The heavier, opt-in plugins live in their own repo,
-[`minimal-agent-plugins`][map], and are cloned once into
+Every plugin above (plus the heavier, opt-in ones) lives in
+[`minimal-agent-plugins`][map] and is cloned once into
 `~/.minimal-agent/plugins/` on the first interactive run. The clone is one-shot:
 once that directory has plugins it is never auto-pulled, so you stay in control.
 Update them yourself with `git -C ~/.minimal-agent/plugins pull`.
 
-That repo currently ships, among others: `Fetch` (JS-rendering web fetch),
+That repo also ships, among others: `Fetch` (JS-rendering web fetch),
 `Skill` ([Agent Skills][as] support), `Speak` (text-to-speech), background jobs,
 a Chrome DevTools driver, a Mac control helper, inter-session intercom, and a
 slash-command palette.
@@ -410,8 +414,8 @@ Controls:
 Run WebSearch directly while debugging provider config:
 
 ```sh
-bun run plugins/web-search/cli.ts "typescript 6 release notes" --limit 5
-bun run plugins/web-search/cli.ts "EU AI act" --type news --format json
+bun run ../minimal-agent-plugins/ma-web-search-plugin/cli.ts "typescript 6 release notes" --limit 5
+bun run ../minimal-agent-plugins/ma-web-search-plugin/cli.ts "EU AI act" --type news --format json
 ```
 
 ## Sessions

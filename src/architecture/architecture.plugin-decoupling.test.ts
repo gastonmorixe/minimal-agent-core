@@ -40,16 +40,21 @@ import { countByFile, scanPluginSrcImports } from "./plugin-import-scan.ts"
 const PLUGINS_ROOT = join(import.meta.dirname, "..", "..", "plugins")
 
 /**
- * Wave-G roots the I3 ratchet enforces across. Embedded `plugins/` PLUS the
- * sibling `../minimal-agent-plugins/` checkout (where migrated plugins live),
- * so a plugin that moves out of the monorepo does NOT escape the coupling
- * ratchet — it must stay `src/`-free in its new home too. The sibling is
- * scanned only when present (a bare host checkout without the plugins repo
- * still runs this test green). File keys stay distinct across roots: embedded
- * plugins use bare dir names (`memory/...`), migrated ones use `ma-*-plugin/`.
+ * Wave-G roots the I3 ratchet enforces across. The embedded `plugins/` tree
+ * (empty as of Wave G — every plugin has moved to the sibling repo, so the
+ * directory no longer exists) PLUS the sibling `../minimal-agent-plugins/`
+ * checkout (where migrated plugins live), so a plugin that moves out of the
+ * monorepo does NOT escape the coupling ratchet — it must stay `src/`-free in
+ * its new home too. Each root is scanned only when present (a bare host
+ * checkout without either tree still runs this test green). File keys stay
+ * distinct across roots: any residual embedded plugin uses a bare dir name
+ * (`memory/...`), migrated ones use `ma-*-plugin/`.
  */
 const SIBLING_ROOT = join(import.meta.dirname, "..", "..", "..", "minimal-agent-plugins")
-const PLUGIN_ROOTS = [PLUGINS_ROOT, ...(existsSync(SIBLING_ROOT) ? [SIBLING_ROOT] : [])]
+const PLUGIN_ROOTS = [
+  ...(existsSync(PLUGINS_ROOT) ? [PLUGINS_ROOT] : []),
+  ...(existsSync(SIBLING_ROOT) ? [SIBLING_ROOT] : []),
+]
 
 /** Scan every enforced root and concatenate the sites (keys are root-relative, disjoint). */
 function scanAllRoots(): ReturnType<typeof scanPluginSrcImports> {
@@ -77,39 +82,23 @@ function scanAllRoots(): ReturnType<typeof scanPluginSrcImports> {
  * site-by-site list in reports/FIX-i3.md.
  */
 const BASELINE = new Map<string, number>([
-  // Wave D-anthropic: §5 net/registry/pure-neutral re-point sweep (76→51).
-  // Residual src sites are all blocked type families: canonical-request (C-3),
-  // model-registry runtime + ModelEntry, provider.ts port (post-C-3), pricing
-  // MTokRate, defaultNetworkClient (startup-probe + probeQuota param default),
-  // and host-only modules with no package home (auth, headers, quota-cache/
-  // broadcast, model-label, list-models, preflight, session-restore, media).
-  // See reports/D-anthropic.md.
-  ["llm-anthropic/adapter.broadcast.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
-  ["llm-anthropic/adapter.preflight.test.ts", 2],
-  ["llm-anthropic/adapter.ts", 5], // dropped client/list-models import (provider-decoupling final wave)
-  ["llm-anthropic/anthropic.test.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
-  ["llm-anthropic/beta-flags.characterization.test.ts", 2],
-  ["llm-anthropic/beta-flags.ts", 2],
-  ["llm-anthropic/beta-gates.ts", 1],
-  ["llm-anthropic/bootstrap.ts", 3],
-  ["llm-anthropic/forked-session.e2e.test.ts", 3],
-  ["llm-anthropic/headers.ts", 2],
-  ["llm-anthropic/list-models.ts", 3], // GET /v1/models moved out of core (provider-decoupling final wave)
-  ["llm-anthropic/media-limits.ts", 1],
-  ["llm-anthropic/models.ts", 3], // [surfaced by FIX-i3] +1: multi-line clause
-  // [surfaced by FIX-i3] +2: two multi-line clauses (canonical-request type,
-  // model-registry).
-  ["llm-anthropic/opus-48-features.test.ts", 2],
-  ["llm-anthropic/pricing.test.ts", 1],
-  ["llm-anthropic/pricing.ts", 1],
-  ["llm-anthropic/quota-probe.test.ts", 2],
-  ["llm-anthropic/quota-probe.ts", 5],
-  ["llm-anthropic/session-info.cache.test.ts", 1],
-  ["llm-anthropic/session-info.ts", 4],
-  ["llm-anthropic/system-prompt.ts", 1],
-  ["llm-anthropic/thinking-preflight.test.ts", 1],
-  ["llm-anthropic/thinking-preflight.ts", 2],
-  ["llm-anthropic/validate.degrade.test.ts", 2],
+  // Wave G: llm-anthropic physically moved to the sibling
+  // ../minimal-agent-plugins/ma-llm-anthropic-plugin and was made fully
+  // src/-clean in the move (vendored plugin-api leaf libs into lib/, a
+  // plugin-local model catalog in lib/registry.ts replacing the host
+  // model-registry reads, a plugin-local quota cache + `setQuotaRefreshHook`
+  // seam replacing quota-cache/quota-broadcast, a vendored prompt loader in
+  // lib/prompts.ts, and the cold-start quota probe dropped in favor of
+  // filling the cache from real response headers — same design as the openai
+  // plugin). Two host-orchestrator tests (forked-session.e2e, the
+  // adapter.preflight integration) could not follow it without a
+  // core->sibling import the arch scan forbids; they must be re-adopted as
+  // core integration tests (the preflight pipeline + session-restore paths
+  // are already exercised by src/agent/preflight-pipeline.test.ts and
+  // src/llm/preflight.test.ts). With anthropic gone, the top-level ./plugins
+  // tree is empty and I3's frozen baseline is now EMPTY: every remaining
+  // plugin lives in the sibling repo and is src/-clean.
+  //
   // Wave G: the llm-openai provider physically moved to the sibling
   // ../minimal-agent-plugins/ma-llm-openai-plugin (its plugin-local tests ride
   // along). The stall-repro capstone (a host watchdog/adapter-legacy stream

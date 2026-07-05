@@ -55,7 +55,7 @@ every plugin is zero-dependency.
   throws if unwired) and `%%name?%%` (optional). The rule: prose in markdown,
   control flow (which fragment, what order) in TypeScript. See
   `buildLoopSafetyParagraph` (formerly in the now-removed `src/headers.ts`; the
-  Anthropic header logic moved to `plugins/llm-anthropic/`) for the worked
+  Anthropic header logic moved to `../minimal-agent-plugins/ma-llm-anthropic-plugin/`) for the worked
   example, and `docs/changes/2026-05-30-prompts-as-markdown.md` for the rationale.
 
 ## How the LLM layer is structured
@@ -113,17 +113,21 @@ Inside, the adapter is the only place that knows a wire format. Shape:
 `bootstrap<Provider>()` + the exported `ProviderPlugin`). Canonical-core imports
 use `../../src/llm/*`.
 
-- `plugins/llm-anthropic/` is complete: 6 models, full Messages mapping, live
-  SSE fixtures, 38 tests.
-- `plugins/llm-openai/` is complete: Chat + Responses surfaces, gpt-5.x / gpt-4 /
-  o-series (gpt-5.5 registered dual-surface), live SSE fixtures, 16 tests.
+As of Wave G every provider plugin lives in the sibling
+`../minimal-agent-plugins/` repo (there is no in-core `plugins/` dir):
+- `ma-llm-anthropic-plugin` is complete: full Messages mapping, live SSE
+  fixtures, plugin-local model catalog + quota cache (no core `src/` imports).
+- `ma-llm-openai-plugin` is complete: Chat + Responses surfaces, gpt-5.x / gpt-4 /
+  o-series (gpt-5.5 registered dual-surface), live SSE fixtures.
 
-`src/llm/provider-discovery.ts` is the EARLY provider loader: it scans
-`plugins/llm-*` for `provider.json`, dynamically imports each `ProviderPlugin`,
-and registers it. `main()` calls `registerDiscoveredProviders(<repo>/plugins)`
-then `activateProviderPlugins()` BEFORE any model resolution, so `src/index.ts`
-names no provider. This is separate from the TUI `PluginLoader` (which runs
-later for tools / live-area slots; provider registration must happen earlier).
+`src/llm/provider-discovery.ts` is the EARLY provider loader: it scans each
+plugin root for `provider.json`, dynamically imports each `ProviderPlugin`, and
+registers it. Boot calls `registerDiscoveredProviders([<repo>/plugins,
+...resolveSiblingPluginRoots()])` then `activateDiscoveredProviders()` BEFORE any
+model resolution, so `src/index.ts` names no provider. The embedded `<repo>/plugins`
+root is now empty (providers come from the sibling clone at `~/.minimal-agent/plugins`
+in prod, or the sibling checkout at dev time). Separate from the TUI `PluginLoader`
+(which runs later for tools / live-area slots; provider registration must happen earlier).
 
 ### Coexistence with the legacy client (important)
 
@@ -145,8 +149,8 @@ side-effect of provider work.**
 
 - New model for an existing provider: add a `Capabilities` record in that
   plugin's `capabilities.ts` and a `registerModel({...})` entry in its
-  `models.ts` (e.g. under `plugins/llm-anthropic/`).
-- New provider: create `plugins/llm-<id>/` mirroring an existing one, implement
+  `models.ts` (e.g. under `../minimal-agent-plugins/ma-llm-anthropic-plugin/`).
+- New provider: create `../minimal-agent-plugins/ma-llm-<id>-plugin/` mirroring an existing one, implement
   the `ProviderAdapter` port + a `bootstrap<Id>()`, export a `ProviderPlugin`,
   and add a `provider.json` pointing at it. Discovery registers it at startup.
   A provider that reuses another's wire spec (e.g. an OpenAI-compatible gateway)
