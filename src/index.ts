@@ -56,26 +56,13 @@ import {
   instantiateTurnAttachments,
   parseReplaySidecarTasks,
 } from "./agent/turn-attachments.ts"
-import {
-  discoverCredentialedProviders,
-  storedProvidersHint,
-  suggestModelForProvider,
-} from "./auth/auth-strategies.ts"
 import { defaultBinDir } from "./binaries/store.ts"
 import { diag } from "./bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "./bus/global-bus.ts"
-import { findDashTypos, formatDashTypoError, normalizeArgs } from "./cli/cli-args.ts"
 import { extractPromptFromArgs } from "./cli/extract-prompt.ts"
 import { resolveInitialModeId } from "./cli/non-interactive-defaults.ts"
-import { parseCliOptions } from "./cli/parse-argv.ts"
-import {
-  loadModeUserOverrides,
-  loadPluginEnabledOverrides,
-  loadUserConfig,
-} from "./config/config.ts"
-import { planCommand } from "./host/cli/command-plan.ts"
+import { loadModeUserOverrides, loadPluginEnabledOverrides } from "./config/config.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
-import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "./host/print-output.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
@@ -83,19 +70,19 @@ import {
   userTimestampsFromRecords,
 } from "./host/session-replay.ts"
 import { attachStartupDiagnosticSinks } from "./host/startup/diagnostic-sinks.ts"
-import { printHelp, readEmbeddedPackageVersion } from "./host/startup/help.ts"
-import { resolveStartupAuth, startupAuthLabel } from "./host/startup/provider-auth.ts"
+import { prepareEntrypointArgs } from "./host/startup/entry-args.ts"
+import { readEmbeddedPackageVersion } from "./host/startup/help.ts"
+import { resolveStartupProviderState, startProviderWarmups } from "./host/startup/provider-boot.ts"
+import { bootProviderDiscovery } from "./host/startup/provider-discovery-boot.ts"
 import {
   modelHidesReasoning,
   providerWantsQuotaProbe,
   signInStepLabel,
 } from "./host/startup/provider-presentation.ts"
-import {
-  resolveBootModel,
-  resolveSingleStoredProviderBootModel,
-} from "./host/startup/resolve-boot-model.ts"
+import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
+import { computeStartupHashes } from "./host/startup/startup-hashes.ts"
 import {
   printStartupConfigRows,
   printTerminalViewportRow,
@@ -105,7 +92,6 @@ import {
 import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
-import { Formatter, parseFormatterCommand } from "./host/ui/formatter/formatter.ts"
 import type { Spinner } from "./host/ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./host/ui/spinner/named-presets.ts"
 import { startStartupProgressSpinner } from "./host/ui/startup/progress-spinner.ts"
@@ -114,14 +100,10 @@ import {
   closeStartupTreeWithTools,
   printStartupHeader,
   printStartupRow,
-  setStartupTreeVisible,
   startStartupRowSpinner,
 } from "./host/ui/startup/tree.ts"
 import type { StatusSpinnerTheme } from "./host/ui/status/line-renderer.ts"
-import { activateDiscoveredProviders, registerDiscoveredProviders } from "./llm/index.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
-import { findModel } from "./llm/model-registry.ts"
-import { findProviderPlugin } from "./llm/provider-plugin.ts"
 import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes/modes.ts"
 import { defaultNetworkClient } from "./network/index.ts"
@@ -134,66 +116,30 @@ import {
   resolvePluginEnabledOverrides,
 } from "./plugins/plugin-enable-resolution.ts"
 import { resolveEffectivePlatform } from "./plugins/plugin-platform-resolution.ts"
-import { PluginStream } from "./plugins/stream.ts"
 import { formatQuotaWindows } from "./quota/quota-summary.ts"
 import { parseSchemaFile } from "./sdk/output-schema.ts"
-import { loadBlobStoreConfig } from "./session/blob-store.ts"
-import { getSessionId, setSessionId } from "./session/session-id.ts"
+import { getSessionId } from "./session/session-id.ts"
 import { loadSession } from "./session/session-restore.ts"
-import { shortHash } from "./session/session-store.ts"
 import { ToolTimeTracker } from "./tools/tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools/tools.ts"
 
 // ---------------------------------------------------------------------------
-// Argument parsing // TODO: This should be moved to a separate file instead of here and coded in a better way, reusable etc. It's a mess now.
+// Argument parsing
 // ---------------------------------------------------------------------------
+//
+// All the side-effecting entry-point argument setup (smart-dash rejection,
+// `--help` dispatch, env flag propagation, config load, command planning,
+// startup-tree visibility, and early session-id seeding) lives in
+// `host/startup/entry-args.ts`. It leans on the pure `cli/*` parsers and keeps
+// this file a thin composition root. See that module for the precedence rules.
 
-const rawArgv = process.argv.slice(2)
-
-// Catch flags mangled by "smart dashes"/autocorrect (e.g. `--resume–same-sid`
-// with a U+2013 en-dash) BEFORE normalization silently drops them and their
-// value gets misparsed as a positional prompt. Fail loud with a fix-it hint.
-const dashTypos = findDashTypos(rawArgv)
-if (dashTypos.length > 0) {
-  process.stderr.write(`${formatDashTypoError(dashTypos)}\n`)
-  process.exit(2)
-}
-
-const args = normalizeArgs(rawArgv)
-
-// Provider plugins (plugins/llm-*) are discovered + registered at the top
-// of main() via the provider loader, before any model resolution. The
-// entrypoint imports no provider by name.
-
-if (args.includes("--help") || args.includes("-h")) {
-  printHelp()
-  process.exit(0)
-}
-
-if (args.includes("--debug")) {
-  process.env.DEBUG = "1"
-}
-
-if (args.includes("--verbose")) {
-  process.env.VERBOSE = "1"
-}
-
-// Propagate --show-hidden-chars to subsystems (e.g. the debug printer in
-// client.ts) via env var, mirroring how --debug/--verbose work. The editor
-// also reads this flag directly from `args` further down.
-if (args.includes("--show-hidden-chars")) {
-  process.env.MINIMAL_AGENT_SHOW_HIDDEN_CHARS = "1"
-}
-
-// Global user config (~/.minimal-agent/config.json). Lowest precedence:
-// CLI flag > env var > config file > built-in default.
-const userConfig = loadUserConfig()
-
-// Resolve every CLI/env/config-derived option in one place. The pure
-// flag/precedence logic lives in `src/cli/parse-argv.ts` (unit-tested); the
-// entry point keeps only the side-effecting startup bits (setSessionId,
-// setStartupTreeVisible, env-var propagation) that key off these values.
-const opts = parseCliOptions(args, userConfig, process.env, parseFormatterCommand)
+const entry = prepareEntrypointArgs({
+  rawArgv: process.argv.slice(2),
+  env: process.env,
+  cwd: process.cwd(),
+})
+const { args, userConfig, opts, commandPlan, showHeader: SHOW_HEADER, readFlagValue } = entry
+const extractPrompt = entry.extractPrompt
 const {
   model,
   provider,
@@ -202,7 +148,6 @@ const {
   wantJsonOutput,
   outputSchemaPath,
   spinnerName,
-  showHeader: SHOW_HEADER,
   effort,
   effortSource,
   thinkingDisplay,
@@ -215,100 +160,11 @@ const {
   formatterExtraArgs,
   resumeSameArg,
   effectiveResumeArg,
-  sessionIdArg,
   sessionsQuery,
   usagePeriod,
   dumpArg,
   dumpFormatArg,
 } = opts
-
-// Build the command plan from the resolved flags. `planCommand` lives in the
-// host tree, so it stays here (the blessed entry-point seam) rather than
-// inside the pure `cli/` resolver, keeping the core→host ratchet green.
-const commandPlan = planCommand({
-  dumpArg,
-  wantListSessions: opts.wantListSessions,
-  wantUsage: opts.wantUsage,
-  wantListFlags: opts.wantListFlags,
-  wantListSpinners: opts.wantListSpinners,
-  wantListModels: opts.wantListModels,
-  wantListProviders: opts.wantListProviders,
-  wantListPlugins: opts.wantListPlugins,
-  wantLogin: opts.wantLogin,
-  wantLogout: opts.wantLogout,
-  wantAuthStatus: opts.wantAuthStatus,
-})
-
-// The startup-tree renderer (src/ui/startup/tree.ts) holds the row-printing
-// state; arm its visibility gate once, here (SHOW_HEADER resolved above via
-// parseCliOptions), so every printer below and in main() respects it.
-setStartupTreeVisible(SHOW_HEADER)
-
-// `--auth-method` is read inside main()'s login branch; keep the small
-// inline-or-spaced flag reader here for that one call site.
-function readFlagValue(name: string): string | undefined {
-  const eq = args.find((a) => a.startsWith(`${name}=`))
-  if (eq) return eq.slice(name.length + 1)
-  const idx = args.indexOf(name)
-  if (idx !== -1 && args[idx + 1]) return args[idx + 1]
-  return undefined
-}
-
-// --resume <sid>  resume a saved session (or "last" for the most recent
-// session in this cwd, falling back to the global most-recent).
-// --sessions [<query>]  list saved sessions (optionally fuzzy-filter on
-//                       date/sid/cwd) and exit.
-// --session-id <uuid>: pin this run's session id (from parseCliOptions).
-// Seed it BEFORE any getSessionId() call below. Invalid ids exit non-zero.
-if (sessionIdArg !== undefined) {
-  try {
-    setSessionId(sessionIdArg)
-  } catch (e) {
-    process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`)
-    process.exit(2)
-  }
-}
-// --resume-same-sid: pin this process's session id to the TARGET session's
-// sid BEFORE any getSessionId() call, so the session file, log file, blob
-// dir, and goodbye banner all share the original sid (no fork). Resolve
-// "last" via the same target resolver `--resume` uses.
-if (resumeSameArg !== undefined) {
-  try {
-    const resolved = resolveSessionTarget(resumeSameArg, process.cwd())
-    if (!resolved) {
-      process.stderr.write(
-        `error: no saved sessions found for --resume-same-sid ${resumeSameArg}\n`,
-      )
-      process.exit(1)
-    }
-    setSessionId(resolved)
-  } catch (e) {
-    process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`)
-    process.exit(2)
-  }
-}
-
-/**
- * Extract a non-interactive prompt from command-line args.
- *
- * Wraps the pure {@link extractPromptFromArgs} (in `./extract-prompt.ts`)
- * by handling the stdin-slurp case here. Lifting the classification out
- * keeps it unit-testable — see `src/extract-prompt.test.ts`.
- *
- * @returns The prompt text, or `null` for interactive REPL mode.
- */
-async function extractPrompt(): Promise<string | null> {
-  const src = extractPromptFromArgs(args)
-  if (src.kind === "literal") return src.text
-  if (src.kind === "stdin") {
-    const chunks: Buffer[] = []
-    for await (const chunk of process.stdin) {
-      chunks.push(chunk as Buffer)
-    }
-    return Buffer.concat(chunks).toString("utf-8").trim()
-  }
-  return null
-}
 
 // ---------------------------------------------------------------------------
 // Main
@@ -349,11 +205,7 @@ async function main() {
   // BOTH the embedded plugins dir and the sibling roots (same resolution the
   // TUI loader uses) so a migrated provider is still found. Embedded wins on
   // id collision during a mid-migration window.
-  await registerDiscoveredProviders([
-    join(providerEmbeddedDir, "plugins"),
-    ...resolveSiblingPluginRoots(providerEmbeddedDir),
-  ])
-  activateDiscoveredProviders()
+  await bootProviderDiscovery(providerEmbeddedDir)
 
   // Dispatch one-shot subcommands (dump/sessions/usage/list-*/login/logout/
   // auth-status). Returns true when handled (we return); login/logout/
@@ -437,87 +289,24 @@ async function main() {
     env: process.env,
   })
 
-  // Resolve the boot selection once, up front. Everything that is
+  // Resolve model/provider/auth once, up front. Everything that is
   // provider-specific (startup probe, quota) keys off this so a session
   // started with an explicit provider/model pair never contacts the wrong host.
-  const bootModel = resolveBootModel({
-    cliModel: model,
-    cliProvider: provider,
-    envModel: process.env.MINIMAL_AGENT_MODEL,
-    envProvider: process.env.MINIMAL_AGENT_PROVIDER,
-    configModel: userConfig.model,
-    configProvider: userConfig.provider,
+  // See `host/startup/provider-boot.ts` for the resolution + ad-hoc model
+  // registration; it prints the `auth` startup row.
+  const providerState = await resolveStartupProviderState({
+    opts: { model, provider, cliCredentialName },
+    userConfig,
+    env: process.env,
   })
+  const { selectedModel, selectedModelBase, selectedProviderId, credentialName, auth } =
+    providerState
 
-  if (bootModel.kind === "invalid") {
-    throw new Error(bootModel.reason)
-  }
-
-  const selected =
-    bootModel.kind === "explicit"
-      ? bootModel
-      : resolveSingleStoredProviderBootModel(
-          discoverCredentialedProviders(),
-          suggestModelForProvider,
-        )
-  if (selected.kind === "invalid") {
-    throw new Error(`${selected.reason}. ${storedProvidersHint()}`)
-  }
-  const selectedModel = selected.model
-  const selectedModelBase = selectedModel.replace(/\[(1|2)m\]/gi, "")
-  const selectedProviderId = selected.provider
-  const plugin = findProviderPlugin(selectedProviderId)
-  if (!plugin) {
-    throw new Error(`unknown provider "${selectedProviderId}"`)
-  }
-  if (!findModel(selectedModelBase)) {
-    plugin.registerAdHocModel?.(selectedModelBase)
-  }
-  if (!findModel(selectedModelBase)) {
-    throw new Error(`unknown model "${selectedModelBase}" for provider "${selectedProviderId}"`)
-  }
-
-  const credentialName = cliCredentialName ?? userConfig.credentialName
-  const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase, credentialName)
-  printStartupRow("auth", startupAuthLabel(auth, selectedProviderId))
-
-  // Provider startup probe (fire-and-forget) for the SELECTED provider only.
-  // A plugin MAY overlay server-shipped data onto the canonical registry —
-  // e.g. Anthropic's /api/claude_cli/bootstrap model-cost overrides. We run
-  // ONLY the selected model's provider so a gpt-5.5 session does not hit
+  // Fire-and-forget provider warm-ups (bootstrap overlay probe + session-info
+  // prime) for the SELECTED provider only, so a gpt-5.5 session never contacts
   // api.anthropic.com just because the host holds an Anthropic OAuth session.
-  // The plugin still self-gates + swallows failures (local pricing stays
-  // authoritative).
-  if (selectedProviderId) {
-    const { listProviderPlugins } = await import("./llm/provider-plugin.ts")
-    const { legacyAuthToProviderAuth } = await import("./llm/adapter-legacy.ts")
-    const probeCtx = {
-      auth: legacyAuthToProviderAuth(auth),
-      modelId: selectedModelBase,
-    }
-    for (const plugin of listProviderPlugins()) {
-      if (plugin.id !== selectedProviderId) continue
-      plugin.onStartupProbe?.(probeCtx)
-    }
-  }
-
-  // Warm the SELECTED provider's session-metadata cache so the status-bar
-  // slot's first tick finds fresh data without ever issuing a network call
-  // of its own. Fire-and-forget — by the time the prime probe lands, the
-  // provider broadcasts `quota.headersReceived`, which refires the slot
-  // and the footer populates with no blocking on the REPL boot path. A
-  // provider with no `primeSessionInfo` (OpenAI / OpenRouter, whose cache
-  // fills from real chat traffic) silently no-ops here.
-  if (selectedProviderId) {
-    void (async () => {
-      const { primeProviderSessionInfo } = await import("./llm/provider-session.ts")
-      await primeProviderSessionInfo(selectedModelBase)
-    })().catch(() => {
-      // Tolerated: prime is a UX warm-up. The slot stays on its placeholder
-      // until real chat traffic broadcasts the headers — same fallback as
-      // before the prime hook existed.
-    })
-  }
+  // Both self-gate and swallow failures (local pricing stays authoritative).
+  startProviderWarmups(providerState)
 
   // Resolve formatter: explicit --formatter, PATH, cached binary, or auto-download.
   let formatterCmd: string[] | undefined
@@ -1052,64 +841,17 @@ async function main() {
   scrollbackSink?.flushBuffer()
 
   // Compute systemHash + toolsHash for the session-store meta record (and
-  // for resume drift detection). These mirror what agent.run() would
-  // compute internally — we duplicate the recipe here because the meta
-  // record is written at session OPEN, before any run() call.
-  const pluginBlock = (hasPlugins ? loader : null)?.getPromptBlock() ?? null
-  const modeAddition = modeManager?.systemPromptAddition() ?? ""
-  const sessionContextForHash =
-    pluginBlock && modeAddition
-      ? `${pluginBlock}\n\n${modeAddition}`
-      : pluginBlock != null
-        ? pluginBlock
-        : modeAddition !== ""
-          ? modeAddition
-          : null
-  const { DEFAULT_REFLECTION_INTERVAL, DEFAULT_REFLECTION_COOLDOWN_MS } = await import(
-    "./agent/reflection.ts"
-  )
-  const { resolveSystemPromptForModel } = await import("./llm/system-prompt.ts")
-  // Mirror Agent's runtime defaults explicitly so the systemHash captured
-  // at session open matches what `agent.run()` will compute on the first
-  // turn. Resume drift detection compares these two hashes : if they
-  // diverge, a yellow warning fires on --resume. The defaults below MUST
-  // track the Agent class field defaults in src/agent.ts (reflectionInterval,
-  // reflectionCooldownMs, maxToolRounds=Number.POSITIVE_INFINITY).
-  //
-  // Routed through the SAME provider-resolving `resolveSystemPromptForModel`
-  // the Agent uses (keyed by the selected model + auth kind), so the
-  // provider's preamble (Anthropic billing/identity, or a neutral identity)
-  // is folded into the hash identically at both call sites. If we later add
-  // CLI flags / config knobs for these values, both call sites must thread
-  // the same value. Resolve blob-store enablement BEFORE the hash so the
-  // resume drift detector treats "blob store on" vs "off" as distinct
-  // prefix shapes (cheap; config loader is memoized).
-  const blobStoreEnabled = loadBlobStoreConfig().config.enabled
-  const systemForHash = sessionContextForHash
-    ? JSON.stringify(
-        resolveSystemPromptForModel(selectedModelBase, {
-          sessionContext: sessionContextForHash,
-          reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
-          reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
-          maxToolRounds: Number.POSITIVE_INFINITY,
-          blobStoreEnabled,
-          authKind: auth.type,
-          cacheTtl,
-        }),
-      )
-    : ""
-  const allToolsForHash = (hasPlugins ? loader : null)
-    ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as typeof TOOL_DEFINITIONS)]
-    : [...TOOL_DEFINITIONS]
-  const toolsForHash = JSON.stringify(
-    allToolsForHash.map((t) => ({
-      name: t.name,
-      description: t.description,
-      schema: t.input_schema,
-    })),
-  )
-  const systemHash = shortHash(systemForHash)
-  const toolsHash = shortHash(toolsForHash)
+  // for resume drift detection). These mirror what agent.run() would compute
+  // internally — the meta record is written at session OPEN, before any run()
+  // call. See `host/startup/startup-hashes.ts` for the recipe (it must track
+  // the Agent class field defaults).
+  const { systemHash, toolsHash } = await computeStartupHashes({
+    loader: hasPlugins ? loader : null,
+    modeManager,
+    selectedModelBase,
+    auth,
+    cacheTtl,
+  })
 
   // Session store + blob store + resume warnings + attach/detach
   // lifecycle markers. Lives in `src/startup/session-store-boot.ts`;
@@ -1279,96 +1021,21 @@ async function main() {
     }
   }
 
-  // Non-interactive mode: send prompt, print response, exit
+  // Non-interactive mode: send prompt, print response, exit. The output
+  // routing (formatter, --json / human / --output-schema, plugin stream,
+  // schema gate) lives in `host/startup/run-non-interactive.ts`.
   const prompt = await extractPrompt()
   if (prompt) {
-    // Breathing room between the closed startup tree (stderr) and the
-    // streamed response (stdout). The interactive REPL gets this for
-    // free via the Compositor; the non-interactive path doesn't. When
-    // the header is suppressed (typical for `--prompt`) there's nothing
-    // to breathe from, so skip the leading blank line — script-friendly.
-    if (SHOW_HEADER) process.stdout.write("\n")
-    const formatter = formatterCmd ? new Formatter(formatterCmd, process.stdout) : null
-    if (formatter) formatter.start()
-
-    // Phase 4 non-interactive output mode. `--json` selects a JSONL event
-    // stream; otherwise human mode (the legacy behavior). PrintOutput owns the
-    // stream-routing + final-answer pipe rule; it goes live here so the
-    // adapter is actually exercised, not dead code. The legacy agent.run()
-    // yields TEXT chunks (not structured AgentEvents), so in this path
-    // PrintOutput drives the final-answer pipe rule + schema; full JSONL event
-    // streaming arrives once AgentCore emits through an EventSink.
-    const stdoutIsTTY = process.stdout.isTTY === true
-    const printOpts = resolvePrintModeOptions({
-      jsonFlag: wantJsonOutput,
-      stdoutIsTTY,
-      ...(outputSchema !== undefined ? { outputSchema } : {}),
+    await runNonInteractivePrompt({
+      agent,
+      prompt,
+      formatterCmd,
+      showHeader: SHOW_HEADER,
+      wantJsonOutput,
+      outputSchema,
+      loader: hasPlugins ? loader : null,
+      cwd: process.cwd(),
     })
-    const printOut = new PrintOutput(printOpts, {
-      stdout: process.stdout,
-      stderr: process.stderr,
-      stdoutIsTTY,
-    })
-
-    // In human mode on a pipe we stream chunks straight to stdout (the live
-    // feel); the answer is also accumulated so --output-schema can validate it
-    // and PrintOutput.finish enforces the no-double-print rule. In json mode we
-    // suppress the raw stream (events are the only stdout) and emit the final
-    // answer as a terminal item_completed event via finish().
-    const jsonMode = printOut.outputMode() === "json"
-    // Suppress live streaming when output is BUFFERED: json mode (events are
-    // the only stdout) OR --output-schema (the answer must be validated before
-    // any byte reaches stdout, else a non-conforming answer would leak before
-    // the exit-1). A schema answer is JSON, not human-progressive, so nothing
-    // is lost by buffering it. Otherwise stream chunk-by-chunk (the live feel).
-    const buffered = jsonMode || outputSchema !== undefined
-    const baseSink = (s: string) => {
-      if (buffered) return // buffered: stdout is written once, after validation
-      if (formatter) formatter.write(s)
-      else process.stdout.write(s)
-    }
-    const pluginStream = hasPlugins ? new PluginStream(baseSink, loader, process.cwd()) : null
-
-    let finalText = ""
-    try {
-      const gen = agent.run(prompt)
-      while (true) {
-        const { done, value } = await gen.next()
-        if (done) break
-        finalText += value
-        if (pluginStream) {
-          const p = pluginStream.feed(value)
-          if (p) await p
-        } else {
-          baseSink(value)
-        }
-      }
-      if (pluginStream) await pluginStream.end()
-    } finally {
-      if (formatter) await formatter.end()
-    }
-
-    // --output-schema validate-and-exit: the final answer must be valid JSON
-    // matching the schema, else a diagnostic to stderr + exit 1. Runs BEFORE
-    // any stdout write so a failing run never leaks a non-conforming answer.
-    if (outputSchema !== undefined) {
-      const enforcement = enforceOutputSchema(finalText, outputSchema)
-      if (!enforcement.ok) {
-        for (const line of enforcement.diagnostics) process.stderr.write(`${line}\n`)
-        process.exit(1)
-      }
-    }
-
-    if (jsonMode) {
-      // Emit the validated final answer as the terminal item_completed event.
-      printOut.finish(finalText)
-    } else if (outputSchema !== undefined) {
-      // Buffered + validated human path: write the conforming answer once.
-      process.stdout.write(finalText.endsWith("\n") ? finalText : `${finalText}\n`)
-    } else {
-      // Live-streamed human path: chunks already went to stdout; just close.
-      process.stdout.write("\n")
-    }
     return
   }
 
