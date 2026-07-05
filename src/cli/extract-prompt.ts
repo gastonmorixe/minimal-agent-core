@@ -58,6 +58,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--credential-name",
   "--name",
   "--output-schema",
+  "--output-format",
   "--service-tier",
   "--platform",
 ])

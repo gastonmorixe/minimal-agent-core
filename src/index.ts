@@ -63,6 +63,7 @@ import { extractPromptFromArgs } from "./cli/extract-prompt.ts"
 import { resolveInitialModeId } from "./cli/non-interactive-defaults.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides } from "./config/config.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
+import { buildAgentCore } from "./host/sdk-adapters/build-agent-core.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
@@ -146,6 +147,7 @@ const {
   cliCredentialName,
   listModelsProvider,
   wantJsonOutput,
+  outputFormat,
   outputSchemaPath,
   spinnerName,
   effort,
@@ -1032,9 +1034,33 @@ async function main() {
       formatterCmd,
       showHeader: SHOW_HEADER,
       wantJsonOutput,
+      outputFormat,
       outputSchema,
       loader: hasPlugins ? loader : null,
       cwd: process.cwd(),
+      // Structured event-stream route for `--output-format json` / `stream-json`:
+      // build a fully-wired AgentCore (Tier-1 adapters) whose JsonlEventSink is
+      // supplied by run-non-interactive. `text` / `--output-schema` never call
+      // this (see wantsEventStream), so those paths stay byte-identical.
+      buildCore: (eventSink) =>
+        buildAgentCore({
+          auth,
+          model: selectedModel,
+          providerId: selectedProviderId,
+          ...(credentialName ? { credentialName } : {}),
+          effort,
+          serviceTier,
+          thinkingDisplay,
+          cacheTtl,
+          initialMessages,
+          loader: hasPlugins ? loader : null,
+          modeManager,
+          store,
+          blobStore,
+          saveEcho,
+          turnAttachments: turnAttachmentSeam.producers,
+          eventSink,
+        }),
     })
     return
   }

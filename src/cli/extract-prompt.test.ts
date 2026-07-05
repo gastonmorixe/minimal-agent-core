@@ -269,6 +269,38 @@ describe("extractPromptFromArgs", () => {
     })
   })
 
+  // ---- regression: --output-format must consume its value ---------------
+  //
+  // `--output-format` takes a value (text|json|stream-json). Without it in
+  // FLAGS_WITH_VALUES the positional walk would mistake "json" for the prompt,
+  // so `minimal-agent --output-format json "hi"` would run "json" as the prompt
+  // and drop the real one — the exact class of bug this module prevents.
+
+  test("--output-format json <prompt> → the prompt is the positional, not 'json'", () => {
+    expect(extractPromptFromArgs(["--output-format", "json", "hi"])).toEqual({
+      kind: "literal",
+      text: "hi",
+    })
+  })
+
+  test("--output-format stream-json <prompt> → positional is the prompt", () => {
+    expect(extractPromptFromArgs(["--output-format", "stream-json", "do the thing"])).toEqual({
+      kind: "literal",
+      text: "do the thing",
+    })
+  })
+
+  test("--output-format json alone → none (interactive REPL)", () => {
+    expect(extractPromptFromArgs(["--output-format", "json"])).toEqual({ kind: "none" })
+  })
+
+  test("normalized `--output-format=json` + bare positional → positional is the prompt", () => {
+    expect(extractPromptFromArgs(normalizeArgs(["--output-format=json", "hi"]))).toEqual({
+      kind: "literal",
+      text: "hi",
+    })
+  })
+
   // ---- regression: --service-tier must consume its value ----------------
 
   test("--service-tier <tier> alone → none", () => {

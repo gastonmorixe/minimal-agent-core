@@ -20,6 +20,7 @@ import type { UserConfig } from "../config/config.ts"
 import { type EffortSource, resolveEffort } from "../config/effort-resolution.ts"
 
 import { resolveShowHeader } from "./non-interactive-defaults.ts"
+import { type OutputFormat, resolveOutputFormat } from "./output-format.ts"
 
 /** A minimal view of the process environment this resolver reads. */
 export type EnvLike = Record<string, string | undefined>
@@ -47,6 +48,13 @@ export interface CliOptions {
   readonly wantListPlugins: boolean
   readonly wantListSpinners: boolean
   readonly wantJsonOutput: boolean
+  /**
+   * The resolved non-interactive output format (`text` | `json` |
+   * `stream-json`). Precedence: a valid `--output-format` value wins, then the
+   * `--json` alias (mirrored by `wantJsonOutput`), then `text`. See
+   * {@link resolveOutputFormat}.
+   */
+  readonly outputFormat: OutputFormat
   readonly outputSchemaPath: string | undefined
   readonly spinnerName: string | undefined
   readonly showHeader: boolean
@@ -132,6 +140,12 @@ export function parseCliOptions(
   const wantListSpinners = args.includes("--list-spinners")
 
   const wantJsonOutput = args.includes("--json")
+  // The `--output-format <text|json|stream-json>` flag. `--json` is the legacy
+  // alias; a valid `--output-format` value wins over it (see resolveOutputFormat).
+  const outputFormat = resolveOutputFormat({
+    outputFormatFlag: valueAfter(args, "--output-format"),
+    jsonFlag: wantJsonOutput,
+  })
   const outputSchemaPath = valueAfter(args, "--output-schema")
 
   const showHeader = resolveShowHeader({
@@ -213,6 +227,7 @@ export function parseCliOptions(
     wantListPlugins,
     wantListSpinners,
     wantJsonOutput,
+    outputFormat,
     outputSchemaPath,
     spinnerName,
     showHeader,

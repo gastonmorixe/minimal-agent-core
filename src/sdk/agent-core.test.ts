@@ -300,3 +300,137 @@ describe("AgentCore.run — structured event emission", () => {
     expect(text).toBe("ok")
   })
 })
+
+describe("AgentCore.run — realtime deltas (Phase 3)", () => {
+  /** Drain a run, discarding the yielded text (events are asserted on the sink). */
+  async function drainRun(gen: AsyncGenerator<string, StreamedResponse, undefined>): Promise<void> {
+    while (true) {
+      const { done } = await gen.next()
+      if (done) return
+    }
+  }
+
+  it("emitDeltas: emits a text_delta per streamed chunk, in order, concatenating to the text", async () => {
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      yield "he"
+      yield "llo"
+      return {
+        blocks: [{ type: "text" as const, text: "hello" }],
+        text: "hello",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await drainRun(core.run("go", { emitDeltas: true }))
+
+    const deltas = sink.events.filter((e) => e.type === "text_delta")
+    expect(deltas.length).toBeGreaterThan(1)
+    expect(deltas.map((d) => (d.type === "text_delta" ? d.text : "")).join("")).toBe("hello")
+    // Every delta of a turn shares the per-turn streaming id.
+    for (const d of deltas) if (d.type === "text_delta") expect(d.id).toBe("1:text")
+    // The terminal item_completed still carries the whole body.
+    const completed = sink.events.find((e) => e.type === "item_completed" && e.itemType === "text")
+    if (completed?.type !== "item_completed") throw new Error("no text item_completed")
+    expect(completed.text).toBe("hello")
+  })
+
+  it("emitDeltas OFF (default): no text_delta events (buffered json + golden parity)", async () => {
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      yield "he"
+      yield "llo"
+      return {
+        blocks: [{ type: "text" as const, text: "hello" }],
+        text: "hello",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await drainRun(core.run("go"))
+    expect(sink.events.some((e) => e.type === "text_delta")).toBe(false)
+    // The non-delta event sequence is exactly the Phase-2 shape.
+    expect(sink.events.map((e) => e.type)).toEqual([
+      "turn_started",
+      "item_started",
+      "item_completed",
+      "turn_completed",
+    ])
+  })
+
+  it("emitDeltas: forwards transport thinking chunks as thinking_delta events", async () => {
+    const sendFn = async function* (
+      opts: { onThinkingDelta?: (t: string) => void } = {},
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      // Simulate the transport streaming reasoning before the answer.
+      opts.onThinkingDelta?.("think ")
+      opts.onThinkingDelta?.("more")
+      yield "answer"
+      return {
+        blocks: [{ type: "text" as const, text: "answer" }],
+        text: "answer",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await drainRun(core.run("go", { emitDeltas: true }))
+
+    const thinking = sink.events.filter((e) => e.type === "thinking_delta")
+    expect(thinking.map((d) => (d.type === "thinking_delta" ? d.text : "")).join("")).toBe(
+      "think more",
+    )
+    for (const d of thinking) if (d.type === "thinking_delta") expect(d.id).toBe("1:thinking")
+    // text_delta and thinking_delta carry distinct per-turn ids.
+    const textIds = new Set(
+      sink.events.filter((e) => e.type === "text_delta").map((e) => (e as { id: string }).id),
+    )
+    expect(textIds.has("1:thinking")).toBe(false)
+  })
+
+  it("emitDeltas OFF: transport thinking chunks emit no thinking_delta events", async () => {
+    const sendFn = async function* (
+      opts: { onThinkingDelta?: (t: string) => void } = {},
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      opts.onThinkingDelta?.("secret reasoning")
+      yield "answer"
+      return {
+        blocks: [{ type: "text" as const, text: "answer" }],
+        text: "answer",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await drainRun(core.run("go"))
+    expect(sink.events.some((e) => e.type === "thinking_delta")).toBe(false)
+  })
+
+  it("emitDeltas: still forwards the caller's own onThinkingChunk callback", async () => {
+    const seen: string[] = []
+    const sendFn = async function* (
+      opts: { onThinkingDelta?: (t: string) => void } = {},
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      opts.onThinkingDelta?.("r1")
+      yield "answer"
+      return {
+        blocks: [{ type: "text" as const, text: "answer" }],
+        text: "answer",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await drainRun(
+      core.run("go", {
+        emitDeltas: true,
+        onThinkingChunk: (c) => {
+          seen.push(c)
+        },
+      }),
+    )
+    // The wrapper emits the event AND chains to the caller's callback.
+    expect(seen).toEqual(["r1"])
+    expect(sink.events.some((e) => e.type === "thinking_delta")).toBe(true)
+  })
+})

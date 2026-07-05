@@ -7,6 +7,27 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
+### Feature: `--output-format {text,json,stream-json}` on the modern agent core
+
+Non-interactive runs (`--prompt`, `-`, a bare positional) can now select an
+output format explicitly. `text` (the default) is unchanged: human progress to
+stderr, the final answer to stdout when piped. `json` and `stream-json` both
+drive the port-injected `AgentCore` and emit its structured `AgentEvent` stream
+as JSON Lines on stdout (`turn_started` → `item_started` → `item_completed` →
+`turn_completed`, with `tool_result` carrying the `tool_result.id ===
+item_started.id` join for tool turns). `json` is buffered; `stream-json` flushes
+each event live and additionally emits token-level `text_delta` and
+`thinking_delta` events as the model streams.
+
+`--json` is now a documented alias for `--output-format json`. This changes its
+wire output: it previously emitted a single synthetic final-answer line
+(`item_completed` with id `"final"`); it now emits the full event stream, where
+the answer is the real `item_completed` (itemType `text`) followed by
+`turn_completed`. A consumer that read the last line for the answer should
+instead take the `item_completed` text event (or the terminal `turn_completed`
+for stop reason + usage). `--output-schema` enforcement is unchanged and stays
+on the buffered validate-before-stdout path.
+
 ### Architecture: provider-decoupling ratchet + first cleanups
 
 New fitness test (`src/architecture.provider-decoupling.test.ts`) enforces
