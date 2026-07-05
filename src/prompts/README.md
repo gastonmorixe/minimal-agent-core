@@ -63,7 +63,7 @@ Conditional assembly (which fragment, in what order, under what condition) is
 logic and belongs in `.ts`. The sentences themselves belong here. For an
 example, see how `buildLoopSafetyParagraph` composes the `loop-safety/*`
 fragments (it lived in the now-removed `src/headers.ts`; the Anthropic header
-logic moved into `plugins/llm-anthropic/`).
+logic moved into the sibling `../minimal-agent-plugins/ma-llm-anthropic-plugin/`).
 
 ## Layout
 
@@ -89,13 +89,16 @@ Plugin prompts live next to the plugin, not here:
 
 - `plugins/<id>/PROMPT.md` — the plugin's system-prompt contribution (loaded by
   the plugin loader).
-- `plugins/<id>/prompts/*.{md,tmpl.md}` — any other prompts the plugin renders
-  itself (e.g. `plugins/memory/prompts/summarize.tmpl.md`).
+- `<plugin>/prompts/*.{md,tmpl.md}` — any other prompts the plugin renders
+  itself (e.g. `ma-memory-plugin/prompts/summarize.tmpl.md` in the sibling repo).
 
 ## Anthropic preamble is special
 
-`anthropic/identity.claude-code.md` and `anthropic/billing.tmpl.md` are the
-exact blocks Anthropic's server validates for plan/OAuth auth. They are the
-single source of truth: the `plugins/llm-anthropic` provider renders from these
-files (the former `src/headers.ts` legacy shim has been removed). Keep them byte-exact.
-Reword `instructions.md` freely; do **not** reword these two.
+The Anthropic provider's `prompts/identity.claude-code.md` and
+`prompts/billing.tmpl.md` (now in the sibling
+`../minimal-agent-plugins/ma-llm-anthropic-plugin/prompts/`, rendered via that
+plugin's own `lib/prompts.ts` loader) are the exact blocks Anthropic's server
+validates for plan/OAuth auth. They are the single source of truth (the former
+`src/headers.ts` legacy shim and the core `src/prompts/anthropic/` copies have
+been removed). Keep them byte-exact. Reword `instructions.md` freely; do **not**
+reword those two.

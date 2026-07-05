@@ -34,7 +34,7 @@ llm-wafer/
 └── wafer.test.ts     // end-to-end adapter tests
 ```
 
-Key imports from the shared OpenAI plugin (`plugins/llm-openai/index.ts`):
+Key imports from the shared OpenAI plugin (`../minimal-agent-plugins/ma-llm-openai-plugin/index.ts`):
 
 ```typescript
 import {
@@ -56,8 +56,9 @@ protocol, and validation.
 
 ## Template: starting a new provider
 
-Copy `llm-wafer/` as a starting point if your provider speaks OpenAI Chat
-Completions. Copy `llm-anthropic/` if it doesn't.
+Copy `ma-llm-wafer-plugin/` (in the sibling `../minimal-agent-plugins/` repo) as
+a starting point if your provider speaks OpenAI Chat Completions. Copy
+`ma-llm-anthropic-plugin/` if it doesn't.
 
 Files you must touch:
 
