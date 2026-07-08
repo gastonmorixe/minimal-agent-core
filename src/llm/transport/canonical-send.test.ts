@@ -33,6 +33,7 @@ import {
   resetDefaultAuthStoreForTests,
   type SecretBag,
 } from "../../auth/auth-store.ts"
+import { setGlobalEventBus } from "../../bus/global-bus.ts"
 import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
   NetworkClient,
@@ -40,6 +41,8 @@ import {
   NetworkResponse,
   type NetworkTransport,
 } from "../../network/index.ts"
+import { EventBus } from "../../plugins/event-bus.ts"
+import { QUOTA_HEADERS_RECEIVED } from "../../quota/quota-broadcast.ts"
 import { clearSessionTokens, getSessionTokens } from "../../session/session-tokens.ts"
 import type { CanonicalEvent } from "../canonical-events.ts"
 import type { Message } from "../messages.ts"
@@ -519,6 +522,44 @@ describe("canonicalSendFn — resilience middleware is wired end-to-end", () => 
 // ---------------------------------------------------------------------------
 // Usage / quota broadcast on the same buses as the legacy client
 // ---------------------------------------------------------------------------
+
+describe("canonicalSendFn — quota footer refresh", () => {
+  it("emits quota.headersReceived after a completed send so the footer repaints this turn", async () => {
+    // Post-Wave-G regression: the provider adapter caches its rate-limit
+    // headers in its own sibling-repo module during run(); core can't reach
+    // that cache, so it can't broadcast the headers. But the quota-status slot
+    // ignores the event payload and re-reads the provider cache, so the host
+    // only needs to POKE the bus once the turn completes. Without this the
+    // footer's 5h/7d windows only refresh on the 5-minute heartbeat.
+    const bus = new EventBus()
+    setGlobalEventBus(bus)
+    let received = 0
+    const dispose = bus.on(QUOTA_HEADERS_RECEIVED, () => {
+      received++
+    })
+    try {
+      const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
+      const auth: AuthResult = { type: "oauth", token: "test-token" }
+      const gen = canonicalSendFn({
+        auth,
+        messages,
+        model: "claude-opus-4-8",
+        stream: true,
+        networkClient,
+      })
+      while (!(await gen.next()).done) {
+        // drain
+      }
+      // Bus delivery is microtask-deferred; let it drain before asserting.
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(received).toBeGreaterThanOrEqual(1)
+    } finally {
+      dispose()
+      setGlobalEventBus(null)
+    }
+  }, 15_000)
+})
 
 describe("canonicalSendFn — usage broadcast", () => {
   it("records the message_start footprint on the session-token bus", async () => {
