@@ -109,6 +109,35 @@ export function rebroadcastQuotaForSessionUpdate(): void {
 }
 
 /**
+ * Emit {@link QUOTA_HEADERS_RECEIVED} unconditionally, with an EMPTY payload,
+ * to poke the footer into re-rendering after a turn completes.
+ *
+ * Why this exists: post-Wave-G every provider plugin lives in a sibling repo and
+ * keeps its OWN rate-limit cache (`setAnthropicRateLimits` / `setOpenAIRateLimits`
+ * on the adapter's `run()` path), which core cannot reach. The old in-tree
+ * providers imported {@link broadcastResponseRateLimits} / {@link announceQuotaRefresh}
+ * from here, so a fresh response both filled the core cache AND emitted the
+ * refresh event. After the move, core's cache stays empty forever, so
+ * {@link rebroadcastQuotaForSessionUpdate} (gated on a non-empty core cache) is a
+ * permanent no-op and the `quota-status` footer only repaints on its 5-minute
+ * heartbeat — the 5h/7d windows "vanish" for minutes at a time.
+ *
+ * The `quota-status` slot handler IGNORES the event payload: on any
+ * `quota.headersReceived` it simply re-fires and re-reads the active provider's
+ * OWN cache via `fetchSessionInfo`. So the host doesn't need the provider's
+ * headers to trigger a repaint — it only needs to emit the event once the
+ * provider has cached them. The canonical transport calls this after each
+ * completed send, restoring same-turn footer refresh for EVERY provider without
+ * importing any provider's cache.
+ *
+ * No-op when the bus isn't installed yet (pre-load, tests).
+ */
+export function signalQuotaRefresh(): void {
+  const payload: QuotaHeadersReceivedPayload = { rateLimits: new Map() }
+  getGlobalEventBus()?.emit(QUOTA_HEADERS_RECEIVED, payload)
+}
+
+/**
  * Emit {@link QUOTA_HEADERS_RECEIVED} WITHOUT touching the core
  * (`quota-cache.ts`) cache — the announce-only counterpart to
  * {@link broadcastResponseRateLimits}.

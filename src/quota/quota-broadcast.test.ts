@@ -20,6 +20,7 @@ import {
   QUOTA_HEADERS_RECEIVED,
   type QuotaHeadersReceivedPayload,
   rebroadcastQuotaForSessionUpdate,
+  signalQuotaRefresh,
 } from "./quota-broadcast.ts"
 import { clearLastRateLimits, getLastRateLimits } from "./quota-cache.ts"
 
@@ -153,5 +154,29 @@ describe("quota-broadcast", () => {
     expect(() =>
       announceQuotaRefresh(new Map([["x-codex-primary-used-percent", "1"]])),
     ).not.toThrow()
+  })
+
+  // signalQuotaRefresh: the payload-less poke the canonical transport fires
+  // after every completed send. Post-Wave-G each provider plugin keeps its OWN
+  // rate-limit cache (in a sibling repo core can't reach), so core no longer
+  // has the headers to broadcast — but the `quota-status` footer slot ignores
+  // the payload and re-reads the active provider's cache via fetchSessionInfo.
+  // So an empty-payload emit is all it takes to make the footer repaint THIS
+  // turn instead of waiting for its 5-minute heartbeat.
+  it("signalQuotaRefresh emits the event unconditionally, even with no cache", async () => {
+    // Core cache is cold and no provider headers were broadcast this test.
+    expect(getLastRateLimits()).toBeNull()
+    signalQuotaRefresh()
+    await flush()
+    expect(received.length).toBe(1)
+    // Empty payload: the slot doesn't consume it, it re-reads the provider cache.
+    expect(received[0]!.rateLimits.size).toBe(0)
+    // The core cache is untouched (this path is provider-neutral).
+    expect(getLastRateLimits()).toBeNull()
+  })
+
+  it("signalQuotaRefresh is a harmless no-op with no bus installed", async () => {
+    setGlobalEventBus(null)
+    expect(() => signalQuotaRefresh()).not.toThrow()
   })
 })

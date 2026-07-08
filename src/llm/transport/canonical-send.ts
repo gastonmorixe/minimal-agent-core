@@ -45,7 +45,10 @@ import {
   NetworkClient,
   networkActivityObserver,
 } from "../../network/index.ts"
-import { rebroadcastQuotaForSessionUpdate } from "../../quota/quota-broadcast.ts"
+import {
+  rebroadcastQuotaForSessionUpdate,
+  signalQuotaRefresh,
+} from "../../quota/quota-broadcast.ts"
 import { addSessionUsage } from "../../session/session-tokens.ts"
 import {
   canonicalEventsToLegacyStream,
@@ -269,6 +272,18 @@ export async function* canonicalSendFn(
       })
       rebroadcastQuotaForSessionUpdate()
     }
+    // Poke the `quota-status` footer to repaint THIS turn. The provider adapter
+    // cached its own fresh rate-limit headers during run() (setAnthropicRateLimits
+    // / setOpenAIRateLimits — each provider owns its cache in its sibling repo,
+    // which core cannot reach). The footer slot ignores the event payload: on
+    // `quota.headersReceived` it re-fires and re-reads the active provider's cache
+    // via fetchSessionInfo. So a payload-less signal is enough, and this stays
+    // fully provider-neutral. Without it the footer only refreshes on its 5-minute
+    // heartbeat (rebroadcastQuotaForSessionUpdate is gated on the now-always-empty
+    // CORE cache), which is why the 5h/7d windows vanished after the plugin move.
+    // Fired unconditionally (even on a usage-less stream) so an early/aborted turn
+    // that still cached headers repaints too.
+    signalQuotaRefresh()
     return finalStream
   } finally {
     requestStatus.clear()

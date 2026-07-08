@@ -795,3 +795,63 @@ describe("LiveAreaScheduler — placeholder + refreshOn", () => {
     sched.stop()
   })
 })
+
+// ---------------------------------------------------------------------------
+// End-to-end: the canonical transport's post-turn quota poke reaches the footer
+// ---------------------------------------------------------------------------
+//
+// Post-Wave-G regression guard. Every provider plugin now lives in a sibling
+// repo and caches its OWN rate-limit headers during adapter.run(); core can't
+// reach that cache, so it can't broadcast the headers. The fix is that the
+// canonical transport fires `signalQuotaRefresh()` (a payload-less
+// `quota.headersReceived` emit on the global bus) after every completed send.
+// This test proves that emit re-invokes a real quota footer slot through the
+// live-area scheduler — the whole "footer repaints this turn" path — using the
+// exact core seam the transport calls, without pulling the transport's auth
+// harness into a host test. (The transport-side emit itself is pinned in
+// src/llm/transport/canonical-send.test.ts.)
+describe("LiveAreaScheduler — post-turn quota footer refresh (E2E seam)", () => {
+  it("signalQuotaRefresh() from the transport re-invokes the quota footer slot", async () => {
+    const { EventBus } = await import("../../../plugins/event-bus.ts")
+    const { getGlobalEventBus, setGlobalEventBus } = await import("../../../bus/global-bus.ts")
+    const { QUOTA_HEADERS_RECEIVED, signalQuotaRefresh } = await import(
+      "../../../quota/quota-broadcast.ts"
+    )
+
+    const prevBus = getGlobalEventBus()
+    const bus = new EventBus(() => {})
+    setGlobalEventBus(bus)
+
+    let invokeCount = 0
+    const slot = makeSlot({
+      id: "quota",
+      refreshMs: 60_000, // long timer: the only re-fire we expect is event-driven
+      invoke: async () => `quota-${invokeCount++}`,
+    })
+    slot.definition.refreshOn = [QUOTA_HEADERS_RECEIVED]
+
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      bus,
+      logger: () => {},
+    })
+    try {
+      sched.start()
+      await clock.tick(0)
+      expect(invokeCount).toBe(1)
+      expect(sink.footerCalls.at(-1)).toEqual(["quota-0"])
+
+      // The exact call canonicalSendFn makes after a completed send.
+      signalQuotaRefresh()
+      await clock.tick(0)
+      expect(invokeCount).toBe(2)
+      expect(sink.footerCalls.at(-1)).toEqual(["quota-1"])
+    } finally {
+      sched.stop()
+      setGlobalEventBus(prevBus)
+    }
+  })
+})
