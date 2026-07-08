@@ -1,3 +1,10 @@
+/**
+ * Type-check the workspace with the TypeScript compiler.
+ *
+ * As of TypeScript 7 (GA 2026-07-08), `tsc` IS the native Go compiler that the
+ * `@typescript/native-preview` `tsgo` binary previewed, so the old
+ * tsgo-with-tsc-fallback dance is gone: there is one compiler and one command.
+ */
 type CommandResult = {
   code: number
 }
@@ -14,18 +21,5 @@ function run(label: string, command: string[]): CommandResult {
   return { code }
 }
 
-const fast = run("typecheck:fast", ["bunx", "tsgo", "--noEmit"])
-
-if (fast.code === 0) {
-  process.exit(0)
-}
-
-console.error("\ntsgo failed. Running the stable TypeScript compiler as fallback.")
-const fallback = run("typecheck:fallback", ["bunx", "tsc", "--noEmit"])
-
-if (fallback.code === 0) {
-  console.error("\ntsc passed after tsgo failed. Treat this as a native preview mismatch.")
-  process.exit(0)
-}
-
-process.exit(fallback.code)
+const result = run("typecheck", ["bunx", "tsc", "--noEmit"])
+process.exit(result.code)
