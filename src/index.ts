@@ -95,7 +95,7 @@ import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
 import type { Spinner } from "./host/ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./host/ui/spinner/named-presets.ts"
-import { startStartupProgressSpinner } from "./host/ui/startup/progress-spinner.ts"
+
 import {
   closeStartupTree,
   closeStartupTreeWithTools,
@@ -203,12 +203,56 @@ async function main() {
   // rather than throwing.
   const srcDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url))
   const providerEmbeddedDir = dirname(srcDir)
+  // minimal-agent's own per-user plugins root (`~/.minimal-agent`). The
+  // first-run bootstrap clones the extended first-party plugins — which now
+  // include the LLM PROVIDERS — into `<userDir>/plugins`. Resolved up front
+  // because BOTH the provider discovery just below and the first-run clone
+  // key off it. Cheap + pure (reads env).
+  const userDir = resolveAgentHome()
+
+  // First-run plugin bootstrap (silent, before provider discovery). On a
+  // freshly-installed box the extended first-party plugins (Fetch, Skill,
+  // slash-menu, …) AND the LLM provider plugins (anthropic, openai, …) aren't
+  // present; clone them ONCE into `<userDir>/plugins` so the provider discovery
+  // below finds them. This MUST run before provider discovery because the
+  // providers now ship IN the cloned repo — without them, a fresh install
+  // finds zero providers and dies with "no provider credentials found" before
+  // the user can sign in.
+  //
+  // Best-effort and fully gated:
+  //   - skipped entirely in non-interactive runs (--prompt / `-` / piped):
+  //     a one-shot scripted call shouldn't reach out to the network or grow
+  //     the toolset under the user's feet.
+  //   - opt-out via MINIMAL_AGENT_NO_PLUGIN_SYNC=1 or config `pluginSync:false`.
+  //   - never throws; a private-repo / offline / no-git box degrades to the
+  //     embedded plugins with a quiet startup row.
+  //   - silent (no spinner, no startup row) because the tree hasn't opened yet.
+  //     A startup row is printed later, after the tree opens, if the clone
+  //     actually ran.
+  let pluginSyncResult: Awaited<ReturnType<typeof bootstrapUserPlugins>> | undefined
+  if (userDir && SHOW_HEADER) {
+    const pluginSyncEnabled =
+      process.env.MINIMAL_AGENT_NO_PLUGIN_SYNC === "1" ? false : (userConfig.pluginSync ?? true)
+    const pluginsRepo =
+      process.env.MINIMAL_AGENT_PLUGINS_REPO?.trim() || userConfig.pluginsRepo || undefined
+    pluginSyncResult = await bootstrapUserPlugins({
+      targetDir: join(userDir, "plugins"),
+      enabled: pluginSyncEnabled,
+      repoUrl: pluginsRepo,
+      // Silent: no spinner or startup row yet — the tree hasn't opened.
+      showSpinner: false,
+    })
+  }
+
   // Wave G: provider plugins (provider.json) migrate to the sibling
-  // ../minimal-agent-plugins repo alongside manifest plugins. Discover from
-  // BOTH the embedded plugins dir and the sibling roots (same resolution the
-  // TUI loader uses) so a migrated provider is still found. Embedded wins on
-  // id collision during a mid-migration window.
-  await bootProviderDiscovery(providerEmbeddedDir)
+  // ../minimal-agent-plugins repo alongside manifest plugins, and on an
+  // installed box they are git-cloned into `<userDir>/plugins` (just above).
+  // Discover from the embedded plugins dir, the dev-time sibling roots, AND
+  // the user clone root (same resolution the TUI loader uses) so a
+  // migrated/cloned provider is found. Earlier roots win on id collision.
+  // Without the user root a fresh install finds zero providers → `0 models
+  // available` and a fatal boot.
+  await bootProviderDiscovery({ embeddedDir: providerEmbeddedDir, userDir })
 
   // Dispatch one-shot subcommands (dump/sessions/usage/list-*/login/logout/
   // auth-status). Returns true when handled (we return); login/logout/
@@ -292,6 +336,18 @@ async function main() {
     env: process.env,
   })
 
+  // Plugin-sync startup row. The clone itself ran silently before provider
+  // discovery (above); now that the tree is open, surface the result.
+  if (pluginSyncResult) {
+    if (pluginSyncResult.status === "cloned") {
+      printStartupRow("plugins", `${c.dim("+")} ${c.dim(pluginSyncResult.label)}`)
+    } else if (pluginSyncResult.status === "failed" || pluginSyncResult.status === "skipped") {
+      // Quiet, non-fatal. Detail lands in the file log via the diagnostic bus
+      // (the loader still runs with embedded plugins only).
+      diag.notice("plugin-sync", pluginSyncResult.detail ?? pluginSyncResult.label)
+    }
+  }
+
   // Resolve model/provider/auth once, up front. Everything that is
   // provider-specific (startup probe, quota) keys off this so a session
   // started with an explicit provider/model pair never contacts the wrong host.
@@ -358,48 +414,10 @@ async function main() {
   // Core tool names must always win over plugin names.
   const coreToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name))
   const homeDir = process.env.HOME ? join(process.env.HOME, ".agents") : undefined
-  // minimal-agent's own per-user plugins root. The first-run bootstrap
-  // clones `minimal-agent-plugins` here, so this is where the extended
-  // first-party plugins (Fetch, Skill, slash-menu, …) live on an installed
-  // box. Sits above embedded built-ins but below the user's hand-curated
-  // ~/.agents/plugins and <cwd>/.agents/plugins roots. See `userDir` in
-  // PluginLoaderOptions for the precedence rationale.
-  const userDir = resolveAgentHome()
-
-  // First-run plugin bootstrap. On a freshly-installed box the extended
-  // first-party plugins (Fetch, Skill, slash-menu, …) aren't present; clone
-  // them ONCE into `<userDir>/plugins` so the loader (which scans that as the
-  // `user` root) picks them up on THIS boot. Best-effort and fully gated:
-  //   - skipped entirely in non-interactive runs (--prompt / `-` / piped):
-  //     a one-shot scripted call shouldn't reach out to the network or grow
-  //     the toolset under the user's feet.
-  //   - opt-out via MINIMAL_AGENT_NO_PLUGIN_SYNC=1 or config `pluginSync:false`.
-  //   - never throws; a private-repo / offline / no-git box degrades to the
-  //     embedded plugins with a quiet startup row.
-  if (userDir && SHOW_HEADER) {
-    const pluginSyncEnabled =
-      process.env.MINIMAL_AGENT_NO_PLUGIN_SYNC === "1" ? false : (userConfig.pluginSync ?? true)
-    const pluginsRepo =
-      process.env.MINIMAL_AGENT_PLUGINS_REPO?.trim() || userConfig.pluginsRepo || undefined
-    const sync = await bootstrapUserPlugins({
-      targetDir: join(userDir, "plugins"),
-      enabled: pluginSyncEnabled,
-      repoUrl: pluginsRepo,
-      showSpinner: true,
-      spinnerFactory: startStartupProgressSpinner,
-    })
-    // Only surface a startup row when something meaningful happened: a fresh
-    // clone, or a failed/skipped attempt the operator may want to know about.
-    // The common steady-state (`present`) and the opt-out (`disabled`) stay
-    // silent so the tree doesn't gain a permanent noise row.
-    if (sync.status === "cloned") {
-      printStartupRow("plugins", `${c.dim("+")} ${c.dim(sync.label)}`)
-    } else if (sync.status === "failed" || sync.status === "skipped") {
-      // Quiet, non-fatal. Detail lands in the file log via the diagnostic bus
-      // (the loader still runs with embedded plugins only).
-      diag.notice("plugin-sync", sync.detail ?? sync.label)
-    }
-  }
+  // `userDir` (the per-user agent home) is resolved up front, before provider
+  // discovery, and the first-run plugin clone runs earlier still (before
+  // provider resolution) — because the LLM providers now ship IN the cloned
+  // plugins repo, so they must exist before auth/sign-in. See both blocks above.
 
   // Embedded plugins ship inside the agent's own checkout: `<repo>/plugins/`.
   // `import.meta.dirname` (Bun + Node 20+) of this file is `<repo>/src`, so
