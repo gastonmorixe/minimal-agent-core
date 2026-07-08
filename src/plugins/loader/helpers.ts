@@ -21,6 +21,8 @@ import type {
   TUIResult,
 } from "../types.ts"
 
+import { subprocessOutputExceededResult } from "./PROMPTS.ts"
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -352,7 +354,7 @@ export async function invokeSubprocess(
       out = await consumeStreamBounded(proc.stdout, MAX_STDOUT_BYTES)
     } catch (err: any) {
       killTree("SIGKILL")
-      out = `Error: Subprocess output exceeded maximum length of ${MAX_STDOUT_BYTES} bytes. Details: ${err.message}`
+      out = subprocessOutputExceededResult(MAX_STDOUT_BYTES, err.message)
       if (isTool) return { kind: "tool_result", content: out, is_error: true }
       return { kind: "rendered", ansi: out }
     }

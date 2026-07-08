@@ -48,7 +48,6 @@ import {
   TOOL_PREVIEW_LINES,
   TOOL_PREVIEW_LINES_DEFAULT,
   type ToolPresentation,
-  tuiPreviewHint,
 } from "../host/ui/tool-transcript/format.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
@@ -67,6 +66,7 @@ import {
 import type { SessionStore } from "../session/session-store.ts"
 import { expandTabs } from "../terminal/term-width.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
+import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import type { ToolTimeTracker } from "../tools/tool-time.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
@@ -737,12 +737,14 @@ export async function executeToolRound(
         // (body under `minBytesToPersist`, store disabled, skip-listed tool).
         const rawPath = blobWrite?.path
         const hint = tuiPreviewHint(tool.name, rawPath)
-        const pathAttr = rawPath ? ` path="${rawPath}"` : ""
-        content =
-          `${content}\n\n<ma::agent::output-preview ` +
-          `shown="${e.shown}" total="${e.total}" tool="${tool.name}"${pathAttr}>` +
-          hint +
-          `</ma::agent::output-preview>`
+        content = outputPreviewAnnotation({
+          content,
+          shown: e.shown,
+          total: e.total,
+          tool: tool.name,
+          path: rawPath,
+          hint,
+        })
       }
     }
   }

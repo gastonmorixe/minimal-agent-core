@@ -42,6 +42,8 @@ import { c } from "../agent/agent.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 
+import { activeModeStamp, modeChangeAttachment, modeToolRefusalMessage } from "./PROMPTS.ts"
+
 /**
  * Resolved tool-permission rules for a mode.
  *
@@ -618,10 +620,9 @@ export class ModeManager {
     if (!perms) return { allowed: true }
     if (isToolAllowedByPermissions(toolName, perms, toolInput)) return { allowed: true }
     const label = (m.label ?? m.id).toUpperCase()
-    const tail = m.refusalHint ? ` ${m.refusalHint}` : ""
     return {
       allowed: false,
-      message: `Tool "${toolName}" is not permitted in ${label} mode.${tail}`,
+      message: modeToolRefusalMessage({ toolName, label, refusalHint: m.refusalHint }),
     }
   }
 
@@ -649,7 +650,7 @@ export class ModeManager {
     const m = this.active()
     if (!m) return null
     const since = (this.activeSinceAt ?? this.now()).toISOString()
-    return `<ma::agent::mode-active id="${m.id}" since="${since}" />`
+    return activeModeStamp(m.id, since)
   }
 
   /**
@@ -703,7 +704,7 @@ export class ModeManager {
     // render their chip history correctly.
     return {
       type: "text",
-      text: `<ma::agent::mode-change from="${from}" to="${to}" at="${at.toISOString()}" />`,
+      text: modeChangeAttachment({ from, to, at: at.toISOString() }),
     }
   }
 

@@ -19,6 +19,12 @@ import {
   repairOrphanedToolUse as repairOrphanedToolUseImpl,
   rollbackPendingTurn as rollbackPendingTurnImpl,
 } from "../agent/history-repair.ts"
+import {
+  emergencyCapTriggeredAttachmentText,
+  outputTruncatedAttachmentText,
+  responseTruncatedPlaceholderText,
+  turnAbortedAttachmentText,
+} from "../agent/PROMPTS.ts"
 import { type AskUserFn, runPreflightPipeline } from "../agent/preflight-pipeline.ts"
 import {
   buildReflectionCheckpointBlock,
@@ -324,7 +330,7 @@ export class AgentCore {
       this.previousTurnAborted = false
       initialUserContent.push({
         type: "text",
-        text: "<ma::agent::turn-aborted />\nThe previous turn was interrupted by the user before it finished. Everything already completed above is preserved (this is not an error). Treat the earlier plan as paused: address the new instruction below, and do not silently resume the prior plan unless the user asks you to continue it.",
+        text: turnAbortedAttachmentText(),
       })
     }
 
@@ -581,7 +587,7 @@ export class AgentCore {
               const placeholder: ContentBlock[] = [
                 {
                   type: "text",
-                  text: "[response truncated at the output-token limit before any content was produced]",
+                  text: responseTruncatedPlaceholderText(),
                 },
               ]
               this.messages.push({ role: "assistant", content: placeholder })
@@ -594,9 +600,7 @@ export class AgentCore {
             const cont: ContentBlock[] = [
               {
                 type: "text",
-                text:
-                  "<ma::agent::output-truncated />\n" +
-                  "Your previous response was cut off at the max_tokens output ceiling. Continue exactly from where you stopped. Do not repeat what you already wrote. If you were about to call a tool, issue that tool call now.",
+                text: outputTruncatedAttachmentText(),
               },
             ]
             this.messages.push({ role: "user", content: cont })
@@ -704,9 +708,7 @@ export class AgentCore {
           : [{ type: "text" as const, text: lastMsg.content }]
         content.push({
           type: "text",
-          text:
-            `<ma::agent::emergency-cap-triggered round="${this.maxToolRounds}" />\n` +
-            "You have reached the configured emergency tool-round cap for this user turn. Tools are disabled for this final response. Summarize what you accomplished, surface anything the user should know, and stop.",
+          text: emergencyCapTriggeredAttachmentText(this.maxToolRounds),
         })
         lastMsg.content = content
       }

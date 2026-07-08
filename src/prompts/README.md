@@ -65,6 +65,35 @@ example, see how `buildLoopSafetyParagraph` composes the `loop-safety/*`
 fragments (it lived in the now-removed `src/headers.ts`; the Anthropic header
 logic moved into the sibling `../minimal-agent-plugins/ma-llm-anthropic-plugin/`).
 
+## When markdown does not fit: colocated `PROMPTS.ts`
+
+A few model-facing strings are a bad fit for a standalone markdown file: a
+one-line wire token (`<ma::agent::mode-active id="..." />`), a short
+interpolated tool-result error (`Edit error: old_string matches N locations`),
+or a dense per-key map (the tool-parameter descriptions). Forty four-word `.md`
+files would be worse than one manifest.
+
+For those, put the strings in a `PROMPTS.ts` file **colocated with its
+consumer**: `src/tools/PROMPTS.ts`, `src/media/PROMPTS.ts`,
+`src/modes/PROMPTS.ts`, `src/plugins/loader/PROMPTS.ts`, `src/agent/PROMPTS.ts`.
+The contract is strict, so the file stays greppable and auditable:
+
+- It exports **only** string constants and pure `(vars) => string` builders.
+- **No logic** beyond a `switch`/interpolation that shapes the string. No IO,
+  no branching on runtime state, no imports besides types and helper
+  formatters.
+- Runtime attachments whose prose is real prose (multi-sentence) still go in
+  `prompts/runtime/*.md` and are loaded through a thin `PROMPTS.ts` wrapper
+  (see `src/agent/PROMPTS.ts` + `src/prompts/runtime/`), so even the templated
+  attachments keep their words in markdown.
+
+Two regression guards keep this from rotting:
+
+- `src/prompts/prompt-audit.test.ts` style-checks the markdown fragments.
+- `src/prompts/core-inline-prose-audit.test.ts` confirms each `PROMPTS.ts` seam
+  exists, style-checks the prose it emits, and fails if an extracted literal is
+  reintroduced inline in the logic file it came from.
+
 ## Layout
 
 ```
@@ -78,6 +107,12 @@ src/prompts/
     checkpoint-plain.tmpl.md
     ack.md
     emergency-cap.tmpl.md
+  runtime/                     # per-turn user attachments (loaded via src/agent/PROMPTS.ts)
+    turn-aborted.md
+    output-truncated.md
+    emergency-cap-triggered.tmpl.md
+    reflection-checkpoint.tmpl.md
+    response-truncated-placeholder.md
   anthropic/                   # Anthropic plan-auth preamble (server-validated)
     identity.claude-code.md
     billing.tmpl.md

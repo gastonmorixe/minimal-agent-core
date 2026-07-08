@@ -39,6 +39,7 @@ import { getSessionId } from "../session/session-id.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
+import * as ToolPrompts from "./PROMPTS.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./truncation.ts"
 
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
@@ -329,7 +330,7 @@ export function stripInternalFields(r: ToolExecResult): void {
 }
 
 const ABORTED_RESULT = (): ToolExecResult => ({
-  content: "tool aborted by user",
+  content: ToolPrompts.toolAbortedByUserResult(),
   is_error: true,
   _aborted: true,
 })
@@ -347,10 +348,10 @@ const BASH_TOOL: ToolDefinition = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      command: { description: "The command to execute", type: "string" },
-      timeout: { description: "Optional timeout in milliseconds (max 600000)", type: "number" },
+      command: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.command, type: "string" },
+      timeout: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.timeout, type: "number" },
       description: {
-        description: "Clear, concise description of what this command does",
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.description,
         type: "string",
       },
     },
@@ -368,9 +369,20 @@ const READ_TOOL: ToolDefinition = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      file_path: { description: "The absolute path to the file to read", type: "string" },
-      offset: { description: "Line number to start reading from", type: "integer", minimum: 0 },
-      limit: { description: "Number of lines to read", type: "integer", exclusiveMinimum: 0 },
+      file_path: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.file_path,
+        type: "string",
+      },
+      offset: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.offset,
+        type: "integer",
+        minimum: 0,
+      },
+      limit: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.limit,
+        type: "integer",
+        exclusiveMinimum: 0,
+      },
     },
     required: ["file_path"],
     additionalProperties: false,
@@ -386,8 +398,11 @@ const WRITE_TOOL: ToolDefinition = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      file_path: { description: "The absolute path to the file to write", type: "string" },
-      content: { description: "The content to write to the file", type: "string" },
+      file_path: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.file_path,
+        type: "string",
+      },
+      content: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.content, type: "string" },
     },
     required: ["file_path", "content"],
     additionalProperties: false,
@@ -403,11 +418,20 @@ const EDIT_TOOL: ToolDefinition = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      file_path: { description: "The absolute path to the file to modify", type: "string" },
-      old_string: { description: "The text to replace", type: "string" },
-      new_string: { description: "The text to replace it with", type: "string" },
+      file_path: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.file_path,
+        type: "string",
+      },
+      old_string: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.old_string,
+        type: "string",
+      },
+      new_string: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.new_string,
+        type: "string",
+      },
       replace_all: {
-        description: "Replace all occurrences (default false)",
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.replace_all,
         default: false,
         type: "boolean",
       },
@@ -426,8 +450,8 @@ const GLOB_TOOL: ToolDefinition = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      pattern: { description: "The glob pattern to match files against", type: "string" },
-      path: { description: "Directory to search in. Defaults to cwd.", type: "string" },
+      pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.pattern, type: "string" },
+      path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.path, type: "string" },
     },
     required: ["pattern"],
     additionalProperties: false,
@@ -443,22 +467,37 @@ const GREP_TOOL: ToolDefinition = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
-      pattern: { description: "Regex pattern to search for", type: "string" },
-      path: { description: "File or directory to search in. Defaults to cwd.", type: "string" },
-      glob: { description: 'Glob pattern to filter files (e.g. "*.js")', type: "string" },
+      pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.pattern, type: "string" },
+      path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.path, type: "string" },
+      glob: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.glob, type: "string" },
       output_mode: {
-        description: "Output mode: content, files_with_matches, or count",
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.output_mode,
         type: "string",
         enum: ["content", "files_with_matches", "count"],
       },
-      "-i": { description: "Case insensitive search", type: "boolean" },
-      "-n": { description: "Show line numbers (default true)", type: "boolean" },
-      "-A": { description: "Lines after match", type: "number" },
-      "-B": { description: "Lines before match", type: "number" },
-      "-C": { description: "Context lines", type: "number" },
-      context: { description: "Context lines (alias for -C)", type: "number" },
-      head_limit: { description: "Limit output lines (default 250)", type: "number" },
-      multiline: { description: "Enable multiline mode", type: "boolean" },
+      "-i": {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.caseInsensitive,
+        type: "boolean",
+      },
+      "-n": {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.showLineNumbers,
+        type: "boolean",
+      },
+      "-A": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.after, type: "number" },
+      "-B": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.before, type: "number" },
+      "-C": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.context, type: "number" },
+      context: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.contextAlias,
+        type: "number",
+      },
+      head_limit: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.headLimit,
+        type: "number",
+      },
+      multiline: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.multiline,
+        type: "boolean",
+      },
     },
     required: ["pattern"],
     additionalProperties: false,
@@ -605,9 +644,7 @@ async function dispatch(
       // the interceptor and reaches here, surface a clear error rather
       // than silently returning stale data.
       return {
-        content:
-          "Mode tool reached the dispatcher; this should have been handled by " +
-          "the agent loop. File a bug : see `agent.ts` Mode interceptor.",
+        content: ToolPrompts.modeToolDispatcherBugResult(),
         is_error: true,
       }
     case "reflection-ack":
@@ -618,13 +655,11 @@ async function dispatch(
       // corrective hint so the model learns to write the tag as text
       // next time.
       return {
-        content:
-          "reflection-ack applied. Next time, write this tag as inline text " +
-          "in your response body, not as a tool call.",
+        content: ToolPrompts.reflectionAckToolResult(),
         is_error: false,
       }
     default:
-      return { content: `Unknown tool: ${name}`, is_error: true }
+      return { content: ToolPrompts.unknownToolResult(name), is_error: true }
   }
 }
 
@@ -756,7 +791,7 @@ async function withFileLock(
     return await run()
   } catch (e) {
     if (e instanceof LockTimeoutError) {
-      return { content: `${tool} error: ${e.message}`, is_error: true }
+      return { content: ToolPrompts.lockTimeoutResult(tool, e.message), is_error: true }
     }
     if (e instanceof LockAbortedError) {
       return ABORTED_RESULT()
@@ -764,7 +799,7 @@ async function withFileLock(
     // Any other thrown error from acquire (filesystem-level) : surface as
     // a tool error rather than letting it crash the dispatch loop.
     const msg = e instanceof Error ? e.message : String(e)
-    return { content: `${tool} error: lock acquire failed: ${msg}`, is_error: true }
+    return { content: ToolPrompts.lockAcquireFailedResult(tool, msg), is_error: true }
   }
 }
 
@@ -822,7 +857,7 @@ async function execBash(
         bashCwd = newDir
         return { content: "" }
       }
-      return { content: `cd: no such directory: ${unquoted}`, is_error: true }
+      return { content: ToolPrompts.cdNoSuchDirectoryResult(unquoted), is_error: true }
     }
 
     // Async spawn: critical for UI responsiveness. The previous
@@ -1030,7 +1065,7 @@ async function execBash(
     // still trims this to 64 KB for the model; the full capped body reaches the
     // blob store via `_raw`.
     if (outputCapped) {
-      const capMsg = `[output exceeded ${MAX_BASH_OUTPUT_BYTES} bytes; command terminated and output truncated]`
+      const capMsg = ToolPrompts.bashOutputCapMarker(MAX_BASH_OUTPUT_BYTES)
       // PREPEND the marker: the body is ~MAX_BASH_OUTPUT_BYTES, far past the
       // universal 64 KB post-hoc clamp which keeps the FRONT. An end-appended
       // marker would be clipped off; at the front the model always sees it.
@@ -1051,8 +1086,8 @@ async function execBash(
     if (timedOut) {
       return {
         content: output
-          ? `${output}\n[timed out after ${timeout}ms]`
-          : `[timed out after ${timeout}ms]`,
+          ? `${output}\n${ToolPrompts.bashTimedOutMarker(timeout)}`
+          : ToolPrompts.bashTimedOutMarker(timeout),
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }
@@ -1060,7 +1095,7 @@ async function execBash(
 
     if (proc.exitCode !== 0) {
       return {
-        content: output || `Exit code ${proc.exitCode}`,
+        content: output || ToolPrompts.bashExitCodeResult(proc.exitCode),
         is_error: true,
         _truncCtx: { totalBytes, totalLines },
       }
@@ -1068,7 +1103,7 @@ async function execBash(
     return { content: output, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
-      content: `Bash error: ${e instanceof Error ? e.message : String(e)}`,
+      content: ToolPrompts.bashErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,
     }
   }
@@ -1111,8 +1146,7 @@ async function execRead(
   // Self-heal a whitespace-confusable path (e.g. macOS screenshots whose name
   // carries a NARROW NO-BREAK SPACE that got normalized to a plain space).
   const filePath = resolveWhitespaceConfusablePath(requestedPath) ?? requestedPath
-  const healedNote =
-    filePath !== requestedPath ? `Note: resolved to "${filePath}" (whitespace mismatch).\n` : ""
+  const healedNote = filePath !== requestedPath ? ToolPrompts.whitespaceResolvedNote(filePath) : ""
 
   // Size guard (B-045): both branches below slurp the whole file via
   // readFileSync, which OOMs on a multi-GB file. Check the on-disk size BEFORE
@@ -1123,8 +1157,7 @@ async function execRead(
     if (st.size > MAX_READ_BYTES) {
       return {
         content:
-          healedNote +
-          `File is ${(st.size / 1024 / 1024).toFixed(1)} MB, exceeds the 50 MB read limit. Use offset/limit to read a portion, or Grep to search it.`,
+          healedNote + ToolPrompts.readTooLargeResult((st.size / 1024 / 1024).toFixed(1), 50),
         is_error: true,
       }
     }
@@ -1144,7 +1177,7 @@ async function execRead(
       bytes = await Bun.file(filePath).bytes()
     } catch (e) {
       return {
-        content: `Read error: ${e instanceof Error ? e.message : String(e)}`,
+        content: ToolPrompts.readErrorResult(e instanceof Error ? e.message : String(e)),
         is_error: true,
       }
     }
@@ -1167,7 +1200,7 @@ async function execRead(
     return renderTextRead(content, offset, limit, healedNote)
   } catch (e) {
     return {
-      content: `Read error: ${e instanceof Error ? e.message : String(e)}`,
+      content: ToolPrompts.readErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,
     }
   }
@@ -1231,10 +1264,10 @@ async function execWrite(
     const display = patch
       ? renderUnifiedDiff(patch, isNew ? `New file: ${filePath}` : `Write: ${filePath}`)
       : undefined
-    return { content: `File written: ${filePath}`, display }
+    return { content: ToolPrompts.fileWrittenResult(filePath), display }
   } catch (e) {
     return {
-      content: `Write error: ${e instanceof Error ? e.message : String(e)}`,
+      content: ToolPrompts.writeErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,
     }
   }
@@ -1272,14 +1305,14 @@ async function execEdit(
 
     if (count === 0) {
       return {
-        content: `Edit error: old_string not found in ${filePath}`,
+        content: ToolPrompts.editOldStringNotFoundResult(filePath),
         is_error: true,
       }
     }
 
     if (!replaceAll && count > 1) {
       return {
-        content: `Edit error: old_string matches ${count} locations in ${filePath}. Use replace_all or provide more context.`,
+        content: ToolPrompts.editOldStringMultipleMatchesResult(count, filePath),
         is_error: true,
       }
     }
@@ -1295,12 +1328,12 @@ async function execEdit(
     const patch = buildEditDiff(filePath, before, oldString, newString, replaceAll)
     const display = patch ? renderUnifiedDiff(patch) : undefined
     return {
-      content: `File edited: ${filePath} (${replaceAll ? count : 1} replacement(s))`,
+      content: ToolPrompts.fileEditedResult(filePath, replaceAll ? count : 1),
       display,
     }
   } catch (e) {
     return {
-      content: `Edit error: ${e instanceof Error ? e.message : String(e)}`,
+      content: ToolPrompts.editErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,
     }
   }
@@ -1348,7 +1381,7 @@ async function execGlob(
     }
 
     if (entries.length === 0) {
-      return { content: "No files matched the pattern." }
+      return { content: ToolPrompts.noFilesMatchedResult() }
     }
     // Sort for a stable, `ls`-like ordering of the relative paths.
     entries.sort()
@@ -1358,7 +1391,7 @@ async function execGlob(
     return { content: output, _truncCtx: { totalBytes, totalLines } }
   } catch (e) {
     return {
-      content: `Glob error: ${e instanceof Error ? e.message : String(e)}`,
+      content: ToolPrompts.globErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,
     }
   }
@@ -1428,14 +1461,14 @@ async function execGrep(
 
     if (result.error) {
       return {
-        content: `Grep error: ${result.error.message}`,
+        content: ToolPrompts.grepErrorResult(result.error.message),
         is_error: true,
       }
     }
 
     const raw = (result.stdout ?? "").trim()
     if (!raw) {
-      return { content: "No matches found." }
+      return { content: ToolPrompts.noMatchesFoundResult() }
     }
     const allLines = raw.split("\n")
     const totalBytes = Buffer.byteLength(raw, "utf8")
@@ -1448,7 +1481,7 @@ async function execGrep(
     }
   } catch (e) {
     return {
-      content: `Grep error: ${e instanceof Error ? e.message : String(e)}`,
+      content: ToolPrompts.grepErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,
     }
   }

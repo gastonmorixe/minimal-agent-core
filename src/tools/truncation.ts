@@ -21,6 +21,8 @@ export const MAX_TOOL_OUTPUT_BYTES = 64_000
 /** Hard line ceiling for any single tool result body. */
 export const MAX_TOOL_OUTPUT_LINES = 1_000
 
+import { truncationHint, truncationNotice } from "./PROMPTS.ts"
+
 export interface TruncateCtx {
   /** Tool name; selects the per-tool resume hint. */
   tool?: string
@@ -144,10 +146,15 @@ export function truncateToolOutput(
   const totalL = ctx.totalLines != null ? String(ctx.totalLines) : "unknown"
   const hint = ctx.hint ?? defaultHint(ctx.tool, cutLine)
 
-  const content =
-    kept +
-    `\n\n[truncated: shown ${shownBytes} of ${totalB} bytes, ` +
-    `${shownLines}/${totalL} lines; cut at byte ${shownBytes}, line ${cutLine}. ${hint}]`
+  const content = truncationNotice({
+    kept,
+    shownBytes,
+    totalBytes: totalB,
+    shownLines,
+    totalLines: totalL,
+    cutLine,
+    hint,
+  })
   const info: TruncationInfo = {
     tool: ctx.tool,
     truncated: true,
@@ -162,39 +169,7 @@ export function truncateToolOutput(
 }
 
 function defaultHint(tool: string | undefined, cutLine: number): string {
-  switch (tool) {
-    case "Read":
-      return `to continue, call Read with offset=${cutLine} (and limit as needed).`
-    case "Grep":
-      return `narrow with a more specific pattern, glob, or smaller -A/-B/-C; or raise head_limit explicitly.`
-    case "Bash":
-      // The clamp keeps the FRONT of the body, so a failing build/test run's
-      // diagnostics (which live at the END) are exactly what got dropped.
-      // Steer the model to the tail explicitly, and remind it the full body
-      // is recoverable from the raw-output blob the agent appends below.
-      //
-      // Deliberately NOT spelling the literal `<ma::agent::raw-output …/>`
-      // token here: this hint is inlined into the model-facing `[truncated:]`
-      // notice, and embedding the real annotation token inside body prose
-      // both pollutes the namespace `findAnnotationStart` scans and trips
-      // `not.toMatch(/<ma::agent::raw-output/)` invariants when the store is
-      // disabled and no footer is actually written. "raw-output blob" reads
-      // the same to the model without the machine token.
-      return `output exceeded ${MAX_TOOL_OUTPUT_BYTES} bytes and the FRONT was kept, so trailing errors/build failures may be cut. Re-run scoped to the tail (e.g. \`... 2>&1 | tail -n 100\`) or filtered (\`grep -nE 'error:|FAIL'\`); or Read the tail of the raw-output blob whose path is appended below, which holds the full output.`
-    case "Glob":
-      return `narrow the pattern or search a subdirectory.`
-    case "Fetch":
-      // Plugin tool. Clamped by the agent now that raw is recoverable
-      // via the blob store. Steer toward narrowing rather than re-fetch.
-      return `the full body is preserved at the \`<ma::agent::raw-output … />\` path below; use Read on that path, or re-call Fetch with a CSS \`selector\` to scope to a specific element.`
-    case "WebSearch":
-      return `lower \`count\`, narrow the query, or use the result's \`url\` to Fetch a specific page.`
-    default:
-      // Plugin tools we don't know about land here. The pointer footer
-      // appended by the agent below tells the model where to find the
-      // full bytes, so the "narrower parameters" copy doesn't strand it.
-      return `re-run with narrower parameters; the full body is preserved at the \`<ma::agent::raw-output … />\` path below.`
-  }
+  return truncationHint(tool, cutLine, MAX_TOOL_OUTPUT_BYTES)
 }
 
 /** Truncate `s` to at most `maxBytes` UTF-8 bytes, never splitting a codepoint. */
