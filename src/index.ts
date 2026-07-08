@@ -166,7 +166,7 @@ const {
   usagePeriod,
   dumpArg,
   dumpFormatArg,
-  systemPromptOverrides,
+  systemPromptOverrides: _systemPromptOverrides,
 } = opts
 
 // ---------------------------------------------------------------------------
