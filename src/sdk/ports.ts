@@ -267,6 +267,8 @@ export interface AgentCoreConfig {
    * provider's default displayName entry.
    */
   credentialName?: string
+  /** Resolved system-prompt overrides from CLI/env/config. */
+  systemPromptOverrides?: import("../llm/system-prompt-overrides.ts").SystemPromptOverrides
   /** Speed mode. */
   speed?: "normal" | "fast"
   /** Reflection checkpoint cadence in tool rounds. */

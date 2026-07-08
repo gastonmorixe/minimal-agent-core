@@ -239,6 +239,78 @@ describe("loadUserConfig", () => {
     writeFileSync(path, JSON.stringify({ provider: "test-gateway" }))
     expect(loadUserConfig()).toEqual({ provider: "test-gateway" })
   })
+
+  it("parses systemPrompt with string values as text replacements", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        systemPrompt: {
+          identity: "custom identity",
+          instructions: "custom instructions",
+        },
+      }),
+    )
+    expect(loadUserConfig()).toEqual({
+      systemPrompt: { identity: "custom identity", instructions: "custom instructions" },
+    })
+  })
+
+  it("parses systemPrompt with false/null as omit signals", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        systemPrompt: {
+          loopSafety: false,
+          toolOutputConventions: null,
+        },
+      }),
+    )
+    expect(loadUserConfig()).toEqual({
+      systemPrompt: { loopSafety: false, toolOutputConventions: null },
+    })
+  })
+
+  it("parses systemPrompt file keys", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        systemPrompt: {
+          instructionsFile: "/tmp/instructions.md",
+          identityFile: "/tmp/identity.md",
+        },
+      }),
+    )
+    expect(loadUserConfig()).toEqual({
+      systemPrompt: { instructionsFile: "/tmp/instructions.md", identityFile: "/tmp/identity.md" },
+    })
+  })
+
+  it("parses systemPrompt unsafeProviderOverrides", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        systemPrompt: { unsafeProviderOverrides: true },
+      }),
+    )
+    expect(loadUserConfig()).toEqual({
+      systemPrompt: { unsafeProviderOverrides: true },
+    })
+  })
+
+  it("drops unknown systemPrompt keys", () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        systemPrompt: { identity: "x", banana: 42 },
+      }),
+    )
+    expect(loadUserConfig()).toEqual({ systemPrompt: { identity: "x" } })
+  })
+
+  it("drops empty systemPrompt object", () => {
+    writeFileSync(path, JSON.stringify({ systemPrompt: {} }))
+    expect(loadUserConfig()).toEqual({})
+  })
 })
 
 describe("loadDisabledPluginIds", () => {

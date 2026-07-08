@@ -42,6 +42,7 @@ import {
   type SystemPromptBlock,
   type SystemPromptContext,
 } from "./provider-plugin.ts"
+import { applyPromptPartOverride, type SystemPromptOverrides } from "./system-prompt-overrides.ts"
 import type { SystemBlock } from "./transport/types.ts"
 
 /**
@@ -76,17 +77,21 @@ export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
  */
 export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPromptBlock[] {
   const ttl = opts?.cacheTtl ?? DEFAULT_CACHE_TTL
-  const blocks: SystemPromptBlock[] = [
-    {
-      type: "text",
-      text: buildInstructionsBlockText(opts),
-      cache_control: { type: "ephemeral", ttl, scope: "global" },
-    },
-  ]
-  if (opts?.sessionContext) {
+  const overrides = opts?.overrides
+  const instructionsText = buildInstructionsBlockText(opts)
+  const blocks: SystemPromptBlock[] = []
+  if (instructionsText.length > 0) {
     blocks.push({
       type: "text",
-      text: opts.sessionContext,
+      text: instructionsText,
+      cache_control: { type: "ephemeral", ttl, scope: "global" },
+    })
+  }
+  const sessionContext = applyPromptPartOverride(opts?.sessionContext, overrides?.sessionContext)
+  if (sessionContext) {
+    blocks.push({
+      type: "text",
+      text: sessionContext,
       cache_control: { type: "ephemeral", ttl },
     })
   }
@@ -104,6 +109,8 @@ export interface ResolveSystemPromptOptions extends AgentSystemPromptOptions {
   authKind?: ProviderAuth["kind"]
   /** Override the neutral identity line. Providers may still replace it. */
   identity?: string
+  /** Resolved system-prompt overrides for identity/full/sessionContext/providerPreamble. */
+  overrides?: SystemPromptOverrides
 }
 
 /**
@@ -116,11 +123,30 @@ export function resolveSystemPromptForModel(
   modelId: string,
   opts?: ResolveSystemPromptOptions,
 ): SystemBlock[] {
+  const overrides = opts?.overrides
+
+  // full override: replace or omit the entire core-controllable body.
+  if (overrides?.full) {
+    if (overrides.full.kind === "omit") return []
+    if (overrides.full.kind === "replace") {
+      return [{ type: "text", text: overrides.full.text }] as SystemBlock[]
+    }
+  }
+
+  const identity =
+    applyPromptPartOverride(opts?.identity ?? NEUTRAL_IDENTITY, overrides?.identity) ??
+    NEUTRAL_IDENTITY
+
   const ctx: SystemPromptContext = {
-    identity: opts?.identity ?? NEUTRAL_IDENTITY,
+    identity,
     body: buildAgentSystemBody(opts),
     authKind: opts?.authKind ?? "oauth",
     modelId,
+  }
+  if (overrides?.providerPreamble && overrides.providerPreamble.kind !== "default") {
+    ctx.providerPreambleOverride = overrides.providerPreamble as
+      | { readonly kind: "replace"; readonly text: string }
+      | { readonly kind: "omit" }
   }
 
   let providerId: string | undefined

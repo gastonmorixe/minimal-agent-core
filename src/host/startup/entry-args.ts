@@ -13,7 +13,9 @@
 import { findDashTypos, formatDashTypoError, normalizeArgs } from "../../cli/cli-args.ts"
 import { extractPromptFromArgs } from "../../cli/extract-prompt.ts"
 import { type CliOptions, parseCliOptions } from "../../cli/parse-argv.ts"
+import { resolveSystemPromptOverridesForStartup } from "../../cli/system-prompt-override-resolution.ts"
 import { loadUserConfig, type UserConfig } from "../../config/config.ts"
+import { SystemPromptOverrideError } from "../../llm/system-prompt-overrides.ts"
 import { setSessionId } from "../../session/session-id.ts"
 import { type CommandPlan, planCommand } from "../cli/command-plan.ts"
 import { resolveSessionTarget } from "../commands/session-index.ts"
@@ -100,7 +102,27 @@ export function prepareEntrypointArgs(input: PrepareEntrypointArgsInput): Entryp
   }
 
   const userConfig = loadUserConfig()
-  const opts = parseCliOptions(args, userConfig, input.env, parseFormatterCommand)
+  let systemPromptOverrides
+  try {
+    systemPromptOverrides = resolveSystemPromptOverridesForStartup({
+      args,
+      env: input.env,
+      config: userConfig,
+    })
+  } catch (e) {
+    if (e instanceof SystemPromptOverrideError) {
+      stderr.write(`${e.message}\n`)
+      exit(2)
+    }
+    throw e
+  }
+  const opts = parseCliOptions(
+    args,
+    userConfig,
+    input.env,
+    parseFormatterCommand,
+    systemPromptOverrides,
+  )
   const commandPlan = planCommand({
     dumpArg: opts.dumpArg,
     wantListSessions: opts.wantListSessions,

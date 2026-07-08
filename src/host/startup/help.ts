@@ -164,6 +164,54 @@ function buildHelpSections(): HelpSection[] {
       ],
     },
     {
+      title: c.bold("System prompt"),
+      note: c.dim("(override or omit individual system-prompt parts)"),
+      rows: [
+        row(
+          `${c.cyan("--system-prompt")} ${c.dim("<text>")}`,
+          "Replace the whole core-controllable system prompt",
+          ["or --system-prompt-file <path>, or --no-system-prompt to omit"],
+        ),
+        row(
+          `${c.cyan("--system-identity")} ${c.dim("<text>")}`,
+          "Replace the neutral identity block",
+          ["or --system-identity-file <path>, or --no-system-identity"],
+        ),
+        row(
+          `${c.cyan("--system-instructions")} ${c.dim("<text>")}`,
+          "Replace the base instructions block",
+          ["or --system-instructions-file <path>, or --no-system-instructions"],
+        ),
+        row(
+          `${c.cyan("--system-loop-safety")} ${c.dim("<text>")}`,
+          "Replace the loop-safety paragraph",
+          ["or --system-loop-safety-file <path>, or --no-system-loop-safety"],
+        ),
+        row(
+          `${c.cyan("--system-tool-output-conventions")} ${c.dim("<text>")}`,
+          "Replace the tool-output-conventions paragraph",
+          [
+            "or --system-tool-output-conventions-file <path>, or --no-system-tool-output-conventions",
+          ],
+        ),
+        row(
+          `${c.cyan("--system-session-context")} ${c.dim("<text>")}`,
+          "Replace the session-context block (plugin prompts)",
+          ["or --system-session-context-file <path>, or --no-system-session-context"],
+        ),
+        row(
+          `${c.cyan("--provider-system-preamble")} ${c.dim("<text>")}`,
+          "Replace the provider-owned preamble (requires --unsafe-system-prompt-overrides)",
+          ["or --provider-system-preamble-file <path>, or --no-provider-system-preamble"],
+        ),
+        row(
+          c.cyan("--unsafe-system-prompt-overrides"),
+          "Allow provider preamble replacement/omission",
+          ["without this flag, provider preamble overrides are rejected"],
+        ),
+      ],
+    },
+    {
       title: c.bold("Auth"),
       note: c.dim("(provider-owned auth flows, flags remain legacy aliases)"),
       rows: [
@@ -311,6 +359,14 @@ function buildHelpSections(): HelpSection[] {
           "default off",
         ]),
         row(c.cyan("NERD_FONT=1"), "Enable Nerd Font glyphs in TUI"),
+        row(
+          c.cyan("MINIMAL_AGENT_SYSTEM_*"),
+          "Override system-prompt parts (see System prompt section)",
+          [
+            "_INSTRUCTIONS, _IDENTITY, _LOOP_SAFETY, _TOOL_OUTPUT_CONVENTIONS,",
+            "_SESSION_CONTEXT, _PROMPT; each also *_FILE for a path; empty = omit",
+          ],
+        ),
       ],
     },
     {

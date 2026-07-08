@@ -13,6 +13,7 @@
 
 import type { AuthResult } from "../../auth/auth.ts"
 import type { CacheTtl } from "../../cache/cache-ttl.ts"
+import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { loadBlobStoreConfig } from "../../session/blob-store.ts"
@@ -31,6 +32,8 @@ export interface ComputeStartupHashesInput {
   readonly auth: AuthResult
   /** Resolved cache TTL bucket. */
   readonly cacheTtl: CacheTtl
+  /** Resolved system-prompt overrides from CLI/env/config. */
+  readonly systemPromptOverrides?: SystemPromptOverrides
 }
 
 /** The two digests stored on the session-store meta record. */
@@ -48,7 +51,7 @@ export interface StartupHashes {
 export async function computeStartupHashes(
   input: ComputeStartupHashesInput,
 ): Promise<StartupHashes> {
-  const { loader, modeManager, selectedModelBase, auth, cacheTtl } = input
+  const { loader, modeManager, selectedModelBase, auth, cacheTtl, systemPromptOverrides } = input
 
   const pluginBlock = loader?.getPromptBlock() ?? null
   const modeAddition = modeManager?.systemPromptAddition() ?? ""
@@ -81,6 +84,7 @@ export async function computeStartupHashes(
           blobStoreEnabled,
           authKind: auth.type,
           cacheTtl,
+          overrides: systemPromptOverrides,
         }),
       )
     : ""

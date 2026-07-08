@@ -206,6 +206,16 @@ export interface ProviderSetupContext {
 // ---------------------------------------------------------------------------
 
 /**
+ * Minimal tri-state override for a single prompt part, mirrored from
+ * `src/llm/system-prompt-overrides.ts` so the plugin-api contract stays
+ * dependency-free. Only `replace` and `omit` are meaningful at the provider
+ * seam; `default` is never passed.
+ */
+export type ProviderPromptPartOverride =
+  | { readonly kind: "replace"; readonly text: string }
+  | { readonly kind: "omit" }
+
+/**
  * One system-prompt block. Structurally identical to `headers.SystemBlock`,
  * but declared here so the provider port carries no dependency on the
  * Anthropic-flavored `headers.ts` module (DIP: the contract owns its types).
@@ -244,6 +254,8 @@ export interface SystemPromptContext {
   authKind: ProviderAuth["kind"]
   /** Normalized model id (no `[1m]`/`[2m]` suffix). */
   modelId: string
+  /** Optional provider preamble override, gated by unsafe flag at startup. */
+  providerPreambleOverride?: ProviderPromptPartOverride
 }
 
 /**

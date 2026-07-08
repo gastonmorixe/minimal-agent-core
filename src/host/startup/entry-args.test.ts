@@ -131,4 +131,55 @@ describe("prepareEntrypointArgs", () => {
     })
     expect(await prepared.extractPrompt()).toBeNull()
   })
+
+  it("rejects provider preamble override without unsafe flag (exit 2)", () => {
+    const h = makeHarness()
+    let code: number | undefined
+    try {
+      prepareEntrypointArgs({
+        rawArgv: ["--provider-system-preamble", "custom preamble"],
+        env: {},
+        cwd: "/tmp",
+        ...h.deps,
+      })
+    } catch (e) {
+      if (e instanceof ExitSignal) code = e.code
+      else throw e
+    }
+    expect(code).toBe(2)
+    expect(h.writes.join("")).toContain("providerPreamble override requires")
+  })
+
+  it("accepts provider preamble override with unsafe flag", () => {
+    const h = makeHarness()
+    const prepared = prepareEntrypointArgs({
+      rawArgv: [
+        "--provider-system-preamble",
+        "custom preamble",
+        "--unsafe-system-prompt-overrides",
+      ],
+      env: {},
+      cwd: "/tmp",
+      ...h.deps,
+    })
+    expect(prepared.opts.systemPromptOverrides.providerPreamble).toEqual({
+      kind: "replace",
+      text: "custom preamble",
+    })
+  })
+
+  it("resolves system prompt overrides from CLI flags", () => {
+    const h = makeHarness()
+    const prepared = prepareEntrypointArgs({
+      rawArgv: ["--system-instructions", "custom instructions", "--no-system-loop-safety"],
+      env: {},
+      cwd: "/tmp",
+      ...h.deps,
+    })
+    expect(prepared.opts.systemPromptOverrides.instructions).toEqual({
+      kind: "replace",
+      text: "custom instructions",
+    })
+    expect(prepared.opts.systemPromptOverrides.loopSafety).toEqual({ kind: "omit" })
+  })
 })

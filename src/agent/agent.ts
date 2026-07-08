@@ -38,6 +38,7 @@ import {
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { findModel, findModelForProvider, getDefaultModelId } from "../llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import { selectedTransport } from "../llm/transport/select-transport.ts"
 import type { SystemBlock } from "../llm/transport/types.ts"
 import {
@@ -201,6 +202,8 @@ export class Agent {
    * (`src/cache-ttl.ts`). Defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`).
    */
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
+  /** Resolved system-prompt overrides from CLI/env/config. */
+  private systemPromptOverrides: SystemPromptOverrides | undefined
   /** Optional Plugin loader. When set, plugin tools merge with core tools. */
   private loader: PluginLoader | null
   /** Optional mode manager (mode-aware system prompt + tool filter). */
@@ -496,6 +499,8 @@ export class Agent {
      * See {@link Agent.toolTimeTracker} and `src/tool-time.ts`.
      */
     toolTimeTracker?: ToolTimeTracker | null
+    /** Resolved system-prompt overrides from CLI/env/config. */
+    systemPromptOverrides?: SystemPromptOverrides
   }) {
     this.auth = opts.auth
     // No explicit model ⇒ ask the registry for its default. A provider plugin
@@ -545,6 +550,7 @@ export class Agent {
     if (opts.toolTimeTracker !== undefined) {
       this.toolTimeTracker = opts.toolTimeTracker
     }
+    this.systemPromptOverrides = opts.systemPromptOverrides
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       for (const m of opts.initialMessages) this.messages.push(m)
     }
@@ -1056,6 +1062,7 @@ export class Agent {
       blobStoreEnabled: this.blobStore !== null,
       authKind: this.auth.type,
       cacheTtl: this.cacheTtl,
+      overrides: this.systemPromptOverrides,
     })
     const allTools: ToolDefinition[] = this.loader
       ? [...TOOL_DEFINITIONS, ...(this.loader.getExtraTools() as ToolDefinition[])]

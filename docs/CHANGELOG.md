@@ -7,6 +7,32 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
+### Feature: system-prompt overrides (`--system-*` flags, env, config)
+
+Every model-facing part of the system prompt can now be replaced or omitted at
+startup: the whole core prompt (`--system-prompt`), the neutral identity, the
+base instructions, the loop-safety paragraph, the tool-output-conventions
+paragraph, the session-context block (plugin prompts), and the provider preamble.
+Each part has a `--system-<part>` (inline text), `--system-<part>-file` (path),
+and `--no-system-<part>` (omit) form; an empty string also means omit. The same
+parts are configurable via `systemPrompt.*` in `config.jsonc` (a `false`/`null`
+value means omit, a string means replace, a `*File` key names a file) and via
+`MINIMAL_AGENT_SYSTEM_*` env vars. Precedence is CLI > env > config > default.
+
+The design is a single shared tri-state override model
+(`src/llm/system-prompt-overrides.ts`: `default | replace | omit`) resolved once
+at startup and threaded identically into the legacy `Agent`, the modern
+`AgentCore`, and the resume-drift `computeStartupHashes` — applied in exactly one
+place (`resolveSystemPromptForModel` + `buildInstructionsBlockText`), so both
+runtimes and the hash stay byte-consistent. With no overrides, the output is
+byte-identical to before (cache-key stable). Safety: the provider preamble is
+server-validated on some plans (Anthropic OAuth), so replacing/omitting it is
+refused unless `--unsafe-system-prompt-overrides` is passed; conflicting flags
+and missing `--system-*-file` paths fail fast at startup with exit 2; and
+`--system-prompt` replacing the whole body ignores the individual part overrides
+(the provider preamble is unaffected). No model-facing prose is hardcoded in
+TypeScript — only flag names, keys, and error strings.
+
 ### Feature: `--output-format {text,json,stream-json}` on the modern agent core
 
 Non-interactive runs (`--prompt`, `-`, a bare positional) can now select an
