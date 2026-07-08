@@ -34,6 +34,13 @@ import type { ImageBlock, ImageSource } from "../llm/canonical-messages.ts"
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
 import { base64EncodedSize, checkMedia, type MediaLimits } from "./limits.ts"
+import {
+  binaryDocumentRejectedMessage,
+  fittedImageTooLargeMessage,
+  imageSummaryMessage,
+  unsupportedEmbeddingMessage,
+  unsupportedImageModalityMessage,
+} from "./PROMPTS.ts"
 import { imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
 import { type FitResult, fitImageToBudget } from "./transform.ts"
 import { formatBytes, type MediaKind } from "./types.ts"
@@ -126,10 +133,7 @@ export async function decideReadFile(
     return {
       kind: "rejected",
       code: "unsupported-type",
-      message:
-        `${mimeType} (${formatBytes(bytes.length)}) is a binary document. ` +
-        `Tool output can include text and images but not documents, so it can't be embedded here. ` +
-        `Ask the user to attach it to their message, or convert it to text/images first.`,
+      message: binaryDocumentRejectedMessage({ mimeType, sizeBytes: bytes.length }),
     }
   }
 
@@ -137,9 +141,7 @@ export async function decideReadFile(
   return {
     kind: "rejected",
     code: "unsupported-type",
-    message:
-      `${mimeType} (${formatBytes(bytes.length)}) can't be embedded in tool output. ` +
-      `Ask the user to attach it to their message instead.`,
+    message: unsupportedEmbeddingMessage({ mimeType, sizeBytes: bytes.length }),
   }
 }
 
@@ -154,9 +156,7 @@ async function decideImage(
     return {
       kind: "rejected",
       code: "unsupported-modality",
-      message:
-        `${modelId} doesn't accept image input, so this ${mimeType} ` +
-        `(${formatBytes(bytes.length)}) can't be shown to the model. Describe it for the user from context, or switch to a vision-capable model.`,
+      message: unsupportedImageModalityMessage({ modelId, mimeType, sizeBytes: bytes.length }),
     }
   }
 
@@ -204,9 +204,11 @@ async function decideImage(
     return {
       kind: "rejected",
       code: "too-large",
-      message:
-        `${formatBytes(bytes.length)} image is too large to embed even after resizing ` +
-        `(per-item cap ${formatBytes(ctx.limits.maxBytesPerItem)} encoded for ${modelId}).`,
+      message: fittedImageTooLargeMessage({
+        sizeBytes: bytes.length,
+        limitBytes: ctx.limits.maxBytesPerItem,
+        modelId,
+      }),
     }
   }
 
@@ -230,10 +232,12 @@ export function imageSummary(
   fittedStrategy: string | null,
 ): string {
   const sub = mimeType.split("/")[1]?.toUpperCase() ?? "IMAGE"
-  const dims = dimensions ? `${dimensions.width}x${dimensions.height} ` : ""
-  const base = `[${sub} image ${dims}${formatBytes(sizeBytes)} — shown to the model below]`
-  if (fittedStrategy) return `${base.slice(0, -1)}; resized to fit (${fittedStrategy})]`
-  return base
+  return imageSummaryMessage({
+    subtype: sub,
+    sizeBytes,
+    dimensions,
+    fittedStrategy,
+  })
 }
 
 /** Re-export so callers don't reach past this module for the budget math. */

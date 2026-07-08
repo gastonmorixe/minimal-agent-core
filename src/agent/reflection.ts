@@ -23,6 +23,8 @@ import type { StatusBus } from "../bus/status.ts"
 import type { InputCaptureStack } from "../input/input-capture-stack.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 
+import { reflectionCheckpointAttachmentText } from "./PROMPTS.ts"
+
 /**
  * Default interval (in tool-execution rounds) between reflection
  * checkpoints within a single `run()` call. 50 because a real agentic
@@ -222,9 +224,6 @@ export function buildReflectionCheckpointBlock(round: number, cooldownMs: number
   const cooldownSec = Math.max(0, Math.round(cooldownMs / 1000))
   return {
     type: "text",
-    text:
-      `<ma::agent::reflection-checkpoint round="${round}" cooldown-applied-seconds="${cooldownSec}" />\n` +
-      `Soft checkpoint, not a stop signal. Briefly consider whether you are still on track, then continue, change strategy, or pause and ask the user. ` +
-      `Write \`<ma::agent::reflection-ack silence-for="K" reason="..." />\` as inline text anywhere in your response body (not a tool call) to suppress the next K checkpoints (skipping both the cooldown and this attachment).`,
+    text: reflectionCheckpointAttachmentText(round, cooldownSec),
   }
 }

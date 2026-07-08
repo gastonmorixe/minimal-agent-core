@@ -10,6 +10,14 @@
 
 import type { ModalitySupport } from "../llm/capabilities.ts"
 
+import {
+  mediaDimensionsTooLargeMessage,
+  mediaTooLargeMessage,
+  requestTooLargeMessage,
+  tooManyAttachmentsMessage,
+  unsupportedModalityMessage,
+  unsupportedTypeMessage,
+} from "./PROMPTS.ts"
 import { formatBytes, type MediaItem, type MediaKind, type MediaRejection } from "./types.ts"
 
 // ---------------------------------------------------------------------------
@@ -94,14 +102,14 @@ export function checkMedia(
     return {
       ok: false,
       code: "unsupported-modality",
-      message: `${modelId} doesn't accept ${item.kind} input`,
+      message: unsupportedModalityMessage(modelId, item.kind),
     }
   }
   if (!limits.acceptedMimeTypes.has(item.mimeType)) {
     return {
       ok: false,
       code: "unsupported-type",
-      message: `${item.mimeType} isn't a supported type for ${modelId}`,
+      message: unsupportedTypeMessage(item.mimeType, modelId),
     }
   }
   // The API enforces its byte cap on the base64-encoded payload (inline media
@@ -114,9 +122,12 @@ export function checkMedia(
     return {
       ok: false,
       code: "too-large",
-      message: `${formatBytes(item.sizeBytes)} (${formatBytes(
+      message: mediaTooLargeMessage({
+        rawBytes: item.sizeBytes,
         encodedBytes,
-      )} encoded) exceeds the ${formatBytes(limits.maxBytesPerItem)} limit for ${modelId}`,
+        limitBytes: limits.maxBytesPerItem,
+        modelId,
+      }),
     }
   }
   if (limits.maxDimension != null && item.dimensions) {
@@ -125,7 +136,12 @@ export function checkMedia(
       return {
         ok: false,
         code: "dimensions",
-        message: `${item.dimensions.width}x${item.dimensions.height} exceeds the ${limits.maxDimension}px limit for ${modelId}`,
+        message: mediaDimensionsTooLargeMessage({
+          width: item.dimensions.width,
+          height: item.dimensions.height,
+          maxDimension: limits.maxDimension,
+          modelId,
+        }),
       }
     }
   }
@@ -150,7 +166,7 @@ export function checkMediaSet(
       return {
         ok: false,
         code: "too-many",
-        message: `more than ${limits.maxItemsPerRequest} attachments for ${modelId}`,
+        message: tooManyAttachmentsMessage(limits.maxItemsPerRequest, modelId),
       }
     }
     // Aggregate the ENCODED sizes: the request budget is spent on the base64
@@ -160,9 +176,7 @@ export function checkMediaSet(
       return {
         ok: false,
         code: "request-too-large",
-        message: `attachments total exceeds the ${formatBytes(
-          limits.maxRequestBytes,
-        )} request limit for ${modelId}`,
+        message: requestTooLargeMessage(limits.maxRequestBytes, modelId),
       }
     }
     return OK

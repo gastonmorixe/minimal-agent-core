@@ -13,6 +13,8 @@
 
 import type { Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
+import { toolExecutionAbortedBeforeCompletionResult } from "./PROMPTS.ts"
+
 /**
  * Minimal structural view of the session store this module touches: it only
  * appends synthetic tool_result rows. Kept structural (not the concrete
@@ -111,7 +113,7 @@ export function repairOrphanedToolUse(
   const blocks: ToolResultBlock[] = orphans.map((tu) => ({
     type: "tool_result" as const,
     tool_use_id: tu.id,
-    content: "Tool execution aborted by user before completion.",
+    content: toolExecutionAbortedBeforeCompletionResult(),
     is_error: true,
   }))
   // Persist each synthetic result so the on-disk JSONL contains the

@@ -37,6 +37,7 @@ import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
+import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type {
   AgentContext,
   CommandInfo,
@@ -1416,7 +1417,7 @@ export class PluginLoader {
       return trigger.type === "tool"
         ? {
             kind: "tool_result",
-            content: `Unknown plugin tool: ${trigger.name}`,
+            content: unknownPluginToolResult(trigger.name),
             is_error: true,
           }
         : { kind: "rendered", ansi: "" }
@@ -1472,7 +1473,7 @@ export class PluginLoader {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (trigger.type === "tool") {
-        return { kind: "tool_result", content: `Handler error: ${msg}`, is_error: true }
+        return { kind: "tool_result", content: pluginHandlerErrorResult(msg), is_error: true }
       }
       // Inline handler: emit empty render and let the caller fall back to raw.
       return { kind: "rendered", ansi: "" }
