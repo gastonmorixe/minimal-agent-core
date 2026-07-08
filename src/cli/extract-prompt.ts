@@ -23,6 +23,11 @@
  * @module extract-prompt
  */
 
+import {
+  SYSTEM_PROMPT_OVERRIDE_NO_VALUE_FLAGS,
+  SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS,
+} from "./system-prompt-override-flags.ts"
+
 /**
  * Long flags that consume the following positional as their value.
  * Used to skip both the flag and its value when scanning for a bare
@@ -61,6 +66,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--output-format",
   "--service-tier",
   "--platform",
+  ...SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS,
 ])
 
 /**
@@ -93,6 +99,7 @@ export const FLAGS_NO_VALUE: ReadonlySet<string> = new Set([
   "--login",
   "--logout",
   "--auth-status",
+  ...SYSTEM_PROMPT_OVERRIDE_NO_VALUE_FLAGS,
 ])
 
 export type PromptSource = { kind: "literal"; text: string } | { kind: "stdin" } | { kind: "none" }

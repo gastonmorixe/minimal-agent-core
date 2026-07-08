@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import { normalizeArgs } from "./cli-args.ts"
 import { extractPromptFromArgs, FLAGS_NO_VALUE, FLAGS_WITH_VALUES } from "./extract-prompt.ts"
+import {
+  SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS,
+  SYSTEM_PROMPT_OVERRIDE_NO_VALUE_FLAGS,
+  SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS,
+} from "./system-prompt-override-flags.ts"
 
 describe("extractPromptFromArgs", () => {
   test("empty args → none (interactive REPL)", () => {
@@ -211,6 +216,13 @@ describe("extractPromptFromArgs", () => {
     }
   })
 
+  test("all system-prompt override value flags are tracked as value-bearing", () => {
+    for (const flag of SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS) {
+      expect(FLAGS_WITH_VALUES.has(flag)).toBe(true)
+      expect(extractPromptFromArgs([flag, "VAL"])).toEqual({ kind: "none" })
+    }
+  })
+
   test("each no-value flag does not consume the next positional", () => {
     for (const flag of FLAGS_NO_VALUE) {
       if (flag === "-") continue // `-` triggers stdin sentinel, separate path
@@ -218,6 +230,20 @@ describe("extractPromptFromArgs", () => {
         kind: "literal",
         text: "real-prompt",
       })
+    }
+  })
+
+  test("all system-prompt override no-value flags are tracked as no-value flags", () => {
+    for (const flag of SYSTEM_PROMPT_OVERRIDE_NO_VALUE_FLAGS) {
+      expect(FLAGS_NO_VALUE.has(flag)).toBe(true)
+    }
+  })
+
+  test("each system-prompt override part has value, file, and no-value flags", () => {
+    for (const spec of SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS) {
+      expect(FLAGS_WITH_VALUES.has(spec.valueFlag)).toBe(true)
+      expect(FLAGS_WITH_VALUES.has(spec.fileFlag)).toBe(true)
+      expect(FLAGS_NO_VALUE.has(spec.noFlag)).toBe(true)
     }
   })
 

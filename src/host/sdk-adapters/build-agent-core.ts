@@ -37,6 +37,7 @@
 import type { AuthResult } from "../../auth/auth.ts"
 import type { CacheTtl } from "../../cache/cache-ttl.ts"
 import type { Message } from "../../llm/messages.ts"
+import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
 import type { TransportFn } from "../../llm/transport/types.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { NetworkClient } from "../../network/index.ts"
@@ -102,6 +103,8 @@ export interface BuildAgentCoreDeps {
   networkClient?: NetworkClient
   /** Structured event sink (the JsonlEventSink for `--json`/`stream-json`). */
   eventSink?: EventSink
+  /** Resolved system-prompt overrides from CLI/env/config. */
+  systemPromptOverrides?: SystemPromptOverrides
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -194,6 +197,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     // Required by the type, unread at runtime.
     systemPrompt: "",
     maxTokens: 0,
+    ...(deps.systemPromptOverrides ? { systemPromptOverrides: deps.systemPromptOverrides } : {}),
   }
 
   return new AgentCore(config)

@@ -18,6 +18,7 @@
 import { type CacheTtl, type CacheTtlSource, resolveCacheTtl } from "../cache/cache-ttl.ts"
 import type { UserConfig } from "../config/config.ts"
 import { type EffortSource, resolveEffort } from "../config/effort-resolution.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 
 import { resolveShowHeader } from "./non-interactive-defaults.ts"
 import { type OutputFormat, resolveOutputFormat } from "./output-format.ts"
@@ -66,6 +67,7 @@ export interface CliOptions {
   readonly serviceTier: string | undefined
   readonly cacheTtl: CacheTtl
   readonly cacheTtlSource: CacheTtlSource
+  readonly systemPromptOverrides: SystemPromptOverrides
   readonly formatterExplicitArg: string[] | undefined
   readonly formatterExtraArgs: string[]
   readonly resumeArg: string | undefined
@@ -125,6 +127,7 @@ export function parseCliOptions(
   userConfig: UserConfig,
   env: EnvLike,
   parseFormatter: FormatterParser,
+  systemPromptOverrides: SystemPromptOverrides = {},
 ): CliOptions {
   const readFlagValue = makeReadFlagValue(args)
 
@@ -239,6 +242,7 @@ export function parseCliOptions(
     serviceTier,
     cacheTtl,
     cacheTtlSource,
+    systemPromptOverrides,
     formatterExplicitArg,
     formatterExtraArgs,
     resumeArg,

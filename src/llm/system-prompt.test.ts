@@ -23,6 +23,7 @@ import {
   NEUTRAL_IDENTITY,
   resolveSystemPromptForModel,
 } from "./system-prompt.ts"
+import type { SystemPromptOverrides } from "./system-prompt-overrides.ts"
 
 const CAPS: Capabilities = {
   contextWindow: 200_000,
@@ -121,5 +122,104 @@ describe("buildAgentSystemBody cache TTL", () => {
   it("threads cacheTtl through resolveSystemPromptForModel to the instructions block", () => {
     const out = resolveSystemPromptForModel("does-not-exist", { cacheTtl: "1h" })
     expect(out[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h", scope: "global" })
+  })
+})
+
+describe("system-prompt overrides", () => {
+  const NO_OVERRIDES: SystemPromptOverrides = {}
+
+  it("produces byte-identical output with no overrides (default identity + instructions)", () => {
+    const baseline = resolveSystemPromptForModel("does-not-exist", {})
+    const withEmpty = resolveSystemPromptForModel("does-not-exist", { overrides: NO_OVERRIDES })
+    expect(withEmpty).toEqual(baseline)
+  })
+
+  it("replaces the neutral identity", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      overrides: { identity: { kind: "replace", text: "Custom identity" } },
+    })
+    expect(out[0].text).toBe("Custom identity")
+  })
+
+  it("omits the neutral identity (falls back to NEUTRAL_IDENTITY)", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      overrides: { identity: { kind: "omit" } },
+    })
+    // omit on identity falls back to NEUTRAL_IDENTITY via applyPromptPartOverride
+    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
+  })
+
+  it("replaces instructions text", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      overrides: { instructions: { kind: "replace", text: "Custom instructions" } },
+    })
+    // instructions block starts with the replacement text
+    expect(out[1].text.startsWith("Custom instructions")).toBe(true)
+  })
+
+  it("omits instructions text (loop-safety still present)", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      overrides: { instructions: { kind: "omit" } },
+    })
+    // identity + loop-safety block (instructions omitted but loop-safety remains)
+    expect(out).toHaveLength(2)
+    expect(out[0].text).toBe(NEUTRAL_IDENTITY)
+    expect(out[1].text).toContain("Tool-use loop safety")
+  })
+
+  it("replaces session context", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      sessionContext: "original context",
+      overrides: { sessionContext: { kind: "replace", text: "custom context" } },
+    })
+    expect(out.at(-1)?.text).toBe("custom context")
+  })
+
+  it("omits session context", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      sessionContext: "original context",
+      overrides: { sessionContext: { kind: "omit" } },
+    })
+    // identity + instructions only, no session context
+    expect(out).toHaveLength(2)
+  })
+
+  it("full override replaces the entire core-controllable body", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      sessionContext: "ENV",
+      overrides: { full: { kind: "replace", text: "Complete custom prompt" } },
+    })
+    expect(out).toHaveLength(1)
+    expect(out[0].text).toBe("Complete custom prompt")
+  })
+
+  it("full override omit returns empty blocks", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      sessionContext: "ENV",
+      overrides: { full: { kind: "omit" } },
+    })
+    expect(out).toHaveLength(0)
+  })
+
+  it("threads providerPreambleOverride to the provider context", () => {
+    registerFakeModel("fake-pp", "pprov")
+    const seen: SystemPromptContext[] = []
+    registerProviderPlugin({
+      id: "pprov",
+      displayName: "PP",
+      shortCode: "pp",
+      register() {},
+      resolveSystemPrompt(ctx) {
+        seen.push(ctx)
+        return [{ type: "text", text: "PREAMBLE" }, ...ctx.body]
+      },
+    })
+    resolveSystemPromptForModel("fake-pp", {
+      overrides: { providerPreamble: { kind: "replace", text: "custom preamble" } },
+    })
+    expect(seen[0].providerPreambleOverride).toEqual({
+      kind: "replace",
+      text: "custom preamble",
+    })
   })
 })

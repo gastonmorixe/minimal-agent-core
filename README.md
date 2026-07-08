@@ -167,6 +167,40 @@ Useful flags:
 - **Hidden characters:** `--show-hidden-chars`
 - **Skip quota check:** `--skip-quota`
 
+### System-prompt overrides
+
+Each model-facing part of the system prompt can be replaced or omitted at
+startup. Every part has three forms, resolved with precedence CLI > env >
+config > default:
+
+- **Replace inline:** `--system-<part> "<text>"`
+- **Replace from file:** `--system-<part>-file <path.md>`
+- **Omit:** `--no-system-<part>` (or pass an empty string `--system-<part> ""`)
+
+The controllable parts:
+
+| Part | Flag | Config key | Env var |
+| --- | --- | --- | --- |
+| Whole core prompt | `--system-prompt` | `systemPrompt.full` | `MINIMAL_AGENT_SYSTEM_PROMPT` |
+| Neutral identity | `--system-identity` | `systemPrompt.identity` | `MINIMAL_AGENT_SYSTEM_IDENTITY` |
+| Base instructions | `--system-instructions` | `systemPrompt.instructions` | `MINIMAL_AGENT_SYSTEM_INSTRUCTIONS` |
+| Loop-safety paragraph | `--system-loop-safety` | `systemPrompt.loopSafety` | `MINIMAL_AGENT_SYSTEM_LOOP_SAFETY` |
+| Tool-output conventions | `--system-tool-output-conventions` | `systemPrompt.toolOutputConventions` | `MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS` |
+| Session context (plugin prompts) | `--system-session-context` | `systemPrompt.sessionContext` | `MINIMAL_AGENT_SYSTEM_SESSION_CONTEXT` |
+| Provider preamble | `--provider-system-preamble` | `systemPrompt.providerPreamble` | `MINIMAL_AGENT_PROVIDER_SYSTEM_PREAMBLE` |
+
+`--system-prompt` replaces the entire core-controllable body, so individual part
+overrides are ignored when it is set (the provider preamble is unaffected).
+
+The provider preamble is server-validated on some plans (e.g. Anthropic OAuth),
+so replacing or omitting it is refused unless you also pass
+`--unsafe-system-prompt-overrides`. In config, a `false` or `null` value means
+omit, a string means replace, and `<part>File` names a file to read.
+
+Conflicting flags (e.g. `--system-instructions` together with
+`--system-instructions-file`, or a missing `--system-*-file` path) fail fast at
+startup with exit code 2.
+
 ## Models & providers
 
 A model lives in a provider plugin, not in the core. Pick one with `--model <id>`
@@ -225,6 +259,10 @@ Example:
   "formatter": "mdstream",
   "autoAsk": true,
   "skipQuota": false,
+  "systemPrompt": {
+    "instructionsFile": "~/prompts/my-instructions.md",
+    "loopSafety": false
+  },
   "plugins": {
     "web-search": {
       "enabled": true,

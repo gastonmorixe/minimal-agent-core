@@ -166,6 +166,7 @@ const {
   usagePeriod,
   dumpArg,
   dumpFormatArg,
+  systemPromptOverrides,
 } = opts
 
 // ---------------------------------------------------------------------------
@@ -853,6 +854,7 @@ async function main() {
     selectedModelBase,
     auth,
     cacheTtl,
+    systemPromptOverrides: opts.systemPromptOverrides,
   })
 
   // Session store + blob store + resume warnings + attach/detach
@@ -919,6 +921,7 @@ async function main() {
     blobStore,
     initialMessages,
     toolTimeTracker,
+    systemPromptOverrides: opts.systemPromptOverrides,
   })
   // Point the ModelInfo provider at the agent's live model from here on.
   getLiveModelId = () => agent.getModel()
@@ -1060,6 +1063,7 @@ async function main() {
           saveEcho,
           turnAttachments: turnAttachmentSeam.producers,
           eventSink,
+          systemPromptOverrides: opts.systemPromptOverrides,
         }),
     })
     return

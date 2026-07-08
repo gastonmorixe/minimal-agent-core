@@ -21,6 +21,8 @@
 import { DEFAULT_REFLECTION_COOLDOWN_MS, DEFAULT_REFLECTION_INTERVAL } from "../agent/reflection.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
+import { applyPromptPartOverride, type SystemPromptOverrides } from "./system-prompt-overrides.ts"
+
 /**
  * Resolve a core prompt file under `src/prompts/`. Prose for the system
  * prompt lives in markdown; see `src/prompts/README.md`. This module sits in
@@ -115,6 +117,8 @@ export interface InstructionsBlockOptions {
   reflectionCooldownMs?: number
   maxToolRounds?: number
   blobStoreEnabled?: boolean
+  /** Resolved system-prompt overrides for instructions/loopSafety/toolOutputConventions. */
+  overrides?: SystemPromptOverrides
 }
 
 /**
@@ -132,15 +136,25 @@ export function buildInstructionsBlockText(opts?: InstructionsBlockOptions): str
   const reflectionCooldownMs = opts?.reflectionCooldownMs ?? DEFAULT_REFLECTION_COOLDOWN_MS
   const maxToolRounds = opts?.maxToolRounds ?? Number.POSITIVE_INFINITY
   const blobStoreEnabled = opts?.blobStoreEnabled ?? false
-  const instructionsBase = opts?.instructions ?? DEFAULT_INSTRUCTIONS
-  const safetyParagraph = buildLoopSafetyParagraph({
-    reflectionInterval,
-    reflectionCooldownMs,
-    maxToolRounds,
-  })
-  const conventionsParagraph = buildToolOutputConventionsParagraph({ blobStoreEnabled })
+  const overrides = opts?.overrides
+  const instructionsBase = applyPromptPartOverride(
+    opts?.instructions ?? DEFAULT_INSTRUCTIONS,
+    overrides?.instructions,
+  )
+  const safetyParagraph = applyPromptPartOverride(
+    buildLoopSafetyParagraph({
+      reflectionInterval,
+      reflectionCooldownMs,
+      maxToolRounds,
+    }),
+    overrides?.loopSafety,
+  )
+  const conventionsParagraph = applyPromptPartOverride(
+    buildToolOutputConventionsParagraph({ blobStoreEnabled }),
+    overrides?.toolOutputConventions,
+  )
   return [instructionsBase, safetyParagraph, conventionsParagraph]
-    .filter((s) => s.length > 0)
+    .filter((s): s is string => s !== undefined && s.length > 0)
     .join("\n\n")
 }
 

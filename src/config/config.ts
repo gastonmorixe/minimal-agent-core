@@ -36,8 +36,27 @@ import { join } from "node:path"
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 import { parseFormatterCommand } from "@minimal-agent/plugin-api/utils/shell-args"
 
+import { SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS } from "../cli/system-prompt-override-flags.ts"
 import { normalizeSubmittedAtStyle } from "../ui/scrollback-submitted-at.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
+
+export interface SystemPromptUserConfig {
+  full?: string | false | null
+  fullFile?: string
+  identity?: string | false | null
+  identityFile?: string
+  providerPreamble?: string | false | null
+  providerPreambleFile?: string
+  instructions?: string | false | null
+  instructionsFile?: string
+  loopSafety?: string | false | null
+  loopSafetyFile?: string
+  toolOutputConventions?: string | false | null
+  toolOutputConventionsFile?: string
+  sessionContext?: string | false | null
+  sessionContextFile?: string
+  unsafeProviderOverrides?: boolean
+}
 
 export interface UserConfig {
   model?: string
@@ -60,6 +79,7 @@ export interface UserConfig {
    * runtime via `--cache-ttl <5m|1h>` or `MINIMAL_AGENT_CACHE_TTL`.
    */
   cacheTtl?: "5m" | "1h"
+  systemPrompt?: SystemPromptUserConfig
   spinner?: string
   formatter?: string
   /**
@@ -214,6 +234,24 @@ export function configPath(): string {
  * Validation is lenient: unknown keys are dropped, invalid enum values
  * are dropped (with a debug-mode warning), valid keys pass through.
  */
+function parseSystemPromptUserConfig(obj: Record<string, unknown>): SystemPromptUserConfig {
+  const out: SystemPromptUserConfig = {}
+  for (const spec of SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS) {
+    const value = obj[spec.configKey]
+    if (typeof value === "string" || value === false || value === null) {
+      out[spec.configKey as keyof SystemPromptUserConfig] = value as never
+    }
+    const fileValue = obj[spec.configFileKey]
+    if (typeof fileValue === "string") {
+      out[spec.configFileKey as keyof SystemPromptUserConfig] = fileValue as never
+    }
+  }
+  if (typeof obj.unsafeProviderOverrides === "boolean") {
+    out.unsafeProviderOverrides = obj.unsafeProviderOverrides
+  }
+  return out
+}
+
 export function loadUserConfig(): UserConfig {
   const path = configPath()
   if (!existsSync(path)) return {}
@@ -256,6 +294,14 @@ export function loadUserConfig(): UserConfig {
   }
   if (typeof obj.cacheTtl === "string" && VALID_CACHE_TTL.has(obj.cacheTtl)) {
     out.cacheTtl = obj.cacheTtl as UserConfig["cacheTtl"]
+  }
+  if (
+    obj.systemPrompt &&
+    typeof obj.systemPrompt === "object" &&
+    !Array.isArray(obj.systemPrompt)
+  ) {
+    const systemPrompt = parseSystemPromptUserConfig(obj.systemPrompt as Record<string, unknown>)
+    if (Object.keys(systemPrompt).length > 0) out.systemPrompt = systemPrompt
   }
   if (typeof obj.spinner === "string" && obj.spinner.length > 0) out.spinner = obj.spinner
   if (typeof obj.formatter === "string" && obj.formatter.length > 0) out.formatter = obj.formatter

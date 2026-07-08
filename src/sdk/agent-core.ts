@@ -39,6 +39,7 @@ import {
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
+import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
 import { selectedTransport } from "../llm/transport/select-transport.ts"
 import type { SystemBlock } from "../llm/transport/types.ts"
 import {
@@ -132,6 +133,7 @@ export class AgentCore {
   private reflectionInterval: number = DEFAULT_REFLECTION_INTERVAL
   private reflectionCooldownMs: number = DEFAULT_REFLECTION_COOLDOWN_MS
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
+  private systemPromptOverrides: SystemPromptOverrides | undefined
   private reflectionSilenceRemaining = 0
   private previousTurnAborted = false
   private eventSink: EventSink | null
@@ -158,6 +160,7 @@ export class AgentCore {
     this.serviceTier = config.serviceTier
     this.thinkingDisplay = config.thinkingDisplay
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
+    this.systemPromptOverrides = config.systemPromptOverrides
     if (typeof config.reflectionInterval === "number" && config.reflectionInterval >= 0) {
       this.reflectionInterval = Math.floor(config.reflectionInterval)
     }
@@ -382,6 +385,7 @@ export class AgentCore {
       maxToolRounds: this.maxToolRounds,
       blobStoreEnabled: false,
       cacheTtl: this.cacheTtl,
+      overrides: this.systemPromptOverrides,
     })
 
     const allTools: ToolDefinition[] = this.toolRegistry.list()
