@@ -6,6 +6,7 @@ import type {
 } from "node:http2"
 import { connect, constants } from "node:http2"
 
+import { TRANSIENT_NETWORK_STREAM_ERROR_TYPE } from "./transient-error.ts"
 import { type NetworkRequest, NetworkResponse, type NetworkTransport } from "./types.ts"
 
 type SessionEntry = {
@@ -218,10 +219,26 @@ function headersToWeb(rawHeaders: IncomingHttpHeaders): Headers {
   return headers
 }
 
+/** Test seam for exercising HTTP/2 stream-to-Web-stream termination edge cases. */
+export function _nodeStreamToWebForTest(
+  stream: ClientHttp2Stream,
+  onDone: () => void,
+): ReadableStream<Uint8Array> {
+  return nodeStreamToWeb(stream, onDone)
+}
+
 function nodeStreamToWeb(
   stream: ClientHttp2Stream,
   onDone: () => void,
 ): ReadableStream<Uint8Array> {
+  let finished = false
+  const finish = (fn: () => void) => {
+    if (finished) return
+    finished = true
+    onDone()
+    fn()
+  }
+
   return new ReadableStream<Uint8Array>({
     start(controller) {
       stream.on("data", (chunk: Uint8Array) => {
@@ -231,24 +248,38 @@ function nodeStreamToWeb(
         }
       })
       stream.once("end", () => {
-        onDone()
-        controller.close()
+        finish(() => controller.close())
+      })
+      stream.once("close", () => {
+        const readableEnded = (stream as { readableEnded?: boolean }).readableEnded === true
+        if (readableEnded) {
+          finish(() => controller.close())
+          return
+        }
+        const err = new Error("HTTP/2 stream closed before end") as Error & {
+          streamErrorType?: string
+        }
+        err.streamErrorType = TRANSIENT_NETWORK_STREAM_ERROR_TYPE
+        finish(() => controller.error(err))
       })
       stream.once("error", (err) => {
-        onDone()
-        controller.error(err)
+        finish(() => controller.error(err))
       })
       stream.once("aborted", () => {
-        onDone()
-        controller.error(new Error("HTTP/2 stream aborted"))
+        finish(() => controller.error(new Error("HTTP/2 stream aborted")))
       })
     },
     pull() {
       stream.resume()
     },
     cancel() {
-      onDone()
-      stream.close(constants.NGHTTP2_CANCEL)
+      if (!finished) {
+        finished = true
+        onDone()
+      }
+      try {
+        stream.close(constants.NGHTTP2_CANCEL)
+      } catch {}
     },
   })
 }
@@ -271,18 +302,9 @@ function attachAbort(
   if (!signal) return () => {}
 
   const onAbort = () => {
-    // 1. Graceful: ask the peer to cancel the stream.
-    try {
-      stream.close(constants.NGHTTP2_CANCEL)
-    } catch {}
-
-    // 2. Escalate: on a black-holed socket the RST_STREAM frame can't be
-    //    written (TCP send buffer full, peer not ACKing), so `close()`
-    //    never lands and neither the stream nor the session would ever
-    //    tear down — the request "aborts" in name only and the next retry
-    //    reuses the same dead session. If the stream hasn't closed within
-    //    the grace window, force it down and evict the session so the
-    //    retry dials a fresh connection.
+    // 1. Arm escalation before canceling. A healthy stream may emit `close`
+    //    immediately after `close(NGHTTP2_CANCEL)`, so the listener must be in
+    //    place before we ask Node to cancel the stream.
     const escalate = setTimeout(() => {
       try {
         stream.destroy(new Error("aborted: HTTP/2 stream did not close after cancel"))
@@ -291,6 +313,11 @@ function attachAbort(
     }, ABORT_ESCALATE_MS)
     if (typeof escalate.unref === "function") escalate.unref()
     stream.once("close", () => clearTimeout(escalate))
+
+    // 2. Graceful: ask the peer to cancel the stream.
+    try {
+      stream.close(constants.NGHTTP2_CANCEL)
+    } catch {}
 
     reject(signal.reason ?? new Error("Network request aborted"))
   }

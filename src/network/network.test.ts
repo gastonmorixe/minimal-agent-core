@@ -1,9 +1,11 @@
+import { EventEmitter } from "node:events"
 import type { Http2Server, ServerHttp2Stream } from "node:http2"
 import { createServer } from "node:http2"
 
 import { describe, expect, it } from "bun:test"
 
 import { isPlaintextHttp } from "./client.ts"
+import { _nodeStreamToWebForTest } from "./http2-transport.ts"
 import {
   defaultNetworkClient,
   Http2Transport,
@@ -12,6 +14,7 @@ import {
   NetworkResponse,
   type NetworkTransport,
 } from "./index.ts"
+import { TRANSIENT_NETWORK_STREAM_ERROR_TYPE } from "./transient-error.ts"
 
 describe("network", () => {
   it("reuses one HTTP/2 session for sequential same-origin requests", async () => {
@@ -160,6 +163,64 @@ describe("network", () => {
     expect(await response.text()).toBe("fallback-ok")
   })
 
+  it("closes the web body when an HTTP/2 stream ends before close", async () => {
+    const stream = new FakeHttp2Stream()
+    let doneCount = 0
+    const body = _nodeStreamToWebForTest(stream as never, () => {
+      doneCount++
+    })
+    const reader = body.getReader()
+
+    stream.emit("data", new TextEncoder().encode("data: ping\\n\\n"))
+    const first = await reader.read()
+    expect(first.done).toBe(false)
+
+    const pending = reader.read()
+    stream.readableEnded = true
+    stream.emit("end")
+    stream.emit("close")
+
+    const second = await pending
+    expect(second).toEqual({ done: true, value: undefined })
+    expect(doneCount).toBe(1)
+
+    stream.emit("error", new Error("late"))
+    stream.emit("aborted")
+    expect(doneCount).toBe(1)
+  })
+
+  it("errors the web body with network_error when an HTTP/2 stream closes before end", async () => {
+    const stream = new FakeHttp2Stream()
+    let doneCount = 0
+    const body = _nodeStreamToWebForTest(stream as never, () => {
+      doneCount++
+    })
+    const reader = body.getReader()
+
+    stream.emit("data", new TextEncoder().encode("data: ping\\n\\n"))
+    const first = await reader.read()
+    expect(first.done).toBe(false)
+
+    const pending = reader.read()
+    stream.readableEnded = false
+    stream.emit("close")
+
+    let caught: (Error & { streamErrorType?: string }) | undefined
+    try {
+      await pending
+    } catch (err) {
+      caught = err as Error & { streamErrorType?: string }
+    }
+    expect(caught?.message).toBe("HTTP/2 stream closed before end")
+    expect(caught?.streamErrorType).toBe(TRANSIENT_NETWORK_STREAM_ERROR_TYPE)
+    expect(doneCount).toBe(1)
+
+    stream.emit("end")
+    stream.emit("error", new Error("late"))
+    stream.emit("aborted")
+    expect(doneCount).toBe(1)
+  })
+
   it.skipIf(!process.env.E2E)(
     "live model request uses HTTP/2",
     async () => {
@@ -244,6 +305,25 @@ function labeledTransport(id: string): NetworkTransport {
         },
       })
     },
+  }
+}
+
+class FakeHttp2Stream extends EventEmitter {
+  paused = false
+  closed = false
+  readableEnded = false
+
+  pause(): void {
+    this.paused = true
+  }
+
+  resume(): void {
+    this.paused = false
+  }
+
+  close(): void {
+    this.closed = true
+    this.emit("close")
   }
 }
 
