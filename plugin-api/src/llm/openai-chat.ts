@@ -166,13 +166,38 @@ export async function* translateOpenAIChatStream(
     // Treat a missing array as empty rather than dereferencing it (which threw
     // `undefined is not an object (evaluating 'chunk.choices.length')` and
     // stalled the stream until the idle watchdog fired).
+    //
+    // Emit a `ping` for these no-choice chunks instead of silently swallowing
+    // them: they are valid SSE frames that prove the connection is alive and
+    // the server is working (e.g. an MLX server sending keepalives every 10s
+    // during a ~30s prefill of a long prompt). The stream watchdog resets its
+    // idle timer on any yielded canonical event, so surfacing the keepalive as
+    // a `ping` is what keeps it from firing `stream_idle` mid-prefill and
+    // aborting a healthy request. The agent/bridge ignore `ping` (see the
+    // `case "ping": break` in adapter-legacy.ts), so this is a pure
+    // liveness signal with no content effect.
     const choices = chunk.choices ?? []
-    if (choices.length === 0) continue
+    if (choices.length === 0) {
+      yield { type: "ping" }
+      continue
+    }
 
     const choice = choices[0]
-    if (!choice) continue
+    if (!choice) {
+      yield { type: "ping" }
+      continue
+    }
 
     const delta = choice.delta ?? {}
+
+    // Track whether this chunk produced any actionable canonical event. A
+    // keepalive chunk during prefill has a choice with an empty delta
+    // (`{role:"assistant",content:""}`) and `finish_reason:null`, so it matches
+    // none of the branches below. Left unhandled it would yield nothing and the
+    // idle watchdog would count it as silence. We yield a `ping` at the end of
+    // the iteration when nothing else was produced, so the keepalive still
+    // resets the watchdog's idle timer.
+    let producedEvent = false
 
     // Text content
     if (typeof delta.content === "string" && delta.content.length > 0) {
@@ -181,11 +206,13 @@ export async function* translateOpenAIChatStream(
         yield { type: "text_start", index: textIndex }
       }
       yield { type: "text_delta", index: textIndex, text: delta.content }
+      producedEvent = true
     }
 
     // Refusal content
     if (typeof delta.refusal === "string" && delta.refusal.length > 0) {
       yield { type: "refusal_delta", text: delta.refusal }
+      producedEvent = true
     }
 
     // Reasoning content (DeepSeek-style thinking). Streamed as thinking
@@ -197,14 +224,17 @@ export async function* translateOpenAIChatStream(
           yield { type: "thinking_start", index: thinkingIndex }
         }
         yield { type: "thinking_delta", index: thinkingIndex, text: delta.reasoning_content }
+        producedEvent = true
       } else if (thinkingIndex !== null) {
         yield { type: "thinking_stop", index: thinkingIndex }
         thinkingIndex = null
+        producedEvent = true
       }
     }
 
     // Tool call deltas
     if (delta.tool_calls) {
+      producedEvent = true
       for (const tc of delta.tool_calls) {
         // First chunk for this tool-call index: open the block.
         if (!toolBlockIndex.has(tc.index)) {
@@ -235,6 +265,7 @@ export async function* translateOpenAIChatStream(
 
     // Finish reason → close any open blocks + record stop reason.
     if (choice.finish_reason) {
+      producedEvent = true
       stopReason = mapFinishReason(choice.finish_reason)
       if (thinkingIndex !== null) {
         yield { type: "thinking_stop", index: thinkingIndex }
@@ -258,6 +289,15 @@ export async function* translateOpenAIChatStream(
       toolBlockIndex.clear()
       toolJson.clear()
       toolNames.clear()
+    }
+
+    // Keepalive / no-op chunk: a choice was present but its delta carried no
+    // actionable content (the classic prefill keepalive is
+    // `delta:{role:"assistant",content:""}` with `finish_reason:null`). Surface
+    // it as a `ping` so the stream watchdog's idle timer resets on the live
+    // frame instead of counting it as silence and firing `stream_idle`.
+    if (!producedEvent) {
+      yield { type: "ping" }
     }
   }
 
