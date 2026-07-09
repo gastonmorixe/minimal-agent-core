@@ -224,11 +224,34 @@ time):
 | `openrouter` | `ma-llm-openrouter-plugin` | OpenRouter gateway | OpenAI-compatible |
 | `wafer` | `ma-llm-wafer-plugin` | Wafer Serverless gateway | OpenAI-compatible |
 | `opencode` | `ma-llm-opencode-plugin` | OpenCode gateway | OpenAI + Messages |
+| `generic-endpoint` | `ma-llm-generic-endpoint-plugin` | any registered wire surface | runtime-configured |
 
 Adding a backend is a directory, not a core change. A provider that speaks the
 OpenAI Chat protocol reuses `llm-openai`'s wire layer and lands in ~50 lines; one
 with its own protocol implements the adapter port directly. See
 [`docs/provider-plugin-standards.md`](docs/provider-plugin-standards.md).
+
+### Point at any OpenAI-compatible endpoint (no plugin)
+
+To reach a local runtime (LM Studio, vLLM, MLX) or a custom proxy without
+writing a plugin, use the `generic-endpoint` provider with flags:
+
+```
+minimal-agent --provider generic-endpoint \
+  --model my-local-model \
+  --format openai-chat-completions \
+  --endpoint http://localhost:1234/v1/chat/completions \
+  --auth-type api-key --api-key "$MY_KEY"
+```
+
+`--format` accepts any registered wire surface (today: `openai-chat-completions`).
+`--auth-type` is `api-key` / `bearer` / `none` / `custom-header` (pair the last
+with `--auth-header`). `--provider-model` overrides the wire model id, and
+`--effort-levels "low,medium,high"` lets `--effort` pass through for a reasoning
+backend. Every flag has a `MINIMAL_AGENT_*` env and config equivalent. A plaintext
+`http://` endpoint is auto-routed to HTTP/1.1 (the default HTTP/2 transport can't
+talk to a plain HTTP/1.1 server). See
+[`docs/2026-07-09-generic-endpoint-and-surface-codecs.md`](docs/2026-07-09-generic-endpoint-and-surface-codecs.md).
 
 **Capabilities are data, not branching.** Code asks "does this model support
 thinking / fast mode / 1M context?" by reading a `Capabilities` record, never by

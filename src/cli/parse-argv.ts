@@ -19,6 +19,7 @@ import { type CacheTtl, type CacheTtlSource, resolveCacheTtl } from "../cache/ca
 import type { UserConfig } from "../config/config.ts"
 import { type EffortSource, resolveEffort } from "../config/effort-resolution.ts"
 import type { SystemPromptOverrides } from "../llm/system-prompt-overrides.ts"
+import type { ToolNamePolicy } from "../sdk/tool-filter.ts"
 
 import { resolveShowHeader } from "./non-interactive-defaults.ts"
 import { type OutputFormat, resolveOutputFormat } from "./output-format.ts"
@@ -34,13 +35,27 @@ export type EnvLike = Record<string, string | undefined>
 export type FormatterParser = (raw: string) => string[]
 
 /**
+ * CLI-level tool name policy (`--tools` / `--no-tools`).
+ * Alias of the SDK {@link ToolNamePolicy} — single source of truth.
+ */
+export type CliToolFilter = ToolNamePolicy
+
+/**
  * Every CLI/env/config-derived value the entry point needs, fully resolved.
  * Field names mirror the historical module-scope constants in `index.ts` so
  * the entry point can destructure this struct 1:1.
  */
 export interface CliOptions {
   readonly model: string | undefined
+  readonly cliToolFilter: CliToolFilter
   readonly provider: string | undefined
+  readonly endpoint: string | undefined
+  readonly format: string | undefined
+  readonly authType: "api-key" | "bearer" | "none" | "custom-header" | undefined
+  readonly apiKey: string | undefined
+  readonly authHeader: string | undefined
+  readonly providerModel: string | undefined
+  readonly effortLevels: string[] | undefined
   readonly cliCredentialName: string | undefined
   readonly wantListModels: boolean
   readonly wantListProviders: boolean
@@ -133,6 +148,40 @@ export function parseCliOptions(
 
   const model = valueAfter(args, "--model") ?? rawAfter(args, "--model")
   const provider = valueAfter(args, "--provider")
+  const endpoint = readFlagValue("--endpoint") ?? env.MINIMAL_AGENT_ENDPOINT ?? userConfig.endpoint
+  const format =
+    readFlagValue("--format") ??
+    readFlagValue("--surface") ??
+    env.MINIMAL_AGENT_FORMAT ??
+    env.MINIMAL_AGENT_SURFACE ??
+    userConfig.format
+  const authTypeRaw =
+    readFlagValue("--auth-type") ?? env.MINIMAL_AGENT_AUTH_TYPE ?? userConfig.authType
+  const authType =
+    authTypeRaw === "api-key" ||
+    authTypeRaw === "bearer" ||
+    authTypeRaw === "none" ||
+    authTypeRaw === "custom-header"
+      ? authTypeRaw
+      : undefined
+  const apiKey = readFlagValue("--api-key") ?? env.MINIMAL_AGENT_API_KEY ?? userConfig.apiKey
+  const authHeader =
+    readFlagValue("--auth-header") ?? env.MINIMAL_AGENT_AUTH_HEADER ?? userConfig.authHeader
+  const providerModel =
+    readFlagValue("--provider-model") ??
+    env.MINIMAL_AGENT_PROVIDER_MODEL ??
+    userConfig.providerModel
+  // Generic endpoint effort ladder. Comma-separated levels the ad-hoc model
+  // advertises (e.g. "low,medium,high"), so `--effort <level>` is accepted for
+  // a runtime-configured backend whose codec defaults declare none.
+  const effortLevelsRaw =
+    readFlagValue("--effort-levels") ?? env.MINIMAL_AGENT_EFFORT_LEVELS ?? undefined
+  const effortLevels: string[] | undefined = effortLevelsRaw
+    ? effortLevelsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    : userConfig.effortLevels
   const cliCredentialName = valueAfter(args, "--credential-name")
 
   const wantListModels = args.includes("--list-models")
@@ -219,9 +268,30 @@ export function parseCliOptions(
   const wantLogout = args.includes("--logout")
   const wantAuthStatus = args.includes("--auth-status")
 
+  // --tools "Read,Task,Grep" → allow-list; --no-tools → deny-all
+  const cliToolFilter: CliToolFilter = (() => {
+    if (args.includes("--no-tools")) return { kind: "deny-all" }
+    const toolsVal = readFlagValue("--tools")
+    if (toolsVal) {
+      const tools = toolsVal
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+      return tools.length > 0 ? { kind: "allow-list", tools } : null
+    }
+    return null
+  })()
+
   return {
     model,
     provider,
+    endpoint,
+    format,
+    authType,
+    apiKey,
+    authHeader,
+    providerModel,
+    effortLevels,
     cliCredentialName,
     wantListModels,
     wantListProviders,
@@ -258,5 +328,6 @@ export function parseCliOptions(
     wantLogin,
     wantLogout,
     wantAuthStatus,
+    cliToolFilter,
   }
 }

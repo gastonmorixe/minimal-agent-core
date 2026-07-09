@@ -39,102 +39,127 @@ export const TOOL_PARAM_DESCRIPTIONS = {
   },
 } as const
 
+/** Returns the tool-result string shown when the user aborts a tool call. */
 export function toolAbortedByUserResult(): string {
   return "tool aborted by user"
 }
 
+/** Returns the error string for an invocation of an unregistered tool name. */
 export function unknownToolResult(name: string): string {
   return `Unknown tool: ${name}`
 }
 
+/** Returns the internal-bug message shown if the Mode tool reaches the dispatcher. */
 export function modeToolDispatcherBugResult(): string {
   return "Mode tool reached the dispatcher; this should have been handled by the agent loop. File a bug : see `agent.ts` Mode interceptor."
 }
 
+/** Returns the note shown when a reflection-ack was submitted as a tool call. */
 export function reflectionAckToolResult(): string {
   return "reflection-ack applied. Next time, write this tag as inline text in your response body, not as a tool call."
 }
 
+/** Returns the error string for a tool that timed out waiting on a file lock. */
 export function lockTimeoutResult(tool: string, message: string): string {
   return `${tool} error: ${message}`
 }
 
+/** Returns the error string for a tool that failed to acquire a file lock. */
 export function lockAcquireFailedResult(tool: string, message: string): string {
   return `${tool} error: lock acquire failed: ${message}`
 }
 
+/** Returns the shell-style error string for a cd into a nonexistent directory. */
 export function cdNoSuchDirectoryResult(path: string): string {
   return `cd: no such directory: ${path}`
 }
 
+/** Returns the inline marker appended when Bash output exceeds the byte cap. */
 export function bashOutputCapMarker(maxBytes: number): string {
   return `[output exceeded ${maxBytes} bytes; command terminated and output truncated]`
 }
 
+/** Returns the inline marker appended when a Bash command hits its timeout. */
 export function bashTimedOutMarker(timeoutMs: number): string {
   return `[timed out after ${timeoutMs}ms]`
 }
 
+/** Returns the trailing line reporting a Bash command's exit code. */
 export function bashExitCodeResult(exitCode: number | null): string {
   return `Exit code ${exitCode}`
 }
 
+/** Returns the error string for a failed Bash invocation. */
 export function bashErrorResult(message: string): string {
   return `Bash error: ${message}`
 }
 
+/** Returns the note explaining an Edit target was resolved past a whitespace mismatch. */
 export function whitespaceResolvedNote(path: string): string {
   return `Note: resolved to "${path}" (whitespace mismatch).\n`
 }
 
+/** Returns the error string for a Read of a file above the size limit. */
 export function readTooLargeResult(sizeMb: string, limitMb: number): string {
   return `File is ${sizeMb} MB, exceeds the ${limitMb} MB read limit. Use offset/limit to read a portion, or Grep to search it.`
 }
 
+/** Returns the error string for a failed Read. */
 export function readErrorResult(message: string): string {
   return `Read error: ${message}`
 }
 
+/** Returns the success string confirming a file was written. */
 export function fileWrittenResult(filePath: string): string {
   return `File written: ${filePath}`
 }
 
+/** Returns the error string for a failed Write. */
 export function writeErrorResult(message: string): string {
   return `Write error: ${message}`
 }
 
+/** Returns the Edit error string for an old_string not found in the file. */
 export function editOldStringNotFoundResult(filePath: string): string {
   return `Edit error: old_string not found in ${filePath}`
 }
 
+/** Returns the Edit error string for an old_string matching multiple locations. */
 export function editOldStringMultipleMatchesResult(count: number, filePath: string): string {
   return `Edit error: old_string matches ${count} locations in ${filePath}. Use replace_all or provide more context.`
 }
 
+/** Returns the success string confirming an Edit and its replacement count. */
 export function fileEditedResult(filePath: string, replacements: number): string {
   return `File edited: ${filePath} (${replacements} replacement(s))`
 }
 
+/** Returns the error string for a failed Edit. */
 export function editErrorResult(message: string): string {
   return `Edit error: ${message}`
 }
 
+/** Returns the Glob result string shown when no files match the pattern. */
 export function noFilesMatchedResult(): string {
   return "No files matched the pattern."
 }
 
+/** Returns the error string for a failed Glob. */
 export function globErrorResult(message: string): string {
   return `Glob error: ${message}`
 }
 
+/** Returns the error string for a failed Grep. */
 export function grepErrorResult(message: string): string {
   return `Grep error: ${message}`
 }
 
+/** Returns the Grep result string shown when no matches are found. */
 export function noMatchesFoundResult(): string {
   return "No matches found."
 }
 
+/** Returns tool content with an appended output-preview annotation describing how much was shown. */
 export function outputPreviewAnnotation(args: {
   content: string
   shown: number
@@ -147,6 +172,7 @@ export function outputPreviewAnnotation(args: {
   return `${args.content}\n\n<ma::agent::output-preview shown="${args.shown}" total="${args.total}" tool="${args.tool}"${pathAttr}>${args.hint}</ma::agent::output-preview>`
 }
 
+/** Returns kept output plus a truncation notice reporting shown vs total bytes and lines. */
 export function truncationNotice(args: {
   kept: string
   shownBytes: number
@@ -159,6 +185,7 @@ export function truncationNotice(args: {
   return `${args.kept}\n\n[truncated: shown ${args.shownBytes} of ${args.totalBytes} bytes, ${args.shownLines}/${args.totalLines} lines; cut at byte ${args.shownBytes}, line ${args.cutLine}. ${args.hint}]`
 }
 
+/** Returns a per-tool hint on how to resume or narrow a call whose output was truncated. */
 export function truncationHint(
   tool: string | undefined,
   cutLine: number,
@@ -182,6 +209,7 @@ export function truncationHint(
   }
 }
 
+/** Returns the bracketed note warning that a tool has truncated several calls in a row. */
 export function streakNote(tool: string, threshold: number): string {
   const body = streakNoteBody(tool, threshold)
   return `[note: ${body}]`
@@ -202,6 +230,7 @@ function streakNoteBody(tool: string, threshold: number): string {
   }
 }
 
+/** Returns the hint shown when the TUI preview clipped tool output, noting where the full output lives. */
 export function tuiPreviewHint(tool: string, rawPath?: string): string {
   const recover = rawPath
     ? ` The full untruncated output is saved at ${rawPath} : Read that path (its tail for build/test errors) when this preview isn't enough.`

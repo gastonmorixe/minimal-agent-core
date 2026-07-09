@@ -71,6 +71,28 @@ function buildHelpSections(): HelpSection[] {
         row(`${c.cyan("--provider")} ${c.dim("<id>")}`, "Select provider for --model", [
           "else MINIMAL_AGENT_PROVIDER, config provider",
         ]),
+        row(`${c.cyan("--endpoint")} ${c.dim("<url>")}`, "Generic endpoint URL", [
+          "use with --provider generic-endpoint, or MINIMAL_AGENT_ENDPOINT",
+        ]),
+        row(`${c.cyan("--format")} ${c.dim("<surface>")}`, "Generic endpoint surface id", [
+          "a registered generic wire surface, or MINIMAL_AGENT_FORMAT",
+        ]),
+        row(`${c.cyan("--auth-type")} ${c.dim("<type>")}`, "Generic endpoint auth", [
+          "api-key | bearer | none | custom-header, or MINIMAL_AGENT_AUTH_TYPE",
+        ]),
+        row(`${c.cyan("--api-key")} ${c.dim("<key>")}`, "Generic endpoint key/token", [
+          "or MINIMAL_AGENT_API_KEY",
+        ]),
+        row(`${c.cyan("--auth-header")} ${c.dim("<name>")}`, "Custom auth header name", [
+          "for --auth-type custom-header, or MINIMAL_AGENT_AUTH_HEADER",
+        ]),
+        row(`${c.cyan("--provider-model")} ${c.dim("<id>")}`, "Wire model id override", [
+          "separate from local --model, or MINIMAL_AGENT_PROVIDER_MODEL",
+        ]),
+        row(`${c.cyan("--effort-levels")} ${c.dim("<levels>")}`, "Generic endpoint effort ladder", [
+          'comma-separated, e.g. "low,medium,high", lets --effort pass through',
+          "or MINIMAL_AGENT_EFFORT_LEVELS",
+        ]),
         row(
           `${c.cyan("-e")}, ${c.cyan("--effort")} ${c.dim("<level>")}`,
           "Reasoning effort: low, medium, high, xhigh, max",
@@ -122,6 +144,13 @@ function buildHelpSections(): HelpSection[] {
         ),
         row(`${c.cyan("--mode")} ${c.dim("<id|none>")}`, "Initial mode", [
           "default: ask in non-interactive, plugin default otherwise",
+        ]),
+        row(`${c.cyan("--tools")} ${c.dim("<names>")}`, "Advertise only these tools", [
+          'comma-separated allow-list, e.g. --tools "WebSearch,Task"',
+          "model only sees listed tools; checked before mode permissions",
+        ]),
+        row(c.cyan("--no-tools"), "Advertise no tools (pure Q&A)", [
+          "empty tools array on the request; checked before mode permissions",
         ]),
         row(`${c.cyan("--disable-plugin")} ${c.dim("<id>")}`, "Skip a plugin for this run", [
           "repeatable, comma-separated ok, see plugins list",
@@ -282,7 +311,14 @@ function buildHelpSections(): HelpSection[] {
       title: c.bold("Env"),
       rows: [
         row(c.cyan("DEBUG=1"), "Verbose request/response logging to stderr"),
-        row(c.cyan("MINIMAL_AGENT_TRANSPORT"), "Transport: http2 or fetch", ["default: http2"]),
+        row(c.cyan("MINIMAL_AGENT_TRANSPORT"), "Transport: http2 or fetch", [
+          "default: http2; plaintext http:// auto-routes to HTTP/1.1",
+        ]),
+        row(
+          c.cyan("MINIMAL_AGENT_NO_PLAINTEXT_HTTP1=1"),
+          "Keep http:// on HTTP/2 (disable the plaintext auto-route)",
+          ["for an h2c-capable local server"],
+        ),
         row(
           c.cyan("MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1"),
           "Allow fetch fallback after HTTP/2 failure",
@@ -310,6 +346,23 @@ function buildHelpSections(): HelpSection[] {
         ]),
         row(c.cyan("MINIMAL_AGENT_MODEL"), "Default model id", ["same as --model"]),
         row(c.cyan("MINIMAL_AGENT_PROVIDER"), "Default provider id", ["same as --provider"]),
+        row(c.cyan("MINIMAL_AGENT_ENDPOINT"), "Generic endpoint URL", ["same as --endpoint"]),
+        row(c.cyan("MINIMAL_AGENT_FORMAT"), "Generic endpoint surface id", [
+          "same as --format / --surface",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_AUTH_TYPE"), "Generic endpoint auth", [
+          "api-key | bearer | none | custom-header, same as --auth-type",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_API_KEY"), "Generic endpoint key/token", ["same as --api-key"]),
+        row(c.cyan("MINIMAL_AGENT_AUTH_HEADER"), "Custom auth header name", [
+          "same as --auth-header",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_PROVIDER_MODEL"), "Wire model id override", [
+          "same as --provider-model",
+        ]),
+        row(c.cyan("MINIMAL_AGENT_EFFORT_LEVELS"), "Generic endpoint effort ladder", [
+          "comma-separated, same as --effort-levels",
+        ]),
         row(
           c.cyan("MINIMAL_AGENT_MEMORY_NAMESPACE"),
           "Namespace memory paths under namespaces/<ns>/",

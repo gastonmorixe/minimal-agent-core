@@ -118,7 +118,7 @@ export function hasSystemPromptOverrides(overrides: SystemPromptOverrides | unde
 /**
  * Resolve raw CLI/env/config prompt overrides into the shared tri-state model.
  *
- * Precedence is CLI > env > config > default. Within a single tier, text,
+ * Precedence is CLI \> env \> config \> default. Within a single tier, text,
  * fileText, and omit are mutually exclusive. An empty replacement string means
  * omit, matching the CLI contract for `--flag ""`.
  */

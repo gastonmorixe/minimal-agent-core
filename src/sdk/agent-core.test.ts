@@ -95,6 +95,36 @@ describe("AgentCore.run — port injection", () => {
     expect(core.history()[1]?.role).toBe("assistant")
   })
 
+  it("applies toolFilter when advertising tools to the transport", async () => {
+    let seenToolNames: string[] | undefined
+    const sendFn = async function* (opts: {
+      tools?: Array<{ name: string }>
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      seenToolNames = (opts.tools ?? []).map((t) => t.name)
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const core = new AgentCore(
+      baseConfig({
+        sendFn: sendFn as never,
+        toolRegistry: registryOf([
+          { name: "Read", description: "r", input_schema: {} },
+          { name: "WebSearch", description: "w", input_schema: {} },
+          { name: "Task", description: "t", input_schema: {} },
+        ]),
+        toolFilter: {
+          filter: (tools) => tools.filter((t) => t.name === "WebSearch"),
+        },
+      }),
+    )
+    await drain(core.run("hi"))
+    expect(seenToolNames).toEqual(["WebSearch"])
+  })
+
   it("routes tool execution through the ToolExecutor port", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {

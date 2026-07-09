@@ -1,7 +1,8 @@
 /**
  * Unit tests for {@link ModeProviderAdapter}: the AgentCore-facing mode surface
  * over a {@link ModeManager}. Delegation of activeModeId / promptPrefix /
- * consumePendingAttachment, and the deliberate filterTools pass-through.
+ * consumePendingAttachment; filterTools is a deliberate pass-through (CLI
+ * advertisement filtering is the SDK `toolFilter` port).
  */
 
 import { describe, expect, it } from "bun:test"
@@ -37,7 +38,7 @@ describe("ModeProviderAdapter", () => {
     expect(seen).toBe("❯")
   })
 
-  it("filterTools is a pass-through (mode gating happens at dispatch)", () => {
+  it("filterTools is a pass-through (advertisement uses toolFilter port)", () => {
     const adapter = new ModeProviderAdapter(managerStub({}))
     const tools: ToolDefinition[] = [
       { name: "Bash", description: "b", input_schema: {} },

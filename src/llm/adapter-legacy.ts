@@ -582,13 +582,20 @@ function legacyThinkingToCanonical(
  * fix lives in the transport middleware, not here.
  */
 export function legacyAuthToProviderAuth(auth: AuthResult): ProviderAuth {
+  if (auth.type === "provider") return auth.auth
   if (auth.type === "oauth") {
     if (auth.refresh) {
       const refresh = auth.refresh
       return {
         kind: "oauth",
         token: auth.token,
-        refresh: async () => ({ token: (await refresh()).token }),
+        refresh: async () => {
+          const refreshed = await refresh()
+          if (refreshed.type !== "oauth" && refreshed.type !== "api-key") {
+            throw new Error("provider-native auth refresh cannot produce a bearer token")
+          }
+          return { token: refreshed.token }
+        },
       }
     }
     return { kind: "oauth", token: auth.token }

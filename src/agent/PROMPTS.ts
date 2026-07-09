@@ -7,26 +7,32 @@ function runtimePrompt(
   return renderPrompt(promptPath(import.meta, "..", "prompts", "runtime", file), vars)
 }
 
+/** Returns the attachment text injected when a turn is aborted by the user. */
 export function turnAbortedAttachmentText(): string {
   return runtimePrompt("turn-aborted.md")
 }
 
+/** Returns the attachment text injected when tool output was truncated. */
 export function outputTruncatedAttachmentText(): string {
   return runtimePrompt("output-truncated.md")
 }
 
+/** Returns the placeholder text used when an assistant response is truncated. */
 export function responseTruncatedPlaceholderText(): string {
   return runtimePrompt("response-truncated-placeholder.md")
 }
 
+/** Returns the attachment text injected when the emergency round cap triggers. */
 export function emergencyCapTriggeredAttachmentText(round: number): string {
   return runtimePrompt("emergency-cap-triggered.tmpl.md", { round })
 }
 
+/** Returns the attachment text for a reflection checkpoint at a given round and cooldown. */
 export function reflectionCheckpointAttachmentText(round: number, cooldownSec: number): string {
   return runtimePrompt("reflection-checkpoint.tmpl.md", { round, cooldownSec })
 }
 
+/** Returns the tool-result string for a tool aborted by the user before completion. */
 export function toolExecutionAbortedBeforeCompletionResult(): string {
   return "Tool execution aborted by user before completion."
 }

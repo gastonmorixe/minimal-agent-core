@@ -124,4 +124,43 @@ describe("buildAgentCore", () => {
     for (const t of TOOL_DEFINITIONS) expect(names).toContain(t.name)
     expect(names).toContain("Widget")
   })
+
+  it("toolNamePolicy narrows advertised tools via the toolFilter port", async () => {
+    let capturedTools: Array<{ name: string }> = []
+    const sendFn = async function* (
+      opts: SendOptions,
+    ): AsyncGenerator<string, StreamedResponse, undefined> {
+      capturedTools = (opts.tools ?? []) as Array<{ name: string }>
+      yield "ok"
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const loader = {
+      getPromptBlockAsync: async () => null,
+      getExtraTools: () => [
+        { name: "Widget", description: "w", input_schema: {} },
+        { name: "WebSearch", description: "s", input_schema: {} },
+      ],
+      getToolAliases: () => new Map<string, string>(),
+      hasTool: () => false,
+    } as unknown as PluginLoader
+
+    const core = await buildAgentCore({
+      auth: AUTH,
+      model: "test-model",
+      sendFn,
+      loader,
+      modeManager: null,
+      toolNamePolicy: { kind: "allow-list", tools: ["WebSearch"] },
+      store: null,
+      blobStore: null,
+      saveEcho: null,
+      turnAttachments: [],
+    })
+    await drain(core.run("go"))
+    expect(capturedTools.map((t) => t.name)).toEqual(["WebSearch"])
+  })
 })

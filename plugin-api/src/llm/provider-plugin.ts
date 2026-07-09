@@ -30,6 +30,7 @@ import type { CanonicalEvent } from "./canonical-events.ts"
 import type { CanonicalRequest } from "./canonical-request.ts"
 import type { CapabilityViolation } from "./errors.ts"
 import type { ProviderAuth, RunContext } from "./provider-auth.ts"
+import type { SurfaceCodecRegistry } from "./surface-codec.ts"
 import type { TokenEstimator } from "./token-estimate.ts"
 
 /**
@@ -199,6 +200,8 @@ export interface ProviderSetupContext {
   models: ModelRegistrar
   /** Setup-time provider-adapter-registry writer (the `providers:register` capability). */
   providers?: ProviderAdapterRegistrar
+  /** Setup-time generic wire-surface codec registry writer. */
+  surfaceCodecs?: SurfaceCodecRegistry
 }
 
 // ---------------------------------------------------------------------------

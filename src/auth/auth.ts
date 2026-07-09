@@ -55,6 +55,7 @@
 
 import { join } from "node:path"
 
+import type { ProviderAuth } from "@minimal-agent/plugin-api/llm/provider-auth"
 import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
 
 import { withLock } from "../infra/lockfile.ts"
@@ -165,7 +166,11 @@ export interface CredentialsData {
   }
 }
 
-export interface AuthResult {
+/**
+ * Legacy token-bearing auth: a bearer token (OAuth or API key) with an optional
+ * refresh closure. This is what the OAuth/api-key flows produce.
+ */
+export interface TokenAuthResult {
   type: "api-key" | "oauth"
   token: string
   accountUuid?: string
@@ -175,8 +180,19 @@ export interface AuthResult {
    * client.ts calls this to get a fresh token, then retries the request.
    * Mirrors the CLI's `onAuth401` handler pattern (L751090-751112).
    */
-  refresh?: () => Promise<AuthResult>
+  refresh?: () => Promise<TokenAuthResult>
 }
+
+/**
+ * Provider-native auth that cannot be represented as legacy token auth (e.g. a
+ * generic endpoint using a custom header bag). Carried opaquely to the transport.
+ */
+export interface ProviderNativeAuthResult {
+  type: "provider"
+  auth: ProviderAuth
+}
+
+export type AuthResult = TokenAuthResult | ProviderNativeAuthResult
 
 export interface TokenRefreshResult {
   accessToken: string
@@ -422,7 +438,7 @@ export interface GetAuthDeps {
 export async function getAuth(
   providerId: string = ANTHROPIC_PLAN_OAUTH.id,
   deps: GetAuthDeps = {},
-): Promise<AuthResult> {
+): Promise<TokenAuthResult> {
   if (process.env.MINIMAL_AGENT_TEST_AUTH === "1") {
     const testEnv = process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
     if (!testEnv) {
@@ -499,7 +515,7 @@ export async function getAuth(
   let lastIssuedExpiresAt = oauth.expiresAt ?? 0
   const lockPath = join(resolveAgentHome(), `.refresh-${sanitizeForFilename(service)}.lock`)
 
-  const doRefreshUnlocked = async (): Promise<AuthResult> => {
+  const doRefreshUnlocked = async (): Promise<TokenAuthResult> => {
     const current = read(service) ?? creds
     const currentOauth = current.claudeAiOauth
 
@@ -571,7 +587,7 @@ export async function getAuth(
     }
   }
 
-  const doRefresh = async (): Promise<AuthResult> => {
+  const doRefresh = async (): Promise<TokenAuthResult> => {
     // Skip the lock entirely when fakes are injected (tests don't want to
     // touch the real filesystem at all).
     if (deps.read || deps.write || deps.refresh) {

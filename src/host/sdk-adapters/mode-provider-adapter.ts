@@ -7,20 +7,19 @@
  *     block onto the next user turn when the active mode changed since the last
  *     time it was advertised to the model. This is how a mode toggle reaches
  *     the model without invalidating the cached system-prompt prefix.
- *   - `activeModeId()` / `promptPrefix()` / `filterTools()` — read-only mode
- *     queries a host may use (the `--json` path uses `consumePendingAttachment`
- *     primarily; the others round out the port).
+ *   - `activeModeId()` / `promptPrefix()` — read-only mode queries a host may
+ *     use.
  *
- * ### Where the real mode gating lives
+ * ### Where tool filtering lives
  *
- * Tool-level mode enforcement (refusing a disallowed tool with a teaching
- * error) and the per-tool_result `<ma::agent::mode-active …>` stamp happen
- * inside `executeToolRound`, which receives the raw {@link ModeManager} through
- * the {@link ToolExecutorAdapter}. This adapter is only the AgentCore-facing
- * mode surface (the mode-change signal + queries). `filterTools` is a
- * deprecated no-op pass-through on the manager, so this adapter's
- * `filterTools` returns its input unchanged too — matching the legacy loop,
- * which advertises all tools and gates at dispatch.
+ * - **Advertisement** (request body): {@link AgentCoreConfig.toolFilter} /
+ *   `toolFilterFromNamePolicy` — not this adapter. Modes deliberately do
+ *   *not* strip tools from the request (prompt-cache stability).
+ * - **Dispatch** (refuse a tool_use): `executeToolRound` via the raw
+ *   {@link ModeManager} on {@link ToolExecutorAdapter}.
+ *
+ * `filterTools` remains a deprecated pass-through for residual callers of the
+ * ModeProvider port; do not put CLI allow-lists here.
  *
  * @module host/sdk-adapters/mode-provider-adapter
  */
@@ -51,11 +50,10 @@ export class ModeProviderAdapter implements ModeProvider {
   }
 
   /**
-   * Pass-through. The request body advertises every tool regardless of mode;
-   * disallowed calls are refused at DISPATCH time inside `executeToolRound`.
-   * `ModeManager.filterTools` is a deprecated no-op, so this returns its input
-   * unchanged, keeping the tool schema array byte-stable across mode toggles
-   * (the cached prefix must not depend on mode). Matches the legacy loop.
+   * Pass-through. Mode gating is dispatch-time only.
+   *
+   * @deprecated Use {@link AgentCoreConfig.toolFilter} for advertisement-time
+   * filtering.
    */
   filterTools(tools: ToolDefinition[]): ToolDefinition[] {
     return tools

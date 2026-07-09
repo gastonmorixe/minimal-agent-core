@@ -30,6 +30,7 @@ import type {
   ProviderModelSpec,
   ProviderSetupContext,
 } from "@minimal-agent/plugin-api/llm/provider-plugin"
+import type { SurfaceCodecRegistry } from "@minimal-agent/plugin-api/llm/surface-codec"
 
 import { registerModel, registerProvider, setDefaultModelId } from "./model-registry.ts"
 import type { ProviderAdapter } from "./provider.ts"
@@ -38,6 +39,11 @@ import {
   type ProviderPlugin,
   registerProviderPlugin,
 } from "./provider-plugin.ts"
+import {
+  findSurfaceCodec,
+  listSurfaceCodecs,
+  registerSurfaceCodec,
+} from "./surface-codec-registry.ts"
 
 interface ProviderDescriptor {
   id: string
@@ -188,7 +194,18 @@ export function buildProviderSetupContext(): ProviderSetupContext {
       registerProvider(adapter as unknown as ProviderAdapter)
     },
   }
-  return { models, providers }
+  const surfaceCodecs: SurfaceCodecRegistry = {
+    register(codec): void {
+      registerSurfaceCodec(codec)
+    },
+    find(surfaceId) {
+      return findSurfaceCodec(surfaceId)
+    },
+    list() {
+      return listSurfaceCodecs()
+    },
+  }
+  return { models, providers, surfaceCodecs }
 }
 
 /**

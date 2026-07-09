@@ -16,6 +16,7 @@ import type { CacheTtl } from "../../cache/cache-ttl.ts"
 import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
+import { applyToolNamePolicy, type ToolNamePolicy } from "../../sdk/tool-filter.ts"
 import { loadBlobStoreConfig } from "../../session/blob-store.ts"
 import { shortHash } from "../../session/session-store.ts"
 import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
@@ -26,6 +27,11 @@ export interface ComputeStartupHashesInput {
   readonly loader: PluginLoader | null
   /** The active mode manager, or `null` when no modes loaded. */
   readonly modeManager: ModeManager | null
+  /**
+   * Advertisement-time tool name policy (CLI `--tools` / `--no-tools`).
+   * Tools hash digests the same set the model will see.
+   */
+  readonly toolNamePolicy?: ToolNamePolicy
   /** Normalized selected model id (no `[1m]`/`[2m]` suffix). */
   readonly selectedModelBase: string
   /** Resolved startup auth (its `type` folds into the system prompt hash). */
@@ -51,7 +57,15 @@ export interface StartupHashes {
 export async function computeStartupHashes(
   input: ComputeStartupHashesInput,
 ): Promise<StartupHashes> {
-  const { loader, modeManager, selectedModelBase, auth, cacheTtl, systemPromptOverrides } = input
+  const {
+    loader,
+    modeManager,
+    toolNamePolicy = null,
+    selectedModelBase,
+    auth,
+    cacheTtl,
+    systemPromptOverrides,
+  } = input
 
   const pluginBlock = loader?.getPromptBlock() ?? null
   const modeAddition = modeManager?.systemPromptAddition() ?? ""
@@ -82,7 +96,7 @@ export async function computeStartupHashes(
           reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
           maxToolRounds: Number.POSITIVE_INFINITY,
           blobStoreEnabled,
-          authKind: auth.type,
+          authKind: auth.type === "provider" ? auth.auth.kind : auth.type,
           cacheTtl,
           overrides: systemPromptOverrides,
         }),
@@ -92,8 +106,11 @@ export async function computeStartupHashes(
   const allToolsForHash = loader
     ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as typeof TOOL_DEFINITIONS)]
     : [...TOOL_DEFINITIONS]
+  // Same pure policy as Agent / AgentCore advertisement — resume drift
+  // compares tools the model actually sees.
+  const toolsAdvertised = applyToolNamePolicy(allToolsForHash, toolNamePolicy)
   const toolsForHash = JSON.stringify(
-    allToolsForHash.map((t) => ({
+    toolsAdvertised.map((t) => ({
       name: t.name,
       description: t.description,
       schema: t.input_schema,

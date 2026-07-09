@@ -41,8 +41,29 @@ import {
 import { c } from "../agent/agent.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
+import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 
 import { activeModeStamp, modeChangeAttachment, modeToolRefusalMessage } from "./PROMPTS.ts"
+
+// ---------------------------------------------------------------------------
+// CLI-level tool filter (checked BEFORE mode permissions at dispatch)
+// ---------------------------------------------------------------------------
+
+/**
+ * CLI-level tool name policy (`--tools` / `--no-tools`).
+ *
+ * Alias of the SDK {@link ToolNamePolicy}. Advertisement (request body,
+ * startup banner, tools hash) uses {@link applyToolNamePolicy} /
+ * {@link toolFilterFromNamePolicy} directly; {@link ModeManager} keeps the
+ * same policy only for the dispatch-time `isToolAllowed` gate.
+ */
+export type CliToolFilter = ToolNamePolicy
+
+/**
+ * @deprecated Prefer {@link applyToolNamePolicy} from `src/sdk/tool-filter.ts`.
+ * Kept as a thin re-export so existing host call sites keep compiling.
+ */
+export const applyCliToolFilter = applyToolNamePolicy
 
 /**
  * Resolved tool-permission rules for a mode.
@@ -411,6 +432,12 @@ export class ModeManager {
    * reloads (rare; the host calls this explicitly).
    */
   private permissionsCache: (EffectiveModePermissions | null)[]
+  /**
+   * Name policy from CLI/SDK (`--tools` / `--no-tools`), checked BEFORE mode
+   * permissions at dispatch. Advertisement filtering is owned by the SDK
+   * `toolFilter` port — this field is only the dispatch second line of defense.
+   */
+  private cliToolFilter: ToolNamePolicy
 
   /**
    * Builds the manager and resolves the starting mode.
@@ -432,12 +459,14 @@ export class ModeManager {
     env?: StyleEnv,
     now?: () => Date,
     getOverride?: (modeId: string) => ModeUserOverride | null,
+    cliToolFilter?: CliToolFilter,
   ) {
     this.modes = [...modes]
     this.idx = -1
     this.env = env ?? detectStyleEnv()
     this.now = now ?? (() => new Date())
     this.getOverride = getOverride ?? (() => null)
+    this.cliToolFilter = cliToolFilter ?? null
     this.resolvedCache = this.modes.map((m) => {
       const req = m.style ?? styleFromLegacyColor(m.color)
       return req ? resolveModeStyle(req, this.env) : null
@@ -614,6 +643,19 @@ export class ModeManager {
     toolName: string,
     toolInput?: Record<string, unknown>,
   ): { allowed: true } | { allowed: false; message: string } {
+    // Phase 1: name policy (CLI `--tools` / `--no-tools`) before mode rules.
+    const nameGate = isToolNameAllowed(toolName, this.cliToolFilter)
+    if (!nameGate.allowed) {
+      if (nameGate.reason === "deny-all") {
+        return {
+          allowed: false,
+          message: `Tool "${toolName}" is not permitted (--no-tools is active).`,
+        }
+      }
+      return { allowed: false, message: `Tool "${toolName}" is not in the --tools allow-list.` }
+    }
+
+    // Phase 2: mode-level permissions
     const m = this.active()
     if (!m) return { allowed: true }
     const perms = this.effectivePermissions(m.id)
@@ -797,6 +839,17 @@ export class ModeManager {
    */
   filterTools<T extends { name: string }>(tools: T[]): T[] {
     return tools
+  }
+
+  /**
+   * Advertisement-time filter for the CLI name policy.
+   *
+   * @deprecated Prefer {@link applyToolNamePolicy} / AgentCore
+   * `toolFilter` so advertisement is not tied to ModeManager. Kept for
+   * one release as a thin wrapper; dispatch still uses {@link isToolAllowed}.
+   */
+  filterToolsForCli<T extends { name: string }>(tools: T[]): T[] {
+    return applyToolNamePolicy(tools, this.cliToolFilter)
   }
 
   /**

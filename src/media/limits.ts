@@ -18,7 +18,7 @@ import {
   unsupportedModalityMessage,
   unsupportedTypeMessage,
 } from "./PROMPTS.ts"
-import { formatBytes, type MediaItem, type MediaKind, type MediaRejection } from "./types.ts"
+import type { MediaItem, MediaKind, MediaRejection } from "./types.ts"
 
 // ---------------------------------------------------------------------------
 // Limits (per provider/model, supplied as data)

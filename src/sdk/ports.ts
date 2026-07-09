@@ -65,6 +65,20 @@ export interface ToolRegistry {
   presentation?(): ReadonlyMap<string, { icon?: string; color?: string; headerKey?: string }>
 }
 
+/**
+ * Advertisement-time tool filter: shapes the tools array sent to the model.
+ *
+ * Distinct from dispatch-time gating (mode permissions / teaching refusals),
+ * which refuses a call *after* the model names a tool. Wire via
+ * {@link AgentCoreConfig.toolFilter}. Hosts typically build one with
+ * `toolFilterFromNamePolicy` from `./tool-filter.ts` (CLI `--tools` /
+ * `--no-tools`, SDK allow-lists, tests).
+ */
+export interface ToolAdvertisementFilter {
+  /** Return the subset of `tools` that should be advertised to the model. */
+  filter(tools: readonly ToolDefinition[]): ToolDefinition[]
+}
+
 // ---------------------------------------------------------------------------
 // Transcript / event sink
 // ---------------------------------------------------------------------------
@@ -163,7 +177,11 @@ export interface ModeProvider {
   activeModeId(): string | null
   /** Resolve the prompt prefix for a given mode id. */
   promptPrefix?(baseArrow: string): string
-  /** Filter tools allowed in the current mode. */
+  /**
+   * @deprecated Mode gating is dispatch-time only (cache-stable tool schemas).
+   * Prefer {@link AgentCoreConfig.toolFilter} / {@link ToolAdvertisementFilter}
+   * for advertisement-time filtering (CLI `--tools`, SDK allow-lists).
+   */
   filterTools?(tools: ToolDefinition[]): ToolDefinition[]
   /** Consume a pending mode-change attachment, if any. */
   consumePendingAttachment?(): ContentBlock | null
@@ -216,6 +234,13 @@ export interface AgentCoreConfig {
   networkClient?: NetworkClient
   /** Tool registry (core + plugin tools). */
   toolRegistry: ToolRegistry
+  /**
+   * Optional advertisement-time tool filter. Applied to
+   * `toolRegistry.list()` when assembling the request body so the model only
+   * sees allowed tools. Distinct from mode dispatch gates. See
+   * {@link ToolAdvertisementFilter} and `toolFilterFromNamePolicy`.
+   */
+  toolFilter?: ToolAdvertisementFilter
   /** Tool executor. */
   toolExecutor: ToolExecutor
   /** Transcript sink. */

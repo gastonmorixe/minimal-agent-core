@@ -17,6 +17,7 @@ import {
   registerDiscoveredProviders,
 } from "./provider-discovery.ts"
 import { clearProviderPlugins } from "./provider-plugin.ts"
+import { clearSurfaceCodecs, findSurfaceCodec } from "./surface-codec-registry.ts"
 
 // Discovery is tested against a SYNTHETIC fixture tree built at runtime (two
 // fake provider plugins with neutral ids), so it exercises the mechanism
@@ -50,6 +51,16 @@ export const providerPlugin = {
       async *run() {},
     }
     ctx.providers.register(adapter)
+    ctx.surfaceCodecs?.register({
+      surfaceId: ${JSON.stringify(`${id}-surface`)},
+      displayName: ${JSON.stringify(`${id} surface`)},
+      defaultPath: "/v1/chat/completions",
+      defaultCapabilities: { contextWindow: 1000, maxOutputTokens: 100 },
+      defaultPricing: { inputUSD: 0, outputUSD: 0, cacheWriteUSD: 0, cacheReadUSD: 0, webSearchPerCallUSD: 0 },
+      validate: () => ({ ok: true, errors: [] }),
+      buildRequest: (i) => ({ label: "t", method: "POST", url: i.endpoint }),
+      async *translateStream() {},
+    })
     ctx.models.register({
       id: ${JSON.stringify(modelId)},
       providerId: ${JSON.stringify(id)},
@@ -108,6 +119,22 @@ describe("provider discovery", () => {
     expect(resolveModel("vendorb-model-1").providerId).toBe("vendorb")
 
     clearProviderPlugins()
+  })
+
+  it("activation threads a surface-codec registrar so plugins register codecs", async () => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+    clearSurfaceCodecs()
+
+    await registerDiscoveredProviders(pluginsDir)
+    activateDiscoveredProviders()
+
+    expect(findSurfaceCodec("vendora-surface")?.surfaceId).toBe("vendora-surface")
+    expect(findSurfaceCodec("vendorb-surface")?.surfaceId).toBe("vendorb-surface")
+
+    clearProviderPlugins()
+    clearSurfaceCodecs()
   })
 
   it("returns empty for a non-existent dir", () => {

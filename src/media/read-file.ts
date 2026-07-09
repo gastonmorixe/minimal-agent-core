@@ -43,7 +43,7 @@ import {
 } from "./PROMPTS.ts"
 import { imageDimensions, mimeToKind, sniffMime } from "./probe.ts"
 import { type FitResult, fitImageToBudget } from "./transform.ts"
-import { formatBytes, type MediaKind } from "./types.ts"
+import type { MediaKind } from "./types.ts"
 
 /** Image fitter signature (so tests can inject a deterministic stub). */
 export type ImageFitter = (

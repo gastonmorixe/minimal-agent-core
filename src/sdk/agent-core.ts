@@ -65,6 +65,7 @@ import type {
   PromptContributor,
   SessionPersistence,
   TerminalMetrics,
+  ToolAdvertisementFilter,
   ToolDefinition,
   ToolExecutor,
   ToolRegistry,
@@ -127,6 +128,7 @@ export class AgentCore {
   private sendFn: TransportFn
   private networkClient: import("../network/index.ts").NetworkClient | undefined
   private toolRegistry: ToolRegistry
+  private toolFilter: ToolAdvertisementFilter | null
   private toolExecutor: ToolExecutor
   private transcriptSink: TranscriptSink
   private sessionPersistence: SessionPersistence | null
@@ -152,6 +154,7 @@ export class AgentCore {
     this.sendFn = config.sendFn ?? selectedTransport
     this.networkClient = config.networkClient
     this.toolRegistry = config.toolRegistry
+    this.toolFilter = config.toolFilter ?? null
     this.toolExecutor = config.toolExecutor
     this.transcriptSink = config.transcriptSink
     this.sessionPersistence = config.sessionPersistence ?? null
@@ -395,12 +398,18 @@ export class AgentCore {
     })
 
     const allTools: ToolDefinition[] = this.toolRegistry.list()
+    // Advertisement-time filter (CLI `--tools` / SDK allow-list). Mode
+    // gating is deliberately NOT applied here — modes keep the tool schema
+    // byte-stable and refuse at dispatch. Prefer `config.toolFilter`; the
+    // deprecated ModeProvider.filterTools is a last-resort fallback only.
+    const advertisedTools =
+      this.toolFilter?.filter(allTools) ?? this.modeProvider?.filterTools?.(allTools) ?? allTools
 
     const mergedTools: Array<{
       name: string
       description: string
       input_schema: Record<string, unknown>
-    }> = allTools.map((t) => ({
+    }> = advertisedTools.map((t) => ({
       name: t.name,
       description: t.description,
       input_schema: t.input_schema,
