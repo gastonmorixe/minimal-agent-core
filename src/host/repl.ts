@@ -555,7 +555,13 @@ export async function runRepl(
       }
       const onThinkingStop = async (): Promise<void> => {
         await endThinkingFormatter()
-        writeDirectSink("\n")
+        // Guarantee exactly one blank line between the reasoning block and the
+        // response text. Reasoning streams through `writeDirectSink` (lastKind
+        // = "text"), so the text↔transcript separator never fires for the
+        // following response. A lone "\n" only closes the reasoning line when
+        // it didn't already end in one, leaving zero blank rows. Emit the
+        // second newline in that case so the separation is always present.
+        writeDirectSink(lastChunkEndedWithNewline ? "\n" : "\n\n")
       }
       // Per-text-block formatter boundary. See `runReplLiveArea` for the
       // full rationale; this is the legacy `runRepl` (non-live-area) twin.
