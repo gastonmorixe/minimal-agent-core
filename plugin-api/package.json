@@ -42,6 +42,7 @@
     "./llm/canonical-messages": "./src/llm/canonical-messages.ts",
     "./llm/canonical-tools": "./src/llm/canonical-tools.ts",
     "./llm/provider-auth": "./src/llm/provider-auth.ts",
-    "./llm/provider-plugin": "./src/llm/provider-plugin.ts"
+    "./llm/provider-plugin": "./src/llm/provider-plugin.ts",
+    "./llm/surface-codec": "./src/llm/surface-codec.ts"
   }
 }

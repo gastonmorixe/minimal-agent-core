@@ -116,6 +116,7 @@ async function* updateLabelsFromEvents(
  * raises its own "unknown model" error rather than this masking it.
  */
 function resolveProviderAuth(opts: SendOptions): ProviderAuth {
+  if (opts.auth.type === "provider") return opts.auth.auth
   const providerId = resolveRequestProviderId(opts)
   if (!providerId) return legacyAuthToProviderAuth(opts.auth)
   return resolveStoredProviderAuth(providerId, opts.model ?? "", opts.credentialName)
@@ -161,7 +162,8 @@ export async function* canonicalSendFn(
   // its own credential through the provider auth store. auth-refresh updates
   // `.token` in place so a refreshed token is picked up by the next attempt
   // within this send.
-  const authState: AuthRefreshState = { auth: resolveProviderAuth(opts) }
+  const initialAuth = resolveProviderAuth(opts)
+  const authState: AuthRefreshState = { auth: initialAuth }
 
   // ------------------------------------------------------------------
   // Realtime activity binding (the status-line ↑/↓ bytes infix).

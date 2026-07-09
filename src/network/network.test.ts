@@ -3,6 +3,7 @@ import { createServer } from "node:http2"
 
 import { describe, expect, it } from "bun:test"
 
+import { isPlaintextHttp } from "./client.ts"
 import {
   defaultNetworkClient,
   Http2Transport,
@@ -62,6 +63,63 @@ describe("network", () => {
       await client.close()
       await closeServer(server)
     }
+  })
+
+  it("routes plaintext http:// to the plaintextHttpTransport, https:// to primary", async () => {
+    const primary = labeledTransport("primary")
+    const plaintextHttpTransport = labeledTransport("plaintext")
+    const client = new NetworkClient({ primary, plaintextHttpTransport })
+
+    const httpRes = await client.request({
+      label: "t.http",
+      method: "GET",
+      url: "http://192.168.1.40:8000/v1/chat/completions",
+    })
+    const httpsRes = await client.request({
+      label: "t.https",
+      method: "GET",
+      url: "https://api.example.com/v1/chat/completions",
+    })
+
+    expect(httpRes.transport.id).toBe("plaintext")
+    expect(httpsRes.transport.id).toBe("primary")
+  })
+
+  it("an explicit protocol pin still wins over the plaintext auto-route", async () => {
+    const primary = labeledTransport("primary")
+    const plaintextHttpTransport = labeledTransport("plaintext")
+    const h3 = labeledTransport("h3")
+    const client = new NetworkClient({
+      primary,
+      plaintextHttpTransport,
+      transports: new Map([["h3", h3]]),
+    })
+
+    const res = await client.request({
+      label: "t.pinned",
+      method: "GET",
+      url: "http://192.168.1.40:8000/v1/chat/completions",
+      protocol: "h3",
+    })
+    expect(res.transport.id).toBe("h3")
+  })
+
+  it("falls back to primary for plaintext http:// when no plaintextHttpTransport is set", async () => {
+    const primary = labeledTransport("primary")
+    const client = new NetworkClient({ primary })
+    const res = await client.request({
+      label: "t.noroute",
+      method: "GET",
+      url: "http://192.168.1.40:8000/v1/chat/completions",
+    })
+    expect(res.transport.id).toBe("primary")
+  })
+
+  it("isPlaintextHttp: true for http, false for https/malformed", () => {
+    expect(isPlaintextHttp("http://192.168.1.40:8000/v1/chat/completions")).toBe(true)
+    expect(isPlaintextHttp("http://localhost:1234")).toBe(true)
+    expect(isPlaintextHttp("https://api.example.com")).toBe(false)
+    expect(isPlaintextHttp("not a url")).toBe(false)
   })
 
   it("does not use fetch fallback unless fallback is enabled", async () => {
@@ -162,6 +220,31 @@ async function closeServer(server: Http2Server): Promise<void> {
   await new Promise<void>((resolve) => {
     server.close(() => resolve())
   })
+}
+
+/** A transport that echoes its own id on the response so tests can assert routing. */
+function labeledTransport(id: string): NetworkTransport {
+  return {
+    id,
+    async request(req: NetworkRequest) {
+      return new NetworkResponse({
+        status: 200,
+        headers: { "content-type": "text/plain" },
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(id))
+            controller.close()
+          },
+        }),
+        transport: {
+          id,
+          protocol: "http/1.1",
+          origin: new URL(req.url).origin,
+          fallbackUsed: false,
+        },
+      })
+    },
+  }
 }
 
 function failingTransport(): NetworkTransport {

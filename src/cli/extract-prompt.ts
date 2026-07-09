@@ -40,6 +40,14 @@ import {
 export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--model",
   "--provider",
+  "--endpoint",
+  "--format",
+  "--surface",
+  "--auth-type",
+  "--api-key",
+  "--auth-header",
+  "--provider-model",
+  "--effort-levels",
   "--session-id",
   "--prompt",
   "--resume",
@@ -66,6 +74,7 @@ export const FLAGS_WITH_VALUES: ReadonlySet<string> = new Set([
   "--output-format",
   "--service-tier",
   "--platform",
+  "--tools",
   ...SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS,
 ])
 
@@ -92,6 +101,7 @@ export const FLAGS_NO_VALUE: ReadonlySet<string> = new Set([
   "--show-hidden-chars",
   "--header",
   "--no-header",
+  "--no-tools",
   // Auth subcommands — see src/cli/command-plan.ts. None of these consume
   // the following positional, so they belong here rather than in
   // FLAGS_WITH_VALUES. (`--login --email foo@bar` is a future option but

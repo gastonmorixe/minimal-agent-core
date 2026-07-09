@@ -35,6 +35,15 @@ export interface NetworkClientOptions {
    */
   transports?: Map<NetworkProtocol, NetworkTransport>
   /**
+   * Transport for plaintext `http://` requests. The default HTTP/2 transport
+   * connects with h2c prior-knowledge, which a plain HTTP/1.1 server (LM Studio,
+   * vLLM, a local proxy) never answers, so the stream hangs. When this is set,
+   * any `http://` (non-TLS) URL is routed here instead of `primary`. `https://`
+   * traffic is unaffected. Set to a {@link FetchTransport} in the default client;
+   * omit (or pin `MINIMAL_AGENT_TRANSPORT`) to disable the auto-route.
+   */
+  plaintextHttpTransport?: NetworkTransport
+  /**
    * Middleware applied to each request in registration order.
    * `onRequest` runs outer→inner, `wrap` nests outer-around-inner,
    * `onResponse` runs inner→outer (LIFO so the outermost policy
@@ -54,6 +63,7 @@ export class NetworkClient {
   private readonly observers: NetworkObserver[]
   private readonly allowFetchFallback: boolean
   private readonly transports: Map<NetworkProtocol, NetworkTransport>
+  private readonly plaintextHttpTransport?: NetworkTransport
   private readonly policies: NetworkPolicy[]
 
   constructor(opts: NetworkClientOptions) {
@@ -62,6 +72,7 @@ export class NetworkClient {
     this.observers = opts.observers ?? []
     this.allowFetchFallback = opts.allowFetchFallback ?? false
     this.transports = opts.transports ?? new Map()
+    this.plaintextHttpTransport = opts.plaintextHttpTransport
     this.policies = opts.policies ?? []
   }
 
@@ -156,6 +167,13 @@ export class NetworkClient {
       const t = this.transports.get(req.protocol)
       if (t) return t
     }
+    // Plaintext http:// can't be served by the h2c-prior-knowledge primary
+    // transport (it hangs waiting for an HTTP/2 preface a plain HTTP/1.1 server
+    // never sends). Route it to the HTTP/1.1 transport when one is configured.
+    // An explicit protocol pin above still wins. `https://` is untouched.
+    if (this.plaintextHttpTransport && isPlaintextHttp(req.url)) {
+      return this.plaintextHttpTransport
+    }
     return this.primary
   }
 
@@ -230,6 +248,15 @@ export class NetworkClient {
   }
 }
 
+/** True for a cleartext `http://` URL (not `https://`). Malformed → false. */
+export function isPlaintextHttp(url: string): boolean {
+  try {
+    return new URL(url).protocol === "http:"
+  } catch {
+    return false
+  }
+}
+
 /**
  * Build the process default client from environment transport settings.
  *
@@ -258,8 +285,18 @@ export function createDefaultNetworkClient(): NetworkClient {
     if (!testEnv) throw new Error("MINIMAL_AGENT_TRANSPORT=test is only allowed in test")
     return new NetworkClient({ primary: new TestTransport() })
   }
-  const primary = requested === "fetch" ? new FetchTransport() : new Http2Transport()
-  const fallback = requested === "fetch" ? undefined : new FetchTransport()
+  const usingHttp2Primary = requested !== "fetch"
+  const primary = usingHttp2Primary ? new Http2Transport() : new FetchTransport()
+  const fallback = usingHttp2Primary ? new FetchTransport() : undefined
+  // Auto-route plaintext http:// to HTTP/1.1: the h2c-prior-knowledge primary
+  // hangs against a plain HTTP/1.1 server (local LLM runtimes like LM Studio /
+  // vLLM / MLX, or a cleartext proxy). Only meaningful when the primary is
+  // http2; when the user already pinned fetch, the primary IS http/1.1.
+  // Opt out with MINIMAL_AGENT_NO_PLAINTEXT_HTTP1=1 (e.g. an h2c-capable local
+  // server you want to reach over HTTP/2). See isPlaintextHttp + transportFor.
+  const plaintextOptOut = process.env.MINIMAL_AGENT_NO_PLAINTEXT_HTTP1 === "1"
+  const plaintextHttpTransport =
+    usingHttp2Primary && !plaintextOptOut ? new FetchTransport() : undefined
 
   // HTTP/3 — opt-in via env. Off by default while Bun's h3 client is
   // experimental (Bun ≥ 1.3.14) and few origins serve h3 anyway
@@ -287,6 +324,7 @@ export function createDefaultNetworkClient(): NetworkClient {
     fallback,
     allowFetchFallback: process.env.MINIMAL_AGENT_ALLOW_FETCH_FALLBACK === "1",
     transports,
+    ...(plaintextHttpTransport ? { plaintextHttpTransport } : {}),
     policies,
     // Order matters slightly: net-dbg snapshots full traffic to disk for
     // post-hoc debugging; the activity observer only mutates an attached

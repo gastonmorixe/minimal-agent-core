@@ -122,6 +122,73 @@ describe("Agent.run with ModeManager (dispatch gate + activation attachment)", (
     expect(joinedTranscript).toContain("refused by ask")
   })
 
+  it("--tools allow-list refuses tools not in the list at dispatch (CLI filter before mode)", async () => {
+    const { ModeManager } = await import("../modes/modes.ts")
+    // --tools "Read" — only Read is allowed. Edit is not in the list.
+    const modeManager = new ModeManager([ASK_MANIFEST], "ask", undefined, undefined, undefined, {
+      kind: "allow-list",
+      tools: ["Read"],
+    })
+
+    const records: Array<Record<string, unknown>> = []
+    const sendFn = makeRecordingSendFn(records)
+    const auth: AuthResult = { type: "api-key", token: "test" }
+    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+
+    const transcript: string[] = []
+    const gen = agent.run("please edit foo.ts", {
+      onTranscriptLine: (line) => transcript.push(line),
+    })
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    const history = agent.history()
+    expect(history.length).toBe(4)
+    const toolResultMsg = history[2]
+    expect(toolResultMsg.role).toBe("user")
+    const tr = (toolResultMsg.content as unknown as Array<Record<string, unknown>>).find(
+      (b) => b.type === "tool_result",
+    ) as Record<string, unknown>
+    expect(tr).toBeDefined()
+    expect(tr.is_error).toBe(true)
+    // The CLI filter message, not the mode refusal message
+    expect(String(tr.content)).toContain("not in the --tools allow-list")
+
+    const joinedTranscript = stripAnsi(transcript.join("\n"))
+    expect(joinedTranscript).toContain("⊘")
+  })
+
+  it("--no-tools refuses every tool at dispatch", async () => {
+    const { ModeManager } = await import("../modes/modes.ts")
+    const modeManager = new ModeManager([ASK_MANIFEST], "ask", undefined, undefined, undefined, {
+      kind: "deny-all",
+    })
+
+    const records: Array<Record<string, unknown>> = []
+    const sendFn = makeRecordingSendFn(records)
+    const auth: AuthResult = { type: "api-key", token: "test" }
+    const agent = new Agent({ auth, model: "test-model", sendFn, modeManager })
+
+    const gen = agent.run("please edit foo.ts")
+    while (true) {
+      const { done } = await gen.next()
+      if (done) break
+    }
+
+    const history = agent.history()
+    expect(history.length).toBe(4)
+    const toolResultMsg = history[2]
+    expect(toolResultMsg.role).toBe("user")
+    const tr = (toolResultMsg.content as unknown as Array<Record<string, unknown>>).find(
+      (b) => b.type === "tool_result",
+    ) as Record<string, unknown>
+    expect(tr).toBeDefined()
+    expect(tr.is_error).toBe(true)
+    expect(String(tr.content)).toContain("--no-tools is active")
+  })
+
   it("keeps the tools array byte-stable across mode toggles (Edit always advertised)", async () => {
     const { ModeManager } = await import("../modes/modes.ts")
     const modeManager = new ModeManager([ASK_MANIFEST])

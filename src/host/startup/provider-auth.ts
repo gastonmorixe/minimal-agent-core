@@ -8,7 +8,7 @@
  * @module startup/provider-auth
  */
 
-import type { AuthResult } from "../../auth/auth.ts"
+import type { AuthResult, TokenAuthResult } from "../../auth/auth.ts"
 import { storedProvidersHint, tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { findProviderPlugin } from "../../llm/provider-plugin.ts"
@@ -26,12 +26,24 @@ export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
         ...(auth.refresh ? { refresh: refreshBridge(auth.refresh) } : {}),
       }
     case "custom":
-      throw new Error("custom provider auth cannot bridge to legacy AuthResult")
+      return { type: "provider", auth }
     default: {
       const _exhaustive: never = auth
       throw new Error(`unhandled provider auth kind: ${_exhaustive}`)
     }
   }
+}
+
+/**
+ * Options describing how to authenticate against a user-supplied generic
+ * OpenAI-compatible endpoint (the `generic-endpoint` pseudo-provider).
+ */
+export interface GenericEndpointAuthOptions {
+  endpoint?: string
+  format?: string
+  authType?: "api-key" | "bearer" | "none" | "custom-header"
+  apiKey?: string
+  authHeader?: string
 }
 
 /**
@@ -45,11 +57,13 @@ export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
  * @param credentialName - Optional credential name to disambiguate when the
  *   provider has multiple stored credentials. When omitted, the provider's
  *   default displayName is used.
+ * @param generic - Options for the `generic-endpoint` pseudo-provider.
  */
 export async function resolveStartupAuth(
   providerId: string | undefined,
   modelId: string,
   credentialName?: string,
+  generic?: GenericEndpointAuthOptions,
 ): Promise<AuthResult> {
   if (process.env.MINIMAL_AGENT_TEST_AUTH === "1") {
     return { type: "oauth", token: "test-token", accountUuid: "test-account" }
@@ -57,6 +71,10 @@ export async function resolveStartupAuth(
 
   if (providerId === undefined) {
     throw new Error(`no provider selected for model "${modelId}". ${storedProvidersHint()}`)
+  }
+
+  if (providerId === "generic-endpoint") {
+    return { type: "provider", auth: resolveGenericEndpointAuth(generic) }
   }
 
   const auth = tryResolveProviderAuth(providerId, modelId, credentialName)
@@ -71,7 +89,33 @@ export async function resolveStartupAuth(
   return providerAuthToAuthResult(auth)
 }
 
-function refreshBridge(refresh: () => Promise<{ token: string }>): () => Promise<AuthResult> {
+function resolveGenericEndpointAuth(opts?: GenericEndpointAuthOptions): ProviderAuth {
+  const authType = opts?.authType ?? (opts?.apiKey ? "bearer" : "none")
+  switch (authType) {
+    case "none":
+      return { kind: "custom", headers: {} }
+    case "api-key":
+    case "bearer": {
+      const key = opts?.apiKey?.trim()
+      if (!key) throw new Error(`generic-endpoint auth-type ${authType} requires --api-key`)
+      return { kind: "api-key", key }
+    }
+    case "custom-header": {
+      const key = opts?.apiKey?.trim()
+      const header = opts?.authHeader?.trim()
+      if (!key) throw new Error("generic-endpoint auth-type custom-header requires --api-key")
+      if (!header)
+        throw new Error("generic-endpoint auth-type custom-header requires --auth-header")
+      return { kind: "custom", headers: { [header]: key } }
+    }
+    default: {
+      const _exhaustive: never = authType
+      throw new Error(`unhandled generic-endpoint auth-type: ${_exhaustive}`)
+    }
+  }
+}
+
+function refreshBridge(refresh: () => Promise<{ token: string }>): () => Promise<TokenAuthResult> {
   return async () => {
     const refreshed = await refresh()
     return { type: "oauth", token: refreshed.token }
@@ -83,5 +127,5 @@ export function startupAuthLabel(auth: AuthResult, providerId: string | undefine
   if (providerId && findProviderPlugin(providerId)) {
     return `${auth.type} ${c.dim(`(${providerId})`)}`
   }
-  return `${auth.type}${auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`
+  return `${auth.type}${auth.type !== "provider" && auth.accountUuid ? ` ${c.dim(`(account: ${auth.accountUuid.slice(0, 8)}...)`)}` : ""}`
 }

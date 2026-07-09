@@ -52,6 +52,7 @@ import { ModeManager } from "../modes/modes.ts"
 import type { NetworkClient } from "../network/index.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import type { ManifestMode } from "../plugins/types.ts"
+import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import { appendUserTurn } from "../session/session-restore.ts"
 import type { SessionStore } from "../session/session-store.ts"
@@ -212,8 +213,14 @@ export class Agent {
   private systemPromptOverrides: SystemPromptOverrides | undefined
   /** Optional Plugin loader. When set, plugin tools merge with core tools. */
   private loader: PluginLoader | null
-  /** Optional mode manager (mode-aware system prompt + tool filter). */
+  /** Optional mode manager (mode-aware system prompt + dispatch tool gate). */
   private modeManager: ModeManager | null
+  /**
+   * Advertisement-time tool name policy (`--tools` / `--no-tools`). Applied
+   * via {@link applyToolNamePolicy} when building the request tools array.
+   * Null → advertise the full registry.
+   */
+  private toolNamePolicy: ToolNamePolicy
   /**
    * Optional save-echo collector. When set, every `<ma::agent::memory-saved …>`
    * event the inline-tag handler (or the `MemoryTool` add action)
@@ -429,6 +436,13 @@ export class Agent {
     loader?: PluginLoader | null
     modeManager?: ModeManager | null
     /**
+     * Advertisement-time tool name policy (`--tools` / `--no-tools`).
+     * Applied when assembling the request body via {@link applyToolNamePolicy}.
+     * Dispatch refusals still go through {@link ModeManager.isToolAllowed}
+     * (which receives the same policy at construction).
+     */
+    toolNamePolicy?: ToolNamePolicy
+    /**
      * Optional save-echo collector (see {@link Agent.saveEcho}). The
      * structural type avoids a hard dependency on the memory plugin's
      * implementation : `src/index.ts` constructs and injects it.
@@ -523,6 +537,7 @@ export class Agent {
     this.cacheTtl = opts.cacheTtl ?? DEFAULT_CACHE_TTL
     this.loader = opts.loader ?? null
     this.modeManager = opts.modeManager ?? null
+    this.toolNamePolicy = opts.toolNamePolicy ?? null
     this.saveEcho = opts.saveEcho ?? null
     this.shortTermSnapshot = opts.shortTermSnapshot ?? null
     this.tasksAttachment = opts.tasksAttachment ?? null
@@ -1066,13 +1081,16 @@ export class Agent {
       // tool-output-conventions paragraph appears in the instructions block;
       // null disables it (matches the pre-blob-store prompt shape exactly).
       blobStoreEnabled: this.blobStore !== null,
-      authKind: this.auth.type,
+      authKind: this.auth.type === "provider" ? this.auth.auth.kind : this.auth.type,
       cacheTtl: this.cacheTtl,
       overrides: this.systemPromptOverrides,
     })
     const allTools: ToolDefinition[] = this.loader
       ? [...TOOL_DEFINITIONS, ...(this.loader.getExtraTools() as ToolDefinition[])]
       : [...TOOL_DEFINITIONS]
+    // Advertisement-time name policy (same pure helper AgentCore's toolFilter
+    // port uses). ModeManager is not involved — it only gates at dispatch.
+    const filteredTools = applyToolNamePolicy(allTools, this.toolNamePolicy)
     // Build a presentation map (icon + color) keyed by tool name for transcript
     // rendering, then strip those cosmetic fields before sending to the API.
     const toolPresentation = new Map<
@@ -1098,7 +1116,7 @@ export class Agent {
       name: string
       description: string
       input_schema: Record<string, unknown>
-    }> = allTools.map((t) => ({
+    }> = filteredTools.map((t) => ({
       name: t.name,
       description: t.description,
       input_schema: t.input_schema,

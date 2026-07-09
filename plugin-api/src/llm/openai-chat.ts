@@ -79,7 +79,7 @@ export interface OpenAIChatChunk {
   object: "chat.completion.chunk"
   created: number
   model: string
-  choices: Array<{
+  choices?: Array<{
     index: number
     delta: {
       role?: "assistant"
@@ -159,12 +159,17 @@ export async function* translateOpenAIChatStream(
       lastUsage = mapUsage(chunk.usage)
     }
 
-    // Usage-only trailing chunk (OpenAI standard): choices empty, usage set.
-    if (chunk.choices.length === 0 && chunk.usage) {
-      continue
-    }
+    // Tolerate chunks with no `choices` array. The OpenAI standard always
+    // sends `choices` (empty only on the trailing usage-only chunk), but
+    // real-world OpenAI-compatible servers (MLX, vLLM, LM Studio, some proxies)
+    // emit keepalive/ping and usage chunks that omit `choices` entirely.
+    // Treat a missing array as empty rather than dereferencing it (which threw
+    // `undefined is not an object (evaluating 'chunk.choices.length')` and
+    // stalled the stream until the idle watchdog fired).
+    const choices = chunk.choices ?? []
+    if (choices.length === 0) continue
 
-    const choice = chunk.choices[0]
+    const choice = choices[0]
     if (!choice) continue
 
     const delta = choice.delta ?? {}

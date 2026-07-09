@@ -45,6 +45,7 @@ import type { PluginLoader } from "../../plugins/loader.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
 import type { EventSink } from "../../sdk/events.ts"
 import type { AgentCoreConfig } from "../../sdk/ports.ts"
+import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
@@ -89,6 +90,12 @@ export interface BuildAgentCoreDeps {
   loader: PluginLoader | null
   /** Mode manager. Null when modes are disabled. */
   modeManager: ModeManager | null
+  /**
+   * Advertisement-time tool name policy (`--tools` / `--no-tools` / SDK
+   * allow-list). Wired onto AgentCore as `toolFilter` via
+   * {@link toolFilterFromNamePolicy}. Null/undefined → advertise full registry.
+   */
+  toolNamePolicy?: ToolNamePolicy
   /** Append-only session store. Null when persistence is off. */
   store: SessionStore | null
   /** Per-session raw-output blob store. Null when blob capture is off. */
@@ -165,7 +172,15 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
 
   // Mode provider: the mode-change signal + read-only queries. Tool gating +
   // active-mode stamps live in executeToolRound via the raw manager above.
+  // Advertisement-time filtering is the separate `toolFilter` port below —
+  // not ModeProvider.filterTools.
   const modeProvider = deps.modeManager ? new ModeProviderAdapter(deps.modeManager) : undefined
+
+  // Advertisement filter: CLI/SDK name policy → structural ToolAdvertisementFilter.
+  // Wire whenever a non-null policy is present (allow-list or deny-all) so
+  // AgentCore never falls back to the deprecated ModeProvider.filterTools path.
+  const toolFilter =
+    deps.toolNamePolicy != null ? toolFilterFromNamePolicy(deps.toolNamePolicy) : undefined
 
   // Media resolver: ingest inline @file / image refs using the run's model.
   const mediaResolver = new MediaResolverAdapter(deps.model)
@@ -184,6 +199,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.networkClient !== undefined ? { networkClient: deps.networkClient } : {}),
     ...(deps.eventSink !== undefined ? { eventSink: deps.eventSink } : {}),
     toolRegistry,
+    ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,
     // The core writes no transcript on the headless path; a no-op sink keeps
     // the required port satisfied without rendering anything.

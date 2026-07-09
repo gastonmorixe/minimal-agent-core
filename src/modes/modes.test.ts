@@ -19,8 +19,9 @@
 import { describe, expect, test } from "bun:test"
 
 import type { ManifestMode } from "../plugins/types.ts"
+import { applyToolNamePolicy } from "../sdk/tool-filter.ts"
 
-import { ModeManager } from "./modes.ts"
+import { applyCliToolFilter, ModeManager } from "./modes.ts"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -102,6 +103,100 @@ describe("ModeManager.isToolAllowed", () => {
     const r = m.isToolAllowed("Bash")
     expect(r.allowed).toBe(false)
     if (!r.allowed) expect(r.message).toContain("LOCKDOWN mode")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isToolAllowed with CLI tool filter (--tools / --no-tools)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// CLI name policy at dispatch (advertisement is sdk/tool-filter)
+// ---------------------------------------------------------------------------
+
+describe("applyCliToolFilter re-export", () => {
+  test("is the same function as applyToolNamePolicy", () => {
+    expect(applyCliToolFilter).toBe(applyToolNamePolicy)
+  })
+})
+
+describe("ModeManager.filterToolsForCli (deprecated wrapper)", () => {
+  const tools = [{ name: "Read" }, { name: "Task" }, { name: "WebSearch" }]
+
+  test("delegates to the SDK name policy", () => {
+    const m = new ModeManager([ASK_MODE], null, undefined, undefined, undefined, {
+      kind: "allow-list",
+      tools: ["WebSearch"],
+    })
+    expect(m.filterToolsForCli(tools)).toEqual([{ name: "WebSearch" }])
+  })
+})
+
+describe("ModeManager.isToolAllowed with cliToolFilter", () => {
+  test("--no-tools denies every tool even when no mode is active", () => {
+    const m = new ModeManager([ASK_MODE], null, undefined, undefined, undefined, {
+      kind: "deny-all",
+    })
+    expect(m.active()).toBeNull()
+    expect(m.isToolAllowed("Read")).toEqual({
+      allowed: false,
+      message: 'Tool "Read" is not permitted (--no-tools is active).',
+    })
+    expect(m.isToolAllowed("Task")).toEqual({
+      allowed: false,
+      message: 'Tool "Task" is not permitted (--no-tools is active).',
+    })
+  })
+
+  test("--no-tools denies every tool even when a mode would allow it", () => {
+    const m = new ModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
+      kind: "deny-all",
+    })
+    // ASK mode allows Read, but --no-tools blocks it first
+    expect(m.isToolAllowed("Read")).toEqual({
+      allowed: false,
+      message: 'Tool "Read" is not permitted (--no-tools is active).',
+    })
+  })
+
+  test("--tools allow-list permits only listed tools (no mode)", () => {
+    const m = new ModeManager([ASK_MODE], null, undefined, undefined, undefined, {
+      kind: "allow-list",
+      tools: ["Read", "Task"],
+    })
+    expect(m.isToolAllowed("Read")).toEqual({ allowed: true })
+    expect(m.isToolAllowed("Task")).toEqual({ allowed: true })
+    expect(m.isToolAllowed("Grep")).toEqual({
+      allowed: false,
+      message: 'Tool "Grep" is not in the --tools allow-list.',
+    })
+    expect(m.isToolAllowed("Bash")).toEqual({
+      allowed: false,
+      message: 'Tool "Bash" is not in the --tools allow-list.',
+    })
+  })
+
+  test("--tools allow-list is checked before mode permissions", () => {
+    const m = new ModeManager([ASK_MODE], "ask", undefined, undefined, undefined, {
+      kind: "allow-list",
+      tools: ["Read"],
+    })
+    // Read is in the allow-list, so it passes CLI filter. Then ASK mode allows it.
+    expect(m.isToolAllowed("Read")).toEqual({ allowed: true })
+    // Edit is NOT in the allow-list, so CLI filter denies it before mode gets a say.
+    expect(m.isToolAllowed("Edit")).toEqual({
+      allowed: false,
+      message: 'Tool "Edit" is not in the --tools allow-list.',
+    })
+  })
+
+  test("null cliToolFilter (default) does not affect mode permissions", () => {
+    const m = new ModeManager([ASK_MODE], "ask")
+    expect(m.isToolAllowed("Read")).toEqual({ allowed: true })
+    expect(m.isToolAllowed("Edit")).toEqual({
+      allowed: false,
+      message: expect.stringContaining("ASK mode"),
+    })
   })
 })
 

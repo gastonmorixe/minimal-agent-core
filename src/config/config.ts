@@ -61,6 +61,23 @@ export interface SystemPromptUserConfig {
 export interface UserConfig {
   model?: string
   provider?: string
+  /** Generic endpoint URL. Used by provider `generic-endpoint`. */
+  endpoint?: string
+  /** Generic endpoint surface id, e.g. `openai-chat-completions`. */
+  format?: string
+  /** Generic endpoint auth mode. */
+  authType?: "api-key" | "bearer" | "none" | "custom-header"
+  /** API key or bearer token for a generic endpoint. */
+  apiKey?: string
+  /** Header name for `authType: "custom-header"`. */
+  authHeader?: string
+  /** Wire model id to send to a generic endpoint, separate from local `model`. */
+  providerModel?: string
+  /**
+   * Effort levels a generic endpoint ad-hoc model advertises, so `--effort`
+   * is accepted for a runtime-configured backend (e.g. `["low","medium","high"]`).
+   */
+  effortLevels?: string[]
   /**
    * Credential name to use for the selected provider. When the provider has
    * multiple stored credentials (e.g. "Work" and "Personal"), this selects
@@ -252,6 +269,12 @@ function parseSystemPromptUserConfig(obj: Record<string, unknown>): SystemPrompt
   return out
 }
 
+/**
+ * Load and parse the user config file from disk.
+ *
+ * Returns an empty config when the file is absent or cannot be read/parsed,
+ * so callers can always treat the result as a valid (possibly empty) config.
+ */
 export function loadUserConfig(): UserConfig {
   const path = configPath()
   if (!existsSync(path)) return {}

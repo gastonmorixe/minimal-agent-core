@@ -95,7 +95,6 @@ import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
 import type { Spinner } from "./host/ui/spinner/index.ts"
 import { getSpinnerPreset, type NamedSpinnerPreset } from "./host/ui/spinner/named-presets.ts"
-
 import {
   closeStartupTree,
   closeStartupTreeWithTools,
@@ -119,6 +118,7 @@ import {
 import { resolveEffectivePlatform } from "./plugins/plugin-platform-resolution.ts"
 import { formatQuotaWindows } from "./quota/quota-summary.ts"
 import { parseSchemaFile } from "./sdk/output-schema.ts"
+import { applyToolNamePolicy } from "./sdk/tool-filter.ts"
 import { getSessionId } from "./session/session-id.ts"
 import { loadSession } from "./session/session-restore.ts"
 import { ToolTimeTracker } from "./tools/tool-time.ts"
@@ -144,6 +144,13 @@ const extractPrompt = entry.extractPrompt
 const {
   model,
   provider,
+  endpoint,
+  format,
+  authType,
+  apiKey,
+  authHeader,
+  providerModel,
+  effortLevels,
   cliCredentialName,
   listModelsProvider,
   wantJsonOutput,
@@ -354,7 +361,18 @@ async function main() {
   // See `host/startup/provider-boot.ts` for the resolution + ad-hoc model
   // registration; it prints the `auth` startup row.
   const providerState = await resolveStartupProviderState({
-    opts: { model, provider, cliCredentialName },
+    opts: {
+      model,
+      provider,
+      endpoint,
+      format,
+      authType,
+      apiKey,
+      authHeader,
+      providerModel,
+      effortLevels,
+      cliCredentialName,
+    },
     userConfig,
     env: process.env,
   })
@@ -468,6 +486,15 @@ async function main() {
   // reach a `process.env`-only reader.
   process.env.MINIMAL_AGENT_MODEL = selectedModel
   process.env.MINIMAL_AGENT_PROVIDER = selectedProviderId
+  if (endpoint) process.env.MINIMAL_AGENT_ENDPOINT = endpoint
+  if (format) process.env.MINIMAL_AGENT_FORMAT = format
+  if (authType) process.env.MINIMAL_AGENT_AUTH_TYPE = authType
+  if (apiKey) process.env.MINIMAL_AGENT_API_KEY = apiKey
+  if (authHeader) process.env.MINIMAL_AGENT_AUTH_HEADER = authHeader
+  if (providerModel) process.env.MINIMAL_AGENT_PROVIDER_MODEL = providerModel
+  if (effortLevels && effortLevels.length > 0) {
+    process.env.MINIMAL_AGENT_EFFORT_LEVELS = effortLevels.join(",")
+  }
   process.env.MINIMAL_AGENT_SESSION_ID = agentContext.sessionId
   process.env.MINIMAL_AGENT_PID = String(agentContext.pid)
   process.env.MINIMAL_AGENT_VERSION = agentContext.version
@@ -647,14 +674,18 @@ async function main() {
   // restart to apply. (Hot-reload of permissions is future work.) The
   // overlay map is queried on demand inside `ModeManager.effectivePermissions`.
   const modeUserOverrides = loadedModes.length > 0 ? loadModeUserOverrides() : new Map()
+  // Always construct a ModeManager when `--tools` / `--no-tools` is set, even
+  // with zero modes: the manager owns CLI-level filter application for the
+  // request body (`filterToolsForCli`) and isToolAllowed dispatch gate.
   const modeManager =
-    loadedModes.length > 0
+    loadedModes.length > 0 || opts.cliToolFilter != null
       ? new ModeManager(
           loadedModes,
           initialModeId,
           undefined,
           undefined,
           (modeId) => modeUserOverrides.get(modeId) ?? null,
+          opts.cliToolFilter,
         )
       : null
   if (modeManager?.active()) {
@@ -846,8 +877,11 @@ async function main() {
       process.exit(1)
     }
   }
-  if (loadedTools.length > 0) {
-    closeStartupTreeWithTools(loadedTools)
+  // Startup tools row matches advertisement (same pure SDK policy helper as
+  // Agent / AgentCore request assembly — not ModeManager).
+  const bannerTools = applyToolNamePolicy(loadedTools, opts.cliToolFilter)
+  if (bannerTools.length > 0) {
+    closeStartupTreeWithTools(bannerTools)
   } else {
     closeStartupTree()
   }
@@ -869,6 +903,7 @@ async function main() {
   const { systemHash, toolsHash } = await computeStartupHashes({
     loader: hasPlugins ? loader : null,
     modeManager,
+    toolNamePolicy: opts.cliToolFilter,
     selectedModelBase,
     auth,
     cacheTtl,
@@ -927,6 +962,7 @@ async function main() {
     cacheTtl,
     loader: hasPlugins ? loader : null,
     modeManager,
+    toolNamePolicy: opts.cliToolFilter,
     saveEcho,
     // All plugin-contributed producers ride the generic array, in
     // registry order (memory's short-term snapshot, tasks snapshot,
@@ -1076,6 +1112,7 @@ async function main() {
           initialMessages,
           loader: hasPlugins ? loader : null,
           modeManager,
+          toolNamePolicy: opts.cliToolFilter,
           store,
           blobStore,
           saveEcho,

@@ -27,20 +27,23 @@
  */
 
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { basename, dirname, resolve } from "node:path"
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
+import { dirname, resolve } from "node:path"
 
 import { configPath as userConfigPath } from "../config/config.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "../infra/file-lock.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
-import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
 import * as ToolPrompts from "./PROMPTS.ts"
+import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
+import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
 import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./truncation.ts"
+
+export { TOOL_DEFINITIONS }
 
 const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file reads (B-045)
 
@@ -74,62 +77,6 @@ export type ToolResultMediaBlock = ImageBlock
  * pre-multimodal behavior), so this is a safe additive option.
  */
 export type ToolMediaContext = ReadFileMediaContext
-
-/**
- * Load a built-in tool's description from `src/prompts/tools/<name>.md`. Tool
- * descriptions are model-facing prompts, so they live in markdown rather than
- * inline string literals (see `src/prompts/README.md`).
- *
- * @param name - The markdown basename (e.g. `"bash"`).
- * @returns The rendered description text.
- */
-function toolDescription(name: string): string {
-  return renderPrompt(promptPath(import.meta, "..", "prompts", "tools", `${name}.md`))
-}
-
-/**
- * Fold every run of Unicode whitespace to a single ASCII space.
- *
- * macOS names screenshots with a NARROW NO-BREAK SPACE (U+202F) before
- * "AM"/"PM" (e.g. `Screenshot 2026-05-31 at 5.49.35␏PM.png`). When that name
- * is typed, dragged, or copied into a tool call it is easy for the literal
- * U+202F to be normalized to a regular space (U+0020) somewhere along the way,
- * so `readFileSync` then looks up bytes that do not exist on disk → ENOENT.
- * Folding both the requested name and the real directory entries to the same
- * whitespace class lets us match across that confusable. NBSP (U+00A0), the
- * en/em spaces (U+2000–U+200A), the ideographic space (U+3000), and tabs are
- * folded too, so the heal is general, not AM/PM-specific.
- */
-function foldWhitespace(s: string): string {
-  return s.replace(/\s+/g, " ")
-}
-
-/**
- * Resolve a path that may differ from the on-disk name only by a
- * whitespace-confusable (see {@link foldWhitespace}). Returns the requested
- * path unchanged when it exists; otherwise scans the parent directory for the
- * single entry whose whitespace-folded name matches, and returns that real
- * path. Returns `null` when there is no match or the match is ambiguous (more
- * than one entry folds to the same name), so the caller surfaces the original
- * ENOENT rather than guessing.
- */
-function resolveWhitespaceConfusablePath(filePath: string): string | null {
-  // Guard non-string / empty input: let the executor's own validation speak.
-  if (typeof filePath !== "string" || filePath.length === 0) return null
-  if (existsSync(filePath)) return filePath
-  let entries: string[]
-  const dir = dirname(filePath)
-  try {
-    entries = readdirSync(dir)
-  } catch {
-    return null
-  }
-  const wantBase = foldWhitespace(basename(filePath))
-  const matches = entries.filter((e) => foldWhitespace(e) === wantBase)
-  if (matches.length !== 1) return null
-  const healed = `${dir}/${matches[0]}`
-  return existsSync(healed) ? healed : null
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -334,222 +281,6 @@ const ABORTED_RESULT = (): ToolExecResult => ({
   is_error: true,
   _aborted: true,
 })
-
-// ---------------------------------------------------------------------------
-// Tool definitions (matching v2.1.91 capture schemas)
-// ---------------------------------------------------------------------------
-
-const BASH_TOOL: ToolDefinition = {
-  name: "Bash",
-  icon: "»",
-  color: "orange",
-  description: toolDescription("bash"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {
-      command: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.command, type: "string" },
-      timeout: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.timeout, type: "number" },
-      description: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Bash.description,
-        type: "string",
-      },
-    },
-    required: ["command"],
-    additionalProperties: false,
-  },
-}
-
-const READ_TOOL: ToolDefinition = {
-  name: "Read",
-  icon: "•",
-  color: "sky",
-  description: toolDescription("read"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {
-      file_path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.file_path,
-        type: "string",
-      },
-      offset: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.offset,
-        type: "integer",
-        minimum: 0,
-      },
-      limit: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Read.limit,
-        type: "integer",
-        exclusiveMinimum: 0,
-      },
-    },
-    required: ["file_path"],
-    additionalProperties: false,
-  },
-}
-
-const WRITE_TOOL: ToolDefinition = {
-  name: "Write",
-  icon: "✚",
-  color: "lime",
-  description: toolDescription("write"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {
-      file_path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.file_path,
-        type: "string",
-      },
-      content: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.content, type: "string" },
-    },
-    required: ["file_path", "content"],
-    additionalProperties: false,
-  },
-}
-
-const EDIT_TOOL: ToolDefinition = {
-  name: "Edit",
-  icon: "✦",
-  color: "gold",
-  description: toolDescription("edit"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {
-      file_path: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.file_path,
-        type: "string",
-      },
-      old_string: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.old_string,
-        type: "string",
-      },
-      new_string: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.new_string,
-        type: "string",
-      },
-      replace_all: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Edit.replace_all,
-        default: false,
-        type: "boolean",
-      },
-    },
-    required: ["file_path", "old_string", "new_string"],
-    additionalProperties: false,
-  },
-}
-
-const GLOB_TOOL: ToolDefinition = {
-  name: "Glob",
-  icon: "✱",
-  color: "violet",
-  description: toolDescription("glob"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {
-      pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.pattern, type: "string" },
-      path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.path, type: "string" },
-    },
-    required: ["pattern"],
-    additionalProperties: false,
-  },
-}
-
-const GREP_TOOL: ToolDefinition = {
-  name: "Grep",
-  icon: "⌕",
-  color: "pink",
-  description: toolDescription("grep"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {
-      pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.pattern, type: "string" },
-      path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.path, type: "string" },
-      glob: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.glob, type: "string" },
-      output_mode: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.output_mode,
-        type: "string",
-        enum: ["content", "files_with_matches", "count"],
-      },
-      "-i": {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.caseInsensitive,
-        type: "boolean",
-      },
-      "-n": {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.showLineNumbers,
-        type: "boolean",
-      },
-      "-A": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.after, type: "number" },
-      "-B": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.before, type: "number" },
-      "-C": { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.context, type: "number" },
-      context: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.contextAlias,
-        type: "number",
-      },
-      head_limit: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.headLimit,
-        type: "number",
-      },
-      multiline: {
-        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Grep.multiline,
-        type: "boolean",
-      },
-    },
-    required: ["pattern"],
-    additionalProperties: false,
-  },
-}
-
-/**
- * All tool definitions, in the order the agent sends them in API requests.
- *
- * Pass this directly to {@link SendOptions.tools} or to the `Agent.run()`
- * method to enable tool use. The model will see these schemas and pick
- * tools by name; {@link executeTool} dispatches by the same names.
- *
- * @example
- * ```ts
- * import { TOOL_DEFINITIONS, executeTool } from "./tools.ts";
- *
- * const response = await sendMessageFull({
- *   auth, messages,
- *   tools: TOOL_DEFINITIONS,
- * });
- *
- * for (const block of response.blocks) {
- *   if (block.type === "tool_use") {
- *     const result = executeTool(block.name, block.input);
- *     // send result back as tool_result block...
- *   }
- * }
- * ```
- */
-const MODE_TOOL: ToolDefinition = {
-  name: "Mode",
-  icon: "◐",
-  color: "sky",
-  description: toolDescription("mode"),
-  input_schema: {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object",
-    properties: {},
-    additionalProperties: false,
-  },
-}
-
-export const TOOL_DEFINITIONS: ToolDefinition[] = [
-  BASH_TOOL,
-  READ_TOOL,
-  WRITE_TOOL,
-  EDIT_TOOL,
-  GLOB_TOOL,
-  GREP_TOOL,
-  MODE_TOOL,
-]
 
 // ---------------------------------------------------------------------------
 // Tool execution

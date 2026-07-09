@@ -16,4 +16,13 @@ describe("renderHelp", () => {
     expect(text).toContain("MINIMAL_AGENT_ENABLE_PLUGINS")
     expect(text).toContain("minimal-agent --disable-plugin web-search,memory")
   })
+
+  test("documents --tools allow-list and --no-tools", () => {
+    const text = stripAnsi(renderHelp().join("\n"))
+    expect(text).toContain("--tools <names>")
+    expect(text).toContain("--no-tools")
+    expect(text).toContain("Advertise only these tools")
+    expect(text).toContain("Advertise no tools (pure Q&A)")
+    expect(text).toContain('e.g. --tools "WebSearch,Task"')
+  })
 })

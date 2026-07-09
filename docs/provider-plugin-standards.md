@@ -14,6 +14,14 @@ Every provider plugin sits in `plugins/llm-<name>/` and exports a standard
 surface: `adapter.ts`, `auth.ts`, `capabilities.ts`, `models.ts`, `pricing.ts`,
 `session-info.ts`, `wire-constants.ts`, `index.ts`.
 
+## Generic endpoint (no plugin needed)
+
+To point at an arbitrary OpenAI-compatible endpoint without writing a plugin at
+all, use the `generic-endpoint` provider plus a registered surface codec. See
+[`2026-07-09-generic-endpoint-and-surface-codecs.md`](2026-07-09-generic-endpoint-and-surface-codecs.md).
+A provider plugin exposes a surface generically by registering a `SurfaceCodec`
+in `register(ctx)` via `ctx.surfaceCodecs?.register(...)`.
+
 ## Two reuse patterns
 
 ### Pattern 1: OpenAI-compatible gateway (Wafer, OpenRouter)

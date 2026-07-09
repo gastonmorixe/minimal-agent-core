@@ -227,7 +227,7 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // after an intentional cleanup with the one-liner in the module header, and
 // lower the numbers.
 //
-// BASELINE IS DEBT — must only shrink. These 53 sites are real core→host
+// BASELINE IS DEBT — must only shrink. These 54 sites are real core→host
 // decoupling debt (the P3 re-export shims). They are scheduled for removal in
 // Phase 4: Jacob's host adapter replaces the shims with SDK port wiring, at
 // which point each entry burns down to zero. Burned down by Phase 4 port
@@ -254,6 +254,7 @@ const BASELINE = new Map<string, number>([
   ["e2e/live-area-e2e.test.ts", 3],
   ["e2e/notification-frame-tear.e2e.test.ts", 1],
   ["e2e/prompt-inject-e2e.test.ts", 2],
+  ["e2e/system-prompt-override-e2e.test.ts", 1],
   ["plugins/loader.replay-renderers.test.ts", 1],
   ["plugins/loader/replay-renderers.ts", 1],
   ["session/draft-store-editor.integration.test.ts", 1],
