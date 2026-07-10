@@ -16,7 +16,8 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 
-import { readLine, readSecretLine, runLoginCommand } from "./login.ts"
+import { readLine, runLoginCommand } from "./login.ts"
+import { readSecureInput } from "../ui/secure-input.ts"
 
 afterEach(() => {
   clearProviderPlugins()
@@ -141,22 +142,25 @@ describe("readLine line/close ordering", () => {
   })
 })
 
-describe("readSecretLine", () => {
-  it("rejects on Ctrl+C and restores raw mode", async () => {
+describe("readSecureInput", () => {
+  it("returns null on Ctrl+C and restores raw mode", async () => {
     const input = new PassThrough() as PassThrough & {
+      isTTY?: boolean
       isRaw?: boolean
       setRawMode?: (mode: boolean) => void
     }
+    input.isTTY = true
     input.isRaw = false
     input.setRawMode = (mode) => {
       input.isRaw = mode
     }
     const output = new PassThrough()
 
-    const promise = readSecretLine("> ", input, output)
+    const promise = readSecureInput("> ", { input, output })
     input.write("\x03")
 
-    await expect(promise).rejects.toThrow("login aborted")
+    const result = await promise
+    expect(result).toBeNull()
     expect(input.isRaw).toBe(false)
   })
 })

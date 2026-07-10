@@ -40,6 +40,7 @@ import {
   renderOAuthLoginSuccess,
 } from "../ui/chrome/login.ts"
 import { writeCommandRows } from "../ui/command-output.ts"
+import { readSecureInput } from "../ui/secure-input.ts"
 import { c } from "../ui/style/ansi.ts"
 
 /**
@@ -226,64 +227,6 @@ export async function readLine(
   })
 }
 
-/** Read a single secret line from a TTY without echoing the bytes. */
-export async function readSecretLine(
-  promptText: string,
-  input: NodeJS.ReadableStream & {
-    isRaw?: boolean
-    setRawMode?: (mode: boolean) => void
-  } = process.stdin,
-  output: NodeJS.WritableStream = process.stderr,
-): Promise<string> {
-  output.write(promptText)
-  return new Promise<string>((resolve, reject) => {
-    let value = ""
-    let settled = false
-    const wasRaw = input.isRaw
-    const settleResolve = (next: string) => {
-      if (settled) return
-      settled = true
-      cleanup()
-      output.write("\n")
-      resolve(next)
-    }
-    const settleReject = (err: Error) => {
-      if (settled) return
-      settled = true
-      cleanup()
-      output.write("\n")
-      reject(err)
-    }
-    const onData = (chunk: Buffer | string) => {
-      const text = chunk.toString("utf8")
-      for (const ch of text) {
-        const code = ch.charCodeAt(0)
-        if (ch === "\r" || ch === "\n") {
-          settleResolve(value)
-          return
-        }
-        if (code === 3) {
-          settleReject(new LoginAbortedError())
-          return
-        }
-        if (code === 127 || code === 8) {
-          value = value.slice(0, -1)
-          continue
-        }
-        value += ch
-      }
-    }
-    const cleanup = () => {
-      input.off("data", onData)
-      input.pause()
-      if (input.setRawMode && wasRaw !== undefined) input.setRawMode(wasRaw)
-    }
-    if (input.setRawMode) input.setRawMode(true)
-    input.resume()
-    input.on("data", onData)
-  })
-}
-
 /**
  * Print the auth URL with a click-friendly format and the rest of the
  * instructions. We separate `display(...)` calls in `runOAuthLogin` from
@@ -325,11 +268,20 @@ export async function runLoginCommand(opts: LoginCommandOptions = {}): Promise<n
 
   if (method.kind === "api-key") {
     try {
-      const key = await readSecretLine(
+      const key = await readSecureInput(
         `  ${c.faintWhite("│")} ${c.dim(`${method.provider.displayName} key`)} ${c.bold(c.pink("›"))} `,
-        input,
-        output,
+        {
+          input: input as NodeJS.ReadStream & {
+            isRaw?: boolean
+            setRawMode?: (mode: boolean) => void
+          },
+          output,
+        },
       )
+      if (key === null) {
+        writeCommandRows(renderLoginFailure("aborted"), output)
+        return 130
+      }
       if (key.trim().length === 0) {
         writeCommandRows(renderLoginFailure("empty API key"), output)
         return 1
