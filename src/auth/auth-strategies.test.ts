@@ -267,6 +267,63 @@ describe("auth-strategies", () => {
     if (work.kind === "api-key") expect(work.key).toBe("sk-work")
   })
 
+  it("discovers both oauth and api-key credentials when a plugin has both strategies", () => {
+    registerProviderPlugin({
+      id: "dual-auth-provider",
+      displayName: "Dual Auth Provider",
+      shortCode: "da",
+      register() {},
+      oauthLogin: {
+        serviceId: "dual-oauth",
+        displayName: "Dual OAuth",
+        config: () => ({
+          clientId: "c",
+          authorizeUrl: "a",
+          tokenUrl: "t",
+          redirectUri: "r",
+          scopes: [],
+        }),
+        buildCredential: () => ({
+          credential: { serviceId: "dual-oauth", displayName: "Dual OAuth", secrets: {} },
+          result: { accessToken: "", refreshToken: "", expiresAt: 0, scopes: [] },
+        }),
+        readAuth: (secrets) =>
+          typeof secrets.accessToken === "string"
+            ? { kind: "oauth", token: secrets.accessToken }
+            : null,
+      },
+      apiKeyAuth: {
+        serviceId: "dual-api-key",
+        displayName: "Dual API Key",
+        buildCredential: (key) => ({
+          serviceId: "dual-api-key",
+          displayName: "Dual API Key",
+          secrets: { tokenType: "api-key", apiKey: key },
+        }),
+        readApiKey: (secrets) => (typeof secrets.apiKey === "string" ? secrets.apiKey : null),
+      },
+    })
+
+    defaultAuthStore().set("dual-oauth", "Dual OAuth", { tokenType: "oauth", accessToken: "at" })
+    defaultAuthStore().set("dual-api-key", "Dual API Key", {
+      tokenType: "api-key",
+      apiKey: "sk-dual",
+    })
+
+    const found = discoverCredentialedProviders()
+    expect(found).toHaveLength(2)
+
+    const oauth = found.find((f) => f.authKind === "oauth")
+    expect(oauth).toBeDefined()
+    expect(oauth!.providerId).toBe("dual-auth-provider")
+    expect(oauth!.credentialLabel).toBe("Dual OAuth")
+
+    const apiKey = found.find((f) => f.authKind === "api-key")
+    expect(apiKey).toBeDefined()
+    expect(apiKey!.providerId).toBe("dual-auth-provider")
+    expect(apiKey!.credentialLabel).toBe("Dual API Key")
+  })
+
   it("resolveStoredProviderAuth throws for an unknown credential name", () => {
     registerTestOpenRouterLikePlugin()
     defaultAuthStore().set("test-api-key", "Test API Key", {

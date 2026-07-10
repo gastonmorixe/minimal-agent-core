@@ -232,28 +232,27 @@ export function discoverCredentialedProviders(
           credentialInfo: info ?? { usable: Boolean(auth) },
         })
       }
-      continue
     }
 
     const apiKey = plugin.apiKeyAuth
-    if (!apiKey) continue
-
-    // List ALL store entries matching this provider's serviceId
-    const allEntries = store.list(apiKey.serviceId)
-    for (const entry of allEntries) {
-      const storedSecrets = store.getSecrets(apiKey.serviceId, entry.name)
-      if (!storedSecrets) continue
-      const stored = apiKey.readApiKey(storedSecrets)
-      const usable = Boolean(stored && stored.trim().length > 0)
-      out.push({
-        providerId: plugin.id,
-        displayName: plugin.displayName,
-        authKind: "api-key",
-        source: "store",
-        credentialLabel: entry.name,
-        credentialName: entry.name,
-        credentialInfo: apiKey.inspectCredential?.(storedSecrets) ?? { usable },
-      })
+    if (apiKey) {
+      // List ALL store entries matching this provider's serviceId
+      const allEntries = store.list(apiKey.serviceId)
+      for (const entry of allEntries) {
+        const storedSecrets = store.getSecrets(apiKey.serviceId, entry.name)
+        if (!storedSecrets) continue
+        const stored = apiKey.readApiKey(storedSecrets)
+        const usable = Boolean(stored && stored.trim().length > 0)
+        out.push({
+          providerId: plugin.id,
+          displayName: plugin.displayName,
+          authKind: "api-key",
+          source: "store",
+          credentialLabel: entry.name,
+          credentialName: entry.name,
+          credentialInfo: apiKey.inspectCredential?.(storedSecrets) ?? { usable },
+        })
+      }
     }
   }
 

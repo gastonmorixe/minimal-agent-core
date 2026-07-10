@@ -103,6 +103,18 @@ describe("classifyUpstreamError", () => {
     expect(missingCode.retryable).toBe(false)
   })
 
+  it("tolerates non-string upstream error codes from gateway JSON", () => {
+    // OpenRouter and other gateways may expose a numeric or structured
+    // `error.code`. Error classification must preserve the original failure,
+    // never replace it with a local TypeError from `.toLowerCase()`.
+    for (const upstreamCode of [400, { code: "bad_request" }, ["bad_request"], null]) {
+      const r = classifyUpstreamError({ upstreamCode })
+      expect(r.streamErrorType).toBeUndefined()
+      expect(r.category).toBe("unknown")
+      expect(r.retryable).toBe(false)
+    }
+  })
+
   it("leaves an unknown error untagged so it propagates (does not silently retry forever)", () => {
     const r = classifyUpstreamError({ upstreamCode: "some_new_unmapped_code" })
     expect(r.streamErrorType).toBeUndefined()

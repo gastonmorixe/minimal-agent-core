@@ -4,7 +4,7 @@ import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth
 import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-registry.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 import { registerTestProvider } from "../../llm/test-fixtures.ts"
-import { stripAnsi } from "../../terminal/term-width.ts"
+import { displayWidth, stripAnsi } from "../../terminal/term-width.ts"
 import { SPINNER_PRESETS } from "../ui/spinner/named-presets.ts"
 
 import { runListFlagsCommand } from "./list-flags.ts"
@@ -70,7 +70,22 @@ describe("list UI commands", () => {
       id: "live",
       displayName: "Live",
       shortCode: "li",
-      models: [{ id: "live-model" }],
+      models: [
+        {
+          id: "live-model",
+          capabilities: {
+            contextWindow: 1_050_000,
+            maxOutputTokens: 128_000,
+            effort: { levels: ["low", "medium", "xhigh"], default: "medium" },
+            thinking: { visible: true, adaptive: true },
+            tools: { userDefined: true, strictSchema: true },
+            modalities: { image: true, pdf: true },
+            structuredOutputs: true,
+            serverSideHistory: true,
+            serverTools: ["web_search", "code_interpreter"],
+          },
+        },
+      ],
     })
     registerProviderPlugin({
       id: "live",
@@ -95,6 +110,7 @@ describe("list UI commands", () => {
 
     let out = ""
     await runListModelsCommand(undefined, {
+      columns: 220,
       output: { write: (s) => (out += s) },
     })
 
@@ -102,10 +118,59 @@ describe("list UI commands", () => {
     expect(stripped).toContain("live")
     expect(stripped).toContain("live-model")
     expect(stripped).toContain("Live Model")
-    expect(stripped).toContain("custom")
-    expect(stripped).toContain("2026-01-01")
+    expect(stripped).toContain("ctx 1.05M")
+    expect(stripped).toContain("out 128k")
+    expect(stripped).toContain("eff:low/medium/xhigh")
+    expect(stripped).toContain("think:vis")
+    expect(stripped).toContain("tools:strict")
+    expect(stripped).toContain("in:img,pdf")
+    expect(stripped).toContain("host:web,code")
+    expect(stripped).toContain("json")
+    expect(stripped).toContain("hist")
+    expect(stripped).toContain("surface:custom")
+    expect(stripped).toContain("cutoff:2026-01-01")
     expect(stripped).toContain("1 models available")
     delete process.env.TEST_LIVE_KEY
+  })
+
+  it("renders models within the injected terminal width", async () => {
+    registerTestProvider({
+      id: "narrow",
+      displayName: "Narrow",
+      models: [
+        {
+          id: "very-long-model-id-that-must-be-clipped",
+          capabilities: {
+            contextWindow: 1_050_000,
+            maxOutputTokens: 128_000,
+            effort: { levels: ["provider-custom-effort", "max-quality"], default: "max-quality" },
+            thinking: { visible: true, adaptive: true },
+            tools: { userDefined: true, strictSchema: true },
+            modalities: { image: true, audio: true, pdf: true },
+            serverTools: ["web_search", "file_search", "code_interpreter"],
+            structuredOutputs: true,
+            serverSideHistory: true,
+            caching: { automatic: true },
+          },
+        },
+      ],
+    })
+
+    let out = ""
+    await runListModelsCommand("narrow", {
+      columns: 72,
+      output: { write: (s) => (out += s) },
+    })
+    const stripped = stripAnsi(out)
+
+    expect(stripped).toContain("ctx 1.05M")
+    expect(stripped).toContain("out 128k")
+    expect(stripped).toContain("eff:provider")
+    expect(stripped).toContain("max-quality")
+    expect(stripped).not.toContain("medium")
+    for (const line of stripped.split("\n").filter(Boolean)) {
+      expect(displayWidth(line)).toBeLessThanOrEqual(72)
+    }
   })
 
   it("lists a publicModelList provider's live catalog WITHOUT a stored credential", async () => {
