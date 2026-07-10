@@ -235,6 +235,7 @@ export function normalizeArgs(raw: string[]): string[] {
       // Nested `providers <verb>` grammar (parallels `sessions`):
       //   providers models [<providerId>] → --list-models [<providerId>]
       //   providers login <providerId>    → --login --provider <providerId>
+      //   providers logout <providerId>   → --logout --provider <providerId>
       //   providers list                  → --list-providers
       //   providers <other>               → --list-providers (bare list)
       // Bare `providers` (no verb, or a flag next) falls through to
@@ -258,6 +259,13 @@ export function normalizeArgs(raw: string[]): string[] {
             start = 4
           }
         }
+      } else if (second === "logout") {
+        out.push("--logout")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push("--provider", raw[2])
+          start = 3
+        }
       } else {
         out.push("--list-providers")
         start = 2
@@ -265,6 +273,7 @@ export function normalizeArgs(raw: string[]): string[] {
     } else if (head === "provider" && raw[1] !== undefined && !raw[1].startsWith("-")) {
       // Singular provider grammar:
       //   provider <providerId> login [--name <name>]  → --login --provider <providerId> [--name <name>]
+      //   provider <providerId> logout                  → --logout --provider <providerId>
       //   provider <providerId> models → --list-models <providerId>
       const providerId = raw[1]
       const action = raw[2]
@@ -294,6 +303,9 @@ export function normalizeArgs(raw: string[]): string[] {
           }
         }
         start = i
+      } else if (action === "logout") {
+        out.push("--logout", "--provider", providerId)
+        start = 3
       } else if (action === "models") {
         out.push("--list-models", providerId)
         start = 3
@@ -313,6 +325,9 @@ export function normalizeArgs(raw: string[]): string[] {
             out.push("--auth-method", raw[2])
             start = 3
           }
+        } else if (head === "logout" && raw[1] !== undefined && !raw[1].startsWith("-")) {
+          out.push("--provider", raw[1])
+          start = 2
         } else if (sub.takesValue) {
           // `resume <sid>`: consume the next positional, if present and not a flag.
           if (raw[1] !== undefined && !raw[1].startsWith("-")) {
