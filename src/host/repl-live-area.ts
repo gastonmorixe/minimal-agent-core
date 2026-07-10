@@ -1155,6 +1155,11 @@ export async function runReplLiveArea(
         // it didn't already end in one, leaving zero blank rows. Emit the
         // second newline in that case so the separation is always present.
         writeDirectSink(lastChunkEndedWithNewline ? "\n" : "\n\n")
+        // Reset state so the next `baseSink` call (response text) will insert
+        // a leading blank line via the `!wroteOutput` clause, giving exactly
+        // one blank row between the thinking block and the response.
+        lastKind = "none"
+        wroteOutput = false
       }
       // Abnormal termination (refusal / content filter): the core hands
       // us the semantic notice; render it as a loud banner through the

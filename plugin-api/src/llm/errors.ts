@@ -187,12 +187,14 @@ export type StreamErrorCategory =
  * 401 is intentionally NOT mapped: the auth-refresh layer owns it, and a
  * retry tag would mask a real auth failure.
  */
-export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode?: string }): {
+export function classifyUpstreamError(input: { httpStatus?: number; upstreamCode?: unknown }): {
   streamErrorType?: string
   category: StreamErrorCategory
   retryable: boolean
 } {
-  const code = input.upstreamCode?.toLowerCase()
+  // Provider error payloads are untrusted JSON. Several gateways use a
+  // number or object for `error.code`, so never call string methods blindly.
+  const code = typeof input.upstreamCode === "string" ? input.upstreamCode.toLowerCase() : undefined
   const status = input.httpStatus
 
   // Billing / quota exhaustion is TERMINAL, not a rate limit. A provider may

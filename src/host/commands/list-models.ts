@@ -13,10 +13,12 @@
  */
 
 import { tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
-import { listRegisteredModels } from "../../llm/model-registry.ts"
+import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
+import { listRegisteredModels, type ModelEntry } from "../../llm/model-registry.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { listProviderPlugins } from "../../llm/provider-plugin.ts"
-import { writeCommandTable } from "../ui/command-table.ts"
+import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
+import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
 
 interface ModelRow {
@@ -25,6 +27,198 @@ interface ModelRow {
   providerId: string
   surface?: string
   date?: string
+  contextWindow?: number
+  maxOutputTokens?: number
+  capabilities?: Capabilities
+}
+
+interface CommandOutputWithColumns {
+  write(s: string): unknown
+  columns?: number
+}
+
+interface ListModelsDeps {
+  output?: CommandOutputWithColumns
+  error?: { write(s: string): unknown }
+  columns?: number
+}
+
+interface ModelTableLayout {
+  idW: number
+  ctxW: number
+  outW: number
+  capsW: number
+}
+
+const SERVER_TOOL_LABELS: Record<ServerToolId, string> = {
+  web_search: "web",
+  code_interpreter: "code",
+  computer_use: "comp",
+  file_search: "file",
+  advisor: "adv",
+}
+
+function applyRegisteredEntry(row: ModelRow, entry: ModelEntry): void {
+  row.displayName ??= entry.displayName
+  row.surface ??= entry.surfaceId
+  row.date ??= entry.knowledgeCutoff
+  row.contextWindow = entry.capabilities.contextWindow
+  row.maxOutputTokens = entry.capabilities.maxOutputTokens
+  row.capabilities = entry.capabilities
+}
+
+function resolveTerminalColumns(deps: ListModelsDeps): number {
+  if (deps.columns && deps.columns > 0) return Math.floor(deps.columns)
+  const outCols = deps.output?.columns
+  if (outCols && outCols > 0) return Math.floor(outCols)
+  // COLUMNS is injected by the host for child commands and lets non-TTY
+  // callers retain an explicit width instead of inheriting the parent TTY.
+  const envCols = Number.parseInt(process.env.COLUMNS ?? "", 10)
+  if (Number.isFinite(envCols) && envCols > 0) return envCols
+  if (process.stdout.columns && process.stdout.columns > 0)
+    return Math.floor(process.stdout.columns)
+  return 100
+}
+
+function formatTokenLimit(n: number | undefined): string {
+  if (n === undefined || !Number.isFinite(n)) return ""
+  if (n >= 1_000_000) return `${trimDecimal(n / 1_000_000, 2)}M`
+  if (n >= 1_000) return `${trimDecimal(n / 1_000, n % 1_000 === 0 ? 0 : 1)}k`
+  return String(n)
+}
+
+function trimDecimal(n: number, places: number): string {
+  return n
+    .toFixed(places)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1")
+}
+
+function formatCapabilities(caps: Capabilities | undefined): string {
+  if (!caps) return ""
+  const parts: string[] = []
+
+  if (caps.effort.levels.length > 0) {
+    // Exact model-declared API vocabulary. Never normalize these names.
+    parts.push(`eff:${caps.effort.levels.join("/")}`)
+  }
+
+  if (caps.thinking.visible) parts.push("think:vis")
+  else if (caps.thinking.extended) parts.push("think:ext")
+  else if (caps.thinking.adaptive) parts.push("think")
+
+  const modalities = [
+    caps.modalities.image ? "img" : "",
+    caps.modalities.audio ? "aud" : "",
+    caps.modalities.pdf ? "pdf" : "",
+    caps.modalities.video ? "vid" : "",
+  ].filter(Boolean)
+  if (modalities.length > 0) parts.push(`in:${modalities.join(",")}`)
+
+  if (caps.tools.userDefined) parts.push(caps.tools.strictSchema ? "tools:strict" : "tools")
+  if (caps.serverTools.length > 0) {
+    parts.push(`host:${caps.serverTools.map((tool) => SERVER_TOOL_LABELS[tool] ?? tool).join(",")}`)
+  }
+  if (caps.structuredOutputs) parts.push("json")
+  if (caps.caching.automatic || caps.caching.explicit) {
+    const cache = [caps.caching.automatic ? "auto" : "", caps.caching.explicit ? "explicit" : ""]
+      .filter(Boolean)
+      .join("+")
+    parts.push(`cache:${cache}`)
+  }
+  if (caps.serverSideHistory) parts.push("hist")
+  if (caps.speedFast) parts.push("fast-tier")
+
+  return parts.length > 0 ? parts.join(" · ") : "text"
+}
+
+function chooseLayout(rows: ModelRow[], termColumns: number): ModelTableLayout {
+  // Four cells of section-row indentation, plus ten cells of slack for ANSI
+  // re-anchoring and terminal exact-fill quirks. Rows wrap before the edge.
+  const available = Math.max(44, termColumns - 14)
+  const maxIdW = Math.max(0, ...rows.map((r) => displayWidth(r.id)))
+  const idW = Math.min(Math.max(16, maxIdW), available >= 80 ? 22 : 18)
+  const ctxW = 9
+  const outW = 9
+  const capsW = Math.max(12, available - idW - ctxW - outW - 3)
+  return { idW, ctxW, outW, capsW }
+}
+
+function pad(value: string, width: number): string {
+  return `${value}${" ".repeat(Math.max(0, width - displayWidth(value)))}`
+}
+
+function splitLongToken(token: string, width: number): string[] {
+  if (width <= 0 || displayWidth(token) <= width) return [token]
+  const out: string[] = []
+  let current = ""
+  for (const char of token) {
+    if (displayWidth(current + char) > width && current.length > 0) {
+      out.push(current)
+      current = char
+    } else {
+      current += char
+    }
+  }
+  if (current) out.push(current)
+  return out
+}
+
+function wrapCapabilities(value: string, width: number): string[] {
+  if (!value) return [""]
+  const words = value.split(" ")
+  const wrapped: string[] = []
+  for (const word of words) {
+    for (const line of wordWrap(word, width)) {
+      if (displayWidth(line) <= width) wrapped.push(line)
+      else wrapped.push(...splitLongToken(line, width))
+    }
+  }
+  // `wordWrap` is intentionally called per semantic token so separators are
+  // retained and the labels remain easy to scan. Pack the resulting chunks.
+  const packed: string[] = []
+  for (const token of wrapped) {
+    const last = packed.at(-1)
+    if (last !== undefined && displayWidth(`${last} ${token}`) <= width)
+      packed[packed.length - 1] = `${last} ${token}`
+    else packed.push(token)
+  }
+  return packed
+}
+
+function formatModelRow(row: ModelRow, layout: ModelTableLayout): string[] {
+  // Model IDs are inputs users copy into configuration. Preserve an unusually
+  // long id by giving it leading rows rather than clipping it.
+  const idLines = splitLongToken(row.id, layout.idW)
+  const id = idLines.pop() ?? ""
+  const prefix = [
+    pad(id, layout.idW),
+    pad(row.contextWindow ? `ctx ${formatTokenLimit(row.contextWindow)}` : "", layout.ctxW),
+    pad(row.maxOutputTokens ? `out ${formatTokenLimit(row.maxOutputTokens)}` : "", layout.outW),
+  ].join(" ")
+  const continuation = " ".repeat(displayWidth(prefix) + 1)
+  const capabilities = wrapCapabilities(formatCapabilities(row.capabilities), layout.capsW)
+  const metadata = [
+    row.displayName ? `name:${row.displayName}` : "",
+    row.surface ? `surface:${row.surface}` : "",
+    row.date ? `cutoff:${row.date}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
+  const metadataLines = wrapCapabilities(metadata, layout.capsW)
+
+  const lines = idLines.map((line) => `    ${c.cyan(line)}`)
+  lines.push(
+    ...capabilities.map((capability, index) => {
+      if (index === 0)
+        return `    ${c.cyan(prefix.slice(0, layout.idW))}${prefix.slice(layout.idW)} ${capability}`.trimEnd()
+      return `    ${continuation}${capability}`.trimEnd()
+    }),
+  )
+  for (const line of metadataLines) {
+    if (line) lines.push(`    ${continuation}${c.dim(line)}`)
+  }
+  return lines
 }
 
 /**
@@ -35,23 +229,13 @@ interface ModelRow {
  */
 export async function runListModelsCommand(
   providerFilter?: string,
-  deps: {
-    output?: { write(s: string): unknown }
-    error?: { write(s: string): unknown }
-  } = {},
+  deps: ListModelsDeps = {},
 ): Promise<void> {
   const byId = new Map<string, ModelRow>()
 
-  // Live catalogs, one hook call per provider plugin that implements it.
-  // Parallel, individually fault-isolated: one provider's outage must not
-  // hide another's rows (nor the registry fallback below).
   const plugins = listProviderPlugins().filter((p) => typeof p.listLiveModels === "function")
   const results = await Promise.allSettled(
     plugins.map(async (p) => {
-      // Providers whose live catalog is public (e.g. HuggingFace's /v1/models)
-      // set `publicModelList`, so we can list them without a stored credential
-      // by passing an anonymous custom auth. Auth-required providers omit it and
-      // contribute no rows when unauthenticated (falling back to the registry).
       const providerAuth: ProviderAuth | null =
         tryResolveProviderAuth(p.id, "") ??
         (p.publicModelList ? { kind: "custom", headers: {} } : null)
@@ -71,31 +255,26 @@ export async function runListModelsCommand(
         id: m.id,
         displayName: m.displayName,
         providerId: r.value.plugin.id,
-        surface: undefined,
         date: m.createdAt,
       })
     }
   }
 
-  // Canonical registry: every registered provider's static catalog.
-  // Live entries win on id collision.
   for (const entry of listRegisteredModels()) {
-    if (byId.has(entry.id)) {
-      // Backfill the surface (live rows don't know it).
-      const row = byId.get(entry.id)!
-      if (!row.surface) row.surface = entry.surfaceId
+    const existing = byId.get(entry.id)
+    if (existing) {
+      applyRegisteredEntry(existing, entry)
       continue
     }
-    byId.set(entry.id, {
+    const row: ModelRow = {
       id: entry.id,
       displayName: entry.displayName,
       providerId: entry.providerId,
-      surface: entry.surfaceId,
-      date: entry.knowledgeCutoff,
-    })
+    }
+    applyRegisteredEntry(row, entry)
+    byId.set(entry.id, row)
   }
 
-  // Group by provider.
   const byProvider = new Map<string, ModelRow[]>()
   for (const row of byId.values()) {
     const list = byProvider.get(row.providerId)
@@ -104,47 +283,29 @@ export async function runListModelsCommand(
   }
 
   const providerIds = providerFilter ? [providerFilter] : [...byProvider.keys()].sort()
-
-  // Column widths sized to the rows actually shown, so long ids, display
-  // names, and surfaces stay aligned instead of overflowing a hard pad.
   const shownRows = providerIds.flatMap((p) => byProvider.get(p) ?? [])
-  const idW = Math.max(20, ...shownRows.map((r) => r.id.length))
-  const nameW = Math.max(12, ...shownRows.map((r) => (r.displayName ?? "").length))
-  const surfaceW = Math.max(10, ...shownRows.map((r) => (r.surface ?? "").length))
+  if (shownRows.length === 0) {
+    const empty = providerFilter
+      ? `no models registered for provider "${providerFilter}"`
+      : "no models registered"
+    writeCommandRows(["", `  ${c.dim(empty)}`, `  ${c.dim("0 models available")}`], deps.output)
+    return
+  }
 
-  const sections = providerIds.flatMap((provider) => {
+  const layout = chooseLayout(shownRows, resolveTerminalColumns(deps))
+  const lines: string[] = [""]
+  let shown = 0
+  for (const provider of providerIds) {
     const rows = byProvider.get(provider)
-    if (!rows || rows.length === 0) return []
-    return [
-      {
-        title: provider,
-        rows: rows
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .map((row) => ({
-            cells: {
-              id: row.id,
-              name: row.displayName ?? "",
-              surface: row.surface ?? "",
-              date: row.date ?? "",
-            },
-          })),
-      },
-    ]
-  })
-  const shown = sections.reduce((n, section) => n + section.rows.length, 0)
-
-  writeCommandTable(
-    {
-      columns: [
-        { key: "id", minWidth: idW, color: "cyan" },
-        { key: "name", minWidth: nameW, color: "dim" },
-        { key: "surface", minWidth: surfaceW, color: "dim" },
-        { key: "date", color: "dim" },
-      ],
-      sections,
-      empty: providerFilter ? `no models registered for provider "${providerFilter}"` : undefined,
-      summary: `${shown} models available`,
-    },
-    deps.output,
-  )
+    if (!rows || rows.length === 0) continue
+    lines.push(`  ${c.bold(provider)}`)
+    for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
+      lines.push(...formatModelRow(row, layout))
+      shown++
+    }
+    lines.push("")
+  }
+  if (lines.at(-1) === "") lines.pop()
+  lines.push(`  ${c.dim(`${shown} models available`)}`)
+  writeCommandRows(lines, deps.output)
 }

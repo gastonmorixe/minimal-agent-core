@@ -24,15 +24,19 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Effort/reasoning-depth levels accepted by Anthropic (`output_config.effort`)
- * and OpenAI (`reasoning_effort` on Chat, `reasoning.effort` on Responses).
+ * Provider/model-specific reasoning-effort token.
  *
- * Sorted low → high. `"xhigh"` and `"max"` are Anthropic-only as of
- * 2026-05-28 (opus-4-7+ for xhigh, opus-4-5+ for max).
+ * This deliberately stays open instead of normalizing every provider's
+ * vocabulary into a core enum. Providers declare the exact wire values each
+ * model accepts, such as `"none"`, `"xhigh"`, `"max"`, or a vendor-specific
+ * tier. Callers validate against that model's `capabilities.effort.levels`.
  */
-export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max"
+export type EffortLevel = string
 
-/** All known levels in canonical ascending order. */
+/**
+ * Legacy known-level ordering for UIs that need a deterministic sort. It is
+ * not a validation allow-list and does not constrain provider model tables.
+ */
 export const EFFORT_LEVELS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"]
 
 // ---------------------------------------------------------------------------
@@ -60,8 +64,8 @@ export interface ThinkingSupport {
 }
 
 /**
- * Effort param support. `levels` is the inclusive set the server accepts;
- * `default` is what the adapter sends when the caller omits `effort`.
+ * Effort param support. `levels` is the exact, model-specific set the server
+ * accepts. `default` is what the adapter sends when the caller omits `effort`.
  */
 export interface EffortSupport {
   levels: ReadonlyArray<EffortLevel>
@@ -253,11 +257,16 @@ export function defaultCapabilities(): Capabilities {
 }
 
 /**
- * Compare two effort levels by canonical order. Returns negative if
- * `a < b`, zero if equal, positive if `a > b`. Unknown levels sort last.
+ * Compare two effort levels by the legacy known-level order. Unknown,
+ * provider-specific values sort after known levels, then lexicographically.
  */
 export function compareEffort(a: EffortLevel, b: EffortLevel): number {
-  return EFFORT_LEVELS.indexOf(a) - EFFORT_LEVELS.indexOf(b)
+  const ai = EFFORT_LEVELS.indexOf(a)
+  const bi = EFFORT_LEVELS.indexOf(b)
+  if (ai >= 0 && bi >= 0) return ai - bi
+  if (ai >= 0) return -1
+  if (bi >= 0) return 1
+  return a.localeCompare(b)
 }
 
 /**
