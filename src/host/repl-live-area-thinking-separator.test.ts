@@ -59,16 +59,6 @@ function simulateTurn(opts: {
     ? { start: () => {}, write: (_s: string) => {}, end: () => Promise.resolve() }
     : null
 
-  // pendingTrailingNewlines buffer (from the formatter trailing-newline handling).
-  let pendingTrailingNewlines = ""
-  const flushTrailingNewlines = () => {
-    if (pendingTrailingNewlines.length > 0) {
-      compositor.writeStream(pendingTrailingNewlines)
-      lastChunkEndedWithNewline = pendingTrailingNewlines.endsWith("\n")
-      pendingTrailingNewlines = ""
-    }
-  }
-
   // This is the writeDirectSink from repl-live-area.ts — used for thinking
   // chunks AND for the onThinkingStop separator.
   const writeDirectSink = (s: string) => {
@@ -103,16 +93,6 @@ function simulateTurn(opts: {
   // Thinking chunk handler — writes through writeDirectSink.
   const onThinkingChunk = (chunk: string) => {
     writeDirectSink(chunk)
-  }
-
-  // The BUGGY onThinkingStop: it writes a closing newline but leaves
-  // wroteOutput = true and lastKind = "text", so the following baseSink
-  // call sees "oh, we already wrote text, no separator needed" and skips
-  // the blank line.
-  const onThinkingStopBuggy = () => {
-    // Close the reasoning line when it didn't already end in one.
-    // Emit the second newline so separation is always present.
-    writeDirectSink(lastChunkEndedWithNewline ? "\n" : "\n\n")
   }
 
   // The FIXED onThinkingStop: resets state so baseSink will insert
@@ -155,16 +135,6 @@ describe("thinking-block → response blank-line separation", () => {
     //   2. A blank line (one empty line)
     //   3. Response text
     //
-    // In the raw string, a blank line between two text blocks looks like
-    // "...thinking...\n\nHere is the response..."  — two consecutive \n
-    // characters (the first closes the thinking line, the second is the
-    // blank row).
-    const thinkingPart = output
-      .split("\n")
-      .filter((l) => l.includes("thinking"))
-      .join("\n")
-    const responsePart = output.split("Here is the response")[1] ?? ""
-
     // The key assertion: the response text must NOT immediately follow
     // the thinking text. There must be a blank line (two \n) between them.
     expect(output).toMatch(/thinking.*\n\n.*Here is the response/s)

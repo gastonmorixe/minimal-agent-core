@@ -48,8 +48,6 @@ import type { StreamedResponse } from "./types.ts"
 // Fake network (Bun mock + NetworkClient primary transport)
 // ---------------------------------------------------------------------------
 
-type FakeHandler = (req: NetworkRequest) => NetworkResponse | Promise<NetworkResponse>
-
 function sseFromEvents(events: CanonicalEvent[], requestId = "req_termless"): NetworkResponse {
   return new NetworkResponse({
     status: 200,
