@@ -1,13 +1,49 @@
+---
+project: "minimal-agent"
+title: "Changelog"
+type: changelog
+status: living
+working-dir: "/Users/gaston/Projects/minimal-agent"
+created-at: "2026-05-01T00:00:00-0400"
+updated-at: "2026-07-12T16:40:00-0400"
+format: "Keep a Changelog (pragmatic, date-stamped)"
+latest-unreleased:
+  - id: "2026-07-12-never-give-up-terminal-less-thinking-idle"
+    type: fix
+    status: shipped
+    commits: ["15c295c", "cbcf119", "dc020a2"]
+    detail: "docs/changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md"
+    research: "private/retry-fix/PROGRESS.md"
+related:
+  - "docs/changes/"
+  - "private/retry-fix/PROGRESS.md"
+---
+
 # Changelog
 
 All notable changes to this project are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
-and the project follows a pragmatic, date-stamped release rhythm.
+and the project follows a pragmatic, date-stamped release rhythm. Longer
+write-ups live under [`docs/changes/`](changes/); research handoffs under
+`private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
 
 ### Fix: never-give-up terminal-less recovery + thinking-aware stream idle (Grok / OpenAI Responses)
+
+---
+id: "2026-07-12-never-give-up-terminal-less-thinking-idle"
+type: fix
+status: shipped
+created-at: "2026-07-12T13:34:39-0400"
+updated-at: "2026-07-12T16:40:00-0400"
+incidents: ["523dba62", "113921b7"]
+commits: ["15c295c", "cbcf119", "dc020a2"]
+detail: "docs/changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md"
+research: "private/retry-fix/PROGRESS.md"
+agents: ["ba7cd4f2", "97596567", "ce0e0589", "842604fe", "f61fc420", "106c4c8c"]
+---
 
 Grok high-effort reasoning streams that paused more than ~30s mid-think were
 idle-aborted by the provider-neutral watchdog, then mis-tagged as
@@ -50,7 +86,9 @@ the old one-shot `terminal-less-bounded` + `api.retry-terminal-less-stop`
 fail path for pre-effect closes).
 
 **Commits:** `15c295c` (post-tool salvage), `cbcf119` (mid-text continuation),
-`dc020a2` (this never-give-up + thinking-idle fix). Restart the running agent
+`dc020a2` (this never-give-up + thinking-idle fix). Full write-up:
+[`docs/changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md`](changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md).
+Research handoff: `private/retry-fix/PROGRESS.md`. Restart the running agent
 process to pick up the binary.
 
 ### Feature: AGENTS.md auto-load (`agents-md` plugin + `--no-agents-md`)
