@@ -7,6 +7,52 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
+### Fix: never-give-up terminal-less recovery + thinking-aware stream idle (Grok / OpenAI Responses)
+
+Grok high-effort reasoning streams that paused more than ~30s mid-think were
+idle-aborted by the provider-neutral watchdog, then mis-tagged as
+`stream_closed_without_terminal` when the aborted body drained without a
+terminal SSE event. The post-`15c295c` / `cbcf119` policy then took **one**
+near-zero pre-effect transport retry and **`failTurn`**, hard-stopping the
+agent with `OpenAI Responses stream closed without a terminal event
+(truncated)` (session `113921b7`, ~33s elapsed, `saw-reasoning: true`,
+`completedToolCalls: 0`). That violated the harness principle that multi-day
+agentic runs must outlive transient transport EOF without a human re-prompt.
+
+**Watchdog** (`src/llm/transport/watchdog.ts`):
+
+- While a thinking/reasoning block is open, idle budget is **5 minutes**
+  (`DEFAULT_THINKING_IDLE_TIMEOUT_MS`), not the ordinary 30s
+  `streamIdleTimeoutMs`. After `thinking_stop`, the ordinary idle applies again.
+- If the watchdog has already set an abort reason (`stream_idle` /
+  `attempt_too_long`), it **throws that tagged error and does not yield** any
+  further events — so a synthetic adapter `stream_closed_without_terminal` on
+  quiet drain cannot replace a real idle classification. Idle stalls stay on
+  the forever **fast** retry curve.
+
+**Pre-effect terminal-less policy** (`attempt-progress.ts` + `retry.ts`):
+
+- **No completed tools** (empty or mid-reasoning / mid-stream with no closed
+  tool_use): retry **forever** with polite capped exponential backoff (max
+  5 min). Empty closes use a short base; midstream (saw reasoning or text)
+  uses a multi-second base with a **≥1s floor** so the first retry cannot
+  collapse to `after 0.0s` thrash. Only the caller's AbortSignal (Esc) stops
+  the loop — no `failTurn` budget.
+- **≥1 completed tool**: still **never re-POST** the same request body
+  (`continueTurn` / bridge salvage). That remains the side-effect safety
+  boundary from `15c295c`.
+- Partial-text salvage and one local agent continuation from `cbcf119` are
+  unchanged (bridge returns `end_turn` with preserved text when `sawText`
+  without throwing into `withRetry`).
+
+Diag curves: `terminal-less-empty` and `terminal-less-midstream` (replacing
+the old one-shot `terminal-less-bounded` + `api.retry-terminal-less-stop`
+fail path for pre-effect closes).
+
+**Commits:** `15c295c` (post-tool salvage), `cbcf119` (mid-text continuation),
+`dc020a2` (this never-give-up + thinking-idle fix). Restart the running agent
+process to pick up the binary.
+
 ### Feature: AGENTS.md auto-load (`agents-md` plugin + `--no-agents-md`)
 
 First-party plugin `ma-agents-md-plugin` (extended plugins repo) now loads
