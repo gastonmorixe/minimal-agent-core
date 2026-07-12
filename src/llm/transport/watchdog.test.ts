@@ -211,7 +211,7 @@ describe("withStreamWatchdog", () => {
           retryable: true,
           category: "api",
           upstreamType: "stream_closed_without_terminal",
-          cause: new Error("OpenAI Responses stream closed without a terminal event (truncated)"),
+          cause: new Error("Responses stream closed without a terminal event (truncated)"),
         } satisfies CanonicalEvent
       })()
 
