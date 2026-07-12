@@ -378,17 +378,20 @@ export class AgentCore {
       stopReason: null,
     }
 
-    const systemPromptBlocks: ContentBlock[] = []
+    const afterParts: string[] = []
+    const sessionParts: string[] = []
     for (const contributor of this.promptContributors) {
-      const blocks = contributor.systemPromptBlocks?.() ?? []
-      for (const b of blocks) systemPromptBlocks.push(b)
+      for (const b of contributor.afterInstructionsBlocks?.() ?? []) {
+        if (b.type === "text" && b.text) afterParts.push(b.text)
+      }
+      for (const b of contributor.systemPromptBlocks?.() ?? []) {
+        if (b.type === "text" && b.text) sessionParts.push(b.text)
+      }
     }
 
     const system = resolveSystemPromptForModel(normalizeModelForAPI(this.model), {
-      sessionContext:
-        systemPromptBlocks.length > 0
-          ? systemPromptBlocks.map((b) => (b.type === "text" ? b.text : "")).join("\n")
-          : undefined,
+      afterInstructions: afterParts.length > 0 ? afterParts.join("\n") : undefined,
+      sessionContext: sessionParts.length > 0 ? sessionParts.join("\n") : undefined,
       reflectionInterval: this.reflectionInterval,
       reflectionCooldownMs: this.reflectionCooldownMs,
       maxToolRounds: this.maxToolRounds,

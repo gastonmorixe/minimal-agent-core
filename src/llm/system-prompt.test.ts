@@ -101,7 +101,11 @@ describe("resolveSystemPromptForModel", () => {
     expect(out[0].text).toBe(NEUTRAL_IDENTITY)
     // instructions block always present after the identity
     expect(out).toHaveLength(2)
-    expect(out[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m", scope: "global" })
+    expect(out[1].cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "5m",
+      scope: "global",
+    })
   })
 })
 
@@ -109,19 +113,86 @@ describe("buildAgentSystemBody cache TTL", () => {
   it("defaults both breakpoints to 5m (instructions scoped global, session per-session)", () => {
     const body = buildAgentSystemBody({ sessionContext: "ENV" })
     expect(body).toHaveLength(2)
-    expect(body[0].cache_control).toEqual({ type: "ephemeral", ttl: "5m", scope: "global" })
+    expect(body[0].cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "5m",
+      scope: "global",
+    })
     expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
   })
 
   it("applies an explicit cacheTtl (1h) to both breakpoints", () => {
-    const body = buildAgentSystemBody({ sessionContext: "ENV", cacheTtl: "1h" })
-    expect(body[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h", scope: "global" })
+    const body = buildAgentSystemBody({
+      sessionContext: "ENV",
+      cacheTtl: "1h",
+    })
+    expect(body[0].cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "1h",
+      scope: "global",
+    })
     expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 
   it("threads cacheTtl through resolveSystemPromptForModel to the instructions block", () => {
-    const out = resolveSystemPromptForModel("does-not-exist", { cacheTtl: "1h" })
-    expect(out[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h", scope: "global" })
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      cacheTtl: "1h",
+    })
+    expect(out[1].cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "1h",
+      scope: "global",
+    })
+  })
+})
+
+describe("buildAgentSystemBody afterInstructions", () => {
+  it("inserts plain afterInstructions between instructions and sessionContext", () => {
+    const body = buildAgentSystemBody({
+      afterInstructions: "PLAIN GUIDANCE",
+      sessionContext: "ENV",
+    })
+    expect(body).toHaveLength(3)
+    expect(body[0].cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "5m",
+      scope: "global",
+    })
+    expect(body[1].text).toBe("PLAIN GUIDANCE")
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+    expect(body[2].text).toBe("ENV")
+    expect(body[2].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+  })
+
+  it("omits empty or whitespace-only afterInstructions", () => {
+    const empty = buildAgentSystemBody({
+      afterInstructions: "   ",
+      sessionContext: "ENV",
+    })
+    expect(empty).toHaveLength(2)
+    expect(empty[1].text).toBe("ENV")
+
+    const missing = buildAgentSystemBody({ sessionContext: "ENV" })
+    expect(missing).toHaveLength(2)
+  })
+
+  it("emits afterInstructions alone when sessionContext is absent", () => {
+    const body = buildAgentSystemBody({ afterInstructions: "ONLY PLAIN" })
+    expect(body).toHaveLength(2)
+    expect(body[1].text).toBe("ONLY PLAIN")
+    // per-session cache — no global scope
+    expect(body[1].cache_control).toEqual({ type: "ephemeral", ttl: "5m" })
+  })
+
+  it("threads afterInstructions through resolveSystemPromptForModel", () => {
+    const out = resolveSystemPromptForModel("does-not-exist", {
+      afterInstructions: "PLAIN",
+      sessionContext: "CTX",
+    })
+    // identity + instructions + afterInstructions + sessionContext
+    expect(out).toHaveLength(4)
+    expect(out[2].text).toBe("PLAIN")
+    expect(out[3].text).toBe("CTX")
   })
 })
 
@@ -130,7 +201,9 @@ describe("system-prompt overrides", () => {
 
   it("produces byte-identical output with no overrides (default identity + instructions)", () => {
     const baseline = resolveSystemPromptForModel("does-not-exist", {})
-    const withEmpty = resolveSystemPromptForModel("does-not-exist", { overrides: NO_OVERRIDES })
+    const withEmpty = resolveSystemPromptForModel("does-not-exist", {
+      overrides: NO_OVERRIDES,
+    })
     expect(withEmpty).toEqual(baseline)
   })
 
@@ -151,7 +224,9 @@ describe("system-prompt overrides", () => {
 
   it("replaces instructions text", () => {
     const out = resolveSystemPromptForModel("does-not-exist", {
-      overrides: { instructions: { kind: "replace", text: "Custom instructions" } },
+      overrides: {
+        instructions: { kind: "replace", text: "Custom instructions" },
+      },
     })
     // instructions block starts with the replacement text
     expect(out[1].text.startsWith("Custom instructions")).toBe(true)
@@ -170,7 +245,9 @@ describe("system-prompt overrides", () => {
   it("replaces session context", () => {
     const out = resolveSystemPromptForModel("does-not-exist", {
       sessionContext: "original context",
-      overrides: { sessionContext: { kind: "replace", text: "custom context" } },
+      overrides: {
+        sessionContext: { kind: "replace", text: "custom context" },
+      },
     })
     expect(out.at(-1)?.text).toBe("custom context")
   })
@@ -215,7 +292,9 @@ describe("system-prompt overrides", () => {
       },
     })
     resolveSystemPromptForModel("fake-pp", {
-      overrides: { providerPreamble: { kind: "replace", text: "custom preamble" } },
+      overrides: {
+        providerPreamble: { kind: "replace", text: "custom preamble" },
+      },
     })
     expect(seen[0].providerPreambleOverride).toEqual({
       kind: "replace",

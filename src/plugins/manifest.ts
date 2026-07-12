@@ -407,7 +407,15 @@ function parseLiveAreaSlot(
     }
   }
 
-  return { id, handler, position, refreshMs, timeoutMs, placeholder, refreshOn }
+  return {
+    id,
+    handler,
+    position,
+    refreshMs,
+    timeoutMs,
+    placeholder,
+    refreshOn,
+  }
 }
 
 /**
@@ -449,13 +457,23 @@ function parsePromptFragment(
     order = obj.order as number
   }
 
+  let placement: ManifestPromptFragment["placement"] | undefined
+  if (obj.placement != null) {
+    if (obj.placement !== "sessionContext" && obj.placement !== "afterInstructions") {
+      err(
+        `placement must be "sessionContext" or "afterInstructions" (got: ${JSON.stringify(obj.placement)})`,
+      )
+    }
+    placement = obj.placement as ManifestPromptFragment["placement"]
+  }
+
   for (const k of Object.keys(obj)) {
-    if (!["id", "handler", "timeoutMs", "order"].includes(k)) {
+    if (!["id", "handler", "timeoutMs", "order", "placement"].includes(k)) {
       err(`unknown prompt fragment key: ${JSON.stringify(k)}`)
     }
   }
 
-  return { id, handler, timeoutMs, order }
+  return { id, handler, timeoutMs, order, placement }
 }
 
 /**

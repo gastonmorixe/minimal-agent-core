@@ -1054,27 +1054,32 @@ export class Agent {
     //     consumePendingAttachment() calls above and below. That block
     //     sits behind the rolling-tail breakpoint that's invalidated
     //     every turn anyway, so mode toggles cost zero extra cache.
-    // Use the async variant so plugin-contributed prompt fragments
-    // (env-info, etc.) get awaited+memoized. The first turn pays the
-    // fragment-resolution cost (bounded by each fragment's `timeoutMs`,
-    // default 2s); subsequent turns hit the cache. The sync `getPromptBlock`
-    // is reserved for the session hash in src/index.ts so volatile fragment
-    // content (date, terminal size) doesn't bust resume drift detection.
-    const pluginBlock = (await this.loader?.getPromptBlockAsync()) ?? null
+    // Use the async dual-block API so plugin-contributed prompt fragments
+    // (env-info, plain afterInstructions, etc.) get awaited+memoized. The
+    // first turn pays the fragment-resolution cost (bounded by each
+    // fragment's `timeoutMs`, default 2s); subsequent turns hit the cache.
+    // `getPromptBlocksAsync` splits plain afterInstructions from the
+    // XML-wrapped sessionContext. The sync `getPromptBlock` remains a
+    // sessionContext-only baseline without async fragments.
+    const promptBlocks = (await this.loader?.getPromptBlocksAsync()) ?? {
+      afterInstructions: null,
+      sessionContext: null,
+    }
     // Always pass the loop-safety knobs so the appended "Tool-use loop
     // safety" paragraph in system[2] reflects the runtime config (interval,
     // cooldown, emergency cap). Default values produce stable text, so the
     // cache key matches the corresponding systemHash computed at session
     // open in index.ts when both call sites use the same Agent defaults.
     // Provider-resolved system prompt: the agent builds the neutral skeleton
-    // (instructions + session context) and the request's provider injects its
-    // preamble (Anthropic plan-auth → billing + Claude-Code identity; everyone
-    // else → neutral "You are Minimal Agent …" identity). Routed through the
-    // model registry seam, so the agent names no provider. `index.ts` computes
-    // the resume-drift systemHash through the SAME resolver with the same args,
-    // keeping the cached prefix byte-consistent.
+    // (instructions + optional afterInstructions + session context) and the
+    // request's provider injects its preamble (Anthropic plan-auth → billing
+    // + Claude-Code identity; everyone else → neutral identity). Routed
+    // through the model registry seam, so the agent names no provider.
+    // `index.ts` computes the resume-drift systemHash through the SAME
+    // resolver with the same args, keeping the cached prefix byte-consistent.
     const system = resolveSystemPromptForModel(normalizeModelForAPI(this.model), {
-      sessionContext: pluginBlock ?? undefined,
+      afterInstructions: promptBlocks.afterInstructions ?? undefined,
+      sessionContext: promptBlocks.sessionContext ?? undefined,
       reflectionInterval: this.reflectionInterval,
       reflectionCooldownMs: this.reflectionCooldownMs,
       maxToolRounds: this.maxToolRounds,
@@ -1100,7 +1105,11 @@ export class Agent {
     >()
     for (const t of allTools) {
       if (t.icon || t.color || t.headerKey)
-        toolPresentation.set(t.name, { icon: t.icon, color: t.color, headerKey: t.headerKey })
+        toolPresentation.set(t.name, {
+          icon: t.icon,
+          color: t.color,
+          headerKey: t.headerKey,
+        })
     }
     // Mirror canonical presentation into alias slots so a tool_use the model
     // emits with an old/legacy name still renders with the canonical icon
@@ -1175,7 +1184,10 @@ export class Agent {
       // clamped to the room left in the context window using the SAME system
       // prompt + tool schemas we are about to send, so the estimate matches
       // the real payload (see resolveMaxOutputTokens / context-budget.ts).
-      const maxOutputTokens = this.resolveMaxOutputTokens({ system, tools: mergedTools })
+      const maxOutputTokens = this.resolveMaxOutputTokens({
+        system,
+        tools: mergedTools,
+      })
       const gen = this.sendFn({
         auth: this.auth,
         messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
@@ -1193,7 +1205,12 @@ export class Agent {
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
-          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+          ? {
+              thinking: {
+                type: "adaptive" as const,
+                display: this.thinkingDisplay,
+              },
+            }
           : {}),
         ...sendOpts,
         ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
@@ -1512,7 +1529,10 @@ export class Agent {
       // repeats; the model can call MemoryTool to re-fetch if it cares).
       userContent.push(...toolResults)
       if (streamInterruptedSalvage) {
-        userContent.push({ type: "text", text: streamInterruptedAttachmentText() })
+        userContent.push({
+          type: "text",
+          text: streamInterruptedAttachmentText(),
+        })
       }
       const loopModeAttach = this.modeManager?.consumePendingAttachment() ?? null
       if (loopModeAttach) userContent.push(loopModeAttach)
@@ -1619,7 +1639,12 @@ export class Agent {
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
-          ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+          ? {
+              thinking: {
+                type: "adaptive" as const,
+                display: this.thinkingDisplay,
+              },
+            }
           : {}),
         ...sendOpts,
         ...(thinkingStart ? { onThinkingStart: thinkingStart } : {}),
@@ -1646,7 +1671,10 @@ export class Agent {
       if (wrapResponse) {
         lastResponse = wrapResponse
         if (wrapResponse.blocks.length > 0) {
-          this.messages.push({ role: "assistant", content: wrapResponse.blocks })
+          this.messages.push({
+            role: "assistant",
+            content: wrapResponse.blocks,
+          })
           this.store?.appendAssistant(
             wrapResponse.blocks,
             wrapResponse.stopReason,
@@ -1707,7 +1735,12 @@ export class Agent {
       ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
       ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
       ...(this.thinkingDisplay
-        ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
+        ? {
+            thinking: {
+              type: "adaptive" as const,
+              display: this.thinkingDisplay,
+            },
+          }
         : {}),
       ...opts,
     })
@@ -1759,9 +1792,15 @@ export class Agent {
    * `--output-schema` JSON Schema, as `{ type: "json_schema", schema }`).
    */
   private outputConfigSpread(): {
-    outputConfig?: { effort?: string; format?: { type: string; schema?: unknown } }
+    outputConfig?: {
+      effort?: string
+      format?: { type: string; schema?: unknown }
+    }
   } {
-    const cfg: { effort?: string; format?: { type: string; schema?: unknown } } = {}
+    const cfg: {
+      effort?: string
+      format?: { type: string; schema?: unknown }
+    } = {}
     if (this.effort) cfg.effort = this.effort
     if (this.outputSchema) cfg.format = { type: "json_schema", schema: this.outputSchema }
     return Object.keys(cfg).length > 0 ? { outputConfig: cfg } : {}

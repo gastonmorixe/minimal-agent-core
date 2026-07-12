@@ -101,7 +101,12 @@ export interface TranscriptSink {
 // The canonical AgentEvent union + EventSink port live in ./events.ts (the
 // single source of truth, per the PM ruling). Re-exported here so consumers
 // that pull the event surface from the ports barrel keep working.
-export type { AgentEvent, AgentEventType, EventSink, EventUsage } from "./events.ts"
+export type {
+  AgentEvent,
+  AgentEventType,
+  EventSink,
+  EventUsage,
+} from "./events.ts"
 
 // ---------------------------------------------------------------------------
 // Transcript formatter (decouples tool-round.ts from ui/tool-transcript/format.ts)
@@ -145,7 +150,11 @@ export interface SessionPersistence {
   appendToolResult(
     result: ToolResultBlock,
     rawBlob?: { path: string; bytes: number; sha256: string },
-    presentation?: { display?: string; displayHeader?: string; displayFooter?: string },
+    presentation?: {
+      display?: string
+      displayHeader?: string
+      displayFooter?: string
+    },
   ): void
   /** Append a free-form note. */
   appendNote(text: string): void
@@ -159,8 +168,16 @@ export interface SessionPersistence {
 
 /** Contributes blocks to the system prompt or user turn context. */
 export interface PromptContributor {
-  /** Additional system prompt blocks injected before the base system prompt. */
+  /**
+   * Session-context system blocks (typically plugin `<ma::sys::…>` sections).
+   * AgentCore joins these into `resolveSystemPromptForModel({ sessionContext })`.
+   */
   systemPromptBlocks?(): ContentBlock[]
+  /**
+   * Plain-markdown blocks inserted after the instructions block and before
+   * session context. No plugin XML wrap. Optional; omit for legacy contributors.
+   */
+  afterInstructionsBlocks?(): ContentBlock[]
   /** Blocks prepended to each user turn (e.g. mode-change, tasks, short-term memory). */
   turnAttachments?(): ContentBlock[]
   /** Save-echo blocks collected after a turn completes. */

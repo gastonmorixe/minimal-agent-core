@@ -2,10 +2,11 @@
  * Async prompt-fragment producers for the plugin loader.
  *
  * A {@link ManifestPromptFragment} declares a module or subprocess
- * producer whose text is folded into the plugin's system-prompt section.
+ * producer whose text is folded into a system-prompt slot
+ * (`sessionContext` by default, or plain `afterInstructions` when set).
  * Producers are kicked off eagerly at `PluginLoader.load` time and
  * awaited (against their per-fragment timeout) on the first call to
- * `PluginLoader.getPromptBlockAsync`.
+ * `PluginLoader.getPromptBlocksAsync` / `getPromptBlockAsync`.
  *
  * Split out of `src/plugins/loader.ts` to keep that file under the
  * `max-lines` lint budget. Names are imported by the `PluginLoader`
