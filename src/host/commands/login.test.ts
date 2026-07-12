@@ -15,9 +15,9 @@ import { PassThrough } from "node:stream"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
+import { readSecureInput } from "../ui/secure-input.ts"
 
 import { readLine, runLoginCommand } from "./login.ts"
-import { readSecureInput } from "../ui/secure-input.ts"
 
 afterEach(() => {
   clearProviderPlugins()
