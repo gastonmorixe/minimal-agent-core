@@ -49,6 +49,11 @@ import type {
 } from "./messages.ts"
 import { getDefaultModelId } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
+import {
+  type AttemptProgress,
+  attachAttemptProgress,
+  ZERO_ATTEMPT_PROGRESS,
+} from "./transport/attempt-progress.ts"
 import type {
   SendOptions as LegacySendOptions,
   StreamedResponse as LegacyStreamedResponse,
@@ -681,8 +686,14 @@ function safeParseToolInput(json: string): Record<string, unknown> {
  * retry classifier understands (`streamErrorType`). The raw Phase-1 transport
  * has no retry loop, so this just throws; the Phase-2 retry middleware
  * intercepts `stream_error` events upstream and never lets them reach here.
+ *
+ * Always attaches {@link AttemptProgress} so terminal-less recovery can see
+ * whether any complete tool call already landed (the post-tool replay ban).
  */
-function taggedStreamError(ev: Extract<CanonicalEvent, { type: "stream_error" }>): Error {
+function taggedStreamError(
+  ev: Extract<CanonicalEvent, { type: "stream_error" }>,
+  progress: AttemptProgress,
+): Error {
   const byCategory: Record<string, string> = {
     overloaded: "overloaded_error",
     api: "api_error",
@@ -712,7 +723,7 @@ function taggedStreamError(ev: Extract<CanonicalEvent, { type: "stream_error" }>
   // happens to live in a retryable set; `retryable: false` is the
   // authoritative override the retry classifier honors so it propagates.
   if (ev.retryable === false) err.retryable = false
-  return err
+  return attachAttemptProgress(err, { ...progress })
 }
 
 /**
@@ -746,6 +757,11 @@ export async function* canonicalEventsToLegacyStream(
   // exact footprint via appendAssistant. Mirrors the legacy client path.
   let turnUsage: LegacyStreamedResponse["usage"]
 
+  // Progress for terminal-less recovery. Completed tool calls are counted
+  // only on `tool_use_stop` (fully assembled + closed), never on a partial
+  // open tool_use or bare input deltas.
+  let progress: AttemptProgress = { ...ZERO_ATTEMPT_PROGRESS }
+
   type Cur =
     | { kind: "text"; text: string }
     | { kind: "thinking"; thinking: string; signature: string }
@@ -760,7 +776,11 @@ export async function* canonicalEventsToLegacyStream(
     }
   }
 
-  const flushCur = () => {
+  const noteEvent = (type: CanonicalEvent["type"]) => {
+    progress = { ...progress, lastEventType: type }
+  }
+
+  const flushCur = (opts?: { countCompletedTool?: boolean }) => {
     if (!cur) return
     if (cur.kind === "text") {
       // Drop empty/whitespace-only text blocks. The Anthropic API rejects
@@ -783,11 +803,18 @@ export async function* canonicalEventsToLegacyStream(
         name: cur.name,
         input: safeParseToolInput(cur.json),
       })
+      if (opts?.countCompletedTool) {
+        progress = {
+          ...progress,
+          completedToolCalls: progress.completedToolCalls + 1,
+        }
+      }
     }
     cur = null
   }
 
   for await (const ev of events) {
+    noteEvent(ev.type)
     switch (ev.type) {
       case "message_start":
         // Anthropic reports the input/cache footprint at message_start (cache
@@ -797,13 +824,17 @@ export async function* canonicalEventsToLegacyStream(
         turnUsage = canonicalUsageToWire(ev.initialUsage)
         // Capture the provider response id (OpenAI Responses `response.id`).
         // Kept on the returned StreamedResponse instead of being discarded.
-        if (ev.messageId) responseId = ev.messageId
+        if (ev.messageId) {
+          responseId = ev.messageId
+          progress = { ...progress, responseId: ev.messageId }
+        }
         break
       case "text_start":
         flushCur()
         cur = { kind: "text", text: "" }
         break
       case "text_delta":
+        progress = { ...progress, sawText: true }
         checkCap(fullText.length, ev.text.length)
         if (cur?.kind === "text") {
           checkCap(cur.text.length, ev.text.length)
@@ -824,17 +855,22 @@ export async function* canonicalEventsToLegacyStream(
           // from finalText when it carries real content; never push a `""`
           // block, which would 400 on the next Anthropic send / resume.
           const text = ev.finalText ?? ""
-          if (text.trim().length > 0) blocks.push({ type: "text", text })
+          if (text.trim().length > 0) {
+            progress = { ...progress, sawText: true }
+            blocks.push({ type: "text", text })
+          }
         }
         await cb.onTextStop?.()
         break
       }
       case "thinking_start":
         flushCur()
+        progress = { ...progress, sawReasoning: true }
         cur = { kind: "thinking", thinking: "", signature: "" }
         await cb.onThinkingStart?.()
         break
       case "thinking_delta":
+        progress = { ...progress, sawReasoning: true }
         if (cur?.kind === "thinking") {
           checkCap(cur.thinking.length, ev.text.length)
           cur.thinking += ev.text
@@ -862,12 +898,14 @@ export async function* canonicalEventsToLegacyStream(
         }
         break
       case "tool_use_stop": {
-        if (cur?.kind === "tool_use") flushCur()
+        // Only a closed tool_use is executable / counts as completed.
+        if (cur?.kind === "tool_use") flushCur({ countCompletedTool: true })
         break
       }
       case "refusal_delta":
         // OpenAI surfaces refusals on a dedicated channel; fold into the
         // text stream so the legacy consumer doesn't silently drop it.
+        progress = { ...progress, sawText: true }
         fullText += ev.text
         yield ev.text
         break
@@ -881,9 +919,40 @@ export async function* canonicalEventsToLegacyStream(
         break
       case "message_stop":
         break
-      case "stream_error":
-        throw taggedStreamError(ev)
+      case "stream_error": {
+        // Terminal-less EOF after at least one complete tool call: NEVER
+        // throw into withRetry (that would replay the pre-tool request body).
+        // Salvage closed tools, drop any open partial tool_use, and return a
+        // tool_use stop so the agent loop executes complete calls once and
+        // continues from local transcript state.
+        const streamErrorType = ev.upstreamType ?? (ev.category === "api" ? "api_error" : undefined)
+        if (
+          streamErrorType === "stream_closed_without_terminal" &&
+          progress.completedToolCalls > 0
+        ) {
+          // Discard partial open tool_use — never execute incomplete calls.
+          if (cur?.kind === "tool_use") cur = null
+          // Flush open text (already yielded) so history stays consistent.
+          if (cur?.kind === "text") flushCur()
+          else if (cur?.kind === "thinking") flushCur()
+          else cur = null
+          return {
+            blocks,
+            text: fullText,
+            stopReason: "tool_use",
+            stopDetails: {
+              type: "stream_closed_without_terminal",
+              message:
+                "Provider closed the stream without a terminal event after complete tool call(s); salvaged closed tools and continuing from local state",
+            },
+            usage: turnUsage,
+            responseId,
+          }
+        }
+        throw taggedStreamError(ev, progress)
+      }
       case "ping":
+        // Keepalive / long-thinking activity — progress only, no failure.
         break
       default: {
         throw new Error(`unhandled canonical event: ${JSON.stringify(ev satisfies never)}`)
@@ -898,7 +967,13 @@ export async function* canonicalEventsToLegacyStream(
   // thinking) block was silently dropped and the agent loop mistook a
   // budget-capped turn for a clean finish. Finalize it the same way the
   // stop events do so the partial tool call still reaches the loop.
-  if (cur) flushCur()
+  //
+  // NOTE: terminal-less closes with complete tools return earlier and do
+  // NOT reach here with an open partial tool_use still set (discarded above).
+  if (cur) {
+    const wasTool = cur.kind === "tool_use"
+    flushCur({ countCompletedTool: wasTool })
+  }
 
   return { blocks, text: fullText, stopReason, stopDetails, usage: turnUsage, responseId }
 }

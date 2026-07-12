@@ -66,6 +66,16 @@ describe("renderTurnNotice (TUI treatment per kind)", () => {
     )
   })
 
+  it("renders stream_interrupted_salvaged with complete-tool count", () => {
+    const line = renderTurnNotice({
+      kind: "stream_interrupted_salvaged",
+      severity: "warn",
+      completedToolCalls: 2,
+    })
+    expect(line).toContain("2 complete tool")
+    expect(line).toContain("will not replay")
+  })
+
   it("renders a dim marker for reflection_ack (with and without reason)", () => {
     const withReason = renderTurnNotice({
       kind: "reflection_ack",
