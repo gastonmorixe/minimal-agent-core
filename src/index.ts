@@ -541,6 +541,13 @@ async function main() {
     )
   }
   const configPluginOverrides = loadPluginEnabledOverrides()
+  // `--no-agents-md` / `--no-agents` / MINIMAL_AGENT_NO_AGENTS_MD=1 are
+  // convenience aliases that force-disable the `agents-md` plugin (AGENTS.md
+  // system-prompt injection). Equivalent to `--disable-plugin agents-md`.
+  const noAgentsMd =
+    args.includes("--no-agents-md") ||
+    args.includes("--no-agents") ||
+    process.env.MINIMAL_AGENT_NO_AGENTS_MD === "1"
   const pluginOverrides = resolvePluginEnabledOverrides({
     config: configPluginOverrides,
     env: {
@@ -548,7 +555,10 @@ async function main() {
       enable: process.env.MINIMAL_AGENT_ENABLE_PLUGINS,
     },
     cli: {
-      disable: collectFlagValues(args, "--disable-plugin"),
+      disable: [
+        ...collectFlagValues(args, "--disable-plugin"),
+        ...(noAgentsMd ? ["agents-md"] : []),
+      ],
       enable: collectFlagValues(args, "--enable-plugin"),
     },
   })

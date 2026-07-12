@@ -25,4 +25,12 @@ describe("renderHelp", () => {
     expect(text).toContain("Advertise no tools (pure Q&A)")
     expect(text).toContain('e.g. --tools "WebSearch,Task"')
   })
+
+  test("documents --no-agents-md and MINIMAL_AGENT_NO_AGENTS_MD", () => {
+    const text = stripAnsi(renderHelp().join("\n"))
+    expect(text).toContain("--no-agents-md")
+    expect(text).toContain("Skip AGENTS.md system-prompt injection")
+    expect(text).toContain("MINIMAL_AGENT_NO_AGENTS_MD=1")
+    expect(text).toContain("--disable-plugin agents-md")
+  })
 })

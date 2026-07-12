@@ -102,6 +102,9 @@ export const FLAGS_NO_VALUE: ReadonlySet<string> = new Set([
   "--header",
   "--no-header",
   "--no-tools",
+  // Convenience alias for `--disable-plugin agents-md` (AGENTS.md injection).
+  "--no-agents-md",
+  "--no-agents",
   // Auth subcommands — see src/cli/command-plan.ts. None of these consume
   // the following positional, so they belong here rather than in
   // FLAGS_WITH_VALUES. (`--login --email foo@bar` is a future option but

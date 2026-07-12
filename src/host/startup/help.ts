@@ -158,6 +158,10 @@ function buildHelpSections(): HelpSection[] {
         row(`${c.cyan("--enable-plugin")} ${c.dim("<id>")}`, "Force-enable a plugin for this run", [
           "overrides config + manifest opt-out",
         ]),
+        row(c.cyan("--no-agents-md"), "Skip AGENTS.md system-prompt injection", [
+          "alias for --disable-plugin agents-md",
+          "or MINIMAL_AGENT_NO_AGENTS_MD=1",
+        ]),
         row(
           `${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}`,
           "Force startup tree on/off",
@@ -395,6 +399,9 @@ function buildHelpSections(): HelpSection[] {
           "Comma-separated plugin ids to force on this run",
           ["same as --enable-plugin"],
         ),
+        row(c.cyan("MINIMAL_AGENT_NO_AGENTS_MD=1"), "Skip AGENTS.md system-prompt injection", [
+          "same as --no-agents-md / --disable-plugin agents-md",
+        ]),
         row(c.cyan("MINIMAL_AGENT_PLUGINS_REPO"), "Git URL for the extended plugins repo", [
           "fork/mirror",
         ]),

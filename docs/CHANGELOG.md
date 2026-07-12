@@ -7,6 +7,21 @@ and the project follows a pragmatic, date-stamped release rhythm.
 
 ## [Unreleased]
 
+### Feature: AGENTS.md auto-load (`agents-md` plugin + `--no-agents-md`)
+
+First-party plugin `ma-agents-md-plugin` (extended plugins repo) now loads
+[AGENTS.md](https://agents.md) into the system prompt at session start: global
+from the resolved agent home (`MINIMAL_AGENT_HOME/AGENTS.md`), then project from
+`<cwd>/AGENTS.md`. Injection uses the standard `promptFragments` path, so both
+the legacy `Agent` loop and modern `AgentCore` (`PromptContributorAdapter`)
+receive it. Core adds a convenience disable flag:
+
+- `--no-agents-md` / `--no-agents` (aliases for `--disable-plugin agents-md`)
+- `MINIMAL_AGENT_NO_AGENTS_MD=1`
+
+Also documented in `--help`. Config: `plugins["agents-md"].enabled = false` or
+per-source `global` / `project` / `maxBytes`.
+
 ### Feature: system-prompt overrides (`--system-*` flags, env, config)
 
 Every model-facing part of the system prompt can now be replaced or omitted at
