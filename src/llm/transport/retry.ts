@@ -19,15 +19,21 @@
  * is "retry forever, politely" : capped backoff + jitter + user-abortable +
  * sustained-warning, not a blind `while(true)` hammer.
  *
- * # Terminal-less stream close (progress-aware exception)
+ * # Terminal-less stream close (progress-aware; still never give up)
  *
- * `stream_closed_without_terminal` is NOT on the forever/slow curve. A
- * Grok/OpenAI Responses 200 SSE can close after complete tool calls without
- * `response.completed`; replaying that request body forever is the incident
- * this policy prevents. Recovery uses {@link decideTerminalLessRecovery}:
- * at most one short pre-effect retry; never replay after completed tools.
- * (The bridge usually salvages completed tools and returns without throwing;
- * this path is defense-in-depth if a throw still carries progress.)
+ * After completed tool calls, never re-POST the same body (side effects /
+ * transcript divergence) — {@link decideTerminalLessRecovery} returns
+ * `continueTurn` and the bridge salvages. Pre-effect closes (empty or
+ * mid-reasoning, no completed tools) retry FOREVER with polite capped
+ * backoff (multi-second floor when reasoning was seen so we do not thrash
+ * a thinking model — session 113921b7). That matches the harness principle:
+ * multi-day agentic runs must not stop for a human re-prompt on network EOF.
+ * Only the caller's AbortSignal (Esc) ends the loop.
+ *
+ * Idle aborts during open thinking are classified as `stream_idle` by the
+ * watchdog (thinking-aware idle budget), which is also forever-retried on
+ * the fast curve. (The bridge usually salvages completed tools / partial
+ * text without throwing; this path is defense-in-depth.)
  *
  * @module llm/transport/retry
  */
@@ -66,9 +72,10 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   // Tagged `network_error` by the transient-network classifier in the catch
   // below. Mirrors client.ts. See network/transient-error.ts.
   TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
-  // Pre-effect terminal-less closes use a dedicated bounded policy below,
-  // but remain "known" to the tag classifier so we enter the catch path.
-  // They are NOT forever-retried and NOT on the slow rate-limit curve.
+  // Terminal-less closes use a dedicated progress-aware policy below, but
+  // remain "known" to the tag classifier so we enter the catch path. Pre-
+  // effect closes retry forever (never-give-up); post-tool closes do not
+  // re-POST (continueTurn / salvage). Not on the slow rate-limit curve.
   "stream_closed_without_terminal",
 ])
 
@@ -197,7 +204,9 @@ export async function* withRetry(
         })
 
         if (decision.kind === "continueTurn" || decision.kind === "failTurn") {
-          // Post-tool or budget exhausted: do NOT call makeAttempt again.
+          // Post-tool salvage (continueTurn): do NOT call makeAttempt again.
+          // failTurn is not emitted by current terminal-less policy (never-give-up)
+          // but remains handled if a future path returns it.
           diag.warn(
             "api.retry-terminal-less-stop",
             `stream_closed_without_terminal: ${decision.kind} — ${decision.kind === "failTurn" ? decision.reason : decision.reason} (completedToolCalls=${progress?.completedToolCalls ?? 0})`,
@@ -217,17 +226,20 @@ export async function* withRetry(
         terminalLessRetries++
         const delayMs = decision.delayMs
         const nextAttempt = attempt + 1
+        const curve = decision.curve
         diag.warn(
           "api.retry",
-          `${streamErrType}: bounded pre-effect retry attempt ${nextAttempt} after ${(delayMs / 1000).toFixed(1)}s — ${formatElapsedLong(elapsedMs)} elapsed so far`,
+          `${streamErrType}: ${curve} retry attempt ${nextAttempt} after ${(delayMs / 1000).toFixed(1)}s — ${formatElapsedLong(elapsedMs)} elapsed so far`,
           {
             "error-type": streamErrType,
             attempt: nextAttempt,
             "delay-ms": delayMs,
             "elapsed-ms": elapsedMs,
-            curve: "terminal-less-bounded",
+            curve,
             "fresh-connection": decision.freshConnection,
             "completed-tool-calls": progress?.completedToolCalls ?? 0,
+            "saw-text": progress?.sawText ?? false,
+            "saw-reasoning": progress?.sawReasoning ?? false,
           },
         )
         if (hasYielded) {

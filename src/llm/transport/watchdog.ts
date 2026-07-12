@@ -8,12 +8,34 @@
  *   1. **idle** : the server stops emitting SSE events but neither closes
  *      the body nor sends `message_stop`. HTTP/2 PINGs keep the socket
  *      alive, so the iterator blocks forever. Fires `stream_idle` after
- *      `streamIdleTimeoutMs` of silence.
+ *      `streamIdleTimeoutMs` of silence (or the longer thinking-idle
+ *      budget while a reasoning block is open — see below).
  *   2. **hard timeout** : a single attempt runs past `attemptHardTimeoutMs`
  *      (slow trickle of irrelevant frames that never reaches idle). Fires
  *      `attempt_too_long`.
  *   3. **truncation** : the body closes cleanly but `message_stop` never
  *      arrived. Fires `stream_truncated`.
+ *
+ * # Thinking-aware idle (Grok / OpenAI Responses, session 113921b7)
+ *
+ * Reasoning models routinely pause 30s+ between summary deltas while still
+ * computing. A flat 30s idle abort during an open thinking block is a
+ * false positive: the watchdog cancels a healthy stream, the provider
+ * adapter synthesizes `stream_closed_without_terminal`, and the old
+ * terminal-less policy hard-failed after one near-zero retry. While a
+ * thinking block is open we use {@link DEFAULT_THINKING_IDLE_TIMEOUT_MS}
+ * (5 min) instead of the ordinary idle budget. The hard ceiling still
+ * bounds pathological hangs.
+ *
+ * # Abort classification priority
+ *
+ * When the watchdog trips, the aborted HTTP body often drains as a clean
+ * EOF. The Responses translator then yields a synthetic
+ * `stream_error`/`stream_closed_without_terminal`. That event must NOT
+ * replace the watchdog's `stream_idle` / `attempt_too_long` tag: once
+ * `reason` is set we throw the watchdog error and stop yielding, so the
+ * outer retry coordinator sees the real stall and uses the forever fast
+ * curve instead of the terminal-less failTurn path.
  *
  * This is a faithful port of the inline watchdog in `sendMessageOnce`
  * (1s tick, idle-checked-before-hard, `unref`'d timer) but operating on
@@ -32,6 +54,17 @@ import type { CanonicalEvent } from "../canonical-events.ts"
 
 /** Default idle timeout : matches `SendOptions.streamIdleTimeoutMs`. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 30_000
+/**
+ * Idle budget while a thinking/reasoning block is open.
+ *
+ * Grok/OpenAI reasoning streams often go silent for well over 30s between
+ * summary deltas while the model is still working. Aborting there is a
+ * false positive (session 113921b7: ~33s elapsed, saw-reasoning=true,
+ * completedToolCalls=0 → hard fail). Five minutes still catches a true
+ * hang without mistaking long thinking for a dead socket; the hard
+ * attempt ceiling remains the ultimate bound.
+ */
+export const DEFAULT_THINKING_IDLE_TIMEOUT_MS = 5 * 60_000
 /** Default hard per-attempt ceiling : matches `SendOptions.attemptHardTimeoutMs`. */
 export const DEFAULT_ATTEMPT_HARD_TIMEOUT_MS = 30 * 60_000
 
@@ -50,6 +83,12 @@ function makeWatchdogError(reason: WatchdogAbortReason, message: string): Watchd
 
 export interface WatchdogOptions {
   streamIdleTimeoutMs?: number
+  /**
+   * Idle budget while at least one thinking block is open. Defaults to
+   * {@link DEFAULT_THINKING_IDLE_TIMEOUT_MS}. Must be ≥ the ordinary idle
+   * timeout to be useful; smaller values are clamped up.
+   */
+  thinkingIdleTimeoutMs?: number
   attemptHardTimeoutMs?: number
   /** Upstream cancellation; linked into the attempt signal. */
   signal?: AbortSignal
@@ -77,6 +116,10 @@ export async function* withStreamWatchdog(
   opts: WatchdogOptions = {},
 ): AsyncIterable<CanonicalEvent> {
   const idleTimeout = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS
+  const thinkingIdleTimeout = Math.max(
+    idleTimeout,
+    opts.thinkingIdleTimeoutMs ?? DEFAULT_THINKING_IDLE_TIMEOUT_MS,
+  )
   const hardTimeout = opts.attemptHardTimeoutMs ?? DEFAULT_ATTEMPT_HARD_TIMEOUT_MS
 
   const ac = new AbortController()
@@ -90,12 +133,17 @@ export async function* withStreamWatchdog(
   let lastEventAt = Date.now()
   let messageStopReceived = false
   let reason: WatchdogAbortReason | null = null
+  /** Nested open thinking blocks (start without matching stop). */
+  let openThinkingBlocks = 0
+
+  const effectiveIdleTimeout = (): number =>
+    openThinkingBlocks > 0 ? thinkingIdleTimeout : idleTimeout
 
   const timer = setInterval(() => {
-    if (messageStopReceived || ac.signal.aborted) return
+    if (messageStopReceived || ac.signal.aborted || reason !== null) return
     const idleMs = Date.now() - lastEventAt
     const elapsedMs = Date.now() - startedAt
-    if (idleMs >= idleTimeout) {
+    if (idleMs >= effectiveIdleTimeout()) {
       reason = "stream_idle"
       ac.abort()
     } else if (elapsedMs >= hardTimeout) {
@@ -121,7 +169,15 @@ export async function* withStreamWatchdog(
 
   try {
     for await (const ev of makeStream(ac.signal)) {
+      // Watchdog already tripped: the aborted body may still drain and the
+      // Responses translator may synthesize stream_closed_without_terminal.
+      // Prefer the watchdog tag so retry uses stream_idle forever-fast, not
+      // the terminal-less failTurn path (session 113921b7).
+      if (reason !== null) throw fail(reason)
+
       lastEventAt = Date.now()
+      if (ev.type === "thinking_start") openThinkingBlocks++
+      else if (ev.type === "thinking_stop" && openThinkingBlocks > 0) openThinkingBlocks--
       if (ev.type === "message_stop") messageStopReceived = true
       yield ev
     }

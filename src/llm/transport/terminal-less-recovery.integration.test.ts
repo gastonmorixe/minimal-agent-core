@@ -327,64 +327,94 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
     expect(response.stopReason).toBe("end_turn")
   }, 15_000)
 
-  it("empty terminal-less twice: stops after one retry (no unlimited replay)", async () => {
-    const handler = mock((_req: NetworkRequest) => sseFromEvents(emptyTerminalLessEvents()))
+  it("empty terminal-less thrice then recovers (never-give-up, not failTurn)", async () => {
+    // Never-give-up: empty EOF must keep re-POSTing until the provider recovers.
+    let n = 0
+    const handler = mock((_req: NetworkRequest) => {
+      n++
+      if (n <= 3) return sseFromEvents(emptyTerminalLessEvents())
+      return sseFromEvents(cleanEndEvents("recovered after empty eof"))
+    })
     const networkClient = new NetworkClient({
       primary: { id: "fake", request: async (req) => handler(req) },
     })
 
-    let caught: Error | undefined
-    try {
-      await drainSend(
-        canonicalSendFn({
-          auth,
-          messages,
-          model: "test-model-recovery",
-          selectedProviderId: "test-recovery",
-          stream: true,
-          networkClient,
-        }),
-      )
-    } catch (e) {
-      caught = e as Error
-    }
-
-    // First attempt + exactly one bounded retry.
-    expect(handler).toHaveBeenCalledTimes(2)
-    expect(caught).toBeDefined()
-    expect((caught as { streamErrorType?: string }).streamErrorType).toBe(
-      "stream_closed_without_terminal",
+    const { response } = await drainSend(
+      canonicalSendFn({
+        auth,
+        messages,
+        model: "test-model-recovery",
+        selectedProviderId: "test-recovery",
+        stream: true,
+        networkClient,
+      }),
     )
+
+    expect(handler).toHaveBeenCalledTimes(4)
+    expect(response.text).toBe("recovered after empty eof")
+    expect(response.stopReason).toBe("end_turn")
   }, 15_000)
 
-  it("reasoning-only terminal-less: one retry then fail (not slow forever curve)", async () => {
-    const started = Date.now()
-    const handler = mock((_req: NetworkRequest) => sseFromEvents(reasoningOnlyTerminalLessEvents()))
+  it("reasoning-only terminal-less: midstream retry recovers (does not failTurn after one shot)", async () => {
+    // Session 113921b7 regression: reasoning-only used to hard-fail after one
+    // near-zero retry. Never-give-up + midstream floor must allow recovery.
+    let n = 0
+    const handler = mock((_req: NetworkRequest) => {
+      n++
+      if (n <= 3) return sseFromEvents(reasoningOnlyTerminalLessEvents())
+      return sseFromEvents(cleanEndEvents("recovered after thinking"))
+    })
     const networkClient = new NetworkClient({
       primary: { id: "fake", request: async (req) => handler(req) },
     })
 
-    let caught: Error | undefined
-    try {
-      await drainSend(
-        canonicalSendFn({
-          auth,
-          messages,
-          model: "test-model-recovery",
-          selectedProviderId: "test-recovery",
-          stream: true,
-          networkClient,
-        }),
-      )
-    } catch (e) {
-      caught = e as Error
-    }
+    const { response } = await drainSend(
+      canonicalSendFn({
+        auth,
+        messages,
+        model: "test-model-recovery",
+        selectedProviderId: "test-recovery",
+        stream: true,
+        networkClient,
+      }),
+    )
 
-    expect(handler).toHaveBeenCalledTimes(2)
-    expect(caught).toBeDefined()
-    // Must not sit on the 30s rate-limit curve (Math.random pinned to 0 → 0ms sleep).
-    expect(Date.now() - started).toBeLessThan(5_000)
-  }, 15_000)
+    expect(handler).toHaveBeenCalledTimes(4)
+    expect(response.text).toBe("recovered after thinking")
+    expect(response.stopReason).toBe("end_turn")
+  }, 30_000)
+
+  it("reasoning-only terminal-less: midstream delay is polite (not 0ms thrash, not slow 30s base)", async () => {
+    // Measure the first few midstream sleeps: floor ≥ 1s, not the rate-limit 30s base.
+    let n = 0
+    const times: number[] = []
+    const handler = mock((_req: NetworkRequest) => {
+      times.push(Date.now())
+      n++
+      if (n <= 2) return sseFromEvents(reasoningOnlyTerminalLessEvents())
+      return sseFromEvents(cleanEndEvents("ok"))
+    })
+    const networkClient = new NetworkClient({
+      primary: { id: "fake", request: async (req) => handler(req) },
+    })
+
+    await drainSend(
+      canonicalSendFn({
+        auth,
+        messages,
+        model: "test-model-recovery",
+        selectedProviderId: "test-recovery",
+        stream: true,
+        networkClient,
+      }),
+    )
+
+    expect(handler).toHaveBeenCalledTimes(3)
+    // Gap between attempt 1 and 2 is the midstream floor (~1s with Math.random=0).
+    const gap = times[1]! - times[0]!
+    expect(gap).toBeGreaterThanOrEqual(900)
+    expect(gap).toBeLessThan(10_000)
+  }, 20_000)
 
   it("text-only terminal-less: returns partial text without transport re-POST", async () => {
     const handler = mock((_req: NetworkRequest) =>

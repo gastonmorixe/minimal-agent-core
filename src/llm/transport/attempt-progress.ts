@@ -2,10 +2,27 @@
  * Structured progress for a single LLM stream attempt, used to decide how to
  * recover from a terminal-less stream close (`stream_closed_without_terminal`).
  *
+ * # Harness principle: never give up on transport
+ *
+ * Pre-effect closes (no completed tools) are safe to resend and MUST retry
+ * forever with polite capped backoff — the agent is built for multi-day /
+ * multi-week agentic runs and must not stop waiting for a human to re-prompt
+ * after a Grok/OpenAI SSE EOF. Only the caller's AbortSignal (Esc / Ctrl-C)
+ * ends the loop.
+ *
+ * # Completed tools: never re-POST
+ *
  * Completed tool calls are the safety boundary: once any tool_use is fully
  * assembled and closed, the original request body must never be replayed
  * (tools may already have side effects once the agent executes them, and even
  * before that the local transcript will diverge from a byte-identical resend).
+ * That path is `continueTurn` (salvage), not transport retry.
+ *
+ * # Mid-stream politeness (session 113921b7)
+ *
+ * Mid-reasoning closes use a multi-second floor so we do not thrash a provider
+ * that is still thinking with 0ms re-POSTs. Empty closes may use a shorter
+ * base, still forever, still capped.
  *
  * @module llm/transport/attempt-progress
  */
@@ -35,24 +52,50 @@ export const ZERO_ATTEMPT_PROGRESS: AttemptProgress = {
 }
 
 /**
- * At most one short transport retry for terminal-less closes that had no
- * completed tool call (no output, or reasoning-only).
- */
-export const MAX_PRE_EFFECT_TERMINALLESS_RETRIES = 1
-
-/**
- * Short base delay for the one safe pre-effect terminal-less retry.
- * Intentionally NOT the 30s rate-limit curve.
+ * Short base delay for empty pre-effect terminal-less retries (no progress).
+ * Forever-retry with this curve; not a max-attempt budget.
  */
 export const TERMINALLESS_RETRY_BASE_DELAY_MS = 200
+
+/**
+ * Base delay for mid-stream (reasoning/text progress, no completed tools)
+ * terminal-less retries. Long enough that a provider still thinking is not
+ * immediately re-POSTed; jittered and exponential in {@link decideTerminalLessRecovery}.
+ */
+export const TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS = 2_000
+
+/**
+ * Cap for terminal-less pre-effect backoff. Matches the forever-retry max on
+ * ordinary transport errors (5 min) so multi-day outages stay polite.
+ */
+export const TERMINALLESS_RETRY_MAX_DELAY_MS = 5 * 60_000
+
+/**
+ * @deprecated No max-attempt budget remains (never-give-up). Kept as a large
+ * sentinel so older imports compile; policy no longer uses it to failTurn.
+ */
+export const MAX_EMPTY_TERMINALLESS_RETRIES = Number.POSITIVE_INFINITY
+
+/**
+ * @deprecated No max-attempt budget remains (never-give-up). Kept as a large
+ * sentinel so older imports compile; policy no longer uses it to failTurn.
+ */
+export const MAX_MIDSTREAM_TERMINALLESS_RETRIES = Number.POSITIVE_INFINITY
+
+/**
+ * @deprecated Prefer the forever-retry policy. Alias of empty sentinel.
+ */
+export const MAX_PRE_EFFECT_TERMINALLESS_RETRIES = MAX_EMPTY_TERMINALLESS_RETRIES
 
 /**
  * Recovery decision for a tagged stream failure. Pure policy: no I/O.
  *
  * - `retryTransport`: sleep then call `makeAttempt` again (same logical request).
- * - `failTurn`: stop retrying; propagate the error (or let the bridge salvage).
+ *   Forever for pre-effect closes (empty / mid-reasoning). Only user abort stops.
  * - `continueTurn`: do not resend; the caller must continue from local state
  *   (used when the bridge already salvaged completed tools — retry must not run).
+ * - `failTurn`: reserved; terminal-less recovery never returns this under the
+ *   never-give-up harness principle. Kept for type stability / future use.
  */
 export type RecoveryDecision =
   | {
@@ -66,6 +109,8 @@ export type RecoveryDecision =
        * field as behavioral.
        */
       freshConnection: boolean
+      /** Which delay curve produced `delayMs` (diagnostics only). */
+      curve: "terminal-less-empty" | "terminal-less-midstream"
     }
   | { kind: "continueTurn"; reason: "terminalLessClose" }
   | { kind: "failTurn"; reason: string }
@@ -83,29 +128,55 @@ export type TerminalLessRecoveryInput = {
  *
  * Critical invariant: if `completedToolCalls > 0`, never `retryTransport`
  * (that would replay a post-tool / post-complete-tool-call request body).
+ *
+ * Pre-effect policy (never give up):
+ * - empty stream → forever short exponential backoff (capped)
+ * - saw reasoning and/or text (no completed tools) → forever multi-second
+ *   exponential backoff with a floor so jitter cannot collapse to 0.0s
+ *
+ * No `failTurn` path: only Esc / AbortSignal stops the agent.
  */
 export function decideTerminalLessRecovery(input: TerminalLessRecoveryInput): RecoveryDecision {
   const progress = input.progress ?? ZERO_ATTEMPT_PROGRESS
   if (progress.completedToolCalls > 0) {
     return { kind: "continueTurn", reason: "terminalLessClose" }
   }
-  if (input.priorTerminalLessRetries >= MAX_PRE_EFFECT_TERMINALLESS_RETRIES) {
+
+  const midstream = progress.sawReasoning || progress.sawText
+  const jitter = input.jitter ?? Math.random()
+  // Cap exponent so 2^exp cannot overflow; delay is also min'd with max.
+  const exp = Math.min(Math.max(0, input.priorTerminalLessRetries), 16)
+
+  if (!midstream) {
+    const ideal = Math.min(
+      TERMINALLESS_RETRY_MAX_DELAY_MS,
+      TERMINALLESS_RETRY_BASE_DELAY_MS * 2 ** exp,
+    )
+    // Tiny floor so we never spin at 0ms forever on Math.random=0 in tests
+    // after the first few attempts; first attempt may still be 0 with jitter=0.
+    const floor = input.priorTerminalLessRetries === 0 ? 0 : 50
+    const delayMs = floor + Math.floor(jitter * Math.max(0, ideal - floor))
     return {
-      kind: "failTurn",
-      reason:
-        progress.sawText || progress.sawReasoning
-          ? "terminal-less close after bounded pre-effect retry (partial output preserved upstream when possible)"
-          : "terminal-less close after bounded pre-effect retry (no output)",
+      kind: "retryTransport",
+      delayMs,
+      freshConnection: false,
+      curve: "terminal-less-empty",
     }
   }
-  const jitter = input.jitter ?? Math.random()
-  const delayMs = Math.floor(jitter * TERMINALLESS_RETRY_BASE_DELAY_MS)
+
+  // Mid-stream: multi-second base + floor so a thinking provider is not
+  // hammered (session 113921b7 "after 0.0s" failure mode).
+  const ideal = Math.min(
+    TERMINALLESS_RETRY_MAX_DELAY_MS,
+    TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS * 2 ** exp,
+  )
+  const floor = Math.floor(TERMINALLESS_MIDSTREAM_RETRY_BASE_DELAY_MS / 2)
+  const delayMs = floor + Math.floor(jitter * Math.max(0, ideal - floor))
   return {
     kind: "retryTransport",
     delayMs,
-    // Explicitly unsupported: no origin-session eviction is wired into retry.
-    // PLAN §5 is optional; leave false so we never claim a behavior we lack.
     freshConnection: false,
+    curve: "terminal-less-midstream",
   }
 }
 

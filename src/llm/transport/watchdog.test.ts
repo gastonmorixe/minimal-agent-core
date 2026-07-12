@@ -132,4 +132,108 @@ describe("withStreamWatchdog", () => {
     expect(caught?.name).toBe("AbortError")
     expect((caught as WatchdogError).streamErrorType).toBeUndefined()
   }, 10_000)
+
+  it("uses the longer thinking idle budget while a thinking block is open", async () => {
+    // Open thinking + stall: ordinary idle=80ms must NOT fire; thinking idle=1500ms should.
+    // Hard timeout high so only idle can trip.
+    const thinkingOpen: CanonicalEvent[] = [
+      START,
+      { type: "thinking_start", index: 0 },
+      { type: "thinking_delta", index: 0, text: "still working" },
+    ]
+    let stall: { reason: string; idleMs: number } | undefined
+    const run = withStreamWatchdog(attempt(thinkingOpen, { stall: true }), {
+      streamIdleTimeoutMs: 80,
+      thinkingIdleTimeoutMs: 1500,
+      attemptHardTimeoutMs: 30_000,
+      onStall: (i) => {
+        stall = i
+      },
+    })
+    const t0 = Date.now()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(run)
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    const elapsed = Date.now() - t0
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(stall?.reason).toBe("stream_idle")
+    // Must have waited past the ordinary 80ms budget (with 1s tick + margin).
+    expect(elapsed).toBeGreaterThanOrEqual(1000)
+    // And not have used a multi-minute default — we set thinking idle to 1.5s.
+    expect(elapsed).toBeLessThan(5000)
+  }, 15_000)
+
+  it("reverts to ordinary idle after thinking_stop", async () => {
+    const afterThinking: CanonicalEvent[] = [
+      START,
+      { type: "thinking_start", index: 0 },
+      { type: "thinking_delta", index: 0, text: "done thinking" },
+      { type: "thinking_stop", index: 0 },
+    ]
+    const run = withStreamWatchdog(attempt(afterThinking, { stall: true }), {
+      streamIdleTimeoutMs: 50,
+      thinkingIdleTimeoutMs: 30_000,
+      attemptHardTimeoutMs: 30_000,
+    })
+    let caught: WatchdogError | undefined
+    try {
+      await collect(run)
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+  }, 10_000)
+
+  it("prefers stream_idle over a synthetic terminal-less drain after abort", async () => {
+    // Reproduces 113921b7: watchdog aborts → body drains quietly → adapter
+    // would yield stream_closed_without_terminal. Watchdog must throw
+    // stream_idle and not forward that synthetic error event.
+    const thinkingOpen: CanonicalEvent[] = [
+      START,
+      { type: "thinking_start", index: 0 },
+      { type: "thinking_delta", index: 0, text: "…" },
+    ]
+    const makeStream = (signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        for (const ev of thinkingOpen) yield ev
+        // Stall until the watchdog aborts, then quiet-drain (resolve, don't
+        // throw) and emit the synthetic terminal-less error the Responses
+        // translator produces on clean EOF without response.completed.
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve()
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+        yield {
+          type: "stream_error",
+          retryable: true,
+          category: "api",
+          upstreamType: "stream_closed_without_terminal",
+          cause: new Error("OpenAI Responses stream closed without a terminal event (truncated)"),
+        } satisfies CanonicalEvent
+      })()
+
+    let stall: { reason: string } | undefined
+    const run = withStreamWatchdog(makeStream, {
+      streamIdleTimeoutMs: 50,
+      thinkingIdleTimeoutMs: 80,
+      attemptHardTimeoutMs: 30_000,
+      onStall: (i) => {
+        stall = i
+      },
+    })
+    let caught: WatchdogError | undefined
+    const yielded: CanonicalEvent[] = []
+    try {
+      for await (const ev of run) yielded.push(ev)
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(stall?.reason).toBe("stream_idle")
+    // Must not have yielded the synthetic stream_error (would poison classification).
+    expect(yielded.some((e) => e.type === "stream_error")).toBe(false)
+  }, 15_000)
 })

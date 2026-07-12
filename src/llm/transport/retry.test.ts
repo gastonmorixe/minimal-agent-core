@@ -128,7 +128,7 @@ describe("withRetry", () => {
     expect(retry?.structuredData?.curve).toBe("slow")
   })
 
-  it("gives stream_closed_without_terminal exactly one short pre-effect retry (not slow curve)", async () => {
+  it("gives empty stream_closed_without_terminal exactly one short pre-effect retry (not slow curve)", async () => {
     const origRandom = Math.random
     Math.random = () => 0 // delay → 0ms
     const { events, dispose } = collectDiag()
@@ -155,7 +155,7 @@ describe("withRetry", () => {
     expect(calls).toBe(2)
     const retry = events.find((e) => e.source === "api.retry")
     expect(retry?.structuredData?.["error-type"]).toBe("stream_closed_without_terminal")
-    expect(retry?.structuredData?.curve).toBe("terminal-less-bounded")
+    expect(retry?.structuredData?.curve).toBe("terminal-less-empty")
     expect(retry?.structuredData?.curve).not.toBe("slow")
   })
 
@@ -195,33 +195,73 @@ describe("withRetry", () => {
     expect(events.some((e) => e.source === "api.retry-terminal-less-stop")).toBe(true)
   })
 
-  it("stops after one failed pre-effect terminal-less retry (no unlimited loop)", async () => {
+  it("keeps retrying empty terminal-less forever until success (never-give-up)", async () => {
     const origRandom = Math.random
     Math.random = () => 0
+    const { events, dispose } = collectDiag()
     let calls = 0
-    let caught: Error | undefined
     try {
-      await drain(
+      const { result } = await drain(
         withRetry(async function* () {
           calls++
-          throw Object.assign(new Error(`termless ${calls}`), {
-            streamErrorType: "stream_closed_without_terminal",
-            attemptProgress: { sawReasoning: true, sawText: false, completedToolCalls: 0 },
-          })
-          // biome-ignore lint/correctness/useYield: throw-only attempt
-          // oxlint-disable-next-line no-unreachable
-          yield ""
+          if (calls < 5) {
+            throw Object.assign(new Error(`termless empty ${calls}`), {
+              streamErrorType: "stream_closed_without_terminal",
+              attemptProgress: { sawReasoning: false, sawText: false, completedToolCalls: 0 },
+            })
+          }
+          yield "ok"
+          return resp("ok")
         }),
       )
-    } catch (e) {
-      caught = e as Error
+      expect(result.text).toBe("ok")
     } finally {
       Math.random = origRandom
+      dispose()
     }
-    // First throw → one retry → second throw fails the turn. Never loops forever.
-    expect(calls).toBe(2)
-    expect(caught?.message).toContain("termless")
+    expect(calls).toBe(5)
+    expect(events.filter((e) => e.source === "api.retry").length).toBe(4)
+    expect(events.some((e) => e.source === "api.retry-terminal-less-stop")).toBe(false)
+    expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
   })
+
+  it("retries reasoning-only terminal-less on midstream curve until recovery (never failTurn)", async () => {
+    // Regression for 113921b7: saw-reasoning + 0 tools used to hard-fail after
+    // one near-zero retry. Never-give-up + midstream floor must allow recovery.
+    const origRandom = Math.random
+    Math.random = () => 0 // still non-zero floor on midstream delay
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls <= 3) {
+            throw Object.assign(new Error(`termless reasoning ${calls}`), {
+              streamErrorType: "stream_closed_without_terminal",
+              attemptProgress: { sawReasoning: true, sawText: false, completedToolCalls: 0 },
+            })
+          }
+          yield "recovered"
+          return resp("recovered")
+        }),
+      )
+      expect(result.text).toBe("recovered")
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(4)
+    const retries = events.filter((e) => e.source === "api.retry")
+    expect(retries.length).toBe(3)
+    for (const r of retries) {
+      expect(r.structuredData?.curve).toBe("terminal-less-midstream")
+      expect(r.structuredData?.curve).not.toBe("slow")
+      expect(Number(r.structuredData?.["delay-ms"])).toBeGreaterThanOrEqual(1000)
+    }
+    expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
+    expect(events.some((e) => e.source === "api.retry-terminal-less-stop")).toBe(false)
+  }, 15_000)
 
   it("does not treat text-only terminal-less close as rate-limit slow curve", async () => {
     const origRandom = Math.random
@@ -249,8 +289,43 @@ describe("withRetry", () => {
     }
     expect(calls).toBe(2)
     const retry = events.find((e) => e.source === "api.retry")
-    expect(retry?.structuredData?.curve).toBe("terminal-less-bounded")
+    expect(retry?.structuredData?.curve).toBe("terminal-less-midstream")
+    expect(retry?.structuredData?.curve).not.toBe("slow")
   })
+
+  it("stops midstream terminal-less only on AbortSignal (never-give-up otherwise)", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0
+    const ac = new AbortController()
+    let calls = 0
+    let caught: Error | undefined
+    const stopAfter = 3
+    try {
+      await drain(
+        withRetry(
+          async function* () {
+            calls++
+            if (calls >= stopAfter) ac.abort()
+            throw Object.assign(new Error(`termless mid ${calls}`), {
+              streamErrorType: "stream_closed_without_terminal",
+              attemptProgress: { sawReasoning: true, sawText: false, completedToolCalls: 0 },
+            })
+            // biome-ignore lint/correctness/useYield: throw-only attempt
+            // oxlint-disable-next-line no-unreachable
+            yield ""
+          },
+          { signal: ac.signal },
+        ),
+      )
+    } catch (e) {
+      caught = e as Error
+    } finally {
+      Math.random = origRandom
+    }
+    expect(calls).toBeGreaterThanOrEqual(2)
+    expect(calls).toBeLessThanOrEqual(stopAfter + 1)
+    expect(caught).toBeDefined()
+  }, 15_000)
 
   it("retries rate_limit_error on the SLOW curve and recovers (does not stop the agent)", async () => {
     const origRandom = Math.random
