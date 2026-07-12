@@ -26,7 +26,6 @@
  * @module tools
  */
 
-import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
@@ -1129,6 +1128,17 @@ async function execGlob(
 }
 
 /**
+ * Hard ceiling on Grep stdout+stderr buffered in memory (parity with the old
+ * `spawnSync` `maxBuffer: 2 MiB`). Enforced during the async drain so a
+ * pathological match set can't OOM the agent while still yielding to the
+ * event loop so the TUI live area keeps painting.
+ */
+const MAX_GREP_OUTPUT_BYTES = 2 * 1024 * 1024
+
+/** Wall-clock limit for a single `rg` invocation (ms). */
+const GREP_TIMEOUT_MS = 30_000
+
+/**
  * Search file contents using ripgrep (`rg`).
  *
  * Three output modes (matches the real CLI's Grep tool):
@@ -1138,6 +1148,13 @@ async function execGlob(
  *
  * Results are head-limited (default 250 lines) with a "... N more lines"
  * marker to keep responses bounded. Pass `head_limit: 0` for unlimited.
+ *
+ * **Async spawn (critical for TUI responsiveness):** previously this used
+ * `child_process.spawnSync`, which blocked the entire JS event loop for the
+ * duration of `rg`. That froze the live-area prompt input, spinner, and
+ * keystroke handling. We now use `Bun.spawn` with native `signal` +
+ * `timeout` so the event loop keeps running; abort (Esc) kills `rg` via
+ * Bun's AbortSignal integration.
  *
  * Recognized `input` fields:
  *
@@ -1181,23 +1198,99 @@ async function execGrep(
   if (contextB != null) args.push("-B", String(contextB))
   if (contextC != null) args.push("-C", String(contextC))
 
-  args.push(pattern, searchPath)
+  args.push("--", pattern, searchPath)
 
   try {
-    const result = spawnSync("rg", args, {
-      timeout: 30_000,
-      encoding: "utf-8",
-      maxBuffer: 2 * 1024 * 1024,
+    // Async spawn: free the event loop so the live-area prompt/spinner keep
+    // updating while ripgrep runs. Bun's native `signal` aborts the child on
+    // Esc; `timeout` is the 30s wall-clock ceiling (was spawnSync.timeout).
+    const proc = Bun.spawn(["rg", ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+      signal: opts.signal,
+      timeout: GREP_TIMEOUT_MS,
+      killSignal: "SIGTERM",
     })
 
-    if (result.error) {
+    let outputBytes = 0
+    let outputCapped = false
+    const drain = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+      const decoder = new TextDecoder()
+      let acc = ""
+      const reader = stream.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          // Keep draining after the cap so pipes close, but stop growing `acc`.
+          if (outputCapped) continue
+          outputBytes += value.byteLength
+          acc += decoder.decode(value, { stream: true })
+          if (outputBytes > MAX_GREP_OUTPUT_BYTES) {
+            outputCapped = true
+            try {
+              proc.kill("SIGTERM")
+            } catch {
+              /* already exited */
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      if (!outputCapped) {
+        const tail = decoder.decode()
+        if (tail) acc += tail
+      }
+      return acc
+    }
+
+    const [stdout, stderr] = await Promise.all([drain(proc.stdout), drain(proc.stderr)])
+    const exitCode = await proc.exited
+
+    // Abort wins over every other outcome (timeout, cap, rg error).
+    if (opts.signal?.aborted) return ABORTED_RESULT()
+
+    const raw = stdout.trim()
+
+    // Output-cap kill (we SIGTERM'd ourselves) still returns whatever we
+    // buffered — same spirit as the old maxBuffer path, which handed back
+    // partial stdout rather than hard-failing.
+    if (outputCapped && raw) {
+      const allLines = raw.split("\n")
+      const totalBytes = Buffer.byteLength(raw, "utf8")
+      const totalLines = allLines.length
+      const limited =
+        headLimit > 0 && allLines.length > headLimit ? allLines.slice(0, headLimit).join("\n") : raw
       return {
-        content: ToolPrompts.grepErrorResult(result.error.message),
+        content: limited,
+        _truncCtx: { totalBytes, totalLines },
+      }
+    }
+
+    // Timed out: Bun killed the child via `timeout` (SIGTERM/killSignal).
+    // Clean rg exits are 0 (matches) / 1 (no match) / 2 (error) and leave
+    // signalCode null; a signalled death that isn't our cap-kill is a timeout.
+    if (proc.signalCode != null && exitCode !== 0 && exitCode !== 1 && exitCode !== 2) {
+      return {
+        content: ToolPrompts.grepErrorResult(`rg timed out after ${GREP_TIMEOUT_MS}ms`),
         is_error: true,
       }
     }
 
-    const raw = (result.stdout ?? "").trim()
+    // rg exit codes: 0 = matches, 1 = no matches, 2 = error (bad pattern, IO).
+    if (exitCode === 1) {
+      return { content: ToolPrompts.noMatchesFoundResult() }
+    }
+    if (exitCode === 2 || (exitCode !== 0 && exitCode !== 1)) {
+      const err = (stderr || stdout).trim()
+      return {
+        content: ToolPrompts.grepErrorResult(err || `rg exited with code ${exitCode}`),
+        is_error: true,
+      }
+    }
+
     if (!raw) {
       return { content: ToolPrompts.noMatchesFoundResult() }
     }
@@ -1211,6 +1304,7 @@ async function execGrep(
       _truncCtx: { totalBytes, totalLines },
     }
   } catch (e) {
+    if (opts.signal?.aborted) return ABORTED_RESULT()
     return {
       content: ToolPrompts.grepErrorResult(e instanceof Error ? e.message : String(e)),
       is_error: true,

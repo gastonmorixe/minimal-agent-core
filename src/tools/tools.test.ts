@@ -62,7 +62,7 @@ describe("executeTool — universal clamp wiring", () => {
     expect(r.content).toMatch(/narrow|head_limit/i)
   })
 
-  it("Bash output clamped with known totals (spawnSync buffered)", async () => {
+  it("Bash output clamped with known totals (async Bun.spawn buffered)", async () => {
     const r = await executeTool("Bash", {
       command: `yes ABC | head -c ${MAX_TOOL_OUTPUT_BYTES * 2}`,
     })

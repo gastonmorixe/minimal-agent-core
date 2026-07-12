@@ -268,4 +268,72 @@ describe("executeTool — abort plumbing", () => {
     stripInternalFields(r)
     expect((r as unknown as Record<string, unknown>)._truncInfo).toBeUndefined()
   })
+
+  // Regression: Grep used child_process.spawnSync which blocked the entire
+  // JS event loop for the duration of `rg`, freezing the live-area prompt
+  // input / spinner. Now Bun.spawn yields, so timers keep firing mid-search.
+  it("Grep yields the event loop (does not freeze live area)", async () => {
+    const path = join(dir, "grep-yield.txt")
+    // Large enough that a blocking spawnSync would visibly starve timers.
+    await Bun.write(path, ("needle line\n".repeat(20_000) + "other\n".repeat(20_000)).repeat(5))
+    let ticks = 0
+    const timer = setInterval(() => {
+      ticks++
+    }, 5)
+    try {
+      const r = await executeTool("Grep", {
+        pattern: "needle",
+        path,
+        output_mode: "content",
+        head_limit: 50,
+      })
+      expect(r.is_error).toBeFalsy()
+      expect(r.content).toContain("needle")
+      // If Grep blocked the event loop, ticks would stay 0. A few ticks is
+      // enough proof the loop stayed live; bound is generous for CI load.
+      expect(ticks).toBeGreaterThan(0)
+    } finally {
+      clearInterval(timer)
+    }
+  })
+
+  it("Grep with already-aborted signal returns _aborted without spawning", async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const r = (await executeTool(
+      "Grep",
+      { pattern: "anything", path: dir },
+      { signal: ac.signal },
+    )) as ToolExecResult
+    expect(r._aborted).toBe(true)
+    expect(r.is_error).toBe(true)
+    expect(r.content).toBe("tool aborted by user")
+  })
+
+  it("Grep abort mid-flight returns _aborted quickly", async () => {
+    // Enough work that rg is still running when the abort fires. A tiny file
+    // finishes in <10ms and races past the abort window (false green/red).
+    const path = join(dir, "slow-grep.txt")
+    const line = "needle line with padding xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+    await Bun.write(path, line.repeat(400_000)) // ~25 MB
+    const ac = new AbortController()
+    // Abort on the next macrotask so spawn has started, but well before rg
+    // finishes scanning ~25 MB of matches with head_limit disabled.
+    setTimeout(() => ac.abort(), 5)
+    const t0 = Date.now()
+    const r = (await executeTool(
+      "Grep",
+      {
+        pattern: "needle",
+        path,
+        output_mode: "content",
+        head_limit: 0,
+      },
+      { signal: ac.signal },
+    )) as ToolExecResult
+    const dt = Date.now() - t0
+    expect(r._aborted).toBe(true)
+    expect(r.is_error).toBe(true)
+    expect(dt).toBeLessThan(3000)
+  })
 })
