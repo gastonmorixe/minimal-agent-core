@@ -17,6 +17,14 @@ export function outputTruncatedAttachmentText(): string {
   return runtimePrompt("output-truncated.md")
 }
 
+/**
+ * Attachment injected after salvaging complete tool calls from a
+ * terminal-less stream close. Tells the model not to re-issue those tools.
+ */
+export function streamInterruptedAttachmentText(): string {
+  return runtimePrompt("stream-interrupted.md")
+}
+
 /** Returns the placeholder text used when an assistant response is truncated. */
 export function responseTruncatedPlaceholderText(): string {
   return runtimePrompt("response-truncated-placeholder.md")

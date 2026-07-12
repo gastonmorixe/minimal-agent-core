@@ -11,19 +11,23 @@
  *
  * # Harness principle (intentional deviation from generic Retry+Backoff)
  *
- * There is deliberately NO `maxAttempts` and NO total deadline. The agent
- * harness must outlive transient outages: it retries every tagged error
- * forever, with backoff capped at 5 min, and only stops when the caller's
- * `signal` aborts (Esc / Ctrl-C) or the error is untagged (a real bug, not
- * "the network is slow today"). This is "retry forever, politely" : capped
- * backoff + jitter + user-abortable + sustained-warning, not a blind
- * `while(true)` hammer. The generic pattern's `maxAttempts` would defeat
- * the purpose here.
+ * There is deliberately NO `maxAttempts` and NO total deadline for ordinary
+ * tagged transport failures. The agent harness must outlive transient
+ * outages: it retries every tagged error forever, with backoff capped at
+ * 5 min, and only stops when the caller's `signal` aborts (Esc / Ctrl-C) or
+ * the error is untagged (a real bug, not "the network is slow today"). This
+ * is "retry forever, politely" : capped backoff + jitter + user-abortable +
+ * sustained-warning, not a blind `while(true)` hammer.
  *
- * The `streamErrorType` constants are duplicated from `client.ts` (which
- * keeps them private) rather than imported, because the task constraint is
- * to NOT edit `client.ts`'s retry infra. Drift is caught by the Phase-0
- * characterization tests (legacy) plus this module's own tests (canonical).
+ * # Terminal-less stream close (progress-aware exception)
+ *
+ * `stream_closed_without_terminal` is NOT on the forever/slow curve. A
+ * Grok/OpenAI Responses 200 SSE can close after complete tool calls without
+ * `response.completed`; replaying that request body forever is the incident
+ * this policy prevents. Recovery uses {@link decideTerminalLessRecovery}:
+ * at most one short pre-effect retry; never replay after completed tools.
+ * (The bridge usually salvages completed tools and returns without throwing;
+ * this path is defense-in-depth if a throw still carries progress.)
  *
  * @module llm/transport/retry
  */
@@ -37,6 +41,7 @@ import {
   tagTransientNetworkError,
 } from "../../network/index.ts"
 
+import { decideTerminalLessRecovery, readAttemptProgress } from "./attempt-progress.ts"
 import type { StreamedResponse } from "./types.ts"
 
 /**
@@ -61,20 +66,27 @@ const RETRYABLE_STREAM_ERROR_TYPES: ReadonlySet<string> = new Set([
   // Tagged `network_error` by the transient-network classifier in the catch
   // below. Mirrors client.ts. See network/transient-error.ts.
   TRANSIENT_NETWORK_STREAM_ERROR_TYPE,
+  // Pre-effect terminal-less closes use a dedicated bounded policy below,
+  // but remain "known" to the tag classifier so we enter the catch path.
+  // They are NOT forever-retried and NOT on the slow rate-limit curve.
+  "stream_closed_without_terminal",
 ])
 
 /**
- * Hard-error types that retry on the SLOW curve. Mirrors `client.ts`.
+ * Hard-error types that retry on the SLOW curve. Mirrors `client.ts` for
+ * rate limits only.
  *
  * `rate_limit_error` is here (not in the fast set) so a 429 waits the
  * limit window out on the 30s→5min curve instead of hammering a closed
  * window sub-second. It retries forever because the window can clear on
  * its own. Keep in sync with `client.ts`'s `SLOW_RETRY_TYPES`.
+ *
+ * NOTE: `stream_closed_without_terminal` used to live here and caused
+ * unlimited 30s-curve replay of side-effecting Grok request bodies after
+ * tool progress (session 523dba62). It is handled by progress-aware
+ * recovery instead.
  */
-const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set([
-  "rate_limit_error",
-  "stream_closed_without_terminal",
-])
+const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set(["rate_limit_error"])
 
 const RETRY_FAST_BASE_DELAY_MS = 200
 const RETRY_SLOW_BASE_DELAY_MS = 30_000
@@ -116,9 +128,10 @@ function retryableStreamErrorType(err: unknown): string | undefined {
 }
 
 /**
- * Retry `makeAttempt` forever on tagged retryable errors. Yields the
- * attempt's text deltas (plus a visible stall marker on retry-after-yield)
- * and returns the successful attempt's `StreamedResponse`.
+ * Retry `makeAttempt` forever on tagged retryable errors (except
+ * progress-aware terminal-less closes). Yields the attempt's text deltas
+ * (plus a visible stall marker on retry-after-yield) and returns the
+ * successful attempt's `StreamedResponse`.
  *
  * @param makeAttempt - Fresh attempt factory. Called once per attempt; each
  *   call must start a brand-new request (the watchdog + auth-refresh layers
@@ -133,6 +146,8 @@ export async function* withRetry(
   let hasYielded = false
   const startedAt = Date.now()
   let lastStreamErrType: string | undefined
+  /** Bounded counter for pre-effect terminal-less transport retries only. */
+  let terminalLessRetries = 0
 
   for (let attempt = 1; ; attempt++) {
     try {
@@ -170,6 +185,65 @@ export async function* withRetry(
       // cancellation) propagate. Only tagged transient/hard errors retry.
       if (streamErrType === undefined) throw err
       lastStreamErrType = streamErrType
+
+      // ------------------------------------------------------------------
+      // Terminal-less close: progress-aware, bounded. Never forever-replay.
+      // ------------------------------------------------------------------
+      if (streamErrType === "stream_closed_without_terminal") {
+        const progress = readAttemptProgress(err)
+        const decision = decideTerminalLessRecovery({
+          progress,
+          priorTerminalLessRetries: terminalLessRetries,
+        })
+
+        if (decision.kind === "continueTurn" || decision.kind === "failTurn") {
+          // Post-tool or budget exhausted: do NOT call makeAttempt again.
+          diag.warn(
+            "api.retry-terminal-less-stop",
+            `stream_closed_without_terminal: ${decision.kind} — ${decision.kind === "failTurn" ? decision.reason : decision.reason} (completedToolCalls=${progress?.completedToolCalls ?? 0})`,
+            {
+              "error-type": streamErrType,
+              decision: decision.kind,
+              "completed-tool-calls": progress?.completedToolCalls ?? 0,
+              "saw-text": progress?.sawText ?? false,
+              "saw-reasoning": progress?.sawReasoning ?? false,
+              "elapsed-ms": elapsedMs,
+            },
+          )
+          throw err
+        }
+
+        // decision.kind === "retryTransport"
+        terminalLessRetries++
+        const delayMs = decision.delayMs
+        const nextAttempt = attempt + 1
+        diag.warn(
+          "api.retry",
+          `${streamErrType}: bounded pre-effect retry attempt ${nextAttempt} after ${(delayMs / 1000).toFixed(1)}s — ${formatElapsedLong(elapsedMs)} elapsed so far`,
+          {
+            "error-type": streamErrType,
+            attempt: nextAttempt,
+            "delay-ms": delayMs,
+            "elapsed-ms": elapsedMs,
+            curve: "terminal-less-bounded",
+            "fresh-connection": decision.freshConnection,
+            "completed-tool-calls": progress?.completedToolCalls ?? 0,
+          },
+        )
+        if (hasYielded) {
+          yield `\n↳ stream stalled — retrying (attempt ${nextAttempt})…\n`
+        }
+        const retryStatus = GLOBAL_STATUS_BUS.create(
+          `Retrying after ${streamErrType} (attempt ${nextAttempt}) — sleeping ${(delayMs / 1000).toFixed(1)}s…`,
+          { notificationId: "network.retry", category: "network" },
+        )
+        try {
+          await abortableSleep(delayMs, opts.signal)
+        } finally {
+          retryStatus.clear()
+        }
+        continue
+      }
 
       const slow = SLOW_RETRY_TYPES.has(streamErrType)
       const base = slow ? RETRY_SLOW_BASE_DELAY_MS : RETRY_FAST_BASE_DELAY_MS

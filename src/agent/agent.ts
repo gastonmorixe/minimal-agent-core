@@ -74,6 +74,7 @@ import {
   emergencyCapTriggeredAttachmentText,
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
+  streamInterruptedAttachmentText,
   turnAbortedAttachmentText,
 } from "./PROMPTS.ts"
 import { type AskUserFn, runPreflightPipeline } from "./preflight-pipeline.ts"
@@ -1317,6 +1318,27 @@ export class Agent {
         if (notice) await emitNotice(notice)
       }
 
+      // Terminal-less stream salvage (Grok/OpenAI Responses 200 SSE closed
+      // without response.completed after complete tool call(s)). The transport
+      // bridge already returned stopReason "tool_use" with only closed tools
+      // in blocks; we surface a notice and flag the next user turn to carry a
+      // compact "do not re-issue completed tools" attachment. The tool path
+      // below executes those tools once and continues from local state — the
+      // interrupted request body is never replayed (withRetry never re-enters
+      // makeAttempt for post-tool terminal-less closes).
+      let streamInterruptedSalvage = false
+      if (
+        lastResponse.stopDetails?.type === "stream_closed_without_terminal" &&
+        toolBlocks.length > 0
+      ) {
+        streamInterruptedSalvage = true
+        await emitNotice({
+          kind: "stream_interrupted_salvaged",
+          severity: "warn",
+          completedToolCalls: toolBlocks.length,
+        })
+      }
+
       // max_tokens handling (Fix B + D). The response hit the output-token
       // ceiling. Two shapes:
       //
@@ -1489,6 +1511,9 @@ export class Agent {
       // every tool round just balloons the conversation with stale
       // repeats; the model can call MemoryTool to re-fetch if it cares).
       userContent.push(...toolResults)
+      if (streamInterruptedSalvage) {
+        userContent.push({ type: "text", text: streamInterruptedAttachmentText() })
+      }
       const loopModeAttach = this.modeManager?.consumePendingAttachment() ?? null
       if (loopModeAttach) userContent.push(loopModeAttach)
       const loopSaveEchoes = this.saveEcho?.consumeAll() ?? []

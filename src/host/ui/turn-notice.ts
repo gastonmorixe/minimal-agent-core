@@ -65,6 +65,12 @@ export function renderTurnNotice(notice: TurnNotice): string {
         `reflection ack: silencing next ${notice.silenceFor} checkpoint${plural}${suffix}${via}`,
       )}`
     }
+    case "stream_interrupted_salvaged": {
+      const n = notice.completedToolCalls
+      return `\n  ${c.boldYellow("!")} ${c.yellow(
+        `Provider closed the stream without a terminal event after ${n} complete tool call${n === 1 ? "" : "s"} — salvaged closed tools and continuing (will not replay the interrupted request)`,
+      )}`
+    }
     default: {
       const _exhaustive: never = notice
       return _exhaustive

@@ -208,6 +208,95 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
     expect(response.blocks).toEqual([])
   })
 
+  // Terminal-less EOF after complete tool + partial second tool (Grok incident
+  // 523dba62): salvage only the closed tool, discard the partial, return
+  // stopReason tool_use so the agent loop continues without replaying the body.
+  it("salvages complete tool_use and discards partial on stream_closed_without_terminal", async () => {
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "resp_termless_1",
+        modelId: "grok-test",
+        initialUsage: { inputTokens: 10, outputTokens: 0 },
+      },
+      { type: "thinking_start", index: 0 },
+      { type: "thinking_delta", index: 0, text: "long live thinking" },
+      { type: "thinking_stop", index: 0 },
+      { type: "ping" },
+      { type: "tool_use_start", index: 1, id: "call_complete", name: "Task" },
+      {
+        type: "tool_use_input_delta",
+        index: 1,
+        partialJson: '{"action":"add_many","titles":["a","b"]}',
+      },
+      {
+        type: "tool_use_stop",
+        index: 1,
+        input: { action: "add_many", titles: ["a", "b"] },
+      },
+      { type: "tool_use_start", index: 2, id: "call_partial", name: "Task" },
+      { type: "tool_use_input_delta", index: 2, partialJson: '{"action":"st' },
+      // Terminal-less EOF — no message_delta / message_stop.
+      {
+        type: "stream_error",
+        retryable: true,
+        category: "api",
+        upstreamType: "stream_closed_without_terminal",
+        cause: new Error("OpenAI Responses stream closed without a terminal event (truncated)"),
+      },
+    ])
+
+    expect(response.stopReason).toBe("tool_use")
+    expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
+    expect(response.blocks).toEqual([
+      {
+        type: "tool_use",
+        id: "call_complete",
+        name: "Task",
+        input: { action: "add_many", titles: ["a", "b"] },
+      },
+    ])
+    expect(response.blocks.some((b) => b.type === "tool_use" && b.id === "call_partial")).toBe(
+      false,
+    )
+    expect(response.responseId).toBe("resp_termless_1")
+  })
+
+  it("throws stream_closed_without_terminal with progress when no complete tool", async () => {
+    let thrown:
+      | (Error & {
+          streamErrorType?: string
+          attemptProgress?: { completedToolCalls: number; sawReasoning: boolean; sawText: boolean }
+        })
+      | undefined
+    try {
+      await drain([
+        {
+          type: "message_start",
+          messageId: "resp_empty",
+          modelId: "grok-test",
+          initialUsage: { inputTokens: 1, outputTokens: 0 },
+        },
+        { type: "thinking_start", index: 0 },
+        { type: "thinking_delta", index: 0, text: "still thinking" },
+        { type: "ping" },
+        {
+          type: "stream_error",
+          retryable: true,
+          category: "api",
+          upstreamType: "stream_closed_without_terminal",
+          cause: new Error("truncated"),
+        },
+      ])
+    } catch (e) {
+      thrown = e as typeof thrown
+    }
+    expect(thrown?.streamErrorType).toBe("stream_closed_without_terminal")
+    expect(thrown?.attemptProgress?.completedToolCalls).toBe(0)
+    expect(thrown?.attemptProgress?.sawReasoning).toBe(true)
+    expect(thrown?.attemptProgress?.sawText).toBe(false)
+  })
+
   it("does not double-push when the block closed normally", async () => {
     const response = await drain([
       {

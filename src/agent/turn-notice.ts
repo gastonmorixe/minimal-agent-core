@@ -95,6 +95,18 @@ export interface ReflectionAckNotice {
 }
 
 /**
+ * Provider closed the SSE stream without a terminal event after one or more
+ * complete tool calls. Closed tools were salvaged; partial calls discarded.
+ * The loop continues from local transcript state (never replays the old body).
+ */
+export interface StreamInterruptedSalvagedNotice {
+  kind: "stream_interrupted_salvaged"
+  severity: "warn"
+  /** How many complete tool calls were preserved. */
+  completedToolCalls: number
+}
+
+/**
  * The discriminated union of every out-of-band condition the agent loop
  * surfaces. Narrow on `kind`.
  */
@@ -105,6 +117,7 @@ export type TurnNotice =
   | MaxTokensCappedNotice
   | ToolRoundsCappedNotice
   | ReflectionAckNotice
+  | StreamInterruptedSalvagedNotice
 
 /**
  * Project a turn's stop reason + details into a {@link StopNotice}, or
@@ -150,6 +163,10 @@ export function formatTurnNoticePlain(notice: TurnNotice): string {
       const suffix = notice.reason.length > 0 ? ` — ${notice.reason}` : ""
       const via = notice.fromToolFallback ? " (from tool_use fallback)" : ""
       return `reflection ack: silencing next ${notice.silenceFor} checkpoint${notice.silenceFor === 1 ? "" : "s"}${suffix}${via}`
+    }
+    case "stream_interrupted_salvaged": {
+      const n = notice.completedToolCalls
+      return `[stream] Provider closed the response without a terminal event after ${n} complete tool call${n === 1 ? "" : "s"}; salvaged closed tools, discarded partials, and continuing from local state. Do not repeat those tool calls.`
     }
     default: {
       const _exhaustive: never = notice

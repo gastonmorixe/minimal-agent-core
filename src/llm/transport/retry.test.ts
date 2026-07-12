@@ -105,10 +105,7 @@ describe("withRetry", () => {
     expect(success?.structuredData?.retries).toBe(1)
   })
 
-  it.each([
-    "rate_limit_error",
-    "stream_closed_without_terminal",
-  ])("uses the SLOW curve for %s", async (tag) => {
+  it("uses the SLOW curve for rate_limit_error", async () => {
     const origRandom = Math.random
     Math.random = () => 0
     const { events, dispose } = collectDiag()
@@ -117,7 +114,7 @@ describe("withRetry", () => {
       await drain(
         withRetry(async function* () {
           calls++
-          if (calls === 1) throw tagged(tag)
+          if (calls === 1) throw tagged("rate_limit_error")
           yield "ok"
           return resp("ok")
         }),
@@ -127,8 +124,132 @@ describe("withRetry", () => {
       dispose()
     }
     const retry = events.find((e) => e.source === "api.retry")
-    expect(retry?.structuredData?.["error-type"]).toBe(tag)
+    expect(retry?.structuredData?.["error-type"]).toBe("rate_limit_error")
     expect(retry?.structuredData?.curve).toBe("slow")
+  })
+
+  it("gives stream_closed_without_terminal exactly one short pre-effect retry (not slow curve)", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0 // delay → 0ms
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            throw Object.assign(new Error("truncated"), {
+              streamErrorType: "stream_closed_without_terminal",
+              attemptProgress: { sawReasoning: false, sawText: false, completedToolCalls: 0 },
+            })
+          }
+          yield "ok"
+          return resp("ok")
+        }),
+      )
+      expect(result.text).toBe("ok")
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(2)
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.["error-type"]).toBe("stream_closed_without_terminal")
+    expect(retry?.structuredData?.curve).toBe("terminal-less-bounded")
+    expect(retry?.structuredData?.curve).not.toBe("slow")
+  })
+
+  it("does not invoke makeAttempt again after terminal-less close with completed tools", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    let caught: Error | undefined
+    try {
+      await drain(
+        withRetry(async function* () {
+          calls++
+          throw Object.assign(new Error("truncated after tools"), {
+            streamErrorType: "stream_closed_without_terminal",
+            attemptProgress: {
+              sawReasoning: true,
+              sawText: false,
+              completedToolCalls: 1,
+              lastEventType: "stream_error",
+            },
+          })
+          // biome-ignore lint/correctness/useYield: throw-only attempt
+          // oxlint-disable-next-line no-unreachable
+          yield ""
+        }),
+      )
+    } catch (e) {
+      caught = e as Error
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(1)
+    expect(caught?.message).toContain("truncated after tools")
+    expect(events.some((e) => e.source === "api.retry")).toBe(false)
+    expect(events.some((e) => e.source === "api.retry-terminal-less-stop")).toBe(true)
+  })
+
+  it("stops after one failed pre-effect terminal-less retry (no unlimited loop)", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0
+    let calls = 0
+    let caught: Error | undefined
+    try {
+      await drain(
+        withRetry(async function* () {
+          calls++
+          throw Object.assign(new Error(`termless ${calls}`), {
+            streamErrorType: "stream_closed_without_terminal",
+            attemptProgress: { sawReasoning: true, sawText: false, completedToolCalls: 0 },
+          })
+          // biome-ignore lint/correctness/useYield: throw-only attempt
+          // oxlint-disable-next-line no-unreachable
+          yield ""
+        }),
+      )
+    } catch (e) {
+      caught = e as Error
+    } finally {
+      Math.random = origRandom
+    }
+    // First throw → one retry → second throw fails the turn. Never loops forever.
+    expect(calls).toBe(2)
+    expect(caught?.message).toContain("termless")
+  })
+
+  it("does not treat text-only terminal-less close as rate-limit slow curve", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            yield "partial text"
+            throw Object.assign(new Error("truncated after text"), {
+              streamErrorType: "stream_closed_without_terminal",
+              attemptProgress: { sawReasoning: false, sawText: true, completedToolCalls: 0 },
+            })
+          }
+          yield " recovered"
+          return resp("partial text recovered")
+        }),
+      )
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(2)
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.curve).toBe("terminal-less-bounded")
   })
 
   it("retries rate_limit_error on the SLOW curve and recovers (does not stop the agent)", async () => {
