@@ -38,9 +38,13 @@ describe("PromptContributorAdapter", () => {
   })
 
   it("contributes no system block when the plugin block is null or empty", async () => {
-    const nullAdapter = await PromptContributorAdapter.create({ loader: loaderStub(null) })
+    const nullAdapter = await PromptContributorAdapter.create({
+      loader: loaderStub(null),
+    })
     expect(nullAdapter.systemPromptBlocks()).toEqual([])
-    const emptyAdapter = await PromptContributorAdapter.create({ loader: loaderStub("") })
+    const emptyAdapter = await PromptContributorAdapter.create({
+      loader: loaderStub(""),
+    })
     expect(emptyAdapter.systemPromptBlocks()).toEqual([])
   })
 
@@ -80,5 +84,37 @@ describe("PromptContributorAdapter", () => {
   it("returns [] save-echoes when no collector is wired", async () => {
     const adapter = await PromptContributorAdapter.create({})
     expect(adapter.saveEchoes()).toEqual([])
+  })
+
+  it("splits getPromptBlocksAsync into sessionContext + afterInstructions", async () => {
+    let calls = 0
+    const loader = {
+      getPromptBlocksAsync: async () => {
+        calls++
+        return {
+          afterInstructions: "PLAIN GUIDANCE",
+          sessionContext: '<ma::sys::context name="env">ENV</ma::sys::context>',
+        }
+      },
+    } as unknown as PluginLoader
+    const adapter = await PromptContributorAdapter.create({ loader })
+    expect(calls).toBe(1)
+    expect(adapter.afterInstructionsBlocks()).toEqual([{ type: "text", text: "PLAIN GUIDANCE" }])
+    expect(adapter.systemPromptBlocks()).toEqual([
+      {
+        type: "text",
+        text: '<ma::sys::context name="env">ENV</ma::sys::context>',
+      },
+    ])
+    adapter.afterInstructionsBlocks()
+    expect(calls).toBe(1)
+  })
+
+  it("legacy getPromptBlockAsync stubs still work (afterInstructions empty)", async () => {
+    const adapter = await PromptContributorAdapter.create({
+      loader: loaderStub("SESSION ONLY"),
+    })
+    expect(adapter.systemPromptBlocks()).toEqual([{ type: "text", text: "SESSION ONLY" }])
+    expect(adapter.afterInstructionsBlocks()).toEqual([])
   })
 })

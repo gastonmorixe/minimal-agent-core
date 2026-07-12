@@ -590,6 +590,49 @@ describe("parseManifest / prompt field", () => {
   })
 })
 
+describe("parseManifest / promptFragments placement", () => {
+  const base = {
+    id: "p",
+    name: "p",
+    version: "0.1.0",
+    description: "t",
+  }
+  const handler = { type: "module", path: "./h.ts", export: "default" }
+
+  it("defaults placement to undefined (sessionContext at runtime)", () => {
+    const m = parseManifest({ ...base, promptFragments: [{ id: "f1", handler }] }, "/x")
+    expect(m.promptFragments![0]!.placement).toBeUndefined()
+  })
+
+  it("accepts placement sessionContext and afterInstructions", () => {
+    const m = parseManifest(
+      {
+        ...base,
+        promptFragments: [
+          { id: "a", handler, placement: "sessionContext" },
+          { id: "b", handler, placement: "afterInstructions", order: 10 },
+        ],
+      },
+      "/x",
+    )
+    expect(m.promptFragments![0]!.placement).toBe("sessionContext")
+    expect(m.promptFragments![1]!.placement).toBe("afterInstructions")
+    expect(m.promptFragments![1]!.order).toBe(10)
+  })
+
+  it("rejects unknown placement values", () => {
+    expect(() =>
+      parseManifest(
+        {
+          ...base,
+          promptFragments: [{ id: "f1", handler, placement: "beforeIdentity" }],
+        },
+        "/x",
+      ),
+    ).toThrow(/placement must be "sessionContext" or "afterInstructions"/)
+  })
+})
+
 describe("parseManifest / no declared contributions", () => {
   // The validator no longer enforces "manifest must declare at least one
   // contribution". The reason: PROMPT.md is implicit (looked up by the
@@ -678,7 +721,13 @@ describe("parseManifest / liveAreaSlots: placeholder + refreshOn", () => {
 
   it("rejects event names with whitespace", () => {
     expect(() =>
-      parseManifest({ ...base, liveAreaSlots: [{ ...slot, refreshOn: ["evt with space"] }] }, "/x"),
+      parseManifest(
+        {
+          ...base,
+          liveAreaSlots: [{ ...slot, refreshOn: ["evt with space"] }],
+        },
+        "/x",
+      ),
     ).toThrow(/must not contain whitespace/)
   })
 

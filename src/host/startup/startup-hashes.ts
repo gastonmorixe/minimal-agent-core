@@ -67,13 +67,32 @@ export async function computeStartupHashes(
     systemPromptOverrides,
   } = input
 
-  const pluginBlock = loader?.getPromptBlock() ?? null
+  // sessionContext for hash stays SYNC (`getPromptBlock`): PROMPT.md only,
+  // no async fragments — volatile env-info must not false-fire resume drift.
+  // afterInstructions (file-based plain guidance) comes from the async dual
+  // API when available so it participates in systemHash without pulling
+  // sessionContext fragments into the hash.
+  const loaderAny = loader as
+    | {
+        getPromptBlocksAsync?: () => Promise<{
+          afterInstructions: string | null
+          sessionContext: string | null
+        }>
+        getPromptBlock?: () => string | null
+      }
+    | null
+    | undefined
+  let afterInstructionsForHash: string | null = null
+  if (loaderAny && typeof loaderAny.getPromptBlocksAsync === "function") {
+    afterInstructionsForHash = (await loaderAny.getPromptBlocksAsync()).afterInstructions
+  }
+  const sessionPluginBlock = loaderAny?.getPromptBlock?.() ?? null
   const modeAddition = modeManager?.systemPromptAddition() ?? ""
   const sessionContextForHash =
-    pluginBlock && modeAddition
-      ? `${pluginBlock}\n\n${modeAddition}`
-      : pluginBlock != null
-        ? pluginBlock
+    sessionPluginBlock && modeAddition
+      ? `${sessionPluginBlock}\n\n${modeAddition}`
+      : sessionPluginBlock != null
+        ? sessionPluginBlock
         : modeAddition !== ""
           ? modeAddition
           : null
@@ -88,10 +107,12 @@ export async function computeStartupHashes(
   // config loader is memoized). The reflection defaults below MUST track the
   // Agent class field defaults in src/agent.ts.
   const blobStoreEnabled = loadBlobStoreConfig().config.enabled
-  const systemForHash = sessionContextForHash
+  const hasBodyExtras = Boolean(sessionContextForHash || afterInstructionsForHash)
+  const systemForHash = hasBodyExtras
     ? JSON.stringify(
         resolveSystemPromptForModel(selectedModelBase, {
-          sessionContext: sessionContextForHash,
+          afterInstructions: afterInstructionsForHash ?? undefined,
+          sessionContext: sessionContextForHash ?? undefined,
           reflectionInterval: DEFAULT_REFLECTION_INTERVAL,
           reflectionCooldownMs: DEFAULT_REFLECTION_COOLDOWN_MS,
           maxToolRounds: Number.POSITIVE_INFINITY,

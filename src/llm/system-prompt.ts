@@ -56,7 +56,14 @@ export const NEUTRAL_IDENTITY: string = renderPrompt(
 
 /** Options for building the agent's provider-neutral system-prompt body. */
 export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
-  /** Session-specific guidance block (env, CLAUDE.md, git status, …). */
+  /**
+   * Plain-markdown block inserted immediately AFTER the instructions block
+   * and BEFORE {@link sessionContext}. For plugin/host content that should
+   * read as first-class guidance (not a plugin `<ma::sys::…>` section).
+   * Per-session cache (no `scope:"global"`).
+   */
+  afterInstructions?: string
+  /** Session-specific guidance block (plugin prompts, env snapshot, …). */
   sessionContext?: string
   /**
    * TTL bucket for the ephemeral cache breakpoints placed on the system
@@ -70,10 +77,12 @@ export interface AgentSystemPromptOptions extends InstructionsBlockOptions {
 
 /**
  * Build the provider-neutral BODY blocks (everything after the identity):
- * the cached instructions block, then the optional session-context block.
+ * the cached instructions block, then optional after-instructions (plain
+ * markdown), then the optional session-context block.
  * Cache-control mirrors live traffic (`scope:"global"` on instructions;
- * per-session on session context). The `ttl` bucket is configurable via
- * `opts.cacheTtl` and defaults to {@link DEFAULT_CACHE_TTL} (`"5m"`).
+ * per-session on after-instructions and session context). The `ttl` bucket
+ * is configurable via `opts.cacheTtl` and defaults to {@link DEFAULT_CACHE_TTL}
+ * (`"5m"`).
  */
 export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPromptBlock[] {
   const ttl = opts?.cacheTtl ?? DEFAULT_CACHE_TTL
@@ -85,6 +94,14 @@ export function buildAgentSystemBody(opts?: AgentSystemPromptOptions): SystemPro
       type: "text",
       text: instructionsText,
       cache_control: { type: "ephemeral", ttl, scope: "global" },
+    })
+  }
+  const afterInstructions = opts?.afterInstructions?.trim()
+  if (afterInstructions) {
+    blocks.push({
+      type: "text",
+      text: afterInstructions,
+      cache_control: { type: "ephemeral", ttl },
     })
   }
   const sessionContext = applyPromptPartOverride(opts?.sessionContext, overrides?.sessionContext)

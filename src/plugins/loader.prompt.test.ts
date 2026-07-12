@@ -503,10 +503,16 @@ describe("PluginLoader / prompt role composition (<ma::sys::ROLE>)", () => {
         version: "0.1.0",
         description: "d",
         promptFragments: [
-          { id: "f", handler: { type: "module", path: "./f.ts", export: "default" } },
+          {
+            id: "f",
+            handler: { type: "module", path: "./f.ts", export: "default" },
+          },
         ],
       },
-      { "PROMPT.md": "# Ambient\n\nReference data.", "f.ts": "export default async () => ''" },
+      {
+        "PROMPT.md": "# Ambient\n\nReference data.",
+        "f.ts": "export default async () => ''",
+      },
     )
 
     const loader = await PluginLoader.load({
@@ -656,5 +662,243 @@ export const available = (ctx) => ctx.env.SHOW_GATED === "1";
       coreToolNames: CORE_TOOLS,
     })
     expect(loader.getExtraTools().map((t) => t.name)).toContain("plain_tool")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Multi-slot prompt fragment placement (afterInstructions vs sessionContext)
+// ---------------------------------------------------------------------------
+
+describe("PluginLoader / prompt fragment placement", () => {
+  const PLACE_ROOT = resolve(__dirname, "../../tmp/loader-placement-tests")
+  const PLACE_HOME = join(PLACE_ROOT, "home")
+
+  beforeAll(() => {
+    rmSync(PLACE_ROOT, { recursive: true, force: true })
+    mkdirSync(PLACE_HOME, { recursive: true })
+  })
+  afterAll(() => rmSync(PLACE_ROOT, { recursive: true, force: true }))
+
+  function cleanPlugins() {
+    rmSync(join(PLACE_HOME, "plugins"), { recursive: true, force: true })
+  }
+
+  it("puts afterInstructions placement in afterInstructions only (no <ma::sys)", async () => {
+    cleanPlugins()
+    writePackage(
+      PLACE_HOME,
+      "plain_ai",
+      {
+        id: "plain_ai",
+        name: "plain_ai",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          {
+            id: "guidance",
+            handler: { type: "module", path: "./f.ts", export: "default" },
+            placement: "afterInstructions",
+          },
+        ],
+      },
+      { "f.ts": "export default async () => 'PLAIN_AFTER_INSTRUCTIONS_BODY'" },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: PLACE_HOME,
+      projectDir: join(PLACE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const blocks = await loader.getPromptBlocksAsync()
+    expect(blocks.afterInstructions).toBe("PLAIN_AFTER_INSTRUCTIONS_BODY")
+    expect(blocks.afterInstructions).not.toContain("<ma::sys")
+    expect(blocks.sessionContext).toBeNull()
+    // Back-compat: getPromptBlockAsync is sessionContext only.
+    expect(await loader.getPromptBlockAsync()).toBeNull()
+  })
+
+  it("default placement still lands in the sessionContext XML path", async () => {
+    cleanPlugins()
+    writePackage(
+      PLACE_HOME,
+      "def_sc",
+      {
+        id: "def_sc",
+        name: "def_sc",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          {
+            id: "ambient",
+            handler: { type: "module", path: "./f.ts", export: "default" },
+            // placement omitted → sessionContext
+          },
+        ],
+      },
+      {
+        "PROMPT.md": "# Ambient\n\nStatic framing.",
+        "f.ts": "export default async () => 'DEFAULT_FRAGMENT_TEXT'",
+      },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: PLACE_HOME,
+      projectDir: join(PLACE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const blocks = await loader.getPromptBlocksAsync()
+    expect(blocks.afterInstructions).toBeNull()
+    expect(blocks.sessionContext).toBeString()
+    expect(blocks.sessionContext).toContain("<ma::sys::context")
+    expect(blocks.sessionContext).toContain("DEFAULT_FRAGMENT_TEXT")
+    expect(blocks.sessionContext).toContain("Static framing.")
+    expect(await loader.getPromptBlockAsync()).toBe(blocks.sessionContext)
+  })
+
+  it("mixed fragments: one afterInstructions + one sessionContext", async () => {
+    cleanPlugins()
+    writePackage(
+      PLACE_HOME,
+      "mix_a",
+      {
+        id: "mix_a",
+        name: "mix_a",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          {
+            id: "plain",
+            handler: { type: "module", path: "./plain.ts", export: "default" },
+            placement: "afterInstructions",
+          },
+        ],
+      },
+      { "plain.ts": "export default async () => 'MIXED_PLAIN_SLOT'" },
+    )
+    writePackage(
+      PLACE_HOME,
+      "mix_b",
+      {
+        id: "mix_b",
+        name: "mix_b",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          {
+            id: "wrapped",
+            handler: {
+              type: "module",
+              path: "./wrapped.ts",
+              export: "default",
+            },
+            placement: "sessionContext",
+          },
+        ],
+      },
+      {
+        "PROMPT.md": "# Mix Context\n\nWrapped framing.",
+        "wrapped.ts": "export default async () => 'MIXED_SESSION_SLOT'",
+      },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: PLACE_HOME,
+      projectDir: join(PLACE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const blocks = await loader.getPromptBlocksAsync()
+    expect(blocks.afterInstructions).toBe("MIXED_PLAIN_SLOT")
+    expect(blocks.afterInstructions).not.toContain("<ma::sys")
+    expect(blocks.sessionContext).toContain("MIXED_SESSION_SLOT")
+    expect(blocks.sessionContext).toContain("<ma::sys::context")
+    expect(blocks.sessionContext).not.toContain("MIXED_PLAIN_SLOT")
+    expect(await loader.getPromptBlockAsync()).toBe(blocks.sessionContext)
+  })
+
+  it("empty afterInstructions → null", async () => {
+    cleanPlugins()
+    // Only a sessionContext fragment / PROMPT.md contributor.
+    writePackage(
+      PLACE_HOME,
+      "only_sc",
+      {
+        id: "only_sc",
+        name: "only_sc",
+        version: "0.1.0",
+        description: "d",
+      },
+      { "PROMPT.md": "# Only Session\n\nNo plain slot." },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: PLACE_HOME,
+      projectDir: join(PLACE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const blocks = await loader.getPromptBlocksAsync()
+    expect(blocks.afterInstructions).toBeNull()
+    expect(blocks.sessionContext).toContain("No plain slot.")
+  })
+
+  it("orders multiple afterInstructions fragments by order then pluginId then fragmentId", async () => {
+    cleanPlugins()
+    writePackage(
+      PLACE_HOME,
+      "z_late",
+      {
+        id: "z_late",
+        name: "z_late",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          {
+            id: "b",
+            order: 50,
+            handler: { type: "module", path: "./b.ts", export: "default" },
+            placement: "afterInstructions",
+          },
+        ],
+      },
+      { "b.ts": "export default async () => 'ORDER_B'" },
+    )
+    writePackage(
+      PLACE_HOME,
+      "a_first",
+      {
+        id: "a_first",
+        name: "a_first",
+        version: "0.1.0",
+        description: "d",
+        promptFragments: [
+          {
+            id: "a",
+            order: 10,
+            handler: { type: "module", path: "./a.ts", export: "default" },
+            placement: "afterInstructions",
+          },
+          {
+            id: "c",
+            order: 50,
+            handler: { type: "module", path: "./c.ts", export: "default" },
+            placement: "afterInstructions",
+          },
+        ],
+      },
+      {
+        "a.ts": "export default async () => 'ORDER_A'",
+        "c.ts": "export default async () => 'ORDER_C'",
+      },
+    )
+
+    const loader = await PluginLoader.load({
+      homeDir: PLACE_HOME,
+      projectDir: join(PLACE_ROOT, "nope"),
+      coreToolNames: CORE_TOOLS,
+    })
+    const blocks = await loader.getPromptBlocksAsync()
+    // order 10 (a) first, then order 50 sorted by pluginId (a_first before z_late),
+    // then fragmentId within same plugin (c after a already handled by order).
+    expect(blocks.afterInstructions).toBe("ORDER_A\n\nORDER_C\n\nORDER_B")
+    expect(blocks.sessionContext).toBeNull()
   })
 })

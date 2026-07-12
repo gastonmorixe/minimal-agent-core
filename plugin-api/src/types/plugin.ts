@@ -639,6 +639,21 @@ export interface ManifestPromptFragment {
    * first. Defaults to 100.
    */
   order?: number
+  /**
+   * Where the fragment text lands in the composed system prompt.
+   *
+   * - `"sessionContext"` (default): folded into the per-plugin
+   *   `<ma::sys::…>` section that becomes the trailing session-context
+   *   system block (with other plugins).
+   * - `"afterInstructions"`: emitted as a **plain markdown** system block
+   *   immediately after the cached instructions block and before the
+   *   session-context block. No `<ma::sys::…>` wrapper. Use for first-class
+   *   guidance that should not appear as a plugin section.
+   *
+   * Optional. Default `"sessionContext"`. Additional slots may be added later
+   * without changing the default (open for extension).
+   */
+  placement?: "sessionContext" | "afterInstructions"
 }
 
 /**

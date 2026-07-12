@@ -70,36 +70,65 @@ export interface PromptContributorAdapterDeps {
  */
 export class PromptContributorAdapter implements PromptContributor {
   private constructor(
-    private readonly promptBlock: string | null,
+    private readonly sessionContextBlock: string | null,
+    private readonly afterInstructionsBlock: string | null,
     private readonly saveEcho: SaveEchoCollector | null,
     private readonly turnAttachmentProducers: readonly TurnAttachmentProducer[],
   ) {}
 
   /**
-   * Build the adapter, awaiting the plugin prompt block once. Mirrors the
-   * legacy `const pluginBlock = await loader.getPromptBlockAsync()` seam.
+   * Build the adapter, awaiting plugin prompt blocks once. Prefers
+   * `loader.getPromptBlocksAsync()` (dual placement); falls back to
+   * `getPromptBlockAsync()` for stubs that only implement the legacy API.
    */
   static async create(deps: PromptContributorAdapterDeps): Promise<PromptContributorAdapter> {
-    const promptBlock = (await deps.loader?.getPromptBlockAsync()) ?? null
+    const loader = deps.loader as
+      | {
+          getPromptBlocksAsync?: () => Promise<{
+            afterInstructions: string | null
+            sessionContext: string | null
+          }>
+          getPromptBlockAsync?: () => Promise<string | null>
+        }
+      | null
+      | undefined
+    let sessionContext: string | null = null
+    let afterInstructions: string | null = null
+    if (loader && typeof loader.getPromptBlocksAsync === "function") {
+      const blocks = await loader.getPromptBlocksAsync()
+      sessionContext = blocks.sessionContext
+      afterInstructions = blocks.afterInstructions
+    } else if (loader && typeof loader.getPromptBlockAsync === "function") {
+      sessionContext = (await loader.getPromptBlockAsync()) ?? null
+    }
     return new PromptContributorAdapter(
-      promptBlock,
+      sessionContext,
+      afterInstructions,
       deps.saveEcho ?? null,
       deps.turnAttachments ?? [],
     )
   }
 
   /**
-   * The plugin prompt block as a single text block, or none when empty.
+   * Plugin session-context text as a single block, or none when empty.
    *
    * AgentCore joins each contributor's text blocks with `\n` into the
-   * `sessionContext` of `resolveSystemPromptForModel` — the same key and
-   * assembly the legacy loop uses — so one block carrying the whole plugin
-   * text reproduces the legacy system prompt byte-for-byte. An empty or null
-   * block contributes nothing (matches `sessionContext: undefined`).
+   * `sessionContext` of `resolveSystemPromptForModel`. Empty/null → nothing.
    */
   systemPromptBlocks(): ContentBlock[] {
-    if (this.promptBlock === null || this.promptBlock.length === 0) return []
-    return [{ type: "text", text: this.promptBlock }]
+    if (this.sessionContextBlock === null || this.sessionContextBlock.length === 0) return []
+    return [{ type: "text", text: this.sessionContextBlock }]
+  }
+
+  /**
+   * Plain after-instructions text as a single block, or none when empty.
+   * AgentCore joins these into `resolveSystemPromptForModel({ afterInstructions })`.
+   */
+  afterInstructionsBlocks(): ContentBlock[] {
+    if (this.afterInstructionsBlock === null || this.afterInstructionsBlock.length === 0) {
+      return []
+    }
+    return [{ type: "text", text: this.afterInstructionsBlock }]
   }
 
   /**

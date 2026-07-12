@@ -266,22 +266,6 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_FRAGMENT_ORDER = 100
 
 /**
- * One async prompt fragment in flight.
- *
- * `promise` resolves to the fragment text or `null` (timeout / handler
- * error / not started). Each fragment is started eagerly at
- * {@link PluginLoader.load} and awaited at the first call to
- * {@link PluginLoader.getPromptBlockAsync}.
- */
-interface PendingFragment {
-  pluginId: string
-  fragmentId: string
-  order: number
-  startedAt: number
-  promise: Promise<string | null>
-}
-
-/**
  * Derive CamelCase prefix from a plugin's display name.
  *
  * Splits on word boundaries (spaces and hyphens), capitalizes each token,
@@ -377,12 +361,13 @@ export class PluginLoader {
   /** Live sub-agent model recommendations provider; see {@link PluginLoaderOptions.recommendSubagentModels}. */
   private readonly recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
   /**
-   * Cached result of {@link getPromptBlockAsync}. Populated on first call
-   * (after fragments resolve or time out). Subsequent calls return this
-   * without re-awaiting — the system prompt sits on a cache breakpoint
-   * and must be byte-stable for the rest of the session.
+   * Cached dual result of {@link getPromptBlocksAsync} (and therefore
+   * {@link getPromptBlockAsync}). Populated on first call after fragments
+   * resolve or time out. Subsequent calls return this without re-awaiting —
+   * the system prompt sits on a cache breakpoint and must be byte-stable for
+   * the rest of the session.
    */
-  private asyncBlockCache: string | null | undefined = undefined
+  private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
   /**
    * Global slash-command registry, keyed by command name (no slash).
    * Built in the constructor from each plugin's resolved `commands` with
@@ -867,6 +852,8 @@ export class PluginLoader {
           pluginId: pkg.manifest.id,
           fragmentId: frag.id,
           order: frag.order ?? DEFAULT_FRAGMENT_ORDER,
+          // Manifest may omit placement; default keeps prior sessionContext path.
+          placement: frag.placement ?? "sessionContext",
           startedAt,
           promise,
         })
@@ -1128,17 +1115,21 @@ export class PluginLoader {
   }
 
   /**
-   * Like {@link getPromptBlock} but additionally awaits and embeds the
-   * resolved text of every {@link ManifestPromptFragment} contributed by
-   * a loaded plugin.
+   * Await all prompt fragments and return both system-prompt slots.
+   *
+   * - `afterInstructions`: plain join of fragments with
+   *   `placement: "afterInstructions"` (order → pluginId → fragmentId).
+   *   No `buildBlock`, no PROMPT.md, no `<ma::sys::…>` wrap.
+   * - `sessionContext`: existing {@link buildBlock} path for PROMPT.md plus
+   *   fragments with default/`sessionContext` placement only.
    *
    * Each fragment has its own `timeoutMs` (default 2000ms). Fragments
    * that exceed it (or throw) are dropped silently with a diagnostic
    * logged through the loader's logger; the rest of the prompt assembles
    * normally.
    *
-   * The result is memoized for the rest of the loader's lifetime — the
-   * system prompt sits on a prompt-cache breakpoint and must be
+   * The dual result is memoized for the rest of the loader's lifetime —
+   * the system prompt sits on a prompt-cache breakpoint and must be
    * byte-stable across turns. Volatile content (current date, terminal
    * size, ...) is therefore captured once and reused, which is what the
    * `(at session start)` framing in the env-info plugin describes.
@@ -1147,21 +1138,42 @@ export class PluginLoader {
    * the cached value if the first completed, or awaits the same in-flight
    * resolution otherwise (callers race on the same fragment promises).
    */
+  async getPromptBlocksAsync(): Promise<PluginPromptBlocks> {
+    if (this.asyncBlocksCache !== undefined) return this.asyncBlocksCache
+    const resolved = await this.resolveFragments()
+    const blocks: PluginPromptBlocks = {
+      afterInstructions: joinAfterInstructions(resolved),
+      sessionContext: this.buildBlock(groupSessionContextFragments(resolved)),
+    }
+    this.asyncBlocksCache = blocks
+    return blocks
+  }
+
+  /**
+   * Like {@link getPromptBlock} but additionally awaits and embeds the
+   * resolved text of every sessionContext-placement
+   * {@link ManifestPromptFragment} contributed by a loaded plugin.
+   *
+   * Back-compat: returns only the `sessionContext` field of
+   * {@link getPromptBlocksAsync}. Fragments with
+   * `placement: "afterInstructions"` are excluded.
+   */
   async getPromptBlockAsync(): Promise<string | null> {
-    if (this.asyncBlockCache !== undefined) return this.asyncBlockCache
-    const fragmentTexts = await this.resolveFragments()
-    const block = this.buildBlock(fragmentTexts)
-    this.asyncBlockCache = block
-    return block
+    return (await this.getPromptBlocksAsync()).sessionContext
   }
 
   /**
    * Pending fragments still awaiting resolution. Useful for status-bar
    * indicators and diagnostics. Returns an empty array once
-   * {@link getPromptBlockAsync} has fully resolved.
+   * {@link getPromptBlocksAsync} / {@link getPromptBlockAsync} has fully
+   * resolved.
    */
-  pendingFragments(): { pluginId: string; fragmentId: string; startedAt: number }[] {
-    if (this.asyncBlockCache !== undefined) return []
+  pendingFragments(): {
+    pluginId: string
+    fragmentId: string
+    startedAt: number
+  }[] {
+    if (this.asyncBlocksCache !== undefined) return []
     return this.pendingFrags.map((f) => ({
       pluginId: f.pluginId,
       fragmentId: f.fragmentId,
@@ -1171,11 +1183,11 @@ export class PluginLoader {
 
   /**
    * Race each pending fragment against its declared timeout and collect
-   * the resolved texts grouped by plugin id, ordered by `order`.
+   * successful texts in pending order (`order`, then pluginId, then
+   * fragmentId — set at load). Placement is preserved for slot split.
    */
-  private async resolveFragments(): Promise<Map<string, string[]>> {
-    const out = new Map<string, string[]>()
-    if (this.pendingFrags.length === 0) return out
+  private async resolveFragments(): Promise<ResolvedFragment[]> {
+    if (this.pendingFrags.length === 0) return []
 
     const timed = await Promise.all(
       this.pendingFrags.map(async (f) => {
@@ -1192,40 +1204,48 @@ export class PluginLoader {
           this.logger(
             `prompt fragment "${f.pluginId}:${f.fragmentId}" timed out or failed; dropping`,
           )
-          return { pluginId: f.pluginId, text: null }
+          return null
         }
-        return { pluginId: f.pluginId, text: result }
+        return {
+          pluginId: f.pluginId,
+          fragmentId: f.fragmentId,
+          order: f.order,
+          placement: f.placement,
+          text: result,
+        } satisfies ResolvedFragment
       }),
     )
 
+    const out: ResolvedFragment[] = []
     for (const t of timed) {
-      if (t.text == null) continue
-      const arr = out.get(t.pluginId) ?? []
-      arr.push(t.text)
-      out.set(t.pluginId, arr)
+      if (t == null) continue
+      out.push(t)
     }
     return out
   }
 
   /**
-   * Common path for {@link getPromptBlock} and {@link getPromptBlockAsync}.
-   * If `fragmentTexts` is `null`, fragments are omitted entirely (sync
-   * path used for the session hash). Otherwise resolved fragment text is
-   * folded into the same plugin's section body.
+   * Common path for {@link getPromptBlock} and the `sessionContext` half of
+   * {@link getPromptBlocksAsync}. If `fragmentTexts` is `null`, fragments
+   * are omitted entirely (sync path used for the session hash). Otherwise
+   * only sessionContext-placement fragment text is folded into the same
+   * plugin's section body (callers must filter placement before passing).
    *
    * Each contributing plugin yields exactly ONE `<ma::sys::ROLE name="…">`
    * section: its `PROMPT.md` body (leading H1 stripped) followed by any
-   * resolved prompt-fragment text. The role + name come from
+   * resolved sessionContext fragment text. The role + name come from
    * {@link classifyPluginPrompt} (manifest-shape inference, no manifest
    * field, no plugin id leaked to the model). Sections sort by
    * {@link PROMPT_ROLE_ORDER} then by name so the composed block is
    * byte-stable for a given plugin set (the system prompt is cached).
    *
-   * A plugin with NO `PROMPT.md` AND NO resolved prompt fragments is
-   * silent: it contributes no section. We do NOT fall back to
+   * A plugin with NO `PROMPT.md` AND NO resolved sessionContext fragments
+   * is silent: it contributes no section. We do NOT fall back to
    * `manifest.description` (that would leak per-plugin dev docs into the
    * cached system prompt). If every loaded plugin is silent, this returns
    * `null`, same as having no plugins at all.
+   *
+   * afterInstructions fragments never enter this path.
    */
   private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
     if (this.plugins.length === 0) return null
@@ -1473,7 +1493,11 @@ export class PluginLoader {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (trigger.type === "tool") {
-        return { kind: "tool_result", content: pluginHandlerErrorResult(msg), is_error: true }
+        return {
+          kind: "tool_result",
+          content: pluginHandlerErrorResult(msg),
+          is_error: true,
+        }
       }
       // Inline handler: emit empty render and let the caller fall back to raw.
       return { kind: "rendered", ansi: "" }
@@ -1509,21 +1533,9 @@ export class PluginLoader {
 }
 
 // ---------------------------------------------------------------------------
-// Extracted submodules (kept under the max-lines lint budget):
-//   ./loader/helpers.ts          — pure fs + handler-resolution helpers
-//   ./loader/event-subs.ts       — event/hook/live-area/command resolution
-//   ./loader/discovery.ts        — package discovery + manifest parsing
-//   ./loader/fragments.ts        — async prompt-fragment producers
-//   ./loader/replay-renderers.ts — --resume re-render seam
-//   ./loader/turn-attachments.ts — per-turn attachment factory seam
-//   ./loader/setups.ts           — plugin setup() execution
-// ---------------------------------------------------------------------------
-
-// Global slash-command registry (extracted T-8a0c44).
+// Extracted submodules (max-lines budget): helpers, event-subs, discovery,
+// fragments, prompt-blocks, replay-renderers, turn-attachments, setups.
 import { CommandRegistry } from "./loader/commands.ts"
-// Package discovery + manifest parsing (the four-root walk, realpath
-// dedupe, enable/disable gates, PROMPT.md resolution) lives in
-// `src/plugins/loader/discovery.ts`.
 import { discoverAndParsePackages } from "./loader/discovery.ts"
 import {
   registerEventSub,
@@ -1533,15 +1545,7 @@ import {
   resolveHookSub,
   resolveLiveAreaSlot,
 } from "./loader/event-subs.ts"
-// Async prompt-fragment producers (module + subprocess) live in
-// `src/plugins/loader/fragments.ts`.
 import { DEFAULT_FRAGMENT_TIMEOUT_MS, findFragmentDef, startFragment } from "./loader/fragments.ts"
-// Pure filesystem + handler-resolution helpers live in
-// `src/plugins/loader/helpers.ts`. Async event-sub / hook-sub /
-// live-area-slot resolution + registration live in
-// `src/plugins/loader/event-subs.ts`. Both are imported here for the
-// `PluginLoader` class's internal use and are NOT re-exported (no
-// external consumer of this module touched those names).
 import {
   classifyPluginPrompt,
   escapeTagAttr,
@@ -1552,12 +1556,15 @@ import {
   resolveHandler,
   stripLeadingHeading,
 } from "./loader/helpers.ts"
-// Replay-renderer resolution (the `--resume` re-render seam) lives in
-// `src/plugins/loader/replay-renderers.ts`.
+import type {
+  PendingFragment,
+  PluginPromptBlocks,
+  ResolvedFragment,
+} from "./loader/prompt-blocks.ts"
+import { groupSessionContextFragments, joinAfterInstructions } from "./loader/prompt-blocks.ts"
+
+export type { PluginPromptBlocks, PromptFragmentPlacement } from "./loader/prompt-blocks.ts"
+
 import { registerManifestReplayRenderers } from "./loader/replay-renderers.ts"
-// Plugin `setup()` execution (binary-provisioning declarations) lives in
-// `src/plugins/loader/setups.ts`.
 import { runPluginSetups } from "./loader/setups.ts"
-// Turn-attachment factory resolution (the per-turn user-message
-// attachment seam) lives in `src/plugins/loader/turn-attachments.ts`.
 import { registerManifestTurnAttachments } from "./loader/turn-attachments.ts"
