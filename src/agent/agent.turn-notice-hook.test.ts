@@ -179,6 +179,8 @@ describe("formatTurnNoticePlain (core, style-free fallback)", () => {
       { kind: "max_tokens_continuing", severity: "warn", attempt: 1, cap: 5 },
       { kind: "max_tokens_capped", severity: "warn", cap: 5 },
       { kind: "stream_interrupted_salvaged", severity: "warn", completedToolCalls: 1 },
+      { kind: "stream_interrupted_continuing", severity: "warn", attempt: 1, cap: 1 },
+      { kind: "stream_interrupted_capped", severity: "warn", cap: 1 },
       { kind: "tool_rounds_capped", severity: "warn", cap: 50 },
       {
         kind: "reflection_ack",

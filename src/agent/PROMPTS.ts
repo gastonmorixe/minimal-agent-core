@@ -25,6 +25,15 @@ export function streamInterruptedAttachmentText(): string {
   return runtimePrompt("stream-interrupted.md")
 }
 
+/**
+ * Attachment injected when the provider closed mid-text with no complete
+ * tool calls. Asks the model to continue from local transcript state
+ * without repeating already-streamed text.
+ */
+export function streamInterruptedContinueAttachmentText(): string {
+  return runtimePrompt("stream-interrupted-continue.md")
+}
+
 /** Returns the placeholder text used when an assistant response is truncated. */
 export function responseTruncatedPlaceholderText(): string {
   return runtimePrompt("response-truncated-placeholder.md")

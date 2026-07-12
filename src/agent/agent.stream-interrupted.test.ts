@@ -119,4 +119,89 @@ describe("Agent.run stream_interrupted salvage continuation", () => {
       salvage && salvage.kind === "stream_interrupted_salvaged" && salvage.completedToolCalls,
     ).toBe(1)
   })
+
+  it("mid-text terminal-less continues once with new body, preserves partial text", async () => {
+    const requestBodies: Message[][] = []
+    let round = 0
+    const notices: TurnNotice[] = []
+
+    const sendFn = async function* (opts: {
+      messages: Message[]
+    }): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      requestBodies.push(JSON.parse(JSON.stringify(opts.messages)) as Message[])
+
+      if (round === 1) {
+        yield "Continuing: writing the plan"
+        return {
+          blocks: [{ type: "text" as const, text: "Continuing: writing the plan" }],
+          text: "Continuing: writing the plan",
+          stopReason: "end_turn",
+          stopDetails: {
+            type: "stream_closed_without_terminal",
+            message: "partial text salvage",
+          },
+        } as StreamedResponse
+      }
+
+      yield " and delivering via Intercom."
+      return {
+        blocks: [{ type: "text" as const, text: " and delivering via Intercom." }],
+        text: " and delivering via Intercom.",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+
+    const agent = new Agent({ auth, model: "test-model", sendFn: sendFn as never })
+    await drainRun(agent, "continue", {
+      onNotice: (n) => notices.push(n),
+    })
+
+    expect(round).toBe(2)
+    expect(requestBodies).toHaveLength(2)
+    const body1 = JSON.stringify(requestBodies[0])
+    const body2 = JSON.stringify(requestBodies[1])
+    expect(body1).not.toBe(body2)
+
+    // Round-2 body carries partial assistant text + continue attachment.
+    expect(body2).toContain("Continuing: writing the plan")
+    expect(body2).toContain("stream-interrupted")
+
+    expect(notices.some((n) => n.kind === "stream_interrupted_continuing")).toBe(true)
+    const cont = notices.find((n) => n.kind === "stream_interrupted_continuing")
+    expect(cont && cont.kind === "stream_interrupted_continuing" && cont.attempt).toBe(1)
+    expect(cont && cont.kind === "stream_interrupted_continuing" && cont.cap).toBe(1)
+
+    // Partial text is in agent history.
+    expect(JSON.stringify(agent.messages)).toContain("Continuing: writing the plan")
+  })
+
+  it("two consecutive mid-text terminal-less closes hit continuation cap", async () => {
+    let round = 0
+    const notices: TurnNotice[] = []
+
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      yield `partial ${round}`
+      return {
+        blocks: [{ type: "text" as const, text: `partial ${round}` }],
+        text: `partial ${round}`,
+        stopReason: "end_turn",
+        stopDetails: {
+          type: "stream_closed_without_terminal",
+          message: "again",
+        },
+      } as StreamedResponse
+    }
+
+    const agent = new Agent({ auth, model: "test-model", sendFn: sendFn as never })
+    await drainRun(agent, "continue", {
+      onNotice: (n) => notices.push(n),
+    })
+
+    // First mid-text → continue (round 2). Second mid-text → capped, stop.
+    expect(round).toBe(2)
+    expect(notices.some((n) => n.kind === "stream_interrupted_continuing")).toBe(true)
+    expect(notices.some((n) => n.kind === "stream_interrupted_capped")).toBe(true)
+  })
 })

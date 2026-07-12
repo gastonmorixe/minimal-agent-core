@@ -107,6 +107,24 @@ export interface StreamInterruptedSalvagedNotice {
 }
 
 /**
+ * Provider closed mid-text (no complete tools). Partial assistant output was
+ * preserved; the loop issues a bounded local continuation with a new body.
+ */
+export interface StreamInterruptedContinuingNotice {
+  kind: "stream_interrupted_continuing"
+  severity: "warn"
+  attempt: number
+  cap: number
+}
+
+/** Bounded local continuations for terminal-less mid-text exhausted. */
+export interface StreamInterruptedCappedNotice {
+  kind: "stream_interrupted_capped"
+  severity: "warn"
+  cap: number
+}
+
+/**
  * The discriminated union of every out-of-band condition the agent loop
  * surfaces. Narrow on `kind`.
  */
@@ -118,6 +136,8 @@ export type TurnNotice =
   | ToolRoundsCappedNotice
   | ReflectionAckNotice
   | StreamInterruptedSalvagedNotice
+  | StreamInterruptedContinuingNotice
+  | StreamInterruptedCappedNotice
 
 /**
  * Project a turn's stop reason + details into a {@link StopNotice}, or
@@ -168,6 +188,10 @@ export function formatTurnNoticePlain(notice: TurnNotice): string {
       const n = notice.completedToolCalls
       return `[stream] Provider closed the response without a terminal event after ${n} complete tool call${n === 1 ? "" : "s"}; salvaged closed tools, discarded partials, and continuing from local state. Do not repeat those tool calls.`
     }
+    case "stream_interrupted_continuing":
+      return `[stream] Provider closed the response without a terminal event mid-output; auto-continuing from local state (${notice.attempt}/${notice.cap}).`
+    case "stream_interrupted_capped":
+      return `[stream] Provider closed the response without a terminal event ${notice.cap} times in a row mid-output; stopping. Partial output above is preserved.`
     default: {
       const _exhaustive: never = notice
       return _exhaustive

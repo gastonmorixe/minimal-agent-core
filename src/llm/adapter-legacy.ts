@@ -920,33 +920,61 @@ export async function* canonicalEventsToLegacyStream(
       case "message_stop":
         break
       case "stream_error": {
-        // Terminal-less EOF after at least one complete tool call: NEVER
-        // throw into withRetry (that would replay the pre-tool request body).
-        // Salvage closed tools, drop any open partial tool_use, and return a
-        // tool_use stop so the agent loop executes complete calls once and
-        // continues from local transcript state.
+        // Terminal-less EOF recovery (Grok/OpenAI Responses 200 SSE closed
+        // without response.completed / failed / incomplete).
+        //
+        // Two salvage shapes — both avoid throwing into withRetry so the
+        // agent can continue from local state instead of replaying a body:
+        //
+        //   1. completedToolCalls > 0: return tool_use with only closed tools
+        //      (discard open partial tool_use). Agent executes tools once.
+        //   2. sawText (no complete tools): return end_turn with partial text
+        //      (discard open partial tool_use). Agent does a bounded local
+        //      continuation (new body), not an identical re-POST.
+        //
+        // Empty / reasoning-only with no text still throws so withRetry can
+        // take its one short pre-effect transport retry.
         const streamErrorType = ev.upstreamType ?? (ev.category === "api" ? "api_error" : undefined)
-        if (
-          streamErrorType === "stream_closed_without_terminal" &&
-          progress.completedToolCalls > 0
-        ) {
+        if (streamErrorType === "stream_closed_without_terminal") {
           // Discard partial open tool_use — never execute incomplete calls.
           if (cur?.kind === "tool_use") cur = null
-          // Flush open text (already yielded) so history stays consistent.
-          if (cur?.kind === "text") flushCur()
-          else if (cur?.kind === "thinking") flushCur()
-          else cur = null
-          return {
-            blocks,
-            text: fullText,
-            stopReason: "tool_use",
-            stopDetails: {
-              type: "stream_closed_without_terminal",
-              message:
-                "Provider closed the stream without a terminal event after complete tool call(s); salvaged closed tools and continuing from local state",
-            },
-            usage: turnUsage,
-            responseId,
+
+          if (progress.completedToolCalls > 0) {
+            // Flush open text/thinking so history stays consistent with UI.
+            if (cur?.kind === "text" || cur?.kind === "thinking") flushCur()
+            else cur = null
+            return {
+              blocks,
+              text: fullText,
+              stopReason: "tool_use",
+              stopDetails: {
+                type: "stream_closed_without_terminal",
+                message:
+                  "Provider closed the stream without a terminal event after complete tool call(s); salvaged closed tools and continuing from local state",
+              },
+              usage: turnUsage,
+              responseId,
+            }
+          }
+
+          // Partial assistant TEXT only. Reasoning-only / empty still throw so
+          // withRetry can take its one short pre-effect transport retry.
+          // Do NOT treat thinking-only blocks as salvageable partial output.
+          if (progress.sawText || fullText.trim().length > 0) {
+            if (cur?.kind === "text" || cur?.kind === "thinking") flushCur()
+            else cur = null
+            return {
+              blocks,
+              text: fullText,
+              stopReason: "end_turn",
+              stopDetails: {
+                type: "stream_closed_without_terminal",
+                message:
+                  "Provider closed the stream without a terminal event after partial output; preserved text and discarding incomplete tool calls",
+              },
+              usage: turnUsage,
+              responseId,
+            }
           }
         }
         throw taggedStreamError(ev, progress)

@@ -23,6 +23,8 @@ import {
   emergencyCapTriggeredAttachmentText,
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
+  streamInterruptedAttachmentText,
+  streamInterruptedContinueAttachmentText,
   turnAbortedAttachmentText,
 } from "../agent/PROMPTS.ts"
 import { type AskUserFn, runPreflightPipeline } from "../agent/preflight-pipeline.ts"
@@ -75,6 +77,8 @@ import type {
 type MaybePromise<T> = T | Promise<T>
 
 const MAX_TOKENS_CONTINUATION_CAP = 5
+/** See agent.ts — one local continuation for mid-text terminal-less closes. */
+const MAX_INTERRUPTED_TURN_CONTINUATIONS = 1
 
 /**
  * Project a transport usage snapshot onto the host-facing {@link EventUsage}
@@ -370,6 +374,7 @@ export class AgentCore {
 
     let rounds = 0
     let maxTokensStreak = 0
+    let streamInterruptedStreak = 0
     this.reflectionSilenceRemaining = 0
     let exitedByCap = true
     let lastResponse: StreamedResponse = {
@@ -582,6 +587,64 @@ export class AgentCore {
         }
       }
 
+      // Terminal-less stream salvage (mirror agent.ts). Complete tools →
+      // notice + attachment on tool_result turn. Partial text → bounded
+      // local continuation with a new body (never replay interrupted POST).
+      let streamInterruptedSalvage = false
+      if (lastResponse.stopDetails?.type === "stream_closed_without_terminal") {
+        if (toolBlocks.length > 0) {
+          streamInterruptedSalvage = true
+          streamInterruptedStreak = 0
+          emitNotice({
+            kind: "stream_interrupted_salvaged",
+            severity: "warn",
+            completedToolCalls: toolBlocks.length,
+          })
+        } else {
+          streamInterruptedStreak++
+          if (streamInterruptedStreak <= MAX_INTERRUPTED_TURN_CONTINUATIONS) {
+            emitNotice({
+              kind: "stream_interrupted_continuing",
+              severity: "warn",
+              attempt: streamInterruptedStreak,
+              cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
+            })
+            if (lastResponse.blocks.length === 0) {
+              const placeholder: ContentBlock[] = [
+                {
+                  type: "text",
+                  text: responseTruncatedPlaceholderText(),
+                },
+              ]
+              this.messages.push({ role: "assistant", content: placeholder })
+              this.sessionPersistence?.appendAssistant(
+                placeholder,
+                lastResponse.stopReason,
+                lastResponse.usage,
+              )
+            }
+            const cont: ContentBlock[] = [
+              {
+                type: "text",
+                text: streamInterruptedContinueAttachmentText(),
+              },
+            ]
+            this.messages.push({ role: "user", content: cont })
+            this.sessionPersistence?.appendUser(cont)
+            continue
+          }
+          emitNotice({
+            kind: "stream_interrupted_capped",
+            severity: "warn",
+            cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
+          })
+          exitedByCap = false
+          break
+        }
+      } else {
+        streamInterruptedStreak = 0
+      }
+
       if (lastResponse.stopReason === "max_tokens") {
         if (toolBlocks.length > 0) {
           maxTokensStreak = 0
@@ -682,6 +745,12 @@ export class AgentCore {
 
       const userContent: ContentBlock[] = []
       userContent.push(...toolResults)
+      if (streamInterruptedSalvage) {
+        userContent.push({
+          type: "text",
+          text: streamInterruptedAttachmentText(),
+        })
+      }
       const loopModeAttach = this.modeProvider?.consumePendingAttachment?.() ?? null
       if (loopModeAttach) userContent.push(loopModeAttach)
       for (const contributor of this.promptContributors) {

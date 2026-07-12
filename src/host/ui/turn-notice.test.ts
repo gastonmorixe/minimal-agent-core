@@ -76,6 +76,20 @@ describe("renderTurnNotice (TUI treatment per kind)", () => {
     expect(line).toContain("will not replay")
   })
 
+  it("renders stream_interrupted_continuing and capped variants", () => {
+    expect(
+      renderTurnNotice({
+        kind: "stream_interrupted_continuing",
+        severity: "warn",
+        attempt: 1,
+        cap: 1,
+      }),
+    ).toContain("auto-continuing from local state (1/1)")
+    expect(
+      renderTurnNotice({ kind: "stream_interrupted_capped", severity: "warn", cap: 1 }),
+    ).toContain("1 times in a row")
+  })
+
   it("renders a dim marker for reflection_ack (with and without reason)", () => {
     const withReason = renderTurnNotice({
       kind: "reflection_ack",

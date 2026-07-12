@@ -75,6 +75,7 @@ import {
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
   streamInterruptedAttachmentText,
+  streamInterruptedContinueAttachmentText,
   turnAbortedAttachmentText,
 } from "./PROMPTS.ts"
 import { type AskUserFn, runPreflightPipeline } from "./preflight-pipeline.ts"
@@ -118,6 +119,18 @@ type MaybePromise<T> = T | Promise<T>
  * deliverable rarely needs more than one or two continuations.
  */
 const MAX_TOKENS_CONTINUATION_CAP = 5
+
+/**
+ * Maximum consecutive terminal-less mid-text auto-continuations within a
+ * single `run()`. When the provider closes SSE without a terminal event
+ * after partial assistant text (no complete tools), the loop injects a
+ * local continue turn with a *new* request body instead of replaying the
+ * interrupted one. Cap is intentionally 1 (PLAN
+ * `MAX_INTERRUPTED_TURN_CONTINUATIONS`): one salvage continuation is
+ * enough to recover from a flaky close; repeated mid-text closes surface
+ * to the user rather than spinning.
+ */
+const MAX_INTERRUPTED_TURN_CONTINUATIONS = 1
 
 /**
  * Conversational agent with append-only history and an agentic tool loop.
@@ -1024,6 +1037,10 @@ export class Agent {
     // BACK-TO-BACK truncations. Guards against a turn that hits the wall
     // every time auto-continuing forever.
     let maxTokensStreak = 0
+    // Consecutive terminal-less mid-text local continuations (no complete
+    // tools). Capped by MAX_INTERRUPTED_TURN_CONTINUATIONS. Reset when the
+    // turn makes real progress (tool executed / clean finish).
+    let streamInterruptedStreak = 0
     // Silence is per-turn : the model has to re-ack each new user turn.
     // Reset here at the seam between turns so a stale silence counter
     // from the previous `run()` can't suppress checkpoints in this one.
@@ -1336,24 +1353,71 @@ export class Agent {
       }
 
       // Terminal-less stream salvage (Grok/OpenAI Responses 200 SSE closed
-      // without response.completed after complete tool call(s)). The transport
-      // bridge already returned stopReason "tool_use" with only closed tools
-      // in blocks; we surface a notice and flag the next user turn to carry a
-      // compact "do not re-issue completed tools" attachment. The tool path
-      // below executes those tools once and continues from local state — the
-      // interrupted request body is never replayed (withRetry never re-enters
-      // makeAttempt for post-tool terminal-less closes).
+      // without response.completed). Two shapes from the bridge:
+      //
+      //   1. Complete tool call(s): stopReason tool_use + only closed tools.
+      //      Surface a notice and flag the next user turn with a compact
+      //      "do not re-issue completed tools" attachment. Tool path below
+      //      executes those tools once and continues from local state — the
+      //      interrupted request body is never replayed.
+      //
+      //   2. Partial text, no complete tools: stopReason end_turn + partial
+      //      blocks. Mirror max_tokens continuation: keep partial assistant
+      //      (already appended above), inject a continue user attachment,
+      //      re-enter the loop with a *new* body. Bounded by
+      //      MAX_INTERRUPTED_TURN_CONTINUATIONS so a flaky provider cannot
+      //      spin forever.
       let streamInterruptedSalvage = false
-      if (
-        lastResponse.stopDetails?.type === "stream_closed_without_terminal" &&
-        toolBlocks.length > 0
-      ) {
-        streamInterruptedSalvage = true
-        await emitNotice({
-          kind: "stream_interrupted_salvaged",
-          severity: "warn",
-          completedToolCalls: toolBlocks.length,
-        })
+      if (lastResponse.stopDetails?.type === "stream_closed_without_terminal") {
+        if (toolBlocks.length > 0) {
+          streamInterruptedSalvage = true
+          streamInterruptedStreak = 0
+          await emitNotice({
+            kind: "stream_interrupted_salvaged",
+            severity: "warn",
+            completedToolCalls: toolBlocks.length,
+          })
+        } else {
+          streamInterruptedStreak++
+          if (streamInterruptedStreak <= MAX_INTERRUPTED_TURN_CONTINUATIONS) {
+            await emitNotice({
+              kind: "stream_interrupted_continuing",
+              severity: "warn",
+              attempt: streamInterruptedStreak,
+              cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
+            })
+            // Degenerate: bridge returned terminal-less with no blocks
+            // (e.g. only whitespace text). Keep assistant→user alternation.
+            if (lastResponse.blocks.length === 0) {
+              const placeholder: ContentBlock[] = [
+                {
+                  type: "text",
+                  text: responseTruncatedPlaceholderText(),
+                },
+              ]
+              this.messages.push({ role: "assistant", content: placeholder })
+              this.store?.appendAssistant(placeholder, lastResponse.stopReason, lastResponse.usage)
+            }
+            const cont: ContentBlock[] = [
+              {
+                type: "text",
+                text: streamInterruptedContinueAttachmentText(),
+              },
+            ]
+            this.messages.push({ role: "user", content: cont })
+            this.store?.appendUser(cont)
+            continue
+          }
+          await emitNotice({
+            kind: "stream_interrupted_capped",
+            severity: "warn",
+            cap: MAX_INTERRUPTED_TURN_CONTINUATIONS,
+          })
+          exitedByCap = false
+          break
+        }
+      } else {
+        streamInterruptedStreak = 0
       }
 
       // max_tokens handling (Fix B + D). The response hit the output-token
