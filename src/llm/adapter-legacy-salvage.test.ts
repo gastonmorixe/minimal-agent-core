@@ -262,7 +262,7 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
     expect(response.responseId).toBe("resp_termless_1")
   })
 
-  it("throws stream_closed_without_terminal with progress when no complete tool", async () => {
+  it("throws stream_closed_without_terminal with progress when reasoning-only (no text)", async () => {
     let thrown:
       | (Error & {
           streamErrorType?: string
@@ -291,10 +291,70 @@ describe("canonicalEventsToLegacyStream max_tokens salvage", () => {
     } catch (e) {
       thrown = e as typeof thrown
     }
+    // Reasoning-only with no flushed text/blocks still throws so withRetry
+    // can take its one pre-effect transport retry.
     expect(thrown?.streamErrorType).toBe("stream_closed_without_terminal")
     expect(thrown?.attemptProgress?.completedToolCalls).toBe(0)
     expect(thrown?.attemptProgress?.sawReasoning).toBe(true)
     expect(thrown?.attemptProgress?.sawText).toBe(false)
+  })
+
+  it("salvages partial text (no complete tools) as end_turn without throwing", async () => {
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "resp_text",
+        modelId: "grok-test",
+        initialUsage: { inputTokens: 10, outputTokens: 0 },
+      },
+      { type: "thinking_start", index: 0 },
+      { type: "thinking_delta", index: 0, text: "plan" },
+      { type: "thinking_stop", index: 0 },
+      { type: "text_start", index: 1 },
+      { type: "text_delta", index: 1, text: "Continuing the plan." },
+      {
+        type: "stream_error",
+        retryable: true,
+        category: "api",
+        upstreamType: "stream_closed_without_terminal",
+        cause: new Error("truncated mid text"),
+      },
+    ])
+
+    expect(response.stopReason).toBe("end_turn")
+    expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
+    expect(response.text).toBe("Continuing the plan.")
+    expect(response.blocks.some((b) => b.type === "text")).toBe(true)
+    expect(response.blocks.some((b) => b.type === "tool_use")).toBe(false)
+  })
+
+  it("salvages text and discards open partial tool on terminal-less close", async () => {
+    const response = await drain([
+      {
+        type: "message_start",
+        messageId: "resp_text_partial_tool",
+        modelId: "grok-test",
+        initialUsage: { inputTokens: 10, outputTokens: 0 },
+      },
+      { type: "text_start", index: 0 },
+      { type: "text_delta", index: 0, text: "About to write the file." },
+      { type: "text_stop", index: 0 },
+      { type: "tool_use_start", index: 1, id: "call_partial", name: "Write" },
+      { type: "tool_use_input_delta", index: 1, partialJson: '{"file_path":"/x' },
+      {
+        type: "stream_error",
+        retryable: true,
+        category: "api",
+        upstreamType: "stream_closed_without_terminal",
+        cause: new Error("truncated mid tool"),
+      },
+    ])
+
+    expect(response.stopReason).toBe("end_turn")
+    expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
+    expect(response.text).toBe("About to write the file.")
+    expect(response.blocks).toEqual([{ type: "text", text: "About to write the file." }])
+    expect(response.blocks.some((b) => b.type === "tool_use")).toBe(false)
   })
 
   it("does not double-push when the block closed normally", async () => {

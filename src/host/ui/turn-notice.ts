@@ -71,6 +71,14 @@ export function renderTurnNotice(notice: TurnNotice): string {
         `Provider closed the stream without a terminal event after ${n} complete tool call${n === 1 ? "" : "s"} — salvaged closed tools and continuing (will not replay the interrupted request)`,
       )}`
     }
+    case "stream_interrupted_continuing":
+      return `\n  ${c.boldYellow("!")} ${c.yellow(
+        `Provider closed the stream without a terminal event mid-output — auto-continuing from local state (${notice.attempt}/${notice.cap})`,
+      )}`
+    case "stream_interrupted_capped":
+      return `\n  ${c.boldYellow("!")} ${c.yellow(
+        `Provider closed the stream without a terminal event ${notice.cap} times in a row mid-output — stopping. Partial output above is preserved.`,
+      )}`
     default: {
       const _exhaustive: never = notice
       return _exhaustive

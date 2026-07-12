@@ -159,6 +159,30 @@ function cleanEndEvents(text: string): CanonicalEvent[] {
   ]
 }
 
+/** Mid-text terminal-less close (523dba62 post-ship shape): text, no tools. */
+function textOnlyTerminalLessEvents(text: string): CanonicalEvent[] {
+  return [
+    {
+      type: "message_start",
+      messageId: "resp_text_termless",
+      modelId: "test-model-recovery",
+      initialUsage: { inputTokens: 1, outputTokens: 0 },
+    },
+    { type: "thinking_start", index: 0 },
+    { type: "thinking_delta", index: 0, text: "drafting" },
+    { type: "thinking_stop", index: 0 },
+    { type: "text_start", index: 1 },
+    { type: "text_delta", index: 1, text },
+    {
+      type: "stream_error",
+      retryable: true,
+      category: "api",
+      upstreamType: "stream_closed_without_terminal",
+      cause: new Error("truncated mid text"),
+    },
+  ]
+}
+
 async function drainSend(
   gen: AsyncGenerator<string, StreamedResponse, undefined>,
 ): Promise<{ yields: string[]; response: StreamedResponse }> {
@@ -360,6 +384,33 @@ describe("terminal-less recovery — full stack (fake NetworkClient, no real net
     expect(caught).toBeDefined()
     // Must not sit on the 30s rate-limit curve (Math.random pinned to 0 → 0ms sleep).
     expect(Date.now() - started).toBeLessThan(5_000)
+  }, 15_000)
+
+  it("text-only terminal-less: returns partial text without transport re-POST", async () => {
+    const handler = mock((_req: NetworkRequest) =>
+      sseFromEvents(textOnlyTerminalLessEvents("Continuing: writing the plan")),
+    )
+    const networkClient = new NetworkClient({
+      primary: { id: "fake", request: async (req) => handler(req) },
+    })
+
+    const { response } = await drainSend(
+      canonicalSendFn({
+        auth,
+        messages,
+        model: "test-model-recovery",
+        selectedProviderId: "test-recovery",
+        stream: true,
+        networkClient,
+      }),
+    )
+
+    // Bridge salvages partial text — withRetry never re-enters makeAttempt.
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(response.stopReason).toBe("end_turn")
+    expect(response.stopDetails?.type).toBe("stream_closed_without_terminal")
+    expect(response.text).toBe("Continuing: writing the plan")
+    expect(response.blocks.some((b) => b.type === "tool_use")).toBe(false)
   }, 15_000)
 
   it("stress: 20 sequential complete-tool terminal-less sends never double-POST", async () => {
