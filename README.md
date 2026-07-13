@@ -5,9 +5,9 @@
 </p>
 
 
-[![CI](https://github.com/gastonmorixe/minimal-agent-dev-private/actions/workflows/ci.yml/badge.svg)](https://github.com/gastonmorixe/minimal-agent-dev-private/actions/workflows/ci.yml)
-[![Release](https://github.com/gastonmorixe/minimal-agent-dev-private/actions/workflows/release.yml/badge.svg)](https://github.com/gastonmorixe/minimal-agent-dev-private/actions/workflows/release.yml)
-[![License: CopyRight](https://img.shields.io/badge/License-CopyRight-blue.svg)](LICENSE)
+[![CI](https://github.com/gastonmorixe/minimal-agent-core/actions/workflows/ci.yml/badge.svg)](https://github.com/gastonmorixe/minimal-agent-core/actions/workflows/ci.yml)
+[![Release](https://github.com/gastonmorixe/minimal-agent-core/actions/workflows/release.yml/badge.svg)](https://github.com/gastonmorixe/minimal-agent-core/actions/workflows/release.yml)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey)
 
 `minimal-agent` is a tiny, beautiful, composable agent harness.
@@ -50,11 +50,11 @@ Bun, so "installing" is getting the source tree onto your machine and running
 
 ### From a release tarball
 
-Every push to `dev-private` / `main` and every PR produces a timestamped
+Every push to `main` and every PR produces a timestamped
 pre-release tarball on the [Releases page][releases]. Stable releases are cut
 from `v*` tags. Each release ships a source tarball and its SHA-256 checksum.
 
-[releases]: https://github.com/gastonmorixe/minimal-agent-dev-private/releases
+[releases]: https://github.com/gastonmorixe/minimal-agent-core/releases
 
 ```sh
 # download minimal-agent-<label>.tar.gz + its .sha256 from the release assets
@@ -68,20 +68,20 @@ bun install
 ### From a clone (latest, unreleased)
 
 ```sh
-git clone https://github.com/gastonmorixe/minimal-agent-dev-private.git
-cd minimal-agent-dev-private
+git clone https://github.com/gastonmorixe/minimal-agent-core.git
+cd minimal-agent-core
 bun install
 ./minimal-agent
 ```
 
-### On a private fork
+### Authenticated clone
 
-While the repo is private, anonymous git access fails. Use a token-authenticated
+If the repository is private, anonymous git access fails. Use a token-authenticated
 clone instead:
 
 ```sh
-git clone "https://x-access-token:$(gh auth token)@github.com/gastonmorixe/minimal-agent-dev-private.git"
-cd minimal-agent-dev-private
+git clone "https://x-access-token:$(gh auth token)@github.com/gastonmorixe/minimal-agent-core.git"
+cd minimal-agent-core
 bun install
 ./minimal-agent
 ```
@@ -546,7 +546,7 @@ Start here:
 - **`src/session/session-restore.ts`:** Session folding and repair.
 - **`src/host/session-replay.ts`:** Resume header and scrollback replay.
 - **`plugin-api/`:** The leaf contract package (`@minimal-agent/plugin-api`): shared types and pure utilities both core and plugins depend on.
-- **`plugins/`:** Bundled provider, tool, mode, and UI plugins.
+- **Sibling [`minimal-agent-plugins`](https://github.com/gastonmorixe/minimal-agent-plugins):** First-party provider, tool, mode, and UI plugins (not vendored in this tree).
 - **`docs/internal/`:** Notes for the parts that are easiest to break by guessing.
 
 ## Design rules
@@ -577,3 +577,18 @@ This is a research tool and a daily-use terminal agent. The value is the small
 surface: enough behavior to run real agentic turns, enough tests to change it
 without guessing, and enough debug output to explain what happened when the
 server or terminal says no.
+
+## Related repositories
+
+- Monorepo (core + plugins pins): [minimal-agent](https://github.com/gastonmorixe/minimal-agent)
+- First-party plugins: [minimal-agent-plugins](https://github.com/gastonmorixe/minimal-agent-plugins)
+
+## License
+
+Copyright (c) 2025–2026 Gaston Morixe. All rights reserved.
+
+This software is proprietary and confidential. No license is granted to use,
+copy, modify, merge, publish, distribute, sublicense, or sell copies of the
+software except as expressly authorized in writing by the copyright holder.
+See [LICENSE](./LICENSE).
+

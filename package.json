@@ -8,10 +8,10 @@
     "tools/docs"
   ],
   "description": "A tiny, beautiful, composable terminal agent harness that runs straight from source on Bun.",
-  "homepage": "https://github.com/gastonmorixe/minimal-agent",
+  "homepage": "https://github.com/gastonmorixe/minimal-agent-core",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gastonmorixe/minimal-agent.git"
+    "url": "git+https://github.com/gastonmorixe/minimal-agent-core.git"
   },
   "bin": {
     "minimal-agent": "src/index.ts"
@@ -49,5 +49,6 @@
   },
   "overrides": {
     "brace-expansion": "^5.0.6"
-  }
+  },
+  "license": "UNLICENSED"
 }
