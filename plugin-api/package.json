@@ -1,13 +1,13 @@
 {
   "name": "@minimal-agent/plugin-api",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "type": "module",
   "description": "Leaf contract package for minimal-agent: provider-neutral types and pure utilities shared by the host (src/) and plugins. Imports NOTHING from src/ or plugins/.",
-  "homepage": "https://github.com/gastonmorixe/minimal-agent",
+  "homepage": "https://github.com/gastonmorixe/minimal-agent-core",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gastonmorixe/minimal-agent.git"
+    "url": "git+https://github.com/gastonmorixe/minimal-agent-core.git"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -44,5 +44,6 @@
     "./llm/provider-auth": "./src/llm/provider-auth.ts",
     "./llm/provider-plugin": "./src/llm/provider-plugin.ts",
     "./llm/surface-codec": "./src/llm/surface-codec.ts"
-  }
+  },
+  "license": "UNLICENSED"
 }
