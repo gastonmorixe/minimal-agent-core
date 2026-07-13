@@ -180,3 +180,25 @@ use it. The `schedule` plugin (cron engine + `CronCreate/List/Delete` + `/loop`
 + `/schedule` + a 1s heartbeat) is built entirely on these ports. It imports no
 harness runtime, only `import type` from `src/plugins/types.ts`. See
 `docs/changes/2026-05-30-schedule-plugin.md`.
+
+## Git commits (co-author trailer)
+
+Every commit made by an agent must include a `Co-authored-by` trailer for the
+**current session** (name + short session id):
+
+```
+Co-authored-by: {Name} <{short-sid}@minimal-agent>
+```
+
+- `{Name}` — session name (from `SessionInfo` / the TUI, e.g. `Veronica`)
+- `{short-sid}` — first 8 hex characters of the session id (e.g. `a26a1e75`
+  from `a26a1e75-…`)
+
+Example:
+
+```
+Co-authored-by: Veronica <a26a1e75@minimal-agent>
+```
+
+Put the trailer on its own line at the end of the commit message (blank line
+before it, HEREDOC so the trailer is preserved).
