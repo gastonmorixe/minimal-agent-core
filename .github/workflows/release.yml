@@ -2,28 +2,32 @@ name: Release
 
 # Two kinds of release come out of this workflow:
 #
-#   * Nightly pre-releases. Every push (and same-repo PR) to dev-private / main
-#     cuts a timestamped pre-release tagged `v<version>-nightly.<UTC-stamp>`,
-#     where <version> is the current package.json version and <UTC-stamp> is
+#   * Nightly pre-releases. Every push (and same-repo PR) to main cuts a
+#     timestamped pre-release tagged `v<version>-nightly.<UTC-stamp>`, where
+#     <version> is the current package.json version and <UTC-stamp> is
 #     YYYYMMDDTHHMMSSZ (second resolution, so two pushes in the same minute do
 #     not collide). Marked as a GitHub pre-release.
 #
-#   * Stable releases. Pushing a `v*` tag (e.g. v0.2.0) cuts a normal,
-#     non-pre-release using that exact tag.
+#   * Stable releases. Pushing a `v*` tag (e.g. v0.1.0) cuts a normal,
+#     non-pre-release using that exact tag. The tag's semver (without the
+#     leading `v`) must match package.json `version` exactly.
 #
 # Both build the same source tarball with scripts/build-tarball.sh and attach it
 # plus its SHA-256 checksum. The full gate (`bun run check`) runs first; a red
 # gate blocks the release.
+#
+# Cut a stable release from the monorepo (or any clone) with:
+#   bun run version -- set 0.1.0 --targets core --tag --push
+# or, after package.json is already at 0.1.0:
+#   git tag -a v0.1.0 -m "release v0.1.0" && git push origin v0.1.0
 on:
   push:
     branches:
-      - dev-private
       - main
     tags:
       - "v*"
   pull_request:
     branches:
-      - dev-private
       - main
 
 # Serialize per ref so two quick pushes do not race on the same nightly tag.
@@ -56,7 +60,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.14"
+          bun-version: "1.4.0"
 
       - name: Install ripgrep
         run: brew install ripgrep
@@ -81,8 +85,21 @@ jobs:
             # Stable release from a pushed tag.
             TAG="${GITHUB_REF#refs/tags/}"
             LABEL="${TAG#v}"
-            PRERELEASE=false
-            NAME="minimal-agent ${TAG}"
+            # Nightly tags are created by this workflow on branch pushes; if someone
+            # pushes a pre-existing nightly tag, treat it as prerelease and skip
+            # the package.json equality check (label is not a bare semver).
+            if [[ "${LABEL}" == *"-nightly."* ]]; then
+              PRERELEASE=true
+              NAME="minimal-agent ${TAG} (nightly)"
+            else
+              if [[ "${LABEL}" != "${VERSION}" ]]; then
+                echo "stable tag ${TAG} does not match package.json version ${VERSION}" >&2
+                echo "bump package.json (bun run version -- set ${LABEL} --targets core) before tagging" >&2
+                exit 1
+              fi
+              PRERELEASE=false
+              NAME="minimal-agent ${TAG}"
+            fi
           else
             # Nightly pre-release from a branch push or same-repo PR.
             STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"

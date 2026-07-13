@@ -1,18 +1,16 @@
 name: CI
 
-# Full gate on pull requests and on direct pushes to the long-lived branches.
+# Full gate on pull requests and on direct pushes to the long-lived branch.
 # `release.yml` also runs the gate before cutting a release, so this workflow
 # stays focused on fast feedback for everyday work.
 on:
   push:
     branches:
-      - dev-private
       - main
     tags-ignore:
       - "**" # tag pushes are handled by release.yml, not here
   pull_request:
     branches:
-      - dev-private
       - main
 
 # A newer push to the same ref cancels the in-flight run.
@@ -35,7 +33,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.14"
+          bun-version: "1.4.0"
 
       - name: Install ripgrep
         run: brew install ripgrep
