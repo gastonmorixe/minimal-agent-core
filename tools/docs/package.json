@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Isolated documentation toolchain: typedoc pinned to the TypeScript 6.0 compiler API. Quarantined here so the repo root can run TypeScript 7 while typedoc keeps the 6.0 programmatic API it still requires. See README.md for why.",
   "devDependencies": {
-    "bun-types": "^1.3.14",
+    "bun-types": "catalog:",
     "typedoc": "^0.28.20",
     "typescript": "^6.0.3"
   }

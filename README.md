@@ -138,6 +138,11 @@ bun test
 (oxlint), format check, the architecture fitness tests, docs check, and the test
 suite. It stops at the first failure.
 
+This repository is a Bun workspace (`plugin-api`, `tools/docs`). Shared toolchain
+versions are declared once under `workspaces.catalog` and referenced as
+`"catalog:"` from root `devDependencies`. Note: `tools/docs` keeps its own
+TypeScript 6 pin for typedoc; only `bun-types` is taken from the catalog there.
+
 ## CLI surface
 
 Core commands:
