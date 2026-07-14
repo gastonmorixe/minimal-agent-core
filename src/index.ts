@@ -62,6 +62,7 @@ import { setGlobalEventBus } from "./bus/global-bus.ts"
 import { extractPromptFromArgs } from "./cli/extract-prompt.ts"
 import { resolveInitialModeId } from "./cli/non-interactive-defaults.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides } from "./config/config.ts"
+import { registerCompactHostCommand } from "./host/commands/compact.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { buildAgentCore } from "./host/sdk-adapters/build-agent-core.ts"
 import {
@@ -796,6 +797,9 @@ async function main() {
   // edit / clear) instead of losing their draft to the void. See
   // `extractPendingDraft` in `./session-restore.ts`.
   let pendingDraft: string | null = null
+  // Full transcript for UI replay (ignores durable compact checkpoints).
+  // Model-facing `initialMessages` may be shorter after compact folds.
+  let displayMessages: import("./llm/messages.ts").Message[] = []
   const resumeSameSid = resumeSameArg !== undefined
   if (effectiveResumeArg) {
     try {
@@ -805,7 +809,9 @@ async function main() {
         process.exit(1)
       }
       const loaded = loadSession(resumeSid)
+      // Model path: compact-aware fold. UI replay uses displayMessages.
       initialMessages = loaded.messages
+      displayMessages = loaded.displayMessages
       pendingDraft = loaded.pendingDraft
       // Build the tool_use_id → ts(ms) lookup for the replay time-hint.
       // We use AssistantRecord.ts because that's the moment the assistant
@@ -987,6 +993,12 @@ async function main() {
     toolTimeTracker,
     systemPromptOverrides: opts.systemPromptOverrides,
   })
+  // Host slash commands that need a live agent (not plugin-declared).
+  // Must run after Agent construction so `/compact` appears in
+  // listCommands / slash-menu and dispatches through CommandRegistry.
+  if (hasPlugins) {
+    registerCompactHostCommand(loader, agent)
+  }
   // Point the ModelInfo provider at the agent's live model from here on.
   getLiveModelId = () => agent.getModel()
 
@@ -1026,18 +1038,21 @@ async function main() {
   // the user sees a coherent "you're resuming session X, here's your
   // unsent prompt" story instead of an unexplained populated editor.
   const isInteractiveResume = resumeSid && !args.includes("--prompt")
+  // Replay the FULL display history (not the compact-aware model path)
+  // so the user still sees pre-compact turns in scrollback.
+  const resumeReplayMessages = displayMessages.length > 0 ? displayMessages : initialMessages
   const shouldEmitResumeBlock =
-    isInteractiveResume && (initialMessages.length > 0 || pendingDraft !== null)
+    isInteractiveResume && (resumeReplayMessages.length > 0 || pendingDraft !== null)
   if (shouldEmitResumeBlock) {
     const stdoutSink = { write: (s: string) => process.stdout.write(s) }
     stdoutSink.write(
       buildResumeHeader({
         sid: resumeSid as string,
-        turns: initialMessages.length,
+        turns: resumeReplayMessages.length,
         model: selectedModel,
       }),
     )
-    if (initialMessages.length > 0) {
+    if (resumeReplayMessages.length > 0) {
       // Build the tool presentation map (icon + color) for replay. Mirror
       // the live agent's `toolPresentation` construction in
       // `src/agent.ts`: built-ins come from `TOOL_DEFINITIONS`, plugin
@@ -1066,7 +1081,7 @@ async function main() {
           if (pres && !toolPresentation.has(alias)) toolPresentation.set(alias, pres)
         }
       }
-      await replayToScrollback(initialMessages, stdoutSink, {
+      await replayToScrollback(resumeReplayMessages, stdoutSink, {
         modeManager,
         formatterCmd,
         toolTimeTracker,

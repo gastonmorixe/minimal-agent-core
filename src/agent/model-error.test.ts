@@ -56,6 +56,7 @@ describe("contextLengthExceededAdvice", () => {
     expect(advice).toContain("model-x")
     expect(advice).toContain("failed user turn was rolled back")
     expect(advice).toContain("Resuming the same oversized transcript will fail again")
+    expect(advice).toContain("/compact")
   })
 })
 

@@ -240,4 +240,33 @@ export interface ProviderAdapter {
    * inline base64 can skip uploading and just build a base64 source here.
    */
   prepareMedia?(item: MediaItem, model: ModelEntry, ctx: RunContext): Promise<PreparedMedia>
+
+  /**
+   * Optional remote history compaction (provider-owned unary endpoint).
+   * When present, the agent prefers this over local LLM summarization.
+   * Undefined for providers without a compact API.
+   */
+  compact?(input: CompactInput, model: ModelEntry, ctx: RunContext): Promise<CompactResult>
+}
+
+/**
+ * Input to {@link ProviderAdapter.compact}. The agent builds a
+ * {@link CanonicalRequest} snapshot of the current history; the provider
+ * maps it to its compact wire shape.
+ */
+export interface CompactInput {
+  req: CanonicalRequest
+}
+
+/**
+ * Result of a successful {@link ProviderAdapter.compact} call. Portable
+ * text messages the agent installs as the new model-facing history.
+ */
+export interface CompactResult {
+  replacementMessages: Array<{
+    role: "user" | "assistant" | "system"
+    content: string
+  }>
+  kind: "remote" | "local"
+  rawOutput?: unknown[]
 }

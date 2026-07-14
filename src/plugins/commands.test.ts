@@ -148,6 +148,53 @@ describe("loader: command registry", () => {
     // registry holds exactly one "dup".
     expect(loader.hasCommand("dup")).toBe(true)
   })
+
+  it("registerHostCommand installs a host-owned command into the menu", async () => {
+    writeCommandPlugin("p", ["loop"], HANDLER)
+    const loader = await loadFrom()
+    expect(loader.hasCommand("compact")).toBe(false)
+    const ok = loader.registerHostCommand({
+      pluginId: "host",
+      packageDir: "",
+      entryAbsolute: "",
+      spec: {
+        name: "compact",
+        summary: "Compact model-facing context",
+        handler: { type: "module", path: "", export: "default" },
+      },
+      invoke: async () => ({ kind: "notice", lines: ["compacted"] }),
+    })
+    expect(ok).toBe(true)
+    expect(loader.hasCommand("compact")).toBe(true)
+    const info = loader.listCommandInfo()
+    expect(info.find((c) => c.name === "compact")).toMatchObject({
+      name: "compact",
+      pluginId: "host",
+      summary: "Compact model-facing context",
+    })
+    expect(await loader.dispatchCommand("/compact")).toEqual({
+      kind: "notice",
+      lines: ["compacted"],
+    })
+  })
+
+  it("registerHostCommand first-wins against an existing plugin command", async () => {
+    writeCommandPlugin("p", ["compact"], HANDLER)
+    const loader = await loadFrom()
+    const ok = loader.registerHostCommand({
+      pluginId: "host",
+      packageDir: "",
+      entryAbsolute: "",
+      spec: {
+        name: "compact",
+        summary: "host compact",
+        handler: { type: "module", path: "", export: "default" },
+      },
+      invoke: async () => ({ kind: "notice", lines: ["host"] }),
+    })
+    expect(ok).toBe(false)
+    expect(loader.listCommandInfo().find((c) => c.name === "compact")?.pluginId).toBe("p")
+  })
 })
 
 describe("loader: dispatchCommand", () => {

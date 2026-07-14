@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs"
 
+import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 
 import {
@@ -28,10 +29,27 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
+ * How to fold durable `compact` records into model-facing history.
+ *
+ * - `since-last-compact` (default): drop pre-checkpoint transcript and
+ *   inject the compact's replacementMessages, then continue with later
+ *   turns. Matches live post-compact `messages[]`.
+ * - `full`: ignore compact checkpoints (force full resend, e.g. after
+ *   switching to a larger-window model). Display folds always use full.
+ * - `ignore-last-n`: skip the last N compact checkpoints (0 = same as
+ *   since-last-compact; large N approaches full).
+ */
+export type CompactSendPolicy =
+  | { mode: "since-last-compact" }
+  | { mode: "full" }
+  | { mode: "ignore-last-n"; n: number }
+
+/**
  * Fold a list of session records (in write order) into the `messages`
  * array shape Anthropic expects. Rules:
  *
- * - `meta` and `note` records are skipped (metadata only).
+ * - `meta`, `note`, `attach`, `detach`, and `compact` records are skipped
+ *   for **display** (metadata only; compact never deletes history).
  * - `user` → push `{role:"user", content}`.
  * - `assistant` → push `{role:"assistant", content}`. The block array is
  *   pushed verbatim, which means `thinking` blocks (and their
@@ -50,19 +68,91 @@ import {
  *   walked. If `to` does not match any prior user record, the rewind is
  *   logged and skipped (defensive — append-only logs can in theory carry
  *   stale ids after a manual edit).
+ *
+ * Prefer {@link foldRecordsForDisplay} / {@link foldRecordsForModel} at
+ * call sites so intent is explicit. This name remains the display fold
+ * (full history) for back-compat.
  */
 export function foldRecords(records: SessionRecord[]): Message[] {
+  return foldRecordsForDisplay(records)
+}
+
+/**
+ * Full transcript for UI / `--resume` replay. Never applies compact
+ * checkpoints: jsonl stays append-only and the user sees everything.
+ */
+export function foldRecordsForDisplay(records: SessionRecord[]): Message[] {
+  return foldRecordsInternal(records, { applyCompacts: false })
+}
+
+/**
+ * Model-facing history. By default starts from the last durable compact
+ * checkpoint (replacementMessages + later turns). Pass `policy` to force
+ * a full resend or ignore the last N compacts.
+ */
+export function foldRecordsForModel(
+  records: SessionRecord[],
+  policy: CompactSendPolicy = { mode: "since-last-compact" },
+): Message[] {
+  if (policy.mode === "full") {
+    return foldRecordsInternal(records, { applyCompacts: false })
+  }
+  if (policy.mode === "ignore-last-n") {
+    const n = Math.max(0, policy.n)
+    if (n === 0) {
+      return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 })
+    }
+    return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: n })
+  }
+  return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 })
+}
+
+function foldRecordsInternal(
+  records: SessionRecord[],
+  opts: { applyCompacts: boolean; skipLastCompacts?: number },
+): Message[] {
   const messages: Message[] = []
   // Map from UserRecord.id → index in `messages[]` of the user message it
   // produced. Maintained alongside `messages` so rewinds can find their
   // truncation point in O(1). Entries pointing past the current end of
   // `messages` are pruned on rewind.
   const userIdToIndex = new Map<string, number>()
+
+  // Which compact records to honor: all but the last `skipLastCompacts`.
+  let compactOrdinal = 0
+  let totalCompacts = 0
+  if (opts.applyCompacts) {
+    for (const r of records) {
+      if (r.kind === "compact") totalCompacts++
+    }
+  }
+  const skipLast = opts.skipLastCompacts ?? 0
+  const applyThroughOrdinal = totalCompacts - skipLast // exclusive upper bound of skipped tail
+
   for (const rec of records) {
     switch (rec.kind) {
       case "meta":
       case "note":
+      case "attach":
+      case "detach":
         continue
+      case "compact": {
+        if (!opts.applyCompacts) continue
+        const ord = compactOrdinal++
+        // Skip last N: only apply when ord < applyThroughOrdinal.
+        if (ord >= applyThroughOrdinal) continue
+        // Replace model history with the checkpoint replacement + clear
+        // user id map (pre-compact ids are no longer in messages).
+        messages.length = 0
+        userIdToIndex.clear()
+        for (const m of rec.replacementMessages) {
+          messages.push({
+            role: m.role,
+            content: [{ type: "text", text: m.content }],
+          })
+        }
+        break
+      }
       case "user": {
         const idx = messages.length
         messages.push({ role: "user", content: rec.content })
@@ -254,7 +344,7 @@ export function repairMessages(input: Message[]): Message[] {
     }
   }
 
-  // Step 4: collapse consecutive `user` messages. Two distinct
+  // Step 4: collapse consecutive `user` messages. Three distinct
   // scenarios produce a `[user, user]` adjacency in `out`:
   //
   // 1. ABANDONED PROMPT across multi-resume. Run 1 appends
@@ -280,6 +370,13 @@ export function repairMessages(input: Message[]): Message[] {
   //    the tool_results-first invariant from step 3b), then drop the
   //    earlier user's shell.
   //
+  // 3. DURABLE COMPACT CHECKPOINT. `foldRecordsForModel` injects the
+  //    compact's replacementMessages (often a single user checkpoint)
+  //    then continues with later user turns. That yields
+  //    `[user(checkpoint), user(next prompt), …]`. Dropping the
+  //    checkpoint would erase the whole point of compact. Merge the
+  //    checkpoint text into the later user as a leading text block.
+  //
   // Walks backwards so the last user in each run is naturally retained
   // and we can transfer/drop the earlier ones in place without index
   // juggling.
@@ -292,7 +389,10 @@ export function repairMessages(input: Message[]): Message[] {
       // into `prev` (the later user). Non-tool-result content from
       // `cur` is dropped : in scenario 1 it's an abandoned prompt; in
       // scenario 2 the earlier user only carries tool_results anyway.
-      if (Array.isArray(cur.content) && Array.isArray(prev.content)) {
+      // Exception: compact checkpoints (scenario 3) keep their text.
+      if (isCompactionCheckpointMessage(cur)) {
+        mergeUserContentInto(prev, cur, { keepText: true })
+      } else if (Array.isArray(cur.content) && Array.isArray(prev.content)) {
         const carriedResults = cur.content.filter((b) => b.type === "tool_result")
         if (carriedResults.length > 0) {
           // Prepend so tool_results stay first in the merged message.
@@ -302,6 +402,12 @@ export function repairMessages(input: Message[]): Message[] {
           // which is the order the API requires.
           prev.content = [...carriedResults, ...prev.content]
         }
+      } else if (Array.isArray(cur.content) && typeof prev.content === "string") {
+        // Later user is plain string; still salvage tool_results if any.
+        const carriedResults = cur.content.filter((b) => b.type === "tool_result")
+        if (carriedResults.length > 0) {
+          prev.content = [...carriedResults, { type: "text", text: prev.content }]
+        }
       }
       continue
     }
@@ -309,6 +415,49 @@ export function repairMessages(input: Message[]): Message[] {
   }
   collapsed.reverse()
   return collapsed
+}
+
+/** True when a user message is a durable/local compact checkpoint marker. */
+function isCompactionCheckpointMessage(msg: Message): boolean {
+  if (msg.role !== "user") return false
+  if (typeof msg.content === "string") return msg.content.includes(COMPACTION_USER_MARKER)
+  if (!Array.isArray(msg.content)) return false
+  return msg.content.some(
+    (b) =>
+      b.type === "text" && typeof b.text === "string" && b.text.includes(COMPACTION_USER_MARKER),
+  )
+}
+
+/**
+ * Merge earlier user content into later user for consecutive-user collapse.
+ * Always salvages tool_result blocks. When `keepText`, also keeps text
+ * blocks from the earlier message (compact checkpoints).
+ */
+function mergeUserContentInto(later: Message, earlier: Message, opts: { keepText: boolean }): void {
+  const earlierBlocks: ContentBlock[] =
+    typeof earlier.content === "string"
+      ? earlier.content.length > 0
+        ? [{ type: "text", text: earlier.content }]
+        : []
+      : Array.isArray(earlier.content)
+        ? earlier.content
+        : []
+  const toolResults = earlierBlocks.filter((b) => b.type === "tool_result")
+  const textBlocks = opts.keepText ? earlierBlocks.filter((b) => b.type === "text") : []
+  if (toolResults.length === 0 && textBlocks.length === 0) return
+
+  if (typeof later.content === "string") {
+    later.content = [
+      ...toolResults,
+      ...textBlocks,
+      ...(later.content.length > 0 ? [{ type: "text" as const, text: later.content }] : []),
+    ]
+    return
+  }
+  if (Array.isArray(later.content)) {
+    // tool_results first, then checkpoint text, then later content.
+    later.content = [...toolResults, ...textBlocks, ...later.content]
+  }
 }
 
 /** Back-compat alias for `repairMessages`. */
@@ -351,7 +500,17 @@ export function appendUserTurn(messages: Message[], content: ContentBlock[]): vo
 export interface LoadedSession {
   meta: MetaRecord | null
   records: SessionRecord[]
+  /**
+   * Model-facing history (honors durable compact checkpoints by default).
+   * This is what the agent should load into `messages[]` for the next send.
+   */
   messages: Message[]
+  /**
+   * Full display history for UI / `--resume` scrollback replay. Never
+   * applies compact checkpoints so the user still sees the full log.
+   * Not API-repaired (replay is presentation-only).
+   */
+  displayMessages: Message[]
   dropped: { line: number; reason: string }[]
   /** True when `repairTrailingTurn` removed at least one message. */
   repaired: boolean
@@ -444,10 +603,17 @@ export function extractPendingDraft(messages: Message[]): string | null {
  * sent. `dropped` and `repaired` report how lossy the load was so callers can
  * warn the user.
  */
-export function loadSessionFromText(text: string): LoadedSession {
+export function loadSessionFromText(
+  text: string,
+  opts?: { modelPolicy?: CompactSendPolicy },
+): LoadedSession {
   const { records, dropped } = parseLines(text)
   const meta = (records.find((r) => r.kind === "meta") as MetaRecord | undefined) ?? null
-  const folded = foldRecords(records)
+  // Model-facing history honors durable compact checkpoints by default so
+  // resume does not full-resend pre-compact turns. Display/replay uses the
+  // full fold so UI still shows everything.
+  const displayMessages = foldRecordsForDisplay(records)
+  const folded = foldRecordsForModel(records, opts?.modelPolicy ?? { mode: "since-last-compact" })
   const messages = repairMessages(folded)
   // "repaired" = anything changed: a message was dropped OR a message's
   // content shrank (orphan tool_result blocks filtered out).
@@ -468,7 +634,7 @@ export function loadSessionFromText(text: string): LoadedSession {
   // user message contains tool_results) is already filtered out and
   // can't be mistaken for a draft.
   const pendingDraft = extractPendingDraft(messages)
-  return { meta, records, messages, dropped, repaired, pendingDraft }
+  return { meta, records, messages, displayMessages, dropped, repaired, pendingDraft }
 }
 
 /**

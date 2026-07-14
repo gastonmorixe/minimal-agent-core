@@ -20,6 +20,14 @@ export function providerAuthToAuthResult(auth: ProviderAuth): AuthResult {
     case "api-key":
       return { type: "api-key", token: auth.key }
     case "oauth":
+      // Plan backends often carry provider-owned `baseUrl` / `headers` on
+      // ProviderAuth. The legacy TokenAuthResult shape has no fields for
+      // those, so stripping them sends compact / non-canonical paths to the
+      // public API host with a plan token → 401 → silent local compact.
+      // Keep the full ProviderAuth when present.
+      if (auth.baseUrl || auth.headers) {
+        return { type: "provider", auth }
+      }
       return {
         type: "oauth",
         token: auth.token,
