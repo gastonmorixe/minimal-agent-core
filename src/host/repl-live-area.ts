@@ -30,8 +30,9 @@ import {
 } from "../ui/scrollback-submitted-at.ts"
 
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
+import { tryRecoverContextExceeded } from "./context-exceeded-recovery.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
-import { contextLengthExceededAdvice, parseContextLengthExceededError } from "./model-error.ts"
+import { parseContextLengthExceededError } from "./model-error.ts"
 import type {
   ReplAgentLike,
   ReplCompositor,
@@ -742,12 +743,40 @@ export async function runReplLiveArea(
 
   const onSubmit = (text: string, commitLines: string[] = [], submittedAt?: Date): void => {
     if (!text.trim()) return
+    // Host-owned `/compact` fallback when the command is not in the
+    // registry (plugins disabled / registerHostCommand never ran). When
+    // registered, the normal slash-command path below handles it so the
+    // slash-menu and submit stay on one CommandRegistry.
+    {
+      const parsed = parseCommandLine(text)
+      if (
+        parsed?.name === "compact" &&
+        !(loader && loader.hasCommand("compact")) &&
+        typeof agent.compact === "function"
+      ) {
+        const submittedAtIso = (submittedAt ?? new Date()).toISOString()
+        flushQueueItemToScrollback({ text, commitLines, submittedAt: submittedAtIso })
+        void (async () => {
+          try {
+            writeNoticeLines(["Compacting context…"])
+            const stats = await agent.compact!({ reason: "manual" })
+            writeNoticeLines([
+              `✓ compact (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages`,
+            ])
+          } catch (e) {
+            writeNoticeLines([`✗ compact failed: ${e instanceof Error ? e.message : String(e)}`])
+          }
+        })()
+        return
+      }
+    }
     // Slash-command interception (REPL-scoped). A submitted line that
     // parses as `/<name>` AND names a registered command is dispatched
     // out-of-band; everything else (unknown `/foo`, pasted `/usr/bin`,
     // ordinary prose) falls through to the normal prompt queue. The
     // dispatch is async + fire-and-forget so the editor's sync submit
-    // event never blocks.
+    // event never blocks. Host commands (e.g. `/compact`) are registered
+    // into the same registry after Agent construction.
     if (loader) {
       const parsed = parseCommandLine(text)
       if (parsed && loader.hasCommand(parsed.name)) {
@@ -1398,12 +1427,20 @@ export async function runReplLiveArea(
         if (!isErrorDiagEmitted(turnError)) {
           compositor.writeStream(`\n  ${c.boldRed("error")} ${msg}\n`)
         }
+        let recovered = false
         if (parseContextLengthExceededError(msg)) {
-          compositor.writeStream(
-            `  ${c.boldYellow("!")} ${c.yellow(contextLengthExceededAdvice(agent.getModel?.()))}\n`,
-          )
+          const recovery = await tryRecoverContextExceeded(agent, msg)
+          for (const line of recovery.notices) {
+            compositor.writeStream(`  ${c.boldYellow("!")} ${c.yellow(line)}\n`)
+          }
+          if (recovery.shouldRetry && recovery.retryText) {
+            recovered = true
+            // Re-queue as a user submit so the live-area path reuses the
+            // normal turn pipeline (abort bus, formatters, scrollback).
+            enqueuePrompt(recovery.retryText, [])
+          }
         }
-        if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
+        if (!recovered && agent.rollbackPendingTurn) agent.rollbackPendingTurn()
       } else if (wroteOutput && !lastChunkEndedWithNewline) {
         // Terminate the partial response line so the next stream write (or
         // the editor's submit flush) starts at column 0. No extra blank

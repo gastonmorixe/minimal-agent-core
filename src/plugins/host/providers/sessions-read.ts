@@ -317,6 +317,8 @@ export function summarizeRecord(r: SessionRecord): string {
       return `tool_result · ${r.isError ? "ERROR" : "ok"} · id ${r.tool_use_id}`
     case "note":
       return "note"
+    case "compact":
+      return `compact · ${r.compactKind} · ${r.reason} · ${r.messagesBefore}→${r.messagesAfter}`
     case "rewind":
       return `rewind · to ${r.to} · dropped ${r.droppedCount}`
     case "attach":
@@ -342,6 +344,8 @@ export function recordBodyText(r: SessionRecord): string {
       return contentToText(r.content)
     case "note":
       return r.text
+    case "compact":
+      return r.replacementMessages.map((m) => `${m.role}: ${m.content}`).join("\n")
     case "rewind":
     case "attach":
     case "detach":

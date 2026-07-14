@@ -196,6 +196,41 @@ export interface NoteRecord {
 }
 
 /**
+ * Durable context-compaction checkpoint.
+ *
+ * Append-only. Prior user/assistant/tool_result records stay on disk forever
+ * so UI / `--resume` can still render the full transcript. Model-facing
+ * send paths fold from this checkpoint via
+ * {@link foldRecordsForModel} (default: since last compact).
+ *
+ * `replacementMessages` is the portable post-compact history the model
+ * should see as of this checkpoint (typically a checkpoint user message
+ * plus optional retained tail). Later conversation records after this
+ * line continue the model history.
+ */
+export interface CompactRecord {
+  kind: "compact"
+  ts: string
+  /** Stable id for this checkpoint (optional, for diagnostics). */
+  id?: string
+  reason: "manual" | "auto" | "exceeded"
+  /** Remote provider compact vs local prune/checkpoint. */
+  compactKind: "remote" | "local"
+  messagesBefore: number
+  messagesAfter: number
+  /**
+   * Model-facing replacement history at the compact boundary.
+   * Portable text rows (same shape as ProviderAdapter.compact output).
+   */
+  replacementMessages: Array<{
+    role: "user" | "assistant" | "system"
+    content: string
+  }>
+  /** Optional encrypted remote compaction payload (OpenAI/Codex). */
+  encryptedContent?: string
+}
+
+/**
  * Rewind marker. When folding records into the live `messages[]`, encountering
  * a rewind drops every message after the target user prompt (the prompt with
  * `id === to` is KEPT). Multiple rewinds compose: each operates on the
@@ -255,6 +290,7 @@ export type SessionRecord =
   | AssistantRecord
   | ToolResultRecord
   | NoteRecord
+  | CompactRecord
   | RewindRecord
   | AttachRecord
   | DetachRecord
@@ -309,6 +345,7 @@ function isConversationRecord(rec: SessionRecord): boolean {
     rec.kind === "assistant" ||
     rec.kind === "tool_result" ||
     rec.kind === "note" ||
+    rec.kind === "compact" ||
     rec.kind === "rewind"
   )
 }
@@ -800,6 +837,29 @@ export class SessionStore {
   /** Free-form annotation (mode change, error, manual marker). */
   appendNote(text: string, now: Date = new Date()): void {
     this.write({ kind: "note", ts: now.toISOString(), text })
+    this.hasConversation = true
+  }
+
+  /**
+   * Append a durable compact checkpoint. Does NOT delete prior history;
+   * model folds from this marker via {@link foldRecordsForModel}.
+   */
+  appendCompact(
+    rec: Omit<CompactRecord, "kind" | "ts"> & { ts?: string },
+    now: Date = new Date(),
+  ): void {
+    const row: CompactRecord = {
+      kind: "compact",
+      ts: rec.ts ?? now.toISOString(),
+      reason: rec.reason,
+      compactKind: rec.compactKind,
+      messagesBefore: rec.messagesBefore,
+      messagesAfter: rec.messagesAfter,
+      replacementMessages: rec.replacementMessages,
+    }
+    if (rec.id !== undefined) row.id = rec.id
+    if (rec.encryptedContent !== undefined) row.encryptedContent = rec.encryptedContent
+    this.write(row)
     this.hasConversation = true
   }
 

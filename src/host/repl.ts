@@ -27,9 +27,9 @@ import { PluginLoader } from "../plugins/loader.ts"
 import { PluginStream } from "../plugins/stream.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 
+import { tryRecoverContextExceeded } from "./context-exceeded-recovery.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
 import {
-  contextLengthExceededAdvice,
   parseContextLengthExceededError,
   parseModelNotFoundError,
   parseModelUnavailableError,
@@ -110,6 +110,19 @@ export interface ReplAgentLike {
    * No-op when the agent has no session store (ad-hoc runs, tests).
    */
   appendNote?(text: string): void
+  /**
+   * Optional: compact model-facing history (remote provider API or local
+   * checkpoint). Used for `/compact` and auto-recovery on
+   * `context_length_exceeded`. Shared by legacy Agent and AgentCore.
+   */
+  compact?(opts?: { reason?: "manual" | "auto" | "exceeded"; preferRemote?: boolean }): Promise<{
+    reason: "manual" | "auto" | "exceeded"
+    kind: "remote" | "local"
+    messagesBefore: number
+    messagesAfter: number
+  }>
+  /** Optional: snapshot of conversation history (for re-queue after compact). */
+  history?(): import("../llm/messages.ts").Message[]
 }
 
 export type ReplOutput = Pick<NodeJS.WriteStream, "write"> & {
@@ -432,6 +445,27 @@ export async function runRepl(
 
       if (!text.trim()) continue
 
+      // Host-owned `/compact` (shared with live-area). Manual compact of
+      // model-facing history without starting a model turn.
+      if (/^\s*\/compact(?:\s|$)/i.test(text)) {
+        if (typeof agent.compact !== "function") {
+          errOutput.write(`  ${c.boldRed("error")} /compact unavailable on this agent\n`)
+          continue
+        }
+        try {
+          errOutput.write(`  ${c.dim("compacting context…")}\n`)
+          const stats = await agent.compact({ reason: "manual" })
+          errOutput.write(
+            `  ${c.boldGreen("ok")} compact (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages\n`,
+          )
+        } catch (e) {
+          errOutput.write(
+            `  ${c.boldRed("error")} compact failed: ${e instanceof Error ? e.message : String(e)}\n`,
+          )
+        }
+        continue
+      }
+
       // Main response formatter : see `runReplLiveArea` for the full
       // rationale on per-text-block lifecycle (mdstream's `partial`
       // paragraph buffer would otherwise concatenate two unrelated
@@ -615,15 +649,42 @@ export async function runRepl(
         if (!isErrorDiagEmitted(turnError)) {
           errOutput.write(`\n  ${c.boldRed("error")} ${msg}\n`)
         }
-        // Discard the failed user turn so the next attempt doesn't send
-        // two back-to-back user messages (the API rejects that).
-        if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
 
+        // Context-window recovery: prefer auto-compact + one retry over a
+        // dead-end rollback. Shared helper with the live-area path.
+        let recovered = false
         if (parseContextLengthExceededError(msg)) {
-          errOutput.write(
-            `  ${c.boldYellow("!")} ${c.yellow(contextLengthExceededAdvice(agent.getModel?.()))}\n`,
-          )
+          const recovery = await tryRecoverContextExceeded(agent, msg)
+          for (const line of recovery.notices) {
+            errOutput.write(`  ${c.boldYellow("!")} ${c.yellow(line)}\n`)
+          }
+          if (recovery.shouldRetry && recovery.retryText) {
+            recovered = true
+            // History already rewritten by compact; re-run the pending user
+            // text once on the next loop iteration by stuffing it into the
+            // input path via a second agent.run below.
+            try {
+              const retryGen = agent.run(recovery.retryText)
+              while (true) {
+                const { done, value } = await retryGen.next()
+                if (done) break
+                if (typeof value === "string" && value.length > 0) {
+                  statusRenderer?.suspend()
+                  output.write(value)
+                }
+              }
+            } catch (retryErr) {
+              const rmsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+              errOutput.write(`\n  ${c.boldRed("error")} retry after compact failed: ${rmsg}\n`)
+              if (agent.rollbackPendingTurn) agent.rollbackPendingTurn()
+            }
+          }
         }
+
+        // Discard the failed user turn so the next attempt doesn't send
+        // two back-to-back user messages (the API rejects that). Skip when
+        // auto-compact already rewrote history for a retry.
+        if (!recovered && agent.rollbackPendingTurn) agent.rollbackPendingTurn()
 
         // Detect errors that indicate the current model selection won't
         // work for this account (unknown model, or a beta the subscription

@@ -160,6 +160,20 @@ export interface SessionPersistence {
   appendNote(text: string): void
   /** Append a rewind marker. */
   appendRewind(toMsgId: string, droppedCount: number): void
+  /**
+   * Append a durable compact checkpoint (optional on older adapters).
+   * When present, core writes `kind:"compact"` so model folds honor it
+   * on resume without deleting history.
+   */
+  appendCompact?(rec: {
+    reason: "manual" | "auto" | "exceeded"
+    compactKind: "remote" | "local"
+    messagesBefore: number
+    messagesAfter: number
+    replacementMessages: Array<{ role: "user" | "assistant" | "system"; content: string }>
+    encryptedContent?: string
+    id?: string
+  }): void
 }
 
 // ---------------------------------------------------------------------------

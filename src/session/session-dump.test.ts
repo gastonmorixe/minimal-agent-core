@@ -49,6 +49,39 @@ const mockSession: LoadedSession = {
       ],
     },
   ],
+  displayMessages: [
+    {
+      role: "user",
+      content: "Hello",
+    },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "I need to say hi",
+          signature: "sig123",
+        },
+        {
+          type: "tool_use",
+          id: "toolu_1",
+          name: "Bash",
+          input: { command: "echo hi" },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_1",
+          content: "hi",
+          is_error: false,
+        },
+      ],
+    },
+  ],
   dropped: [],
   repaired: false,
   pendingDraft: null,
@@ -83,6 +116,18 @@ const mockSessionRedacted: LoadedSession = {
   meta: null,
   records: [],
   messages: [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "",
+          signature: "very-long-signature-xyz",
+        },
+      ],
+    },
+  ],
+  displayMessages: [
     {
       role: "assistant",
       content: [

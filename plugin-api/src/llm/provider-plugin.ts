@@ -151,6 +151,24 @@ export interface ProviderValidationResult {
  * omitted from the view — a provider that needs them implements the host port
  * directly; OpenAI-compatible providers like this do not.
  */
+/**
+ * Input for optional remote history compaction. Mirrors the host
+ * `CompactInput` (plugin-api leaf slice).
+ */
+export interface CompactInput {
+  req: CanonicalRequest
+}
+
+/** Result of a successful remote compact call. */
+export interface CompactResult {
+  replacementMessages: Array<{
+    role: "user" | "assistant" | "system"
+    content: string
+  }>
+  kind: "remote" | "local"
+  rawOutput?: unknown[]
+}
+
 export interface ProviderAdapterView {
   /** Registry id, matching `ProviderPlugin.id` and `ModelView.providerId`. */
   readonly id: string
@@ -164,6 +182,15 @@ export interface ProviderAdapterView {
   run(req: CanonicalRequest, model: ModelView, ctx: RunContext): AsyncIterable<CanonicalEvent>
   /** Optional per-role sub-agent model recommendations from this provider's own catalog. */
   recommendSubagentModels?(): SubagentModelRecommendation[]
+  /**
+   * Optional remote history compaction (provider-owned unary endpoint).
+   * Undefined ⇒ host falls back to local summarization/prune.
+   */
+  compact?(
+    input: CompactInput,
+    model: ModelView,
+    ctx: RunContext,
+  ): Promise<CompactResult>
 }
 
 /**

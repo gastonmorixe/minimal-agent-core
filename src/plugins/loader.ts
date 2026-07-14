@@ -917,107 +917,42 @@ export class PluginLoader {
     return [...this.modes]
   }
 
-  /**
-   * All registered slash commands (post collision-dedupe), sorted by
-   * name for stable display. The host's command dispatcher and the
-   * `slash-menu` overlay both read this.
-   *
-   * Delegates to {@link CommandRegistry.getCommands}.
-   */
   getCommands(): ReadonlyArray<ResolvedCommand> {
     return this.commands.getCommands()
   }
-
-  /**
-   * O(1) check whether a command name is registered. The REPL uses this
-   * to decide, synchronously at submit time, whether a `/<name>` line is
-   * a command (dispatch it) or just text (queue it as a prompt).
-   *
-   * @param name - Command name without the leading slash.
-   *
-   * Delegates to {@link CommandRegistry.hasCommand}.
-   */
   hasCommand(name: string): boolean {
     return this.commands.hasCommand(name)
   }
-
-  /**
-   * Read-only metadata view of every registered command. This is the
-   * shape exposed to plugin handler contexts via `listCommands()` so the
-   * `slash-menu` overlay can render/filter without importing the loader.
-   *
-   * Delegates to {@link CommandRegistry.listCommandInfo}.
-   */
   listCommandInfo(): CommandInfo[] {
     return this.commands.listCommandInfo()
   }
-
-  /**
-   * Dispatch a submitted line as a slash command.
-   *
-   * Returns `null` when `line` is not a command line OR names an
-   * unregistered command — in both cases the host treats the text as an
-   * ordinary prompt (so pasted paths like `/usr/bin` and unknown `/foo`
-   * fall through untouched). Returns a {@link CommandResult} otherwise;
-   * a handler throw (or malformed return) is caught and surfaced as
-   * `{kind:"error"}` so a buggy command never crashes the REPL.
-   *
-   * The `opts` bag carries `cwd` (defaults to `process.cwd()`) and an
-   * optional external abort `signal` composed with the per-call timeout.
-   *
-   * @param line - Raw submitted text.
-   *
-   * Delegates to {@link CommandRegistry.dispatchCommand}.
-   */
   async dispatchCommand(
     line: string,
     opts: { cwd?: string; signal?: AbortSignal } = {},
   ): Promise<CommandResult | null> {
     return this.commands.dispatchCommand(line, opts)
   }
-
-  /** Mode id flagged `default: true`, or `null` if none. */
+  registerHostCommand(cmd: ResolvedCommand): boolean {
+    return this.commands.registerHostCommand(cmd)
+  }
   getDefaultModeId(): string | null {
     return this.defaultModeId
   }
-
-  /**
-   * Event subscriptions installed on the bus, flattened across all
-   * plugins. Useful for diagnostics and tests; not needed at runtime
-   * (the bus is the source of truth).
-   */
   getEventSubs(): ReadonlyArray<{ pluginId: string; sub: ResolvedEventSub }> {
     const out: { pluginId: string; sub: ResolvedEventSub }[] = []
-    for (const pkg of this.plugins) {
+    for (const pkg of this.plugins)
       for (const s of pkg.eventSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
-    }
     return out
   }
-
-  /**
-   * Hook subscriptions installed on the hooks facade, flattened across
-   * all plugins. Diagnostics-only — the facade is the runtime source
-   * of truth.
-   */
   getHookSubs(): ReadonlyArray<{ pluginId: string; sub: ResolvedHookSub }> {
     const out: { pluginId: string; sub: ResolvedHookSub }[] = []
-    for (const pkg of this.plugins) {
+    for (const pkg of this.plugins)
       for (const s of pkg.hookSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
-    }
     return out
   }
-
-  /**
-   * Live-area slots contributed by loaded plugins, flattened across all
-   * packages. The REPL's live-area scheduler iterates this once at start
-   * to wire periodic producers into the sticky bottom UI. Order is
-   * stable (plugin-load order, then manifest declaration order).
-   */
   getLiveAreaSlots(): ReadonlyArray<ResolvedLiveAreaSlot> {
     const out: ResolvedLiveAreaSlot[] = []
-    for (const pkg of this.plugins) {
-      for (const s of pkg.liveAreaSlots) out.push(s)
-    }
+    for (const pkg of this.plugins) for (const s of pkg.liveAreaSlots) out.push(s)
     return out
   }
 

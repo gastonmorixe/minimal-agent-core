@@ -74,7 +74,19 @@ export function contextLengthExceededAdvice(currentModel: string | undefined): s
   const modelSuffix = currentModel ? ` for ${currentModel}` : ""
   return (
     `Context window exceeded${modelSuffix}. The failed user turn was rolled back. ` +
-    "Start a fresh session, compact the transcript, or prune old history before retrying. " +
+    "Run /compact (or enable auto-compact on exceeded), start a fresh session, or prune old history before retrying. " +
     "Resuming the same oversized transcript will fail again."
   )
+}
+
+/**
+ * Whether the host should attempt auto-compact + single retry on a
+ * context-window error. Env `MINIMAL_AGENT_AUTO_COMPACT=0` disables.
+ * Default: enabled.
+ */
+export function isAutoCompactOnExceededEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.MINIMAL_AGENT_AUTO_COMPACT
+  if (raw === undefined || raw === "") return true
+  const v = raw.trim().toLowerCase()
+  return !(v === "0" || v === "false" || v === "off" || v === "no")
 }

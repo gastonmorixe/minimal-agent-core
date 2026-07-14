@@ -201,6 +201,39 @@ export class AgentCore {
   }
 
   /**
+   * Replace model-facing history in place (compaction / preflight).
+   * Shared with legacy {@link Agent} via context-compact helpers.
+   */
+  replaceMessages(next: Message[]): void {
+    // Inline to avoid a circular import at module load; the helper is pure.
+    this.messages.length = 0
+    for (const m of next) this.messages.push(m)
+  }
+
+  /**
+   * Compact model-facing history. Same contract as legacy Agent.compact:
+   * prefer provider remote compact, else local checkpoint. Shared runner
+   * in `agent/run-compact.ts`.
+   */
+  async compact(opts?: {
+    reason?: import("../agent/context-compact.ts").CompactReason
+    preferRemote?: boolean
+  }): Promise<import("../agent/context-compact.ts").CompactStats> {
+    const { runCompact } = await import("../agent/run-compact.ts")
+    return runCompact({
+      messages: this.messages,
+      model: this.model,
+      providerId: this.providerId,
+      auth: this.auth,
+      networkClient: this.networkClient,
+      reason: opts?.reason ?? "manual",
+      preferRemote: opts?.preferRemote,
+      appendNote: (text) => this.sessionPersistence?.appendNote(text),
+      appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
+    })
+  }
+
+  /**
    * Emit one structured {@link AgentEvent} to the configured sink, if any.
    *
    * Best-effort and NON-THROWING: a sink that throws must never abort the

@@ -1848,6 +1848,21 @@ export class Agent {
     return [...this.messages]
   }
 
+  /** Replace model-facing history in place (compaction / preflight). */
+  replaceMessages(next: Message[]): void {
+    this.messages.length = 0
+    for (const m of next) this.messages.push(m)
+  }
+
+  /** Compact via `runCompact` (remote prefer, local fallback + durable record). */
+  async compact(opts?: {
+    reason?: "manual" | "auto" | "exceeded"
+    preferRemote?: boolean
+  }): Promise<import("./context-compact.ts").CompactStats> {
+    const { agentCompact } = await import("./agent-compact-methods.ts")
+    return agentCompact(this as never, opts)
+  }
+
   /**
    * Build the `outputConfig` for a request from the agent's effort + output
    * schema. Returns `{ outputConfig: {...} }` to spread into a `sendFn` call,

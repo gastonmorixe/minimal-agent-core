@@ -81,17 +81,23 @@ export class CommandRegistry {
     // with a diagnostic; the rest of the plugin is unaffected.
     this.index = new Map<string, ResolvedCommand>()
     for (const cmd of commands) {
-      const name = cmd.spec.name
-      const existing = this.index.get(name)
-      if (existing) {
-        this.logger(
-          `command "/${name}" from "${cmd.pluginId}" collides with "${existing.pluginId}"; ` +
-            `keeping the first and skipping`,
-        )
-        continue
-      }
-      this.index.set(name, cmd)
+      this.install(cmd)
     }
+  }
+
+  /**
+   * Install a host-owned slash command after loader boot.
+   *
+   * Host commands are not declared in plugin manifests (they need a live
+   * agent closure, e.g. `/compact` → `agent.compact`). Register them once
+   * the agent exists so `listCommandInfo` / `hasCommand` / slash-menu /
+   * `dispatchCommand` all see the same name.
+   *
+   * Returns `true` when installed. Returns `false` and logs when the name
+   * already belongs to a plugin command (first-wins, same as load-time).
+   */
+  registerHostCommand(cmd: ResolvedCommand): boolean {
+    return this.install(cmd)
   }
 
   /**
@@ -101,6 +107,21 @@ export class CommandRegistry {
    */
   getCommands(): ReadonlyArray<ResolvedCommand> {
     return [...this.index.values()].sort((a, b) => a.spec.name.localeCompare(b.spec.name))
+  }
+
+  /** First-wins insert into the index. Shared by ctor + host registration. */
+  private install(cmd: ResolvedCommand): boolean {
+    const name = cmd.spec.name
+    const existing = this.index.get(name)
+    if (existing) {
+      this.logger(
+        `command "/${name}" from "${cmd.pluginId}" collides with "${existing.pluginId}"; ` +
+          `keeping the first and skipping`,
+      )
+      return false
+    }
+    this.index.set(name, cmd)
+    return true
   }
 
   /**
