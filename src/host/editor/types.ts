@@ -304,6 +304,21 @@ export type ParsedKey = {
 }
 
 /**
+ * A styled range over the editor buffer, used by plugins (e.g. at-mentions)
+ * via the `editor.buffer.styles` channel.
+ *
+ * Offsets are **code-point** indices into the full buffer string
+ * (`buf.toString()`, lines joined with `\n`). `\n` counts as one code point.
+ * `style` is an SGR open sequence (e.g. `\x1b[35m`); the renderer closes each
+ * run with `\x1b[0m`. Empty `spans` (or clearing) removes all highlights.
+ */
+export type BufferStyleSpan = {
+  start: number
+  end: number
+  style: string
+}
+
+/**
  * Context the editor hands to a {@link QueueKeyHandler} on every
  * queue-navigation-eligible keystroke. Lets the host decide whether to
  * claim the key without the host having to track editor buffer state.

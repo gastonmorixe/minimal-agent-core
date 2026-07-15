@@ -52,7 +52,14 @@ export const CHANNELS = [
     name: "turn.willStart",
     shape: "chain",
     permission: "hooks:turn.willStart",
-    description: "Chain hook — listeners may rewrite the user input or veto the turn.",
+    description:
+      "Chain hook fired just before a queued user prompt is handed to the model. " +
+      "Payload `{text: string}` is the raw buffer text (what the user typed). " +
+      "Listeners may return `{payload: {text}}` to rewrite the model-facing " +
+      "content (e.g. expand `@Michelle` into a peer XML tag) without changing " +
+      "scrollback commit lines, or `{halt: true}` to veto the turn. The host " +
+      "emits this from the REPL queue-drain path after shifting an item and " +
+      "before `agent.run(text)`.",
   },
   {
     name: "turn.didStart",
@@ -182,6 +189,20 @@ export const CHANNELS = [
       "and calls EditorController.setFooterLines() on the next repaint. " +
       "Mirrors the editor.buffer.set pattern. Used by overlays (slash-menu) " +
       "that want to draw without grabbing the EditorController directly.",
+  },
+  {
+    name: "editor.buffer.styles",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.buffer.styles",
+    description:
+      "Plugin → host signal to style ranges of the editor buffer (e.g. " +
+      "at-mentions). Payload `{spans: Array<{start:number, end:number, " +
+      "style: string}>}` where start/end are code-point offsets into the " +
+      "full buffer string (join lines with `\\n`), and `style` is an SGR " +
+      "open sequence (or a named token later). Empty spans clears. The host " +
+      "listens and calls EditorController.setBufferStyles() on the next " +
+      "repaint. Styles paint live input and are also baked into submit " +
+      "commitLines so scrollback keeps the highlight.",
   },
   {
     name: "editor.overlay.open",
