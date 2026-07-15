@@ -30,6 +30,32 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Feat: editor buffer style spans + `turn.willStart` model rewrite seam
+
+---
+id: "2026-07-15-editor-buffer-styles-turn-will-start"
+type: feat
+status: in-progress
+created-at: "2026-07-15T01:45:31-0400"
+updated-at: "2026-07-15T01:45:31-0400"
+---
+
+Host support for live input highlights and dual-representation user text
+(e.g. intercom `@`-mentions):
+
+- **`editor.buffer.styles` channel** (`broadcast-sync`): plugins emit
+  `{spans: [{start, end, style}]}` with code-point offsets into
+  `buf.toString()` (`\n` counts as 1). Host calls
+  `EditorController.setBufferStyles`. Empty spans clear.
+- **`EditorRenderer`**: optional `styles` / `setStyles` paint SGR around
+  matching ranges without shifting cursor or wrap math. Styles bake into
+  submit `commitLines` so scrollback keeps the highlight.
+- **`turn.willStart` chain** (payload `{text}`): REPL queue-drain emits
+  before `agent.run(text)`. Listeners may rewrite model-facing text or
+  `{halt: true}` veto. Scrollback still uses original `commitLines`.
+
+First consumer: `ma-intercom-plugin` peer `@`-mentions.
+
 ### Fix: never-give-up terminal-less recovery + thinking-aware stream idle (Grok / OpenAI Responses)
 
 ---

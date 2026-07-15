@@ -227,6 +227,67 @@ describe("EditorRenderer", () => {
   })
 })
 
+describe("EditorRenderer — buffer styles", () => {
+  const PURPLE = "\x1b[35m"
+  const RESET = "\x1b[0m"
+
+  it("styles a substring with SGR without shifting cursor column", () => {
+    const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+    const buf = new EditorBuffer()
+    // "hi @bob" — style "@bob" at code points 3..7
+    buf.insert("hi @bob")
+    const out = r.render(buf, {
+      styles: [{ start: 3, end: 7, style: PURPLE }],
+    })
+    expect(out.lines[0]).toBe(`❯ hi ${PURPLE}@bob${RESET}`)
+    // Cursor at end of "hi @bob" (7 code points) + prompt width 2 = 9
+    expect(out.cursor).toEqual({ row: 0, col: 9 })
+  })
+
+  it("preserves style across soft-wrap boundaries", () => {
+    const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "  " })
+    const buf = new EditorBuffer()
+    // 18 chars; style the whole line so both wrap chunks carry color.
+    buf.insert("123456789012345678")
+    const out = r.render(buf, {
+      columns: 10,
+      styles: [{ start: 0, end: 18, style: PURPLE }],
+    })
+    // First physical row: prompt + 8 content cells; second: 10 content.
+    // Phantom empty third row for exact-fill end-of-line.
+    expect(out.lines.length).toBe(3)
+    expect(out.lines[0]).toBe(`❯ ${PURPLE}12345678${RESET}`)
+    expect(out.lines[1]).toBe(`${PURPLE}9012345678${RESET}`)
+    // Cursor still parks on the phantom row (styles must not change col math).
+    expect(out.cursor).toEqual({ row: 2, col: 0 })
+  })
+
+  it("maps absolute multi-line offsets (\\n counts as 1)", () => {
+    const r = new EditorRenderer({ prompt: "❯ ", continuationPrompt: "· " })
+    const buf = new EditorBuffer()
+    buf.insert("ab")
+    buf.newline()
+    buf.insert("cd")
+    // Buffer string "ab\ncd": style "cd" at absolute [3, 5)
+    const out = r.render(buf, {
+      styles: [{ start: 3, end: 5, style: PURPLE }],
+    })
+    expect(out.lines[0]).toBe("❯ ab")
+    expect(out.lines[1]).toBe(`· ${PURPLE}cd${RESET}`)
+  })
+
+  it("setStyles installs defaults used when opts.styles is omitted", () => {
+    const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  " })
+    const buf = new EditorBuffer()
+    buf.insert("xyz")
+    r.setStyles([{ start: 1, end: 2, style: PURPLE }])
+    const out = r.render(buf)
+    expect(out.lines[0]).toBe(`> x${PURPLE}y${RESET}z`)
+    r.setStyles([])
+    expect(r.render(buf).lines[0]).toBe("> xyz")
+  })
+})
+
 describe("EditorRenderer — showHidden", () => {
   it("spaces become faint middle-dot glyphs", () => {
     const r = new EditorRenderer({ prompt: "> ", continuationPrompt: "  ", showHidden: true })

@@ -144,6 +144,41 @@ describe("EditorController — typing & submit", () => {
     ctrl.stop()
   })
 
+  it("setBufferStyles paints live input and clears on submit", () => {
+    const { ctrl, stdin, compositor } = make()
+    const submits: { text: string; commitLines: string[] }[] = []
+    ctrl.on("submit", (text, commitLines) => submits.push({ text, commitLines: commitLines ?? [] }))
+    ctrl.start()
+    stdin.send("hi @bob")
+    // Style "@bob" at code points 3..7
+    const style = "\x1b[35m"
+    ctrl.setBufferStyles([{ start: 3, end: 7, style }])
+    expect(compositor.last().lines[0]).toBe(`> hi ${style}@bob\x1b[0m`)
+    // Shallow-dedup: identical re-set is a no-op (still painted).
+    ctrl.setBufferStyles([{ start: 3, end: 7, style }])
+    expect(ctrl.getBufferStyles()).toEqual([{ start: 3, end: 7, style }])
+    stdin.send("\r")
+    expect(submits.length).toBe(1)
+    expect(submits[0]!.text).toBe("hi @bob")
+    // commitLines keep the style so scrollback stays highlighted.
+    expect(submits[0]!.commitLines).toEqual([`> hi ${style}@bob\x1b[0m`])
+    // Styles cleared after submit.
+    expect(ctrl.getBufferStyles()).toEqual([])
+    expect(compositor.last().lines).toEqual(["> "])
+    ctrl.stop()
+  })
+
+  it("setBuffer clears buffer styles", () => {
+    const { ctrl, stdin } = make()
+    ctrl.start()
+    stdin.send("hello")
+    ctrl.setBufferStyles([{ start: 0, end: 5, style: "\x1b[34m" }])
+    expect(ctrl.getBufferStyles().length).toBe(1)
+    ctrl.setBuffer("other")
+    expect(ctrl.getBufferStyles()).toEqual([])
+    ctrl.stop()
+  })
+
   it("Enter on blank does not emit submit and just clears any whitespace", () => {
     const { ctrl, stdin } = make()
     const submits: string[] = []

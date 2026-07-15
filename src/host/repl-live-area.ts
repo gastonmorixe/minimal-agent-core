@@ -41,6 +41,7 @@ import type {
   ReplOutput,
   StatusController,
 } from "./repl.ts"
+import { applyTurnWillStart, registerEditorPluginHooks } from "./repl-editor-hooks.ts"
 import { printGoodbye } from "./ui/chrome/goodbye-banner.ts"
 import { buildModeChangeChip } from "./ui/chrome/mode-change-chip.ts"
 import { buildPendingModeChangeDecoration } from "./ui/chrome/mode-change-pending-decoration.ts"
@@ -222,104 +223,9 @@ export async function runReplLiveArea(
   // at end-of-buffer; plugins that need finer cursor placement should
   // use the `editor.key` payload's `result.cursor` instead.
   //
-  // No-op when no plugins are loaded; the listener never fires.
-  if (loader) {
-    loader.hooks().on(
-      "editor.buffer.set",
-      (payload: unknown) => {
-        if (!payload || typeof payload !== "object") return
-        const p = payload as { text?: unknown }
-        if (typeof p.text !== "string") return
-        if (typeof editor.setBuffer === "function") editor.setBuffer(p.text)
-      },
-      { caller: "agent", priority: 5000, label: "agent:editor.buffer.set" },
-    )
-
-    // Host-side listener for `editor.footer.set` — overlays (slash-menu
-    // is the first user) paint into the editor's footer band by emitting
-    // on this channel. Payload `{lines: string[]}`. Empty array clears.
-    //
-    // CRITICAL: route to the dedicated `overlay` footer layer, NOT the
-    // default layer. The default layer is owned by the FooterAggregator
-    // (quota row + diagnostic surface) — if we wrote there, the next
-    // quota-status tick would overwrite the menu mid-typing. The overlay
-    // layer sits ABOVE default in z-order, so an overlay obscures the
-    // quota row while open and the quota row pops back when the overlay
-    // clears. ARMED (Ctrl+C confirm) still wins over both.
-    loader.hooks().on(
-      "editor.footer.set",
-      (payload: unknown) => {
-        if (!payload || typeof payload !== "object") return
-        const p = payload as { lines?: unknown }
-        if (!Array.isArray(p.lines)) return
-        if (!p.lines.every((l) => typeof l === "string")) return
-        const lines = p.lines as string[]
-        // Dynamic import keeps the agent free of editor-controller
-        // module references when no plugins ever emit on this channel.
-        import("./editor-controller.ts")
-          .then(({ FOOTER_LAYER_OVERLAY, FOOTER_PRIORITY_OVERLAY }) => {
-            const e = editor as unknown as {
-              setFooterLayer?: (id: string, lines: string[], opts?: { priority?: number }) => void
-              clearFooterLayer?: (id: string) => void
-            }
-            if (lines.length === 0) {
-              if (typeof e.clearFooterLayer === "function") {
-                e.clearFooterLayer(FOOTER_LAYER_OVERLAY)
-              }
-              return
-            }
-            if (typeof e.setFooterLayer === "function") {
-              e.setFooterLayer(FOOTER_LAYER_OVERLAY, lines, {
-                priority: FOOTER_PRIORITY_OVERLAY,
-              })
-            } else if (typeof editor.setFooterLines === "function") {
-              // Back-compat path: older editor without layer support.
-              editor.setFooterLines(lines)
-            }
-          })
-          .catch(() => {
-            // Best-effort fallback when the import fails.
-            if (typeof editor.setFooterLines === "function") {
-              editor.setFooterLines(lines)
-            }
-          })
-      },
-      { caller: "agent", priority: 5000, label: "agent:editor.footer.set" },
-    )
-
-    // Host-side listeners for `editor.overlay.open` / `editor.overlay.close`
-    // — interactive command TUIs (/config, /usage) take MODAL ownership of
-    // the input line. While owned the editor hides the prompt row + cursor,
-    // blocks submit (so the typed `/cmd` can't leak to scrollback), and
-    // routes every key to the overlay's `editor.key` handler. Payload
-    // `{owner}` is the opening plugin's id; close is owner-checked so a stale
-    // handler can't tear down a different overlay. No-op on editors without
-    // the methods (older host / non-live REPL).
-    const overlayCapable = editor as unknown as {
-      openOverlay?: (owner: string) => void
-      closeOverlay?: (owner: string) => void
-    }
-    loader.hooks().on(
-      "editor.overlay.open",
-      (payload: unknown) => {
-        if (!payload || typeof payload !== "object") return
-        const owner = (payload as { owner?: unknown }).owner
-        if (typeof owner !== "string" || owner.length === 0) return
-        overlayCapable.openOverlay?.(owner)
-      },
-      { caller: "agent", priority: 5000, label: "agent:editor.overlay.open" },
-    )
-    loader.hooks().on(
-      "editor.overlay.close",
-      (payload: unknown) => {
-        if (!payload || typeof payload !== "object") return
-        const owner = (payload as { owner?: unknown }).owner
-        if (typeof owner !== "string" || owner.length === 0) return
-        overlayCapable.closeOverlay?.(owner)
-      },
-      { caller: "agent", priority: 5000, label: "agent:editor.overlay.close" },
-    )
-  }
+  // Plugin → editor bridge (buffer.set, footer overlay, buffer.styles,
+  // modal overlay open/close). Extracted so this file stays under max-lines.
+  registerEditorPluginHooks(loader ?? null, editor)
 
   // Build the askUser callback for the agent's preflight pipeline.
   //
@@ -957,7 +863,18 @@ export async function runReplLiveArea(
       // Acceptable: the pre-store behavior lost every queued item on
       // every exit. See queue-store.ts module doc for the full rationale.
       persistQueue()
-      const text = item.text
+      // Model-facing rewrite (e.g. intercom at-mentions → peer XML).
+      // Scrollback still uses item.commitLines (human form).
+      let text = item.text
+      {
+        const will = await applyTurnWillStart(loader ?? null, text)
+        text = will.text
+        if (will.halted) {
+          flushQueueItemToScrollback(item)
+          renderDecoration()
+          continue
+        }
+      }
       // Flush the deferred scrollback commit NOW (the editor stopped
       // writing at submit time : Bug 393). For queued items this is
       // when they first appear in scrollback; for direct submits it's

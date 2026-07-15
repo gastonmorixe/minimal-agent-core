@@ -24,6 +24,7 @@ import {
   displayWidth,
   wrapRows,
 } from "../../../terminal/term-width.ts"
+import type { BufferStyleSpan } from "../../editor/types.ts"
 
 export interface EditorRendererOptions {
   prompt: string
@@ -47,6 +48,13 @@ export interface EditorRenderOptions {
    * right edge by the terminal.
    */
   columns?: number
+  /**
+   * Absolute buffer style spans (code-point offsets into `buf.toString()`,
+   * with `\n` counting as 1). When omitted, uses the last value passed to
+   * {@link EditorRenderer.setStyles} (default empty). Styles are ANSI-only
+   * and never affect cursor column math or wrap width.
+   */
+  styles?: readonly BufferStyleSpan[]
 }
 
 /**
@@ -61,6 +69,8 @@ export class EditorRenderer {
   private promptWidth: number
   private continuationPromptWidth: number
   private showHidden: boolean
+  /** Last styles set via {@link setStyles}; overridden per-render by opts.styles. */
+  private styles: readonly BufferStyleSpan[] = []
 
   constructor(opts: EditorRendererOptions) {
     this.prompt = opts.prompt
@@ -76,6 +86,15 @@ export class EditorRenderer {
    */
   setShowHidden(v: boolean): void {
     this.showHidden = v
+  }
+
+  /**
+   * Install buffer style spans for subsequent {@link render} calls.
+   * Pass `[]` to clear. Does not repaint on its own — the controller
+   * owns that. Per-call `opts.styles` on {@link render} overrides this.
+   */
+  setStyles(spans: readonly BufferStyleSpan[]): void {
+    this.styles = spans
   }
 
   /**
@@ -145,6 +164,11 @@ export class EditorRenderer {
     )
     const cols = opts?.columns
     const wrap = typeof cols === "number" && cols > 0
+    const styles = opts?.styles ?? this.styles
+    // Absolute code-point offsets of each logical line start in buf.toString().
+    // Built only when styles are present so the no-style path stays allocation-free.
+    const lineAbsStarts =
+      styles.length > 0 ? buildLineAbsStarts(buf.lines) : (null as number[] | null)
 
     const lines: string[] = []
     let cursorRow = 0
@@ -157,11 +181,23 @@ export class EditorRenderer {
       const prompt = isFirstLogical ? this.prompt : this.continuationPrompt
       const promptW = isFirstLogical ? this.promptWidth : this.continuationPromptWidth
       const lineText = buf.lines[logical]
+      const absStart = lineAbsStarts ? lineAbsStarts[logical]! : 0
+      const paint = (text: string, contentStartCp: number): string => {
+        if (!lineAbsStarts || styles.length === 0) return text
+        return applyStylesToText(text, absStart + contentStartCp, styles)
+      }
 
       if (!wrap) {
-        const displayText = this.showHidden
-          ? markHidden(lineText) + (logical < totalRows - 1 ? HIDDEN_NEWLINE : "")
-          : lineText
+        // show-hidden + styles: paint SGR around plain text, then swap
+        // space/tab code points for dim glyphs (markHidden leaves ESC runs
+        // alone). Cursor math still uses plain buf.col / displayWidth.
+        let displayText: string
+        if (this.showHidden) {
+          displayText =
+            markHidden(paint(lineText, 0)) + (logical < totalRows - 1 ? HIDDEN_NEWLINE : "")
+        } else {
+          displayText = paint(lineText, 0)
+        }
         lines.push(prompt + displayText)
         if (logical === buf.row) {
           cursorRow = i
@@ -172,20 +208,20 @@ export class EditorRenderer {
       }
 
       const startPhysical = lines.length
+      // wrapContent returns plain chunks; track code-point offsets so styles
+      // re-apply across wrap boundaries (each chunk paints its own SGR runs).
       const chunks = wrapContent(lineText, cols, promptW)
-      if (this.showHidden) {
-        // Apply show-hidden transform AFTER wrapping so width calculations
-        // remain correct (wrapping uses the original text's display widths).
-        const isNonLastLine = logical < totalRows - 1
-        for (let k = 0; k < chunks.length; k++) {
-          const transformed =
-            markHidden(chunks[k]) + (isNonLastLine && k === chunks.length - 1 ? HIDDEN_NEWLINE : "")
-          lines.push((k === 0 ? prompt : "") + transformed)
+      let contentCp = 0
+      const isNonLastLine = logical < totalRows - 1
+      for (let k = 0; k < chunks.length; k++) {
+        const chunk = chunks[k]!
+        let painted = paint(chunk, contentCp)
+        if (this.showHidden) {
+          painted =
+            markHidden(painted) + (isNonLastLine && k === chunks.length - 1 ? HIDDEN_NEWLINE : "")
         }
-      } else {
-        for (let k = 0; k < chunks.length; k++) {
-          lines.push((k === 0 ? prompt : "") + chunks[k])
-        }
+        lines.push((k === 0 ? prompt : "") + painted)
+        contentCp += codePointCount(chunk)
       }
 
       if (logical === buf.row) {
@@ -404,6 +440,68 @@ function wrapContent(text: string, cols: number, firstPromptW: number): string[]
   }
   if (result.length === 0 || cur.length > 0) result.push(cur)
   return result
+}
+
+/**
+ * Absolute code-point offset of each logical line start in `lines.join("\\n")`.
+ * Line i starts at the sum of prior line code-point lengths, each plus one for
+ * the newline separator (except after the last line).
+ */
+function buildLineAbsStarts(lines: readonly string[]): number[] {
+  const starts: number[] = new Array(lines.length)
+  let abs = 0
+  for (let i = 0; i < lines.length; i++) {
+    starts[i] = abs
+    abs += codePointCount(lines[i]!) + (i < lines.length - 1 ? 1 : 0)
+  }
+  return starts
+}
+
+/**
+ * Paint SGR open/close around runs of `text` whose absolute code-point range
+ * (starting at `absStart`) intersects any of `styles`. Last-wins when spans
+ * overlap. Resets with `\x1b[0m` after each styled run so subsequent plain
+ * text is unstyled. Empty text is returned unchanged.
+ *
+ * Styles never change display width: only ANSI is inserted.
+ */
+function applyStylesToText(
+  text: string,
+  absStart: number,
+  styles: readonly BufferStyleSpan[],
+): string {
+  if (text.length === 0 || styles.length === 0) return text
+  // Resolve which style (if any) covers each code point. Later spans win.
+  const cps: string[] = []
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i)!
+    const ch = String.fromCodePoint(cp)
+    cps.push(ch)
+    i += ch.length
+  }
+  const n = cps.length
+  const styleAt: (string | null)[] = new Array(n).fill(null)
+  for (const span of styles) {
+    if (typeof span.start !== "number" || typeof span.end !== "number") continue
+    if (typeof span.style !== "string" || span.style.length === 0) continue
+    if (!(span.end > span.start)) continue
+    const from = Math.max(0, span.start - absStart)
+    const to = Math.min(n, span.end - absStart)
+    if (from >= to) continue
+    for (let i = from; i < to; i++) styleAt[i] = span.style
+  }
+  let out = ""
+  let i = 0
+  while (i < n) {
+    const s = styleAt[i]
+    let j = i + 1
+    while (j < n && styleAt[j] === s) j++
+    const run = cps.slice(i, j).join("")
+    if (s) out += s + run + "\x1b[0m"
+    else out += run
+    i = j
+  }
+  return out
 }
 
 /**

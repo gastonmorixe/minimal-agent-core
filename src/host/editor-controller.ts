@@ -30,6 +30,7 @@ import { truncateDisplayWidth } from "../terminal/term-width.ts"
 
 import { EditorKeyDispatcher, type KeyDispatchHost } from "./editor/key-dispatch.ts"
 import {
+  type BufferStyleSpan,
   type CompositorLike,
   type EditorControllerOptions,
   type EditorKeyPayload,
@@ -61,6 +62,7 @@ import { c } from "./ui/style/ansi.ts"
 // so external consumers (commands, tests, plugins) keep their existing
 // `import { ... } from "./editor-controller.ts"` paths.
 export type {
+  BufferStyleSpan,
   CompositorLike,
   EditorControllerOptions,
   EditorKeyPayload,
@@ -920,6 +922,13 @@ export class EditorController extends EventEmitter {
    * just slots them into the live area and bumps the cursor row offset.
    */
   private decorationLines: string[] = []
+  /**
+   * Plugin-supplied style spans over the full buffer string (code-point
+   * offsets, `\n` counts as 1). Fed to the renderer for live paint and for
+   * submit commitLines so scrollback keeps at-mention (etc.) highlights.
+   * Cleared on buffer clear / submit. See `editor.buffer.styles`.
+   */
+  private bufferStyles: BufferStyleSpan[] = []
 
   /**
    * Active modal-overlay owner id, or `null` when the prompt is live.
@@ -964,6 +973,8 @@ export class EditorController extends EventEmitter {
     // overlay owns the screen now; the prompt is hidden, so leaving stale
     // bytes in `buf` would only resurface on close.
     this.buf.clear()
+    this.bufferStyles = []
+    this.renderer.setStyles([])
     this.viewportTop = 0
     if (this.started) this.repaint()
   }
@@ -978,6 +989,8 @@ export class EditorController extends EventEmitter {
     if (this.overlayOwner === null || this.overlayOwner !== owner) return
     this.overlayOwner = null
     this.buf.clear()
+    this.bufferStyles = []
+    this.renderer.setStyles([])
     this.viewportTop = 0
     if (this.started) this.repaint()
   }
@@ -1006,6 +1019,9 @@ export class EditorController extends EventEmitter {
    */
   setBuffer(text: string): void {
     this.buf.clear()
+    // Replacing the buffer invalidates absolute style offsets; drop them.
+    this.bufferStyles = []
+    this.renderer.setStyles([])
     if (text.length > 0) {
       const lines = text.split("\n")
       for (let i = 0; i < lines.length; i++) {
@@ -1014,6 +1030,32 @@ export class EditorController extends EventEmitter {
       }
     }
     if (this.started) this.repaint()
+  }
+
+  /**
+   * Install buffer style spans for live paint (and for the next submit's
+   * commitLines). Shallow-dedup: identical start/end/style arrays are a
+   * no-op. Pass `[]` to clear. See `editor.buffer.styles` and
+   * {@link BufferStyleSpan}.
+   */
+  setBufferStyles(spans: BufferStyleSpan[]): void {
+    const next = Array.isArray(spans) ? spans : []
+    const prev = this.bufferStyles
+    const same =
+      prev.length === next.length &&
+      prev.every(
+        (p, i) =>
+          p.start === next[i]!.start && p.end === next[i]!.end && p.style === next[i]!.style,
+      )
+    if (same) return
+    this.bufferStyles = next.map((s) => ({ start: s.start, end: s.end, style: s.style }))
+    this.renderer.setStyles(this.bufferStyles)
+    if (this.started) this.repaint()
+  }
+
+  /** Current buffer style spans (copy). For tests / diagnostics. */
+  getBufferStyles(): BufferStyleSpan[] {
+    return this.bufferStyles.map((s) => ({ ...s }))
   }
 
   /**
@@ -1231,9 +1273,12 @@ export class EditorController extends EventEmitter {
         }
       }
       try {
+        // Bake current styles into commitLines so scrollback keeps the
+        // purple/blue mention (etc.) styling the user saw while typing.
         const rendered = this.renderer.render(this.buf, {
           firstRow: 0,
           rowCount: this.buf.lines.length,
+          styles: this.bufferStyles,
         })
         commitLines = rendered.lines
       } finally {
@@ -1241,6 +1286,8 @@ export class EditorController extends EventEmitter {
       }
     }
     this.buf.clear()
+    this.bufferStyles = []
+    this.renderer.setStyles([])
     this.viewportTop = 0
     this.repaint()
     this.emit("submit", text, commitLines, new Date())
@@ -1369,6 +1416,7 @@ export class EditorController extends EventEmitter {
       firstRow: vTop,
       rowCount: editorWindow,
       columns: cols,
+      styles: this.bufferStyles,
     })
 
     // Build the scroll indicator when content is hidden above the viewport.
