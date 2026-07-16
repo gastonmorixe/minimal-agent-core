@@ -187,6 +187,155 @@ describe("withStreamWatchdog", () => {
     expect(caught?.streamErrorType).toBe("stream_idle")
   }, 10_000)
 
+  it("pre-stream: hangs with no body activity until responseHeadersTimeoutMs (not mid-stream idle)", async () => {
+    // MA-882492: attempt start with zero events must NOT use 30s mid-stream idle.
+    let stall: { reason: string; stallPhase?: string; stallSubPhase?: string } | undefined
+    const hang = (_signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        await new Promise<void>((_resolve, reject) => {
+          if (_signal.aborted) return reject(abortError())
+          _signal.addEventListener("abort", () => reject(abortError()), { once: true })
+        })
+      })()
+
+    const t0 = Date.now()
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(hang, {
+          responseHeadersTimeoutMs: 50,
+          streamIdleTimeoutMs: 30_000,
+          attemptHardTimeoutMs: 30_000,
+          onStall: (i) => {
+            stall = i
+          },
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    const elapsed = Date.now() - t0
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(caught?.stallPhase).toBe("pre-stream")
+    expect(caught?.stallSubPhase).toBe("pre-headers")
+    expect(stall?.stallPhase).toBe("pre-stream")
+    expect(elapsed).toBeGreaterThanOrEqual(900)
+    // Must not wait for multi-second mid-stream default.
+    expect(elapsed).toBeLessThan(5000)
+  }, 15_000)
+
+  it("pre-stream: headers-wait-body sub-phase when markHeadersReceived without body bytes", async () => {
+    let phaseCtl: { markHeadersReceived: () => void; markBodyActivity: () => void } | undefined
+    const hang = (_signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        phaseCtl?.markHeadersReceived()
+        await new Promise<void>((_resolve, reject) => {
+          if (_signal.aborted) return reject(abortError())
+          _signal.addEventListener("abort", () => reject(abortError()), { once: true })
+        })
+      })()
+
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(hang, {
+          responseHeadersTimeoutMs: 50,
+          streamIdleTimeoutMs: 30_000,
+          attemptHardTimeoutMs: 30_000,
+          onBindPhaseControl: (ctl) => {
+            phaseCtl = ctl
+          },
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(caught?.stallPhase).toBe("pre-stream")
+    expect(caught?.stallSubPhase).toBe("headers-wait-body")
+  }, 15_000)
+
+  it("markBodyActivity ends pre-stream and arms mid-stream idle (byte-level, no CanonicalEvent)", async () => {
+    let phaseCtl: { markHeadersReceived: () => void; markBodyActivity: () => void } | undefined
+    const makeStream = (signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        phaseCtl?.markHeadersReceived()
+        // Simulate SSE comment/keepalive bytes with no translated CanonicalEvent.
+        phaseCtl?.markBodyActivity()
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) return reject(abortError())
+          signal.addEventListener("abort", () => reject(abortError()), { once: true })
+        })
+      })()
+
+    let caught: WatchdogError | undefined
+    try {
+      await collect(
+        withStreamWatchdog(makeStream, {
+          responseHeadersTimeoutMs: 30_000,
+          streamIdleTimeoutMs: 50,
+          attemptHardTimeoutMs: 30_000,
+          onBindPhaseControl: (ctl) => {
+            phaseCtl = ctl
+          },
+        }),
+      )
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(caught?.stallPhase).toBe("mid-stream")
+  }, 15_000)
+
+  it("markBodyActivity refreshes mid-stream idle on subsequent raw chunks", async () => {
+    let phaseCtl: { markHeadersReceived: () => void; markBodyActivity: () => void } | undefined
+    const makeStream = (signal: AbortSignal): AsyncIterable<CanonicalEvent> =>
+      (async function* () {
+        phaseCtl?.markBodyActivity()
+        // Keepalive bytes every 400ms — longer than a naive 50ms idle if not refreshed.
+        for (let i = 0; i < 4; i++) {
+          await new Promise((r) => setTimeout(r, 400))
+          if (signal.aborted) throw abortError()
+          phaseCtl?.markBodyActivity()
+        }
+        yield START
+        yield { type: "message_stop" } satisfies CanonicalEvent
+      })()
+
+    const got = await collect(
+      withStreamWatchdog(makeStream, {
+        responseHeadersTimeoutMs: 30_000,
+        streamIdleTimeoutMs: 500,
+        attemptHardTimeoutMs: 30_000,
+        onBindPhaseControl: (ctl) => {
+          phaseCtl = ctl
+        },
+      }),
+    )
+    expect(got.some((e) => e.type === "message_stop")).toBe(true)
+  }, 15_000)
+
+  it("mid-stream idle still trips after CanonicalEvents when silence follows", async () => {
+    let stall: { stallPhase?: string } | undefined
+    const run = withStreamWatchdog(attempt([START], { stall: true }), {
+      streamIdleTimeoutMs: 50,
+      responseHeadersTimeoutMs: 30_000,
+      attemptHardTimeoutMs: 30_000,
+      onStall: (i) => {
+        stall = i
+      },
+    })
+    let caught: WatchdogError | undefined
+    try {
+      await collect(run)
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(caught?.stallPhase).toBe("mid-stream")
+    expect(stall?.stallPhase).toBe("mid-stream")
+  }, 10_000)
+
   it("prefers stream_idle over a synthetic terminal-less drain after abort", async () => {
     // Reproduces 113921b7: watchdog aborts → body drains quietly → adapter
     // would yield stream_closed_without_terminal. Watchdog must throw

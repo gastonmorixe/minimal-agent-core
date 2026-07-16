@@ -184,15 +184,17 @@ export interface SendOptions {
   attemptHardTimeoutMs?: number
 
   /**
-   * Upper bound, in ms, on the request-send + wait-for-response-headers
-   * phase (everything BEFORE the first byte of the response body). The
-   * idle watchdog only arms once we start reading the body, so without
-   * this knob a stalled upload, or a server that accepts the POST but never
-   * returns headers, hangs forever with nothing to abort it.
+   * Pre-stream deadline in ms: attempt start → first **response body activity**
+   * (non-empty body chunk; CanonicalEvents are a fallback). Covers request
+   * send, upload, wait-for-headers, and headers→first-byte. Wired into
+   * `withStreamWatchdog` (MA-882492 / legacy `65ab8ca`). Mid-stream idle
+   * (`streamIdleTimeoutMs`) arms only after first body activity — not at
+   * attempt start.
    *
-   * Defaults to `120_000` (2 minutes). When this deadline trips, the
-   * attempt is aborted and the outer retry loop tries again against a fresh
-   * connection. Set lower in tests for fast deterministic coverage.
+   * Defaults to `120_000` (2 minutes), **caller-overridable** (tests lower
+   * it). When this deadline trips the attempt is aborted with tagged
+   * `stream_idle` + `stallPhase: "pre-stream"` so the outer retry loop uses
+   * a polite pre-stream backoff (not the mid-stream sub-second thrash).
    */
   responseHeadersTimeoutMs?: number
 

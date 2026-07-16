@@ -35,6 +35,13 @@
  * the fast curve. (The bridge usually salvages completed tools / partial
  * text without throwing; this path is defense-in-depth.)
  *
+ * # Pre-stream stalls (MA-882492)
+ *
+ * When `stream_idle` carries `stallPhase: "pre-stream"` (upload / TTFB /
+ * headers, no body yet), retry uses a multi-second floor (`pre-stream` curve)
+ * so multi-MB POSTs are not re-fired every ~100ms. Mid-stream idle stays on
+ * the fast curve. Phase is read from the thrown error, not diag alone.
+ *
  * @module llm/transport/retry
  */
 
@@ -97,12 +104,21 @@ const SLOW_RETRY_TYPES: ReadonlySet<string> = new Set(["rate_limit_error"])
 
 const RETRY_FAST_BASE_DELAY_MS = 200
 const RETRY_SLOW_BASE_DELAY_MS = 30_000
+/** Polite floor for pre-stream stalls (upload/TTFB) so multi-MB bodies are not re-POSTed every ~100ms (MA-882492). */
+const RETRY_PRE_STREAM_BASE_DELAY_MS = 2_000
 const RETRY_MAX_DELAY_MS = 5 * 60_000
 const RETRY_SUSTAINED_WARN_EVERY = 12
 
 export interface RetryOptions {
   /** Caller cancellation. Aborts the backoff sleep and stops the loop. */
   signal?: AbortSignal
+}
+
+/** Structured stall phase from {@link WatchdogError} (retry policy must read the error, not diag). */
+function readStallPhase(err: unknown): "pre-stream" | "mid-stream" | undefined {
+  const p = (err as { stallPhase?: string } | null)?.stallPhase
+  if (p === "pre-stream" || p === "mid-stream") return p
+  return undefined
 }
 
 /** Format a ms duration as `12s` / `1m 47s` / `2h 13m` / `1d 4h`. */
@@ -258,11 +274,22 @@ export async function* withRetry(
       }
 
       const slow = SLOW_RETRY_TYPES.has(streamErrType)
-      const base = slow ? RETRY_SLOW_BASE_DELAY_MS : RETRY_FAST_BASE_DELAY_MS
+      const stallPhase = readStallPhase(err)
+      // Pre-stream (upload/TTFB) stalls use a multi-second floor so large
+      // identical POSTs are not hammered on the fast 200ms curve (MA-882492).
+      const preStream = stallPhase === "pre-stream" && streamErrType === "stream_idle"
+      const base = slow
+        ? RETRY_SLOW_BASE_DELAY_MS
+        : preStream
+          ? RETRY_PRE_STREAM_BASE_DELAY_MS
+          : RETRY_FAST_BASE_DELAY_MS
       const cappedExp = Math.min(attempt - 1, 16)
       const ideal = Math.min(RETRY_MAX_DELAY_MS, base * 2 ** cappedExp)
-      const delayMs = Math.floor(Math.random() * ideal)
+      // Pre-stream: floor at base (2s) so jitter cannot collapse to sub-second thrash.
+      const raw = Math.floor(Math.random() * ideal)
+      const delayMs = preStream ? Math.max(RETRY_PRE_STREAM_BASE_DELAY_MS, raw) : raw
       const nextAttempt = attempt + 1
+      const curve = slow ? "slow" : preStream ? "pre-stream" : "fast"
 
       diag.warn(
         "api.retry",
@@ -272,7 +299,8 @@ export async function* withRetry(
           attempt: nextAttempt,
           "delay-ms": delayMs,
           "elapsed-ms": elapsedMs,
-          curve: slow ? "slow" : "fast",
+          curve,
+          ...(stallPhase ? { phase: stallPhase } : {}),
         },
       )
 
@@ -285,7 +313,8 @@ export async function* withRetry(
             retries: attempt - 1,
             "elapsed-ms": elapsedMs,
             "last-error": streamErrType,
-            curve: slow ? "slow" : "fast",
+            curve,
+            ...(stallPhase ? { phase: stallPhase } : {}),
           },
         )
       }

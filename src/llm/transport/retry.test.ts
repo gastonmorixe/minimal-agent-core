@@ -546,4 +546,65 @@ describe("withRetry", () => {
     expect(caught?.name).toBe("AbortError")
     expect(calls).toBe(1) // never spun up a second attempt
   }, 10_000)
+
+  it("uses pre-stream curve (≥2s floor) when stream_idle carries stallPhase=pre-stream", async () => {
+    // MA-882492: multi-MB upload stalls must not thrash on the fast 200ms curve.
+    const origRandom = Math.random
+    Math.random = () => 0 // ideal → 0; floor must still be ≥2000
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            throw Object.assign(new Error("pre-stream idle"), {
+              streamErrorType: "stream_idle",
+              stallPhase: "pre-stream",
+              stallSubPhase: "pre-headers",
+            })
+          }
+          yield "ok"
+          return resp("ok")
+        }),
+      )
+      expect(result.text).toBe("ok")
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(2)
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.curve).toBe("pre-stream")
+    expect(retry?.structuredData?.phase).toBe("pre-stream")
+    expect(Number(retry?.structuredData?.["delay-ms"])).toBeGreaterThanOrEqual(2000)
+  }, 15_000)
+
+  it("keeps fast curve for mid-stream stream_idle (stallPhase=mid-stream)", async () => {
+    const origRandom = Math.random
+    Math.random = () => 0
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            throw Object.assign(new Error("mid idle"), {
+              streamErrorType: "stream_idle",
+              stallPhase: "mid-stream",
+            })
+          }
+          yield "ok"
+          return resp("ok")
+        }),
+      )
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.curve).toBe("fast")
+    expect(retry?.structuredData?.phase).toBe("mid-stream")
+  })
 })

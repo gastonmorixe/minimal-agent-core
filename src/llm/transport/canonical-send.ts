@@ -43,6 +43,7 @@ import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
 import {
   defaultNetworkClient,
   NetworkClient,
+  NetworkResponse,
   networkActivityObserver,
 } from "../../network/index.ts"
 import {
@@ -198,17 +199,28 @@ export async function* canonicalSendFn(
   const reqId = randomUUID()
   networkActivityObserver.attach(reqId, requestStatus)
   const baseClient = (opts.networkClient ?? defaultNetworkClient) as NetworkClient
-  const boundClient = bindRequestId(baseClient, reqId)
+  const idBoundClient = bindRequestId(baseClient, reqId)
 
   // One attempt = run() guarded by the watchdog, bridged to the legacy
   // string/StreamedResponse contract + lifecycle callbacks.
   const makeWatchdoggedAttempt = (): AsyncGenerator<string, StreamedResponse, undefined> => {
+    // Phase control is filled by withStreamWatchdog via onBindPhaseControl
+    // before makeStream runs; network lifecycle hooks call into it.
+    let phaseCtl: {
+      markHeadersReceived: () => void
+      markBodyActivity: () => void
+    } | null = null
+
     const events = withStreamWatchdog(
       (signal) => {
+        const lifecycleClient = bindRequestLifecycle(idBoundClient, {
+          onHeaders: () => phaseCtl?.markHeadersReceived(),
+          onBodyChunk: () => phaseCtl?.markBodyActivity(),
+        })
         const ctx: RunContext = {
           auth: authState.auth,
           sessionId: "",
-          networkClient: boundClient,
+          networkClient: lifecycleClient,
         }
         // acceptDegrade: when the adapter can offer a cheaper-but-valid
         // variant (e.g. fast-mode requested on a model with no fast tier →
@@ -221,14 +233,23 @@ export async function* canonicalSendFn(
       {
         streamIdleTimeoutMs: opts.streamIdleTimeoutMs,
         attemptHardTimeoutMs: opts.attemptHardTimeoutMs,
+        // Pre-stream / TTFB budget (default 120s). Without this the watchdog
+        // falsely charged multi-MB upload to mid-stream 30s idle (MA-882492).
+        responseHeadersTimeoutMs: opts.responseHeadersTimeoutMs,
         signal: opts.signal,
-        onStall: ({ reason, idleMs, elapsedMs }) => {
+        onBindPhaseControl: (ctl) => {
+          phaseCtl = ctl
+        },
+        onStall: ({ reason, idleMs, elapsedMs, stallPhase, stallSubPhase }) => {
           // Mirror the legacy scrollback surface so a stalled canonical
-          // attempt reads identically to a stalled legacy one.
+          // attempt reads identically to a stalled legacy one. Phase is also
+          // on the thrown error for retry.ts (diag alone is not enough).
           diag.warn("api.stream-stalled", `stream ${reason}`, {
             "error-type": reason,
             "idle-ms": idleMs,
             "elapsed-ms": elapsedMs,
+            phase: stallPhase,
+            ...(stallSubPhase ? { "stall-sub-phase": stallSubPhase } : {}),
           })
         },
       },
@@ -307,5 +328,74 @@ export async function* canonicalSendFn(
 function bindRequestId(client: NetworkClient, id: string): NetworkClient {
   const wrapper: NetworkClient = Object.create(client)
   wrapper.request = (input) => client.request({ id, ...input })
+  return wrapper
+}
+
+/**
+ * Wrap a {@link NetworkClient} so response headers and body chunks notify the
+ * stream watchdog's phase control (MA-882492).
+ *
+ * - After `request()` resolves → headers received (pre-stream sub-phase only).
+ * - Every non-empty body chunk → `onBodyChunk` (first ends pre-stream; later
+ *   refreshes mid-stream idle even for SSE comments with no CanonicalEvent).
+ *
+ * Wraps **outside** the real client so status/net-dbg observers still see the
+ * original request/response; only the body stream is re-wrapped.
+ */
+/**
+ * Exported for unit tests (MA-882492 lifecycle wiring). Production uses it
+ * only from `canonicalSendFn` / makeWatchdoggedAttempt.
+ */
+export function bindRequestLifecycle(
+  client: NetworkClient,
+  hooks: {
+    onHeaders?: () => void
+    onBodyChunk?: () => void
+  },
+): NetworkClient {
+  const wrapper: NetworkClient = Object.create(client)
+  wrapper.request = async (input) => {
+    const res = await client.request(input)
+    hooks.onHeaders?.()
+    // Lazy reader over the already-tapped body (NetworkClient.tapResponse).
+    // Mirrors tapResponse's pull/cancel shape so observers underneath stay
+    // intact; marks body activity only for non-empty values (Angela).
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        reader ??= res.body.getReader()
+        try {
+          const { done, value } = await reader.read()
+          if (done) {
+            controller.close()
+            reader.releaseLock()
+            reader = undefined
+            return
+          }
+          if (value && value.byteLength > 0) hooks.onBodyChunk?.()
+          if (value) controller.enqueue(value)
+        } catch (err) {
+          controller.error(err)
+          try {
+            reader?.releaseLock()
+          } catch {
+            // already released
+          }
+          reader = undefined
+        }
+      },
+      cancel: async (reason) => {
+        await reader?.cancel(reason)
+        reader?.releaseLock()
+        reader = undefined
+      },
+    })
+    return new NetworkResponse({
+      status: res.status,
+      headers: res.headers,
+      body,
+      transport: res.transport,
+    })
+  }
   return wrapper
 }
