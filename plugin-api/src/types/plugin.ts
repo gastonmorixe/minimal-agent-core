@@ -324,17 +324,20 @@ export type TUIResult =
        * occupies by default, AFTER the agent-drawn chrome:
        *
        * ```text
-       *   ╭ <icon> <label>  <displayHeader || formatToolInput(tool)>
-       *     ^^^^^^^^^^^^^^                  ^^^^^^^^^^^^^^^^^^^^^^
-       *     agent-owned                     plugin-owned slot
+       *   ╭ <icon> <label> <displayHeader || formatToolInput(tool)>
+       *     ^^^^^^^^^^^^^^                 ^^^^^^^^^^^^^^^^^^^^^^
+       *     agent-owned                    plugin-owned slot
        * ```
        *
-       * The icon, label, frame glyphs (`╭`, `┊`, `│`, `╰`), and the
-       * two-space gap between label and content all come from the manifest
-       * + agent unconditionally. A plugin that wants a richer summary than
-       * the raw input JSON ("+ added 7 tasks · 0/7" instead of
-       * `action="add_many"`) writes it here and the agent splices it into
-       * the slot — without losing the tool's identity.
+       * The icon, label, and frame glyphs (`╭`, `┊`, `│`, `╰`) come from the
+       * manifest + agent unconditionally. Default input summaries keep a
+       * two-space gap after the label (`Bash  $ cmd`); a plugin-supplied
+       * `displayHeader` uses a single space so chrome like
+       * `IntercomSend → Sergio (id)` does not read as a double gap. A plugin
+       * that wants a richer summary than the raw input JSON
+       * ("+ added 7 tasks · 0/7" instead of `action="add_many"`) writes it
+       * here and the agent splices it into the slot — without losing the
+       * tool's identity.
        *
        * Single-line. Empty string is treated as "no content slot, just
        * the chrome" (renders as `╭ <icon> <label>` with no trailing
