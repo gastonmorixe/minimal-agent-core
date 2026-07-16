@@ -596,7 +596,7 @@ describe("Compositor (cols-drift recovery)", () => {
     const c = new Compositor({ output: cap.output })
     c.mount()
     // ~63-cell status — 1 physical row at cols=80, 2 rows under cols=40.
-    const wideStatus = "Receiving stream ↓ 118.4 KB · 10.9 KB/s · chatgpt.com:h2 (9s)"
+    const wideStatus = "Receiving stream ↓ 118.4 KB · 10.9 KB/s · api.example.com:h2 (9s)"
     c.setLiveArea([wideStatus, "", "❯ "], { row: 2, col: 2 })
     cap.writes.length = 0
 

@@ -671,7 +671,17 @@ export function clampBodyWithHint(line: string, maxWidth: number): string {
   const trimmed = truncateDisplayWidth(line, trimWidth, "")
   // eslint-disable-next-line typescript-eslint/no-misused-spread
   const cpCut = [...line].length - [...trimmed].length
-  return `${trimmed}${truncHint(cpCut, "ch")}`
+  const hint = truncHint(cpCut, "ch")
+  // truncateDisplayWidth appends a full reset when it copied any ANSI.
+  // Put the marker BEFORE that synthetic reset so it inherits the style
+  // active at the truncation point. Default tool headers truncate inside
+  // their dim input/path run, so `...(+Nch)` stays dim instead of flaring
+  // bright. Bright diff/plugin rows keep their own active style, and plain
+  // rows remain plain. Regression: BUG #192851.
+  const reset = "\x1b[0m"
+  return trimmed.endsWith(reset)
+    ? `${trimmed.slice(0, -reset.length)}${hint}${reset}`
+    : `${trimmed}${hint}`
 }
 
 /**
