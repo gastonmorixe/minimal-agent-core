@@ -900,6 +900,11 @@ export class EditorController extends EventEmitter {
    */
   notifyResize(): void {
     if (!this.started) return
+    // Arm compositor stream-hold so model/mdstream chunks mid-drag do
+    // not erase+redraw the live area at every intermediate column
+    // (MA-481485). Released by the trailing setLiveArea from repaint().
+    this.compositor.beginStreamHold?.()
+    this.compositor.notifyResize?.()
     if (this.resizeDebounceMs <= 0) {
       this.repaint()
       return
@@ -1304,6 +1309,17 @@ export class EditorController extends EventEmitter {
     // step with the keystroke pump. Dedup'd internally — cursor-only
     // repaints don't trigger it.
     this.fireBufferChangedHook()
+    // MA-481485: while a trailing resize coalesce is armed, do not paint
+    // the live area. `notifyResize` only debounced *its own* timer; the
+    // status spinner (LiveAreaStatusController ~8fps → setStatus),
+    // decoration, and footer paths still called `repaint()` immediately
+    // and forced `setLiveArea` on intermediate drag columns, stacking
+    // reflow residue into scrollback — the same class of leak
+    // `resizeDebounceMs` was meant to kill. State mutations
+    // (statusLine, decorationLines, footer layers, buffer) still land
+    // above; the trailing timer's single `repaint()` reads them at the
+    // final geometry.
+    if (this.resizeDebounceTimer !== null) return
     const cols = (this.output as { columns?: number }).columns
     const decorationRows = this.decorationLines.length
     // Do not reserve the status band at cold idle. Once a status has
@@ -1335,10 +1351,17 @@ export class EditorController extends EventEmitter {
     // the terminal doesn't blink it inside the hidden prompt.
     if (this.overlayOwner !== null) {
       const rawStatusOwned = this.statusLine ?? ""
+      // Budget cols-1 (when cols>1) as belt-and-suspenders against
+      // DECAWM wrap-pending after a full-width status cell. Typical
+      // terminals clear pending wrap on the EL that drawLiveSeq emits
+      // next, so this is defensive rather than the sole load-bearing
+      // fix (MA-481485). Primary fix is repaint suppression while
+      // resizeDebounceTimer is armed, plus compositor stream hold.
+      const statusBudgetOwned = typeof cols === "number" && cols > 1 ? cols - 1 : (cols ?? 0)
       const statusLineOwned =
         !rawStatusOwned || !cols || cols <= 0
           ? rawStatusOwned
-          : truncateDisplayWidth(rawStatusOwned, cols)
+          : truncateDisplayWidth(rawStatusOwned, statusBudgetOwned)
       const ownedHead: string[] = statusReserved ? [statusLineOwned] : []
       const ownedGap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
       const ownedFooter = composedFooter.length > 0 ? [...composedFooter] : []
@@ -1458,8 +1481,10 @@ export class EditorController extends EventEmitter {
     }
 
     const rawStatus = this.statusLine ?? ""
+    // See overlay path above: defensive cols-1 status budget (MA-481485).
+    const statusBudget = typeof cols === "number" && cols > 1 ? cols - 1 : (cols ?? 0)
     const statusLine =
-      !rawStatus || !cols || cols <= 0 ? rawStatus : truncateDisplayWidth(rawStatus, cols)
+      !rawStatus || !cols || cols <= 0 ? rawStatus : truncateDisplayWidth(rawStatus, statusBudget)
 
     let finalLines: string[]
     let finalCursor: { row: number; col: number }

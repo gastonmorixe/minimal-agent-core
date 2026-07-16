@@ -132,6 +132,20 @@ export class Compositor {
   private lastLines: string[] = []
   private lastCursor: { row: number; col: number } | null = null
   private drawnLiveKey: string | null = null
+  /**
+   * When true, `writeStream` / `writeBufferedStream` append into
+   * {@link heldStream} instead of erasing and redrawing the live area.
+   * Armed by {@link notifyResize} / {@link beginStreamHold} for the
+   * duration of a window-edge drag; released by the next
+   * {@link setLiveArea} (the editor's trailing coalesced repaint) which
+   * flushes the held bytes as one stream write at final geometry.
+   * Without this, every model/mdstream chunk during "Receiving stream"
+   * would still paint intermediate-width live frames mid-drag even after
+   * editor `repaint()` suppression (MA-481485).
+   */
+  private streamHold = false
+  /** Stream bytes held while {@link streamHold} is true. */
+  private heldStream = ""
 
   constructor(opts: CompositorOptions = {}) {
     this.output = opts.output ?? (process.stdout as CompositorOutput)
@@ -165,6 +179,11 @@ export class Compositor {
 
   unmount(): void {
     if (!this.mounted) return
+    // Drop any resize-hold so flushStream / teardown can write freely.
+    this.streamHold = false
+    const held = this.heldStream
+    this.heldStream = ""
+    if (held.length > 0) this.writeBufferedStream(held)
     this.flushStream()
     this.mounted = false
     if (!this.tty) return
@@ -205,6 +224,10 @@ export class Compositor {
     if (safeChunk.length === 0) return
     const capped = this.capBlankLines(safeChunk)
     if (capped.length === 0) return
+    if (this.streamHold) {
+      this.heldStream += capped
+      return
+    }
     this.writeBufferedStream(capped)
   }
 
@@ -217,6 +240,10 @@ export class Compositor {
     }
     const capped = this.capBlankLines(tail)
     if (capped.length === 0) return
+    if (this.streamHold) {
+      this.heldStream += capped
+      return
+    }
     this.writeBufferedStream(capped)
   }
 
@@ -367,15 +394,38 @@ export class Compositor {
     const nextKey = liveAreaKey(nextLines, nextCursor)
     this.lastLines = nextLines
     this.lastCursor = nextCursor
-    if (!this.tty || !this.mounted) return
-    if (this.liveHeightValue > 0 && this.drawnLiveKey === nextKey && !this.hasColsDrift()) return
+    if (!this.tty || !this.mounted) {
+      // Still clear a hold so a later mount doesn't flush stale bytes.
+      this.streamHold = false
+      this.heldStream = ""
+      return
+    }
+    // Take held stream under the resize coalesce. Prefer ONE frame:
+    // erase old live → write held chunk → draw newest live (MA-481485).
+    // Calling writeBufferedStream first would paint lastLines (already
+    // overwritten to next) then paint again below = two redraws.
+    const heldPending = this.heldStream
+    this.heldStream = ""
+    this.streamHold = false
+    const hasHeld = heldPending.length > 0
+    if (
+      !hasHeld &&
+      this.liveHeightValue > 0 &&
+      this.drawnLiveKey === nextKey &&
+      !this.hasColsDrift()
+    ) {
+      return
+    }
     // Detect silent cols changes (PTY-size jitter, SIGWINCH that hasn't
     // hit `editor.notifyResize()` yet, terminals whose TIOCGWINSZ races
     // with their actual width). The recovery wipes the viewport and
     // zeroes our counters so `drawLiveSeq` starts at home with no stale
     // wrapped content lurking above the new draw.
     this.maybeRecoverFromColsDrift()
-    const repaintExistingLiveArea = this.liveHeightValue > 0
+    // Held stream must walk over sep rows (includeSepRows true) so the
+    // chunk lands at the scrollback cursor. Pure live repaint without
+    // held stream keeps the existing-live shortcut.
+    const repaintExistingLiveArea = this.liveHeightValue > 0 && !hasHeld
     const parts: string[] = []
     parts.push(this.bsu)
     parts.push("\x1b[?25l")
@@ -386,6 +436,16 @@ export class Compositor {
         drawnCursor: prevCursor,
       }),
     )
+    if (hasHeld) {
+      parts.push(heldPending)
+      this.streamCol = updateStreamColAfterRedraw(
+        heldPending,
+        this.streamCol,
+        this.effectiveColumns(),
+      )
+      // Held stream is new scrollback; prior separator is buried.
+      this.liveSepDrawn = false
+    }
     parts.push(this.drawLiveSeq({ reuseExistingGap: repaintExistingLiveArea }))
     parts.push(this.esu)
     this.output.write(parts.join(""))
@@ -403,8 +463,26 @@ export class Compositor {
 
   async withSuspendedLiveArea<T>(fn: () => T | Promise<T>): Promise<T> {
     if (!this.tty || !this.mounted) return await fn()
+    // Flush any resize-held stream before handing the tty to the callback
+    // so held model chunks are not retained across suspend (MA-481485).
+    const heldPending = this.heldStream
+    this.heldStream = ""
+    this.streamHold = false
     // Erase the live area and show the cursor so the callback owns the tty.
-    this.output.write(this.bsu + this.eraseLiveSeq() + "\x1b[?25h" + this.esu)
+    // If we held stream bytes, emit them after erase (same order as
+    // setLiveArea's held path) before the callback runs.
+    const openParts: string[] = [this.bsu, this.eraseLiveSeq()]
+    if (heldPending.length > 0) {
+      openParts.push(heldPending)
+      this.streamCol = updateStreamColAfterRedraw(
+        heldPending,
+        this.streamCol,
+        this.effectiveColumns(),
+      )
+      this.liveSepDrawn = false
+    }
+    openParts.push("\x1b[?25h", this.esu)
+    this.output.write(openParts.join(""))
     try {
       return await fn()
     } finally {
@@ -452,8 +530,26 @@ export class Compositor {
    * (no `\x1b[J`, uses `\x1b[K` per-row) and `drawLiveSeq` (overwrites
    * shrink residuals with `\r\n\x1b[K`).
    */
+  /**
+   * Arm stream-hold without emitting CSI. Prefer {@link notifyResize}
+   * from SIGWINCH paths; this exists so the editor can arm hold when it
+   * only owns the trailing coalesce timer (tests / dual-listener setups).
+   */
+  beginStreamHold(): void {
+    // Only hold when a live area is on screen; otherwise stream writes
+    // should pass through (and a dangling hold with no setLiveArea could
+    // retain output forever).
+    if (!this.tty || !this.mounted || this.liveHeightValue === 0) return
+    this.streamHold = true
+  }
+
   notifyResize(): void {
     if (!this.tty || !this.mounted) return
+    // Hold stream paints until the editor's trailing setLiveArea so
+    // mid-drag model chunks do not erase/redraw the live area at every
+    // intermediate column (MA-481485). Emit nothing else (HARD RULE).
+    // Only arm when a live area exists (see beginStreamHold).
+    if (this.liveHeightValue > 0) this.streamHold = true
     // HARD RULE: emit nothing on SIGWINCH. Do not reset counters.
     //
     // Reasoning: the terminal already reflowed our cells in place. Our
@@ -740,6 +836,14 @@ export class Compositor {
     for (let i = 0; i < lines.length; i++) {
       parts.push(lines[i])
       // Clear to end of line in case the previous content here was wider.
+      // Order is content → EL → CRLF. FakeTerminal / typical DECAWM
+      // implementations clear wrap-pending on EL, so this does not by
+      // itself add a physical row when a line fills every cell; the
+      // editor still clamps status to cols-1 as belt-and-suspenders
+      // (MA-481485). Do NOT change liveHeightValue to a physical wrap
+      // sum here: cursorRowInLive and unmount's downRows math stay
+      // logical, and eraseLiveSeq already walks physical rows via
+      // computePhysicalCursorRowInLive.
       parts.push("\x1b[K")
       if (i < lines.length - 1) parts.push("\r\n")
     }
