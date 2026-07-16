@@ -445,10 +445,14 @@ export function formatToolHeaderRows(opts: {
     headerOverride !== undefined
       ? headerOverride
       : c.dim(formatToolInput(tool, adjustedCols, presentation?.headerKey))
+  // Default input summaries keep the historical two-space gap after the label
+  // (`Bash  $ cmd`). Plugin-owned `displayHeader` overrides use a single space so
+  // chrome like `IntercomSend → Sergio (id)` does not read as a double gap.
+  const labelGap = headerOverride !== undefined ? " " : "  "
   const headerLine =
     content.length === 0
       ? `${icon}${label}${dimTimeSuffix}`
-      : `${icon}${label}  ${content}${dimTimeSuffix}`
+      : `${icon}${label}${labelGap}${content}${dimTimeSuffix}`
 
   const rows = [clampTranscriptRow(`  ${c.dimCyan("╭")} ${headerLine}`, cols)]
   if (headerOverride === undefined) {
