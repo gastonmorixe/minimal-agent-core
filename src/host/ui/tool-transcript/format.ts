@@ -665,19 +665,24 @@ const TOOL_PREVIEW_HINT_RESERVE_WIDTH = 12
  * batched `formatToolPreview` body path so both paths produce identical
  * shape under identical widths.
  */
-export function clampBodyWithHint(line: string, maxWidth: number): string {
+export function clampBodyWithHint(
+  line: string,
+  maxWidth: number,
+  opts: { inheritMarkerStyle?: boolean } = {},
+): string {
   if (displayWidth(line) <= maxWidth) return line
   const trimWidth = Math.max(1, maxWidth - TOOL_PREVIEW_HINT_RESERVE_WIDTH)
   const trimmed = truncateDisplayWidth(line, trimWidth, "")
   // eslint-disable-next-line typescript-eslint/no-misused-spread
   const cpCut = [...line].length - [...trimmed].length
   const hint = truncHint(cpCut, "ch")
+  if (!opts.inheritMarkerStyle) return `${trimmed}${hint}`
   // truncateDisplayWidth appends a full reset when it copied any ANSI.
-  // Put the marker BEFORE that synthetic reset so it inherits the style
-  // active at the truncation point. Default tool headers truncate inside
-  // their dim input/path run, so `...(+Nch)` stays dim instead of flaring
-  // bright. Bright diff/plugin rows keep their own active style, and plain
-  // rows remain plain. Regression: BUG #192851.
+  // For already-composed transcript headers, put the marker BEFORE that
+  // synthetic reset so it inherits the dim input/path style instead of
+  // flaring bright (BUG #192851). This is opt-in because ANSI-colored
+  // diff/display rows intentionally keep their truncation marker in the
+  // terminal's default foreground rather than inheriting red/green.
   const reset = "\x1b[0m"
   return trimmed.endsWith(reset)
     ? `${trimmed.slice(0, -reset.length)}${hint}${reset}`
@@ -705,7 +710,7 @@ export function clampTranscriptRow(row: string, cols?: number): string {
   if (cols === undefined || !Number.isFinite(cols) || cols <= 0) return row
   const maxWidth = Math.floor(cols) - TOOL_PREVIEW_WRAP_SAFETY_WIDTH
   if (maxWidth <= 0) return row
-  return clampBodyWithHint(row, maxWidth)
+  return clampBodyWithHint(row, maxWidth, { inheritMarkerStyle: true })
 }
 
 /**
