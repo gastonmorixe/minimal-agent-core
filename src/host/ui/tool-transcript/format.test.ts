@@ -1024,10 +1024,18 @@ describe("clampTranscriptRow — outer-row width clamp for header lines", () => 
 })
 
 describe("clampBodyWithHint — contextual ANSI style", () => {
-  it("places the marker before truncateDisplayWidth's synthetic reset", () => {
-    const clamped = clampBodyWithHint(`\x1b[2m${"x".repeat(100)}\x1b[22m`, 40)
+  it("places the marker before truncateDisplayWidth's synthetic reset when opted in", () => {
+    const clamped = clampBodyWithHint(`\x1b[2m${"x".repeat(100)}\x1b[22m`, 40, {
+      inheritMarkerStyle: true,
+    })
     expect(clamped).toMatch(/\.\.\.\(\+\d+ch\)\x1b\[0m$/)
     expect(clamped).not.toMatch(/\x1b\[0m\.\.\.\(\+\d+ch\)$/)
+  })
+
+  it("keeps colored display/diff markers outside the color run by default", () => {
+    const clamped = clampBodyWithHint(`\x1b[32m+${"x".repeat(100)}\x1b[39m`, 40)
+    expect(clamped).toMatch(/\x1b\[0m\.\.\.\(\+\d+ch\)$/)
+    expect(displayWidth(clamped)).toBeLessThanOrEqual(40)
   })
 
   it("leaves plain rows plain", () => {
