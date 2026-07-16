@@ -39,6 +39,18 @@ export interface CompositorLike {
    * (e.g. test stubs) can omit it.
    */
   writeStream?(chunk: string): void
+  /**
+   * Optional. Arm stream-hold so `writeStream` buffers mid-resize instead
+   * of painting the live area at every intermediate column (MA-481485).
+   * Released by the next `setLiveArea` (trailing coalesce repaint).
+   */
+  beginStreamHold?(): void
+  /**
+   * Optional SIGWINCH hook. Real {@link Compositor} arms stream-hold and
+   * emits nothing (HARD RULE). Editor may call this from its own
+   * `notifyResize` when the host does not dual-call both layers.
+   */
+  notifyResize?(): void
 }
 
 // ----------------------------- footer-layer surface -----------------------------

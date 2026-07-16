@@ -356,8 +356,11 @@ describe("EditorController — status row", () => {
     ctrl.setStatus("Thinking about a very long model response")
 
     const status = compositor.last().lines[0]
-    expect(displayWidth(status)).toBeLessThanOrEqual(20)
-    expect(status).toBe("Thinking about a ...")
+    // MA-481485: status budget is cols-1 (19 here) so DECAWM wrap-pending
+    // cannot land after a full-width cell. Truncation still fits in width.
+    expect(displayWidth(status)).toBeLessThanOrEqual(19)
+    expect(displayWidth(status)).toBeLessThan(20)
+    expect(status).toBe("Thinking about a...")
     ctrl.stop()
   })
 
@@ -465,6 +468,74 @@ describe("EditorController — resize", () => {
     await new Promise((r) => setTimeout(r, 40))
     // The timer was cleared by stop(); no post-teardown repaint.
     expect(compositor.liveAreaCalls.length).toBe(atStop)
+  })
+
+  it("setStatus during an armed resize debounce does not paint mid-drag (MA-481485)", async () => {
+    // LiveAreaStatusController ticks ~8fps via setStatus. Before this
+    // guard, each tick called repaint() immediately even while
+    // resizeDebounceTimer was armed, so a window-edge drag still
+    // stacked one setLiveArea per intermediate column (the residue
+    // leak resizeDebounceMs was added to kill for notifyResize alone).
+    const { ctrl, output, compositor } = make({
+      columns: 40,
+      resizeDebounceMs: 30,
+    })
+    ctrl.start()
+    ctrl.setStatus("● Sending request")
+    const callsBeforeBurst = compositor.liveAreaCalls.length
+
+    for (let w = 40; w >= 28; w--) {
+      output.columns = w
+      ctrl.notifyResize()
+      // Spinner / activity tick mid-drag.
+      ctrl.setStatus(`● Sending request · ${40 - w}s`)
+    }
+    // No mid-drag paints from setStatus while the coalesce is armed.
+    expect(compositor.liveAreaCalls.length).toBe(callsBeforeBurst)
+
+    await new Promise((r) => setTimeout(r, 50))
+    // Exactly one trailing repaint, with the latest status text.
+    expect(compositor.liveAreaCalls.length).toBe(callsBeforeBurst + 1)
+    const last = compositor.last()
+    expect(last.lines.some((l) => l.includes("Sending request"))).toBe(true)
+    ctrl.stop()
+  })
+
+  it("setDecorationLines during an armed resize debounce does not paint mid-drag (MA-481485)", async () => {
+    const { ctrl, output, compositor } = make({
+      columns: 40,
+      resizeDebounceMs: 30,
+    })
+    ctrl.start()
+    const callsBeforeBurst = compositor.liveAreaCalls.length
+
+    for (let w = 40; w >= 28; w--) {
+      output.columns = w
+      ctrl.notifyResize()
+      // Cols-sensitive decoration (nav highlight bar) would change every step.
+      ctrl.setDecorationLines([`queued · cols=${w}`])
+    }
+    expect(compositor.liveAreaCalls.length).toBe(callsBeforeBurst)
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(compositor.liveAreaCalls.length).toBe(callsBeforeBurst + 1)
+    expect(compositor.last().lines.some((l) => l.includes("cols=28"))).toBe(true)
+    ctrl.stop()
+  })
+
+  it("status line is truncated to cols-1 (defensive DECAWM budget, MA-481485)", () => {
+    // Belt-and-suspenders: keep status under full terminal width.
+    // Primary load-bearing fix is repaint suppression during resize
+    // debounce; FakeTerminal clears wrap-pending on EL so exact-width
+    // content→EL→CRLF does not by itself add a physical row.
+    const { ctrl, compositor } = make({ columns: 20, resizeDebounceMs: 0 })
+    ctrl.start()
+    // 30 visible cells → must fit in statusBudget=19 (cols-1), not 20.
+    ctrl.setStatus("X".repeat(30))
+    const statusRow = compositor.last().lines[0] ?? ""
+    expect(displayWidth(statusRow)).toBeLessThanOrEqual(19)
+    expect(displayWidth(statusRow)).toBeLessThan(20)
+    ctrl.stop()
   })
 })
 

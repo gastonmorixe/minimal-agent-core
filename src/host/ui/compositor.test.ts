@@ -587,6 +587,47 @@ describe("Compositor (cols-drift recovery)", () => {
     expect(out).toContain("❯ b")
   })
 
+  it("holds writeStream during resize and flushes once on setLiveArea (MA-481485)", () => {
+    // During "Receiving stream", every model chunk does erase→write→draw.
+    // A shrink drag without stream-hold would repaint the live area at
+    // every intermediate column even after editor repaint suppression.
+    const cap = makeOutput()
+    cap.output.columns = 80
+    const c = new Compositor({ output: cap.output })
+    c.mount()
+    // ~63-cell status — 1 physical row at cols=80, 2 rows under cols=40.
+    const wideStatus = "Receiving stream ↓ 118.4 KB · 10.9 KB/s · chatgpt.com:h2 (9s)"
+    c.setLiveArea([wideStatus, "", "❯ "], { row: 2, col: 2 })
+    cap.writes.length = 0
+
+    c.notifyResize() // arm hold (emit nothing)
+    expect(joined(cap)).toBe("")
+    expect(cap.writes.length).toBe(0)
+
+    c.writeStream("chunk-a ")
+    c.writeStream("chunk-b\n")
+    // Still held: no terminal writes yet.
+    expect(cap.writes.length).toBe(0)
+
+    cap.output.columns = 40
+    c.setLiveArea(["● Receiving stream", "", "❯ "], { row: 2, col: 2 })
+    // Exactly one terminal write after release (single erase→stream→draw frame).
+    expect(cap.writes.length).toBe(1)
+    const out = joined(cap)
+    expect(out).toContain("chunk-a chunk-b\n")
+    // Physical walk-up under cols=40 using PREVIOUS wide status:
+    //   line 0 wideStatus (~63 cells): ceil(63/40)=2
+    //   line 1 "": 1
+    //   cursor.col=2 < 40: +0 → walk-up 3.
+    // Stale logical cursor.row=2 would undershoot.
+    expect(out).toContain("\x1b[3A")
+    expect(out).not.toContain("\x1b[2A")
+    // Held chunks appear once only.
+    const firstChunkIdx = out.indexOf("chunk-a ")
+    expect(firstChunkIdx).toBeGreaterThanOrEqual(0)
+    expect(out.indexOf("chunk-a ", firstChunkIdx + 1)).toBe(-1)
+  })
+
   it("setLiveArea repaint does NOT walk right by streamCol (spinner blink stays at col 0)", () => {
     // Regression for the "horizontally accumulating Thinking labels" bug:
     // after streaming content leaves streamCol > 0, a pure live-area
