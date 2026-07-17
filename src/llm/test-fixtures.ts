@@ -68,6 +68,8 @@ export interface TestCapabilityOverrides
 export interface TestModelSpec {
   /** Canonical model id (neutral, e.g. `test-model-1`). */
   id: string
+  /** Optional human-facing label. Defaults to `id` when omitted. */
+  displayName?: string
   /** Optional aliases resolving to the same entry. */
   aliases?: string[]
   /** Capability overrides merged over the neutral defaults. */
@@ -219,7 +221,7 @@ export function registerTestProvider(opts: TestProviderOptions = {}): TestProvid
       id: spec.id,
       providerId: id,
       surfaceId: "custom",
-      displayName: spec.id,
+      displayName: spec.displayName ?? spec.id,
       capabilities: mergeCapabilities(spec.capabilities),
       pricing: { ...NEUTRAL_PRICING, ...spec.pricing },
     }

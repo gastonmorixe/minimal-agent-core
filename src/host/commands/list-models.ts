@@ -222,16 +222,33 @@ function formatModelRow(row: ModelRow, layout: ModelTableLayout): string[] {
 }
 
 /**
+ * Composite map key for one model under one provider.
+ *
+ * Live catalogs often reuse bare slugs across gateways (`kimi-k2.6` on both
+ * Ollama Cloud and OpenCode Go). Merging on bare `id` alone lets one provider's
+ * live row steal another provider's static registration — the OpenCode catalog
+ * collapsed to the handful of slugs Ollama did not also advertise. Always key
+ * by `providerId\0id` so providers stay independent.
+ */
+function modelRowKey(providerId: string, modelId: string): string {
+  return `${providerId}\0${modelId}`
+}
+
+/**
  * Implements `minimal-agent list-models`: merges live model catalogs from
  * every provider plugin (queried in parallel, fault-isolated so one outage
  * cannot hide another provider's rows) with the static registry fallback,
  * then prints a deduplicated table, optionally filtered to one provider.
+ *
+ * Dedup is **per provider**: the same model id may appear under multiple
+ * providers (e.g. `deepseek-v4-flash` on Ollama and OpenCode). Live wins over
+ * static only within the same provider.
  */
 export async function runListModelsCommand(
   providerFilter?: string,
   deps: ListModelsDeps = {},
 ): Promise<void> {
-  const byId = new Map<string, ModelRow>()
+  const byKey = new Map<string, ModelRow>()
 
   const plugins = listProviderPlugins().filter((p) => typeof p.listLiveModels === "function")
   const results = await Promise.allSettled(
@@ -251,18 +268,22 @@ export async function runListModelsCommand(
       continue
     }
     for (const m of r.value.rows ?? []) {
-      byId.set(m.id, {
+      const providerId = r.value.plugin.id
+      byKey.set(modelRowKey(providerId, m.id), {
         id: m.id,
         displayName: m.displayName,
-        providerId: r.value.plugin.id,
+        providerId,
         date: m.createdAt,
       })
     }
   }
 
   for (const entry of listRegisteredModels()) {
-    const existing = byId.get(entry.id)
+    const key = modelRowKey(entry.providerId, entry.id)
+    const existing = byKey.get(key)
     if (existing) {
+      // Same provider only: enrich the live row with static caps/surface/name.
+      // Never reassign providerId — that would reintroduce cross-provider theft.
       applyRegisteredEntry(existing, entry)
       continue
     }
@@ -272,11 +293,11 @@ export async function runListModelsCommand(
       providerId: entry.providerId,
     }
     applyRegisteredEntry(row, entry)
-    byId.set(entry.id, row)
+    byKey.set(key, row)
   }
 
   const byProvider = new Map<string, ModelRow[]>()
-  for (const row of byId.values()) {
+  for (const row of byKey.values()) {
     const list = byProvider.get(row.providerId)
     if (list) list.push(row)
     else byProvider.set(row.providerId, [row])

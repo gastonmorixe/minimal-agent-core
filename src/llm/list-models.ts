@@ -6,6 +6,10 @@
  * `ModelInfo` rows. Fault-isolated: one provider's outage degrades to the
  * others' rows rather than failing the whole list. Names no provider.
  *
+ * When the same bare model id is returned by multiple providers (e.g.
+ * `kimi-k2.6` from Ollama and OpenCode), both rows are kept — dedup is
+ * per-provider, not global on bare id.
+ *
  * @module llm/list-models
  */
 
@@ -13,6 +17,11 @@ import { tryResolveProviderAuth } from "../auth/auth-strategies.ts"
 
 import { listProviderPlugins } from "./provider-plugin.ts"
 import type { ModelInfo } from "./transport/types.ts"
+
+/** Composite key so two providers advertising the same bare slug stay distinct. */
+function liveRowKey(providerId: string, modelId: string): string {
+  return `${providerId}\0${modelId}`
+}
 
 /**
  * List the live models the authenticated principal can access across all
@@ -35,15 +44,22 @@ export async function listLiveModelsForPicker(providerId?: string): Promise<Mode
       const auth =
         tryResolveProviderAuth(p.id, "") ??
         (p.publicModelList ? ({ kind: "custom", headers: {} } as const) : null)
-      if (!auth) return []
-      return (await p.listLiveModels?.(auth)) ?? []
+      if (!auth)
+        return [] as Array<{
+          providerId: string
+          row: { id: string; displayName?: string; createdAt?: string }
+        }>
+      const rows = (await p.listLiveModels?.(auth)) ?? []
+      return rows.map((row) => ({ providerId: p.id, row }))
     }),
   )
-  const byId = new Map<string, ModelInfo>()
+  // Per-provider dedup: same bare id from two providers → two picker rows.
+  // Within one provider, later live rows win on id collision (stable map).
+  const byKey = new Map<string, ModelInfo>()
   for (const r of results) {
     if (r.status !== "fulfilled") continue
-    for (const row of r.value) {
-      byId.set(row.id, {
+    for (const { providerId, row } of r.value) {
+      byKey.set(liveRowKey(providerId, row.id), {
         id: row.id,
         display_name: row.displayName,
         type: "model",
@@ -51,5 +67,5 @@ export async function listLiveModelsForPicker(providerId?: string): Promise<Mode
       })
     }
   }
-  return [...byId.values()]
+  return [...byKey.values()]
 }

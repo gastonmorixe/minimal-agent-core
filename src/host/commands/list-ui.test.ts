@@ -223,4 +223,165 @@ describe("list UI commands", () => {
     expect(stripped).not.toContain("priv-live-model")
     expect(stripped).toContain('no models registered for provider "priv"')
   })
+
+  it("keeps same bare model id under EACH provider (no cross-provider theft)", async () => {
+    // Regression: Ollama live `kimi-k2.6` used to steal OpenCode's static
+    // `kimi-k2.6` (and deepseek/glm/minimax siblings) because merge keyed only
+    // on bare id. Both providers must still list the shared slug; OpenCode-only
+    // slugs (kimi-k3) must not vanish either.
+    registerTestProvider({
+      id: "ollama",
+      displayName: "Ollama Cloud",
+      shortCode: "ol",
+      models: [
+        { id: "kimi-k2.6", displayName: "Kimi K2.6 (Ollama static)" },
+        { id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash (Ollama static)" },
+      ],
+    })
+    registerTestProvider({
+      id: "opencode",
+      displayName: "OpenCode Go",
+      shortCode: "oc",
+      models: [
+        { id: "kimi-k2.6", displayName: "Kimi K2.6 (OpenCode)" },
+        { id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash (OpenCode)" },
+        { id: "kimi-k3", displayName: "Kimi K3 (OpenCode)" },
+        { id: "glm-5.2", displayName: "GLM-5.2 (OpenCode)" },
+        { id: "minimax-m3", displayName: "MiniMax M3 (OpenCode)" },
+      ],
+    })
+
+    // Ollama has a live catalog that overlaps bare ids with OpenCode's static set.
+    registerProviderPlugin({
+      id: "ollama",
+      displayName: "Ollama Cloud",
+      shortCode: "ol",
+      register() {},
+      publicModelList: true,
+      async listLiveModels() {
+        return [
+          { id: "kimi-k2.6", displayName: "Kimi K2.6 (Ollama live)", createdAt: "2026-07-01" },
+          {
+            id: "deepseek-v4-flash",
+            displayName: "DeepSeek V4 Flash (Ollama live)",
+            createdAt: "2026-07-01",
+          },
+          { id: "glm-5.2", displayName: "GLM-5.2 (Ollama live)", createdAt: "2026-07-01" },
+          { id: "minimax-m3", displayName: "MiniMax M3 (Ollama live)", createdAt: "2026-07-01" },
+        ]
+      },
+    })
+    // OpenCode has no listLiveModels (static registry only) — mirrors production.
+    registerProviderPlugin({
+      id: "opencode",
+      displayName: "OpenCode Go",
+      shortCode: "oc",
+      register() {},
+    })
+
+    let out = ""
+    await runListModelsCommand(undefined, {
+      columns: 220,
+      output: { write: (s) => (out += s) },
+    })
+    const stripped = stripAnsi(out)
+
+    // Provider headers are printed as `  <providerId>` (two leading spaces).
+    function section(text: string, provider: string): string {
+      const re = new RegExp(
+        `(?:^|\\n)  ${provider}\\n([\\s\\S]*?)(?=\\n  [a-z]|\\n  \\d+ models|$)`,
+      )
+      return text.match(re)?.[1] ?? ""
+    }
+
+    const ollamaSection = section(stripped, "ollama")
+    const opencodeSection = section(stripped, "opencode")
+    expect(ollamaSection.length).toBeGreaterThan(0)
+    expect(opencodeSection.length).toBeGreaterThan(0)
+
+    // Shared bare ids appear under BOTH providers (not stolen into ollama only).
+    expect(ollamaSection).toContain("kimi-k2.6")
+    expect(ollamaSection).toContain("deepseek-v4-flash")
+    expect(opencodeSection).toContain("kimi-k2.6")
+    expect(opencodeSection).toContain("deepseek-v4-flash")
+    expect(opencodeSection).toContain("kimi-k3")
+    expect(opencodeSection).toContain("glm-5.2")
+    expect(opencodeSection).toContain("minimax-m3")
+
+    // OpenCode still shows OpenCode display names (static), not Ollama live labels.
+    expect(opencodeSection).toContain("Kimi K2.6 (OpenCode)")
+    expect(opencodeSection).not.toContain("Kimi K2.6 (Ollama live)")
+
+    // ollama: kimi-k2.6, deepseek-v4-flash, glm-5.2, minimax-m3 (4)
+    // opencode: kimi-k2.6, deepseek-v4-flash, kimi-k3, glm-5.2, minimax-m3 (5)
+    expect(stripped).toMatch(/(\d+) models available/)
+    const total = Number(stripped.match(/(\d+) models available/)?.[1] ?? 0)
+    expect(total).toBe(9)
+
+    // Provider-filtered view must also keep OpenCode's full static catalog.
+    let ocOnly = ""
+    await runListModelsCommand("opencode", {
+      columns: 220,
+      output: { write: (s) => (ocOnly += s) },
+    })
+    const ocStripped = stripAnsi(ocOnly)
+    expect(ocStripped).toContain("kimi-k3")
+    expect(ocStripped).toContain("kimi-k2.6")
+    expect(ocStripped).toContain("deepseek-v4-flash")
+    expect(ocStripped).toContain("5 models available")
+    expect(ocStripped).not.toContain("Ollama live")
+  })
+
+  it("enriches live row with static caps only when provider matches", async () => {
+    // Live ollama row + static opencode row share id; ollama live must NOT pick
+    // up opencode's displayName/caps via a bare-id merge.
+    registerTestProvider({
+      id: "opencode",
+      displayName: "OpenCode Go",
+      models: [
+        {
+          id: "shared-slug",
+          displayName: "Shared (OpenCode)",
+          capabilities: { contextWindow: 999_000, maxOutputTokens: 12_000 },
+        },
+      ],
+    })
+    registerProviderPlugin({
+      id: "ollama",
+      displayName: "Ollama Cloud",
+      shortCode: "ol",
+      register() {},
+      publicModelList: true,
+      async listLiveModels() {
+        return [{ id: "shared-slug", displayName: "Shared (Ollama live)", createdAt: "2026-03-03" }]
+      },
+    })
+    registerProviderPlugin({
+      id: "opencode",
+      displayName: "OpenCode Go",
+      shortCode: "oc",
+      register() {},
+    })
+
+    let out = ""
+    await runListModelsCommand(undefined, {
+      columns: 220,
+      output: { write: (s) => (out += s) },
+    })
+    const stripped = stripAnsi(out)
+
+    function section(text: string, provider: string): string {
+      const re = new RegExp(
+        `(?:^|\\n)  ${provider}\\n([\\s\\S]*?)(?=\\n  [a-z]|\\n  \\d+ models|$)`,
+      )
+      return text.match(re)?.[1] ?? ""
+    }
+    const ollamaSection = section(stripped, "ollama")
+    const opencodeSection = section(stripped, "opencode")
+
+    expect(ollamaSection).toContain("Shared (Ollama live)")
+    expect(ollamaSection).not.toContain("ctx 999k")
+    expect(opencodeSection).toContain("Shared (OpenCode)")
+    expect(opencodeSection).toContain("ctx 999k")
+  })
 })
