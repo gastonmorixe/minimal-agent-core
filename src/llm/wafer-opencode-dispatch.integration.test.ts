@@ -2,18 +2,16 @@
  * End-to-end dispatch disambiguation (opencode vs wafer) through the REAL
  * discovery + `run()` path.
  *
- * When both OpenCode and Wafer register the same bare model id
- * (`deepseek-v4-flash`), the dispatch path must resolve the correct provider's
- * adapter when `CanonicalRequest.providerId` is set, and fall back to the
- * global (last-registered) entry when it is not. A fake NetworkClient forces a
- * pre-stream error so the assertion reads which provider's error path ran.
+ * Live catalogs no longer share bare model ids across OpenCode and Wafer
+ * (each gateway uses its own SKU spelling). Shared-id routing is still the
+ * host contract, so this suite:
  *
- * Wave G: both providers migrated to the sibling `../minimal-agent-plugins/`
- * repo, so this test discovers them from there via `registerDiscoveredProviders`
- * + `activateDiscoveredProviders` instead of importing the plugin adapters. It
- * lives in `src/llm/` because it drives the host orchestrator (`run`,
- * `model-info`, `model-label`) and tests CROSS-provider routing spanning BOTH
- * plugins. On a bare host checkout without the sibling, it skips cleanly.
+ * 1. Discovers both real plugins (adapter error paths, short codes).
+ * 2. Registers a synthetic bare id under BOTH providers to exercise
+ *    `CanonicalRequest.providerId` scoped dispatch.
+ *
+ * Wave G: both providers live in the sibling `../minimal-agent-plugins/`
+ * repo. On a bare host checkout without the sibling, the suite skips cleanly.
  */
 
 import { join } from "node:path"
@@ -27,11 +25,14 @@ import { resolveSiblingPluginRoots } from "../plugins/loader/helpers.ts"
 import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 
 import type { CanonicalRequest } from "./canonical-request.ts"
+import { defaultCapabilities } from "./capabilities.ts"
 import {
   clearModelRegistry,
   clearProviderRegistry,
   findModelForProvider,
+  registerModel,
 } from "./model-registry.ts"
+import type { MTokRate } from "./pricing.ts"
 import {
   activateDiscoveredProviders,
   buildProviderSetupContext,
@@ -39,6 +40,7 @@ import {
 } from "./provider-discovery.ts"
 import { clearProviderPlugins } from "./provider-plugin.ts"
 import { run } from "./run.ts"
+import { makeCharRatioEstimator } from "./token-estimate.ts"
 
 const EMBEDDED_DIR = join(import.meta.dir, "../..")
 const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
@@ -46,13 +48,48 @@ const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoot
 const HAVE_BOTH =
   siblingPluginPresent("ma-llm-opencode-plugin") && siblingPluginPresent("ma-llm-wafer-plugin")
 
-/** Discover + activate opencode and wafer from the sibling repo. */
-async function discoverBoth(): Promise<void> {
+/** Bare id registered under both providers so scoped dispatch can be asserted. */
+const SHARED_ID = "dispatch-shared-model"
+
+const TEST_RATE: MTokRate = {
+  inputUSD: 1,
+  outputUSD: 2,
+  cacheWriteUSD: 1,
+  cacheReadUSD: 0.5,
+  webSearchPerCallUSD: 0,
+}
+
+/**
+ * Discover + activate opencode and wafer from the sibling repo, then pin a
+ * synthetic shared bare id under both providers (catalogs no longer overlap).
+ */
+async function discoverBothWithSharedModel(): Promise<void> {
   clearModelRegistry()
   clearProviderRegistry()
   clearProviderPlugins()
   await registerDiscoveredProviders(PLUGIN_ROOTS)
   activateDiscoveredProviders(buildProviderSetupContext())
+
+  registerModel({
+    id: SHARED_ID,
+    providerId: "opencode",
+    surfaceId: "surface-a",
+    displayName: "Dispatch Shared (OpenCode)",
+    tags: ["opencode", "dispatch-fixture"],
+    capabilities: defaultCapabilities(),
+    pricing: TEST_RATE,
+    estimateTokens: makeCharRatioEstimator(3.5),
+  })
+  registerModel({
+    id: SHARED_ID,
+    providerId: "wafer",
+    surfaceId: "surface-b",
+    displayName: "Dispatch Shared (Wafer)",
+    tags: ["wafer", "dispatch-fixture"],
+    capabilities: defaultCapabilities(),
+    pricing: TEST_RATE,
+    estimateTokens: makeCharRatioEstimator(3.5),
+  })
 }
 
 /**
@@ -75,15 +112,15 @@ function fakeNet() {
 
 describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalRequest", () => {
   it("run() with providerId:'opencode' routes to OpenCode, not Wafer", async () => {
-    await discoverBoth()
+    await discoverBothWithSharedModel()
 
-    const ocModel = findModelForProvider("deepseek-v4-flash", "opencode")
-    const wfModel = findModelForProvider("deepseek-v4-flash", "wafer")
+    const ocModel = findModelForProvider(SHARED_ID, "opencode")
+    const wfModel = findModelForProvider(SHARED_ID, "wafer")
     expect(ocModel?.providerId).toBe("opencode")
     expect(wfModel?.providerId).toBe("wafer")
 
     const req: CanonicalRequest = {
-      modelId: "deepseek-v4-flash",
+      modelId: SHARED_ID,
       providerId: "opencode",
       messages: [userText("hi")],
       generation: { maxOutputTokens: 1 },
@@ -105,15 +142,16 @@ describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalReq
 
     // OpenCode adapter must be used, NOT Wafer.
     expect(errorMessage).not.toMatch(/wafer/i)
+    expect(errorMessage).toMatch(/opencode/i)
 
     clearProviderPlugins()
   })
 
   it("run() with providerId:'wafer' routes to Wafer, not OpenCode", async () => {
-    await discoverBoth()
+    await discoverBothWithSharedModel()
 
     const req: CanonicalRequest = {
-      modelId: "deepseek-v4-flash",
+      modelId: SHARED_ID,
       providerId: "wafer",
       messages: [userText("hi")],
       generation: { maxOutputTokens: 1 },
@@ -141,15 +179,12 @@ describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalReq
   })
 
   it("run() without providerId uses the global (last-registered) entry", async () => {
-    await discoverBoth()
+    await discoverBothWithSharedModel()
 
-    // `deepseek-v4-flash` is served by several discovered providers (opencode,
-    // wafer, ollama). Without a providerId, dispatch resolves the global
-    // last-write-wins entry. We don't pin WHICH provider wins (that depends on
-    // the full discovered set's registration order), only that dispatch routes
-    // to one real provider's error path rather than failing to resolve.
+    // Without a providerId, dispatch resolves the global last-write-wins entry
+    // for SHARED_ID (wafer registered last above). Assert that path runs.
     const req: CanonicalRequest = {
-      modelId: "deepseek-v4-flash",
+      modelId: SHARED_ID,
       // No providerId.
       messages: [userText("hi")],
       generation: { maxOutputTokens: 1 },
@@ -177,38 +212,38 @@ describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalReq
   })
 
   it("modelInfoSnapshot resolves correct provider via scoped lookup", async () => {
-    await discoverBoth()
+    await discoverBothWithSharedModel()
 
     const { buildModelInfoSnapshot } = await import("./model-info.ts")
 
-    const ocSnapshot = buildModelInfoSnapshot("deepseek-v4-flash", "opencode")
+    const ocSnapshot = buildModelInfoSnapshot(SHARED_ID, "opencode")
     expect(ocSnapshot.providerId).toBe("opencode")
     expect(ocSnapshot.resolved).toBe(true)
 
-    const wfSnapshot = buildModelInfoSnapshot("deepseek-v4-flash", "wafer")
+    const wfSnapshot = buildModelInfoSnapshot(SHARED_ID, "wafer")
     expect(wfSnapshot.providerId).toBe("wafer")
     expect(wfSnapshot.resolved).toBe(true)
 
     // Without providerId: falls back to the global entry, which resolves to
-    // one of the discovered providers that serves this id (not pinned here).
-    const unScoped = buildModelInfoSnapshot("deepseek-v4-flash")
+    // one of the providers that serves this id (not pinned here).
+    const unScoped = buildModelInfoSnapshot(SHARED_ID)
     expect(unScoped.resolved).toBe(true)
 
     clearProviderPlugins()
   })
 
   it("modelShortLabel resolves correct provider via scoped lookup", async () => {
-    await discoverBoth()
+    await discoverBothWithSharedModel()
 
     const { modelShortLabel } = await import("./model-label.ts")
 
     // Scoped for OpenCode -> label uses OpenCode's short code ("og").
-    const ocLabel = modelShortLabel("deepseek-v4-flash", "opencode")
+    const ocLabel = modelShortLabel(SHARED_ID, "opencode")
     expect(ocLabel).toMatch(/^og/i)
     expect(ocLabel).not.toMatch(/^wf/i)
 
     // Scoped for Wafer -> label uses Wafer's short code ("wf"), not OpenCode's.
-    const wfLabel = modelShortLabel("deepseek-v4-flash", "wafer")
+    const wfLabel = modelShortLabel(SHARED_ID, "wafer")
     expect(wfLabel).not.toMatch(/^og/i)
     expect(wfLabel).toMatch(/^wf/i)
 
