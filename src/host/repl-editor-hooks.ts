@@ -21,9 +21,10 @@ export interface EditorHooksEditor {
 /**
  * Minimal loader surface (hooks facade). Kept deliberately loose so the
  * real PluginLoader.hooks() facade is assignable without coupling this
- * helper to ListenOpts / CallerKind.
+ * helper to ListenOpts / CallerKind. Parameter types stay as `any` so the
+ * concrete hooks facade (stricter opts + typed payload generics) remains
+ * assignable under TypeScript's function parameter checking.
  */
-// oxlint-disable-next-line typescript/no-explicit-any -- structural duck-type for PluginLoader
 export interface EditorHooksLoader {
   hooks(): {
     on: (channel: string, listener: (...args: any[]) => unknown, opts: any) => unknown
