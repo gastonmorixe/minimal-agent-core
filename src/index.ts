@@ -424,7 +424,9 @@ async function main() {
   })
   const hidesReasoning = modelHidesReasoning(selectedModel)
   // Fail fast if the resolved effort isn't among the model's declared levels.
-  validateStartupEffort(hidesReasoning, selectedModelBase, effort)
+  // Pass selectedProviderId so dual-registered bare ids (grok-4.5 on grok +
+  // opencode) validate against THIS provider's caps, not unscoped last-write.
+  validateStartupEffort(hidesReasoning, selectedModelBase, effort, selectedProviderId)
 
   // Terminal viewport row (cols × rows) for the compositor / mdstream.
   printTerminalViewportRow(process.env, process.stdout)

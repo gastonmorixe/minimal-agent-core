@@ -13,7 +13,7 @@
 import { c } from "../../agent/agent.ts"
 import type { CacheTtlSource } from "../../cache/cache-ttl.ts"
 import { type EffortSource, validateEffortForModel } from "../../config/effort-resolution.ts"
-import { findModel } from "../../llm/model-registry.ts"
+import { findModel, findModelForProvider } from "../../llm/model-registry.ts"
 import { printStartupRow } from "../ui/startup/tree.ts"
 
 import { modelHidesReasoning } from "./provider-presentation.ts"
@@ -96,18 +96,29 @@ export function printStartupConfigRows(cfg: StartupConfigRows): void {
  * message instead of a cryptic "unsupported capabilities: effort" on the
  * first request. No-op for models that hide reasoning.
  *
+ * When `providerId` is set, lookup is **provider-scoped** via
+ * {@link findModelForProvider}. Dual-registered bare ids (e.g. `grok-4.5`
+ * under both `grok` and `opencode`) must not validate against the wrong
+ * catalog: unscoped last-write-wins made subagent children with
+ * `--provider grok --effort low` die because OpenCode's caps
+ * (`medium|high|max`) overwrote first-party grok (`low|medium|high`).
+ *
  * @param hidesReasoning - Whether the model hides reasoning (skip if true).
  * @param selectedModelBase - The base model id to look up in the registry.
  * @param effort - The resolved effort value (may be undefined).
+ * @param providerId - Optional selected provider; scopes the registry lookup.
  * @throws If the effort is not among the model's declared levels.
  */
 export function validateStartupEffort(
   hidesReasoning: boolean,
   selectedModelBase: string,
   effort: string | undefined,
+  providerId?: string,
 ): void {
   if (hidesReasoning) return
-  const modelEntry = findModel(selectedModelBase)
+  const modelEntry = providerId
+    ? (findModelForProvider(selectedModelBase, providerId) ?? findModel(selectedModelBase))
+    : findModel(selectedModelBase)
   if (!modelEntry) return
   const validation = validateEffortForModel(effort, modelEntry.capabilities.effort.levels)
   if (!validation.ok) throw new Error(validation.reason)
