@@ -278,6 +278,30 @@ describe("parseManifest", () => {
     })
   })
 
+  describe("tool.mayReturnBinary", () => {
+    it("parses true and surfaces on the tool trigger", () => {
+      const raw = structuredClone(valid)
+      ;(raw.tuis[0].trigger.tool as { mayReturnBinary?: boolean }).mayReturnBinary = true
+      const m = parseManifest(raw, "/x")
+      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { mayReturnBinary?: boolean } })
+        .tool
+      expect(tool.mayReturnBinary).toBe(true)
+    })
+
+    it("treats omitted field as undefined", () => {
+      const m = parseManifest(valid, "/x")
+      const tool = (m.tuis![0].trigger as { type: "tool"; tool: { mayReturnBinary?: boolean } })
+        .tool
+      expect(tool.mayReturnBinary).toBeUndefined()
+    })
+
+    it("rejects non-boolean", () => {
+      const raw = structuredClone(valid)
+      ;(raw.tuis[0].trigger.tool as { mayReturnBinary?: unknown }).mayReturnBinary = "yes"
+      expect(() => parseManifest(raw, "/x")).toThrow(/mayReturnBinary must be a boolean/)
+    })
+  })
+
   it("parses inline_tag trigger", () => {
     const m = parseManifest(
       {

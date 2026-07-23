@@ -15,7 +15,6 @@
 import { KNOWN_PLATFORMS } from "@minimal-agent/plugin-api/utils/platform"
 
 import { diag } from "../bus/diagnostic-bus.ts"
-
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
 import type {
   ColorRequest,
@@ -946,6 +945,9 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
       if (out.length > 0) aliases = out
     }
 
+    if (typeof tool.mayReturnBinary !== "boolean" && tool.mayReturnBinary != null)
+      err("tool.mayReturnBinary must be a boolean if present")
+
     return {
       type: "tool",
       tool: {
@@ -956,6 +958,7 @@ function parseTrigger(raw: unknown, at: string, manifestPath: string): ManifestT
         ...(typeof tool.reason === "string" && tool.reason.length > 0
           ? { reason: tool.reason }
           : {}),
+        ...(tool.mayReturnBinary ? { mayReturnBinary: true } : {}),
         ...(aliases ? { aliases } : {}),
       },
     }

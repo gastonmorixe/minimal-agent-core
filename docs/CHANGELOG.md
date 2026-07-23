@@ -30,6 +30,22 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Fix: withhold binary tool results from model context (opt-in `binary`)
+
+Tools that return PDF/image/zip-like bodies (Fetch `format: original`,
+`cat foo.pdf` via Bash, …) no longer dump UTF-8 mojibake into the model.
+Core adds a defense-in-depth guard in `tool-round` plus a schema injection
+path for tools that declare `mayReturnBinary`:
+
+- `src/tools/binary-guard.ts` — classify bytes/text, format
+  `<ma::agent::binary-result …/>`, inject `binary?: boolean` into
+  input schemas, base64 opt-in under a 48 KiB raw cap.
+- Plugin-api `ManifestTrigger.tool.mayReturnBinary`; loader injects the
+  opt-in arg via `getExtraTools()`.
+- `tool-round` rewrites binary string content **before** transcript paint
+  and **after** blob capture so the annotation carries a real path; media
+  `blocks` (Read images) and user-message document uploads are untouched.
+
 ### Feat: editor buffer style spans + `turn.willStart` model rewrite seam
 
 ---

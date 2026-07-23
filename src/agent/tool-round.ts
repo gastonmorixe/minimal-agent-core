@@ -65,6 +65,12 @@ import {
 } from "../session/blob-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import { expandTabs } from "../terminal/term-width.ts"
+import {
+  classifyBinaryText,
+  formatBinaryOptInContent,
+  formatBinaryResultMessage,
+  isBinaryOptIn,
+} from "../tools/binary-guard.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import type { ToolTimeTracker } from "../tools/tool-time.ts"
@@ -607,6 +613,47 @@ export async function executeToolRound(
       toolStatus.clear()
     }
 
+    // Detect binary tool output BEFORE transcript paint so the user never
+    // sees mojibake, and so we can (a) force the full body into the blob
+    // store even under the clamp threshold, and (b) rewrite the
+    // model-facing text AFTER the blob write with the real on-disk path.
+    // Media blocks (Read image embeds) and user-message document uploads
+    // are untouched — those are the supported multimodal paths. Plugin
+    // tools that already emitted `<ma::agent::binary-result` are left alone.
+    let binaryGuard:
+      | {
+          mime: string
+          sizeBytes: number
+          optedIn: boolean
+          source: string
+        }
+      | undefined
+    if (!aborted && !mediaBlocks?.length && typeof content === "string" && content.length > 0) {
+      const sourceForClass = rawForBlob ?? content
+      if (!sourceForClass.includes("<ma::agent::binary-result")) {
+        const verdict = classifyBinaryText(sourceForClass)
+        if (verdict.binary) {
+          if (rawForBlob == null) rawForBlob = sourceForClass
+          binaryGuard = {
+            mime: verdict.mime,
+            sizeBytes: Buffer.byteLength(sourceForClass, "utf8"),
+            optedIn: isBinaryOptIn(tool.input as Record<string, unknown>),
+            source: sourceForClass,
+          }
+          // Transcript preview: short clean summary, never the raw body.
+          display = `${verdict.mime} · ${binaryGuard.sizeBytes} bytes (binary; withheld from model)`
+          // Placeholder model content for the preview paint; the real
+          // rewrite (with blob path) lands after blob capture below.
+          content = formatBinaryResultMessage({
+            mime: binaryGuard.mime,
+            sizeBytes: binaryGuard.sizeBytes,
+            tool: tool.name,
+          })
+          truncInfo = undefined
+        }
+      }
+    }
+
     // Tool-lifecycle extension point (generic seam, NOT diagnostics-
     // specific). Fire the `tool.didInvoke` CHAIN so any plugin can
     // augment a just-finished tool result: a plugin pushes structured
@@ -689,7 +736,7 @@ export async function executeToolRound(
       // We're already inside an async function here, so the await is
       // free; the tool_result it produces is returned below either way.
       blobWrite = await ctx.blobStore.writeAsync(tool.id, rawBody)
-      if (blobWrite) {
+      if (blobWrite && !binaryGuard) {
         // Footer order: existing `[truncated: …]` notice is already
         // inside `content` (appended by truncation.ts when the clamp
         // fired). Our `<ma::agent::raw-output …/>` goes AFTER that and BEFORE
@@ -701,7 +748,38 @@ export async function executeToolRound(
         //   <ma::agent::raw-output path="<path>" size="85kB" sha256="…" />   ← new
         //
         //   <ma::agent::output-preview shown=… total=…>…</ma::agent::output-preview>   ← only when TUI elided
+        //
+        // Binary bodies skip this append: the binary-guard rewrite below
+        // embeds path/sha256 itself so we never ship both a mojibake body
+        // AND a raw-output footer.
         content = `${content}\n\n${formatRawOutputFooter(blobWrite)}`
+      }
+    }
+
+    // Binary-output rewrite (runs AFTER blob capture so the annotation
+    // can cite the real path). Replaces mojibake with a structured
+    // `<ma::agent::binary-result …/>` summary unless the model opted in
+    // via `binary: true` (then base64 under a size cap, else still path).
+    if (binaryGuard) {
+      const path = blobWrite?.path
+      const sha256 = blobWrite?.sha256
+      if (binaryGuard.optedIn) {
+        const bytes = Buffer.from(binaryGuard.source, "latin1")
+        content = formatBinaryOptInContent({
+          bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+          mime: binaryGuard.mime,
+          path,
+          sha256,
+          tool: tool.name,
+        })
+      } else {
+        content = formatBinaryResultMessage({
+          mime: binaryGuard.mime,
+          sizeBytes: binaryGuard.sizeBytes,
+          path,
+          sha256,
+          tool: tool.name,
+        })
       }
     }
 
