@@ -62,8 +62,10 @@ import type { PendingModeAttachment } from "../../../modes/modes.ts"
  *   active") to its display label. Conventional spelling for `null`
  *   is `"default"`.
  * @param resolveFgOpen - Maps a mode id (or `null`) to the SGR open
- *   string for its accent color. `null` means "no accent" : the
- *   side falls back to dim (source) or bold faintWhite (target).
+ *   string for its accent color. Live callers pass brand primary for
+ *   `null` (no-mode / `"default"`) so it matches the prompt arrow.
+ *   Returning `null` means "no accent" : the side falls back to dim
+ *   (source) or bold faintWhite (target) for truly unstyled modes.
  *
  * @returns The rendered line (no trailing newline) or `null` when
  *   nothing is pending.

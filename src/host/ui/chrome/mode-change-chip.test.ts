@@ -95,11 +95,12 @@ describe("labelFor", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildModeChangeChip", () => {
-  test("default → ASK: dim · chip-lead, dim 'mode' category, dim 'default', dim arrow, bold blue ASK, faint-white timestamp", () => {
+  test("default → ASK: dim · chip-lead, dim 'mode' category, brand-primary 'default', dim arrow, bold blue ASK, faint-white timestamp", () => {
+    const brand = "\x1b[38;5;199m" // palette brand/pink — same as prompt ❯
     const out = buildModeChangeChip({
       fromLabel: "default",
       toLabel: "ASK",
-      fromFgOpen: null, // default has no accent
+      fromFgOpen: brand,
       toFgOpen: "\x1b[34m",
       at: FIXED_AT,
     })
@@ -110,8 +111,8 @@ describe("buildModeChangeChip", () => {
         " " +
         "\x1b[2mmode\x1b[22m" +
         "   " +
-        // from = "default", no accent → dim
-        "\x1b[2mdefault\x1b[22m" +
+        // from = "default", brand primary (prompt arrow pigment)
+        `${brand}default\x1b[39m` +
         " " +
         "\x1b[2m→\x1b[22m" +
         " " +
@@ -153,18 +154,19 @@ describe("buildModeChangeChip", () => {
     expect(out).toContain("\x1b[1m\x1b[34mASK\x1b[0m")
   })
 
-  test("ASK → default: source bold-style, target falls back to dim faint-white bold", () => {
+  test("ASK → default: source non-bold accent, target bold brand primary", () => {
+    const brand = "\x1b[38;5;199m"
     const out = buildModeChangeChip({
       fromLabel: "ASK",
       toLabel: "default",
       fromFgOpen: "\x1b[34m",
-      toFgOpen: null,
+      toFgOpen: brand,
       at: FIXED_AT,
     })
     // Source: accent color, non-bold.
     expect(out).toContain("\x1b[34mASK\x1b[39m")
-    // Target: bold faint-white fallback.
-    expect(out).toContain("\x1b[1;37mdefault\x1b[0m")
+    // Target: bold brand primary (same pigment as prompt ❯).
+    expect(out).toContain(`\x1b[1m${brand}default\x1b[0m`)
   })
 
   test("emits no trailing newline (caller appends \\n live, \\n\\n in replay)", () => {
@@ -184,6 +186,7 @@ describe("buildModeChangeChip", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildPendingModeChangeChip", () => {
+  const brand = "\x1b[38;5;199m"
   const labelMap: Record<string, string> = { ask: "ASK", plan: "PLAN" }
   const fgMap: Record<string, string | null> = {
     ask: "\x1b[34m",
@@ -191,8 +194,9 @@ describe("buildPendingModeChangeChip", () => {
   }
   const resolveLabel = (id: string | null): string =>
     id == null ? "default" : (labelMap[id] ?? id)
+  // Mirrors ModeManager.resolvedForId: null id → brand primary.
   const resolveFgOpen = (id: string | null): string | null =>
-    id == null ? null : (fgMap[id] ?? null)
+    id == null ? brand : (fgMap[id] ?? null)
   const at = new Date("2026-05-22T17:52:00")
 
   test("returns null when pending is null (net-zero between submits)", () => {
@@ -209,14 +213,14 @@ describe("buildPendingModeChangeChip", () => {
     const want = buildModeChangeChip({
       fromLabel: "default",
       toLabel: "ASK",
-      fromFgOpen: null,
+      fromFgOpen: brand,
       toFgOpen: "\x1b[34m",
       at,
     })
     expect(got).toBe(want)
   })
 
-  test("ASK → default uses bold faintWhite for the default target, source keeps its accent", () => {
+  test("ASK → default uses bold brand primary for the default target, source keeps its accent", () => {
     const got = buildPendingModeChangeChip(
       { fromId: "ask", toId: null },
       resolveLabel,
@@ -224,7 +228,7 @@ describe("buildPendingModeChangeChip", () => {
       at,
     )
     expect(got).toContain("\x1b[34mASK\x1b[39m") // source non-bold accent
-    expect(got).toContain("\x1b[1;37mdefault\x1b[0m") // target bold fallback
+    expect(got).toContain(`\x1b[1m${brand}default\x1b[0m`) // target bold brand
   })
 })
 
@@ -246,6 +250,8 @@ describe("eventToChipInput", () => {
     )
     expect(input.fromLabel).toBe("default")
     expect(input.toLabel).toBe("ASK")
+    // No-mode/"default" resolves to brand primary (prompt arrow pigment).
+    expect(input.fromFgOpen).toBe("\x1b[38;5;199m")
     // ASK_MODE's style requests `fg: "blue"` which maps to legacy ANSI 34.
     expect(input.toFgOpen).toBe("\x1b[34m")
     expect(input.at).toEqual(FIXED_AT)

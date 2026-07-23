@@ -45,8 +45,10 @@ import type { ManifestMode } from "../../../plugins/types.ts"
  *
  * `fromFgOpen` / `toFgOpen` are SGR open sequences for the source /
  * target modes' accent colors. `null` means "no color" : that side
- * falls back to dim (source) or bold faint-white (target). This
- * keeps `default ↔ <mode>` transitions readable.
+ * falls back to dim (source) or bold faint-white (target). Live
+ * callers resolve `"default"` / no-mode via `ModeManager.resolvedForId(null)`
+ * which supplies the brand primary (same pigment as the prompt `❯`),
+ * so the pure fallback is only for modes that truly declare no style.
  */
 export interface ChipRenderInput {
   fromLabel: string
@@ -133,8 +135,9 @@ export function buildModeChangeChip(input: ChipRenderInput): string {
 
 /**
  * Paint `text` in `fgOpen` (non-bold). Falls back to dim when the mode
- * has no accent color (e.g. `"default"`), matching the sibling
- * pending-decoration renderer.
+ * has no accent color (unstyled modes only — `"default"` is resolved to
+ * brand primary by the caller), matching the sibling pending-decoration
+ * renderer.
  */
 function paintFlat(text: string, fgOpen: string | null): string {
   if (fgOpen) return `${fgOpen}${text}${ANSI_CODES.FG_RESET}`
@@ -143,9 +146,9 @@ function paintFlat(text: string, fgOpen: string | null): string {
 
 /**
  * Paint `text` bold in `fgOpen`. Falls back to bold faint-white when the
- * mode has no accent color, so "default" still reads as a label without
- * stealing focus from a colored sibling. Matches the pending-decoration
- * renderer byte-for-byte.
+ * mode has no accent color (unstyled modes only). `"default"` is resolved
+ * to brand primary by the caller so it matches the prompt arrow. Matches
+ * the pending-decoration renderer byte-for-byte.
  */
 function paintBold(text: string, fgOpen: string | null): string {
   if (fgOpen) return `${ANSI_CODES.BOLD}${fgOpen}${text}${ANSI_CODES.RESET}`
