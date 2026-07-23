@@ -1592,6 +1592,16 @@ export type ManifestTrigger =
          * the model.
          */
         reason?: string
+        /**
+         * When `true`, this tool MAY return binary (non-text) bodies — e.g.
+         * Fetch with `format: "original"` on a PDF. The loader auto-injects a
+         * `binary: boolean` (default false) argument into `input_schema` so
+         * the model can opt in. Without opt-in, core withholds binary bodies
+         * and replaces them with a `<ma::agent::binary-result …/>` summary
+         * instead of dumping mojibake into context. See
+         * `src/tools/binary-guard.ts`.
+         */
+        mayReturnBinary?: boolean
         aliases?: string[]
       }
     }
