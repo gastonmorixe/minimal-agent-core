@@ -121,6 +121,8 @@ const LEGACY_FG_OPEN: Record<string, string> = {
 const SEMANTIC_TO_LEGACY: Record<string, string> = {
   accent: "blue", // mode-style prefers calm blue over the brand sky
   "accent-soft": SEMANTIC["accent-soft"],
+  // Brand primary — same pigment as the default prompt arrow (`❯`).
+  brand: SEMANTIC.brand,
   danger: SEMANTIC.danger,
   muted: SEMANTIC.muted,
 }

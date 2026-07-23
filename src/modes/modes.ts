@@ -372,6 +372,12 @@ export class ModeManager {
   /** Resolved style cache, one entry per mode in {@link modes}. */
   private readonly resolvedCache: (ResolvedModeStyle | null)[]
   /**
+   * Synthetic style for "no mode active" (`id === null` / label `"default"`).
+   * Uses the semantic `brand` token so chip/decoration labels match the
+   * default prompt arrow (`❯`) pigment without hardcoding an SGR sequence.
+   */
+  private readonly defaultResolved: ResolvedModeStyle
+  /**
    * Mode the model was last *told* about (via a `<mode-change>` attachment
    * consumed by {@link consumePendingAttachment}). May lag {@link active}
    * between a Shift+Tab toggle and the next outgoing user message. `null`
@@ -471,6 +477,15 @@ export class ModeManager {
       const req = m.style ?? styleFromLegacyColor(m.color)
       return req ? resolveModeStyle(req, this.env) : null
     })
+    // Brand primary for the no-mode/"default" side of mode-change chrome.
+    // Mirrors the live prompt's `c.pink("❯")` via the shared palette semantic.
+    this.defaultResolved = resolveModeStyle(
+      {
+        label: { fg: "brand", bold: true },
+        arrow: { fg: "brand", bold: true },
+      },
+      this.env,
+    )
     this.permissionsCache = this.modes.map(() => null)
     if (defaultModeId) {
       const i = this.modes.findIndex((m) => m.id === defaultModeId)
@@ -973,13 +988,19 @@ export class ModeManager {
   }
 
   /**
-   * Resolved style for an arbitrary mode by id. Returns `null` when the
-   * id is unknown OR when the mode declared no style. Used by the chip
-   * renderer to look up the target mode's accent color without binding
+   * Resolved style for an arbitrary mode by id.
+   *
+   * - `id === null` → synthetic "default" / no-mode style in the brand
+   *   primary color (same pigment as the default prompt arrow). Callers
+   *   that paint mode-change chips/decorations use this so `"default"`
+   *   is never unstyled white/dim.
+   * - unknown id OR mode with no style → `null` (renderer falls back).
+   *
+   * Used by the chip renderer to look up accent colors without binding
    * the renderer to the manager's internal cache.
    */
   resolvedForId(id: string | null): ResolvedModeStyle | null {
-    if (id == null) return null
+    if (id == null) return this.defaultResolved
     const idx = this.modes.findIndex((m) => m.id === id)
     if (idx === -1) return null
     return this.resolvedCache[idx]

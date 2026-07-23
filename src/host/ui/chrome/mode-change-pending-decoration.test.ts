@@ -11,21 +11,23 @@ import { describe, expect, test } from "bun:test"
 
 import { buildPendingModeChangeDecoration } from "./mode-change-pending-decoration.ts"
 
+const brand = "\x1b[38;5;199m" // palette brand/pink — same as prompt ❯
 const labelMap: Record<string, string> = { ask: "ASK", plan: "PLAN" }
 const fgMap: Record<string, string | null> = {
   ask: "\x1b[34m",
   plan: "\x1b[38;5;208m",
 }
 const resolveLabel = (id: string | null): string => (id == null ? "default" : (labelMap[id] ?? id))
+// Mirrors ModeManager.resolvedForId: null id → brand primary.
 const resolveFgOpen = (id: string | null): string | null =>
-  id == null ? null : (fgMap[id] ?? null)
+  id == null ? brand : (fgMap[id] ?? null)
 
 describe("buildPendingModeChangeDecoration", () => {
   test("returns null when nothing is pending", () => {
     expect(buildPendingModeChangeDecoration(null, resolveLabel, resolveFgOpen)).toBeNull()
   })
 
-  test("default → ASK renders the full widget with violet glyph, dim category, dim 'default', bold blue ASK, dim hint", () => {
+  test("default → ASK renders the full widget with violet glyph, dim category, brand-primary 'default', bold blue ASK, dim hint", () => {
     const out = buildPendingModeChangeDecoration(
       { fromId: null, toId: "ask" },
       resolveLabel,
@@ -39,8 +41,8 @@ describe("buildPendingModeChangeDecoration", () => {
         // dim "mode" category
         "\x1b[2mmode\x1b[22m" +
         "   " +
-        // from = "default", no accent → dim
-        "\x1b[2mdefault\x1b[22m" +
+        // from = "default", brand primary (prompt arrow pigment)
+        `${brand}default\x1b[39m` +
         " " +
         "\x1b[2m→\x1b[22m" +
         " " +
@@ -55,7 +57,7 @@ describe("buildPendingModeChangeDecoration", () => {
     )
   })
 
-  test("ASK → default uses bold faintWhite for the default target; source keeps its accent", () => {
+  test("ASK → default uses bold brand primary for the default target; source keeps its accent", () => {
     const out = buildPendingModeChangeDecoration(
       { fromId: "ask", toId: null },
       resolveLabel,
@@ -64,8 +66,8 @@ describe("buildPendingModeChangeDecoration", () => {
     expect(out).not.toBeNull()
     // Source ASK: accent color, non-bold.
     expect(out).toContain("\x1b[34mASK\x1b[39m")
-    // Target default: bold faint-white fallback.
-    expect(out).toContain("\x1b[1;37mdefault\x1b[0m")
+    // Target default: bold brand primary (same pigment as prompt ❯).
+    expect(out).toContain(`\x1b[1m${brand}default\x1b[0m`)
     // Hint is always present.
     expect(out).toContain("⌥M to apply now")
   })
