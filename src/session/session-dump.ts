@@ -1,6 +1,17 @@
 import type { ContentBlock, TextBlock } from "../llm/messages.ts"
+import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 
 import type { LoadedSession } from "./session-restore.ts"
+
+/**
+ * Redact oversized `data:*;base64,…` URIs in tool_result text for human
+ * dumps. Model-facing scrub already runs at tool ingest; this covers
+ * legacy sessions that still have raw data-URIs on disk.
+ */
+function scrubDumpText(s: string): string {
+  const r = scrubEmbeddedPayloads(s)
+  return r.changed ? r.text : s
+}
 
 /**
  * Format a session as a human-readable Markdown string.
@@ -66,12 +77,14 @@ function formatBlockAsMarkdown(block: ContentBlock): string {
 
       let contentStr = ""
       if (typeof block.content === "string") {
-        contentStr = block.content
+        contentStr = scrubDumpText(block.content)
       } else {
-        contentStr = block.content
-          .filter((b) => b.type === "text")
-          .map((b) => (b as TextBlock).text)
-          .join("\n")
+        contentStr = scrubDumpText(
+          block.content
+            .filter((b) => b.type === "text")
+            .map((b) => (b as TextBlock).text)
+            .join("\n"),
+        )
       }
 
       if (contentStr) {
@@ -164,12 +177,14 @@ function formatBlockAsXml(block: ContentBlock, indent: number): string {
       const isErrorAttr = block.is_error ? ` is_error="true"` : ""
       let contentStr = ""
       if (typeof block.content === "string") {
-        contentStr = block.content
+        contentStr = scrubDumpText(block.content)
       } else {
-        contentStr = block.content
-          .filter((b) => b.type === "text")
-          .map((b) => (b as TextBlock).text)
-          .join("\n")
+        contentStr = scrubDumpText(
+          block.content
+            .filter((b) => b.type === "text")
+            .map((b) => (b as TextBlock).text)
+            .join("\n"),
+        )
       }
 
       return (

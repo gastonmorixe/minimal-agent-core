@@ -71,6 +71,7 @@ import {
   formatBinaryResultMessage,
   isBinaryOptIn,
 } from "../tools/binary-guard.ts"
+import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
 import type { ToolTimeTracker } from "../tools/tool-time.ts"
@@ -650,6 +651,34 @@ export async function executeToolRound(
             tool: tool.name,
           })
           truncInfo = undefined
+        }
+      }
+    }
+
+    // Embedded data-URI scrub BEFORE transcript paint so the user never
+    // sees multi-KB base64 in the TUI, and so `content` is already clean
+    // for the model. Whole-body binary (above) is a different path.
+    // Capture pre-scrub bytes into `rawForBlob` so the blob store keeps
+    // high-fidelity recovery material. Skipped when the call opted into
+    // binary delivery or when multimodal image blocks are present.
+    // Idempotent: re-scrub of already-clean text is a no-op.
+    if (
+      !aborted &&
+      !binaryGuard &&
+      !mediaBlocks?.length &&
+      !isBinaryOptIn(tool.input as Record<string, unknown>) &&
+      typeof content === "string" &&
+      content.length > 0 &&
+      !content.includes("<ma::agent::binary-result")
+    ) {
+      const preScrub = content
+      const scrubbed = scrubEmbeddedPayloads(preScrub, { tool: tool.name })
+      if (scrubbed.changed) {
+        if (rawForBlob == null) rawForBlob = preScrub
+        content = scrubbed.text
+        if (typeof display === "string" && display.includes("data:")) {
+          const d = scrubEmbeddedPayloads(display, { tool: tool.name })
+          if (d.changed) display = d.text
         }
       }
     }

@@ -30,6 +30,27 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Fix: scrub embedded `data:*;base64` URIs in tool text (token waste)
+
+---
+id: "2026-07-23-embedded-payload-scrub"
+type: fix
+status: shipped
+created-at: "2026-07-23T16:41:00-0400"
+updated-at: "2026-07-23T16:55:00-0400"
+---
+
+Whole-body binary-guard does not catch base64 **inside** otherwise-valid UTF-8
+(e.g. Fetch markdown with inlined `data:image/png;base64,…`). New pure scrub:
+
+- `src/tools/embedded-payload-scrub.ts` — continuous data-URI base64 above 256
+  chars → `<ma::agent::redacted-asset …/>` + `<ma::agent::context-sanitizer …/>`.
+- `tool-round` runs scrub **before** transcript paint; pre-scrub body kept for
+  blob recovery (`rawForBlob`). Skips `binary: true` and multimodal blocks.
+- `session-dump` re-scrubs so `ma sessions dump` no longer prints megabase64.
+- Loader max-lines: `pluginToolDefinitionFromTrigger` moved into
+  `loader/helpers.ts` (binary opt-in inject stays).
+
 ### Fix: withhold binary tool results from model context (opt-in `binary`)
 
 Tools that return PDF/image/zip-like bodies (Fetch `format: original`,
