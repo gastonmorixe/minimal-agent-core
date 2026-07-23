@@ -15,6 +15,7 @@
 import { KNOWN_PLATFORMS } from "@minimal-agent/plugin-api/utils/platform"
 
 import { diag } from "../bus/diagnostic-bus.ts"
+
 import { type CapabilityToken, isCapabilityToken, KNOWN_CAPABILITIES } from "./host/capabilities.ts"
 import type {
   ColorRequest,

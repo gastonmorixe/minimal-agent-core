@@ -11,6 +11,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
 
+import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import type {
   LoadedPlugin,
   ManifestHandler,
@@ -22,6 +23,30 @@ import type {
 } from "../types.ts"
 
 import { subprocessOutputExceededResult } from "./PROMPTS.ts"
+
+/**
+ * Build the model-facing tool definition for a plugin tool trigger.
+ * Injects the `binary` opt-in arg when the tool declared `mayReturnBinary`.
+ * Lives here (not in loader.ts) to keep that file under the max-lines budget.
+ */
+export function pluginToolDefinitionFromTrigger(tool: {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+  mayReturnBinary?: boolean
+}): {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+} {
+  return {
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.mayReturnBinary
+      ? injectBinaryOptInArg(tool.input_schema)
+      : tool.input_schema,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

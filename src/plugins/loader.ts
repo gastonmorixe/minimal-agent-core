@@ -28,8 +28,9 @@
 
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 import type { NormalizedPlatform } from "@minimal-agent/plugin-api/utils/platform"
+
 import { createPluginLogger, diag } from "../bus/diagnostic-bus.ts"
-import { injectBinaryOptInArg } from "../tools/binary-guard.ts"
+
 import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
 import { EventBus } from "./event-bus.ts"
 import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
@@ -1007,11 +1008,7 @@ export class PluginLoader {
         if (h.definition.trigger.type === "tool" && this.isToolAvailable(h, actx)) {
           const tool = h.definition.trigger.tool
           out.push({
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.mayReturnBinary
-              ? injectBinaryOptInArg(tool.input_schema)
-              : tool.input_schema,
+            ...pluginToolDefinitionFromTrigger(tool),
             ...(h.definition.icon ? { icon: h.definition.icon } : {}),
             ...(h.definition.color ? { color: h.definition.color } : {}),
             ...(h.definition.headerKey ? { headerKey: h.definition.headerKey } : {}),
@@ -1490,6 +1487,7 @@ import {
   findPluginIdFor,
   PROMPT_ROLE_ORDER,
   type PromptRole,
+  pluginToolDefinitionFromTrigger,
   resolveHandler,
   stripLeadingHeading,
 } from "./loader/helpers.ts"
