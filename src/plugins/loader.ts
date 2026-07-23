@@ -28,7 +28,6 @@
 
 import { paletteEnvJson } from "@minimal-agent/plugin-api/utils/palette"
 import type { NormalizedPlatform } from "@minimal-agent/plugin-api/utils/platform"
-
 import { createPluginLogger, diag } from "../bus/diagnostic-bus.ts"
 import { injectBinaryOptInArg } from "../tools/binary-guard.ts"
 import { agentContextToEnv, createAgentContext } from "./agent-context.ts"
@@ -58,7 +57,6 @@ import type {
   TUIResult,
   TUITrigger,
 } from "./types.ts"
-
 /**
  * Module-handler default-export signature for hook subscriptions.
  *
@@ -981,9 +979,10 @@ export class PluginLoader {
     try {
       return h.available(ctx) !== false
     } catch (e) {
+      const name =
+        h.definition.trigger.type === "tool" ? h.definition.trigger.tool.name : h.definition.id
       this.logger(
-        `tool availability predicate threw for "${h.definition.trigger.type === "tool" ? h.definition.trigger.tool.name : h.definition.id}"; ` +
-          `keeping the tool visible: ${e instanceof Error ? e.message : String(e)}`,
+        `tool availability predicate threw for "${name}"; keeping the tool visible: ${e instanceof Error ? e.message : String(e)}`,
       )
       return true
     }
@@ -1010,7 +1009,9 @@ export class PluginLoader {
           out.push({
             name: tool.name,
             description: tool.description,
-            input_schema: tool.mayReturnBinary ? injectBinaryOptInArg(tool.input_schema) : tool.input_schema,
+            input_schema: tool.mayReturnBinary
+              ? injectBinaryOptInArg(tool.input_schema)
+              : tool.input_schema,
             ...(h.definition.icon ? { icon: h.definition.icon } : {}),
             ...(h.definition.color ? { color: h.definition.color } : {}),
             ...(h.definition.headerKey ? { headerKey: h.definition.headerKey } : {}),
