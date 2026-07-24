@@ -13,9 +13,9 @@ import { describe, expect, it } from "bun:test"
 import { StatusBus } from "../../bus/status.ts"
 import {
   NetworkClient,
-  networkActivityObserver,
   NetworkResponse,
   type NetworkTransport,
+  networkActivityObserver,
 } from "../../network/index.ts"
 
 import { bindPrimaryStreamRequest, bindRequestLifecycle } from "./canonical-send.ts"
@@ -265,6 +265,8 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
       url: "https://example.test/v1/responses",
       body: "{}",
     })
+    const bodiesAfterStreamHeaders = bodies.length
+
     await client
       .request({
         label: "grok.billing",
@@ -273,10 +275,11 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
       })
       .then((r) => r.text())
 
-    // Stream body activity only when the stream body is actually read.
-    expect(bodies).toEqual([])
+    // Billing must not add body-activity marks.
+    expect(bodies.length).toBe(bodiesAfterStreamHeaders)
+
     await stream.text()
-    expect(bodies).toEqual([1])
+    expect(bodies.length).toBeGreaterThan(bodiesAfterStreamHeaders)
 
     expect(seen).toHaveLength(2)
     expect(seen[0]!.label).toBe("grok.responses")

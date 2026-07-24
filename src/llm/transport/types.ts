@@ -162,9 +162,10 @@ export interface SendOptions {
    */
   onTextStop?: () => MaybePromise<void>
   /**
-   * Stream-idle watchdog: if the server stops sending events for this many
-   * ms while the request is in-flight (no terminator received yet), the
-   * attempt is aborted and the outer retry loop tries again.
+   * Mid-stream wire-idle watchdog: if the server stops delivering response
+   * body bytes for this many ms after first body activity (no terminator
+   * yet), the attempt is aborted and the outer retry loop tries again.
+   * Wire bytes are authoritative; CanonicalEvent yields are a fallback.
    *
    * Defaults to `30_000` (30 seconds). Guards against a stream that streams
    * partial content then stops without a terminator. Set lower in tests for

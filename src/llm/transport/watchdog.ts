@@ -183,6 +183,7 @@ export async function* withStreamWatchdog(
   let headersReceived = false
   let messageStopReceived = false
   let reason: WatchdogAbortReason | null = null
+  let failure: WatchdogError | null = null
   let openThinkingBlocks = 0
 
   /** First call: pre-stream → mid-stream. Every call: refresh mid-stream idle. */
@@ -237,6 +238,10 @@ export async function* withStreamWatchdog(
   if (typeof timer.unref === "function") timer.unref()
 
   const fail = (code: WatchdogAbortReason): WatchdogError => {
+    // Single-fire: try-path and catch-path both call fail(reason). Without
+    // this, every mid-stream stall logs api.stream-stalled twice (Sergio +
+    // Benjamin Grok sessions).
+    if (failure !== null) return failure
     const phase = currentStallPhase()
     const sub = currentSubPhase()
     const idleMs = streamStarted ? Date.now() - lastEventAt : Date.now() - startedAt
@@ -245,7 +250,7 @@ export async function* withStreamWatchdog(
       code === "stream_idle"
         ? phase === "pre-stream"
           ? `no response body activity for ${(elapsedMs / 1000).toFixed(1)}s — aborting (stalled pre-stream: upload/TTFB/headers, no SSE yet)`
-          : `no SSE event received for ${(idleMs / 1000).toFixed(1)}s — aborting (stalled mid-stream, no message_stop)`
+          : `no response body activity for ${(idleMs / 1000).toFixed(1)}s — aborting (stalled mid-stream, no message_stop)`
         : code === "attempt_too_long"
           ? `attempt exceeded ${(elapsedMs / 1000).toFixed(0)}s — aborting`
           : `stream ended without message_stop after ${(elapsedMs / 1000).toFixed(1)}s (server truncated the SSE response)`
@@ -256,7 +261,8 @@ export async function* withStreamWatchdog(
       stallPhase: phase,
       stallSubPhase: sub,
     })
-    return makeWatchdogError(code, message, phase, sub)
+    failure = makeWatchdogError(code, message, phase, sub)
+    return failure
   }
 
   try {

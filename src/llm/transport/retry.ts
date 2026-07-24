@@ -185,7 +185,9 @@ export async function* withRetry(
       }
       if (attempt > 1) {
         const totalMs = Date.now() - startedAt
-        diag.warn(
+        // Notice (not warn) so TUI footer recovery clears the stall banner,
+        // and recovery flags clear matching warn slots for the stall sources.
+        diag.notice(
           "api.retry-success",
           `recovered after ${attempt - 1} retr${attempt - 1 === 1 ? "y" : "ies"} (${formatElapsedLong(totalMs)} total) — last error ${lastStreamErrType ?? "unknown"}`,
           {
@@ -195,6 +197,9 @@ export async function* withRetry(
             "last-error": lastStreamErrType ?? "unknown",
           },
         )
+        // Clear stall warn slots in TuiDiagnosticSurface (same sources as the warns).
+        diag.notice("api.stream-stalled", "stream recovered after retry", { recovery: "true" })
+        diag.notice("api.retry", "retry recovered", { recovery: "true" })
       }
       return result.value
     } catch (err) {
