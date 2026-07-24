@@ -240,48 +240,55 @@ export class NetworkClient {
       this.notifyError(req, err)
       req.lifecycle?.onError?.(err)
     }
-    const body = new ReadableStream<Uint8Array>({
-      pull: async (controller) => {
-        reader ??= response.body.getReader()
-        try {
-          const { done, value } = await reader.read()
-          if (done) {
-            settleEnd()
-            controller.close()
-            reader.releaseLock()
-            reader = undefined
-            return
-          }
-          if (value) {
-            this.notifyChunk(req, value, response)
-            if (value.byteLength > 0) req.lifecycle?.onBodyChunk?.(value, response)
-            controller.enqueue(value)
-          }
-        } catch (err) {
-          settleError(err)
-          controller.error(err)
-        }
-      },
-      cancel: async (reason) => {
-        // Acquire the underlying reader even when the consumer never pulled,
-        // so early returns / non-2xx cancel paths actually cancel the wire
-        // stream and fire terminal observer hooks.
-        try {
+    // highWaterMark: 0 keeps this tap fully consumer-driven. The default
+    // highWaterMark of 1 would call pull() immediately after construction and
+    // fire onChunk/lifecycle body hooks before the adapter started reading —
+    // which made "lazy body" tests and pre-stream phase control race.
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
           reader ??= response.body.getReader()
-          await reader.cancel(reason)
-        } catch (err) {
-          settleError(err)
-        } finally {
           try {
-            reader?.releaseLock()
-          } catch {
-            // already released
+            const { done, value } = await reader.read()
+            if (done) {
+              settleEnd()
+              controller.close()
+              reader.releaseLock()
+              reader = undefined
+              return
+            }
+            if (value) {
+              this.notifyChunk(req, value, response)
+              if (value.byteLength > 0) req.lifecycle?.onBodyChunk?.(value, response)
+              controller.enqueue(value)
+            }
+          } catch (err) {
+            settleError(err)
+            controller.error(err)
           }
-          reader = undefined
-          settleEnd()
-        }
+        },
+        cancel: async (reason) => {
+          // Acquire the underlying reader even when the consumer never pulled,
+          // so early returns / non-2xx cancel paths actually cancel the wire
+          // stream and fire terminal observer hooks.
+          try {
+            reader ??= response.body.getReader()
+            await reader.cancel(reason)
+          } catch (err) {
+            settleError(err)
+          } finally {
+            try {
+              reader?.releaseLock()
+            } catch {
+              // already released
+            }
+            reader = undefined
+            settleEnd()
+          }
+        },
       },
-    })
+      { highWaterMark: 0 },
+    )
 
     return new NetworkResponse({
       status: response.status,
