@@ -135,21 +135,6 @@ describe("bindRequestLifecycle", () => {
 describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
   it("does not mark body activity from concurrent billing after SSE headers (c5a709f2)", async () => {
     const encoder = new TextEncoder()
-    const base = clientWithHandler(async (signal) => {
-      // Transport sees only the URL via the request object on NetworkClient —
-      // our fake ignores input, so we branch on signal presence is not enough.
-      // Use a stateful handler via closure over the last request is awkward;
-      // instead use a multi-call transport below.
-      void signal
-      return new NetworkResponse({
-        status: 200,
-        headers: { "content-type": "application/json" },
-        transport: { id: "fake" },
-        body: emptyClosedBody(),
-      })
-    })
-
-    // Replace with a transport that inspects req.label.
     const transport: NetworkTransport = {
       id: "fake",
       request: async (req) => {
@@ -159,7 +144,7 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
             headers: { "content-type": "text/event-stream" },
             transport: { id: "fake", protocol: "h2" },
             body: new ReadableStream<Uint8Array>({
-              start(controller) {
+              start() {
                 // No body bytes yet — pre-stream until SSE arrives.
               },
             }),
