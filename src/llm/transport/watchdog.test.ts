@@ -336,6 +336,27 @@ describe("withStreamWatchdog", () => {
     expect(stall?.stallPhase).toBe("mid-stream")
   }, 10_000)
 
+  it("fires onStall exactly once when try-path and catch-path both observe the abort", async () => {
+    // Sergio/Benjamin: api.stream-stalled was logged twice because fail() ran
+    // once for the in-loop reason check and again in the catch after abort.
+    let stalls = 0
+    const run = withStreamWatchdog(attempt([START], { stall: true }), {
+      streamIdleTimeoutMs: 50,
+      attemptHardTimeoutMs: 30_000,
+      onStall: () => {
+        stalls++
+      },
+    })
+    let caught: WatchdogError | undefined
+    try {
+      await collect(run)
+    } catch (e) {
+      caught = e as WatchdogError
+    }
+    expect(caught?.streamErrorType).toBe("stream_idle")
+    expect(stalls).toBe(1)
+  }, 10_000)
+
   it("prefers stream_idle over a synthetic terminal-less drain after abort", async () => {
     // Reproduces 113921b7: watchdog aborts → body drains quietly → adapter
     // would yield stream_closed_without_terminal. Watchdog must throw

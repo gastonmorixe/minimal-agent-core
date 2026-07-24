@@ -12,7 +12,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { getDiagnosticBus, type LogEvent, resetDiagnosticBus } from "../../bus/diagnostic-bus.ts"
+import {
+  getDiagnosticBus,
+  type LogEvent,
+  resetDiagnosticBus,
+  Severity,
+} from "../../bus/diagnostic-bus.ts"
 
 import { withRetry } from "./retry.ts"
 import type { StreamedResponse } from "./types.ts"
@@ -103,6 +108,8 @@ describe("withRetry", () => {
     expect(retry?.structuredData?.curve).toBe("fast")
     const success = events.find((e) => e.source === "api.retry-success")
     expect(success?.structuredData?.retries).toBe(1)
+    // Recovery is a Notice so the TUI footer can clear the stall warn slot.
+    expect(success?.severity).toBe(Severity.Notice)
   })
 
   it("uses the SLOW curve for rate_limit_error", async () => {
@@ -220,7 +227,10 @@ describe("withRetry", () => {
       dispose()
     }
     expect(calls).toBe(5)
-    expect(events.filter((e) => e.source === "api.retry").length).toBe(4)
+    // 4 warn retries + 1 recovery Notice on the same source after success.
+    expect(
+      events.filter((e) => e.source === "api.retry" && e.severity === Severity.Warning).length,
+    ).toBe(4)
     expect(events.some((e) => e.source === "api.retry-terminal-less-stop")).toBe(false)
     expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
   })
@@ -252,7 +262,9 @@ describe("withRetry", () => {
       dispose()
     }
     expect(calls).toBe(4)
-    const retries = events.filter((e) => e.source === "api.retry")
+    const retries = events.filter(
+      (e) => e.source === "api.retry" && e.severity === Severity.Warning,
+    )
     expect(retries.length).toBe(3)
     for (const r of retries) {
       expect(r.structuredData?.curve).toBe("terminal-less-midstream")
