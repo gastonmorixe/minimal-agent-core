@@ -30,6 +30,31 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Fix: Grok false mid-stream `stream_idle` from billing / shared request ids
+
+---
+id: "2026-07-24-stream-idle-billing-isolation"
+type: fix
+status: shipped
+created-at: "2026-07-24T02:50:00-0400"
+updated-at: "2026-07-24T02:55:00-0400"
+detail: "docs/changes/2026-07-24-stream-idle-billing-isolation.md"
+commits: ["ff4a1ab", "7c91bc7", "bf35061"]
+---
+
+Grok OAuth turns often logged mid-stream `stream_idle` ~30s after headers when a
+concurrent `GET /v1/billing` shared the LLM stream's request id and lifecycle
+hooks — billing JSON ended pre-stream and armed the wrong idle clock. Separate
+from real upstream silence (e.g. mid tool-arg pauses), which still trips at 30s.
+
+Fix: request-local lifecycle at the NetworkClient body tap; `bindPrimaryStreamRequest`
+gives unique wire ids and attaches activity/watchdog only to the primary stream
+(SSE/NDJSON/connect+ at headers, or `llm-stream` policy tag); denylist billing /
+OAuth / quota labels; single-fire stall diagnostics; Notice-level retry recovery
+so TUI warn slots clear. Mid-stream idle stays 30s (thinking-open 5 min).
+
+See `docs/changes/2026-07-24-stream-idle-billing-isolation.md`.
+
 ### Fix: explicit `protocol: "h2"` NetworkClient routing (Cursor Connect)
 
 ---
