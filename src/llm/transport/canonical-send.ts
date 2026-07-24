@@ -39,11 +39,11 @@ import { randomUUID } from "node:crypto"
 
 import { providerPeerToken, resolveStoredProviderAuth } from "../../auth/auth-strategies.ts"
 import { diag } from "../../bus/diagnostic-bus.ts"
-import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
+import { GLOBAL_STATUS_BUS, type StatusHandle } from "../../bus/status.ts"
 import {
   defaultNetworkClient,
   NetworkClient,
-  NetworkResponse,
+  type NetworkRequestInput,
   networkActivityObserver,
 } from "../../network/index.ts"
 import {
@@ -167,39 +167,18 @@ export async function* canonicalSendFn(
   const authState: AuthRefreshState = { auth: initialAuth }
 
   // ------------------------------------------------------------------
-  // Realtime activity binding (the status-line ↑/↓ bytes infix).
+  // Realtime activity binding (status-line ↑/↓ bytes infix).
   //
-  // The network client's `networkActivityObserver` accumulates sent/recv
-  // bytes per request and pushes them onto the bound `StatusHandle`, which
-  // the status renderer reads to draw the "↑ N · ↓ N" infix on the
-  // "· Thinking (3s)" line. That observer keys its trackers by the
-  // request's `id` (see network/activity-observer.ts `onChunk(req)` →
-  // `trackers.get(req.id)`). The LEGACY transport (client.ts) bound it by
-  // pre-generating a `reqId`, calling `attach(reqId, handle)`, then firing
-  // `networkClient.request({ id: reqId, ... })` so the wire request carried
-  // the SAME id. When the default transport flipped to this canonical path,
-  // the provider adapter (a plugin) issues `networkClient.request()` WITHOUT
-  // an id, so the client auto-uuids and nothing matched the pre-attached
-  // handle — the infix went empty.
-  //
-  // We restore the exact legacy contract with the smallest provider-neutral
-  // change: pre-generate `reqId`, attach the handle, and hand the adapter a
-  // thin wrapper around the real client that stamps `id: reqId` onto every
-  // request that doesn't already carry one. The adapter stays untouched and
-  // provider-agnostic; the id correlation happens at the client boundary,
-  // using the same `NetworkRequestInput.id` field the legacy path used (no
-  // new global). Retries reuse the one `reqId` across sequential attempts,
-  // exactly as the legacy outer finally did. `attach()` is a documented
-  // no-op when the singleton observer isn't wired into the client in play
-  // (e.g. test-injected clients), so this is inert there.
+  // Wire ids are PER REQUEST, not per send. A provider may start side traffic
+  // (Grok's OAuth billing GET is the observed case) while its response stream
+  // is open. Reusing one id lets that probe overwrite the stream's net-dbg and
+  // activity trackers. Each watchdog attempt therefore creates a fresh
+  // stream-only client below; side requests keep NetworkClient's own UUIDs.
   const requestStatus = GLOBAL_STATUS_BUS.create("Sending request", {
     notificationId: "network.request",
     category: "network",
   })
-  const reqId = randomUUID()
-  networkActivityObserver.attach(reqId, requestStatus)
   const baseClient = (opts.networkClient ?? defaultNetworkClient) as NetworkClient
-  const idBoundClient = bindRequestId(baseClient, reqId)
 
   // One attempt = run() guarded by the watchdog, bridged to the legacy
   // string/StreamedResponse contract + lifecycle callbacks.
@@ -211,16 +190,19 @@ export async function* canonicalSendFn(
       markBodyActivity: () => void
     } | null = null
 
+    let detachAttemptActivity = (): void => {}
     const events = withStreamWatchdog(
       (signal) => {
-        const lifecycleClient = bindRequestLifecycle(idBoundClient, {
+        const attemptClient = bindPrimaryStreamRequest(baseClient, {
+          statusHandle: requestStatus,
           onHeaders: () => phaseCtl?.markHeadersReceived(),
           onBodyChunk: () => phaseCtl?.markBodyActivity(),
         })
+        detachAttemptActivity = attemptClient.detach
         const ctx: RunContext = {
           auth: authState.auth,
           sessionId: "",
-          networkClient: lifecycleClient,
+          networkClient: attemptClient.client,
         }
         // acceptDegrade: when the adapter can offer a cheaper-but-valid
         // variant (e.g. fast-mode requested on a model with no fast tier →
@@ -254,7 +236,10 @@ export async function* canonicalSendFn(
         },
       },
     )
-    const labelledEvents = updateLabelsFromEvents(events, requestStatus)
+    const labelledEvents = updateLabelsFromEvents(
+      finalizeEvents(events, () => detachAttemptActivity()),
+      requestStatus,
+    )
     return canonicalEventsToLegacyStream(labelledEvents, {
       onThinkingStart: opts.onThinkingStart,
       onThinkingDelta: opts.onThinkingDelta,
@@ -310,42 +295,117 @@ export async function* canonicalSendFn(
     return finalStream
   } finally {
     requestStatus.clear()
-    networkActivityObserver.detach(reqId)
   }
 }
 
-/**
- * Wrap a {@link NetworkClient} so every `request()` it issues carries the
- * given `id` (unless the caller already supplied one). This is how the
- * canonical path correlates the provider adapter's wire request with the
- * `networkActivityObserver` tracker bound to `reqId` — the adapter never
- * sees the id, the correlation lives entirely at this client boundary.
- *
- * Returns a thin prototype-delegating shim: only `request` is overridden,
- * everything else falls through to the real client, so transport selection,
- * fallback, policies, and the observer fan-out are unchanged.
- */
-function bindRequestId(client: NetworkClient, id: string): NetworkClient {
-  const wrapper: NetworkClient = Object.create(client)
-  wrapper.request = (input) => client.request({ id, ...input })
-  return wrapper
+const KNOWN_NON_STREAM_LABELS = new Set([
+  "grok.billing",
+  "grok.quota.probe",
+  "grok.oauth.device.code",
+  "grok.oauth.device.poll",
+  "grok.oauth.refresh",
+  "openai.oauth.device.usercode",
+  "openai.oauth.device.poll",
+  "openai.oauth.device.exchange",
+  "openai.oauth.refresh",
+  "anthropic.oauth.refresh",
+])
+
+function isPrimaryStreamRequest(input: NetworkRequestInput): boolean {
+  if (KNOWN_NON_STREAM_LABELS.has(input.label)) return false
+  if (input.policyTags?.includes("llm-stream")) return true
+  return input.method === "POST"
+}
+
+function isStreamingResponse(input: NetworkRequestInput, contentType: string): boolean {
+  if (input.policyTags?.includes("llm-stream")) return true
+  const ct = contentType.toLowerCase()
+  return (
+    ct.includes("text/event-stream") ||
+    ct.includes("application/x-ndjson") ||
+    ct.includes("application/ndjson") ||
+    ct.includes("application/connect+")
+  )
 }
 
 /**
- * Wrap a {@link NetworkClient} so response headers and body chunks notify the
- * stream watchdog's phase control (MA-882492).
+ * Bind one exact LLM stream request for an attempt.
  *
- * - After `request()` resolves → headers received (pre-stream sub-phase only).
- * - Every non-empty body chunk → `onBodyChunk` (first ends pre-stream; later
- *   refreshes mid-stream idle even for SSE comments with no CanonicalEvent).
+ * Every request gets a unique wire id. Only the first stream-eligible POST gets
+ * the status tracker and watchdog lifecycle taps; concurrent billing/auth/quota
+ * traffic keeps an independent id and cannot reset the stream watchdog or
+ * overwrite its net-dbg handle. Request-local lifecycle callbacks run inside
+ * NetworkClient.tapResponse at the same raw-chunk boundary as observers.
  *
- * Wraps **outside** the real client so status/net-dbg observers still see the
- * original request/response; only the body stream is re-wrapped.
+ * Activity attach must happen at reservation (before headers): the upload-phase
+ * "Sending request" row needs onRequest → ↑/host immediately. Waiting until
+ * onResponse left that row empty for long TTFB, even though receiving later
+ * painted correctly once onChunk fired.
  */
-/**
- * Exported for unit tests (MA-882492 lifecycle wiring). Production uses it
- * only from `canonicalSendFn` / makeWatchdoggedAttempt.
- */
+export function bindPrimaryStreamRequest(
+  client: NetworkClient,
+  hooks: {
+    statusHandle: StatusHandle
+    onHeaders?: () => void
+    onBodyChunk?: () => void
+  },
+): { client: NetworkClient; detach: () => void } {
+  const wrapper: NetworkClient = Object.create(client)
+  /** Wire id of the claimed stream (activity attach target). */
+  let primaryId: string | undefined
+  /** First stream-eligible POST reserved until headers classify it. */
+  let reservedId: string | undefined
+
+  wrapper.request = (input) => {
+    const id = input.id ?? randomUUID()
+    // Only one candidate may hold lifecycle/activity at a time. Side probes
+    // (billing, quota, OAuth) keep independent UUIDs and never mark body activity.
+    if (primaryId === undefined && reservedId === undefined && isPrimaryStreamRequest(input)) {
+      reservedId = id
+      // Attach before the wire call so NetworkClient.onRequest can paint upload
+      // activity (↑ N · host). Detach below if headers prove this was not a stream.
+      networkActivityObserver.attach(id, hooks.statusHandle)
+      let claimed = false
+      return client.request({
+        ...input,
+        id,
+        lifecycle: {
+          ...input.lifecycle,
+          onResponse: (response) => {
+            input.lifecycle?.onResponse?.(response)
+            if (!isStreamingResponse(input, response.headers.get("content-type") ?? "")) {
+              // Auth/JSON POST was first — free the reservation for the real stream.
+              if (reservedId === id) {
+                networkActivityObserver.detach(id)
+                reservedId = undefined
+              }
+              return
+            }
+            claimed = true
+            primaryId = id
+            reservedId = undefined
+            hooks.onHeaders?.()
+          },
+          onBodyChunk: (chunk, response) => {
+            input.lifecycle?.onBodyChunk?.(chunk, response)
+            if (claimed) hooks.onBodyChunk?.()
+          },
+        },
+      })
+    }
+    return client.request({ ...input, id })
+  }
+
+  return {
+    client: wrapper,
+    detach: () => {
+      if (primaryId !== undefined) networkActivityObserver.detach(primaryId)
+      else if (reservedId !== undefined) networkActivityObserver.detach(reservedId)
+    },
+  }
+}
+
+/** Back-compatible lifecycle helper for focused tests and wire probes. */
 export function bindRequestLifecycle(
   client: NetworkClient,
   hooks: {
@@ -354,48 +414,31 @@ export function bindRequestLifecycle(
   },
 ): NetworkClient {
   const wrapper: NetworkClient = Object.create(client)
-  wrapper.request = async (input) => {
-    const res = await client.request(input)
-    hooks.onHeaders?.()
-    // Lazy reader over the already-tapped body (NetworkClient.tapResponse).
-    // Mirrors tapResponse's pull/cancel shape so observers underneath stay
-    // intact; marks body activity only for non-empty values (Angela).
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-    const body = new ReadableStream<Uint8Array>({
-      pull: async (controller) => {
-        reader ??= res.body.getReader()
-        try {
-          const { done, value } = await reader.read()
-          if (done) {
-            controller.close()
-            reader.releaseLock()
-            reader = undefined
-            return
-          }
-          if (value && value.byteLength > 0) hooks.onBodyChunk?.()
-          if (value) controller.enqueue(value)
-        } catch (err) {
-          controller.error(err)
-          try {
-            reader?.releaseLock()
-          } catch {
-            // already released
-          }
-          reader = undefined
-        }
-      },
-      cancel: async (reason) => {
-        await reader?.cancel(reason)
-        reader?.releaseLock()
-        reader = undefined
+  wrapper.request = (input) =>
+    client.request({
+      ...input,
+      lifecycle: {
+        ...input.lifecycle,
+        onResponse: (response) => {
+          input.lifecycle?.onResponse?.(response)
+          hooks.onHeaders?.()
+        },
+        onBodyChunk: (chunk, response) => {
+          input.lifecycle?.onBodyChunk?.(chunk, response)
+          hooks.onBodyChunk?.()
+        },
       },
     })
-    return new NetworkResponse({
-      status: res.status,
-      headers: res.headers,
-      body,
-      transport: res.transport,
-    })
-  }
   return wrapper
+}
+
+async function* finalizeEvents(
+  events: AsyncIterable<CanonicalEvent>,
+  finalize: () => void,
+): AsyncIterable<CanonicalEvent> {
+  try {
+    yield* events
+  } finally {
+    finalize()
+  }
 }
