@@ -91,6 +91,13 @@ export class NetworkClient {
       const out = await policy.onRequest(req)
       if (out) req = { ...out, id: req.id, transportHint: req.transportHint }
     }
+    // Stamp the transport that will actually serve this request before
+    // observers see it. Without this, an explicit protocol pin still
+    // reported the process-wide primary (e.g. fetch) in net-dbg.
+    req = {
+      ...req,
+      transportHint: this.transportFor(req).id,
+    }
     this.notifyRequest(req)
 
     // 2. Build the inner "do one round-trip" thunk. Knows about
@@ -107,7 +114,7 @@ export class NetworkClient {
         const response = await transport.request(carried)
         return this.tapResponse(carried, response)
       } catch (err) {
-        if (transport === this.primary && this.shouldFallback(carried)) {
+        if (this.shouldFallback(carried, transport)) {
           const fb = await this.fallback!.request({
             ...carried,
             transportHint: this.fallback!.id,
@@ -149,9 +156,11 @@ export class NetworkClient {
       }
 
       this.notifyResponse(req, response)
+      req.lifecycle?.onResponse?.(response)
       return response
     } catch (err) {
       this.notifyError(req, err)
+      req.lifecycle?.onError?.(err)
       throw err
     }
   }
@@ -181,23 +190,63 @@ export class NetworkClient {
     return this.primary.preconnect?.(origin)
   }
 
+  /**
+   * Close every distinct configured transport.
+   *
+   * Why a Set: with always-registered h2 + optional h3/plaintext, the same
+   * Http2Transport instance is often both `primary` and `transports.get("h2")`.
+   * Closing twice is wasteful and can race session teardown.
+   */
   async close(): Promise<void> {
-    await Promise.all([this.primary.close?.(), this.fallback?.close?.()])
+    const transports = new Set<NetworkTransport>([
+      this.primary,
+      ...(this.fallback ? [this.fallback] : []),
+      ...(this.plaintextHttpTransport ? [this.plaintextHttpTransport] : []),
+      ...this.transports.values(),
+    ])
+    await Promise.all([...transports].map((transport) => transport.close?.()))
   }
 
-  private shouldFallback(req: NetworkRequest): boolean {
-    return Boolean(this.fallback && (this.allowFetchFallback || req.allowFetchFallback))
+  /**
+   * Decide whether a failed primary attempt may retry on the fetch fallback.
+   *
+   * Cursor AgentService/Run pins `protocol: "h2"` and `allowFetchFallback: false`
+   * because Bun fetch malformed that Connect stream. A global
+   * MINIMAL_AGENT_ALLOW_FETCH_FALLBACK=1 must not defeat that pin.
+   */
+  private shouldFallback(req: NetworkRequest, transport: NetworkTransport): boolean {
+    if (!this.fallback || transport !== this.primary) return false
+    // An explicit protocol pin means "this request requires that transport".
+    // Falling back to fetch would silently defeat Cursor Connect and similar
+    // streams that only work on node:http2.
+    if (req.protocol !== undefined) return false
+    // Explicit request-level false wins over the client-wide default.
+    if (req.allowFetchFallback === false) return false
+    return this.allowFetchFallback || req.allowFetchFallback === true
   }
 
   private tapResponse(req: NetworkRequest, response: NetworkResponse): NetworkResponse {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    let settled = false
+    const settleEnd = () => {
+      if (settled) return
+      settled = true
+      this.notifyEnd(req, response)
+      req.lifecycle?.onEnd?.(response)
+    }
+    const settleError = (err: unknown) => {
+      if (settled) return
+      settled = true
+      this.notifyError(req, err)
+      req.lifecycle?.onError?.(err)
+    }
     const body = new ReadableStream<Uint8Array>({
       pull: async (controller) => {
         reader ??= response.body.getReader()
         try {
           const { done, value } = await reader.read()
           if (done) {
-            this.notifyEnd(req, response)
+            settleEnd()
             controller.close()
             reader.releaseLock()
             reader = undefined
@@ -205,17 +254,32 @@ export class NetworkClient {
           }
           if (value) {
             this.notifyChunk(req, value, response)
+            if (value.byteLength > 0) req.lifecycle?.onBodyChunk?.(value, response)
             controller.enqueue(value)
           }
         } catch (err) {
-          this.notifyError(req, err)
+          settleError(err)
           controller.error(err)
         }
       },
       cancel: async (reason) => {
-        await reader?.cancel(reason)
-        reader?.releaseLock()
-        reader = undefined
+        // Acquire the underlying reader even when the consumer never pulled,
+        // so early returns / non-2xx cancel paths actually cancel the wire
+        // stream and fire terminal observer hooks.
+        try {
+          reader ??= response.body.getReader()
+          await reader.cancel(reason)
+        } catch (err) {
+          settleError(err)
+        } finally {
+          try {
+            reader?.releaseLock()
+          } catch {
+            // already released
+          }
+          reader = undefined
+          settleEnd()
+        }
       },
     })
 
@@ -286,7 +350,11 @@ export function createDefaultNetworkClient(): NetworkClient {
     return new NetworkClient({ primary: new TestTransport() })
   }
   const usingHttp2Primary = requested !== "fetch"
-  const primary = usingHttp2Primary ? new Http2Transport() : new FetchTransport()
+  // Always construct Http2Transport so explicit `protocol: "h2"` pins work
+  // even when MINIMAL_AGENT_TRANSPORT=fetch makes fetch the default primary.
+  // Cursor Connect needs this distinction; Bun fetch is not a substitute.
+  const http2 = new Http2Transport()
+  const primary = usingHttp2Primary ? http2 : new FetchTransport()
   const fallback = usingHttp2Primary ? new FetchTransport() : undefined
   // Auto-route plaintext http:// to HTTP/1.1: the h2c-prior-knowledge primary
   // hangs against a plain HTTP/1.1 server (local LLM runtimes like LM Studio /
@@ -302,7 +370,10 @@ export function createDefaultNetworkClient(): NetworkClient {
   // experimental (Bun ≥ 1.3.14) and few origins serve h3 anyway
   // (notably api.anthropic.com refuses QUIC as of May 2026).
   const h3Mode = process.env.MINIMAL_AGENT_HTTP3?.trim().toLowerCase() ?? "off"
-  const transports = new Map<NetworkProtocol, NetworkTransport>()
+  // Explicit h2 pins must remain h2 even when the operator selects fetch as
+  // the default primary. Cursor's Connect stream relies on this distinction:
+  // Bun fetch malformed that stream, while Http2Transport is node:http2.
+  const transports = new Map<NetworkProtocol, NetworkTransport>([["h2", http2]])
   const policies: NetworkPolicy[] = []
   if (h3Mode === "opt" || h3Mode === "force") {
     transports.set("h3", new Http3Transport())

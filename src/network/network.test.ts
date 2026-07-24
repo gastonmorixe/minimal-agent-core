@@ -4,7 +4,7 @@ import { createServer } from "node:http2"
 
 import { describe, expect, it } from "bun:test"
 
-import { isPlaintextHttp } from "./client.ts"
+import { createDefaultNetworkClient, isPlaintextHttp } from "./client.ts"
 import { _nodeStreamToWebForTest } from "./http2-transport.ts"
 import {
   defaultNetworkClient,
@@ -123,6 +123,51 @@ describe("network", () => {
     expect(isPlaintextHttp("http://localhost:1234")).toBe(true)
     expect(isPlaintextHttp("https://api.example.com")).toBe(false)
     expect(isPlaintextHttp("not a url")).toBe(false)
+  })
+
+  it("keeps explicit h2 routing when fetch is the default primary", async () => {
+    const { server, url } = await startHttp2Server()
+    const previous = process.env.MINIMAL_AGENT_TRANSPORT
+    process.env.MINIMAL_AGENT_TRANSPORT = "fetch"
+    const client = createDefaultNetworkClient()
+    try {
+      const response = await client.request({
+        label: "test.explicit-h2",
+        method: "GET",
+        url: `${url}/pinned-h2`,
+        protocol: "h2",
+      })
+      expect(response.transport.protocol).toBe("h2")
+      expect(await response.json<{ path: string }>()).toEqual({ path: "/pinned-h2" })
+    } finally {
+      await client.close()
+      await closeServer(server)
+      if (previous === undefined) delete process.env.MINIMAL_AGENT_TRANSPORT
+      else process.env.MINIMAL_AGENT_TRANSPORT = previous
+    }
+  })
+
+  it("closes every distinct configured transport exactly once", async () => {
+    const closed: string[] = []
+    const primary = closableTransport("primary", closed)
+    const fallback = closableTransport("fallback", closed)
+    const plaintext = closableTransport("plaintext", closed)
+    const h2 = closableTransport("h2", closed)
+    const h3 = closableTransport("h3", closed)
+    const client = new NetworkClient({
+      primary,
+      fallback,
+      plaintextHttpTransport: plaintext,
+      transports: new Map([
+        ["h2", h2],
+        ["h3", h3],
+        ["http/1.1", primary],
+      ]),
+    })
+
+    await client.close()
+
+    expect(closed.sort()).toEqual(["fallback", "h2", "h3", "plaintext", "primary"])
   })
 
   it("does not use fetch fallback unless fallback is enabled", async () => {
@@ -281,6 +326,18 @@ async function closeServer(server: Http2Server): Promise<void> {
   await new Promise<void>((resolve) => {
     server.close(() => resolve())
   })
+}
+
+function closableTransport(id: string, closed: string[]): NetworkTransport {
+  return {
+    id,
+    async request() {
+      throw new Error(`unexpected request through ${id}`)
+    },
+    close() {
+      closed.push(id)
+    },
+  }
 }
 
 /** A transport that echoes its own id on the response so tests can assert routing. */
