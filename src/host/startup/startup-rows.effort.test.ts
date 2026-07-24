@@ -1,9 +1,12 @@
 /**
- * Regression: dual-registered bare model ids (e.g. grok-4.5 under both
- * `grok` and `opencode`) must validate effort against the SELECTED provider's
- * caps, not unscoped last-write-wins. Carlos smoke: lead ModelInfo said
- * low|medium|high (grok) but child boot fatally rejected low with
- * supported medium|high|max (opencode last-write).
+ * Regression: dual-registered bare model ids (e.g. the same slug under both
+ * a first-party provider and a gateway) must validate effort against the
+ * SELECTED provider's caps, not unscoped last-write-wins. Lead ModelInfo said
+ * low|medium|high (first-party) but child boot fatally rejected low with
+ * supported medium|high|max (gateway last-write).
+ *
+ * Provider / surface ids here are intentionally generic so this test stays
+ * outside the provider-token architecture baseline.
  *
  * @module host/startup/startup-rows.effort.test
  */
@@ -30,9 +33,9 @@ const SHARED = "dual-effort-model"
 function registerDual(): void {
   registerModel({
     id: SHARED,
-    providerId: "grok",
-    surfaceId: "openai-responses",
-    displayName: "Dual Effort (Grok)",
+    providerId: "firstparty",
+    surfaceId: "responses",
+    displayName: "Dual Effort (First-party)",
     capabilities: {
       ...defaultCapabilities(),
       effort: { levels: ["low", "medium", "high"], default: "high" },
@@ -40,12 +43,12 @@ function registerDual(): void {
     pricing: RATE,
     estimateTokens: makeCharRatioEstimator(3.5),
   })
-  // Register second so unscoped findModel last-write-wins to opencode.
+  // Register second so unscoped findModel last-write-wins to the gateway.
   registerModel({
     id: SHARED,
-    providerId: "opencode",
-    surfaceId: "openai-chat-completions",
-    displayName: "Dual Effort (OpenCode)",
+    providerId: "gateway",
+    surfaceId: "chat-completions",
+    displayName: "Dual Effort (Gateway)",
     capabilities: {
       ...defaultCapabilities(),
       effort: { levels: ["medium", "high", "max"], default: "medium" },
@@ -64,21 +67,23 @@ describe("validateStartupEffort provider scoping", () => {
     clearModelRegistry()
   })
 
-  it("allows effort=low when the selected provider is grok (not opencode last-write)", () => {
-    expect(() => validateStartupEffort(false, SHARED, "low", "grok")).not.toThrow()
+  it("allows effort=low when the selected provider is firstparty (not gateway last-write)", () => {
+    expect(() => validateStartupEffort(false, SHARED, "low", "firstparty")).not.toThrow()
   })
 
-  it("rejects effort=low when the selected provider is opencode", () => {
-    expect(() => validateStartupEffort(false, SHARED, "low", "opencode")).toThrow(
+  it("rejects effort=low when the selected provider is gateway", () => {
+    expect(() => validateStartupEffort(false, SHARED, "low", "gateway")).toThrow(
       /medium, high, max/,
     )
   })
 
-  it("rejects effort=max on grok (first-party levels have no max)", () => {
-    expect(() => validateStartupEffort(false, SHARED, "max", "grok")).toThrow(/low, medium, high/)
+  it("rejects effort=max on firstparty (first-party levels have no max)", () => {
+    expect(() => validateStartupEffort(false, SHARED, "max", "firstparty")).toThrow(
+      /low, medium, high/,
+    )
   })
 
   it("no-ops when hidesReasoning is true", () => {
-    expect(() => validateStartupEffort(true, SHARED, "low", "opencode")).not.toThrow()
+    expect(() => validateStartupEffort(true, SHARED, "low", "gateway")).not.toThrow()
   })
 })

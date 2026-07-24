@@ -133,13 +133,15 @@ describe("list UI commands", () => {
     delete process.env.TEST_LIVE_KEY
   })
 
-  it("renders models within the injected terminal width", async () => {
+  it("never truncates or mid-wraps model ids; wraps only caps/metadata", async () => {
+    // Neutral long id (no provider-family tokens — arch scan forbids those in core).
+    const longId = "narrow-flagship-4.5-thinking-preview"
     registerTestProvider({
       id: "narrow",
       displayName: "Narrow",
       models: [
         {
-          id: "very-long-model-id-that-must-be-clipped",
+          id: longId,
           capabilities: {
             contextWindow: 1_050_000,
             maxOutputTokens: 128_000,
@@ -163,12 +165,21 @@ describe("list UI commands", () => {
     })
     const stripped = stripAnsi(out)
 
+    // Full model id must appear contiguously (never hard-wrapped mid-token).
+    expect(stripped).toContain(longId)
+    expect(stripped).not.toMatch(/narrow-flagship-4\.5-think\s*\ning/)
     expect(stripped).toContain("ctx 1.05M")
     expect(stripped).toContain("out 128k")
-    expect(stripped).toContain("eff:provider")
+    // Caps may stack under the primary row when the id is long, but labels
+    // must still appear intact (not shredded into mid-token fragments only).
     expect(stripped).toContain("max-quality")
+    expect(stripped).toContain("tools:strict")
     expect(stripped).not.toContain("medium")
+
+    // Caps/metadata continuation lines still wrap to the terminal; only the
+    // primary id row may exceed width when the model id itself is longer.
     for (const line of stripped.split("\n").filter(Boolean)) {
+      if (line.includes(longId)) continue
       expect(displayWidth(line)).toBeLessThanOrEqual(72)
     }
   })
@@ -222,6 +233,62 @@ describe("list UI commands", () => {
     expect(hookCalled).toBe(false)
     expect(stripped).not.toContain("priv-live-model")
     expect(stripped).toContain('no models registered for provider "priv"')
+  })
+
+  it("does not probe other providers' live catalogs when filtered (no foreign 401 noise)", async () => {
+    // Regression: `provider models <id>` used to call every plugin's
+    // listLiveModels. A revoked foreign OAuth token then printed
+    // `(live model list unavailable: Models API 401: ...revoked)` under a
+    // filtered listing even when the target provider was fine. Filter must
+    // skip other hooks entirely.
+    let otherHookCalls = 0
+    let targetHookCalls = 0
+    // Static registry first; plugin registration last so listLiveModels is kept
+    // (registerTestProvider also installs a plugin without a live hook).
+    registerTestProvider({
+      id: "target",
+      displayName: "Target",
+      models: [{ id: "target-auto", displayName: "Auto" }],
+    })
+    registerProviderPlugin({
+      id: "other",
+      displayName: "Other",
+      shortCode: "ot",
+      register() {},
+      publicModelList: true,
+      async listLiveModels() {
+        otherHookCalls++
+        throw new Error(
+          'Models API 401: {"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."},"request_id":null}',
+        )
+      },
+    })
+    registerProviderPlugin({
+      id: "target",
+      displayName: "Target",
+      shortCode: "tgt",
+      register() {},
+      publicModelList: true,
+      async listLiveModels() {
+        targetHookCalls++
+        return [{ id: "target-auto", displayName: "Auto" }]
+      },
+    })
+
+    let out = ""
+    let err = ""
+    await runListModelsCommand("target", {
+      output: { write: (s) => (out += s) },
+      error: { write: (s) => (err += s) },
+    })
+    const stripped = stripAnsi(out + err)
+
+    expect(targetHookCalls).toBe(1)
+    expect(otherHookCalls).toBe(0)
+    expect(stripped).toContain("target-auto")
+    expect(stripped).not.toContain("live model list unavailable")
+    expect(stripped).not.toContain("Models API 401")
+    expect(stripped).not.toContain("revoked")
   })
 
   it("keeps same bare model id under EACH provider (no cross-provider theft)", async () => {

@@ -48,6 +48,8 @@ interface ModelTableLayout {
   ctxW: number
   outW: number
   capsW: number
+  /** When false, caps/metadata start on the next line at full content width. */
+  capsOnPrimary: boolean
 }
 
 const SERVER_TOOL_LABELS: Record<ServerToolId, string> = {
@@ -134,14 +136,22 @@ function formatCapabilities(caps: Capabilities | undefined): string {
 
 function chooseLayout(rows: ModelRow[], termColumns: number): ModelTableLayout {
   // Four cells of section-row indentation, plus ten cells of slack for ANSI
-  // re-anchoring and terminal exact-fill quirks. Rows wrap before the edge.
+  // re-anchoring and terminal exact-fill quirks. Caps wrap before the edge;
+  // model ids never wrap mid-token — they are copy/paste inputs.
   const available = Math.max(44, termColumns - 14)
   const maxIdW = Math.max(0, ...rows.map((r) => displayWidth(r.id)))
-  const idW = Math.min(Math.max(16, maxIdW), available >= 80 ? 22 : 18)
+  // Always size the id column to the longest model id (floor 16). An artificial
+  // 18/22 cap used to hard-wrap names like `cursor-claude-4.5-haiku` mid-word.
+  const idW = Math.max(16, maxIdW)
   const ctxW = 9
   const outW = 9
-  const capsW = Math.max(12, available - idW - ctxW - outW - 3)
-  return { idW, ctxW, outW, capsW }
+  const residual = available - idW - ctxW - outW - 3
+  // If the id column leaves a usable residual, keep the classic four-column
+  // row. Otherwise stack caps under the primary line at full content width so
+  // labels are not shredded into 12-cell fragments.
+  const capsOnPrimary = residual >= 20
+  const capsW = capsOnPrimary ? residual : available
+  return { idW, ctxW, outW, capsW, capsOnPrimary }
 }
 
 function pad(value: string, width: number): string {
@@ -187,16 +197,18 @@ function wrapCapabilities(value: string, width: number): string[] {
 }
 
 function formatModelRow(row: ModelRow, layout: ModelTableLayout): string[] {
-  // Model IDs are inputs users copy into configuration. Preserve an unusually
-  // long id by giving it leading rows rather than clipping it.
-  const idLines = splitLongToken(row.id, layout.idW)
-  const id = idLines.pop() ?? ""
+  // Model IDs are inputs users copy into configuration. Never hard-wrap or
+  // clip them mid-token: layout.idW is sized to the longest id, so the full
+  // name stays on the primary row as a contiguous string.
+  const idCell = pad(row.id, layout.idW)
   const prefix = [
-    pad(id, layout.idW),
+    idCell,
     pad(row.contextWindow ? `ctx ${formatTokenLimit(row.contextWindow)}` : "", layout.ctxW),
     pad(row.maxOutputTokens ? `out ${formatTokenLimit(row.maxOutputTokens)}` : "", layout.outW),
   ].join(" ")
-  const continuation = " ".repeat(displayWidth(prefix) + 1)
+  // Same-line caps hang under the residual column; stacked caps hang under a
+  // fixed indent so the wrap width can use the full content area.
+  const continuation = layout.capsOnPrimary ? " ".repeat(displayWidth(prefix) + 1) : "  "
   const capabilities = wrapCapabilities(formatCapabilities(row.capabilities), layout.capsW)
   const metadata = [
     row.displayName ? `name:${row.displayName}` : "",
@@ -207,14 +219,21 @@ function formatModelRow(row: ModelRow, layout: ModelTableLayout): string[] {
     .join(" · ")
   const metadataLines = wrapCapabilities(metadata, layout.capsW)
 
-  const lines = idLines.map((line) => `    ${c.cyan(line)}`)
-  lines.push(
-    ...capabilities.map((capability, index) => {
-      if (index === 0)
-        return `    ${c.cyan(prefix.slice(0, layout.idW))}${prefix.slice(layout.idW)} ${capability}`.trimEnd()
-      return `    ${continuation}${capability}`.trimEnd()
-    }),
-  )
+  const lines: string[] = []
+  if (layout.capsOnPrimary) {
+    lines.push(
+      ...capabilities.map((capability, index) => {
+        if (index === 0)
+          return `    ${c.cyan(idCell)}${prefix.slice(idCell.length)} ${capability}`.trimEnd()
+        return `    ${continuation}${capability}`.trimEnd()
+      }),
+    )
+  } else {
+    lines.push(`    ${c.cyan(idCell)}${prefix.slice(idCell.length)}`.trimEnd())
+    for (const capability of capabilities) {
+      if (capability) lines.push(`    ${continuation}${capability}`.trimEnd())
+    }
+  }
   for (const line of metadataLines) {
     if (line) lines.push(`    ${continuation}${c.dim(line)}`)
   }
@@ -250,7 +269,14 @@ export async function runListModelsCommand(
 ): Promise<void> {
   const byKey = new Map<string, ModelRow>()
 
-  const plugins = listProviderPlugins().filter((p) => typeof p.listLiveModels === "function")
+  // When listing a single provider (`provider models cursor`), only probe that
+  // provider's live catalog. Querying every registered plugin still printed
+  // unrelated failures (e.g. Anthropic "Models API 401: …revoked") under a
+  // filtered Cursor listing — and burned other providers' credentials for no
+  // reason. Mirrors listLiveModelsForPicker's providerId filter.
+  const plugins = listProviderPlugins().filter(
+    (p) => typeof p.listLiveModels === "function" && (!providerFilter || p.id === providerFilter),
+  )
   const results = await Promise.allSettled(
     plugins.map(async (p) => {
       const providerAuth: ProviderAuth | null =
