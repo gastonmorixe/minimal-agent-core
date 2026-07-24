@@ -133,12 +133,12 @@ describe("bindRequestLifecycle", () => {
 })
 
 describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
-  it("does not mark body activity from concurrent billing after SSE headers (c5a709f2)", async () => {
+  it("does not mark body activity from concurrent billing after SSE headers (billing probe)", async () => {
     const encoder = new TextEncoder()
     const transport: NetworkTransport = {
       id: "fake",
       request: async (req) => {
-        if (req.label === "grok.responses") {
+        if (req.label === "llm.responses") {
           return new NetworkResponse({
             status: 200,
             headers: { "content-type": "text/event-stream" },
@@ -150,7 +150,7 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
             }),
           })
         }
-        if (req.label === "grok.billing") {
+        if (req.label === "llm.billing") {
           return new NetworkResponse({
             status: 200,
             headers: { "content-type": "application/json" },
@@ -178,9 +178,9 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
     })
 
     const streamRes = await client.request({
-      label: "grok.responses",
+      label: "llm.responses",
       method: "POST",
-      url: "https://cli-chat-proxy.grok.com/v1/responses",
+      url: "https://example.test/v1/responses",
       body: "{}",
     })
     expect(headers).toEqual([1])
@@ -188,9 +188,9 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
 
     // Concurrent billing probe — must not end pre-stream / refresh mid-stream.
     const billingRes = await client.request({
-      label: "grok.billing",
+      label: "llm.billing",
       method: "GET",
-      url: "https://cli-chat-proxy.grok.com/v1/billing",
+      url: "https://example.test/v1/billing",
     })
     await billingRes.text()
     expect(bodies).toEqual([])
@@ -209,7 +209,7 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
       id: "fake",
       request: async (req) => {
         seen.push({ id: req.id, label: req.label })
-        if (req.label === "grok.responses") {
+        if (req.label === "llm.responses") {
           return new NetworkResponse({
             status: 200,
             headers: { "content-type": "text/event-stream" },
@@ -245,7 +245,7 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
     })
 
     const stream = await client.request({
-      label: "grok.responses",
+      label: "llm.responses",
       method: "POST",
       url: "https://example.test/v1/responses",
       body: "{}",
@@ -254,7 +254,7 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
 
     await client
       .request({
-        label: "grok.billing",
+        label: "llm.billing",
         method: "GET",
         url: "https://example.test/v1/billing",
       })
@@ -267,8 +267,8 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
     expect(bodies.length).toBeGreaterThan(bodiesAfterStreamHeaders)
 
     expect(seen).toHaveLength(2)
-    expect(seen[0]!.label).toBe("grok.responses")
-    expect(seen[1]!.label).toBe("grok.billing")
+    expect(seen[0]!.label).toBe("llm.responses")
+    expect(seen[1]!.label).toBe("llm.billing")
     expect(seen[0]!.id).not.toBe(seen[1]!.id)
     detach()
     handle.clear()
@@ -302,9 +302,9 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
       onBodyChunk: () => bodies.push(1),
     })
     const res = await client.request({
-      label: "openai.oauth.refresh",
+      label: "llm.oauth.refresh",
       method: "POST",
-      url: "https://auth.openai.com/oauth/token",
+      url: "https://auth.example.test/oauth/token",
       body: "{}",
     })
     await res.text()
@@ -346,9 +346,9 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
     const { client, detach } = bindPrimaryStreamRequest(base, { statusHandle: handle })
 
     const pending = client.request({
-      label: "grok.responses",
+      label: "llm.responses",
       method: "POST",
-      url: "https://cli-chat-proxy.grok.com/v1/responses",
+      url: "https://example.test/v1/responses",
       body,
     })
 
@@ -359,7 +359,7 @@ describe("bindPrimaryStreamRequest — stream vs side-probe isolation", () => {
     const preHeaders = bus.currentStatus()?.activity
     expect(preHeaders?.direction).toBe("up")
     expect(preHeaders?.sentBytes).toBe(Buffer.byteLength(body, "utf8"))
-    expect(preHeaders?.target?.host).toBe("cli-chat-proxy.grok.com")
+    expect(preHeaders?.target?.host).toBe("example.test")
     // Still pre-headers: protocol comes from onResponse.
     expect(preHeaders?.target?.protocol).toBeUndefined()
 

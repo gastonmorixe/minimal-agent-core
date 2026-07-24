@@ -298,21 +298,27 @@ export async function* canonicalSendFn(
   }
 }
 
-const KNOWN_NON_STREAM_LABELS = new Set([
-  "grok.billing",
-  "grok.quota.probe",
-  "grok.oauth.device.code",
-  "grok.oauth.device.poll",
-  "grok.oauth.refresh",
-  "openai.oauth.device.usercode",
-  "openai.oauth.device.poll",
-  "openai.oauth.device.exchange",
-  "openai.oauth.refresh",
-  "anthropic.oauth.refresh",
-])
+/**
+ * Provider-neutral side-probe labels that must never own stream lifecycle.
+ * Match dotted suffixes so plugins keep free naming (`*.billing`, `*.oauth.*`)
+ * without embedding vendor tokens in core.
+ */
+function isNonStreamSideProbeLabel(label: string): boolean {
+  const lower = label.toLowerCase()
+  return (
+    lower.endsWith(".billing") ||
+    lower.includes(".billing.") ||
+    lower.endsWith(".quota.probe") ||
+    lower.includes(".quota.probe.") ||
+    lower.includes(".oauth.") ||
+    lower.endsWith(".oauth") ||
+    // Non-stream POST helpers that can share the attempt client (e.g. compact).
+    lower.endsWith(".compact")
+  )
+}
 
 function isPrimaryStreamRequest(input: NetworkRequestInput): boolean {
-  if (KNOWN_NON_STREAM_LABELS.has(input.label)) return false
+  if (isNonStreamSideProbeLabel(input.label)) return false
   if (input.policyTags?.includes("llm-stream")) return true
   return input.method === "POST"
 }
