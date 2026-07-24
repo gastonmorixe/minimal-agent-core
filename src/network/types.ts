@@ -15,6 +15,17 @@ export interface NetworkCaptureOptions {
   responseBody?: boolean
 }
 
+export interface NetworkRequestLifecycle {
+  /** Response headers became available for this exact wire request. */
+  onResponse?: (response: NetworkResponse) => void
+  /** A non-empty response-body chunk crossed the NetworkClient tap. */
+  onBodyChunk?: (chunk: Uint8Array, response: NetworkResponse) => void
+  /** The response body closed normally. */
+  onEnd?: (response: NetworkResponse) => void
+  /** The request or response body failed. */
+  onError?: (error: unknown) => void
+}
+
 export interface NetworkRequest {
   id: string
   label: string
@@ -50,6 +61,13 @@ export interface NetworkRequest {
    * `"background"`). Defaults to an empty array.
    */
   policyTags?: ReadonlyArray<string>
+  /**
+   * Request-local lifecycle taps. Unlike global observers, these belong to one
+   * exact wire request, so a concurrent quota/auth probe cannot impersonate an
+   * LLM stream. The client invokes body activity at the same tap boundary used
+   * by net-dbg and the activity observer.
+   */
+  lifecycle?: NetworkRequestLifecycle
 }
 
 /**

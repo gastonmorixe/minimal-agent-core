@@ -30,6 +30,32 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Fix: explicit `protocol: "h2"` NetworkClient routing (Cursor Connect)
+
+---
+id: "2026-07-24-explicit-h2-network-routing"
+type: fix
+status: shipped
+created-at: "2026-07-24T02:30:00-0400"
+updated-at: "2026-07-24T02:35:00-0400"
+detail: "docs/changes/2026-07-24-explicit-h2-network-routing.md"
+---
+
+`NetworkClient.request({ protocol: "h2" })` always selects a registered
+`Http2Transport`, even when `MINIMAL_AGENT_TRANSPORT=fetch` makes fetch the
+process-wide primary. Without an always-registered h2 map entry, explicit pins
+silently fell through to fetch — unusable for Cursor AgentService/Run
+Connect/protobuf streaming (Bun fetch is malformed on that stream; host
+Http2Transport is node:http2).
+
+Also: `close()` tears down every distinct configured transport (including the
+always-on h2 pool); protocol pins and `allowFetchFallback: false` never
+fallback to fetch; request `transportHint` reflects the transport that will
+actually serve the call (net-dbg accuracy). Focused tests cover pin-under-fetch
+and exactly-once multi-transport close.
+
+See `docs/changes/2026-07-24-explicit-h2-network-routing.md`.
+
 ### Fix: scrub embedded `data:*;base64` URIs in tool text (token waste)
 
 ---

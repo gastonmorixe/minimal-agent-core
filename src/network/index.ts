@@ -4,7 +4,12 @@ export {
   NetworkActivityTracker,
   networkActivityObserver,
 } from "./activity-observer.ts"
-export { createDefaultNetworkClient, defaultNetworkClient, NetworkClient } from "./client.ts"
+export {
+  createDefaultNetworkClient,
+  defaultNetworkClient,
+  NetworkClient,
+  type NetworkRequestInput,
+} from "./client.ts"
 export { FetchTransport } from "./fetch-transport.ts"
 export { Http2Transport } from "./http2-transport.ts"
 export {
