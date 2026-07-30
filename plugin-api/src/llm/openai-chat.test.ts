@@ -48,6 +48,88 @@ function stopChunk(id: string): OpenAIChatChunk {
   }
 }
 
+describe("translateOpenAIChatStream reasoning → text boundary", () => {
+  /**
+   * DeepSeek / OpenCode Go emit the first visible token in the SAME chunk that
+   * clears reasoning (`content:"Pre", reasoning_content:null`). Emitting
+   * text_delta BEFORE thinking_stop makes the REPL's onThinkingStop insert
+   * blank-line separators mid-word (orphaned "Pre" / "Plug" / "All" rows).
+   * Mirror Ollama: close thinking before any content starts.
+   */
+  function reasoningChunk(id: string, reasoning: string): OpenAIChatChunk {
+    return {
+      id,
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "deepseek-v4-pro",
+      choices: [
+        {
+          index: 0,
+          delta: { content: null, reasoning_content: reasoning },
+          finish_reason: null,
+        },
+      ],
+    }
+  }
+
+  function contentAfterReasoning(id: string, content: string): OpenAIChatChunk {
+    return {
+      id,
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "deepseek-v4-pro",
+      choices: [
+        {
+          index: 0,
+          delta: { content, reasoning_content: null },
+          finish_reason: null,
+        },
+      ],
+    }
+  }
+
+  it("emits thinking_stop before text_start when content arrives with reasoning_content:null", async () => {
+    const evs = await collect(
+      translateOpenAIChatStream(
+        fromChunks([
+          reasoningChunk("r1", "plan."),
+          contentAfterReasoning("r1", "Pre"),
+          contentAfterReasoning("r1", "-existing"),
+          stopChunk("r1"),
+        ]),
+      ),
+    )
+    const t = types(evs)
+    const stopIdx = t.indexOf("thinking_stop")
+    const textStartIdx = t.indexOf("text_start")
+    const firstTextIdx = t.indexOf("text_delta")
+    expect(stopIdx).toBeGreaterThanOrEqual(0)
+    expect(textStartIdx).toBeGreaterThan(stopIdx)
+    expect(firstTextIdx).toBeGreaterThan(stopIdx)
+    expect(evs.filter((e) => e.type === "thinking_stop")).toHaveLength(1)
+    const text = evs
+      .filter((e): e is CanonicalEvent & { type: "text_delta" } => e.type === "text_delta")
+      .map((e) => e.text)
+      .join("")
+    expect(text).toBe("Pre-existing")
+  })
+
+  it("closes open thinking when content arrives without a reasoning_content field", async () => {
+    const contentOnly: OpenAIChatChunk = {
+      id: "r1",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "deepseek-v4-pro",
+      choices: [{ index: 0, delta: { content: "Hi" }, finish_reason: null }],
+    }
+    const evs = await collect(
+      translateOpenAIChatStream(fromChunks([reasoningChunk("r1", "think"), contentOnly, stopChunk("r1")])),
+    )
+    const t = types(evs)
+    expect(t.indexOf("thinking_stop")).toBeLessThan(t.indexOf("text_start"))
+  })
+})
+
 describe("translateOpenAIChatStream keepalive handling", () => {
   it("emits a ping for a prefill keepalive chunk (empty-delta choice) so the watchdog sees activity", async () => {
     // message_start is minted from the FIRST chunk regardless, so drive the

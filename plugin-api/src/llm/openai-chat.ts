@@ -199,24 +199,13 @@ export async function* translateOpenAIChatStream(
     // resets the watchdog's idle timer.
     let producedEvent = false
 
-    // Text content
-    if (typeof delta.content === "string" && delta.content.length > 0) {
-      if (textIndex === null) {
-        textIndex = nextBlockIndex++
-        yield { type: "text_start", index: textIndex }
-      }
-      yield { type: "text_delta", index: textIndex, text: delta.content }
-      producedEvent = true
-    }
-
-    // Refusal content
-    if (typeof delta.refusal === "string" && delta.refusal.length > 0) {
-      yield { type: "refusal_delta", text: delta.refusal }
-      producedEvent = true
-    }
-
     // Reasoning content (DeepSeek-style thinking). Streamed as thinking
     // blocks — `reasoning_content` is the model's internal chain-of-thought.
+    // Handled BEFORE text so a transition chunk that carries both
+    // `content:"Pre"` and `reasoning_content:null` closes thinking first.
+    // Emitting text_delta before thinking_stop makes the REPL's
+    // onThinkingStop insert blank-line separators mid-word (orphaned
+    // "Pre" / "Plug" / "All" rows in scrollback). Same ordering as Ollama.
     if (delta.reasoning_content !== undefined) {
       if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
         if (thinkingIndex === null) {
@@ -232,8 +221,34 @@ export async function* translateOpenAIChatStream(
       }
     }
 
+    // Text content. Close any open thinking block first — covers providers
+    // that drop the reasoning_content field entirely once content starts
+    // (no explicit null clear), not only the same-chunk null clear above.
+    if (typeof delta.content === "string" && delta.content.length > 0) {
+      if (thinkingIndex !== null) {
+        yield { type: "thinking_stop", index: thinkingIndex }
+        thinkingIndex = null
+      }
+      if (textIndex === null) {
+        textIndex = nextBlockIndex++
+        yield { type: "text_start", index: textIndex }
+      }
+      yield { type: "text_delta", index: textIndex, text: delta.content }
+      producedEvent = true
+    }
+
+    // Refusal content
+    if (typeof delta.refusal === "string" && delta.refusal.length > 0) {
+      yield { type: "refusal_delta", text: delta.refusal }
+      producedEvent = true
+    }
+
     // Tool call deltas
     if (delta.tool_calls) {
+      if (thinkingIndex !== null) {
+        yield { type: "thinking_stop", index: thinkingIndex }
+        thinkingIndex = null
+      }
       producedEvent = true
       for (const tc of delta.tool_calls) {
         // First chunk for this tool-call index: open the block.
