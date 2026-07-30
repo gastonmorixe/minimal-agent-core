@@ -5,9 +5,13 @@ type: changelog
 status: living
 working-dir: "/Users/gaston/Projects/minimal-agent"
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-07-12T16:40:00-0400"
+updated-at: "2026-07-30T18:11:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-07-30-openai-chat-thinking-stop-before-text"
+    type: fix
+    status: landed
+    detail: "docs/changes/2026-07-30-openai-chat-thinking-stop-before-text.md"
   - id: "2026-07-12-never-give-up-terminal-less-thinking-idle"
     type: fix
     status: shipped
@@ -29,6 +33,30 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Fix: OpenAI Chat thinking_stop before first text (orphaned response prefixes)
+
+---
+id: "2026-07-30-openai-chat-thinking-stop-before-text"
+type: fix
+status: landed
+created-at: "2026-07-30T18:11:00-0400"
+updated-at: "2026-07-30T18:11:00-0400"
+detail: "docs/changes/2026-07-30-openai-chat-thinking-stop-before-text.md"
+---
+
+DeepSeek Chat Completions transition chunks carry both the first visible token
+and `reasoning_content: null` (e.g. `content:"Pre"`). The translator emitted
+`text_delta` before `thinking_stop`, so the REPL's `onThinkingStop` blank-line
+separator landed mid-word — orphaned bright prefixes (`Pre` / `Plug` / `All`)
+in scrollback while JSONL stayed correct (session `a37f1f39`).
+
+Fix: handle reasoning before text; close any open thinking block before
+`text_start` / tool-call deltas (same order as Ollama). Canonical
+`plugin-api/src/llm/openai-chat.ts`; plugins vendored copies synced.
+Regression tests in `openai-chat.test.ts` + fixture order assert.
+
+See `docs/changes/2026-07-30-openai-chat-thinking-stop-before-text.md`.
 
 ### Fix: Grok false mid-stream `stream_idle` from billing / shared request ids
 
