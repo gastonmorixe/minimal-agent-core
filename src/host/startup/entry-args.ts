@@ -130,6 +130,7 @@ export function prepareEntrypointArgs(input: PrepareEntrypointArgsInput): Entryp
     wantListFlags: opts.wantListFlags,
     wantListSpinners: opts.wantListSpinners,
     wantListModels: opts.wantListModels,
+    wantListModelsLive: opts.wantListModelsLive,
     wantListProviders: opts.wantListProviders,
     wantListPlugins: opts.wantListPlugins,
     wantLogin: opts.wantLogin,

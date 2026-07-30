@@ -572,24 +572,23 @@ export interface ProviderPlugin {
   /**
    * Optional: fetch this provider's LIVE model catalog (the authoritative
    * server-side list, including ids the static registry may not know yet).
-   * Used by `--list-models` / the model picker to merge real-time rows
-   * over the registry. Implementations own their endpoint, auth headers,
-   * and any client-side variant synthesis (e.g. context-window aliases).
-   * Must REJECT or resolve `[]` on failure — callers treat errors as
-   * "live list unavailable" and fall back to the registry (OCP: adding a
-   * provider never edits the listing command).
+   * Used by the REPL model picker and the `models-live` command — **not**
+   * by `ma models` / `--list-models`, which stay registry-only / offline.
+   * Implementations own their endpoint, auth headers, and any client-side
+   * variant synthesis (e.g. context-window aliases). Must REJECT or resolve
+   * `[]` on failure — callers treat errors as "live list unavailable".
    */
   listLiveModels?(auth: ProviderAuth): Promise<LiveModelRow[]>
 
   /**
    * Optional: declare that {@link listLiveModels} works WITHOUT stored
    * credentials (the provider's model-list endpoint is public). When `true`,
-   * `--list-models` / the picker still invoke `listLiveModels` for this
+   * the picker / `models-live` still invoke `listLiveModels` for this
    * provider when no credential is stored, passing an anonymous
    * `{ kind: "custom", headers: {} }` auth. Providers whose catalog needs auth
-   * (the default) omit this, so an unauthenticated listing skips them and
-   * falls back to the static registry. Gateways like HuggingFace, whose
-   * `/v1/models` is public, set it so the full live catalog shows before login.
+   * (the default) omit this, so an unauthenticated live listing skips them.
+   * Gateways like HuggingFace, whose `/v1/models` is public, set it so the
+   * full live catalog shows before login.
    */
   publicModelList?: boolean
 

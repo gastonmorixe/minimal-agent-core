@@ -65,14 +65,16 @@ describe("list UI commands", () => {
     expect(out).toContain("1 providers")
   })
 
-  it("renders models through injected output", async () => {
+  it("renders models through injected output (static registry only)", async () => {
+    let liveHookCalls = 0
     registerTestProvider({
-      id: "live",
-      displayName: "Live",
-      shortCode: "li",
+      id: "catalog",
+      displayName: "Catalog",
+      shortCode: "cat",
       models: [
         {
-          id: "live-model",
+          id: "catalog-model",
+          displayName: "Catalog Model",
           capabilities: {
             contextWindow: 1_050_000,
             maxOutputTokens: 128_000,
@@ -87,26 +89,19 @@ describe("list UI commands", () => {
         },
       ],
     })
+    // Live hooks must never run for `ma models` — even with auth + publicModelList.
     registerProviderPlugin({
-      id: "live",
-      displayName: "Live",
-      shortCode: "li",
+      id: "catalog",
+      displayName: "Catalog",
+      shortCode: "cat",
       register() {},
-      apiKeyAuth: {
-        serviceId: "live",
-        displayName: "Live",
-        buildCredential: (key) => ({
-          serviceId: "live",
-          displayName: "Live",
-          secrets: { apiKey: key },
-        }),
-        readApiKey: (secrets) => (typeof secrets.apiKey === "string" ? secrets.apiKey : null),
-      },
+      publicModelList: true,
       async listLiveModels() {
-        return [{ id: "live-model", displayName: "Live Model", createdAt: "2026-01-01" }]
+        liveHookCalls++
+        return [{ id: "should-not-appear", displayName: "Live Only", createdAt: "2026-01-01" }]
       },
     })
-    defaultAuthStore().set("live", "Live", { apiKey: "dummy" })
+    defaultAuthStore().set("catalog", "Catalog", { apiKey: "dummy" })
 
     let out = ""
     await runListModelsCommand(undefined, {
@@ -115,9 +110,11 @@ describe("list UI commands", () => {
     })
 
     const stripped = stripAnsi(out)
-    expect(stripped).toContain("live")
-    expect(stripped).toContain("live-model")
-    expect(stripped).toContain("Live Model")
+    expect(liveHookCalls).toBe(0)
+    expect(stripped).toContain("catalog")
+    expect(stripped).toContain("catalog-model")
+    expect(stripped).toContain("Catalog Model")
+    expect(stripped).not.toContain("should-not-appear")
     expect(stripped).toContain("ctx 1.05M")
     expect(stripped).toContain("out 128k")
     expect(stripped).toContain("eff:low/medium/xhigh")
@@ -128,9 +125,7 @@ describe("list UI commands", () => {
     expect(stripped).toContain("json")
     expect(stripped).toContain("hist")
     expect(stripped).toContain("surface:custom")
-    expect(stripped).toContain("cutoff:2026-01-01")
     expect(stripped).toContain("1 models available")
-    delete process.env.TEST_LIVE_KEY
   })
 
   it("never truncates or mid-wraps model ids; wraps only caps/metadata", async () => {
@@ -184,19 +179,16 @@ describe("list UI commands", () => {
     }
   })
 
-  it("lists a publicModelList provider's live catalog WITHOUT a stored credential", async () => {
-    // No credential is set for this provider. Because it declares
-    // `publicModelList`, the command must still invoke listLiveModels (with an
-    // anonymous auth) rather than falling back to the empty registry.
-    let sawAuthKind: string | undefined
+  it("never invokes listLiveModels — even for publicModelList providers", async () => {
+    let hookCalled = false
     registerProviderPlugin({
       id: "pub",
       displayName: "Public Gateway",
       shortCode: "pub",
       register() {},
       publicModelList: true,
-      async listLiveModels(auth) {
-        sawAuthKind = auth.kind
+      async listLiveModels() {
+        hookCalled = true
         return [{ id: "pub-live-model", displayName: "Pub Live", createdAt: "2026-02-02" }]
       },
     })
@@ -205,15 +197,12 @@ describe("list UI commands", () => {
     await runListModelsCommand("pub", { output: { write: (s) => (out += s) } })
     const stripped = stripAnsi(out)
 
-    expect(sawAuthKind).toBe("custom") // anonymous auth was synthesized
-    expect(stripped).toContain("pub-live-model")
-    expect(stripped).toContain("Pub Live")
-    expect(stripped).toContain("1 models available")
+    expect(hookCalled).toBe(false)
+    expect(stripped).not.toContain("pub-live-model")
+    expect(stripped).toContain('no models registered for provider "pub"')
   })
 
-  it("does NOT list an auth-required provider's live catalog without a credential", async () => {
-    // Same setup but WITHOUT publicModelList: no credential means the hook is
-    // never called and the provider contributes zero rows.
+  it("never invokes listLiveModels for auth-required providers either", async () => {
     let hookCalled = false
     registerProviderPlugin({
       id: "priv",
@@ -235,16 +224,11 @@ describe("list UI commands", () => {
     expect(stripped).toContain('no models registered for provider "priv"')
   })
 
-  it("does not probe other providers' live catalogs when filtered (no foreign 401 noise)", async () => {
-    // Regression: `provider models <id>` used to call every plugin's
-    // listLiveModels. A revoked foreign OAuth token then printed
-    // `(live model list unavailable: Models API 401: ...revoked)` under a
-    // filtered listing even when the target provider was fine. Filter must
-    // skip other hooks entirely.
+  it("does not probe any live catalogs when filtered (no foreign 401 noise)", async () => {
+    // Static `ma models` must never touch listLiveModels — previously a
+    // filtered listing still called foreign hooks and printed 401 noise.
     let otherHookCalls = 0
     let targetHookCalls = 0
-    // Static registry first; plugin registration last so listLiveModels is kept
-    // (registerTestProvider also installs a plugin without a live hook).
     registerTestProvider({
       id: "target",
       displayName: "Target",
@@ -271,7 +255,7 @@ describe("list UI commands", () => {
       publicModelList: true,
       async listLiveModels() {
         targetHookCalls++
-        return [{ id: "target-auto", displayName: "Auto" }]
+        return [{ id: "target-live-only", displayName: "Live Only" }]
       },
     })
 
@@ -283,26 +267,26 @@ describe("list UI commands", () => {
     })
     const stripped = stripAnsi(out + err)
 
-    expect(targetHookCalls).toBe(1)
+    expect(targetHookCalls).toBe(0)
     expect(otherHookCalls).toBe(0)
     expect(stripped).toContain("target-auto")
+    expect(stripped).not.toContain("target-live-only")
     expect(stripped).not.toContain("live model list unavailable")
     expect(stripped).not.toContain("Models API 401")
     expect(stripped).not.toContain("revoked")
   })
 
   it("keeps same bare model id under EACH provider (no cross-provider theft)", async () => {
-    // Regression: Ollama live `kimi-k2.6` used to steal OpenCode's static
-    // `kimi-k2.6` (and deepseek/glm/minimax siblings) because merge keyed only
-    // on bare id. Both providers must still list the shared slug; OpenCode-only
-    // slugs (kimi-k3) must not vanish either.
+    // Shared bare ids must list under BOTH providers via the scoped registry.
+    // (listRegisteredModels used to iterate the global last-write map and drop
+    // the earlier provider's entry.)
     registerTestProvider({
       id: "ollama",
       displayName: "Ollama Cloud",
       shortCode: "ol",
       models: [
-        { id: "kimi-k2.6", displayName: "Kimi K2.6 (Ollama static)" },
-        { id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash (Ollama static)" },
+        { id: "kimi-k2.6", displayName: "Kimi K2.6 (Ollama)" },
+        { id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash (Ollama)" },
       ],
     })
     registerTestProvider({
@@ -318,34 +302,6 @@ describe("list UI commands", () => {
       ],
     })
 
-    // Ollama has a live catalog that overlaps bare ids with OpenCode's static set.
-    registerProviderPlugin({
-      id: "ollama",
-      displayName: "Ollama Cloud",
-      shortCode: "ol",
-      register() {},
-      publicModelList: true,
-      async listLiveModels() {
-        return [
-          { id: "kimi-k2.6", displayName: "Kimi K2.6 (Ollama live)", createdAt: "2026-07-01" },
-          {
-            id: "deepseek-v4-flash",
-            displayName: "DeepSeek V4 Flash (Ollama live)",
-            createdAt: "2026-07-01",
-          },
-          { id: "glm-5.2", displayName: "GLM-5.2 (Ollama live)", createdAt: "2026-07-01" },
-          { id: "minimax-m3", displayName: "MiniMax M3 (Ollama live)", createdAt: "2026-07-01" },
-        ]
-      },
-    })
-    // OpenCode has no listLiveModels (static registry only) — mirrors production.
-    registerProviderPlugin({
-      id: "opencode",
-      displayName: "OpenCode Go",
-      shortCode: "oc",
-      register() {},
-    })
-
     let out = ""
     await runListModelsCommand(undefined, {
       columns: 220,
@@ -353,7 +309,6 @@ describe("list UI commands", () => {
     })
     const stripped = stripAnsi(out)
 
-    // Provider headers are printed as `  <providerId>` (two leading spaces).
     function section(text: string, provider: string): string {
       const re = new RegExp(
         `(?:^|\\n)  ${provider}\\n([\\s\\S]*?)(?=\\n  [a-z]|\\n  \\d+ models|$)`,
@@ -366,26 +321,22 @@ describe("list UI commands", () => {
     expect(ollamaSection.length).toBeGreaterThan(0)
     expect(opencodeSection.length).toBeGreaterThan(0)
 
-    // Shared bare ids appear under BOTH providers (not stolen into ollama only).
     expect(ollamaSection).toContain("kimi-k2.6")
     expect(ollamaSection).toContain("deepseek-v4-flash")
+    expect(ollamaSection).toContain("Kimi K2.6 (Ollama)")
     expect(opencodeSection).toContain("kimi-k2.6")
     expect(opencodeSection).toContain("deepseek-v4-flash")
     expect(opencodeSection).toContain("kimi-k3")
     expect(opencodeSection).toContain("glm-5.2")
     expect(opencodeSection).toContain("minimax-m3")
-
-    // OpenCode still shows OpenCode display names (static), not Ollama live labels.
     expect(opencodeSection).toContain("Kimi K2.6 (OpenCode)")
-    expect(opencodeSection).not.toContain("Kimi K2.6 (Ollama live)")
+    expect(opencodeSection).not.toContain("Kimi K2.6 (Ollama)")
 
-    // ollama: kimi-k2.6, deepseek-v4-flash, glm-5.2, minimax-m3 (4)
-    // opencode: kimi-k2.6, deepseek-v4-flash, kimi-k3, glm-5.2, minimax-m3 (5)
+    // ollama: 2 + opencode: 5
     expect(stripped).toMatch(/(\d+) models available/)
     const total = Number(stripped.match(/(\d+) models available/)?.[1] ?? 0)
-    expect(total).toBe(9)
+    expect(total).toBe(7)
 
-    // Provider-filtered view must also keep OpenCode's full static catalog.
     let ocOnly = ""
     await runListModelsCommand("opencode", {
       columns: 220,
@@ -396,12 +347,20 @@ describe("list UI commands", () => {
     expect(ocStripped).toContain("kimi-k2.6")
     expect(ocStripped).toContain("deepseek-v4-flash")
     expect(ocStripped).toContain("5 models available")
-    expect(ocStripped).not.toContain("Ollama live")
   })
 
-  it("enriches live row with static caps only when provider matches", async () => {
-    // Live ollama row + static opencode row share id; ollama live must NOT pick
-    // up opencode's displayName/caps via a bare-id merge.
+  it("keeps per-provider caps when two providers share a bare model id", async () => {
+    registerTestProvider({
+      id: "ollama",
+      displayName: "Ollama Cloud",
+      models: [
+        {
+          id: "shared-slug",
+          displayName: "Shared (Ollama)",
+          capabilities: { contextWindow: 128_000, maxOutputTokens: 4_000 },
+        },
+      ],
+    })
     registerTestProvider({
       id: "opencode",
       displayName: "OpenCode Go",
@@ -412,22 +371,6 @@ describe("list UI commands", () => {
           capabilities: { contextWindow: 999_000, maxOutputTokens: 12_000 },
         },
       ],
-    })
-    registerProviderPlugin({
-      id: "ollama",
-      displayName: "Ollama Cloud",
-      shortCode: "ol",
-      register() {},
-      publicModelList: true,
-      async listLiveModels() {
-        return [{ id: "shared-slug", displayName: "Shared (Ollama live)", createdAt: "2026-03-03" }]
-      },
-    })
-    registerProviderPlugin({
-      id: "opencode",
-      displayName: "OpenCode Go",
-      shortCode: "oc",
-      register() {},
     })
 
     let out = ""
@@ -446,7 +389,8 @@ describe("list UI commands", () => {
     const ollamaSection = section(stripped, "ollama")
     const opencodeSection = section(stripped, "opencode")
 
-    expect(ollamaSection).toContain("Shared (Ollama live)")
+    expect(ollamaSection).toContain("Shared (Ollama)")
+    expect(ollamaSection).toContain("ctx 128k")
     expect(ollamaSection).not.toContain("ctx 999k")
     expect(opencodeSection).toContain("Shared (OpenCode)")
     expect(opencodeSection).toContain("ctx 999k")

@@ -90,6 +90,14 @@ export class Http2Transport implements NetworkTransport {
             fallbackUsed: false,
           },
         })
+        if (req.keepRequestOpen) {
+          response.writeRequestBody = (chunk: Uint8Array) => {
+            stream.write(chunk)
+          }
+          response.endRequestBody = () => {
+            stream.end()
+          }
+        }
         if (!settled) {
           settled = true
           resolve(response)
@@ -102,7 +110,9 @@ export class Http2Transport implements NetworkTransport {
         fail(err)
       })
 
-      if (req.body == null) {
+      if (req.keepRequestOpen) {
+        if (req.body != null) stream.write(req.body)
+      } else if (req.body == null) {
         stream.end()
       } else {
         stream.end(req.body)

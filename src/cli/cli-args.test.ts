@@ -242,6 +242,20 @@ describe("normalizeArgs", () => {
     expect(normalizeArgs(["provider", "acme", "models"])).toEqual(["--list-models", "acme"])
   })
 
+  test("models-live grammar maps to --list-models-live", () => {
+    expect(normalizeArgs(["models-live"])).toEqual(["--list-models-live"])
+    expect(normalizeArgs(["--models-live"])).toEqual(["--list-models-live"])
+    expect(normalizeArgs(["providers", "models-live"])).toEqual(["--list-models-live"])
+    expect(normalizeArgs(["providers", "models-live", "acme"])).toEqual([
+      "--list-models-live",
+      "acme",
+    ])
+    expect(normalizeArgs(["provider", "acme", "models-live"])).toEqual([
+      "--list-models-live",
+      "acme",
+    ])
+  })
+
   test("auth subcommands keep trailing flags after the verb", () => {
     // `minimal-agent login --email foo@bar` → `--login --email foo@bar`.
     // The subcommand recognizer only consumes the first positional;

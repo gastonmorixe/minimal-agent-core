@@ -1,32 +1,39 @@
 /**
- * `--list-models` / `ma models` / `ma provider <id> models`:
- * **static** registered model catalog only, grouped by provider.
+ * `--list-models-live` / `ma providers models-live` /
+ * `ma provider <id> models-live`: merged **live** provider catalogs + static
+ * registry enrichment, grouped by provider.
  *
- * Never reaches the network. Live server catalogs belong on a separate
- * `models-live` command (see Task 3). This command is the offline source of
- * truth for what the process actually registered at bootstrap — capabilities,
- * pricing, surfaces, etc. — not what a provider advertises right now.
+ * Network-facing catalog command. Offline static listing stays on
+ * `ma models` / `--list-models` (see `list-models.ts`).
  *
- * Provider-NEUTRAL by construction (OCP): rows come solely from the canonical
- * model registry populated by `ProviderPlugin.register`. Adding a provider
- * plugin extends this listing with zero edits here.
+ * Provider-NEUTRAL by construction (OCP): live rows come from each
+ * registered `ProviderPlugin.listLiveModels` hook; static rows come from
+ * the canonical model registry. Live rows win on id collision within a
+ * provider (they carry real `created_at` dates); a failed/missing live
+ * fetch degrades to the registry.
  *
- * @module commands/list-models
+ * @module commands/list-models-live
  */
 
-import type { PrintFormat } from "../../cli/print-format.ts"
+import { tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
 import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
+import { listRegisteredModels, type ModelEntry } from "../../llm/model-registry.ts"
+import type { ProviderAuth } from "../../llm/provider.ts"
+import { listProviderPlugins } from "../../llm/provider-plugin.ts"
 import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
 
-import {
-  collectRegisteredModelRows,
-  groupModelRowsByProvider,
-  type ModelCatalogRow,
-} from "./model-catalog-data.ts"
-
-type ModelRow = ModelCatalogRow
+interface ModelRow {
+  id: string
+  displayName?: string
+  providerId: string
+  surface?: string
+  date?: string
+  contextWindow?: number
+  maxOutputTokens?: number
+  capabilities?: Capabilities
+}
 
 interface CommandOutputWithColumns {
   write(s: string): unknown
@@ -37,8 +44,6 @@ interface ListModelsDeps {
   output?: CommandOutputWithColumns
   error?: { write(s: string): unknown }
   columns?: number
-  /** Inspection print format (`text` default). See `--print-format`. */
-  printFormat?: PrintFormat
 }
 
 interface ModelTableLayout {
@@ -56,6 +61,15 @@ const SERVER_TOOL_LABELS: Record<ServerToolId, string> = {
   computer_use: "comp",
   file_search: "file",
   advisor: "adv",
+}
+
+function applyRegisteredEntry(row: ModelRow, entry: ModelEntry): void {
+  row.displayName ??= entry.displayName
+  row.surface ??= entry.surfaceId
+  row.date ??= entry.knowledgeCutoff
+  row.contextWindow = entry.capabilities.contextWindow
+  row.maxOutputTokens = entry.capabilities.maxOutputTokens
+  row.capabilities = entry.capabilities
 }
 
 function resolveTerminalColumns(deps: ListModelsDeps): number {
@@ -230,56 +244,95 @@ function formatModelRow(row: ModelRow, layout: ModelTableLayout): string[] {
 }
 
 /**
- * Implements `minimal-agent list-models`: prints the **static** registered
- * model catalog (no network, no auth, no `listLiveModels`). Optionally
- * filtered to one provider.
+ * Composite map key for one model under one provider.
+ *
+ * Live catalogs often reuse bare slugs across gateways (`kimi-k2.6` on both
+ * Ollama Cloud and OpenCode Go). Merging on bare `id` alone lets one provider's
+ * live row steal another provider's static registration — the OpenCode catalog
+ * collapsed to the handful of slugs Ollama did not also advertise. Always key
+ * by `providerId\0id` so providers stay independent.
+ */
+function modelRowKey(providerId: string, modelId: string): string {
+  return `${providerId}\0${modelId}`
+}
+
+/**
+ * Implements `minimal-agent list-models-live`: merges live model catalogs from
+ * every provider plugin (queried in parallel, fault-isolated so one outage
+ * cannot hide another provider's rows) with the static registry fallback,
+ * then prints a deduplicated table, optionally filtered to one provider.
  *
  * Dedup is **per provider**: the same model id may appear under multiple
- * providers (e.g. `deepseek-v4-flash` on Ollama and OpenCode).
- *
- * Kept async for call-site stability (`runStartupSubcommand` / tests).
+ * providers (e.g. `deepseek-v4-flash` on Ollama and OpenCode). Live wins over
+ * static only within the same provider.
  */
-export async function runListModelsCommand(
+export async function runListModelsLiveCommand(
   providerFilter?: string,
   deps: ListModelsDeps = {},
 ): Promise<void> {
-  const rows = collectRegisteredModelRows(providerFilter)
-  const format = deps.printFormat ?? "text"
+  const byKey = new Map<string, ModelRow>()
 
-  if (format === "json") {
-    const payload = {
-      kind: "models",
-      source: "registry",
-      providerFilter: providerFilter ?? null,
-      models: rows.map((r) => ({
-        id: r.id,
-        displayName: r.displayName ?? null,
-        providerId: r.providerId,
-        surface: r.surface ?? null,
-        knowledgeCutoff: r.date ?? null,
-        contextWindow: r.contextWindow ?? null,
-        maxOutputTokens: r.maxOutputTokens ?? null,
-        capabilities: r.capabilities ?? null,
-      })),
-      count: rows.length,
+  // When listing a single provider (`provider models cursor`), only probe that
+  // provider's live catalog. Querying every registered plugin still printed
+  // unrelated failures (e.g. Anthropic "Models API 401: …revoked") under a
+  // filtered Cursor listing — and burned other providers' credentials for no
+  // reason. Mirrors listLiveModelsForPicker's providerId filter.
+  const plugins = listProviderPlugins().filter(
+    (p) => typeof p.listLiveModels === "function" && (!providerFilter || p.id === providerFilter),
+  )
+  const results = await Promise.allSettled(
+    plugins.map(async (p) => {
+      const providerAuth: ProviderAuth | null =
+        tryResolveProviderAuth(p.id, "") ??
+        (p.publicModelList ? { kind: "custom", headers: {} } : null)
+      if (!providerAuth)
+        return { plugin: p, rows: [] as Awaited<ReturnType<NonNullable<typeof p.listLiveModels>>> }
+      return { plugin: p, rows: await p.listLiveModels?.(providerAuth) }
+    }),
+  )
+  for (const r of results) {
+    if (r.status === "rejected") {
+      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+      ;(deps.error ?? process.stderr).write(`  ${c.dim(`(live model list unavailable: ${msg})`)}\n`)
+      continue
     }
-    writeCommandRows([JSON.stringify(payload, null, 2)], deps.output)
-    return
+    for (const m of r.value.rows ?? []) {
+      const providerId = r.value.plugin.id
+      byKey.set(modelRowKey(providerId, m.id), {
+        id: m.id,
+        displayName: m.displayName,
+        providerId,
+        date: m.createdAt,
+      })
+    }
   }
 
-  if (format === "md" || format === "xml") {
-    // Skeleton: structured formats beyond json land in a follow-up.
-    writeCommandRows(
-      [
-        "",
-        `  ${c.dim(`print-format "${format}" not implemented yet for models; use text or json`)}`,
-      ],
-      deps.output,
-    )
-    return
+  for (const entry of listRegisteredModels()) {
+    if (providerFilter && entry.providerId !== providerFilter) continue
+    const key = modelRowKey(entry.providerId, entry.id)
+    const existing = byKey.get(key)
+    if (existing) {
+      // Same provider only: enrich the live row with static caps/surface/name.
+      // Never reassign providerId — that would reintroduce cross-provider theft.
+      applyRegisteredEntry(existing, entry)
+      continue
+    }
+    const row: ModelRow = {
+      id: entry.id,
+      displayName: entry.displayName,
+      providerId: entry.providerId,
+    }
+    applyRegisteredEntry(row, entry)
+    byKey.set(key, row)
   }
 
-  const byProvider = groupModelRowsByProvider(rows)
+  const byProvider = new Map<string, ModelRow[]>()
+  for (const row of byKey.values()) {
+    const list = byProvider.get(row.providerId)
+    if (list) list.push(row)
+    else byProvider.set(row.providerId, [row])
+  }
+
   const providerIds = providerFilter ? [providerFilter] : [...byProvider.keys()].sort()
   const shownRows = providerIds.flatMap((p) => byProvider.get(p) ?? [])
   if (shownRows.length === 0) {
@@ -294,10 +347,10 @@ export async function runListModelsCommand(
   const lines: string[] = [""]
   let shown = 0
   for (const provider of providerIds) {
-    const providerRows = byProvider.get(provider)
-    if (!providerRows || providerRows.length === 0) continue
+    const rows = byProvider.get(provider)
+    if (!rows || rows.length === 0) continue
     lines.push(`  ${c.bold(provider)}`)
-    for (const row of providerRows.sort((a, b) => a.id.localeCompare(b.id))) {
+    for (const row of rows.sort((a, b) => a.id.localeCompare(b.id))) {
       lines.push(...formatModelRow(row, layout))
       shown++
     }

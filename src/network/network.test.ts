@@ -68,6 +68,31 @@ describe("network", () => {
     }
   })
 
+  it("keeps the HTTP/2 request stream open for follow-up writes", async () => {
+    const { server, url } = await startBidiHttp2Server()
+    const transport = new Http2Transport()
+    const client = new NetworkClient({ primary: transport })
+
+    try {
+      const response = await client.request({
+        label: "test.bidi",
+        method: "POST",
+        url: `${url}/bidi`,
+        body: new TextEncoder().encode("hello"),
+        keepRequestOpen: true,
+      })
+      expect(response.ok).toBe(true)
+      expect(typeof response.writeRequestBody).toBe("function")
+      expect(typeof response.endRequestBody).toBe("function")
+      response.writeRequestBody!(new TextEncoder().encode(" world"))
+      response.endRequestBody!()
+      expect(await response.text()).toBe("hello world")
+    } finally {
+      await client.close()
+      await closeServer(server)
+    }
+  })
+
   it("routes plaintext http:// to the plaintextHttpTransport, https:// to primary", async () => {
     const primary = labeledTransport("primary")
     const plaintextHttpTransport = labeledTransport("plaintext")
@@ -285,6 +310,35 @@ describe("network", () => {
     30_000,
   )
 })
+
+async function startBidiHttp2Server(): Promise<{
+  server: Http2Server
+  url: string
+}> {
+  const server = createServer()
+
+  server.on("stream", (stream: ServerHttp2Stream) => {
+    const chunks: Buffer[] = []
+    stream.respond({ ":status": 200, "content-type": "text/plain" })
+    stream.on("data", (chunk: Buffer) => chunks.push(chunk))
+    stream.on("end", () => {
+      stream.end(Buffer.concat(chunks))
+    })
+  })
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === "string") {
+    throw new Error("HTTP/2 bidi test server did not bind to a TCP port")
+  }
+
+  return {
+    server,
+    url: `http://127.0.0.1:${address.port}`,
+  }
+}
 
 async function startHttp2Server(): Promise<{
   server: Http2Server

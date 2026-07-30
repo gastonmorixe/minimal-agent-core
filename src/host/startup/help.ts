@@ -272,8 +272,18 @@ function buildHelpSections(): HelpSection[] {
         row(c.cyan("providers"), "List registered providers", ["id · surfaces"]),
         row(
           `${c.cyan("providers models")} ${c.dim("[<id>]")}`,
-          "List models, optionally one provider",
+          "List registered models (offline, no network)",
           ["alias: --list-models"],
+        ),
+        row(
+          `${c.cyan("providers models-live")} ${c.dim("[<id>]")}`,
+          "List live provider catalogs (network)",
+          ["alias: --list-models-live"],
+        ),
+        row(
+          `${c.cyan("--print-format")} ${c.dim("<text|json|md|xml>")}`,
+          "Inspection command output shape (models, …)",
+          ["default: text; aliases: tui/console/stdout"],
         ),
         row(
           `${c.cyan("plugins")} ${c.dim("[list]")}`,

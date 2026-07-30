@@ -154,6 +154,7 @@ const {
   effortLevels,
   cliCredentialName,
   listModelsProvider,
+  printFormat,
   wantJsonOutput,
   outputFormat,
   outputSchemaPath,
@@ -275,6 +276,7 @@ async function main() {
     sessionsQuery,
     usagePeriod,
     listModelsProvider,
+    printFormat,
     repoRoot: dirname(srcDir),
     readFlagValue,
   })

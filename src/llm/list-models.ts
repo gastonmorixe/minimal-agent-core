@@ -1,10 +1,12 @@
 /**
- * Provider-neutral live model listing for the REPL model picker.
+ * Provider-neutral live model listing for the REPL model picker (and the
+ * forthcoming `models-live` command).
  *
- * Queries every registered provider plugin's `listLiveModels` hook (the same
- * seam `minimal-agent list-models` uses) and returns the merged catalog as
- * `ModelInfo` rows. Fault-isolated: one provider's outage degrades to the
- * others' rows rather than failing the whole list. Names no provider.
+ * Queries every registered provider plugin's `listLiveModels` hook and
+ * returns the catalog as `ModelInfo` rows. The static CLI listing
+ * (`ma models` / `--list-models`) never calls this — it reads only the
+ * in-process registry. Fault-isolated: one provider's outage degrades to
+ * the others' rows rather than failing the whole list. Names no provider.
  *
  * When the same bare model id is returned by multiple providers (e.g.
  * `kimi-k2.6` from Ollama and OpenCode), both rows are kept — dedup is

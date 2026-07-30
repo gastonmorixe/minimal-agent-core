@@ -5,6 +5,7 @@ export type CommandName =
   | "list-flags"
   | "list-spinners"
   | "list-models"
+  | "list-models-live"
   | "list-providers"
   | "list-plugins"
   | "login"
@@ -33,6 +34,8 @@ export interface PlanCommandInput {
   wantListFlags: boolean
   wantListSpinners: boolean
   wantListModels: boolean
+  /** Live provider catalogs (`models-live` / `--list-models-live`). */
+  wantListModelsLive?: boolean
   /** `providers` (bare): list registered providers from the canonical registry. */
   wantListProviders?: boolean
   /** `plugins` / `--list-plugins`: list installed plugins and effective on/off. */
@@ -84,6 +87,19 @@ function capabilities(command: CommandName): CommandCapabilities {
         supportsPromptInput: false,
       }
     case "list-models":
+      // Static registry only — never hits the network or needs credentials.
+      // Live catalogs live on a separate models-live command.
+      return {
+        needsStartupUi: false,
+        needsAuth: false,
+        needsNetwork: false,
+        needsFormatter: false,
+        needsQuota: false,
+        supportsPromptInput: false,
+      }
+    case "list-models-live":
+      // Probes each provider's listLiveModels (auth when required; public
+      // catalogs may proceed anonymously via publicModelList).
       return {
         needsStartupUi: false,
         needsAuth: true,
@@ -112,10 +128,12 @@ function capabilities(command: CommandName): CommandCapabilities {
  * capability profile so startup dependencies are only initialized when needed.
  *
  * Precedence: dump \> sessions \> usage \> list-flags \> list-spinners \>
- * list-models \> login \> logout \> auth-status \> run. Auth subcommands sit
- * ahead of `run` but after the read-only inspection commands so a
- * `--sessions --logout` combo still falls through to sessions (whoever wrote
- * that flag combo almost certainly meant the read).
+ * list-models-live \> list-models \> login \> logout \> auth-status \> run.
+ * Auth subcommands sit ahead of `run` but after the read-only inspection
+ * commands so a `--sessions --logout` combo still falls through to sessions
+ * (whoever wrote that flag combo almost certainly meant the read).
+ * `list-models-live` beats `list-models` so an accidental dual flag still
+ * prefers the live path the user asked for.
  */
 export function planCommand(input: PlanCommandInput): CommandPlan {
   const command: CommandName = input.dumpArg
@@ -128,19 +146,21 @@ export function planCommand(input: PlanCommandInput): CommandPlan {
           ? "list-flags"
           : input.wantListSpinners
             ? "list-spinners"
-            : input.wantListModels
-              ? "list-models"
-              : input.wantListProviders
-                ? "list-providers"
-                : input.wantListPlugins
-                  ? "list-plugins"
-                  : input.wantLogin
-                    ? "login"
-                    : input.wantLogout
-                      ? "logout"
-                      : input.wantAuthStatus
-                        ? "auth-status"
-                        : "run"
+            : input.wantListModelsLive
+              ? "list-models-live"
+              : input.wantListModels
+                ? "list-models"
+                : input.wantListProviders
+                  ? "list-providers"
+                  : input.wantListPlugins
+                    ? "list-plugins"
+                    : input.wantLogin
+                      ? "login"
+                      : input.wantLogout
+                        ? "logout"
+                        : input.wantAuthStatus
+                          ? "auth-status"
+                          : "run"
 
   return {
     command,

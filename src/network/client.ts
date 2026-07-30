@@ -290,12 +290,19 @@ export class NetworkClient {
       { highWaterMark: 0 },
     )
 
-    return new NetworkResponse({
+    const tapped = new NetworkResponse({
       status: response.status,
       headers: response.headers,
       body,
       transport: response.transport,
     })
+    if (response.writeRequestBody) {
+      tapped.writeRequestBody = (chunk) => response.writeRequestBody!(chunk)
+    }
+    if (response.endRequestBody) {
+      tapped.endRequestBody = () => response.endRequestBody!()
+    }
+    return tapped
   }
 
   private notifyRequest(req: NetworkRequest): void {
