@@ -68,6 +68,12 @@ export interface NetworkRequest {
    * by net-dbg and the activity observer.
    */
   lifecycle?: NetworkRequestLifecycle
+  /**
+   * When true, keep the HTTP/2 request stream writable after the initial
+   * `body` write so callers can send more bytes via
+   * {@link NetworkResponse.writeRequestBody} (Connect bidi).
+   */
+  keepRequestOpen?: boolean
 }
 
 /**
@@ -149,6 +155,10 @@ export class NetworkResponse {
   readonly headers: Headers
   readonly body: ReadableStream<Uint8Array>
   readonly transport: NetworkTransportInfo
+  /** Write more bytes on an open HTTP/2 request stream (Connect bidi). */
+  writeRequestBody?: (chunk: Uint8Array) => void
+  /** Half-close the HTTP/2 request stream. */
+  endRequestBody?: () => void
 
   constructor(opts: {
     status: number

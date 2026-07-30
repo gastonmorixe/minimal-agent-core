@@ -23,6 +23,7 @@ import type { ToolNamePolicy } from "../sdk/tool-filter.ts"
 
 import { resolveShowHeader } from "./non-interactive-defaults.ts"
 import { type OutputFormat, resolveOutputFormat } from "./output-format.ts"
+import { type PrintFormat, parsePrintFormat } from "./print-format.ts"
 
 /** A minimal view of the process environment this resolver reads. */
 export type EnvLike = Record<string, string | undefined>
@@ -58,8 +59,12 @@ export interface CliOptions {
   readonly effortLevels: string[] | undefined
   readonly cliCredentialName: string | undefined
   readonly wantListModels: boolean
+  /** Live catalogs: `--list-models-live` / `providers models-live`. */
+  readonly wantListModelsLive: boolean
   readonly wantListProviders: boolean
   readonly listModelsProvider: string | undefined
+  /** Inspection command print format (`--print-format`). */
+  readonly printFormat: PrintFormat
   readonly wantListFlags: boolean
   readonly wantListPlugins: boolean
   readonly wantListSpinners: boolean
@@ -185,8 +190,14 @@ export function parseCliOptions(
   const cliCredentialName = valueAfter(args, "--credential-name")
 
   const wantListModels = args.includes("--list-models")
+  const wantListModelsLive = args.includes("--list-models-live")
   const wantListProviders = args.includes("--list-providers")
-  const listModelsProvider = valueAfter(args, "--list-models")
+  // Provider filter for whichever models command won (live preferred if both).
+  const listModelsProvider =
+    valueAfter(args, "--list-models-live") ?? valueAfter(args, "--list-models")
+  const printFormat = parsePrintFormat(
+    valueAfter(args, "--print-format") ?? env.MINIMAL_AGENT_PRINT_FORMAT,
+  )
   const wantListFlags = args.includes("--list-flags")
   const wantListPlugins = args.includes("--list-plugins")
   const wantListSpinners = args.includes("--list-spinners")
@@ -294,8 +305,10 @@ export function parseCliOptions(
     effortLevels,
     cliCredentialName,
     wantListModels,
+    wantListModelsLive,
     wantListProviders,
     listModelsProvider,
+    printFormat,
     wantListFlags,
     wantListPlugins,
     wantListSpinners,

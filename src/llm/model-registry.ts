@@ -219,8 +219,20 @@ export function resolveModelForProvider(idOrAlias: string, providerId: string): 
 }
 
 /** Enumerate registered models. Useful for `--list-models`. */
+/**
+ * Every registered model entry across all providers.
+ *
+ * Prefer this over iterating the global last-write-wins map: when two
+ * providers register the same bare id (e.g. Ollama + OpenCode both ship
+ * `kimi-k2.6`), both entries are returned. Callers that need a single
+ * unscoped pick still use {@link findModel}.
+ */
 export function listRegisteredModels(): ModelEntry[] {
-  return [...models.values()]
+  const out: ModelEntry[] = []
+  for (const perProvider of modelsByProvider.values()) {
+    for (const entry of perProvider.values()) out.push(entry)
+  }
+  return out
 }
 
 /**
@@ -234,10 +246,10 @@ export function findModelByTags(
   providerId: string,
   mustHave: readonly string[],
 ): ModelEntry | undefined {
-  for (const m of models.values()) {
-    if (m.providerId !== providerId) continue
-    const tags = m.tags ?? []
-    if (mustHave.every((t) => tags.includes(t))) return m
+  for (const entry of listRegisteredModels()) {
+    if (entry.providerId !== providerId) continue
+    const tags = entry.tags ?? []
+    if (mustHave.every((t) => tags.includes(t))) return entry
   }
   return undefined
 }

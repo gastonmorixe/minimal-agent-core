@@ -79,12 +79,24 @@ describe("planCommand", () => {
 
     const models = planCommand({ ...base, wantListModels: true })
     expect(models.command).toBe("list-models")
-    expect(models.needsAuth).toBe(true)
-    expect(models.needsNetwork).toBe(true)
+    // Static registry only — no auth/network (live catalogs are models-live).
+    expect(models.needsAuth).toBe(false)
+    expect(models.needsNetwork).toBe(false)
     expect(models.needsStartupUi).toBe(false)
     expect(models.needsFormatter).toBe(false)
     expect(models.needsQuota).toBe(false)
     expect(models.supportsPromptInput).toBe(false)
+
+    const live = planCommand({ ...base, wantListModelsLive: true })
+    expect(live.command).toBe("list-models-live")
+    expect(live.needsAuth).toBe(true)
+    expect(live.needsNetwork).toBe(true)
+  })
+
+  test("list-models-live takes precedence over list-models", () => {
+    expect(planCommand({ ...base, wantListModels: true, wantListModelsLive: true }).command).toBe(
+      "list-models-live",
+    )
   })
 
   test("login: needs network but NOT auth (must work with no stored credentials)", () => {

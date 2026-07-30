@@ -50,6 +50,7 @@ import {
   rebroadcastQuotaForSessionUpdate,
   signalQuotaRefresh,
 } from "../../quota/quota-broadcast.ts"
+import { getSessionId } from "../../session/session-id.ts"
 import { addSessionUsage } from "../../session/session-tokens.ts"
 import {
   canonicalEventsToLegacyStream,
@@ -201,7 +202,9 @@ export async function* canonicalSendFn(
         detachAttemptActivity = attemptClient.detach
         const ctx: RunContext = {
           auth: authState.auth,
-          sessionId: "",
+          // Bidi providers (Cursor) key open tool-exec streams by sessionId.
+          // Empty string forced a new UUID every round → never continued.
+          sessionId: getSessionId(),
           networkClient: attemptClient.client,
         }
         // acceptDegrade: when the adapter can offer a cheaper-but-valid

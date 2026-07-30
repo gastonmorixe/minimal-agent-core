@@ -15,6 +15,7 @@
  *
  * ```text
  * models   [list]                  → --list-models
+ * models-live [list]               → --list-models-live
  * flags    [list]                  → --list-flags
  * plugins  [list]                  → --list-plugins
  * spinners [list]                  → --list-spinners
@@ -50,8 +51,10 @@ const SHORT_TO_LONG: Record<string, string> = {
 
 const LONG_ALIAS: Record<string, string> = {
   "--models": "--list-models",
+  "--models-live": "--list-models-live",
   "--providers": "--list-providers",
   "--list-model": "--list-models",
+  "--list-model-live": "--list-models-live",
   "--flags": "--list-flags",
   "--list-flag": "--list-flags",
   "--plugins": "--list-plugins",
@@ -71,6 +74,7 @@ interface SubcommandSpec {
 
 const SUBCOMMANDS: Record<string, SubcommandSpec> = {
   models: { flag: "--list-models" },
+  "models-live": { flag: "--list-models-live" },
   providers: { flag: "--list-providers" },
   flags: { flag: "--list-flags" },
   plugins: { flag: "--list-plugins" },
@@ -234,6 +238,7 @@ export function normalizeArgs(raw: string[]): string[] {
     } else if (head === "providers" && raw[1] !== undefined && !raw[1].startsWith("-")) {
       // Nested `providers <verb>` grammar (parallels `sessions`):
       //   providers models [<providerId>] → --list-models [<providerId>]
+      //   providers models-live [<providerId>] → --list-models-live [<providerId>]
       //   providers login <providerId>    → --login --provider <providerId>
       //   providers logout <providerId>   → --logout --provider <providerId>
       //   providers list                  → --list-providers
@@ -243,6 +248,13 @@ export function normalizeArgs(raw: string[]): string[] {
       const second = raw[1]
       if (second === "models") {
         out.push("--list-models")
+        start = 2
+        if (raw[2] !== undefined && !raw[2].startsWith("-")) {
+          out.push(raw[2])
+          start = 3
+        }
+      } else if (second === "models-live") {
+        out.push("--list-models-live")
         start = 2
         if (raw[2] !== undefined && !raw[2].startsWith("-")) {
           out.push(raw[2])
@@ -275,6 +287,7 @@ export function normalizeArgs(raw: string[]): string[] {
       //   provider <providerId> login [--name <name>]  → --login --provider <providerId> [--name <name>]
       //   provider <providerId> logout                  → --logout --provider <providerId>
       //   provider <providerId> models → --list-models <providerId>
+      //   provider <providerId> models-live → --list-models-live <providerId>
       const providerId = raw[1]
       const action = raw[2]
       if (action === "login") {
@@ -308,6 +321,9 @@ export function normalizeArgs(raw: string[]): string[] {
         start = 3
       } else if (action === "models") {
         out.push("--list-models", providerId)
+        start = 3
+      } else if (action === "models-live") {
+        out.push("--list-models-live", providerId)
         start = 3
       } else {
         out.push("--list-providers")

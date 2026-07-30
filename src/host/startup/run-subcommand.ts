@@ -17,11 +17,13 @@
 
 import { c } from "../../agent/agent.ts"
 import { resolveAgentHome } from "../../agent/agent-paths.ts"
+import type { PrintFormat } from "../../cli/print-format.ts"
 import type { CommandPlan } from "../cli/command-plan.ts"
 import { runAuthStatusCommand } from "../commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "../commands/dump.ts"
 import { runListFlagsCommand } from "../commands/list-flags.ts"
 import { runListModelsCommand } from "../commands/list-models.ts"
+import { runListModelsLiveCommand } from "../commands/list-models-live.ts"
 import { runListPluginsCommand } from "../commands/list-plugins.ts"
 import { runListProvidersCommand } from "../commands/list-providers.ts"
 import { runListSpinnersCommand } from "../commands/list-spinners.ts"
@@ -39,6 +41,7 @@ export interface SubcommandContext {
   readonly sessionsQuery: string | undefined
   readonly usagePeriod: string | undefined
   readonly listModelsProvider: string | undefined
+  readonly printFormat: PrintFormat
   /** Repo root (`<repo>`), computed by the caller — never derived here. */
   readonly repoRoot: string
   /** Inline-or-spaced flag reader from the entry point. */
@@ -88,7 +91,10 @@ export async function runStartupSubcommand(ctx: SubcommandContext): Promise<bool
       runListSpinnersCommand()
       return true
     case "list-models":
-      await runListModelsCommand(ctx.listModelsProvider)
+      await runListModelsCommand(ctx.listModelsProvider, { printFormat: ctx.printFormat })
+      return true
+    case "list-models-live":
+      await runListModelsLiveCommand(ctx.listModelsProvider)
       return true
     case "list-providers":
       runListProvidersCommand()
