@@ -77,6 +77,12 @@ export interface MetaRecord {
    * sessions written before this field existed.
    */
   provider?: string
+  /**
+   * Named credential pin (`--credential-name`) used for this session.
+   * Written at open/fork so `--resume` can re-select the same stored
+   * account when CLI/config omit the pin. Absent on old sessions.
+   */
+  credentialName?: string
 }
 
 export interface UserRecord {
@@ -430,6 +436,27 @@ export function _resetOwnStartTimeForTest(): void {
   _ownStartTime = null
 }
 
+/**
+ * Rewrite the leading `meta` line to add `credentialName` when missing.
+ * Used by same-sid resume (`existsOk`) so an old session can gain the pin
+ * without forking. Never overwrites an existing pin. Best-effort: no-op
+ * when the first record is not meta or already has any credentialName.
+ */
+function backfillMetaCredentialName(
+  path: string,
+  text: string,
+  records: SessionRecord[],
+  credentialName: string,
+): void {
+  const meta = records[0]
+  if (!meta || meta.kind !== "meta") return
+  if (meta.credentialName) return
+  const updated: MetaRecord = { ...meta, credentialName }
+  const nl = text.indexOf("\n")
+  const rest = nl === -1 ? "" : text.slice(nl + 1)
+  writeFileSync(path, `${JSON.stringify(updated)}\n${rest}`)
+}
+
 // ---------------------------------------------------------------------------
 // SessionStore — append-only writer
 // ---------------------------------------------------------------------------
@@ -489,6 +516,7 @@ export class SessionStore {
     dir?: string
     existsOk?: boolean
     provider?: string
+    credentialName?: string
     /** Override the timestamp; tests use this for determinism. */
     now?: () => Date
   }): SessionStore {
@@ -525,6 +553,7 @@ export class SessionStore {
         toolsHash: opts.toolsHash,
         agentVersion: opts.agentVersion,
         ...(opts.provider ? { provider: opts.provider } : {}),
+        ...(opts.credentialName ? { credentialName: opts.credentialName } : {}),
       }
       writeFileSync(store.path, `${JSON.stringify(meta)}\n`, { flag: "wx" })
 
@@ -540,6 +569,12 @@ export class SessionStore {
       const text = readFileSync(store.path, "utf-8")
       const { records } = parseLines(text)
       store.hasConversation = records.some(isConversationRecord)
+      // Same-sid resume keeps creation meta (model/hashes) intact, but may
+      // backfill a missing credentialName so later resumes can re-pin without
+      // re-passing --credential-name. Never overwrite an existing pin.
+      if (opts.credentialName) {
+        backfillMetaCredentialName(store.path, text, records, opts.credentialName)
+      }
     }
 
     return store
@@ -594,6 +629,7 @@ export class SessionStore {
     argv?: string[]
     dir?: string
     provider?: string
+    credentialName?: string
     /** Allow forking onto an existing dstSid file. Default false. */
     existsOk?: boolean
     /** Override the timestamp; tests use this for determinism. */
@@ -643,6 +679,7 @@ export class SessionStore {
       parentSid: opts.srcSid,
       forkedAt: createdAt,
       ...(opts.provider ? { provider: opts.provider } : {}),
+      ...(opts.credentialName ? { credentialName: opts.credentialName } : {}),
     }
     const lines: string[] = [JSON.stringify(meta)]
     for (const r of srcRecords) {

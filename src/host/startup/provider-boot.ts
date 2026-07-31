@@ -23,6 +23,7 @@ import { printStartupRow } from "../ui/startup/tree.ts"
 
 import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
 import { resolveBootModel, resolveSingleStoredProviderBootModel } from "./resolve-boot-model.ts"
+import { resolveCredentialName } from "./resolve-credential-name.ts"
 
 /** Resolved provider startup state needed by later boot phases. */
 export interface StartupProviderState {
@@ -50,6 +51,11 @@ export interface ResolveStartupProviderStateInput {
   >
   readonly userConfig: Pick<UserConfig, "model" | "provider" | "credentialName">
   readonly env: Record<string, string | undefined>
+  /**
+   * `meta.credentialName` from the session being resumed, when known.
+   * Used only when CLI and config omit a pin.
+   */
+  readonly resumeCredentialName?: string
 }
 
 /** Resolve model, provider, ad-hoc model registration, and startup auth. */
@@ -95,7 +101,11 @@ export async function resolveStartupProviderState(
     throw new Error(`unknown model "${selectedModelBase}" for provider "${selectedProviderId}"`)
   }
 
-  const credentialName = input.opts.cliCredentialName ?? input.userConfig.credentialName
+  const credentialName = resolveCredentialName({
+    cliCredentialName: input.opts.cliCredentialName,
+    configCredentialName: input.userConfig.credentialName,
+    resumeCredentialName: input.resumeCredentialName,
+  })
   const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase, credentialName, {
     endpoint: input.opts.endpoint,
     format: input.opts.format,
