@@ -21,6 +21,7 @@ describe("RUNTIME_ATTACHMENT_OPENERS", () => {
     expect(matches('<ma::agent::reflection-checkpoint round="50" />')).toBe(true)
     expect(matches('<ma::agent::emergency-cap-triggered round="N" />')).toBe(true)
     expect(matches("<ma::agent::turn-aborted />")).toBe(true)
+    expect(matches("<ma::agent::session-resumed />")).toBe(true)
     expect(matches("<ma::agent::output-truncated />")).toBe(true)
 
     // Plugin schema.

@@ -74,6 +74,27 @@ async function drain(
 }
 
 describe("AgentCore.run — port injection", () => {
+  it("adds a session-resumed attachment without an empty user-text block", async () => {
+    let seen: import("../llm/messages.ts").Message[] = []
+    const sendFn = async function* (opts: { messages: import("../llm/messages.ts").Message[] }) {
+      seen = JSON.parse(JSON.stringify(opts.messages))
+      return {
+        blocks: [{ type: "text" as const, text: "ok" }],
+        text: "ok",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const core = new AgentCore(baseConfig({ sendFn: sendFn as never }))
+
+    core.noteSessionResumed()
+    await drain(core.run(""))
+
+    const user = seen.find((m) => m.role === "user")
+    expect(user?.content).toEqual([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("session-resumed") }),
+    ])
+  })
+
   it("streams a plain text reply with no tools and returns the final response", async () => {
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
       yield "hello "

@@ -102,9 +102,10 @@ async function loaderWithCommand(bus: EventBus): Promise<PluginLoader> {
   })
 }
 
-function makeAgent(observed: string[], loader: PluginLoader): ReplAgentLike {
+function makeAgent(observed: string[], loader: PluginLoader, onResume?: () => void): ReplAgentLike {
   return {
     pluginLoader: () => loader,
+    ...(onResume ? { noteSessionResumed: onResume } : {}),
     async *run(text: string) {
       observed.push(text)
       yield "ok\n"
@@ -115,6 +116,47 @@ function makeAgent(observed: string[], loader: PluginLoader): ReplAgentLike {
 }
 
 describe("slash command dispatch through the REPL", () => {
+  it("routes a host /continue command into an attachments-only turn", async () => {
+    sid = `ma-continue-repl-${Date.now()}`
+    const bus = new EventBus()
+    const loader = await loaderWithCommand(bus)
+    const stdin = new FakeTTYInput()
+    const output = new FakeOutput()
+    const compositor = new Compositor({ output: output as never })
+    const editor = new EditorController({
+      prompt: "❯ ",
+      continuationPrompt: "  ",
+      compositor,
+      stdin: stdin as never,
+      output: output as never,
+    })
+    const observed: string[] = []
+    let resumeCalls = 0
+    const agent = makeAgent(observed, loader, () => {
+      resumeCalls++
+    })
+    const replPromise = runRepl(agent, {
+      output: output as never,
+      statusBus: new StatusBus(),
+      statusRenderer: null,
+      useLiveArea: true,
+      compositor,
+      editor,
+      sessionId: sid,
+    })
+    await new Promise((r) => setTimeout(r, 25))
+
+    bus.emit("prompt.inject", { text: "/continue" })
+    await new Promise((r) => setTimeout(r, 80))
+
+    expect(resumeCalls).toBe(1)
+    expect(observed).toEqual([""])
+
+    stdin.send("\x03")
+    stdin.send("\x03")
+    await replPromise
+  })
+
   it("routes commands vs prompts correctly", async () => {
     sid = `ma-cmd-repl-${Date.now()}`
     const bus = new EventBus()

@@ -74,6 +74,7 @@ import {
   emergencyCapTriggeredAttachmentText,
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
+  sessionResumedAttachmentText,
   streamInterruptedAttachmentText,
   streamInterruptedContinueAttachmentText,
   turnAbortedAttachmentText,
@@ -380,14 +381,12 @@ export class Agent {
   private toolTimeTracker: ToolTimeTracker | null = null
 
   /**
-   * When true, the next `run()` call will prepend a model-visible
-   * `<ma::agent::turn-aborted />` text block to the user message so the
-   * model knows its prior plan was interrupted (not failed).
-   *
-   * Set by {@link notePreviousTurnAborted}. Consumed (and cleared) exactly
-   * once at the start of the next `run()`.
+   * Runtime continuation marker for the next `run()` call. `"aborted"` tells
+   * the model that a user stopped the preceding turn; `"resumed"` tells it to
+   * pick up incomplete work after `/continue`. Consumed exactly once when the
+   * initial user-content blocks are built.
    */
-  private previousTurnAborted = false
+  private pendingTurnMarker: "aborted" | "resumed" | null = null
 
   /**
    * Create an agent with auth, model, plugin, mode, and transport settings.
@@ -733,13 +732,14 @@ export class Agent {
     return rollbackPendingTurnImpl(this.messages)
   }
 
-  /**
-   * Host calls this after a USER-initiated abort (Esc/Ctrl+C), NOT after a
-   * programmatic mode-interrupt. The next run() emits a model-visible marker
-   * so the model knows its prior plan was interrupted (not failed).
-   */
+  /** Record that the user aborted the preceding turn. */
   notePreviousTurnAborted(): void {
-    this.previousTurnAborted = true
+    this.pendingTurnMarker = "aborted"
+  }
+
+  /** Request one attachments-only continuation turn, used by `/continue`. */
+  noteSessionResumed(): void {
+    this.pendingTurnMarker = "resumed"
   }
 
   /**
@@ -966,14 +966,14 @@ export class Agent {
     // after tool_use" ordering. See {@link repairOrphanedToolUse}.
     const orphanRepair = this.repairOrphanedToolUse()
     for (const b of orphanRepair) initialUserContent.push(b)
-    // Abort marker: must come AFTER orphan-repair tool_results (the API
-    // requires tool_result blocks to appear immediately after their tool_use).
-    if (this.previousTurnAborted) {
-      this.previousTurnAborted = false
-      initialUserContent.push({
-        type: "text",
-        text: turnAbortedAttachmentText(),
-      })
+    // The runtime marker must follow orphan-repair tool_results: the API
+    // requires tool_result blocks immediately after their tool_use.
+    const turnMarker = this.pendingTurnMarker
+    this.pendingTurnMarker = null
+    if (turnMarker === "aborted") {
+      initialUserContent.push({ type: "text", text: turnAbortedAttachmentText() })
+    } else if (turnMarker === "resumed") {
+      initialUserContent.push({ type: "text", text: sessionResumedAttachmentText() })
     }
     const initialModeAttach = this.modeManager?.consumePendingAttachment() ?? null
     if (initialModeAttach) initialUserContent.push(initialModeAttach)

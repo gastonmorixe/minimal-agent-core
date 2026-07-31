@@ -23,6 +23,7 @@ import {
   emergencyCapTriggeredAttachmentText,
   outputTruncatedAttachmentText,
   responseTruncatedPlaceholderText,
+  sessionResumedAttachmentText,
   streamInterruptedAttachmentText,
   streamInterruptedContinueAttachmentText,
   turnAbortedAttachmentText,
@@ -147,7 +148,8 @@ export class AgentCore {
   private cacheTtl: CacheTtl = DEFAULT_CACHE_TTL
   private systemPromptOverrides: SystemPromptOverrides | undefined
   private reflectionSilenceRemaining = 0
-  private previousTurnAborted = false
+  /** One-shot runtime marker for the next attachments-only continuation turn. */
+  private pendingTurnMarker: "aborted" | "resumed" | null = null
   private eventSink: EventSink | null
 
   constructor(config: AgentCoreConfig) {
@@ -277,7 +279,12 @@ export class AgentCore {
   }
 
   notePreviousTurnAborted(): void {
-    this.previousTurnAborted = true
+    this.pendingTurnMarker = "aborted"
+  }
+
+  /** Request one attachments-only continuation turn, used by `/continue`. */
+  noteSessionResumed(): void {
+    this.pendingTurnMarker = "resumed"
   }
 
   pushSystemMessage(text: string): void {
@@ -366,12 +373,14 @@ export class AgentCore {
     const orphanRepair = this.repairOrphanedToolUse()
     for (const b of orphanRepair) initialUserContent.push(b)
 
-    if (this.previousTurnAborted) {
-      this.previousTurnAborted = false
-      initialUserContent.push({
-        type: "text",
-        text: turnAbortedAttachmentText(),
-      })
+    // Runtime markers follow orphan-repair results because tool_result blocks
+    // must be immediately after their matching tool_use.
+    const turnMarker = this.pendingTurnMarker
+    this.pendingTurnMarker = null
+    if (turnMarker === "aborted") {
+      initialUserContent.push({ type: "text", text: turnAbortedAttachmentText() })
+    } else if (turnMarker === "resumed") {
+      initialUserContent.push({ type: "text", text: sessionResumedAttachmentText() })
     }
 
     const initialModeAttach = this.modeProvider?.consumePendingAttachment?.() ?? null

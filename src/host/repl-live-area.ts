@@ -675,6 +675,17 @@ export async function runReplLiveArea(
         })()
         return
       }
+      if (
+        parsed?.name === "continue" &&
+        !(loader && loader.hasCommand("continue")) &&
+        typeof agent.noteSessionResumed === "function"
+      ) {
+        const submittedAtIso = (submittedAt ?? new Date()).toISOString()
+        flushQueueItemToScrollback({ text, commitLines, submittedAt: submittedAtIso })
+        agent.noteSessionResumed()
+        enqueuePrompt("", [], submittedAt)
+        return
+      }
     }
     // Slash-command interception (REPL-scoped). A submitted line that
     // parses as `/<name>` AND names a registered command is dispatched

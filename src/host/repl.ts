@@ -102,6 +102,8 @@ export interface ReplAgentLike {
    * mode-interrupt aborts (Alt+M).
    */
   notePreviousTurnAborted?(): void
+  /** Optional: schedule one model-visible session-resume marker for the next run. */
+  noteSessionResumed?(): void
   /**
    * Optional: append a free-form `note` record to the session JSONL. Used by
    * the host's `notification.emit` listener to persist a user-facing toast
@@ -440,13 +442,12 @@ export async function runRepl(
 
   try {
     while (true) {
-      const text = await input.read()
+      let text = await input.read()
       if (text === null) break
 
       if (!text.trim()) continue
 
-      // Host-owned `/compact` (shared with live-area). Manual compact of
-      // model-facing history without starting a model turn.
+      // Host-owned fallbacks used when no command registry is available.
       if (/^\s*\/compact(?:\s|$)/i.test(text)) {
         if (typeof agent.compact !== "function") {
           errOutput.write(`  ${c.boldRed("error")} /compact unavailable on this agent\n`)
@@ -464,6 +465,16 @@ export async function runRepl(
           )
         }
         continue
+      }
+      if (/^\s*\/continue(?:\s|$)/i.test(text)) {
+        if (typeof agent.noteSessionResumed !== "function") {
+          errOutput.write(`  ${c.boldRed("error")} /continue unavailable on this agent\n`)
+          continue
+        }
+        agent.noteSessionResumed()
+        // Empty text is deliberate: the agent emits only its tagged runtime
+        // attachment, then the ordinary REPL turn wiring drives the response.
+        text = ""
       }
 
       // Main response formatter : see `runReplLiveArea` for the full
