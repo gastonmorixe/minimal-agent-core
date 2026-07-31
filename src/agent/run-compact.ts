@@ -35,6 +35,12 @@ export interface RunCompactInput {
   model: string
   providerId?: string
   auth: AuthResult
+  /**
+   * Named credential pin (`--credential-name`). Must match the live send
+   * path so remote compact does not fall back to the provider's default
+   * stored account when multiple ChatGPT OAuth entries exist.
+   */
+  credentialName?: string
   networkClient?: NetworkClient
   reason: CompactReason
   /**
@@ -177,7 +183,7 @@ function resolveCompactProviderAuth(
   modelId: string,
 ): ProviderAuth {
   try {
-    return resolveStoredProviderAuth(providerId, modelId)
+    return resolveStoredProviderAuth(providerId, modelId, input.credentialName)
   } catch {
     // No stored credential / plugins not booted (unit tests): use session auth.
     return legacyAuthToProviderAuth(input.auth)

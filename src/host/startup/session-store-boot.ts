@@ -41,6 +41,8 @@ export interface SessionStoreBootOptions {
   selectedModel: string
   /** The resolved provider id recorded in the meta record. */
   providerId: string
+  /** Named credential pin recorded in the meta record (resume survival). */
+  credentialName?: string
   /** Hash of the system-prompt recipe (resume drift detection). */
   systemHash: string
   /** Hash of the advertised tool set (resume drift detection). */
@@ -67,6 +69,7 @@ export async function bootSessionStores(
   opts: SessionStoreBootOptions,
 ): Promise<SessionStoreBootResult> {
   const { sid, resumeSid, selectedModel, providerId, systemHash, toolsHash } = opts
+  const credentialName = opts.credentialName
   const output = opts.output ?? process.stderr
 
   // Open the session store. Three paths:
@@ -120,6 +123,7 @@ export async function bootSessionStores(
             agentVersion: AGENT_VERSION,
             argv: process.argv,
             provider: providerId,
+            ...(credentialName ? { credentialName } : {}),
           })
         : SessionStore.open({
             sid,
@@ -130,6 +134,7 @@ export async function bootSessionStores(
             agentVersion: AGENT_VERSION,
             argv: process.argv,
             provider: providerId,
+            ...(credentialName ? { credentialName } : {}),
             existsOk: resumeSame,
           })
   } catch (err) {

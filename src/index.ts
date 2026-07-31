@@ -82,6 +82,7 @@ import {
   providerWantsQuotaProbe,
   signInStepLabel,
 } from "./host/startup/provider-presentation.ts"
+import { peekResumeCredentialName } from "./host/startup/resolve-credential-name.ts"
 import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
@@ -379,6 +380,7 @@ async function main() {
     },
     userConfig,
     env: process.env,
+    resumeCredentialName: peekResumeCredentialName(effectiveResumeArg),
   })
   const { selectedModel, selectedModelBase, selectedProviderId, credentialName, auth } =
     providerState
@@ -941,6 +943,7 @@ async function main() {
     resumeSameSid,
     selectedModel,
     providerId: selectedProviderId,
+    ...(credentialName ? { credentialName } : {}),
     systemHash,
     toolsHash,
   })

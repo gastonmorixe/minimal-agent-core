@@ -18,6 +18,8 @@ export interface CompactableAgent {
   model: string
   providerId?: string
   auth: AuthResult
+  /** Named credential pin used by the live send path. */
+  credentialName?: string
   networkClient?: NetworkClient
   appendNote(text: string): void
   store: SessionStore | null
@@ -40,6 +42,7 @@ export async function agentCompact(
     model: agent.model,
     providerId: agent.providerId,
     auth: agent.auth,
+    ...(agent.credentialName ? { credentialName: agent.credentialName } : {}),
     networkClient: agent.networkClient,
     reason: opts?.reason ?? "manual",
     preferRemote: opts?.preferRemote,

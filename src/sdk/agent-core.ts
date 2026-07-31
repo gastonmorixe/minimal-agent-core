@@ -227,6 +227,7 @@ export class AgentCore {
       model: this.model,
       providerId: this.providerId,
       auth: this.auth,
+      ...(this.credentialName ? { credentialName: this.credentialName } : {}),
       networkClient: this.networkClient,
       reason: opts?.reason ?? "manual",
       preferRemote: opts?.preferRemote,
