@@ -63,6 +63,7 @@ import { extractPromptFromArgs } from "./cli/extract-prompt.ts"
 import { resolveInitialModeId } from "./cli/non-interactive-defaults.ts"
 import { loadModeUserOverrides, loadPluginEnabledOverrides } from "./config/config.ts"
 import { registerCompactHostCommand } from "./host/commands/compact.ts"
+import { registerContinueHostCommand } from "./host/commands/continue.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { buildAgentCore } from "./host/sdk-adapters/build-agent-core.ts"
 import {
@@ -998,10 +999,11 @@ async function main() {
     systemPromptOverrides: opts.systemPromptOverrides,
   })
   // Host slash commands that need a live agent (not plugin-declared).
-  // Must run after Agent construction so `/compact` appears in
-  // listCommands / slash-menu and dispatches through CommandRegistry.
+  // Must run after Agent construction so `/compact` and `/continue` appear in
+  // listCommands / slash-menu and dispatch through CommandRegistry.
   if (hasPlugins) {
     registerCompactHostCommand(loader, agent)
+    registerContinueHostCommand(loader, agent)
   }
   // Point the ModelInfo provider at the agent's live model from here on.
   getLiveModelId = () => agent.getModel()

@@ -17,6 +17,11 @@ export function outputTruncatedAttachmentText(): string {
   return runtimePrompt("output-truncated.md")
 }
 
+/** Returns the attachment text injected when a session is resumed with incomplete work. */
+export function sessionResumedAttachmentText(): string {
+  return runtimePrompt("session-resumed.md")
+}
+
 /**
  * Attachment injected after salvaging complete tool calls from a
  * terminal-less stream close. Tells the model not to re-issue those tools.
