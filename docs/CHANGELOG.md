@@ -5,9 +5,13 @@ type: changelog
 status: living
 working-dir: "/Users/gaston/Projects/minimal-agent"
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-07-30T18:11:00-0400"
+updated-at: "2026-08-01T15:35:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-01-resume-credential-pin-provider-scope"
+    type: fix
+    status: landed
+    detail: "docs/changes/2026-08-01-resume-credential-pin-provider-scope.md"
   - id: "2026-07-30-openai-chat-thinking-stop-before-text"
     type: fix
     status: landed
@@ -33,6 +37,29 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Fix: Resume credential pin scoped to session provider
+
+---
+id: "2026-08-01-resume-credential-pin-provider-scope"
+type: fix
+status: landed
+created-at: "2026-08-01T15:25:00-0400"
+updated-at: "2026-08-01T15:35:00-0400"
+detail: "docs/changes/2026-08-01-resume-credential-pin-provider-scope.md"
+---
+
+`--resume` no longer applies `meta.credentialName` when the effective
+provider differs from the session's `meta.provider`. Credential names are
+per-provider store keys; a grok pin on a cursor override previously fataled
+with "no credentials for provider cursor" even when cursor was logged in.
+Mismatch skips the pin via `diag.warn("auth.resume-pin", …)` (buffered
+through the scrollback sink so the startup tree does not tear) and uses
+the new provider default. Legacy sessions without `meta.provider` still
+reuse the pin. Covered by `resolve-credential-name.test.ts` (pin gate) and
+`provider-boot.test.ts` (diag emit, no mid-banner `console.error`).
+
+See `docs/changes/2026-08-01-resume-credential-pin-provider-scope.md`.
 
 ### Fix: OpenAI Chat thinking_stop before first text (orphaned response prefixes)
 

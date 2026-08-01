@@ -14,6 +14,7 @@ import {
   storedProvidersHint,
   suggestModelForProvider,
 } from "../../auth/auth-strategies.ts"
+import { diag } from "../../bus/diagnostic-bus.ts"
 import type { CliOptions } from "../../cli/parse-argv.ts"
 import type { UserConfig } from "../../config/config.ts"
 import { findModelForProvider } from "../../llm/model-registry.ts"
@@ -36,26 +37,32 @@ export interface StartupProviderState {
 
 /** Inputs for {@link resolveStartupProviderState}. */
 export interface ResolveStartupProviderStateInput {
-  readonly opts: Pick<
-    CliOptions,
-    | "model"
-    | "provider"
-    | "endpoint"
-    | "format"
-    | "authType"
-    | "apiKey"
-    | "authHeader"
-    | "providerModel"
-    | "effortLevels"
-    | "cliCredentialName"
+  readonly opts: Partial<
+    Pick<
+      CliOptions,
+      | "model"
+      | "provider"
+      | "endpoint"
+      | "format"
+      | "authType"
+      | "apiKey"
+      | "authHeader"
+      | "providerModel"
+      | "effortLevels"
+      | "cliCredentialName"
+    >
   >
   readonly userConfig: Pick<UserConfig, "model" | "provider" | "credentialName">
   readonly env: Record<string, string | undefined>
   /**
    * `meta.credentialName` from the session being resumed, when known.
-   * Used only when CLI and config omit a pin.
+   * Used only when CLI and config omit a pin, and only when the session
+   * provider matches the effective selected provider (or meta.provider is
+   * absent on legacy sessions).
    */
   readonly resumeCredentialName?: string
+  /** `meta.provider` from the session being resumed, when known. */
+  readonly resumeProviderId?: string
 }
 
 /** Resolve model, provider, ad-hoc model registration, and startup auth. */
@@ -101,11 +108,29 @@ export async function resolveStartupProviderState(
     throw new Error(`unknown model "${selectedModelBase}" for provider "${selectedProviderId}"`)
   }
 
-  const credentialName = resolveCredentialName({
+  const cred = resolveCredentialName({
     cliCredentialName: input.opts.cliCredentialName,
     configCredentialName: input.userConfig.credentialName,
     resumeCredentialName: input.resumeCredentialName,
+    resumeProviderId: input.resumeProviderId,
+    selectedProviderId,
   })
+  // Do NOT write to stderr here — that tears the startup tree mid-paint.
+  // Emit on the diagnostic bus; ScrollbackDiagnosticSink buffers during
+  // the banner and flushes a proper ⚠ warn block after closeStartupTree().
+  if (cred.resumePinSkipped) {
+    const skip = cred.resumePinSkipped
+    diag.warn(
+      "auth.resume-pin",
+      `pin "${skip.pin}" skipped (session was ${skip.sessionProvider}; using ${skip.selectedProvider} default)`,
+      {
+        pin: skip.pin,
+        "session-provider": skip.sessionProvider,
+        "selected-provider": skip.selectedProvider,
+      },
+    )
+  }
+  const credentialName = cred.credentialName
   const auth = await resolveStartupAuth(selectedProviderId, selectedModelBase, credentialName, {
     endpoint: input.opts.endpoint,
     format: input.opts.format,

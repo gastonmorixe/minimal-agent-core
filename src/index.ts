@@ -82,7 +82,7 @@ import {
   providerWantsQuotaProbe,
   signInStepLabel,
 } from "./host/startup/provider-presentation.ts"
-import { peekResumeCredentialName } from "./host/startup/resolve-credential-name.ts"
+import { peekResumeCredentialPin } from "./host/startup/resolve-credential-name.ts"
 import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
@@ -365,6 +365,7 @@ async function main() {
   // started with an explicit provider/model pair never contacts the wrong host.
   // See `host/startup/provider-boot.ts` for the resolution + ad-hoc model
   // registration; it prints the `auth` startup row.
+  const resumeCredPin = peekResumeCredentialPin(effectiveResumeArg)
   const providerState = await resolveStartupProviderState({
     opts: {
       model,
@@ -380,7 +381,8 @@ async function main() {
     },
     userConfig,
     env: process.env,
-    resumeCredentialName: peekResumeCredentialName(effectiveResumeArg),
+    ...(resumeCredPin.credentialName ? { resumeCredentialName: resumeCredPin.credentialName } : {}),
+    ...(resumeCredPin.providerId ? { resumeProviderId: resumeCredPin.providerId } : {}),
   })
   const { selectedModel, selectedModelBase, selectedProviderId, credentialName, auth } =
     providerState
