@@ -182,6 +182,7 @@ function buildHelpSections(): HelpSection[] {
           [
             "use when the provider has multiple credentials (e.g. Work and Personal)",
             "or MINIMAL_AGENT_CREDENTIAL_NAME, config credentialName",
+            "--resume reuses the session pin only for the same provider",
           ],
         ),
         row(
@@ -307,7 +308,10 @@ function buildHelpSections(): HelpSection[] {
         row(
           `${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}`,
           "Resume a saved session",
-          ["`sessions resume <sid>`"],
+          [
+            "`sessions resume <sid>`",
+            "reuses credential pin only when provider matches the session",
+          ],
         ),
         row(
           `${c.cyan("--resume-same-sid")} ${c.dim("<sid|last>")}`,
