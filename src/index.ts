@@ -48,7 +48,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { Agent, c, runRepl } from "./agent/agent.ts"
+import { c, runRepl } from "./agent/agent.ts"
 import { resolveAgentName } from "./agent/agent-name.ts"
 import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent/agent-paths.ts"
 import {
@@ -65,7 +65,8 @@ import { loadModeUserOverrides, loadPluginEnabledOverrides } from "./config/conf
 import { registerCompactHostCommand } from "./host/commands/compact.ts"
 import { registerContinueHostCommand } from "./host/commands/continue.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
-import { buildAgentCore } from "./host/sdk-adapters/build-agent-core.ts"
+import { InteractiveSession } from "./host/interactive-session.ts"
+import { buildAgentCore, createLifecyclePort } from "./host/sdk-adapters/build-agent-core.ts"
 import {
   buildResumeHeader,
   replayToScrollback,
@@ -630,10 +631,26 @@ async function main() {
   // the startup banner, the tool hash, and the first turn's API
   // request.  getPromptBlockAsync() awaits all fragment promises,
   // then memoizes; subsequent calls (sync and async) return cached.
-  void (await loader.getPromptBlockAsync())
+  const promptBlocks = await loader.getPromptBlocksAsync()
   const loadedTools = loader.getExtraTools()
   const loadedModes = loader.getModes()
-  const hasPromptBlock = loader.getPromptBlock() !== null
+  const hasPromptBlock =
+    loader.getPromptBlock() !== null ||
+    (promptBlocks.afterInstructions != null && promptBlocks.afterInstructions.length > 0)
+  // Host lifecycle port (HookBus adapter). Used for session/cwd/instructions
+  // broadcasts that live outside AgentCore's conversation loop.
+  const hostLifecycle = createLifecyclePort(loader.hooks())
+  if (promptBlocks.afterInstructions) {
+    void hostLifecycle.instructionsDidLoad?.({ source: "agents-md" })
+  }
+  if (promptBlocks.sessionContext) {
+    void hostLifecycle.instructionsDidLoad?.({ source: "plugin-session-context" })
+  }
+  // Sticky Bash cwd → `cwd.didChange` for observe-only plugins.
+  const { setBashCwdChangeListener } = await import("./tools/tools.ts")
+  setBashCwdChangeListener((from, to) => {
+    void hostLifecycle.cwdDidChange?.({ from, to })
+  })
   // Aggregate flag preserved for downstream system-prompt / tool-hash
   // construction (search this file for `hasPlugins`). Independently of
   // how we choose to render the startup tree, those callers want one
@@ -975,14 +992,17 @@ async function main() {
     }
   }
 
-  const agent = new Agent({
+  // Tier-2 InteractiveSession over AgentCore — production conversation path
+  // for both REPL and non-interactive human/`--prompt` (json/stream-json
+  // still builds a dedicated AgentCore via buildCore below).
+  const agent = await InteractiveSession.create({
     auth,
     model: selectedModel,
     providerId: selectedProviderId,
     ...(credentialName ? { credentialName } : {}),
     effort,
     ...(outputSchema !== undefined ? { outputSchema } : {}),
-    speed,
+    ...(speed ? { speed } : {}),
     serviceTier,
     thinkingDisplay,
     cacheTtl,
@@ -990,12 +1010,6 @@ async function main() {
     modeManager,
     toolNamePolicy: opts.cliToolFilter,
     saveEcho,
-    // All plugin-contributed producers ride the generic array, in
-    // registry order (memory's short-term snapshot, tasks snapshot,
-    // sub-agents fleet digest, …) — same model-visible attachment order
-    // as the old named wiring. The named `shortTermSnapshot` /
-    // `tasksAttachment` params stay unset: core no longer knows those
-    // producers' identities.
     turnAttachments: turnAttachmentSeam.producers,
     store,
     blobStore,
@@ -1003,8 +1017,13 @@ async function main() {
     toolTimeTracker,
     systemPromptOverrides: opts.systemPromptOverrides,
   })
+  void hostLifecycle.sessionStart?.({
+    sid: getSessionId(),
+    cwd: process.cwd(),
+    model: selectedModel,
+  })
   // Host slash commands that need a live agent (not plugin-declared).
-  // Must run after Agent construction so `/compact` and `/continue` appear in
+  // Must run after session construction so `/compact` and `/continue` appear in
   // listCommands / slash-menu and dispatch through CommandRegistry.
   if (hasPlugins) {
     registerCompactHostCommand(loader, agent)
@@ -1121,42 +1140,51 @@ async function main() {
   // schema gate) lives in `host/startup/run-non-interactive.ts`.
   const prompt = await extractPrompt()
   if (prompt) {
-    await runNonInteractivePrompt({
-      agent,
-      prompt,
-      formatterCmd,
-      showHeader: SHOW_HEADER,
-      wantJsonOutput,
-      outputFormat,
-      outputSchema,
-      loader: hasPlugins ? loader : null,
-      cwd: process.cwd(),
-      // Structured event-stream route for `--output-format json` / `stream-json`:
-      // build a fully-wired AgentCore (Tier-1 adapters) whose JsonlEventSink is
-      // supplied by run-non-interactive. `text` / `--output-schema` never call
-      // this (see wantsEventStream), so those paths stay byte-identical.
-      buildCore: (eventSink) =>
-        buildAgentCore({
-          auth,
-          model: selectedModel,
-          providerId: selectedProviderId,
-          ...(credentialName ? { credentialName } : {}),
-          effort,
-          serviceTier,
-          thinkingDisplay,
-          cacheTtl,
-          initialMessages,
-          loader: hasPlugins ? loader : null,
-          modeManager,
-          toolNamePolicy: opts.cliToolFilter,
-          store,
-          blobStore,
-          saveEcho,
-          turnAttachments: turnAttachmentSeam.producers,
-          eventSink,
-          systemPromptOverrides: opts.systemPromptOverrides,
-        }),
-    })
+    try {
+      await runNonInteractivePrompt({
+        agent,
+        prompt,
+        formatterCmd,
+        showHeader: SHOW_HEADER,
+        wantJsonOutput,
+        outputFormat,
+        outputSchema,
+        loader: hasPlugins ? loader : null,
+        cwd: process.cwd(),
+        // Structured event-stream route for `--output-format json` / `stream-json`:
+        // build a fully-wired AgentCore (Tier-1 adapters) whose JsonlEventSink is
+        // supplied by run-non-interactive. `text` / `--output-schema` never call
+        // this (see wantsEventStream), so those paths stay byte-identical.
+        buildCore: (eventSink) =>
+          buildAgentCore({
+            auth,
+            model: selectedModel,
+            providerId: selectedProviderId,
+            ...(credentialName ? { credentialName } : {}),
+            effort,
+            serviceTier,
+            thinkingDisplay,
+            cacheTtl,
+            initialMessages,
+            loader: hasPlugins ? loader : null,
+            modeManager,
+            toolNamePolicy: opts.cliToolFilter,
+            store,
+            blobStore,
+            saveEcho,
+            turnAttachments: turnAttachmentSeam.producers,
+            eventSink,
+            systemPromptOverrides: opts.systemPromptOverrides,
+          }),
+      })
+    } finally {
+      void hostLifecycle.sessionEnd?.({
+        sid: getSessionId(),
+        cwd: process.cwd(),
+        model: agent.getModel(),
+      })
+      setBashCwdChangeListener(null)
+    }
     return
   }
 
@@ -1188,27 +1216,36 @@ async function main() {
     }
   }
 
-  if (noLiveArea) {
-    await runRepl(agent, { formatterCmd, auth, spinner })
-  } else {
-    // Full interactive TTY stack (capability probes, compositor,
-    // interceptor, editor, resize fan-out, Auto-ASK) lives in
-    // `src/startup/live-repl.ts`. `runRepl` is passed in as a value to
-    // keep that module import-cycle-free with `../agent.ts`.
-    const { runLiveAreaRepl } = await import("./host/startup/live-repl.ts")
-    await runLiveAreaRepl({
-      agent,
-      repl: runRepl,
-      formatterCmd,
-      auth,
-      spinner,
-      args,
-      userConfig,
-      modeManager,
-      hasPlugins,
-      loader,
-      pendingDraft,
+  try {
+    if (noLiveArea) {
+      await runRepl(agent, { formatterCmd, auth, spinner })
+    } else {
+      // Full interactive TTY stack (capability probes, compositor,
+      // interceptor, editor, resize fan-out, Auto-ASK) lives in
+      // `src/startup/live-repl.ts`. `runRepl` is passed in as a value to
+      // keep that module import-cycle-free with `../agent.ts`.
+      const { runLiveAreaRepl } = await import("./host/startup/live-repl.ts")
+      await runLiveAreaRepl({
+        agent,
+        repl: runRepl,
+        formatterCmd,
+        auth,
+        spinner,
+        args,
+        userConfig,
+        modeManager,
+        hasPlugins,
+        loader,
+        pendingDraft,
+      })
+    }
+  } finally {
+    void hostLifecycle.sessionEnd?.({
+      sid: getSessionId(),
+      cwd: process.cwd(),
+      model: agent.getModel(),
     })
+    setBashCwdChangeListener(null)
   }
 
   process.exit(0)

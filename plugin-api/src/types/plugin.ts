@@ -287,6 +287,16 @@ export interface TUIContext {
    * plugins that declared no capabilities, and for back-compat callers.
    */
   host?: PluginHost
+  /**
+   * Await a HookBus `chain` channel (policy veto/rewrite). Optional —
+   * present for in-process module handlers when the loader wired Hooks.
+   * Returns `{ payload, halted, reason? }`. Used by e.g. sub-agents for
+   * `subagent.willSpawn`. Subprocess handlers leave this undefined.
+   */
+  emitChain?: <T>(
+    channel: string,
+    payload: T,
+  ) => Promise<{ payload: T; halted: boolean; reason?: string }>
 }
 
 // ---------------------------------------------------------------------------

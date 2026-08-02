@@ -85,7 +85,9 @@ function widgetLoader(content: string): PluginLoader {
       { name: "Widget", description: "a fixture tool", input_schema: { type: "object" } },
     ],
     getPromptBlockAsync: async () => null,
+    getPromptBlocksAsync: async () => ({ afterInstructions: null, sessionContext: null }),
     getPromptBlock: () => null,
+    hooks: () => null,
     getToolAliases: () => new Map<string, string>(),
   }
   return stub as unknown as PluginLoader

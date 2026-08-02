@@ -292,6 +292,20 @@ const ABORTED_RESULT = (): ToolExecResult => ({
  */
 let bashCwd = process.cwd()
 
+/** Optional observer for sticky Bash cwd changes (`cwd.didChange`). */
+let cwdChangeListener: ((from: string, to: string) => void) | null = null
+
+/**
+ * Register (or clear with `null`) a listener fired when bare `cd` updates
+ * the sticky Bash cwd. Hosts wire this to LifecyclePort.cwdDidChange /
+ * `cwd.didChange`.
+ */
+export function setBashCwdChangeListener(
+  listener: ((from: string, to: string) => void) | null,
+): void {
+  cwdChangeListener = listener
+}
+
 /**
  * Execute a tool by name with the given input.
  *
@@ -584,7 +598,15 @@ async function execBash(
           : raw
       const newDir = resolve(bashCwd, unquoted)
       if (existsSync(newDir)) {
+        const from = bashCwd
         bashCwd = newDir
+        if (from !== newDir) {
+          try {
+            cwdChangeListener?.(from, newDir)
+          } catch {
+            /* observer must not break Bash */
+          }
+        }
         return { content: "" }
       }
       return { content: ToolPrompts.cdNoSuchDirectoryResult(unquoted), is_error: true }

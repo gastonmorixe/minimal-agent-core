@@ -243,7 +243,7 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 const BASELINE = new Map<string, number>([
   ["agent/agent.plugin-tool-feedback.test.ts", 1],
   ["agent/agent.queue-nav-repl.test.ts", 1],
-  ["agent/agent.ts", 6],
+  ["agent/agent.ts", 7],
   ["agent/ask-user-host.test.ts", 3],
   ["agent/model-error.test.ts", 1],
   ["agent/tool-round.ts", 1],

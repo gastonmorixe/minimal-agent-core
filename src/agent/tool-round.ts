@@ -59,6 +59,12 @@ import {
 } from "../plugins/hooks/tool-lifecycle.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import {
+  collectAdditionalContext,
+  isDenied,
+  type LifecyclePort,
+  NOOP_LIFECYCLE,
+} from "../sdk/lifecycle.ts"
+import {
   type BlobStore,
   type BlobWriteResult,
   formatRawOutputFooter,
@@ -107,6 +113,16 @@ export interface ToolRoundContext {
   store: SessionStore | null
   /** Per-turn cancellation signal forwarded into tool execution. */
   signal?: AbortSignal | undefined
+  /**
+   * Lifecycle / policy port (beforeTool / afterTool). Defaults to
+   * {@link NOOP_LIFECYCLE}. Hosts wire a HookBus adapter so plugin
+   * `tool.willInvoke` listeners can deny or rewrite input.
+   */
+  lifecycle?: LifecyclePort
+  /** Optional agent id when this round runs inside a sub-agent worker. */
+  agentId?: string
+  /** Lead session id when `agentId` is set. */
+  leadSid?: string
 }
 
 /**
@@ -149,24 +165,10 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
  * linters, or formatters. All failure modes are contained by the HookBus.
  */
 async function runToolDidInvokeChain(
-  loader: PluginLoader | null,
+  lifecycle: LifecyclePort,
   tool: ToolUseBlock,
   isError: boolean | undefined,
 ): Promise<{ panel: string[]; annotation: string } | null> {
-  // Defensive resolution: a loader may be a partial/mock without the hooks
-  // facade (several tests inject a minimal loader exposing only hasTool /
-  // dispatch). Treat any missing piece as "no subscribers" and bail quietly.
-  if (!loader || typeof loader.hooks !== "function") return null
-  let hooks: ReturnType<PluginLoader["hooks"]>
-  try {
-    hooks = loader.hooks()
-  } catch {
-    return null
-  }
-  if (!hooks?.hookBus || typeof hooks.hookBus.listenerCount !== "function") return null
-  // Cheap guard: skip the whole dance when nothing subscribed.
-  if (hooks.hookBus.listenerCount("tool.didInvoke") === 0) return null
-
   const filePath = typeof tool.input.file_path === "string" ? tool.input.file_path : undefined
   const payload = makeToolDidInvokePayload({
     tool: tool.name,
@@ -178,10 +180,8 @@ async function runToolDidInvokeChain(
 
   let result: ToolDidInvokePayload
   try {
-    const emitted = await hooks.emitChain<ToolDidInvokePayload>("tool.didInvoke", payload)
-    result = emitted.payload
+    result = lifecycle.afterTool ? await lifecycle.afterTool(payload) : payload
   } catch {
-    // The bus already absorbs listener errors; this guards the emit itself.
     return null
   }
 
@@ -194,6 +194,25 @@ async function runToolDidInvokeChain(
   return {
     panel: renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
     annotation: formatDiagnosticsAnnotation(notes, diagScope),
+  }
+}
+
+/** Emit observation-only permission-checked (best-effort). */
+function emitPermissionChecked(
+  loader: PluginLoader | null,
+  tool: string,
+  allowed: boolean,
+  reason?: string,
+): void {
+  if (!loader || typeof loader.hooks !== "function") return
+  try {
+    loader.hooks().emitAsync("tool.permissionChecked", {
+      tool,
+      allowed,
+      ...(reason !== undefined ? { reason } : {}),
+    })
+  } catch {
+    /* catalog/shape — ignore */
   }
 }
 
@@ -235,7 +254,7 @@ export async function executeToolRound(
     for (const [idx, row] of rows.entries()) writeTranscript(idx === 0 ? `\n${row}` : row)
   }
 
-  let content: string
+  let content = ""
   let isError: boolean | undefined
   let display: string | undefined
   let displayHeader: string | undefined
@@ -285,10 +304,17 @@ export async function executeToolRound(
   // The synthesized error tool_result teaches the model how to
   // adapt : see ManifestMode.refusalHint. No spinner, no execution
   // side effects.
+  const lifecycle = ctx.lifecycle ?? NOOP_LIFECYCLE
   const gate = ctx.modeManager?.isToolAllowed(
     tool.name,
     tool.input as Record<string, unknown> | undefined,
   ) ?? { allowed: true as const }
+  emitPermissionChecked(
+    ctx.loader,
+    tool.name,
+    gate.allowed,
+    gate.allowed ? undefined : gate.message,
+  )
   if (!gate.allowed) {
     writeToolHeader()
     content = gate.message
@@ -338,522 +364,570 @@ export async function executeToolRound(
     const labelDisplay = active ? (active.label ?? active.id) : "default"
     writeTranscript(formatModeCloseRow(labelDisplay))
   } else {
-    // Header-timing is a per-tool STRATEGY, because scrollback is
-    // append-only: a tool can either paint its header NOW (from data
-    // we have synchronously) or DEFER it until the handler returns a
-    // richer `displayHeader` — never both on the same line.
-    //
-    //   - Built-in tools: always paint early (they format their own
-    //     header from input; no plugin handler runs).
-    //   - Plugin tools that declare `headerKey`: paint early using
-    //     that input field. This is the opt-in for LONG-RUNNING tools
-    //     (Fetch → url, WebSearch → query) that must show feedback
-    //     immediately instead of a frozen 120s gap. The reported bug.
-    //   - Plugin tools WITHOUT `headerKey`: defer to `displayHeader`,
-    //     exactly as before. These are the instant tools (Task,
-    //     ShowDiff, MemoryTool, LockStatus) whose `displayHeader` IS
-    //     the header (e.g. Task's `+ added 2 tasks · 0/2`) and which
-    //     have no perceptible delay to bridge.
-    //
-    // `displayHeader` is captured for session-replay fidelity in the
-    // `presentation` block below regardless. When we paint early the
-    // later `writeToolHeader(displayHeader)` is a no-op (headerWritten
-    // guard); when we defer, that later call is what paints the frame.
-    const pluginTool = ctx.loader?.hasTool(tool.name) ?? false
-    const paintHeaderEarly = !pluginTool || pres?.headerKey != null
-    if (paintHeaderEarly) writeToolHeader()
-    const toolStartedAt = Date.now()
-    // Stall detection is for tools that STREAM chunks (Bash). The
-    // amber `⋯ stalled · last byte Ns ago` infix is driven by
-    // `direction:"down"` + `lastChunkAt` going quiet for >2s (see
-    // STALL_THRESHOLD_MS in status.ts → formatActivityInfix). Seeding
-    // that for a NON-streaming tool (every plugin tool: Fetch,
-    // WebSearch, …) was a bug: those tools never call `onChunk`, so
-    // the row was GUARANTEED to flip to "stalled" after 2s on a
-    // perfectly healthy call. Only seed the stall machinery for tools
-    // that actually feed chunks; everything else gets a neutral
-    // `idle` activity (spinner + elapsed clock keep ticking, no
-    // false "stalled"). `toolStreamsOutput` is the single source of
-    // truth shared with the `onStdout`/`onStderr` wiring below.
-    const toolStreamsOutput = tool.name === "Bash"
-    const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
-      notificationId: "tool.running",
-      category: "tool",
-      // When chunks DO start arriving (onChunk below), `lastChunkAt`
-      // is bumped and the stalled state clears, giving way to
-      // `↓ 1.2 KB · 12 B/s` etc.
-      activity: toolStreamsOutput
-        ? {
-            direction: "down",
-            startedAt: toolStartedAt,
-            recvBytes: 0,
-            lastChunkAt: toolStartedAt,
-          }
-        : { direction: "idle", startedAt: toolStartedAt },
-    })
-
-    try {
-      if (ctx.loader?.hasTool(tool.name)) {
-        // Plugin-provided tool: delegate to the loader dispatcher. Plugin
-        // handlers may draw their own interactive UI; we do not preview
-        // their stdout here.
-        const pluginResult = await ctx.loader.dispatch(
-          {
-            type: "tool",
-            name: tool.name,
-            input: tool.input,
-            tool_use_id: tool.id,
-          },
-          process.cwd(),
-          // Forward the per-turn AbortSignal so Esc / Ctrl+C can
-          // cancel a long-running plugin tool (Fetch, WebSearch, …).
-          // Without this, abort no-ops until the manifest timeoutMs
-          // fires — see loader.test.ts "dispatch external AbortSignal".
-          signal,
-        )
-        if (pluginResult.kind === "tool_result") {
-          content = pluginResult.content
-          isError = pluginResult.is_error
-          display = pluginResult.display
-          displayHeader = pluginResult.displayHeader
-          displayFooter = pluginResult.displayFooter
-          suppressToolTime = pluginResult.suppressToolTime ?? false
-
-          // Universal post-hoc clamp for plugin tools. Mirrors what
-          // `executeTool` already does for built-in tools (Bash/Read/…).
-          // Plugin handlers (Fetch, WebSearch, …) used to bypass the
-          // clamp entirely, so a 5 MiB markdown from Fetch would ship
-          // straight to the API. Now plugin output is clamped to the
-          // same 64 KB / 1000-line budgets and the FULL pre-clamp body
-          // is preserved in `rawForBlob` for the blob-store hook
-          // below. Recoverable via the `<ma::agent::raw-output …/>` pointer
-          // footer the agent appends a few lines down.
-          //
-          // Tools that want full plugin control over the
-          // model-facing body (tasks, ShowDiff, LockStatus,
-          // MemoryTool) live on the `skipTools` list resolved at
-          // construction. Setting `display` alone does NOT
-          // disable the clamp: Fetch sets `display` for the
-          // transcript preview while `content` carries the full
-          // body, and we genuinely want that body clamped.
-          //
-          // See `src/tools/truncation.ts` and `src/blob-store.ts`.
-          if (!ctx.blobSkipTools.has(tool.name)) {
-            const preClamp = content
-            const { content: clamped, info } = truncateToolOutput(preClamp, {
-              tool: tool.name,
-            })
-            content = clamped
-            truncInfo = info
-            if (info.truncated) rawForBlob = preClamp
-          }
-        } else {
-          content = `Plugin tool "${tool.name}" returned a non-tool_result value`
-          isError = true
-        }
-        writeToolHeader(displayHeader)
-      } else {
-        // Live-stream Bash stdout/stderr to the transcript as the
-        // child writes it, instead of waiting for the process to
-        // exit. Without this, a `for i in {1..20}; do echo $i;
-        // sleep 1; done` produced nothing visible for 20 seconds :
-        // the user couldn't tell the difference between "working"
-        // and "frozen". The streamer emits one `│ <line>` per
-        // newline up to the per-tool body budget; lines past the
-        // budget are still counted (so the footer can say "shown
-        // V/T L") but not emitted.
-        //
-        // The last emitted line is BUFFERED instead of written
-        // immediately : so when the stream ends we can decide
-        // between (a) writing it as `│` followed by a `╰ <footer>`
-        // line (when there's something to say), or (b) rewriting
-        // it as `╰` and dropping the footer entirely (clean run,
-        // body fits in budget). Scrollback is permanent so this
-        // last-line trick is the only way to keep the close glyph
-        // attached to the body in the no-footer case.
-        // Reuse the same streaming predicate that seeded the stall
-        // activity above, so "seeds stall" and "wires onChunk" can
-        // never drift apart (the original bug was exactly that
-        // divergence: stall was seeded for all tools, onChunk only for
-        // Bash).
-        const isBash = toolStreamsOutput
-        const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
-        let streamedLineCount = 0
-        let bufferedLastLine: string | null = null
-        let bufferedLastLineRaw: string | null = null
-        let pendingChunk = ""
-        let didStream = false
-
-        const flushLineToBuffer = (raw: string) => {
-          didStream = true
-          if (streamedLineCount >= STREAM_BUDGET) {
-            streamedLineCount++
-            return
-          }
-          if (bufferedLastLine !== null) {
-            writeTranscript(formatStreamBodyRow(bufferedLastLine))
-          }
-          // Per-line width clamp : `min(terminal_cols - gutter,
-          // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is
-          // emitted. Live width (no `cols` arg → reads
-          // `process.stdout.columns` now), so a mid-stream resize
-          // takes effect on the very next line. Scrollback above
-          // never re-renders, but no NEW line will overflow the
-          // current visible columns. See {@link
-          // effectiveBodyLineWidth} and {@link clampBodyWithHint}.
-          //
-          // Expand `\t` first using the body's start column
-          // (after the 4-cell gutter) so the width math accounts
-          // for the terminal's tab-stop advance. Without this,
-          // a `<linenum>\t<content>` line (Read, also TSV-style
-          // Bash output) underflows the cap by 1–8 cells and the
-          // trailing `...(+Nch)` hint wraps into the gutter.
-          bufferedLastLine = clampBodyWithHint(
-            expandTabs(raw, TOOL_PREVIEW_GUTTER_WIDTH),
-            effectiveBodyLineWidth(),
-          )
-          bufferedLastLineRaw = raw
-          streamedLineCount++
-        }
-
-        // Track bytes streamed AND timestamp the most recent chunk so
-        // the live-area status row renders `↓ 1.2 KB · 12 B/s` while
-        // bash is producing output, AND flips to `⋯ stalled · last
-        // byte Ns ago` when the subprocess goes quiet (which the user
-        // observes as "Bash is frozen with no feedback" -- common
-        // when the command pipes through a buffering filter like
-        // `tail -N` or `head -N` that holds all output until EOF).
-        let recvBytes = 0
-        const onChunk = (s: string) => {
-          pendingChunk += s
-          recvBytes += Buffer.byteLength(s, "utf8")
-          toolStatus.updateActivity({
-            direction: "down",
-            recvBytes,
-            lastChunkAt: Date.now(),
-          })
-          let nl: number
-          while ((nl = pendingChunk.indexOf("\n")) !== -1) {
-            flushLineToBuffer(pendingChunk.slice(0, nl))
-            pendingChunk = pendingChunk.slice(nl + 1)
-          }
-        }
-
-        const result = await executeTool(tool.name, tool.input, {
-          signal,
-          // Active-model media capability context : lets `Read` hand back
-          // an image block for a screenshot the model can actually see
-          // instead of UTF-8 mojibake. Provider-neutral; resolved from
-          // the registry. `undefined` for unknown models keeps the
-          // legacy text-only behavior.
-          media: resolveToolMediaContext(ctx.model),
-          onStdout: isBash ? onChunk : undefined,
-          onStderr: isBash ? onChunk : undefined,
+    // Lifecycle beforeTool (tool.willInvoke): deny or rewrite input.
+    // Runs AFTER the hard mode/CLI gate; hooks cannot allow a refused tool.
+    let policyDenied = false
+    let lifecycleNotes: string[] = []
+    if (lifecycle.beforeTool) {
+      try {
+        const will = await lifecycle.beforeTool({
+          tool: tool.name,
+          toolUseId: tool.id,
+          input: tool.input as Record<string, unknown>,
+          cwd: process.cwd(),
+          ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
+          ...(ctx.leadSid !== undefined ? { leadSid: ctx.leadSid } : {}),
         })
-        content = result.content
-        isError = result.is_error
-        display = result.display
-        truncInfo = result._truncInfo
-        mediaBlocks = result.blocks
-        // Pre-clamp body, present only when the universal clamp
-        // fired (see `src/tools.ts` :: `executeTool`). The agent's
-        // blob-store hook below prefers this over the clamped
-        // `content` so the persisted file is the FULL output.
-        rawForBlob = result._raw
-
-        // Flush any trailing partial line (no terminating newline).
-        if (pendingChunk.length > 0) {
-          flushLineToBuffer(pendingChunk)
-          pendingChunk = ""
+        lifecycleNotes = collectAdditionalContext(will)
+        if (isDenied(will)) {
+          policyDenied = true
+          writeToolHeader()
+          content =
+            will.action === "deny" || will.action === "ask"
+              ? will.reason
+              : "Tool blocked by lifecycle policy hook."
+          isError = true
+          for (const row of formatRefusalRows(content, "policy")) {
+            writeTranscript(row)
+          }
+        } else if (will.action === "allow") {
+          // updatedInput: replace the tool_use input in place so dispatch
+          // and executeTool see the rewritten args.
+          tool.input = will.payload.input
         }
-
-        // Propagate _aborted so the renderer below can draw a
-        // dim "canceled" close line instead of the generic error
-        // preview. The flag is stripped before the result is sent
-        // back to the API as a tool_result block.
-        if ((result as { _aborted?: boolean })._aborted) {
-          aborted = true
-          // If the executor surfaced partial output (e.g. Bash captured
-          // some stdout before SIGTERM landed), keep it : both for the
-          // user (transcript body) and for the model (so it sees what
-          // ran before the abort). Only fall back to the canned
-          // "canceled" string when there's literally nothing to show.
-          if (!content) content = "canceled"
-        } else {
-          // Layer 3 of the size-feedback design: streak tracker.
-          // After N consecutive truncations on the same tool, append
-          // a soft `[note: ...]` to the model-facing content so the
-          // model sees the *pattern*, not just per-call hints.
-          // Skipped on aborted calls (no tool work happened) and on
-          // plugin-tool branches (those don't go through executeTool
-          // so we have no _truncInfo to consult anyway).
-          const streakNote = ctx.feedbackTracker.observe(tool.name, truncInfo?.truncated ?? false)
-          if (streakNote) content = `${content}\n\n${streakNote}`
-        }
-
-        if (didStream) {
-          // Emit the buffered last line + computed footer. We then
-          // mark `streamedRendered` so the post-block render path
-          // (which would call formatToolPreview and re-emit the
-          // body) is skipped : but the tool_result push to the API
-          // below still happens.
-          renderStreamedTail({
-            bufferedLastLine,
-            bufferedLastLineRaw,
-            streamedLineCount,
-            budget: STREAM_BUDGET,
-            truncInfo,
-            isError,
-            writeTranscript,
-            cols: renderCols,
-          })
-          streamedRendered = true
-        }
+      } catch {
+        // Port failures must not brick the tool loop — proceed with original input.
       }
-    } finally {
-      toolStatus.clear()
     }
 
-    // Detect binary tool output BEFORE transcript paint so the user never
-    // sees mojibake, and so we can (a) force the full body into the blob
-    // store even under the clamp threshold, and (b) rewrite the
-    // model-facing text AFTER the blob write with the real on-disk path.
-    // Media blocks (Read image embeds) and user-message document uploads
-    // are untouched — those are the supported multimodal paths. Plugin
-    // tools that already emitted `<ma::agent::binary-result` are left alone.
-    let binaryGuard:
-      | {
-          mime: string
-          sizeBytes: number
-          optedIn: boolean
-          source: string
-        }
-      | undefined
-    if (!aborted && !mediaBlocks?.length && typeof content === "string" && content.length > 0) {
-      const sourceForClass = rawForBlob ?? content
-      if (!sourceForClass.includes("<ma::agent::binary-result")) {
-        const verdict = classifyBinaryText(sourceForClass)
-        if (verdict.binary) {
-          if (rawForBlob == null) rawForBlob = sourceForClass
-          binaryGuard = {
-            mime: verdict.mime,
-            sizeBytes: Buffer.byteLength(sourceForClass, "utf8"),
-            optedIn: isBinaryOptIn(tool.input as Record<string, unknown>),
-            source: sourceForClass,
+    if (policyDenied) {
+      // Skip execution; content/isError already set. Fold lifecycle notes below.
+      if (lifecycleNotes.length > 0 && typeof content === "string") {
+        content = `${content}\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\n")}`
+      }
+    } else {
+      // Header-timing is a per-tool STRATEGY, because scrollback is
+      // append-only: a tool can either paint its header NOW (from data
+      // we have synchronously) or DEFER it until the handler returns a
+      // richer `displayHeader` — never both on the same line.
+      //
+      //   - Built-in tools: always paint early (they format their own
+      //     header from input; no plugin handler runs).
+      //   - Plugin tools that declare `headerKey`: paint early using
+      //     that input field. This is the opt-in for LONG-RUNNING tools
+      //     (Fetch → url, WebSearch → query) that must show feedback
+      //     immediately instead of a frozen 120s gap. The reported bug.
+      //   - Plugin tools WITHOUT `headerKey`: defer to `displayHeader`,
+      //     exactly as before. These are the instant tools (Task,
+      //     ShowDiff, MemoryTool, LockStatus) whose `displayHeader` IS
+      //     the header (e.g. Task's `+ added 2 tasks · 0/2`) and which
+      //     have no perceptible delay to bridge.
+      //
+      // `displayHeader` is captured for session-replay fidelity in the
+      // `presentation` block below regardless. When we paint early the
+      // later `writeToolHeader(displayHeader)` is a no-op (headerWritten
+      // guard); when we defer, that later call is what paints the frame.
+      const pluginTool = ctx.loader?.hasTool(tool.name) ?? false
+      const paintHeaderEarly = !pluginTool || pres?.headerKey != null
+      if (paintHeaderEarly) writeToolHeader()
+      const toolStartedAt = Date.now()
+      // Stall detection is for tools that STREAM chunks (Bash). The
+      // amber `⋯ stalled · last byte Ns ago` infix is driven by
+      // `direction:"down"` + `lastChunkAt` going quiet for >2s (see
+      // STALL_THRESHOLD_MS in status.ts → formatActivityInfix). Seeding
+      // that for a NON-streaming tool (every plugin tool: Fetch,
+      // WebSearch, …) was a bug: those tools never call `onChunk`, so
+      // the row was GUARANTEED to flip to "stalled" after 2s on a
+      // perfectly healthy call. Only seed the stall machinery for tools
+      // that actually feed chunks; everything else gets a neutral
+      // `idle` activity (spinner + elapsed clock keep ticking, no
+      // false "stalled"). `toolStreamsOutput` is the single source of
+      // truth shared with the `onStdout`/`onStderr` wiring below.
+      const toolStreamsOutput = tool.name === "Bash"
+      const toolStatus = GLOBAL_STATUS_BUS.create(`Running ${tool.name}`, {
+        notificationId: "tool.running",
+        category: "tool",
+        // When chunks DO start arriving (onChunk below), `lastChunkAt`
+        // is bumped and the stalled state clears, giving way to
+        // `↓ 1.2 KB · 12 B/s` etc.
+        activity: toolStreamsOutput
+          ? {
+              direction: "down",
+              startedAt: toolStartedAt,
+              recvBytes: 0,
+              lastChunkAt: toolStartedAt,
+            }
+          : { direction: "idle", startedAt: toolStartedAt },
+      })
+
+      try {
+        if (ctx.loader?.hasTool(tool.name)) {
+          // Plugin-provided tool: delegate to the loader dispatcher. Plugin
+          // handlers may draw their own interactive UI; we do not preview
+          // their stdout here.
+          const pluginResult = await ctx.loader.dispatch(
+            {
+              type: "tool",
+              name: tool.name,
+              input: tool.input,
+              tool_use_id: tool.id,
+            },
+            process.cwd(),
+            // Forward the per-turn AbortSignal so Esc / Ctrl+C can
+            // cancel a long-running plugin tool (Fetch, WebSearch, …).
+            // Without this, abort no-ops until the manifest timeoutMs
+            // fires — see loader.test.ts "dispatch external AbortSignal".
+            signal,
+          )
+          if (pluginResult.kind === "tool_result") {
+            content = pluginResult.content
+            isError = pluginResult.is_error
+            display = pluginResult.display
+            displayHeader = pluginResult.displayHeader
+            displayFooter = pluginResult.displayFooter
+            suppressToolTime = pluginResult.suppressToolTime ?? false
+
+            // Universal post-hoc clamp for plugin tools. Mirrors what
+            // `executeTool` already does for built-in tools (Bash/Read/…).
+            // Plugin handlers (Fetch, WebSearch, …) used to bypass the
+            // clamp entirely, so a 5 MiB markdown from Fetch would ship
+            // straight to the API. Now plugin output is clamped to the
+            // same 64 KB / 1000-line budgets and the FULL pre-clamp body
+            // is preserved in `rawForBlob` for the blob-store hook
+            // below. Recoverable via the `<ma::agent::raw-output …/>` pointer
+            // footer the agent appends a few lines down.
+            //
+            // Tools that want full plugin control over the
+            // model-facing body (tasks, ShowDiff, LockStatus,
+            // MemoryTool) live on the `skipTools` list resolved at
+            // construction. Setting `display` alone does NOT
+            // disable the clamp: Fetch sets `display` for the
+            // transcript preview while `content` carries the full
+            // body, and we genuinely want that body clamped.
+            //
+            // See `src/tools/truncation.ts` and `src/blob-store.ts`.
+            if (!ctx.blobSkipTools.has(tool.name)) {
+              const preClamp = content
+              const { content: clamped, info } = truncateToolOutput(preClamp, {
+                tool: tool.name,
+              })
+              content = clamped
+              truncInfo = info
+              if (info.truncated) rawForBlob = preClamp
+            }
+          } else {
+            content = `Plugin tool "${tool.name}" returned a non-tool_result value`
+            isError = true
           }
-          // Transcript preview: short clean summary, never the raw body.
-          display = `${verdict.mime} · ${binaryGuard.sizeBytes} bytes (binary; withheld from model)`
-          // Placeholder model content for the preview paint; the real
-          // rewrite (with blob path) lands after blob capture below.
+          writeToolHeader(displayHeader)
+        } else {
+          // Live-stream Bash stdout/stderr to the transcript as the
+          // child writes it, instead of waiting for the process to
+          // exit. Without this, a `for i in {1..20}; do echo $i;
+          // sleep 1; done` produced nothing visible for 20 seconds :
+          // the user couldn't tell the difference between "working"
+          // and "frozen". The streamer emits one `│ <line>` per
+          // newline up to the per-tool body budget; lines past the
+          // budget are still counted (so the footer can say "shown
+          // V/T L") but not emitted.
+          //
+          // The last emitted line is BUFFERED instead of written
+          // immediately : so when the stream ends we can decide
+          // between (a) writing it as `│` followed by a `╰ <footer>`
+          // line (when there's something to say), or (b) rewriting
+          // it as `╰` and dropping the footer entirely (clean run,
+          // body fits in budget). Scrollback is permanent so this
+          // last-line trick is the only way to keep the close glyph
+          // attached to the body in the no-footer case.
+          // Reuse the same streaming predicate that seeded the stall
+          // activity above, so "seeds stall" and "wires onChunk" can
+          // never drift apart (the original bug was exactly that
+          // divergence: stall was seeded for all tools, onChunk only for
+          // Bash).
+          const isBash = toolStreamsOutput
+          const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
+          let streamedLineCount = 0
+          let bufferedLastLine: string | null = null
+          let bufferedLastLineRaw: string | null = null
+          let pendingChunk = ""
+          let didStream = false
+
+          const flushLineToBuffer = (raw: string) => {
+            didStream = true
+            if (streamedLineCount >= STREAM_BUDGET) {
+              streamedLineCount++
+              return
+            }
+            if (bufferedLastLine !== null) {
+              writeTranscript(formatStreamBodyRow(bufferedLastLine))
+            }
+            // Per-line width clamp : `min(terminal_cols - gutter,
+            // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is
+            // emitted. Live width (no `cols` arg → reads
+            // `process.stdout.columns` now), so a mid-stream resize
+            // takes effect on the very next line. Scrollback above
+            // never re-renders, but no NEW line will overflow the
+            // current visible columns. See {@link
+            // effectiveBodyLineWidth} and {@link clampBodyWithHint}.
+            //
+            // Expand `\t` first using the body's start column
+            // (after the 4-cell gutter) so the width math accounts
+            // for the terminal's tab-stop advance. Without this,
+            // a `<linenum>\t<content>` line (Read, also TSV-style
+            // Bash output) underflows the cap by 1–8 cells and the
+            // trailing `...(+Nch)` hint wraps into the gutter.
+            bufferedLastLine = clampBodyWithHint(
+              expandTabs(raw, TOOL_PREVIEW_GUTTER_WIDTH),
+              effectiveBodyLineWidth(),
+            )
+            bufferedLastLineRaw = raw
+            streamedLineCount++
+          }
+
+          // Track bytes streamed AND timestamp the most recent chunk so
+          // the live-area status row renders `↓ 1.2 KB · 12 B/s` while
+          // bash is producing output, AND flips to `⋯ stalled · last
+          // byte Ns ago` when the subprocess goes quiet (which the user
+          // observes as "Bash is frozen with no feedback" -- common
+          // when the command pipes through a buffering filter like
+          // `tail -N` or `head -N` that holds all output until EOF).
+          let recvBytes = 0
+          const onChunk = (s: string) => {
+            pendingChunk += s
+            recvBytes += Buffer.byteLength(s, "utf8")
+            toolStatus.updateActivity({
+              direction: "down",
+              recvBytes,
+              lastChunkAt: Date.now(),
+            })
+            let nl: number
+            while ((nl = pendingChunk.indexOf("\n")) !== -1) {
+              flushLineToBuffer(pendingChunk.slice(0, nl))
+              pendingChunk = pendingChunk.slice(nl + 1)
+            }
+          }
+
+          const result = await executeTool(tool.name, tool.input, {
+            signal,
+            // Active-model media capability context : lets `Read` hand back
+            // an image block for a screenshot the model can actually see
+            // instead of UTF-8 mojibake. Provider-neutral; resolved from
+            // the registry. `undefined` for unknown models keeps the
+            // legacy text-only behavior.
+            media: resolveToolMediaContext(ctx.model),
+            onStdout: isBash ? onChunk : undefined,
+            onStderr: isBash ? onChunk : undefined,
+          })
+          content = result.content
+          isError = result.is_error
+          display = result.display
+          truncInfo = result._truncInfo
+          mediaBlocks = result.blocks
+          // Pre-clamp body, present only when the universal clamp
+          // fired (see `src/tools.ts` :: `executeTool`). The agent's
+          // blob-store hook below prefers this over the clamped
+          // `content` so the persisted file is the FULL output.
+          rawForBlob = result._raw
+
+          // Flush any trailing partial line (no terminating newline).
+          if (pendingChunk.length > 0) {
+            flushLineToBuffer(pendingChunk)
+            pendingChunk = ""
+          }
+
+          // Propagate _aborted so the renderer below can draw a
+          // dim "canceled" close line instead of the generic error
+          // preview. The flag is stripped before the result is sent
+          // back to the API as a tool_result block.
+          if ((result as { _aborted?: boolean })._aborted) {
+            aborted = true
+            // If the executor surfaced partial output (e.g. Bash captured
+            // some stdout before SIGTERM landed), keep it : both for the
+            // user (transcript body) and for the model (so it sees what
+            // ran before the abort). Only fall back to the canned
+            // "canceled" string when there's literally nothing to show.
+            if (!content) content = "canceled"
+          } else {
+            // Layer 3 of the size-feedback design: streak tracker.
+            // After N consecutive truncations on the same tool, append
+            // a soft `[note: ...]` to the model-facing content so the
+            // model sees the *pattern*, not just per-call hints.
+            // Skipped on aborted calls (no tool work happened) and on
+            // plugin-tool branches (those don't go through executeTool
+            // so we have no _truncInfo to consult anyway).
+            const streakNote = ctx.feedbackTracker.observe(tool.name, truncInfo?.truncated ?? false)
+            if (streakNote) content = `${content}\n\n${streakNote}`
+          }
+
+          if (didStream) {
+            // Emit the buffered last line + computed footer. We then
+            // mark `streamedRendered` so the post-block render path
+            // (which would call formatToolPreview and re-emit the
+            // body) is skipped : but the tool_result push to the API
+            // below still happens.
+            renderStreamedTail({
+              bufferedLastLine,
+              bufferedLastLineRaw,
+              streamedLineCount,
+              budget: STREAM_BUDGET,
+              truncInfo,
+              isError,
+              writeTranscript,
+              cols: renderCols,
+            })
+            streamedRendered = true
+          }
+        }
+      } finally {
+        toolStatus.clear()
+      }
+
+      // Detect binary tool output BEFORE transcript paint so the user never
+      // sees mojibake, and so we can (a) force the full body into the blob
+      // store even under the clamp threshold, and (b) rewrite the
+      // model-facing text AFTER the blob write with the real on-disk path.
+      // Media blocks (Read image embeds) and user-message document uploads
+      // are untouched — those are the supported multimodal paths. Plugin
+      // tools that already emitted `<ma::agent::binary-result` are left alone.
+      let binaryGuard:
+        | {
+            mime: string
+            sizeBytes: number
+            optedIn: boolean
+            source: string
+          }
+        | undefined
+      if (!aborted && !mediaBlocks?.length && typeof content === "string" && content.length > 0) {
+        const sourceForClass = rawForBlob ?? content
+        if (!sourceForClass.includes("<ma::agent::binary-result")) {
+          const verdict = classifyBinaryText(sourceForClass)
+          if (verdict.binary) {
+            if (rawForBlob == null) rawForBlob = sourceForClass
+            binaryGuard = {
+              mime: verdict.mime,
+              sizeBytes: Buffer.byteLength(sourceForClass, "utf8"),
+              optedIn: isBinaryOptIn(tool.input as Record<string, unknown>),
+              source: sourceForClass,
+            }
+            // Transcript preview: short clean summary, never the raw body.
+            display = `${verdict.mime} · ${binaryGuard.sizeBytes} bytes (binary; withheld from model)`
+            // Placeholder model content for the preview paint; the real
+            // rewrite (with blob path) lands after blob capture below.
+            content = formatBinaryResultMessage({
+              mime: binaryGuard.mime,
+              sizeBytes: binaryGuard.sizeBytes,
+              tool: tool.name,
+            })
+            truncInfo = undefined
+          }
+        }
+      }
+
+      // Embedded data-URI scrub BEFORE transcript paint so the user never
+      // sees multi-KB base64 in the TUI, and so `content` is already clean
+      // for the model. Whole-body binary (above) is a different path.
+      // Capture pre-scrub bytes into `rawForBlob` so the blob store keeps
+      // high-fidelity recovery material. Skipped when the call opted into
+      // binary delivery or when multimodal image blocks are present.
+      // Idempotent: re-scrub of already-clean text is a no-op.
+      if (
+        !aborted &&
+        !binaryGuard &&
+        !mediaBlocks?.length &&
+        !isBinaryOptIn(tool.input as Record<string, unknown>) &&
+        typeof content === "string" &&
+        content.length > 0 &&
+        !content.includes("<ma::agent::binary-result")
+      ) {
+        const preScrub = content
+        const scrubbed = scrubEmbeddedPayloads(preScrub, { tool: tool.name })
+        if (scrubbed.changed) {
+          if (rawForBlob == null) rawForBlob = preScrub
+          content = scrubbed.text
+          if (typeof display === "string" && display.includes("data:")) {
+            const d = scrubEmbeddedPayloads(display, { tool: tool.name })
+            if (d.changed) display = d.text
+          }
+        }
+      }
+
+      // Tool-lifecycle extension point (generic seam, NOT diagnostics-
+      // specific). Fire the `tool.didInvoke` CHAIN so any plugin can
+      // augment a just-finished tool result: a plugin pushes structured
+      // `findings` (the AGENT renders them, below) and model-facing
+      // `notes` (folded into a `<ma::agent::diagnostics>` annotation on
+      // `content`). The `diagnostics` plugin (LSP/linter/formatter
+      // feedback) is the first consumer; the shape is tool-agnostic.
+      //
+      // Decoupled by construction: the agent never imports the plugin,
+      // the plugin never imports the agent — they meet only at the
+      // `ToolDidInvokePayload` shape. Listener errors/timeouts are
+      // absorbed by the HookBus, so a misbehaving plugin can never break
+      // the tool loop. Skipped when no plugin subscribes (zero cost) and
+      // for aborted runs (no completed work to react to).
+      let diagnosticsPanel: string[] = []
+      if (!aborted) {
+        const augmented = await runToolDidInvokeChain(lifecycle, tool, isError)
+        if (augmented) {
+          if (augmented.annotation) content = `${content}${augmented.annotation}`
+          diagnosticsPanel = augmented.panel
+        }
+      }
+
+      if (!streamedRendered) {
+        if (!headerWritten) writeToolHeader(displayHeader)
+        const previewLines = formatToolPreview(content, isError, display, {
+          tool: tool.name,
+          info: truncInfo,
+          footer: displayFooter,
+          cols: renderCols,
+        })
+        // When a plugin attached a diagnostics panel, the panel owns the
+        // final `╰`; re-open the preview's own closer to a `│` so the two
+        // blocks fuse into one frame instead of double-closing.
+        if (diagnosticsPanel.length > 0 && previewLines.length > 0) {
+          const lastIdx = previewLines.length - 1
+          previewLines[lastIdx] = reopenFrameCloser(previewLines[lastIdx])
+        }
+        for (const line of previewLines) writeTranscript(line)
+        for (const line of diagnosticsPanel) writeTranscript(line)
+      }
+
+      // Raw-output blob capture (design 2026-05-26). The model's
+      // `content` may be the clamped body (built-in tools that hit the
+      // 64KB/1000L universal cap) OR the full body (plugin tools, OR
+      // built-ins under cap). When persistable, write the FULL bytes
+      // to `<sid>.blobs/<tool_use_id>.raw` and append a
+      // `<ma::agent::raw-output …/>` pointer footer so the model can `Read` the
+      // file when the inline body isn't enough.
+      //
+      // Source of truth for the blob:
+      //   - `result._raw` (built-in clamp branch) when set: pre-clamp
+      //     body, never includes the trailing `[truncated: …]` notice.
+      //   - `content` otherwise: full output (no clamp ran, or plugin
+      //     tool which currently doesn't clamp at all).
+      //
+      // Skipped when:
+      //   - blobStore is null (config disabled, or construction failed)
+      //   - tool is on the user-configurable skip list (Task,
+      //     MemoryTool, ShowDiff, LockStatus). These plugins own
+      //     full audience-split and would be mangled by an
+      //     after-the-fact blob+footer on the model-facing body.
+      //   - tool was aborted (partial output, no point)
+      //   - body too small to be useful (gated inside BlobStore.write
+      //     via `minBytesToPersist`)
+      //
+      // Setting `display` alone does NOT disable the blob: Fetch
+      // sets `display` for the transcript preview while `content`
+      // carries the full body, and we genuinely want that body
+      // persisted. For Edit/Write the `content` is "File written:
+      // …" sized, so the `minBytesToPersist` gate inside the store
+      // handles them without an explicit `!display` guard here.
+      //
+      // See `src/blob-store.ts`.
+      if (ctx.blobStore !== null && !ctx.blobSkipTools.has(tool.name) && !aborted) {
+        const rawBody = rawForBlob ?? content
+        // Async write: keeps the (potentially multi-MB) body's fs write
+        // off the synchronous critical section so the TUI/input loop
+        // doesn't freeze while a big Fetch body is persisted (Bug 4).
+        // We're already inside an async function here, so the await is
+        // free; the tool_result it produces is returned below either way.
+        blobWrite = await ctx.blobStore.writeAsync(tool.id, rawBody)
+        if (blobWrite && !binaryGuard) {
+          // Footer order: existing `[truncated: …]` notice is already
+          // inside `content` (appended by truncation.ts when the clamp
+          // fired). Our `<ma::agent::raw-output …/>` goes AFTER that and BEFORE
+          // the `<ma::agent::output-preview …>` annotation appended below. The
+          // model-facing tail therefore reads:
+          //   <body>
+          //   [truncated: …]               ← only when clamp fired
+          //
+          //   <ma::agent::raw-output path="<path>" size="85kB" sha256="…" />   ← new
+          //
+          //   <ma::agent::output-preview shown=… total=…>…</ma::agent::output-preview>   ← only when TUI elided
+          //
+          // Binary bodies skip this append: the binary-guard rewrite below
+          // embeds path/sha256 itself so we never ship both a mojibake body
+          // AND a raw-output footer.
+          content = `${content}\n\n${formatRawOutputFooter(blobWrite)}`
+        }
+      }
+
+      // Binary-output rewrite (runs AFTER blob capture so the annotation
+      // can cite the real path). Replaces mojibake with a structured
+      // `<ma::agent::binary-result …/>` summary unless the model opted in
+      // via `binary: true` (then base64 under a size cap, else still path).
+      if (binaryGuard) {
+        const path = blobWrite?.path
+        const sha256 = blobWrite?.sha256
+        if (binaryGuard.optedIn) {
+          const bytes = Buffer.from(binaryGuard.source, "latin1")
+          content = formatBinaryOptInContent({
+            bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+            mime: binaryGuard.mime,
+            path,
+            sha256,
+            tool: tool.name,
+          })
+        } else {
           content = formatBinaryResultMessage({
             mime: binaryGuard.mime,
             sizeBytes: binaryGuard.sizeBytes,
+            path,
+            sha256,
             tool: tool.name,
           })
-          truncInfo = undefined
         }
       }
-    }
 
-    // Embedded data-URI scrub BEFORE transcript paint so the user never
-    // sees multi-KB base64 in the TUI, and so `content` is already clean
-    // for the model. Whole-body binary (above) is a different path.
-    // Capture pre-scrub bytes into `rawForBlob` so the blob store keeps
-    // high-fidelity recovery material. Skipped when the call opted into
-    // binary delivery or when multimodal image blocks are present.
-    // Idempotent: re-scrub of already-clean text is a no-op.
-    if (
-      !aborted &&
-      !binaryGuard &&
-      !mediaBlocks?.length &&
-      !isBinaryOptIn(tool.input as Record<string, unknown>) &&
-      typeof content === "string" &&
-      content.length > 0 &&
-      !content.includes("<ma::agent::binary-result")
-    ) {
-      const preScrub = content
-      const scrubbed = scrubEmbeddedPayloads(preScrub, { tool: tool.name })
-      if (scrubbed.changed) {
-        if (rawForBlob == null) rawForBlob = preScrub
-        content = scrubbed.text
-        if (typeof display === "string" && display.includes("data:")) {
-          const d = scrubEmbeddedPayloads(display, { tool: tool.name })
-          if (d.changed) display = d.text
+      // Layer 1b of size-feedback (companion to truncation.ts notice and
+      // feedback-tracker.ts streak note): when the user's transcript
+      // clamped MORE lines than the API cap did (every tool with a tight
+      // preview budget : Bash=10, Read=15, Grep=12, Glob=25), append a
+      // model-only `<ma::agent::output-preview …>` annotation to `content` BEFORE
+      // the result block is built, so the model knows the audiences
+      // diverged. Without this, the model sees the full body and
+      // assumes the user did too, leading to "as you can see above"
+      // claims that desync from what the user actually saw.
+      //
+      // Model-only by construction: this runs AFTER the transcript
+      // render path, so `formatToolPreview` / `renderStreamedTail`
+      // never sees it. The strip in `formatToolPreview` also catches
+      // it (for session-replay where this annotation is persisted in
+      // tool_result history). Skipped when:
+      //   - tool was refused by the mode gate (no execution happened),
+      //   - tool returned a `display` override (Edit/Write diff render
+      //     full by design),
+      //   - tool was aborted (partial output, no point nagging),
+      //   - body fits the TUI budget.
+      if (!display && !aborted) {
+        const e = computeTuiElision(content, tool.name)
+        if (e) {
+          // When a raw-output blob was written for this same result (above),
+          // thread its path into BOTH the hint prose and a machine-readable
+          // `path="…"` attribute, so the elision flag carries its own recovery
+          // pointer instead of stranding the model with "you saw less than the
+          // model did" and no destination. `blobWrite` is the write outcome
+          // from the blob-store hook a few lines up; null when nothing spilled
+          // (body under `minBytesToPersist`, store disabled, skip-listed tool).
+          const rawPath = blobWrite?.path
+          const hint = tuiPreviewHint(tool.name, rawPath)
+          content = outputPreviewAnnotation({
+            content,
+            shown: e.shown,
+            total: e.total,
+            tool: tool.name,
+            path: rawPath,
+            hint,
+          })
         }
       }
-    }
 
-    // Tool-lifecycle extension point (generic seam, NOT diagnostics-
-    // specific). Fire the `tool.didInvoke` CHAIN so any plugin can
-    // augment a just-finished tool result: a plugin pushes structured
-    // `findings` (the AGENT renders them, below) and model-facing
-    // `notes` (folded into a `<ma::agent::diagnostics>` annotation on
-    // `content`). The `diagnostics` plugin (LSP/linter/formatter
-    // feedback) is the first consumer; the shape is tool-agnostic.
-    //
-    // Decoupled by construction: the agent never imports the plugin,
-    // the plugin never imports the agent — they meet only at the
-    // `ToolDidInvokePayload` shape. Listener errors/timeouts are
-    // absorbed by the HookBus, so a misbehaving plugin can never break
-    // the tool loop. Skipped when no plugin subscribes (zero cost) and
-    // for aborted runs (no completed work to react to).
-    let diagnosticsPanel: string[] = []
-    if (!aborted) {
-      const augmented = await runToolDidInvokeChain(ctx.loader, tool, isError)
-      if (augmented) {
-        if (augmented.annotation) content = `${content}${augmented.annotation}`
-        diagnosticsPanel = augmented.panel
+      // Fold beforeTool additionalContext onto successful (and denied-via-other) results.
+      if (lifecycleNotes.length > 0 && typeof content === "string") {
+        content = `${content}\n${lifecycleNotes.map((n) => `<ma::agent::policy>${n}</ma::agent::policy>`).join("\n")}`
       }
-    }
-
-    if (!streamedRendered) {
-      if (!headerWritten) writeToolHeader(displayHeader)
-      const previewLines = formatToolPreview(content, isError, display, {
-        tool: tool.name,
-        info: truncInfo,
-        footer: displayFooter,
-        cols: renderCols,
-      })
-      // When a plugin attached a diagnostics panel, the panel owns the
-      // final `╰`; re-open the preview's own closer to a `│` so the two
-      // blocks fuse into one frame instead of double-closing.
-      if (diagnosticsPanel.length > 0 && previewLines.length > 0) {
-        const lastIdx = previewLines.length - 1
-        previewLines[lastIdx] = reopenFrameCloser(previewLines[lastIdx])
-      }
-      for (const line of previewLines) writeTranscript(line)
-      for (const line of diagnosticsPanel) writeTranscript(line)
-    }
-
-    // Raw-output blob capture (design 2026-05-26). The model's
-    // `content` may be the clamped body (built-in tools that hit the
-    // 64KB/1000L universal cap) OR the full body (plugin tools, OR
-    // built-ins under cap). When persistable, write the FULL bytes
-    // to `<sid>.blobs/<tool_use_id>.raw` and append a
-    // `<ma::agent::raw-output …/>` pointer footer so the model can `Read` the
-    // file when the inline body isn't enough.
-    //
-    // Source of truth for the blob:
-    //   - `result._raw` (built-in clamp branch) when set: pre-clamp
-    //     body, never includes the trailing `[truncated: …]` notice.
-    //   - `content` otherwise: full output (no clamp ran, or plugin
-    //     tool which currently doesn't clamp at all).
-    //
-    // Skipped when:
-    //   - blobStore is null (config disabled, or construction failed)
-    //   - tool is on the user-configurable skip list (Task,
-    //     MemoryTool, ShowDiff, LockStatus). These plugins own
-    //     full audience-split and would be mangled by an
-    //     after-the-fact blob+footer on the model-facing body.
-    //   - tool was aborted (partial output, no point)
-    //   - body too small to be useful (gated inside BlobStore.write
-    //     via `minBytesToPersist`)
-    //
-    // Setting `display` alone does NOT disable the blob: Fetch
-    // sets `display` for the transcript preview while `content`
-    // carries the full body, and we genuinely want that body
-    // persisted. For Edit/Write the `content` is "File written:
-    // …" sized, so the `minBytesToPersist` gate inside the store
-    // handles them without an explicit `!display` guard here.
-    //
-    // See `src/blob-store.ts`.
-    if (ctx.blobStore !== null && !ctx.blobSkipTools.has(tool.name) && !aborted) {
-      const rawBody = rawForBlob ?? content
-      // Async write: keeps the (potentially multi-MB) body's fs write
-      // off the synchronous critical section so the TUI/input loop
-      // doesn't freeze while a big Fetch body is persisted (Bug 4).
-      // We're already inside an async function here, so the await is
-      // free; the tool_result it produces is returned below either way.
-      blobWrite = await ctx.blobStore.writeAsync(tool.id, rawBody)
-      if (blobWrite && !binaryGuard) {
-        // Footer order: existing `[truncated: …]` notice is already
-        // inside `content` (appended by truncation.ts when the clamp
-        // fired). Our `<ma::agent::raw-output …/>` goes AFTER that and BEFORE
-        // the `<ma::agent::output-preview …>` annotation appended below. The
-        // model-facing tail therefore reads:
-        //   <body>
-        //   [truncated: …]               ← only when clamp fired
-        //
-        //   <ma::agent::raw-output path="<path>" size="85kB" sha256="…" />   ← new
-        //
-        //   <ma::agent::output-preview shown=… total=…>…</ma::agent::output-preview>   ← only when TUI elided
-        //
-        // Binary bodies skip this append: the binary-guard rewrite below
-        // embeds path/sha256 itself so we never ship both a mojibake body
-        // AND a raw-output footer.
-        content = `${content}\n\n${formatRawOutputFooter(blobWrite)}`
-      }
-    }
-
-    // Binary-output rewrite (runs AFTER blob capture so the annotation
-    // can cite the real path). Replaces mojibake with a structured
-    // `<ma::agent::binary-result …/>` summary unless the model opted in
-    // via `binary: true` (then base64 under a size cap, else still path).
-    if (binaryGuard) {
-      const path = blobWrite?.path
-      const sha256 = blobWrite?.sha256
-      if (binaryGuard.optedIn) {
-        const bytes = Buffer.from(binaryGuard.source, "latin1")
-        content = formatBinaryOptInContent({
-          bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-          mime: binaryGuard.mime,
-          path,
-          sha256,
-          tool: tool.name,
-        })
-      } else {
-        content = formatBinaryResultMessage({
-          mime: binaryGuard.mime,
-          sizeBytes: binaryGuard.sizeBytes,
-          path,
-          sha256,
-          tool: tool.name,
-        })
-      }
-    }
-
-    // Layer 1b of size-feedback (companion to truncation.ts notice and
-    // feedback-tracker.ts streak note): when the user's transcript
-    // clamped MORE lines than the API cap did (every tool with a tight
-    // preview budget : Bash=10, Read=15, Grep=12, Glob=25), append a
-    // model-only `<ma::agent::output-preview …>` annotation to `content` BEFORE
-    // the result block is built, so the model knows the audiences
-    // diverged. Without this, the model sees the full body and
-    // assumes the user did too, leading to "as you can see above"
-    // claims that desync from what the user actually saw.
-    //
-    // Model-only by construction: this runs AFTER the transcript
-    // render path, so `formatToolPreview` / `renderStreamedTail`
-    // never sees it. The strip in `formatToolPreview` also catches
-    // it (for session-replay where this annotation is persisted in
-    // tool_result history). Skipped when:
-    //   - tool was refused by the mode gate (no execution happened),
-    //   - tool returned a `display` override (Edit/Write diff render
-    //     full by design),
-    //   - tool was aborted (partial output, no point nagging),
-    //   - body fits the TUI budget.
-    if (!display && !aborted) {
-      const e = computeTuiElision(content, tool.name)
-      if (e) {
-        // When a raw-output blob was written for this same result (above),
-        // thread its path into BOTH the hint prose and a machine-readable
-        // `path="…"` attribute, so the elision flag carries its own recovery
-        // pointer instead of stranding the model with "you saw less than the
-        // model did" and no destination. `blobWrite` is the write outcome
-        // from the blob-store hook a few lines up; null when nothing spilled
-        // (body under `minBytesToPersist`, store disabled, skip-listed tool).
-        const rawPath = blobWrite?.path
-        const hint = tuiPreviewHint(tool.name, rawPath)
-        content = outputPreviewAnnotation({
-          content,
-          shown: e.shown,
-          total: e.total,
-          tool: tool.name,
-          path: rawPath,
-          hint,
-        })
-      }
-    }
+    } // end !policyDenied
   }
 
   // Active-mode stamp on EVERY tool_result. Continuously surfaces

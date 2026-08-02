@@ -28,6 +28,7 @@
 import type { AuthResult } from "../auth/auth.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
+import { createLifecyclePort } from "../host/sdk-adapters/lifecycle-port-adapter.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "../host/ui/style/ansi.ts"
 import { inputCaptureStack } from "../input/input-capture-stack.ts"
 import {
@@ -52,7 +53,10 @@ import { ModeManager } from "../modes/modes.ts"
 import type { NetworkClient } from "../network/index.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import type { ManifestMode } from "../plugins/types.ts"
+import type { LifecyclePort } from "../sdk/lifecycle.ts"
+import { outputConfigSpread as buildOutputConfig } from "../sdk/output-config.ts"
 import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
+import { wrapTransportWithLifecycle } from "../sdk/with-lifecycle-send.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import { appendUserTurn } from "../session/session-restore.ts"
 import type { SessionStore } from "../session/session-store.ts"
@@ -135,6 +139,11 @@ const MAX_INTERRUPTED_TURN_CONTINUATIONS = 1
 
 /**
  * Conversational agent with append-only history and an agentic tool loop.
+ *
+ * **Production interactive path:** the CLI REPL and `--prompt` human route
+ * use `InteractiveSession` over `AgentCore` (`src/host/interactive-session.ts`).
+ * This class remains the unit-test and compat surface; its `run()` loop shares
+ * `executeToolRound` + LifecyclePort with AgentCore but is not what the TUI boots.
  *
  * The agent maintains its own message list and re-sends the full history
  * on every API call (no truncation, no compression : that's a server-side
@@ -228,6 +237,8 @@ export class Agent {
   private systemPromptOverrides: SystemPromptOverrides | undefined
   /** Optional Plugin loader. When set, plugin tools merge with core tools. */
   private loader: PluginLoader | null
+  /** Lifecycle / policy port (HookBus adapter or no-op). */
+  private lifecycle: LifecyclePort
   /** Optional mode manager (mode-aware system prompt + dispatch tool gate). */
   private modeManager: ModeManager | null
   /**
@@ -549,6 +560,10 @@ export class Agent {
     this.thinkingDisplay = opts.thinkingDisplay
     this.cacheTtl = opts.cacheTtl ?? DEFAULT_CACHE_TTL
     this.loader = opts.loader ?? null
+    // Test stubs may pass a partial loader without `hooks()`; treat as no-op.
+    const hooks =
+      this.loader && typeof this.loader.hooks === "function" ? this.loader.hooks() : null
+    this.lifecycle = createLifecyclePort(hooks)
     this.modeManager = opts.modeManager ?? null
     this.toolNamePolicy = opts.toolNamePolicy ?? null
     this.saveEcho = opts.saveEcho ?? null
@@ -557,8 +572,9 @@ export class Agent {
     this.turnAttachments = opts.turnAttachments ?? []
     // Default transport routes every request through the canonical run() so
     // each model reaches its own provider adapter. Callers/tests can still
-    // inject any sendFn. See select-transport.ts.
-    this.sendFn = opts.sendFn ?? selectedTransport
+    // inject any sendFn. See select-transport.ts. Wrapped with message.willSend
+    // so plugin redaction/deny applies on both Agent and AgentCore paths.
+    this.sendFn = wrapTransportWithLifecycle(opts.sendFn ?? selectedTransport, this.lifecycle)
     this.networkClient = opts.networkClient
     this.store = opts.store ?? null
     this.blobStore = opts.blobStore ?? null
@@ -1078,10 +1094,16 @@ export class Agent {
     // `getPromptBlocksAsync` splits plain afterInstructions from the
     // XML-wrapped sessionContext. The sync `getPromptBlock` remains a
     // sessionContext-only baseline without async fragments.
-    const promptBlocks = (await this.loader?.getPromptBlocksAsync()) ?? {
-      afterInstructions: null,
-      sessionContext: null,
-    }
+    const promptBlocks =
+      this.loader && typeof this.loader.getPromptBlocksAsync === "function"
+        ? await this.loader.getPromptBlocksAsync()
+        : {
+            afterInstructions: null,
+            sessionContext:
+              this.loader && typeof this.loader.getPromptBlockAsync === "function"
+                ? await this.loader.getPromptBlockAsync()
+                : null,
+          }
     // Always pass the loop-safety knobs so the appended "Tool-use loop
     // safety" paragraph in system[2] reflects the runtime config (interval,
     // cooldown, emergency cap). Default values produce stable text, so the
@@ -1218,7 +1240,7 @@ export class Agent {
         // rather than the transport's conservative 64k default. Placed before
         // `...sendOpts` so an explicit caller override still wins.
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-        ...this.outputConfigSpread(),
+        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -1542,6 +1564,8 @@ export class Agent {
       // its collaborators through an explicit context bag so the module
       // stays decoupled from the Agent class.
       const toolResults: ToolResultBlock[] = []
+      const workerAgentId = process.env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || undefined
+      const workerLeadSid = process.env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
       for (const tool of toolBlocks) {
         toolResults.push(
           await executeToolRound(tool, {
@@ -1556,8 +1580,20 @@ export class Agent {
             model: this.model,
             store: this.store,
             signal,
+            lifecycle: this.lifecycle,
+            ...(workerAgentId ? { agentId: workerAgentId } : {}),
+            ...(workerLeadSid ? { leadSid: workerLeadSid } : {}),
           }),
         )
+      }
+
+      const { checkToolDidBatch } = await import("./tool-batch-gate.ts")
+      const batchGate = await checkToolDidBatch(this.lifecycle, toolBlocks, toolResults)
+      if (batchGate.halted) {
+        writeTranscript(`\n  ${batchGate.reason}`)
+        void this.lifecycle.turnEnd?.({ ok: false, error: batchGate.reason })
+        exitedByCap = false
+        break
       }
 
       // Send tool results back. Before the next API request, give the host
@@ -1699,7 +1735,7 @@ export class Agent {
           const mt = this.resolveMaxOutputTokens({ system })
           return mt !== undefined ? { maxTokens: mt } : {}
         })(),
-        ...this.outputConfigSpread(),
+        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -1760,81 +1796,48 @@ export class Agent {
     // 2026-05-27: the original post-loop one-shot synthesizer DID
     // leave orphans and the next user submit 400'd.
 
+    const aborted = Boolean(signal?.aborted)
+    void this.lifecycle.turnEnd?.({
+      ok: !aborted && !exitedByCap,
+      ...(aborted ? { aborted: true } : {}),
+      ...(exitedByCap && Number.isFinite(this.maxToolRounds)
+        ? { error: `Tool rounds capped at ${this.maxToolRounds}` }
+        : {}),
+    })
+
     return lastResponse
   }
 
   /**
    * Send a user message without enabling tools : single round-trip.
    *
-   * Use this when you want a plain text reply without the agentic loop.
-   * The model will not be told about any tools, so it cannot call them.
-   * For agentic behavior, use {@link run} instead.
-   *
    * @param userText - The user's message content
    * @param opts - Optional overrides for the underlying send
    * @yields Text chunks from `text_delta` SSE events as they arrive
-   * @returns The {@link StreamedResponse} containing all content blocks
    */
   async *send(
     userText: string,
     opts?: Partial<SendOptions>,
   ): AsyncGenerator<string, StreamedResponse, undefined> {
-    this.messages.push({
-      role: "user",
-      content: [{ type: "text", text: userText }],
-    })
-
-    // Use `this.sendFn` (the injectable transport) so tests can stub the
-    // SSE layer the same way they do for `run()`. Previously this called
-    // `sendMessage` directly, which left `send()` un-testable without
-    // hitting the real API.
-    const sendMaxTokens = this.resolveMaxOutputTokens()
-    const gen = this.sendFn({
-      auth: this.auth,
-      messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
-      model: this.model,
-      ...(this.networkClient ? { networkClient: this.networkClient } : {}),
-      ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),
-      ...this.outputConfigSpread(),
-      ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
-      ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
-      ...(this.thinkingDisplay
-        ? {
-            thinking: {
-              type: "adaptive" as const,
-              display: this.thinkingDisplay,
-            },
-          }
-        : {}),
-      ...opts,
-    })
-
-    let response: StreamedResponse | undefined
-    // Strip `<ma::agent::reflection-ack ... />` from the streamed text channel.
-    // `send()` is the no-tools single-shot variant and doesn't run the
-    // reflection-checkpoint loop, so a model rarely has reason to emit
-    // the tag here — but we strip defensively so accidental emissions
-    // don't leak into scrollback. See `src/reflection-ack-stripper.ts`.
-    const ackStripper = createReflectionAckStripper()
-    while (true) {
-      const { done, value } = await gen.next()
-      if (done) {
-        response = value as unknown as StreamedResponse
-        const tail = ackStripper.flush()
-        if (tail.length > 0) yield tail
-        break
-      }
-      const cleaned = ackStripper.write(value)
-      if (cleaned.length > 0) yield cleaned
-    }
-
-    const result = response ?? { blocks: [], text: "", stopReason: null }
-
-    if (result.blocks.length > 0) {
-      this.messages.push({ role: "assistant", content: result.blocks })
-    }
-
-    return result
+    const { simpleSend } = await import("../sdk/simple-send.ts")
+    return yield* simpleSend(
+      {
+        messages: this.messages,
+        auth: this.auth,
+        model: this.model,
+        sendFn: this.sendFn,
+        networkClient: this.networkClient,
+        effort: this.effort,
+        outputSchema: this.outputSchema,
+        speed: this.speed,
+        serviceTier: this.serviceTier,
+        thinkingDisplay: this.thinkingDisplay,
+        cacheTtl: this.cacheTtl,
+        resolveMaxOutputTokens: () => this.resolveMaxOutputTokens(),
+      },
+      userText,
+      opts,
+    )
   }
 
   /**
@@ -1859,40 +1862,36 @@ export class Agent {
     reason?: "manual" | "auto" | "exceeded"
     preferRemote?: boolean
   }): Promise<import("./context-compact.ts").CompactStats> {
-    const { agentCompact } = await import("./agent-compact-methods.ts")
-    return agentCompact(this as never, opts)
-  }
-
-  /**
-   * Build the `outputConfig` for a request from the agent's effort + output
-   * schema. Returns `{ outputConfig: {...} }` to spread into a `sendFn` call,
-   * or `{}` when neither is set (so the field is omitted entirely). Merges
-   * both concerns: `effort` (computation budget) and `format` (the
-   * `--output-schema` JSON Schema, as `{ type: "json_schema", schema }`).
-   */
-  private outputConfigSpread(): {
-    outputConfig?: {
-      effort?: string
-      format?: { type: string; schema?: unknown }
-    }
-  } {
-    const cfg: {
-      effort?: string
-      format?: { type: string; schema?: unknown }
-    } = {}
-    if (this.effort) cfg.effort = this.effort
-    if (this.outputSchema) cfg.format = { type: "json_schema", schema: this.outputSchema }
-    return Object.keys(cfg).length > 0 ? { outputConfig: cfg } : {}
+    const { compactWithLifecycle } = await import("../sdk/lifecycle-compact.ts")
+    return compactWithLifecycle({
+      messages: this.messages,
+      model: this.model,
+      providerId: this.providerId,
+      auth: this.auth,
+      ...(this.credentialName ? { credentialName: this.credentialName } : {}),
+      networkClient: this.networkClient,
+      lifecycle: this.lifecycle,
+      reason: opts?.reason,
+      preferRemote: opts?.preferRemote,
+      appendNote: (text) => this.appendNote(text),
+      appendCompact: (rec) => this.store?.appendCompact(rec),
+    })
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tool transcript render helpers (implementation lives under ./ui)
-// ---------------------------------------------------------------------------
-
-// Re-exported here so external consumers can keep
-// `import { formatToolInput, ... } from "../agent.ts"`.
-import {
+export {
+  parseModelNotFoundError,
+  parseModelUnavailableError,
+} from "../host/model-error.ts"
+export type {
+  ReplAgentLike,
+  ReplCompositor,
+  ReplEditor,
+  StatusController,
+} from "../host/repl.ts"
+export { runRepl } from "../host/repl.ts"
+export type { ToolPresentation } from "../host/ui/tool-transcript/format.ts"
+export {
   clampTranscriptRow,
   formatToolHeaderRows,
   formatToolInput,
@@ -1901,37 +1900,3 @@ import {
   isOuterFrameClose,
   toolContinuationIndentCells,
 } from "../host/ui/tool-transcript/format.ts"
-
-export type { ToolPresentation } from "../host/ui/tool-transcript/format.ts"
-
-export {
-  clampTranscriptRow,
-  formatToolHeaderRows,
-  formatToolInput,
-  formatToolInputContinuation,
-  formatToolPreview,
-  isOuterFrameClose,
-  toolContinuationIndentCells,
-}
-
-// ---------------------------------------------------------------------------
-// REPL (extracted to ./agent/repl.ts + ./agent/repl-live-area.ts + ./agent/model-error.ts)
-// ---------------------------------------------------------------------------
-
-export {
-  parseModelNotFoundError,
-  parseModelUnavailableError,
-} from "../host/model-error.ts"
-// The REPL types, the `runRepl` orchestration shell, and the live-area
-// renderer live under `src/agent/` so this file stays under the
-// `max-lines` lint budget. The public surface
-// (`ReplAgentLike`, `StatusController`, `runRepl`,
-// `parseModelNotFoundError`, `parseModelUnavailableError`) is
-// re-exported below for back-compat with existing consumers.
-export type {
-  ReplAgentLike,
-  ReplCompositor,
-  ReplEditor,
-  StatusController,
-} from "../host/repl.ts"
-export { runRepl } from "../host/repl.ts"

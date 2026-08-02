@@ -85,13 +85,47 @@ export const CHANNELS = [
     name: "message.willSend",
     shape: "chain",
     permission: "hooks:message.willSend",
-    description: "Chain hook — listeners may mutate outgoing messages or system prompt.",
+    description:
+      "Chain hook fired immediately BEFORE the transport send. Payload is " +
+      "SendSnapshot `{messages, system, model, providerId?}`. Listeners may " +
+      "rewrite messages/system for redaction or `{halt:true}` to block the " +
+      "network call. Wired via LifecyclePort.beforeSend in AgentCore.",
   },
   {
     name: "message.didSend",
     shape: "broadcast-async",
     permission: "hooks:message.didSend",
     description: "Emitted after the wire request is dispatched.",
+  },
+  {
+    name: "compact.willRun",
+    shape: "chain",
+    permission: "hooks:compact.willRun",
+    description:
+      "Chain hook before context compaction (PreCompact analogue). " +
+      "`{halt:true}` blocks the compact.",
+  },
+  {
+    name: "compact.didRun",
+    shape: "broadcast-async",
+    permission: "hooks:compact.didRun",
+    description: "Emitted after context compaction completes (PostCompact analogue).",
+  },
+  {
+    name: "cwd.didChange",
+    shape: "broadcast-async",
+    permission: "hooks:cwd.didChange",
+    description:
+      "Emitted when the sticky Bash cwd changes (bare `cd` interception). " +
+      "Payload `{from, to}`. CwdChanged analogue.",
+  },
+  {
+    name: "instructions.didLoad",
+    shape: "broadcast-async",
+    permission: "hooks:instructions.didLoad",
+    description:
+      "Emitted when AGENTS.md / skill instructions are loaded into context. " +
+      "Observation only (InstructionsLoaded analogue).",
   },
   {
     name: "message.tokens",
@@ -105,7 +139,12 @@ export const CHANNELS = [
     name: "tool.willInvoke",
     shape: "chain",
     permission: "hooks:tool.willInvoke",
-    description: "Chain hook — listeners may rewrite tool input, swap the tool, or veto.",
+    description:
+      "Chain hook fired AFTER mode/CLI permission gates and BEFORE tool IO. " +
+      "Payload is ToolWillInvokePayload (`tool`, `toolUseId`, `input`, `cwd`, …). " +
+      "Listeners may rewrite `input` (`{payload}`) or veto (`{halt:true, reason}`). " +
+      "Silence allows the call; hooks cannot override a prior mode deny. " +
+      "Wired via LifecyclePort.beforeTool / executeToolRound.",
   },
   {
     name: "tool.didInvoke",
@@ -123,6 +162,23 @@ export const CHANNELS = [
       "The diagnostics plugin (LSP/linter/formatter feedback) is the first " +
       "consumer, but the shape is tool-agnostic. Observation-only listeners " +
       "just watch.",
+  },
+  {
+    name: "tool.didBatch",
+    shape: "chain",
+    permission: "hooks:tool.didBatch",
+    description:
+      "Chain hook fired after a parallel tool batch resolves and BEFORE the " +
+      "next model call (PostToolBatch analogue). Payload " +
+      "`{results:[{tool,toolUseId,ok}]}`. `{halt:true}` stops the agentic loop.",
+  },
+  {
+    name: "tool.permissionChecked",
+    shape: "broadcast-async",
+    permission: "hooks:tool.permissionChecked",
+    description:
+      "Observation-only: emitted after the mode/CLI permission gate evaluates a " +
+      "tool_use (`{tool, allowed, reason?}`). For audit plugins; cannot veto.",
   },
 
   // -- REPL lifecycle ---------------------------------------------------------

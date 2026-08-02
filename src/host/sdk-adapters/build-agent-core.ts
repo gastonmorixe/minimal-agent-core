@@ -50,6 +50,7 @@ import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts
 import type { SessionStore } from "../../session/session-store.ts"
 import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
 
+import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "./media-resolver-adapter.ts"
 import { ModeProviderAdapter } from "./mode-provider-adapter.ts"
 import {
@@ -78,6 +79,10 @@ export interface BuildAgentCoreDeps {
   credentialName?: string
   /** Reasoning effort (opaque string; cast to the config union). */
   effort?: string
+  /** JSON Schema for `--output-schema` constrained decoding. */
+  outputSchema?: object
+  /** Speed mode (`fast` when the host opted in). */
+  speed?: "normal" | "fast"
   /** Provider-neutral service-tier override. */
   serviceTier?: string
   /** Optional `thinking.display` override. */
@@ -112,6 +117,14 @@ export interface BuildAgentCoreDeps {
   eventSink?: EventSink
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
+  /**
+   * Interactive transcript sink (tool chrome). When set, ToolExecutorAdapter
+   * and AgentCore.transcriptSink both write here. Headless `--json` omits
+   * this (no-op). A mutable wrapper lets InteractiveSession rebind per turn.
+   */
+  writeTranscript?: (line: string) => void
+  /** Optional `· HH:MM:SS` tool-header time hints (interactive only). */
+  toolTimeTracker?: import("../../tools/tool-time.ts").ToolTimeTracker | null
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -145,6 +158,10 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   // Tool executor: runs executeToolRound verbatim. It is the SOLE persister of
   // tool_result records (with blob + presentation fidelity), so it gets the
   // store; the session-persistence adapter no-ops appendToolResult.
+  const hooks = deps.loader && typeof deps.loader.hooks === "function" ? deps.loader.hooks() : null
+  const lifecycle = createLifecyclePort(hooks)
+
+  const writeTranscript = deps.writeTranscript ?? NOOP_WRITE
   const toolExecutor = new ToolExecutorAdapter({
     presentation: toolRegistry.presentation(),
     loader: deps.loader,
@@ -153,9 +170,11 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     blobSkipTools: loadBlobStoreConfig().skipTools,
     feedbackTracker: new ToolFeedbackTracker(),
     // Headless `--json`: no transcript header time-hint (cosmetic only).
-    toolTimeTracker: null,
+    toolTimeTracker: deps.toolTimeTracker ?? null,
     model: deps.model,
     store: deps.store,
+    writeTranscript,
+    lifecycle,
   })
 
   // Prompt contributor: awaits the plugin prompt block once (parity seam),
@@ -191,6 +210,8 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
     ...(deps.credentialName !== undefined ? { credentialName: deps.credentialName } : {}),
     ...(toEffort(deps.effort) !== undefined ? { effort: toEffort(deps.effort) } : {}),
+    ...(deps.outputSchema !== undefined ? { outputSchema: deps.outputSchema } : {}),
+    ...(deps.speed !== undefined ? { speed: deps.speed } : {}),
     ...(deps.serviceTier !== undefined ? { serviceTier: deps.serviceTier } : {}),
     ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
     ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
@@ -201,13 +222,13 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     toolRegistry,
     ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,
-    // The core writes no transcript on the headless path; a no-op sink keeps
-    // the required port satisfied without rendering anything.
-    transcriptSink: { write: NOOP_WRITE },
+    // Interactive hosts pass writeTranscript; headless `--json` uses no-op.
+    transcriptSink: { write: writeTranscript },
     ...(sessionPersistence ? { sessionPersistence } : {}),
     promptContributors: [promptContributor],
     ...(modeProvider ? { modeProvider } : {}),
     mediaResolver,
+    lifecycle,
     // `systemPrompt` + `maxTokens` are vestigial in AgentCoreConfig: run()
     // derives both itself (resolveSystemPromptForModel + resolveMaxOutputTokens).
     // Required by the type, unread at runtime.
@@ -224,6 +245,10 @@ function NOOP_WRITE(_line: string): void {}
 
 // Re-export the adapter surface so a host can import the whole Tier-1 binding
 // from one module.
+export {
+  createLifecyclePort,
+  LifecyclePortAdapter,
+} from "./lifecycle-port-adapter.ts"
 export {
   MediaResolverAdapter,
   ModeProviderAdapter,

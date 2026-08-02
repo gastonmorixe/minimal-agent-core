@@ -61,6 +61,24 @@ reuse the pin. Covered by `resolve-credential-name.test.ts` (pin gate) and
 
 See `docs/changes/2026-08-01-resume-credential-pin-provider-scope.md`.
 
+### Feat: Lifecycle policy seams + InteractiveSession on AgentCore
+
+---
+id: "2026-08-01-lifecycle-policy-seams"
+type: feat
+status: landed
+created-at: "2026-08-01T12:00:00-0400"
+updated-at: "2026-08-01T12:00:00-0400"
+detail: "docs/hooks.md"
+---
+
+Typed `PolicyDecision` / `LifecyclePort` (DIP); host `LifecyclePortAdapter`
+maps HookBus chain/async channels. Wired emits: `tool.willInvoke` (after mode
+gate), `message.willSend`, `tool.didBatch`, compact, session/cwd/instructions,
+`subagent.willSpawn`. Production REPL/`--prompt` uses Tier-2
+`InteractiveSession` over `AgentCore`. Headless `turn.willStart` parity.
+Docs: `docs/hooks.md`. Reference plugin: `ma-policy-ref-plugin` (disabled).
+
 ### Fix: OpenAI Chat thinking_stop before first text (orphaned response prefixes)
 
 ---
