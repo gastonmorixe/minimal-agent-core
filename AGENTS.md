@@ -160,6 +160,20 @@ side-effect of provider work.**
   `--model` against the registry (the server is the source of truth), so
   forward-compat ids pass through.
 
+## Lifecycle policy seams + AgentCore
+
+- Policy veto/rewrite uses typed `PolicyDecision` / `LifecyclePort`
+  (`src/sdk/lifecycle.ts`). AgentCore never imports HookBus; the host wires
+  `LifecyclePortAdapter` over `loader.hooks()`.
+- Catalog + decision contract: [`docs/hooks.md`](docs/hooks.md). Channels such as
+  `tool.willInvoke` and `message.willSend` are **wired emit sites** (not
+  catalog-only). Mode/CLI deny runs before `tool.willInvoke`; silence ≠ allow.
+- Production interactive + `--prompt` human path: `InteractiveSession`
+  (`src/host/interactive-session.ts`) over `AgentCore`. Legacy `Agent` remains
+  for unit tests / compat and still shares `executeToolRound`.
+- Reference policy fixture (plugins repo): `ma-policy-ref-plugin` (disabled by
+  default).
+
 ## Slash commands + scheduling (the `commands[]` port)
 
 Plugins contribute slash commands declaratively via a manifest `commands[]`

@@ -60,6 +60,8 @@ import {
 import { appendUserTurn } from "../session/session-restore.ts"
 
 import type { AgentEvent, EventSink, EventUsage } from "./events.ts"
+import { type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
+import { outputConfigSpread as buildOutputConfig } from "./output-config.ts"
 import type {
   AbortSignalProvider,
   AgentCoreConfig,
@@ -74,6 +76,7 @@ import type {
   ToolRegistry,
   TranscriptSink,
 } from "./ports.ts"
+import { wrapTransportWithLifecycle } from "./with-lifecycle-send.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -127,6 +130,7 @@ export class AgentCore {
   private credentialName?: string
   private auth: AuthResult
   private effort: string | undefined
+  private outputSchema: object | undefined
   private speed: "normal" | "fast"
   private serviceTier: string | undefined
   private thinkingDisplay: "summarized" | "omitted" | undefined
@@ -151,13 +155,15 @@ export class AgentCore {
   /** One-shot runtime marker for the next attachments-only continuation turn. */
   private pendingTurnMarker: "aborted" | "resumed" | null = null
   private eventSink: EventSink | null
+  private lifecycle: LifecyclePort
 
   constructor(config: AgentCoreConfig) {
     this.model = config.model
     this.providerId = config.providerId
     this.credentialName = config.credentialName
     this.auth = config.auth
-    this.sendFn = config.sendFn ?? selectedTransport
+    this.lifecycle = config.lifecycle ?? NOOP_LIFECYCLE
+    this.sendFn = wrapTransportWithLifecycle(config.sendFn ?? selectedTransport, this.lifecycle)
     this.networkClient = config.networkClient
     this.toolRegistry = config.toolRegistry
     this.toolFilter = config.toolFilter ?? null
@@ -171,7 +177,8 @@ export class AgentCore {
     this.terminalMetrics = config.terminalMetrics ?? null
     this.eventSink = config.eventSink ?? null
     this.effort = config.effort
-    this.speed = "normal"
+    this.outputSchema = config.outputSchema
+    this.speed = config.speed === "fast" ? "fast" : "normal"
     this.serviceTier = config.serviceTier
     this.thinkingDisplay = config.thinkingDisplay
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
@@ -214,22 +221,22 @@ export class AgentCore {
 
   /**
    * Compact model-facing history. Same contract as legacy Agent.compact:
-   * prefer provider remote compact, else local checkpoint. Shared runner
-   * in `agent/run-compact.ts`.
+   * prefer provider remote compact, else local checkpoint.
    */
   async compact(opts?: {
     reason?: import("../agent/context-compact.ts").CompactReason
     preferRemote?: boolean
   }): Promise<import("../agent/context-compact.ts").CompactStats> {
-    const { runCompact } = await import("../agent/run-compact.ts")
-    return runCompact({
+    const { compactWithLifecycle } = await import("./lifecycle-compact.ts")
+    return compactWithLifecycle({
       messages: this.messages,
       model: this.model,
       providerId: this.providerId,
       auth: this.auth,
       ...(this.credentialName ? { credentialName: this.credentialName } : {}),
       networkClient: this.networkClient,
-      reason: opts?.reason ?? "manual",
+      lifecycle: this.lifecycle,
+      reason: opts?.reason,
       preferRemote: opts?.preferRemote,
       appendNote: (text) => this.sessionPersistence?.appendNote(text),
       appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
@@ -288,6 +295,16 @@ export class AgentCore {
     this.pendingTurnMarker = "resumed"
   }
 
+  /** Persist a free-form session note (metadata; not folded into model history). */
+  appendNote(text: string): void {
+    this.sessionPersistence?.appendNote(text)
+  }
+
+  /** Reflection cooldown duration used by Tier-2 InteractiveSession. */
+  getReflectionCooldownMs(): number {
+    return this.reflectionCooldownMs
+  }
+
   pushSystemMessage(text: string): void {
     this.messages.push({ role: "system", content: text })
   }
@@ -337,6 +354,18 @@ export class AgentCore {
        * event stream is byte-identical to before Phase 3.
        */
       emitDeltas?: boolean
+      /**
+       * Host-side notice renderer (Tier 2). When set, semantic
+       * {@link TurnNotice}s are handed to the host instead of (or in addition
+       * to) a plain transcript line.
+       */
+      onNotice?: (notice: TurnNotice) => MaybePromise<void>
+      /**
+       * Tier-2 hook before a reflection-checkpoint attachment is injected.
+       * InteractiveSession uses this for the Esc-skippable wall-clock cooldown.
+       * Headless / `--json` leave it unset (no pause).
+       */
+      beforeReflectionCheckpoint?: (round: number) => MaybePromise<void>
     },
   ): AsyncGenerator<string, StreamedResponse, undefined> {
     const {
@@ -349,6 +378,8 @@ export class AgentCore {
       signal,
       askUser,
       emitDeltas,
+      onNotice,
+      beforeReflectionCheckpoint,
       ...sendOpts
     } = opts ?? {}
     const thinkingStart = onThinkingStart
@@ -366,7 +397,11 @@ export class AgentCore {
     // event or transcript downstream.
     const emitNotice = (notice: TurnNotice): void => {
       this.emit({ type: "notice", notice })
-      writeTranscript(`\n  ${formatTurnNoticePlain(notice)}`)
+      if (onNotice) {
+        void onNotice(notice)
+      } else {
+        writeTranscript(`\n  ${formatTurnNoticePlain(notice)}`)
+      }
     }
 
     const initialUserContent: ContentBlock[] = []
@@ -511,7 +546,7 @@ export class AgentCore {
         tools: mergedTools,
         system,
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-        ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -777,6 +812,16 @@ export class AgentCore {
           isError: result.isError,
         })
       }
+
+      const { checkToolDidBatch } = await import("../agent/tool-batch-gate.ts")
+      const batchGate = await checkToolDidBatch(this.lifecycle, toolBlocks, toolResults)
+      if (batchGate.halted) {
+        this.emit({ type: "error", message: batchGate.reason })
+        await this.lifecycle.turnEnd?.({ ok: false, error: batchGate.reason })
+        exitedByCap = false
+        break
+      }
+
       // A turn that executed tools also settled here (next iteration is a
       // fresh model response). Emit turn_completed before looping.
       this.emit({
@@ -811,6 +856,9 @@ export class AgentCore {
         if (this.reflectionSilenceRemaining > 0) {
           this.reflectionSilenceRemaining -= 1
         } else {
+          if (beforeReflectionCheckpoint) {
+            await beforeReflectionCheckpoint(rounds)
+          }
           userContent.push(buildReflectionCheckpointBlock(rounds, this.reflectionCooldownMs))
         }
       }
@@ -847,7 +895,7 @@ export class AgentCore {
           const mt = this.resolveMaxOutputTokens({ system })
           return mt !== undefined ? { maxTokens: mt } : {}
         })(),
-        ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
+        ...buildOutputConfig({ effort: this.effort, outputSchema: this.outputSchema }),
         ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
         ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
         ...(this.thinkingDisplay
@@ -894,6 +942,15 @@ export class AgentCore {
       }
     }
 
+    const aborted = Boolean(signal?.aborted)
+    void this.lifecycle.turnEnd?.({
+      ok: !aborted && !exitedByCap,
+      ...(aborted ? { aborted: true } : {}),
+      ...(exitedByCap && Number.isFinite(this.maxToolRounds)
+        ? { error: `Tool rounds capped at ${this.maxToolRounds}` }
+        : {}),
+    })
+
     return lastResponse
   }
 
@@ -901,47 +958,24 @@ export class AgentCore {
     userText: string,
     opts?: Partial<SendOptions>,
   ): AsyncGenerator<string, StreamedResponse, undefined> {
-    this.messages.push({
-      role: "user",
-      content: [{ type: "text", text: userText }],
-    })
-
-    const sendMaxTokens = this.resolveMaxOutputTokens()
-    const gen = this.sendFn({
-      auth: this.auth,
-      messages: withRollingCacheBreakpoint(this.messages, this.cacheTtl),
-      model: this.model,
-      ...(this.networkClient ? { networkClient: this.networkClient } : {}),
-      ...(sendMaxTokens !== undefined ? { maxTokens: sendMaxTokens } : {}),
-      ...(this.effort ? { outputConfig: { effort: this.effort } } : {}),
-      ...(this.speed === "fast" ? { speed: "fast" as const } : {}),
-      ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
-      ...(this.thinkingDisplay
-        ? { thinking: { type: "adaptive" as const, display: this.thinkingDisplay } }
-        : {}),
-      ...opts,
-    })
-
-    let response: StreamedResponse | undefined
-    const ackStripper = createReflectionAckStripper()
-    while (true) {
-      const { done, value } = await gen.next()
-      if (done) {
-        response = value as unknown as StreamedResponse
-        const tail = ackStripper.flush()
-        if (tail.length > 0) yield tail
-        break
-      }
-      const cleaned = ackStripper.write(value)
-      if (cleaned.length > 0) yield cleaned
-    }
-
-    const result = response ?? { blocks: [], text: "", stopReason: null }
-
-    if (result.blocks.length > 0) {
-      this.messages.push({ role: "assistant", content: result.blocks })
-    }
-
-    return result
+    const { simpleSend } = await import("./simple-send.ts")
+    return yield* simpleSend(
+      {
+        messages: this.messages,
+        auth: this.auth,
+        model: this.model,
+        sendFn: this.sendFn,
+        networkClient: this.networkClient,
+        effort: this.effort,
+        outputSchema: this.outputSchema,
+        speed: this.speed,
+        serviceTier: this.serviceTier,
+        thinkingDisplay: this.thinkingDisplay,
+        cacheTtl: this.cacheTtl,
+        resolveMaxOutputTokens: () => this.resolveMaxOutputTokens(),
+      },
+      userText,
+      opts,
+    )
   }
 }

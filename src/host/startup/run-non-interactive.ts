@@ -29,19 +29,20 @@
  * @module host/startup/run-non-interactive
  */
 
-import type { Agent } from "../../agent/agent.ts"
 import type { OutputFormat } from "../../cli/output-format.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
 import type { AgentCore } from "../../sdk/agent-core.ts"
 import { type EventSink, JsonlEventSink } from "../../sdk/events.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "../print-output.ts"
+import type { ReplAgentLike } from "../repl.ts"
+import { applyTurnWillStart } from "../repl-editor-hooks.ts"
 import { Formatter } from "../ui/formatter/formatter.ts"
 
 /** Inputs for {@link runNonInteractivePrompt}. */
 export interface RunNonInteractivePromptInput {
-  /** The initialized agent to drive. */
-  readonly agent: Agent
+  /** The initialized agent / InteractiveSession to drive. */
+  readonly agent: ReplAgentLike
   /** The resolved one-shot prompt text. */
   readonly prompt: string
   /** Resolved formatter argv, or undefined when none. */
@@ -146,14 +147,22 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
  * schema-validation failure.
  */
 export async function runNonInteractivePrompt(input: RunNonInteractivePromptInput): Promise<void> {
-  const { agent, prompt, formatterCmd, outputSchema, loader } = input
+  const { agent, formatterCmd, outputSchema, loader } = input
   const exit = input.exit ?? ((code: number): never => process.exit(code))
+
+  // Parity with REPL: `turn.willStart` may rewrite or halt before the model.
+  const turn = await applyTurnWillStart(loader, input.prompt)
+  if (turn.halted) {
+    process.stderr.write(`turn.willStart: prompt blocked by lifecycle policy hook.\n`)
+    exit(1)
+  }
+  const prompt = turn.text
 
   // Structured event-stream route (`--output-format json` / `stream-json`).
   // Bypasses the formatter/plugin-stream/human-answer machinery entirely: the
   // JSONL event stream is the whole output.
   if (wantsEventStream(input)) {
-    await runCoreEventStream(input)
+    await runCoreEventStream({ ...input, prompt })
     return
   }
 

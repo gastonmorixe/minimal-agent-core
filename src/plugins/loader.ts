@@ -1419,6 +1419,8 @@ export class PluginLoader {
         ? { recommendSubagentModels: this.recommendSubagentModels }
         : {}),
       ...(host ? { host } : {}),
+      emitChain: (ch, payload) =>
+        this.hooksFacade.emitChain(ch, payload).catch(() => ({ payload, halted: false as const })),
     }
 
     try {
@@ -1466,40 +1468,33 @@ export class PluginLoader {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Extracted submodules (max-lines budget): helpers, event-subs, discovery,
-// fragments, prompt-blocks, replay-renderers, turn-attachments, setups.
-import { CommandRegistry } from "./loader/commands.ts"
-import { discoverAndParsePackages } from "./loader/discovery.ts"
 import {
-  registerEventSub,
-  registerHookSub,
-  resolveCommand,
-  resolveEventSub,
-  resolveHookSub,
-  resolveLiveAreaSlot,
-} from "./loader/event-subs.ts"
-import { DEFAULT_FRAGMENT_TIMEOUT_MS, findFragmentDef, startFragment } from "./loader/fragments.ts"
-import {
+  CommandRegistry,
   classifyPluginPrompt,
+  DEFAULT_FRAGMENT_TIMEOUT_MS,
+  discoverAndParsePackages,
   escapeTagAttr,
+  findFragmentDef,
   findPackageDirFor,
   findPluginIdFor,
+  groupSessionContextFragments,
+  joinAfterInstructions,
+  type PendingFragment,
+  type PluginPromptBlocks,
   PROMPT_ROLE_ORDER,
   type PromptRole,
   pluginToolDefinitionFromTrigger,
+  type ResolvedFragment,
+  registerEventSub,
+  registerHookSub,
+  registerManifestReplayRenderers,
+  registerManifestTurnAttachments,
+  resolveCommand,
+  resolveEventSub,
   resolveHandler,
+  resolveHookSub,
+  resolveLiveAreaSlot,
+  runPluginSetups,
+  startFragment,
   stripLeadingHeading,
-} from "./loader/helpers.ts"
-import type {
-  PendingFragment,
-  PluginPromptBlocks,
-  ResolvedFragment,
-} from "./loader/prompt-blocks.ts"
-import { groupSessionContextFragments, joinAfterInstructions } from "./loader/prompt-blocks.ts"
-
-export type { PluginPromptBlocks, PromptFragmentPlacement } from "./loader/prompt-blocks.ts"
-
-import { registerManifestReplayRenderers } from "./loader/replay-renderers.ts"
-import { runPluginSetups } from "./loader/setups.ts"
-import { registerManifestTurnAttachments } from "./loader/turn-attachments.ts"
+} from "./loader/late.ts"

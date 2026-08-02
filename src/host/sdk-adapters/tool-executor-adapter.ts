@@ -44,6 +44,8 @@ import { executeToolRound, type ToolRoundContext } from "../../agent/tool-round.
 import type { ToolUseBlock } from "../../llm/messages.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
+import type { LifecyclePort } from "../../sdk/lifecycle.ts"
+import { NOOP_LIFECYCLE } from "../../sdk/lifecycle.ts"
 import type { ToolExecResult, ToolExecutor } from "../../sdk/ports.ts"
 import type { BlobStore } from "../../session/blob-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
@@ -91,6 +93,8 @@ export interface ToolExecutorAdapterDeps {
    * route these to its sink.
    */
   writeTranscript?: (line: string) => void
+  /** Lifecycle / policy port. Defaults to {@link NOOP_LIFECYCLE}. */
+  lifecycle?: LifecyclePort
 }
 
 /**
@@ -118,6 +122,9 @@ export class ToolExecutorAdapter implements ToolExecutor {
    * is preserved without this adapter ever touching it.
    */
   async execute(toolUse: ToolUseBlock, signal?: AbortSignal): Promise<ToolExecResult> {
+    // Sub-agent workers stamp MINIMAL_AGENT_SUBAGENT_ID / _LEAD (spawn-plan).
+    const agentId = process.env.MINIMAL_AGENT_SUBAGENT_ID?.trim() || undefined
+    const leadSid = process.env.MINIMAL_AGENT_SUBAGENT_LEAD?.trim() || undefined
     const ctx: ToolRoundContext = {
       presentation: this.deps.presentation,
       writeTranscript: this.writeTranscript,
@@ -129,7 +136,10 @@ export class ToolExecutorAdapter implements ToolExecutor {
       toolTimeTracker: this.deps.toolTimeTracker ?? null,
       model: this.deps.model,
       store: this.deps.store ?? null,
+      lifecycle: this.deps.lifecycle ?? NOOP_LIFECYCLE,
       ...(signal ? { signal } : {}),
+      ...(agentId ? { agentId } : {}),
+      ...(leadSid ? { leadSid } : {}),
     }
 
     const block = await executeToolRound(toolUse, ctx)

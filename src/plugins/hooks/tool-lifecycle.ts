@@ -3,24 +3,15 @@
  *
  * The agent emits {@link ToolDidInvokePayload} on the `tool.didInvoke` chain
  * channel right after a tool returns, BEFORE rendering the result and pushing
- * it to the model. Plugins (the `diagnostics` plugin is the first consumer, but
- * the shape is deliberately tool-agnostic) receive the payload, may run their
- * own work, and push entries into the two accumulators:
- *
- *  - {@link ToolDidInvokePayload.findings}: STRUCTURED results the AGENT renders
- *    into its own gutter/palette chrome (the agent owns the TUI; plugins provide
- *    data — never pre-rendered ANSI).
- *  - {@link ToolDidInvokePayload.notes}: model-facing one-liners the agent wraps
- *    in a `<ma::agent::diagnostics>` annotation on the `tool_result` content.
+ * it to the model. Pre-tool veto/rewrite uses {@link ToolWillInvokePayload} in
+ * `src/sdk/lifecycle.ts` (`tool.willInvoke` / LifecyclePort.beforeTool).
  *
  * Why a chain (not broadcast): a chain lets the emitter read the mutated payload
- * back synchronously after all listeners ran, which is exactly "let plugins
- * augment this tool result, then I render the union." Listener errors/timeouts
- * are absorbed by the bus, so a misbehaving plugin can never break the tool loop.
+ * back synchronously after all listeners ran. Listener errors/timeouts are
+ * absorbed by the bus, so a misbehaving plugin can never break the tool loop.
  *
  * This module has ZERO dependencies on agent or plugin internals: it is a pure
- * data contract + tiny guard helpers, unit-testable in isolation. Both the agent
- * (emitter) and any plugin (listener) agree on it structurally.
+ * data contract + tiny guard helpers, unit-testable in isolation.
  *
  * @module plugins/hooks/tool-lifecycle
  */

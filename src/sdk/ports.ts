@@ -18,6 +18,32 @@ import type { TransportFn } from "../llm/transport/types.ts"
 import type { NetworkClient } from "../network/index.ts"
 
 import type { EventSink } from "./events.ts"
+import type { LifecyclePort } from "./lifecycle.ts"
+
+export type {
+  CompactDidRunPayload,
+  CompactWillRunPayload,
+  CwdDidChangePayload,
+  InstructionsDidLoadPayload,
+  LifecyclePort,
+  PolicyDecision,
+  SendSnapshot,
+  SessionLifecyclePayload,
+  SubagentWillSpawnPayload,
+  ToolBatchItem,
+  ToolDidBatchPayload,
+  ToolWillInvokePayload,
+  TurnEndPayload,
+  TurnWillStartPayload,
+} from "./lifecycle.ts"
+export {
+  allowDecision,
+  chainResultToDecision,
+  collectAdditionalContext,
+  denyDecision,
+  isDenied,
+  NOOP_LIFECYCLE,
+} from "./lifecycle.ts"
 
 // ---------------------------------------------------------------------------
 // Tool surface
@@ -296,6 +322,11 @@ export interface AgentCoreConfig {
   maxTokens: number
   /** Reasoning effort level. */
   effort?: "low" | "medium" | "high" | "max"
+  /**
+   * JSON Schema for constrained final answers (`--output-schema`). Merged into
+   * `outputConfig.format` on each send when set.
+   */
+  outputSchema?: object
   /** Thinking display mode. */
   thinkingDisplay?: "summarized" | "omitted"
   /**
@@ -339,4 +370,11 @@ export interface AgentCoreConfig {
    * `./events.ts`.
    */
   eventSink?: EventSink
+  /**
+   * Optional lifecycle / policy port (beforeSend, beforeTool, afterToolBatch,
+   * compact, session). Hosts wire a HookBus adapter; omit or pass
+   * {@link NOOP_LIFECYCLE} when no plugins are loaded. AgentCore never imports
+   * HookBus directly (DIP).
+   */
+  lifecycle?: LifecyclePort
 }
