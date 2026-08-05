@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
+import { displayWidth } from "../terminal/term-width.ts"
+
 import { make } from "./editor-controller.fixtures.ts"
 
 describe("EditorController — footer rows (live-area slots)", () => {
@@ -75,6 +77,33 @@ describe("EditorController — footer rows (live-area slots)", () => {
     ctrl.setFooterLines([])
     // Layout: [editor] = 1 row.
     expect(compositor.last()!.lines.length).toBe(1)
+    ctrl.stop()
+  })
+
+  it("footer and decoration lines are truncated to cols-1 (no DECAWM wrap / live-area dup)", () => {
+    // Live-area invariant (see compositor drawLiveSeq / MA-481485): every
+    // painted row must stay ≤ cols cells so logical row count == physical
+    // row count. Status already clamps; a long diagnostic footer (e.g.
+    // web-search 429 JSON) used to wrap on the terminal, desync erase, and
+    // duplicate status / "ASK ❯ ^ N more lines" frames.
+    const { ctrl, compositor } = make({ columns: 20, resizeDebounceMs: 0 })
+    ctrl.start()
+    const longWarn =
+      '⚠ web-search.chain: provider "brave" failed: HTTP 429 Too Many Requests: {"type":"ErrorResponse","error":{"status":429,"detail":"Request rate limit exceeded for plan"}}'
+    ctrl.setDecorationLines([`queued · ${"x".repeat(40)}`])
+    ctrl.setFooterLines([longWarn, "⇆ intercom · 1 online"])
+    const last = compositor.last()!
+    const budget = 19 // cols-1
+    for (const line of last.lines) {
+      expect(displayWidth(line)).toBeLessThanOrEqual(budget)
+    }
+    const footer = last.lines.at(-1) ?? ""
+    expect(footer).toContain("intercom")
+    const warnRow = last.lines.at(-2) ?? ""
+    expect(displayWidth(warnRow)).toBeLessThanOrEqual(budget)
+    expect(warnRow.includes("web-search") || warnRow.includes("⚠") || warnRow.includes("...")).toBe(
+      true,
+    )
     ctrl.stop()
   })
 })
