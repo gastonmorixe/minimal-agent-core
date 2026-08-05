@@ -1337,7 +1337,19 @@ export class EditorController extends EventEmitter {
     // Compose ONCE per repaint and thread the result through height
     // math (above) and layout assembly (below). The layer stack is
     // the source of truth; we never read a stale field.
-    const composedFooter = this.composeFooter()
+    const composedFooterRaw = this.composeFooter()
+    // Live-area invariant (compositor drawLiveSeq / MA-481485): every painted
+    // row must stay ≤ cols cells so logical row count == physical row count.
+    // Status already clamps; footer (diagnostic ⚠ lines with long JSON) and
+    // decoration did not — terminal DECAWM wrap then desynced eraseLiveSeq and
+    // duplicated status / scroll-indicator frames. Budget cols-1 when cols>1.
+    const liveLineBudget = typeof cols === "number" && cols > 1 ? cols - 1 : (cols ?? 0)
+    const clampLiveLine = (line: string): string =>
+      !line || !cols || cols <= 0 || liveLineBudget <= 0
+        ? line
+        : truncateDisplayWidth(line, liveLineBudget)
+    const composedFooter = composedFooterRaw.map(clampLiveLine)
+    const decorationClamped = this.decorationLines.map(clampLiveLine)
     const footerSpacerRows = composedFooter.length > 0 ? 1 : 0
     const footerRows = composedFooter.length + footerSpacerRows
     const cap = Math.max(1, this.maxLiveHeight())
@@ -1357,15 +1369,11 @@ export class EditorController extends EventEmitter {
       // next, so this is defensive rather than the sole load-bearing
       // fix (MA-481485). Primary fix is repaint suppression while
       // resizeDebounceTimer is armed, plus compositor stream hold.
-      const statusBudgetOwned = typeof cols === "number" && cols > 1 ? cols - 1 : (cols ?? 0)
-      const statusLineOwned =
-        !rawStatusOwned || !cols || cols <= 0
-          ? rawStatusOwned
-          : truncateDisplayWidth(rawStatusOwned, statusBudgetOwned)
+      const statusLineOwned = clampLiveLine(rawStatusOwned)
       const ownedHead: string[] = statusReserved ? [statusLineOwned] : []
       const ownedGap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
       const ownedFooter = composedFooter.length > 0 ? [...composedFooter] : []
-      const ownedLines = [...ownedHead, ...this.decorationLines, ...ownedGap, ...ownedFooter]
+      const ownedLines = [...ownedHead, ...decorationClamped, ...ownedGap, ...ownedFooter]
       const ownedTarget = ownedLines.length
       if (ownedTarget !== this.compositor.liveHeight) {
         this.compositor.setLiveHeight(Math.max(1, ownedTarget))
@@ -1481,10 +1489,8 @@ export class EditorController extends EventEmitter {
     }
 
     const rawStatus = this.statusLine ?? ""
-    // See overlay path above: defensive cols-1 status budget (MA-481485).
-    const statusBudget = typeof cols === "number" && cols > 1 ? cols - 1 : (cols ?? 0)
-    const statusLine =
-      !rawStatus || !cols || cols <= 0 ? rawStatus : truncateDisplayWidth(rawStatus, statusBudget)
+    // See overlay path / clampLiveLine above: defensive cols-1 budget (MA-481485).
+    const statusLine = clampLiveLine(rawStatus)
 
     let finalLines: string[]
     let finalCursor: { row: number; col: number }
@@ -1503,7 +1509,7 @@ export class EditorController extends EventEmitter {
     //                               `composeFooter` for the contract.)
     // Cursor offset = (statusRows = statusFilled?1:0 + decorationRows)
     //               + statusGapRows + indicatorOffset.
-    const decoration = this.decorationLines
+    const decoration = decorationClamped
     const head: string[] = statusReserved ? [statusLine] : []
     const gap: string[] = statusGapRows > 0 ? Array(statusGapRows).fill("") : []
     const footerWithSpacer = composedFooter.length > 0 ? ["", ...composedFooter] : []
