@@ -5,9 +5,13 @@ type: changelog
 status: living
 working-dir: "/Users/gaston/Projects/minimal-agent"
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-05T11:00:00-0400"
+updated-at: "2026-08-05T11:30:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-05-husky-commitlint-ci"
+    type: chore
+    status: landed
+    detail: "Husky + Commitlint + CI commitlint job; Actions checkout/upload-artifact v7"
   - id: "2026-08-05-tool-output-mega-line-caps"
     type: fix
     status: landed
@@ -41,6 +45,24 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Chore: Husky, Commitlint, and CI Action bumps
+
+---
+id: "2026-08-05-husky-commitlint-ci"
+type: chore
+status: landed
+created-at: "2026-08-05T11:30:00-0400"
+updated-at: "2026-08-05T11:30:00-0400"
+---
+
+Conventional Commits enforced locally via Husky `commit-msg` → Commitlint
+(`commitlint.config.js`, `prepare` → `husky`) and in GitHub Actions via a
+`commitlint` job (`bun run commitlint:last` on push; PR range lint). The same
+hook runs agent-gated `scripts/check-agent-coauthor.sh` when
+`MINIMAL_AGENT_SESSION_ID` is set (humans unaffected). Workflows use
+`actions/checkout@v7` and `actions/upload-artifact@v7`; install steps set
+`HUSKY=0`.
 
 ### Fix: Tool output mega-line / TUI flood caps
 
