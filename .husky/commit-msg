@@ -1,0 +1,2 @@
+bunx --no -- commitlint --edit "$1"
+./scripts/check-agent-coauthor.sh "$1"

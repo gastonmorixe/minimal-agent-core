@@ -49,13 +49,19 @@
     "imports": "biome check --write --formatter-enabled=false --linter-enabled=false .",
     "docs:check": "tools/docs/node_modules/.bin/typedoc --options typedoc.json",
     "check": "bun run scripts/check.ts",
-    "workspaces:list": "bun pm ls --all"
+    "workspaces:list": "bun pm ls --all",
+    "prepare": "husky",
+    "commitlint": "commitlint",
+    "commitlint:last": "commitlint --last --verbose"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "bun-types": "catalog:",
     "eslint-plugin-jsdoc": "catalog:",
     "eslint-plugin-tsdoc": "catalog:",
+    "husky": "^9.1.7",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:"

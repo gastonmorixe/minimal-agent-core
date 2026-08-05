@@ -50,7 +50,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # For PR events, check out the PR head (not the synthetic merge commit)
           # so the tarball matches what is being proposed.
@@ -66,6 +66,8 @@ jobs:
         run: brew install ripgrep
 
       - name: Install dependencies
+        env:
+          HUSKY: "0"
         run: bun install --frozen-lockfile
 
       - name: Run check
@@ -123,7 +125,7 @@ jobs:
         run: ./scripts/build-tarball.sh "${{ steps.meta.outputs.label }}" dist
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: minimal-agent-${{ steps.meta.outputs.label }}
           path: dist/*
