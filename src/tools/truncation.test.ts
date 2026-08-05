@@ -1,6 +1,25 @@
 import { describe, expect, it } from "bun:test"
 
-import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES, truncateToolOutput } from "./truncation.ts"
+import {
+  clampToolOutputLines,
+  clampToolRaw,
+  MAX_TOOL_OUTPUT_BYTES,
+  MAX_TOOL_OUTPUT_LINE_CHARS,
+  MAX_TOOL_OUTPUT_LINES,
+  MAX_TOOL_RAW_BYTES,
+  truncateToolOutput,
+} from "./truncation.ts"
+
+/** Many short lines totaling at least `minBytes` (each line under the per-line cap). */
+function shortLinesAtLeast(minBytes: number, lineLen = 64): string {
+  const lines: string[] = []
+  let size = 0
+  while (size < minBytes) {
+    lines.push("x".repeat(lineLen))
+    size += lineLen + 1
+  }
+  return lines.join("\n")
+}
 
 describe("truncateToolOutput — passthrough", () => {
   it("returns input unchanged when under both budgets", () => {
@@ -19,8 +38,13 @@ describe("truncateToolOutput — passthrough", () => {
     expect(info.shownLines).toBe(0)
   })
 
-  it("does not append a notice at exactly the byte budget", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES)
+  it("does not append a notice at exactly the byte budget (short lines)", () => {
+    // One mega-line of MAX bytes would trip the per-line cap; build short lines
+    // that land at-or-under the byte budget and under the line-char cap.
+    const lineLen = 64
+    const n = Math.floor(MAX_TOOL_OUTPUT_BYTES / (lineLen + 1))
+    const s = Array.from({ length: n }, () => "x".repeat(lineLen)).join("\n")
+    expect(Buffer.byteLength(s, "utf8")).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_BYTES)
     const { content, info } = truncateToolOutput(s)
     expect(content).toBe(s)
     expect(content).not.toContain("[truncated:")
@@ -38,7 +62,7 @@ describe("truncateToolOutput — passthrough", () => {
 
 describe("truncateToolOutput — notice shape", () => {
   it("appends exactly one notice line prefixed with [truncated:", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES + 1000)
+    const s = shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES + 1000)
     const { content } = truncateToolOutput(s)
     const lines = content.split("\n").filter((l) => l.startsWith("[truncated:"))
     expect(lines.length).toBe(1)
@@ -47,16 +71,18 @@ describe("truncateToolOutput — notice shape", () => {
     )
   })
 
-  it("reports `unknown` for totals when ctx omits them", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES + 500)
-    const { content } = truncateToolOutput(s)
-    expect(content).toMatch(/of unknown bytes/)
-    expect(content).toMatch(/\/unknown lines/)
+  it("reports measured totals when ctx omits them", () => {
+    const s = shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES + 500)
+    const { content, info } = truncateToolOutput(s)
+    const total = Buffer.byteLength(s, "utf8")
+    expect(content).toContain(`of ${total} bytes`)
+    expect(info.totalBytes).toBe(total)
+    expect(info.totalLines).toBe(s.split("\n").length)
   })
 
   it("reports exact totals when ctx provides them", () => {
     const total = MAX_TOOL_OUTPUT_BYTES * 4
-    const s = "x".repeat(total)
+    const s = shortLinesAtLeast(total)
     const { content, info } = truncateToolOutput(s, { totalBytes: total, totalLines: 1 })
     expect(content).toContain(`of ${total} bytes`)
     expect(content).toContain(`/1 lines`)
@@ -87,8 +113,19 @@ describe("truncateToolOutput — line/byte budgets", () => {
     expect(info.shownLines).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_LINES)
   })
 
-  it("clamps when over byte budget but under line budget (one huge line)", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES * 3)
+  it("clamps a single mega-line to MAX_TOOL_OUTPUT_LINE_CHARS before byte budget", () => {
+    const s = "x".repeat(MAX_TOOL_OUTPUT_LINE_CHARS * 3)
+    const { content, info } = truncateToolOutput(s)
+    expect(content).toContain("[truncated:")
+    expect(info.truncated).toBe(true)
+    const kept = content.split("\n\n[truncated:")[0]
+    expect(kept).toContain("...(+")
+    expect(kept.length).toBeLessThan(MAX_TOOL_OUTPUT_LINE_CHARS + 40)
+    expect(info.totalBytes).toBe(Buffer.byteLength(s, "utf8"))
+  })
+
+  it("clamps when over byte budget via many short lines (under per-line cap)", () => {
+    const s = shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES * 3)
     const { content, info } = truncateToolOutput(s)
     expect(content).toContain("[truncated:")
     const kept = content.split("\n\n[truncated:")[0]
@@ -97,7 +134,7 @@ describe("truncateToolOutput — line/byte budgets", () => {
   })
 
   it("never returns a string longer than budget + small notice overhead", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES * 10)
+    const s = shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES * 10)
     const { content } = truncateToolOutput(s)
     expect(Buffer.byteLength(content)).toBeLessThan(MAX_TOOL_OUTPUT_BYTES + 500)
   })
@@ -118,7 +155,7 @@ describe("truncateToolOutput — cut location", () => {
   })
 
   it("`cut at byte` equals shown bytes", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES * 2)
+    const s = shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES * 2)
     const { content, info } = truncateToolOutput(s)
     const shown = Number(content.match(/shown (\d+) of/)![1])
     const cut = Number(content.match(/cut at byte (\d+),/)![1])
@@ -171,9 +208,18 @@ describe("truncateToolOutput — per-tool resume hints", () => {
 
 describe("truncateToolOutput — utf-8 safety", () => {
   it("does not split a multi-byte codepoint at the byte boundary", () => {
-    // "🙂" is 4 bytes; pad so the boundary lands mid-codepoint.
-    const pad = "a".repeat(MAX_TOOL_OUTPUT_BYTES - 2)
-    const s = pad + "🙂🙂🙂🙂🙂"
+    // Many short lines totaling just under the byte budget, then a final
+    // line that pushes past it mid-emoji. Per-line lengths stay under the
+    // line-char cap so the byte clamp (not the line clamp) is what cuts.
+    const lineLen = 64
+    const lines: string[] = []
+    let size = 0
+    while (size + lineLen + 1 < MAX_TOOL_OUTPUT_BYTES - 8) {
+      lines.push("a".repeat(lineLen))
+      size += lineLen + 1
+    }
+    lines.push(`aa🙂🙂🙂🙂🙂`)
+    const s = lines.join("\n")
     const { content } = truncateToolOutput(s)
     // No replacement char from broken utf-8 in the kept content.
     const kept = content.split("\n\n[truncated:")[0]
@@ -193,7 +239,7 @@ describe("truncateToolOutput — info object", () => {
   })
 
   it("info.totalBytes/totalLines reflect ctx values when source was bigger", () => {
-    const s = "x".repeat(MAX_TOOL_OUTPUT_BYTES + 500)
+    const s = shortLinesAtLeast(MAX_TOOL_OUTPUT_BYTES + 500)
     const { info } = truncateToolOutput(s, {
       totalBytes: 10_000_000,
       totalLines: 42_000,
@@ -210,5 +256,36 @@ describe("truncateToolOutput — info object", () => {
     const body = content.split("\n\n[truncated:")[0]
     expect(info.shownBytes).toBe(Buffer.byteLength(body, "utf8"))
     expect(info.shownLines).toBe(body.split("\n").length)
+  })
+})
+
+describe("clampToolOutputLines", () => {
+  it("passes through when under the per-line cap", () => {
+    const s = "short\nlines\nok"
+    expect(clampToolOutputLines(s)).toEqual({ text: s, clamped: false })
+  })
+
+  it("clips each mega-line and marks clamped", () => {
+    const s = `${"a".repeat(MAX_TOOL_OUTPUT_LINE_CHARS + 50)}\nshort`
+    const { text, clamped } = clampToolOutputLines(s)
+    expect(clamped).toBe(true)
+    const [first, second] = text.split("\n")
+    expect(first.startsWith("a".repeat(MAX_TOOL_OUTPUT_LINE_CHARS))).toBe(true)
+    expect(first).toContain("...(+50ch)")
+    expect(second).toBe("short")
+  })
+})
+
+describe("clampToolRaw", () => {
+  it("passes through under the raw blob ceiling", () => {
+    const s = "x".repeat(1000)
+    expect(clampToolRaw(s)).toBe(s)
+  })
+
+  it("caps at MAX_TOOL_RAW_BYTES", () => {
+    const s = "x".repeat(MAX_TOOL_RAW_BYTES + 50_000)
+    const out = clampToolRaw(s)
+    expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
+    expect(out.length).toBeLessThan(s.length)
   })
 })

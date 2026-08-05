@@ -40,7 +40,12 @@ import { parseJsonc } from "../utils/jsonc.ts"
 import * as ToolPrompts from "./PROMPTS.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
 import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
-import { type TruncateCtx, type TruncationInfo, truncateToolOutput } from "./truncation.ts"
+import {
+  clampToolRaw,
+  type TruncateCtx,
+  type TruncationInfo,
+  truncateToolOutput,
+} from "./truncation.ts"
 
 export { TOOL_DEFINITIONS }
 
@@ -51,13 +56,14 @@ const MAX_READ_BYTES = 50 * 1024 * 1024 // 50 MiB: blocks runaway whole-file rea
  * in memory, enforced DURING the streaming drain (B-005). Without it `drain()`
  * does `acc += s` with no bound, so a high-volume command (`cat /dev/zero`,
  * `yes`, a chatty build) grows the accumulator until the process OOMs — long
- * before the post-hoc 64 KB clamp in {@link executeTool} ever runs. 10 MiB is
- * far above any legitimate interactive command's output (and ~160x the post-hoc
- * clamp, so real build logs are still captured whole for the blob store) while
- * still bounding memory hard. On crossing it we terminate the child group and
- * return the capped output with unknown totals.
+ * before the post-hoc 64 KB clamp in {@link executeTool} ever runs.
+ *
+ * 512 KiB is intentionally tight: ~8× the model-facing 64 KB clamp, enough
+ * head for a useful blob-store recovery slice, but not enough to materialize
+ * a minified webpack bundle (Adrian 2026-08-05: 7.2 MB single-line `rg` hit).
+ * On crossing it we terminate the child group and return the capped output.
  */
-const MAX_BASH_OUTPUT_BYTES = 10 * 1024 * 1024
+export const MAX_BASH_OUTPUT_BYTES = 512 * 1024
 
 /**
  * A non-text block a tool may attach to its `tool_result`. Today only canonical
@@ -352,8 +358,11 @@ export async function executeTool(
     // Surface the pre-clamp body to the agent's blob-store hook ONLY
     // when the clamp actually fired. When `info.truncated === false`,
     // `content` already equals the full body and there's nothing
-    // additional to preserve. See `src/blob-store.ts`.
-    if (info.truncated) r._raw = preClamp
+    // additional to preserve. Cap the persisted slice so a pathological
+    // tool body (Read of a huge file, Bash mega-line before drain kill)
+    // cannot write multi-MB blobs. See `src/blob-store.ts` /
+    // `MAX_TOOL_RAW_BYTES`.
+    if (info.truncated) r._raw = clampToolRaw(preClamp)
   }
   // `_truncCtx` was an executor→clamp ferry; once consumed, drop it. We
   // intentionally KEEP `_truncInfo`, `_aborted`, and `_raw` so the
@@ -1150,12 +1159,13 @@ async function execGlob(
 }
 
 /**
- * Hard ceiling on Grep stdout+stderr buffered in memory (parity with the old
- * `spawnSync` `maxBuffer: 2 MiB`). Enforced during the async drain so a
- * pathological match set can't OOM the agent while still yielding to the
- * event loop so the TUI live area keeps painting.
+ * Hard ceiling on Grep stdout+stderr buffered in memory. Aligned with the
+ * Bash drain ceiling so a single mega-line match (minified bundle) cannot
+ * buffer multi-MB before the universal clamp. Enforced during the async
+ * drain so a pathological match set can't OOM the agent while still
+ * yielding to the event loop so the TUI live area keeps painting.
  */
-const MAX_GREP_OUTPUT_BYTES = 2 * 1024 * 1024
+export const MAX_GREP_OUTPUT_BYTES = 512 * 1024
 
 /** Wall-clock limit for a single `rg` invocation (ms). */
 const GREP_TIMEOUT_MS = 30_000

@@ -13,8 +13,8 @@
  *    the model is stripped from the displayed body and replaced with a
  *    bare-facts footer (`shown N/M L · X/Y B · cut at L`) — no model-facing
  *    action verbs in the human-facing transcript.
- *  - Per-line display-width is capped at 300 cells so a single 10_000-char
- *    minified blob doesn't dominate the preview.
+ *  - Per-line display-width is capped at TOOL_PREVIEW_LINE_WIDTH (200)
+ *    cells so a single 10_000-char minified blob doesn't dominate the preview.
  *
  * Audience split (this is the load-bearing invariant):
  *   - `tool_result.content` (sent to the API) keeps the verbose notice
@@ -34,7 +34,12 @@ import {
   formatToolInput,
   formatToolInputContinuation,
   formatToolPreview,
+  renderStreamedTail,
+  TOOL_PREVIEW_LINE_WIDTH,
 } from "./format.ts"
+
+/** Body cells kept at the hard cap after reserving 12 for `...(+Nch)`. */
+const PREVIEW_BODY_AT_CAP = TOOL_PREVIEW_LINE_WIDTH - 12
 
 /** Strip ANSI escapes so assertions don't fight against the SGR wrap. */
 function stripAnsi(s: string): string {
@@ -760,26 +765,23 @@ describe("formatToolPreview — `┊` truncation separator", () => {
 })
 
 describe("formatToolPreview — per-line display-width clamp", () => {
-  it("clamps a single mega-line to the 300-cell hard cap with truncHint reserve", () => {
+  it("clamps a single mega-line to the hard cap with truncHint reserve", () => {
     const huge = "x".repeat(5_000)
     const lines = formatToolPreview(huge, false, undefined, { tool: "Bash" })
     // One body row.
     expect(lines.length).toBe(1)
     const visible = stripAnsi(lines[0])
     expect(visible).toContain("...(+")
-    // Body must fit within the 300-cell cap : the trim reserves
-    // `TOOL_PREVIEW_HINT_RESERVE_WIDTH` (12) cells for the hint marker,
-    // so the x-run is 300 - 12 = 288 cells. The full body (xs + hint)
-    // lands at ≤ 300 cells, which is the invariant the user cares
-    // about (no terminal wrap on terminals ≥ 305 cols).
+    // Body must fit within TOOL_PREVIEW_LINE_WIDTH : the trim reserves
+    // 12 cells for the hint marker, so the x-run is cap - 12.
     const xs = visible.match(/x+/)?.[0] ?? ""
-    expect(xs.length).toBe(288)
-    // Body + gutter prefix ("  │ " = 4 cells) ≤ 304 cells.
-    expect(displayWidth(visible)).toBeLessThanOrEqual(304)
+    expect(xs.length).toBe(PREVIEW_BODY_AT_CAP)
+    // Body + gutter prefix ("  │ " = 4 cells) ≤ cap + 4.
+    expect(displayWidth(visible)).toBeLessThanOrEqual(TOOL_PREVIEW_LINE_WIDTH + 4)
   })
 
   it("does NOT clamp lines under the per-line cap", () => {
-    const line = "x".repeat(250)
+    const line = "x".repeat(150)
     const lines = formatToolPreview(line, false, undefined, { tool: "Bash" })
     expect(stripAnsi(lines[0])).not.toContain("...(+")
   })
@@ -793,10 +795,10 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
   //   ne\",\"title\":\"Scaffold rese
   //   arch/...
   //
-  // because `formatToolPreview` only clamped at the 300-cell hard cap
-  // and a 200-char body line in a 90-col terminal fits the 300 cap but
-  // overflows the visible width. The fix : clamp to
-  // `min(terminal_cols - gutter - safety, 300)` at render time.
+  // because `formatToolPreview` only clamped at the hard cap and a long
+  // body line in a 90-col terminal can fit the hard cap but overflow the
+  // visible width. The fix : clamp to
+  // `min(terminal_cols - gutter - safety, TOOL_PREVIEW_LINE_WIDTH)`.
   it("clamps body lines to terminal width when cols is passed (no terminal wrap)", () => {
     // 200-char line, cols=90 → effective width = 90 - 4 - 1 = 85.
     // The trim reserves 12 cells for the truncHint marker, so the y-run
@@ -814,19 +816,18 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
     expect(ys.length).toBe(73)
   })
 
-  it("uses the 300-cell hard cap when terminal cols are wider than 305", () => {
-    // 5_000-char line, cols=400 → effective width = min(395, 300) = 300.
-    // Hint reserve cuts the z-run to 300 - 12 = 288. Same shape as the
-    // "no cols" test (where cols defaults to 300).
+  it("uses the hard cap when terminal cols are wider than the cap + gutter", () => {
+    // 5_000-char line, cols=400 → effective width = min(395, cap) = cap.
+    // Hint reserve cuts the z-run to cap - 12. Same shape as the "no cols"
+    // test (where cols defaults to the hard cap).
     const huge = "z".repeat(5_000)
     const lines = formatToolPreview(huge, false, undefined, { tool: "Bash", cols: 400 })
     expect(lines.length).toBe(1)
     const visible = stripAnsi(lines[0])
     expect(visible).toContain("...(+")
     const zs = visible.match(/z+/)?.[0] ?? ""
-    expect(zs.length).toBe(288)
-    // Body + gutter ≤ 304 cells (under the 400-col terminal).
-    expect(displayWidth(visible)).toBeLessThanOrEqual(304)
+    expect(zs.length).toBe(PREVIEW_BODY_AT_CAP)
+    expect(displayWidth(visible)).toBeLessThanOrEqual(TOOL_PREVIEW_LINE_WIDTH + 4)
   })
 
   it("does NOT trim a body line that fits in the terminal", () => {
@@ -838,7 +839,7 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
 
   it("clamps the display channel too when cols is passed (Edit/Write diffs in narrow terminal)", () => {
     // A 200-char synthetic diff line in an 80-col terminal MUST clamp,
-    // even though it's the "display" branch (where 300-cell preview cap
+    // even though it's the "display" branch (where the preview hard cap
     // doesn't apply : but the terminal-cols rule still does).
     const display = `+${"a".repeat(199)}`
     const lines = formatToolPreview("model-compact", false, display, {
@@ -856,7 +857,7 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
     expect(visible).toMatch(/\.{3}\(\+\d+ch\)/)
   })
 
-  it("ignores cols=0 / NaN / negative and falls back to the 300-cell hard cap", () => {
+  it("ignores cols=0 / NaN / negative and falls back to the hard cap", () => {
     const huge = "w".repeat(5_000)
     // Each pathological cols input falls back to the hard cap so the
     // body always renders with a visible content slice.
@@ -865,10 +866,10 @@ describe("formatToolPreview — terminal-cols clamp on body lines", () => {
       const visible = stripAnsi(lines[0])
       expect(visible).toContain("...(+")
       const ws = visible.match(/w+/)?.[0] ?? ""
-      // 288 for all of the above : finite-but-≤0 collapses to the
-      // 300-cell hard cap, Infinity goes to the cap via Math.min, and
-      // both then reserve 12 cells for the hint marker → 288 body.
-      expect(ws.length).toBe(288)
+      // PREVIEW_BODY_AT_CAP for all of the above : finite-but-≤0 collapses
+      // to the hard cap, Infinity goes to the cap via Math.min, and both
+      // then reserve 12 cells for the hint marker.
+      expect(ws.length).toBe(PREVIEW_BODY_AT_CAP)
     }
   })
 
@@ -1050,5 +1051,39 @@ describe("formatToolPreview — error coloring", () => {
     const lines = formatToolPreview("oops", true, undefined, { tool: "Bash" })
     // Red SGR open + red close in the rendered line.
     expect(lines[0]).toMatch(/\x1b\[31m.*\x1b\[39m/)
+  })
+})
+
+describe("renderStreamedTail — mega-line must not flood scrollback", () => {
+  // Regression for Adrian 2026-08-05: when a truncation footer was present,
+  // writeLastLine word-wrapped bufferedLastLineRaw into tens of thousands of
+  // `│` rows. Now it must emit the pre-clamped single row only.
+  it("emits one body row even when bufferedLastLineRaw is a 50k mega-line", () => {
+    const clamped = "head...(+49000ch)"
+    const mega = "m".repeat(50_000)
+    const written: string[] = []
+    renderStreamedTail({
+      bufferedLastLine: clamped,
+      bufferedLastLineRaw: mega,
+      streamedLineCount: 1,
+      budget: 10,
+      truncInfo: {
+        truncated: true,
+        shownBytes: 64_000,
+        shownLines: 1,
+        totalBytes: 7_500_000,
+        totalLines: 1,
+        cutLine: 1,
+      },
+      writeTranscript: (line) => written.push(line),
+      cols: 100,
+    })
+    // body + ┊ + footer — never thousands of wrap fragments
+    expect(written.length).toBeLessThanOrEqual(4)
+    expect(written.length).toBeGreaterThanOrEqual(3)
+    const body = stripAnsi(written[0] ?? "")
+    expect(body).toContain(clamped)
+    expect(body).not.toContain("mmmmm")
+    expect(written.some((l) => stripAnsi(l).includes("shown 1/1 L"))).toBe(true)
   })
 })

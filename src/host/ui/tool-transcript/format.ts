@@ -581,7 +581,13 @@ export function computeTuiElision(
  * permanent : a later resize does not re-render older blocks, but every
  * new tool block paints correctly under the new width.
  */
-const TOOL_PREVIEW_LINE_WIDTH = 300
+/**
+ * Hard per-line display-width cap for tool transcript body rows (cells).
+ * Intentionally tight: a single mega-line must never paint as a wall of
+ * soft-wrapped scrollback. Terminal width still wins when narrower
+ * (`effectiveBodyLineWidth` = min(term-gutter-safety, this)).
+ */
+export const TOOL_PREVIEW_LINE_WIDTH = 200
 export const TOOL_PREVIEW_GUTTER_WIDTH = 4
 const TOOL_PREVIEW_WRAP_SAFETY_WIDTH = 1
 
@@ -613,9 +619,10 @@ function toolPreviewBodyWidth(cols?: number): number | undefined {
  * Always returns a positive integer. When the terminal width signal is
  * missing OR pathologically small (≤ gutter), falls back to the fixed
  * hard cap so the behavior in unit tests (no TTY, no `cols` argument)
- * stays deterministic at 300 cells. In production with a real TTY the
- * terminal-derived width almost always wins (e.g. an 127-col terminal
- * gives 127 − 4 − 1 = 122, well below the 300 cap).
+ * stays deterministic at {@link TOOL_PREVIEW_LINE_WIDTH} cells. In
+ * production with a real TTY the terminal-derived width almost always
+ * wins (e.g. an 127-col terminal gives 127 − 4 − 1 = 122, well below
+ * the 200-cell hard cap).
  *
  * Mirrors the semantic of `toolPreviewBodyWidth` but collapses the
  * "no width" sentinel to the hard cap so callers don't need a separate
@@ -902,11 +909,11 @@ export function formatToolPreview(
   // unified diff from Edit/Write), render it as-is, line by line, with the
   // standard `│ ... └` connector gutter. Per-line clamp to the live
   // terminal width still applies so a 400-char diff line in a 90-col
-  // terminal doesn't soft-wrap into the gutter ; we don't apply the 300-
-  // cell preview cap here (diffs are the point on wide terminals). When
-  // the caller has no width signal (e.g. unit tests with no TTY and no
-  // `opts.cols`), `toolPreviewBodyWidth` returns `undefined` and
-  // `clampToolPreviewBodyLine` becomes a no-op : full-width verbatim
+  // terminal doesn't soft-wrap into the gutter ; we don't apply the
+  // TOOL_PREVIEW_LINE_WIDTH preview cap here (diffs are the point on wide
+  // terminals). When the caller has no width signal (e.g. unit tests with
+  // no TTY and no `opts.cols`), `toolPreviewBodyWidth` returns `undefined`
+  // and `clampToolPreviewBodyLine` becomes a no-op : full-width verbatim
   // output for tests, terminal-aware clamping in production.
   if (display !== undefined && !isError) {
     const out: string[] = []
@@ -1085,16 +1092,7 @@ export function renderStreamedTail(opts: {
   writeTranscript: (line: string) => void
   cols?: number
 }): void {
-  const {
-    bufferedLastLine,
-    bufferedLastLineRaw,
-    streamedLineCount,
-    budget,
-    truncInfo,
-    isError,
-    writeTranscript,
-    cols,
-  } = opts
+  const { bufferedLastLine, streamedLineCount, budget, truncInfo, isError, writeTranscript } = opts
   const visibleCount = Math.min(streamedLineCount, budget)
   const color = isError ? c.red : c.dim
 
@@ -1106,29 +1104,22 @@ export function renderStreamedTail(opts: {
     footer = `shown ${visibleCount}/${totalLines} L`
   }
 
-  // Helper: write word-wrapped fragments of the raw last line.
-  // When cols is available AND bufferedLastLineRaw is set, word-wrap
-  // the raw line (then per-fragment clamp as safety net) so the last
-  // line renders without truncation. Otherwise fall back to the
-  // pre-clamped bufferedLastLine.
+  // Always emit the pre-clamped single row. Never word-wrap
+  // `bufferedLastLineRaw`: a minified mega-line (webpack bundles, etc.)
+  // would otherwise expand into tens of thousands of `│` rows and flood
+  // the transcript (Adrian 2026-08-05: 7.2 MB single-line `rg` hit →
+  // wall of soft-wrapped scrollback under a truncation footer).
+  // `bufferedLastLine` was already width-clamped in `flushLineToBuffer`.
   const writeLastLine = (connector: string) => {
-    const bodyWidth = toolPreviewBodyWidth(cols)
-    const raw = bufferedLastLineRaw ?? bufferedLastLine
-    if (raw === null) {
+    if (bufferedLastLine === null) {
       writeTranscript(`  ${c.dimCyan(connector)}`)
       return
     }
-    const fragments =
-      bodyWidth !== undefined && bufferedLastLineRaw !== null
-        ? wordWrap(raw, bodyWidth).map((f) => clampBodyWithHint(f, bodyWidth))
-        : [bufferedLastLine ?? raw]
-    for (let fi = 0; fi < fragments.length; fi++) {
-      const conn = fi === fragments.length - 1 ? connector : "\u2502"
-      const line = fragments[fi]
-      writeTranscript(
-        line.length === 0 ? `  ${c.dimCyan(conn)}` : `  ${c.dimCyan(conn)} ${color(line)}`,
-      )
-    }
+    writeTranscript(
+      bufferedLastLine.length === 0
+        ? `  ${c.dimCyan(connector)}`
+        : `  ${c.dimCyan(connector)} ${color(bufferedLastLine)}`,
+    )
   }
 
   if (bufferedLastLine === null) {
