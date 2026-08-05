@@ -5,9 +5,13 @@ type: changelog
 status: living
 working-dir: "/Users/gaston/Projects/minimal-agent"
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-01T15:35:00-0400"
+updated-at: "2026-08-05T11:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-05-tool-output-mega-line-caps"
+    type: fix
+    status: landed
+    detail: "docs/changes/2026-08-05-tool-output-mega-line-caps.md"
   - id: "2026-08-01-resume-credential-pin-provider-scope"
     type: fix
     status: landed
@@ -37,6 +41,24 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Fix: Tool output mega-line / TUI flood caps
+
+---
+id: "2026-08-05-tool-output-mega-line-caps"
+type: fix
+status: landed
+created-at: "2026-08-05T11:00:00-0400"
+updated-at: "2026-08-05T11:00:00-0400"
+detail: "docs/changes/2026-08-05-tool-output-mega-line-caps.md"
+---
+
+Hardens buffer, model, blob, and TUI layers against single mega-lines
+(minified bundles). Bash/Grep drain 512 KiB, universal per-line clamp
+8,192 chars, `_raw` blob 256 KB, TUI preview width 200, streamed tail
+never word-wraps raw mega-lines. Read image/`blocks` paths untouched.
+
+See `docs/changes/2026-08-05-tool-output-mega-line-caps.md`.
 
 ### Fix: Resume credential pin scoped to session provider
 

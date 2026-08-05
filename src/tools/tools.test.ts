@@ -4,8 +4,13 @@ import { join } from "node:path"
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 
-import { executeTool, stripInternalFields, type ToolExecResult } from "./tools.ts"
-import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES } from "./truncation.ts"
+import {
+  executeTool,
+  MAX_BASH_OUTPUT_BYTES,
+  stripInternalFields,
+  type ToolExecResult,
+} from "./tools.ts"
+import { MAX_TOOL_OUTPUT_BYTES, MAX_TOOL_OUTPUT_LINES, MAX_TOOL_RAW_BYTES } from "./truncation.ts"
 
 let dir: string
 beforeAll(() => {
@@ -107,21 +112,23 @@ describe("executeTool — universal clamp wiring", () => {
   })
 
   it("Bash output ceiling caps a high-volume command in-stream (B-005)", async () => {
-    // 12 MiB > the 10 MiB MAX_BASH_OUTPUT_BYTES drain ceiling. Without the
-    // in-stream cap the drain accumulator would buffer all of it (and a real
-    // `yes`/`cat /dev/zero` would grow unbounded and OOM) before the post-hoc
-    // 64 KB clamp ever ran.
+    // Just over the drain ceiling. Without the in-stream cap the drain
+    // accumulator would buffer all of it (and a real `yes`/`cat /dev/zero`
+    // would grow unbounded and OOM) before the post-hoc 64 KB clamp ever ran.
+    const over = MAX_BASH_OUTPUT_BYTES + 64 * 1024
     const r = await executeTool("Bash", {
-      command: `yes 0123456789ABCDEF | head -c ${12 * 1024 * 1024}`,
+      command: `yes 0123456789ABCDEF | head -c ${over}`,
     })
     expect(r.is_error).toBe(true)
     expect(r.content).toContain("command terminated and output truncated")
     // The post-hoc universal clamp still applies on top of the in-stream cap.
     expect(r.content).toContain("[truncated:")
-    // Hard memory bound: the model-facing body is clamped to ~64 KB, and even
-    // the preserved pre-clamp body is bounded by the drain ceiling, never the
-    // full firehose.
-    if (r._raw) expect(r._raw.length).toBeLessThan(11 * 1024 * 1024)
+    // Hard memory bound: model-facing body ~64 KB; preserved pre-clamp body
+    // is bounded by MAX_TOOL_RAW_BYTES (and the drain ceiling above that).
+    if (r._raw) {
+      expect(Buffer.byteLength(r._raw, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
+      expect(r._raw.length).toBeLessThan(MAX_BASH_OUTPUT_BYTES + 64 * 1024)
+    }
   }, 30_000)
 })
 
@@ -132,9 +139,8 @@ describe("executeTool — _raw pre-clamp surface (for blob store)", () => {
     })
     expect(r.content).toContain("[truncated:")
     expect(r._raw).toBeDefined()
-    // _raw is the pre-clamp body. It must be at least as large as the
-    // post-clamp content (which still includes the trailing notice).
-    expect(r._raw!.length).toBeGreaterThan(r.content.length)
+    // _raw is the pre-clamp body (possibly capped at MAX_TOOL_RAW_BYTES).
+    expect(Buffer.byteLength(r._raw!, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
     // Trailing notice must NOT be in the raw body (raw is pre-clamp).
     expect(r._raw!).not.toContain("[truncated:")
   })
@@ -146,9 +152,10 @@ describe("executeTool — _raw pre-clamp surface (for blob store)", () => {
     const r = await executeTool("Read", { file_path: path })
     expect(r.content).toContain("[truncated:")
     expect(r._raw).toBeDefined()
-    // Pre-clamp body for Read carries the same `cat -n` style prefix.
-    // Count lines: should equal totalLines (no clamp on raw).
-    expect(r._raw!.split("\n").length).toBeGreaterThanOrEqual(totalLines)
+    // Pre-clamp body for Read may be capped at MAX_TOOL_RAW_BYTES when the
+    // unclamped body would exceed the blob ceiling.
+    expect(Buffer.byteLength(r._raw!, "utf8")).toBeLessThanOrEqual(MAX_TOOL_RAW_BYTES)
+    expect(r._raw!.length).toBeGreaterThan(0)
   })
 
   it("does NOT set _raw when content fits under the cap", async () => {

@@ -546,10 +546,20 @@ export async function executeToolRound(
           // Bash).
           const isBash = toolStreamsOutput
           const STREAM_BUDGET = TOOL_PREVIEW_LINES[tool.name] ?? TOOL_PREVIEW_LINES_DEFAULT
+          /**
+           * Cap on a single newline-free pending stream chunk. Mega-lines
+           * (minified bundles) must not accumulate multi-MB in the TUI
+           * buffer waiting for a newline that never comes, and must not
+           * reach `clampBodyWithHint` / `[...line]` spreads intact.
+           * Preview only needs ~{@link TOOL_PREVIEW_LINE_WIDTH} cells;
+           * keep a small multiple for tab expansion / wide glyphs.
+           */
+          const STREAM_PENDING_LINE_MAX = 4_096
           let streamedLineCount = 0
           let bufferedLastLine: string | null = null
           let bufferedLastLineRaw: string | null = null
           let pendingChunk = ""
+          let discardingLine = false
           let didStream = false
 
           const flushLineToBuffer = (raw: string) => {
@@ -561,6 +571,11 @@ export async function executeToolRound(
             if (bufferedLastLine !== null) {
               writeTranscript(formatStreamBodyRow(bufferedLastLine))
             }
+            // Cheap pre-slice BEFORE expandTabs / displayWidth / codepoint
+            // spreads. Mega-lines are already ruined for preview; keep
+            // the hot path O(width), not O(bundle size).
+            const previewRaw =
+              raw.length > STREAM_PENDING_LINE_MAX ? raw.slice(0, STREAM_PENDING_LINE_MAX) : raw
             // Per-line width clamp : `min(terminal_cols - gutter,
             // TOOL_PREVIEW_LINE_WIDTH)` at the moment this line is
             // emitted. Live width (no `cols` arg → reads
@@ -577,10 +592,12 @@ export async function executeToolRound(
             // Bash output) underflows the cap by 1–8 cells and the
             // trailing `...(+Nch)` hint wraps into the gutter.
             bufferedLastLine = clampBodyWithHint(
-              expandTabs(raw, TOOL_PREVIEW_GUTTER_WIDTH),
+              expandTabs(previewRaw, TOOL_PREVIEW_GUTTER_WIDTH),
               effectiveBodyLineWidth(),
             )
-            bufferedLastLineRaw = raw
+            // Keep only the preview-sized raw slice (never the full
+            // mega-line) for any residual callers of bufferedLastLineRaw.
+            bufferedLastLineRaw = previewRaw
             streamedLineCount++
           }
 
@@ -593,17 +610,32 @@ export async function executeToolRound(
           // `tail -N` or `head -N` that holds all output until EOF).
           let recvBytes = 0
           const onChunk = (s: string) => {
-            pendingChunk += s
             recvBytes += Buffer.byteLength(s, "utf8")
             toolStatus.updateActivity({
               direction: "down",
               recvBytes,
               lastChunkAt: Date.now(),
             })
+            let chunk = s
+            if (discardingLine) {
+              const nlDiscard = chunk.indexOf("\n")
+              if (nlDiscard === -1) return
+              discardingLine = false
+              chunk = chunk.slice(nlDiscard + 1)
+              if (!chunk) return
+            }
+            pendingChunk += chunk
             let nl: number
             while ((nl = pendingChunk.indexOf("\n")) !== -1) {
               flushLineToBuffer(pendingChunk.slice(0, nl))
               pendingChunk = pendingChunk.slice(nl + 1)
+            }
+            // No newline yet and the pending line is already huge: flush
+            // a preview-sized head and discard the rest until `\n`.
+            if (pendingChunk.length > STREAM_PENDING_LINE_MAX) {
+              flushLineToBuffer(pendingChunk.slice(0, STREAM_PENDING_LINE_MAX))
+              pendingChunk = ""
+              discardingLine = true
             }
           }
 
