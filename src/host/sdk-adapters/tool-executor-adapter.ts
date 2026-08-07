@@ -48,6 +48,7 @@ import type { LifecyclePort } from "../../sdk/lifecycle.ts"
 import { NOOP_LIFECYCLE } from "../../sdk/lifecycle.ts"
 import type { ToolExecResult, ToolExecutor } from "../../sdk/ports.ts"
 import type { BlobStore } from "../../session/blob-store.ts"
+import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import type { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
 import type { ToolTimeTracker } from "../../tools/tool-time.ts"
@@ -86,6 +87,8 @@ export interface ToolExecutorAdapterDeps {
    * records, with full blob + presentation fidelity. Defaults to `null`.
    */
   store?: SessionStore | null
+  /** Durable per-session file observation store. */
+  fileTrackingStore?: FileTrackingStore | null
   /**
    * Transcript sink for the tool block's scrollback rows. Purely cosmetic:
    * these lines never reach the model, so a no-op (the default) is
@@ -136,6 +139,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       toolTimeTracker: this.deps.toolTimeTracker ?? null,
       model: this.deps.model,
       store: this.deps.store ?? null,
+      fileTrackingStore: this.deps.fileTrackingStore ?? undefined,
       lifecycle: this.deps.lifecycle ?? NOOP_LIFECYCLE,
       ...(signal ? { signal } : {}),
       ...(agentId ? { agentId } : {}),

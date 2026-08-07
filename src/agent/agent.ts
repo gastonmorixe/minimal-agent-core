@@ -58,6 +58,7 @@ import { outputConfigSpread as buildOutputConfig } from "../sdk/output-config.ts
 import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 import { wrapTransportWithLifecycle } from "../sdk/with-lifecycle-send.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
+import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import { appendUserTurn } from "../session/session-restore.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
@@ -305,6 +306,7 @@ export class Agent {
    * See `src/session-store.ts` for the FORMAT v1 record shape.
    */
   private store: SessionStore | null
+  private fileTrackingStore: FileTrackingStore | null
   /**
    * Optional per-session blob store for raw tool outputs. When set, large
    * or truncated tool bodies are persisted verbatim at
@@ -496,6 +498,8 @@ export class Agent {
      */
     networkClient?: NetworkClient
     store?: SessionStore | null
+    /** Optional durable per-session file observation store. */
+    fileTrackingStore?: FileTrackingStore | null
     /**
      * Optional per-session blob store. When supplied, raw pre-clamp
      * tool outputs are persisted to `<sessionsDir>/<sid>.blobs/` and
@@ -577,6 +581,7 @@ export class Agent {
     this.sendFn = wrapTransportWithLifecycle(opts.sendFn ?? selectedTransport, this.lifecycle)
     this.networkClient = opts.networkClient
     this.store = opts.store ?? null
+    this.fileTrackingStore = opts.fileTrackingStore ?? null
     this.blobStore = opts.blobStore ?? null
     // Resolve the skipTools list once at construction. Reads
     // `~/.minimal-agent/config.jsonc :: plugins["blob-store"].skipTools`
@@ -1579,6 +1584,7 @@ export class Agent {
             toolTimeTracker: this.toolTimeTracker,
             model: this.model,
             store: this.store,
+            fileTrackingStore: this.fileTrackingStore ?? undefined,
             signal,
             lifecycle: this.lifecycle,
             ...(workerAgentId ? { agentId: workerAgentId } : {}),

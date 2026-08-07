@@ -33,10 +33,12 @@ import { configPath as userConfigPath } from "../config/config.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "../infra/file-lock.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
+import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
 
+import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
 import * as ToolPrompts from "./PROMPTS.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
 import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
@@ -263,6 +265,8 @@ export interface ToolExecOpts {
   onStdout?: (chunk: string) => void
   /** Stderr counterpart to {@link onStdout}. Bash-only for now. */
   onStderr?: (chunk: string) => void
+  /** Optional durable tracker for tool file observations. */
+  fileTrackingStore?: FileTrackingStore
 }
 
 /**
@@ -380,16 +384,63 @@ async function dispatch(
   switch (name) {
     case "Bash":
       return execBash(input, opts)
-    case "Read":
-      return execRead(input, opts)
+    case "Read": {
+      const result = await execRead(input, opts)
+      if (opts.fileTrackingStore && typeof input.file_path === "string") {
+        // Record the observation on success AND on a genuinely-missing file
+        // (the read-observed-missing observation is what authorizes a later
+        // `Write` to CREATE the path). Other read failures (EACCES, IO) leave
+        // any prior observation untouched so a stale "present" record can't be
+        // downgraded to "missing" by an unreadable stat.
+        if (!result.is_error || !existsSync(input.file_path)) {
+          opts.fileTrackingStore.track(input.file_path)
+        }
+      }
+      return result
+    }
     case "Write":
-      return withFileLock("Write", input, opts, () => execWrite(input, opts))
+      return withFileLock("Write", input, opts, async () => {
+        const precondition = checkTrackedFilePrecondition(
+          opts.fileTrackingStore,
+          input.file_path,
+          "Write",
+        )
+        if (precondition) return precondition
+        const result = await execWrite(input, opts)
+        recordTrackedFileObservation(opts.fileTrackingStore, input.file_path, result)
+        return result
+      })
     case "Edit":
-      return withFileLock("Edit", input, opts, () => execEdit(input, opts))
+      return withFileLock("Edit", input, opts, async () => {
+        const precondition = checkTrackedFilePrecondition(
+          opts.fileTrackingStore,
+          input.file_path,
+          "Edit",
+        )
+        if (precondition) return precondition
+        const result = await execEdit(input, opts)
+        recordTrackedFileObservation(opts.fileTrackingStore, input.file_path, result)
+        return result
+      })
     case "Glob":
       return execGlob(input, opts)
     case "Grep":
       return execGrep(input, opts)
+    case "FilesStats":
+      if (!opts.fileTrackingStore) {
+        return {
+          content: "FilesStats is unavailable: file tracking is not configured.",
+          is_error: true,
+        }
+      }
+      return {
+        content: formatFilesStatsReport(
+          buildFilesStatsReport(opts.fileTrackingStore, {
+            status: input.status as "all" | "present" | "missing" | "changed" | undefined,
+            path: typeof input.path === "string" ? input.path : undefined,
+          }),
+        ),
+      }
     case "Mode":
       // `Mode` is intercepted by the agent loop BEFORE `executeTool` is
       // called : the synthesizer there has access to the live
@@ -413,6 +464,51 @@ async function dispatch(
       }
     default:
       return { content: ToolPrompts.unknownToolResult(name), is_error: true }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// File tracking integration
+// ---------------------------------------------------------------------------
+
+function checkTrackedFilePrecondition(
+  store: FileTrackingStore | undefined,
+  filePath: unknown,
+  tool: "Edit" | "Write",
+): ToolExecResult | null {
+  // No tracker wired → previous no-tracking behavior (unit tests, hosts that
+  // opt out). When a tracker IS present the precondition is enforced.
+  if (!store || typeof filePath !== "string" || filePath.length === 0) return null
+  const tracked = store.lookup(filePath)
+  if (!tracked) {
+    return {
+      content: `${tool} error: ${filePath} has not been read in this session. Read it first, then retry the ${tool.toLowerCase()}.`,
+      is_error: true,
+    }
+  }
+  const status = store.status(filePath)
+  if (status === "present") return null
+  // A `Write` may CREATE a path that a prior `Read` observed as missing
+  // (tracked.metadata === null). Any other mismatch — file deleted since it
+  // was read present, or changed since read — is a stale-write hazard.
+  if (tool === "Write" && status === "missing" && tracked.metadata === null) return null
+  const reason =
+    status === "missing"
+      ? "file no longer exists (it was present when last read)"
+      : "file changed since it was last read"
+  return {
+    content: `${tool} error: ${reason}: ${filePath}. Read it again, then retry the ${tool.toLowerCase()}.`,
+    is_error: true,
+  }
+}
+
+function recordTrackedFileObservation(
+  store: FileTrackingStore | undefined,
+  filePath: unknown,
+  result: ToolExecResult,
+): void {
+  if (store && !result.is_error && typeof filePath === "string" && filePath.length > 0) {
+    store.track(filePath)
   }
 }
 

@@ -10,7 +10,10 @@
 import { c } from "../style/ansi.ts"
 
 /** Render the warning shown when a persistence store cannot be opened. */
-export function renderStoreUnavailableWarning(kind: "session" | "blob", reason: string): string[] {
+export function renderStoreUnavailableWarning(
+  kind: "session" | "blob" | "file-tracking",
+  reason: string,
+): string[] {
   return [`  ${c.boldYellow("warn")} ${kind} store unavailable: ${reason}`]
 }
 

@@ -23,6 +23,10 @@ export const TOOL_PARAM_DESCRIPTIONS = {
     pattern: "The glob pattern to match files against",
     path: "Directory to search in. Defaults to cwd.",
   },
+  FilesStats: {
+    status: "Optional status filter: all, present, missing, or changed",
+    path: "Optional absolute path or directory prefix filter",
+  },
   Grep: {
     pattern: "Regex pattern to search for",
     path: "File or directory to search in. Defaults to cwd.",

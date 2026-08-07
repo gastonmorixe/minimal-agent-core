@@ -69,6 +69,7 @@ import {
   type BlobWriteResult,
   formatRawOutputFooter,
 } from "../session/blob-store.ts"
+import type { FileTrackingStore } from "../session/file-tracking-store.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import { expandTabs } from "../terminal/term-width.ts"
 import {
@@ -111,6 +112,8 @@ export interface ToolRoundContext {
   model: string
   /** Append-only session store for tool_result persistence (optional). */
   store: SessionStore | null
+  /** Durable per-session file observations for Read/Edit/Write safety. */
+  fileTrackingStore?: FileTrackingStore
   /** Per-turn cancellation signal forwarded into tool execution. */
   signal?: AbortSignal | undefined
   /**
@@ -649,6 +652,7 @@ export async function executeToolRound(
             media: resolveToolMediaContext(ctx.model),
             onStdout: isBash ? onChunk : undefined,
             onStderr: isBash ? onChunk : undefined,
+            fileTrackingStore: ctx.fileTrackingStore,
           })
           content = result.content
           isError = result.is_error
