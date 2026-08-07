@@ -145,7 +145,7 @@ describe("matchesQuery", () => {
   const rec: IndexRecord = {
     sid: "b3b4b4ce-0000-4000-8000-8054f75b15ca",
     createdAt: "2026-04-28T05:24:32.231Z",
-    cwd: "/Users/user/Projects/minimal-agent",
+    cwd: "/Users/dev/Projects/minimal-agent",
     model: "test-model-1",
   }
 
@@ -218,7 +218,7 @@ describe("renderSessionsCommandRows", () => {
           model: "test-model",
           bytes: 1536,
           usage: usage({ tokens: 12_300, estimated: false, turns: 2, realTurns: 2 }),
-          cwd: "/Users/user/Projects/minimal-agent",
+          cwd: "/Users/dev/Projects/minimal-agent",
           snippet: "hello",
         },
       ],

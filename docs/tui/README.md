@@ -2,14 +2,6 @@
 title: TUI architecture (index)
 created_at: "2026-05-27T10:14:30.725679000-0400"
 updated_at: "2026-05-27T10:14:30.725679000-0400"
-session_id: 8f9abb76-0000-4000-8000-b2eaf38f6f01
-host_info:
-  hostname: host.local
-  user: user
-  os: "macOS"
-  kernel: "25.5.0"
-  arch: arm64
-  serial: C02EXAMPLE0
 tags: [tui, architecture, index, compositor, editor, repl]
 taillog:
  - "2026-05-27T10:14:30.725679000-0400 | Initial deep-review docs split into 9 chapters + this index"
@@ -33,7 +25,6 @@ There is **no full-screen TUI**. The agent is a scrolling REPL with a small bloc
 | 05 | [Input pipeline](./05-input-pipeline.md) | RawInput → InputCaptureStack → hook chain → abort-quit FSM |
 | 06 | [Supporting modules](./06-supporting-modules.md) | StdioInterceptor, AnsiStreamBuffer, term-caps, theme, picker, overlay, quit-modal, scrollback-guard |
 | 07 | [Data flows](./07-data-flows.md) | End-to-end diagrams: one keystroke, one stream chunk, SIGWINCH, mount/unmount |
-| 08 | [`--tui-debug` design](./08-tui-debug-design.md) | Proposed CLI flag: region tints, copy-paste markers, HUD, frame markers |
 
 ## Code map (read-along)
 

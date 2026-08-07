@@ -4,7 +4,7 @@
  * AgentCore depends on {@link LifecyclePort} (DIP); it never imports HookBus
  * or PluginLoader. The host wires a HookBus-backed adapter (or a no-op).
  *
- * Decision vocabulary (aligned with Claude PreToolUse richness, plugin-TS only):
+ * Decision vocabulary (rich lifecycle decisions, plugin-TS only):
  * - `allow` — continue; payload may be rewritten (updatedInput / redacted messages)
  * - `deny` — halt; reason is model/user-facing
  * - `ask` — reserved for a future host ask-user path; treat as deny until wired

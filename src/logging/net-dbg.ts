@@ -1,12 +1,12 @@
 /**
- * On-disk request/response logger, mirroring Claude Code's ~/.node-net-dbg/
- * file-quad scheme (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
+ * On-disk request/response logger, writing a file-quad per request
+ * (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
  *
  * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1`. Logs go to
  * `<agent-home>/net-dbg/${epoch}-${human-date}/` (honoring
  * `MINIMAL_AGENT_HOME`), so captures from every project land in one
- * relocation-correct place instead of scattering `.net-dbg/` dirs across
- * working directories. Each call produces four files keyed by a per-process
+ * relocation-correct place instead of scattering across working
+ * directories. Each call produces four files keyed by a per-process
  * sequence number.
  *
  * Designed to be called from {@link sendMessage} in client.ts. The response

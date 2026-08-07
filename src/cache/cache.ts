@@ -22,8 +22,8 @@
  *    needing `--debug`) when the cache misbehaves. Each anomaly type is
  *    emitted at most once per process to avoid spam.
  *
- * The fields read off `usage` mirror the live wire shape from Claude Code
- * 2.1.118 (verified against `~/.node-net-dbg/...`):
+ * The fields read off `usage` mirror the live Anthropic wire shape (verified
+ * against net-dbg captures):
  *
  *     "usage": \{
  *       "input_tokens": 1,

@@ -41,7 +41,7 @@ Caller pins protocol explicitly (req.protocol = "h2" or "h3")
   ╰─ policy stays out of the way; the transport map routes accordingly
 ```
 
-See `docs/changes/2026-05-19-design-network-layer-v2.md` §7f for the
+See the network-layer design doc (archived under `private/docs-archive/`) for the
 full state machine, measured numbers, and behavior matrix.
 
 ## NetworkPolicy — middleware shape

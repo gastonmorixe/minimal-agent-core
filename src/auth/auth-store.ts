@@ -16,7 +16,7 @@
  *  DESIGN GOALS (and the future this is built for)
  * ───────────────────────────────────────────────────────────────────────────
  * Today minimal-agent has exactly one provider — Anthropic, authenticated via
- * the Claude Pro/Max subscription OAuth flow. Tomorrow it will have many, and
+ * that provider's subscription OAuth flow. Tomorrow it will have many, and
  * each will be implemented by an **auth plugin** rather than hard-coded here.
  * Different providers authenticate in wildly different ways (OAuth bearer
  * tokens, refreshable token pairs, long-lived API keys, device-code grants,

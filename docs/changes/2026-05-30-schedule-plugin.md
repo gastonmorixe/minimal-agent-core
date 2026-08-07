@@ -62,8 +62,7 @@ under `~/.agents/plugins` / `~/.minimal-agent/plugins`), the single slash overla
 it reads the same host registry via `ctx.listCommands()` and adds skill discovery,
 per-item token-cost chips, and the `/` (commands+skills) / `$` (skills-only)
 triggers. Two overlays bound the same `editor.key` / `editor.footer.set` channels
-at once, so the in-repo duplicate was dropped. See
-[`2026-05-31-slash-menu-dedup-and-config.md`](2026-05-31-slash-menu-dedup-and-config.md).
+at once, so the in-repo duplicate was dropped. See the slash-menu dedup note (archived under `private/docs-archive/`).
 
 The host ports above (A/B/C) are what make ANY overlay possible; the registry is
 host-owned, so `/loop` and `/schedule` dispatch headlessly whether or not an

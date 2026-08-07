@@ -16,7 +16,7 @@
  *   ╭ minimal-agent · first run
  *   │ Setting things up for you. This happens once.
  *   │
- *   │   1  sign in to your Anthropic (Claude) account
+ *   │   1  sign in to your Anthropic account
  *   │   2  fetch mdstream, the Markdown renderer
  *   │   3  fetch the extended plugins (Fetch, Skill, ...)
  *   ╰ takes a few seconds · everything lands in ~/.minimal-agent

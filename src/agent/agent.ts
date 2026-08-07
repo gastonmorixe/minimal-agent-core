@@ -726,7 +726,7 @@ export class Agent {
    * editing the top-level `system` prefix (which would invalidate the
    * prompt cache).
    *
-   * claude-code uses three concrete patterns:
+   * Three concrete patterns are used:
    *
    * ```text
    * 1. User interrupt:    "The user sent a new message while you were
@@ -1117,7 +1117,7 @@ export class Agent {
     // Provider-resolved system prompt: the agent builds the neutral skeleton
     // (instructions + optional afterInstructions + session context) and the
     // request's provider injects its preamble (Anthropic plan-auth → billing
-    // + Claude-Code identity; everyone else → neutral identity). Routed
+    // + provider identity; everyone else → neutral identity). Routed
     // through the model registry seam, so the agent names no provider.
     // `index.ts` computes the resume-drift systemHash through the SAME
     // resolver with the same args, keeping the cached prefix byte-consistent.

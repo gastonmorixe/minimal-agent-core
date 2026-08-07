@@ -713,7 +713,6 @@ export function listLocksUnder(rootDir: string): ListedLock[] {
     "build",
     ".cache",
     ".net-dbg",
-    ".node-net-dbg",
   ])
   const out: ListedLock[] = []
   const walk = (dir: string): void => {

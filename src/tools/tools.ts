@@ -1,27 +1,23 @@
 /**
  * Tools module: tool definitions and execution for the minimal agent.
  *
- * Implements a subset of the tools the real Claude Code CLI provides. Each
- * tool has a JSON-schema definition (sent to the API) and a local executor
- * function. The agent's tool loop calls {@link executeTool} when the model
- * emits a `tool_use` block, then sends the result back as a `tool_result`.
+ * Each tool has a JSON-schema definition (sent to the API) and a local
+ * executor function. The agent's tool loop calls {@link executeTool} when the
+ * model emits a `tool_use` block, then sends the result back as a
+ * `tool_result`.
  *
- * **Tools provided:**
+ * **Tools provided (core):**
  * - {@link BASH_TOOL | Bash}: execute shell commands (cwd persists across calls)
  * - {@link READ_TOOL | Read}: read file contents with cat -n style line numbers
  * - {@link WRITE_TOOL | Write}: write/create files (creates parent dirs)
  * - {@link EDIT_TOOL | Edit}: exact string replacement in files
  * - {@link GLOB_TOOL | Glob}: find files by glob pattern (uses bash globstar)
  * - {@link GREP_TOOL | Grep}: search file contents using ripgrep
+ * - {@link FILES_STATS_TOOL | FilesStats}: report tracked-file status
+ * - {@link MODE_TOOL | Mode}: report the active operating mode
  *
- * **Skipped intentionally** (not implemented in minimal agent):
- * - Agent (sub-agent spawning)
- * - Skill (slash-command-style skill execution)
- * - ToolSearch (deferred tool loading)
- *
- * Tool schemas match the exact JSON schemas extracted from the v2.1.91 capture
- * at `.node-net-dbg/.../fetch-014-02-req-body.txt`. The agent sends them
- * unmodified so the model sees the same surface as the real CLI.
+ * The extended surface (sub-agents, skills, background jobs, browser control,
+ * memory, scheduling, …) ships as runtime-loaded plugins, not here.
  *
  * @module tools
  */

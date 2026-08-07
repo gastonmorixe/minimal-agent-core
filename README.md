@@ -532,7 +532,7 @@ Commands:
 ./minimal-agent --dump last --dump-format xml
 ```
 
-More detail: `docs/internal/session-restore.md`.
+More detail: `docs/tui/` for the terminal layer; `src/session/session-restore.ts` for session restore.
 
 ## Debugging the wire
 
@@ -552,7 +552,7 @@ Captures are written under `~/.minimal-agent/net-dbg/` (or `$MINIMAL_AGENT_HOME/
 when the home is relocated), one file per request and response, for diffing
 against real traffic.
 
-Prompt cache behavior is documented in `docs/internal/caching.md`. The short
+Prompt cache behavior is documented in `src/cache/cache.ts` and `src/agent/cache.ts`. The short
 version: tools, system blocks, and the rolling conversation tail are arranged so
 a provider's prefix cache can pay off across turns in one process.
 
@@ -571,7 +571,7 @@ Start here:
 - **`src/host/session-replay.ts`:** Resume header and scrollback replay.
 - **`plugin-api/`:** The leaf contract package (`@minimal-agent/plugin-api`): shared types and pure utilities both core and plugins depend on.
 - **Sibling [`minimal-agent-plugins`](https://github.com/gastonmorixe/minimal-agent-plugins):** First-party provider, tool, mode, and UI plugins (not vendored in this tree).
-- **`docs/internal/`:** Notes for the parts that are easiest to break by guessing.
+- **`docs/`:** Architecture and contributor docs (see the tree below).
 
 ## Design rules
 
@@ -593,11 +593,11 @@ The repo works best when changes stay small and observable:
 - `docs/tui/` : terminal renderer architecture, one file per layer.
 - `docs/network/README.md` : HTTP transport, retry, and wire-capture notes.
 - `docs/sub-agents-prompt.md` : how the sub-agents system prompt composes.
-- `docs/changes/` : per-change write-ups, dated, the design rationale behind each landed change.
+- `docs/changes/` : design rationale for the current architecture (a curated subset of per-change write-ups; the full history is archived under `private/`).
 
 ## Status
 
-This is a research tool and the engine behind a daily-use terminal agent. The
+This is the engine behind a daily-use terminal agent. The
 value is the small surface: enough behavior to run real agentic turns, enough
 tests to change it without guessing, and enough debug output to explain what
 happened when the server or terminal says no. The terminal client itself is

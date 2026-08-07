@@ -2,14 +2,6 @@
 title: TUI overview
 created_at: "2026-05-27T10:14:30.725679000-0400"
 updated_at: "2026-05-27T10:14:30.725679000-0400"
-session_id: 8f9abb76-0000-4000-8000-b2eaf38f6f01
-host_info:
-  hostname: host.local
-  user: user
-  os: "macOS"
-  kernel: "25.5.0"
-  arch: arm64
-  serial: C02EXAMPLE0
 tags: [tui, overview, scrollback, live-area]
 taillog:
  - "2026-05-27T10:14:30.725679000-0400 | Initial: big-picture model + screen diagram + the three actors"

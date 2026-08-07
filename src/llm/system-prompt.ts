@@ -18,7 +18,7 @@
  *     identity `"You are Minimal Agent, …"`.
  *
  * Why a dedicated module (not `headers.ts`): `headers.ts` is the Anthropic-
- * flavored wire layer and hardcodes the Claude-Code identity. This module is
+ * flavored wire layer and hardcodes a provider-specific identity. This module is
  * provider-neutral and is what the agent + the resume-drift hash both call,
  * so a single resolver keeps the two call sites byte-consistent and lets
  * sub-agents (future) resolve their OWN provider's prompt independently.
