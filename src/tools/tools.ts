@@ -429,7 +429,8 @@ async function dispatch(
     case "FilesStats":
       if (!opts.fileTrackingStore) {
         return {
-          content: "FilesStats is unavailable: file tracking is not configured.",
+          content:
+            "FilesStats: file tracking is not enabled in this host. Read/Edit/Write observations and this report are unavailable here.",
           is_error: true,
         }
       }

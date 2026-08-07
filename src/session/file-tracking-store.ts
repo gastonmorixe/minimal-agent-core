@@ -112,7 +112,23 @@ export class FileTrackingStore {
     this.sid = options.sid
     this.path = fileTrackingPath(options.sid, options.dir)
     this.cwd = options.cwd ?? process.cwd()
+    this.ensureFile()
     this.replay()
+  }
+
+  /**
+   * Create the sidecar file up front (empty when no observation exists yet)
+   * so the tracking state for a session is ALWAYS present on disk from boot
+   * onward — never "missing until the first Read/Edit/Write". Best-effort:
+   * if the dir is unwritable here, {@link append} retries on first use.
+   */
+  private ensureFile(): void {
+    try {
+      mkdirSync(dirname(this.path), { recursive: true })
+      if (!existsSync(this.path)) appendFileSync(this.path, "", "utf8")
+    } catch {
+      // best-effort; append() retries
+    }
   }
 
   /** Re-read all valid JSONL records, retaining the newest record per path. */
