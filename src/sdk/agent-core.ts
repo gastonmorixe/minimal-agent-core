@@ -57,8 +57,8 @@ import {
   type StreamedResponse,
   type TransportFn,
 } from "../llm/transport/types.ts"
-import { appendUserTurn } from "../session/session-restore.ts"
 
+import { appendUserTurn } from "./conversation-history.ts"
 import type { AgentEvent, EventSink, EventUsage } from "./events.ts"
 import { type LifecyclePort, NOOP_LIFECYCLE } from "./lifecycle.ts"
 import { outputConfigSpread as buildOutputConfig } from "./output-config.ts"

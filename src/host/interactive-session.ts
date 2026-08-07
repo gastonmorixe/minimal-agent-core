@@ -27,17 +27,71 @@ import { type BuildAgentCoreDeps, buildAgentCore } from "./sdk-adapters/build-ag
 
 type MaybePromise<T> = T | Promise<T>
 
-/** Mutable transcript sink so each `run` can rebind the host's line writer. */
-export class MutableTranscriptSink {
-  current: (line: string) => void = () => {}
-  write = (line: string): void => {
+type TranscriptWriter = (line: string) => void
+
+/** Input handed to the interactive host's reflection checkpoint behavior. */
+export interface ReflectionCheckpointContext {
+  round: number
+  cooldownMs: number
+  signal?: AbortSignal
+}
+
+/**
+ * Interactive reflection behavior. The implementation owns completion, abort,
+ * and any host-specific skip affordance such as temporarily capturing Esc.
+ */
+export interface ReflectionCheckpointBehavior {
+  wait(context: ReflectionCheckpointContext): Promise<void>
+}
+
+/**
+ * Run-scoped transcript router. A lease cannot overwrite another active run,
+ * and releasing a stale lease cannot disturb the current route.
+ */
+export class TranscriptRouter {
+  private active: symbol | null = null
+  private current: TranscriptWriter
+
+  constructor(private readonly fallback: TranscriptWriter = () => {}) {
+    this.current = fallback
+  }
+
+  readonly write = (line: string): void => {
     this.current(line)
+  }
+
+  acquire(writer?: TranscriptWriter): () => void {
+    if (this.active !== null) {
+      throw new Error("InteractiveSession already has an active run")
+    }
+    const lease = Symbol("interactive-session-transcript")
+    this.active = lease
+    this.current = writer ?? this.fallback
+    return () => {
+      if (this.active !== lease) return
+      this.active = null
+      this.current = this.fallback
+    }
   }
 }
 
 export type InteractiveSessionDeps = BuildAgentCoreDeps & {
   /** Mode manager for prompt/status/cycling (same instance as buildAgentCore). */
   modeManager: ModeManager | null
+  /** Injectable interactive reflection behavior. Defaults to the real TUI cooldown. */
+  reflectionCheckpoint?: ReflectionCheckpointBehavior
+}
+
+const DEFAULT_REFLECTION_CHECKPOINT: ReflectionCheckpointBehavior = {
+  async wait({ round, cooldownMs, signal }): Promise<void> {
+    await runReflectionCooldown({
+      totalMs: cooldownMs,
+      round,
+      statusBus: GLOBAL_STATUS_BUS,
+      inputCaptureStack,
+      ...(signal ? { signal } : {}),
+    })
+  },
 }
 
 /**
@@ -49,19 +103,26 @@ export class InteractiveSession implements ReplAgentLike {
     private readonly core: AgentCore,
     private readonly loader: PluginLoader | null,
     private readonly modeManager: ModeManager | null,
-    private readonly transcript: MutableTranscriptSink,
+    private readonly transcript: TranscriptRouter,
+    private readonly reflectionCheckpoint: ReflectionCheckpointBehavior,
   ) {}
 
   /**
    * Build a fully-wired session (AgentCore + interactive transcript bridge).
    */
   static async create(deps: InteractiveSessionDeps): Promise<InteractiveSession> {
-    const transcript = new MutableTranscriptSink()
+    const transcript = new TranscriptRouter(deps.writeTranscript)
     const core = await buildAgentCore({
       ...deps,
-      writeTranscript: (line) => transcript.write(line),
+      writeTranscript: transcript.write,
     })
-    return new InteractiveSession(core, deps.loader, deps.modeManager, transcript)
+    return new InteractiveSession(
+      core,
+      deps.loader,
+      deps.modeManager,
+      transcript,
+      deps.reflectionCheckpoint ?? DEFAULT_REFLECTION_CHECKPOINT,
+    )
   }
 
   /** Underlying conversation engine (tests / slash-command bridges). */
@@ -132,8 +193,7 @@ export class InteractiveSession implements ReplAgentLike {
       askUser?: (issue: PreflightIssue) => Promise<string | null>
     },
   ): AsyncGenerator<string, StreamedResponse, undefined> {
-    const prev = this.transcript.current
-    this.transcript.current = opts?.onTranscriptLine ?? (() => {})
+    const releaseTranscript = this.transcript.acquire(opts?.onTranscriptLine)
     try {
       return yield* this.core.run(userText, {
         onThinkingStart: opts?.onThinkingStart,
@@ -146,17 +206,15 @@ export class InteractiveSession implements ReplAgentLike {
         signal: opts?.signal,
         askUser: opts?.askUser,
         beforeReflectionCheckpoint: async (round) => {
-          await runReflectionCooldown({
-            totalMs: this.core.getReflectionCooldownMs(),
+          await this.reflectionCheckpoint.wait({
             round,
-            statusBus: GLOBAL_STATUS_BUS,
-            inputCaptureStack,
+            cooldownMs: this.core.getReflectionCooldownMs(),
             ...(opts?.signal ? { signal: opts.signal } : {}),
           })
         },
       })
     } finally {
-      this.transcript.current = prev
+      releaseTranscript()
     }
   }
 }

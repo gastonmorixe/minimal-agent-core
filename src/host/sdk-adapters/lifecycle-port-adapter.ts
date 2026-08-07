@@ -10,7 +10,6 @@
  */
 
 import type { Hooks } from "../../plugins/hooks/hooks.ts"
-import type { ToolDidInvokePayload } from "../../plugins/hooks/tool-lifecycle.ts"
 import {
   allowDecision,
   type CompactDidRunPayload,
@@ -29,6 +28,7 @@ import {
   type TurnEndPayload,
   type TurnWillStartPayload,
 } from "../../sdk/lifecycle.ts"
+import type { ToolDidInvokePayload } from "../../sdk/tool-lifecycle.ts"
 
 /**
  * Build a {@link LifecyclePort} over a live Hooks facade, or return

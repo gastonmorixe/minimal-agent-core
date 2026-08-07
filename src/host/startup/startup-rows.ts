@@ -10,11 +10,11 @@
  * @module host/startup/startup-rows
  */
 
-import { c } from "../../agent/agent.ts"
 import type { CacheTtlSource } from "../../cache/cache-ttl.ts"
 import { type EffortSource, validateEffortForModel } from "../../config/effort-resolution.ts"
 import { findModel, findModelForProvider } from "../../llm/model-registry.ts"
 import { printStartupRow } from "../ui/startup/tree.ts"
+import { c } from "../ui/style/ansi.ts"
 
 import { modelHidesReasoning } from "./provider-presentation.ts"
 

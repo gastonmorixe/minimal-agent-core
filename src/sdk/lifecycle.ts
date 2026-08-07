@@ -16,7 +16,8 @@
  */
 
 import type { ContentBlock, Message } from "../llm/messages.ts"
-import type { ToolDidInvokePayload } from "../plugins/hooks/tool-lifecycle.ts"
+
+import type { ToolDidInvokePayload } from "./tool-lifecycle.ts"
 
 // ---------------------------------------------------------------------------
 // PolicyDecision

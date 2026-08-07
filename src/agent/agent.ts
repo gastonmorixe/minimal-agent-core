@@ -53,13 +53,13 @@ import { ModeManager } from "../modes/modes.ts"
 import type { NetworkClient } from "../network/index.ts"
 import { PluginLoader } from "../plugins/loader.ts"
 import type { ManifestMode } from "../plugins/types.ts"
+import { appendUserTurn } from "../sdk/conversation-history.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import { outputConfigSpread as buildOutputConfig } from "../sdk/output-config.ts"
 import { applyToolNamePolicy, type ToolNamePolicy } from "../sdk/tool-filter.ts"
 import { wrapTransportWithLifecycle } from "../sdk/with-lifecycle-send.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../session/blob-store.ts"
 import type { FileTrackingStore } from "../session/file-tracking-store.ts"
-import { appendUserTurn } from "../session/session-restore.ts"
 import type { SessionStore } from "../session/session-store.ts"
 import { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import type { ToolTimeTracker } from "../tools/tool-time.ts"
@@ -1885,16 +1885,8 @@ export class Agent {
   }
 }
 
-export {
-  parseModelNotFoundError,
-  parseModelUnavailableError,
-} from "../host/model-error.ts"
-export type {
-  ReplAgentLike,
-  ReplCompositor,
-  ReplEditor,
-  StatusController,
-} from "../host/repl.ts"
+export { parseModelNotFoundError, parseModelUnavailableError } from "../host/model-error.ts"
+export type { ReplAgentLike, ReplCompositor, ReplEditor, StatusController } from "../host/repl.ts"
 export { runRepl } from "../host/repl.ts"
 export type { ToolPresentation } from "../host/ui/tool-transcript/format.ts"
 export {
