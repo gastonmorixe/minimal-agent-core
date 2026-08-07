@@ -233,12 +233,14 @@ export function combineTurnDrains(drains: readonly TurnContentDrain[]): TurnCont
  *
  * Core-local mirror of `plugins/tasks/lib/parse.ts`'s `parseFile` —
  * re-implemented here (not imported) per the I2 invariant. The replay
- * path only needs read-side tolerance, so this validates exactly what
- * the plugin parser validates and silently drops anything else:
+ * path only needs read-side tolerance, so this validates the task-row
+ * shape and id/parent relationship, then silently drops anything else:
  * corruption must degrade to "no sidecar", never break `--resume`.
  * v1 lines (no `started_at` / `last_resumed_at` / `active_ms`) parse
- * forward-compatibly with the v2 fields defaulted to `null` / `0`,
- * matching the plugin parser byte for byte.
+ * forward-compatibly with the v2 fields defaulted to `null` / `0`.
+ * v3 files add a `tasks_meta` header and ordinal ids. The header is not
+ * task data and is skipped, while both ordinal and legacy six-hex rows
+ * remain readable for replay compatibility.
  */
 export function parseReplaySidecarTasks(content: string): ReplaySidecarTask[] {
   const out: ReplaySidecarTask[] = []
@@ -249,8 +251,19 @@ export function parseReplaySidecarTasks(content: string): ReplaySidecarTask[] {
   return out
 }
 
-const SIDECAR_ID_RE = /^[0-9a-f]{6}([a-z])?$/
+const SIDECAR_ID_RE = /^(?:[0-9a-f]{6}|[1-9]\d*)(?:[a-z])?$/
+const SIDECAR_ROOT_ID_RE = /^(?:[0-9a-f]{6}|[1-9]\d*)$/
 const SIDECAR_STATUSES = new Set(["todo", "doing", "done", "canceled"])
+
+function hasValidSidecarRelationship(id: string, parent: string | null): boolean {
+  if (parent === null) return SIDECAR_ROOT_ID_RE.test(id)
+  return (
+    SIDECAR_ROOT_ID_RE.test(parent) &&
+    id.length === parent.length + 1 &&
+    id.startsWith(parent) &&
+    /^[a-z]$/.test(id.slice(-1))
+  )
+}
 
 function parseSidecarLine(line: string): ReplaySidecarTask | null {
   const trimmed = line.trim()
@@ -263,10 +276,15 @@ function parseSidecarLine(line: string): ReplaySidecarTask | null {
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
   const o = parsed as Record<string, unknown>
+  // v3 metadata is a sidecar header, never a task row. Reject malformed
+  // metadata too, even if it happens to carry otherwise task-like fields.
+  if (o.kind === "tasks_meta") return null
   if (typeof o.id !== "string" || !SIDECAR_ID_RE.test(o.id)) return null
   if (o.parent !== null && (typeof o.parent !== "string" || !SIDECAR_ID_RE.test(o.parent))) {
     return null
   }
+  const parent = o.parent as string | null
+  if (!hasValidSidecarRelationship(o.id, parent)) return null
   if (typeof o.status !== "string" || !SIDECAR_STATUSES.has(o.status)) return null
   if (typeof o.title !== "string") return null
   if (typeof o.created_at !== "string") return null
@@ -289,7 +307,7 @@ function parseSidecarLine(line: string): ReplaySidecarTask | null {
   }
   return {
     id: o.id,
-    parent: (o.parent as string | null | undefined) ?? null,
+    parent,
     status: o.status as ReplaySidecarTask["status"],
     title: o.title,
     created_at: o.created_at,

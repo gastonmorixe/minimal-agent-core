@@ -63,9 +63,9 @@ export interface DerivedDisplay {
  * only consumer that interprets it.
  */
 export interface ReplaySidecarTask {
-  /** Six hex chars for top-level, parent-id + alpha suffix for subtasks. No `#` prefix. */
+  /** Ordinal or legacy six-hex root id, optionally plus an alpha child suffix. No `#`. */
   id: string
-  /** Parent task id (no `#`), or `null` for top-level tasks. */
+  /** Root task id (ordinal or legacy six-hex, no `#`), or `null` for top-level tasks. */
   parent: string | null
   /** Lifecycle state. */
   status: "todo" | "doing" | "done" | "canceled"
