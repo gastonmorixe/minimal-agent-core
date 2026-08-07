@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -59,6 +60,18 @@ describe("file tracking paths and metadata", () => {
 })
 
 describe("FileTrackingStore", () => {
+  it("creates the sidecar file at construction (never missing until first append)", () => {
+    const dir = tempDir()
+    const nested = join(dir, "sessions")
+    const store = new FileTrackingStore({ sid: "boot-sid", dir: nested, cwd: dir })
+    expect(store.path).toBe(join(nested, "boot-sid.files.jsonl"))
+    // The file must exist on disk immediately — even with zero observations —
+    // so FilesStats / boot never see a "missing" tracking state.
+    expect(existsSync(store.path)).toBe(true)
+    expect(readFileSync(store.path, "utf8")).toBe("")
+    rmSync(dir, { recursive: true })
+  })
+
   it("appends records and captures existing and missing files", () => {
     const dir = tempDir()
     const root = join(dir, "work")

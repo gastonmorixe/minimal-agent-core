@@ -58,12 +58,24 @@ describe("FilesStats report", () => {
 
   it("formats an empty filtered report", () => {
     const f = fixture()
-    expect(
-      formatFilesStatsReport(
-        buildFilesStatsReport(f.store, { status: "present", path: f.missing }),
-      ),
-    ).toBe("No tracked files matched the filter.")
+    const text = formatFilesStatsReport(
+      buildFilesStatsReport(f.store, { status: "present", path: f.missing }),
+    )
+    expect(text).toContain("No tracked files matched the filter.")
+    expect(text).toContain("Totals: present=0 missing=0 changed=0")
     rmSync(f.dir, { recursive: true })
+  })
+
+  it("explains itself when nothing is tracked yet (no filters)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-files-stats-empty-"))
+    const store = new FileTrackingStore({ sid: "empty", dir, cwd: dir })
+    const text = formatFilesStatsReport(buildFilesStatsReport(store))
+    expect(text).toContain("No files have been read or modified yet")
+    expect(text).toContain("present")
+    expect(text).toContain("changed")
+    expect(text).toContain("missing")
+    expect(text).toContain("Totals: present=0 missing=0 changed=0")
+    rmSync(dir, { recursive: true })
   })
 })
 
@@ -71,7 +83,7 @@ describe("FilesStats tool dispatch", () => {
   it("returns an actionable error without a tracker", async () => {
     const result = await executeTool("FilesStats", {})
     expect(result.is_error).toBe(true)
-    expect(result.content).toContain("not configured")
+    expect(result.content).toContain("file tracking is not enabled in this host")
   })
 
   it("dispatches status and path filters through the tracker", async () => {
