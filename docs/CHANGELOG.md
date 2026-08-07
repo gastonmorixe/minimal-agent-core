@@ -5,7 +5,7 @@ type: changelog
 status: living
 working-dir: "/Users/gaston/Projects/minimal-agent"
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-05T11:30:00-0400"
+updated-at: "2026-08-07T13:45:26-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
   - id: "2026-08-05-husky-commitlint-ci"
@@ -45,6 +45,28 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Feat: MA-394837 agent loop SDK refactor enabling wave
+
+---
+id: "2026-08-07-ma-394837-sdk-refactor-enabling-wave"
+type: feat
+status: landed
+commits: ["9596da8", "0bf68cc"]
+created-at: "2026-08-07T13:45:26-0400"
+updated-at: "2026-08-07T13:45:26-0400"
+---
+
+Repointed production imports off the legacy `agent.ts` barrel onto SDK owners
+(`runRepl`, ANSI `c`, tool-lifecycle payloads), extracted
+`src/sdk/conversation-history.ts` and `src/sdk/tool-lifecycle.ts`, added the
+TypeScript-7 AST `sdk-port-boundaries` scanner (genuine-Node child with
+NODE=bun rejection; exported-but-explicitly-unstable `typescript/unstable/*`
+exact-pinned to 7.0.2), and characterized `InteractiveSession` reflection /
+transcript seams. Core README reframed as presentation-free SDK; the terminal
+client is being moved to `minimal-agent-cli` (transitional entrypoint until
+Program 3B cutover). Follow-ups before merge (file-tracking lane): recordedAt-vs-file-order
+replay, same-ms mtimeNs detection.
 
 ### Chore: Husky, Commitlint, and CI Action bumps
 
