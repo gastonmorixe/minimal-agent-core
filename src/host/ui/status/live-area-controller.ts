@@ -11,9 +11,9 @@
  * @module ui/status/live-area-controller
  */
 
-import type { StatusController } from "../../../agent/agent.ts"
 import type { StatusBus, StatusSnapshot } from "../../../bus/status.ts"
 import { visualCellsForGlyph } from "../../../terminal/nerd-glyph-width.ts"
+import type { StatusController } from "../../repl.ts"
 import {
   BlinkingNerdSpinner,
   type Spinner,

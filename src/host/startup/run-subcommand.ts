@@ -15,7 +15,6 @@
  * @module host/startup/run-subcommand
  */
 
-import { c } from "../../agent/agent.ts"
 import { resolveAgentHome } from "../../agent/agent-paths.ts"
 import type { PrintFormat } from "../../cli/print-format.ts"
 import type { CommandPlan } from "../cli/command-plan.ts"
@@ -31,6 +30,7 @@ import { runLoginCommand } from "../commands/login.ts"
 import { runLogoutCommand } from "../commands/logout.ts"
 import { runSessionsCommand } from "../commands/sessions.ts"
 import { runUsageCommand } from "../commands/usage.ts"
+import { c } from "../ui/style/ansi.ts"
 
 /** Everything the subcommand dispatcher needs from the entry point. */
 export interface SubcommandContext {

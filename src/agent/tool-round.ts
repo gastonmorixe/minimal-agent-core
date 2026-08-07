@@ -52,11 +52,6 @@ import {
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
-import {
-  type Finding,
-  makeToolDidInvokePayload,
-  type ToolDidInvokePayload,
-} from "../plugins/hooks/tool-lifecycle.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import {
   collectAdditionalContext,
@@ -64,6 +59,11 @@ import {
   type LifecyclePort,
   NOOP_LIFECYCLE,
 } from "../sdk/lifecycle.ts"
+import {
+  type Finding,
+  makeToolDidInvokePayload,
+  type ToolDidInvokePayload,
+} from "../sdk/tool-lifecycle.ts"
 import {
   type BlobStore,
   type BlobWriteResult,

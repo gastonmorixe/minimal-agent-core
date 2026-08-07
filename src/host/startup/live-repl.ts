@@ -15,7 +15,6 @@
  * @module startup/live-repl
  */
 
-import type { runRepl } from "../../agent/agent.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import { getGlobalEventBus } from "../../bus/global-bus.ts"
 import type { UserConfig } from "../../config/config.ts"
@@ -25,7 +24,7 @@ import { AutoAskController } from "../../modes/auto-ask.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { getSessionId } from "../../session/session-id.ts"
-import type { ReplAgentLike } from "../repl.ts"
+import type { ReplAgentLike, runRepl } from "../repl.ts"
 import type { Spinner } from "../ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "../ui/status/line-renderer.ts"
 import { c } from "../ui/style/ansi.ts"

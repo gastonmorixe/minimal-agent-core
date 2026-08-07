@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs"
 
 import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
+import { appendUserTurn } from "../sdk/conversation-history.ts"
 
 import {
   type MetaRecord,
@@ -23,6 +24,8 @@ import {
   type SessionRecord,
   sessionFilePath,
 } from "./session-store.ts"
+
+export { appendUserTurn }
 
 // ---------------------------------------------------------------------------
 // foldRecords — records → messages
@@ -462,36 +465,6 @@ function mergeUserContentInto(later: Message, earlier: Message, opts: { keepText
 
 /** Back-compat alias for `repairMessages`. */
 export const repairTrailingTurn = repairMessages
-
-/**
- * Append a fresh user turn to `messages`, coalescing into a trailing `user`
- * message instead of producing a `[user, user]` adjacency (which the
- * Anthropic API rejects with "roles must alternate"). Mutates in place.
- *
- * This is the live-append counterpart to `repairMessages`' consecutive-user
- * collapse. It matters on resume after a force-quit that stranded tool_results
- * without their assistant continuation: `extractPendingDraft` pulls the
- * un-replied prompt into the editor, leaving `user([tool_results])` as the
- * tail. The next submit must merge into that message rather than appending a
- * second user message, keeping tool_results FIRST (the API requires them
- * immediately after the assistant's `tool_use`). The merged shape
- * `[...tool_results, ...text]` also matches the live queued-submit layout, so
- * a later resume folds the on-disk records back to the identical history.
- *
- * In the steady state the last message is an assistant turn (or the history
- * is empty), so a fresh user message is pushed : byte-identical to the old
- * unconditional `messages.push`.
- */
-export function appendUserTurn(messages: Message[], content: ContentBlock[]): void {
-  const last = messages[messages.length - 1]
-  if (last?.role === "user" && Array.isArray(last.content)) {
-    const toolResults = last.content.filter((b) => b.type === "tool_result")
-    const rest = last.content.filter((b) => b.type !== "tool_result")
-    last.content = [...toolResults, ...rest, ...content]
-  } else {
-    messages.push({ role: "user", content })
-  }
-}
 
 // ---------------------------------------------------------------------------
 // loadSession — top-level convenience: path → { meta, messages, dropped }

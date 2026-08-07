@@ -11,7 +11,7 @@
 
 import { shouldSoftSplit, splitBashSegments } from "../../../cli/bash-split.ts"
 import type { ToolUseBlock } from "../../../llm/messages.ts"
-import type { Finding, FindingSeverity } from "../../../plugins/hooks/tool-lifecycle.ts"
+import type { Finding, FindingSeverity } from "../../../sdk/tool-lifecycle.ts"
 import {
   displayWidth,
   expandTabs,

@@ -48,7 +48,6 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { c, runRepl } from "./agent/agent.ts"
 import { resolveAgentName } from "./agent/agent-name.ts"
 import { publishAgentHomeEnv, resolveAgentHome, resolveSessionsDir } from "./agent/agent-paths.ts"
 import {
