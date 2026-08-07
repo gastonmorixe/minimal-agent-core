@@ -33,7 +33,11 @@ import { configPath as userConfigPath } from "../config/config.ts"
 import { acquireLock, LockAbortedError, LockTimeoutError } from "../infra/file-lock.ts"
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
-import type { FileTrackingStore } from "../session/file-tracking-store.ts"
+import {
+  type FileTrackingStore,
+  normalizeTrackedPath,
+  statMetadata,
+} from "../session/file-tracking-store.ts"
 import { getSessionId } from "../session/session-id.ts"
 import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.ts"
 import { parseJsonc } from "../utils/jsonc.ts"
@@ -480,6 +484,14 @@ function checkTrackedFilePrecondition(
   // No tracker wired → previous no-tracking behavior (unit tests, hosts that
   // opt out). When a tracker IS present the precondition is enforced.
   if (!store || typeof filePath !== "string" || filePath.length === 0) return null
+
+  // A Write to a path with nothing on disk is a CREATE — there is no file to
+  // overwrite, so no prior Read is required. This keeps the natural
+  // "write a brand-new file" flow working without a clunky read-ENOENT
+  // dance first (the tracker still records the observation on success).
+  const path = normalizeTrackedPath(filePath, store.cwd)
+  if (tool === "Write" && statMetadata(path) === null) return null
+
   const tracked = store.lookup(filePath)
   if (!tracked) {
     return {
@@ -489,10 +501,6 @@ function checkTrackedFilePrecondition(
   }
   const status = store.status(filePath)
   if (status === "present") return null
-  // A `Write` may CREATE a path that a prior `Read` observed as missing
-  // (tracked.metadata === null). Any other mismatch — file deleted since it
-  // was read present, or changed since read — is a stale-write hazard.
-  if (tool === "Write" && status === "missing" && tracked.metadata === null) return null
   const reason =
     status === "missing"
       ? "file no longer exists (it was present when last read)"

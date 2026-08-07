@@ -286,6 +286,36 @@ describe("FileTrackingStore integration", () => {
     expect(readFileSync(file, "utf-8")).toBe("new\n")
     expect(store.status(file)).toBe("present")
   })
+
+  it("allows Write to create a brand-new file WITHOUT any prior Read (nothing to overwrite)", async () => {
+    const file = join(dir, "create-fresh.txt")
+    const store = new FileTrackingStore({ sid: "tracking-create-fresh", dir })
+    const result = await executeTool(
+      "Write",
+      { file_path: file, content: "brand new\n" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBeFalsy()
+    expect(readFileSync(file, "utf-8")).toBe("brand new\n")
+    // The successful create still records the observation so FilesStats and
+    // subsequent Edit/Write safety see it as present.
+    expect(store.lookup(file)).toBeDefined()
+    expect(store.status(file)).toBe("present")
+  })
+
+  it("still rejects Write when a never-read file EXISTS and would be clobbered", async () => {
+    const file = join(dir, "exists-unread.txt")
+    writeFileSync(file, "keep me\n")
+    const store = new FileTrackingStore({ sid: "tracking-exists-unread", dir })
+    const result = await executeTool(
+      "Write",
+      { file_path: file, content: "clobber\n" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBe(true)
+    expect(result.content).toContain("has not been read")
+    expect(readFileSync(file, "utf-8")).toBe("keep me\n")
+  })
 })
 
 describe("error path: missing file_path", () => {
