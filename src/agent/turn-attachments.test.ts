@@ -453,6 +453,39 @@ describe("parseReplaySidecarTasks", () => {
     done_at: "2026-06-10T09:30:00-04:00",
     reason: null,
   })
+  const V3_META = JSON.stringify({
+    kind: "tasks_meta",
+    v: 3,
+    id_scheme: "ordinal",
+    next_root: 2,
+    aliases: { a7b3c4: "1" },
+  })
+  const V3_ROOT = JSON.stringify({
+    v: 3,
+    id: "1",
+    parent: null,
+    status: "doing",
+    title: "ordinal root",
+    created_at: "2026-08-07T09:00:00-04:00",
+    done_at: null,
+    reason: null,
+    started_at: "2026-08-07T09:01:00-04:00",
+    last_resumed_at: "2026-08-07T09:01:00-04:00",
+    active_ms: 250,
+  })
+  const V3_CHILD = JSON.stringify({
+    v: 3,
+    id: "1a",
+    parent: "1",
+    status: "todo",
+    title: "ordinal child",
+    created_at: "2026-08-07T09:00:01-04:00",
+    done_at: null,
+    reason: null,
+    started_at: null,
+    last_resumed_at: null,
+    active_ms: 0,
+  })
 
   it("parses well-formed JSONL lines (v2 + v1 forward-compat defaults)", () => {
     const tasks = parseReplaySidecarTasks(`${V2_LINE}\n${V1_LINE}\n`)
@@ -466,6 +499,41 @@ describe("parseReplaySidecarTasks", () => {
     expect(tasks[1]?.started_at).toBeNull()
     expect(tasks[1]?.last_resumed_at).toBeNull()
     expect(tasks[1]?.active_ms).toBe(0)
+  })
+
+  it("skips v3 metadata and parses canonical ordinal root and child rows", () => {
+    const tasks = parseReplaySidecarTasks([V3_META, V3_ROOT, V3_CHILD].join("\n"))
+    expect(tasks.map(({ id, parent }) => ({ id, parent }))).toEqual([
+      { id: "1", parent: null },
+      { id: "1a", parent: "1" },
+    ])
+  })
+
+  it("retains legacy rows when mixed with v3 metadata and ordinal rows", () => {
+    const tasks = parseReplaySidecarTasks([V3_META, V2_LINE, V3_ROOT, V1_LINE, V3_CHILD].join("\n"))
+    expect(tasks.map((task) => task.id)).toEqual(["a7b3c4", "1", "a7b3c4a", "1a"])
+  })
+
+  it("drops malformed metadata and malformed ids or parent relationships", () => {
+    const malformedMetadata = [
+      { kind: "tasks_meta", v: 2, id_scheme: "ordinal", next_root: 2, aliases: {} },
+      { kind: "tasks_meta", v: 3, id_scheme: "hash", next_root: 2, aliases: {} },
+      { kind: "tasks_meta", v: 3, id_scheme: "ordinal", id: "2", parent: null },
+    ]
+    const malformedTasks = [
+      { ...JSON.parse(V3_ROOT), id: "0" },
+      { ...JSON.parse(V3_ROOT), id: "01" },
+      { ...JSON.parse(V3_ROOT), id: "1a", parent: null },
+      { ...JSON.parse(V3_CHILD), parent: "2" },
+      { ...JSON.parse(V3_CHILD), id: "1", parent: "1" },
+      { ...JSON.parse(V2_LINE), parent: "a7b3c4" },
+      { ...JSON.parse(V1_LINE), parent: "abcdef" },
+      { ...JSON.parse(V1_LINE), parent: "1" },
+    ]
+    const text = [...malformedMetadata, ...malformedTasks]
+      .map((row) => JSON.stringify(row))
+      .join("\n")
+    expect(parseReplaySidecarTasks(text)).toEqual([])
   })
 
   it("drops corrupt / blank / non-task lines silently", () => {
