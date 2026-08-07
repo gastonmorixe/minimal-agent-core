@@ -619,10 +619,12 @@ describe("SessionStore.fork", () => {
     const scratchBody = "[2026-05-25T16:51:56-04:00] note one\n"
     const draftBody = "in-progress prompt text"
     const futureBody = "anything keyed by sid"
+    const filesTrackingBody = `{"path":"/tmp/x.txt","metadata":null,"recordedAt":"2026-05-25T16:51:56-04:00"}\n`
     writeFileSync(join(dir, `${srcSid}.tasks.jsonl`), tasksBody)
     writeFileSync(join(dir, `${srcSid}.scratch.md`), scratchBody)
     writeFileSync(join(dir, `${srcSid}.draft`), draftBody)
     writeFileSync(join(dir, `${srcSid}.future-plugin.bin`), futureBody)
+    writeFileSync(join(dir, `${srcSid}.files.jsonl`), filesTrackingBody)
 
     SessionStore.fork({ ...baseOpenOpts, srcSid, dstSid, dir })
 
@@ -631,6 +633,9 @@ describe("SessionStore.fork", () => {
     expect(readFileSync(join(dir, `${dstSid}.scratch.md`), "utf-8")).toBe(scratchBody)
     expect(readFileSync(join(dir, `${dstSid}.draft`), "utf-8")).toBe(draftBody)
     expect(readFileSync(join(dir, `${dstSid}.future-plugin.bin`), "utf-8")).toBe(futureBody)
+    // The file-tracking sidecar rides the same generic rule, so a resumed
+    // session keeps its Read/Edit/Write observation history.
+    expect(readFileSync(join(dir, `${dstSid}.files.jsonl`), "utf-8")).toBe(filesTrackingBody)
 
     // Parent sidecars must remain in place (fork is non-destructive).
     expect(existsSync(join(dir, `${srcSid}.tasks.jsonl`))).toBe(true)
@@ -793,10 +798,15 @@ describe("SessionStore.cleanupIfUnused", () => {
     const store = SessionStore.open({ ...baseOpenOpts, sid, dir })
 
     // Plant a few sidecars + a blob directory, the way the tasks/memory
-    // plugins and blob store would create them lazily during a real run.
+    // plugins, the file-tracking store, and blob store would create them
+    // lazily during a real run.
     writeFileSync(join(dir, `${sid}.tasks.jsonl`), "{}\n")
     writeFileSync(join(dir, `${sid}.scratch.md`), "scratch\n")
     writeFileSync(join(dir, `${sid}.draft`), "draft body")
+    writeFileSync(
+      join(dir, `${sid}.files.jsonl`),
+      '{"path":"/tmp/x","metadata":null,"recordedAt":"t"}\n',
+    )
     mkdirSync(join(dir, `${sid}.blobs`), { recursive: true })
     writeFileSync(join(dir, `${sid}.blobs`, "toolu_x.raw"), "raw")
 
@@ -813,6 +823,7 @@ describe("SessionStore.cleanupIfUnused", () => {
     expect(existsSync(join(dir, `${sid}.tasks.jsonl`))).toBe(false)
     expect(existsSync(join(dir, `${sid}.scratch.md`))).toBe(false)
     expect(existsSync(join(dir, `${sid}.draft`))).toBe(false)
+    expect(existsSync(join(dir, `${sid}.files.jsonl`))).toBe(false)
     // Blob dir gone.
     expect(existsSync(join(dir, `${sid}.blobs`))).toBe(false)
     // Index entry gone.

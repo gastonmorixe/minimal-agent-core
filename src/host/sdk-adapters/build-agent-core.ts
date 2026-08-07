@@ -47,6 +47,7 @@ import type { EventSink } from "../../sdk/events.ts"
 import type { AgentCoreConfig } from "../../sdk/ports.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
+import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
 
@@ -103,6 +104,8 @@ export interface BuildAgentCoreDeps {
   toolNamePolicy?: ToolNamePolicy
   /** Append-only session store. Null when persistence is off. */
   store: SessionStore | null
+  /** Durable per-session file observation store. */
+  fileTrackingStore?: FileTrackingStore | null
   /** Per-session raw-output blob store. Null when blob capture is off. */
   blobStore: BlobStore | null
   /** Save-echo collector (memory-saved blocks). Null when memory is absent. */
@@ -173,6 +176,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     toolTimeTracker: deps.toolTimeTracker ?? null,
     model: deps.model,
     store: deps.store,
+    fileTrackingStore: deps.fileTrackingStore,
     writeTranscript,
     lifecycle,
   })

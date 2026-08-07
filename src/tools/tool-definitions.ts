@@ -191,6 +191,29 @@ const GREP_TOOL: ToolDefinition = {
   },
 }
 
+const FILES_STATS_TOOL: ToolDefinition = {
+  name: "FilesStats",
+  icon: "▦",
+  color: "cyan",
+  description: toolDescription("files-stats"),
+  input_schema: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    properties: {
+      status: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.FilesStats.status,
+        type: "string",
+        enum: ["all", "present", "missing", "changed"],
+      },
+      path: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.FilesStats.path,
+        type: "string",
+      },
+    },
+    additionalProperties: false,
+  },
+}
+
 const MODE_TOOL: ToolDefinition = {
   name: "Mode",
   icon: "◐",
@@ -235,5 +258,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   EDIT_TOOL,
   GLOB_TOOL,
   GREP_TOOL,
+  FILES_STATS_TOOL,
   MODE_TOOL,
 ]

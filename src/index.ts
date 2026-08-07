@@ -956,7 +956,7 @@ async function main() {
   // lifecycle markers. Lives in `src/startup/session-store-boot.ts`;
   // see that module for the fork-on-resume + best-effort semantics.
   const sid = getSessionId()
-  const { store, blobStore } = await bootSessionStores({
+  const { store, blobStore, fileTrackingStore } = await bootSessionStores({
     sid,
     resumeSid,
     resumeSameSid,
@@ -1013,6 +1013,7 @@ async function main() {
     turnAttachments: turnAttachmentSeam.producers,
     store,
     blobStore,
+    fileTrackingStore,
     initialMessages,
     toolTimeTracker,
     systemPromptOverrides: opts.systemPromptOverrides,
@@ -1171,6 +1172,7 @@ async function main() {
             toolNamePolicy: opts.cliToolFilter,
             store,
             blobStore,
+            fileTrackingStore,
             saveEcho,
             turnAttachments: turnAttachmentSeam.producers,
             eventSink,

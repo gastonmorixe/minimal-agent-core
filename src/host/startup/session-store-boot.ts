@@ -14,8 +14,9 @@
  */
 
 import { BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
+import { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import { loadSession } from "../../session/session-restore.ts"
-import { SessionStore } from "../../session/session-store.ts"
+import { defaultSessionsDir, SessionStore } from "../../session/session-store.ts"
 import { AGENT_VERSION } from "../../utils/build-info.ts"
 import {
   renderLiveSessionWarning,
@@ -57,6 +58,14 @@ export interface SessionStoreBootResult {
   store: SessionStore | null
   /** The blob store, or `null` when disabled/unavailable. */
   blobStore: BlobStore | null
+  /**
+   * Durable per-session file-observation tracker (`<sid>.files.jsonl`),
+   * or `null` when unavailable. Read/Edit/Write safety and the FilesStats
+   * tool read from it; fork/resume persistence rides the same sidecar
+   * copy convention `SessionStore.fork` already applies to `<sid>.*`
+   * files.
+   */
+  fileTrackingStore: FileTrackingStore | null
 }
 
 /**
@@ -169,6 +178,30 @@ export async function bootSessionStores(
     )
   }
 
+  // Per-session file-observation tracker for Read/Edit/Write safety and the
+  // FilesStats tool. Lives at `~/.minimal-agent/sessions/<sid>.files.jsonl`.
+  // Best-effort like the session store: when it cannot be built the tools
+  // degrade to the previous no-tracking behavior (Edit/Write proceed without
+  // a read prerequisite). On fork resume the `<sid>.files.jsonl` sidecar is
+  // copied by `SessionStore.fork`'s existing `<sid>.*` convention, so the
+  // observation history survives resume.
+  let fileTrackingStore: FileTrackingStore | null = null
+  try {
+    fileTrackingStore = new FileTrackingStore({
+      sid,
+      dir: defaultSessionsDir(),
+      cwd: process.cwd(),
+    })
+  } catch (err) {
+    writeCommandRows(
+      renderStoreUnavailableWarning(
+        "file-tracking",
+        err instanceof Error ? err.message : String(err),
+      ),
+      output,
+    )
+  }
+
   // Soft warn-on-resume: if another agent process appears to be live on
   // this same session, the user is about to fork the conversation.
   // Liveness is OS-probed (kill(0) + ps -o lstart=) so this catches the
@@ -251,5 +284,5 @@ export async function bootSessionStores(
     })
   }
 
-  return { store, blobStore }
+  return { store, blobStore, fileTrackingStore }
 }

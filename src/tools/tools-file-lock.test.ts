@@ -24,6 +24,7 @@ import {
   _resetForTests as resetLockLib,
   serializeHolder,
 } from "../infra/file-lock.ts"
+import { FileTrackingStore } from "../session/file-tracking-store.ts"
 
 import { _resetFileLockConfigForTests, executeTool } from "./tools.ts"
 
@@ -190,6 +191,100 @@ describe("opt-out paths", () => {
     })
     expect(r.is_error).toBeFalsy()
     expect(readFileSync(file, "utf-8")).toBe("X\n")
+  })
+})
+
+describe("FileTrackingStore integration", () => {
+  it("records Read and rejects an Edit after an external change", async () => {
+    const file = join(dir, "tracked.txt")
+    writeFileSync(file, "alpha\n")
+    const store = new FileTrackingStore({ sid: "tracking-test", dir })
+    const read = await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
+    expect(read.is_error).toBeFalsy()
+    expect(store.lookup(file)).toBeDefined()
+
+    writeFileSync(file, "changed externally\n")
+    const edit = await executeTool(
+      "Edit",
+      { file_path: file, old_string: "alpha", new_string: "ALPHA" },
+      { fileTrackingStore: store },
+    )
+    expect(edit.is_error).toBe(true)
+    expect(edit.content).toContain("changed since it was last read")
+    expect(readFileSync(file, "utf-8")).toBe("changed externally\n")
+  })
+
+  it("records successful Write observations", async () => {
+    const file = join(dir, "tracked-write.txt")
+    const store = new FileTrackingStore({ sid: "tracking-write", dir })
+    // A Write may create a path only after a Read observed it missing.
+    const read = await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
+    expect(read.is_error).toBe(true) // canonical Read error for a missing file
+    const result = await executeTool(
+      "Write",
+      { file_path: file, content: "hello\n" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBeFalsy()
+    expect(store.lookup(file)?.metadata?.size).toBe(6)
+    expect(store.status(file)).toBe("present")
+  })
+
+  it("rejects Edit on a file that was never read", async () => {
+    const file = join(dir, "never-read-edit.txt")
+    writeFileSync(file, "alpha\n")
+    const store = new FileTrackingStore({ sid: "tracking-never-read", dir })
+    const result = await executeTool(
+      "Edit",
+      { file_path: file, old_string: "alpha", new_string: "ALPHA" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBe(true)
+    expect(result.content).toContain("has not been read")
+    expect(readFileSync(file, "utf-8")).toBe("alpha\n")
+  })
+
+  it("rejects Write over an existing file that was never read", async () => {
+    const file = join(dir, "never-read-write.txt")
+    writeFileSync(file, "precious\n")
+    const store = new FileTrackingStore({ sid: "tracking-never-read-write", dir })
+    const result = await executeTool(
+      "Write",
+      { file_path: file, content: "clobbered\n" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBe(true)
+    expect(result.content).toContain("has not been read")
+    expect(readFileSync(file, "utf-8")).toBe("precious\n")
+  })
+
+  it("rejects Edit when the file was deleted since it was read", async () => {
+    const file = join(dir, "deleted-after-read.txt")
+    writeFileSync(file, "alpha\n")
+    const store = new FileTrackingStore({ sid: "tracking-deleted", dir })
+    await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
+    rmSync(file)
+    const result = await executeTool(
+      "Edit",
+      { file_path: file, old_string: "alpha", new_string: "ALPHA" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBe(true)
+    expect(result.content).toContain("no longer exists")
+  })
+
+  it("allows Write to create a file after Read observed it missing", async () => {
+    const file = join(dir, "create-after-missing.txt")
+    const store = new FileTrackingStore({ sid: "tracking-create-missing", dir })
+    await executeTool("Read", { file_path: file }, { fileTrackingStore: store })
+    const result = await executeTool(
+      "Write",
+      { file_path: file, content: "new\n" },
+      { fileTrackingStore: store },
+    )
+    expect(result.is_error).toBeFalsy()
+    expect(readFileSync(file, "utf-8")).toBe("new\n")
+    expect(store.status(file)).toBe("present")
   })
 })
 
