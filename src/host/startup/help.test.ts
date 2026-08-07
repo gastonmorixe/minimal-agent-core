@@ -29,8 +29,30 @@ describe("renderHelp", () => {
   test("documents --no-agents-md and MINIMAL_AGENT_NO_AGENTS_MD", () => {
     const text = stripAnsi(renderHelp().join("\n"))
     expect(text).toContain("--no-agents-md")
-    expect(text).toContain("Skip AGENTS.md system-prompt injection")
+    expect(text).toContain("Skip AGENTS.md injection")
     expect(text).toContain("MINIMAL_AGENT_NO_AGENTS_MD=1")
     expect(text).toContain("--disable-plugin agents-md")
+  })
+
+  test("leads with runnable examples and the command map", () => {
+    const text = stripAnsi(renderHelp().join("\n"))
+    expect(text).toContain("Start here")
+    expect(text).toContain('minimal-agent "explain this codebase"')
+    expect(text).toContain('echo "summarize stdin" | minimal-agent -')
+    expect(text).toContain("Command map")
+    expect(text).toContain("providers models-live")
+    expect(text).toContain("Every command also accepts --help")
+  })
+
+  test("documents current output, auth, and command aliases", () => {
+    const text = stripAnsi(renderHelp().join("\n"))
+    expect(text).toContain("--output-format <text|json|stream-json>")
+    expect(text).toContain("--json is an alias for --output-format json")
+    expect(text).toContain("--format, --surface <id>")
+    expect(text).toContain("--auth-method <oauth|api-key>")
+    expect(text).toContain("--email, --email-hint <address>")
+    expect(text).toContain("--list-providers")
+    expect(text).toContain("--usage-stats")
+    expect(text).toContain("resume-same <sid|last>")
   })
 })

@@ -43,13 +43,23 @@ export function readEmbeddedPackageVersion(embeddedDir: string): string {
 /** Render the full `--help` usage text without writing to stdout. */
 export function renderHelp(): string[] {
   return [
-    `  ${c.bold("minimal-agent")} ${c.dim(`v${AGENT_VERSION}`)}`,
-    `  ${c.faintWhite(c.italic("by Gaston Morixe"))} ${c.faintWhite("·")} ${c.faintWhite(c.italic("github.com/gastonmorixe/minimal-agent"))}`,
     "",
-    `  ${c.bold("Usage")}`,
-    `    ${c.dim("$")} minimal-agent ${c.dim("[options]")}`,
-    `    ${c.dim("$")} minimal-agent ${c.dim('"prompt text"')}`,
-    `    ${c.dim("$")} echo "prompt" | minimal-agent ${c.dim("-")}`,
+    `  ${c.bold(c.cyan("minimal-agent"))} ${c.dim(`v${AGENT_VERSION}`)}`,
+    `  ${c.faintWhite("A small, inspectable terminal agent harness.")}`,
+    `  ${c.faintWhite(c.italic("github.com/gastonmorixe/minimal-agent"))}`,
+    "",
+    `  ${c.bold("Start here")}`,
+    `    ${c.dim("$")} minimal-agent                                      ${c.dim("interactive REPL")}`,
+    `    ${c.dim("$")} minimal-agent ${c.cyan('"explain this codebase"')}       ${c.dim("one prompt, then exit")}`,
+    `    ${c.dim("$")} echo ${c.cyan('"summarize stdin"')} | minimal-agent ${c.cyan("-")}  ${c.dim("read a prompt from stdin")}`,
+    "",
+    `  ${c.bold("Command map")}`,
+    `    ${c.cyan("providers")} ${c.dim("·")} ${c.cyan("providers models")} ${c.dim("·")} ${c.cyan("providers models-live")}  ${c.dim("discover models and providers")}`,
+    `    ${c.cyan("sessions")} ${c.dim("·")} ${c.cyan("sessions dump")} ${c.dim("·")} ${c.cyan("resume")} ${c.dim("·")} ${c.cyan("usage")}                    ${c.dim("inspect or continue past work")}`,
+    `    ${c.cyan("provider <id> login")} ${c.dim("·")} ${c.cyan("logout")} ${c.dim("·")} ${c.cyan("auth-status")}       ${c.dim("manage provider credentials")}`,
+    `    ${c.cyan("plugins")} ${c.dim("·")} ${c.cyan("flags")} ${c.dim("·")} ${c.cyan("spinners")} ${c.dim("·")} ${c.cyan("help")}                         ${c.dim("inspect the local installation")}`,
+    "",
+    `  ${c.dim("Every command also accepts --help. Flags win over a positional prompt.")}`,
     "",
     ...renderHelpSections(buildHelpSections()),
   ]
@@ -74,9 +84,11 @@ function buildHelpSections(): HelpSection[] {
         row(`${c.cyan("--endpoint")} ${c.dim("<url>")}`, "Generic endpoint URL", [
           "use with --provider generic-endpoint, or MINIMAL_AGENT_ENDPOINT",
         ]),
-        row(`${c.cyan("--format")} ${c.dim("<surface>")}`, "Generic endpoint surface id", [
-          "a registered generic wire surface, or MINIMAL_AGENT_FORMAT",
-        ]),
+        row(
+          `${c.cyan("--format")}, ${c.cyan("--surface")} ${c.dim("<id>")}`,
+          "Generic endpoint surface",
+          ["a registered wire surface, or MINIMAL_AGENT_FORMAT"],
+        ),
         row(`${c.cyan("--auth-type")} ${c.dim("<type>")}`, "Generic endpoint auth", [
           "api-key | bearer | none | custom-header, or MINIMAL_AGENT_AUTH_TYPE",
         ]),
@@ -98,7 +110,7 @@ function buildHelpSections(): HelpSection[] {
           "Reasoning effort: low, medium, high, xhigh, max",
           ["or MINIMAL_AGENT_EFFORT"],
         ),
-        row(c.cyan("--fast"), "Fast-mode dispatch", [
+        row(`${c.cyan("-F")}, ${c.cyan("--fast")}`, "Fast-mode dispatch", [
           'speed:"fast", fast-capable models only, ~2.5x tok/s, ~2x cost, or MINIMAL_AGENT_FAST=1',
         ]),
         row(
@@ -128,9 +140,14 @@ function buildHelpSections(): HelpSection[] {
           `${c.cyan("-p")}, ${c.cyan("--prompt")} ${c.dim("<text>")}`,
           "Non-interactive: send prompt, print, exit",
         ),
-        row(c.cyan("--json"), "Non-interactive: emit the final answer as JSONL", [
-          "final-answer JSONL, not a structured event stream",
-        ]),
+        row(
+          `${c.cyan("--output-format")} ${c.dim("<text|json|stream-json>")}`,
+          "Non-interactive output",
+          [
+            "text is human output; json is buffered JSONL; stream-json flushes JSONL events live",
+            "--json is an alias for --output-format json",
+          ],
+        ),
         row(
           `${c.cyan("--output-schema")} ${c.dim("<file>")}`,
           "Constrain the final answer to a JSON Schema",
@@ -158,9 +175,8 @@ function buildHelpSections(): HelpSection[] {
         row(`${c.cyan("--enable-plugin")} ${c.dim("<id>")}`, "Force-enable a plugin for this run", [
           "overrides config + manifest opt-out",
         ]),
-        row(c.cyan("--no-agents-md"), "Skip AGENTS.md system-prompt injection", [
-          "alias for --disable-plugin agents-md",
-          "or MINIMAL_AGENT_NO_AGENTS_MD=1",
+        row(`${c.cyan("--no-agents-md")}, ${c.cyan("--no-agents")}`, "Skip AGENTS.md injection", [
+          "alias for --disable-plugin agents-md, or MINIMAL_AGENT_NO_AGENTS_MD=1",
         ]),
         row(
           `${c.cyan("--header")} ${c.dim("/")} ${c.cyan("--no-header")}`,
@@ -204,7 +220,7 @@ function buildHelpSections(): HelpSection[] {
         row(
           `${c.cyan("--system-prompt")} ${c.dim("<text>")}`,
           "Replace the whole core-controllable system prompt",
-          ["or --system-prompt-file <path>, or --no-system-prompt to omit"],
+          ["every override accepts <flag>-file <path> or --no-<flag-name> to omit"],
         ),
         row(
           `${c.cyan("--system-identity")} ${c.dim("<text>")}`,
@@ -252,13 +268,19 @@ function buildHelpSections(): HelpSection[] {
         row(
           `${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("login")} ${c.dim("[method]")}`,
           "Sign in to a provider",
-          ["provider <id> login oauth"],
+          ["also: login [provider] [method], providers login <id> [method]"],
         ),
-        row(`${c.cyan("login")} ${c.dim("<id> [method]")}`, "Short alias for provider login", [
-          "method: oauth | api-key",
-        ]),
-        row(c.cyan("--logout"), "Clear minimal-agent credentials", ["~/.minimal-agent/auth.jsonc"]),
-        row(c.cyan("--auth-status"), "Show login status, account, scopes, expiry"),
+        row(
+          `${c.cyan("provider")} ${c.dim("<id>")} ${c.cyan("logout")}`,
+          "Clear one provider's credentials",
+          ["also: logout [provider], providers logout <id>"],
+        ),
+        row(c.cyan("auth-status"), "Show login status, account, scopes, and expiry"),
+        row(`${c.cyan("--auth-method")} ${c.dim("<oauth|api-key>")}`, "Choose a login method"),
+        row(
+          `${c.cyan("--email")}, ${c.cyan("--email-hint")} ${c.dim("<address>")}`,
+          "Pre-fill login email",
+        ),
         row(
           `${c.cyan("--name")} ${c.dim("<label>")}`,
           "Label a credential during login (e.g. Work or Personal)",
@@ -268,18 +290,20 @@ function buildHelpSections(): HelpSection[] {
     },
     {
       title: c.bold("Info"),
-      note: c.dim("(also as subcommands: `models [list]`, `plugins [list]`, `flags [list]`, ...)"),
+      note: c.dim("(subcommands are preferred, flags and aliases stay supported)"),
       rows: [
-        row(c.cyan("providers"), "List registered providers", ["id · surfaces"]),
+        row(c.cyan("providers [list]"), "List registered providers", [
+          "aliases: --list-providers, --providers",
+        ]),
         row(
           `${c.cyan("providers models")} ${c.dim("[<id>]")}`,
           "List registered models (offline, no network)",
-          ["alias: --list-models"],
+          ["also: models [list], aliases: --list-models, --models"],
         ),
         row(
           `${c.cyan("providers models-live")} ${c.dim("[<id>]")}`,
           "List live provider catalogs (network)",
-          ["alias: --list-models-live"],
+          ["also: models-live [list], aliases: --list-models-live, --models-live"],
         ),
         row(
           `${c.cyan("--print-format")} ${c.dim("<text|json|md|xml>")}`,
@@ -289,40 +313,33 @@ function buildHelpSections(): HelpSection[] {
         row(
           `${c.cyan("plugins")} ${c.dim("[list]")}`,
           "List installed plugins and effective on/off state",
-          ["alias: --list-plugins / --plugins"],
+          ["aliases: --list-plugins, --plugins"],
         ),
-        row(
-          `${c.cyan("--list-flags")} ${c.dim("/")} ${c.cyan("--flags")}`,
-          "Show beta feature flags",
-        ),
-        row(
-          `${c.cyan("--list-spinners")} ${c.dim("/")} ${c.cyan("--spinners")}`,
-          "Show available spinner presets",
-        ),
-        row(`${c.cyan("--sessions")} ${c.dim("[<query>]")}`, "List saved sessions", [
-          "fuzzy filter on date/sid/cwd",
+        row(c.cyan("flags [list]"), "Show beta feature flags", ["aliases: --list-flags, --flags"]),
+        row(c.cyan("spinners [list]"), "Show available spinner presets", [
+          "aliases: --list-spinners, --spinners",
         ]),
+        row(`${c.cyan("sessions")} ${c.dim("[list|query]")}`, "List saved sessions", [
+          "fuzzy filter on date/sid/cwd; aliases: --sessions, --session, --list-sessions",
+        ]),
+        row(
+          `${c.cyan("sessions dump")} ${c.dim("<sid|last>")}`,
+          "Dump a full session history to stdout",
+          ["alias: --dump <sid|last>; --dump-format md|xml"],
+        ),
         row(`${c.cyan("usage")} ${c.dim("[<period>]")}`, "Token-usage stats", [
-          "today|last-day|last-month|ytd|year|all, interactive on a TTY",
+          "today|last-day|last-month|ytd|year|all; alias: --usage-stats",
+        ]),
+        row(`${c.cyan("resume")} ${c.dim("<sid|last>")}`, "Resume a saved session", [
+          "also: sessions resume <sid>; aliases: -r, --resume",
+          "reuses credential pin only when provider matches the session",
         ]),
         row(
-          `${c.cyan("-r")}, ${c.cyan("--resume")} ${c.dim("<sid|last>")}`,
-          "Resume a saved session",
-          [
-            "`sessions resume <sid>`",
-            "reuses credential pin only when provider matches the session",
-          ],
-        ),
-        row(
-          `${c.cyan("--resume-same-sid")} ${c.dim("<sid|last>")}`,
+          `${c.cyan("resume-same")} ${c.dim("<sid|last>")}`,
           "Resume in place, keeping the same session id",
-          ["no fork, appends to the existing log", "`resume-same <sid>`"],
+          ["also: sessions resume-same <sid>; alias: --resume-same-sid"],
         ),
-        row(`${c.cyan("--dump")} ${c.dim("<sid|last>")}`, "Dump a full session history to stdout"),
-        row(`${c.cyan("--dump-format")} ${c.dim("<md|xml>")}`, "Output format for --dump", [
-          "default: md",
-        ]),
-        row(`${c.cyan("-h")}, ${c.cyan("--help")}`, "Show this help"),
+        row(`${c.cyan("help")}, ${c.cyan("-h")}, ${c.cyan("--help")}`, "Show this help"),
       ],
     },
     {
