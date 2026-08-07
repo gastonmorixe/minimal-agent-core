@@ -65,6 +65,7 @@ import { registerCompactHostCommand } from "./host/commands/compact.ts"
 import { registerContinueHostCommand } from "./host/commands/continue.ts"
 import { resolveSessionTarget } from "./host/commands/session-index.ts"
 import { InteractiveSession } from "./host/interactive-session.ts"
+import { runRepl } from "./host/repl.ts"
 import { buildAgentCore, createLifecyclePort } from "./host/sdk-adapters/build-agent-core.ts"
 import {
   buildResumeHeader,
@@ -106,6 +107,7 @@ import {
   startStartupRowSpinner,
 } from "./host/ui/startup/tree.ts"
 import type { StatusSpinnerTheme } from "./host/ui/status/line-renderer.ts"
+import { c } from "./host/ui/style/ansi.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes/modes.ts"
