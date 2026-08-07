@@ -12,16 +12,30 @@
 
 `minimal-agent` is a tiny, beautiful, composable agent harness.
 
-It is built for people who want to see the wire shape, tool loop, terminal renderer, session logs, plugins, auth, and prompt caching without unpacking a bundled CLI. It runs as a usable terminal agent, but the point is clarity: every moving part has a file you can read, a test you can run, and a debug path you can inspect.
+It is the **presentation-free SDK and conversation engine** for the minimal-agent
+family. It owns the agent loop, canonical model/provider contracts, session
+records, plugins, auth, and prompt caching. The terminal client is being moved
+to `minimal-agent-cli` (Program 3A scaffold is live; the executable remains here
+transitionally until the Program 3B cutover lands). Every moving part has a file
+you can read, a test you can run, and a debug path you can inspect.
 
 ## What it is
 
 `minimal-agent` does four things:
 
-- **Runs a real local agent.** Interactive REPL, one-shot prompts, stdin input, tool calls, streamed output, and resume.
-- **Talks to any model through a neutral core.** The agent loop, REPL, and renderers depend on canonical request/event types, never a vendor's wire format. Each backend is a separate provider plugin that translates canonical types to its own protocol.
-- **Keeps the terminal sharp.** Live input, status rows, formatter support, diff display, spinner presets, quit modal, hidden-character display, and Markdown output are all tested as terminal code, not string guesses.
-- **Makes internals inspectable.** Network captures, session JSONL, plugin manifests, config parsing, tool definitions, and command routing live in small files.
+- **Runs a real local agent engine.** One conversation instance per process
+  session, tool calls, streamed output, resume, and headless execution
+  primitives.
+- **Talks to any model through a neutral core.** The agent loop and SDK depend
+  on canonical request/event types, never a vendor's wire format. Each backend
+  is a separate provider plugin that translates canonical types to its own
+  protocol.
+- **Keeps the engine honest.** The core stays presentation-free: terminal
+  rendering, input, and REPL live in the CLI repository (transitional until
+  Program 3B moves the remaining host/UI code out of core).
+- **Makes internals inspectable.** Network captures, session JSONL, plugin
+  manifests, config parsing, tool definitions, and command routing live in small
+  files.
 
 ## Architecture in one breath
 
@@ -102,6 +116,10 @@ none of this repeats.
 
 ### Dev entry point
 
+> The executable is **transitional here until the Program 3B cutover** moves the
+> terminal client to `minimal-agent-cli`. Terminal users will invoke
+> `minimal-agent-cli` once cutover lands.
+
 ```sh
 bun install                 # dev deps only (biome, oxlint, typecheck)
 bun run src/index.ts        # raw entry point
@@ -145,7 +163,8 @@ TypeScript 6 pin for typedoc; only `bun-types` is taken from the catalog there.
 
 ## CLI surface
 
-Core commands:
+Core commands (transitional entrypoint until Program 3B cutover; the terminal
+client is being moved to `minimal-agent-cli`):
 
 - **Interactive:** `./minimal-agent`
 - **One-shot prompt:** `./minimal-agent "prompt text"`
@@ -541,7 +560,7 @@ a provider's prefix cache can pay off across turns in one process.
 
 Start here:
 
-- **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch.
+- **`src/index.ts`:** CLI, startup, config, plugin loading, provider discovery, session wiring, and REPL launch. **Transitional entrypoint** - the terminal client is being moved to `minimal-agent-cli` (Program 3B cutover).
 - **`src/agent/agent.ts`:** Agent loop, message history, tool execution, cache markers, and streamed assistant turns.
 - **`src/llm/`:** The provider-agnostic core: canonical request/event types, the capability schema, the model registry, the provider port, and the orchestrator.
 - **`src/network/`:** HTTP/2 transport, fetch transport, fallback, observers, and the test transport.
@@ -578,10 +597,12 @@ The repo works best when changes stay small and observable:
 
 ## Status
 
-This is a research tool and a daily-use terminal agent. The value is the small
-surface: enough behavior to run real agentic turns, enough tests to change it
-without guessing, and enough debug output to explain what happened when the
-server or terminal says no.
+This is a research tool and the engine behind a daily-use terminal agent. The
+value is the small surface: enough behavior to run real agentic turns, enough
+tests to change it without guessing, and enough debug output to explain what
+happened when the server or terminal says no. The terminal client itself is
+being moved to `minimal-agent-cli`; this repository remains the
+presentation-free core.
 
 ## Related repositories
 
