@@ -3,7 +3,6 @@ project: "minimal-agent"
 title: "Changelog"
 type: changelog
 status: living
-working-dir: "/Users/gaston/Projects/minimal-agent"
 created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-08-07T13:45:26-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
@@ -15,20 +14,16 @@ latest-unreleased:
   - id: "2026-08-05-tool-output-mega-line-caps"
     type: fix
     status: landed
-    detail: "docs/changes/2026-08-05-tool-output-mega-line-caps.md"
   - id: "2026-08-01-resume-credential-pin-provider-scope"
     type: fix
     status: landed
-    detail: "docs/changes/2026-08-01-resume-credential-pin-provider-scope.md"
   - id: "2026-07-30-openai-chat-thinking-stop-before-text"
     type: fix
     status: landed
-    detail: "docs/changes/2026-07-30-openai-chat-thinking-stop-before-text.md"
   - id: "2026-07-12-never-give-up-terminal-less-thinking-idle"
     type: fix
     status: shipped
     commits: ["15c295c", "cbcf119", "dc020a2"]
-    detail: "docs/changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md"
     research: "private/retry-fix/PROGRESS.md"
 related:
   - "docs/changes/"
@@ -94,15 +89,12 @@ type: fix
 status: landed
 created-at: "2026-08-05T11:00:00-0400"
 updated-at: "2026-08-05T11:00:00-0400"
-detail: "docs/changes/2026-08-05-tool-output-mega-line-caps.md"
 ---
 
 Hardens buffer, model, blob, and TUI layers against single mega-lines
 (minified bundles). Bash/Grep drain 512 KiB, universal per-line clamp
 8,192 chars, `_raw` blob 256 KB, TUI preview width 200, streamed tail
 never word-wraps raw mega-lines. Read image/`blocks` paths untouched.
-
-See `docs/changes/2026-08-05-tool-output-mega-line-caps.md`.
 
 ### Fix: Resume credential pin scoped to session provider
 
@@ -112,7 +104,6 @@ type: fix
 status: landed
 created-at: "2026-08-01T15:25:00-0400"
 updated-at: "2026-08-01T15:35:00-0400"
-detail: "docs/changes/2026-08-01-resume-credential-pin-provider-scope.md"
 ---
 
 `--resume` no longer applies `meta.credentialName` when the effective
@@ -125,7 +116,6 @@ the new provider default. Legacy sessions without `meta.provider` still
 reuse the pin. Covered by `resolve-credential-name.test.ts` (pin gate) and
 `provider-boot.test.ts` (diag emit, no mid-banner `console.error`).
 
-See `docs/changes/2026-08-01-resume-credential-pin-provider-scope.md`.
 
 ### Feat: Lifecycle policy seams + InteractiveSession on AgentCore
 
@@ -153,7 +143,6 @@ type: fix
 status: landed
 created-at: "2026-07-30T18:11:00-0400"
 updated-at: "2026-07-30T18:11:00-0400"
-detail: "docs/changes/2026-07-30-openai-chat-thinking-stop-before-text.md"
 ---
 
 DeepSeek Chat Completions transition chunks carry both the first visible token
@@ -167,7 +156,6 @@ Fix: handle reasoning before text; close any open thinking block before
 `plugin-api/src/llm/openai-chat.ts`; plugins vendored copies synced.
 Regression tests in `openai-chat.test.ts` + fixture order assert.
 
-See `docs/changes/2026-07-30-openai-chat-thinking-stop-before-text.md`.
 
 ### Fix: Grok false mid-stream `stream_idle` from billing / shared request ids
 
@@ -177,7 +165,6 @@ type: fix
 status: shipped
 created-at: "2026-07-24T02:50:00-0400"
 updated-at: "2026-07-24T02:55:00-0400"
-detail: "docs/changes/2026-07-24-stream-idle-billing-isolation.md"
 commits: ["ff4a1ab", "7c91bc7", "bf35061"]
 ---
 
@@ -192,7 +179,6 @@ gives unique wire ids and attaches activity/watchdog only to the primary stream
 OAuth / quota labels; single-fire stall diagnostics; Notice-level retry recovery
 so TUI warn slots clear. Mid-stream idle stays 30s (thinking-open 5 min).
 
-See `docs/changes/2026-07-24-stream-idle-billing-isolation.md`.
 
 ### Fix: explicit `protocol: "h2"` NetworkClient routing (Cursor Connect)
 
@@ -202,7 +188,6 @@ type: fix
 status: shipped
 created-at: "2026-07-24T02:30:00-0400"
 updated-at: "2026-07-24T02:35:00-0400"
-detail: "docs/changes/2026-07-24-explicit-h2-network-routing.md"
 ---
 
 `NetworkClient.request({ protocol: "h2" })` always selects a registered
@@ -218,7 +203,6 @@ fallback to fetch; request `transportHint` reflects the transport that will
 actually serve the call (net-dbg accuracy). Focused tests cover pin-under-fetch
 and exactly-once multi-transport close.
 
-See `docs/changes/2026-07-24-explicit-h2-network-routing.md`.
 
 ### Fix: scrub embedded `data:*;base64` URIs in tool text (token waste)
 
@@ -293,7 +277,6 @@ created-at: "2026-07-12T13:34:39-0400"
 updated-at: "2026-07-12T16:40:00-0400"
 incidents: ["523dba62", "113921b7"]
 commits: ["15c295c", "cbcf119", "dc020a2"]
-detail: "docs/changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md"
 research: "private/retry-fix/PROGRESS.md"
 agents: ["ba7cd4f2", "97596567", "ce0e0589", "842604fe", "f61fc420", "106c4c8c"]
 ---
@@ -339,8 +322,7 @@ the old one-shot `terminal-less-bounded` + `api.retry-terminal-less-stop`
 fail path for pre-effect closes).
 
 **Commits:** `15c295c` (post-tool salvage), `cbcf119` (mid-text continuation),
-`dc020a2` (this never-give-up + thinking-idle fix). Full write-up:
-[`docs/changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md`](changes/2026-07-12-never-give-up-terminal-less-thinking-idle.md).
+`dc020a2` (this never-give-up + thinking-idle fix).
 Research handoff: `private/retry-fix/PROGRESS.md`. Restart the running agent
 process to pick up the binary.
 
@@ -528,8 +510,7 @@ not gated, a hidden tool's handler still runs if invoked, so availability
 controls advertisement, not execution. `ReportResult` uses it to stay invisible
 to the lead (which has no result path) while workers carry it. New
 `plugins/sub-agents/lib/report.ts` + `handlers/report_result.ts`,
-`available` plumbing in `src/plugins/loader.ts` and `types.ts`. See
-`docs/changes/2026-06-01-subagent-result-protocol-and-tool-availability.md`.
+`available` plumbing in `src/plugins/loader.ts` and `types.ts`.
 
 ## 2026-06-04
 
@@ -555,8 +536,7 @@ model and the env override always win.
 Also corrected the model-facing docs that described the cheap default as
 intended (`manifest.json` `model` param description, `PROMPT.md`, library/service
 comments) and unwrapped the hard-wrapped worker result-protocol template to save
-wire tokens. New tests in `runtime.test.ts` and `handler-deps.test.ts`. See
-`docs/changes/2026-06-04-subagent-model-inheritance.md`.
+wire tokens. New tests in `runtime.test.ts` and `handler-deps.test.ts`.
 
 ## 2026-05-31
 
@@ -593,9 +573,7 @@ tool calls. Wire-proven against `.net-dbg` captures; absent on opus-4.7 under th
 same beta, so it is a model-behavior change (4.7 -> 4.8), NOT the provider
 refactor (the harness delivers every tool result correctly). Fix omits the
 interleaved-thinking beta for opus-4-8 only (4.6/4.7 + sonnet keep it); escape
-hatch `MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1`. See
-`docs/changes/2026-05-31-fix-opus48-interleaved-thinking-tool-batching.md` and
-TODOS.md `T-7c3f02`.
+hatch `MINIMAL_AGENT_FORCE_INTERLEAVED_THINKING=1` (see TODOS.md `T-7c3f02`).
 
 ### First-run onboarding: `bunx`-runnable, plugin auto-clone, welcome card
 
@@ -619,7 +597,6 @@ Makes the agent usable on a clean device with no manual install.
   config `pluginSync` / `pluginsRepo`. Verified end-to-end in a clean
   `oven/bun:1.3-debian` container.
 
-See `docs/changes/2026-05-31-first-run-onboarding.md`.
 
 ### Schedule plugin: TUI redesign + sub-minute intervals
 
@@ -678,4 +655,3 @@ See `docs/changes/2026-05-30-prompts-as-markdown.md`.
 
 ### Tool routing + search directives
 
-See `docs/changes/2026-05-30-tool-routing-search-directives.md`.

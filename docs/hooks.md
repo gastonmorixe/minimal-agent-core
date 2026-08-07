@@ -56,7 +56,7 @@ model tool_use
 
 ## Channel catalog (policy-relevant)
 
-| Channel | Shape | Claude analogue | Wired? |
+| Channel | Shape | Known analogue | Wired? |
 |---------|-------|-----------------|--------|
 | `turn.willStart` | chain | UserPromptSubmit | Yes (REPL + headless) |
 | `tool.willInvoke` | chain | PreToolUse | Yes (`executeToolRound`) |
@@ -100,6 +100,6 @@ dangerous Bash and redacts `sk-` tokens on `message.willSend`.
 
 ## Out of scope (v1)
 
-Shell/HTTP/prompt user hooks (Claude `settings.json`), PermissionRequest auto-ask
+Shell/HTTP/prompt user hooks (`settings.json` user hooks), PermissionRequest auto-ask
 UI, MessageDisplay stream redaction, FileChanged watchers, enterprise managed
 hook policy.

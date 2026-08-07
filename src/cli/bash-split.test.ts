@@ -106,9 +106,9 @@ describe("splitBashSegments — operator disambiguation (longest-prefix wins)", 
 describe("splitBashSegments — mixed operators", () => {
   it("splits the user's reported real-world example", () => {
     const cmd =
-      'cd /Users/gaston/Projects/mdstream && grep -n -i "single mega-cell\\|mega.cell\\|mega cell" tmp/markdown-tables-mock-002.md | head -10'
+      'cd /Users/dev/Projects/mdstream && grep -n -i "single mega-cell\\|mega.cell\\|mega cell" tmp/markdown-tables-mock-002.md | head -10'
     const out = splitBashSegments(cmd)
-    expect(out.lead).toBe("cd /Users/gaston/Projects/mdstream")
+    expect(out.lead).toBe("cd /Users/dev/Projects/mdstream")
     expect(out.rest).toEqual([
       {
         op: "&&",
@@ -350,7 +350,7 @@ describe("shouldSoftSplit — multi-operator pipeline rule", () => {
     // fits inline and the old width-only predicate left it unsplit.
     // The new rule splits any structured 2+ operator command.
     const cmd =
-      "cd /Users/gaston/Projects/inditex/work/inditex-supplier-management && cat Makefile 2>/dev/null | head -80"
+      "cd /Users/dev/Projects/inditex/work/inditex-supplier-management && cat Makefile 2>/dev/null | head -80"
     expect(shouldSoftSplit(cmd, 130)).toBe(true)
     expect(shouldSoftSplit(cmd, 200)).toBe(true)
     expect(shouldSoftSplit(cmd, 400)).toBe(true)

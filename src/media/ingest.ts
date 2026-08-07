@@ -103,8 +103,8 @@ export async function buildUserContent(
   }
 }
 
-// Bare absolute IMAGE paths typed/pasted into the prompt (matches Claude Code's
-// "just type a path to an image and I'll read it"). Documents (.pdf/.txt) are
+// Bare absolute IMAGE paths typed/pasted into the prompt (matches the
+// "just type a path to an image and I'll read it" convention). Documents (.pdf/.txt) are
 // NOT auto-attached inline : they need an explicit drag-drop or token, so a
 // prose mention of a doc path is not silently turned into an attachment.
 // The path atom accepts a backslash-escape (`\.` for a drag-escaped space), a

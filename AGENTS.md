@@ -1,5 +1,5 @@
 Orientation for agents working in this repo. User-facing usage lives in
-[`README.md`](README.md); deferred work in [`TODOS.md`](TODOS.md); per-change
+[`README.md`](README.md); deferred work in `private/TODOS.md` (untracked); per-change
 write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
 -engineering captures under `private/research/`.
 
@@ -68,7 +68,7 @@ adapter; OpenAI Chat + Responses foundation files are present but not registered
 Full design rationale, the capability schema, and the phase plan are in
 [`private/research/2026-05-28-llm-providers/01-architecture.md`](private/research/2026-05-28-llm-providers/01-architecture.md).
 The shipped state and gotchas are in
-[`docs/changes/2026-05-28-anthropic-opus-4-8.md`](docs/changes/2026-05-28-anthropic-opus-4-8.md).
+[`docs/changes/2026-06-12-provider-decoupling-plugin-architecture.md`](docs/changes/2026-06-12-provider-decoupling-plugin-architecture.md).
 
 ### The canonical core (`src/llm/`)
 

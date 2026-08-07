@@ -25,7 +25,7 @@ export type Effort = string
  *
  *  Per-model availability (as of 2026-06-30):
  *  - `low` / `medium` / `high`: opus-4-5+, opus-4-6, opus-4-7, opus-4-8, sonnet-4-6, sonnet-5
- *  - `xhigh`: opus-4-7, opus-4-8, sonnet-5 (claude-code's REPL default for opus tier)
+ *  - `xhigh`: opus-4-7, opus-4-8, sonnet-5 (the opus-tier default)
  *  - `max`:   opus-4-5+ only (gated by user subscription tier)
  *
  *  Sonnet 4.5 and haiku 4.5 reject `effort` outright with a 400. */

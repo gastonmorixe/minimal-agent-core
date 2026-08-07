@@ -204,12 +204,11 @@ describe("net-dbg", () => {
   describe("redactHeaders", () => {
     it("strips Bearer token contents past the Bearer prefix", () => {
       const out = redactHeaders({
-        authorization:
-          "Bearer sk-ant-oat01-DZ2tVxdvDQ5FVDx_vrfEl4cT-yjeG_MzvijzTPUGS4WiFVWRBokTC0vvsnc",
+        authorization: "Bearer sk-ant-oat01-FAKE-TOKEN-FOR-REDACTION-TEST-0123456789abcdef",
       })
       // Must not contain any character from the original token past "Bearer ".
       expect(out.authorization).not.toContain("sk-ant")
-      expect(out.authorization).not.toContain("DZ2tV")
+      expect(out.authorization).not.toContain("FAKE-TOKEN")
       expect(out.authorization.startsWith("Bearer ")).toBe(true)
     })
 

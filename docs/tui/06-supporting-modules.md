@@ -2,14 +2,6 @@
 title: Supporting modules
 created_at: "2026-05-27T10:14:30.725679000-0400"
 updated_at: "2026-05-27T10:14:30.725679000-0400"
-session_id: 4aa1cfdf-7a42-47ce-8b99-c7612a39e167
-host_info:
-  hostname: macbookpro.home.arpa
-  user: gaston
-  os: "macOS 26.5 (25F71)"
-  kernel: "25.5.0"
-  arch: arm64
-  serial: FHQ93DD9T6
 tags: [tui, stdio-interceptor, ansi-stream, term-caps, theme, overlay, picker, quit-modal]
 taillog:
  - "2026-05-27T10:14:30.725679000-0400 | Initial: smaller modules in src/ui/ + ansi-stream + theme"

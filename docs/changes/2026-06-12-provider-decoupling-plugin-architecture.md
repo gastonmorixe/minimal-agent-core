@@ -19,8 +19,7 @@ inversion at repo scale: core never depends on a concrete plugin, plugins never
 depend on core internals.
 
 Charter and plan of record: `private/decoupling-refactor-work/CHARTER.md`,
-`private/decoupling-refactor-work/PLAN.md`. Predecessor doc:
-`docs/changes/2026-06-09-fable-5-hardening-and-headers-decoupling.md`.
+`private/decoupling-refactor-work/PLAN.md`. Predecessor docs archived under `private/docs-archive/`.
 
 ## The three invariants
 

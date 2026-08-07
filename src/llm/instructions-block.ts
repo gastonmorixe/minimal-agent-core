@@ -3,8 +3,8 @@
  *
  * The big cached `system[2]` block (base instructions + the loop-safety
  * paragraph + the tool-output-conventions paragraph) is the same for EVERY
- * provider: it carries no Anthropic wire shape, no billing header, no
- * Claude-Code identity. Those provider-specific preambles are resolved
+ * provider: it carries no provider wire shape, no billing header, no
+ * provider-specific identity. Those provider-specific preambles are resolved
  * separately (see `src/llm/system-prompt.ts` + each provider's
  * `resolveSystemPrompt`).
  *

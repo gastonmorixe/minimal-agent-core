@@ -138,8 +138,7 @@ The plugin imports from two packages:
 `../../src/llm/model-registry.ts` and `../../src/llm/provider.ts` to register
 models and type the adapter struct. These are not yet in `@minimal-agent/plugin-api`.
 When they move into the API package, provider plugins will drop all `src/`
-imports. Tracked at `docs/2026-06-19T230000Z-skill-declared-tools.md`
-("Deferred" limitations table).
+imports. Tracked in the skill-declared-tools spec (archived under `private/`).
 
 ## Boot sequence
 

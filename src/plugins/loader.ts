@@ -20,8 +20,7 @@
  * time. On collision, the later package is dropped and a diagnostic is
  * routed through the optional logger. Core tools always win.
  *
- * **Spec:** `/Users/gaston/.claude/plans/polished-drifting-dijkstra.md`,
- * section "Loader lifecycle".
+ * **Spec:** design note, section "Loader lifecycle".
  *
  * @module plugins/loader
  */

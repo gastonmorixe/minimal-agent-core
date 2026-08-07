@@ -63,7 +63,7 @@ const SGR_FRAGMENT_RE = /(?:^|[^\x1b])\[(?:0|1|22|38;2;\d{1,3};\d{1,3};\d{1,3})m
 
 const FORMATTED_LINE =
   "Concrete example: ASK mode (from the ask-mode plugin). When active, Edit and Write are stripped from my available tools."
-const MDSTREAM = "/Users/gaston/Projects/mdstream/target/release/mdstream"
+const MDSTREAM = "/Users/dev/Projects/mdstream/target/release/mdstream"
 
 function feedChunked(c: Compositor, bytes: string, chunkSize: number) {
   for (let i = 0; i < bytes.length; i += chunkSize) {

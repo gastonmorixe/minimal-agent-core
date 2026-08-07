@@ -32,10 +32,10 @@ describe("formatToolInput — Bash soft-split (width-aware)", () => {
   })
 
   it("returns lead-only when the single-line command would overflow", () => {
-    const cmd = "cd /Users/gaston/Projects/mdstream && grep -n -i pat file.md | head -10"
+    const cmd = "cd /Users/dev/Projects/mdstream && grep -n -i pat file.md | head -10"
     const out = formatToolInput(tu("Bash", { command: cmd }), 60)
     // Only the lead segment makes it into the header.
-    expect(out).toBe("$ cd /Users/gaston/Projects/mdstream")
+    expect(out).toBe("$ cd /Users/dev/Projects/mdstream")
   })
 
   it("falls back to the full first line when no top-level operators exist", () => {
@@ -76,7 +76,7 @@ describe("formatToolInputContinuation — Bash soft-split (↳ rows)", () => {
   })
 
   it("returns ↳ rows for an overflowing single-line pipeline (operator leads each row)", () => {
-    const cmd = "cd /Users/gaston/Projects/mdstream && grep -n foo bar.md | head -10"
+    const cmd = "cd /Users/dev/Projects/mdstream && grep -n foo bar.md | head -10"
     const cont = formatToolInputContinuation(tu("Bash", { command: cmd }), 60)
     expect(cont).toEqual(["↳ && grep -n foo bar.md", "↳ | head -10"])
   })
@@ -91,7 +91,7 @@ describe("formatToolInputContinuation — Bash soft-split (↳ rows)", () => {
     // Header is rendered separately by formatToolInput; this asserts the
     // continuation rows that go below it.
     const cmd =
-      'cd /Users/gaston/Projects/mdstream && grep -n -i "single mega-cell\\|mega.cell\\|mega cell" tmp/markdown-tables-mock-002.md | head -10'
+      'cd /Users/dev/Projects/mdstream && grep -n -i "single mega-cell\\|mega.cell\\|mega cell" tmp/markdown-tables-mock-002.md | head -10'
     const cont = formatToolInputContinuation(tu("Bash", { command: cmd }), 107)
     expect(cont).toEqual([
       '↳ && grep -n -i "single mega-cell\\|mega.cell\\|mega cell" tmp/markdown-tables-mock-002.md',

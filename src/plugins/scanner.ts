@@ -38,8 +38,7 @@
  * are ambiguous; the first inner close will end the outer capture. Plugin
  * authors should avoid nesting same-name tags.
  *
- * **Spec:** `/Users/gaston/.claude/plans/polished-drifting-dijkstra.md`,
- * section "Inline tag trigger path".
+ * **Spec:** design note, section "Inline tag trigger path".
  *
  * @module plugins/scanner
  */

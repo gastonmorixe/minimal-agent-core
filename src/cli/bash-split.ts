@@ -313,7 +313,7 @@ function matchOperator(cmd: string, i: number): BashOperator | null {
  * they overflow — they're short and trivially scannable.
  *
  * Bumped to 2 (rather than 1) after a user report (May 2026) where
- * `cd /Users/.../inditex-supplier-management && cat Makefile … | head -80`
+ * `cd /Users/.../supplier-management && cat Makefile … | head -80`
  * stayed unsplit at a typical 130-col iTerm window. Splitting on every
  * single operator regardless of width felt too noisy in early prototypes
  * (`ls | wc -l` → 2 rows is overkill); the 2-operator threshold strikes

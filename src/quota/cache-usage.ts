@@ -16,8 +16,8 @@
  * surviving core consumer (`session-tokens.ts`) depends on it, so it lives
  * here in its own neutral module rather than riding the dying file.
  *
- * The field names mirror the wire `usage` payload (verified against Claude
- * Code 2.1.118 captures), which is also the de-facto shape the session-token
+ * The field names mirror the wire `usage` payload (verified against net-dbg
+ * captures), which is also the de-facto shape the session-token
  * accumulator and the canonical usage bridge already use.
  *
  * @module cache-usage

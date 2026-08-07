@@ -2,7 +2,7 @@
  * Auth module: credential resolution + OAuth token refresh.
  *
  * ───────────────────────────────────────────────────────────────────────────
- *  STORAGE: fully independent, no sharing with the official `claude` CLI
+ *  STORAGE: fully independent credential store
  * ───────────────────────────────────────────────────────────────────────────
  * minimal-agent stores credentials in its OWN file via {@link AuthStore}
  * (`~/.minimal-agent/auth.jsonc`). It is the sole credential source: there is
@@ -15,7 +15,7 @@
  *     id   = "anthropic-plan-oauth"        (the slug an auth plugin will match)
  *     name = "Anthropic Plan (OAuth)"      (the human label shown in a TUI)
  *
- * i.e. Anthropic, authenticated via the Claude Pro/Max subscription OAuth
+ * i.e. Anthropic, authenticated via the Anthropic subscription OAuth
  * flow. When auth becomes a plugin surface (multiple providers, each with its
  * own credential mechanics), the provider-specific bits below — the secret-bag
  * shape, the refresh grant, the scopes — move into a plugin keyed by that
@@ -79,12 +79,12 @@ export const ANTHROPIC_PLAN_OAUTH = {
 } as const
 
 /**
- * Current first-party OAuth client id from Claude Code v2.1.104 source.
+ * Current first-party OAuth client id used by Anthropic's own CLI.
  */
 const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 /**
- * Current first-party token endpoint from Claude Code v2.1.104 source.
+ * Current first-party token endpoint used by Anthropic's own CLI.
  */
 const DEFAULT_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 

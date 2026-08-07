@@ -13,7 +13,6 @@ docs/internal/
 tmp/
 .logs/
 .net-dbg/
-.node-net-dbg/
 *.log
 # stray scratch / captured tool output (raw response bodies + captured stderr).
 # Curated copies live under private/research/, already ignored above.

@@ -64,8 +64,7 @@ describe("formatToolInput — Bash word-boundary trim", () => {
     // The user's reported regression: `… | head -50` with the old slice
     // would cut as `… | head...(+4ch)`. With the new 500-char budget
     // and word-boundary trim, this stays intact.
-    const cmd =
-      'cd /Users/gaston/Projects/minimal-agent && grep -n "input\\." src/tools.ts | head -50'
+    const cmd = 'cd /Users/dev/Projects/minimal-agent && grep -n "input\\." src/tools.ts | head -50'
     const out = formatToolInput(tu("Bash", { command: cmd }))
     expect(out).toBe(`$ ${cmd}`)
     expect(out).not.toContain("...(+")
@@ -201,7 +200,7 @@ describe("formatToolInputContinuation — Bash", () => {
 
 describe("formatToolInput — non-Bash tools", () => {
   it("Read/Write/Edit show file_path as-is (no trim under typical paths)", () => {
-    const path = "/Users/gaston/Projects/minimal-agent/src/tools.ts"
+    const path = "/Users/dev/Projects/minimal-agent/src/tools.ts"
     expect(formatToolInput(tu("Read", { file_path: path }))).toBe(path)
     expect(formatToolInput(tu("Write", { file_path: path, content: "x" }))).toBe(path)
     expect(formatToolInput(tu("Edit", { file_path: path, old_string: "a", new_string: "b" }))).toBe(
@@ -1008,8 +1007,8 @@ describe("clampTranscriptRow — outer-row width clamp for header lines", () => 
   })
 
   it.each([
-    ["Read", { file_path: `/Users/gaston/Projects/${"very-long/".repeat(20)}file.ts` }],
-    ["Grep", { pattern: "mention|autocomplete|".repeat(20), path: "/Users/gaston/Projects" }],
+    ["Read", { file_path: `/Users/dev/Projects/${"very-long/".repeat(20)}file.ts` }],
+    ["Grep", { pattern: "mention|autocomplete|".repeat(20), path: "/Users/dev/Projects" }],
     ["Bash", { command: `printf ${"very-long-argument".repeat(30)}` }],
   ])("keeps a %s header truncation marker inside the dim input run (BUG #192851)", (name, input) => {
     const header = formatToolHeaderRows({ tool: tu(name, input), cols: 90 })[0] ?? ""

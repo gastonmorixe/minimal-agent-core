@@ -4,30 +4,18 @@
 // better and smaller chunks. - Gaston
 
 /**
- * Minimal Claude agent — entry point.
- *
- * A research tool for understanding the minimal API surface needed to make
- * authenticated, agentic requests to the Anthropic Messages API using the
- * Claude Code CLI's stored OAuth credentials.
- *
- * This script reuses the real CLI's credentials (read from macOS Keychain)
- * and replicates its exact request format (headers, metadata, system prompt,
- * beta flags, tool schemas) so the server treats it identically to the real
- * CLI. Verified against live captures via `.node-net-dbg/`.
+ * Minimal-agent — entry point.
  *
  * **Modules:**
- * - {@link auth} — Keychain reading + OAuth refresh
- * - {@link headers} — User-Agent, beta flags, system prompt
- * - {@link metadata} — `metadata.user_id` JSON construction
- * - {@link client} — HTTP layer + SSE streaming + request body
- * - {@link tools} — Tool definitions + local execution
- * - {@link agent} — Conversation state + agentic tool loop + REPL
- * - {@link formatter} — Pipe streamed output through external processes
+ * - `src/auth/auth.ts` — credential resolution + OAuth token refresh
+ * - `src/network/client.ts` — HTTP layer + SSE streaming + request body
+ * - `src/tools/tools.ts` — tool definitions + local execution
+ * - `src/agent/agent.ts` — conversation state + agentic tool loop + REPL
  *
  * **Usage:**
  * ```
  * bun run src/index.ts                          # interactive REPL
- * bun run src/index.ts --model claude-opus-4-7  # specific model
+ * bun run src/index.ts --model <id>             # specific model
  * bun run src/index.ts --debug                  # log full request/response
  * bun run src/index.ts --list-models            # show available models
  * bun run src/index.ts --list-flags             # show beta flags
@@ -189,17 +177,11 @@ const {
 /**
  * Entry point. Orchestrates the full startup flow:
  *
- * 1. Print session info to stderr
- * 2. Read OAuth credentials from macOS Keychain
- * 3. Handle one-shot subcommands (--list-flags, --list-models)
- * 4. Run the quota check (unless --skip-quota)
- * 5. Set up the agent with the selected model
- * 6. Either:
- *    - Non-interactive mode: send a single prompt and exit
- *    - Interactive REPL mode: read lines from stdin until EOF
- *
- * If `--formatter` is provided, the streamed output is piped through
- * the external process for realtime formatting.
+ * 1. Publish the resolved agent home into the environment
+ * 2. Boot provider discovery; dispatch one-shot subcommands
+ * 3. Detect cold start and show the first-run welcome card
+ * 4. Resolve the provider/model + auth state and print startup rows
+ * 5. Either run a single `--prompt` turn, or enter the interactive REPL
  */
 async function main() {
   // Publish the resolved agent home into the environment BEFORE anything else,
@@ -645,7 +627,9 @@ async function main() {
     void hostLifecycle.instructionsDidLoad?.({ source: "agents-md" })
   }
   if (promptBlocks.sessionContext) {
-    void hostLifecycle.instructionsDidLoad?.({ source: "plugin-session-context" })
+    void hostLifecycle.instructionsDidLoad?.({
+      source: "plugin-session-context",
+    })
   }
   // Sticky Bash cwd → `cwd.didChange` for observe-only plugins.
   const { setBashCwdChangeListener } = await import("./tools/tools.ts")

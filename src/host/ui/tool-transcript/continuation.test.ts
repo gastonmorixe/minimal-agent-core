@@ -31,9 +31,9 @@ function tu(name: string, input: Record<string, unknown>): ToolUseBlock {
 
 describe("formatToolInput / formatToolInputContinuation — 2+ operator split at wide cols", () => {
   const userCmd1 =
-    "cd /Users/gaston/Projects/inditex/work/inditex-supplier-management && cat Makefile 2>/dev/null | head -80"
+    "cd /Users/dev/Projects/inditex/work/inditex-supplier-management && cat Makefile 2>/dev/null | head -80"
   const userCmd2 =
-    "cd /Users/gaston/Projects/inditex/work/inditex-supplier-management/api && npm run lint 2>&1 | tail -120"
+    "cd /Users/dev/Projects/inditex/work/inditex-supplier-management/api && npm run lint 2>&1 | tail -120"
 
   // Span a few realistic terminal widths. All three must split because
   // both commands have 2 top-level operators (&&, |) — the multi-op
@@ -41,7 +41,7 @@ describe("formatToolInput / formatToolInputContinuation — 2+ operator split at
   for (const cols of [120, 140, 160, 200]) {
     it(`user-reported cmd #1 splits at cols=${cols} (2+ operators)`, () => {
       expect(formatToolInput(tu("Bash", { command: userCmd1 }), cols)).toBe(
-        "$ cd /Users/gaston/Projects/inditex/work/inditex-supplier-management",
+        "$ cd /Users/dev/Projects/inditex/work/inditex-supplier-management",
       )
       expect(formatToolInputContinuation(tu("Bash", { command: userCmd1 }), cols)).toEqual([
         "↳ && cat Makefile 2>/dev/null",
@@ -51,7 +51,7 @@ describe("formatToolInput / formatToolInputContinuation — 2+ operator split at
 
     it(`user-reported cmd #2 splits at cols=${cols} (2+ operators)`, () => {
       expect(formatToolInput(tu("Bash", { command: userCmd2 }), cols)).toBe(
-        "$ cd /Users/gaston/Projects/inditex/work/inditex-supplier-management/api",
+        "$ cd /Users/dev/Projects/inditex/work/inditex-supplier-management/api",
       )
       expect(formatToolInputContinuation(tu("Bash", { command: userCmd2 }), cols)).toEqual([
         "↳ && npm run lint 2>&1",

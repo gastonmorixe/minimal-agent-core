@@ -2,14 +2,6 @@
 title: Editor controller
 created_at: "2026-05-27T10:14:30.725679000-0400"
 updated_at: "2026-05-27T10:14:30.725679000-0400"
-session_id: 4aa1cfdf-7a42-47ce-8b99-c7612a39e167
-host_info:
-  hostname: macbookpro.home.arpa
-  user: gaston
-  os: "macOS 26.5 (25F71)"
-  kernel: "25.5.0"
-  arch: arm64
-  serial: FHQ93DD9T6
 tags: [tui, editor-controller, repaint, footer-layers, lifecycle]
 taillog:
  - "2026-05-27T10:14:30.725679000-0400 | Initial: lifecycle, repaint loop, footer layers, events, signals"
@@ -158,7 +150,7 @@ This is the only thing that prevents a crashing agent from leaving the user's te
 
 Invoked from `process.stdout.on("resize")` after the controller's compositor sibling call. Recomputes `maxLiveHeight` (it's a closure that reads `process.stdout.rows`) and triggers a `repaint()`. The compositor handles the bytes-on-wire side per chapter 01.
 
-**Coalesced (May 2026).** A window-edge *drag* fires one SIGWINCH per intermediate column. Repainting on each one stacks a reflow residue into permanent scrollback per column (the terminal scrolls the live area's top rows above the viewport as the pre-wrapped lines re-wrap narrower, and the compositor's relative `ESC[J` can't reach above the viewport top — see chapter 01's `notifyResize`). So `notifyResize` now **debounces**: it arms a trailing timer and repaints once, `resizeDebounceMs` (default 150ms) after the *last* resize, collapsing a whole drag into a single repaint at the final geometry. Measured on a 120→48 drag: 25 leaked copies at 0ms, 10 at 80ms, 0 at ≥150ms. `resizeDebounceMs: 0` restores the legacy synchronous repaint-per-resize (used by the unit tests that assert immediate reflow). The timer is cleared in `stop()` / `emergencyRestore()`. See `docs/changes/2026-05-31-fix-resize-scrollback-leak.md`.
+**Coalesced (May 2026).** A window-edge *drag* fires one SIGWINCH per intermediate column. Repainting on each one stacks a reflow residue into permanent scrollback per column (the terminal scrolls the live area's top rows above the viewport as the pre-wrapped lines re-wrap narrower, and the compositor's relative `ESC[J` can't reach above the viewport top — see chapter 01's `notifyResize`). So `notifyResize` now **debounces**: it arms a trailing timer and repaints once, `resizeDebounceMs` (default 150ms) after the *last* resize, collapsing a whole drag into a single repaint at the final geometry. Measured on a 120→48 drag: 25 leaked copies at 0ms, 10 at 80ms, 0 at ≥150ms. `resizeDebounceMs: 0` restores the legacy synchronous repaint-per-resize (used by the unit tests that assert immediate reflow). The timer is cleared in `stop()` / `emergencyRestore()`. 
 
 ## What lives in here that probably shouldn't
 
