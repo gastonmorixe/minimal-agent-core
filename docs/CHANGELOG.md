@@ -41,6 +41,20 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Feat: Session dump artifact paths
+
+---
+id: "2026-08-09-session-dump-artifact-paths"
+type: feat
+status: landed
+created-at: "2026-08-09T20:34:40-0400"
+updated-at: "2026-08-09T20:34:40-0400"
+---
+
+`--dump-paths` reports the computed transcript, session sidecar, blob, index, and
+network-debug paths for a saved session without changing the default transcript
+format. Path resolution follows `MINIMAL_AGENT_HOME` and reports artifact status.
+
 ### Feat: MA-394837 agent loop SDK refactor enabling wave
 
 ---

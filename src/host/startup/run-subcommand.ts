@@ -38,6 +38,7 @@ export interface SubcommandContext {
   readonly args: string[]
   readonly dumpArg: string | undefined
   readonly dumpFormatArg: string
+  readonly dumpPaths: boolean
   readonly sessionsQuery: string | undefined
   readonly usagePeriod: string | undefined
   readonly listModelsProvider: string | undefined
@@ -65,7 +66,12 @@ export async function runStartupSubcommand(ctx: SubcommandContext): Promise<bool
         process.exit(1)
       }
       try {
-        await runDumpCommand({ target: ctx.dumpArg, format: ctx.dumpFormatArg, cwd: process.cwd() })
+        await runDumpCommand({
+          target: ctx.dumpArg,
+          format: ctx.dumpFormatArg,
+          paths: ctx.dumpPaths,
+          cwd: process.cwd(),
+        })
       } catch (err) {
         if (err instanceof DumpCommandError) {
           console.error(`  ${c.boldRed("error")} ${err.message}`)
