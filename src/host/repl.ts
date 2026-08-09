@@ -125,6 +125,8 @@ export interface ReplAgentLike {
   }>
   /** Optional: snapshot of conversation history (for re-queue after compact). */
   history?(): import("../llm/messages.ts").Message[]
+  /** Optional: underlying core for host-owned live history replacement. */
+  agentCore?(): import("../sdk/agent-core.ts").AgentCore
 }
 
 export type ReplOutput = Pick<NodeJS.WriteStream, "write"> & {
@@ -366,6 +368,8 @@ export async function runRepl(
     useLiveArea?: boolean
     compositor?: ReplCompositor
     editor?: ReplEditor
+    /** Session directory override forwarded to the live-area queue store. */
+    sessionsDir?: string
     /** Forwarded to {@link runReplLiveArea}; see its docs. */
     initialStdinBytes?: string
     /**

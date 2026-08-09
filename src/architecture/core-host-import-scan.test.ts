@@ -251,6 +251,7 @@ const BASELINE = new Map<string, number>([
   ["bus/abort-quit-keystroke.test.ts", 1],
   ["e2e/command-repl-e2e.test.ts", 2],
   ["e2e/first-run.test.ts", 1],
+  ["e2e/history-edit-repl.e2e.test.ts", 2],
   ["e2e/live-area-e2e.test.ts", 3],
   ["e2e/notification-frame-tear.e2e.test.ts", 1],
   ["e2e/prompt-inject-e2e.test.ts", 2],

@@ -56,6 +56,20 @@ describe("buildPluginHost", () => {
     expect(meta?.firstPrompt).toContain("hello host")
   })
 
+  it("binds sessions:write to the active SID and denies it without one", async () => {
+    expect(
+      buildPluginHost({ capabilities: ["sessions:write"], sessionsDir: dir }).sessionsWrite,
+    ).toBeUndefined()
+
+    const host = buildPluginHost({
+      capabilities: ["sessions:write"],
+      sessionsDir: dir,
+      activeSessionId: "host-sid",
+    })
+    const begun = await host.sessionsWrite?.beginHistoryEdit({ targetUserId: "missing" })
+    expect(begun).toMatchObject({ ok: false, code: "target_not_found" })
+  })
+
   it("clock honors the injected now()", () => {
     const host = buildPluginHost({ capabilities: ["clock"], now: () => 1_000_000 })
     expect(host.clock?.now()).toBe(1_000_000)

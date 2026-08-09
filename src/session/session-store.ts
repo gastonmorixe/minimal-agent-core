@@ -83,6 +83,10 @@ export interface MetaRecord {
    * account when CLI/config omit the pin. Absent on old sessions.
    */
   credentialName?: string
+  /** True when this session is an archived original branch created by history editing. */
+  backup?: boolean
+  /** Active session whose pre-edit timeline this archival session preserves. */
+  backupOfSid?: string
 }
 
 export interface UserRecord {
@@ -255,6 +259,19 @@ export interface RewindRecord {
 }
 
 /**
+ * Durable audit marker emitted immediately before a replacement prompt follows
+ * a history edit. The selected original prompt is excluded from the active
+ * JSONL, so this record links the edited timeline to its full backup.
+ */
+export interface HistoryEditRecord {
+  kind: "history_edit"
+  ts: string
+  targetUserId: string
+  backupSid: string
+  droppedRecordCount: number
+}
+
+/**
  * Process-attach marker. Written once on session open (new OR resume) so any
  * other process can answer "is an agent currently attached to this session?"
  *
@@ -298,6 +315,7 @@ export type SessionRecord =
   | NoteRecord
   | CompactRecord
   | RewindRecord
+  | HistoryEditRecord
   | AttachRecord
   | DetachRecord
 
@@ -338,6 +356,10 @@ export interface IndexRecord {
   cwd: string
   model: string
   argv?: string[]
+  /** Archived original timeline created by a history edit. */
+  backup?: boolean
+  /** Active session whose original timeline this backup preserves. */
+  backupOfSid?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +374,8 @@ function isConversationRecord(rec: SessionRecord): boolean {
     rec.kind === "tool_result" ||
     rec.kind === "note" ||
     rec.kind === "compact" ||
-    rec.kind === "rewind"
+    rec.kind === "rewind" ||
+    rec.kind === "history_edit"
   )
 }
 
@@ -908,6 +931,23 @@ export class SessionStore {
    */
   appendRewind(toMsgId: string, droppedCount: number, now: Date = new Date()): void {
     this.write({ kind: "rewind", ts: now.toISOString(), to: toMsgId, droppedCount })
+    this.hasConversation = true
+  }
+
+  /** Append an audit link after a strict history-edit cut. */
+  appendHistoryEdit(
+    targetUserId: string,
+    backupSid: string,
+    droppedRecordCount: number,
+    now: Date = new Date(),
+  ): void {
+    this.write({
+      kind: "history_edit",
+      ts: now.toISOString(),
+      targetUserId,
+      backupSid,
+      droppedRecordCount,
+    })
     this.hasConversation = true
   }
 
