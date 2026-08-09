@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-07T13:45:26-0400"
+updated-at: "2026-08-09T17:03:59-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-09-raw-mode-mdstream-fence-paint"
+    type: fix
+    status: landed
+    commits: ["7cf4357"]
   - id: "2026-08-05-husky-commitlint-ci"
     type: chore
     status: landed
@@ -40,6 +44,27 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Fix: mdstream fence bodies invisible on raw-mode TTYs
+
+---
+id: "2026-08-09-raw-mode-mdstream-fence-paint"
+type: fix
+status: landed
+commits: ["7cf4357"]
+created-at: "2026-08-09T17:01:24-0400"
+updated-at: "2026-08-09T17:03:59-0400"
+---
+
+Raw-mode stdin clears `ONLCR`, so mdstream's bare `\n` left the cursor mid-row
+after styled fence lines and painted the next border (or the next line) at the
+wrong column: empty `── bash ──` boxes with the body seemingly missing.
+`Compositor.writeStream` / `flushStream` now normalize LF → CRLF on TTY writes,
+treat mdstream's `\r\x1b[K` erase as a redraw clear for `streamCol`, and the
+REPL formatter sink keeps one structural trailing newline with the chunk body
+(only extra blank separators stay held). Regression coverage in
+`compositor-mdstream.test.ts` / `compositor.test.ts`. Observed on Judy
+`699995c8` (net-dbg and transcript still had the filled fence).
 
 ### Feat: Session dump artifact paths
 
