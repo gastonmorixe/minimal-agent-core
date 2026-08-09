@@ -136,6 +136,7 @@ function foldRecordsInternal(
     switch (rec.kind) {
       case "meta":
       case "note":
+      case "history_edit":
       case "attach":
       case "detach":
         continue

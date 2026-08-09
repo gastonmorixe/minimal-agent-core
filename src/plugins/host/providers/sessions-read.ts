@@ -270,6 +270,7 @@ export function toRecordView(r: SessionRecord, index: number, previewChars: numb
   const { text, clipped } = clip(body, previewChars)
   return {
     index,
+    userId: r.kind === "user" ? (r.id ?? null) : null,
     kind: r.kind,
     ts: recordTs(r),
     summary: summarizeRecord(r),
@@ -321,6 +322,8 @@ export function summarizeRecord(r: SessionRecord): string {
       return `compact · ${r.compactKind} · ${r.reason} · ${r.messagesBefore}→${r.messagesAfter}`
     case "rewind":
       return `rewind · to ${r.to} · dropped ${r.droppedCount}`
+    case "history_edit":
+      return `history edit · backup ${r.backupSid} · dropped ${r.droppedRecordCount}`
     case "attach":
       return `attach · pid ${r.pid} on ${r.hostname}`
     case "detach":
@@ -347,6 +350,7 @@ export function recordBodyText(r: SessionRecord): string {
     case "compact":
       return r.replacementMessages.map((m) => `${m.role}: ${m.content}`).join("\n")
     case "rewind":
+    case "history_edit":
     case "attach":
     case "detach":
       return ""

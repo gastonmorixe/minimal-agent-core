@@ -88,6 +88,8 @@ export async function runReplLiveArea(
      * scrollback. Omit / empty → degraded copy without the resume line.
      */
     sessionId?: string
+    /** Session directory override for queue persistence tests and embedded hosts. */
+    sessionsDir?: string
     scrollbackSubmittedAt?: SubmittedAtStyle
   },
 ): Promise<void> {
@@ -107,6 +109,12 @@ export async function runReplLiveArea(
   // label and color.
   const continuationPromptForRebuild = process.env.MINIMAL_AGENT_CONTINUATION_PROMPT ?? "  "
   const baseArrow = `${c.bold(c.pink("❯"))} `
+  const resolveBasePrompt = () => ({
+    prompt: modeManager?.hasModes() ? modeManager.promptPrefix(baseArrow) : baseArrow,
+    continuationPrompt: continuationPromptForRebuild,
+  })
+  let promptOverride: { prompt: string; continuationPrompt?: string } | null = null
+  const resolvePrompt = () => promptOverride ?? resolveBasePrompt()
   if (
     modeManager &&
     modeManager.hasModes() &&
@@ -114,7 +122,8 @@ export async function runReplLiveArea(
     typeof editor.setPrompt === "function"
   ) {
     const repaintPrompt = () => {
-      editor.setPrompt?.(modeManager.promptPrefix(baseArrow), continuationPromptForRebuild)
+      const prompt = resolvePrompt()
+      editor.setPrompt?.(prompt.prompt, prompt.continuationPrompt)
     }
     modeManager.subscribe(repaintPrompt)
     // Pending-widget refresh on every toggle. The widget peeks
@@ -131,7 +140,7 @@ export async function runReplLiveArea(
     // `renderer.prompt` could be one tick behind. The mode-change
     // attachment that ships with the turn always reflects the
     // active mode at consume-time, so the prefix MUST match.
-    editor.setCommitPromptBuilder?.(() => modeManager.promptPrefix(baseArrow))
+    editor.setCommitPromptBuilder?.(() => resolvePrompt().prompt)
     // Delivery subscription : paints the scrollback chip the instant
     // the model is told about the change (consumePendingAttachment
     // returns a non-null block). Replaces the old send-time peek
@@ -225,7 +234,9 @@ export async function runReplLiveArea(
   //
   // Plugin → editor bridge (buffer.set, footer overlay, buffer.styles,
   // modal overlay open/close). Extracted so this file stays under max-lines.
-  registerEditorPluginHooks(loader ?? null, editor)
+  registerEditorPluginHooks(loader ?? null, editor, resolveBasePrompt, (next) => {
+    promptOverride = next
+  })
 
   // Build the askUser callback for the agent's preflight pipeline.
   //
@@ -329,7 +340,9 @@ export async function runReplLiveArea(
   // tests). See src/queue-store.ts for on-disk format + crash semantics;
   // the empty-array snapshot deletes the file, so a clean drain leaves
   // no stale state behind.
-  const queueStore = opts.sessionId ? new QueueStore(opts.sessionId) : null
+  const queueStore = opts.sessionId
+    ? new QueueStore(opts.sessionId, { ...(opts.sessionsDir ? { dir: opts.sessionsDir } : {}) })
+    : null
   const persistQueue = (): void => {
     queueStore?.save(queue)
   }
@@ -573,6 +586,46 @@ export async function runReplLiveArea(
   /** The live terminal width, for width-aware renderers (e.g. notice wrapping). */
   const liveCols = (): number | undefined => opts.output?.columns ?? process.stdout.columns
 
+  // Late-bound by the sessions:write host provider. The provider awaits this
+  // callback after its durable rewrite and before returning success to the
+  // history-edit command, so the replacement prompt cannot reach agent.run
+  // while the old in-memory history or queued future is still present.
+  let preparedHistoryEdit: {
+    core: import("../sdk/agent-core.ts").AgentCore
+    messages: import("../llm/messages.ts").Message[]
+  } | null = null
+  loader?.setHistoryEditCommitHandler({
+    beforeCommit: async ({ modelMessages }) => {
+      const core = agent.agentCore?.()
+      if (!opts.sessionId || !core) {
+        throw new Error("history edit reset is unavailable without an active persisted session")
+      }
+      preparedHistoryEdit = { core, messages: modelMessages }
+    },
+    afterCommit: async ({ backupSid, droppedRecordCount }) => {
+      const prepared = preparedHistoryEdit
+      preparedHistoryEdit = null
+      // The durable cut already happened. This phase must never report a
+      // false failure back to the provider or attempt any new disk I/O.
+      if (!prepared) return
+      prepared.core.replaceMessages(prepared.messages)
+      queue.splice(0)
+      queueNavIndex = null
+      try {
+        persistQueue()
+        renderDecoration()
+        writeNoticeLines([
+          "↶ Conversation rewound",
+          `  Original conversation timeline backup: ${backupSid}`,
+          `  Resume it with: --resume ${backupSid}`,
+          `  Dropped ${droppedRecordCount} future record${droppedRecordCount === 1 ? "" : "s"}.`,
+        ])
+      } catch {
+        // Queue persistence and terminal paint are noncritical post-commit IO.
+      }
+    },
+  })
+
   /** The normal "queue this text as a user prompt" path. */
   const enqueuePrompt = (text: string, commitLines: string[], submittedAt?: Date): void => {
     queue.push({ text, commitLines, submittedAt: (submittedAt ?? new Date()).toISOString() })
@@ -629,6 +682,9 @@ export async function runReplLiveArea(
         // The typed `/cmd` line is already in scrollback; the expanded
         // prompt drives the turn with no extra commit lines.
         enqueuePrompt(result.prompt, [])
+        if (parseCommandLine(text)?.name === "history-edit") {
+          loader.bus().emit("history.edit.expanded", { prompt: result.prompt })
+        }
         break
       case "notice":
         writeNoticeLines([

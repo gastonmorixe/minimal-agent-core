@@ -41,6 +41,7 @@ import { getSessionTokens } from "../../session/session-tokens.ts"
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
+import { createSessionsWriteApi, type HistoryEditCommitNotice } from "./providers/sessions-write.ts"
 import { createTransportRegistryApi } from "./transport-registry.ts"
 
 /** Inputs for {@link buildPluginHost}. All injectable for tests. */
@@ -51,6 +52,16 @@ export interface BuildHostOptions {
   logger?: PluginLogger
   /** Sessions-directory override (tests). */
   sessionsDir?: string
+  /** Current process session. Write capabilities are bound to this SID only. */
+  activeSessionId?: string
+  /** Fallible reload validation that runs before the durable history-edit cut. */
+  beforeHistoryEditCommit?: (
+    input: import("./providers/sessions-write.ts").PreparedHistoryEditCommit,
+  ) => Promise<void>
+  /** Host reload coordinator invoked after a durable history-edit cut. */
+  onHistoryEditCommitted?: (notice: HistoryEditCommitNotice) => Promise<void>
+  /** Synchronous availability guard checked before the durable cut. */
+  isHistoryEditCommitReady?: () => boolean
   /** Clock override (tests). */
   now?: () => number
   /**
@@ -77,6 +88,19 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
     ),
     ...(has("sessions:read")
       ? { sessions: Object.freeze(createSessionsReadApi({ dir: opts.sessionsDir })) }
+      : {}),
+    ...(has("sessions:write") && opts.activeSessionId
+      ? {
+          sessionsWrite: Object.freeze(
+            createSessionsWriteApi({
+              dir: opts.sessionsDir,
+              activeSessionId: opts.activeSessionId,
+              beforeCommit: opts.beforeHistoryEditCommit,
+              onCommitted: opts.onHistoryEditCommitted,
+              canCommit: opts.isHistoryEditCommitReady,
+            }),
+          ),
+        }
       : {}),
     ...(has("blobs:read")
       ? { blobs: Object.freeze(createBlobsReadApi({ dir: opts.sessionsDir })) }

@@ -174,6 +174,8 @@ export interface SessionMetaView {
  */
 export interface RecordView {
   readonly index: number
+  /** Stable user-record id, present only for user prompts. */
+  readonly userId: string | null
   readonly kind: string
   readonly ts: string | null
   /** Compact role/summary, e.g. "assistant · 2 tool_use (Bash, Read)". */
@@ -284,6 +286,27 @@ export interface SessionsReadApi {
 }
 
 /** `blobs:read` — spilled tool-output access for a session. */
+/** Narrow, host-owned mutation surface for history-edit plugins. */
+export interface SessionsWriteApi {
+  beginHistoryEdit(input: { targetUserId: string }): Promise<
+    | {
+        ok: true
+        backupSid: string
+        selectedText: string
+        targetRecordIndex: number
+        userPromptOrdinal: number
+        totalUserPrompts: number
+      }
+    | { ok: false; code: string; message: string }
+  >
+  commitHistoryEdit(input: {
+    targetUserId: string
+    backupSid: string
+  }): Promise<
+    { ok: true; droppedRecordCount: number } | { ok: false; code: string; message: string }
+  >
+}
+
 export interface BlobsReadApi {
   list(
     sid: string,
@@ -514,6 +537,7 @@ export interface UsageReadApi {
 export interface PluginHost {
   readonly capabilities: readonly CapabilityToken[]
   readonly sessions?: SessionsReadApi
+  readonly sessionsWrite?: SessionsWriteApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi

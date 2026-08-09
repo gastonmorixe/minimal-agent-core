@@ -261,6 +261,36 @@ export const CHANNELS = [
       "commitLines so scrollback keeps the highlight.",
   },
   {
+    name: "editor.prompt.set",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.prompt.set",
+    description:
+      "Plugin → host temporarily override its own modal prompt. Payload `{owner, prompt, continuationPrompt?}`. " +
+      "Only the active matching overlay owner may set it; clear restores the current host mode prompt.",
+  },
+  {
+    name: "editor.prompt.clear",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.prompt.clear",
+    description: "Plugin → host clear its temporary prompt by payload `{owner}`.",
+  },
+  {
+    name: "editor.picker.set",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.picker.set",
+    description:
+      "Plugin → host render a reusable picker overlay. Payload `{owner, title?, rows: " +
+      "Array<{id, label, hint?, disabled?}>, selected, footer?}`. The host owns " +
+      "display-width-safe rendering; the plugin owns selection state and key handling " +
+      "through `editor.key`.",
+  },
+  {
+    name: "editor.picker.clear",
+    shape: "broadcast-sync",
+    permission: "hooks:editor.picker.clear",
+    description: "Plugin → host clear its picker overlay by payload `{owner}`.",
+  },
+  {
     name: "editor.overlay.open",
     shape: "broadcast-sync",
     permission: "hooks:editor.overlay.open",
@@ -289,6 +319,14 @@ export const CHANNELS = [
       "restores the prompt row + cursor and resumes normal key handling. " +
       "Idempotent + owner-checked: a close from a non-owner is ignored, so a " +
       "stale handler can't tear down a different overlay.",
+  },
+  {
+    name: "history.edit.expanded",
+    shape: "broadcast-async",
+    permission: "hooks:history.edit.expanded",
+    description:
+      "Host → plugin acknowledgment emitted immediately after a history-edit command expansion has been enqueued. " +
+      "Payload `{prompt: string}`. The history-edit plugin clears its temporary UI state only after this signal.",
   },
   {
     name: "prompt.submitted",

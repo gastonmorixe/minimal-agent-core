@@ -52,7 +52,6 @@ import type {
   SetupBinaryInventory,
   SetupResult,
   SubagentModelRecommendation,
-  ToolAvailabilityContext,
   TUIContext,
   TUIResult,
   TUITrigger,
@@ -311,22 +310,11 @@ function computeEffectiveName(
   return { canonical, migrationAlias: toolName }
 }
 
-/**
- * Loaded collection of plugins with a dispatch entry point.
- *
- * Call {@link load} once at agent startup. The resulting loader is
- * reusable across turns and immutable after construction.
- */
+/** Loaded plugin collection with dispatch, commands, and host capabilities. */
 export class PluginLoader {
   private readonly plugins: LoadedPlugin[]
   private readonly toolIndex: Map<string, ResolvedHandler>
-  /**
-   * Alias → canonical-tool-name map. Built once at load time. The
-   * dispatcher consults this on a {@link toolIndex} miss; aliases are
-   * never advertised to the model (see `getExtraTools`) and never
-   * mutate the result on hit. See manifest's `tool.aliases` field for
-   * the public contract.
-   */
+  /** Alias → canonical tool-name map, never advertised to the model. */
   private readonly aliasIndex: Map<string, string>
   private readonly tagIndex: Map<string, ResolvedHandler>
   private readonly coreToolNames: Set<string>
@@ -334,58 +322,34 @@ export class PluginLoader {
   private readonly defaultModeId: string | null
   private readonly timeoutMs: number
   private readonly eventBus: EventBus
-  /**
-   * Hooks facade. Wraps {@link eventBus} (for `broadcast-async` channels)
-   * AND an internal {@link HookBus} (for `chain`, `broadcast-sync`, `stream`
-   * channels). Plugin `manifest.hooks` entries are subscribed here at load
-   * time. Host code (the editor's key dispatch, REPL lifecycle) emits
-   * through the same facade so plugins see a uniform surface.
-   */
+  /** Shared async/sync plugin hooks facade. */
   private readonly hooksFacade: Hooks
   private readonly pendingFrags: PendingFragment[]
   private readonly logger: (msg: string) => void
-  /**
-   * Main-agent identity (session id, pid, model, version) if one was
-   * provided to {@link load}. Forwarded to every dispatched handler as
-   * `ctx.agent` and as `MINIMAL_AGENT_*` env vars for subprocesses, via
-   * {@link agentContextToEnv}.
-   *
-   * `undefined` only when neither `agent` nor the deprecated `sessionId`
-   * was supplied (ad-hoc tests).
-   */
+  /** Optional main-agent identity forwarded to plugin handlers. */
   private readonly agent: AgentContext | undefined
   /** Live current-model snapshot provider; see {@link PluginLoaderOptions.modelInfoProvider}. */
   private readonly modelInfoProvider: (() => ModelInfoSnapshot | undefined) | undefined
   /** Live sub-agent model recommendations provider; see {@link PluginLoaderOptions.recommendSubagentModels}. */
   private readonly recommendSubagentModels: (() => SubagentModelRecommendation[]) | undefined
-  /**
-   * Cached dual result of {@link getPromptBlocksAsync} (and therefore
-   * {@link getPromptBlockAsync}). Populated on first call after fragments
-   * resolve or time out. Subsequent calls return this without re-awaiting —
-   * the system prompt sits on a cache breakpoint and must be byte-stable for
-   * the rest of the session.
-   */
+  /** Cached async prompt-block resolution, kept byte-stable for the session. */
   private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
-  /**
-   * Global slash-command registry, keyed by command name (no slash).
-   * Built in the constructor from each plugin's resolved `commands` with
-   * first-wins collision handling. The host's `dispatchCommand` and the
-   * `slash-menu` overlay (via `listCommandInfo`) read it.
-   *
-   * Lives in {@link CommandRegistry} (extracted to `./loader/commands.ts`
-   * for T-8a0c44).
-   */
+  /** Global slash-command registry (first-wins by name). */
   private readonly commands: CommandRegistry
-  /**
-   * Per-plugin capability hosts, memoized by plugin id. Built lazily on
-   * first dispatch to a handler whose manifest declared `capabilities`.
-   * One frozen host per plugin for the loader's lifetime — handler calls
-   * across turns see the same object identity (cheap, and consistent
-   * with the frozen-value-object discipline of {@link AgentContext}).
-   */
+  /** Lazily memoized frozen capability hosts. */
   private readonly hostCache = new Map<string, PluginHost>()
   /** Capability-host overrides (test sessionsDir injection). See {@link PluginLoaderOptions.hostOptions}. */
   private readonly hostOptions: { sessionsDir?: string } | undefined
+  private historyEditCommitHandler:
+    | {
+        beforeCommit: (
+          input: import("./host/providers/sessions-write.ts").PreparedHistoryEditCommit,
+        ) => Promise<void>
+        afterCommit: (
+          notice: import("./host/providers/sessions-write.ts").HistoryEditCommitNotice,
+        ) => Promise<void>
+      }
+    | undefined
 
   private constructor(
     plugins: LoadedPlugin[],
@@ -843,6 +807,7 @@ export class PluginLoader {
                 ...(opts.hostOptions?.sessionsDir
                   ? { sessionsDir: opts.hostOptions.sessionsDir }
                   : {}),
+                ...(agent ? { activeSessionId: agent.sessionId } : {}),
               })
             : undefined,
         )
@@ -937,55 +902,13 @@ export class PluginLoader {
     return this.defaultModeId
   }
   getEventSubs(): ReadonlyArray<{ pluginId: string; sub: ResolvedEventSub }> {
-    const out: { pluginId: string; sub: ResolvedEventSub }[] = []
-    for (const pkg of this.plugins)
-      for (const s of pkg.eventSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
-    return out
+    return collectEventSubscriptions(this.plugins)
   }
   getHookSubs(): ReadonlyArray<{ pluginId: string; sub: ResolvedHookSub }> {
-    const out: { pluginId: string; sub: ResolvedHookSub }[] = []
-    for (const pkg of this.plugins)
-      for (const s of pkg.hookSubs) out.push({ pluginId: pkg.manifest.id, sub: s })
-    return out
+    return collectHookSubscriptions(this.plugins)
   }
   getLiveAreaSlots(): ReadonlyArray<ResolvedLiveAreaSlot> {
-    const out: ResolvedLiveAreaSlot[] = []
-    for (const pkg of this.plugins) for (const s of pkg.liveAreaSlots) out.push(s)
-    return out
-  }
-
-  /**
-   * Build the read-only context a tool's `available` predicate sees. Keyed on
-   * process-lifetime-stable facts (env, cwd, boot agent identity) so a tool's
-   * advertisement decision is byte-stable across a session and the cached
-   * system-prompt prefix doesn't churn turn-to-turn.
-   */
-  private availabilityContext(): ToolAvailabilityContext {
-    return {
-      env: { ...process.env } as Record<string, string>,
-      cwd: process.cwd(),
-      ...(this.agent ? { agent: this.agent } : {}),
-    }
-  }
-
-  /**
-   * Is this tool handler advertised to the model right now? A handler with no
-   * `available` predicate is always advertised; otherwise the predicate
-   * decides. A throwing predicate fails OPEN (the tool stays visible) and is
-   * logged, so a buggy gate never silently strips a tool.
-   */
-  private isToolAvailable(h: ResolvedHandler, ctx: ToolAvailabilityContext): boolean {
-    if (!h.available) return true
-    try {
-      return h.available(ctx) !== false
-    } catch (e) {
-      const name =
-        h.definition.trigger.type === "tool" ? h.definition.trigger.tool.name : h.definition.id
-      this.logger(
-        `tool availability predicate threw for "${name}"; keeping the tool visible: ${e instanceof Error ? e.message : String(e)}`,
-      )
-      return true
-    }
+    return collectLiveAreaSlots(this.plugins)
   }
 
   /**
@@ -1000,22 +923,7 @@ export class PluginLoader {
    * still refuses defensively if somehow invoked.
    */
   getExtraTools(): PluginToolDefinition[] {
-    const actx = this.availabilityContext()
-    const out: PluginToolDefinition[] = []
-    for (const pkg of this.plugins) {
-      for (const h of pkg.handlers) {
-        if (h.definition.trigger.type === "tool" && this.isToolAvailable(h, actx)) {
-          const tool = h.definition.trigger.tool
-          out.push({
-            ...pluginToolDefinitionFromTrigger(tool),
-            ...(h.definition.icon ? { icon: h.definition.icon } : {}),
-            ...(h.definition.color ? { color: h.definition.color } : {}),
-            ...(h.definition.headerKey ? { headerKey: h.definition.headerKey } : {}),
-          })
-        }
-      }
-    }
-    return out
+    return collectPluginTools(this.plugins, createToolAvailabilityContext(this.agent), this.logger)
   }
 
   /**
@@ -1182,7 +1090,7 @@ export class PluginLoader {
    */
   private buildBlock(fragmentTexts: Map<string, string[]> | null): string | null {
     if (this.plugins.length === 0) return null
-    const actx = this.availabilityContext()
+    const actx = createToolAvailabilityContext(this.agent)
     const sections: { role: PromptRole; name: string; body: string }[] = []
     for (const pkg of this.plugins) {
       // Drop the prompt section for a plugin whose ENTIRE tool surface is
@@ -1191,7 +1099,10 @@ export class PluginLoader {
       // PROMPT.md still describes the visible tools). A plugin contributing no
       // tools at all (behavior/context) is never affected.
       const toolHandlers = pkg.handlers.filter((h) => h.definition.trigger.type === "tool")
-      if (toolHandlers.length > 0 && !toolHandlers.some((h) => this.isToolAvailable(h, actx))) {
+      if (
+        toolHandlers.length > 0 &&
+        !toolHandlers.some((h) => isPluginToolAvailable(h, actx, this.logger))
+      ) {
         continue
       }
       const promptBody = pkg.prompt ? stripLeadingHeading(pkg.prompt) : ""
@@ -1311,6 +1222,18 @@ export class PluginLoader {
       capabilities: caps,
       logger: createPluginLogger(pluginId),
       sessionsDir: this.hostOptions?.sessionsDir,
+      ...(this.agent ? { activeSessionId: this.agent.sessionId } : {}),
+      beforeHistoryEditCommit: async (input) => {
+        if (!this.historyEditCommitHandler)
+          throw new Error("history edit reload handler unavailable")
+        await this.historyEditCommitHandler.beforeCommit(input)
+      },
+      onHistoryEditCommitted: async (notice) => {
+        if (!this.historyEditCommitHandler)
+          throw new Error("history edit reload handler unavailable")
+        await this.historyEditCommitHandler.afterCommit(notice)
+      },
+      isHistoryEditCommitReady: () => this.historyEditCommitHandler !== undefined,
     })
     this.hostCache.set(pluginId, host)
     return host
@@ -1325,6 +1248,18 @@ export class PluginLoader {
    */
   capabilityHostFor(pluginId: string): PluginHost | undefined {
     return this.hostFor(pluginId)
+  }
+
+  /** Register the live-session reload coordinator used after history-edit commits. */
+  setHistoryEditCommitHandler(handler: {
+    beforeCommit: (
+      input: import("./host/providers/sessions-write.ts").PreparedHistoryEditCommit,
+    ) => Promise<void>
+    afterCommit: (
+      notice: import("./host/providers/sessions-write.ts").HistoryEditCommitNotice,
+    ) => Promise<void>
+  }): void {
+    this.historyEditCommitHandler = handler
   }
 
   /**
@@ -1446,20 +1381,7 @@ export class PluginLoader {
     }
   }
 
-  /**
-   * Run every loaded plugin's optional `setup()` handler, in declaration
-   * order, handing each the shared binary inventory. Returns the structured
-   * {@link SetupResult}s (one per plugin that declares `setup`) WITHOUT
-   * performing any side effect: the host (src/index.ts) owns downloads, TUI
-   * progress, syslog audit, and halting boot.
-   *
-   * A plugin whose `setup()` throws is logged and skipped (its result is
-   * dropped) so one broken setup can't poison boot. The handler is given a
-   * per-call timeout via {@link timeoutMs}.
-   *
-   * @param inventory - The managed-binary inventory adapter the host builds
-   *   from its `BinaryStore` (in `../binaries/store.ts`).
-   */
+  /** Run optional plugin setup handlers without performing host-side effects. */
   async runSetups(
     inventory: SetupBinaryInventory,
   ): Promise<Array<{ pluginId: string; result: SetupResult }>> {
@@ -1470,6 +1392,11 @@ export class PluginLoader {
 import {
   CommandRegistry,
   classifyPluginPrompt,
+  collectEventSubscriptions,
+  collectHookSubscriptions,
+  collectLiveAreaSlots,
+  collectPluginTools,
+  createToolAvailabilityContext,
   DEFAULT_FRAGMENT_TIMEOUT_MS,
   discoverAndParsePackages,
   escapeTagAttr,
@@ -1477,12 +1404,12 @@ import {
   findPackageDirFor,
   findPluginIdFor,
   groupSessionContextFragments,
+  isPluginToolAvailable,
   joinAfterInstructions,
   type PendingFragment,
   type PluginPromptBlocks,
   PROMPT_ROLE_ORDER,
   type PromptRole,
-  pluginToolDefinitionFromTrigger,
   type ResolvedFragment,
   registerEventSub,
   registerHookSub,
