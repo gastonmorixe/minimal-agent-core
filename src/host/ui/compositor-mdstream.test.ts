@@ -37,7 +37,8 @@ import { Compositor } from "./compositor.ts"
 import { Formatter } from "./formatter/formatter.ts"
 
 function loadFixture(name: string): string {
-  const p = join(import.meta.dir, "..", "test-utils", "fixtures", name)
+  // ui/ → host/ → src/test-utils/fixtures
+  const p = join(import.meta.dir, "..", "..", "test-utils", "fixtures", name)
   return readFileSync(p, "utf8")
 }
 
@@ -70,6 +71,36 @@ function feedChunked(c: Compositor, bytes: string, chunkSize: number) {
     c.writeStream(bytes.slice(i, i + chunkSize))
   }
 }
+
+describe("Compositor raw-mode fence paint (bare LF → CRLF)", () => {
+  it("keeps fence body and bottom border at column 0 under FakeTerminal LF semantics", () => {
+    // FakeTerminal mirrors raw-mode TTYs: LF advances the row but does not
+    // reset the column (ONLCR off). Without compositor CRLF normalize,
+    // mdstream fence lines paint mid-row and the bottom rule looks empty.
+    const term = new FakeTerminal({ cols: 40, rows: 10, scrollbackLimit: 40 })
+    const c = makeCompositor(term)
+    c.mount()
+    c.setLiveArea(["ASK ❯"], { row: 0, col: 5 })
+    c.writeStream(
+      [
+        "── bash ────────────────────────────────",
+        "  1  git status --short",
+        "────────────────────────────────────────",
+        "",
+      ].join("\n"),
+    )
+    c.unmount()
+    const lines = [...term.scrollback, ...term.screen()].map((l) => l.replace(/ +$/, ""))
+    expect(lines.some((l) => l.includes("git status --short"))).toBe(true)
+    const body = lines.find((l) => l.includes("git status --short"))
+    expect(body?.startsWith("  1  git status")).toBe(true)
+    const bottom = lines.find((l) => /^─{8,}/.test(l) && !l.includes("bash"))
+    expect(bottom).toBeDefined()
+    expect(bottom!.startsWith("─")).toBe(true)
+    // Broken paint left the rule indented after the code line.
+    expect(lines.some((l) => /^\s{4,}─{8,}/.test(l))).toBe(false)
+  })
+})
 
 describe("Compositor + mdstream redraw — wide terminal regression", () => {
   it("no SGR fragments leak into scrollback when chunks split mid-escape (200 cols, 8-byte chunks)", () => {
