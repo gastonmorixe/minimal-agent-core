@@ -12,12 +12,14 @@
 
 import { writeStdoutSafely } from "../../infra/safe-stdout.ts"
 import { createSessionsReadApi } from "../../plugins/host/providers/sessions-read.ts"
+import { formatSessionArtifacts, inspectSessionArtifacts } from "../../session/session-artifacts.ts"
 
 import { resolveSessionTarget } from "./session-index.ts"
 
 export interface DumpCommandInput {
   target: string
   format: string
+  paths?: boolean
   cwd: string
 }
 
@@ -42,5 +44,6 @@ export async function runDumpCommand(input: DumpCommandInput): Promise<void> {
   if (!result) {
     throw new DumpCommandError(`no session file on disk for sid ${JSON.stringify(sid)}`)
   }
+  if (input.paths) await writeStdoutSafely(formatSessionArtifacts(inspectSessionArtifacts(sid)))
   await writeStdoutSafely(result.text)
 }

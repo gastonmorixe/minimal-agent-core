@@ -100,6 +100,7 @@ export interface CliOptions {
   readonly usagePeriod: string | undefined
   readonly dumpArg: string | undefined
   readonly dumpFormatArg: string
+  readonly dumpPaths: boolean
   readonly wantLogin: boolean
   readonly wantLogout: boolean
   readonly wantAuthStatus: boolean
@@ -274,6 +275,7 @@ export function parseCliOptions(
 
   const dumpArg = rawAfter(args, "--dump")
   const dumpFormatArg = rawAfter(args, "--dump-format") ?? "md"
+  const dumpPaths = args.includes("--dump-paths")
 
   const wantLogin = args.includes("--login")
   const wantLogout = args.includes("--logout")
@@ -338,6 +340,7 @@ export function parseCliOptions(
     usagePeriod,
     dumpArg,
     dumpFormatArg,
+    dumpPaths,
     wantLogin,
     wantLogout,
     wantAuthStatus,

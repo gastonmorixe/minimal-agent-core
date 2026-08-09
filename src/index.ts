@@ -167,6 +167,7 @@ const {
   usagePeriod,
   dumpArg,
   dumpFormatArg,
+  dumpPaths,
   systemPromptOverrides: _systemPromptOverrides,
 } = opts
 
@@ -259,6 +260,7 @@ async function main() {
     args,
     dumpArg,
     dumpFormatArg,
+    dumpPaths,
     sessionsQuery,
     usagePeriod,
     listModelsProvider,

@@ -60,6 +60,30 @@ describe("dump command architecture", () => {
     }
   })
 
+  it("--dump-paths prints computed artifact paths before the transcript", async () => {
+    const sid = "dump-paths-sid"
+    const home = createHomeWithSession(sid)
+    try {
+      const p = Bun.spawn(["bun", "run", "src/index.ts", "--dump", sid, "--dump-paths"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: home, MINIMAL_AGENT_HOME: join(home, ".minimal-agent") },
+      })
+      const [code, stdout, stderr] = await Promise.all([
+        p.exited,
+        readStream(p.stdout),
+        readStream(p.stderr),
+      ])
+      expect(code).toBe(0)
+      expect(stderr.trim()).toBe("")
+      expect(stdout).toContain(`Session artifacts for ${sid}`)
+      expect(stdout).toContain(join(home, ".minimal-agent", "sessions", `${sid}.jsonl`))
+      expect(stdout).toContain(`# Session: ${sid}`)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("handles downstream pipe close without broken-pipe noise", async () => {
     const sid = "dump-pipe-sid"
     const home = createHomeWithSession(sid)

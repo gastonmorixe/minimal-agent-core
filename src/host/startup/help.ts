@@ -325,7 +325,7 @@ function buildHelpSections(): HelpSection[] {
         row(
           `${c.cyan("sessions dump")} ${c.dim("<sid|last>")}`,
           "Dump a full session history to stdout",
-          ["alias: --dump <sid|last>; --dump-format md|xml"],
+          ["alias: --dump <sid|last>; --dump-format md|xml; --dump-paths"],
         ),
         row(`${c.cyan("usage")} ${c.dim("[<period>]")}`, "Token-usage stats", [
           "today|last-day|last-month|ytd|year|all; alias: --usage-stats",
