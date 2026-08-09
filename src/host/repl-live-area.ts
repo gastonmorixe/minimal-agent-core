@@ -987,10 +987,11 @@ export async function runReplLiveArea(
       // Some formatters (notably mdstream) emit a trailing `\n\n` at the end
       // of a render to ensure block-level separation. In our REPL that lands
       // as TWO blank rows between the response and the next prompt instead
-      // of one. We solve this by buffering trailing `\n` chunks: any run of
-      // `\n` characters at the tail of a chunk is held back, and flushed
-      // only when more body content arrives (preserving internal blank
-      // lines). At end-of-turn we flush at most a single `\n`.
+      // of one. Hold only the *extra* trailing newlines (2nd+); keep the
+      // first `\n` with the body so structural EOL is not split across
+      // writeStream frames (raw-mode + mdstream fence paint). Extra held
+      // newlines flush when more body arrives. At end-of-turn we discard
+      // the held extras (compositor drawLiveSeq owns the response→prompt gap).
       let pendingTrailingNewlines = ""
       const flushTrailingNewlines = () => {
         if (pendingTrailingNewlines.length > 0) {
@@ -1003,15 +1004,20 @@ export async function runReplLiveArea(
         if (s.length === 0) return
         let i = s.length
         while (i > 0 && s[i - 1] === "\n") i--
-        const body = s.slice(0, i)
-        const tail = s.slice(i)
-        if (body.length > 0) {
-          // Body resumes after a tail-only run; flush any held newlines
-          // verbatim so the internal layout is preserved.
+        const newlineCount = s.length - i
+        if (newlineCount === 0) {
           flushTrailingNewlines()
-          compositor.writeStream(body)
+          compositor.writeStream(s)
+          lastChunkEndedWithNewline = false
+          return
         }
-        pendingTrailingNewlines += tail
+        // Keep one trailing `\n` with the body (structural EOL). Hold 2nd+.
+        const body = s.slice(0, i + 1)
+        const extra = s.slice(i + 1)
+        flushTrailingNewlines()
+        compositor.writeStream(body)
+        lastChunkEndedWithNewline = true
+        pendingTrailingNewlines += extra
       }
       // Shared sink + decoder: lifted out of the original
       // `if (opts.formatterCmd)` block so `spawnMainFormatter()` (below) can

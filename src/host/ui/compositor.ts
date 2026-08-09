@@ -216,35 +216,44 @@ export class Compositor {
       this.output.write(chunk)
       return
     }
+    // Raw mode (REPL stdin) clears ONLCR: bare LF advances the row but
+    // keeps the column. Formatters like mdstream emit LF-only line
+    // endings, so fence bodies/borders paint mid-line unless we normalize.
     if (!this.mounted) {
-      this.output.write(chunk)
+      this.output.write(normalizeLfToCrlf(chunk))
       return
     }
     const safeChunk = this.streamAnsi.push(chunk)
     if (safeChunk.length === 0) return
     const capped = this.capBlankLines(safeChunk)
     if (capped.length === 0) return
+    const forTty = normalizeLfToCrlf(capped)
     if (this.streamHold) {
-      this.heldStream += capped
+      this.heldStream += forTty
       return
     }
-    this.writeBufferedStream(capped)
+    this.writeBufferedStream(forTty)
   }
 
   flushStream(): void {
     const tail = this.streamAnsi.flush()
     if (tail.length === 0) return
-    if (!this.tty || !this.mounted) {
+    if (!this.tty) {
       this.output.write(tail)
+      return
+    }
+    if (!this.mounted) {
+      this.output.write(normalizeLfToCrlf(tail))
       return
     }
     const capped = this.capBlankLines(tail)
     if (capped.length === 0) return
+    const forTty = normalizeLfToCrlf(capped)
     if (this.streamHold) {
-      this.heldStream += capped
+      this.heldStream += forTty
       return
     }
-    this.writeBufferedStream(capped)
+    this.writeBufferedStream(forTty)
   }
 
   /**
@@ -902,11 +911,22 @@ function updateStreamColAfterRedraw(chunk: string, prevCol: number, columns?: nu
 
 function suffixAfterLastRedrawClear(chunk: string): string | null {
   let end = -1
-  const redraw = /\x1b\[\d*A\r\x1b\[(?:0)?J|\r\x1b\[(?:0)?J/g
+  // mdstream styled code lines erase with `\r\x1b[K` (EL), not only
+  // `\r\x1b[J` / CUU+J full clears. Treat both as redraw anchors so
+  // streamCol tracks the painted suffix, not pre-erase width.
+  const redraw = /\x1b\[\d*A\r\x1b\[(?:0)?J|\r\x1b\[(?:0)?J|\r\x1b\[(?:0)?K/g
   for (const match of chunk.matchAll(redraw)) {
     end = (match.index ?? 0) + match[0].length
   }
   return end === -1 ? null : chunk.slice(end)
+}
+
+/**
+ * Raw-mode TTY: convert bare LF to CRLF without doubling existing CRLF.
+ * Idempotent. Non-TTY callers must not use this (pipes keep LF).
+ */
+export function normalizeLfToCrlf(chunk: string): string {
+  return chunk.replace(/\r?\n/g, "\r\n")
 }
 
 function liveAreaKey(lines: string[], cursor: { row: number; col: number } | null): string {

@@ -196,7 +196,8 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     cap.writes.length = 0
     c.writeStream("hello\n")
     const out = joined(cap)
-    expect(out).toContain("hello\n")
+    // TTY path CRLF-normalizes bare LF (raw mode clears ONLCR).
+    expect(out).toContain("hello\r\n")
     // Live area redrawn after.
     expect(out).toContain("❯ ")
     expect(out).toContain("\x1b[K")
@@ -214,7 +215,7 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     expect(out).toContain("\x1b[1A")
     expect(out).toContain("\x1b[J")
     // Then chunk goes into the natural scroll-back stream.
-    expect(out).toContain("hello\n")
+    expect(out).toContain("hello\r\n")
   })
 
   it("appends consecutive non-newline chunks on the same stream line", () => {
@@ -259,7 +260,7 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
 
     c.writeStream("mred\x1b[0m\n")
     const out = joined(cap)
-    expect(out).toContain("\x1b[31mred\x1b[0m\n")
+    expect(out).toContain("\x1b[31mred\x1b[0m\r\n")
     expect(out).not.toContain("\x1b[31\x1b")
   })
 
@@ -285,10 +286,10 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     c.writeStream("\n\n") // model's "\n\n" text content
     c.writeStream("\n  ╭ Read /tmp/foo\n") // next transcript header
     const out = joined(cap)
-    // Strip ANSI to inspect content.
+    // Strip ANSI + CR (TTY CRLF normalize) to inspect LF runs.
     const stripAnsi = (s: string) =>
       s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
-    const plain = stripAnsi(out)
+    const plain = stripAnsi(out).replace(/\r/g, "")
     // Find content between "╰ done" and "╭ Read".
     const between = plain.slice(plain.indexOf("╰ done") + "╰ done".length, plain.indexOf("╭ Read"))
     // Count `\n` runs: the longest run must be 2 (= one blank row), never 3+.
@@ -317,7 +318,7 @@ describe("Compositor (writeStream — scrollback-friendly)", () => {
     c.writeStream("\n\n\x1b[31m\n\x1b[0m") // 3 newlines with ANSI between #2 and #3
     const stripAnsi = (s: string) =>
       s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "")
-    const plain = stripAnsi(joined(cap))
+    const plain = stripAnsi(joined(cap)).replace(/\r/g, "")
     // ANSI redraw bytes around the chunk are stripped; the scrollback
     // payload should contain all 3 consecutive `\n` from this write
     // (cap=3 since May 2026, was cap=2). ANSI codes don't extend the run.
@@ -614,7 +615,7 @@ describe("Compositor (cols-drift recovery)", () => {
     // Exactly one terminal write after release (single erase→stream→draw frame).
     expect(cap.writes.length).toBe(1)
     const out = joined(cap)
-    expect(out).toContain("chunk-a chunk-b\n")
+    expect(out).toContain("chunk-a chunk-b\r\n")
     // Physical walk-up under cols=40 using PREVIOUS wide status:
     //   line 0 wideStatus (~63 cells): ceil(63/40)=2
     //   line 1 "": 1
