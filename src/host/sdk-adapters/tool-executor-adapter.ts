@@ -52,6 +52,7 @@ import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import type { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
 import type { ToolTimeTracker } from "../../tools/tool-time.ts"
+import type { CodeHighlighter } from "../ui/formatter/mdstream-code-highlighter.ts"
 import type { ToolPresentation } from "../ui/tool-transcript/format.ts"
 
 /**
@@ -79,6 +80,8 @@ export interface ToolExecutorAdapterDeps {
    * choice for the headless `--json` path. Defaults to `null`.
    */
   toolTimeTracker?: ToolTimeTracker | null
+  /** Optional presentation-only syntax highlighter. */
+  codeHighlighter?: CodeHighlighter | null
   /** Active model id, used to resolve media (vision) capabilities. */
   model: string
   /**
@@ -137,6 +140,7 @@ export class ToolExecutorAdapter implements ToolExecutor {
       blobSkipTools: this.deps.blobSkipTools,
       feedbackTracker: this.deps.feedbackTracker,
       toolTimeTracker: this.deps.toolTimeTracker ?? null,
+      codeHighlighter: this.deps.codeHighlighter ?? null,
       model: this.deps.model,
       store: this.deps.store ?? null,
       fileTrackingStore: this.deps.fileTrackingStore ?? undefined,

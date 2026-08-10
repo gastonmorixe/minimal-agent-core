@@ -33,8 +33,11 @@ import {
 
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
+import { resolveFileLanguage } from "./ui/formatter/file-language.ts"
 import { Formatter } from "./ui/formatter/formatter.ts"
+import type { CodeHighlighter } from "./ui/formatter/mdstream-code-highlighter.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
+import { highlightReadBody } from "./ui/tool-transcript/code-highlight-render.ts"
 import {
   formatToolHeaderRows,
   formatToolPreview,
@@ -79,6 +82,9 @@ export interface ReplayOptions {
    * be smashed together at end-of-render — see memory `#mp0pnjih-16b0`.
    */
   formatterCmd?: string[]
+
+  /** Optional warm syntax highlighter for re-rendering Read tool bodies. */
+  codeHighlighter?: CodeHighlighter | null
 
   /**
    * Optional time-hint tracker shared with the live Agent. When provided
@@ -217,6 +223,7 @@ export async function replayToScrollback(
   const baseArrow = `${c.bold(c.pink("❯"))} `
   const modeManager = opts.modeManager ?? null
   const formatterCmd = opts.formatterCmd
+  const codeHighlighter = opts.codeHighlighter ?? null
   const toolTimeTracker = opts.toolTimeTracker ?? null
   const toolStartTimes = opts.toolStartTimes ?? null
   const userTimestamps = opts.userTimestamps ?? null
@@ -411,6 +418,33 @@ export async function replayToScrollback(
                   .filter((rb): rb is Extract<ContentBlock, { type: "text" }> => rb.type === "text")
                   .map((rb) => rb.text)
                   .join("")
+          let previewContent = content
+          let previewHasAnsi = false
+          if (
+            tu.name === "Read" &&
+            !result.is_error &&
+            displays?.display === undefined &&
+            codeHighlighter &&
+            typeof tu.input.file_path === "string"
+          ) {
+            const language = resolveFileLanguage({ path: tu.input.file_path, content })
+            if (language) {
+              const annotationCandidates = [
+                content.indexOf("\n\n<ma::"),
+                content.indexOf("\n\n[truncated:"),
+                content.indexOf("\n\n[note:"),
+              ].filter((index) => index >= 0)
+              const annotationIdx =
+                annotationCandidates.length === 0 ? -1 : Math.min(...annotationCandidates)
+              const body = annotationIdx < 0 ? content : content.slice(0, annotationIdx)
+              const annotation = annotationIdx < 0 ? "" : content.slice(annotationIdx)
+              const highlighted = await highlightReadBody(body, language, codeHighlighter)
+              if (highlighted !== null) {
+                previewContent = highlighted + annotation
+                previewHasAnsi = true
+              }
+            }
+          }
           // Replay does not have access to the live `_truncInfo` (it was
           // never persisted in the JSONL — it's a per-render artifact).
           // We pass `tool: tu.name` so the per-tool body line budget still
@@ -433,11 +467,17 @@ export async function replayToScrollback(
           // footer (instead of computing one from a `_truncInfo` we
           // don't have on disk). This is what makes Edit's unified diff
           // and the tasks plugin's tree survive `--resume` intact.
-          for (const line of formatToolPreview(content, !!result.is_error, displays?.display, {
-            tool: tu.name,
-            cols: replayCols,
-            footer: displays?.displayFooter,
-          })) {
+          for (const line of formatToolPreview(
+            previewContent,
+            !!result.is_error,
+            displays?.display,
+            {
+              tool: tu.name,
+              cols: replayCols,
+              footer: displays?.displayFooter,
+              ansiContent: previewHasAnsi,
+            },
+          )) {
             sink.write(`${line}\n`)
           }
         } else {

@@ -50,6 +50,7 @@ import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts
 import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
+import type { CodeHighlighter } from "../ui/formatter/mdstream-code-highlighter.ts"
 
 import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "./media-resolver-adapter.ts"
@@ -128,6 +129,8 @@ export interface BuildAgentCoreDeps {
   writeTranscript?: (line: string) => void
   /** Optional `· HH:MM:SS` tool-header time hints (interactive only). */
   toolTimeTracker?: import("../../tools/tool-time.ts").ToolTimeTracker | null
+  /** Warm, fail-closed syntax highlighter for transcript tool output. */
+  codeHighlighter?: CodeHighlighter | null
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -174,6 +177,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     feedbackTracker: new ToolFeedbackTracker(),
     // Headless `--json`: no transcript header time-hint (cosmetic only).
     toolTimeTracker: deps.toolTimeTracker ?? null,
+    codeHighlighter: deps.codeHighlighter ?? null,
     model: deps.model,
     store: deps.store,
     fileTrackingStore: deps.fileTrackingStore,

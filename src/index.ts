@@ -979,6 +979,15 @@ async function main() {
     }
   }
 
+  // mdstream's syntax/theme dump costs ~20ms cold. Spawn its persistent raw-
+  // code server during startup and overlap warmup with session construction so
+  // the first Read/Edit/Write result never pays that cost in the paint path.
+  const { createMdstreamCodeHighlighter } = await import(
+    "./host/ui/formatter/mdstream-code-highlighter.ts"
+  )
+  const codeHighlighter = createMdstreamCodeHighlighter(formatterCmd)
+  void codeHighlighter?.warmup()
+
   // Tier-2 InteractiveSession over AgentCore — production conversation path
   // for both REPL and non-interactive human/`--prompt` (json/stream-json
   // still builds a dedicated AgentCore via buildCore below).
@@ -1003,6 +1012,7 @@ async function main() {
     fileTrackingStore,
     initialMessages,
     toolTimeTracker,
+    codeHighlighter,
     systemPromptOverrides: opts.systemPromptOverrides,
   })
   void hostLifecycle.sessionStart?.({
@@ -1102,6 +1112,7 @@ async function main() {
       await replayToScrollback(resumeReplayMessages, stdoutSink, {
         modeManager,
         formatterCmd,
+        codeHighlighter,
         toolTimeTracker,
         toolStartTimes,
         userTimestamps: userTimestamps ?? undefined,
@@ -1163,6 +1174,7 @@ async function main() {
             saveEcho,
             turnAttachments: turnAttachmentSeam.producers,
             eventSink,
+            codeHighlighter,
             systemPromptOverrides: opts.systemPromptOverrides,
           }),
       })
@@ -1172,6 +1184,7 @@ async function main() {
         cwd: process.cwd(),
         model: agent.getModel(),
       })
+      await codeHighlighter?.close()
       setBashCwdChangeListener(null)
     }
     return
@@ -1234,6 +1247,7 @@ async function main() {
       cwd: process.cwd(),
       model: agent.getModel(),
     })
+    await codeHighlighter?.close()
     setBashCwdChangeListener(null)
   }
 
