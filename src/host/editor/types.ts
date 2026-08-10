@@ -182,7 +182,7 @@ export interface EditorControllerOptions {
    * `EscapeEscape`. When no listener claims the gesture, the normal single
    * Escape route still runs after this window.
    *
-   * Default: 120.
+   * Default: 500.
    */
   doubleEscapeMs?: number
   /**

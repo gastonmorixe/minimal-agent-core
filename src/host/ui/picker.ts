@@ -5,9 +5,17 @@
  * caller owns key event delivery and writing the rendered rows to the screen.
  */
 
-import { ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, bgRgb } from "@minimal-agent/plugin-api/utils/ansi"
 
-const { DIM, INVERSE, RESET } = ANSI_CODES
+import { displayWidth, truncateDisplayWidth } from "../../terminal/term-width.ts"
+
+const { DIM, RESET } = ANSI_CODES
+const SELECTED_BG = bgRgb(55, 45, 85)
+const SELECTED_BG_RESET = ANSI_CODES.BG_RESET
+const SELECTED_MARKER = "▌"
+const SELECTED_MARKER_OPEN = "\x1b[38;2;203;166;247m"
+const SELECTED_TEXT_OPEN = "\x1b[1;38;2;255;255;255m"
+const SELECTED_FOREGROUND_RESET = "\x1b[22;39m"
 
 export interface PickerItem<V = unknown> {
   label: string
@@ -147,24 +155,29 @@ export class Picker<V> {
     for (let i = 0; i < this.items.length; i++) {
       const it = this.items[i]
       if (!it) continue
-      const cursor = i === this.idx ? "❯ " : "  "
+      const cursor = i === this.idx ? `${SELECTED_MARKER} ` : "  "
       const label = it.label
       const hint = it.hint ?? ""
       // budget: width - cursorWidth(2)
       const inner = Math.max(1, w - 2)
       let line: string
       if (hint) {
-        const hintLen = Math.min(hint.length, Math.max(0, inner - 2))
-        const labelBudget = Math.max(1, inner - hintLen - 1)
-        const lab = truncate(label, labelBudget)
-        const pad = Math.max(1, inner - lab.length - hintLen)
-        line = lab + " ".repeat(pad) + hint.slice(0, hintLen)
+        const hintText = truncateDisplayWidth(hint, Math.max(0, inner - 2), "")
+        const hintWidth = displayWidth(hintText)
+        const labelBudget = Math.max(1, inner - hintWidth - 1)
+        const lab = truncateDisplayWidth(label, labelBudget, "")
+        const pad = Math.max(1, inner - displayWidth(lab) - hintWidth)
+        line = lab + " ".repeat(pad) + hintText
       } else {
-        line = truncate(label, inner)
+        line = truncateDisplayWidth(label, inner, "")
       }
       let row = cursor + line
       if (it.disabled) row = `${DIM}${row}${RESET}`
-      else if (i === this.idx) row = `${INVERSE}${row}${RESET}`
+      else if (i === this.idx) {
+        const plainWidth = displayWidth(row)
+        const padding = " ".repeat(Math.max(0, w - plainWidth))
+        row = `${SELECTED_BG}${SELECTED_MARKER_OPEN}${SELECTED_MARKER}${SELECTED_FOREGROUND_RESET} ${SELECTED_TEXT_OPEN}${line}${SELECTED_FOREGROUND_RESET}${padding}${SELECTED_BG_RESET}`
+      }
       rows.push(row)
     }
     if (this.footer) rows.push(`${DIM}${truncate(this.footer, w)}${RESET}`)
@@ -173,7 +186,5 @@ export class Picker<V> {
 }
 
 function truncate(s: string, w: number): string {
-  if (s.length <= w) return s
-  if (w <= 3) return s.slice(0, w)
-  return `${s.slice(0, w - 3)}...`
+  return truncateDisplayWidth(s, w, "...")
 }

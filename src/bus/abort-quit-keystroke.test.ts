@@ -275,6 +275,29 @@ describe("EditorController - double Escape gesture", () => {
     h.ctrl.stop()
   })
 
+  it("accepts two human-paced Escapes within the default half-second window", async () => {
+    const hooks = new Hooks()
+    let gestures = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key !== "EscapeEscape") return
+        gestures++
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks, bareEscapeMs: 0, doubleEscapeMs: 500 })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    h.stdin.send("\x1b")
+    await tick()
+    expect(gestures).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
   it("falls back to one single Escape when the positive-window gesture is unclaimed", async () => {
     const h = makeWorkingHarness({ doubleEscapeMs: 20 })
     enterWorking(h)
