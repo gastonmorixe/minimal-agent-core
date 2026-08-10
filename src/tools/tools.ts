@@ -201,6 +201,15 @@ export interface ToolExecResult {
    */
   display?: string
   /**
+   * Optional plain unified diff used as the source for presentation-only syntax
+   * composition. Kept separate from `display` so the renderer can fall back to
+   * the existing colored diff when no highlighter is available.
+   * @internal
+   */
+  _displayPatch?: string
+  /** Whether the Write diff treated an absent/empty prior file as new. @internal */
+  _displayNewFile?: boolean
+  /**
    * Internal: truncation context passed from each tool's executor up to
    * {@link executeTool}'s universal clamp. Stripped before the result is
    * returned so callers never see it. Not part of the public API.
@@ -279,6 +288,8 @@ export interface ToolExecOpts {
  * and stripped here right before serialization.
  */
 export function stripInternalFields(r: ToolExecResult): void {
+  delete r._displayPatch
+  delete r._displayNewFile
   delete r._truncCtx
   delete r._truncInfo
   delete r._aborted
@@ -1126,7 +1137,11 @@ async function execWrite(
     const display = patch
       ? renderUnifiedDiff(patch, isNew ? `New file: ${filePath}` : `Write: ${filePath}`)
       : undefined
-    return { content: ToolPrompts.fileWrittenResult(filePath), display }
+    return {
+      content: ToolPrompts.fileWrittenResult(filePath),
+      display,
+      ...(patch ? { _displayPatch: patch, _displayNewFile: isNew } : {}),
+    }
   } catch (e) {
     return {
       content: ToolPrompts.writeErrorResult(e instanceof Error ? e.message : String(e)),
@@ -1192,6 +1207,7 @@ async function execEdit(
     return {
       content: ToolPrompts.fileEditedResult(filePath, replaceAll ? count : 1),
       display,
+      ...(patch ? { _displayPatch: patch } : {}),
     }
   } catch (e) {
     return {

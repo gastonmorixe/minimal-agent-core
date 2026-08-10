@@ -23,6 +23,14 @@ import { countLines, type TruncationInfo } from "../../../tools/truncation.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"
 import { c } from "../style/ansi.ts"
 
+export { resolveFileLanguage } from "../formatter/file-language.ts"
+export type {
+  CodeHighlighter,
+  CodeHighlightRequest,
+} from "../formatter/mdstream-code-highlighter.ts"
+
+export { highlightReadBody, highlightUnifiedDiff } from "./code-highlight-render.ts"
+
 /**
  * Cosmetic per-tool presentation hints stripped from tool definitions before
  * they go on the model wire. The transcript renderer owns how these hints are
@@ -903,7 +911,14 @@ export function formatToolPreview(
   content: string,
   isError?: boolean,
   display?: string,
-  opts?: { tool?: string; info?: TruncationInfo; footer?: string; cols?: number },
+  opts?: {
+    tool?: string
+    info?: TruncationInfo
+    footer?: string
+    cols?: number
+    /** Content already carries balanced syntax-highlighting ANSI. */
+    ansiContent?: boolean
+  },
 ): string[] {
   // If the tool provided a pre-rendered display string (e.g. ANSI-colored
   // unified diff from Edit/Write), render it as-is, line by line, with the
@@ -949,7 +964,7 @@ export function formatToolPreview(
 
   const tool = opts?.tool
   const info = opts?.info
-  const color = isError ? c.red : c.dim
+  const color = isError ? c.red : opts?.ansiContent ? (line: string) => line : c.dim
 
   // 1. Strip ALL model-only trailing annotations from what we display to
   //    the human. Three flavors today : `[truncated: ...]`, `[note: ...]`,

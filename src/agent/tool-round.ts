@@ -32,6 +32,7 @@ import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 // move to the leaf: it depends on core modules (bash-split, tools/truncation,
 // truncate-hint, term-width).
 import {
+  type CodeHighlighter,
   clampBodyWithHint,
   computeTuiElision,
   effectiveBodyLineWidth,
@@ -41,9 +42,12 @@ import {
   formatStreamBodyRow,
   formatToolHeaderRows,
   formatToolPreview,
+  highlightReadBody,
+  highlightUnifiedDiff,
   renderFindingsPanel,
   renderStreamedTail,
   reopenFrameCloser,
+  resolveFileLanguage,
   TOOL_PREVIEW_GUTTER_WIDTH,
   TOOL_PREVIEW_LINES,
   TOOL_PREVIEW_LINES_DEFAULT,
@@ -108,6 +112,8 @@ export interface ToolRoundContext {
   feedbackTracker: ToolFeedbackTracker
   /** Optional `· HH:MM:SS` header time-hint tracker (null disables it). */
   toolTimeTracker: ToolTimeTracker | null
+  /** Warm, fail-closed syntax highlighter for presentation-only tool bodies. */
+  codeHighlighter?: CodeHighlighter | null
   /** Active model id, used to resolve media (vision) capabilities. */
   model: string
   /** Append-only session store for tool_result persistence (optional). */
@@ -258,10 +264,13 @@ export async function executeToolRound(
   }
 
   let content = ""
+  let contentHasAnsi = false
   let isError: boolean | undefined
   let display: string | undefined
   let displayHeader: string | undefined
   let displayFooter: string | undefined
+  let displayPatch: string | undefined
+  let displayNewFile = false
   let truncInfo: TruncationInfo | undefined
   let streamedRendered = false
   let aborted = false
@@ -657,6 +666,8 @@ export async function executeToolRound(
           content = result.content
           isError = result.is_error
           display = result.display
+          displayPatch = result._displayPatch
+          displayNewFile = result._displayNewFile === true
           truncInfo = result._truncInfo
           mediaBlocks = result.blocks
           // Pre-clamp body, present only when the universal clamp
@@ -812,11 +823,55 @@ export async function executeToolRound(
 
       if (!streamedRendered) {
         if (!headerWritten) writeToolHeader(displayHeader)
-        const previewLines = formatToolPreview(content, isError, display, {
+
+        // Highlight presentation only after execution/truncation. Detection is
+        // O(path + first line); mdstream is pre-warmed at startup, and any
+        // timeout/protocol failure returns null so the existing render remains.
+        const filePath = typeof tool.input.file_path === "string" ? tool.input.file_path : undefined
+        const language = filePath ? resolveFileLanguage({ path: filePath, content }) : null
+        let previewContent = content
+        if (
+          !isError &&
+          language &&
+          ctx.codeHighlighter &&
+          !contentHasAnsi &&
+          !content.includes("\x1b")
+        ) {
+          if (tool.name === "Read" && display === undefined) {
+            // Model-only annotations are plain metadata, not source code. Strip
+            // them for the highlighter, then restore them so formatToolPreview's
+            // existing annotation removal still sees the canonical content.
+            const annotationMatches = [
+              content.indexOf("\n\n<ma::"),
+              content.indexOf("\n\n[truncated:"),
+              content.indexOf("\n\n[note:"),
+            ].filter((index) => index >= 0)
+            const annotationIdx =
+              annotationMatches.length === 0 ? -1 : Math.min(...annotationMatches)
+            const readBody = annotationIdx < 0 ? content : content.slice(0, annotationIdx)
+            const annotation = annotationIdx < 0 ? "" : content.slice(annotationIdx)
+            const highlighted = await highlightReadBody(readBody, language, ctx.codeHighlighter)
+            if (highlighted !== null) {
+              previewContent = highlighted + annotation
+              contentHasAnsi = true
+            }
+          } else if ((tool.name === "Edit" || tool.name === "Write") && displayPatch) {
+            const title =
+              tool.name === "Write" && filePath
+                ? `${displayNewFile ? "New file" : "Write"}: ${filePath}`
+                : undefined
+            display =
+              (await highlightUnifiedDiff(displayPatch, language, ctx.codeHighlighter, title)) ??
+              display
+          }
+        }
+
+        const previewLines = formatToolPreview(previewContent, isError, display, {
           tool: tool.name,
           info: truncInfo,
           footer: displayFooter,
           cols: renderCols,
+          ansiContent: contentHasAnsi,
         })
         // When a plugin attached a diagnostics panel, the panel owns the
         // final `╰`; re-open the preview's own closer to a `│` so the two
