@@ -28,8 +28,12 @@ import { type InputCaptureStack, inputCaptureStack } from "../input/input-captur
 import type { Hooks } from "../plugins/hooks/hooks.ts"
 import { truncateDisplayWidth } from "../terminal/term-width.ts"
 
+import { BufferStyleLayers } from "./editor/buffer-style-layers.ts"
+import { FooterLayers } from "./editor/footer-layers.ts"
 import { EditorKeyDispatcher, type KeyDispatchHost } from "./editor/key-dispatch.ts"
 import {
+  BUFFER_STYLE_SOURCE_DEFAULT,
+  type BufferStyleSourceId,
   type BufferStyleSpan,
   type CompositorLike,
   type EditorControllerOptions,
@@ -62,6 +66,7 @@ import { c } from "./ui/style/ansi.ts"
 // so external consumers (commands, tests, plugins) keep their existing
 // `import { ... } from "./editor-controller.ts"` paths.
 export type {
+  BufferStyleSourceId,
   BufferStyleSpan,
   CompositorLike,
   EditorControllerOptions,
@@ -75,6 +80,7 @@ export type {
   SetFooterLayerOptions,
 }
 export {
+  BUFFER_STYLE_SOURCE_DEFAULT,
   FOOTER_LAYER_ARMED,
   FOOTER_LAYER_DEFAULT,
   FOOTER_LAYER_OVERLAY,
@@ -285,6 +291,7 @@ export class EditorController extends EventEmitter {
     )
     this.dispatcher = new EditorKeyDispatcher(this.makeDispatchHost(), {
       bareEscapeMs: opts.bareEscapeMs ?? 20,
+      doubleEscapeMs: opts.doubleEscapeMs ?? 120,
     })
   }
 
@@ -684,7 +691,7 @@ export class EditorController extends EventEmitter {
     // Tear down the abort-quit FSM's recurring painter + expiry timer.
     this.stopArmedTimers()
     this.stdin.off("data", this.onDataBound)
-    this.dispatcher.resetPasteState()
+    this.dispatcher.dispose()
     this.output.write(
       XTERM_MODIFY_OTHER_KEYS_DISABLE +
         XTERM_FORMAT_OTHER_KEYS_DISABLE +
@@ -929,11 +936,11 @@ export class EditorController extends EventEmitter {
   private decorationLines: string[] = []
   /**
    * Plugin-supplied style spans over the full buffer string (code-point
-   * offsets, `\n` counts as 1). Fed to the renderer for live paint and for
-   * submit commitLines so scrollback keeps at-mention (etc.) highlights.
-   * Cleared on buffer clear / submit. See `editor.buffer.styles`.
+   * offsets, `\n` counts as 1). Per-source layers (Bug-2801 analogue of footer
+   * layers); see {@link BufferStyleLayers}. Cleared on buffer clear / submit /
+   * overlay open-close.
    */
-  private bufferStyles: BufferStyleSpan[] = []
+  private readonly bufferStyleLayers = new BufferStyleLayers()
 
   /**
    * Active modal-overlay owner id, or `null` when the prompt is live.
@@ -963,6 +970,11 @@ export class EditorController extends EventEmitter {
     return this.overlayOwner !== null
   }
 
+  /** True only when `owner` holds the current modal overlay. */
+  isOverlayOwner(owner: string): boolean {
+    return this.overlayOwner === owner
+  }
+
   /**
    * Take modal ownership of the input line for `owner`. Hides the prompt,
    * blocks submit, and routes all keys to the overlay. No-op if the same
@@ -978,8 +990,7 @@ export class EditorController extends EventEmitter {
     // overlay owns the screen now; the prompt is hidden, so leaving stale
     // bytes in `buf` would only resurface on close.
     this.buf.clear()
-    this.bufferStyles = []
-    this.renderer.setStyles([])
+    this.clearAllBufferStyleLayers()
     this.viewportTop = 0
     if (this.started) this.repaint()
   }
@@ -994,8 +1005,7 @@ export class EditorController extends EventEmitter {
     if (this.overlayOwner === null || this.overlayOwner !== owner) return
     this.overlayOwner = null
     this.buf.clear()
-    this.bufferStyles = []
-    this.renderer.setStyles([])
+    this.clearAllBufferStyleLayers()
     this.viewportTop = 0
     if (this.started) this.repaint()
   }
@@ -1025,8 +1035,7 @@ export class EditorController extends EventEmitter {
   setBuffer(text: string): void {
     this.buf.clear()
     // Replacing the buffer invalidates absolute style offsets; drop them.
-    this.bufferStyles = []
-    this.renderer.setStyles([])
+    this.clearAllBufferStyleLayers()
     if (text.length > 0) {
       const lines = text.split("\n")
       for (let i = 0; i < lines.length; i++) {
@@ -1039,28 +1048,43 @@ export class EditorController extends EventEmitter {
 
   /**
    * Install buffer style spans for live paint (and for the next submit's
-   * commitLines). Shallow-dedup: identical start/end/style arrays are a
-   * no-op. Pass `[]` to clear. See `editor.buffer.styles` and
-   * {@link BufferStyleSpan}.
+   * commitLines).
+   *
+   * Prefer {@link setBufferStyleLayer} when multiple plugins paint concurrently.
+   * This method is the back-compat sugar: it writes the
+   * {@link BUFFER_STYLE_SOURCE_DEFAULT} layer only. Pass `[]` to clear the
+   * default layer (other sources keep their spans). See `editor.buffer.styles`
+   * and {@link BufferStyleSpan}.
    */
   setBufferStyles(spans: BufferStyleSpan[]): void {
-    const next = Array.isArray(spans) ? spans : []
-    const prev = this.bufferStyles
-    const same =
-      prev.length === next.length &&
-      prev.every(
-        (p, i) =>
-          p.start === next[i]!.start && p.end === next[i]!.end && p.style === next[i]!.style,
-      )
-    if (same) return
-    this.bufferStyles = next.map((s) => ({ start: s.start, end: s.end, style: s.style }))
-    this.renderer.setStyles(this.bufferStyles)
+    this.setBufferStyleLayer(BUFFER_STYLE_SOURCE_DEFAULT, spans)
+  }
+
+  /**
+   * Replace one producer's buffer-style layer and recompose. Empty `spans`
+   * clears that source only (other producers' highlights remain). Unknown
+   * empty sources are a silent no-op.
+   */
+  setBufferStyleLayer(source: BufferStyleSourceId, spans: BufferStyleSpan[]): void {
+    if (!this.bufferStyleLayers.setLayer(source, spans)) return
+    this.renderer.setStyles(this.bufferStyleLayers.peekComposed())
     if (this.started) this.repaint()
   }
 
-  /** Current buffer style spans (copy). For tests / diagnostics. */
+  /** Remove one producer's layer. Equivalent to `setBufferStyleLayer(id, [])`. */
+  clearBufferStyleLayer(source: BufferStyleSourceId): void {
+    this.setBufferStyleLayer(source, [])
+  }
+
+  /** Drop every style layer (submit / setBuffer / overlay). */
+  private clearAllBufferStyleLayers(): void {
+    if (!this.bufferStyleLayers.clearAll()) return
+    this.renderer.setStyles([])
+  }
+
+  /** Current composed buffer style spans (copy). For tests / diagnostics. */
   getBufferStyles(): BufferStyleSpan[] {
-    return this.bufferStyles.map((s) => ({ ...s }))
+    return this.bufferStyleLayers.getComposed()
   }
 
   /**
@@ -1136,13 +1160,9 @@ export class EditorController extends EventEmitter {
   // Dedup is at the COMPOSED-output level so a mutation to an OBSCURED
   // layer does NOT trigger a repaint (no flicker, no work).
 
-  private footerLayers: Map<FooterLayerId, FooterLayer> = new Map()
-  /**
-   * Last composed footer pushed to {@link repaint}. Used purely for
-   * dedup in {@link setFooterLayer} / {@link clearFooterLayer}; the
-   * canonical render-path source of truth is always {@link composeFooter}.
-   */
-  private composedFooterCache: string[] = []
+  private readonly footerLayers = new FooterLayers(() => {
+    if (this.started) this.repaint()
+  })
 
   /**
    * Set / replace a footer LAYER. Multiple producers can paint into the
@@ -1162,21 +1182,7 @@ export class EditorController extends EventEmitter {
    * otherwise. Mutating an obscured layer is silent.
    */
   setFooterLayer(layerId: FooterLayerId, lines: string[], opts?: SetFooterLayerOptions): void {
-    const prev = this.footerLayers.get(layerId)
-    const priority = opts?.priority ?? prev?.priority ?? 0
-    if (lines.length === 0) {
-      if (prev === undefined) return
-      this.footerLayers.delete(layerId)
-    } else {
-      const unchanged =
-        prev !== undefined &&
-        prev.priority === priority &&
-        prev.lines.length === lines.length &&
-        prev.lines.every((l, i) => l === lines[i])
-      if (unchanged) return
-      this.footerLayers.set(layerId, { id: layerId, priority, lines: [...lines] })
-    }
-    this.applyFooterChange()
+    this.footerLayers.set(layerId, lines, opts)
   }
 
   /**
@@ -1185,9 +1191,7 @@ export class EditorController extends EventEmitter {
    * repaint).
    */
   clearFooterLayer(layerId: FooterLayerId): void {
-    if (!this.footerLayers.has(layerId)) return
-    this.footerLayers.delete(layerId)
-    this.applyFooterChange()
+    this.footerLayers.clear(layerId)
   }
 
   /**
@@ -1216,27 +1220,7 @@ export class EditorController extends EventEmitter {
    * @internal Exposed for unit-test stability assertions.
    */
   composeFooter(): string[] {
-    let best: FooterLayer | null = null
-    for (const layer of this.footerLayers.values()) {
-      if (layer.lines.length === 0) continue
-      if (best === null || layer.priority > best.priority) best = layer
-    }
-    return best ? [...best.lines] : []
-  }
-
-  /**
-   * Shared tail of {@link setFooterLayer} / {@link clearFooterLayer}:
-   * compute the new composed footer, shallow-compare against the last
-   * one we pushed, and call {@link repaint} only when the visible
-   * footer actually changed.
-   */
-  private applyFooterChange(): void {
-    const composed = this.composeFooter()
-    const prev = this.composedFooterCache
-    const unchanged = composed.length === prev.length && composed.every((l, i) => l === prev[i])
-    if (unchanged) return
-    this.composedFooterCache = composed
-    if (this.started) this.repaint()
+    return this.footerLayers.compose()
   }
 
   // ----------------------------- internals -----------------------------
@@ -1283,7 +1267,7 @@ export class EditorController extends EventEmitter {
         const rendered = this.renderer.render(this.buf, {
           firstRow: 0,
           rowCount: this.buf.lines.length,
-          styles: this.bufferStyles,
+          styles: this.bufferStyleLayers.peekComposed(),
         })
         commitLines = rendered.lines
       } finally {
@@ -1291,8 +1275,7 @@ export class EditorController extends EventEmitter {
       }
     }
     this.buf.clear()
-    this.bufferStyles = []
-    this.renderer.setStyles([])
+    this.clearAllBufferStyleLayers()
     this.viewportTop = 0
     this.repaint()
     this.emit("submit", text, commitLines, new Date())
@@ -1447,7 +1430,7 @@ export class EditorController extends EventEmitter {
       firstRow: vTop,
       rowCount: editorWindow,
       columns: cols,
-      styles: this.bufferStyles,
+      styles: this.bufferStyleLayers.peekComposed(),
     })
 
     // Build the scroll indicator when content is hidden above the viewport.

@@ -14,6 +14,10 @@ export interface EditorHooksEditor {
   setFooterLayer?: (id: string, lines: string[], opts?: { priority?: number }) => void
   clearFooterLayer?: (id: string) => void
   setBufferStyles?: (spans: Array<{ start: number; end: number; style: string }>) => void
+  setBufferStyleLayer?: (
+    source: string,
+    spans: Array<{ start: number; end: number; style: string }>,
+  ) => void
   openOverlay?: (owner: string) => void
   closeOverlay?: (owner: string) => void
 }
@@ -97,15 +101,17 @@ export function registerEditorPluginHooks(
     { caller: "agent", priority: 5000, label: "agent:editor.footer.set" },
   )
 
-  // Plugins (e.g. intercom at-mentions) paint SGR spans over the live input.
-  // Payload `{spans: Array<{start, end, style}>}` with code-point offsets.
-  // Empty spans clears. Validated before hand-off so a malformed emit can't
-  // poison the renderer.
+  // Plugins (e.g. intercom at-mentions, slash-menu tokens) paint SGR spans
+  // over the live input. Payload `{spans, source?}` with code-point offsets.
+  // `source` scopes the spans to one producer so concurrent plugins compose
+  // instead of last-writer-wins; omit it to use the default layer. Empty
+  // spans clear that source only. Validated before hand-off so a malformed
+  // emit can't poison the renderer.
   loader.hooks().on(
     "editor.buffer.styles",
     (payload: unknown) => {
       if (!payload || typeof payload !== "object") return
-      const p = payload as { spans?: unknown }
+      const p = payload as { spans?: unknown; source?: unknown }
       if (!Array.isArray(p.spans)) return
       const spans: Array<{ start: number; end: number; style: string }> = []
       for (const raw of p.spans) {
@@ -115,6 +121,11 @@ export function registerEditorPluginHooks(
         if (typeof s.style !== "string") return
         if (!Number.isFinite(s.start) || !Number.isFinite(s.end)) return
         spans.push({ start: s.start, end: s.end, style: s.style })
+      }
+      const source = typeof p.source === "string" && p.source.length > 0 ? p.source : undefined
+      if (source !== undefined && typeof editor.setBufferStyleLayer === "function") {
+        editor.setBufferStyleLayer(source, spans)
+        return
       }
       if (typeof editor.setBufferStyles === "function") editor.setBufferStyles(spans)
     },

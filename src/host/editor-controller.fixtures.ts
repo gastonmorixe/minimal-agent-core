@@ -82,6 +82,7 @@ export function make(
     continuation?: string
     columns?: number
     bareEscapeMs?: number
+    doubleEscapeMs?: number
     abortBus?: AbortBus
     /** Override armed-state painter cadence. Set 0 to disable tick. */
     armedTickMs?: number
@@ -107,6 +108,7 @@ export function make(
     // dedicated test that opts into a non-zero window.
     resizeDebounceMs: opts.resizeDebounceMs ?? 0,
     ...(opts.bareEscapeMs !== undefined ? { bareEscapeMs: opts.bareEscapeMs } : {}),
+    ...(opts.doubleEscapeMs !== undefined ? { doubleEscapeMs: opts.doubleEscapeMs } : {}),
     ...(opts.abortBus ? { abortBus: opts.abortBus } : {}),
     ...(opts.armedTickMs !== undefined ? { armedTickMs: opts.armedTickMs } : {}),
     ...(opts.nowFn ? { nowFn: opts.nowFn } : {}),

@@ -177,6 +177,15 @@ export interface EditorControllerOptions {
    */
   bareEscapeMs?: number
   /**
+   * Time in milliseconds after a confirmed Escape during which a second
+   * confirmed Escape is offered to captures and `editor.key` hooks as
+   * `EscapeEscape`. When no listener claims the gesture, the normal single
+   * Escape route still runs after this window.
+   *
+   * Default: 120.
+   */
+  doubleEscapeMs?: number
+  /**
    * Debounce window (ms) for the `"input"` event. The event fires this
    * long after the most recent buffer-text change. Default: 120ms - short
    * enough to feel live, long enough to coalesce a fast typist's stream
@@ -322,13 +331,31 @@ export type ParsedKey = {
  * Offsets are **code-point** indices into the full buffer string
  * (`buf.toString()`, lines joined with `\n`). `\n` counts as one code point.
  * `style` is an SGR open sequence (e.g. `\x1b[35m`); the renderer closes each
- * run with `\x1b[0m`. Empty `spans` (or clearing) removes all highlights.
+ * run with `\x1b[0m`.
+ *
+ * Multiple plugins may paint concurrently (at-mentions, slash tokens). Each
+ * producer owns a {@link BufferStyleSourceId} layer; empty `spans` for a source
+ * clears **that** layer only. Composed output is the union of all non-empty
+ * layers. Submit / `setBuffer` / overlay open-close clear every layer.
  */
 export type BufferStyleSpan = {
   start: number
   end: number
   style: string
 }
+
+/**
+ * Stable id for one producer of {@link BufferStyleSpan}s. Two producers MUST
+ * NOT share a source id (last-writer-wins within a single source is fine;
+ * across sources it is the Bug-2801-class stomping we avoid).
+ *
+ * Prefer a plugin-stable name (`"intercom"`, `"slash-menu"`). Legacy callers
+ * that omit `source` land on {@link BUFFER_STYLE_SOURCE_DEFAULT}.
+ */
+export type BufferStyleSourceId = string
+
+/** Back-compat layer used when `editor.buffer.styles` omits `source`. */
+export const BUFFER_STYLE_SOURCE_DEFAULT: BufferStyleSourceId = "default"
 
 /**
  * Context the editor hands to a {@link QueueKeyHandler} on every
