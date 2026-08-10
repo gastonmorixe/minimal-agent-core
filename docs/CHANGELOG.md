@@ -45,6 +45,20 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Fix: Human-paced Escape gestures and queue-style pickers
+
+---
+id: "2026-08-10-escape-picker-interactions"
+type: fix
+status: landed
+created-at: "2026-08-10T08:31:42-0400"
+updated-at: "2026-08-10T08:31:42-0400"
+---
+
+Double Escape now permits a human-paced 500ms interval while preserving the
+single-Escape abort route. Generic picker selections reuse the queue's dark
+violet full-width bar, violet marker, and high-contrast text.
+
 ### Fix: mdstream fence bodies invisible on raw-mode TTYs
 
 ---

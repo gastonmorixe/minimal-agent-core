@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
+import { displayWidth } from "../../terminal/term-width.ts"
+
 import { Picker, type PickerItem } from "./picker.ts"
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")
@@ -114,11 +116,29 @@ describe("Picker", () => {
     expect(plain[2]).toContain("5m ago")
     expect(plain[2]?.startsWith("  ")).toBe(true)
     // Second item: selected
-    expect(plain[3]).toContain("❯ ")
+    expect(plain[3]).toContain("▌ ")
+    expect(rows[3]).toContain("\x1b[48;2;55;45;85m")
     expect(plain[3]).toContain("Beta")
     expect(plain[3]).toContain("1h ago")
     // Footer
     expect(plain[plain.length - 1]).toContain("Esc to cancel")
+  })
+
+  test("render: selected queue-style row fills the width without ANSI bleed for Unicode labels", () => {
+    const p = new Picker({ items: [{ label: "日本語 prompt", value: "u" }] })
+    const [row] = p.render(24).filter((line) => line.includes("日本語"))
+    expect(row).toContain("\x1b[48;2;55;45;85m")
+    expect(row).toContain("\x1b[49m")
+    expect(row).toEndWith("\x1b[49m")
+    expect(row).not.toContain("\x1b[7m")
+    expect(displayWidth(row)).toBe(24)
+  })
+
+  test("render: long CJK and emoji labels truncate to the requested display width", () => {
+    const p = new Picker({ items: [{ label: "日本語😀日本語😀日本語😀日本語😀", value: "u" }] })
+    const [row] = p.render(16).filter((line) => line.includes("▌"))
+    expect(displayWidth(row)).toBe(16)
+    expect(row).toEndWith("\x1b[49m")
   })
 
   test("render: disabled items appear dimmed (ANSI dim sequence)", () => {

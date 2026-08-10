@@ -291,7 +291,7 @@ export class EditorController extends EventEmitter {
     )
     this.dispatcher = new EditorKeyDispatcher(this.makeDispatchHost(), {
       bareEscapeMs: opts.bareEscapeMs ?? 20,
-      doubleEscapeMs: opts.doubleEscapeMs ?? 120,
+      doubleEscapeMs: opts.doubleEscapeMs ?? 500,
     })
   }
 
