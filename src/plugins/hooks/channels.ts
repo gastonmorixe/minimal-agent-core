@@ -256,7 +256,7 @@ export const CHANNELS = [
       "end:number, style: string}>, source?: string}` where start/end are " +
       "code-point offsets into the full buffer string (join lines with " +
       "`\\n`), and `style` is an SGR open sequence (or a named token later). " +
-      "`source` is a stable producer id (`\"intercom\"`, `\"slash-menu\"`); " +
+      "`source` is a stable producer id (`'intercom'`, `'slash-menu'`); " +
       "each source owns a layer so concurrent plugins compose. Omitting " +
       "source writes the default layer. Empty spans clear that source only. " +
       "The host listens and calls EditorController.setBufferStyleLayer() " +
