@@ -168,6 +168,27 @@ describe("EditorController — typing & submit", () => {
     ctrl.stop()
   })
 
+  it("setBufferStyleLayer composes concurrent producers without stomping", () => {
+    const { ctrl, stdin, compositor } = make()
+    ctrl.start()
+    stdin.send("hi @bob /help")
+    const mention = "\x1b[35m"
+    const slash = "\x1b[36m"
+    // Intercom paints "@bob" (3..7); slash-menu paints "/help" (8..13).
+    ctrl.setBufferStyleLayer("intercom", [{ start: 3, end: 7, style: mention }])
+    ctrl.setBufferStyleLayer("slash-menu", [{ start: 8, end: 13, style: slash }])
+    expect(ctrl.getBufferStyles()).toEqual([
+      { start: 3, end: 7, style: mention },
+      { start: 8, end: 13, style: slash },
+    ])
+    expect(compositor.last().lines[0]).toBe(`> hi ${mention}@bob\x1b[0m ${slash}/help\x1b[0m`)
+    // Clearing slash must NOT wipe mention highlights.
+    ctrl.setBufferStyleLayer("slash-menu", [])
+    expect(ctrl.getBufferStyles()).toEqual([{ start: 3, end: 7, style: mention }])
+    expect(compositor.last().lines[0]).toBe(`> hi ${mention}@bob\x1b[0m /help`)
+    ctrl.stop()
+  })
+
   it("setBuffer clears buffer styles", () => {
     const { ctrl, stdin } = make()
     ctrl.start()

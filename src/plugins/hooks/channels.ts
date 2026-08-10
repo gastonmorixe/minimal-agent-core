@@ -252,13 +252,17 @@ export const CHANNELS = [
     permission: "hooks:editor.buffer.styles",
     description:
       "Plugin → host signal to style ranges of the editor buffer (e.g. " +
-      "at-mentions). Payload `{spans: Array<{start:number, end:number, " +
-      "style: string}>}` where start/end are code-point offsets into the " +
-      "full buffer string (join lines with `\\n`), and `style` is an SGR " +
-      "open sequence (or a named token later). Empty spans clears. The host " +
-      "listens and calls EditorController.setBufferStyles() on the next " +
-      "repaint. Styles paint live input and are also baked into submit " +
-      "commitLines so scrollback keeps the highlight.",
+      "at-mentions, slash tokens). Payload `{spans: Array<{start:number, " +
+      "end:number, style: string}>, source?: string}` where start/end are " +
+      "code-point offsets into the full buffer string (join lines with " +
+      "`\\n`), and `style` is an SGR open sequence (or a named token later). " +
+      "`source` is a stable producer id (`\"intercom\"`, `\"slash-menu\"`); " +
+      "each source owns a layer so concurrent plugins compose. Omitting " +
+      "source writes the default layer. Empty spans clear that source only. " +
+      "The host listens and calls EditorController.setBufferStyleLayer() " +
+      "(or setBufferStyles for the default layer). Styles paint live input " +
+      "and are also baked into submit commitLines so scrollback keeps the " +
+      "highlight.",
   },
   {
     name: "editor.prompt.set",

@@ -148,6 +148,7 @@ interface Harness {
 function makeWorkingHarness(
   opts: {
     bareEscapeMs?: number
+    doubleEscapeMs?: number
     armedTickMs?: number
     hooks?: Hooks
     inputCaptureStack?: InputCaptureStack
@@ -166,6 +167,7 @@ function makeWorkingHarness(
     abortBus: bus,
     // 0ms so bare-Esc fires on the next microtask without real timers.
     bareEscapeMs: opts.bareEscapeMs ?? 0,
+    doubleEscapeMs: opts.doubleEscapeMs ?? 0,
     armedTickMs: opts.armedTickMs ?? 0,
     ...(opts.hooks ? { hooks: opts.hooks } : {}),
     ...(opts.inputCaptureStack ? { inputCaptureStack: opts.inputCaptureStack } : {}),
@@ -206,6 +208,156 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 1))
 // ---------------------------------------------------------------------------
 // Working state - ESC variants (rule 1: abort only, no arm, no quit)
 // ---------------------------------------------------------------------------
+
+describe("EditorController - typed slash-menu triggers", () => {
+  it("dispatches typed slash and dollar after inserting them, but not pasted values", () => {
+    const hooks = new Hooks()
+    const observed: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key === "/" || payload.key === "$") observed.push(payload.buffer)
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks })
+    h.stdin.send("look /up $now")
+    expect(observed).toEqual(["look /", "look /up $"])
+    expect(h.ctrl.buffer().toString()).toBe("look /up $now")
+
+    h.stdin.send("\x1b[200~ /pasted $text\x1b[201~")
+    expect(observed).toEqual(["look /", "look /up $"])
+    h.ctrl.stop()
+  })
+})
+
+describe("EditorController - double Escape gesture", () => {
+  it("dispatches EscapeEscape to hooks without aborting when claimed", async () => {
+    const hooks = new Hooks()
+    let gestures = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key !== "EscapeEscape") return
+        gestures++
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks, doubleEscapeMs: 20 })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    h.stdin.send("\x1b")
+    await tick()
+    expect(gestures).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
+  it("recognizes two contiguous bare Escapes without waiting for bare-Escape timers", () => {
+    const hooks = new Hooks()
+    let gestures = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key !== "EscapeEscape") return
+        gestures++
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks, bareEscapeMs: 500, doubleEscapeMs: 500 })
+    enterWorking(h)
+    h.stdin.send("\x1b\x1b")
+    expect(gestures).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
+  it("falls back to one single Escape when the positive-window gesture is unclaimed", async () => {
+    const h = makeWorkingHarness({ doubleEscapeMs: 20 })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    h.stdin.send("\x1b")
+    await tick()
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    h.ctrl.stop()
+  })
+
+  it("routes pending single Escape before a following ordinary key", async () => {
+    const h = makeWorkingHarness({ doubleEscapeMs: 20 })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    h.stdin.send("x")
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    expect(h.ctrl.buffer().toString()).toBe("x")
+    h.ctrl.stop()
+  })
+
+  it("clears pending Escape timers when the editor stops", async () => {
+    const h = makeWorkingHarness({ doubleEscapeMs: 20 })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await tick()
+    h.ctrl.stop()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(h.aborts).toEqual([])
+  })
+
+  it("waits for the gesture window before preserving single-Escape cancellation", async () => {
+    const h = makeWorkingHarness({ doubleEscapeMs: 5 })
+    enterWorking(h)
+    h.stdin.send("\x1b")
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(h.aborts).toEqual([{ kind: "user-key", key: "Ctrl+C" }])
+    h.ctrl.stop()
+  })
+
+  it("recognizes two xterm Escapes as the same gesture", () => {
+    const hooks = new Hooks()
+    let gestures = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key !== "EscapeEscape") return
+        gestures++
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks, doubleEscapeMs: 20 })
+    enterWorking(h)
+    h.stdin.send("\x1b[27;1;27~")
+    h.stdin.send("\x1b[27;1;27~")
+    expect(gestures).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+
+  it("recognizes two kitty CSI-u Escapes as the same gesture", () => {
+    const hooks = new Hooks()
+    let gestures = 0
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        if (payload.key !== "EscapeEscape") return
+        gestures++
+        payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const h = makeWorkingHarness({ hooks, doubleEscapeMs: 20 })
+    enterWorking(h)
+    h.stdin.send("\x1b[27u")
+    h.stdin.send("\x1b[27u")
+    expect(gestures).toBe(1)
+    expect(h.aborts).toEqual([])
+    h.ctrl.stop()
+  })
+})
 
 describe("EditorController - ESC while working aborts via FSM (all encodings)", () => {
   it("bare ESC (`\\x1b`) fires abort-turn, FSM stays `working`, no quit", async () => {

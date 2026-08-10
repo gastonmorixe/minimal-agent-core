@@ -97,6 +97,8 @@ export interface KeyDispatchOptions {
    * `EditorControllerOptions.bareEscapeMs`.
    */
   bareEscapeMs: number
+  /** Window after one confirmed Escape for `EscapeEscape` recognition. */
+  doubleEscapeMs: number
 }
 
 /**
@@ -108,23 +110,42 @@ export class EditorKeyDispatcher {
   private pending = ""
   private bracketedPaste = false
   private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
+  private doubleEscapeTimer: ReturnType<typeof setTimeout> | null = null
   private readonly bareEscapeMs: number
+  private readonly doubleEscapeMs: number
 
   constructor(
     private readonly host: KeyDispatchHost,
     opts: KeyDispatchOptions,
   ) {
     this.bareEscapeMs = opts.bareEscapeMs
+    this.doubleEscapeMs = opts.doubleEscapeMs
   }
 
   /** Append a stdin chunk and consume as much of `pending` as possible. */
   onData(chunk: string | Buffer): void {
-    // Any new input invalidates a pending bare-Esc - either it's the
-    // continuation bytes of a CSI we were holding, or it's a separate
-    // key entirely. In both cases the disambiguation timer must NOT
-    // fire, so cancel it before appending and re-running the consumer.
+    const input = typeof chunk === "string" ? chunk : chunk.toString("utf8")
+    // Two literal Escapes are never a terminal control sequence. Confirm both
+    // immediately, rather than treating the second byte as an unknown escape.
+    if (input === "\x1b\x1b" && this.pending.length === 0) {
+      this.confirmEscape()
+      this.confirmEscape()
+      return
+    }
+    if (this.bareEscapeTimer !== null && this.pending === "\x1b" && input === "\x1b") {
+      this.cancelBareEscapeTimer()
+      this.pending = ""
+      this.confirmEscape()
+      this.confirmEscape()
+      return
+    }
+    if (this.doubleEscapeTimer !== null && !input.startsWith("\x1b")) {
+      clearTimeout(this.doubleEscapeTimer)
+      this.doubleEscapeTimer = null
+      this.dispatchSingleEscape()
+    }
     this.cancelBareEscapeTimer()
-    this.pending += typeof chunk === "string" ? chunk : chunk.toString("utf8")
+    this.pending += input
     this.consumePending()
   }
 
@@ -133,6 +154,15 @@ export class EditorKeyDispatcher {
    * stopped editor doesn't resume mid-paste.
    */
   resetPasteState(): void {
+    this.bracketedPaste = false
+  }
+
+  /** Clear pending input and delayed Escape routes. */
+  dispose(): void {
+    this.cancelBareEscapeTimer()
+    if (this.doubleEscapeTimer !== null) clearTimeout(this.doubleEscapeTimer)
+    this.doubleEscapeTimer = null
+    this.pending = ""
     this.bracketedPaste = false
   }
 
@@ -152,6 +182,32 @@ export class EditorKeyDispatcher {
    * spurious `cancel` nor anything inserted into the buffer).
    */
   private fireBareEscape(): void {
+    this.bareEscapeTimer = null
+    if (this.pending === "\x1b") this.pending = ""
+    this.confirmEscape()
+  }
+
+  private confirmEscape(): void {
+    if (this.doubleEscapeTimer !== null) {
+      clearTimeout(this.doubleEscapeTimer)
+      this.doubleEscapeTimer = null
+      if (this.host.captureStack.dispatch("EscapeEscape")) return
+      if (this.host.dispatchKeyHook("EscapeEscape")) return
+      this.dispatchSingleEscape()
+      return
+    }
+    if (this.doubleEscapeMs <= 0) {
+      this.dispatchSingleEscape()
+      return
+    }
+    this.doubleEscapeTimer = setTimeout(() => {
+      this.doubleEscapeTimer = null
+      this.dispatchSingleEscape()
+    }, this.doubleEscapeMs)
+    ;(this.doubleEscapeTimer as { unref?: () => void }).unref?.()
+  }
+
+  private dispatchSingleEscape(): void {
     this.bareEscapeTimer = null
     if (this.pending === "\x1b") {
       this.pending = ""
@@ -487,7 +543,9 @@ export class EditorKeyDispatcher {
           dirty = true
           continue
         }
-        // Greedy run of printables.
+        // A typed slash-menu trigger must be observable after insertion.
+        // Pasted input takes insertPasted(), so it deliberately never enters
+        // this key-hook path or causes autocomplete flicker.
         let run = char
         while (this.pending.length > 0 && !this.pending.startsWith("\x1b")) {
           const cp = this.pending.codePointAt(0)
@@ -497,7 +555,14 @@ export class EditorKeyDispatcher {
           run += ch
           this.pending = this.pending.slice(ch.length)
         }
-        buf.insert(run)
+        if (run.includes("/") || run.includes("$")) {
+          for (const ch of run) {
+            buf.insert(ch)
+            if (ch === "/" || ch === "$") host.dispatchKeyHook(ch)
+          }
+        } else {
+          buf.insert(run)
+        }
         dirty = true
         continue
       }
@@ -724,9 +789,7 @@ export class EditorKeyDispatcher {
     // `\x1b`), matching `fireBareEscape`'s own reset so the "Esc
     // breaks the Ctrl+C run" invariant holds across encodings.
     if (code === 27 && !shift && !alt && !ctrl) {
-      if (host.captureStack.dispatch("Escape")) return "ignore"
-      if (host.dispatchKeyHook("Escape")) return "ignore"
-      host.feedFsm({ kind: "esc", at: host.now() })
+      this.confirmEscape()
       return "ignore"
     }
 
