@@ -81,7 +81,14 @@ export function resolveSessionTarget(target: string, cwd: string): string | null
   if (target !== "last") {
     return resolveSidByPrefix(target, readSessionIndex())
   }
-  const all = readSessionIndex()
+  return resolveLastSessionSid(readSessionIndex(), cwd)
+}
+
+/** Pure `--resume last` policy, exported for focused backup filtering tests. */
+export function resolveLastSessionSid(records: readonly IndexRecord[], cwd: string): string | null {
+  // Backups are explicitly resumable by sid, but must never win ordinary
+  // `--resume last` selection because they represent discarded timelines.
+  const all = records.filter((entry) => !entry.backup)
   if (all.length === 0) return null
   for (let i = all.length - 1; i >= 0; i--) {
     if (all[i].cwd === cwd) return all[i].sid

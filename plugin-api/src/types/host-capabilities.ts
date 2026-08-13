@@ -34,9 +34,9 @@ import type { PluginLogger } from "./logger.ts"
  * granted namespaces; everything else is `undefined`, so a plugin must
  * defensively check before use.
  *
- * `sessions:write`, `tasks:read`, and `memory:read` are reserved names
- * (declared so manifests validate forward) but not implemented in this
- * cut.
+ * `tasks:read` and `memory:read` are reserved names. `sessions:write`
+ * provides a narrow active-session history-edit transaction, not arbitrary
+ * session filesystem access.
  */
 export type CapabilityToken =
   | "sessions:read"
@@ -141,6 +141,8 @@ export interface SessionMetaView {
  */
 export interface RecordView {
   readonly index: number
+  /** Stable user-record id, present only for user prompts. */
+  readonly userId: string | null
   readonly kind: string
   readonly ts: string | null
   /** Compact role/summary, e.g. "assistant · 2 tool_use (Bash, Read)". */
@@ -248,6 +250,25 @@ export interface SessionsReadApi {
     sid: string,
     opts?: { format?: "markdown" | "xml" },
   ): Promise<{ text: string; bytes: number } | null>
+}
+
+/** Narrow active-session history-edit transaction. */
+export interface SessionsWriteApi {
+  beginHistoryEdit(input: { targetUserId: string }): Promise<
+    | {
+        ok: true
+        backupSid: string
+        selectedText: string
+        targetRecordIndex: number
+        userPromptOrdinal: number
+        totalUserPrompts: number
+      }
+    | { ok: false; code: string; message: string }
+  >
+  commitHistoryEdit(input: {
+    targetUserId: string
+    backupSid: string
+  }): Promise<{ ok: true; droppedRecordCount: number } | { ok: false; code: string; message: string }>
 }
 
 /** `blobs:read` — spilled tool-output access for a session. */
@@ -520,6 +541,7 @@ export interface TransportRegistryApi {
 export interface PluginHost {
   readonly capabilities: readonly CapabilityToken[]
   readonly sessions?: SessionsReadApi
+  readonly sessionsWrite?: SessionsWriteApi
   readonly blobs?: BlobsReadApi
   readonly presence?: PresenceReadApi
   readonly models?: ModelsReadApi

@@ -45,6 +45,12 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ## [Unreleased]
 
+### Fixed
+
+- 2026-08-13 (this session): Host-owned editor picker regression coverage now
+  matches the Picker primitive's violet `▌` selection marker, keeping the new
+  prompt/history overlay tests aligned with the shared queue-style rendering.
+
 ### Fix: Human-paced Escape gestures and queue-style pickers
 
 ---

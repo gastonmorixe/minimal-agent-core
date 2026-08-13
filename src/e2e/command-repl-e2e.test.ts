@@ -71,7 +71,7 @@ afterEach(() => {
 
 const HANDLER = `
 export default (ctx) => {
-  if (ctx.argv === "expand") return { kind: "expand", prompt: "RAN:" + ctx.argv }
+  if (ctx.argv === "expand" || ctx.argv === "commit") return { kind: "expand", prompt: "RAN:" + ctx.argv }
   if (ctx.argv === "notice") return { kind: "notice", lines: ["did a thing"] }
   return { kind: "none" }
 }
