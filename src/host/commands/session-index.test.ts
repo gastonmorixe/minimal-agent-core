@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { IndexRecord } from "../../session/session-store.ts"
 
-import { resolveSidByPrefix } from "./session-index.ts"
+import { resolveLastSessionSid, resolveSidByPrefix } from "./session-index.ts"
 
 function rec(sid: string): IndexRecord {
   return { sid, createdAt: "2026-01-01T00:00:00Z", cwd: "/tmp", model: "test" }
@@ -14,6 +14,19 @@ const FIXTURE: IndexRecord[] = [
   rec("abc12345-cccc-cccc-cccc-cccccccccccc"),
   rec("zzz99999-dddd-dddd-dddd-dddddddddddd"),
 ]
+
+describe("resolveLastSessionSid", () => {
+  test("excludes backups but preserves explicit backup resolution through the normal prefix path", () => {
+    const primary = rec("primary")
+    const backup = { ...rec("primary-backup-01"), backup: true }
+    expect(resolveLastSessionSid([primary, backup], "/tmp")).toBe("primary")
+    expect(resolveSidByPrefix("primary-backup-01", [primary, backup])).toBe("primary-backup-01")
+  })
+
+  test("returns null when only archival backups exist", () => {
+    expect(resolveLastSessionSid([{ ...rec("only-backup"), backup: true }], "/tmp")).toBeNull()
+  })
+})
 
 describe("resolveSidByPrefix", () => {
   test("exactly one prefix match returns that sid", () => {

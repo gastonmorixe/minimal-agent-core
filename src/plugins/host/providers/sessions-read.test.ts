@@ -119,6 +119,7 @@ describe("sessions:read window", () => {
     if (!user) throw new Error("expected a user record")
     expect(user.fullChars).toBeGreaterThan(0)
     expect(user.preview.length).toBeLessThanOrEqual(80)
+    expect(user.userId).toBeString()
   })
 
   it("returns null for an unknown sid", async () => {

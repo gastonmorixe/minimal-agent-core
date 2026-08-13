@@ -7,6 +7,9 @@
  * open/close.
  */
 
+import { FOOTER_LAYER_OVERLAY, FOOTER_PRIORITY_OVERLAY } from "./editor-controller.ts"
+import { Picker, type PickerItem } from "./ui/picker.ts"
+
 /** Minimal editor surface the hooks touch. */
 export interface EditorHooksEditor {
   setBuffer?: (text: string) => void
@@ -20,6 +23,8 @@ export interface EditorHooksEditor {
   ) => void
   openOverlay?: (owner: string) => void
   closeOverlay?: (owner: string) => void
+  isOverlayOwner?: (owner: string) => boolean
+  setPrompt?: (prompt: string, continuationPrompt?: string) => void
 }
 
 /**
@@ -49,8 +54,14 @@ export interface EditorHooksLoader {
 export function registerEditorPluginHooks(
   loader: EditorHooksLoader | null | undefined,
   editor: EditorHooksEditor,
+  basePrompt: (() => { prompt: string; continuationPrompt?: string }) | null = null,
+  onPromptOverride:
+    | ((prompt: { prompt: string; continuationPrompt?: string } | null) => void)
+    | null = null,
 ): void {
   if (!loader) return
+  let pickerOwner: string | null = null
+  let promptOwner: string | null = null
 
   loader.hooks().on(
     "editor.buffer.set",
@@ -130,6 +141,113 @@ export function registerEditorPluginHooks(
       if (typeof editor.setBufferStyles === "function") editor.setBufferStyles(spans)
     },
     { caller: "agent", priority: 5000, label: "agent:editor.buffer.styles" },
+  )
+
+  loader.hooks().on(
+    "editor.prompt.set",
+    (payload: unknown) => {
+      if (!payload || typeof payload !== "object") return
+      const p = payload as { owner?: unknown; prompt?: unknown; continuationPrompt?: unknown }
+      if (
+        typeof p.owner !== "string" ||
+        typeof p.prompt !== "string" ||
+        (p.continuationPrompt !== undefined && typeof p.continuationPrompt !== "string") ||
+        !editor.isOverlayOwner?.(p.owner)
+      ) {
+        return
+      }
+      promptOwner = p.owner
+      const prompt = {
+        prompt: p.prompt,
+        ...(p.continuationPrompt === undefined ? {} : { continuationPrompt: p.continuationPrompt }),
+      }
+      onPromptOverride?.(prompt)
+      editor.setPrompt?.(prompt.prompt, prompt.continuationPrompt)
+    },
+    { caller: "agent", priority: 5000, label: "agent:editor.prompt.set" },
+  )
+  loader.hooks().on(
+    "editor.prompt.clear",
+    (payload: unknown) => {
+      if (!payload || typeof payload !== "object") return
+      const owner = (payload as { owner?: unknown }).owner
+      if (typeof owner !== "string" || owner !== promptOwner) return
+      promptOwner = null
+      onPromptOverride?.(null)
+      const base = basePrompt?.()
+      if (base) editor.setPrompt?.(base.prompt, base.continuationPrompt)
+    },
+    { caller: "agent", priority: 5000, label: "agent:editor.prompt.clear" },
+  )
+
+  loader.hooks().on(
+    "editor.picker.set",
+    (payload: unknown) => {
+      if (!payload || typeof payload !== "object") return
+      const p = payload as {
+        owner?: unknown
+        title?: unknown
+        rows?: unknown
+        selected?: unknown
+        footer?: unknown
+      }
+      if (
+        typeof p.owner !== "string" ||
+        p.owner.length === 0 ||
+        !editor.isOverlayOwner?.(p.owner) ||
+        !Array.isArray(p.rows)
+      ) {
+        return
+      }
+      if (p.title !== undefined && typeof p.title !== "string") return
+      if (p.footer !== undefined && typeof p.footer !== "string") return
+      if (typeof p.selected !== "number" || !Number.isInteger(p.selected)) return
+      const items: PickerItem<string>[] = []
+      for (const row of p.rows) {
+        if (!row || typeof row !== "object") return
+        const r = row as { id?: unknown; label?: unknown; hint?: unknown; disabled?: unknown }
+        if (typeof r.id !== "string" || typeof r.label !== "string") return
+        if (r.hint !== undefined && typeof r.hint !== "string") return
+        if (r.disabled !== undefined && typeof r.disabled !== "boolean") return
+        items.push({
+          value: r.id,
+          label: r.label,
+          ...(r.hint === undefined ? {} : { hint: r.hint }),
+          ...(r.disabled === undefined ? {} : { disabled: r.disabled }),
+        })
+      }
+      pickerOwner = p.owner
+      const picker = new Picker({
+        items,
+        initial: p.selected,
+        ...(p.title === undefined ? {} : { title: p.title }),
+        ...(p.footer === undefined ? {} : { footer: p.footer }),
+      })
+      // Picker width is finalized by the compositor at paint time. The footer
+      // layer accepts rendered rows, and plugins re-emit on selection changes.
+      const lines = picker.render(process.stdout.columns ?? 80)
+      if (editor.setFooterLayer) {
+        editor.setFooterLayer(FOOTER_LAYER_OVERLAY, lines, { priority: FOOTER_PRIORITY_OVERLAY })
+      } else {
+        editor.setFooterLines?.(lines)
+      }
+    },
+    { caller: "agent", priority: 5000, label: "agent:editor.picker.set" },
+  )
+  loader.hooks().on(
+    "editor.picker.clear",
+    (payload: unknown) => {
+      if (!payload || typeof payload !== "object") return
+      const owner = (payload as { owner?: unknown }).owner
+      if (typeof owner !== "string" || owner.length === 0 || owner !== pickerOwner) return
+      pickerOwner = null
+      if (editor.clearFooterLayer) {
+        editor.clearFooterLayer(FOOTER_LAYER_OVERLAY)
+      } else {
+        editor.setFooterLines?.([])
+      }
+    },
+    { caller: "agent", priority: 5000, label: "agent:editor.picker.clear" },
   )
 
   // Interactive command TUIs (/config, /usage) take MODAL ownership of the
