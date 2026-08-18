@@ -212,6 +212,12 @@ describe("formatToolInput — non-Bash tools", () => {
     expect(formatToolInput(tu("Glob", { pattern: "**/*.ts" }))).toBe("**/*.ts")
   })
 
+  it("Glob shows Cursor `glob_pattern` the same as `pattern`", () => {
+    expect(formatToolInput(tu("Glob", { glob_pattern: "src/lib/*.test.ts" }))).toBe(
+      "src/lib/*.test.ts",
+    )
+  })
+
   it("Grep shows /pattern/ with optional ` · in PATH`", () => {
     expect(formatToolInput(tu("Grep", { pattern: "foo" }))).toBe("/foo/")
     // The "in PATH" form uses the project-wide ` · ` separator — same one
@@ -327,6 +333,12 @@ describe("formatToolInput — Edit replace_all (Style A `· g`)", () => {
 describe("formatToolInput — Glob with path", () => {
   it("`path` appends as `· in <path>`", () => {
     expect(formatToolInput(tu("Glob", { pattern: "*.ts", path: "/src" }))).toBe("*.ts · in /src")
+  })
+
+  it("`target_directory` alias appends the same `· in <path>`", () => {
+    expect(formatToolInput(tu("Glob", { glob_pattern: "*.ts", target_directory: "/src" }))).toBe(
+      "*.ts · in /src",
+    )
   })
 })
 

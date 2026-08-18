@@ -19,6 +19,7 @@ import {
   wordWrap,
   wrapIndented,
 } from "../../../terminal/term-width.ts"
+import { globPathFromInput, globPatternFromInput } from "../../../tools/glob-input.ts"
 import { countLines, type TruncationInfo } from "../../../tools/truncation.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"
 import { c } from "../style/ansi.ts"
@@ -113,7 +114,8 @@ const BASH_CONT_MAX_LINES = 8
  *    `offset` only). Bare reads (neither set) render byte-identical to
  *    the pre-extras form.
  *  - **Edit**: `<path> · g` for `replace_all` (sed `s/.../.../g` flavor).
- *  - **Glob**: `<pattern> · in <path>` when `path` is set.
+ *  - **Glob**: `<pattern> · in <path>` when `path` (or alias `target_directory`)
+ *    is set. `glob_pattern` is accepted as an alias for `pattern`.
  *  - **Grep**: regex flags appended to the pattern (`/foo/i` for `-i`,
  *    `/foo/m` for `multiline`, `/foo/im` for both). Modifiers chain after
  *    ` · `: `in <path>` (where), `<glob>` (filter), `↓N`/`↑N`/`↕N` (after/
@@ -203,9 +205,12 @@ export function formatToolInput(tool: ToolUseBlock, cols?: number, headerKey?: s
     // attaches the modifier visually to the path it modifies.
     return input.replace_all ? `${path} · g` : path
   }
-  if (tool.name === "Glob" && input.pattern) {
-    const pat = String(input.pattern)
-    return input.path ? `${pat} · in ${input.path}` : pat
+  if (tool.name === "Glob") {
+    const pat = globPatternFromInput(input)
+    if (pat.status === "ok") {
+      const dir = globPathFromInput(input)
+      return dir.status === "ok" ? `${pat.value} · in ${dir.value}` : pat.value
+    }
   }
   if (tool.name === "Grep" && input.pattern) {
     // Pattern carries its own JS-regex flags: `i` for -i, `m` for

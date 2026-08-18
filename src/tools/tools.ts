@@ -39,6 +39,7 @@ import { buildEditDiff, buildFileDiff, renderUnifiedDiff } from "../utils/diff.t
 import { parseJsonc } from "../utils/jsonc.ts"
 
 import { buildFilesStatsReport, formatFilesStatsReport } from "./files-stats.ts"
+import { resolveGlobExecArgs } from "./glob-input.ts"
 import * as ToolPrompts from "./PROMPTS.ts"
 import { resolveWhitespaceConfusablePath } from "./path-heal.ts"
 import { TOOL_DEFINITIONS } from "./tool-definitions.ts"
@@ -1231,15 +1232,18 @@ async function execEdit(
  *
  * @param input - Tool input:
  *   - `pattern` - Glob pattern (e.g. `**\/*.ts`, `src/*.{js,ts}`)
+ *   - `glob_pattern` - Alias for `pattern` (Cursor-compatible)
  *   - `path` - Directory to search in (default: current bash cwd)
+ *   - `target_directory` - Alias for `path` (Cursor-compatible)
  */
 async function execGlob(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
   if (opts.signal?.aborted) return ABORTED_RESULT()
-  const pattern = input.pattern as string
-  const searchPath = (input.path as string) ?? bashCwd
+  const resolved = resolveGlobExecArgs(input, bashCwd)
+  if (!resolved.ok) return { content: resolved.error, is_error: true }
+  const { pattern, searchPath } = resolved
 
   try {
     // Match in-process so the model-controlled pattern is never shell-evaluated.

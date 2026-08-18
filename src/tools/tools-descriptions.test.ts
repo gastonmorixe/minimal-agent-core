@@ -125,6 +125,13 @@ describe("tool descriptions — search routing directives", () => {
     expect(d).toMatch(/\bfind\b/)
   })
 
+  it("Glob documents pattern/path plus Cursor aliases", () => {
+    const d = descOf("Glob")
+    expect(d).toMatch(/`pattern`/)
+    expect(d).toMatch(/glob_pattern/)
+    expect(d).toMatch(/target_directory/)
+  })
+
   it("Bash steers search/read/count to the dedicated tools", () => {
     const d = descOf("Bash")
     // Names the dedicated tools as the right call for search/read.

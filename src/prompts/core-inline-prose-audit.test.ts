@@ -44,6 +44,7 @@ const EXTRACTED_FRAGMENTS: Record<string, string[]> = {
     "reflection-ack applied",
     "No files matched the pattern.",
     "No matches found.",
+    "Glob requires `pattern` (or alias `glob_pattern`).",
     "Use replace_all or provide more context",
     "exceeds the 50 MB read limit",
   ],

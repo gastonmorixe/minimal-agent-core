@@ -20,8 +20,10 @@ export const TOOL_PARAM_DESCRIPTIONS = {
     replace_all: "Replace all occurrences (default false)",
   },
   Glob: {
-    pattern: "The glob pattern to match files against",
-    path: "Directory to search in. Defaults to cwd.",
+    pattern: "The glob pattern to match files against. `glob_pattern` is accepted as an alias.",
+    glob_pattern: "Alias for `pattern`. Same meaning; ignored when `pattern` is also set.",
+    path: "Directory to search in. Defaults to cwd. `target_directory` is accepted as an alias.",
+    target_directory: "Alias for `path`. Same meaning; ignored when `path` is also set.",
   },
   FilesStats: {
     status: "Optional status filter: all, present, missing, or changed",
@@ -146,6 +148,21 @@ export function editErrorResult(message: string): string {
 /** Returns the Glob result string shown when no files match the pattern. */
 export function noFilesMatchedResult(): string {
   return "No files matched the pattern."
+}
+
+/** Returns the error string when Glob is called with neither pattern nor glob_pattern. */
+export function globMissingPatternResult(): string {
+  return "Glob requires `pattern` (or alias `glob_pattern`)."
+}
+
+/**
+ * Returns the error string when a Glob string argument has the wrong type.
+ *
+ * @param key - The input field that was not a string (`pattern`, `glob_pattern`, ...).
+ * @param got - JSON-ish type name of the value that was sent.
+ */
+export function globArgNotStringResult(key: string, got: string): string {
+  return `Glob \`${key}\` must be a string, got ${got}.`
 }
 
 /** Returns the error string for a failed Glob. */
