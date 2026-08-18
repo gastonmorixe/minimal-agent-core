@@ -168,3 +168,27 @@ describe("parseCliOptions — generic endpoint flags", () => {
     expect(opts.effortLevels).toBeUndefined()
   })
 })
+
+describe("parseCliOptions — --effort vs --fast", () => {
+  test("--effort high --fast keeps both flags", () => {
+    const opts = parseCliOptions(["--effort", "high", "--fast"], NO_CFG, NO_ENV, NOOP_FORMATTER)
+    expect(opts.effort).toBe("high")
+    expect(opts.effortSource).toBe("cli")
+    expect(opts.speedFast).toBe(true)
+  })
+
+  test("--effort --fast does not treat --fast as the effort level", () => {
+    expect(() => parseCliOptions(["--effort", "--fast"], NO_CFG, NO_ENV, NOOP_FORMATTER)).toThrow(
+      /--effort requires a level/,
+    )
+    expect(() => parseCliOptions(["--effort", "--fast"], NO_CFG, NO_ENV, NOOP_FORMATTER)).toThrow(
+      /Got "--fast"/,
+    )
+  })
+
+  test("bare --effort without a level errors", () => {
+    expect(() => parseCliOptions(["--effort"], NO_CFG, NO_ENV, NOOP_FORMATTER)).toThrow(
+      /--effort requires a level/,
+    )
+  })
+})

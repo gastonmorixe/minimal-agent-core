@@ -35,6 +35,11 @@ export type EnvLike = Record<string, string | undefined>
  */
 export type FormatterParser = (raw: string) => string[]
 
+/** User-facing CLI usage error (missing flag value, etc.). */
+export class CliFlagError extends Error {
+  readonly name = "CliFlagError"
+}
+
 /**
  * CLI-level tool name policy (`--tools` / `--no-tools`).
  * Alias of the SDK {@link ToolNamePolicy} — single source of truth.
@@ -124,6 +129,26 @@ function makeReadFlagValue(args: readonly string[]): (name: string) => string | 
 function valueAfter(args: readonly string[], flag: string): string | undefined {
   const idx = args.indexOf(flag)
   return idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith("-") ? args[idx + 1] : undefined
+}
+
+/**
+ * `--effort` / `-e` takes a level token. A following flag is not a level —
+ * `--effort --fast` used to set effort to the literal `"--fast"` and then
+ * fail as `effort "--fast" is not supported`.
+ */
+function readEffortFlag(args: readonly string[]): string | undefined {
+  const idx = args.indexOf("--effort")
+  if (idx === -1) return undefined
+  const next = args[idx + 1]
+  if (next === undefined || next === "" || next.startsWith("-")) {
+    const got = next ? ` Got ${JSON.stringify(next)}.` : ""
+    const hint =
+      next?.startsWith("-") === true
+        ? " That looks like another flag; pass `--effort <level> --fast`."
+        : ""
+    throw new CliFlagError(`--effort requires a level (low, medium, high, xhigh).${got}${hint}`)
+  }
+  return next
 }
 
 /** The raw token after `flag` (a leading dash is allowed). */
@@ -221,7 +246,7 @@ export function parseCliOptions(
   const spinnerName = rawAfter(args, "--spinner") ?? env.MINIMAL_AGENT_SPINNER ?? userConfig.spinner
 
   const { effort, source: effortSource } = resolveEffort({
-    cli: rawAfter(args, "--effort"),
+    cli: readEffortFlag(args),
     env: env.MINIMAL_AGENT_EFFORT,
     config: userConfig.effort,
   })
