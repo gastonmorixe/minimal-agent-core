@@ -7,6 +7,9 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-08-18T15:30:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-18-http2-stream-aborted-retry"
+    type: fix
+    status: landed
   - id: "2026-08-18-glob-pattern-alias"
     type: fix
     status: landed
@@ -52,6 +55,11 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Fixed
+
+- 2026-08-18 (this session): Peer HTTP/2 `RST_STREAM` (`HTTP/2 stream aborted`)
+  is tagged `network_error` and retried instead of stopping the turn. Cursor
+  bidi keep-open streams hit Node's `aborted` event; that throw was untagged,
+  so `withRetry` treated it as a bug. User `AbortError` still propagates.
 
 - 2026-08-18 (this session): Glob accepts Cursor-shaped aliases (`glob_pattern`,
   `target_directory`) and rejects a missing or non-string pattern with a

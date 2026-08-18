@@ -75,12 +75,16 @@ const TRANSIENT_ERROR_CODES: ReadonlySet<string> = new Set([
  * level of `cause` message. These cover errors whose `code` is absent or
  * non-standard — notably our own transport's thrown strings
  * (`HTTP/2 connect timeout`, `HTTP/2 session closed before connect`,
- * `HTTP/2 ALPN negotiation failed`) and the common runtime phrasings
- * (`socket hang up`, undici's `other side closed` / `terminated`, Bun's
- * `fetch failed`).
+ * `HTTP/2 ALPN negotiation failed`, `HTTP/2 stream aborted`) and the
+ * common runtime phrasings (`socket hang up`, undici's `other side closed`
+ * / `terminated`, Bun's `fetch failed`).
+ *
+ * `stream aborted` is Node http2's RST_STREAM (`aborted` event) — a peer
+ * reset, not a user AbortError. User cancels are excluded by name/code
+ * (`AbortError` / `ABORT_ERR`) before this pattern runs.
  */
 const TRANSIENT_MESSAGE_PATTERN =
-  /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ENETUNREACH|ENETDOWN|ENETRESET|EHOSTUNREACH|EHOSTDOWN|EADDRNOTAVAIL|EPROTO|ENOTFOUND|EAI_AGAIN)\b|socket hang up|connect timeout|connection timeout|session closed before connect|alpn negotiation failed|client network socket disconnected|other side closed|fetch failed|network (request )?failed|connection reset|connection closed|goaway|stream (was )?(closed|cancelled|canceled)|premature close|terminated/i
+  /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ENETUNREACH|ENETDOWN|ENETRESET|EHOSTUNREACH|EHOSTDOWN|EADDRNOTAVAIL|EPROTO|ENOTFOUND|EAI_AGAIN)\b|socket hang up|connect timeout|connection timeout|session closed before connect|alpn negotiation failed|client network socket disconnected|other side closed|fetch failed|network (request )?failed|connection reset|connection closed|goaway|stream (was )?(closed|cancelled|canceled|aborted)|premature close|terminated/i
 
 /** True iff `err` (or a wrapped DOMException) is a user/abort cancellation. */
 function isAbortError(err: unknown): boolean {

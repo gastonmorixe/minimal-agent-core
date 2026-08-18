@@ -34,6 +34,9 @@ describe("isTransientNetworkError", () => {
         new Error("HTTP/2 ALPN negotiation failed for https://api.example.com: null"),
       ),
     ).toBe(true)
+    // Node http2 `aborted` event — peer RST_STREAM. Must retry, not stop the turn.
+    expect(isTransientNetworkError(new Error("HTTP/2 stream aborted"))).toBe(true)
+    expect(isTransientNetworkError(new Error("HTTP/2 stream closed before end"))).toBe(true)
   })
 
   it.each([
