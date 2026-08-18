@@ -291,6 +291,39 @@ describe("network", () => {
     expect(doneCount).toBe(1)
   })
 
+  it("errors the web body with network_error when an HTTP/2 stream is aborted (RST)", async () => {
+    // Node emits `aborted` before `close` on peer RST_STREAM. An untagged
+    // "HTTP/2 stream aborted" used to propagate out of withRetry and stop
+    // the agent (Cursor bidi keep-open streams hit this often).
+    const stream = new FakeHttp2Stream()
+    let doneCount = 0
+    const body = _nodeStreamToWebForTest(stream as never, () => {
+      doneCount++
+    })
+    const reader = body.getReader()
+
+    stream.emit("data", new TextEncoder().encode("data: ping\\n\\n"))
+    const first = await reader.read()
+    expect(first.done).toBe(false)
+
+    const pending = reader.read()
+    stream.emit("aborted")
+
+    let caught: (Error & { streamErrorType?: string }) | undefined
+    try {
+      await pending
+    } catch (err) {
+      caught = err as Error & { streamErrorType?: string }
+    }
+    expect(caught?.message).toBe("HTTP/2 stream aborted")
+    expect(caught?.streamErrorType).toBe(TRANSIENT_NETWORK_STREAM_ERROR_TYPE)
+    expect(doneCount).toBe(1)
+
+    stream.emit("close")
+    stream.emit("error", new Error("late"))
+    expect(doneCount).toBe(1)
+  })
+
   it.skipIf(!process.env.E2E)(
     "live model request uses HTTP/2",
     async () => {

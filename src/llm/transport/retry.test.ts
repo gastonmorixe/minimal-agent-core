@@ -424,6 +424,36 @@ describe("withRetry", () => {
     expect(events.some((e) => e.source === "api.retry-success")).toBe(true)
   })
 
+  it("retries an UNTAGGED HTTP/2 stream abort (peer RST_STREAM)", async () => {
+    // Regression: node:http2 `aborted` used to throw a plain
+    // "HTTP/2 stream aborted" with no streamErrorType. The retry loop
+    // treated that as a genuine bug and stopped the agent (Cursor bidi).
+    const origRandom = Math.random
+    Math.random = () => 0
+    const { events, dispose } = collectDiag()
+    let calls = 0
+    try {
+      const { result } = await drain(
+        withRetry(async function* () {
+          calls++
+          if (calls === 1) {
+            throw new Error("HTTP/2 stream aborted")
+          }
+          yield "back"
+          return resp("back")
+        }),
+      )
+      expect(result.text).toBe("back")
+    } finally {
+      Math.random = origRandom
+      dispose()
+    }
+    expect(calls).toBe(2)
+    const retry = events.find((e) => e.source === "api.retry")
+    expect(retry?.structuredData?.["error-type"]).toBe("network_error")
+    expect(retry?.structuredData?.curve).toBe("fast")
+  })
+
   it("retries an errno-coded connection failure carried under a cause chain", async () => {
     const origRandom = Math.random
     Math.random = () => 0

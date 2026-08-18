@@ -237,6 +237,12 @@ export function _nodeStreamToWebForTest(
   return nodeStreamToWeb(stream, onDone)
 }
 
+function transientHttp2StreamError(message: string): Error & { streamErrorType: string } {
+  const err = new Error(message) as Error & { streamErrorType: string }
+  err.streamErrorType = TRANSIENT_NETWORK_STREAM_ERROR_TYPE
+  return err
+}
+
 function nodeStreamToWeb(
   stream: ClientHttp2Stream,
   onDone: () => void,
@@ -266,17 +272,16 @@ function nodeStreamToWeb(
           finish(() => controller.close())
           return
         }
-        const err = new Error("HTTP/2 stream closed before end") as Error & {
-          streamErrorType?: string
-        }
-        err.streamErrorType = TRANSIENT_NETWORK_STREAM_ERROR_TYPE
-        finish(() => controller.error(err))
+        finish(() => controller.error(transientHttp2StreamError("HTTP/2 stream closed before end")))
       })
       stream.once("error", (err) => {
         finish(() => controller.error(err))
       })
+      // Node emits `aborted` (no `error`) when the peer RSTs the stream.
+      // Untagged, this used to stop the agent: withRetry treats plain Errors
+      // as bugs. Same class of failure as close-before-end — retry it.
       stream.once("aborted", () => {
-        finish(() => controller.error(new Error("HTTP/2 stream aborted")))
+        finish(() => controller.error(transientHttp2StreamError("HTTP/2 stream aborted")))
       })
     },
     pull() {
