@@ -4,9 +4,12 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-09T17:03:59-0400"
+updated-at: "2026-08-17T23:59:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-17-effort-flag-does-not-swallow-fast"
+    type: fix
+    status: landed
   - id: "2026-08-09-raw-mode-mdstream-fence-paint"
     type: fix
     status: landed
@@ -46,6 +49,12 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Fixed
+
+- 2026-08-17 (this session): `--effort --fast` no longer treats `"--fast"` as
+  the effort level (`effort "--fast" is not supported`). `--effort` now
+  requires `low|medium|high|xhigh`; a following flag errors with
+  `Got "--fast"` and hints `--effort <level> --fast`. `--fast` stays an
+  independent speed flag.
 
 - 2026-08-13 (this session): Host-owned editor picker regression coverage now
   matches the Picker primitive's violet `▌` selection marker, keeping the new

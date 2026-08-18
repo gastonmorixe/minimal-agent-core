@@ -182,4 +182,23 @@ describe("prepareEntrypointArgs", () => {
     })
     expect(prepared.opts.systemPromptOverrides.loopSafety).toEqual({ kind: "omit" })
   })
+
+  it("rejects --effort --fast as a missing effort level (does not swallow --fast)", () => {
+    const h = makeHarness()
+    let code: number | undefined
+    try {
+      prepareEntrypointArgs({
+        rawArgv: ["--effort", "--fast"],
+        env: {},
+        cwd: "/tmp",
+        ...h.deps,
+      })
+    } catch (e) {
+      if (e instanceof ExitSignal) code = e.code
+      else throw e
+    }
+    expect(code).toBe(2)
+    expect(h.writes.join("")).toContain("--effort requires a level")
+    expect(h.writes.join("")).toContain('Got "--fast"')
+  })
 })

@@ -12,7 +12,7 @@
 
 import { findDashTypos, formatDashTypoError, normalizeArgs } from "../../cli/cli-args.ts"
 import { extractPromptFromArgs } from "../../cli/extract-prompt.ts"
-import { type CliOptions, parseCliOptions } from "../../cli/parse-argv.ts"
+import { CliFlagError, type CliOptions, parseCliOptions } from "../../cli/parse-argv.ts"
 import { resolveSystemPromptOverridesForStartup } from "../../cli/system-prompt-override-resolution.ts"
 import { loadUserConfig, type UserConfig } from "../../config/config.ts"
 import { SystemPromptOverrideError } from "../../llm/system-prompt-overrides.ts"
@@ -116,13 +116,23 @@ export function prepareEntrypointArgs(input: PrepareEntrypointArgsInput): Entryp
     }
     throw e
   }
-  const opts = parseCliOptions(
-    args,
-    userConfig,
-    input.env,
-    parseFormatterCommand,
-    systemPromptOverrides,
-  )
+  const opts = (() => {
+    try {
+      return parseCliOptions(
+        args,
+        userConfig,
+        input.env,
+        parseFormatterCommand,
+        systemPromptOverrides,
+      )
+    } catch (e) {
+      if (e instanceof CliFlagError) {
+        stderr.write(`fatal: ${e.message}\n`)
+        exit(2)
+      }
+      throw e
+    }
+  })()
   const commandPlan = planCommand({
     dumpArg: opts.dumpArg,
     wantListSessions: opts.wantListSessions,
