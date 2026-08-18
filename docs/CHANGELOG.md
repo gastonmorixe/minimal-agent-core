@@ -4,9 +4,12 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-17T23:59:00-0400"
+updated-at: "2026-08-18T15:30:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-18-glob-pattern-alias"
+    type: fix
+    status: landed
   - id: "2026-08-17-effort-flag-does-not-swallow-fast"
     type: fix
     status: landed
@@ -49,6 +52,10 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Fixed
+
+- 2026-08-18 (this session): Glob accepts Cursor-shaped aliases (`glob_pattern`,
+  `target_directory`) and rejects a missing or non-string pattern with a
+  field error instead of `Glob.constructor: first argument is not a string`.
 
 - 2026-08-17 (this session): `--effort --fast` no longer treats `"--fast"` as
   the effort level (`effort "--fast" is not supported`). `--effort` now

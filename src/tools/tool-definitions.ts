@@ -138,7 +138,15 @@ const GLOB_TOOL: ToolDefinition = {
     type: "object",
     properties: {
       pattern: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.pattern, type: "string" },
+      glob_pattern: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.glob_pattern,
+        type: "string",
+      },
       path: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.path, type: "string" },
+      target_directory: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Glob.target_directory,
+        type: "string",
+      },
     },
     required: ["pattern"],
     additionalProperties: false,
