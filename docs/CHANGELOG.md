@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-08-18T15:30:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-21-paste-stacked-ghost-frames"
+    type: fix
+    status: landed
+    commits: ["ff34290"]
   - id: "2026-08-18-http2-stream-aborted-retry"
     type: fix
     status: landed
@@ -55,6 +59,20 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Fixed
+
+- 2026-08-21 (this session): Large multi-line pastes no longer stack ghost
+  editor frames (`ASK ❯ ─── ^ N more lines` rows) into scrollback. Two
+  defects compounded: the renderer wrapped content at `output.columns`
+  while the compositor's erase walk-up re-measured at its own
+  `effectiveColumns()` (which falls back to `$COLUMNS`), so PTY wrappers
+  with broken WINSZ propagation (asciinema, script(1)) desynced erase
+  geometry and each repaint committed the previous frame; and every stdin
+  chunk of a paste burst painted a full frame synchronously. Fix: the
+  controller pins its resolved cols on the compositor (`setDrawColumns`)
+  as the single source of truth, and paste bursts coalesce to one trailing
+  repaint. Regression coverage at unit level (FakeTerminal scrollback,
+  env-fallback + cols-disagreement seams) and integration level (real
+  `Bun.Terminal` PTY with disagreeing COLUMNS). Commit `ff34290`.
 
 - 2026-08-18 (this session): Peer HTTP/2 `RST_STREAM` (`HTTP/2 stream aborted`)
   is tagged `network_error` and retried instead of stopping the turn. Cursor
