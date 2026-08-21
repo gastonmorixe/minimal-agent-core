@@ -228,7 +228,7 @@ export function collectSessionEvents(records: SessionRecord[], modelHint?: strin
       } else {
         // Estimated: this turn's own text + the context since the last turn.
         const text = [...pendingText, recordText(rec)].join("\n")
-        const tokens = estimateTokensForModel(modelId, text)
+        const tokens = estimateTokensForModel(modelId, text, providerId)
         events.push({
           tsMs,
           modelId,

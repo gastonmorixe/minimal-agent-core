@@ -6,29 +6,33 @@
  * the sub-agent fleet widget's per-worker token readout, and anything else
  * that needs a session's footprint after the fact.
  *
- * Two sources, in priority order:
+ * Two sources, mixed per-turn:
  *
- *   1. REAL — the exact billed `usage` we now persist on every
- *      `AssistantRecord` (input / output / cache-read / cache-create, from
- *      the provider's `message_start` + `message_delta`). When every
- *      content-bearing assistant turn carries saved usage, we sum the billed
- *      totals and report `estimated: false`.
+ *   1. REAL — for turns with a persisted billed `usage` payload
+ *      (`input / output / cache-read / cache-create` from the provider's
+ *      `message_start` + `message_delta`), we sum the exact billed counters
+ *      and (for cost) use the model's pricing. `estimated` stays false only
+ *      when every turn is real.
  *
- *   2. ESTIMATED — for sessions recorded before usage persistence landed (or
- *      with any turn missing usage), we fall back to estimating from the
- *      transcript text via the model's registered tokenizer ratio
- *      (`estimateTokensForModel`). The number is an approximate content size,
- *      not a billing meter, so we report `estimated: true` and callers mark
- *      it (e.g. `[E]` vs `[R]`).
+ *   2. ESTIMATED — for turns lacking billed usage (old sessions, crashes,
+ *      providers that do not report usage) we estimate from transcript
+ *      text via the model's tokenizer ratio
+ *      (`estimateTokensForModel`, provider-scoped when a `provider`
+ *      is present on the meta record). Estimated turns contribute 0 to
+ *      billed sub-counters and cost, so `costUSD` stays billed-only.
  *
- * The two numbers have different semantics (billed-with-cache-reread vs
- * transcript-content-size), which is exactly why the `estimated` flag exists:
- * a listing shows the magnitude and tells the user how trustworthy it is.
+ * Mixing is approximate: a real turn's `input_tokens` already includes
+ * the prefix that an adjacent estimated turn re-estimates from its own
+ * prompt+assistant text, so `tokens` double-counts the prefix slightly.
+ * This is intentional — the headline `tokens` is a magnitude for the
+ * `[E]`/`[~]` listing, not a billing meter — and the billed split
+ * (`input/output/cacheRead/cacheCreate`) remains exact.
  *
  * @module session-usage
  */
 
 import type { ContentBlock } from "../llm/messages.ts"
+import { findModelForProvider } from "../llm/model-registry.ts"
 import { estimateTokensForModel } from "../llm/token-estimate.ts"
 
 import type { AssistantRecord, MetaRecord, SessionRecord } from "./session-store.ts"
@@ -201,9 +205,8 @@ export function computeSessionUsage(
     }
   }
 
-  // Real path: every content-bearing assistant turn carried saved usage.
-  // Sum the billed totals; this is the exact session footprint.
-  if (realTurns === assistantTurns.length) {
+  const allReal = realTurns === assistantTurns.length
+  if (allReal) {
     return {
       tokens: input + output + cacheRead + cacheCreate,
       input,
@@ -216,21 +219,40 @@ export function computeSessionUsage(
     }
   }
 
-  // Estimated path: at least one turn lacks saved usage. Estimate the whole
-  // transcript's content size from text — incompatible accounting with the
-  // billed total, so we estimate everything uniformly rather than mixing.
+  // Mixed path: keep real totals for turns with billed usage, estimate
+  // missing turns from transcript text so one missing payload does not
+  // discard every real counter. Estimated turns contribute 0 to the
+  // billed sub-counters and their cost stays 0 (callers rely on that).
   const modelId = opts.modelId ?? modelIdFromRecords(records)
+  const providerId = records.find((r): r is MetaRecord => r.kind === "meta")?.provider
   let estimatedTokens = 0
+  let pendingText: string[] = []
+  const estimateForText = (text: string): number => {
+    if (providerId && modelId) {
+      const scoped = findModelForProvider(modelId, providerId)
+      if (scoped?.estimateTokens) return scoped.estimateTokens(text)
+    }
+    return estimateTokensForModel(modelId, text)
+  }
   for (const rec of records) {
-    const text = recordText(rec)
-    if (text.length > 0) estimatedTokens += estimateTokensForModel(modelId, text)
+    if (rec.kind === "assistant") {
+      const has = hasUsage((rec as AssistantRecord).usage)
+      if (!has) {
+        const text = [...pendingText, recordText(rec)].join("\n")
+        if (text.length > 0) estimatedTokens += estimateForText(text)
+      }
+      pendingText = []
+    } else {
+      const t = recordText(rec)
+      if (t.length > 0) pendingText.push(t)
+    }
   }
   return {
-    tokens: estimatedTokens,
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheCreate: 0,
+    tokens: input + output + cacheRead + cacheCreate + estimatedTokens,
+    input,
+    output,
+    cacheRead,
+    cacheCreate,
     estimated: true,
     turns: assistantTurns.length,
     realTurns,

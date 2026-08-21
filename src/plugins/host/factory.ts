@@ -145,6 +145,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
                 total: t.total,
                 turns: t.turns,
                 contextSize: t.contextSize,
+                contextSizeEstimated: t.contextSizeEstimated,
               }
             },
           }),

@@ -6,7 +6,16 @@
 
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { addSessionUsage, clearSessionTokens, getSessionTokens } from "./session-tokens.ts"
+import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
+
+import { clearModelRegistry, registerModel } from "../llm/model-registry.ts"
+
+import {
+  addSessionEstimatedUsage,
+  addSessionUsage,
+  clearSessionTokens,
+  getSessionTokens,
+} from "./session-tokens.ts"
 
 afterEach(() => clearSessionTokens())
 
@@ -21,6 +30,7 @@ describe("session-tokens", () => {
       total: 0,
       turns: 0,
       contextSize: 0,
+      contextSizeEstimated: false,
     })
   })
 
@@ -116,5 +126,68 @@ describe("session-tokens", () => {
     expect(t.total).toBe(0)
     expect(t.turns).toBe(0)
     expect(t.contextSize).toBe(0)
+  })
+
+  it("addSessionEstimatedUsage adds an estimated contextSize and guards bad inputs", () => {
+    addSessionEstimatedUsage(0)
+    addSessionEstimatedUsage(-10)
+    addSessionEstimatedUsage(Number.NaN)
+    expect(getSessionTokens().turns).toBe(0)
+    expect(getSessionTokens().contextSizeEstimated).toBe(false)
+
+    addSessionEstimatedUsage(42.2)
+    const t = getSessionTokens()
+    expect(t.turns).toBe(1)
+    expect(t.total).toBe(43) // ceil
+    expect(t.contextSize).toBe(43)
+    expect(t.contextSizeEstimated).toBe(true)
+
+    clearSessionTokens()
+    addSessionUsage({ input_tokens: 10, cache_read_input_tokens: 5 })
+    expect(getSessionTokens().contextSizeEstimated).toBe(false)
+    addSessionEstimatedUsage(7)
+    expect(getSessionTokens().contextSizeEstimated).toBe(true)
+  })
+
+  it("contextSize includes output when model shares the context window", () => {
+    const modelId = "test-share-window-evelyn-gaston"
+    registerModel({
+      id: modelId,
+      providerId: "test-provider",
+      surfaceId: "test-surface",
+      displayName: "Test Share",
+      capabilities: {
+        ...defaultCapabilities(),
+        contextWindow: 100_000,
+        maxOutputTokens: 8_000,
+        outputTokensShareContextWindow: true,
+      },
+      pricing: {
+        inputUSD: 0,
+        outputUSD: 0,
+        cacheWriteUSD: 0,
+        cacheReadUSD: 0,
+        webSearchPerCallUSD: 0,
+      },
+    })
+    const prevModel = process.env.MINIMAL_AGENT_MODEL
+    const prevProvider = process.env.MINIMAL_AGENT_PROVIDER
+    process.env.MINIMAL_AGENT_MODEL = modelId
+    process.env.MINIMAL_AGENT_PROVIDER = "test-provider"
+    try {
+      addSessionUsage({
+        input_tokens: 10,
+        output_tokens: 9999,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 5,
+      })
+      expect(getSessionTokens().contextSize).toBe(10 + 30 + 5 + 9999)
+    } finally {
+      if (prevModel === undefined) delete process.env.MINIMAL_AGENT_MODEL
+      else process.env.MINIMAL_AGENT_MODEL = prevModel
+      if (prevProvider === undefined) delete process.env.MINIMAL_AGENT_PROVIDER
+      else process.env.MINIMAL_AGENT_PROVIDER = prevProvider
+      clearModelRegistry()
+    }
   })
 })

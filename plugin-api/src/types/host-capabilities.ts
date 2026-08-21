@@ -424,6 +424,7 @@ export interface SessionTokensView {
   readonly total: number
   readonly turns: number
   readonly contextSize: number
+  readonly contextSizeEstimated: boolean
 }
 
 /**
