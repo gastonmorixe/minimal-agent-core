@@ -1037,6 +1037,26 @@ export interface LiveAreaHandlerContext {
    */
   setDecorationSuffix?: (suffix: string) => void
   /**
+   * Publish (or clear, with `""`) this plugin's RIGHT-ALIGNED footer tail
+   * segment. Unlike {@link LiveAreaHandlerContext.setDecorationSuffix}
+   * (single-writer, appended inline after the first footer line), tails are
+   * keyed per plugin id — concurrent plugins never clobber each other — and
+   * the host's footer flush pads the joined tail block so it ends at the
+   * terminal's right edge.
+   *
+   * Padding rule (owned by the host flush): pad equals `cols` minus the
+   * display width of the footer line minus the display width of the joined
+   * tails, clamped to a minimum of 2 cells; when the pad would go negative
+   * or `cols` is unknown, the block falls back to an inline two-space gap
+   * after the line.
+   *
+   * Two slots from the SAME plugin share one key: the last writer wins.
+   * Optional + best-effort: `undefined` when the scheduler was built without
+   * tail support (some tests). Consumers MUST narrow
+   * (`ctx.setFooterTail?.(text)`).
+   */
+  setFooterTail?: (text: string) => void
+  /**
    * Frozen capability host carrying ONLY the namespaces this plugin's
    * manifest declared in `capabilities: [...]` (deny-by-default; see
    * {@link ManifestFile.capabilities}). The decoupled way for a live-area

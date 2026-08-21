@@ -80,6 +80,8 @@ export class FakeClock {
 
 export interface SlotSpec {
   id: string
+  /** Plugin id the slot belongs to. Defaults to "fake-plugin". */
+  pluginId?: string
   position?: "header" | "footer"
   refreshMs?: number
   timeoutMs?: number
@@ -97,7 +99,7 @@ export function makeSlot(spec: SlotSpec): ResolvedLiveAreaSlot {
   }
   return {
     definition,
-    pluginId: "fake-plugin",
+    pluginId: spec.pluginId ?? "fake-plugin",
     packageDir: "/tmp/fake",
     entryAbsolute: "/tmp/fake/handler.ts",
     invoke: spec.invoke,
