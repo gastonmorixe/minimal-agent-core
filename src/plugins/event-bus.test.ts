@@ -246,4 +246,40 @@ describe("EventBus", () => {
     await tick(5)
     expect(seen).toEqual(["first", undefined])
   })
+
+  test("without coalesce: every rapid emit is delivered (TPS accumulator regression)", async () => {
+    // Reproduce the TPS live failure: with coalesce:true a burst of deltas
+    // collapsed to the latest payload, starving the tracker. Without
+    // coalesce (the plugin's current manifest) every payload must arrive.
+    const bus = silentBus()
+    const seen: number[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let first = true
+    bus.on<number>(
+      "llm.outputDelta",
+      async (ctx) => {
+        seen.push(ctx.payload)
+        if (first) {
+          first = false
+          await gate
+        }
+      },
+      {}, // NO coalesce — accumulator channel must not drop
+    )
+    const N = 10
+    bus.emit("llm.outputDelta", 0)
+    await tick() // first invocation in-flight, awaiting gate
+    for (let i = 1; i < N; i++) bus.emit("llm.outputDelta", i)
+    await tick(2)
+    // Without coalesce, nothing is deferred — the first is in-flight but
+    // additional emits queue as separate invocations, none collapsed.
+    // Release and drain.
+    release()
+    await tick(10)
+    expect(seen.length).toBe(N)
+    expect(seen).toEqual(Array.from({ length: N }, (_, i) => i))
+  })
 })

@@ -22,6 +22,7 @@ import {
   getDecorationSuffix,
   setDecorationSuffix,
 } from "@minimal-agent/plugin-api/utils/decoration-suffix"
+import { getFooterTails, setFooterTail } from "@minimal-agent/plugin-api/utils/footer-tail"
 
 import {
   createPluginLogger,
@@ -374,6 +375,11 @@ export class LiveAreaScheduler {
       // module directly. Keeps the state host-side so a moved (external)
       // plugin never gets a divergent second copy of the holder.
       setDecorationSuffix: (suffix: string) => setDecorationSuffix(suffix),
+      // Keyed footer-tail publisher: bound to THIS slot's plugin id so
+      // concurrent plugins publish independent right-aligned segments
+      // without clobbering each other. Two slots of the same plugin share
+      // the key (last writer wins). See plugin-api/utils/footer-tail.
+      setFooterTail: (text: string) => setFooterTail(s.slot.pluginId, text),
     }
 
     // Single-fire latch shared between the timeout path and the
@@ -424,10 +430,12 @@ export class LiveAreaScheduler {
       // prevent. When no placeholder is configured this collapses to
       // the previous behavior (s.current = null → row disappears).
       const resolved = next ?? s.slot.definition.placeholder ?? null
-      if (resolved !== s.current) {
-        s.current = resolved
-        this.repaint()
-      }
+      s.current = resolved
+      // Always repaint. Tail-only slots (tps) return null every tick and
+      // publish via `setFooterTail`; skipping when `resolved === current`
+      // left the footer stale even though the registry changed. flushFooter
+      // already dedups identical arrays, so unchanged slots stay cheap.
+      this.repaint()
       this.scheduleNext(s)
     }
 
@@ -538,6 +546,21 @@ export class LiveAreaScheduler {
     // roster text.
     const suffix = getDecorationSuffix()
     const modified = suffix && footer.length > 0 ? [footer[0] + suffix, ...footer.slice(1)] : footer
+    // Plugin-contributed tails (e.g. tps readout): append INLINE after the
+    // LAST footer line's content, separated by two spaces — the same visual
+    // grammar as the segments inside that line. No right-edge padding: the
+    // editor clips overlong footer lines, which would truncate a padded
+    // tail; inline keeps it visible and reads as part of the line.
+    //
+    // Why LAST: slot paint order follows manifest load order, and the
+    // intercom roster is a footer slot too — it can sort before
+    // quota-status. The user's mental model of "the status line" is the
+    // bottom-most one (quota + context + model + sid), so tails ride there.
+    const tails = getFooterTails()
+    if (tails && modified.length > 0) {
+      const last = modified.length - 1
+      modified[last] = `${modified[last]!}  ${tails}`
+    }
     if (
       modified.length === this.lastFooter.length &&
       modified.every((l, i) => l === this.lastFooter[i])

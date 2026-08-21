@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
+import { clearFooterTails } from "@minimal-agent/plugin-api/utils/footer-tail"
 
 import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
 import { LiveAreaScheduler } from "./live-area-scheduler.ts"
@@ -24,6 +25,10 @@ import { LiveAreaScheduler } from "./live-area-scheduler.ts"
 // The decoration-suffix singleton is global mutable state. Reset it before
 // every test so non-suffix tests don't see a suffix from a prior file.
 beforeEach(() => setDecorationSuffix(""))
+
+// The footer-tail registry is global mutable state too. Reset before every
+// test so non-tail tests don't see a tail from a prior file.
+beforeEach(() => clearFooterTails())
 
 describe("LiveAreaScheduler — first-tick semantics", () => {
   it("invokes every slot at t=0 with tick=0", async () => {
