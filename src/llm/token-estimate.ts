@@ -14,7 +14,7 @@
 
 import { estimateTokensFromText } from "@minimal-agent/plugin-api/llm/token-estimate"
 
-import { findModel } from "./model-registry.ts"
+import { findModel, findModelForProvider } from "./model-registry.ts"
 
 export * from "@minimal-agent/plugin-api/llm/token-estimate"
 
@@ -23,8 +23,11 @@ export * from "@minimal-agent/plugin-api/llm/token-estimate"
  * model's registered {@link TokenEstimator} when available.
  *
  * Resolution order:
- *   1. `modelId` resolves to a registered entry with `estimateTokens` → use it.
- *   2. Otherwise → `estimateTokensFromText` at the default ratio.
+ *   1. `modelId` + `providerId` resolves to a provider-scoped entry with
+ *      `estimateTokens` → use it (so same bare id under two providers gets
+ *      the right tokenizer ratio).
+ *   2. `modelId` resolves globally → use its estimator.
+ *   3. Otherwise → `estimateTokensFromText` at the default ratio.
  *
  * An unknown / forward-compat model id (the CLI doesn't gate `--model` on the
  * registry) degrades to the default ratio rather than throwing, so listings
@@ -32,9 +35,18 @@ export * from "@minimal-agent/plugin-api/llm/token-estimate"
  *
  * @param modelId - Canonical or alias model id. `undefined` ⇒ default ratio.
  * @param text - Text to estimate.
+ * @param providerId - Optional provider scope for disambiguation.
  * @returns Estimated token count (always ≥ 0, integer).
  */
-export function estimateTokensForModel(modelId: string | undefined, text: string): number {
+export function estimateTokensForModel(
+  modelId: string | undefined,
+  text: string,
+  providerId?: string,
+): number {
+  if (modelId && providerId) {
+    const scoped = findModelForProvider(modelId, providerId)
+    if (scoped?.estimateTokens) return scoped.estimateTokens(text)
+  }
   if (modelId) {
     const entry = findModel(modelId)
     if (entry?.estimateTokens) return entry.estimateTokens(text)

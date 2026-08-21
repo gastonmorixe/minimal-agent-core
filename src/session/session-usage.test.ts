@@ -94,22 +94,40 @@ describe("computeSessionUsage", () => {
     expect(u.realTurns).toBe(2)
   })
 
-  it("falls back to estimation when ANY assistant turn lacks usage", () => {
+  it("falls back to estimation when ANY assistant turn lacks usage (mixed path keeps billed counters)", () => {
     const records = [
       meta(),
       user("hello there"),
       assistant("answer with usage", { input_tokens: 100, output_tokens: 50 }),
-      assistant("answer WITHOUT usage"), // no usage → whole session estimated
+      assistant("answer WITHOUT usage"), // no usage → that turn is estimated, billed counters kept
     ]
     const u = computeSessionUsage(records)
     expect(u.estimated).toBe(true)
-    // Estimated path does not expose billed counters.
-    expect(u.input).toBe(0)
-    expect(u.output).toBe(0)
-    // It estimated SOMETHING from the transcript text.
-    expect(u.tokens).toBeGreaterThan(0)
+    // Mixed path keeps billed counters for the real turn.
+    expect(u.input).toBe(100)
+    expect(u.output).toBe(50)
+    // Headline includes billed sum + estimate for the missing turn.
+    expect(u.tokens).toBeGreaterThan(150)
     expect(u.turns).toBe(2)
     expect(u.realTurns).toBe(1)
+  })
+
+  it("mixed path actually estimates the missing turn's transcript text", () => {
+    const withoutText: SessionRecord[] = [
+      meta(),
+      user("short"),
+      assistant("real", { input_tokens: 10, output_tokens: 10 }),
+      assistant("", undefined), // missing usage + no text → estimate ~0, headline ≈ billed sum
+    ]
+    const withText: SessionRecord[] = [
+      meta(),
+      user("short"),
+      assistant("real", { input_tokens: 10, output_tokens: 10 }),
+      assistant("this is a much longer answer without usage that should estimate to more tokens"),
+    ]
+    const a = computeSessionUsage(withoutText)
+    const b = computeSessionUsage(withText)
+    expect(b.tokens).toBeGreaterThan(a.tokens)
   })
 
   it("estimation is deterministic and model-ratio sensitive", () => {

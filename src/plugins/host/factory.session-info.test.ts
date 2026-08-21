@@ -43,6 +43,7 @@ describe("plugin host: session-info capability", () => {
       total: 0,
       turns: 0,
       contextSize: 0,
+      contextSizeEstimated: false,
     })
 
     // Record a turn; the capability reflects the live counters.

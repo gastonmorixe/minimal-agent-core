@@ -51,7 +51,7 @@ import {
   signalQuotaRefresh,
 } from "../../quota/quota-broadcast.ts"
 import { getSessionId } from "../../session/session-id.ts"
-import { addSessionUsage } from "../../session/session-tokens.ts"
+import { addSessionEstimatedUsage, addSessionUsage } from "../../session/session-tokens.ts"
 import {
   canonicalEventsToLegacyStream,
   legacyAuthToProviderAuth,
@@ -274,14 +274,48 @@ export async function* canonicalSendFn(
   // torn down in finally, mirroring the legacy client's outer try/finally.
   try {
     const finalStream = yield* withRetry(makeAuthRefreshedAttempt, { signal: opts.signal })
-    if (finalStream.usage) {
+    const hasBilledUsage =
+      finalStream.usage &&
+      (finalStream.usage.input_tokens ||
+        finalStream.usage.output_tokens ||
+        finalStream.usage.cache_read_input_tokens ||
+        finalStream.usage.cache_creation_input_tokens)
+    if (hasBilledUsage) {
       addSessionUsage({
-        input_tokens: finalStream.usage.input_tokens ?? 0,
-        output_tokens: finalStream.usage.output_tokens ?? 0,
-        cache_read_input_tokens: finalStream.usage.cache_read_input_tokens ?? 0,
-        cache_creation_input_tokens: finalStream.usage.cache_creation_input_tokens ?? 0,
+        input_tokens: finalStream.usage!.input_tokens ?? 0,
+        output_tokens: finalStream.usage!.output_tokens ?? 0,
+        cache_read_input_tokens: finalStream.usage!.cache_read_input_tokens ?? 0,
+        cache_creation_input_tokens: finalStream.usage!.cache_creation_input_tokens ?? 0,
       })
       rebroadcastQuotaForSessionUpdate()
+    } else {
+      // Provider did not report billed usage (ollama/cursor/generic).
+      // Estimate from transcript text so the live context bar reflects
+      // reality instead of sitting at 0% for the whole session.
+      const { estimateTokensForModel } = await import("../token-estimate.ts")
+      const transcriptText =
+        finalStream.text +
+        "\n" +
+        finalStream.blocks
+          .map((b) => {
+            if (b.type === "text") return b.text
+            if (b.type === "thinking") return b.thinking
+            if (b.type === "tool_use") {
+              try {
+                return JSON.stringify(b.input)
+              } catch {
+                return ""
+              }
+            }
+            return ""
+          })
+          .join("\n")
+      if (transcriptText.trim().length > 0) {
+        const modelId = opts.model ?? process.env.MINIMAL_AGENT_MODEL
+        const est = estimateTokensForModel(modelId, transcriptText, opts.selectedProviderId)
+        addSessionEstimatedUsage(est)
+        rebroadcastQuotaForSessionUpdate()
+      }
     }
     // Poke the `quota-status` footer to repaint THIS turn. The provider adapter
     // cached its own fresh rate-limit headers during run() (setAnthropicRateLimits

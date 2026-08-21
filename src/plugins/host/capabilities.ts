@@ -418,9 +418,11 @@ export interface ModelsRegisterApi {
  * plugin renders the "tokens this session" / context-size footer WITHOUT
  * importing `getSessionTokens` from `src/`.
  *
- * `contextSize` is the field to display (latest-turn input footprint); the
+ * `contextSize` is the field to display (latest-turn footprint); the
  * cumulative `cacheRead` / `total` are inflated for cache-heavy providers and
- * kept for debug parity, not user display. See the field notes on core's
+ * kept for debug parity, not user display. `contextSizeEstimated` is true
+ * when the latest turn had no billed `usage` and the size was estimated;
+ * renderers may show a `~` marker. See the field notes on core's
  * `SessionTokens` for the inflation rationale.
  */
 export interface SessionTokensView {
@@ -431,6 +433,7 @@ export interface SessionTokensView {
   readonly total: number
   readonly turns: number
   readonly contextSize: number
+  readonly contextSizeEstimated: boolean
 }
 
 /**
