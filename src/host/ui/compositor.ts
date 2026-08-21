@@ -129,6 +129,24 @@ export class Compositor {
    * 0 means "no live area drawn yet, no baseline to compare against".
    */
   private lastDrawColumns = 0
+  /**
+   * Columns pinned by the live-area OWNER via `setDrawColumns()` — the
+   * same value the owner's renderer used to pre-wrap the lines it is
+   * about to paint. When non-zero, `effectiveColumns()` returns THIS
+   * instead of re-reading `output.columns` / `$COLUMNS`.
+   *
+   * Why this must exist: the renderer that produced the painted cells
+   * and the erase math that later walks over them MUST agree on the
+   * terminal width, or `computePhysicalCursorRowInLive` counts wrap rows
+   * at a width the terminal never used. Under PTY wrappers (asciinema,
+   * script(1), some tmux configs) `output.columns` can be 0/stale while
+   * `$COLUMNS` says something else; before this pin existed the two
+   * sources disagreed and every wrapped row of a large paste stacked a
+   * ghost frame into scrollback (user-reported Aug 21 2026). The owner
+   * (EditorController) resolves one width for rendering and pins it here,
+   * making it the single source of truth.
+   */
+  private pinnedColumns: number | null = null
   private lastLines: string[] = []
   private lastCursor: { row: number; col: number } | null = null
   private drawnLiveKey: string | null = null
@@ -375,10 +393,22 @@ export class Compositor {
    * so this brings the two layers into agreement.
    */
   private effectiveColumns(): number {
+    if (this.pinnedColumns !== null && this.pinnedColumns > 0) return this.pinnedColumns
     const c = this.output.columns ?? 0
     if (c > 0) return c
     const env = Number.parseInt(process.env.COLUMNS ?? "", 10)
     return Number.isFinite(env) && env > 0 ? env : 0
+  }
+
+  /**
+   * Pin the terminal width the OWNER used to render the live-area lines.
+   * Must be called before `setLiveArea` with the same value the renderer
+   * wrapped content at, so erase walk-up math agrees with what is
+   * physically on screen. Pass a number ≤ 0 to unpin (fall back to
+   * `output.columns` / `$COLUMNS`).
+   */
+  setDrawColumns(columns: number): void {
+    this.pinnedColumns = columns > 0 ? columns : null
   }
 
   setLiveArea(lines: string[], cursor: { row: number; col: number } | null): void {

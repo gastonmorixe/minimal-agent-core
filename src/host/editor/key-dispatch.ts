@@ -88,6 +88,11 @@ export interface KeyDispatchHost {
   submit(): void
   /** Repaint the live area after buffer mutations. */
   repaint(): void
+  /**
+   * True while the controller is started (accepting input). A coalesced
+   * paste paint scheduled before `stop()` must not fire afterwards.
+   */
+  isStarted(): boolean
 }
 
 /** Options for {@link EditorKeyDispatcher}. */
@@ -99,6 +104,12 @@ export interface KeyDispatchOptions {
   bareEscapeMs: number
   /** Window after one confirmed Escape for `EscapeEscape` recognition. */
   doubleEscapeMs: number
+  /**
+   * Trailing-edge coalesce window for paste-burst paints; see
+   * {@link EditorKeyDispatcher.pastePaintTimer}. `0` restores the legacy
+   * synchronous one-paint-per-chunk behavior (tests).
+   */
+  pasteCoalesceMs?: number
 }
 
 /**
@@ -111,6 +122,21 @@ export class EditorKeyDispatcher {
   private bracketedPaste = false
   private bareEscapeTimer: ReturnType<typeof setTimeout> | null = null
   private doubleEscapeTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Trailing-edge paint coalesce for a bracketed-paste burst (stacked
+   * paste-frames bug, Aug 21 2026). A large paste arrives as N stdin
+   * chunks; before this timer each chunk ran insertPasted → repaint()
+   * synchronously, painting one full live-area frame per chunk. Any
+   * per-frame geometry deficit then stacked N ghost frames into
+   * scrollback. With the coalesce, mid-burst mutations only mark the
+   * buffer dirty; a single trailing `repaint()` fires `pasteCoalesceMs`
+   * after the LAST chunk (or immediately when the closing `\x1b[201~`
+   * terminator is consumed). Mirrors the MA-481485 resize debounce.
+   */
+  private pastePaintTimer: ReturnType<typeof setTimeout> | null = null
+  /** True while a coalesced paste paint is pending. */
+  private pastePaintPending = false
+  private readonly pasteCoalesceMs: number
   private readonly bareEscapeMs: number
   private readonly doubleEscapeMs: number
 
@@ -120,6 +146,46 @@ export class EditorKeyDispatcher {
   ) {
     this.bareEscapeMs = opts.bareEscapeMs
     this.doubleEscapeMs = opts.doubleEscapeMs
+    this.pasteCoalesceMs = opts.pasteCoalesceMs ?? 16
+  }
+
+  /**
+   * Coalesced paste paint: schedule ONE trailing repaint for the current
+   * stdin chunk burst instead of painting synchronously per chunk.
+   * Called by `consumePending` when paste-driven buffer mutations made
+   * the frame dirty. Fires at trailing edge (`pasteCoalesceMs` of
+   * silence) or when the bracketed-paste terminator arrives.
+   */
+  private schedulePasteRepaint(): void {
+    this.pastePaintPending = true
+    if (this.pasteCoalesceMs <= 0) {
+      // Legacy synchronous mode (tests): paint now.
+      this.pastePaintPending = false
+      if (this.pastePaintTimer !== null) {
+        clearTimeout(this.pastePaintTimer)
+        this.pastePaintTimer = null
+      }
+      this.host.repaint()
+      return
+    }
+    if (this.pastePaintTimer !== null) return
+    this.pastePaintTimer = setTimeout(() => {
+      this.pastePaintTimer = null
+      if (!this.pastePaintPending || !this.host.isStarted()) return
+      this.pastePaintPending = false
+      this.host.repaint()
+    }, this.pasteCoalesceMs)
+    ;(this.pastePaintTimer as { unref?: () => void }).unref?.()
+  }
+
+  private flushPendingPasteRepaint(): void {
+    if (this.pastePaintTimer !== null) {
+      clearTimeout(this.pastePaintTimer)
+      this.pastePaintTimer = null
+    }
+    if (!this.pastePaintPending) return
+    this.pastePaintPending = false
+    this.host.repaint()
   }
 
   /** Append a stdin chunk and consume as much of `pending` as possible. */
@@ -155,6 +221,9 @@ export class EditorKeyDispatcher {
    */
   resetPasteState(): void {
     this.bracketedPaste = false
+    // A stopped editor must not fire a pending coalesced paste paint:
+    // the trailing timer would repaint a dead live area after teardown.
+    this.cancelPendingPasteRepaint()
   }
 
   /** Clear pending input and delayed Escape routes. */
@@ -164,6 +233,15 @@ export class EditorKeyDispatcher {
     this.doubleEscapeTimer = null
     this.pending = ""
     this.bracketedPaste = false
+    this.cancelPendingPasteRepaint()
+  }
+
+  private cancelPendingPasteRepaint(): void {
+    if (this.pastePaintTimer !== null) {
+      clearTimeout(this.pastePaintTimer)
+      this.pastePaintTimer = null
+    }
+    this.pastePaintPending = false
   }
 
   private cancelBareEscapeTimer(): void {
@@ -259,6 +337,10 @@ export class EditorKeyDispatcher {
     const { host } = this
     const buf = host.buf
     let dirty = false
+    // True when `dirty` was set by a mid-burst bracketed-paste chunk
+    // (no terminator consumed yet). Those repaints go through the
+    // trailing coalesce instead of painting synchronously per chunk.
+    let pasteDirty = false
     while (this.pending.length > 0) {
       if (this.bracketedPaste) {
         // A bracketed paste while the quit-confirm modal is open means
@@ -268,7 +350,12 @@ export class EditorKeyDispatcher {
         }
         const r = this.consumeBracketedPaste()
         if (r === "wait") return
-        if (r) dirty = true
+        if (r) {
+          dirty = true
+          // consumeBracketedPaste already flushed synchronously when it
+          // saw the closing terminator; only burst-coalesce partials.
+          if (this.bracketedPaste) pasteDirty = true
+        }
         continue
       }
 
@@ -566,6 +653,12 @@ export class EditorKeyDispatcher {
         dirty = true
         continue
       }
+    }
+    if (pasteDirty) {
+      // Mid-burst paste chunk: schedule ONE trailing paint for the whole
+      // burst instead of one full live-area repaint per stdin chunk.
+      this.schedulePasteRepaint()
+      return
     }
     if (dirty) host.repaint()
   }
@@ -901,7 +994,11 @@ export class EditorKeyDispatcher {
       const pasted = this.pending.slice(0, idx)
       this.pending = this.pending.slice(idx + BRACKETED_PASTE_END.length)
       this.bracketedPaste = false
-      return this.insertPasted(pasted)
+      const changed = this.insertPasted(pasted)
+      // Paste burst complete: paint the final buffer NOW instead of
+      // waiting for the trailing coalesce timer (feels instant).
+      if (changed) this.flushPendingPasteRepaint()
+      return changed
     }
     const keep = trailingPrefixLength(this.pending, BRACKETED_PASTE_END)
     const pasted = this.pending.slice(0, this.pending.length - keep)

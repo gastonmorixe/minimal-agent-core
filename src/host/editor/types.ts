@@ -51,6 +51,18 @@ export interface CompositorLike {
    * `notifyResize` when the host does not dual-call both layers.
    */
   notifyResize?(): void
+  /**
+   * Optional width pin (stacked paste-frames fix, Aug 21 2026). The
+   * controller calls this with the SAME cols value its renderer used to
+   * pre-wrap the live-area lines, so the compositor's erase walk-up math
+   * (`effectiveColumns`) measures wrap rows at the width actually on
+   * screen. Without the pin, the compositor re-reads output.columns /
+   * `$COLUMNS`, which can disagree with the renderer under PTY wrappers
+   * (asciinema, script(1)) and stack ghost frames into scrollback on
+   * every repaint of a large paste. Compositors without wrap-aware erase
+   * may omit it.
+   */
+  setDrawColumns?(columns: number): void
 }
 
 // ----------------------------- footer-layer surface -----------------------------
