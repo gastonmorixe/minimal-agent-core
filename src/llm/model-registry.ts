@@ -81,7 +81,8 @@ export interface ModelEntry {
 // ---------------------------------------------------------------------------
 
 const models = new Map<string, ModelEntry>()
-const aliases = new Map<string, string>()
+/** Provider-scoped aliases. The same spelling may belong to different providers. */
+const aliases = new Map<string, Map<string, string>>()
 
 /**
  * Per-model-ID map of provider → entry. Used by
@@ -114,9 +115,10 @@ let declaredDefaultModelId: string | null = null
  * existing alias (and vice versa) to surface registration bugs early.
  */
 export function registerModel(entry: ModelEntry): void {
-  if (aliases.has(entry.id)) {
+  const aliasOwners = aliases.get(entry.id)
+  if (aliasOwners?.has(entry.providerId)) {
     throw new Error(
-      `model id "${entry.id}" collides with an existing alias pointing to "${aliases.get(entry.id)}"`,
+      `model id "${entry.id}" collides with an existing alias pointing to "${aliasOwners.get(entry.providerId)}"`,
     )
   }
   // Global registry: last write wins (backwards compatible for
@@ -133,10 +135,16 @@ export function registerModel(entry: ModelEntry): void {
   if (entry.aliases) {
     for (const alias of entry.aliases) {
       if (alias === entry.id) continue
-      if (models.has(alias)) {
+      const existing = models.get(alias)
+      if (existing && existing.providerId === entry.providerId) {
         throw new Error(`alias "${alias}" collides with an existing model id`)
       }
-      aliases.set(alias, entry.id)
+      let providerAliases = aliases.get(alias)
+      if (!providerAliases) {
+        providerAliases = new Map()
+        aliases.set(alias, providerAliases)
+      }
+      providerAliases.set(entry.providerId, entry.id)
     }
   }
 }
@@ -147,7 +155,8 @@ export function registerModel(entry: ModelEntry): void {
 export function findModel(idOrAlias: string): ModelEntry | undefined {
   const direct = models.get(idOrAlias)
   if (direct) return direct
-  const aliasedTo = aliases.get(idOrAlias)
+  const aliasTargets = aliases.get(idOrAlias)
+  const aliasedTo = aliasTargets && [...aliasTargets.values()][0]
   if (aliasedTo) return models.get(aliasedTo)
   return undefined
 }
@@ -190,7 +199,7 @@ export function findModelForProvider(
   providerId: string,
 ): ModelEntry | undefined {
   // Resolve alias first.
-  const directId = aliases.get(idOrAlias) ?? idOrAlias
+  const directId = aliases.get(idOrAlias)?.get(providerId) ?? idOrAlias
   // Provider-scoped lookup: only return the entry from THIS provider.
   const perModel = modelsByProvider.get(directId)
   if (perModel) {
