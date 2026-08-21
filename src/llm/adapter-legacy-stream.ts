@@ -17,7 +17,11 @@ import {
   attachAttemptProgress,
   ZERO_ATTEMPT_PROGRESS,
 } from "./transport/attempt-progress.ts"
-import { getStreamDeltaAccumulator, resetStreamDeltaAccumulator } from "./transport/stream-delta.ts"
+import {
+  emitOutputEnd,
+  getStreamDeltaAccumulator,
+  resetStreamDeltaAccumulator,
+} from "./transport/stream-delta.ts"
 import type { StreamedResponse as LegacyStreamedResponse } from "./transport/types.ts"
 
 /** Lifecycle hooks the legacy stream fires as side-channels (not yielded). */
@@ -372,6 +376,7 @@ export async function* canonicalEventsToLegacyStream(
     // delta would reuse stale pending tokens from this stream. Flush first
     // so subscribers receive the final partial window.
     getStreamDeltaAccumulator().flush()
+    emitOutputEnd("stream_end")
     resetStreamDeltaAccumulator()
   }
 
