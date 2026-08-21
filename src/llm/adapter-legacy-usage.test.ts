@@ -1,7 +1,15 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
+
+import { setGlobalEventBus } from "../bus/global-bus.ts"
+import { EventBus } from "../plugins/event-bus.ts"
 
 import { canonicalEventsToLegacyStream } from "./adapter-legacy.ts"
 import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
+import {
+  LLM_OUTPUT_DELTA,
+  LLM_OUTPUT_END,
+  resetStreamDeltaAccumulator,
+} from "./transport/stream-delta.ts"
 
 async function* fromArray(events: CanonicalEvent[]): AsyncIterable<CanonicalEvent> {
   for (const e of events) yield e
@@ -26,6 +34,84 @@ const finalUsage: CanonicalUsage = {
   cacheReadTokens: 8000,
   cacheCreationTokens: 500,
 }
+
+afterEach(() => {
+  resetStreamDeltaAccumulator()
+  setGlobalEventBus(null)
+})
+
+describe("canonicalEventsToLegacyStream output telemetry", () => {
+  it("batches deltas through the real bus and emits one end after the final flush", async () => {
+    const bus = new EventBus(() => {})
+    const seen: Array<{ channel: string; payload: unknown }> = []
+    bus.on(LLM_OUTPUT_DELTA, (ctx) => {
+      seen.push({ channel: ctx.event, payload: ctx.payload })
+    })
+    bus.on(LLM_OUTPUT_END, (ctx) => {
+      seen.push({ channel: ctx.event, payload: ctx.payload })
+    })
+    setGlobalEventBus(bus)
+
+    await drain([
+      { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+      { type: "text_start", index: 0 },
+      { type: "text_delta", index: 0, text: "x".repeat(200) },
+      { type: "text_delta", index: 0, text: "y".repeat(100) },
+      { type: "text_stop", index: 0, finalText: "" },
+      { type: "message_delta", stopReason: "end_turn", usage: finalUsage },
+      { type: "message_stop" },
+    ])
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(seen).toEqual([
+      { channel: LLM_OUTPUT_DELTA, payload: { deltaTokens: 50 } },
+      { channel: LLM_OUTPUT_DELTA, payload: { deltaTokens: 25 } },
+      { channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } },
+    ])
+  })
+
+  it("emits output end after a stream error", async () => {
+    const bus = new EventBus(() => {})
+    const seen: Array<{ channel: string; payload: unknown }> = []
+    bus.on(LLM_OUTPUT_END, (ctx) => {
+      seen.push({ channel: ctx.event, payload: ctx.payload })
+    })
+    setGlobalEventBus(bus)
+
+    await expect(
+      drain([
+        { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+        { type: "stream_error", retryable: false, category: "api" },
+      ]),
+    ).rejects.toThrow("canonical stream error: api")
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(seen).toEqual([{ channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } }])
+  })
+
+  it("does not emit output end until a tool-use stream finishes", async () => {
+    const bus = new EventBus(() => {})
+    const seen: Array<{ channel: string; payload: unknown }> = []
+    bus.on(LLM_OUTPUT_END, (ctx) => {
+      seen.push({ channel: ctx.event, payload: ctx.payload })
+    })
+    setGlobalEventBus(bus)
+
+    await drain([
+      { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+      { type: "tool_use_start", index: 0, id: "tool_1", name: "Bash" },
+      { type: "tool_use_stop", index: 0 },
+      { type: "message_delta", stopReason: "tool_use", usage: finalUsage },
+      { type: "message_stop" },
+    ])
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(seen).toEqual([{ channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } }])
+  })
+})
 
 describe("canonicalEventsToLegacyStream usage capture", () => {
   it("surfaces merged usage (incl. final output_tokens) on StreamedResponse.usage", async () => {

@@ -32,6 +32,21 @@ import { getGlobalEventBus } from "../../bus/global-bus.ts"
  */
 export const LLM_OUTPUT_DELTA = "llm.outputDelta"
 
+/**
+ * Stable plugin-bus channel marking the immediate end of live model output.
+ * Payload: `{ reason: "stream_end" }`. Emitted once after the final output
+ * batch flushes, for every bridge exit. Consumers should treat it as an
+ * idempotent inactive signal.
+ */
+export const LLM_OUTPUT_END = "llm.outputEnd"
+
+export type OutputEndReason = "stream_end"
+
+/** Publish a live-output boundary without coupling the bridge to plugins. */
+export function emitOutputEnd(reason: OutputEndReason): void {
+  getGlobalEventBus()?.emit(LLM_OUTPUT_END, { reason })
+}
+
 /** Minimum wall time between emits (ms). */
 const BATCH_MS = 250
 /** ...or this many accumulated tokens, whichever comes first. */
