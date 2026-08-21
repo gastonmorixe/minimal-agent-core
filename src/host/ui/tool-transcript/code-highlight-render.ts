@@ -60,13 +60,15 @@ export async function highlightUnifiedDiff(
     }
   }
 
+  const oldCode = oldPayload.join("\n")
+  const newCode = newPayload.join("\n")
   const [oldAnsi, newAnsi] = await Promise.all([
-    highlighter.highlight({ language, code: oldPayload.join("\n") }),
-    highlighter.highlight({ language, code: newPayload.join("\n") }),
+    oldCode.length === 0 ? Promise.resolve("") : highlighter.highlight({ language, code: oldCode }),
+    newCode.length === 0 ? Promise.resolve("") : highlighter.highlight({ language, code: newCode }),
   ])
   if (oldAnsi === null || newAnsi === null) return null
-  const oldLines = splitLogicalLines(oldAnsi)
-  const newLines = splitLogicalLines(newAnsi)
+  const oldLines = oldPayload.length === 0 ? [] : splitLogicalLines(oldAnsi)
+  const newLines = newPayload.length === 0 ? [] : splitLogicalLines(newAnsi)
   if (oldLines.length !== oldPayload.length || newLines.length !== newPayload.length) return null
 
   let oldIndex = 0
