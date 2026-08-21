@@ -20,6 +20,92 @@ afterEach(() => setDecorationSuffix(""))
 afterEach(() => clearFooterTails())
 
 describe("LiveAreaScheduler — footer tails", () => {
+  it("exposes footerReservedWidth = 0 when nothing is reserved", async () => {
+    let seen: number | undefined
+    const slot = makeSlot({
+      id: "f",
+      position: "footer",
+      refreshMs: 1_000,
+      invoke: async (ctx) => {
+        seen = ctx.footerReservedWidth
+        return "quota line"
+      },
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(seen).toBe(0)
+    sched.stop()
+  })
+
+  it("REGRESSION: footerReservedWidth counts suffix + joined tails with their gaps", async () => {
+    // The bug this pins: quota-status rendered its bar ladder against bare
+    // COLUMNS, so bars stayed at max width while the host appended the tps
+    // tail inline — pushing the line past cols and clipping the tail. The
+    // ctx field must report the FULL reservation so the ladder starts
+    // shrinking as soon as the whole painted line stops fitting.
+    let seen: number | undefined
+    const slot = makeSlot({
+      id: "f",
+      pluginId: "quota-status",
+      position: "footer",
+      refreshMs: 1_000,
+      invoke: async (ctx) => {
+        seen = ctx.footerReservedWidth
+        return "quota line"
+      },
+    })
+    setDecorationSuffix("\x1b[2m· ♻ sk-lsp\x1b[22m") // visible width 10
+    setFooterTail("tps", "\x1b[2m28/tps\x1b[22m") // visible width 6
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    // 2 + 10 (suffix gap + width) + 2 + 6 (tails gap + width) = 20.
+    // ANSI escapes contribute 0 cells.
+    expect(seen).toBe(20)
+    sched.stop()
+  })
+
+  it("footerReservedWidth updates when a tail appears mid-session", async () => {
+    const seen: number[] = []
+    const slot = makeSlot({
+      id: "f",
+      position: "footer",
+      refreshMs: 1_000,
+      invoke: async (ctx) => {
+        seen.push(ctx.footerReservedWidth ?? -1)
+        return "quota line"
+      },
+    })
+    const clock = new FakeClock()
+    const sink = makeSink()
+    const sched = new LiveAreaScheduler([slot], sink, {
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      logger: () => {},
+    })
+    sched.start()
+    await clock.tick(0)
+    expect(seen.at(-1)).toBe(0)
+    // TPS wakes up mid-stream.
+    setFooterTail("tps", "28/tps")
+    await clock.tick(1_000)
+    expect(seen.at(-1)).toBe(2 + 6)
+    sched.stop()
+  })
+
   it("suffix-only behavior is UNCHANGED when no tails exist (legacy compat)", async () => {
     const slot = makeSlot({
       id: "f",

@@ -23,6 +23,7 @@ import {
   setDecorationSuffix,
 } from "@minimal-agent/plugin-api/utils/decoration-suffix"
 import { getFooterTails, setFooterTail } from "@minimal-agent/plugin-api/utils/footer-tail"
+import { displayWidth } from "@minimal-agent/plugin-api/utils/term-width"
 
 import {
   createPluginLogger,
@@ -380,6 +381,13 @@ export class LiveAreaScheduler {
       // without clobbering each other. Two slots of the same plugin share
       // the key (last writer wins). See plugin-api/utils/footer-tail.
       setFooterTail: (text: string) => setFooterTail(s.slot.pluginId, text),
+      // Cells the host will append AFTER this line's own content at flush
+      // time (decoration suffix + joined tails, gaps included). Slots that
+      // do their own width-aware compression (quota-status's bar ladder)
+      // subtract this so they start shrinking when the FULL line stops
+      // fitting — not only when the bare line overflows cols. Computed per
+      // fire: a tail appearing mid-session re-renders with the new budget.
+      footerReservedWidth: this.reservedWidth(),
     }
 
     // Single-fire latch shared between the timeout path and the
@@ -502,6 +510,30 @@ export class LiveAreaScheduler {
       s.timer = null
       this.fire(s)
     }, refreshMs)
+  }
+
+  /**
+   * Display-width cells currently reserved by host-appended segments on a
+   * single-line footer value. Mirrors {@link flushFooter}'s composition:
+   * the decoration suffix appends to the FIRST footer line, the joined
+   * tail block to the LAST. A one-line status row (quota-status) can be
+   * both first AND last, so both reservations count against it.
+   *
+   * Each append contributes its own two-space gap + visible width (ANSI
+   * escapes measure as 0 cells). Slots subtract this from their usable
+   * budget so bars shrink as soon as the whole painted line would stop
+   * fitting — see `LiveAreaHandlerContext.footerReservedWidth`.
+   *
+   * Returns 0 when nothing is reserved (no suffix, no tails) so callers
+   * can treat the field as plain subtraction without undefined-guards.
+   */
+  private reservedWidth(): number {
+    let w = 0
+    const suffix = getDecorationSuffix()
+    if (suffix.length > 0) w += 2 + displayWidth(suffix)
+    const tails = getFooterTails()
+    if (tails.length > 0) w += 2 + displayWidth(tails)
+    return w
   }
 
   /** Last value pushed to {@link sink.setDecorationLines}; used for dedup. */
