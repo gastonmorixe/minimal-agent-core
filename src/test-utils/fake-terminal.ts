@@ -38,6 +38,13 @@ export interface FakeTerminalOptions {
   rows?: number
   /** Soft cap so a runaway test doesn't OOM. */
   scrollbackLimit?: number
+  /**
+   * When `true` (strict / VT520-derived semantics), executing EL (`ESC[K`)
+   * or ED (`ESC[J`) does NOT cancel the deferred-wrap (wrap-pending) flag.
+   * A few real emulator families behave this way; most (xterm, iTerm2,
+   * kitty) cancel it. Defaults to `false` (lenient, matches xterm).
+   */
+  elPreservesWrapPending?: boolean
 }
 
 interface Cell {
@@ -60,6 +67,7 @@ export class FakeTerminal {
   private cursorCol = 0
   /** Deferred-wrap pending: cursor sat at col=cols after a print. */
   private pendingWrap = false
+  private readonly elPreservesWrapPending: boolean
   readonly scrollback: string[] = []
   private scrollbackLimit: number
   /** Bytes left over from a previous feed() that ended mid-escape. */
@@ -69,6 +77,7 @@ export class FakeTerminal {
     this.cols = Math.max(1, opts.cols ?? 80)
     this.rows = Math.max(1, opts.rows ?? 24)
     this.scrollbackLimit = opts.scrollbackLimit ?? 5_000
+    this.elPreservesWrapPending = opts.elPreservesWrapPending === true
     this.grid = Array.from({ length: this.rows }, () => this.blankRow())
   }
 
@@ -185,6 +194,18 @@ export class FakeTerminal {
   }
 
   private lineFeed(): void {
+    // Strict (VT520-derived) semantics: a pending deferred wrap is
+    // resolved by LF as its own row advance BEFORE the line feed, so the
+    // cursor drops two rows total. Lenient (xterm/iTerm2) semantics:
+    // pendingWrap is simply cleared and LF advances one row.
+    if (this.pendingWrap && this.elPreservesWrapPending) {
+      this.pendingWrap = false
+      this.lineFeedLenient()
+    }
+    this.lineFeedLenient()
+  }
+
+  private lineFeedLenient(): void {
     this.pendingWrap = false
     if (this.cursorRow < this.rows - 1) {
       this.cursorRow++
@@ -313,7 +334,7 @@ export class FakeTerminal {
         } else if (mode === 2) {
           for (let c = 0; c < this.cols; c++) row[c] = { ch: " ", width: 1 }
         }
-        this.pendingWrap = false
+        if (!this.elPreservesWrapPending) this.pendingWrap = false
         return
       }
       case "J": {
@@ -326,7 +347,7 @@ export class FakeTerminal {
         } else if (mode === 2) {
           for (let r = 0; r < this.rows; r++) this.grid[r] = this.blankRow()
         }
-        this.pendingWrap = false
+        if (!this.elPreservesWrapPending) this.pendingWrap = false
         return
       }
       case "m":

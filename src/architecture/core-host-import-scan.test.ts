@@ -260,6 +260,7 @@ const BASELINE = new Map<string, number>([
   ["plugins/loader/replay-renderers.ts", 1],
   ["session/draft-store-editor.integration.test.ts", 1],
   ["session/queue-persist-e2e.test.ts", 2],
+  ["test-utils/fixtures/paste-pty-driver.ts", 1],
   ["test-utils/fixtures/quit-confirm-tmux-driver.ts", 3],
   ["ui/choice-modal.ts", 1],
   ["ui/chrome/first-run.ts", 1],

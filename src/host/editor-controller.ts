@@ -368,6 +368,7 @@ export class EditorController extends EventEmitter {
       repaint: () => {
         this.repaint()
       },
+      isStarted: () => this.started,
     }
   }
 
@@ -1304,6 +1305,13 @@ export class EditorController extends EventEmitter {
     // final geometry.
     if (this.resizeDebounceTimer !== null) return
     const cols = (this.output as { columns?: number }).columns
+    // Single source of truth (stacked-paste-frames bug, Aug 21 2026): the
+    // renderer wrapped `lines` at THIS cols; pin it on the compositor so
+    // its erase walk-up (`effectiveColumns`) measures wrap rows at the
+    // same width instead of re-reading output.columns / $COLUMNS, which
+    // can disagree under PTY wrappers (asciinema / script(1)) and stack
+    // ghost frames into scrollback on every repaint of a large paste.
+    if (typeof cols === "number" && cols > 0) this.compositor.setDrawColumns?.(cols)
     const decorationRows = this.decorationLines.length
     // Do not reserve the status band at cold idle. Once a status has
     // appeared, keep the band as blank rows when idle so status clear does
