@@ -55,6 +55,40 @@ describe("auth-status chrome", () => {
     expect(text).toContain("✔")
   })
 
+  it("renders provider-owned detail rows verbatim", () => {
+    const text = renderAuthStatusRows({
+      providers: [
+        {
+          providerId: "cursor",
+          displayName: "Cursor",
+          authKind: "oauth",
+          source: "store",
+          auth: { kind: "oauth", token: "AT" },
+          credentialInfo: {
+            usable: true,
+            accountId: "51930405",
+            details: [
+              { key: "userId", label: "user id", value: "51930405" },
+              { key: "email", label: "email", value: "gaston@gastonmorixe.com" },
+              { key: "plan", label: "plan", value: "$20.00 plan, $20.00 used" },
+              { key: "on-demand", label: "on-demand", value: "$1.58 / $1.00" },
+              { key: "usage-note", label: "note", value: "You've hit your usage limit" },
+            ],
+          },
+        },
+      ],
+      now: 1,
+    })
+      .map(stripAnsi)
+      .join("\n")
+
+    expect(text).toContain("user id 51930405")
+    expect(text).toContain("email gaston@gastonmorixe.com")
+    expect(text).toContain("plan $20.00 plan, $20.00 used")
+    expect(text).toContain("on-demand $1.58 / $1.00")
+    expect(text).toContain("note You've hit your usage limit")
+  })
+
   it("renders safe credential metadata and unreadable credentials", () => {
     const text = renderAuthStatusRows({
       providers: [

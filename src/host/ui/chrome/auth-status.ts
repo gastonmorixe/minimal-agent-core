@@ -88,6 +88,9 @@ function renderDetailLines(info: AuthCredentialInfo | undefined, now: number): s
       c.dim(`refresh ${info.hasRefreshToken ? c.boldGreen("present") : c.boldYellow("missing")}`),
     )
   }
+  for (const detail of info.details ?? []) {
+    lines.push(c.dim(`${detail.label} ${detail.value}`))
+  }
   return lines
 }
 

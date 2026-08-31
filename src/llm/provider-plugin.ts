@@ -34,6 +34,7 @@ import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plug
  */
 export type {
   ApiKeyAuthProvider,
+  AuthCredentialDetail,
   AuthCredentialInfo,
   AuthSecretBag,
   AuthSecretValue,
