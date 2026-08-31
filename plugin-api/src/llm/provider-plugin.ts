@@ -435,6 +435,21 @@ export interface AuthCredentialInfo {
   organizationId?: string
   /** Display-safe scopes or capability names, when known. */
   scopes?: readonly string[]
+  /**
+   * Provider-owned detail rows for status UIs, rendered verbatim and in order.
+   * Providers decide what is display-safe; hosts never interpret these values.
+   */
+  details?: readonly AuthCredentialDetail[]
+}
+
+/** One provider-owned diagnostic row rendered by host status UIs. */
+export interface AuthCredentialDetail {
+  /** Stable row key (e.g. `"email"`, `"plan"`). Hosts may use it for sorting/tests. */
+  key: string
+  /** Human label shown before the value. */
+  label: string
+  /** Display-safe value. Never put secrets here. */
+  value: string
 }
 
 export interface OAuthLoginBuildResult {

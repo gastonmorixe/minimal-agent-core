@@ -7,6 +7,9 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-08-18T15:30:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-08-31-auth-credential-details"
+    type: feat
+    status: landed
   - id: "2026-08-21-paste-stacked-ghost-frames"
     type: fix
     status: landed
@@ -57,6 +60,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 `private/*/PROGRESS.md` when present.
 
 ## [Unreleased]
+
+### Added
+
+- 2026-08-31 (this session): `AuthCredentialInfo` gains optional provider-owned
+  `details` rows (`AuthCredentialDetail`: key/label/value). Host `auth-status`
+  renders them verbatim after the built-in metadata lines so providers can
+  surface display-safe identity/quota diagnostics without the host interpreting
+  secret bags. Coverage in `auth-status.test.ts`.
 
 ### Fixed
 
