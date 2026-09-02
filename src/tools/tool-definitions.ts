@@ -90,6 +90,10 @@ const WRITE_TOOL: ToolDefinition = {
         type: "string",
       },
       content: { description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.content, type: "string" },
+      contents: {
+        description: ToolPrompts.TOOL_PARAM_DESCRIPTIONS.Write.contents,
+        type: "string",
+      },
     },
     required: ["file_path", "content"],
     additionalProperties: false,

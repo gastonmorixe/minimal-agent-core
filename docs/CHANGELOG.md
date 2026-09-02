@@ -4,9 +4,12 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-08-18T15:30:00-0400"
+updated-at: "2026-09-02T19:15:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-09-02-write-contents-alias"
+    type: fix
+    status: landed
   - id: "2026-08-31-auth-credential-details"
     type: feat
     status: landed
@@ -70,6 +73,12 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   secret bags. Coverage in `auth-status.test.ts`.
 
 ### Fixed
+
+- 2026-09-02 (this session): Write accepts Cursor-shaped alias `contents` for
+  `content` and rejects a missing or non-string body with a field error instead
+  of `Bun.write(...): expects a Blob-y thing to write`. Empty `content` still
+  creates an empty file. Replay diffs (`deriveWriteDisplay`) resolve through
+  the same seam. Coverage in `write-input.test.ts`.
 
 - 2026-08-21 (this session): Large multi-line pastes no longer stack ghost
   editor frames (`ASK ❯ ─── ^ N more lines` rows) into scrollback. Two
