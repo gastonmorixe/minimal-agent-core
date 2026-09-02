@@ -11,7 +11,8 @@ export const TOOL_PARAM_DESCRIPTIONS = {
   },
   Write: {
     file_path: "The absolute path to the file to write",
-    content: "The content to write to the file",
+    content: "The content to write to the file. `contents` is accepted as an alias.",
+    contents: "Alias for `content`. Same meaning; ignored when `content` is also set.",
   },
   Edit: {
     file_path: "The absolute path to the file to modify",
@@ -123,6 +124,26 @@ export function fileWrittenResult(filePath: string): string {
 /** Returns the error string for a failed Write. */
 export function writeErrorResult(message: string): string {
   return `Write error: ${message}`
+}
+
+/** Returns the error string when Write is called without file_path. */
+export function writeMissingPathResult(): string {
+  return "Write requires `file_path`."
+}
+
+/** Returns the error string when Write is called with neither content nor contents. */
+export function writeMissingContentResult(): string {
+  return "Write requires `content` (or alias `contents`)."
+}
+
+/**
+ * Returns the error string when a Write string argument has the wrong type.
+ *
+ * @param key - The input field that was not a string (`file_path`, `content`, ...).
+ * @param got - JSON-ish type name of the value that was sent.
+ */
+export function writeArgNotStringResult(key: string, got: string): string {
+  return `Write \`${key}\` must be a string, got ${got}.`
 }
 
 /** Returns the Edit error string for an old_string not found in the file. */

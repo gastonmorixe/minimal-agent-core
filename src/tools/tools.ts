@@ -49,6 +49,7 @@ import {
   type TruncationInfo,
   truncateToolOutput,
 } from "./truncation.ts"
+import { resolveWriteExecArgs } from "./write-input.ts"
 
 export { TOOL_DEFINITIONS }
 
@@ -1115,31 +1116,31 @@ function renderTextRead(
  * @param input - Tool input:
  *   - `file_path` - Absolute path to write
  *   - `content` - Full file content
+ *   - `contents` - Alias for `content` (Cursor-compatible)
  */
 async function execWrite(
   input: Record<string, unknown>,
   opts: ToolExecOpts,
 ): Promise<ToolExecResult> {
   if (opts.signal?.aborted) return ABORTED_RESULT()
-  const filePath = input.file_path as string
-  const content = input.content as string
+  const args = resolveWriteExecArgs(input)
+  if (!args.ok) return { content: args.error, is_error: true }
 
   try {
     // Ensure parent directory exists
-    mkdirSync(dirname(filePath), { recursive: true })
+    mkdirSync(dirname(args.filePath), { recursive: true })
 
-    const file = Bun.file(filePath)
+    const file = Bun.file(args.filePath)
     const before = (await file.exists()) ? await file.text() : ""
-    await Bun.write(filePath, content)
+    await Bun.write(args.filePath, args.content)
     const isNew = before === ""
     const patch = isNew
-      ? buildFileDiff(filePath, "", content)
-      : buildFileDiff(filePath, before, content)
-    const display = patch
-      ? renderUnifiedDiff(patch, isNew ? `New file: ${filePath}` : `Write: ${filePath}`)
-      : undefined
+      ? buildFileDiff(args.filePath, "", args.content)
+      : buildFileDiff(args.filePath, before, args.content)
+    const title = isNew ? `New file: ${args.filePath}` : `Write: ${args.filePath}`
+    const display = patch ? renderUnifiedDiff(patch, title) : undefined
     return {
-      content: ToolPrompts.fileWrittenResult(filePath),
+      content: ToolPrompts.fileWrittenResult(args.filePath),
       display,
       ...(patch ? { _displayPatch: patch, _displayNewFile: isNew } : {}),
     }

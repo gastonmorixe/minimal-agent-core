@@ -39,6 +39,7 @@
  * @module session-replay-derivers
  */
 
+import { writeContentFromInput, writePathFromInput } from "../tools/write-input.ts"
 import { buildEditDiff, buildFileDiff } from "../utils/diff.ts"
 
 import { renderUnifiedDiff } from "./ui/render/unified-diff.ts"
@@ -241,13 +242,13 @@ export function deriveEditDisplay(input: Record<string, unknown>): DerivedDispla
  * (we don't omit anything that did change).
  */
 export function deriveWriteDisplay(input: Record<string, unknown>): DerivedDisplay | undefined {
-  const filePath = typeof input.file_path === "string" ? input.file_path : null
-  const contentArg = typeof input.content === "string" ? input.content : null
-  if (filePath === null || contentArg === null) return undefined
-  if (contentArg.length === 0) return undefined
-  const patch = buildFileDiff(filePath, "", contentArg, 0)
+  const pathArg = writePathFromInput(input)
+  const contentArg = writeContentFromInput(input)
+  if (pathArg.status !== "ok" || contentArg.status !== "ok") return undefined
+  if (contentArg.value.length === 0) return undefined
+  const patch = buildFileDiff(pathArg.value, "", contentArg.value, 0)
   if (patch === "") return undefined
-  const display = renderUnifiedDiff(patch, `New file: ${filePath}`)
+  const display = renderUnifiedDiff(patch, `New file: ${pathArg.value}`)
   return { display }
 }
 
