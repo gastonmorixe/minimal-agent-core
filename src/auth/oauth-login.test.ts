@@ -581,6 +581,26 @@ describe("installCredentials", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it("returns the stored credential name so the success rows can show it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-oauth-install-"))
+    try {
+      const store = new AuthStore({ path: join(dir, "auth.jsonc") })
+      const resp = (token: string): TokenExchangeResponse => ({
+        access_token: token,
+        refresh_token: "RT",
+        expires_in: 3600,
+      })
+      expect(installCredentials(resp("AT1"), { store }, fakeOAuthProvider).credentialName).toBe(
+        "Test OAuth",
+      )
+      expect(installCredentials(resp("AT2"), { store }, fakeOAuthProvider).credentialName).toBe(
+        "test-oauth-2",
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
