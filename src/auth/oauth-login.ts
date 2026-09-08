@@ -227,7 +227,10 @@ export interface TokenExchangeResponse extends Record<string, unknown> {
 }
 
 /** Result of a successful provider login + persistence. */
-export type LoginInstallResult = OAuthLoginInstallResult
+export interface LoginInstallResult extends OAuthLoginInstallResult {
+  /** Credential slot name the secret bag was stored under (e.g. "grok-oauth-4"). */
+  credentialName: string
+}
 
 /**
  * Exchange the pasted authorization code for tokens.
@@ -306,7 +309,7 @@ export function installCredentials(
     credentialName ??
     store.suggestCredentialName(built.credential.serviceId, built.credential.displayName)
   store.set(built.credential.serviceId, name, built.credential.secrets as SecretBag)
-  return built.result
+  return { ...built.result, credentialName: name }
 }
 
 function installBuiltCredential(
@@ -319,7 +322,7 @@ function installBuiltCredential(
     credentialName ??
     store.suggestCredentialName(built.credential.serviceId, built.credential.displayName)
   store.set(built.credential.serviceId, name, built.credential.secrets as SecretBag)
-  return built.result
+  return { ...built.result, credentialName: name }
 }
 
 // ---------------------------------------------------------------------------

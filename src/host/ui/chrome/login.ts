@@ -35,7 +35,11 @@ export function renderOAuthLoginSuccess(result: LoginInstallResult): string[] {
   const acctSuffix = account
     ? ` ${c.dim(`(${account.emailAddress} · ${account.uuid.slice(0, 8)}…)`)}`
     : ""
-  const rows = [``, `  ${c.boldGreen("✔")} ${c.bold("Login successful")}${acctSuffix}`]
+  const rows = [
+    ``,
+    `  ${c.boldGreen("✔")} ${c.bold("Login successful")}${acctSuffix}`,
+    `  ${c.dim(`stored: ${result.credentialName}`)}`,
+  ]
   if (result.scopes.length > 0) {
     rows.push(`  ${c.dim(`scopes: ${result.scopes.join(" ")}`)}`)
   }
