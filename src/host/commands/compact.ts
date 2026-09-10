@@ -21,6 +21,7 @@ import {
   DEFAULT_KEEP_TAIL,
   parseCompactArgs,
 } from "../../agent/context-compact.ts"
+import { GLOBAL_STATUS_BUS, type StatusBus, type StatusHandle } from "../../bus/status.ts"
 import type { CommandContext, ResolvedCommand } from "../../plugins/types.ts"
 
 /** Minimal agent surface the host command needs. */
@@ -59,6 +60,20 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
       const mode = parsed.mode ?? "local"
       const keepTail = parsed.keepTail ?? DEFAULT_KEEP_TAIL
       const focus = parsed.focus?.trim() ? parsed.focus : undefined
+      // Visible progress while the summary LLM call runs. CommandContext
+      // carries no status bus, so prefer a runtime-attached one and fall
+      // back to the global bus (same pattern as repl-live-area.ts:963).
+      const statusBus: StatusBus | undefined =
+        (ctx as unknown as { statusBus?: StatusBus }).statusBus ?? GLOBAL_STATUS_BUS
+      let compactStatus: StatusHandle | undefined
+      try {
+        compactStatus = statusBus?.create("Compacting context", {
+          notificationId: "agent.compact",
+          category: "agent",
+        })
+      } catch {
+        compactStatus = undefined
+      }
       try {
         const stats = await agent.compact({
           reason: "manual",
@@ -85,6 +100,12 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
         return {
           kind: "error",
           message: `compact failed: ${e instanceof Error ? e.message : String(e)}`,
+        }
+      } finally {
+        try {
+          compactStatus?.clear()
+        } catch {
+          // Status UX must never fail the command result.
         }
       }
     },

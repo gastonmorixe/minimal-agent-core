@@ -37,6 +37,19 @@ export interface CompactRequestOpts {
   keepTail?: number
   /** Hint passed to the summarizer and kept verbatim in the checkpoint. */
   focus?: string
+  /**
+   * Optional progress sink for the local-summary LLM stream. Called per
+   * text delta with approximate output tokens so host UX (status label,
+   * TPS footer) can tick during long summaries. UX-only: a throwing sink
+   * must not fail compact (run-compact swallows sink errors).
+   */
+  onProgress?: (delta: { deltaTokens: number }) => void
+  /**
+   * Optional interim-text sink for the local-summary LLM stream. The host
+   * wires `compositor.writeStream` here when one is available; otherwise
+   * status label updates are the only interim UX.
+   */
+  writeStream?: (chunk: string) => void
 }
 
 /** Outcome of a successful history rewrite. */
