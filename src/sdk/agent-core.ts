@@ -223,10 +223,9 @@ export class AgentCore {
    * Compact model-facing history. Same contract as legacy Agent.compact:
    * prefer provider remote compact, else local checkpoint.
    */
-  async compact(opts?: {
-    reason?: import("../agent/context-compact.ts").CompactReason
-    preferRemote?: boolean
-  }): Promise<import("../agent/context-compact.ts").CompactStats> {
+  async compact(
+    opts?: import("../agent/context-compact.ts").CompactRequestOpts,
+  ): Promise<import("../agent/context-compact.ts").CompactStats> {
     const { compactWithLifecycle } = await import("./lifecycle-compact.ts")
     return compactWithLifecycle({
       messages: this.messages,
@@ -238,6 +237,9 @@ export class AgentCore {
       lifecycle: this.lifecycle,
       reason: opts?.reason,
       preferRemote: opts?.preferRemote,
+      ...(opts?.mode ? { mode: opts.mode } : {}),
+      ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
+      ...(opts?.focus ? { focus: opts.focus } : {}),
       appendNote: (text) => this.sessionPersistence?.appendNote(text),
       appendCompact: (rec) => this.sessionPersistence?.appendCompact?.(rec),
     })
