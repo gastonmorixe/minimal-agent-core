@@ -23,12 +23,14 @@
 
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
+import { getGlobalEventBus } from "../bus/global-bus.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
 import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from "../llm/provider.ts"
 import { run } from "../llm/run.ts"
+import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
 import { normalizeModelForAPI } from "../llm/transport/types.ts"
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
 
@@ -75,6 +77,19 @@ export interface RunCompactInput {
   keepTail?: number
   /** Hint passed to the summarizer, kept verbatim in the checkpoint. */
   focus?: string
+  /**
+   * Optional progress sink for the local-summary LLM stream. Called per
+   * text delta with approximate output tokens; also forwarded to the
+   * shared `llm.outputDelta` bus so the TPS footer ticks. UX-only and
+   * non-throwing (run-compact swallows sink errors).
+   */
+  onProgress?: (delta: { deltaTokens: number }) => void
+  /**
+   * Optional interim-text sink. The host wires `compositor.writeStream`
+   * here when one is available; otherwise status label updates are the
+   * only interim UX.
+   */
+  writeStream?: (chunk: string) => void
   /** Optional note sink (session JSONL). */
   appendNote?: (text: string) => void
   /**
@@ -332,10 +347,32 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
 
   let text = ""
   for await (const ev of run(req, { context: ctx })) {
-    if (ev.type === "text_delta") text += ev.text
-    else if (ev.type === "stream_error") {
+    if (ev.type === "text_delta") {
+      text += ev.text
+      const deltaTokens = Math.max(1, Math.round(ev.text.length / 4))
+      try {
+        input.onProgress?.({ deltaTokens })
+      } catch {
+        // UX-only sink: never fail compact.
+      }
+      try {
+        input.writeStream?.(ev.text)
+      } catch {
+        // UX-only sink: never fail compact.
+      }
+      try {
+        getGlobalEventBus()?.emit(LLM_OUTPUT_DELTA, { deltaTokens })
+      } catch {
+        // Bus emit is best-effort telemetry.
+      }
+    } else if (ev.type === "stream_error") {
       throw new Error(`local summary stream error (retryable=${ev.retryable})`)
     }
+  }
+  try {
+    emitOutputEnd("stream_end")
+  } catch {
+    // Bus emit is best-effort telemetry.
   }
   const trimmed = text.trim()
   return trimmed.length > 0 ? trimmed : undefined
