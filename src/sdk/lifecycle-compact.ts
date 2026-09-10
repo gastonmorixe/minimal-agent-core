@@ -4,7 +4,7 @@
  * @module sdk/lifecycle-compact
  */
 
-import type { CompactReason, CompactStats } from "../agent/context-compact.ts"
+import type { CompactReason, CompactRequestOpts, CompactStats } from "../agent/context-compact.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
@@ -21,6 +21,12 @@ export interface CompactWithLifecycleInput {
   lifecycle: LifecyclePort
   reason?: CompactReason
   preferRemote?: boolean
+  /** Explicit engine. Overrides the `preferRemote` default mapping. */
+  mode?: CompactRequestOpts["mode"]
+  /** Trailing messages kept verbatim (default 6). Must be \>= 0. */
+  keepTail?: number
+  /** Hint passed to the summarizer, kept verbatim in the checkpoint. */
+  focus?: string
   appendNote?: (text: string) => void
   appendCompact?: (rec: {
     reason: CompactReason
@@ -37,11 +43,17 @@ export async function compactWithLifecycle(
 ): Promise<CompactStats> {
   const reason = input.reason ?? "manual"
   if (input.lifecycle.beforeCompact) {
-    const will = await input.lifecycle.beforeCompact({
+    // Extra opts ride along as data for policy hooks; the payload type
+    // stays CompactWillRunPayload so legacy hooks keep working.
+    const willPayload = {
       reason,
       preferRemote: input.preferRemote,
+      ...(input.mode ? { mode: input.mode } : {}),
+      ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
+      ...(input.focus ? { focus: input.focus } : {}),
       messagesBefore: input.messages.length,
-    })
+    }
+    const will = await input.lifecycle.beforeCompact(willPayload)
     if (isDenied(will)) {
       throw new Error(
         will.action === "deny" || will.action === "ask"
@@ -60,6 +72,9 @@ export async function compactWithLifecycle(
     networkClient: input.networkClient,
     reason,
     preferRemote: input.preferRemote,
+    ...(input.mode ? { mode: input.mode } : {}),
+    ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
+    ...(input.focus ? { focus: input.focus } : {}),
     appendNote: input.appendNote,
     appendCompact: input.appendCompact,
   })

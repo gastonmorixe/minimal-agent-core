@@ -534,6 +534,29 @@ Commands:
 
 More detail: `docs/tui/` for the terminal layer; `src/session/session-restore.ts` for session restore.
 
+### Compacting context (/compact)
+
+Use `/compact` to shrink model-facing history. Manual compact blocks. It finishes before the next turn runs.
+
+Syntax:
+
+```sh
+/compact [mode] [tail=N] [focus="..."]
+```
+
+Modes:
+
+- **remote**: Use the provider compact endpoint. Falls back to local on error. Shows the remote error in the notice.
+- **tail**: Keep the last N messages verbatim. Makes no LLM call. Use it offline.
+- **local**: Blocking LLM summary plus tail. This is the default. Falls back to a stub checkpoint when the summary fails.
+- **fork**: Not implemented. It leaves history untouched and reports an error with branch guidance.
+
+Defaults: mode is `local`. Tail is `6`. Examples: `/compact`, `/compact remote`, `/compact tail tail=0`, `/compact local tail=10 focus="auth work"`.
+
+Auto compact runs on `context_length_exceeded`. It tries remote first, else local. It retries the failed turn once. It is on by default. Set `MINIMAL_AGENT_AUTO_COMPACT=0` to turn it off.
+
+Local summaries use a fixed 7-heading template: Goal, Constraints (verbatim), Decisions, Files and snippets, Errors and fixes, Pending tasks, Next step. The summarizer gets text only. It makes no tool calls.
+
 ## Debugging the wire
 
 Use `--debug` when you want readable request and response summaries:

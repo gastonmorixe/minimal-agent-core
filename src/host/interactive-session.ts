@@ -10,6 +10,7 @@
  * @module host/interactive-session
  */
 
+import type { CompactRequestOpts } from "../agent/context-compact.ts"
 import { runReflectionCooldown } from "../agent/reflection.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
@@ -170,7 +171,7 @@ export class InteractiveSession implements ReplAgentLike {
     this.core.noteSessionResumed()
   }
 
-  compact(opts?: { reason?: "manual" | "auto" | "exceeded"; preferRemote?: boolean }) {
+  compact(opts?: CompactRequestOpts) {
     return this.core.compact(opts)
   }
 

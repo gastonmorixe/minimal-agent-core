@@ -10,7 +10,7 @@ import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
 import type { SessionStore } from "../session/session-store.ts"
 
-import type { CompactStats } from "./context-compact.ts"
+import type { CompactRequestOpts, CompactStats } from "./context-compact.ts"
 
 /** Minimal Agent surface needed for compact. */
 export interface CompactableAgent {
@@ -34,7 +34,7 @@ export function agentReplaceMessages(agent: CompactableAgent, next: Message[]): 
 /** Compact history via shared `runCompact` runner. */
 export async function agentCompact(
   agent: CompactableAgent,
-  opts?: { reason?: "manual" | "auto" | "exceeded"; preferRemote?: boolean },
+  opts?: CompactRequestOpts,
 ): Promise<CompactStats> {
   const { runCompact } = await import("./run-compact.ts")
   return runCompact({
@@ -46,6 +46,9 @@ export async function agentCompact(
     networkClient: agent.networkClient,
     reason: opts?.reason ?? "manual",
     preferRemote: opts?.preferRemote,
+    ...(opts?.mode ? { mode: opts.mode } : {}),
+    ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
+    ...(opts?.focus ? { focus: opts.focus } : {}),
     appendNote: (t) => agent.appendNote(t),
     appendCompact: (r) => agent.store?.appendCompact(r),
   })

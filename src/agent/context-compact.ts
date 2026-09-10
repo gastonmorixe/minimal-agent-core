@@ -18,6 +18,27 @@ import type { Message } from "../llm/messages.ts"
 /** Why a compact was requested. */
 export type CompactReason = "manual" | "auto" | "exceeded"
 
+/** Compaction engine. Triggers (`auto`/`manual`/`exceeded`) are reasons, not modes. */
+export type CompactMode = "remote" | "tail" | "local" | "fork"
+
+/** Default trailing messages kept verbatim behind the checkpoint. */
+export const DEFAULT_KEEP_TAIL = 6
+
+/**
+ * Options every `compact()` entry point accepts. All fields optional so
+ * legacy callers (`{ reason }`, `{ reason, preferRemote }`) keep working.
+ */
+export interface CompactRequestOpts {
+  reason?: CompactReason
+  preferRemote?: boolean
+  /** Explicit engine. Overrides the `preferRemote` default mapping. */
+  mode?: CompactMode
+  /** Trailing messages kept verbatim (default 6). Must be \>= 0. */
+  keepTail?: number
+  /** Hint passed to the summarizer and kept verbatim in the checkpoint. */
+  focus?: string
+}
+
 /** Outcome of a successful history rewrite. */
 export interface CompactStats {
   reason: CompactReason
@@ -39,22 +60,58 @@ export interface CompactStats {
 export const COMPACTION_USER_MARKER = "<ma::context::compaction"
 
 /**
- * Local summarization prompt (provider-neutral handoff intent). Used when the
- * provider has no remote compact endpoint.
+ * Local summarization prompt (provider-neutral handoff intent). Structured
+ * template from MA-427402 DESIGN-prompt: 7 headings, text-only tool ban,
+ * verbatim constraints, files+snippets, pending, next step. Sent as the
+ * system prompt of the blocking local summary call.
  */
 export const LOCAL_COMPACTION_PROMPT = [
   "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff",
   "summary for another LLM that will resume the task.",
   "",
-  "Include:",
-  "- Current progress and key decisions made",
-  "- Important context, constraints, or user preferences",
-  "- What remains to be done (clear next steps)",
-  "- Any critical data, examples, or references needed to continue",
+  "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.",
+  "Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.",
+  "You have all context in the conversation above. Tool calls are REJECTED.",
+  "Reply with ONLY the summary body (no preamble).",
+  "Respond in the same language as the conversation.",
+  "Do NOT continue the task. Do NOT answer open questions. Only summarize.",
   "",
-  "Be concise, structured, and focused on helping the next LLM seamlessly",
-  "continue the work. Reply with ONLY the summary body (no preamble).",
+  "Use exactly these 7 headings:",
+  "",
+  "## 1. Goal",
+  "One or two lines on user intent. Primary request first.",
+  "",
+  "## 2. Constraints (verbatim)",
+  "Copy user constraints and security rules word for word.",
+  "Never paraphrase this section.",
+  "",
+  "## 3. Decisions",
+  "Each choice plus one-line reason. Drop superseded drafts.",
+  "",
+  "## 4. Files and snippets",
+  "Exact paths touched plus one line per change.",
+  "Keep exact commands, IDs, error text still needed. Drop full logs.",
+  "",
+  "## 5. Errors and fixes",
+  "What broke, what fixed it, what is still broken.",
+  "",
+  "## 6. Pending tasks",
+  "What remains, next action first. Preserve any unanswered",
+  "user question or imperative request verbatim.",
+  "",
+  "## 7. Next step",
+  "The single action the next session takes first.",
 ].join("\n")
+
+/**
+ * System prompt for a local summary call, with an optional focus hint kept
+ * verbatim so the next session sees what the user cared about.
+ */
+export function buildLocalSummarySystemPrompt(focus?: string): string {
+  const trimmed = focus?.trim()
+  if (!trimmed) return LOCAL_COMPACTION_PROMPT
+  return `${LOCAL_COMPACTION_PROMPT}\n\nFocus for this compaction (verbatim): ${trimmed}`
+}
 
 /**
  * Replace `messages` in place with `next`. Shared by Agent / AgentCore
@@ -83,25 +140,14 @@ export function buildReplacementHistory(
 }
 
 /**
- * Local fallback when remote compact is unavailable: keep a short tail
- * of recent turns and prepend a checkpoint user message. Prefer a real
- * model summary (caller supplies `summaryText`) over the generic stub.
+ * Slice the last `keepTail` messages, never starting the tail mid
+ * `tool_use` without its `tool_result`: drop a leading assistant that
+ * still has unpaired `tool_use` when the next message is not a
+ * `tool_result` user turn.
  */
-export function buildLocalCompactMessages(opts: {
-  previous: Message[]
-  summaryText?: string
-  /** How many trailing messages to retain (default 6). */
-  keepTail?: number
-}): Message[] {
-  const keepTail = opts.keepTail ?? 6
+function sliceTail(previous: Message[], keepTail: number): Message[] {
   const tail =
-    opts.previous.length <= keepTail
-      ? [...opts.previous]
-      : opts.previous.slice(opts.previous.length - keepTail)
-
-  // Never start the tail mid tool_use without its tool_result: drop a
-  // leading assistant that still has unpaired tool_use if the next
-  // message is not a tool_result user turn.
+    previous.length <= keepTail ? [...previous] : previous.slice(previous.length - keepTail)
   while (tail.length > 0 && tail[0].role === "assistant") {
     const first = tail[0]
     const hasToolUse =
@@ -113,17 +159,153 @@ export function buildLocalCompactMessages(opts: {
     if (nextHasResult) break
     tail.shift()
   }
+  return tail
+}
 
+/**
+ * Tail-only rewrite: keep the last N messages verbatim behind a
+ * checkpoint marker. Instant, no LLM call. Used for `--mode tail`,
+ * offline use, or as the stub fallback when the summarizer fails.
+ */
+export function buildTailCompactMessages(
+  previous: Message[],
+  keepTail: number = DEFAULT_KEEP_TAIL,
+): Message[] {
+  const tail = sliceTail(previous, keepTail)
+  const checkpoint: Message = {
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: `${COMPACTION_USER_MARKER} kind="tail" />\n## Context checkpoint\n\nRetained last ${tail.length} message(s) verbatim. Older history was dropped.`,
+      },
+    ],
+  }
+  return [checkpoint, ...tail]
+}
+
+/** Parsed `/compact` argv. `error` is set when argv is rejected. */
+export interface ParsedCompactArgs {
+  mode?: CompactMode
+  keepTail?: number
+  focus?: string
+  error?: string
+}
+
+const COMPACT_MODES: readonly CompactMode[] = ["remote", "tail", "local", "fork"]
+
+/**
+ * Parse `/compact` argv: `[mode] [tail=N] [focus="..."]`.
+ *
+ * - `mode`: positional engine or `mode=<engine>` (default unset: caller
+ *   applies `"local"`).
+ * - `tail=N` (alias `keep-tail=N`): trailing messages kept verbatim
+ *   (default unset: caller applies `DEFAULT_KEEP_TAIL`). Must be an
+ *   integer \>= 0.
+ * - `focus="..."`: hint passed to the summarizer, kept verbatim.
+ * - `reason=<trigger>` is accepted and ignored (manual path hardcodes it).
+ */
+export function parseCompactArgs(argv: string): ParsedCompactArgs {
+  const out: ParsedCompactArgs = {}
+  const tokens = tokenizeCompactArgs(argv.trim())
+  for (const token of tokens) {
+    const eq = token.indexOf("=")
+    if (eq === -1) {
+      const lower = token.toLowerCase()
+      if ((COMPACT_MODES as readonly string[]).includes(lower)) {
+        if (out.mode !== undefined) return { error: `/compact: duplicate mode ("${token}")` }
+        out.mode = lower as CompactMode
+        continue
+      }
+      return { error: `/compact: unknown argument "${token}" (want [mode] [tail=N] [focus="..."])` }
+    }
+    const key = token.slice(0, eq).toLowerCase()
+    const raw = unquoteCompactValue(token.slice(eq + 1))
+    if (key === "mode") {
+      const lower = raw.toLowerCase()
+      if (!(COMPACT_MODES as readonly string[]).includes(lower)) {
+        return { error: `/compact: unknown mode "${raw}" (want remote|tail|local|fork)` }
+      }
+      if (out.mode !== undefined) return { error: `/compact: duplicate mode ("${token}")` }
+      out.mode = lower as CompactMode
+    } else if (key === "tail" || key === "keep-tail") {
+      if (!/^\d+$/.test(raw)) {
+        return { error: `/compact: tail must be an integer >= 0 (got "${raw}")` }
+      }
+      out.keepTail = Number.parseInt(raw, 10)
+    } else if (key === "focus") {
+      out.focus = raw
+    } else if (key === "reason") {
+      continue
+    } else {
+      return { error: `/compact: unknown argument "${token}" (want [mode] [tail=N] [focus="..."])` }
+    }
+  }
+  return out
+}
+
+/** Split argv on whitespace, honoring double quotes (kept, stripped later). */
+function tokenizeCompactArgs(argv: string): string[] {
+  if (argv === "") return []
+  const tokens: string[] = []
+  let cur = ""
+  let quote: string | null = null
+  for (const ch of argv) {
+    if (quote) {
+      cur += ch
+      if (ch === quote) quote = null
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+      cur += ch
+    } else if (ch === " " || ch === "\t" || ch === "\n") {
+      if (cur !== "") {
+        tokens.push(cur)
+        cur = ""
+      }
+    } else {
+      cur += ch
+    }
+  }
+  if (cur !== "") tokens.push(cur)
+  return tokens
+}
+
+/** Strip one pair of matching outer quotes. */
+function unquoteCompactValue(raw: string): string {
+  if (raw.length >= 2) {
+    const first = raw[0]
+    const last = raw[raw.length - 1]
+    if ((first === '"' || first === "'") && last === first) return raw.slice(1, -1)
+  }
+  return raw
+}
+
+/**
+ * Local fallback when remote compact is unavailable: keep a short tail
+ * of recent turns and prepend a checkpoint user message. Prefer a real
+ * model summary (caller supplies `summaryText`) over the generic stub.
+ * `focus` is kept verbatim in the checkpoint when set.
+ */
+export function buildLocalCompactMessages(opts: {
+  previous: Message[]
+  summaryText?: string
+  /** How many trailing messages to retain (default 6). */
+  keepTail?: number
+  /** Hint kept verbatim in the checkpoint (default none). */
+  focus?: string
+}): Message[] {
+  const tail = sliceTail(opts.previous, opts.keepTail ?? DEFAULT_KEEP_TAIL)
   const summary =
     opts.summaryText?.trim() ||
     "Prior conversation was compacted locally. Continue from the retained recent turns below."
+  const focusLine = opts.focus?.trim() ? `\nFocus (verbatim): ${opts.focus.trim()}\n` : ""
 
   const checkpoint: Message = {
     role: "user",
     content: [
       {
         type: "text",
-        text: `${COMPACTION_USER_MARKER} kind="local" />\n## Context checkpoint\n\n${summary}`,
+        text: `${COMPACTION_USER_MARKER} kind="local" />\n## Context checkpoint\n${focusLine}\n${summary}`,
       },
     ],
   }

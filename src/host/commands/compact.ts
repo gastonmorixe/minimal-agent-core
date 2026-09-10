@@ -6,15 +6,26 @@
  * after the agent is constructed so slash-menu / `hasCommand` /
  * `dispatchCommand` all see it.
  *
+ * Manual path blocks: `invoke` awaits `compact()` before it returns the
+ * user message. No fire-forget.
+ *
+ * Arg parsing lives in {@link parseCompactArgs} (agent/context-compact):
+ * this module only applies host defaults (`local`, `DEFAULT_KEEP_TAIL`).
+ *
  * @module host/commands/compact
  */
 
-import type { CompactReason, CompactStats } from "../../agent/context-compact.ts"
-import type { ResolvedCommand } from "../../plugins/types.ts"
+import {
+  type CompactRequestOpts,
+  type CompactStats,
+  DEFAULT_KEEP_TAIL,
+  parseCompactArgs,
+} from "../../agent/context-compact.ts"
+import type { CommandContext, ResolvedCommand } from "../../plugins/types.ts"
 
 /** Minimal agent surface the host command needs. */
 export interface CompactAgentLike {
-  compact?(opts?: { reason?: CompactReason; preferRemote?: boolean }): Promise<CompactStats>
+  compact?(opts?: CompactRequestOpts): Promise<CompactStats>
 }
 
 /**
@@ -31,20 +42,39 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
     spec: {
       name: "compact",
       summary: "Compact model-facing context (remote provider API or local checkpoint)",
+      argHint: '[mode] [tail=N] [focus="..."]',
       handler: { type: "module", path: "", export: "default" },
     },
-    invoke: async () => {
+    invoke: async (ctx: CommandContext) => {
       if (typeof agent.compact !== "function") {
         return {
           kind: "error",
           message: "/compact is unavailable on this agent (no compact method).",
         }
       }
+      const parsed = parseCompactArgs(ctx.argv ?? "")
+      if (parsed.error) {
+        return { kind: "error", message: parsed.error }
+      }
+      const mode = parsed.mode ?? "local"
+      const keepTail = parsed.keepTail ?? DEFAULT_KEEP_TAIL
+      const focus = parsed.focus?.trim() ? parsed.focus : undefined
       try {
-        const stats = await agent.compact({ reason: "manual" })
+        const stats = await agent.compact({
+          reason: "manual",
+          mode,
+          keepTail,
+          ...(focus ? { focus } : {}),
+        })
         const lines = [
           `✓ compact (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages`,
         ]
+        if (mode !== "local" || keepTail !== DEFAULT_KEEP_TAIL) {
+          lines.push(`  mode: ${mode}, tail: ${keepTail}`)
+        }
+        if (focus) {
+          lines.push(`  focus: ${focus}`)
+        }
         // Make silent remote→local fallback visible in the TUI (plan-auth
         // wrong-host 401 used to look like a successful "local" compact).
         if (stats.kind === "local" && stats.remoteError) {

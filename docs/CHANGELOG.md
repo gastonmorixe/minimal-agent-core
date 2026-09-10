@@ -7,6 +7,9 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-09-02T19:15:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-09-10-compact-multi-mode"
+    type: feat
+    status: landed
   - id: "2026-09-02-write-contents-alias"
     type: fix
     status: landed
@@ -65,6 +68,12 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Added
+
+- 2026-09-10 (this session): feat: multi-mode compact. `/compact` takes
+  `[mode] [tail=N] [focus="..."]`. Modes are `remote|tail|local|fork`.
+  Defaults are mode `local` and tail `6`. Manual compact blocks. Auto compact
+  on context exceed tries remote first, else local. Local summaries use a
+  fixed 7-heading template. README documents the syntax under Sessions.
 
 - 2026-08-31 (this session): `AuthCredentialInfo` gains optional provider-owned
   `details` rows (`AuthCredentialDetail`: key/label/value). Host `auth-status`

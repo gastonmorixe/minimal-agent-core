@@ -15,6 +15,7 @@
  * @module agent/repl
  */
 
+import type { CompactRequestOpts } from "../agent/context-compact.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { isErrorDiagEmitted } from "../bus/diagnostic-bus.ts"
@@ -117,7 +118,7 @@ export interface ReplAgentLike {
    * checkpoint). Used for `/compact` and auto-recovery on
    * `context_length_exceeded`. Shared by legacy Agent and AgentCore.
    */
-  compact?(opts?: { reason?: "manual" | "auto" | "exceeded"; preferRemote?: boolean }): Promise<{
+  compact?(opts?: CompactRequestOpts): Promise<{
     reason: "manual" | "auto" | "exceeded"
     kind: "remote" | "local"
     messagesBefore: number

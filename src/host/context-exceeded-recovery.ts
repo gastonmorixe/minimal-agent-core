@@ -5,7 +5,7 @@
  * @module host/context-exceeded-recovery
  */
 
-import { extractPendingUserText } from "../agent/context-compact.ts"
+import { type CompactRequestOpts, extractPendingUserText } from "../agent/context-compact.ts"
 import type { Message } from "../llm/messages.ts"
 
 import {
@@ -18,7 +18,7 @@ import {
 export interface CompactableAgent {
   getModel?(): string
   rollbackPendingTurn?(): boolean
-  compact?(opts?: { reason?: "manual" | "auto" | "exceeded"; preferRemote?: boolean }): Promise<{
+  compact?(opts?: CompactRequestOpts): Promise<{
     kind: "remote" | "local"
     messagesBefore: number
     messagesAfter: number
