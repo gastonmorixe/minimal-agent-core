@@ -78,6 +78,69 @@ describe("buildLocalCompactMessages", () => {
       true,
     )
   })
+
+  it("drops a trailing tool_use with no matching tool_result in the tail", () => {
+    const previous: Message[] = [
+      { role: "user", content: "u0" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "out1" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "pwd" } }],
+      },
+    ]
+    const next = buildLocalCompactMessages({ previous, keepTail: 1 })
+    // Tail is just the dangling call, so only the checkpoint remains.
+    expect(next.length).toBe(1)
+    expect(next.some((m) => m.role === "assistant")).toBe(false)
+  })
+
+  it("shifts a leading orphan tool_result whose call was cut off", () => {
+    const previous: Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t0", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t0", content: "out0" }],
+      },
+      { role: "user", content: "later" },
+    ]
+    const next = buildLocalCompactMessages({ previous, keepTail: 2 })
+    // Orphan tool_result is shifted; plain user text remains after checkpoint.
+    expect(next.some((m) => JSON.stringify(m.content).includes("tool_result"))).toBe(false)
+    expect(next.some((m) => m.role === "user" && JSON.stringify(m.content).includes("later"))).toBe(
+      true,
+    )
+  })
+
+  it("keeps intact tool_use/tool_result pairs in the tail", () => {
+    const previous: Message[] = [
+      { role: "user", content: "u0" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "out1" }],
+      },
+      { role: "user", content: "later" },
+    ]
+    const next = buildLocalCompactMessages({ previous, keepTail: 3 })
+    expect(next.some((m) => JSON.stringify(m.content).includes('"id":"t1"'))).toBe(true)
+    expect(next.some((m) => JSON.stringify(m.content).includes('"tool_use_id":"t1"'))).toBe(true)
+    expect(next.some((m) => m.role === "user" && JSON.stringify(m.content).includes("later"))).toBe(
+      true,
+    )
+  })
 })
 
 describe("extractPendingUserText", () => {
