@@ -140,23 +140,62 @@ export function buildReplacementHistory(
 }
 
 /**
- * Slice the last `keepTail` messages, never starting the tail mid
- * `tool_use` without its `tool_result`: drop a leading assistant that
- * still has unpaired `tool_use` when the next message is not a
- * `tool_result` user turn.
+ * Slice the last `keepTail` messages, keeping `tool_use`/`tool_result`
+ * pairs atomic on both edges: drop a trailing assistant whose `tool_use`
+ * ids have no matching `tool_result` in the tail, and drop a leading
+ * user `tool_result` (or leading assistant `tool_use`) whose ids have no
+ * match in the tail.
  */
 function sliceTail(previous: Message[], keepTail: number): Message[] {
   const tail =
     previous.length <= keepTail ? [...previous] : previous.slice(previous.length - keepTail)
-  while (tail.length > 0 && tail[0].role === "assistant") {
+  const toolUseIds = (m: Message): string[] => {
+    if (!Array.isArray(m.content)) return []
+    const ids: string[] = []
+    for (const b of m.content) {
+      if (b.type === "tool_use") ids.push(b.id)
+    }
+    return ids
+  }
+  const toolResultIds = (m: Message): string[] => {
+    if (!Array.isArray(m.content)) return []
+    const ids: string[] = []
+    for (const b of m.content) {
+      if (b.type === "tool_result") ids.push(b.tool_use_id)
+    }
+    return ids
+  }
+  const allToolUseIds = (): Set<string> => {
+    const ids = new Set<string>()
+    for (const m of tail) for (const id of toolUseIds(m)) ids.add(id)
+    return ids
+  }
+  const allToolResultIds = (): Set<string> => {
+    const ids = new Set<string>()
+    for (const m of tail) for (const id of toolResultIds(m)) ids.add(id)
+    return ids
+  }
+  while (tail.length > 0) {
+    const last = tail[tail.length - 1]
+    if (last.role !== "assistant") break
+    const ids = toolUseIds(last)
+    if (ids.length === 0) break
+    if (ids.every((id) => allToolResultIds().has(id))) break
+    tail.pop()
+  }
+  while (tail.length > 0) {
     const first = tail[0]
-    const hasToolUse =
-      Array.isArray(first.content) && first.content.some((b) => b.type === "tool_use")
-    if (!hasToolUse) break
-    const next = tail[1]
-    const nextHasResult =
-      next && Array.isArray(next.content) && next.content.some((b) => b.type === "tool_result")
-    if (nextHasResult) break
+    if (first.role === "assistant") {
+      const ids = toolUseIds(first)
+      if (ids.length === 0) break
+      if (ids.every((id) => allToolResultIds().has(id))) break
+      tail.shift()
+      continue
+    }
+    if (first.role !== "user") break
+    const ids = toolResultIds(first)
+    if (ids.length === 0) break
+    if (ids.every((id) => allToolUseIds().has(id))) break
     tail.shift()
   }
   return tail
