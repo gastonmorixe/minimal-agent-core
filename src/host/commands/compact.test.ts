@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { CompactStats } from "../../agent/context-compact.ts"
 import type { CommandContext } from "../../plugins/types.ts"
 
 import { createCompactHostCommand, registerCompactHostCommand } from "./compact.ts"
@@ -153,6 +154,36 @@ describe("createCompactHostCommand", () => {
     const cmd = createCompactHostCommand({})
     const result = await cmd.invoke(bareCtx())
     expect(result.kind).toBe("error")
+  })
+
+  it("FAIL-FIRST: failed local compact renders a footer distinct from the intentional stub body", async () => {
+    const stats = {
+      reason: "manual",
+      kind: "local",
+      messagesBefore: 20,
+      messagesAfter: 7,
+      summaryError: "boom-summary",
+    } as unknown as CompactStats
+    const cmd = createCompactHostCommand({
+      compact: async () => stats,
+    })
+    const result = await cmd.invoke(bareCtx())
+    expect(result.kind).toBe("notice")
+    const block = (result as { block: { title: string; body: string[]; footer?: string } }).block
+    expect(block.body.join("\n")).toContain("stub checkpoint")
+    expect(block.footer).toBeDefined()
+    expect(String(block.footer)).toContain("boom-summary")
+    const stubCmd = createCompactHostCommand({
+      compact: async () => ({
+        reason: "manual",
+        kind: "local",
+        messagesBefore: 20,
+        messagesAfter: 7,
+      }),
+    })
+    const stubResult = await stubCmd.invoke(bareCtx())
+    const stubBlock = (stubResult as { block: { footer?: string } }).block
+    expect(stubBlock.footer).toBeUndefined()
   })
 })
 

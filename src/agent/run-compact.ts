@@ -207,6 +207,7 @@ function runLocalStub(
   input: RunCompactInput,
   messagesBefore: number,
   remoteError?: string,
+  summaryError?: string,
 ): CompactStats {
   const localMsgs = buildLocalCompactMessages({
     previous: input.messages,
@@ -220,12 +221,14 @@ function runLocalStub(
     messagesBefore,
     messagesAfter: input.messages.length,
     ...(remoteError ? { remoteError } : {}),
+    ...(summaryError ? { summaryError } : {}),
   }
   return finish(
     input,
     stats,
     `compact: local reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter}` +
-      (remoteError ? ` remoteError=${remoteError}` : ""),
+      (remoteError ? ` remoteError=${remoteError}` : "") +
+      (summaryError ? ` summaryError=${summaryError}` : ""),
     true,
   )
 }
@@ -246,9 +249,14 @@ async function runLocalCompact(
     summaryError = err instanceof Error ? err.message : String(err)
   }
   if (!summaryText) {
-    if (summaryError)
-      input.appendNote?.(`compact: local summary failed (${summaryError}); using stub`)
-    return runLocalStub(input, messagesBefore)
+    const apiModel = normalizeModelForAPI(input.model)
+    const known = input.providerId
+      ? (findModelForProvider(apiModel, input.providerId) ?? findModel(apiModel))
+      : findModel(apiModel)
+    const cause =
+      summaryError ?? (known ? "empty summary (no text)" : `unknown model "${input.model}"`)
+    input.appendNote?.(`compact: local summary failed (${cause}); using stub`)
+    return runLocalStub(input, messagesBefore, undefined, cause)
   }
   const localMsgs = buildLocalCompactMessages({
     previous: input.messages,
@@ -367,7 +375,15 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
         // Bus emit is best-effort telemetry.
       }
     } else if (ev.type === "stream_error") {
-      throw new Error(`local summary stream error (retryable=${ev.retryable})`)
+      const causeMsg =
+        ev.cause instanceof Error
+          ? ev.cause.message
+          : ev.cause !== undefined
+            ? String(ev.cause)
+            : ""
+      throw new Error(
+        `local summary stream error (retryable=${ev.retryable})${causeMsg ? `: ${causeMsg}` : ""}`,
+      )
     }
   }
   try {
