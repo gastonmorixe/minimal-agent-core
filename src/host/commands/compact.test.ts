@@ -70,8 +70,24 @@ describe("createCompactHostCommand", () => {
       block: {
         icon: "✓",
         title: "compact (remote): 20 → 4 messages",
+        body: ["Summary unavailable (stub checkpoint). 4 messages kept verbatim."],
       },
     })
+  })
+
+  it("invoke shows stub fallback body for local mode with no summary", async () => {
+    const cmd = createCompactHostCommand({
+      compact: async () => ({
+        reason: "manual",
+        kind: "local",
+        messagesBefore: 20,
+        messagesAfter: 7,
+      }),
+    })
+    const result = await cmd.invoke(bareCtx())
+    expect(result.kind).toBe("notice")
+    const block = (result as { block: { title: string; body: string[] } }).block
+    expect(block.body).toEqual(["Summary unavailable (stub checkpoint). 7 messages kept verbatim."])
   })
 
   it("invoke renders summaryText into the notice block body", async () => {
@@ -127,6 +143,7 @@ describe("createCompactHostCommand", () => {
       block: {
         icon: "✓",
         title: "compact (local): 20 → 7 messages",
+        body: ["Summary unavailable (stub checkpoint). 7 messages kept verbatim."],
         footer: "remote unavailable: boom",
       },
     })
