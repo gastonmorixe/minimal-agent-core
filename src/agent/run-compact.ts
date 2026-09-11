@@ -262,6 +262,7 @@ async function runLocalCompact(
     kind: "local",
     messagesBefore,
     messagesAfter: input.messages.length,
+    summaryText,
   }
   return finish(
     input,
