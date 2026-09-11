@@ -22,7 +22,12 @@ import {
   parseCompactArgs,
 } from "../../agent/context-compact.ts"
 import { GLOBAL_STATUS_BUS, type StatusBus, type StatusHandle } from "../../bus/status.ts"
-import type { CommandContext, ResolvedCommand } from "../../plugins/types.ts"
+import {
+  type CommandContext,
+  type CommandNoticeBlock,
+  type ResolvedCommand,
+} from "../../plugins/types.ts"
+import { clampBodyWithHint, TOOL_PREVIEW_LINE_WIDTH } from "../ui/tool-transcript/format.ts"
 
 /** Minimal agent surface the host command needs. */
 export interface CompactAgentLike {
@@ -81,21 +86,7 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
           keepTail,
           ...(focus ? { focus } : {}),
         })
-        const lines = [
-          `✓ compact (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages`,
-        ]
-        if (mode !== "local" || keepTail !== DEFAULT_KEEP_TAIL) {
-          lines.push(`  mode: ${mode}, tail: ${keepTail}`)
-        }
-        if (focus) {
-          lines.push(`  focus: ${focus}`)
-        }
-        // Make silent remote→local fallback visible in the TUI (plan-auth
-        // wrong-host 401 used to look like a successful "local" compact).
-        if (stats.kind === "local" && stats.remoteError) {
-          lines.push(`  remote unavailable: ${stats.remoteError}`)
-        }
-        return { kind: "notice", lines }
+        return { kind: "notice", block: buildCompactNoticeBlock(stats, { mode, keepTail, focus }) }
       } catch (e) {
         return {
           kind: "error",
@@ -110,6 +101,53 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
       }
     },
   }
+}
+
+/**
+ * Cap for summary body rows in the `/compact` notice. Mirrors the Bash
+ * cont-collapse budget (BASH_CONT_MAX_LINES) so a long summary never
+ * floods scrollback; overflow is replaced with a `+N more` hint.
+ */
+export const COMPACT_SUMMARY_MAX_LINES = 40
+
+/**
+ * Build the framed `/compact` result block the host renders with its own
+ * chrome (`renderCommandNoticeBlock`). Title carries counts + engine;
+ * body is the local-summary markdown (width-clamped per line, row-capped
+ * with a hint). Tail modes have no summary: counts + tail note only.
+ */
+export function buildCompactNoticeBlock(
+  stats: CompactStats,
+  opts: { mode: string; keepTail: number; focus?: string },
+): CommandNoticeBlock {
+  const block: CommandNoticeBlock = {
+    icon: "✓",
+    title: `compact (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages`,
+  }
+  const infoParts: string[] = []
+  if (opts.mode !== "local" || opts.keepTail !== DEFAULT_KEEP_TAIL) {
+    infoParts.push(`mode: ${opts.mode}, tail: ${opts.keepTail}`)
+  }
+  if (opts.focus) infoParts.push(`focus: ${opts.focus}`)
+  if (infoParts.length > 0) block.info = infoParts.join(" · ")
+  const summary = stats.summaryText?.trim()
+  if (summary) {
+    const lines = summary.split("\n")
+    const shown = lines.slice(0, COMPACT_SUMMARY_MAX_LINES)
+    const body = shown.map((line) => clampBodyWithHint(line, TOOL_PREVIEW_LINE_WIDTH))
+    if (lines.length > shown.length) {
+      body.push(`… (+${lines.length - shown.length} more lines)`)
+    }
+    block.body = body
+  } else if (opts.mode === "tail") {
+    block.body = [`Retained last ${opts.keepTail} message(s) verbatim. Older history was dropped.`]
+  }
+  // Make silent remote→local fallback visible in the TUI (plan-auth
+  // wrong-host 401 used to look like a successful "local" compact).
+  if (stats.kind === "local" && stats.remoteError) {
+    block.footer = `remote unavailable: ${stats.remoteError}`
+  }
+  return block
 }
 
 /**

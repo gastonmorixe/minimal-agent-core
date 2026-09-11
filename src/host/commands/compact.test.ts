@@ -67,7 +67,68 @@ describe("createCompactHostCommand", () => {
     expect(called).toBe(true)
     expect(result).toEqual({
       kind: "notice",
-      lines: ["✓ compact (remote): 20 → 4 messages"],
+      block: {
+        icon: "✓",
+        title: "compact (remote): 20 → 4 messages",
+      },
+    })
+  })
+
+  it("invoke renders summaryText into the notice block body", async () => {
+    const cmd = createCompactHostCommand({
+      compact: async () => ({
+        reason: "manual",
+        kind: "local",
+        messagesBefore: 20,
+        messagesAfter: 7,
+        summaryText: "## 1. Goal\nShip it\n\n## 7. Next step\nRun tests",
+      }),
+    })
+    const result = await cmd.invoke(bareCtx())
+    expect(result.kind).toBe("notice")
+    const block = (result as { block: { title: string; body: string[] } }).block
+    expect(block.title).toContain("20 → 7")
+    expect(block.body.join("\n")).toContain("## 1. Goal")
+  })
+
+  it("invoke shows tail note and no summary for tail mode", async () => {
+    const cmd = createCompactHostCommand({
+      compact: async () => ({
+        reason: "manual",
+        kind: "local",
+        messagesBefore: 20,
+        messagesAfter: 7,
+      }),
+    })
+    const result = await cmd.invoke({
+      ...bareCtx(),
+      argv: "tail",
+      rawLine: "/compact tail",
+    })
+    expect(result.kind).toBe("notice")
+    const block = (result as { block: { title: string; body: string[] } }).block
+    expect(block.title).toContain("20 → 7")
+    expect(block.body.join("\n")).toContain("verbatim")
+  })
+
+  it("invoke surfaces remoteError as the block footer", async () => {
+    const cmd = createCompactHostCommand({
+      compact: async () => ({
+        reason: "manual",
+        kind: "local",
+        messagesBefore: 20,
+        messagesAfter: 7,
+        remoteError: "boom",
+      }),
+    })
+    const result = await cmd.invoke(bareCtx())
+    expect(result).toEqual({
+      kind: "notice",
+      block: {
+        icon: "✓",
+        title: "compact (local): 20 → 7 messages",
+        footer: "remote unavailable: boom",
+      },
     })
   })
 

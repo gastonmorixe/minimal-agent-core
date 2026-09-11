@@ -67,6 +67,13 @@ export interface CompactStats {
    * Surfaced in `/compact` notices so a silent local fallback is visible.
    */
   remoteError?: string
+  /**
+   * Full local-summary markdown when the blocking summarizer ran
+   * (`local` mode with a live model). Absent for tail / remote / stub
+   * compacts. Surfaced in `/compact` notices so the user sees what the
+   * checkpoint kept.
+   */
+  summaryText?: string
 }
 
 /** Marker prefix written into model-facing history after a compact. */
