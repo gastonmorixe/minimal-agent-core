@@ -17,9 +17,10 @@ import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry
 import type { ProviderAuth } from "../llm/provider.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { registerTestProvider } from "../llm/test-fixtures.ts"
+import type { NetworkClient } from "../network/index.ts"
 
 import { agentCompact, type CompactableAgent } from "./agent-compact-methods.ts"
-import { COMPACTION_USER_MARKER } from "./context-compact.ts"
+import { COMPACTION_USER_MARKER, type CompactStats } from "./context-compact.ts"
 import { runCompact } from "./run-compact.ts"
 
 describe("runCompact local path", () => {
@@ -180,5 +181,74 @@ describe("runCompact remote credentialName pin", () => {
     const stats = await agentCompact(agent, { reason: "manual", preferRemote: true })
     expect(stats.kind).toBe("remote")
     expect(seenAuth).toEqual({ kind: "api-key", key: "sk-pinned-account" })
+  })
+})
+
+describe("runCompact local stub failure visibility (fail-first)", () => {
+  beforeEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+  })
+
+  afterEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+  })
+
+  function hist(): Message[] {
+    const messages: Message[] = []
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: "user", content: `u${i}` })
+      messages.push({ role: "assistant", content: `a${i}` })
+    }
+    return messages
+  }
+
+  it("FAIL-FIRST: local mode with unknown model sets stats.summaryError on stub fallback", async () => {
+    const messages = hist()
+    const notes: string[] = []
+    const stats = await runCompact({
+      messages,
+      model: "no-such-model-xyz",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      appendNote: (t) => notes.push(t),
+    })
+    expect(stats.kind).toBe("local")
+    const withErr: CompactStats = stats
+    expect(withErr.summaryError).toBeDefined()
+    expect(String(withErr.summaryError)).not.toHaveLength(0)
+  })
+
+  it("FAIL-FIRST: local mode with throwing summary sets stats.summaryError on stub fallback", async () => {
+    registerTestProvider({
+      id: "compact-fail-prov",
+      displayName: "Compact Fail Prov",
+      shortCode: "cfp",
+      models: [{ id: "compact-fail-model" }],
+    })
+    const messages = hist()
+    const notes: string[] = []
+    const throwingClient = {
+      request: async () => {
+        throw new Error("boom-summary")
+      },
+    } as unknown as NetworkClient
+    const stats = await runCompact({
+      messages,
+      model: "compact-fail-model",
+      providerId: "compact-fail-prov",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      networkClient: throwingClient,
+      appendNote: (t) => notes.push(t),
+    })
+    expect(stats.kind).toBe("local")
+    const withErr: CompactStats = stats
+    expect(withErr.summaryError).toContain("boom-summary")
   })
 })

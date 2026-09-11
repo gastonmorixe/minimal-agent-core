@@ -150,6 +150,8 @@ export function buildCompactNoticeBlock(
   // wrong-host 401 used to look like a successful "local" compact).
   if (stats.kind === "local" && stats.remoteError) {
     block.footer = `remote unavailable: ${stats.remoteError}`
+  } else if (stats.kind === "local" && stats.summaryError) {
+    block.footer = `summary failed: ${stats.summaryError}`
   }
   return block
 }

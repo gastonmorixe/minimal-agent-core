@@ -74,6 +74,12 @@ export interface CompactStats {
    * checkpoint kept.
    */
   summaryText?: string
+  /**
+   * Short cause when `local` mode fell back to the stub checkpoint
+   * because the summary call failed or the model was unknown.
+   * Absent on success and on intentional stub compacts.
+   */
+  summaryError?: string
 }
 
 /** Marker prefix written into model-facing history after a compact. */
