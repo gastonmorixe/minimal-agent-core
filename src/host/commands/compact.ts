@@ -141,6 +141,10 @@ export function buildCompactNoticeBlock(
     block.body = body
   } else if (opts.mode === "tail") {
     block.body = [`Retained last ${opts.keepTail} message(s) verbatim. Older history was dropped.`]
+  } else if (opts.mode === "local") {
+    block.body = [
+      `Summary unavailable (stub checkpoint). ${stats.messagesAfter} messages kept verbatim.`,
+    ]
   }
   // Make silent remote→local fallback visible in the TUI (plan-auth
   // wrong-host 401 used to look like a successful "local" compact).
