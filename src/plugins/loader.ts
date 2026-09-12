@@ -36,6 +36,7 @@ import { CHANNEL_BY_NAME, hasPermission } from "./hooks/channels.ts"
 import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
+import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type {
   AgentContext,
@@ -891,7 +892,7 @@ export class PluginLoader {
   }
   async dispatchCommand(
     line: string,
-    opts: { cwd?: string; signal?: AbortSignal } = {},
+    opts: CommandDispatchOptions = {},
   ): Promise<CommandResult | null> {
     return this.commands.dispatchCommand(line, opts)
   }

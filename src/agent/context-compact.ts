@@ -50,6 +50,12 @@ export interface CompactRequestOpts {
    * status label updates are the only interim UX.
    */
   writeStream?: (chunk: string) => void
+  /**
+   * Called at the start of each local-summary attempt (1-based). Host
+   * formatters must reset on attempt 2 so retry tokens are not mixed
+   * into the first stream.
+   */
+  onSummaryAttempt?: (attempt: number) => void | Promise<void>
 }
 
 /** Outcome of a successful history rewrite. */
@@ -80,6 +86,12 @@ export interface CompactStats {
    * Absent on success and on intentional stub compacts.
    */
   summaryError?: string
+  /**
+   * Full checkpoint user-message markdown as persisted (marker + headings
+   * + summary). Authoritative display artifact. Prefer this over
+   * summaryText alone.
+   */
+  checkpointText?: string
 }
 
 /** Marker prefix written into model-facing history after a compact. */

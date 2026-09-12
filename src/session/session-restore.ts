@@ -85,7 +85,32 @@ export function foldRecords(records: SessionRecord[]): Message[] {
  * checkpoints: jsonl stays append-only and the user sees everything.
  */
 export function foldRecordsForDisplay(records: SessionRecord[]): Message[] {
-  return foldRecordsInternal(records, { applyCompacts: false })
+  return foldRecordsInternal(records, { applyCompacts: false }).messages
+}
+
+/**
+ * Compact checkpoints positioned against the display-fold message list.
+ * `afterMessageIndex` is `messages.length` at the compact record in the
+ * same walk as {@link foldRecordsForDisplay} (tool_result merge/new-user
+ * and rewind included).
+ */
+export interface CompactDisplayBoundary {
+  afterMessageIndex: number
+  record: Extract<SessionRecord, { kind: "compact" }>
+}
+
+/**
+ * Compact boundaries in `records` order, for TUI replay. Each entry names the
+ * transcript position (`afterMessageIndex`) where a compact checkpoint sits
+ * plus the record itself, so resume can paint the boundary instead of a fake
+ * message. Model history is left untouched (`applyCompacts: false`).
+ *
+ * @param records - Session records in write order.
+ * @returns One boundary per compact record, oldest first.
+ */
+export function compactDisplayBoundaries(records: SessionRecord[]): CompactDisplayBoundary[] {
+  return foldRecordsInternal(records, { applyCompacts: false, collectCompactBoundaries: true })
+    .compactBoundaries
 }
 
 /**
@@ -98,23 +123,28 @@ export function foldRecordsForModel(
   policy: CompactSendPolicy = { mode: "since-last-compact" },
 ): Message[] {
   if (policy.mode === "full") {
-    return foldRecordsInternal(records, { applyCompacts: false })
+    return foldRecordsInternal(records, { applyCompacts: false }).messages
   }
   if (policy.mode === "ignore-last-n") {
     const n = Math.max(0, policy.n)
     if (n === 0) {
-      return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 })
+      return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 }).messages
     }
-    return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: n })
+    return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: n }).messages
   }
-  return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 })
+  return foldRecordsInternal(records, { applyCompacts: true, skipLastCompacts: 0 }).messages
 }
 
 function foldRecordsInternal(
   records: SessionRecord[],
-  opts: { applyCompacts: boolean; skipLastCompacts?: number },
-): Message[] {
+  opts: {
+    applyCompacts: boolean
+    skipLastCompacts?: number
+    collectCompactBoundaries?: boolean
+  },
+): { messages: Message[]; compactBoundaries: CompactDisplayBoundary[] } {
   const messages: Message[] = []
+  const compactBoundaries: CompactDisplayBoundary[] = []
   // Map from UserRecord.id → index in `messages[]` of the user message it
   // produced. Maintained alongside `messages` so rewinds can find their
   // truncation point in O(1). Entries pointing past the current end of
@@ -141,6 +171,9 @@ function foldRecordsInternal(
       case "detach":
         continue
       case "compact": {
+        if (opts.collectCompactBoundaries) {
+          compactBoundaries.push({ afterMessageIndex: messages.length, record: rec })
+        }
         if (!opts.applyCompacts) continue
         const ord = compactOrdinal++
         // Skip last N: only apply when ord < applyThroughOrdinal.
@@ -152,7 +185,12 @@ function foldRecordsInternal(
         for (const m of rec.replacementMessages) {
           messages.push({
             role: m.role,
-            content: [{ type: "text", text: m.content }],
+            content:
+              typeof m.content === "string"
+                ? [{ type: "text", text: m.content }]
+                : // Deep copy: the restored history must not alias the stored
+                  // JSONL record (later turns mutate their own blocks).
+                  structuredClone(m.content),
           })
         }
         break
@@ -197,7 +235,7 @@ function foldRecordsInternal(
       }
     }
   }
-  return messages
+  return { messages, compactBoundaries }
 }
 
 // ---------------------------------------------------------------------------

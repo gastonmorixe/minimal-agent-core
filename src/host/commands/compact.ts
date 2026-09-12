@@ -27,7 +27,6 @@ import {
   type CommandNoticeBlock,
   type ResolvedCommand,
 } from "../../plugins/types.ts"
-import { clampBodyWithHint, TOOL_PREVIEW_LINE_WIDTH } from "../ui/tool-transcript/format.ts"
 
 /** Minimal agent surface the host command needs. */
 export interface CompactAgentLike {
@@ -79,12 +78,20 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
       } catch {
         compactStatus = undefined
       }
+      const hostCtx = ctx as CommandContext & {
+        writeStream?: (chunk: string) => void
+        onProgress?: (delta: { deltaTokens: number }) => void
+        onSummaryAttempt?: (attempt: number) => void | Promise<void>
+      }
       try {
         const stats = await agent.compact({
           reason: "manual",
           mode,
           keepTail,
           ...(focus ? { focus } : {}),
+          ...(hostCtx.writeStream ? { writeStream: hostCtx.writeStream } : {}),
+          ...(hostCtx.onProgress ? { onProgress: hostCtx.onProgress } : {}),
+          ...(hostCtx.onSummaryAttempt ? { onSummaryAttempt: hostCtx.onSummaryAttempt } : {}),
         })
         return { kind: "notice", block: buildCompactNoticeBlock(stats, { mode, keepTail, focus }) }
       } catch (e) {
@@ -104,17 +111,8 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
 }
 
 /**
- * Cap for summary body rows in the `/compact` notice. Mirrors the Bash
- * cont-collapse budget (BASH_CONT_MAX_LINES) so a long summary never
- * floods scrollback; overflow is replaced with a `+N more` hint.
- */
-export const COMPACT_SUMMARY_MAX_LINES = 40
-
-/**
- * Build the framed `/compact` result block the host renders with its own
- * chrome (`renderCommandNoticeBlock`). Title carries counts + engine;
- * body is the local-summary markdown (width-clamped per line, row-capped
- * with a hint). Tail modes have no summary: counts + tail note only.
+ * Build the framed `/compact` result block. Body is the full checkpoint
+ * markdown (no line/width clamp). Host markdown rendering happens later.
  */
 export function buildCompactNoticeBlock(
   stats: CompactStats,
@@ -130,15 +128,9 @@ export function buildCompactNoticeBlock(
   }
   if (opts.focus) infoParts.push(`focus: ${opts.focus}`)
   if (infoParts.length > 0) block.info = infoParts.join(" · ")
-  const summary = stats.summaryText?.trim()
-  if (summary) {
-    const lines = summary.split("\n")
-    const shown = lines.slice(0, COMPACT_SUMMARY_MAX_LINES)
-    const body = shown.map((line) => clampBodyWithHint(line, TOOL_PREVIEW_LINE_WIDTH))
-    if (lines.length > shown.length) {
-      body.push(`… (+${lines.length - shown.length} more lines)`)
-    }
-    block.body = body
+  const summary = (stats.checkpointText ?? stats.summaryText)?.trim()
+  if (summary && summary.length > 0) {
+    block.body = summary.split("\n")
   } else if (opts.mode === "tail") {
     block.body = [`Retained last ${opts.keepTail} message(s) verbatim. Older history was dropped.`]
   } else if (opts.mode === "local") {

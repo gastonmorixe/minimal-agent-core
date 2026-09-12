@@ -196,7 +196,10 @@ export interface SessionPersistence {
     compactKind: "remote" | "local"
     messagesBefore: number
     messagesAfter: number
-    replacementMessages: Array<{ role: "user" | "assistant" | "system"; content: string }>
+    replacementMessages: Array<{
+      role: "user" | "assistant" | "system"
+      content: string | import("../llm/messages.ts").ContentBlock[]
+    }>
     encryptedContent?: string
     id?: string
   }): void

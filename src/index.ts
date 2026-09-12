@@ -113,7 +113,7 @@ import { formatQuotaWindows } from "./quota/quota-summary.ts"
 import { parseSchemaFile } from "./sdk/output-schema.ts"
 import { applyToolNamePolicy } from "./sdk/tool-filter.ts"
 import { getSessionId } from "./session/session-id.ts"
-import { loadSession } from "./session/session-restore.ts"
+import { compactDisplayBoundaries, loadSession } from "./session/session-restore.ts"
 import { ToolTimeTracker } from "./tools/tool-time.ts"
 import { TOOL_DEFINITIONS } from "./tools/tools.ts"
 
@@ -813,6 +813,7 @@ async function main() {
   // Full transcript for UI replay (ignores durable compact checkpoints).
   // Model-facing `initialMessages` may be shorter after compact folds.
   let displayMessages: import("./llm/messages.ts").Message[] = []
+  let resumeCompactBoundaries: ReturnType<typeof compactDisplayBoundaries> = []
   const resumeSameSid = resumeSameArg !== undefined
   if (effectiveResumeArg) {
     try {
@@ -825,6 +826,7 @@ async function main() {
       // Model path: compact-aware fold. UI replay uses displayMessages.
       initialMessages = loaded.messages
       displayMessages = loaded.displayMessages
+      resumeCompactBoundaries = compactDisplayBoundaries(loaded.records)
       pendingDraft = loaded.pendingDraft
       // Build the tool_use_id → ts(ms) lookup for the replay time-hint.
       // We use AssistantRecord.ts because that's the moment the assistant
@@ -1119,6 +1121,7 @@ async function main() {
         toolDisplays,
         toolPresentation,
         scrollbackSubmittedAt: userConfig.scrollback?.submittedAt,
+        compactBoundaries: resumeCompactBoundaries,
       })
       stdoutSink.write("\n")
     }

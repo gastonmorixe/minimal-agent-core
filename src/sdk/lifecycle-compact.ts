@@ -27,13 +27,19 @@ export interface CompactWithLifecycleInput {
   keepTail?: number
   /** Hint passed to the summarizer, kept verbatim in the checkpoint. */
   focus?: string
+  onProgress?: CompactRequestOpts["onProgress"]
+  writeStream?: CompactRequestOpts["writeStream"]
+  onSummaryAttempt?: CompactRequestOpts["onSummaryAttempt"]
   appendNote?: (text: string) => void
   appendCompact?: (rec: {
     reason: CompactReason
     compactKind: "remote" | "local"
     messagesBefore: number
     messagesAfter: number
-    replacementMessages: Array<{ role: "user" | "assistant" | "system"; content: string }>
+    replacementMessages: Array<{
+      role: "user" | "assistant" | "system"
+      content: string | import("../llm/messages.ts").ContentBlock[]
+    }>
   }) => void
 }
 
@@ -75,14 +81,21 @@ export async function compactWithLifecycle(
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.keepTail !== undefined ? { keepTail: input.keepTail } : {}),
     ...(input.focus ? { focus: input.focus } : {}),
+    ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+    ...(input.writeStream ? { writeStream: input.writeStream } : {}),
+    ...(input.onSummaryAttempt ? { onSummaryAttempt: input.onSummaryAttempt } : {}),
     appendNote: input.appendNote,
     appendCompact: input.appendCompact,
   })
-  await input.lifecycle.afterCompact?.({
-    reason: stats.reason,
-    messagesBefore: stats.messagesBefore,
-    messagesAfter: stats.messagesAfter,
-    compactKind: stats.kind,
-  })
+  try {
+    await input.lifecycle.afterCompact?.({
+      reason: stats.reason,
+      messagesBefore: stats.messagesBefore,
+      messagesAfter: stats.messagesAfter,
+      compactKind: stats.kind,
+    })
+  } catch {
+    // afterCompact is host UX. Persist + memory already committed.
+  }
   return stats
 }

@@ -26,6 +26,21 @@ import type {
   ResolvedCommand,
 } from "../types.ts"
 
+/**
+ * Per-dispatch options for {@link CommandRegistry.dispatchCommand}.
+ *
+ * `writeStream` / `onProgress` / `onSummaryAttempt` are host-side live-output
+ * hooks. The `/compact` path forwards them so a long local summary streams
+ * into the TUI; other commands ignore them.
+ */
+export interface CommandDispatchOptions {
+  cwd?: string
+  signal?: AbortSignal
+  writeStream?: (chunk: string) => void
+  onProgress?: (delta: { deltaTokens: number }) => void
+  onSummaryAttempt?: (attempt: number) => void | Promise<void>
+}
+
 /** Options for constructing a {@link CommandRegistry}. */
 export interface CommandRegistryOptions {
   /** Per-dispatch timeout in ms. */
@@ -169,7 +184,7 @@ export class CommandRegistry {
    */
   async dispatchCommand(
     line: string,
-    opts: { cwd?: string; signal?: AbortSignal } = {},
+    opts: CommandDispatchOptions = {},
   ): Promise<CommandResult | null> {
     const parsed = parseCommandLine(line)
     if (!parsed) return null
@@ -229,7 +244,10 @@ export class CommandRegistry {
       },
       agent: this.agent,
       ...(this.hostFor?.(cmd.pluginId) ? { host: this.hostFor(cmd.pluginId) } : {}),
-    }
+      ...(opts.writeStream ? { writeStream: opts.writeStream } : {}),
+      ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+      ...(opts.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
+    } as CommandContext
 
     try {
       return await cmd.invoke(ctx)

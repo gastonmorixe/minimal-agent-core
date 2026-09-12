@@ -37,6 +37,16 @@ export interface ContextExceededRecoveryResult {
   notices: string[]
 }
 
+/** Live-output hooks forwarded to the auto-compact call (TUI only). */
+export interface ContextExceededCompactHooks {
+  /** Raw sink for the streamed local summary. */
+  writeStream?: (chunk: string) => void
+  /** Progress reporter for the streaming summary. */
+  onProgress?: (delta: { deltaTokens: number }) => void
+  /** Called at the start of each summary attempt (1-based). */
+  onSummaryAttempt?: (attempt: number) => void | Promise<void>
+}
+
 /**
  * Handle a turn failure that may be a context-window exceed.
  *
@@ -48,10 +58,15 @@ export interface ContextExceededRecoveryResult {
  * Does NOT call rollback itself when auto-compact succeeds (history is
  * rewritten wholesale). When auto-compact is skipped/fails, caller should
  * still rollbackPendingTurn as today.
+ *
+ * @param agent - Agent surface with the optional `compact` entry point.
+ * @param errMsg - Error message from the failed turn.
+ * @param hooks - Optional live-output sinks for the auto-compact stream.
  */
 export async function tryRecoverContextExceeded(
   agent: CompactableAgent,
   errMsg: string,
+  hooks: ContextExceededCompactHooks = {},
 ): Promise<ContextExceededRecoveryResult> {
   if (!parseContextLengthExceededError(errMsg)) {
     return { shouldRetry: false, retryText: null, notices: [] }
@@ -76,7 +91,12 @@ export async function tryRecoverContextExceeded(
   const pending = extractPendingUserText(msgs)
 
   try {
-    const stats = await agent.compact({ reason: "exceeded" })
+    const stats = await agent.compact({
+      reason: "exceeded",
+      ...(hooks.writeStream ? { writeStream: hooks.writeStream } : {}),
+      ...(hooks.onProgress ? { onProgress: hooks.onProgress } : {}),
+      ...(hooks.onSummaryAttempt ? { onSummaryAttempt: hooks.onSummaryAttempt } : {}),
+    })
     const notices = [
       `Auto-compacted context (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages.`,
     ]
