@@ -26,7 +26,7 @@ import { resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { getGlobalEventBus } from "../bus/global-bus.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
-import type { Message } from "../llm/messages.ts"
+import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
 import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from "../llm/provider.ts"
 import { run } from "../llm/run.ts"
@@ -90,19 +90,23 @@ export interface RunCompactInput {
    * only interim UX.
    */
   writeStream?: (chunk: string) => void
+  onSummaryAttempt?: (attempt: number) => void | Promise<void>
   /** Optional note sink (session JSONL). */
   appendNote?: (text: string) => void
   /**
-   * Optional durable compact checkpoint writer. When set, called after a
-   * successful rewrite with the post-compact messages so resume can fold
-   * model history from the checkpoint without deleting jsonl history.
+   * Optional durable compact checkpoint writer. Called with the candidate
+   * replacement BEFORE memory is mutated. A throw leaves live history
+   * unchanged.
    */
   appendCompact?: (rec: {
     reason: CompactReason
     compactKind: "remote" | "local"
     messagesBefore: number
     messagesAfter: number
-    replacementMessages: Array<{ role: "user" | "assistant" | "system"; content: string }>
+    replacementMessages: Array<{
+      role: "user" | "assistant" | "system"
+      content: string | ContentBlock[]
+    }>
   }) => void
 }
 
@@ -113,6 +117,25 @@ export interface RunCompactInput {
  * Throws on unknown `mode` strings. Throws RangeError on `keepTail` \< 0
  * (rejected, not clamped, so callers notice bad argv).
  */
+/**
+ * Compact the model-facing history. Returns stats. Throws only when both
+ * remote and local paths fail to produce a non-empty history.
+ *
+ * Throws on unknown `mode` strings. Throws RangeError on `keepTail` \< 0
+ * (rejected, not clamped, so callers notice bad argv).
+ */
+const compactLocks = new WeakSet<Message[]>()
+
+/**
+ * Run the compact pipeline for `input` and return the resulting stats.
+ *
+ * `compactLocks` serializes concurrent compacts that share one `messages`
+ * array (the persist step must not interleave with another compact's
+ * snapshot check).
+ *
+ * @param input - Mode, tail, focus, live-stream hooks, and the history.
+ * @returns Stats for the committed compact, including the checkpoint text.
+ */
 export async function runCompact(input: RunCompactInput): Promise<CompactStats> {
   const mode = input.mode as string | undefined
   const knownModes: readonly string[] = ["remote", "tail", "local", "fork"]
@@ -122,7 +145,21 @@ export async function runCompact(input: RunCompactInput): Promise<CompactStats> 
   if (input.keepTail !== undefined && input.keepTail < 0) {
     throw new RangeError(`runCompact: keepTail must be >= 0 (got ${input.keepTail})`)
   }
-  const messagesBefore = input.messages.length
+  if (compactLocks.has(input.messages)) {
+    throw new Error("compact aborted: compact already in progress")
+  }
+  compactLocks.add(input.messages)
+  try {
+    return await runCompactUnlocked(input)
+  } finally {
+    compactLocks.delete(input.messages)
+  }
+}
+
+async function runCompactUnlocked(input: RunCompactInput): Promise<CompactStats> {
+  const snapshot = input.messages.slice()
+  const contentLens = snapshot.map((m) => (Array.isArray(m.content) ? m.content.length : -1))
+  const messagesBefore = snapshot.length
   if (messagesBefore === 0) {
     return {
       reason: input.reason,
@@ -132,57 +169,104 @@ export async function runCompact(input: RunCompactInput): Promise<CompactStats> 
     }
   }
 
-  if (input.mode === "tail") return runTailCompact(input, messagesBefore)
+  if (input.mode === "tail") return runTailCompact(input, messagesBefore, snapshot, contentLens)
   if (input.mode === "fork") return runForkStub(input, messagesBefore)
-  if (input.mode === "local") return runLocalCompact(input, messagesBefore)
-  if (input.mode === "remote") return runRemoteCompact(input, messagesBefore)
+  if (input.mode === "local") return runLocalCompact(input, messagesBefore, snapshot, contentLens)
+  if (input.mode === "remote") return runRemoteCompact(input, messagesBefore, snapshot, contentLens)
 
   // Legacy path (no explicit mode): preferRemote !== false attempts remote
   // first with a stub fallback, else the local stub directly.
   if (input.preferRemote === false) {
-    return runLocalStub(input, messagesBefore)
+    return runLocalStub(input, messagesBefore, snapshot, contentLens)
   }
-  return runRemoteCompact(input, messagesBefore)
+  return runRemoteCompact(input, messagesBefore, snapshot, contentLens)
+}
+
+function historyUnchanged(live: Message[], snapshot: Message[], contentLens: number[]): boolean {
+  return (
+    live.length === snapshot.length &&
+    live.every((m, i) => m === snapshot[i]) &&
+    live.every((m, i) => (Array.isArray(m.content) ? m.content.length : -1) === contentLens[i])
+  )
 }
 
 function finish(
   input: RunCompactInput,
   stats: CompactStats,
   note: string,
-  writeCheckpoint: boolean,
+  candidate: Message[] | null,
+  snapshot: Message[],
+  contentLens: number[],
 ): CompactStats {
-  input.appendNote?.(note)
-  if (
-    input.appendCompact &&
-    writeCheckpoint &&
-    (stats.messagesAfter > 0 || stats.messagesBefore > 0)
-  ) {
-    input.appendCompact({
-      reason: stats.reason,
-      compactKind: stats.kind,
-      messagesBefore: stats.messagesBefore,
-      messagesAfter: stats.messagesAfter,
-      replacementMessages: input.messages.map(messageToPortableText),
-    })
+  if (candidate) {
+    if (!historyUnchanged(input.messages, snapshot, contentLens)) {
+      throw new Error("compact aborted: history changed during compact")
+    }
+    if (input.appendCompact && (stats.messagesAfter > 0 || stats.messagesBefore > 0)) {
+      input.appendCompact({
+        reason: stats.reason,
+        compactKind: stats.kind,
+        messagesBefore: stats.messagesBefore,
+        messagesAfter: stats.messagesAfter,
+        replacementMessages: candidate.map(messageToReplacement),
+      })
+    }
+    replaceMessagesInPlace(input.messages, candidate)
+    if (!stats.checkpointText) {
+      stats.checkpointText = checkpointTextFromMessages(candidate)
+    }
+  }
+  try {
+    input.appendNote?.(note)
+  } catch {
+    // Note is audit-only. Persist + memory already committed.
   }
   return stats
 }
 
+function checkpointTextFromMessages(msgs: Message[]): string | undefined {
+  const first = msgs[0]
+  if (!first) return undefined
+  if (typeof first.content === "string") return first.content
+  const text = first.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+  return text.length > 0 ? text : undefined
+}
+
+function messageToReplacement(m: Message): {
+  role: "user" | "assistant" | "system"
+  content: string | ContentBlock[]
+} {
+  return {
+    role: m.role,
+    content: typeof m.content === "string" ? m.content : structuredClone(m.content),
+  }
+}
+
 /** Tail-only rewrite: last N verbatim behind a checkpoint. No LLM call. */
-function runTailCompact(input: RunCompactInput, messagesBefore: number): CompactStats {
+function runTailCompact(
+  input: RunCompactInput,
+  messagesBefore: number,
+  snapshot: Message[],
+  contentLens: number[],
+): CompactStats {
   const keepTail = input.keepTail ?? DEFAULT_KEEP_TAIL
-  replaceMessagesInPlace(input.messages, buildTailCompactMessages(input.messages, keepTail))
+  const candidate = buildTailCompactMessages(snapshot, keepTail)
   const stats: CompactStats = {
     reason: input.reason,
     kind: "local",
     messagesBefore,
-    messagesAfter: input.messages.length,
+    messagesAfter: candidate.length,
   }
   return finish(
     input,
     stats,
     `compact: tail reason=${input.reason} keepTail=${keepTail} messages ${messagesBefore}→${stats.messagesAfter}`,
-    true,
+    candidate,
+    snapshot,
+    contentLens,
   )
 }
 
@@ -206,20 +290,21 @@ function runForkStub(input: RunCompactInput, messagesBefore: number): CompactSta
 function runLocalStub(
   input: RunCompactInput,
   messagesBefore: number,
+  snapshot: Message[],
+  contentLens: number[],
   remoteError?: string,
   summaryError?: string,
 ): CompactStats {
   const localMsgs = buildLocalCompactMessages({
-    previous: input.messages,
+    previous: snapshot,
     keepTail: input.keepTail,
     focus: input.focus,
   })
-  replaceMessagesInPlace(input.messages, localMsgs)
   const stats: CompactStats = {
     reason: input.reason,
     kind: "local",
     messagesBefore,
-    messagesAfter: input.messages.length,
+    messagesAfter: localMsgs.length,
     ...(remoteError ? { remoteError } : {}),
     ...(summaryError ? { summaryError } : {}),
   }
@@ -229,7 +314,9 @@ function runLocalStub(
     `compact: local reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter}` +
       (remoteError ? ` remoteError=${remoteError}` : "") +
       (summaryError ? ` summaryError=${summaryError}` : ""),
-    true,
+    localMsgs,
+    snapshot,
+    contentLens,
   )
 }
 
@@ -240,6 +327,8 @@ function runLocalStub(
 async function runLocalCompact(
   input: RunCompactInput,
   messagesBefore: number,
+  snapshot: Message[],
+  contentLens: number[],
 ): Promise<CompactStats> {
   let summaryText: string | undefined
   let summaryError: string | undefined
@@ -256,27 +345,28 @@ async function runLocalCompact(
     const cause =
       summaryError ?? (known ? "empty summary (no text)" : `unknown model "${input.model}"`)
     input.appendNote?.(`compact: local summary failed (${cause}); using stub`)
-    return runLocalStub(input, messagesBefore, undefined, cause)
+    return runLocalStub(input, messagesBefore, snapshot, contentLens, undefined, cause)
   }
   const localMsgs = buildLocalCompactMessages({
-    previous: input.messages,
+    previous: snapshot,
     summaryText,
     keepTail: input.keepTail,
     focus: input.focus,
   })
-  replaceMessagesInPlace(input.messages, localMsgs)
   const stats: CompactStats = {
     reason: input.reason,
     kind: "local",
     messagesBefore,
-    messagesAfter: input.messages.length,
+    messagesAfter: localMsgs.length,
     summaryText,
   }
   return finish(
     input,
     stats,
     `compact: local reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter} summaryChars=${summaryText.length}`,
-    true,
+    localMsgs,
+    snapshot,
+    contentLens,
   )
 }
 
@@ -284,6 +374,8 @@ async function runLocalCompact(
 async function runRemoteCompact(
   input: RunCompactInput,
   messagesBefore: number,
+  snapshot: Message[],
+  contentLens: number[],
 ): Promise<CompactStats> {
   let result: CompactResult | null = null
   let remoteError: string | undefined
@@ -305,20 +397,27 @@ async function runRemoteCompact(
   }
 
   if (!result) {
-    return runLocalStub(input, messagesBefore, remoteError)
+    return runLocalStub(input, messagesBefore, snapshot, contentLens, remoteError)
   }
-  replaceMessagesInPlace(input.messages, buildReplacementHistory(result.replacementMessages))
+  const next = buildReplacementHistory(result.replacementMessages)
   const stats: CompactStats = {
     reason: input.reason,
     kind: result.kind,
     messagesBefore,
-    messagesAfter: input.messages.length,
+    messagesAfter: next.length,
+    summaryText:
+      result.replacementMessages
+        .map((m) => (typeof m.content === "string" ? m.content : ""))
+        .join("\n")
+        .trim() || undefined,
   }
   return finish(
     input,
     stats,
     `compact: ${stats.kind} reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter}`,
-    true,
+    next,
+    snapshot,
+    contentLens,
   )
 }
 
@@ -350,12 +449,17 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
         content: [{ type: "text", text: flattenHistoryForSummary(input.messages) }],
       },
     ],
-    stream: false,
+    stream: true,
     system: [{ type: "text", text: buildLocalSummarySystemPrompt(input.focus) }],
   }
 
   let savedPartial = ""
   for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await input.onSummaryAttempt?.(attempt + 1)
+    } catch {
+      // UX-only
+    }
     let attemptText = ""
     try {
       for await (const ev of run(req, { context: ctx })) {
@@ -421,22 +525,9 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       throw err
     }
   }
-}
-
-function messageToPortableText(m: Message): {
-  role: "user" | "assistant" | "system"
-  content: string
-} {
-  return {
-    role: m.role as "user" | "assistant" | "system",
-    content:
-      typeof m.content === "string"
-        ? m.content
-        : m.content
-            .filter((b): b is { type: "text"; text: string } => b.type === "text")
-            .map((b) => b.text)
-            .join("\n"),
-  }
+  // Unreachable: both attempts exit above (return or throw). Kept explicit so
+  // the function has a consistent return.
+  return savedPartial.length > 0 ? savedPartial : undefined
 }
 
 /**

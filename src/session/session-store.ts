@@ -230,11 +230,12 @@ export interface CompactRecord {
   messagesAfter: number
   /**
    * Model-facing replacement history at the compact boundary.
-   * Portable text rows (same shape as ProviderAdapter.compact output).
+   * `content` is a string on older records and ContentBlock[] on current
+   * writes (tool_use / tool_result / media stay intact). Restore accepts both.
    */
   replacementMessages: Array<{
     role: "user" | "assistant" | "system"
-    content: string
+    content: string | ContentBlock[]
   }>
   /** Optional encrypted remote compaction payload (OpenAI/Codex). */
   encryptedContent?: string

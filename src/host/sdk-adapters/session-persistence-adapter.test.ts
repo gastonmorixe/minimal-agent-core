@@ -80,6 +80,27 @@ describe("SessionPersistenceAdapter", () => {
     expect(records().filter((r) => r.kind === "tool_result").length).toBe(0)
   })
 
+  it("delegates appendCompact to the store", () => {
+    const adapter = new SessionPersistenceAdapter(store)
+    adapter.appendCompact({
+      reason: "manual",
+      compactKind: "local",
+      messagesBefore: 4,
+      messagesAfter: 2,
+      replacementMessages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "checkpoint" }],
+        },
+      ],
+    })
+    const rec = records().find((r) => r.kind === "compact")
+    expect(rec?.compactKind).toBe("local")
+    expect(rec?.replacementMessages).toEqual([
+      { role: "user", content: [{ type: "text", text: "checkpoint" }] },
+    ])
+  })
+
   it("delegates appendNote and appendRewind", () => {
     const adapter = new SessionPersistenceAdapter(store)
     adapter.appendNote("a marker")

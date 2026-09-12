@@ -49,6 +49,9 @@ export async function agentCompact(
     ...(opts?.mode ? { mode: opts.mode } : {}),
     ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
     ...(opts?.focus ? { focus: opts.focus } : {}),
+    ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
+    ...(opts?.writeStream ? { writeStream: opts.writeStream } : {}),
+    ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
     appendNote: (t) => agent.appendNote(t),
     appendCompact: (r) => agent.store?.appendCompact(r),
   })

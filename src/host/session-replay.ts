@@ -23,6 +23,7 @@
 import { isRuntimeAttachmentBlock } from "../agent/runtime-attachments.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import type { ModeManager } from "../modes/modes.ts"
+import type { CompactDisplayBoundary } from "../session/session-restore.ts"
 import type { SessionRecord } from "../session/session-store.ts"
 import type { ToolTimeTracker } from "../tools/tool-time.ts"
 import {
@@ -31,8 +32,11 @@ import {
   submittedAtEnabled,
 } from "../ui/scrollback-submitted-at.ts"
 
+import { buildCompactNoticeBlock } from "./commands/compact.ts"
+import { formatMarkdownLines } from "./commands/compact-stream.ts"
 import { deriveDisplayFallback, type ReplaySidecarTask } from "./session-replay-derivers.ts"
 import { buildModeChangeChip, type ChipRenderInput } from "./ui/chrome/mode-change-chip.ts"
+import { renderCommandNoticeBlock } from "./ui/command-notice.ts"
 import { resolveFileLanguage } from "./ui/formatter/file-language.ts"
 import { Formatter } from "./ui/formatter/formatter.ts"
 import type { CodeHighlighter } from "./ui/formatter/mdstream-code-highlighter.ts"
@@ -164,6 +168,11 @@ export interface ReplayOptions {
    * to orange, matching the live agent.
    */
   toolPresentation?: Map<string, ToolPresentation> | null
+  /**
+   * Compact checkpoints to paint at their original display-fold positions.
+   * Not injected into model history.
+   */
+  compactBoundaries?: readonly CompactDisplayBoundary[]
 }
 
 /**
@@ -230,6 +239,38 @@ export async function replayToScrollback(
   const showSubmittedAt = submittedAtEnabled(opts.scrollbackSubmittedAt)
   const toolDisplays = opts.toolDisplays ?? null
   const toolPresentation = opts.toolPresentation ?? null
+  const compactBoundaries = opts.compactBoundaries ?? []
+  const emitCompactAt = async (index: number): Promise<void> => {
+    for (const b of compactBoundaries) {
+      if (b.afterMessageIndex !== index) continue
+      const rec = b.record
+      const first = rec.replacementMessages[0]
+      const checkpoint =
+        first === undefined
+          ? undefined
+          : typeof first.content === "string"
+            ? first.content
+            : first.content
+                .filter((blk): blk is { type: "text"; text: string } => blk.type === "text")
+                .map((blk) => blk.text)
+                .join("\n")
+      let block = buildCompactNoticeBlock(
+        {
+          reason: rec.reason,
+          kind: rec.compactKind,
+          messagesBefore: rec.messagesBefore,
+          messagesAfter: rec.messagesAfter,
+          checkpointText: checkpoint,
+        },
+        { mode: rec.compactKind, keepTail: 0 },
+      )
+      const md = block.body?.join("\n") ?? ""
+      const formatted = await formatMarkdownLines(md, formatterCmd)
+      if (formatted) block = { ...block, body: formatted }
+      const lines = renderCommandNoticeBlock(block)
+      sink.write(`\n${lines.join("\n")}\n\n`)
+    }
+  }
 
   /**
    * Emit a mode-change chip to the sink for the given transition. Uses
@@ -290,6 +331,7 @@ export async function replayToScrollback(
   }
 
   for (let i = 0; i < messages.length; i++) {
+    await emitCompactAt(i)
     const msg = messages[i]
     const msgTs = userTimestamps?.[i] ?? null
     if (msg.role === "user") {
@@ -487,6 +529,7 @@ export async function replayToScrollback(
     }
     if (wroteAnyText) sink.write("\n")
   }
+  await emitCompactAt(messages.length)
 }
 
 /**

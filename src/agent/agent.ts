@@ -1864,10 +1864,9 @@ export class Agent {
   }
 
   /** Compact via `runCompact` (remote prefer, local fallback + durable record). */
-  async compact(opts?: {
-    reason?: "manual" | "auto" | "exceeded"
-    preferRemote?: boolean
-  }): Promise<import("./context-compact.ts").CompactStats> {
+  async compact(
+    opts?: import("./context-compact.ts").CompactRequestOpts,
+  ): Promise<import("./context-compact.ts").CompactStats> {
     const { compactWithLifecycle } = await import("../sdk/lifecycle-compact.ts")
     return compactWithLifecycle({
       messages: this.messages,
@@ -1879,6 +1878,12 @@ export class Agent {
       lifecycle: this.lifecycle,
       reason: opts?.reason,
       preferRemote: opts?.preferRemote,
+      ...(opts?.mode ? { mode: opts.mode } : {}),
+      ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
+      ...(opts?.focus ? { focus: opts.focus } : {}),
+      ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
+      ...(opts?.writeStream ? { writeStream: opts.writeStream } : {}),
+      ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
       appendNote: (text) => this.appendNote(text),
       appendCompact: (rec) => this.store?.appendCompact(rec),
     })

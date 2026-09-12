@@ -30,6 +30,13 @@ import {
 } from "../ui/scrollback-submitted-at.ts"
 
 import { type AskUserHostEditor, createAskUserHost } from "./ask-user-host.ts"
+import {
+  type CompactStreamDeps,
+  createCompactStream,
+  endQuietly,
+  startCompactFallback,
+} from "./commands/compact-submit.ts"
+import { dispatchCommandAndApply as dispatchCommandSubmit } from "./commands/dispatch-submit.ts"
 import { tryRecoverContextExceeded } from "./context-exceeded-recovery.ts"
 import type { QueueKeyHandler } from "./editor/types.ts"
 import { parseContextLengthExceededError } from "./model-error.ts"
@@ -583,6 +590,17 @@ export async function runReplLiveArea(
     compositor.writeStream(`\n\n${lines.join("\n")}\n`)
   }
 
+  /** Formatter geometry + raw byte sink for `/compact` live output. */
+  const compactRenderDeps: CompactStreamDeps = {
+    formatterCmd: opts.formatterCmd,
+    columns: () => opts.output?.columns,
+    rows: opts.output?.rows,
+    writeStream:
+      typeof compositor.writeStream === "function"
+        ? (chunk: string) => compositor.writeStream(chunk)
+        : undefined,
+  }
+
   /** The live terminal width, for width-aware renderers (e.g. notice wrapping). */
   const liveCols = (): number | undefined => opts.output?.columns ?? process.stdout.columns
 
@@ -662,46 +680,25 @@ export async function runReplLiveArea(
     text: string,
     commitLines: string[],
     submittedAt?: Date,
-  ): Promise<void> => {
-    if (!loader) return
-    const submittedAtIso = (submittedAt ?? new Date()).toISOString()
-    flushQueueItemToScrollback({ text, commitLines, submittedAt: submittedAtIso })
-    let result: Awaited<ReturnType<typeof loader.dispatchCommand>>
-    try {
-      result = await loader.dispatchCommand(text, { cwd: process.cwd() })
-    } catch (e) {
-      writeNoticeLines([`✗ command failed: ${e instanceof Error ? e.message : String(e)}`])
-      return
-    }
-    if (!result) {
-      enqueuePrompt(text, commitLines, submittedAt)
-      return
-    }
-    switch (result.kind) {
-      case "expand":
-        // The typed `/cmd` line is already in scrollback; the expanded
-        // prompt drives the turn with no extra commit lines.
-        enqueuePrompt(result.prompt, [])
-        if (parseCommandLine(text)?.name === "history-edit") {
-          loader.bus().emit("history.edit.expanded", { prompt: result.prompt })
-        }
-        break
-      case "notice":
-        writeNoticeLines([
-          ...(result.block ? renderCommandNoticeBlock(result.block, liveCols()) : []),
-          ...(result.lines ?? []),
-        ])
-        break
-      case "error":
-        writeNoticeLines([`✗ ${result.message}`])
-        break
-      case "none":
-        break
-      default: {
-        throw new Error(`unhandled command result: ${JSON.stringify(result satisfies never)}`)
-      }
-    }
-  }
+  ): Promise<void> =>
+    dispatchCommandSubmit(
+      {
+        loader,
+        writeNoticeLines,
+        liveCols,
+        enqueuePrompt,
+        flushCommandLine: (line: string, lines: string[], at: Date) =>
+          flushQueueItemToScrollback({
+            text: line,
+            commitLines: lines,
+            submittedAt: at.toISOString(),
+          }),
+        compactStream: compactRenderDeps,
+      },
+      text,
+      commitLines,
+      submittedAt,
+    )
 
   const onSubmit = (text: string, commitLines: string[] = [], submittedAt?: Date): void => {
     if (!text.trim()) return
@@ -718,17 +715,11 @@ export async function runReplLiveArea(
       ) {
         const submittedAtIso = (submittedAt ?? new Date()).toISOString()
         flushQueueItemToScrollback({ text, commitLines, submittedAt: submittedAtIso })
-        void (async () => {
-          try {
-            writeNoticeLines(["Compacting context…"])
-            const stats = await agent.compact!({ reason: "manual" })
-            writeNoticeLines([
-              `✓ compact (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages`,
-            ])
-          } catch (e) {
-            writeNoticeLines([`✗ compact failed: ${e instanceof Error ? e.message : String(e)}`])
-          }
-        })()
+        startCompactFallback(parsed.argv, {
+          compact: (opts) => agent.compact!(opts),
+          writeNoticeLines,
+          ...compactRenderDeps,
+        })
         return
       }
       if (
@@ -1419,7 +1410,14 @@ export async function runReplLiveArea(
         }
         let recovered = false
         if (parseContextLengthExceededError(msg)) {
-          const recovery = await tryRecoverContextExceeded(agent, msg)
+          // Same live stream as `/compact`: a local auto-summary streams into
+          // the live area instead of a silent pause.
+          const autoStream = createCompactStream(compactRenderDeps)
+          const recovery = await tryRecoverContextExceeded(agent, msg, {
+            ...(autoStream
+              ? { writeStream: autoStream.write, onSummaryAttempt: autoStream.onAttempt }
+              : {}),
+          }).finally(() => endQuietly(autoStream))
           for (const line of recovery.notices) {
             compositor.writeStream(`  ${c.boldYellow("!")} ${c.yellow(line)}\n`)
           }

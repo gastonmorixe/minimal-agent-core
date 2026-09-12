@@ -79,4 +79,9 @@ export class SessionPersistenceAdapter implements SessionPersistence {
   appendRewind(toMsgId: string, droppedCount: number): void {
     this.store.appendRewind(toMsgId, droppedCount)
   }
+
+  /** Append a durable compact checkpoint. Required for AgentCore resume folds. */
+  appendCompact(rec: Parameters<NonNullable<SessionPersistence["appendCompact"]>>[0]): void {
+    this.store.appendCompact(rec)
+  }
 }
