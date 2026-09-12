@@ -12,12 +12,13 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../auth/auth-store.ts"
+import type { CanonicalEvent } from "../llm/canonical-events.ts"
 import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import type { ProviderAuth } from "../llm/provider.ts"
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
-import { registerTestProvider } from "../llm/test-fixtures.ts"
-import type { NetworkClient } from "../network/index.ts"
+import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
+import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
 
 import { agentCompact, type CompactableAgent } from "./agent-compact-methods.ts"
 import { COMPACTION_USER_MARKER, type CompactStats } from "./context-compact.ts"
@@ -250,5 +251,220 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     expect(stats.kind).toBe("local")
     const withErr: CompactStats = stats
     expect(withErr.summaryError).toContain("boom-summary")
+  })
+})
+
+describe("runCompact local summary retryable stream_error (fail-first)", () => {
+  beforeEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+  })
+
+  afterEach(() => {
+    clearModelRegistry()
+    clearProviderRegistry()
+    clearProviderPlugins()
+  })
+
+  function hist(): Message[] {
+    const messages: Message[] = []
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: "user", content: `u${i}` })
+      messages.push({ role: "assistant", content: `a${i}` })
+    }
+    return messages
+  }
+
+  function sseResponse(events: CanonicalEvent[]): NetworkResponse {
+    return new NetworkResponse({
+      status: 200,
+      headers: { "content-type": "text/event-stream", "request-id": "req_compact_retry" },
+      transport: { id: "fake", protocol: "h2" },
+      body: sseBodyFromEvents(events),
+    })
+  }
+
+  function summaryEvents(text: string): CanonicalEvent[] {
+    return [
+      {
+        type: "message_start",
+        messageId: "msg_compact_summary",
+        modelId: "compact-retry-model",
+        initialUsage: { inputTokens: 1, outputTokens: 0 },
+      },
+      { type: "text_start", index: 0 },
+      { type: "text_delta", index: 0, text },
+      { type: "text_stop", index: 0 },
+      {
+        type: "message_delta",
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      { type: "message_stop" },
+    ]
+  }
+
+  it("FAIL-FIRST: retryable stream_error after partial text salvages summary or retries", async () => {
+    registerTestProvider({
+      id: "compact-retry-prov",
+      displayName: "Compact Retry Prov",
+      shortCode: "crp",
+      models: [{ id: "compact-retry-model" }],
+    })
+    let calls = 0
+    const transport: NetworkTransport = {
+      id: "fake",
+      request: async () => {
+        calls += 1
+        if (calls === 1) {
+          return sseResponse([
+            {
+              type: "message_start",
+              messageId: "msg_compact_partial",
+              modelId: "compact-retry-model",
+              initialUsage: { inputTokens: 1, outputTokens: 0 },
+            },
+            { type: "text_start", index: 0 },
+            { type: "text_delta", index: 0, text: "partial-summary-text" },
+            {
+              type: "stream_error",
+              retryable: true,
+              category: "api",
+              upstreamType: "stream_closed_without_terminal",
+              cause: new Error("flaky mid-stream"),
+            },
+          ])
+        }
+        return sseResponse(summaryEvents("recovered-summary-text"))
+      },
+    }
+    const client = new NetworkClient({ primary: transport })
+    const messages = hist()
+    const stats = await runCompact({
+      messages,
+      model: "compact-retry-model",
+      providerId: "compact-retry-prov",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      networkClient: client,
+    })
+    expect(stats.kind).toBe("local")
+    expect(stats.summaryError).toBeUndefined()
+    expect(stats.summaryText ?? "").toContain("recovered-summary-text")
+    expect(calls).toBe(2)
+  })
+
+  it("non-retryable stream_error does no retry", async () => {
+    registerTestProvider({
+      id: "compact-nonretry-prov",
+      displayName: "Compact Nonretry Prov",
+      shortCode: "cnp",
+      models: [{ id: "compact-nonretry-model" }],
+    })
+    let calls = 0
+    const transport: NetworkTransport = {
+      id: "fake",
+      request: async () => {
+        calls += 1
+        return sseResponse([
+          {
+            type: "message_start",
+            messageId: "msg_compact_nonretry",
+            modelId: "compact-nonretry-model",
+            initialUsage: { inputTokens: 1, outputTokens: 0 },
+          },
+          { type: "text_start", index: 0 },
+          { type: "text_delta", index: 0, text: "doomed-partial-text" },
+          {
+            type: "stream_error",
+            retryable: false,
+            category: "api",
+            upstreamType: "stream_closed_without_terminal",
+            cause: new Error("hard failure"),
+          },
+        ])
+      },
+    }
+    const client = new NetworkClient({ primary: transport })
+    const messages = hist()
+    const stats = await runCompact({
+      messages,
+      model: "compact-nonretry-model",
+      providerId: "compact-nonretry-prov",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      networkClient: client,
+    })
+    expect(stats.kind).toBe("local")
+    expect(stats.summaryError).toBeDefined()
+    expect(calls).toBe(1)
+  })
+
+  it("double retryable failure salvages first partial", async () => {
+    registerTestProvider({
+      id: "compact-salvage-prov",
+      displayName: "Compact Salvage Prov",
+      shortCode: "csp",
+      models: [{ id: "compact-salvage-model" }],
+    })
+    let calls = 0
+    const transport: NetworkTransport = {
+      id: "fake",
+      request: async () => {
+        calls += 1
+        if (calls === 1) {
+          return sseResponse([
+            {
+              type: "message_start",
+              messageId: "msg_compact_salvage_partial",
+              modelId: "compact-salvage-model",
+              initialUsage: { inputTokens: 1, outputTokens: 0 },
+            },
+            { type: "text_start", index: 0 },
+            { type: "text_delta", index: 0, text: "first-partial-text" },
+            {
+              type: "stream_error",
+              retryable: true,
+              category: "api",
+              upstreamType: "stream_closed_without_terminal",
+              cause: new Error("flaky first"),
+            },
+          ])
+        }
+        return sseResponse([
+          {
+            type: "message_start",
+            messageId: "msg_compact_salvage_retry",
+            modelId: "compact-salvage-model",
+            initialUsage: { inputTokens: 1, outputTokens: 0 },
+          },
+          {
+            type: "stream_error",
+            retryable: true,
+            category: "api",
+            upstreamType: "stream_closed_without_terminal",
+            cause: new Error("flaky second"),
+          },
+        ])
+      },
+    }
+    const client = new NetworkClient({ primary: transport })
+    const messages = hist()
+    const stats = await runCompact({
+      messages,
+      model: "compact-salvage-model",
+      providerId: "compact-salvage-prov",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      networkClient: client,
+    })
+    expect(stats.kind).toBe("local")
+    expect(stats.summaryError).toBeUndefined()
+    expect(stats.summaryText ?? "").toContain("first-partial-text")
+    expect(calls).toBe(2)
   })
 })

@@ -354,45 +354,73 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
     system: [{ type: "text", text: buildLocalSummarySystemPrompt(input.focus) }],
   }
 
-  let text = ""
-  for await (const ev of run(req, { context: ctx })) {
-    if (ev.type === "text_delta") {
-      text += ev.text
-      const deltaTokens = Math.max(1, Math.round(ev.text.length / 4))
-      try {
-        input.onProgress?.({ deltaTokens })
-      } catch {
-        // UX-only sink: never fail compact.
+  let savedPartial = ""
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let attemptText = ""
+    try {
+      for await (const ev of run(req, { context: ctx })) {
+        if (ev.type === "text_delta") {
+          attemptText += ev.text
+          const deltaTokens = Math.max(1, Math.round(ev.text.length / 4))
+          try {
+            input.onProgress?.({ deltaTokens })
+          } catch {
+            // UX-only sink: never fail compact.
+          }
+          try {
+            input.writeStream?.(ev.text)
+          } catch {
+            // UX-only sink: never fail compact.
+          }
+          try {
+            getGlobalEventBus()?.emit(LLM_OUTPUT_DELTA, { deltaTokens })
+          } catch {
+            // Bus emit is best-effort telemetry.
+          }
+        } else if (ev.type === "stream_error") {
+          const causeMsg =
+            ev.cause instanceof Error
+              ? ev.cause.message
+              : ev.cause !== undefined
+                ? String(ev.cause)
+                : ""
+          const err = new Error(
+            `local summary stream error (retryable=${ev.retryable})${causeMsg ? `: ${causeMsg}` : ""}`,
+          )
+          ;(err as { retryable?: boolean }).retryable = ev.retryable
+          throw err
+        }
       }
       try {
-        input.writeStream?.(ev.text)
-      } catch {
-        // UX-only sink: never fail compact.
-      }
-      try {
-        getGlobalEventBus()?.emit(LLM_OUTPUT_DELTA, { deltaTokens })
+        emitOutputEnd("stream_end")
       } catch {
         // Bus emit is best-effort telemetry.
       }
-    } else if (ev.type === "stream_error") {
-      const causeMsg =
-        ev.cause instanceof Error
-          ? ev.cause.message
-          : ev.cause !== undefined
-            ? String(ev.cause)
-            : ""
-      throw new Error(
-        `local summary stream error (retryable=${ev.retryable})${causeMsg ? `: ${causeMsg}` : ""}`,
-      )
+      const trimmed = attemptText.trim()
+      return trimmed.length > 0 ? trimmed : undefined
+    } catch (err) {
+      const retryable = (err as { retryable?: boolean } | null)?.retryable === true
+      // Retryable mid-stream failure: save this attempt's partial text, then
+      // retry once with a clean buffer so success returns retry text only.
+      // A second failure salvages the latest partial (else the first) instead
+      // of dropping to an empty stub.
+      const partial = attemptText.trim()
+      if (partial.length > 0) savedPartial = partial
+      if (retryable && attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        continue
+      }
+      if (retryable && savedPartial.length > 0) {
+        try {
+          emitOutputEnd("stream_end")
+        } catch {
+          // Bus emit is best-effort telemetry.
+        }
+        return savedPartial
+      }
+      throw err
     }
   }
-  try {
-    emitOutputEnd("stream_end")
-  } catch {
-    // Bus emit is best-effort telemetry.
-  }
-  const trimmed = text.trim()
-  return trimmed.length > 0 ? trimmed : undefined
 }
 
 function messageToPortableText(m: Message): {
