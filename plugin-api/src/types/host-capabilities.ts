@@ -50,6 +50,7 @@ export type CapabilityToken =
   | "session-info:read"
   | "llm:complete"
   | "usage:read"
+  | "context:compact"
   | "paths"
   | "transport:registry"
   | "clock"
@@ -496,6 +497,31 @@ export interface UsageReadApi {
 }
 
 // ---------------------------------------------------------------------------
+// context:compact — queue-only compact request (parity with host)
+// ---------------------------------------------------------------------------
+
+/** Queue options for {@link ContextCompactApi.requestCompact}. */
+export interface RequestCompactOpts {
+  readonly reason?: string
+  readonly mode?: string
+  readonly keepTail?: number
+  readonly focus?: string
+}
+
+/** Result of a queue request. Queue semantic only, never compacts inline. */
+export interface RequestCompactResult {
+  readonly queued: boolean
+}
+
+/**
+ * `context:compact` — queue-only compact request. The plugin asks, the
+ * agent loop drains between tool rounds via the existing compact path.
+ */
+export interface ContextCompactApi {
+  requestCompact(opts?: RequestCompactOpts): RequestCompactResult | Promise<RequestCompactResult>
+}
+
+// ---------------------------------------------------------------------------
 // transport:registry — host-brokered transport injection seam
 // ---------------------------------------------------------------------------
 
@@ -550,6 +576,7 @@ export interface PluginHost {
   readonly sessionInfo?: SessionInfoReadApi
   readonly llm?: LlmCompleteApi
   readonly usage?: UsageReadApi
+  readonly compact?: ContextCompactApi
   readonly paths?: PathsApi
   /**
    * `transport:registry` — host-brokered remote-transport injection seam (see
