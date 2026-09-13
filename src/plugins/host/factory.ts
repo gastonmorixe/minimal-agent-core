@@ -40,6 +40,7 @@ import { getSessionTokens } from "../../session/session-tokens.ts"
 
 import type { CapabilityToken, PluginHost } from "./capabilities.ts"
 import { createBlobsReadApi } from "./providers/blobs-read.ts"
+import { createContextCompactApi } from "./providers/context-compact.ts"
 import { createSessionsReadApi } from "./providers/sessions-read.ts"
 import { createSessionsWriteApi, type HistoryEditCommitNotice } from "./providers/sessions-write.ts"
 import { createTransportRegistryApi } from "./transport-registry.ts"
@@ -219,6 +220,7 @@ export function buildPluginHost(opts: BuildHostOptions): PluginHost {
           }),
         }
       : {}),
+    ...(has("context:compact") ? { compact: Object.freeze(createContextCompactApi()) } : {}),
     ...(has("transport:registry")
       ? { transportRegistry: Object.freeze(createTransportRegistryApi()) }
       : {}),

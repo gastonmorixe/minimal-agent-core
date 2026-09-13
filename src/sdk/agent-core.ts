@@ -511,6 +511,27 @@ export class AgentCore {
         this.emit({ type: "error", message: "aborted" })
         throw Object.assign(new Error("aborted"), { name: "AbortError" })
       }
+      // Drain a queued `context:compact` plugin request between rounds.
+      // Queue-only: never compacts mid-turn, runs the existing path here.
+      const { takePendingCompact } = await import("../plugins/host/providers/context-compact.ts")
+      const pendingCompact = takePendingCompact()
+      if (pendingCompact !== null) {
+        await this.compact({
+          ...(pendingCompact.reason === "manual" ||
+          pendingCompact.reason === "auto" ||
+          pendingCompact.reason === "exceeded"
+            ? { reason: pendingCompact.reason }
+            : {}),
+          ...(pendingCompact.mode === "remote" ||
+          pendingCompact.mode === "tail" ||
+          pendingCompact.mode === "local" ||
+          pendingCompact.mode === "fork"
+            ? { mode: pendingCompact.mode }
+            : {}),
+          ...(pendingCompact.keepTail !== undefined ? { keepTail: pendingCompact.keepTail } : {}),
+          ...(pendingCompact.focus ? { focus: pendingCompact.focus } : {}),
+        })
+      }
       rounds++
       // A new assistant turn (one model response) begins. `turn` is the
       // monotonic round index per the frozen event contract.
