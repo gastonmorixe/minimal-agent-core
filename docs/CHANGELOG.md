@@ -83,6 +83,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Fixed
 
+- 2026-09-15 (this session): system-prompt resolution is scoped to the
+  selected provider. Bare model ids claimed by several providers (e.g.
+  `claude-opus-5` by anthropic and opencode-zen) used the global
+  last-write-wins entry, so the wrong plugin hook ran and the Anthropic
+  billing preamble never shipped. OAuth then got a bare 429. Fix threads
+  `providerId` through `resolveSystemPromptForModel` (agent, agent-core,
+  startup hashes) with global fallback. Coverage in `system-prompt.test.ts`.
+
 - 2026-09-02 (this session): Write accepts Cursor-shaped alias `contents` for
   `content` and rejects a missing or non-string body with a field error instead
   of `Bun.write(...): expects a Blob-y thing to write`. Empty `content` still
