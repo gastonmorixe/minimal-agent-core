@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
 import { clearFooterTails, setFooterTail } from "@minimal-agent/plugin-api/utils/footer-tail"
+import { displayWidth } from "@minimal-agent/plugin-api/utils/term-width"
 
 import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
 import { LiveAreaScheduler } from "./live-area-scheduler.ts"
@@ -297,6 +298,71 @@ describe("LiveAreaScheduler — suffix + tails coexistence", () => {
     // the standard two-space gap.
     expect(sink.footerCalls.at(-1)).toEqual(["quota line  · ♻ sk-lsp  42/tps"])
     sched.stop()
+  })
+})
+
+describe("LiveAreaScheduler — tail width budget", () => {
+  it("REGRESSION: carrier at exactly cols keeps the tail intact", async () => {
+    const prev = process.env.COLUMNS
+    process.env.COLUMNS = "40"
+    try {
+      // Budget is cols-1 = 39. Carrier of 33 + gap 2 + tail 6 = 41 overflows,
+      // so the carrier truncates and the tail survives verbatim.
+      const carrier = "x".repeat(33)
+      const slot = makeSlot({
+        id: "f",
+        position: "footer",
+        refreshMs: 1_000,
+        invoke: async () => carrier,
+      })
+      const clock = new FakeClock()
+      const sink = makeSink()
+      const sched = new LiveAreaScheduler([slot], sink, {
+        setTimeout: clock.setTimeout,
+        clearTimeout: clock.clearTimeout,
+        logger: () => {},
+      })
+      setFooterTail("tps", "28/tps")
+      sched.start()
+      await clock.tick(0)
+      const line = sink.footerCalls.at(-1)![0]!
+      expect(line.endsWith("28/tps")).toBe(true)
+      expect(displayWidth(line)).toBeLessThanOrEqual(39)
+      sched.stop()
+    } finally {
+      if (prev === undefined) delete process.env.COLUMNS
+      else process.env.COLUMNS = prev
+    }
+  })
+
+  it("REGRESSION: tail-only fallback when the carrier leaves no room", async () => {
+    const prev = process.env.COLUMNS
+    process.env.COLUMNS = "10"
+    try {
+      const slot = makeSlot({
+        id: "f",
+        position: "footer",
+        refreshMs: 1_000,
+        invoke: async () => "x".repeat(30),
+      })
+      const clock = new FakeClock()
+      const sink = makeSink()
+      const sched = new LiveAreaScheduler([slot], sink, {
+        setTimeout: clock.setTimeout,
+        clearTimeout: clock.clearTimeout,
+        logger: () => {},
+      })
+      setFooterTail("tps", "28/tps")
+      sched.start()
+      await clock.tick(0)
+      const line = sink.footerCalls.at(-1)![0]!
+      expect(line).toContain("28/tps")
+      expect(displayWidth(line)).toBeLessThanOrEqual(9)
+      sched.stop()
+    } finally {
+      if (prev === undefined) delete process.env.COLUMNS
+      else process.env.COLUMNS = prev
+    }
   })
 })
 

@@ -23,7 +23,7 @@ import {
   setDecorationSuffix,
 } from "@minimal-agent/plugin-api/utils/decoration-suffix"
 import { getFooterTails, setFooterTail } from "@minimal-agent/plugin-api/utils/footer-tail"
-import { displayWidth } from "@minimal-agent/plugin-api/utils/term-width"
+import { displayWidth, truncateDisplayWidth } from "@minimal-agent/plugin-api/utils/term-width"
 
 import {
   createPluginLogger,
@@ -591,7 +591,26 @@ export class LiveAreaScheduler {
     const tails = getFooterTails()
     if (tails && modified.length > 0) {
       const last = modified.length - 1
-      modified[last] = `${modified[last]!}  ${tails}`
+      const envCols = Number(process.env.COLUMNS)
+      const stdoutCols = typeof process.stdout?.columns === "number" ? process.stdout.columns : NaN
+      const cols = Number.isFinite(envCols) && envCols > 0 ? envCols : stdoutCols
+      if (!Number.isFinite(cols) || cols <= 0) {
+        modified[last] = `${modified[last]!}  ${tails}`
+      } else {
+        const budget = cols > 1 ? cols - 1 : cols
+        const base = modified[last]!
+        const baseW = displayWidth(base)
+        const tailsW = displayWidth(tails)
+        if (baseW + 2 + tailsW <= budget) {
+          modified[last] = `${base}  ${tails}`
+        } else {
+          const allowedBase = budget - 2 - tailsW
+          modified[last] =
+            allowedBase <= 0
+              ? truncateDisplayWidth(tails, budget)
+              : `${truncateDisplayWidth(base, allowedBase)}  ${tails}`
+        }
+      }
     }
     if (
       modified.length === this.lastFooter.length &&
