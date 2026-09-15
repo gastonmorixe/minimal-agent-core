@@ -107,6 +107,37 @@ describe("resolveSystemPromptForModel", () => {
       scope: "global",
     })
   })
+
+  it("uses the provider-scoped entry when a bare id is claimed by two providers", () => {
+    registerFakeModel("shared-model", "rightprov")
+    registerFakeModel("shared-model", "wrongprov")
+    const seen: SystemPromptContext[] = []
+    registerProviderPlugin({
+      id: "rightprov",
+      displayName: "Right",
+      shortCode: "rp",
+      register() {},
+      resolveSystemPrompt(ctx) {
+        seen.push(ctx)
+        return [{ type: "text", text: "RIGHT-PREAMBLE" }, ...ctx.body]
+      },
+    })
+    registerProviderPlugin({
+      id: "wrongprov",
+      displayName: "Wrong",
+      shortCode: "wp",
+      register() {},
+      resolveSystemPrompt(ctx) {
+        return [{ type: "text", text: "WRONG-PREAMBLE" }, ...ctx.body]
+      },
+    })
+    const out = resolveSystemPromptForModel("shared-model", {
+      authKind: "oauth",
+      providerId: "rightprov",
+    })
+    expect(out[0].text).toBe("RIGHT-PREAMBLE")
+    expect(seen[0].modelId).toBe("shared-model")
+  })
 })
 
 describe("buildAgentSystemBody cache TTL", () => {

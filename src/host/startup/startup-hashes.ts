@@ -34,6 +34,8 @@ export interface ComputeStartupHashesInput {
   readonly toolNamePolicy?: ToolNamePolicy
   /** Normalized selected model id (no `[1m]`/`[2m]` suffix). */
   readonly selectedModelBase: string
+  /** Provider selected at boot, for provider-scoped prompt resolution. */
+  readonly selectedProviderId?: string
   /** Resolved startup auth (its `type` folds into the system prompt hash). */
   readonly auth: AuthResult
   /** Resolved cache TTL bucket. */
@@ -62,6 +64,7 @@ export async function computeStartupHashes(
     modeManager,
     toolNamePolicy = null,
     selectedModelBase,
+    selectedProviderId,
     auth,
     cacheTtl,
     systemPromptOverrides,
@@ -118,6 +121,7 @@ export async function computeStartupHashes(
           maxToolRounds: Number.POSITIVE_INFINITY,
           blobStoreEnabled,
           authKind: auth.type === "provider" ? auth.auth.kind : auth.type,
+          ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
           cacheTtl,
           overrides: systemPromptOverrides,
         }),

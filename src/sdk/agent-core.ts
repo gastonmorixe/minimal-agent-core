@@ -485,6 +485,7 @@ export class AgentCore {
       maxToolRounds: this.maxToolRounds,
       blobStoreEnabled: false,
       cacheTtl: this.cacheTtl,
+      ...(this.providerId ? { providerId: this.providerId } : {}),
       overrides: this.systemPromptOverrides,
     })
 
