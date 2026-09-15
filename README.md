@@ -56,30 +56,25 @@ The shared contract both sides depend on lives in a leaf package, `@minimal-agen
   first run.
 - Optional: a `BRAVE_API_KEY` (or any provider key) for the plugins that need one.
 
-## Install & run
+## Install and run
 
-There is no build step and no runtime npm install. The agent runs TypeScript
-from source on Bun. The one-liner clones the tree and puts `minimal-agent`
-and `ma` on PATH (`~/.minimal-agent/bin` plus `~/.local/bin`). First
-interactive launch then signs in, fetches `mdstream`, and clones the plugins
-repo.
+You need Bun 1.4.2 or newer. There is no build step. The agent runs
+TypeScript source directly on Bun.
+
+Fastest path:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gastonmorixe/minimal-agent-core/main/scripts/install.sh | bash
 ```
 
-Private clone (token never lands in argv):
+The script clones the source and puts `minimal-agent` and `ma` on PATH
+(`~/.minimal-agent/bin` plus `~/.local/bin`). The first interactive launch
+signs you in, fetches `mdstream`, and clones the plugins repo.
 
-```sh
-curl -fsSL -H "Authorization: Bearer $(gh auth token)" \
-  https://raw.githubusercontent.com/gastonmorixe/minimal-agent-core/main/scripts/install.sh \
-  | bash
-```
-
-Do **not** use `bunx github:gastonmorixe/minimal-agent-core`. `bunx` always
-runs `bun install`, then fails on the in-tree `workspace:*` plugin-api
-dependency and would still pull the toolchain (biome, oxlint, husky). There
-is nothing to install.
+Skip `bunx github:gastonmorixe/minimal-agent-core`. `bunx` always runs
+`bun install`, then fails on the in-tree `workspace:*` plugin-api
+dependency and pulls the toolchain (biome, oxlint, husky). There is
+nothing to install.
 
 From a checkout already on disk:
 
@@ -87,9 +82,9 @@ From a checkout already on disk:
 ./scripts/install.sh
 ```
 
-That links `minimal-agent` and `ma` at the current tree and skips
+This links `minimal-agent` and `ma` at the current tree and skips
 `bun install`. Open a new shell (or `source` your rc file) if the commands
-are not on PATH yet. Pick a manual path if you want the tarball or a clone
+are not on PATH yet. Manual paths follow for the tarball or a clone
 you already own:
 
 ### From a release tarball
