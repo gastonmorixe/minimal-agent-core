@@ -936,6 +936,7 @@ async function main() {
     modeManager,
     toolNamePolicy: opts.cliToolFilter,
     selectedModelBase,
+    selectedProviderId,
     auth,
     cacheTtl,
     systemPromptOverrides: opts.systemPromptOverrides,

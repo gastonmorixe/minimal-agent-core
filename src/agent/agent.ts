@@ -1132,6 +1132,7 @@ export class Agent {
       // null disables it (matches the pre-blob-store prompt shape exactly).
       blobStoreEnabled: this.blobStore !== null,
       authKind: this.auth.type === "provider" ? this.auth.auth.kind : this.auth.type,
+      ...(this.providerId ? { providerId: this.providerId } : {}),
       cacheTtl: this.cacheTtl,
       overrides: this.systemPromptOverrides,
     })

@@ -34,7 +34,7 @@ import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
 import { promptPath, renderPrompt } from "../prompts/prompts.ts"
 
 import { buildInstructionsBlockText, type InstructionsBlockOptions } from "./instructions-block.ts"
-import { resolveModel } from "./model-registry.ts"
+import { findModelForProvider, resolveModel } from "./model-registry.ts"
 import type { ProviderAuth } from "./provider.ts"
 import {
   findProviderPlugin,
@@ -124,6 +124,14 @@ export interface ResolveSystemPromptOptions extends AgentSystemPromptOptions {
    * a caller omits it.
    */
   authKind?: ProviderAuth["kind"]
+  /**
+   * Provider id that owns this request (e.g. `--provider anthropic`).
+   * When set, prompt resolution uses the provider-scoped model entry so a
+   * bare model id claimed by several providers resolves to THIS provider's
+   * plugin hook. Without it the global last-write-wins entry wins and a
+   * colliding provider can steal the preamble.
+   */
+  providerId?: string
   /** Override the neutral identity line. Providers may still replace it. */
   identity?: string
   /** Resolved system-prompt overrides for identity/full/sessionContext/providerPreamble. */
@@ -166,11 +174,25 @@ export function resolveSystemPromptForModel(
       | { readonly kind: "omit" }
   }
 
-  let providerId: string | undefined
-  try {
-    providerId = resolveModel(modelId).providerId
-  } catch {
-    providerId = undefined
+  let providerId: string | undefined = opts?.providerId
+  if (!providerId) {
+    try {
+      providerId = resolveModel(modelId).providerId
+    } catch {
+      providerId = undefined
+    }
+  } else {
+    // Prefer the scoped entry so a colliding bare id resolves to this
+    // provider. Fall back to the global entry when this provider does not
+    // claim the id (alias-only or ad-hoc registrations).
+    const scoped = findModelForProvider(modelId, providerId)
+    if (!scoped) {
+      try {
+        providerId = resolveModel(modelId).providerId
+      } catch {
+        providerId = undefined
+      }
+    }
   }
   const plugin = providerId ? findProviderPlugin(providerId) : undefined
   const resolved = plugin?.resolveSystemPrompt
