@@ -45,9 +45,9 @@ The shared contract both sides depend on lives in a leaf package, `@minimal-agen
 
 ## Requirements
 
-- [Bun](https://bun.com) 1.1+. That's the only hard dependency. The agent runs
-  the TypeScript source directly, so there is no build step and no compiled
-  release to install.
+- [Bun](https://bun.com) 1.3.14+. That's the only hard dependency. The agent
+  runs the TypeScript source directly, so there is no build step and no
+  compiled release to install.
 - `git`, if you want the first-run bootstrap to fetch the extended plugins.
 - macOS or Linux. Credentials live in a plain `~/.minimal-agent/auth.jsonc`
   (mode 0600), so the same login works on a server, a container, or your
@@ -58,9 +58,39 @@ The shared contract both sides depend on lives in a leaf package, `@minimal-agen
 
 ## Install & run
 
-There is no build step. The agent runs straight from the TypeScript source on
-Bun, so "installing" is getting the source tree onto your machine and running
-`bun install`. Pick one:
+There is no build step and no runtime npm install. The agent runs TypeScript
+from source on Bun. The one-liner clones the tree and puts `minimal-agent`
+and `ma` on PATH (`~/.minimal-agent/bin` plus `~/.local/bin`). First
+interactive launch then signs in, fetches `mdstream`, and clones the plugins
+repo.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gastonmorixe/minimal-agent-core/main/scripts/install.sh | bash
+```
+
+Private clone (token never lands in argv):
+
+```sh
+curl -fsSL -H "Authorization: Bearer $(gh auth token)" \
+  https://raw.githubusercontent.com/gastonmorixe/minimal-agent-core/main/scripts/install.sh \
+  | bash
+```
+
+Do **not** use `bunx github:gastonmorixe/minimal-agent-core`. `bunx` always
+runs `bun install`, then fails on the in-tree `workspace:*` plugin-api
+dependency and would still pull the toolchain (biome, oxlint, husky). There
+is nothing to install.
+
+From a checkout already on disk:
+
+```sh
+./scripts/install.sh
+```
+
+That links `minimal-agent` and `ma` at the current tree and skips
+`bun install`. Open a new shell (or `source` your rc file) if the commands
+are not on PATH yet. Pick a manual path if you want the tarball or a clone
+you already own:
 
 ### From a release tarball
 
@@ -75,8 +105,7 @@ from `v*` tags. Each release ships a source tarball and its SHA-256 checksum.
 sha256sum -c minimal-agent-<label>.tar.gz.sha256   # verify before extracting
 tar -xzf minimal-agent-<label>.tar.gz
 cd minimal-agent
-bun install
-./minimal-agent           # first run walks you through sign-in + setup
+./scripts/install.sh      # or: ./minimal-agent
 ```
 
 ### From a clone (latest, unreleased)
@@ -84,8 +113,7 @@ bun install
 ```sh
 git clone https://github.com/gastonmorixe/minimal-agent-core.git
 cd minimal-agent-core
-bun install
-./minimal-agent
+./scripts/install.sh      # or: ./minimal-agent
 ```
 
 ### Authenticated clone
@@ -96,8 +124,7 @@ clone instead:
 ```sh
 git clone "https://x-access-token:$(gh auth token)@github.com/gastonmorixe/minimal-agent-core.git"
 cd minimal-agent-core
-bun install
-./minimal-agent
+./scripts/install.sh      # or: ./minimal-agent
 ```
 
 ### First run
@@ -121,7 +148,7 @@ none of this repeats.
 > `minimal-agent-cli` once cutover lands.
 
 ```sh
-bun install                 # dev deps only (biome, oxlint, typecheck)
+bun install                 # toolchain only (biome, oxlint, typecheck). Not needed to run.
 bun run src/index.ts        # raw entry point
 ./minimal-agent --help
 ```

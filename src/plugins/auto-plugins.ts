@@ -7,7 +7,7 @@
  * SEPARATE repo, `gastonmorixe/minimal-agent-plugins`, so the core stays tiny
  * and those surfaces can evolve independently.
  *
- * On a freshly-installed box (think `bunx github:gastonmorixe/minimal-agent`)
+ * On a freshly-installed box (think `curl .../install.sh | bash`)
  * that second repo isn't present. This module clones it ONCE into
  * `~/.minimal-agent/plugins`, which the loader scans as the `user` root (see
  * `PluginLoaderOptions.userDir`). After that first clone the directory is left
