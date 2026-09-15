@@ -18,7 +18,7 @@
 #   minimal-agent-<ref-label>.tar.gz.sha256  its SHA-256 checksum
 #
 # The extracted tree has a single top-level dir `minimal-agent/` so a user can:
-#   tar -xzf minimal-agent-<ref>.tar.gz && cd minimal-agent && bun install && ./minimal-agent
+#   tar -xzf minimal-agent-<ref>.tar.gz && cd minimal-agent && ./scripts/install.sh
 set -euo pipefail
 
 REF_LABEL="${1:-}"

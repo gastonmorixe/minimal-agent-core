@@ -25,7 +25,10 @@ write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
 way. The agent runs on Bun's standard library plus the TypeScript source in this
 repo, with no npm packages resolved at runtime. The only `devDependencies` are
 the toolchain (Bun types, Biome, oxlint, typedoc, TypeScript, Husky,
-Commitlint); none of it ships in the running agent. Before reaching for a package, write the small piece you
+Commitlint); none of it ships in the running agent. `scripts/install.sh` is the
+user installer: clone source, link `minimal-agent` and `ma` onto
+`~/.minimal-agent/bin` plus `~/.local/bin`, never `bun install`. Do not
+document `bunx github:...` (it always installs, then dies on `workspace:*`). Before reaching for a package, write the small piece you
 need as a readable file with a test. Optional external binaries (`mdstream`,
 `git`) are fetched on demand and must degrade gracefully when missing, they are
 never package dependencies. The extended-plugins repo follows the same policy:

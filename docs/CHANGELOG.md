@@ -4,9 +4,12 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-09-02T19:15:00-0400"
+updated-at: "2026-09-15T12:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-09-15-curl-pipe-installer"
+    type: feat
+    status: landed
   - id: "2026-09-10-compact-multi-mode"
     type: feat
     status: landed
@@ -68,6 +71,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 ## [Unreleased]
 
 ### Added
+
+- 2026-09-15 (this session): `scripts/install.sh` one-liner installer. Clones
+  (or reuses) source, links `minimal-agent` and `ma` onto
+  `~/.minimal-agent/bin` plus `~/.local/bin`, never runs `bun install`.
+  `bunx github:...` is documented as a dead end (`workspace:*` plus
+  toolchain). Coverage in `src/e2e/install-sh.test.ts`. The `minimal-agent`
+  wrapper now resolves PATH symlinks to the checkout.
 
 - 2026-09-10 (this session): feat: multi-mode compact. `/compact` takes
   `[mode] [tail=N] [focus="..."]`. Modes are `remote|tail|local|fork`.

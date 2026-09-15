@@ -27,7 +27,7 @@
  * DEBUG=1 bun run src/index.ts                  # alternative debug activation
  * ```
  *
- * Or use the shortcut: `./minimal-agent.sh [options]`
+ * Or use the shortcut: `./minimal-agent [options]`
  *
  * @module index
  */
