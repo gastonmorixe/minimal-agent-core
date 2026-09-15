@@ -45,7 +45,7 @@ The shared contract both sides depend on lives in a leaf package, `@minimal-agen
 
 ## Requirements
 
-- [Bun](https://bun.com) 1.3.14+. That's the only hard dependency. The agent
+- [Bun](https://bun.com) 1.4.2+. That's the only hard dependency. The agent
   runs the TypeScript source directly, so there is no build step and no
   compiled release to install.
 - `git`, if you want the first-run bootstrap to fetch the extended plugins.
