@@ -20,7 +20,7 @@
 set -euo pipefail
 
 DEFAULT_REPO="https://github.com/gastonmorixe/minimal-agent-core.git"
-MIN_BUN="1.3.14"
+MIN_BUN="1.4.2"
 
 error() {
   echo "error: $*" >&2
