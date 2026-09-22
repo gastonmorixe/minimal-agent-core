@@ -21,6 +21,21 @@ describe("buildInit", () => {
     expect(init.protocol).toBe("http3")
   })
 
+  test("timeoutMs aborts independently of the caller signal", () => {
+    const signal = new AbortController().signal
+    const init = buildInit({
+      id: "test",
+      label: "t",
+      method: "GET",
+      url: "https://example.com/",
+      signal,
+      timeoutMs: 5_000,
+    })
+    expect(init.signal).not.toBe(signal)
+    expect(init.signal).toBeDefined()
+    expect(init.signal?.aborted).toBe(false)
+  })
+
   test("copies Uint8Array bodies into a fresh ArrayBuffer (detaches caller view)", () => {
     const src = new Uint8Array([1, 2, 3, 4])
     const init = buildInit({

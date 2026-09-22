@@ -29,6 +29,15 @@ export interface SimpleSendHost {
   resolveMaxOutputTokens(): number | undefined
 }
 
+/** Thin wrapper so AgentCore can pass `this` without listing private fields. */
+export async function* simpleSendFromCore(
+  core: SimpleSendHost,
+  userText: string,
+  opts?: Partial<SendOptions>,
+): AsyncGenerator<string, StreamedResponse, undefined> {
+  return yield* simpleSend(core, userText, opts)
+}
+
 /**
  * Append a user turn and stream one assistant reply (no tools advertised).
  *

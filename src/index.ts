@@ -99,7 +99,7 @@ import { c } from "./host/ui/style/ansi.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes/modes.ts"
-import { defaultNetworkClient } from "./network/index.ts"
+import { applyPreferredDnsResultOrder, defaultNetworkClient } from "./network/index.ts"
 import { createAgentContext } from "./plugins/agent-context.ts"
 import { bootstrapUserPlugins } from "./plugins/auto-plugins.ts"
 import { resolveSiblingPluginRoots } from "./plugins/loader/helpers.ts"
@@ -126,6 +126,8 @@ import { TOOL_DEFINITIONS } from "./tools/tools.ts"
 // startup-tree visibility, and early session-id seeding) lives in
 // `host/startup/entry-args.ts`. It leans on the pure `cli/*` parsers and keeps
 // this file a thin composition root. See that module for the precedence rules.
+
+applyPreferredDnsResultOrder()
 
 const entry = prepareEntrypointArgs({
   rawArgv: process.argv.slice(2),

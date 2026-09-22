@@ -151,6 +151,52 @@ function retryableStreamErrorType(err: unknown): string | undefined {
 }
 
 /**
+ * Provider-neutral retryability verdict for a thrown error. Tags
+ * connection-level transient failures first (so an untagged socket error
+ * classifies), then maps to a known retryable stream-error type.
+ *
+ * Exposed so non-turn callers that do NOT ride the `withRetry` onion can
+ * reuse the SAME tag policy. The blocking compact local-summary call is the
+ * motivating case: it drives `run()` directly, so a pre-stream HTTP 429 from
+ * the provider adapter (thrown as a `streamErrorType`-tagged Error, with
+ * `retryable` left undefined) used to abort compaction instead of retrying.
+ *
+ * @returns The retryable stream-error type, or `undefined` to propagate.
+ */
+export function classifyRetryableStreamError(err: unknown): string | undefined {
+  return retryableStreamErrorType(tagTransientNetworkError(err))
+}
+
+/**
+ * Backoff delay for one retry attempt on the shared fast/slow/pre-stream
+ * curves. Full jitter `[0, base * 2^(attempt-1))` capped at 5 min; the
+ * pre-stream floor pins a sub-base jitter back up to the 2s base. Extracted
+ * so the `withRetry` loop and the compact summary retry pick identical
+ * delays for the same tag.
+ *
+ * @param attempt - 1-based attempt that just failed.
+ * @param streamErrorType - Tag from {@link classifyRetryableStreamError}.
+ * @param stallPhase - Watchdog phase when present (`stream_idle` only).
+ */
+export function retryBackoffMs(
+  attempt: number,
+  streamErrorType: string,
+  stallPhase?: "pre-stream" | "mid-stream",
+): number {
+  const slow = SLOW_RETRY_TYPES.has(streamErrorType)
+  const preStream = stallPhase === "pre-stream" && streamErrorType === "stream_idle"
+  const base = slow
+    ? RETRY_SLOW_BASE_DELAY_MS
+    : preStream
+      ? RETRY_PRE_STREAM_BASE_DELAY_MS
+      : RETRY_FAST_BASE_DELAY_MS
+  const cappedExp = Math.min(attempt - 1, 16)
+  const ideal = Math.min(RETRY_MAX_DELAY_MS, base * 2 ** cappedExp)
+  const raw = Math.floor(Math.random() * ideal)
+  return preStream ? Math.max(RETRY_PRE_STREAM_BASE_DELAY_MS, raw) : raw
+}
+
+/**
  * Retry `makeAttempt` forever on tagged retryable errors (except
  * progress-aware terminal-less closes). Yields the attempt's text deltas
  * (plus a visible stall marker on retry-after-yield) and returns the
@@ -207,7 +253,7 @@ export async function* withRetry(
       // socket, DNS blip, GOAWAY) the transport threw with no
       // `streamErrorType`. The classifier excludes user aborts, so a real
       // Ctrl-C still propagates. No-op for already-tagged errors.
-      const streamErrType = retryableStreamErrorType(tagTransientNetworkError(err))
+      const streamErrType = classifyRetryableStreamError(err)
       const elapsedMs = Date.now() - startedAt
       // Untagged / non-retryable errors (programmer bugs, auth-final,
       // cancellation) propagate. Only tagged transient/hard errors retry.
@@ -280,21 +326,13 @@ export async function* withRetry(
 
       const slow = SLOW_RETRY_TYPES.has(streamErrType)
       const stallPhase = readStallPhase(err)
-      // Pre-stream (upload/TTFB) stalls use a multi-second floor so large
-      // identical POSTs are not hammered on the fast 200ms curve (MA-882492).
-      const preStream = stallPhase === "pre-stream" && streamErrType === "stream_idle"
-      const base = slow
-        ? RETRY_SLOW_BASE_DELAY_MS
-        : preStream
-          ? RETRY_PRE_STREAM_BASE_DELAY_MS
-          : RETRY_FAST_BASE_DELAY_MS
-      const cappedExp = Math.min(attempt - 1, 16)
-      const ideal = Math.min(RETRY_MAX_DELAY_MS, base * 2 ** cappedExp)
-      // Pre-stream: floor at base (2s) so jitter cannot collapse to sub-second thrash.
-      const raw = Math.floor(Math.random() * ideal)
-      const delayMs = preStream ? Math.max(RETRY_PRE_STREAM_BASE_DELAY_MS, raw) : raw
+      const delayMs = retryBackoffMs(attempt, streamErrType, stallPhase)
       const nextAttempt = attempt + 1
-      const curve = slow ? "slow" : preStream ? "pre-stream" : "fast"
+      const curve = slow
+        ? "slow"
+        : stallPhase === "pre-stream" && streamErrType === "stream_idle"
+          ? "pre-stream"
+          : "fast"
 
       diag.warn(
         "api.retry",

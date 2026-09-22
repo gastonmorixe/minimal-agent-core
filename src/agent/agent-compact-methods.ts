@@ -49,6 +49,7 @@ export async function agentCompact(
     ...(opts?.mode ? { mode: opts.mode } : {}),
     ...(opts?.keepTail !== undefined ? { keepTail: opts.keepTail } : {}),
     ...(opts?.focus ? { focus: opts.focus } : {}),
+    ...(opts?.signal ? { signal: opts.signal } : {}),
     ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
     ...(opts?.writeStream ? { writeStream: opts.writeStream } : {}),
     ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),

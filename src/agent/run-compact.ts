@@ -21,6 +21,8 @@
  * @module agent/run-compact
  */
 
+import { abortableSleep } from "@minimal-agent/plugin-api/utils/retry"
+
 import type { AuthResult } from "../auth/auth.ts"
 import { resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { getGlobalEventBus } from "../bus/global-bus.ts"
@@ -30,6 +32,7 @@ import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
 import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from "../llm/provider.ts"
 import { run } from "../llm/run.ts"
+import { classifyRetryableStreamError, retryBackoffMs } from "../llm/transport/retry.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
 import { normalizeModelForAPI } from "../llm/transport/types.ts"
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
@@ -77,6 +80,19 @@ export interface RunCompactInput {
   keepTail?: number
   /** Hint passed to the summarizer, kept verbatim in the checkpoint. */
   focus?: string
+  /**
+   * Cancellation for the blocking local-summary call and its retry backoff.
+   * The host wires the slash command's `ctx.abort` (turn cancel / per-command
+   * timeout) here so a rate-limited summary retries on the shared curve but
+   * never outlives the command budget.
+   */
+  signal?: AbortSignal
+  /**
+   * Test seam: sleep between summary retries. Defaults to the abortable sleep
+   * used by the transport retry coordinator. Inject a no-op to exercise the
+   * slow (rate-limit) curve without a real 30s wait.
+   */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   /**
    * Optional progress sink for the local-summary LLM stream. Called per
    * text delta with approximate output tokens; also forwarded to the
@@ -451,12 +467,16 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
     ],
     stream: true,
     system: [{ type: "text", text: buildLocalSummarySystemPrompt(input.focus) }],
+    ...(input.signal ? { signal: input.signal } : {}),
   }
 
+  const sleep = input.sleep ?? abortableSleep
   let savedPartial = ""
-  for (let attempt = 0; attempt < 2; attempt++) {
+  /** Untagged (mid-stream) retryable failures consumed (bounded salvage path). */
+  let untaggedRetries = 0
+  for (let attempt = 1; ; attempt++) {
     try {
-      await input.onSummaryAttempt?.(attempt + 1)
+      await input.onSummaryAttempt?.(attempt)
     } catch {
       // UX-only
     }
@@ -503,31 +523,45 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       const trimmed = attemptText.trim()
       return trimmed.length > 0 ? trimmed : undefined
     } catch (err) {
-      const retryable = (err as { retryable?: boolean } | null)?.retryable === true
-      // Retryable mid-stream failure: save this attempt's partial text, then
-      // retry once with a clean buffer so success returns retry text only.
-      // A second failure salvages the latest partial (else the first) instead
-      // of dropping to an empty stub.
       const partial = attemptText.trim()
       if (partial.length > 0) savedPartial = partial
-      if (retryable && attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Tagged TRANSPORT failure (pre-stream HTTP 429 / 5xx / connect blip).
+      // The provider adapter throws these as `streamErrorType`-tagged Errors
+      // with `retryable` left unset, so a bare `retryable === true` check
+      // missed them and aborted compaction on the first 429 (a
+      // rate_limit_error from the adapter's non-2xx classifier). Classify
+      // with the SAME policy as the live send loop and retry on the shared
+      // fast/slow curve until the caller aborts (Esc / per-command timeout).
+      // This mirrors the turn path's never-give-up rule for tagged errors.
+      const transportTag = classifyRetryableStreamError(err)
+      if (transportTag !== undefined) {
+        const delayMs = retryBackoffMs(attempt, transportTag)
+        await sleep(delayMs, input.signal)
         continue
       }
-      if (retryable && savedPartial.length > 0) {
-        try {
-          emitOutputEnd("stream_end")
-        } catch {
-          // Bus emit is best-effort telemetry.
+
+      // Tagged mid-stream `stream_error` event (`retryable: true`, no
+      // transport tag). Keep the bounded salvage: one clean retry, then
+      // return the newest partial so a flaky summary still lands text.
+      if ((err as { retryable?: boolean } | null)?.retryable === true) {
+        untaggedRetries++
+        if (untaggedRetries === 1) {
+          await sleep(50, input.signal)
+          continue
         }
-        return savedPartial
+        if (savedPartial.length > 0) {
+          try {
+            emitOutputEnd("stream_end")
+          } catch {
+            // Bus emit is best-effort telemetry.
+          }
+          return savedPartial
+        }
       }
       throw err
     }
   }
-  // Unreachable: both attempts exit above (return or throw). Kept explicit so
-  // the function has a consistent return.
-  return savedPartial.length > 0 ? savedPartial : undefined
 }
 
 /**

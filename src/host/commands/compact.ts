@@ -89,6 +89,10 @@ export function createCompactHostCommand(agent: CompactAgentLike): ResolvedComma
           mode,
           keepTail,
           ...(focus ? { focus } : {}),
+          // Turn-cancel / per-command timeout. Lets a rate-limited local
+          // summary retry politely on the shared backoff curve without
+          // outliving the command budget.
+          ...(ctx.abort ? { signal: ctx.abort } : {}),
           ...(hostCtx.writeStream ? { writeStream: hostCtx.writeStream } : {}),
           ...(hostCtx.onProgress ? { onProgress: hostCtx.onProgress } : {}),
           ...(hostCtx.onSummaryAttempt ? { onSummaryAttempt: hostCtx.onSummaryAttempt } : {}),

@@ -865,7 +865,7 @@ describe("runOAuthLogin", () => {
         },
         complete: (_challenge, ctx) =>
           new Promise((_resolve, reject) => {
-            completeSawSignal = ctx.signal === ac.signal
+            completeSawSignal = ctx.signal != null
             ctx.signal?.addEventListener(
               "abort",
               () => {
@@ -890,5 +890,47 @@ describe("runOAuthLogin", () => {
 
     await expect(promise).rejects.toThrow("login aborted")
     expect(completeSawSignal).toBe(true)
+  })
+
+  it("times out a hung device-code complete even when the provider ignores abort", async () => {
+    const previous = process.env.DEBUG
+    process.env.DEBUG = "1"
+    const writes: string[] = []
+    const originalWrite = process.stderr.write.bind(process.stderr)
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"))
+      return true
+    }) as typeof process.stderr.write
+    const deviceProvider: OAuthLoginProvider = {
+      ...fakeOAuthProvider,
+      deviceCode: {
+        request: async () => ({
+          verificationUrl: "https://secret.example.test/device?token=leak",
+          userCode: "LEAK-CODE",
+          expiresInMs: 40,
+        }),
+        complete: () => new Promise(() => {}),
+      },
+    }
+
+    const started = Date.now()
+    try {
+      await expect(
+        runOAuthLogin({
+          provider: deviceProvider,
+          readPaste: async () => "",
+          install: { store: tempStore("ma-oauth-hang-") },
+        }),
+      ).rejects.toThrow("Sign-in timed out. Run login again.")
+      expect(Date.now() - started).toBeLessThan(2_000)
+      const joined = writes.join("")
+      expect(joined).toContain("[login] device-code waiting expiresInMs=40")
+      expect(joined).not.toContain("secret.example.test")
+      expect(joined).not.toContain("LEAK-CODE")
+    } finally {
+      process.stderr.write = originalWrite
+      if (previous === undefined) delete process.env.DEBUG
+      else process.env.DEBUG = previous
+    }
   })
 })

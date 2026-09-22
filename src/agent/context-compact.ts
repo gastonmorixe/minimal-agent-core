@@ -38,6 +38,13 @@ export interface CompactRequestOpts {
   /** Hint passed to the summarizer and kept verbatim in the checkpoint. */
   focus?: string
   /**
+   * Cancellation for the blocking local-summary call and its retry backoff.
+   * The host forwards the command's `ctx.abort` (turn cancel / per-command
+   * timeout) so a rate-limited summary retries politely but never outlives
+   * the command budget.
+   */
+  signal?: AbortSignal
+  /**
    * Optional progress sink for the local-summary LLM stream. Called per
    * text delta with approximate output tokens so host UX (status label,
    * TPS footer) can tick during long summaries. UX-only: a throwing sink

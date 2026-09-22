@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import { networkActivityObserver } from "./activity-observer.ts"
+import { applyPreferredDnsResultOrder } from "./dns-order.ts"
 import { FetchTransport } from "./fetch-transport.ts"
 import { Http2Transport } from "./http2-transport.ts"
 import { Http3NegotiationCache } from "./http3-cache.ts"
@@ -357,6 +358,7 @@ export function isPlaintextHttp(url: string): boolean {
  * @returns Network client wired to the resolved transport stack.
  */
 export function createDefaultNetworkClient(): NetworkClient {
+  applyPreferredDnsResultOrder()
   const requested = process.env.MINIMAL_AGENT_TRANSPORT?.trim().toLowerCase()
   if (requested === "test") {
     const testEnv = process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
