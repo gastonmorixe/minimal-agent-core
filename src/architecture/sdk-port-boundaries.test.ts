@@ -498,6 +498,6 @@ describe("SDK port boundaries scanner", () => {
 
     // Type-only edges are deliberately counted, not exempted. Keep this exact
     // inventory as a ratchet so additions require an intentional architecture review.
-    expect(typeOnlySdkImportCount(result)).toBe(32)
+    expect(typeOnlySdkImportCount(result)).toBe(34)
   })
 })

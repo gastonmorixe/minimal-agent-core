@@ -68,11 +68,16 @@ export class Http3Transport implements NetworkTransport {
  * Exported for unit testing.
  */
 export function buildInit(req: NetworkRequest): RequestInit & { protocol: "http3" } {
+  let signal = req.signal
+  if (req.timeoutMs) {
+    const timeoutSignal = AbortSignal.timeout(req.timeoutMs)
+    signal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+  }
   return {
     method: req.method,
     headers: req.headers,
     body: toFetchBody(req.body),
-    signal: req.signal,
+    signal,
     // Bun-specific. Cast at the call site silences TS strict mode
     // (RequestInit doesn't declare `protocol`).
     protocol: "http3",

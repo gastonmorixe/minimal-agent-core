@@ -467,4 +467,57 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     expect(stats.summaryText ?? "").toContain("first-partial-text")
     expect(calls).toBe(2)
   })
+
+  it("FAIL-FIRST: pre-stream tagged 429 retries instead of aborting with stub", async () => {
+    registerTestProvider({
+      id: "compact-429-prov",
+      displayName: "Compact 429 Prov",
+      shortCode: "c4p",
+      models: [{ id: "compact-429-model" }],
+    })
+    let calls = 0
+    const transport: NetworkTransport = {
+      id: "fake",
+      request: async () => {
+        calls += 1
+        if (calls === 1) {
+          // Shape a provider adapter throws before the stream opens: a
+          // `streamErrorType`-tagged rate-limit Error with `retryable` left
+          // undefined. The compact summary used to abort on this and fall
+          // back to the stub. Kept provider-neutral (the scan bans provider
+          // tokens in core code).
+          const err = new Error(
+            `provider API 429: ${JSON.stringify({
+              type: "error",
+              error: { type: "rate_limit_error", message: "Error" },
+            })}`,
+          ) as Error & { streamErrorType?: string }
+          err.streamErrorType = "rate_limit_error"
+          throw err
+        }
+        return sseResponse(summaryEvents("summary-after-429"))
+      },
+    }
+    const client = new NetworkClient({ primary: transport })
+    const messages = hist()
+    const slept: number[] = []
+    const stats = await runCompact({
+      messages,
+      model: "compact-429-model",
+      providerId: "compact-429-prov",
+      auth: { type: "api-key", token: "x" },
+      reason: "manual",
+      mode: "local",
+      networkClient: client,
+      // Drive the slow rate-limit curve without a real 30s wait.
+      sleep: async (ms) => {
+        slept.push(ms)
+      },
+    })
+    expect(stats.kind).toBe("local")
+    expect(stats.summaryError).toBeUndefined()
+    expect(stats.summaryText ?? "").toContain("summary-after-429")
+    expect(calls).toBe(2)
+    expect(slept).toHaveLength(1)
+  })
 })

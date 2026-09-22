@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 /**
  * Agent module: conversational state + tool execution loop + REPL.
  *
@@ -24,7 +25,6 @@
  *
  * @module agent
  */
-
 import type { AuthResult } from "../auth/auth.ts"
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"

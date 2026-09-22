@@ -45,8 +45,16 @@ export function isLoginAborted(err: unknown): boolean {
   return err instanceof LoginAbortedError || (err instanceof Error && err.name === "AbortError")
 }
 
+function abortReasonError(signal: AbortSignal): Error {
+  const reason = signal.reason
+  if (reason instanceof Error && reason.name === "TimeoutError") {
+    return reason.message ? reason : new Error("Sign-in timed out. Run login again.")
+  }
+  return new LoginAbortedError()
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new LoginAbortedError()
+  if (signal?.aborted) throw abortReasonError(signal)
 }
 
 async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -54,14 +62,56 @@ async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
   if (!signal) return promise
   let cleanup = () => {}
   const abort = new Promise<never>((_resolve, reject) => {
-    const onAbort = () => reject(new LoginAbortedError())
+    const onAbort = () => reject(abortReasonError(signal))
     cleanup = () => signal.removeEventListener("abort", onAbort)
     signal.addEventListener("abort", onAbort, { once: true })
   })
   try {
     return await Promise.race([promise, abort])
+  } catch (err) {
+    if (isLoginAborted(err)) throw new LoginAbortedError()
+    throw err
   } finally {
     cleanup()
+  }
+}
+
+function combineSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const live = signals.filter((s): s is AbortSignal => s != null)
+  if (live.length === 0) return undefined
+  if (live.length === 1) return live[0]
+  return AbortSignal.any(live)
+}
+
+/** Fallback wait cap when a device-code challenge omits `expiresInMs`. */
+export const DEFAULT_DEVICE_CODE_WAIT_MS = 30 * 60 * 1000
+
+function deviceCodeWaitMs(expiresInMs: number | undefined): number {
+  return typeof expiresInMs === "number" && Number.isFinite(expiresInMs) && expiresInMs > 0
+    ? expiresInMs
+    : DEFAULT_DEVICE_CODE_WAIT_MS
+}
+
+function debugLogin(line: string): void {
+  if (!process.env.DEBUG) return
+  try {
+    process.stderr.write(`[login] ${line}\n`)
+  } catch {
+    // Best-effort. Login must not fail because stderr is closed.
+  }
+}
+
+function createDeadline(ms: number): { signal: AbortSignal; cancel: () => void } {
+  const ac = new AbortController()
+  const timer = setTimeout(() => {
+    const err = new Error("Sign-in timed out. Run login again.")
+    err.name = "TimeoutError"
+    ac.abort(err)
+  }, ms)
+  if (typeof timer.unref === "function") timer.unref()
+  return {
+    signal: ac.signal,
+    cancel: () => clearTimeout(timer),
   }
 }
 
@@ -407,8 +457,8 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
   const maxAttempts = deps.maxAttempts ?? 3
 
   if (provider.deviceCode) {
-    const ctx = { networkClient: network, signal: deps.signal }
-    const challenge = await abortable(provider.deviceCode.request(ctx), deps.signal)
+    const requestCtx = { networkClient: network, signal: deps.signal }
+    const challenge = await abortable(provider.deviceCode.request(requestCtx), deps.signal)
     display(
       `Open this page to sign in:\n  ${challenge.verificationUrl}\nEnter this one-time code:\n  ${challenge.userCode}\nNever share this code with anyone.`,
     )
@@ -420,8 +470,24 @@ export async function runOAuthLogin(deps: LoginDeps): Promise<LoginOutcome> {
       }
     }
     display(`Waiting for sign-in to finish…`)
-    const built = await abortable(provider.deviceCode.complete(challenge, ctx), deps.signal)
-    return { ok: true, result: installBuiltCredential(built, deps.install, deps.credentialName) }
+    const waitMs = deviceCodeWaitMs(challenge.expiresInMs)
+    debugLogin(
+      `device-code waiting expiresInMs=${waitMs} pollIntervalMs=${challenge.pollIntervalMs ?? "unset"} dns=${process.env.MINIMAL_AGENT_DNS_RESULT_ORDER?.trim() || "ipv4first"} transport=${process.env.MINIMAL_AGENT_TRANSPORT?.trim() || "http2"}`,
+    )
+    const deadline = createDeadline(waitMs)
+    const signal = combineSignals(deps.signal, deadline.signal)
+    try {
+      const built = await abortable(
+        provider.deviceCode.complete(challenge, {
+          networkClient: network,
+          signal,
+        }),
+        signal,
+      )
+      return { ok: true, result: installBuiltCredential(built, deps.install, deps.credentialName) }
+    } finally {
+      deadline.cancel()
+    }
   }
 
   const codeVerifier = generateCodeVerifier(deps.randomBytes)

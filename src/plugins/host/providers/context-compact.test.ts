@@ -19,7 +19,7 @@ describe("context:compact queue", () => {
   })
 
   it("clear drops the slot", () => {
-    createContextCompactApi().requestCompact({ reason: "auto" })
+    void createContextCompactApi().requestCompact({ reason: "auto" })
     clearPendingCompact()
     expect(takePendingCompact()).toBeNull()
   })
