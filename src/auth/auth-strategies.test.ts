@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { clearModelRegistry, clearProviderRegistry, registerModel } from "../llm/model-registry.ts"
 import {
   type ApiKeyAuthProvider,
+  type AuthCredentialInfo,
   clearProviderPlugins,
   registerProviderPlugin,
 } from "../llm/provider-plugin.ts"
@@ -323,6 +324,189 @@ describe("auth-strategies", () => {
     expect(apiKey!.providerId).toBe("dual-auth-provider")
     expect(apiKey!.credentialLabel).toBe("Dual API Key")
   })
+
+  for (const kind of ["oauth", "api-key"] as const) {
+    for (const withInspect of [false, true]) {
+      it(`merges safe saved metadata for ${kind} with inspect=${withInspect}`, () => {
+        const providerInfo: AuthCredentialInfo = {
+          usable: false,
+          label: "Provider label",
+          expiresAt: 123,
+          hasRefreshToken: true,
+          accountId: "provider-account",
+          organizationId: "provider-org",
+          scopes: ["read"],
+          details: [
+            { key: "emailAddress", label: "Provider email", value: "provider@example.com" },
+            { key: "custom", label: "Custom", value: "preserved" },
+          ],
+        }
+        const inspectCredential = withInspect ? () => providerInfo : undefined
+        registerProviderPlugin({
+          id: "metadata-provider",
+          displayName: "Metadata Provider",
+          shortCode: "mp",
+          register() {},
+          ...(kind === "api-key"
+            ? { apiKeyAuth: { ...TEST_API_KEY_AUTH, inspectCredential } }
+            : {
+                oauthLogin: {
+                  serviceId: "test-api-key",
+                  displayName: "Test OAuth",
+                  config: () => ({
+                    clientId: "c",
+                    authorizeUrl: "a",
+                    tokenUrl: "t",
+                    redirectUri: "r",
+                    scopes: [],
+                  }),
+                  buildCredential: () => ({
+                    credential: {
+                      serviceId: "test-api-key",
+                      displayName: "Test OAuth",
+                      secrets: {},
+                    },
+                    result: { accessToken: "", refreshToken: "", expiresAt: 0, scopes: [] },
+                  }),
+                  readAuth: () => ({ kind: "oauth" as const, token: "runtime-secret" }),
+                  inspectCredential,
+                },
+              }),
+        })
+        defaultAuthStore().set("test-api-key", "Saved", {
+          apiKey: "secret-key",
+          token: "secret-token",
+          password: "secret-password",
+          accessToken: "secret-access",
+          refreshToken: "secret-refresh",
+          idToken: "secret-jwt",
+          emailAddress: "saved@example.com",
+          account_id: "saved-account",
+          orgId: "saved-org",
+          profile: { userName: "saved-user", displayName: "Saved Name", password: "nested-secret" },
+          user: { user_id: "saved-user-id", token: "nested-token" },
+          subscription: { tier: "Pro", apiKey: "nested-key" },
+          arbitrary: { email: "hidden@example.com" },
+        })
+        const info = discoverCredentialedProviders()[0]?.credentialInfo
+        expect(info).toEqual({
+          ...(withInspect ? providerInfo : { usable: true }),
+          accountId: withInspect ? "provider-account" : "saved-account",
+          organizationId: withInspect ? "provider-org" : "saved-org",
+          details: [
+            ...(withInspect
+              ? providerInfo.details!
+              : [{ key: "email", label: "email", value: "saved@example.com" }]),
+            { key: "username", label: "username", value: "saved-user" },
+            { key: "name", label: "name", value: "Saved Name" },
+            { key: "userId", label: "user id", value: "saved-user-id" },
+            { key: "plan", label: "plan", value: "Pro" },
+          ],
+        })
+        expect(providerInfo.details).toHaveLength(2)
+        expect(JSON.stringify(info)).not.toContain("secret")
+        expect(JSON.stringify(info)).not.toContain("hidden@example.com")
+        defaultAuthStore().set("test-api-key", "Empty", { apiKey: "key" })
+        expect(
+          discoverCredentialedProviders().find((row) => row.credentialName === "Empty")
+            ?.credentialInfo,
+        ).toEqual(withInspect ? providerInfo : { usable: true })
+      })
+    }
+  }
+
+  it("reads only explicit scalar identity fields from nested saved accounts", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Nested", {
+      apiKey: "secret",
+      email: { token: "secret" },
+      username: ["not-a-name"],
+      name: " ",
+      account: { email: "nested@example.com", accountId: "account-1", planType: "Team" },
+      profile: { name: "Nested Name" },
+      user: { userId: "user-1" },
+    })
+    expect(discoverCredentialedProviders()[0]?.credentialInfo).toEqual({
+      usable: true,
+      accountId: "account-1",
+      details: [
+        { key: "email", label: "email", value: "nested@example.com" },
+        { key: "name", label: "name", value: "Nested Name" },
+        { key: "userId", label: "user id", value: "user-1" },
+        { key: "plan", label: "plan", value: "Team" },
+      ],
+    })
+  })
+
+  it("shows allowlisted saved profile fields without secrets or recursive bags", () => {
+    registerTestOpenRouterLikePlugin()
+    defaultAuthStore().set("test-api-key", "Profile A", {
+      apiKey: "secret-key",
+      givenName: "Ada",
+      familyName: "Lovelace",
+      xUserId: "x-1",
+      planStatus: "active",
+      planProvider: "stripe",
+      billingPeriodEnd: 1800000000,
+      emailVerified: true,
+      fedramp: false,
+      accessToken: "secret-access",
+      arbitrary: { principalId: "hidden-principal" },
+    })
+    defaultAuthStore().set("test-api-key", "Profile B", {
+      apiKey: "secret-key",
+      principalId: "meta-1",
+      subsTierId: "tier-1",
+      subsTierName: "Pro",
+      isSubsActive: false,
+      emailVerified: false,
+      fedramp: true,
+      billingPeriodEnd: "2026-12-01",
+      refreshToken: "secret-refresh",
+      profile: { user: { givenName: "hidden-name" } },
+    })
+    const found = discoverCredentialedProviders()
+    expect(
+      found.find((row) => row.credentialName === "Profile A")?.credentialInfo?.details,
+    ).toEqual([
+      { key: "givenName", label: "given name", value: "Ada" },
+      { key: "familyName", label: "family name", value: "Lovelace" },
+      { key: "xUserId", label: "x user id", value: "x-1" },
+      { key: "planStatus", label: "plan status", value: "active" },
+      { key: "planProvider", label: "plan provider", value: "stripe" },
+      { key: "billingPeriodEnd", label: "billing period end", value: "1800000000" },
+      { key: "emailVerified", label: "email verified", value: "yes" },
+      { key: "fedramp", label: "fedramp", value: "no" },
+    ])
+    expect(
+      found.find((row) => row.credentialName === "Profile B")?.credentialInfo?.details,
+    ).toEqual([
+      { key: "plan", label: "plan", value: "Pro" },
+      { key: "principalId", label: "principal id", value: "meta-1" },
+      { key: "billingPeriodEnd", label: "billing period end", value: "2026-12-01" },
+      { key: "subsTierId", label: "subscription tier id", value: "tier-1" },
+      { key: "isSubsActive", label: "subscription active", value: "no" },
+      { key: "emailVerified", label: "email verified", value: "no" },
+      { key: "fedramp", label: "fedramp", value: "yes" },
+    ])
+    const output = JSON.stringify(found.map((row) => row.credentialInfo))
+    expect(output).not.toContain("secret")
+    expect(output).not.toContain("hidden")
+  })
+
+  for (const billingPeriodEnd of [Infinity, NaN, true, {}, []]) {
+    it(`rejects invalid billing period end ${String(billingPeriodEnd)} and nonboolean flags`, () => {
+      registerTestOpenRouterLikePlugin()
+      defaultAuthStore().set("test-api-key", "Invalid", {
+        apiKey: "secret",
+        billingPeriodEnd,
+        isSubsActive: "true",
+        emailVerified: 1,
+        fedramp: { token: "secret" },
+      })
+      expect(discoverCredentialedProviders()[0]?.credentialInfo).toEqual({ usable: true })
+    })
+  }
 
   it("resolveStoredProviderAuth throws for an unknown credential name", () => {
     registerTestOpenRouterLikePlugin()

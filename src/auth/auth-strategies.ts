@@ -22,6 +22,7 @@ import { defaultNetworkClient } from "../network/index.ts"
 
 import type { AuthStore } from "./auth-store.ts"
 import { defaultAuthStore } from "./auth-store.ts"
+import { mergeCredentialMetadata } from "./credential-metadata.ts"
 
 /** Summary of a provider the host can authenticate against. */
 export interface CredentialedProvider {
@@ -229,7 +230,7 @@ export function discoverCredentialedProviders(
           source: "store",
           credentialLabel: entry.name,
           credentialName: entry.name,
-          credentialInfo: info ?? { usable: Boolean(auth) },
+          credentialInfo: mergeCredentialMetadata(storedSecrets, info ?? { usable: Boolean(auth) }),
         })
       }
     }
@@ -250,7 +251,10 @@ export function discoverCredentialedProviders(
           source: "store",
           credentialLabel: entry.name,
           credentialName: entry.name,
-          credentialInfo: apiKey.inspectCredential?.(storedSecrets) ?? { usable },
+          credentialInfo: mergeCredentialMetadata(
+            storedSecrets,
+            apiKey.inspectCredential?.(storedSecrets) ?? { usable },
+          ),
         })
       }
     }

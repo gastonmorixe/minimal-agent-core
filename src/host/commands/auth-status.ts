@@ -49,6 +49,7 @@ export function renderAuthStatus(deps: AuthStatusDeps = {}): boolean {
         authKind: p.authKind,
         source: p.source,
         credentialLabel: p.credentialLabel,
+        credentialName: p.credentialName,
         credentialInfo: p.credentialInfo,
         auth: resolveAuth(p.providerId, p.credentialName),
       })),
