@@ -8,7 +8,24 @@ describe("auth-status chrome", () => {
   it("renders not-logged-in rows", () => {
     const text = renderAuthStatusRows({ providers: [], now: 1 }).map(stripAnsi).join("\n")
     expect(text).toContain("not logged in")
-    expect(text).toContain("run `minimal-agent provider <id> login`")
+    expect(text).toContain("Run `minimal-agent provider <id> login`")
+  })
+
+  it("ignores expiry timestamps outside the Date range", () => {
+    const rows = renderAuthStatusRows({
+      providers: [
+        {
+          providerId: "test",
+          displayName: "Test",
+          authKind: "oauth",
+          source: "store",
+          credentialInfo: { usable: true, expiresAt: 1e100 },
+          auth: { kind: "oauth", token: "secret" },
+        },
+      ],
+      now: 1,
+    })
+    expect(rows.map(stripAnsi).join("\n")).not.toContain("expires:")
   })
 
   it("renders api-key auth", () => {
@@ -82,11 +99,11 @@ describe("auth-status chrome", () => {
       .map(stripAnsi)
       .join("\n")
 
-    expect(text).toContain("user id 51930405")
-    expect(text).toContain("email gaston@gastonmorixe.com")
-    expect(text).toContain("plan $20.00 plan, $20.00 used")
-    expect(text).toContain("on-demand $1.58 / $1.00")
-    expect(text).toContain("note You've hit your usage limit")
+    expect(text).toContain("user id: 51930405")
+    expect(text).toContain("email: gaston@gastonmorixe.com")
+    expect(text).toContain("plan: $20.00 plan, $20.00 used")
+    expect(text).toContain("on-demand: $1.58 / $1.00")
+    expect(text).toContain("note: You've hit your usage limit")
   })
 
   it("renders safe credential metadata and unreadable credentials", () => {
@@ -125,10 +142,10 @@ describe("auth-status chrome", () => {
       .join("\n")
 
     expect(text).toContain("provider-a")
-    expect(text).toContain("account acct-1")
-    expect(text).toContain("org org-1")
-    expect(text).toContain("scopes scope:a scope:b")
-    expect(text).toContain("refresh present")
+    expect(text).toContain("account: acct-1")
+    expect(text).toContain("org: org-1")
+    expect(text).toContain("scopes: scope:a scope:b")
+    expect(text).toContain("refresh: present")
     expect(text).toContain("provider-b")
     expect(text).toContain("credential unreadable")
     expect(text).not.toContain("AT")
@@ -164,6 +181,80 @@ describe("auth-status chrome", () => {
     expect(text).toContain("provider-c")
     expect(text).toContain("Work")
     expect(text).toContain("Personal")
+  })
+
+  it("keeps named credential boundaries, sanitizes metadata and shows expiry", () => {
+    const now = 1_700_000_000_000
+    const rows = renderAuthStatusRows({
+      providers: [
+        {
+          providerId: "example\r",
+          displayName: "Example\nProvider",
+          authKind: "oauth",
+          source: "store",
+          credentialName: "Work\tname",
+          credentialLabel: "Ignored label",
+          auth: { kind: "oauth", token: "secret-token" },
+          credentialInfo: {
+            usable: true,
+            expiresAt: now + 60_000,
+            hasRefreshToken: true,
+            accountId: "acct\nnext",
+            organizationId: "org\rnext",
+            scopes: ["read\x07", "write\u009b"],
+            details: [
+              { key: "usage", label: "usage\tlabel", value: `${"x".repeat(2000)}\x1b[2J\nnext` },
+            ],
+          },
+        },
+        {
+          providerId: "example\r",
+          displayName: "Example",
+          authKind: "api-key",
+          source: "store",
+          credentialName: "Broken",
+          auth: null,
+          credentialInfo: { usable: false, expiresAt: now - 60_000, hasRefreshToken: false },
+        },
+        {
+          providerId: "example\r",
+          displayName: "Example",
+          authKind: "api-key",
+          source: "store",
+          credentialLabel: "Label fallback",
+          auth: { kind: "api-key", key: "secret-key" },
+        },
+        {
+          providerId: "example\r",
+          displayName: "Example",
+          authKind: "api-key",
+          source: "store",
+          auth: { kind: "api-key", key: "secret-default" },
+        },
+      ],
+      now,
+    })
+    const plain = rows.map(stripAnsi)
+    expect(plain[1]).toBe("  Example Provider (example)")
+    expect(plain[2]).toBe("    Work name ✔ oauth")
+    expect(rows[2]).toContain("\x1b[1mWork name")
+    expect(plain).toContain("      account: acct next")
+    expect(plain).toContain("      org: org next")
+    expect(plain).toContain("      scopes: read  write")
+    expect(plain).toContain(`      usage label: ${"x".repeat(2000)} [2J next`)
+    const broken = plain.indexOf("    Broken ✗ api-key credential unreadable")
+    expect(broken).toBeGreaterThan(2)
+    expect(plain[broken - 1]).toBe("")
+    expect(plain).toContain("    Label fallback ✔ api-key")
+    expect(plain).toContain("    Credential 4 ✔ api-key")
+    const text = plain.join("\n")
+    expect(text).toContain("expires: 2023-11-14 22:14:20 UTC (in 1m)")
+    expect(text).toContain("expires: expired 1m ago")
+    expect(text).toContain("refresh: present")
+    expect(text).toContain("refresh: missing")
+    expect(text).not.toContain("secret-")
+    expect(text).not.toContain("Ignored label")
+    expect(plain.join("")).not.toMatch(/[\x00-\x1f\x7f-\x9f]/)
   })
 
   it("formats relative durations compactly", () => {

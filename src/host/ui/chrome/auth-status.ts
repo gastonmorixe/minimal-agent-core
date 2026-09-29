@@ -9,7 +9,7 @@
 
 import type { ProviderAuth } from "../../../llm/provider.ts"
 import type { AuthCredentialInfo } from "../../../llm/provider-plugin.ts"
-import { type CommandTableSpec, renderCommandTable } from "../command-table.ts"
+import { renderCommandTable } from "../command-table.ts"
 import { c } from "../style/ansi.ts"
 
 export interface AuthStatusProviderView {
@@ -44,9 +44,17 @@ function groupByProvider(
   return map
 }
 
-function renderCredentialName(p: AuthStatusProviderView): string {
-  const label = p.credentialName ?? p.credentialLabel ?? ""
-  return label ? c.dim(label) : ""
+function safeText(value: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: remove terminal controls from external metadata
+  return value.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, " ").trim()
+}
+
+function renderCredentialName(p: AuthStatusProviderView, index: number): string {
+  return (
+    safeText(p.credentialName ?? "") ||
+    safeText(p.credentialLabel ?? "") ||
+    `Credential ${index + 1}`
+  )
 }
 
 function renderCredentialStatus(p: AuthStatusProviderView): string {
@@ -55,41 +63,30 @@ function renderCredentialStatus(p: AuthStatusProviderView): string {
   return c.boldGreen("✔")
 }
 
-function renderCredentialLabel(p: AuthStatusProviderView): string {
-  const info = p.credentialInfo
-  if (!p.auth || info?.usable === false) return c.dim("credential unreadable")
-  return renderCredentialName(p)
-}
-
-function renderCredentialKind(p: AuthStatusProviderView): string {
-  if (!p.auth) return ""
-  return c.dim(p.auth.kind === "oauth" ? "oauth" : "api-key")
-}
-
 function renderDetailLines(info: AuthCredentialInfo | undefined, now: number): string[] {
   if (!info) return []
   const lines: string[] = []
-  if (info.accountId) lines.push(c.dim(`account ${info.accountId}`))
-  if (info.organizationId) lines.push(c.dim(`org ${info.organizationId}`))
+  if (info.accountId) lines.push(c.dim(`account: ${safeText(info.accountId)}`))
+  if (info.organizationId) lines.push(c.dim(`org: ${safeText(info.organizationId)}`))
   if (info.scopes && info.scopes.length > 0) {
-    lines.push(c.dim(`scopes ${info.scopes.join(" ")}`))
+    lines.push(c.dim(`scopes: ${safeText(info.scopes.join(" "))}`))
   }
-  if (typeof info.expiresAt === "number") {
-    const expired = info.expiresAt < now
+  if (typeof info.expiresAt === "number" && Number.isFinite(new Date(info.expiresAt).getTime())) {
+    const expired = info.expiresAt <= now
     const expiryLabel = expired
       ? c.boldRed(`expired ${formatRelative(now - info.expiresAt)} ago`)
       : `${new Date(info.expiresAt).toISOString().replace("T", " ").slice(0, 19)} UTC ${c.dim(
           `(in ${formatRelative(info.expiresAt - now)})`,
         )}`
-    lines.push(c.dim(`expires ${expiryLabel}`))
+    lines.push(c.dim(`expires: ${expiryLabel}`))
   }
   if (typeof info.hasRefreshToken === "boolean") {
     lines.push(
-      c.dim(`refresh ${info.hasRefreshToken ? c.boldGreen("present") : c.boldYellow("missing")}`),
+      c.dim(`refresh: ${info.hasRefreshToken ? c.boldGreen("present") : c.boldYellow("missing")}`),
     )
   }
   for (const detail of info.details ?? []) {
-    lines.push(c.dim(`${detail.label} ${detail.value}`))
+    lines.push(c.dim(`${safeText(detail.label)}: ${safeText(detail.value)}`))
   }
   return lines
 }
@@ -100,53 +97,27 @@ export function renderAuthStatusRows(input: AuthStatusRenderInput): string[] {
     return renderCommandTable({
       columns: [{ key: "status" }],
       sections: [],
-      empty: "not logged in — run `minimal-agent provider <id> login`",
+      empty: "not logged in. Run `minimal-agent provider <id> login`",
     })
   }
 
-  const grouped = groupByProvider(input.providers)
-  const sections: CommandTableSpec["sections"] = []
-
-  for (const [providerId, creds] of grouped) {
-    const rows: CommandTableSpec["sections"][number]["rows"] = []
-
-    if (creds.length === 1) {
-      // Single credential: flat row with provider, kind, status on one line
-      const p = creds[0]!
-      const label = renderCredentialLabel(p)
-      const kind = renderCredentialKind(p)
+  const rows: string[] = [""]
+  for (const [providerId, creds] of groupByProvider(input.providers)) {
+    if (rows.length > 1) rows.push("")
+    rows.push(`  ${c.bold(safeText(creds[0]!.displayName))} ${c.sky(`(${safeText(providerId)})`)}`)
+    for (const [index, p] of creds.entries()) {
+      if (index > 0) rows.push("")
       const status = renderCredentialStatus(p)
-      rows.push({ cells: { provider: c.sky(providerId), name: label, kind, status } })
-
+      const kind = c.dim(p.auth?.kind ?? p.authKind)
+      const diagnostic =
+        !p.auth || p.credentialInfo?.usable === false ? ` ${c.dim("credential unreadable")}` : ""
+      rows.push(`    ${c.bold(renderCredentialName(p, index))} ${status} ${kind}${diagnostic}`)
       for (const detail of renderDetailLines(p.credentialInfo, input.now)) {
-        rows.push({ cells: { provider: "", name: detail, kind: "", status: "" } })
-      }
-    } else {
-      // Multiple credentials: provider as section title, each credential as sub-row
-      for (const p of creds) {
-        const label = renderCredentialLabel(p)
-        const kind = renderCredentialKind(p)
-        const status = renderCredentialStatus(p)
-        rows.push({ cells: { provider: "", name: label, kind, status } })
-
-        for (const detail of renderDetailLines(p.credentialInfo, input.now)) {
-          rows.push({ cells: { provider: "", name: detail, kind: "", status: "" } })
-        }
+        rows.push(`      ${detail}`)
       }
     }
-
-    sections.push({ title: creds.length > 1 ? providerId : undefined, rows })
   }
-
-  return renderCommandTable({
-    columns: [
-      { key: "provider", minWidth: 14, color: "none" },
-      { key: "name", color: "none" },
-      { key: "kind", minWidth: 8, color: "none" },
-      { key: "status", minWidth: 2, color: "none" },
-    ],
-    sections,
-  })
+  return rows
 }
 
 /**

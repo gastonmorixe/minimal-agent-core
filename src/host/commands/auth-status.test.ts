@@ -22,6 +22,36 @@ function captureOut(): { out: { write: (s: string) => void }; lines: string[]; t
 }
 
 describe("runAuthStatusCommand", () => {
+  it("passes credential names to resolution and keeps unreadable names visible", async () => {
+    const cap = captureOut()
+    const resolved: Array<[string, string | undefined]> = []
+    const code = await runAuthStatusCommand({
+      discover: () =>
+        ["Work", "Broken"].map((credentialName) => ({
+          providerId: "example",
+          displayName: "Example",
+          authKind: "oauth" as const,
+          source: "store" as const,
+          credentialName,
+          credentialLabel: "Shared label",
+        })),
+      resolveAuth: (id, name) => {
+        resolved.push([id, name])
+        return name === "Work" ? { kind: "oauth", token: "secret-token" } : null
+      },
+      output: cap.out,
+    })
+    expect(code).toBe(0)
+    expect(resolved).toEqual([
+      ["example", "Work"],
+      ["example", "Broken"],
+    ])
+    expect(cap.text()).toContain("Example (example)")
+    expect(cap.text()).toContain("    Work ✔ oauth\n\n    Broken ✗ oauth credential unreadable")
+    expect(cap.text()).not.toContain("Shared label")
+    expect(cap.text()).not.toContain("secret-token")
+  })
+
   it("reports not-logged-in (and exit code 1) when the credential store is empty", async () => {
     const cap = captureOut()
     const code = await runAuthStatusCommand({
@@ -99,8 +129,8 @@ describe("runAuthStatusCommand", () => {
     })
 
     expect(code).toBe(0)
-    expect(cap.text()).toContain("account acct-1")
-    expect(cap.text()).toContain("refresh missing")
+    expect(cap.text()).toContain("account: acct-1")
+    expect(cap.text()).toContain("refresh: missing")
     expect(cap.text()).not.toContain("AT")
   })
 })
