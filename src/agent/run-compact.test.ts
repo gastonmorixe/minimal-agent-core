@@ -16,7 +16,7 @@ import type { CanonicalEvent } from "../llm/canonical-events.ts"
 import type { Message } from "../llm/messages.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry.ts"
 import type { ProviderAuth } from "../llm/provider.ts"
-import { clearProviderPlugins } from "../llm/provider-plugin.ts"
+import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
 
@@ -354,6 +354,62 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     expect(stats.summaryError).toBeUndefined()
     expect(stats.summaryText ?? "").toContain("recovered-summary-text")
     expect(calls).toBe(2)
+  })
+
+  // Provider-neutral markers stand in for a plan-auth preamble (billing + identity).
+  it("FAIL-FIRST: oauth local summary system goes through provider resolveSystemPrompt (preamble)", async () => {
+    const handle = registerTestProvider({
+      id: "compact-oauth-sys-prov",
+      displayName: "Compact OAuth Sys Prov",
+      shortCode: "cos",
+      models: [{ id: "compact-oauth-sys-model" }],
+    })
+    registerProviderPlugin({
+      ...handle.plugin,
+      resolveSystemPrompt: (ctx) => {
+        if (ctx.authKind === "oauth") {
+          return [
+            { type: "text", text: "TEST-PLAN-PREAMBLE billing=1" },
+            { type: "text", text: "TEST-PLAN-IDENTITY" },
+            ...ctx.body,
+          ]
+        }
+        return [{ type: "text", text: ctx.identity }, ...ctx.body]
+      },
+    })
+    const seenSystems: unknown[] = []
+    const origRun = handle.adapter.run.bind(handle.adapter)
+    handle.adapter.run = async function* (req, model, ctx) {
+      seenSystems.push(req.system)
+      yield* origRun(req, model, ctx)
+    }
+    let calls = 0
+    const transport: NetworkTransport = {
+      id: "fake",
+      request: async () => {
+        calls += 1
+        return sseResponse(summaryEvents("oauth-summary-ok"))
+      },
+    }
+    const client = new NetworkClient({ primary: transport })
+    const messages = hist()
+    const stats = await runCompact({
+      messages,
+      model: "compact-oauth-sys-model",
+      providerId: "compact-oauth-sys-prov",
+      auth: { type: "oauth", token: "plan-token" },
+      reason: "manual",
+      mode: "local",
+      networkClient: client,
+    })
+    expect(stats.summaryError).toBeUndefined()
+    expect(stats.summaryText).toContain("oauth-summary-ok")
+    expect(calls).toBe(1)
+    expect(seenSystems).toHaveLength(1)
+    const system = seenSystems[0] as Array<{ type: string; text: string }>
+    expect(system[0]?.text).toContain("TEST-PLAN-PREAMBLE")
+    expect(system[1]?.text).toContain("TEST-PLAN-IDENTITY")
+    expect(system.some((b) => b.text.includes("CONTEXT CHECKPOINT COMPACTION"))).toBe(true)
   })
 
   it("non-retryable stream_error does no retry", async () => {
