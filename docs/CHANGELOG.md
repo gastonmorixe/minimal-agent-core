@@ -4,9 +4,12 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-09-15T12:00:00-0400"
+updated-at: "2026-10-01T15:50:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-01-compact-provider-preamble-retry-cap"
+    type: fix
+    status: landed
   - id: "2026-09-15-curl-pipe-installer"
     type: feat
     status: landed
@@ -92,6 +95,17 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   secret bags. Coverage in `auth-status.test.ts`.
 
 ### Fixed
+
+- 2026-10-01: `/compact` no longer hangs on Anthropic OAuth (plan) auth.
+  Found by Janice (`9f031663`), fixed by Debra (`d339b433`).
+  - Root cause: local and remote compaction sent a bare summary system prompt.
+    Plan auth needs the provider's billing and Claude Code identity preamble,
+    so Anthropic answered a fake `rate_limit_error` 429. Compact retried tagged
+    transport errors forever, so `/compact` hung on the slow backoff curve.
+  - Fix: build the compact `system` through the active provider plugin's
+    `resolveSystemPrompt`, the same path live turns use. Cap tagged transport
+    retries in the local summary at 3, then fall back to the stub checkpoint.
+  - Coverage in `src/agent/run-compact.test.ts`.
 
 - 2026-09-15 (this session): system-prompt resolution is scoped to the
   selected provider. Bare model ids claimed by several providers (e.g.

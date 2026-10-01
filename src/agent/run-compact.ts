@@ -31,7 +31,9 @@ import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
 import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from "../llm/provider.ts"
+import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { run } from "../llm/run.ts"
+import { NEUTRAL_IDENTITY } from "../llm/system-prompt.ts"
 import { classifyRetryableStreamError, retryBackoffMs } from "../llm/transport/retry.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
 import { normalizeModelForAPI } from "../llm/transport/types.ts"
@@ -141,6 +143,16 @@ export interface RunCompactInput {
  * (rejected, not clamped, so callers notice bad argv).
  */
 const compactLocks = new WeakSet<Message[]>()
+
+/**
+ * Local-summary transport retries (HTTP 429 / 5xx / connect blips). Unlike the
+ * live turn path (retry forever until Esc), compact MUST bound this: a fake
+ * Anthropic plan-auth 429 from a missing billing/identity system preamble used
+ * to hang `/compact` on the slow curve forever (Janice 9f031663, 2026-10-01).
+ * After this many tagged transport failures, throw so `runLocalCompact` falls
+ * back to the stub checkpoint.
+ */
+const MAX_LOCAL_SUMMARY_TRANSPORT_RETRIES = 3
 
 /**
  * Run the compact pipeline for `input` and return the resulting stats.
@@ -466,7 +478,10 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       },
     ],
     stream: true,
-    system: [{ type: "text", text: buildLocalSummarySystemPrompt(input.focus) }],
+    // MUST go through the provider's resolveSystemPrompt so Anthropic OAuth
+    // plan auth gets billing + Claude Code identity preamble. A bare compaction
+    // prompt alone returns a fake HTTP 429 rate_limit_error (Janice 9f031663).
+    system: buildCompactSummarySystem(entry, providerAuth, input.focus),
     ...(input.signal ? { signal: input.signal } : {}),
   }
 
@@ -474,6 +489,8 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   let savedPartial = ""
   /** Untagged (mid-stream) retryable failures consumed (bounded salvage path). */
   let untaggedRetries = 0
+  /** Tagged transport failures (429 / 5xx / connect). Bounded (see constant). */
+  let transportRetries = 0
   for (let attempt = 1; ; attempt++) {
     try {
       await input.onSummaryAttempt?.(attempt)
@@ -532,10 +549,14 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       // missed them and aborted compaction on the first 429 (a
       // rate_limit_error from the adapter's non-2xx classifier). Classify
       // with the SAME policy as the live send loop and retry on the shared
-      // fast/slow curve until the caller aborts (Esc / per-command timeout).
-      // This mirrors the turn path's never-give-up rule for tagged errors.
+      // fast/slow curve, but CAP attempts: compact is a slash command, not a
+      // multi-day agent turn, and fake plan-auth 429s must not hang forever.
       const transportTag = classifyRetryableStreamError(err)
       if (transportTag !== undefined) {
+        transportRetries++
+        if (transportRetries > MAX_LOCAL_SUMMARY_TRANSPORT_RETRIES) {
+          throw err
+        }
         const delayMs = retryBackoffMs(attempt, transportTag)
         await sleep(delayMs, input.signal)
         continue
@@ -562,6 +583,31 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       throw err
     }
   }
+}
+
+/**
+ * Build the local-summary `system` blocks the same way live turns do: ask the
+ * active provider plugin's `resolveSystemPrompt` so OAuth/plan Anthropic gets
+ * billing + Claude Code identity before the compaction instructions. Without
+ * that preamble, Anthropic answers a fake `rate_limit_error` 429.
+ */
+function buildCompactSummarySystem(
+  entry: { id: string; providerId: string },
+  providerAuth: ProviderAuth,
+  focus?: string,
+): CanonicalRequest["system"] {
+  const bodyText = buildLocalSummarySystemPrompt(focus)
+  const body = [{ type: "text" as const, text: bodyText }]
+  const plugin = findProviderPlugin(entry.providerId)
+  if (plugin?.resolveSystemPrompt) {
+    return plugin.resolveSystemPrompt({
+      identity: NEUTRAL_IDENTITY,
+      body,
+      authKind: providerAuth.kind,
+      modelId: entry.id,
+    })
+  }
+  return body
 }
 
 /**
@@ -613,7 +659,9 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
     providerId: entry.providerId,
     messages: input.messages.map((m) => legacyMessageToMinimalCanonical(m)),
     stream: false,
-    system: [{ type: "text", text: buildLocalSummarySystemPrompt(input.focus) }],
+    // Same provider preamble as local summary / live turns (billing + identity
+    // on Anthropic OAuth). Remote adapters that ignore `system` are unaffected.
+    system: buildCompactSummarySystem(entry, providerAuth, input.focus),
   }
 
   return adapter.compact({ req }, entry, ctx)
