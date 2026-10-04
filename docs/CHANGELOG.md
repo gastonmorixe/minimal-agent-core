@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-10-01T15:50:00-0400"
+updated-at: "2026-10-04T14:18:57-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-04-builtin-tool-input-aliases"
+    type: fix
+    status: landed
+    detail: "Read/Write/Edit accept path alias, validate required fields before IO"
   - id: "2026-10-01-compact-provider-preamble-retry-cap"
     type: fix
     status: landed
@@ -95,6 +99,15 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   secret bags. Coverage in `auth-status.test.ts`.
 
 ### Fixed
+
+- 2026-10-04: Built-in tools accept Cursor-shaped `path` (Read/Write/Edit) and
+  still reject missing or mistyped required fields before filesystem, locks,
+  mode, or hooks run. Canonical `file_path` / `content` win over aliases.
+  Invalid canonical values do not fall through. Write still keeps the
+  `contents` alias and Glob still keeps `glob_pattern` / `target_directory`.
+  Plugin and custom tools are not remapped. File-lock wiring moved to
+  `src/tools/file-lock.ts` so `tools.ts` stays under the line cap. Coverage in
+  `src/tools/tool-input.test.ts`. Work by George (`3c3002a8`).
 
 - 2026-10-01: `/compact` no longer hangs on Anthropic OAuth (plan) auth.
   Found by Janice (`9f031663`), fixed by Debra (`d339b433`).
