@@ -85,6 +85,7 @@ import {
 import { scrubEmbeddedPayloads } from "../tools/embedded-payload-scrub.ts"
 import type { ToolFeedbackTracker } from "../tools/feedback-tracker.ts"
 import { outputPreviewAnnotation, tuiPreviewHint } from "../tools/PROMPTS.ts"
+import { normalizeToolInput, validateToolInput } from "../tools/tool-input.ts"
 import type { ToolTimeTracker } from "../tools/tool-time.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
@@ -310,6 +311,13 @@ export async function executeToolRound(
    */
   let suppressToolTime = false
 
+  // Canonicalize documented built-in aliases (e.g. Cursor `path` ->
+  // `file_path`) before mode/policy/hooks see the input. Custom and
+  // plugin tools are left untouched. Validation rejects missing/
+  // mistyped required fields before any filesystem side effect.
+  tool.input = normalizeToolInput(tool.name, tool.input as Record<string, unknown>)
+  const prepError = validateToolInput(tool.name, tool.input as Record<string, unknown>)
+
   // Mode dispatch gate. Tools stay registered in the request body
   // (so the cached prefix is mode-independent), but the harness
   // refuses to actually invoke a tool the active mode disallows.
@@ -324,10 +332,14 @@ export async function executeToolRound(
   emitPermissionChecked(
     ctx.loader,
     tool.name,
-    gate.allowed,
-    gate.allowed ? undefined : gate.message,
+    prepError ? false : gate.allowed,
+    prepError ?? (gate.allowed ? undefined : gate.message),
   )
-  if (!gate.allowed) {
+  if (prepError) {
+    writeToolHeader()
+    content = prepError
+    isError = true
+  } else if (!gate.allowed) {
     writeToolHeader()
     content = gate.message
     isError = true
@@ -404,8 +416,19 @@ export async function executeToolRound(
           }
         } else if (will.action === "allow") {
           // updatedInput: replace the tool_use input in place so dispatch
-          // and executeTool see the rewritten args.
-          tool.input = will.payload.input
+          // and executeTool see the rewritten args. Re-normalize aliases
+          // and re-validate so a rewrite cannot bypass the input contract.
+          tool.input = normalizeToolInput(tool.name, will.payload.input as Record<string, unknown>)
+          const rewriteError = validateToolInput(tool.name, tool.input as Record<string, unknown>)
+          if (rewriteError) {
+            policyDenied = true
+            writeToolHeader()
+            content = rewriteError
+            isError = true
+            for (const row of formatRefusalRows(content, "policy")) {
+              writeTranscript(row)
+            }
+          }
         }
       } catch {
         // Port failures must not brick the tool loop — proceed with original input.
