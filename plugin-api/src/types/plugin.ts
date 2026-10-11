@@ -1057,22 +1057,23 @@ export interface LiveAreaHandlerContext {
    */
   setFooterTail?: (text: string) => void
   /**
-   * Display-width cells the host RESERVES on this slot's footer line for
-   * segments appended after the line's own content (the decoration suffix
-   * plus all joined footer tails). The quota renderer (and any other
-   * width-aware slot) subtracts this from its usable budget so its
-   * compression ladder reacts to the FULL painted line — not just the
-   * terminal width. Without it, bars stay at max width while the tail
-   * block shoves the line past `cols` and the editor clips the tail.
+   * Display-width cells the host RESERVES on this slot's footer line:
+   * the live-area wrap-safety cell (`cols - 1` paint clamp) plus any
+   * segments appended after the line's own content (decoration suffix
+   * and joined footer tails, each with their two-space gap). The quota
+   * renderer (and any other width-aware slot) subtracts this from its
+   * usable budget so its compression ladder reacts to the FULL painted
+   * line. Without it, bars stay wide while the host ellipsis-truncates
+   * the trailing identity (or clips an appended TPS tail).
    *
-   * The number already includes the two-space gap before each appended
-   * block, so callers treat it as pure subtraction:
-   * `usable = cols - (ctx.footerReservedWidth ?? 0)`.
+   * Always \>= 1 when the host provides it (the wrap cell alone). Callers
+   * treat it as pure subtraction:
+   * `usable = cols - Math.max(1, ctx.footerReservedWidth ?? 1)`.
    *
    * Computed per fire() against the CURRENT registry state, so a tail that
    * appears mid-session (tps waking up on the first stream delta)
    * re-triggers a repaint and the next render sees the new budget.
-   * Optional + best-effort: `undefined` when unknown (tests / no tails).
+   * Optional + best-effort: `undefined` when unknown (tests / older host).
    */
   footerReservedWidth?: number
   /**

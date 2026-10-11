@@ -21,7 +21,7 @@ afterEach(() => setDecorationSuffix(""))
 afterEach(() => clearFooterTails())
 
 describe("LiveAreaScheduler — footer tails", () => {
-  it("exposes footerReservedWidth = 0 when nothing is reserved", async () => {
+  it("exposes footerReservedWidth = 1 (wrap cell) when nothing is appended", async () => {
     let seen: number | undefined
     const slot = makeSlot({
       id: "f",
@@ -41,7 +41,8 @@ describe("LiveAreaScheduler — footer tails", () => {
     })
     sched.start()
     await clock.tick(0)
-    expect(seen).toBe(0)
+    // Always reserve the live-area cols-1 wrap cell even with no suffix/tails.
+    expect(seen).toBe(1)
     sched.stop()
   })
 
@@ -73,9 +74,9 @@ describe("LiveAreaScheduler — footer tails", () => {
     })
     sched.start()
     await clock.tick(0)
-    // 2 + 10 (suffix gap + width) + 2 + 6 (tails gap + width) = 20.
+    // 1 (wrap cell) + 2 + 10 (suffix gap + width) + 2 + 6 (tails gap + width) = 21.
     // ANSI escapes contribute 0 cells.
-    expect(seen).toBe(20)
+    expect(seen).toBe(21)
     sched.stop()
   })
 
@@ -99,11 +100,11 @@ describe("LiveAreaScheduler — footer tails", () => {
     })
     sched.start()
     await clock.tick(0)
-    expect(seen.at(-1)).toBe(0)
+    expect(seen.at(-1)).toBe(1) // wrap cell alone
     // TPS wakes up mid-stream.
     setFooterTail("tps", "28/tps")
     await clock.tick(1_000)
-    expect(seen.at(-1)).toBe(2 + 6)
+    expect(seen.at(-1)).toBe(1 + 2 + 6)
     sched.stop()
   })
 

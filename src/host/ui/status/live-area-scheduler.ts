@@ -381,12 +381,13 @@ export class LiveAreaScheduler {
       // without clobbering each other. Two slots of the same plugin share
       // the key (last writer wins). See plugin-api/utils/footer-tail.
       setFooterTail: (text: string) => setFooterTail(s.slot.pluginId, text),
-      // Cells the host will append AFTER this line's own content at flush
-      // time (decoration suffix + joined tails, gaps included). Slots that
-      // do their own width-aware compression (quota-status's bar ladder)
-      // subtract this so they start shrinking when the FULL line stops
-      // fitting — not only when the bare line overflows cols. Computed per
-      // fire: a tail appearing mid-session re-renders with the new budget.
+      // Cells the slot must leave free: the live-area cols-1 wrap cell
+      // (always >= 1) plus anything the host appends after this line
+      // (decoration suffix + joined tails, gaps included). Width-aware
+      // slots (quota-status's bar ladder) subtract this so they shrink
+      // before the editor ellipsis-truncates the trailing identity.
+      // Computed per fire: a tail appearing mid-session re-renders with
+      // the new budget.
       footerReservedWidth: this.reservedWidth(),
     }
 
@@ -513,22 +514,25 @@ export class LiveAreaScheduler {
   }
 
   /**
-   * Display-width cells currently reserved by host-appended segments on a
-   * single-line footer value. Mirrors {@link flushFooter}'s composition:
-   * the decoration suffix appends to the FIRST footer line, the joined
-   * tail block to the LAST. A one-line status row (quota-status) can be
-   * both first AND last, so both reservations count against it.
+   * Display-width cells the slot must leave free on a single-line footer.
+   * Mirrors {@link flushFooter}'s composition plus the live-area paint
+   * clamp (`cols - 1` in editor-controller / MA-481485):
+   *   - always 1 cell for the wrap-safety budget the host clamps to
+   *   - decoration suffix on the FIRST footer line (gap + width)
+   *   - joined tail block on the LAST (gap + width)
    *
-   * Each append contributes its own two-space gap + visible width (ANSI
-   * escapes measure as 0 cells). Slots subtract this from their usable
-   * budget so bars shrink as soon as the whole painted line would stop
-   * fitting — see `LiveAreaHandlerContext.footerReservedWidth`.
+   * A one-line status row (quota-status) can be both first AND last, so
+   * both append reservations count against it. Slots subtract this from
+   * terminal cols so bars shrink before the host ellipsis-truncates the
+   * trailing identity (sid/name) — see `footerReservedWidth`.
    *
-   * Returns 0 when nothing is reserved (no suffix, no tails) so callers
-   * can treat the field as plain subtraction without undefined-guards.
+   * Always \>= 1 (the wrap cell). Callers treat it as plain subtraction.
    */
   private reservedWidth(): number {
-    let w = 0
+    // Live-area paint clamps every footer row to cols-1. Count that cell
+    // here so width-aware slots shrink one step sooner instead of painting
+    // a full-cols line that the editor then clips with `…`.
+    let w = 1
     const suffix = getDecorationSuffix()
     if (suffix.length > 0) w += 2 + displayWidth(suffix)
     const tails = getFooterTails()
