@@ -291,7 +291,7 @@ function runTailCompact(
   return finish(
     input,
     stats,
-    `compact: tail reason=${input.reason} keepTail=${keepTail} messages ${messagesBefore}→${stats.messagesAfter}`,
+    `compact: tail reason=${input.reason} keepTail=${keepTail} messages ${messagesBefore}->${stats.messagesAfter}`,
     candidate,
     snapshot,
     contentLens,
@@ -309,7 +309,7 @@ function runForkStub(input: RunCompactInput, messagesBefore: number): CompactSta
     "To branch, fork the session file (SessionStore.fork) or copy the transcript, " +
     "then compact the branch."
   input.appendNote?.(
-    `compact: fork reason=${input.reason} ${guidance} messages ${messagesBefore}→${messagesBefore}`,
+    `compact: fork reason=${input.reason} ${guidance} messages ${messagesBefore}->${messagesBefore}`,
   )
   throw new Error(`compact fork: ${guidance}`)
 }
@@ -339,7 +339,7 @@ function runLocalStub(
   return finish(
     input,
     stats,
-    `compact: local reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter}` +
+    `compact: local reason=${input.reason} messages ${messagesBefore}->${stats.messagesAfter}` +
       (remoteError ? ` remoteError=${remoteError}` : "") +
       (summaryError ? ` summaryError=${summaryError}` : ""),
     localMsgs,
@@ -372,7 +372,7 @@ async function runLocalCompact(
       : findModel(apiModel)
     const cause =
       summaryError ?? (known ? "empty summary (no text)" : `unknown model "${input.model}"`)
-    input.appendNote?.(`compact: local summary failed (${cause}); using stub`)
+    input.appendNote?.(`compact: local summary failed (${cause}). Using stub`)
     return runLocalStub(input, messagesBefore, snapshot, contentLens, undefined, cause)
   }
   const localMsgs = buildLocalCompactMessages({
@@ -391,7 +391,7 @@ async function runLocalCompact(
   return finish(
     input,
     stats,
-    `compact: local reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter} summaryChars=${summaryText.length}`,
+    `compact: local reason=${input.reason} messages ${messagesBefore}->${stats.messagesAfter} summaryChars=${summaryText.length}`,
     localMsgs,
     snapshot,
     contentLens,
@@ -415,12 +415,12 @@ async function runRemoteCompact(
       // still explain why we fell back so `/compact` is not a silent
       // "local" mystery on plan-auth sessions.
       remoteError = "remote compact unavailable (no adapter.compact or model entry)"
-      input.appendNote?.(`compact: ${remoteError}; using local fallback`)
+      input.appendNote?.(`compact: ${remoteError}. Using local fallback`)
     }
   } catch (err) {
     // Remote failed: fall through to local. Surface via note for ops.
     remoteError = err instanceof Error ? err.message : String(err)
-    input.appendNote?.(`compact: remote failed (${remoteError}); using local fallback`)
+    input.appendNote?.(`compact: remote failed (${remoteError}). Using local fallback`)
     result = null
   }
 
@@ -442,7 +442,7 @@ async function runRemoteCompact(
   return finish(
     input,
     stats,
-    `compact: ${stats.kind} reason=${input.reason} messages ${messagesBefore}→${stats.messagesAfter}`,
+    `compact: ${stats.kind} reason=${input.reason} messages ${messagesBefore}->${stats.messagesAfter}`,
     next,
     snapshot,
     contentLens,

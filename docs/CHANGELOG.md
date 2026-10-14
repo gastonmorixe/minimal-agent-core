@@ -4,9 +4,13 @@ title: "Changelog"
 type: changelog
 status: living
 created-at: "2026-05-01T00:00:00-0400"
-updated-at: "2026-10-04T14:18:57-0400"
+updated-at: "2026-10-14T14:50:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-14-prompt-writing-style-audit"
+    type: chore
+    status: landed
+    detail: "Writing-style cleanup of model-facing prose plus prompt-audit rules"
   - id: "2026-10-04-builtin-tool-input-aliases"
     type: fix
     status: landed
@@ -97,6 +101,18 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
   renders them verbatim after the built-in metadata lines so providers can
   surface display-safe identity/quota diagnostics without the host interpreting
   secret bags. Coverage in `auth-status.test.ts`.
+
+### Changed
+
+- 2026-10-14: Model-facing prose follows the writing-style rules. Prompts,
+  tool descriptions, truncation notices, compact notes, and loader/error
+  strings drop semicolons, em/en dashes, unicode arrows and ellipses, and
+  filler words. The compact prompt drops shout-case. `truncationNotice` now
+  reads `..., N/M lines, cut at byte ...` (comma, not semicolon). No behavior
+  change. `src/prompts/prompt-audit.test.ts` now enforces no semicolons, no
+  emoji, no sycophancy or signposting phrases, and no `---` before a heading.
+  It masks code fences, inline code, and URLs first. Work by Edward
+  (`dc78a09d`).
 
 ### Fixed
 

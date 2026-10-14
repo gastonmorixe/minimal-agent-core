@@ -672,7 +672,7 @@ function formatTimeoutMessage(
 ): string {
   const waited = (waitedMs / 1000).toFixed(1)
   if (!holder) {
-    return `File ${filePath} is locked (waited ${waited}s); current holder unknown (lock file unreadable).`
+    return `File ${filePath} is locked (waited ${waited}s). Current holder unknown (lock file unreadable).`
   }
   const ageS = Math.round((now() - holder.acquiredAtMs) / 1000)
   return [

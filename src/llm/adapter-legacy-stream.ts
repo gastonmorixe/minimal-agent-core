@@ -333,7 +333,7 @@ export async function* canonicalEventsToLegacyStream(
                 stopDetails: {
                   type: "stream_closed_without_terminal",
                   message:
-                    "Provider closed the stream without a terminal event after complete tool call(s); salvaged closed tools and continuing from local state",
+                    "Provider closed the stream without a terminal event after complete tool call(s). Salvaged closed tools and continuing from local state",
                 },
                 usage: turnUsage,
                 responseId,
@@ -353,7 +353,7 @@ export async function* canonicalEventsToLegacyStream(
                 stopDetails: {
                   type: "stream_closed_without_terminal",
                   message:
-                    "Provider closed the stream without a terminal event after partial output; preserved text and discarding incomplete tool calls",
+                    "Provider closed the stream without a terminal event after partial output. Preserved text and discarding incomplete tool calls",
                 },
                 usage: turnUsage,
                 responseId,

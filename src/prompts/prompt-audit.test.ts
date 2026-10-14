@@ -57,6 +57,24 @@ function promptMarkdownFiles(): PromptFile[] {
   return modelFacingFiles().filter((f) => isPromptMarkdown(f.rel))
 }
 
+/**
+ * Blank out code fences, inline code spans, and URLs so prose rules do not
+ * fire on code. Length and newlines are kept, so line numbers stay correct.
+ */
+function maskNonProse(text: string): string {
+  const blank = (s: string): string => s.replace(/[^\n]/g, " ")
+  return text
+    .replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[^\n]*$/gm, blank)
+    .replace(/^(?: {4,}|\t)[^\n]*$/gm, blank)
+    .replace(/`[^`\n]*`/g, blank)
+    .replace(/\bhttps?:\/\/\S+/g, blank)
+}
+
+function proseFiles(): PromptFile[] {
+  // modelFacingFiles() builds fresh objects per call, so in-place is safe.
+  return modelFacingFiles().map((f) => Object.assign(f, { text: maskNonProse(f.text) }))
+}
+
 function isLiteralEnumValue(file: PromptFile, match: RegExpExecArray): boolean {
   return file.rel === "plugins/web-search/manifest.json" && match[0] === "ALL"
 }
@@ -102,6 +120,35 @@ describe("model-facing prompt audit", () => {
       /\b(?:ALWAYS|NEVER|IMPORTANT|REQUIRED|SHOULD|MUST|BACKGROUND|SAME|GENERIC|DETAILED|CURRENT|CAN|OWN|LIVE|LATEST|RECORDED|ONLY|FINAL|ALL)\b|Do NOT|does NOT|is NOT|are NOT|could NOT|you are NOT|NOT its|NOT the|REFUSES/g,
       "shout-case directive",
       isLiteralEnumValue,
+    )
+    expect(bad).toEqual([])
+  })
+
+  // Writing-style rules (canonical spec: ma-agent-writing-style-plugin/PROMPT.md).
+  test("keeps model-facing prose free of semicolons", () => {
+    const bad = violations(proseFiles(), /;/g, "semicolon in prose")
+    expect(bad).toEqual([])
+  })
+
+  test("keeps model-facing prose free of emoji", () => {
+    const bad = violations(proseFiles(), /\p{Extended_Pictographic}/gu, "emoji")
+    expect(bad).toEqual([])
+  })
+
+  test("keeps model-facing prose free of sycophancy, disclaimers, and signposting", () => {
+    const bad = violations(
+      proseFiles(),
+      /great question|\babsolutely!|\bcertainly!|i hope this helps|let me know if you'd like|as an ai language model|let's dive in|here's what you need to know|without further ado/gi,
+      "sycophancy or signposting",
+    )
+    expect(bad).toEqual([])
+  })
+
+  test("does not put a thematic break before a heading", () => {
+    const bad = violations(
+      promptMarkdownFiles(),
+      /^---[ \t]*\n(?:[ \t]*\n)*#/gm,
+      "--- before heading",
     )
     expect(bad).toEqual([])
   })

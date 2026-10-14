@@ -243,7 +243,7 @@ export function registerTestProvider(opts: TestProviderOptions = {}): TestProvid
       const client = ctx.networkClient as TestNetworkClientLike | undefined
       if (!client) {
         throw new Error(
-          `test provider "${id}": no networkClient injected — pass a fake client via RunContext/SendOptions`,
+          `test provider "${id}": no networkClient injected. Pass a fake client via RunContext/SendOptions`,
         )
       }
       const headers: Record<string, string> = { "content-type": "application/json" }

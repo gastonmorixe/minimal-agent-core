@@ -47,7 +47,7 @@ export const BINARY_OPT_IN_SCHEMA = {
   type: "boolean",
   default: false,
   description:
-    "Opt-in to receive binary tool output. Default false: binary bodies are withheld and replaced with a <ma::agent::binary-result …/> summary (mime, size, on-disk path). Set true only when you intentionally need the bytes (returned as base64 when small enough; otherwise still path-only). Never dumps raw binary as text.",
+    "Opt-in to receive binary tool output. Default false: binary bodies are withheld and replaced with a <ma::agent::binary-result .../> summary (mime, size, on-disk path). Set true only when you intentionally need the bytes (returned as base64 when small enough, otherwise still path-only). Never dumps raw binary as text.",
 } as const
 
 /**
@@ -253,7 +253,7 @@ export function formatBinaryResultMessage(opts: BinaryResultMessageOpts): string
 
   const prose = opts.optedInButWithheld
     ? "Binary body is too large to inline as base64 under the tool-output budget. Use the path above (Read it, or ask the user to attach the file to their message)."
-    : `Binary body withheld from model context (not valid text; dumping it wastes tokens).${
+    : `Binary body withheld from model context (not valid text, and dumping it wastes tokens).${
         opts.path ? " Full bytes saved at the path above." : ""
       } Re-call with binary=true for base64 when small enough, Read the saved path, or ask the user to attach the file.`
 

@@ -57,11 +57,11 @@ export function formatFilesStatsReport(report: FilesStatsReport): string {
     }
     return [
       `No files have been read or modified yet this session.`,
-      `Every successful Read, Edit, or Write records the file's size and modified-time;`,
+      `Every successful Read, Edit, or Write records the file's size and modified-time.`,
       `FilesStats reports each tracked file's live status:`,
-      `  present - unchanged since last read`,
-      `  changed - modified since last read (by you or another process)`,
-      `  missing - deleted since last read`,
+      `  present: unchanged since last read`,
+      `  changed: modified since last read (by you or another process)`,
+      `  missing: deleted since last read`,
       totals,
     ].join("\n")
   }

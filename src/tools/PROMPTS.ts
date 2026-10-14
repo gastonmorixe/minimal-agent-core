@@ -58,7 +58,7 @@ export function unknownToolResult(name: string): string {
 
 /** Returns the internal-bug message shown if the Mode tool reaches the dispatcher. */
 export function modeToolDispatcherBugResult(): string {
-  return "Mode tool reached the dispatcher; this should have been handled by the agent loop. File a bug : see `agent.ts` Mode interceptor."
+  return "Mode tool reached the dispatcher. The agent loop should have handled it. File a bug : see `agent.ts` Mode interceptor."
 }
 
 /** Returns the note shown when a reflection-ack was submitted as a tool call. */
@@ -83,7 +83,7 @@ export function cdNoSuchDirectoryResult(path: string): string {
 
 /** Returns the inline marker appended when Bash output exceeds the byte cap. */
 export function bashOutputCapMarker(maxBytes: number): string {
-  return `[output exceeded ${maxBytes} bytes; command terminated and output truncated]`
+  return `[output exceeded ${maxBytes} bytes: command terminated and output truncated]`
 }
 
 /** Returns the inline marker appended when a Bash command hits its timeout. */
@@ -224,7 +224,7 @@ export function truncationNotice(args: {
   cutLine: number
   hint: string
 }): string {
-  return `${args.kept}\n\n[truncated: shown ${args.shownBytes} of ${args.totalBytes} bytes, ${args.shownLines}/${args.totalLines} lines; cut at byte ${args.shownBytes}, line ${args.cutLine}. ${args.hint}]`
+  return `${args.kept}\n\n[truncated: shown ${args.shownBytes} of ${args.totalBytes} bytes, ${args.shownLines}/${args.totalLines} lines, cut at byte ${args.shownBytes}, line ${args.cutLine}. ${args.hint}]`
 }
 
 /** Returns a per-tool hint on how to resume or narrow a call whose output was truncated. */
@@ -237,17 +237,17 @@ export function truncationHint(
     case "Read":
       return `to continue, call Read with offset=${cutLine} (and limit as needed).`
     case "Grep":
-      return "narrow with a more specific pattern, glob, or smaller -A/-B/-C; or raise head_limit explicitly."
+      return "narrow with a more specific pattern, glob, or smaller -A/-B/-C. Or raise head_limit explicitly."
     case "Bash":
-      return `output exceeded ${maxToolOutputBytes} bytes and the FRONT was kept, so trailing errors/build failures may be cut. Re-run scoped to the tail (e.g. \`... 2>&1 | tail -n 100\`) or filtered (\`grep -nE 'error:|FAIL'\`); or Read the tail of the raw-output blob whose path is appended below, which holds the full output.`
+      return `output exceeded ${maxToolOutputBytes} bytes and the FRONT was kept, so trailing errors/build failures may be cut. Re-run scoped to the tail (e.g. \`... 2>&1 | tail -n 100\`) or filtered (\`grep -nE 'error:|FAIL'\`). Or Read the tail of the raw-output blob whose path is appended below, which holds the full output.`
     case "Glob":
       return "narrow the pattern or search a subdirectory."
     case "Fetch":
-      return "the full body is preserved at the `<ma::agent::raw-output ... />` path below; use Read on that path, or re-call Fetch with a CSS `selector` to scope to a specific element."
+      return "the full body is preserved at the `<ma::agent::raw-output ... />` path below. Use Read on that path, or re-call Fetch with a CSS `selector` to scope to a specific element."
     case "WebSearch":
       return "lower `count`, narrow the query, or use the result's `url` to Fetch a specific page."
     default:
-      return "re-run with narrower parameters; the full body is preserved at the `<ma::agent::raw-output ... />` path below."
+      return "re-run with narrower parameters. The full body is preserved at the `<ma::agent::raw-output ... />` path below."
   }
 }
 
@@ -260,15 +260,15 @@ export function streakNote(tool: string, threshold: number): string {
 function streakNoteBody(tool: string, threshold: number): string {
   switch (tool) {
     case "Read":
-      return `you've truncated ${threshold} Read calls in a row. Use the totals from the last [truncated: ...] notice to compute a single offset+limit that lands where you actually need to read, instead of paging from byte 0.`
+      return `you've truncated ${threshold} Read calls in a row. Use the totals from the last [truncated: ...] notice to compute a single offset+limit that lands where you need to read, instead of paging from byte 0.`
     case "Grep":
       return `you've truncated ${threshold} Grep calls in a row. Try \`output_mode: "files_with_matches"\` (densest), tighten the pattern, add a \`glob\`/\`path\` filter, or set \`head_limit\` explicitly rather than letting the cap fire.`
     case "Bash":
-      return `you've truncated ${threshold} Bash calls in a row. Bound output at the source: \`head -c\`, \`head -n\`, \`tail\`, \`sed -n '1,Np'\`, or pipe through a filter. The post-hoc cap is lossy; pre-bounding gives usable signal.`
+      return `you've truncated ${threshold} Bash calls in a row. Bound output at the source: \`head -c\`, \`head -n\`, \`tail\`, \`sed -n '1,Np'\`, or pipe through a filter. The post-hoc cap is lossy. Pre-bounding gives usable signal.`
     case "Glob":
       return `you've truncated ${threshold} Glob calls in a row. Narrow the pattern (e.g. add a subdirectory prefix or restrict the file extension) instead of matching the world.`
     default:
-      return `you've truncated ${threshold} calls of this tool in a row. Re-think the parameters; see the [truncated: ...] notice on each prior call for resume hints.`
+      return `you've truncated ${threshold} calls of this tool in a row. Re-think the parameters. See the [truncated: ...] notice on each prior call for resume hints.`
   }
 }
 
