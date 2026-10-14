@@ -273,7 +273,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     if (manifest.enabled === false && !enabledPluginIds.has(manifest.id)) {
       const msg =
         `skipping ${dir}: plugin "${manifest.id}" is disabled by its manifest ` +
-        `(manifest.enabled = false); set plugins.${manifest.id}.enabled = true ` +
+        `(manifest.enabled = false). Set plugins.${manifest.id}.enabled = true ` +
         `in ~/.minimal-agent/config.jsonc to enable`
       if (opts.explicitLogger) {
         opts.explicitLogger(msg)
@@ -296,7 +296,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     if (!platformAllowed(manifest.platforms, effectivePlatform)) {
       const msg =
         `skipping ${dir}: plugin "${manifest.id}" is not available on this ` +
-        `platform (${effectivePlatform}); manifest.platforms = ` +
+        `platform (${effectivePlatform}). manifest.platforms = ` +
         `[${(manifest.platforms ?? []).join(", ")}]`
       if (opts.explicitLogger) {
         opts.explicitLogger(msg)
@@ -324,7 +324,7 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
         const toolName = h.trigger.tool.name
         const msg =
           `${dir}: tool "${toolName}" of plugin "${manifest.id}" is not ` +
-          `available on this platform (${effectivePlatform}); platforms = ` +
+          `available on this platform (${effectivePlatform}). Platforms = ` +
           `[${(h.platforms ?? []).join(", ")}]`
         if (opts.explicitLogger) {
           opts.explicitLogger(msg)

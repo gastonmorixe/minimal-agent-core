@@ -98,10 +98,10 @@ export async function tryRecoverContextExceeded(
       ...(hooks.onSummaryAttempt ? { onSummaryAttempt: hooks.onSummaryAttempt } : {}),
     })
     const notices = [
-      `Auto-compacted context (${stats.kind}): ${stats.messagesBefore} → ${stats.messagesAfter} messages.`,
+      `Auto-compacted context (${stats.kind}): ${stats.messagesBefore} -> ${stats.messagesAfter} messages.`,
     ]
     if (pending) {
-      notices.push("Retrying the failed user turn once…")
+      notices.push("Retrying the failed user turn once.")
       return { shouldRetry: true, retryText: pending, notices }
     }
     notices.push(advice)

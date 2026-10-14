@@ -422,7 +422,7 @@ export async function resolveLiveAreaSlot(
         if (out == null) return null
         if (typeof out !== "string") {
           throw new Error(
-            `live-area slot "${slot.id}" returned non-string (${typeof out}); expected string | null`,
+            `live-area slot "${slot.id}" returned non-string (${typeof out}). Expected string | null`,
           )
         }
         return out
@@ -479,7 +479,7 @@ export async function resolveLiveAreaSlot(
 function normalizeCommandResult(out: unknown, name: string): CommandResult {
   if (out == null || typeof out !== "object") {
     throw new Error(
-      `command "/${name}" returned ${out === null ? "null" : typeof out}; expected a CommandResult object`,
+      `command "/${name}" returned ${out === null ? "null" : typeof out}. Expected a CommandResult object`,
     )
   }
   const kind = (out as { kind?: unknown }).kind

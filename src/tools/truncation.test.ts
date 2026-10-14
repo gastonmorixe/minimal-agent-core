@@ -67,7 +67,7 @@ describe("truncateToolOutput — notice shape", () => {
     const lines = content.split("\n").filter((l) => l.startsWith("[truncated:"))
     expect(lines.length).toBe(1)
     expect(lines[0]).toMatch(
-      /^\[truncated: shown \d+ of [\w\d]+ bytes, \d+\/[\w\d]+ lines; cut at byte \d+, line \d+\. .+\]$/,
+      /^\[truncated: shown \d+ of [\w\d]+ bytes, \d+\/[\w\d]+ lines, cut at byte \d+, line \d+\. .+\]$/,
     )
   })
 
