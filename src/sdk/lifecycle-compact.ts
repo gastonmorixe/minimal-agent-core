@@ -86,6 +86,8 @@ export async function compactWithLifecycle(
     ...(input.onSummaryAttempt ? { onSummaryAttempt: input.onSummaryAttempt } : {}),
     appendNote: input.appendNote,
     appendCompact: input.appendCompact,
+    // Item 8: compact requests pass message.willSend like agent sends.
+    lifecycle: input.lifecycle,
   })
   try {
     await input.lifecycle.afterCompact?.({

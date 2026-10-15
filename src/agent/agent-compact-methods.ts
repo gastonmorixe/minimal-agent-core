@@ -8,6 +8,7 @@
 import type { AuthResult } from "../auth/auth.ts"
 import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
+import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import type { SessionStore } from "../session/session-store.ts"
 
 import type { CompactRequestOpts, CompactStats } from "./context-compact.ts"
@@ -23,6 +24,8 @@ export interface CompactableAgent {
   networkClient?: NetworkClient
   appendNote(text: string): void
   store: SessionStore | null
+  /** Send policy port: compact requests pass `message.willSend` (item 8). */
+  lifecycle?: LifecyclePort
 }
 
 /** Replace model-facing history in place (compaction / preflight). */
@@ -55,5 +58,6 @@ export async function agentCompact(
     ...(opts?.onSummaryAttempt ? { onSummaryAttempt: opts.onSummaryAttempt } : {}),
     appendNote: (t) => agent.appendNote(t),
     appendCompact: (r) => agent.store?.appendCompact(r),
+    ...(agent.lifecycle ? { lifecycle: agent.lifecycle } : {}),
   })
 }

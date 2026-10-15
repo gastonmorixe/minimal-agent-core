@@ -38,8 +38,9 @@ export class LifecycleSendDeniedError extends Error {
 /**
  * Build the listener-facing system view. Multi-block systems keep each
  * block's `cache_control` so listeners can see (and keep) the markers.
+ * Exported for the compact runner (item 8), which applies the same rule.
  */
-function systemToSnapshot(system: SystemBlock[] | undefined): string | ContentBlock[] {
+export function systemToSnapshot(system: SystemBlock[] | undefined): string | ContentBlock[] {
   if (!system || system.length === 0) return ""
   if (system.length === 1 && system[0]) return system[0].text
   return system.map((b) =>
@@ -72,8 +73,9 @@ function sameCacheControl(
  *
  * Dropping the markers made every new session and sub-agent pay a full
  * system cache write, and lost the configured TTL and the global scope.
+ * Exported for the compact runner (item 8), which applies the same rule.
  */
-function snapshotToSystem(
+export function snapshotToSystem(
   system: string | ContentBlock[],
   original: SystemBlock[] | undefined,
 ): SystemBlock[] | undefined {
