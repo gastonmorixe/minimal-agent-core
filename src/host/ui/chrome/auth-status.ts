@@ -20,6 +20,8 @@ export interface AuthStatusProviderView {
   readonly credentialLabel?: string
   readonly credentialName?: string
   readonly credentialInfo?: AuthCredentialInfo
+  /** ISO-8601 time of the last store write (login or refresh). */
+  readonly updatedAt?: string
   readonly auth: ProviderAuth | null
 }
 
@@ -91,6 +93,20 @@ function renderDetailLines(info: AuthCredentialInfo | undefined, now: number): s
   return lines
 }
 
+/**
+ * "stored: 4d 2h ago" from the entry's last store write (login or refresh).
+ * An expired ACCESS token is normal for an idle slot and refreshes on first
+ * use. A long-idle slot is the one whose REFRESH token the server may reject
+ * (`invalid_grant`), which needs a new login. Showing the age makes that
+ * difference visible.
+ */
+function renderStoredLine(updatedAt: string | undefined, now: number): string | undefined {
+  if (!updatedAt) return undefined
+  const ts = Date.parse(updatedAt)
+  if (!Number.isFinite(ts)) return undefined
+  return c.dim(`stored: ${formatRelative(Math.max(0, now - ts))} ago`)
+}
+
 /** Render the `minimal-agent --auth-status` rows. */
 export function renderAuthStatusRows(input: AuthStatusRenderInput): string[] {
   if (input.providers.length === 0) {
@@ -115,6 +131,8 @@ export function renderAuthStatusRows(input: AuthStatusRenderInput): string[] {
       for (const detail of renderDetailLines(p.credentialInfo, input.now)) {
         rows.push(`      ${detail}`)
       }
+      const stored = renderStoredLine(p.updatedAt, input.now)
+      if (stored) rows.push(`      ${stored}`)
     }
   }
   return rows

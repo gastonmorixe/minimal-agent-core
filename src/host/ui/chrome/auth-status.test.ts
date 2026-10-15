@@ -28,6 +28,25 @@ describe("auth-status chrome", () => {
     expect(rows.map(stripAnsi).join("\n")).not.toContain("expires:")
   })
 
+  it("renders the last store write age, and skips missing or bad values", () => {
+    const now = Date.parse("2026-10-15T16:21:00.000Z")
+    const view = (updatedAt?: string) => ({
+      providerId: "test",
+      displayName: "Test",
+      authKind: "oauth" as const,
+      source: "store" as const,
+      credentialName: `slot-${updatedAt ?? "none"}`,
+      ...(updatedAt !== undefined ? { updatedAt } : {}),
+      auth: { kind: "oauth" as const, token: "secret" },
+    })
+    const plain = renderAuthStatusRows({
+      providers: [view("2026-10-11T17:47:38.283Z"), view(), view("not-a-date")],
+      now,
+    }).map(stripAnsi)
+    expect(plain).toContain("      stored: 3d 22h ago")
+    expect(plain.filter((l) => l.includes("stored:")).length).toBe(1)
+  })
+
   it("renders api-key auth", () => {
     const text = renderAuthStatusRows({
       providers: [
