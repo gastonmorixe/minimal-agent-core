@@ -6,6 +6,7 @@ import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-regis
 import { clearProviderPlugins } from "../../llm/provider-plugin.ts"
 import { registerTestProvider } from "../../llm/test-fixtures.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
+import { NOOP_LIFECYCLE } from "../../sdk/lifecycle.ts"
 import {
   compactDisplayBoundaries,
   foldRecordsForDisplay,
@@ -126,6 +127,7 @@ describe("compaction production contract", () => {
     const records: unknown[] = []
     const messages = toolPair()
     await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
       auth: { type: "api-key", token: "fixture" },
@@ -144,6 +146,7 @@ describe("compaction production contract", () => {
     const original = structuredClone(messages)
     await expect(
       runCompact({
+        lifecycle: NOOP_LIFECYCLE,
         messages,
         model: MODEL,
         auth: { type: "api-key", token: "fixture" },
@@ -162,6 +165,7 @@ describe("compaction production contract", () => {
     const original = structuredClone(messages)
     let memoryAtWrite: Message[] | undefined
     await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
       auth: { type: "api-key", token: "fixture" },
@@ -230,6 +234,7 @@ describe("compaction production contract", () => {
     const messages = history()
     let writes = 0
     const result = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
       auth: { type: "api-key", token: "fixture" },
@@ -258,6 +263,7 @@ describe("compaction production contract", () => {
     const messages = history()
     const records: unknown[] = []
     const pending = runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: MODEL,
       providerId: PROVIDER,

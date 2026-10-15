@@ -27,7 +27,6 @@ import type { AuthResult } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { getGlobalEventBus } from "../bus/global-bus.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
-import type { CanonicalBlock } from "../llm/canonical-messages.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
 import { findModel, findModelForProvider, resolveProvider } from "../llm/model-registry.ts"
@@ -38,14 +37,10 @@ import { NEUTRAL_IDENTITY } from "../llm/system-prompt.ts"
 import { is401 } from "../llm/transport/auth-refresh.ts"
 import { classifyRetryableStreamError, retryBackoffMs } from "../llm/transport/retry.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
-import { normalizeModelForAPI, type SystemBlock } from "../llm/transport/types.ts"
+import { normalizeModelForAPI } from "../llm/transport/types.ts"
 import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
-import { collectAdditionalContext, isDenied, type LifecyclePort } from "../sdk/lifecycle.ts"
-import {
-  LifecycleSendDeniedError,
-  snapshotToSystem,
-  systemToSnapshot,
-} from "../sdk/with-lifecycle-send.ts"
+import type { LifecyclePort } from "../sdk/lifecycle.ts"
+import { LifecycleSendDeniedError } from "../sdk/with-lifecycle-send.ts"
 
 import {
   buildLocalCompactMessages,
@@ -59,6 +54,7 @@ import {
   flattenHistoryForSummary,
   replaceMessagesInPlace,
 } from "./context-compact.ts"
+import { decideSendPolicy, notifyDidSend } from "./run-compact-send-policy.ts"
 
 /** Inputs both agent shells pass into the shared compact runner. */
 export interface RunCompactInput {
@@ -120,11 +116,13 @@ export interface RunCompactInput {
   /** Optional note sink (session JSONL). */
   appendNote?: (text: string) => void
   /**
-   * Send policy port. When set, both provider-bound compact requests (local
-   * summary and remote `adapter.compact`) pass `message.willSend` once
-   * before the network. A deny gives the stub checkpoint with no send.
+   * Send policy port. Required so no caller can send a compact request raw
+   * by omission (pass `NOOP_LIFECYCLE` for none). Both provider-bound compact
+   * requests (local summary and remote `adapter.compact`) pass
+   * `message.willSend` once before the network, and `message.didSend` after
+   * a successful send. A deny gives the stub checkpoint with no send.
    */
-  lifecycle?: LifecyclePort
+  lifecycle: LifecyclePort
   /**
    * Optional durable compact checkpoint writer. Called with the candidate
    * replacement BEFORE memory is mutated. A throw leaves live history
@@ -579,6 +577,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
       } catch {
         // Bus emit is best-effort telemetry.
       }
+      await notifyDidSend(input.lifecycle, sent)
       const trimmed = attemptText.trim()
       return trimmed.length > 0 ? trimmed : undefined
     } catch (err) {
@@ -633,6 +632,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
           } catch {
             // Bus emit is best-effort telemetry.
           }
+          await notifyDidSend(input.lifecycle, sent)
           return savedPartial
         }
       }
@@ -731,7 +731,9 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
   const authRecovery: CompactAuthRecovery = { triedPeerToken: false, triedRefresh: false }
   for (;;) {
     try {
-      return await adapter.compact({ req }, entry, ctx)
+      const result = await adapter.compact({ req }, entry, ctx)
+      await notifyDidSend(input.lifecycle, sent)
+      return result
     } catch (err) {
       if (
         await recoverCompactAuth401(
@@ -749,148 +751,10 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
   }
 }
 
-/** Inputs to the compact send policy decision. */
-interface CompactSendInput {
-  /** Live legacy history (not mutated). */
-  messages: Message[]
-  /** Summary system blocks from the provider plugin. */
-  system: CanonicalRequest["system"]
-  /** Model id for the snapshot. */
-  modelId: string
-  /** Provider id for the snapshot. */
-  providerId: string
-}
-
-/** What a compact path sends after `message.willSend` decided. */
-interface CompactSendPayload {
-  /** Legacy history to build the wire messages from. */
-  messages: Message[]
-  /** Canonical system blocks to send, or `undefined` for none. */
-  system: CanonicalRequest["system"]
-}
-
-/**
- * Run `message.willSend` (`lifecycle.beforeSend`) ONCE for a compact request
- * and return the payload to build the wire request from. Same snapshot shape
- * as a live send (`sdk/with-lifecycle-send.ts`): messages, system, model,
- * and providerId, where `messages` is a copy of the legacy history with its
- * tool_use and tool_result blocks. Each path then builds its own request from
- * the result (local: flat summary text, remote: canonical messages).
- *
- * - No lifecycle or no `beforeSend`: returns the input unchanged (same bytes).
- * - Deny / ask: throws {@link LifecycleSendDeniedError}. Callers fall back to
- *   the stub checkpoint and never touch the network.
- * - Allow: takes messages and system from the payload. A system block the
- *   listener left unchanged reuses the original block object (item 0 rule:
- *   cache hint, ttl, and scope survive).
- *
- * Non-text system blocks: the listener sees ONLY the text blocks (a snapshot
- * system is text). Non-text blocks are not shown and are kept as is. When the
- * listener keeps the text block count, each text block goes back to its
- * original index between the non-text blocks. When the count changes, the
- * non-text blocks come first, then the listener's text blocks.
- *
- * Called before the retry / 401 loop, so a token retry reuses the redacted
- * request and the hook runs once per compact request.
- *
- * @param args - Live history, summary system, model and provider ids.
- * @param lifecycle - Send policy port, if any.
- * @returns The payload to send (redacted when a listener changed it).
- */
-async function decideSendPolicy(
-  args: CompactSendInput,
-  lifecycle: LifecyclePort | undefined,
-): Promise<CompactSendPayload> {
-  const sysIn = args.system ?? []
-  if (!lifecycle?.beforeSend) return { messages: args.messages, system: args.system }
-  const textIdx: number[] = []
-  sysIn.forEach((b, i) => {
-    if (b.type === "text") textIdx.push(i)
-  })
-  const legacySys: SystemBlock[] = textIdx.map((i) => canonicalSystemToLegacy(sysIn[i]!))
-  const decision = await lifecycle.beforeSend({
-    messages: args.messages.slice(),
-    system: systemToSnapshot(legacySys),
-    model: args.modelId,
-    providerId: args.providerId,
-  })
-  if (isDenied(decision)) {
-    const reason =
-      decision.action === "deny" || decision.action === "ask"
-        ? decision.reason
-        : "Send blocked by lifecycle policy hook."
-    throw new LifecycleSendDeniedError(reason, collectAdditionalContext(decision))
-  }
-  if (decision.action !== "allow") return { messages: args.messages, system: args.system }
-  const nextSys = snapshotToSystem(decision.payload.system, legacySys)
-  return {
-    messages: decision.payload.messages,
-    system: mergeSystem(sysIn, args.system, textIdx, legacySys, nextSys),
-  }
-}
-
-/** Put the listener's text system blocks back next to the non-text originals. */
-function mergeSystem(
-  sysIn: CanonicalBlock[],
-  original: CanonicalRequest["system"],
-  textIdx: number[],
-  legacySys: SystemBlock[],
-  nextSys: SystemBlock[] | undefined,
-): CanonicalRequest["system"] {
-  // Every text block unchanged: keep the original array (same bytes).
-  if (nextSys === legacySys) return original
-  const toCanonical = (b: SystemBlock, i: number): CanonicalBlock => {
-    const at = textIdx[i]
-    return b === legacySys[i] && at !== undefined && sysIn[at]
-      ? sysIn[at]
-      : legacySystemToCanonical(b)
-  }
-  const nonText = sysIn.filter((b) => b.type !== "text")
-  if (!nextSys) return nonText.length > 0 ? nonText : undefined
-  if (nextSys.length === legacySys.length) {
-    const out = sysIn.slice()
-    nextSys.forEach((b, i) => {
-      out[textIdx[i]!] = toCanonical(b, i)
-    })
-    return out
-  }
-  const out = [...nonText, ...nextSys.map(toCanonical)]
-  return out.length > 0 ? out : undefined
-}
-
 /** Note suffix with the deny reason text only (never payload values). */
 function denyReasonSuffix(err: LifecycleSendDeniedError): string {
   const reason = err.reason?.trim()
   return reason ? ` (${reason})` : ""
-}
-
-function canonicalSystemToLegacy(b: CanonicalBlock): SystemBlock {
-  const text = b.type === "text" ? b.text : ""
-  const cache = b.type === "text" ? b.cache : undefined
-  if (!cache) return { type: "text", text }
-  return {
-    type: "text",
-    text,
-    cache_control: {
-      type: "ephemeral",
-      ...(cache.ttl ? { ttl: cache.ttl } : {}),
-      ...(cache.scope ? { scope: cache.scope } : {}),
-    },
-  }
-}
-
-function legacySystemToCanonical(b: SystemBlock): CanonicalBlock {
-  const cc = b.cache_control
-  if (!cc) return { type: "text", text: b.text }
-  return {
-    type: "text",
-    text: b.text,
-    cache: {
-      kind: "ephemeral",
-      ...(cc.ttl ? { ttl: cc.ttl } : {}),
-      ...(cc.scope ? { scope: cc.scope } : {}),
-    },
-  }
 }
 
 /** Per-call 401 recovery state for the compact paths. */
