@@ -213,9 +213,64 @@ describe("executeToolRound — tool.willInvoke", () => {
       name: "Write",
       input: { file_path: path, content: "deep\n", nested: { x: 1 } },
     }
+    const historyInput = tool.input
     const bytesBefore = JSON.stringify(tool.input)
     await executeToolRound(tool, baseCtx({ lifecycle }))
+    expect(tool.input).toBe(historyInput)
     expect(JSON.stringify(tool.input)).toBe(bytesBefore)
+  })
+
+  test("array input mutated in place by a hook does not touch history", async () => {
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeTool(p) {
+        ;(p.input as unknown as unknown[]).push("FAKE-INJECTED")
+        return allowDecision(p)
+      },
+    }
+    const historyInput = ["a", { b: 1 }]
+    const tool = {
+      type: "tool_use",
+      id: "tu_array",
+      name: "NoSuchCustomTool",
+      input: historyInput,
+    } as unknown as ToolUseBlock
+    const bytesBefore = JSON.stringify(tool.input)
+    await executeToolRound(tool, baseCtx({ lifecycle }))
+    expect(tool.input as unknown).toBe(historyInput)
+    expect(JSON.stringify(tool.input)).toBe(bytesBefore)
+  })
+
+  test("policy note keeps only safe key names and caps the list", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-cap-"))
+    const path = join(dir, "cap.txt")
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      async beforeTool(p) {
+        const extra: Record<string, unknown> = { "<x>": 1 }
+        for (let i = 0; i < 20; i++) extra[`k${String(i).padStart(2, "0")}`] = i
+        return allowDecision({ ...p, input: { ...p.input, ...extra } })
+      },
+    }
+    const tool: ToolUseBlock = {
+      type: "tool_use",
+      id: "tu_cap",
+      name: "Write",
+      input: { file_path: path, content: "cap\n" },
+    }
+    const result = await executeToolRound(tool, baseCtx({ lifecycle }))
+    const note = String(result.content)
+      .split("\n")
+      .find((l) => l.includes("input rewritten by policy"))
+    expect(note).toBeDefined()
+    const inner = String(note)
+      .replace("<ma::agent::policy>input rewritten by policy: ", "")
+      .replace("</ma::agent::policy>", "")
+    expect(inner).not.toContain("<")
+    const parts = inner.split(", ")
+    expect(parts.at(-1)).toBe("+5 more")
+    expect(parts.length - 1).toBeLessThanOrEqual(16)
+    for (const name of parts.slice(0, -1)) expect(name).toMatch(/^[A-Za-z0-9_.-]{1,64}$/)
   })
 
   test("a port that mutates the input in place and then throws runs the pre-hook input", async () => {
