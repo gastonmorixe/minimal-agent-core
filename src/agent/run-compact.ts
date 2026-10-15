@@ -24,7 +24,7 @@
 import { abortableSleep } from "@minimal-agent/plugin-api/utils/retry"
 
 import type { AuthResult } from "../auth/auth.ts"
-import { resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
+import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { getGlobalEventBus } from "../bus/global-bus.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
@@ -34,6 +34,7 @@ import type { CompactResult, ProviderAdapter, ProviderAuth, RunContext } from ".
 import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import { run } from "../llm/run.ts"
 import { NEUTRAL_IDENTITY } from "../llm/system-prompt.ts"
+import { is401 } from "../llm/transport/auth-refresh.ts"
 import { classifyRetryableStreamError, retryBackoffMs } from "../llm/transport/retry.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
 import { normalizeModelForAPI } from "../llm/transport/types.ts"
@@ -491,6 +492,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   let untaggedRetries = 0
   /** Tagged transport failures (429 / 5xx / connect). Bounded (see constant). */
   let transportRetries = 0
+  const authRecovery: CompactAuthRecovery = { triedPeerToken: false, triedRefresh: false }
   for (let attempt = 1; ; attempt++) {
     try {
       await input.onSummaryAttempt?.(attempt)
@@ -542,6 +544,20 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
     } catch (err) {
       const partial = attemptText.trim()
       if (partial.length > 0) savedPartial = partial
+
+      // Expired OAuth access token (HTTP 401, pre-stream). See
+      // `recoverCompactAuth401` for why compact needs its own recovery.
+      if (
+        await recoverCompactAuth401(
+          err,
+          ctx.auth,
+          authRecovery,
+          entry.providerId,
+          input.credentialName,
+        )
+      ) {
+        continue
+      }
 
       // Tagged TRANSPORT failure (pre-stream HTTP 429 / 5xx / connect blip).
       // The provider adapter throws these as `streamErrorType`-tagged Errors
@@ -664,7 +680,71 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
     system: buildCompactSummarySystem(entry, providerAuth, input.focus),
   }
 
-  return adapter.compact({ req }, entry, ctx)
+  const authRecovery: CompactAuthRecovery = { triedPeerToken: false, triedRefresh: false }
+  for (;;) {
+    try {
+      return await adapter.compact({ req }, entry, ctx)
+    } catch (err) {
+      if (
+        await recoverCompactAuth401(
+          err,
+          ctx.auth,
+          authRecovery,
+          entry.providerId,
+          input.credentialName,
+        )
+      ) {
+        continue
+      }
+      throw err
+    }
+  }
+}
+
+/** Per-call 401 recovery state for the compact paths. */
+interface CompactAuthRecovery {
+  triedPeerToken: boolean
+  triedRefresh: boolean
+}
+
+/**
+ * Recover one compact request from an expired OAuth access token (HTTP 401).
+ *
+ * Live turns recover through `withAuthRefresh` in the canonical send onion.
+ * Both compact paths (local summary and remote `adapter.compact`) call the
+ * provider directly, so they need the same policy here. Without it, a
+ * `/compact` that is the FIRST request after the access token expired
+ * (typical right after `--resume`) failed with "OAuth access token has
+ * expired" while a new session with the same credential worked.
+ *
+ * Policy (same as `withAuthRefresh`): adopt a token a peer process already
+ * rotated into the store, else do one network refresh. Mutates `auth.token`.
+ *
+ * @returns `true` when the caller should retry with the updated token.
+ */
+async function recoverCompactAuth401(
+  err: unknown,
+  auth: ProviderAuth,
+  state: CompactAuthRecovery,
+  providerId: string,
+  credentialName: string | undefined,
+): Promise<boolean> {
+  if (!is401(err) || auth.kind !== "oauth" || !auth.refresh) return false
+  if (!state.triedPeerToken) {
+    state.triedPeerToken = true
+    const peer = providerPeerToken(providerId, undefined, credentialName)
+    if (peer && peer !== auth.token) {
+      auth.token = peer
+      return true
+    }
+  }
+  if (!state.triedRefresh) {
+    state.triedRefresh = true
+    const next = await auth.refresh()
+    auth.token = next.token
+    return true
+  }
+  return false
 }
 
 /**
