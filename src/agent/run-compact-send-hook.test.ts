@@ -19,7 +19,13 @@ import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry
 import { clearProviderPlugins } from "../llm/provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
-import type { LifecyclePort, PolicyDecision, SendSnapshot } from "../sdk/lifecycle.ts"
+import { AgentCore } from "../sdk/agent-core.ts"
+import {
+  type LifecyclePort,
+  NOOP_LIFECYCLE,
+  type PolicyDecision,
+  type SendSnapshot,
+} from "../sdk/lifecycle.ts"
 
 import { runCompact } from "./run-compact.ts"
 
@@ -45,6 +51,27 @@ function summaryEvents(text: string): CanonicalEvent[] {
     { type: "text_stop", index: 0 },
     { type: "message_delta", stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } },
     { type: "message_stop" },
+  ]
+}
+
+/** Stream that sends some text, then a retryable mid-stream error. */
+function partialThenErrorEvents(text: string): CanonicalEvent[] {
+  return [
+    {
+      type: "message_start",
+      messageId: "msg_hook_partial",
+      modelId: MODEL,
+      initialUsage: { inputTokens: 1, outputTokens: 0 },
+    },
+    { type: "text_start", index: 0 },
+    { type: "text_delta", index: 0, text },
+    {
+      type: "stream_error",
+      retryable: true,
+      category: "api",
+      upstreamType: "stream_closed_without_terminal",
+      cause: new Error("flaky"),
+    },
   ]
 }
 
@@ -84,11 +111,23 @@ function redactingLifecycle(seen: SendSnapshot[]): LifecyclePort {
   }
 }
 
-function denyLifecycle(calls: { n: number }): LifecyclePort {
+function denyLifecycle(calls: { n: number }, action: "deny" | "ask" = "deny"): LifecyclePort {
   return {
-    async beforeSend(): Promise<PolicyDecision<SendSnapshot>> {
+    async beforeSend(p: SendSnapshot): Promise<PolicyDecision<SendSnapshot>> {
       calls.n++
-      return { action: "deny", reason: "fake policy deny" }
+      return action === "ask"
+        ? { action: "ask", reason: "fake policy ask", payload: p }
+        : { action: "deny", reason: "fake policy deny" }
+    },
+  }
+}
+
+/** Wrap a port so each afterSend call is recorded. */
+function withAfterSend(port: LifecyclePort, after: SendSnapshot[]): LifecyclePort {
+  return {
+    ...port,
+    afterSend(p: SendSnapshot) {
+      after.push(p)
     },
   }
 }
@@ -122,6 +161,8 @@ describe("runCompact passes message.willSend (item 8)", () => {
   let compactReqs: CanonicalRequest[] = []
   let compactFail401 = 0
   let netFail401 = 0
+  /** Count of local summary streams that end in a retryable error. */
+  let netPartial = 0
   let client: NetworkClient
   let handle: ReturnType<typeof registerTestProvider>
 
@@ -137,6 +178,7 @@ describe("runCompact passes message.willSend (item 8)", () => {
     compactReqs = []
     compactFail401 = 0
     netFail401 = 0
+    netPartial = 0
 
     handle = registerTestProvider({ id: PROV, shortCode: "chp", models: [{ id: MODEL }] })
     const innerRun = handle.adapter.run.bind(handle.adapter)
@@ -178,6 +220,15 @@ describe("runCompact passes message.willSend (item 8)", () => {
             body: new Response('{"error":"expired"}').body!,
           })
         }
+        if (netPartial > 0) {
+          netPartial--
+          return new NetworkResponse({
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+            transport: { id: "fake", protocol: "h2" },
+            body: sseBodyFromEvents(partialThenErrorEvents("partial-summary")),
+          })
+        }
         return new NetworkResponse({
           status: 200,
           headers: { "content-type": "text/event-stream" },
@@ -209,7 +260,7 @@ describe("runCompact passes message.willSend (item 8)", () => {
       mode,
       networkClient: client,
       sleep: async () => {},
-      ...(lifecycle ? { lifecycle } : {}),
+      lifecycle: lifecycle ?? NOOP_LIFECYCLE,
       ...(notes ? { appendNote: (t: string) => notes.push(t) } : {}),
     }
   }
@@ -380,6 +431,178 @@ describe("runCompact passes message.willSend (item 8)", () => {
       expect(sys[0]).toBe(BILLING)
       expect(sys[1]).toEqual({ type: "text", text: "identity [REDACTED]" })
       expect(sys.length).toBe(3)
+    }
+  })
+
+  it("(h) ask decision: stub checkpoint, zero network calls, no wait", async () => {
+    for (const mode of ["local", "remote"] as const) {
+      netCalls = 0
+      const calls = { n: 0 }
+      const notes: string[] = []
+      const stats = await runCompact(base(mode, denyLifecycle(calls, "ask"), notes))
+      expect(calls.n).toBe(1)
+      expect(netCalls).toBe(0)
+      expect(stats.kind).toBe("local")
+      expect(notes.join("\n")).toContain("(fake policy ask), using stub")
+    }
+  })
+
+  it("(i) a throwing direct port: note holds the error name only, never the message", async () => {
+    const throwing: LifecyclePort = {
+      async beforeSend(): Promise<PolicyDecision<SendSnapshot>> {
+        throw new Error("leak FAKESECRET")
+      },
+    }
+    for (const mode of ["local", "remote"] as const) {
+      netCalls = 0
+      const notes: string[] = []
+      const stats = await runCompact(base(mode, throwing, notes))
+      expect(netCalls).toBe(0)
+      expect(stats.kind).toBe("local")
+      const all = [...notes, stats.summaryError ?? "", stats.remoteError ?? ""].join("\n")
+      expect(all).not.toContain("FAKESECRET")
+      expect(all).toContain("Error")
+    }
+  })
+
+  it("(j) afterSend: called once with the redacted snapshot on success, never after a deny", async () => {
+    for (const mode of ["local", "remote"] as const) {
+      const after: SendSnapshot[] = []
+      await runCompact(base(mode, withAfterSend(redactingLifecycle([]), after)))
+      expect(after.length).toBe(1)
+      expect(JSON.stringify(after[0])).toContain("[REDACTED]")
+      expect(JSON.stringify(after[0])).not.toContain("FAKESECRET")
+      const denied: SendSnapshot[] = []
+      await runCompact(base(mode, withAfterSend(denyLifecycle({ n: 0 }), denied)))
+      expect(denied.length).toBe(0)
+    }
+  })
+
+  it("(n) afterSend: called once on the local saved-partial path", async () => {
+    // Two partial streams: one clean retry, then the saved partial returns.
+    netPartial = 2
+    const after: SendSnapshot[] = []
+    const stats = await runCompact(base("local", withAfterSend(redactingLifecycle([]), after)))
+    expect(stats.kind).toBe("local")
+    expect(stats.summaryText ?? "").toContain("partial-summary")
+    expect(runReqs.length).toBe(2)
+    expect(after.length).toBe(1)
+    expect(JSON.stringify(after[0])).not.toContain("FAKESECRET")
+  })
+
+  it("(o) afterSend: called exactly once after a 401 retry, local and remote", async () => {
+    for (const mode of ["local", "remote"] as const) {
+      runReqs = []
+      compactReqs = []
+      if (mode === "local") netFail401 = 1
+      else compactFail401 = 1
+      const after: SendSnapshot[] = []
+      const stats = await runCompact({
+        ...base(mode, withAfterSend(redactingLifecycle([]), after)),
+        auth: {
+          type: "oauth",
+          token: "old",
+          refresh: async () => ({ type: "oauth", token: "new" }),
+        },
+      })
+      expect(stats.kind).toBe(mode)
+      if (mode === "local") expect(runReqs.length).toBe(2)
+      else expect(compactReqs.length).toBe(2)
+      expect(after.length).toBe(1)
+    }
+  })
+
+  it("(p) a throwing afterSend never fails compaction", async () => {
+    for (const mode of ["local", "remote"] as const) {
+      let calls = 0
+      const port: LifecyclePort = {
+        ...redactingLifecycle([]),
+        afterSend() {
+          calls++
+          throw new Error("observer FAKESECRET")
+        },
+      }
+      const stats = await runCompact(base(mode, port))
+      expect(calls).toBe(1)
+      expect(stats.kind).toBe(mode)
+      if (mode === "local") expect(stats.summaryText).toBe("fake-summary")
+    }
+  })
+
+  it("(k) non-text system block: kept in place, never shown to the listener", async () => {
+    // Plugin types allow text only: a non-text block arrives only from an untyped plugin.
+    const IMG = { type: "image", source: { kind: "url", url: "https://x/i.png" } } as unknown as {
+      type: "text"
+      text: string
+    }
+    handle.plugin.resolveSystemPrompt = (inp) => [
+      BILLING,
+      IMG,
+      { type: "text", text: "identity FAKESECRET" },
+      ...inp.body,
+    ]
+    const seen: SendSnapshot[] = []
+    await runCompact(base("remote", redactingLifecycle(seen)))
+    expect(JSON.stringify(seen[0]!.system)).not.toContain("image")
+    const sys = compactReqs[0]!.system ?? []
+    expect(sys.length).toBe(4)
+    expect(sys[0]).toBe(BILLING)
+    expect(sys[1]).toBe(IMG)
+    expect(sys[2]).toEqual({ type: "text", text: "identity [REDACTED]" })
+  })
+
+  it("(l) text block count change: non-text blocks first, then the listener's text", async () => {
+    // Plugin types allow text only: a non-text block arrives only from an untyped plugin.
+    const IMG = { type: "image", source: { kind: "url", url: "https://x/i.png" } } as unknown as {
+      type: "text"
+      text: string
+    }
+    handle.plugin.resolveSystemPrompt = (inp) => [BILLING, IMG, ...inp.body]
+    const dropFirst: LifecyclePort = {
+      async beforeSend(p: SendSnapshot): Promise<PolicyDecision<SendSnapshot>> {
+        const system = Array.isArray(p.system) ? p.system.slice(1) : p.system
+        return { action: "allow", payload: { ...p, system } }
+      },
+    }
+    await runCompact(base("remote", dropFirst))
+    const sys = compactReqs[0]!.system ?? []
+    expect(sys.length).toBe(2)
+    expect(sys[0]).toBe(IMG)
+    expect(sys[1]?.type).toBe("text")
+    expect(JSON.stringify(sys[1])).not.toContain("billing")
+  })
+
+  it("(m) wiring: AgentCore.compact passes its lifecycle into the compact send hook", async () => {
+    for (const mode of ["local", "remote"] as const) {
+      runReqs = []
+      compactReqs = []
+      const seen: SendSnapshot[] = []
+      const core = new AgentCore({
+        auth: { type: "api-key", token: "fake-key" },
+        model: MODEL,
+        providerId: PROV,
+        systemPrompt: "",
+        maxTokens: 4096,
+        toolRegistry: { list: () => [] },
+        toolExecutor: {
+          async execute() {
+            return { content: "", isError: false }
+          },
+        },
+        transcriptSink: { write() {} },
+        initialMessages: history(),
+        networkClient: client,
+        lifecycle: redactingLifecycle(seen),
+        sendFn: async function* () {
+          return { blocks: [], text: "", stopReason: "end_turn" }
+        },
+      })
+      await core.compact({ mode })
+      expect(seen.length).toBe(1)
+      const req = mode === "local" ? runReqs[0] : compactReqs[0]
+      expect(req).toBeDefined()
+      expect(reqJson(req!)).not.toContain("FAKESECRET")
+      expect(reqJson(req!)).toContain("[REDACTED]")
     }
   })
 })

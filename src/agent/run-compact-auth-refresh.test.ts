@@ -21,6 +21,7 @@ import { clearModelRegistry, clearProviderRegistry } from "../llm/model-registry
 import { clearProviderPlugins, type OAuthLoginProvider } from "../llm/provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
+import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 
 import { runCompact } from "./run-compact.ts"
 
@@ -165,6 +166,7 @@ describe("runCompact local summary OAuth refresh", () => {
       messages.push({ role: "assistant", content: `a${i}` })
     }
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-oauth-model",
       providerId: "compact-oauth-prov",
@@ -188,6 +190,7 @@ describe("runCompact local summary OAuth refresh", () => {
     ]
     const notes: string[] = []
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-oauth-model",
       providerId: "compact-oauth-prov",
@@ -213,6 +216,7 @@ describe("runCompact local summary OAuth refresh", () => {
         expiresAt: Date.now() + 3_600_000,
       })
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages: [
         { role: "user", content: "hello" },
         { role: "assistant", content: "hi" },
@@ -233,6 +237,7 @@ describe("runCompact local summary OAuth refresh", () => {
     refreshedToken = "still-rejected-token"
     const notes: string[] = []
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages: [
         { role: "user", content: "hello" },
         { role: "assistant", content: "hi" },

@@ -19,6 +19,7 @@ import type { ProviderAuth } from "../llm/provider.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../llm/provider-plugin.ts"
 import { registerTestProvider, sseBodyFromEvents } from "../llm/test-fixtures.ts"
 import { NetworkClient, NetworkResponse, type NetworkTransport } from "../network/index.ts"
+import { NOOP_LIFECYCLE } from "../sdk/lifecycle.ts"
 
 import { agentCompact, type CompactableAgent } from "./agent-compact-methods.ts"
 import { COMPACTION_USER_MARKER, type CompactStats } from "./context-compact.ts"
@@ -34,6 +35,7 @@ describe("runCompact local path", () => {
     const before = messages.length
     const notes: string[] = []
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "does-not-matter",
       auth: { type: "api-key", token: "x" },
@@ -56,6 +58,7 @@ describe("runCompact local path", () => {
   it("is a no-op stats-wise on empty history", async () => {
     const messages: Message[] = []
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "x",
       auth: { type: "api-key", token: "x" },
@@ -136,6 +139,7 @@ describe("runCompact remote credentialName pin", () => {
       { role: "assistant", content: "hi" },
     ]
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-cred-model",
       providerId: "compact-cred-prov",
@@ -153,6 +157,7 @@ describe("runCompact remote credentialName pin", () => {
       { role: "assistant", content: "hi" },
     ]
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-cred-model",
       providerId: "compact-cred-prov",
@@ -211,6 +216,7 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
     const messages = hist()
     const notes: string[] = []
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "no-such-model-xyz",
       auth: { type: "api-key", token: "x" },
@@ -239,6 +245,7 @@ describe("runCompact local stub failure visibility (fail-first)", () => {
       },
     } as unknown as NetworkClient
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-fail-model",
       providerId: "compact-fail-prov",
@@ -342,6 +349,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-retry-model",
       providerId: "compact-retry-prov",
@@ -394,6 +402,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-oauth-sys-model",
       providerId: "compact-oauth-sys-prov",
@@ -446,6 +455,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-nonretry-model",
       providerId: "compact-nonretry-prov",
@@ -510,6 +520,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const client = new NetworkClient({ primary: transport })
     const messages = hist()
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-salvage-model",
       providerId: "compact-salvage-prov",
@@ -558,6 +569,7 @@ describe("runCompact local summary retryable stream_error (fail-first)", () => {
     const messages = hist()
     const slept: number[] = []
     const stats = await runCompact({
+      lifecycle: NOOP_LIFECYCLE,
       messages,
       model: "compact-429-model",
       providerId: "compact-429-prov",

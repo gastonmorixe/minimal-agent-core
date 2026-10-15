@@ -182,7 +182,15 @@ export interface LifecyclePort {
   /** Before a queued user prompt is handed to the model (Tier 2 often owns this). */
   beforeTurn?(payload: TurnWillStartPayload): Promise<PolicyDecision<TurnWillStartPayload>>
 
-  /** Before the transport sends; rewrite messages/system or deny (no network). */
+  /**
+   * Before the transport sends; rewrite messages/system or deny (no network).
+   * Also runs for compaction requests (local summary and remote compact).
+   *
+   * Listeners must return NEW objects for anything they change and must
+   * never mutate the snapshot in place. `payload.messages` is only a shallow
+   * copy: its message and block objects are the live history, so an in-place
+   * edit changes the session history (and any compact checkpoint) too.
+   */
   beforeSend?(payload: SendSnapshot): Promise<PolicyDecision<SendSnapshot>>
 
   /** After the transport accepts a stream (observation). */
