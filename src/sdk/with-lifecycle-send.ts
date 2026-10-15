@@ -35,21 +35,89 @@ export class LifecycleSendDeniedError extends Error {
   }
 }
 
+/**
+ * Build the listener-facing system view. Multi-block systems keep each
+ * block's `cache_control` so listeners can see (and keep) the markers.
+ */
 function systemToSnapshot(system: SystemBlock[] | undefined): string | ContentBlock[] {
   if (!system || system.length === 0) return ""
   if (system.length === 1 && system[0]) return system[0].text
-  return system.map((b) => ({ type: "text" as const, text: b.text }))
+  return system.map((b) =>
+    b.cache_control
+      ? { type: "text" as const, text: b.text, cache_control: { ...b.cache_control } }
+      : { type: "text" as const, text: b.text },
+  )
 }
 
-function snapshotToSystem(system: string | ContentBlock[]): SystemBlock[] | undefined {
+function sameCacheControl(
+  a: SystemBlock["cache_control"],
+  b: SystemBlock["cache_control"],
+): boolean {
+  return a?.type === b?.type && a?.ttl === b?.ttl && a?.scope === b?.scope
+}
+
+/**
+ * Map the listener's system back to wire blocks WITHOUT losing prompt-cache
+ * markers (`cache_control` type / ttl / scope).
+ *
+ * - Same block count as `original`: a block with the same text (and no
+ *   different marker) reuses the original object whole. When every block is
+ *   unchanged, the original array is returned (byte-identical wire).
+ *   A changed block keeps its own `cache_control`, else inherits
+ *   `original[i].cache_control`, so a redaction that rebuilds blocks as bare
+ *   text keeps the breakpoint layout. Limit: a same-count reorder inherits
+ *   markers by position.
+ * - Different block count: the listener replaced the system. Use its markers
+ *   only.
+ *
+ * Dropping the markers made every new session and sub-agent pay a full
+ * system cache write, and lost the configured TTL and the global scope.
+ */
+function snapshotToSystem(
+  system: string | ContentBlock[],
+  original: SystemBlock[] | undefined,
+): SystemBlock[] | undefined {
+  // No reference fast path: a listener may mutate the snapshot in place and
+  // return the same object. Per-block text equality below decides reuse.
+  const texts: { text: string; cache_control?: SystemBlock["cache_control"] }[] = []
   if (typeof system === "string") {
-    return system.length > 0 ? [{ type: "text", text: system }] : undefined
+    if (system.length > 0) texts.push({ text: system })
+  } else {
+    for (const b of system) {
+      if (b.type === "text") {
+        texts.push(
+          b.cache_control ? { text: b.text, cache_control: b.cache_control } : { text: b.text },
+        )
+      }
+    }
   }
-  const blocks: SystemBlock[] = []
-  for (const b of system) {
-    if (b.type === "text") blocks.push({ type: "text", text: b.text })
+  if (texts.length === 0) return undefined
+  const sameShape = original !== undefined && original.length === texts.length
+  if (sameShape) {
+    // Unchanged block (same text, marker absent or equal): reuse the original
+    // object whole. All unchanged: reuse the original array (byte-identical).
+    const reused = texts.map((t, i) => {
+      const o = original[i]
+      if (!o || o.text !== t.text) return undefined
+      if (t.cache_control && !sameCacheControl(t.cache_control, o.cache_control)) return undefined
+      return o
+    })
+    if (reused.every((o) => o !== undefined)) return original
+    return texts.map((t, i) => {
+      const o = reused[i]
+      if (o) return o
+      const cc = t.cache_control ?? original[i]?.cache_control
+      return cc
+        ? { type: "text", text: t.text, cache_control: { ...cc } }
+        : { type: "text", text: t.text }
+    })
   }
-  return blocks.length > 0 ? blocks : undefined
+  return texts.map((t) => {
+    const cc = t.cache_control
+    return cc
+      ? { type: "text", text: t.text, cache_control: { ...cc } }
+      : { type: "text", text: t.text }
+  })
 }
 
 /**
@@ -82,7 +150,9 @@ export function wrapTransportWithLifecycle(
     const nextMessages: Message[] =
       decision.action === "allow" ? decision.payload.messages : opts.messages
     const nextSystem =
-      decision.action === "allow" ? snapshotToSystem(decision.payload.system) : opts.system
+      decision.action === "allow"
+        ? snapshotToSystem(decision.payload.system, opts.system)
+        : opts.system
     const nextOpts: SendOptions = {
       ...opts,
       messages: nextMessages,
