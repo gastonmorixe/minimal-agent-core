@@ -176,13 +176,14 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
  */
 async function runToolDidInvokeChain(
   lifecycle: LifecyclePort,
-  tool: ToolUseBlock,
+  toolName: string,
+  execInput: Record<string, unknown>,
   isError: boolean | undefined,
 ): Promise<{ panel: string[]; annotation: string } | null> {
-  const filePath = typeof tool.input.file_path === "string" ? tool.input.file_path : undefined
+  const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
   const payload = makeToolDidInvokePayload({
-    tool: tool.name,
-    input: tool.input,
+    tool: toolName,
+    input: execInput,
     cwd: process.cwd(),
     ok: !isError,
     ...(filePath !== undefined ? { filePath } : {}),
@@ -204,6 +205,75 @@ async function runToolDidInvokeChain(
   return {
     panel: renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
     annotation: formatDiagnosticsAnnotation(notes, diagScope),
+  }
+}
+
+/**
+ * Sorted key names whose value differs between two tool inputs (added,
+ * removed, or changed). Used for the policy-rewrite note: key names only,
+ * values never leave this function.
+ */
+function changedInputKeys(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): string[] {
+  const keys = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])
+  const changed: string[] = []
+  for (const key of keys) {
+    // A throw while comparing (exotic values) counts as "changed": the
+    // diff must never break the tool round.
+    let same: boolean
+    try {
+      const inBefore = before != null && Object.hasOwn(before, key)
+      const inAfter = after != null && Object.hasOwn(after, key)
+      same = inBefore === inAfter && deepEqual(before?.[key], after?.[key])
+    } catch {
+      same = false
+    }
+    if (!same) changed.push(key)
+  }
+  return changed.sort()
+}
+
+/**
+ * Structural equality, insensitive to object key order. Cycle-safe: a
+ * pair already on the compare stack counts as equal.
+ */
+function deepEqual(a: unknown, b: unknown, seen: [object, object][] = []): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false
+  if (seen.some(([x, y]) => x === a && y === b)) return true
+  const ka = Object.keys(a).sort()
+  const kb = Object.keys(b).sort()
+  if (ka.length !== kb.length) return false
+  const next: [object, object][] = [...seen, [a, b]]
+  for (let i = 0; i < ka.length; i++) {
+    const k = ka[i] as string
+    if (k !== kb[i]) return false
+    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], next)) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Deep copy of a tool input so no handler can reach history through a
+ * nested reference. Falls back to a JSON round trip, then to a shallow
+ * copy, when the value cannot be cloned.
+ */
+function cloneToolInput<T>(input: T): T {
+  if (input === null || typeof input !== "object") return input
+  try {
+    return structuredClone(input)
+  } catch {
+    try {
+      return JSON.parse(JSON.stringify(input)) as T
+    } catch {
+      return (Array.isArray(input) ? [...input] : { ...input }) as T
+    }
   }
 }
 
@@ -255,7 +325,7 @@ export async function executeToolRound(
     headerWritten = true
     const timeText = suppressToolTime ? undefined : ctx.toolTimeTracker?.format(Date.now())
     const rows = formatToolHeaderRows({
-      tool,
+      tool: { ...tool, input: execInput },
       presentation: pres,
       headerOverride: override,
       timeText,
@@ -315,8 +385,22 @@ export async function executeToolRound(
   // `file_path`) before mode/policy/hooks see the input. Custom and
   // plugin tools are left untouched. Validation rejects missing/
   // mistyped required fields before any filesystem side effect.
-  tool.input = normalizeToolInput(tool.name, tool.input as Record<string, unknown>)
-  const prepError = validateToolInput(tool.name, tool.input as Record<string, unknown>)
+  //
+  // The round runs on a local copy (`execInput`). `tool.input` is the
+  // block already in history and on disk: it is never written, so
+  // history keeps exactly what the model wrote and `--resume` sees the
+  // same bytes as the live session.
+  // Deep copy first: normalizeToolInput returns the same object for
+  // custom and plugin tools, hooks get execInput by reference, and a
+  // handler must not mutate history, not even a nested value.
+  const modelInput = tool.input as Record<string, unknown>
+  let execInput: Record<string, unknown> = normalizeToolInput(
+    tool.name,
+    modelInput && typeof modelInput === "object" && !Array.isArray(modelInput)
+      ? cloneToolInput(modelInput)
+      : modelInput,
+  )
+  const prepError = validateToolInput(tool.name, execInput)
 
   // Mode dispatch gate. Tools stay registered in the request body
   // (so the cached prefix is mode-independent), but the harness
@@ -325,10 +409,7 @@ export async function executeToolRound(
   // adapt : see ManifestMode.refusalHint. No spinner, no execution
   // side effects.
   const lifecycle = ctx.lifecycle ?? NOOP_LIFECYCLE
-  const gate = ctx.modeManager?.isToolAllowed(
-    tool.name,
-    tool.input as Record<string, unknown> | undefined,
-  ) ?? { allowed: true as const }
+  const gate = ctx.modeManager?.isToolAllowed(tool.name, execInput) ?? { allowed: true as const }
   emitPermissionChecked(
     ctx.loader,
     tool.name,
@@ -393,11 +474,14 @@ export async function executeToolRound(
     let policyDenied = false
     let lifecycleNotes: string[] = []
     if (lifecycle.beforeTool) {
+      // Snapshot before the hook: a listener can edit execInput in place
+      // and return the same object, so the diff needs its own baseline.
+      const preHookInput = cloneToolInput(execInput)
       try {
         const will = await lifecycle.beforeTool({
           tool: tool.name,
           toolUseId: tool.id,
-          input: tool.input as Record<string, unknown>,
+          input: execInput,
           cwd: process.cwd(),
           ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
           ...(ctx.leadSid !== undefined ? { leadSid: ctx.leadSid } : {}),
@@ -415,11 +499,20 @@ export async function executeToolRound(
             writeTranscript(row)
           }
         } else if (will.action === "allow") {
-          // updatedInput: replace the tool_use input in place so dispatch
-          // and executeTool see the rewritten args. Re-normalize aliases
-          // and re-validate so a rewrite cannot bypass the input contract.
-          tool.input = normalizeToolInput(tool.name, will.payload.input as Record<string, unknown>)
-          const rewriteError = validateToolInput(tool.name, tool.input as Record<string, unknown>)
+          // updatedInput: replace the local execInput (never tool.input)
+          // so dispatch and executeTool see the rewritten args. Re-normalize
+          // aliases and re-validate so a rewrite cannot bypass the input
+          // contract. Tell the model which keys changed, never the values.
+          const rewritten = normalizeToolInput(
+            tool.name,
+            will.payload.input as Record<string, unknown>,
+          )
+          const changed = changedInputKeys(preHookInput, rewritten)
+          execInput = rewritten
+          if (changed.length > 0) {
+            lifecycleNotes.push(`input rewritten by policy: ${changed.join(", ")}`)
+          }
+          const rewriteError = validateToolInput(tool.name, execInput)
           if (rewriteError) {
             policyDenied = true
             writeToolHeader()
@@ -431,7 +524,10 @@ export async function executeToolRound(
           }
         }
       } catch {
-        // Port failures must not brick the tool loop — proceed with original input.
+        // Port failures must not brick the tool loop. Proceed with the
+        // pre-hook input, so a port that mutated it and then threw cannot
+        // run an unvalidated, un-noted rewrite.
+        execInput = preHookInput
       }
     }
 
@@ -504,7 +600,7 @@ export async function executeToolRound(
             {
               type: "tool",
               name: tool.name,
-              input: tool.input,
+              input: execInput,
               tool_use_id: tool.id,
             },
             process.cwd(),
@@ -674,7 +770,7 @@ export async function executeToolRound(
             }
           }
 
-          const result = await executeTool(tool.name, tool.input, {
+          const result = await executeTool(tool.name, execInput, {
             signal,
             // Active-model media capability context : lets `Read` hand back
             // an image block for a screenshot the model can actually see
@@ -776,7 +872,7 @@ export async function executeToolRound(
             binaryGuard = {
               mime: verdict.mime,
               sizeBytes: Buffer.byteLength(sourceForClass, "utf8"),
-              optedIn: isBinaryOptIn(tool.input as Record<string, unknown>),
+              optedIn: isBinaryOptIn(execInput),
               source: sourceForClass,
             }
             // Transcript preview: short clean summary, never the raw body.
@@ -804,7 +900,7 @@ export async function executeToolRound(
         !aborted &&
         !binaryGuard &&
         !mediaBlocks?.length &&
-        !isBinaryOptIn(tool.input as Record<string, unknown>) &&
+        !isBinaryOptIn(execInput) &&
         typeof content === "string" &&
         content.length > 0 &&
         !content.includes("<ma::agent::binary-result")
@@ -837,7 +933,7 @@ export async function executeToolRound(
       // for aborted runs (no completed work to react to).
       let diagnosticsPanel: string[] = []
       if (!aborted) {
-        const augmented = await runToolDidInvokeChain(lifecycle, tool, isError)
+        const augmented = await runToolDidInvokeChain(lifecycle, tool.name, execInput, isError)
         if (augmented) {
           if (augmented.annotation) content = `${content}${augmented.annotation}`
           diagnosticsPanel = augmented.panel
@@ -850,7 +946,7 @@ export async function executeToolRound(
         // Highlight presentation only after execution/truncation. Detection is
         // O(path + first line); mdstream is pre-warmed at startup, and any
         // timeout/protocol failure returns null so the existing render remains.
-        const filePath = typeof tool.input.file_path === "string" ? tool.input.file_path : undefined
+        const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
         const language = filePath ? resolveFileLanguage({ path: filePath, content }) : null
         let previewContent = content
         if (
