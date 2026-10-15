@@ -37,6 +37,12 @@ export interface CredentialedProvider {
   credentialName?: string
   /** Provider-supplied safe diagnostic metadata, when available. */
   credentialInfo?: AuthCredentialInfo
+  /**
+   * ISO-8601 time of the last store write for this entry (login or token
+   * refresh). A long-idle slot is the one whose refresh token the server is
+   * most likely to reject, so status UIs show it next to the expiry.
+   */
+  updatedAt?: string
 }
 
 /** List registered provider OAuth login strategies. */
@@ -75,6 +81,7 @@ export function findApiKeyAuthProvider(providerId: string): ApiKeyAuthProvider |
 }
 
 function readOAuthFromStore(
+  providerId: string,
   oauth: OAuthLoginProvider,
   store: AuthStore,
   credentialName?: string,
@@ -90,6 +97,7 @@ function readOAuthFromStore(
       auth: {
         ...auth,
         refresh: buildStoredOAuthRefresh({
+          providerId,
           provider: oauth,
           initialSecrets: storedSecrets,
           credentialName: name,
@@ -158,7 +166,7 @@ export function tryResolveProviderAuth(
 
   const oauth = plugin.oauthLogin
   if (oauth) {
-    const fromStore = readOAuthFromStore(oauth, store, credentialName)
+    const fromStore = readOAuthFromStore(providerId, oauth, store, credentialName)
     if (fromStore) return fromStore.auth
   }
 
@@ -231,6 +239,7 @@ export function discoverCredentialedProviders(
           credentialLabel: entry.name,
           credentialName: entry.name,
           credentialInfo: mergeCredentialMetadata(storedSecrets, info ?? { usable: Boolean(auth) }),
+          updatedAt: entry.updatedAt,
         })
       }
     }
@@ -365,7 +374,10 @@ export function clearAllCredentials(store: AuthStore = defaultAuthStore()): bool
   return had
 }
 
+type RefreshedCredential = Awaited<ReturnType<NonNullable<OAuthLoginProvider["refreshCredential"]>>>
+
 function buildStoredOAuthRefresh(opts: {
+  providerId: string
   provider: OAuthLoginProvider
   initialSecrets: AuthSecretBag
   credentialName?: string
@@ -376,9 +388,14 @@ function buildStoredOAuthRefresh(opts: {
   return async () => {
     const store = defaultAuthStore()
     const currentSecrets = store.getSecrets(provider.serviceId, credentialName) ?? lastSecrets
-    const refreshed = await provider.refreshCredential?.(currentSecrets, {
-      networkClient: defaultNetworkClient,
-    })
+    let refreshed: RefreshedCredential | undefined
+    try {
+      refreshed = await provider.refreshCredential?.(currentSecrets, {
+        networkClient: defaultNetworkClient,
+      })
+    } catch (err) {
+      throw withReloginHint(err, opts.providerId, credentialName)
+    }
     if (!refreshed) throw new Error(`provider "${provider.serviceId}" does not support refresh`)
     store.set(refreshed.credential.serviceId, credentialName, refreshed.credential.secrets)
     lastSecrets = refreshed.credential.secrets
@@ -388,4 +405,21 @@ function buildStoredOAuthRefresh(opts: {
     }
     return { token: nextAuth.token }
   }
+}
+
+/**
+ * The server rejected the stored refresh token (`invalid_grant`: expired,
+ * revoked, or already rotated away). No retry can recover it. Wrap the
+ * provider error with the exact command that re-logs THIS credential slot,
+ * so a multi-credential user does not overwrite the wrong one. Other errors
+ * pass through unchanged.
+ */
+function withReloginHint(err: unknown, providerId: string, credentialName: string): unknown {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (!msg.includes("invalid_grant")) return err
+  return new Error(
+    `${msg}\nThe stored refresh token for "${credentialName}" was rejected. ` +
+      `Run \`minimal-agent provider ${providerId} login --name ${credentialName}\` to sign in again.`,
+    { cause: err },
+  )
 }

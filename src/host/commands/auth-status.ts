@@ -51,6 +51,7 @@ export function renderAuthStatus(deps: AuthStatusDeps = {}): boolean {
         credentialLabel: p.credentialLabel,
         credentialName: p.credentialName,
         credentialInfo: p.credentialInfo,
+        updatedAt: p.updatedAt,
         auth: resolveAuth(p.providerId, p.credentialName),
       })),
       now,
