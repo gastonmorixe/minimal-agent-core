@@ -1,0 +1,18 @@
+# betterleaks value fingerprints (SHA-256 of the exact secret bytes).
+# Each entry suppresses that value everywhere: any rule, path, or commit.
+# Review new entries like any allowlist exception.
+
+# Public OAuth client ID (DEFAULT_OAUTH_CLIENT_ID).
+# src/auth.ts:55 @0d232b50, plugins/llm-anthropic/oauth-login.ts:48 @a9a6c704
+473668f2b13c71009d028ff0ef74c2cf76e71cbdd33b76e69fcc42d7e59aca4b
+
+# Public OAuth client ID (older OAUTH_CLIENT_ID). src/auth.ts:55 @8f8e97ea
+d5ffdfc67f3080dcdab2773efda4884182441765d5785e1a0d55b7c1149be478
+
+# Test fixture passwords. src/auth/auth-strategies.test.ts:379,386 @36fd166e
+d5adca02c9a46dae33101e9727798d0dd091e155cdfb83a851f9706a7d00eb7d
+19029ef87b7d501bf08acff9013977733cd0748e769a5b295b3d9f059590a60e
+
+# Test fixture credential URL (x-access-token@github.com/o/r).
+# src/auto-plugins.test.ts:244 @b2a1ee38
+2e943b05353185d386385ff565bc68aa08099edeefc54dc257ec45101f4c1389
