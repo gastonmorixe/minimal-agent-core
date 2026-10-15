@@ -272,9 +272,25 @@ function cloneToolInput<T>(input: T): T {
     try {
       return JSON.parse(JSON.stringify(input)) as T
     } catch {
+      // Shallow copy: nested objects stay shared, so the no-mutation
+      // guarantee is lost here. Reachable only for inputs with a function
+      // or a cycle that JSON cannot encode, never for model JSON.
       return (Array.isArray(input) ? [...input] : { ...input }) as T
     }
   }
+}
+
+const POLICY_KEY_NAME = /^[A-Za-z0-9_.-]{1,64}$/
+const POLICY_KEY_CAP = 16
+
+/**
+ * Key names for the policy note. Hook keys are untrusted text inside a
+ * tag, so keep only safe names, cap the list, and count the rest.
+ */
+function formatPolicyKeyNames(keys: string[]): string {
+  const shown = keys.filter((k) => POLICY_KEY_NAME.test(k)).slice(0, POLICY_KEY_CAP)
+  const dropped = keys.length - shown.length
+  return dropped > 0 ? [...shown, `+${dropped} more`].join(", ") : shown.join(", ")
 }
 
 /** Emit observation-only permission-checked (best-effort). */
@@ -394,12 +410,7 @@ export async function executeToolRound(
   // custom and plugin tools, hooks get execInput by reference, and a
   // handler must not mutate history, not even a nested value.
   const modelInput = tool.input as Record<string, unknown>
-  let execInput: Record<string, unknown> = normalizeToolInput(
-    tool.name,
-    modelInput && typeof modelInput === "object" && !Array.isArray(modelInput)
-      ? cloneToolInput(modelInput)
-      : modelInput,
-  )
+  let execInput: Record<string, unknown> = normalizeToolInput(tool.name, cloneToolInput(modelInput))
   const prepError = validateToolInput(tool.name, execInput)
 
   // Mode dispatch gate. Tools stay registered in the request body
@@ -510,7 +521,7 @@ export async function executeToolRound(
           const changed = changedInputKeys(preHookInput, rewritten)
           execInput = rewritten
           if (changed.length > 0) {
-            lifecycleNotes.push(`input rewritten by policy: ${changed.join(", ")}`)
+            lifecycleNotes.push(`input rewritten by policy: ${formatPolicyKeyNames(changed)}`)
           }
           const rewriteError = validateToolInput(tool.name, execInput)
           if (rewriteError) {
