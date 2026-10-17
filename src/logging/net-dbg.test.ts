@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
+import { loadUserConfig } from "../config/config.ts"
+
 import {
   _resetLoggerErrorReportedForTest,
   formatSessionDirName,
@@ -7,6 +9,7 @@ import {
   netDbgEnabled,
   netDbgSessionDir,
   redactHeaders,
+  resolveNetDbgEnabled,
   warnLoggerErrorOnce,
 } from "./net-dbg.ts"
 
@@ -240,7 +243,13 @@ describe("net-dbg", () => {
       // it at runtime does NOT change the return value. This test pins that
       // contract so a future refactor doesn't silently change it without a
       // matching docs update.
-      const expected = process.env.MINIMAL_AGENT_NET_DBG === "1"
+      // Mirrors the module's own rule (env wins, else the config key), so the
+      // test holds on machines whose config.jsonc already sets `netDbg`.
+      const env = process.env.MINIMAL_AGENT_NET_DBG
+      const expected = resolveNetDbgEnabled(
+        env,
+        env === undefined ? loadUserConfig().netDbg : undefined,
+      )
       expect(netDbgEnabled()).toBe(expected)
     })
   })
@@ -294,5 +303,16 @@ describe("net-dbg", () => {
       }
       expect(calls[0]).toContain("plain string error")
     })
+  })
+})
+
+describe("resolveNetDbgEnabled", () => {
+  it("env=1 forces on, env=0 forces off, otherwise config decides", async () => {
+    const { resolveNetDbgEnabled } = await import("./net-dbg.ts")
+    expect(resolveNetDbgEnabled("1", false)).toBe(true)
+    expect(resolveNetDbgEnabled("0", true)).toBe(false)
+    expect(resolveNetDbgEnabled(undefined, true)).toBe(true)
+    expect(resolveNetDbgEnabled(undefined, false)).toBe(false)
+    expect(resolveNetDbgEnabled(undefined, undefined)).toBe(false)
   })
 })

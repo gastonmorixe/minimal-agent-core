@@ -157,6 +157,15 @@ describe("loadUserConfig", () => {
     }
   })
 
+  it("accepts a boolean netDbg and drops other types", () => {
+    writeFileSync(path, JSON.stringify({ netDbg: true }))
+    expect(loadUserConfig().netDbg).toBe(true)
+    writeFileSync(path, JSON.stringify({ netDbg: false }))
+    expect(loadUserConfig().netDbg).toBe(false)
+    writeFileSync(path, JSON.stringify({ netDbg: "yes" }))
+    expect(loadUserConfig().netDbg).toBeUndefined()
+  })
+
   it("drops an invalid cacheTtl value", () => {
     writeFileSync(path, JSON.stringify({ cacheTtl: "2h" }))
     expect(loadUserConfig().cacheTtl).toBeUndefined()

@@ -2,7 +2,8 @@
  * On-disk request/response logger, writing a file-quad per request
  * (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
  *
- * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1`. Logs go to
+ * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1` or `"netDbg": true`
+ * in `~/.minimal-agent/config.jsonc`. Logs go to
  * `<agent-home>/net-dbg/${epoch}-${human-date}/` (honoring
  * `MINIMAL_AGENT_HOME`), so captures from every project land in one
  * relocation-correct place instead of scattering across working
@@ -18,14 +19,34 @@ import { join } from "node:path"
 
 import { resolveNetDbgDir } from "@minimal-agent/plugin-api/utils/agent-paths"
 
+import { loadUserConfig } from "../config/config.ts"
 import { getSessionId } from "../session/session-id.ts"
 
 /**
- * Captured at module load. Toggling MINIMAL_AGENT_NET_DBG at runtime does NOT
- * take effect — this is intentional so the logger's enabled state is stable
- * for the lifetime of the process. Restart to change.
+ * Decide whether on-disk logging is on. `CLI/env > config file > default`:
+ * `MINIMAL_AGENT_NET_DBG=1` forces on, `=0` forces off, otherwise the
+ * `netDbg` boolean from `~/.minimal-agent/config.jsonc` decides (default off).
+ * Pure so it is unit-testable without touching the environment.
  */
-const ENABLED = process.env.MINIMAL_AGENT_NET_DBG === "1"
+export function resolveNetDbgEnabled(
+  envValue: string | undefined,
+  configValue: boolean | undefined,
+): boolean {
+  if (envValue === "1") return true
+  if (envValue === "0") return false
+  return configValue === true
+}
+
+/**
+ * Captured at module load. Toggling MINIMAL_AGENT_NET_DBG (or editing the
+ * config) at runtime does NOT take effect — this is intentional so the
+ * logger's enabled state is stable for the lifetime of the process. Restart
+ * to change. Config is only read when the env var does not decide it.
+ */
+const ENABLED = resolveNetDbgEnabled(
+  process.env.MINIMAL_AGENT_NET_DBG,
+  process.env.MINIMAL_AGENT_NET_DBG === undefined ? loadUserConfig().netDbg : undefined,
+)
 
 let SEQ = 0
 let SESSION_DIR: string | null = null

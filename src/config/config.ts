@@ -96,6 +96,13 @@ export interface UserConfig {
    * runtime via `--cache-ttl <5m|1h>` or `MINIMAL_AGENT_CACHE_TTL`.
    */
   cacheTtl?: "5m" | "1h"
+  /**
+   * Mirror every raw HTTP request/response to `~/.minimal-agent/net-dbg/`.
+   * Same switch as `MINIMAL_AGENT_NET_DBG=1`; the env var wins when set
+   * (`1` forces on, `0` forces off). Read once at process start. The logs
+   * hold plaintext `authorization` headers, so treat the folder as secret.
+   */
+  netDbg?: boolean
   systemPrompt?: SystemPromptUserConfig
   spinner?: string
   formatter?: string
@@ -338,6 +345,7 @@ export function loadUserConfig(): UserConfig {
     const parsed = parseFormatterCommand(obj.formatterArgs)
     if (parsed.length > 0) out.formatterArgs = parsed
   }
+  if (typeof obj.netDbg === "boolean") out.netDbg = obj.netDbg
   if (typeof obj.autoAsk === "boolean") out.autoAsk = obj.autoAsk
   if (typeof obj.skipQuota === "boolean") out.skipQuota = obj.skipQuota
   if (typeof obj.pluginSync === "boolean") out.pluginSync = obj.pluginSync
