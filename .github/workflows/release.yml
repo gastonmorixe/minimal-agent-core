@@ -132,15 +132,33 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub release
+      # Immutable releases lock assets once a release is published, and
+      # softprops publishes prereleases before it uploads assets. So create the
+      # release as a draft with every asset attached, then publish it below.
+      - name: Create draft GitHub release
+        id: release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
           target_commitish: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          draft: true
           prerelease: ${{ steps.meta.outputs.prerelease }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
             dist/minimal-agent-${{ steps.meta.outputs.label }}.tar.gz
             dist/minimal-agent-${{ steps.meta.outputs.label }}.tar.gz.sha256
+
+      # Publish by release id: a draft has no git tag yet, so a tag lookup can miss it.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -F prerelease="${PRERELEASE}" \
+            --jq '"published \(.tag_name) draft=\(.draft) prerelease=\(.prerelease) \(.html_url)"'
