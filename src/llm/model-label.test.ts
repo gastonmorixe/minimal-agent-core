@@ -44,6 +44,19 @@ describe("modelShortLabel", () => {
     })
   })
 
+  it("uses the provider's full modelShortLabel hook when it returns a label", () => {
+    const { plugin } = registerTestProvider({
+      id: "vendor-c",
+      shortCode: "vc",
+      models: [{ id: "vendorc-big-3-1" }, { id: "vendorc-other" }],
+      modelVersionToken: (id) => (id.startsWith("vendorc-") ? "x" : undefined),
+    })
+    plugin.modelShortLabel = (id) => (id === "vendorc-big-3-1" ? "big-3.1" : undefined)
+    expect(modelShortLabel("vendorc-big-3-1")).toBe("big-3.1")
+    // Hook returns undefined: default <shortCode>-<token> join applies.
+    expect(modelShortLabel("vendorc-other")).toBe("vc-x")
+  })
+
   afterAll(() => {
     clearModelRegistry()
     clearProviderRegistry()

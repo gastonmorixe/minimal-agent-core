@@ -36,6 +36,8 @@ export function modelShortLabel(modelId: string, providerId?: string): string {
   const modelProviderId = entry?.providerId
   if (modelProviderId) {
     const plugin = findProviderPlugin(modelProviderId)
+    const custom = plugin?.modelShortLabel?.(modelId)
+    if (custom) return custom
     const short = plugin?.shortCode ?? modelProviderId
     const version = plugin?.modelVersionToken?.(modelId) ?? genericToken(modelId)
     return version && version !== short ? `${short}-${version}` : short
@@ -45,6 +47,8 @@ export function modelShortLabel(modelId: string, providerId?: string): string {
   // scheme (pure string parse, no I/O), so live-API-only ids from a known
   // provider still label correctly. First match wins.
   for (const plugin of listProviderPlugins()) {
+    const custom = plugin.modelShortLabel?.(modelId)
+    if (custom) return custom
     const version = plugin.modelVersionToken?.(modelId)
     if (version !== undefined) {
       return version && version !== plugin.shortCode
