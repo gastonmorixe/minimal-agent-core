@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test"
 
 import { HookBus } from "./hook-bus.ts"
 
-const noLog = (_: string) => {}
+const noLog = () => {}
 
 describe("HookBus / chain", () => {
   test("threads payload through listeners in priority order (high first)", async () => {

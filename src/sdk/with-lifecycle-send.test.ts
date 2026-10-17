@@ -114,7 +114,9 @@ describe("wrapTransportWithLifecycle: system cache_control survives the wrap", (
         return allowDecision({
           ...p,
           system: sys.map((b) =>
-            b.type === "text" && b.text === "session ctx" ? { ...b, text: "[REDACTED] ctx" } : b,
+            b.type === "text" && b.text === "session ctx"
+              ? Object.assign({}, b, { text: "[REDACTED] ctx" })
+              : b,
           ),
         })
       },
@@ -173,7 +175,7 @@ describe("wrapTransportWithLifecycle: system cache_control survives the wrap", (
     const lifecycle: LifecyclePort = {
       ...NOOP_LIFECYCLE,
       async beforeSend(p) {
-        const sys = (p.system as ContentBlock[]).map((b) => ({ ...b }))
+        const sys = [...(p.system as ContentBlock[])]
         sys[1] = { type: "text", text: "[REDACTED]" }
         return allowDecision({ ...p, system: sys })
       },
