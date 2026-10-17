@@ -753,7 +753,7 @@ describe("PluginLoader", () => {
           interactive: false,
         },
         entryAbsolute: HOME,
-        invoke: (async (_: any) => ({ kind: "tool_result", content: "never" })) as any,
+        invoke: (async () => ({ kind: "tool_result", content: "never" })) as any,
       } as any,
     ])
     expect(loader.hasTool("Bash")).toBe(false)
@@ -792,7 +792,7 @@ describe("PluginLoader", () => {
           interactive: false,
         },
         entryAbsolute: HOME,
-        invoke: (async (_: any) => ({ kind: "tool_result", content: "never" })) as any,
+        invoke: (async () => ({ kind: "tool_result", content: "never" })) as any,
       } as any,
     ])
     expect(

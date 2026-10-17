@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { Hooks } from "./hooks.ts"
 
-const noLog = (_: string) => {}
+const noLog = () => {}
 
 describe("Hooks facade", () => {
   test("routes broadcast-async to EventBus", async () => {

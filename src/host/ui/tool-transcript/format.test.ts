@@ -1022,17 +1022,20 @@ describe("clampTranscriptRow — outer-row width clamp for header lines", () => 
     ["Read", { file_path: `/Users/dev/Projects/${"very-long/".repeat(20)}file.ts` }],
     ["Grep", { pattern: "mention|autocomplete|".repeat(20), path: "/Users/dev/Projects" }],
     ["Bash", { command: `printf ${"very-long-argument".repeat(30)}` }],
-  ])("keeps a %s header truncation marker inside the dim input run (BUG #192851)", (name, input) => {
-    const header = formatToolHeaderRows({ tool: tu(name, input), cols: 90 })[0] ?? ""
-    const marker = header.indexOf("...(+")
-    expect(marker).toBeGreaterThan(0)
-    // The outer row clamp copies the dim input and appends a synthetic full
-    // reset. The marker must precede that reset, otherwise it renders in the
-    // terminal default bright color while the path/command before it is faded.
-    expect(header.slice(0, marker)).toContain("\x1b[2m")
-    expect(header.slice(marker)).toMatch(/^\.\.\.\(\+\d+ch\)\x1b\[0m$/)
-    expect(header.slice(0, marker)).not.toEndWith("\x1b[0m")
-  })
+  ])(
+    "keeps a %s header truncation marker inside the dim input run (BUG #192851)",
+    (name, input) => {
+      const header = formatToolHeaderRows({ tool: tu(name, input), cols: 90 })[0] ?? ""
+      const marker = header.indexOf("...(+")
+      expect(marker).toBeGreaterThan(0)
+      // The outer row clamp copies the dim input and appends a synthetic full
+      // reset. The marker must precede that reset, otherwise it renders in the
+      // terminal default bright color while the path/command before it is faded.
+      expect(header.slice(0, marker)).toContain("\x1b[2m")
+      expect(header.slice(marker)).toMatch(/^\.\.\.\(\+\d+ch\)\x1b\[0m$/)
+      expect(header.slice(0, marker)).not.toEndWith("\x1b[0m")
+    },
+  )
 })
 
 describe("clampBodyWithHint — contextual ANSI style", () => {
