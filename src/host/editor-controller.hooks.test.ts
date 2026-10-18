@@ -468,6 +468,98 @@ describe("EditorController — Alt+M (mode-interrupt shortcut)", () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Alt+Enter hook (Oct 2026 — the prompts menu's insert-body seam)
+// ---------------------------------------------------------------------------
+//
+// The editor gives the `editor.key` chain first crack at Alt+Enter, mirroring
+// the bare-Enter path where a listener can claim the key before submit. With
+// no overlay open no listener halts, so the newline runs and behavior is
+// unchanged. When a listener halts, the newline is suppressed and the
+// listener's buffer wins. This is what lets the `&` prompt menu use Alt+Enter
+// without conflicting with the input box's newline.
+// ---------------------------------------------------------------------------
+
+describe("EditorController — Alt+Enter hook", () => {
+  it("with no listener, Alt+Enter inserts a newline (unchanged behavior)", () => {
+    const { ctrl, stdin } = make()
+    ctrl.start()
+    stdin.send("foo")
+    stdin.send("\x1b\r")
+    stdin.send("bar")
+    expect(ctrl.buffer().toString()).toBe("foo\nbar")
+    ctrl.stop()
+  })
+
+  it("a halting listener suppresses the newline and replaces the buffer", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push(payload.key)
+        if (payload.key === "Alt+Enter") {
+          payload.result.halt = true
+          payload.result.buffer = "EXPANDED BODY"
+        }
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("&rev")
+    stdin.send("\x1b\r") // Alt+Enter
+    expect(seen).toContain("Alt+Enter")
+    // No newline was inserted; the listener's buffer won.
+    expect(ctrl.buffer().toString()).toBe("EXPANDED BODY")
+    ctrl.stop()
+  })
+
+  it("Shift+Enter is NOT hook-dispatched (always a newline)", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push(payload.key)
+        if (payload.key === "Alt+Enter") payload.result.halt = true
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("foo")
+    stdin.send("\n") // bare LF == Shift+Enter via terminal keymap
+    stdin.send("bar")
+    expect(seen).not.toContain("Alt+Enter")
+    expect(ctrl.buffer().toString()).toBe("foo\nbar")
+    ctrl.stop()
+  })
+
+  it("Alt+Enter via CSI-u (kitty) also reaches the hook", () => {
+    const hooks = new Hooks()
+    const seen: string[] = []
+    hooks.on<EditorKeyPayload>(
+      "editor.key",
+      (payload) => {
+        seen.push(payload.key)
+        if (payload.key === "Alt+Enter") {
+          payload.result.halt = true
+          payload.result.buffer = "KITTY BODY"
+        }
+      },
+      { caller: "plugin" },
+    )
+    const { ctrl, stdin } = make({ hooks })
+    ctrl.start()
+    stdin.send("&rev")
+    stdin.send("\x1b[13;3u") // kitty CSI-u: Enter (13) with alt modifier (3)
+    expect(seen).toContain("Alt+Enter")
+    expect(ctrl.buffer().toString()).toBe("KITTY BODY")
+    ctrl.stop()
+  })
+})
+
 describe("EditorController — overlay key dispatch (editor.key hook)", () => {
   // Regression: a blocking overlay (ask-user modal) subscribes to `editor.key`
   // and halts. The editor must dispatch its navigation/confirm keys to the hook

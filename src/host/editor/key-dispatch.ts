@@ -792,6 +792,11 @@ export class EditorKeyDispatcher {
     switch (seq) {
       case "\x1b\r":
       case "\x1b\n":
+        // Alt+Enter: give the plugin hook chain first crack, mirroring the
+        // bare-Enter path where a listener can claim the key before submit.
+        // With no overlay open no listener halts, so the newline below runs
+        // and the existing behavior is byte-identical.
+        if (host.dispatchKeyHook("Alt+Enter")) return "changed"
         buf.newline()
         return "changed"
       case "\x1bb":
@@ -888,6 +893,13 @@ export class EditorKeyDispatcher {
 
     if ((code === 10 || code === 13) && !ctrl) {
       if (shift || alt) {
+        // Plugins (the prompts menu) can intercept Alt+Enter while their
+        // overlay is open, to insert an item's body instead of a newline.
+        // Shift+Enter is NOT hook-dispatched: it is always a newline.
+        // When no listener claims it, the newline below runs unchanged.
+        if (alt && !shift && host.dispatchKeyHook("Alt+Enter")) {
+          return "changed"
+        }
         buf.newline()
         return "changed"
       }
