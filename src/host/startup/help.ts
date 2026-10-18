@@ -275,7 +275,19 @@ function buildHelpSections(): HelpSection[] {
           "Clear one provider's credentials",
           ["also: logout [provider], providers logout <id>"],
         ),
-        row(c.cyan("auth-status"), "Show login status, account, scopes, and expiry"),
+        row(c.cyan("auth-status [--table]"), "Show login status, account, scopes, and expiry"),
+        row(
+          `${c.cyan("auth-status")} ${c.dim("<credential>")} ${c.cyan("refresh")} ${c.dim("[--name <n>] [--provider <id>]")}`,
+          "Refresh one stored OAuth credential",
+        ),
+        row(
+          `${c.cyan("auth-status")} ${c.cyan("refresh-all")} ${c.dim("[--parallel <n>]")}`,
+          "Refresh all stored OAuth credentials (max 8)",
+        ),
+        row(
+          `${c.cyan("auth-status")} ${c.cyan("prune")} ${c.dim("--dry-run|--force [--table] [--parallel <n>]")}`,
+          "Delete stored credentials the server rejects (dry run lists only)",
+        ),
         row(`${c.cyan("--auth-method")} ${c.dim("<oauth|api-key>")}`, "Choose a login method"),
         row(
           `${c.cyan("--email")}, ${c.cyan("--email-hint")} ${c.dim("<address>")}`,

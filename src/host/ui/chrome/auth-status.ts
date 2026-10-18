@@ -107,6 +107,109 @@ function renderStoredLine(updatedAt: string | undefined, now: number): string | 
   return c.dim(`stored: ${formatRelative(Math.max(0, now - ts))} ago`)
 }
 
+function markdownCell(value: string): string {
+  return safeText(value).replace(/\|/g, "/")
+}
+
+function plainExpiry(expiresAt: number | undefined, now: number): string {
+  if (typeof expiresAt !== "number") return ""
+  if (!Number.isFinite(new Date(expiresAt).getTime())) return ""
+  if (expiresAt <= now) return `expired ${formatRelative(now - expiresAt)} ago`
+  return `${new Date(expiresAt).toISOString().replace("T", " ").slice(0, 19)} UTC (in ${formatRelative(expiresAt - now)})`
+}
+
+function plainStored(updatedAt: string | undefined, now: number): string {
+  if (!updatedAt) return ""
+  const ts = Date.parse(updatedAt)
+  if (!Number.isFinite(ts)) return ""
+  return `${formatRelative(Math.max(0, now - ts))} ago`
+}
+
+function markdownPlan(info: AuthCredentialInfo | undefined): string {
+  const detail = info?.details?.find((d) => d.key === "plan" || d.label.toLowerCase() === "plan")
+  return detail ? markdownCell(detail.value) : ""
+}
+
+function markdownNote(p: AuthStatusProviderView): string {
+  if (!p.auth || p.credentialInfo?.usable === false) return "credential unreadable"
+  const parts: string[] = []
+  if (p.credentialInfo?.hasRefreshToken === false) parts.push("refresh missing")
+  if (p.credentialInfo?.scopes && p.credentialInfo.scopes.length > 0) {
+    parts.push(`scopes: ${p.credentialInfo.scopes.join(" ")}`)
+  }
+  return parts.map(markdownCell).join("; ")
+}
+
+/**
+ * Render the `auth-status --table` Markdown pipe table. Plain text, no ANSI.
+ * Columns: provider, credential, kind, status, account, plan, expires,
+ * stored, note.
+ */
+export function renderAuthStatusMarkdown(input: AuthStatusRenderInput): string[] {
+  const header =
+    "| provider | credential | kind | status | account | plan | expires | stored | note |"
+  const separator = "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+  const rows: string[] = [header, separator]
+  for (const [providerId, creds] of groupByProvider(input.providers)) {
+    for (const [index, p] of creds.entries()) {
+      const credential = p.credentialName ?? p.credentialLabel ?? `Credential ${index + 1}`
+      const status = !p.auth || p.credentialInfo?.usable === false ? "unreadable" : "ok"
+      const account = [p.credentialInfo?.accountId, p.credentialInfo?.organizationId]
+        .filter((v): v is string => Boolean(v))
+        .join(" / ")
+      rows.push(
+        `| ${markdownCell(providerId)} | ${markdownCell(credential)} | ${markdownCell(p.auth?.kind ?? p.authKind)} | ${status} | ${markdownCell(account)} | ${markdownPlan(p.credentialInfo)} | ${markdownCell(plainExpiry(p.credentialInfo?.expiresAt, input.now))} | ${markdownCell(plainStored(p.updatedAt, input.now))} | ${markdownNote(p)} |`,
+      )
+    }
+  }
+  return rows
+}
+
+/**
+ * One credential row for `auth-status prune`.
+ */
+export interface AuthPruneRowView {
+  readonly providerId: string
+  readonly credentialName: string
+  readonly kind: "oauth" | "api-key"
+  readonly verdict: "dead" | "live" | "unknown"
+  readonly note?: string
+  /** API-key fingerprint (`abc12…34`). Never the full key. */
+  readonly maskedKey?: string
+}
+
+/**
+ * Render `auth-status prune` human rows. Plain text, no ANSI.
+ * Mirrors the refresh-all `<provider> <name>: <status>` shape.
+ */
+export function renderAuthPruneRows(rows: readonly AuthPruneRowView[]): string[] {
+  if (rows.length === 0) return ["", "  no stored credentials"]
+  return rows.map((r) => {
+    const key = r.maskedKey ? ` key ${r.maskedKey}` : ""
+    const note = r.note ? ` ${r.note}` : ""
+    return `${r.providerId} ${r.credentialName}: ${r.verdict}${key}${note}`
+  })
+}
+
+/**
+ * Render `auth-status prune --table` as a Markdown pipe table.
+ * Plain text, no ANSI. Columns: provider, credential, kind, verdict, note.
+ */
+export function renderAuthPruneMarkdown(rows: readonly AuthPruneRowView[]): string[] {
+  const header = "| provider | credential | kind | verdict | note |"
+  const separator = "| --- | --- | --- | --- | --- |"
+  const out: string[] = [header, separator]
+  for (const r of rows) {
+    const note = [r.maskedKey ? `key ${r.maskedKey}` : "", r.note ?? ""]
+      .filter((v) => v.length > 0)
+      .join("; ")
+    out.push(
+      `| ${markdownCell(r.providerId)} | ${markdownCell(r.credentialName)} | ${markdownCell(r.kind)} | ${r.verdict} | ${markdownCell(note)} |`,
+    )
+  }
+  return out
+}
+
 /** Render the `minimal-agent --auth-status` rows. */
 export function renderAuthStatusRows(input: AuthStatusRenderInput): string[] {
   if (input.providers.length === 0) {
