@@ -153,6 +153,37 @@ describe("MdstreamCodeHighlighter", () => {
     }
   })
 
+  it("close() keeps the process alive until the warmed sidecar exits", async () => {
+    // Regression: `-p` with a pre-send provider error exited 0 with no output.
+    // close() waited on an unref'd sidecar with an unref'd timeout, so when no
+    // other handle (e.g. an HTTP/2 session) was open, Bun drained the event
+    // loop and exited 0 with main() still pending: its catch never printed the
+    // fatal error. Runs in a child process because the bug IS the loop
+    // draining. No top-level await: index.ts drives `main().then/catch`.
+    const moduleUrl = join(import.meta.dir, "mdstream-code-highlighter.ts")
+    const script = `
+      import { MdstreamCodeHighlighter } from ${JSON.stringify(moduleUrl)}
+      const h = new MdstreamCodeHighlighter(["mdstream"], {
+        timeoutMs: 200,
+        spawn: () => Bun.spawn([process.execPath, ${JSON.stringify(FAKE_SERVER)}, "slow-exit"], {
+          stdin: "pipe", stdout: "pipe", stderr: "pipe",
+        }),
+      })
+      async function main() {
+        if (!(await h.warmup())) throw new Error("warmup failed")
+        await h.close()
+      }
+      main().then(() => {
+        console.log("CLOSED")
+        process.exit(7)
+      })
+    `
+    const proc = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" })
+    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+    expect(out).toContain("CLOSED")
+    expect(code).toBe(7)
+  })
+
   it("starts only when the executable basename is exactly mdstream", async () => {
     expect(isMdstreamFormatter(["mdstream"])).toBe(true)
     expect(isMdstreamFormatter(["/usr/local/bin/mdstream", "--theme", "dracula"])).toBe(true)
