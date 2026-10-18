@@ -13,6 +13,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 import { SessionStore } from "../../session/session-store.ts"
 
 import {
@@ -53,6 +54,28 @@ describe("resolveCredentialName", () => {
         selectedProviderId: "alpha",
       }),
     ).toEqual({ credentialName: "pinned-cred-3" })
+  })
+
+  it("keeps the resume pin when the session used a former provider id", () => {
+    clearProviderPlugins()
+    registerProviderPlugin({
+      id: "alpha-next",
+      displayName: "Alpha Next",
+      shortCode: "an",
+      formerIds: ["alpha"],
+      register() {},
+    })
+    try {
+      expect(
+        resolveCredentialName({
+          resumeCredentialName: "alpha-oauth-2",
+          resumeProviderId: "alpha",
+          selectedProviderId: "alpha-next",
+        }),
+      ).toEqual({ credentialName: "alpha-oauth-2" })
+    } finally {
+      clearProviderPlugins()
+    }
   })
 
   it("uses resume pin when session provider matches selected provider", () => {

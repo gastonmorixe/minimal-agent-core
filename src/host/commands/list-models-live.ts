@@ -19,7 +19,7 @@ import { tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
 import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
 import { listRegisteredModels, type ModelEntry } from "../../llm/model-registry.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
-import { listProviderPlugins } from "../../llm/provider-plugin.ts"
+import { canonicalProviderId, listProviderPlugins } from "../../llm/provider-plugin.ts"
 import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
@@ -267,9 +267,10 @@ function modelRowKey(providerId: string, modelId: string): string {
  * static only within the same provider.
  */
 export async function runListModelsLiveCommand(
-  providerFilter?: string,
+  rawProviderFilter?: string,
   deps: ListModelsDeps = {},
 ): Promise<void> {
+  const providerFilter = rawProviderFilter ? canonicalProviderId(rawProviderFilter) : undefined
   const byKey = new Map<string, ModelRow>()
 
   // When listing a single provider (`provider models cursor`), only probe that

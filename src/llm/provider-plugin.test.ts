@@ -6,10 +6,12 @@ import {
   listApiKeyAuthProviders,
   listOAuthLoginProviders,
 } from "../auth/auth-strategies.ts"
+import { getDiagnosticBus, type LogEvent } from "../bus/diagnostic-bus.ts"
 
 import {
   type ApiKeyAuthProvider,
   activateProviderPlugins,
+  canonicalProviderId,
   clearProviderPlugins,
   findProviderPlugin,
   listProviderPlugins,
@@ -152,5 +154,62 @@ describe("provider-plugin registry", () => {
     expect(findOAuthLoginProvider("fake")).toBe(oauthLogin)
     expect(listApiKeyAuthProviders()).toEqual([{ providerId: "fake", auth: apiKeyAuth }])
     expect(findApiKeyAuthProvider("fake")).toBe(apiKeyAuth)
+  })
+})
+
+describe("provider-plugin formerIds", () => {
+  let events: LogEvent[] = []
+  let unsubscribe: (() => void) | undefined
+  afterEach(() => {
+    unsubscribe?.()
+    unsubscribe = undefined
+    events = []
+    clearProviderPlugins()
+  })
+
+  function setup(): ProviderPlugin {
+    clearProviderPlugins()
+    unsubscribe = getDiagnosticBus().on("*", (e) => events.push(e))
+    const go: ProviderPlugin = {
+      id: "opencode-go",
+      displayName: "OpenCode Go",
+      shortCode: "og",
+      formerIds: ["opencode"],
+      register() {},
+    }
+    registerProviderPlugin(go)
+    return go
+  }
+
+  it("resolves a former id to the renamed plugin", () => {
+    const go = setup()
+    expect(findProviderPlugin("opencode")).toBe(go)
+    expect(findProviderPlugin("opencode-go")).toBe(go)
+    expect(findProviderPlugin("nope")).toBeUndefined()
+  })
+
+  it("normalizes ids and warns once per process", () => {
+    setup()
+    expect(canonicalProviderId("opencode")).toBe("opencode-go")
+    expect(canonicalProviderId("opencode")).toBe("opencode-go")
+    findProviderPlugin("opencode")
+    expect(canonicalProviderId("opencode-go")).toBe("opencode-go")
+    expect(canonicalProviderId("unknown")).toBe("unknown")
+    const warns = events.filter((e) => e.source === "provider.renamed")
+    expect(warns).toHaveLength(1)
+    expect(warns[0]?.message).toBe('provider "opencode" is now "opencode-go"')
+  })
+
+  it("prefers an exact id over a former id of another plugin", () => {
+    setup()
+    const legacy: ProviderPlugin = {
+      id: "opencode",
+      displayName: "Legacy",
+      shortCode: "lg",
+      register() {},
+    }
+    registerProviderPlugin(legacy)
+    expect(findProviderPlugin("opencode")).toBe(legacy)
+    expect(canonicalProviderId("opencode")).toBe("opencode")
   })
 })

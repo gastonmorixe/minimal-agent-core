@@ -519,4 +519,49 @@ describe("auth-strategies", () => {
       resolveStoredProviderAuth("test-provider", "auth-test-model", "NonExistent"),
     ).toThrow(/no credentials/)
   })
+
+  it("resolveStoredProviderAuth returns anonymousAuth when no credential is stored", () => {
+    registerProviderPlugin({
+      id: "anon-provider",
+      displayName: "Anon Provider",
+      shortCode: "an",
+      register() {},
+      apiKeyAuth: TEST_API_KEY_AUTH,
+      anonymousAuth: () => ({ kind: "api-key", key: "public" }),
+    })
+    const auth = resolveStoredProviderAuth("anon-provider", "free-model")
+    expect(auth).toEqual({ kind: "api-key", key: "public" })
+    // tryResolveProviderAuth stays stored-only.
+    expect(tryResolveProviderAuth("anon-provider", "free-model")).toBeNull()
+  })
+
+  it("resolveStoredProviderAuth prefers a stored credential over anonymousAuth", () => {
+    registerProviderPlugin({
+      id: "anon-provider",
+      displayName: "Anon Provider",
+      shortCode: "an",
+      register() {},
+      apiKeyAuth: TEST_API_KEY_AUTH,
+      anonymousAuth: () => ({ kind: "api-key", key: "public" }),
+    })
+    defaultAuthStore().set("test-api-key", "Test API Key", { tokenType: "api-key", apiKey: "sk-1" })
+    expect(resolveStoredProviderAuth("anon-provider", "m")).toEqual({
+      kind: "api-key",
+      key: "sk-1",
+    })
+  })
+
+  it("resolveStoredProviderAuth still throws for a missing explicit credential name", () => {
+    registerProviderPlugin({
+      id: "anon-provider",
+      displayName: "Anon Provider",
+      shortCode: "an",
+      register() {},
+      apiKeyAuth: TEST_API_KEY_AUTH,
+      anonymousAuth: () => ({ kind: "api-key", key: "public" }),
+    })
+    expect(() => resolveStoredProviderAuth("anon-provider", "m", "Missing")).toThrow(
+      /no credentials/,
+    )
+  })
 })

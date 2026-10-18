@@ -112,4 +112,31 @@ describe("resolveStartupProviderState resume pin skip", () => {
       errSpy.mockRestore()
     }
   })
+
+  it("normalizes a former provider id to the canonical id and warns once", async () => {
+    clearProviderPlugins()
+    clearModelRegistry()
+    clearProviderRegistry()
+    const handle = registerTestProvider({
+      id: "beta",
+      displayName: "Beta",
+      models: [{ id: "beta-fast", displayName: "Beta Fast" }],
+    })
+    ;(handle.plugin as { formerIds?: readonly string[] }).formerIds = ["beta-old"]
+
+    const state = await resolveStartupProviderState({
+      opts: { model: "beta-fast", provider: "beta-old" },
+      userConfig: {},
+      env: {},
+      resumeCredentialName: "beta-key-2",
+      resumeProviderId: "beta-old",
+    })
+
+    expect(state.selectedProviderId).toBe("beta")
+    expect(state.credentialName).toBe("beta-key-2")
+    const renamed = events.filter((e) => e.source === "provider.renamed")
+    expect(renamed).toHaveLength(1)
+    expect(renamed[0]?.message).toBe('provider "beta-old" is now "beta"')
+    expect(renamed[0]?.severity).toBe(Severity.Warning)
+  })
 })

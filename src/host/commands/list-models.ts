@@ -16,6 +16,7 @@
 
 import type { PrintFormat } from "../../cli/print-format.ts"
 import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
+import { canonicalProviderId } from "../../llm/provider-plugin.ts"
 import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
@@ -240,9 +241,10 @@ function formatModelRow(row: ModelRow, layout: ModelTableLayout): string[] {
  * Kept async for call-site stability (`runStartupSubcommand` / tests).
  */
 export async function runListModelsCommand(
-  providerFilter?: string,
+  rawProviderFilter?: string,
   deps: ListModelsDeps = {},
 ): Promise<void> {
+  const providerFilter = rawProviderFilter ? canonicalProviderId(rawProviderFilter) : undefined
   const rows = collectRegisteredModelRows(providerFilter)
   const format = deps.printFormat ?? "text"
 
