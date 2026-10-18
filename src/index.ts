@@ -96,6 +96,7 @@ import {
 } from "./host/ui/startup/tree.ts"
 import type { StatusSpinnerTheme } from "./host/ui/status/line-renderer.ts"
 import { c } from "./host/ui/style/ansi.ts"
+import { formatFatalError } from "./host/ui/turn-error.ts"
 import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "./llm/model-info.ts"
 import { primeProviderSessionInfo, resolveProviderSessionInfo } from "./llm/provider-session.ts"
 import { lastAdvertisedModeFromHistory, ModeManager } from "./modes/modes.ts"
@@ -1265,6 +1266,6 @@ main()
     await defaultNetworkClient.close()
   })
   .catch((err: Error) => {
-    console.error("fatal:", err.message)
+    console.error(formatFatalError(err))
     process.exit(1)
   })

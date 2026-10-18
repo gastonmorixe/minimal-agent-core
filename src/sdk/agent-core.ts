@@ -44,6 +44,7 @@ import {
   type EstimableTool,
   estimateRequestInputTokens,
 } from "../llm/context-budget.ts"
+import { fatalErrorFields } from "../llm/error-hint.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
 import { resolveSystemPromptForModel } from "../llm/system-prompt.ts"
@@ -311,6 +312,7 @@ export class AgentCore {
     return clampMaxOutputTokens({ modelMax, contextWindow, inputTokens })
   }
 
+  /** Run one turn. A fatal non-abort throw is emitted as an `error` event, then rethrown. */
   async *run(
     userText: string,
     opts?: Partial<SendOptions> & {
@@ -344,6 +346,16 @@ export class AgentCore {
       beforeReflectionCheckpoint?: (round: number) => MaybePromise<void>
     },
   ): AsyncGenerator<string, StreamedResponse, undefined> {
+    try {
+      return yield* this.runTurn(userText, opts)
+    } catch (err) {
+      const fields = fatalErrorFields(err)
+      if (fields) this.emit({ type: "error", ...fields })
+      throw err
+    }
+  }
+
+  private async *runTurn(...[userText, opts]: Parameters<AgentCore["run"]>) {
     const {
       onThinkingStart,
       onThinkingChunk,

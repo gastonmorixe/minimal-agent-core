@@ -36,12 +36,26 @@ export class ProviderError extends Error {
       upstreamCode?: string
       requestId?: string
       cause?: unknown
+      /** One-line next step for the user. Core renders it on its own dim line. */
+      hint?: string
+      /** Stable machine code (for example `opencode.free_tier_gate`). */
+      code?: string
     } = {},
   ) {
     super(message)
     this.name = "ProviderError"
     if (opts.cause !== undefined) (this as { cause?: unknown }).cause = opts.cause
+    if (opts.hint !== undefined) this.hint = opts.hint
+    if (opts.code !== undefined) this.code = opts.code
   }
+
+  /**
+   * One-line user next step. Core reads any thrown error with a string `hint`
+   * property (duck typed), so vendored copies of this class work too.
+   */
+  readonly hint?: string
+  /** Stable machine code, kept in session logs and observer payloads. */
+  readonly code?: string
 }
 
 // ---------------------------------------------------------------------------

@@ -59,6 +59,7 @@ import type { Spinner } from "./ui/spinner/index.ts"
 import type { StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk, formatAbortedEcho } from "./ui/style/ansi.ts"
 import { isOuterFrameClose } from "./ui/tool-transcript/format.ts"
+import { formatErrorHintLine, formatTurnError } from "./ui/turn-error.ts"
 import { renderTurnNotice } from "./ui/turn-notice.ts"
 
 /**
@@ -1405,8 +1406,13 @@ export async function runReplLiveArea(
         // second bare `error <msg>` line here would just duplicate
         // the same string in plain red. Skip it; the rich block is
         // the user's signal that this turn failed.
+        // The provider hint (duck-typed `hint` on the error) rides its own
+        // dim line, even when the diag block already showed the message.
         if (!isErrorDiagEmitted(turnError)) {
-          compositor.writeStream(`\n  ${c.boldRed("error")} ${msg}\n`)
+          compositor.writeStream(formatTurnError(turnError))
+        } else {
+          const hintLine = formatErrorHintLine(turnError)
+          if (hintLine) compositor.writeStream(hintLine)
         }
         let recovered = false
         if (parseContextLengthExceededError(msg)) {

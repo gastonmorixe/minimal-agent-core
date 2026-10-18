@@ -41,6 +41,7 @@ import { promptModelPicker } from "./ui/model-picker.ts"
 import type { Spinner } from "./ui/spinner/index.ts"
 import { StatusRenderer, type StatusSpinnerTheme } from "./ui/status/line-renderer.ts"
 import { c, faintThinkingChunk } from "./ui/style/ansi.ts"
+import { formatErrorHintLine, formatTurnError } from "./ui/turn-error.ts"
 import { renderTurnNotice } from "./ui/turn-notice.ts"
 
 type MaybePromise<T> = T | Promise<T>
@@ -663,7 +664,10 @@ export async function runRepl(
         // has rendered the failure as a rich block. Skip the bare
         // fallback line to avoid duplicating the message.
         if (!isErrorDiagEmitted(turnError)) {
-          errOutput.write(`\n  ${c.boldRed("error")} ${msg}\n`)
+          errOutput.write(formatTurnError(turnError))
+        } else {
+          const hintLine = formatErrorHintLine(turnError)
+          if (hintLine) errOutput.write(hintLine)
         }
 
         // Context-window recovery: prefer auto-compact + one retry over a

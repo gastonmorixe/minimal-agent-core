@@ -171,7 +171,7 @@ export function renderHumanProgressLine(event: AgentEvent): string {
       return `${marker} ${formatTurnNoticePlain(event.notice)}`
     }
     case "error":
-      return `✗ ${event.message}`
+      return event.hint ? `✗ ${event.message}\n  hint: ${event.hint}` : `✗ ${event.message}`
     default: {
       const _exhaustive: never = event
       return _exhaustive
