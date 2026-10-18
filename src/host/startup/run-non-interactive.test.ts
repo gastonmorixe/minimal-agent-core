@@ -135,6 +135,50 @@ function baseInput(over: Partial<RunNonInteractivePromptInput>): RunNonInteracti
   }
 }
 
+describe("runNonInteractivePrompt — structured route fatal error", () => {
+  it("emits the error event with code/hint and exits 1", async () => {
+    const out: string[] = []
+    const exits: number[] = []
+    // biome-ignore lint/correctness/useYield: throws before the first chunk
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      throw Object.assign(new Error("needs login"), { code: "p.login", hint: "run: login" })
+    }
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        buildCore: (sink) =>
+          new AgentCore({
+            auth: AUTH,
+            model: "test-model",
+            systemPrompt: "",
+            maxTokens: 4096,
+            toolRegistry: EMPTY_REGISTRY,
+            toolExecutor: new StubExecutor(),
+            transcriptSink: new DiscardTranscript(),
+            sendFn,
+            eventSink: sink,
+          }),
+        stdout: (s) => out.push(s),
+        exit: ((code: number) => {
+          exits.push(code)
+        }) as (code: number) => never,
+      }),
+    )
+    const events = out
+      .join("")
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l))
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      message: "needs login",
+      code: "p.login",
+      hint: "run: login",
+    })
+    expect(exits).toEqual([1])
+  })
+})
+
 describe("runNonInteractivePrompt — structured event-stream route", () => {
   it("json: builds the core and emits the exact JSONL event sequence to stdout", async () => {
     const out: string[] = []

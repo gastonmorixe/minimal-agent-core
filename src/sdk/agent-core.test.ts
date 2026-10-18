@@ -249,6 +249,30 @@ class CaptureEventSink implements EventSink {
   }
 }
 
+describe("AgentCore.run — fatal provider errors", () => {
+  it("emits an error event with code and hint, then rethrows", async () => {
+    // biome-ignore lint/correctness/useYield: throws before the first chunk
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      throw Object.assign(new Error("paid model needs login"), {
+        code: "x.login_required",
+        hint: "run: log in",
+      })
+    }
+    const sink = new CaptureEventSink()
+    const core = new AgentCore(baseConfig({ sendFn, eventSink: sink }))
+    await expect(drain(core.run("go"))).rejects.toThrow("paid model needs login")
+    const errors = sink.events.filter((e) => e.type === "error")
+    expect(errors).toEqual([
+      {
+        type: "error",
+        message: "paid model needs login",
+        code: "x.login_required",
+        hint: "run: log in",
+      },
+    ])
+  })
+})
+
 describe("AgentCore.run — structured event emission", () => {
   it("emits turn_started / item_started+completed / turn_completed for a text-only turn", async () => {
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {

@@ -30,6 +30,7 @@
  */
 
 import type { OutputFormat } from "../../cli/output-format.ts"
+import { fatalErrorFields } from "../../llm/error-hint.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
 import type { AgentCore } from "../../sdk/agent-core.ts"
@@ -134,10 +135,12 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
       // Text chunks are carried by the event stream (item_completed); the
       // raw yield channel is not written to stdout in structured mode.
     }
-  } catch {
-    // A fatal run error was already surfaced on the stream as an `error`
-    // event by the core. Swallow the throw so the machine-readable stdout
-    // stays a clean JSONL document instead of a stack trace.
+  } catch (err) {
+    // The core already surfaced the fatal error on the stream as an `error`
+    // event (with code/hint). Keep stdout a clean JSONL document (no stack
+    // trace), but exit non-zero so scripts see the failure. An abort is not
+    // a failure of the run itself.
+    if (fatalErrorFields(err)) (input.exit ?? ((code: number): never => process.exit(code)))(1)
   }
 }
 

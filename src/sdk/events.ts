@@ -170,6 +170,10 @@ export interface NoticeEvent {
 export interface ErrorEvent {
   type: "error"
   message: string
+  /** Stable machine code from the thrown provider error, when present. */
+  code?: string
+  /** One-line user next step from the thrown provider error, when present. */
+  hint?: string
 }
 
 /**

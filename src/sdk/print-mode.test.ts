@@ -161,6 +161,17 @@ describe("renderHumanProgressLine", () => {
   test("error", () => {
     expect(renderHumanProgressLine({ type: "error", message: "boom" })).toBe("✗ boom")
   })
+
+  test("error with hint shows the hint on its own line", () => {
+    expect(
+      renderHumanProgressLine({
+        type: "error",
+        message: "boom",
+        code: "x.y",
+        hint: "run: fix it",
+      }),
+    ).toBe("✗ boom\n  hint: run: fix it")
+  })
 })
 
 describe("renderEvent dispatch", () => {
