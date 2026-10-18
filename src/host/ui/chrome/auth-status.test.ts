@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import { stripAnsi } from "../../../terminal/term-width.ts"
 
-import { formatRelative, renderAuthStatusRows } from "./auth-status.ts"
+import { formatRelative, renderAuthStatusMarkdown, renderAuthStatusRows } from "./auth-status.ts"
 
 describe("auth-status chrome", () => {
   it("renders not-logged-in rows", () => {
@@ -281,5 +281,63 @@ describe("auth-status chrome", () => {
     expect(formatRelative(5 * 60_000 + 20_000)).toBe("5m 20s")
     expect(formatRelative(3 * 3600_000 + 12 * 60_000)).toBe("3h 12m")
     expect(formatRelative(4 * 24 * 3600_000 + 6 * 3600_000)).toBe("4d 6h")
+  })
+
+  it("renders the Markdown table with no ANSI and no secrets", () => {
+    const now = 1_700_000_000_000
+    const rows = renderAuthStatusMarkdown({
+      providers: [
+        {
+          providerId: "example",
+          displayName: "Example",
+          authKind: "oauth",
+          source: "store",
+          credentialName: "Work",
+          credentialInfo: {
+            usable: true,
+            expiresAt: now + 60_000,
+            accountId: "acct-1",
+            details: [{ key: "plan", label: "plan", value: "$20 plan" }],
+          },
+          auth: { kind: "oauth", token: "secret-token" },
+        },
+        {
+          providerId: "keys",
+          displayName: "Keys",
+          authKind: "api-key",
+          source: "store",
+          auth: { kind: "api-key", key: "secret-key" },
+        },
+      ],
+      now,
+    })
+    expect(rows[0]).toBe(
+      "| provider | credential | kind | status | account | plan | expires | stored | note |",
+    )
+    const text = rows.join("\n")
+    expect(text).toContain("| example | Work | oauth | ok | acct-1 | $20 plan |")
+    expect(text).toContain("| keys | Credential 1 | api-key | ok |")
+    expect(text).not.toContain("secret-")
+    expect(text).not.toMatch(/\x1b\[/)
+  })
+
+  it("renders unreadable status and sanitizes pipes in the Markdown table", () => {
+    const rows = renderAuthStatusMarkdown({
+      providers: [
+        {
+          providerId: "ex|ample",
+          displayName: "Example",
+          authKind: "oauth",
+          source: "store",
+          credentialName: "Bro|ken",
+          credentialInfo: { usable: false },
+          auth: null,
+        },
+      ],
+      now: 1,
+    })
+    const text = rows.join("\n")
+    expect(text).toContain("| ex/ample | Bro/ken | oauth | unreadable |")
+    expect(text).toContain("credential unreadable")
   })
 })

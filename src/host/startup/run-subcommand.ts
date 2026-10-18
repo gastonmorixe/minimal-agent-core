@@ -18,7 +18,12 @@
 import { resolveAgentHome } from "../../agent/agent-paths.ts"
 import type { PrintFormat } from "../../cli/print-format.ts"
 import type { CommandPlan } from "../cli/command-plan.ts"
-import { runAuthStatusCommand } from "../commands/auth-status.ts"
+import {
+  runAuthStatusCommand,
+  runAuthStatusPruneCommand,
+  runAuthStatusRefreshAllCommand,
+  runAuthStatusRefreshCommand,
+} from "../commands/auth-status.ts"
 import { DumpCommandError, runDumpCommand } from "../commands/dump.ts"
 import { runListFlagsCommand } from "../commands/list-flags.ts"
 import { runListModelsCommand } from "../commands/list-models.ts"
@@ -150,7 +155,57 @@ export async function runStartupSubcommand(ctx: SubcommandContext): Promise<bool
       process.exit(code)
     }
     case "auth-status": {
-      const code = await runAuthStatusCommand()
+      const table = args.includes("--table")
+      if (args.includes("prune")) {
+        const positionals = args.filter(
+          (a) => !a.startsWith("-") && a !== "auth-status" && a !== "prune",
+        )
+        if (positionals.length > 0) {
+          console.error(
+            `  ${c.boldRed("error")} auth-status prune takes no credential argument (got "${positionals[0]}")`,
+          )
+          process.exit(1)
+        }
+        const parallelRaw = readFlagValue("--parallel")
+        const parsed = parallelRaw ? Number.parseInt(parallelRaw, 10) : 4
+        const code = await runAuthStatusPruneCommand({
+          dryRun: args.includes("--dry-run") ? true : undefined,
+          force: args.includes("--force") ? true : undefined,
+          table: table ? true : undefined,
+          parallel: Number.isFinite(parsed) ? parsed : 4,
+        })
+        process.exit(code)
+      }
+      if (args.includes("refresh-all")) {
+        const parallelRaw = readFlagValue("--parallel")
+        const parsed = parallelRaw ? Number.parseInt(parallelRaw, 10) : 4
+        const code = await runAuthStatusRefreshAllCommand({
+          parallel: Number.isFinite(parsed) ? parsed : 4,
+        })
+        process.exit(code)
+      }
+      if (args.includes("refresh")) {
+        const nameValue = readFlagValue("--name")
+        const providerFlag = readFlagValue("--provider")
+        const positionals = args.filter(
+          (a) => !a.startsWith("-") && a !== "auth-status" && a !== "refresh",
+        )
+        const positional = positionals[0]
+        const credential = positional ?? nameValue ?? providerFlag
+        if (!credential) {
+          console.error(`  ${c.boldRed("error")} auth-status refresh requires <credential>`)
+          process.exit(1)
+        }
+        const code = await runAuthStatusRefreshCommand({
+          credential,
+          ...(providerFlag && positional && providerFlag !== positional
+            ? { providerId: providerFlag }
+            : {}),
+          ...(!positional && providerFlag && nameValue ? { providerId: providerFlag } : {}),
+        })
+        process.exit(code)
+      }
+      const code = await runAuthStatusCommand({ table })
       process.exit(code)
     }
     case "run":
