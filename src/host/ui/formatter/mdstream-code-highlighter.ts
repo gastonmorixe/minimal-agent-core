@@ -132,6 +132,14 @@ export class MdstreamCodeHighlighter implements CodeHighlighter {
         } catch {}
 
         if (!proc) return
+        // The sidecar is unref'd (it must not hold an idle REPL open) and
+        // withTimeout's timer is unref'd too. While a caller awaits close(),
+        // nothing else may hold the loop: re-ref the child so Bun cannot drain
+        // the loop and exit 0 with the caller's promise still pending. That
+        // drain hid fatal errors on `-p` (main().catch never ran).
+        try {
+          proc.ref()
+        } catch {}
         try {
           await withTimeout(
             proc.exited.then(() => undefined),

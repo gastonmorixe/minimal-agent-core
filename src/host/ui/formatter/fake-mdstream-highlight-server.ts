@@ -74,3 +74,6 @@ for await (const chunk of Bun.stdin.stream()) {
     await writeChunks(response, mode === "split")
   }
 }
+
+// Like a real sidecar, take a moment to exit after stdin EOF.
+if (mode === "slow-exit") await Bun.sleep(5_000)
