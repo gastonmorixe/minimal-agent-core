@@ -9,7 +9,11 @@
  */
 
 import type { AuthResult, TokenAuthResult } from "../../auth/auth.ts"
-import { storedProvidersHint, tryResolveProviderAuth } from "../../auth/auth-strategies.ts"
+import {
+  resolveAnonymousProviderAuth,
+  storedProvidersHint,
+  tryResolveProviderAuth,
+} from "../../auth/auth-strategies.ts"
 import type { ProviderAuth } from "../../llm/provider.ts"
 import { findProviderPlugin } from "../../llm/provider-plugin.ts"
 import { c } from "../ui/style/ansi.ts"
@@ -58,7 +62,9 @@ export interface GenericEndpointAuthOptions {
  * Resolve startup credentials for the selected provider.
  *
  * Requires a registered model with a known provider. Missing credentials
- * throw with provider-specific login guidance.
+ * throw with provider-specific login guidance, unless the provider declares
+ * `anonymousAuth` and no explicit credential name was pinned. Then the
+ * anonymous auth is returned (see {@link isAnonymousStartupAuth}).
  *
  * @param providerId - Provider slug to resolve.
  * @param modelId - Normalized model id (no `[1m]`/`[2m]` suffix).
@@ -87,6 +93,12 @@ export async function resolveStartupAuth(
 
   const auth = tryResolveProviderAuth(providerId, modelId, credentialName)
   if (!auth) {
+    const anonymous = resolveAnonymousProviderAuth(providerId, credentialName)
+    if (anonymous) {
+      const result = providerAuthToAuthResult(anonymous)
+      anonymousResults.add(result)
+      return result
+    }
     const hint = storedProvidersHint()
     throw new Error(
       `no credentials for provider "${providerId}" (model "${modelId}"). ` +
@@ -130,8 +142,19 @@ function refreshBridge(refresh: () => Promise<{ token: string }>): () => Promise
   }
 }
 
+/** Startup auth results built from `ProviderPlugin.anonymousAuth`. */
+const anonymousResults = new WeakSet<AuthResult>()
+
+/** True when {@link resolveStartupAuth} returned the provider's anonymous auth. */
+export function isAnonymousStartupAuth(auth: AuthResult): boolean {
+  return anonymousResults.has(auth)
+}
+
 /** Render the auth row shown in the startup tree. */
 export function startupAuthLabel(auth: AuthResult, providerId: string | undefined): string {
+  if (providerId && isAnonymousStartupAuth(auth)) {
+    return `anonymous ${c.dim(`(${providerId})`)}`
+  }
   if (providerId && findProviderPlugin(providerId)) {
     return `${auth.type} ${c.dim(`(${providerId})`)}`
   }

@@ -179,7 +179,25 @@ export function tryResolveProviderAuth(
   return null
 }
 
-/** Resolve runtime auth for a provider or throw with a provider-specific hint. */
+/**
+ * The provider's anonymous auth (`ProviderPlugin.anonymousAuth`), used when no
+ * credential is stored. Returns `null` when the provider has no anonymous
+ * mode, or when the caller pinned an explicit `credentialName` (a missing
+ * named credential is an error, never a silent anonymous run).
+ */
+export function resolveAnonymousProviderAuth(
+  providerId: string,
+  credentialName?: string,
+): ProviderAuth | null {
+  if (credentialName !== undefined) return null
+  return findProviderPlugin(providerId)?.anonymousAuth?.() ?? null
+}
+
+/**
+ * Resolve runtime auth for a provider or throw with a provider-specific hint.
+ * Falls back to the provider's anonymous auth when no credential is stored
+ * and no credential name was pinned.
+ */
 export function resolveStoredProviderAuth(
   providerId: string,
   modelId: string,
@@ -193,7 +211,9 @@ export function resolveStoredProviderAuth(
     )
   }
 
-  const auth = tryResolveProviderAuth(providerId, modelId, credentialName)
+  const auth =
+    tryResolveProviderAuth(providerId, modelId, credentialName) ??
+    resolveAnonymousProviderAuth(providerId, credentialName)
   if (auth) return auth
 
   const others = discoverCredentialedProviders().filter((p) => p.providerId !== providerId)

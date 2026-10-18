@@ -16,6 +16,8 @@
 
 import type { ProviderPlugin } from "@minimal-agent/plugin-api/llm/provider-plugin"
 
+import { diag } from "../bus/diagnostic-bus.ts"
+
 /**
  * Wave D-1 split: the provider-plugin TYPE surface
  * (`ProviderStartupContext`, `LiveModelRow`, `SystemPromptBlock`,
@@ -65,9 +67,43 @@ export function listProviderPlugins(): ProviderPlugin[] {
   return [...plugins.values()]
 }
 
-/** Look up a provider plugin by id (e.g. to map a model's providerId → shortCode). */
+/** Former ids already warned about in this process (one warning each). */
+const warnedFormerIds = new Set<string>()
+
+/**
+ * Look up a provider plugin by id (e.g. to map a model's providerId → shortCode).
+ * An exact id wins. Else a plugin whose `formerIds` contains `id` is returned,
+ * with a one-time deprecation warning on the diagnostic bus.
+ */
 export function findProviderPlugin(id: string): ProviderPlugin | undefined {
-  return plugins.get(id)
+  const exact = plugins.get(id)
+  if (exact) return exact
+  for (const plugin of plugins.values()) {
+    if (plugin.formerIds?.includes(id)) {
+      warnFormerId(id, plugin.id)
+      return plugin
+    }
+  }
+  return undefined
+}
+
+/**
+ * Map a provider id to its canonical id. A former id (see
+ * `ProviderPlugin.formerIds`) maps to the renamed plugin id and warns once.
+ * Unknown ids pass through unchanged, so callers keep their own
+ * "unknown provider" errors.
+ */
+export function canonicalProviderId(id: string): string {
+  return findProviderPlugin(id)?.id ?? id
+}
+
+function warnFormerId(formerId: string, currentId: string): void {
+  if (warnedFormerIds.has(formerId)) return
+  warnedFormerIds.add(formerId)
+  diag.warn("provider.renamed", `provider "${formerId}" is now "${currentId}"`, {
+    "former-id": formerId,
+    "provider-id": currentId,
+  })
 }
 
 /**
@@ -86,4 +122,5 @@ export function activateProviderPlugins(): string[] {
 /** Drop all registered provider plugins. Tests only. */
 export function clearProviderPlugins(): void {
   plugins.clear()
+  warnedFormerIds.clear()
 }

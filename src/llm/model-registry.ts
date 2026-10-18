@@ -30,6 +30,7 @@
 import type { Capabilities } from "./capabilities.ts"
 import type { MTokRate } from "./pricing.ts"
 import type { ProviderAdapter, SurfaceId } from "./provider.ts"
+import { canonicalProviderId } from "./provider-plugin.ts"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -165,7 +166,8 @@ export function findModel(idOrAlias: string): ModelEntry | undefined {
  * Look up a model by id or alias. Throws when not registered. Use this
  * at dispatch sites where "unknown model" is a programmer error.
  */
-export function resolveModel(idOrAlias: string, providerId?: string): ModelEntry {
+export function resolveModel(idOrAlias: string, rawProviderId?: string): ModelEntry {
+  const providerId = rawProviderId === undefined ? undefined : canonicalProviderId(rawProviderId)
   if (providerId) {
     const entry = findModelForProvider(idOrAlias, providerId)
     if (entry) return entry
@@ -196,8 +198,9 @@ export function resolveModel(idOrAlias: string, providerId?: string): ModelEntry
  */
 export function findModelForProvider(
   idOrAlias: string,
-  providerId: string,
+  rawProviderId: string,
 ): ModelEntry | undefined {
+  const providerId = canonicalProviderId(rawProviderId)
   // Resolve alias first.
   const directId = aliases.get(idOrAlias)?.get(providerId) ?? idOrAlias
   // Provider-scoped lookup: only return the entry from THIS provider.
@@ -252,9 +255,10 @@ export function listRegisteredModels(): ModelEntry[] {
  * tag, instead of hardcoding a SKU that could drift on a rename.
  */
 export function findModelByTags(
-  providerId: string,
+  rawProviderId: string,
   mustHave: readonly string[],
 ): ModelEntry | undefined {
+  const providerId = canonicalProviderId(rawProviderId)
   for (const entry of listRegisteredModels()) {
     if (entry.providerId !== providerId) continue
     const tags = entry.tags ?? []
@@ -314,7 +318,7 @@ export function registerProvider(adapter: ProviderAdapter): void {
 
 /** Looks up a provider adapter by id, returning `undefined` when none is registered. */
 export function findProvider(id: string): ProviderAdapter | undefined {
-  return providers.get(id)
+  return providers.get(id) ?? providers.get(canonicalProviderId(id))
 }
 
 /**
@@ -322,7 +326,7 @@ export function findProvider(id: string): ProviderAdapter | undefined {
  * provider ids in the error so a typo is immediately diagnosable.
  */
 export function resolveProvider(id: string): ProviderAdapter {
-  const p = providers.get(id)
+  const p = findProvider(id)
   if (!p) {
     throw new Error(
       `unknown provider "${id}". Registered: ${[...providers.keys()].sort().join(", ")}`,

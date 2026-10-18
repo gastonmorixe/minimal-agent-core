@@ -10,6 +10,7 @@
 
 import type { Capabilities } from "../../llm/capabilities.ts"
 import { listRegisteredModels } from "../../llm/model-registry.ts"
+import { canonicalProviderId } from "../../llm/provider-plugin.ts"
 
 /** One model row in the offline / live catalog listing. */
 export interface ModelCatalogRow {
@@ -32,7 +33,8 @@ export function modelCatalogRowKey(providerId: string, modelId: string): string 
  * Static registered catalog as structured rows (no network).
  * Optional `providerFilter` limits to one provider id.
  */
-export function collectRegisteredModelRows(providerFilter?: string): ModelCatalogRow[] {
+export function collectRegisteredModelRows(rawProviderFilter?: string): ModelCatalogRow[] {
+  const providerFilter = rawProviderFilter ? canonicalProviderId(rawProviderFilter) : undefined
   const byKey = new Map<string, ModelCatalogRow>()
   for (const entry of listRegisteredModels()) {
     if (providerFilter && entry.providerId !== providerFilter) continue

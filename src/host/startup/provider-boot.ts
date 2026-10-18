@@ -18,7 +18,11 @@ import { diag } from "../../bus/diagnostic-bus.ts"
 import type { CliOptions } from "../../cli/parse-argv.ts"
 import type { UserConfig } from "../../config/config.ts"
 import { findModelForProvider } from "../../llm/model-registry.ts"
-import { findProviderPlugin, listProviderPlugins } from "../../llm/provider-plugin.ts"
+import {
+  canonicalProviderId,
+  findProviderPlugin,
+  listProviderPlugins,
+} from "../../llm/provider-plugin.ts"
 import { primeProviderSessionInfo } from "../../llm/provider-session.ts"
 import { printStartupRow } from "../ui/startup/tree.ts"
 
@@ -95,7 +99,9 @@ export async function resolveStartupProviderState(
 
   const selectedModel = selected.model
   const selectedModelBase = selectedModel.replace(/\[(1|2)m\]/gi, "")
-  const selectedProviderId = selected.provider
+  // Former ids (`ProviderPlugin.formerIds`) normalize here, so every later
+  // phase (auth, session meta, usage) sees the canonical provider id.
+  const selectedProviderId = canonicalProviderId(selected.provider)
   publishGenericEndpointEnv(input.opts)
   const plugin = findProviderPlugin(selectedProviderId)
   if (!plugin) {

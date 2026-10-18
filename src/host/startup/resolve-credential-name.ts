@@ -13,6 +13,7 @@
  * @module host/startup/resolve-credential-name
  */
 
+import { canonicalProviderId } from "../../llm/provider-plugin.ts"
 import { loadSession } from "../../session/session-restore.ts"
 import { resolveSessionTarget } from "../commands/session-index.ts"
 
@@ -68,8 +69,12 @@ export function resolveCredentialName(
   const resume = input.resumeCredentialName?.trim()
   if (!resume) return {}
 
-  const sessionProvider = input.resumeProviderId?.trim()
-  const selected = input.selectedProviderId?.trim()
+  // Normalize former provider ids (`ProviderPlugin.formerIds`) so a session
+  // saved under an old id keeps its pin after a provider rename.
+  const rawSession = input.resumeProviderId?.trim()
+  const rawSelected = input.selectedProviderId?.trim()
+  const sessionProvider = rawSession ? canonicalProviderId(rawSession) : rawSession
+  const selected = rawSelected ? canonicalProviderId(rawSelected) : rawSelected
   // Legacy sessions omit meta.provider — keep the pin (compat).
   // When both are known and differ, the pin is not valid for this provider.
   if (sessionProvider && selected && sessionProvider !== selected) {

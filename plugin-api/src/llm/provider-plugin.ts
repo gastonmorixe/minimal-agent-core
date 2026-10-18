@@ -697,4 +697,19 @@ export interface ProviderPlugin {
    * credential resolution.
    */
   apiKeyAuth?: ApiKeyAuthProvider
+
+  /**
+   * Optional: auth used when no credential is stored for this provider.
+   * When present, startup and transport resolution return it instead of
+   * throwing `no credentials for provider`. An explicit credential name that
+   * does not exist still throws. Absent keeps today's behavior (throw).
+   */
+  anonymousAuth?(): ProviderAuth
+
+  /**
+   * Optional: old provider ids that resolve to this provider. A lookup by a
+   * former id (config `provider`, `--provider`, `provider <id> login`, session
+   * resume) returns this plugin and emits a one-time deprecation warning.
+   */
+  formerIds?: readonly string[]
 }

@@ -10,10 +10,14 @@
  * the exit code, or printing the banner only on success, etc.
  */
 
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { PassThrough } from "node:stream"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth-store.ts"
 import { clearProviderPlugins, registerProviderPlugin } from "../../llm/provider-plugin.ts"
 import { readSecureInput } from "../ui/secure-input.ts"
 
@@ -85,6 +89,64 @@ describe("runLoginCommand", () => {
     expect(await promise).toBe(130)
     expect(input.isRaw).toBe(false)
     expect(out).toContain("aborted")
+  })
+})
+
+describe("runLoginCommand with a former provider id", () => {
+  const prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
+  let dir = ""
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+    resetDefaultAuthStoreForTests()
+    if (prevAuthFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+    else process.env.MINIMAL_AGENT_AUTH_FILE = prevAuthFile
+  })
+
+  it("logs in under the canonical provider id", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ma-login-former-"))
+    process.env.MINIMAL_AGENT_AUTH_FILE = join(dir, "auth.jsonc")
+    resetDefaultAuthStoreForTests()
+    registerProviderPlugin({
+      id: "test-provider-next",
+      displayName: "Test Provider Next",
+      shortCode: "tn",
+      formerIds: ["test-provider-old"],
+      register() {},
+      apiKeyAuth: {
+        serviceId: "test-api-key",
+        displayName: "Test API Key",
+        buildCredential: (apiKey) => ({
+          serviceId: "test-api-key",
+          displayName: "Test API Key",
+          secrets: { apiKey },
+        }),
+        readApiKey: (secrets) => (typeof secrets.apiKey === "string" ? secrets.apiKey : null),
+      },
+    })
+    const input = new PassThrough() as PassThrough & {
+      isRaw?: boolean
+      isTTY?: boolean
+      setRawMode?: (mode: boolean) => void
+    }
+    input.isTTY = true
+    input.isRaw = false
+    input.setRawMode = (mode) => {
+      input.isRaw = mode
+    }
+    let out = ""
+    const promise = runLoginCommand({
+      providerId: "test-provider-old",
+      authMethod: "api-key",
+      input,
+      output: { write: (s: string) => ((out += s), true) } as NodeJS.WritableStream,
+    })
+    input.write("sk-test\r")
+
+    expect(await promise).toBe(0)
+    expect(out).toContain("Login successful")
+    expect(defaultAuthStore().getSecrets("test-api-key", "Test API Key")).toEqual({
+      apiKey: "sk-test",
+    })
   })
 })
 

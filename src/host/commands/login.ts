@@ -30,7 +30,11 @@ import {
   type LoginOutcome,
   runOAuthLogin,
 } from "../../auth/oauth-login.ts"
-import type { ApiKeyAuthProvider, OAuthLoginProvider } from "../../llm/provider-plugin.ts"
+import {
+  type ApiKeyAuthProvider,
+  canonicalProviderId,
+  type OAuthLoginProvider,
+} from "../../llm/provider-plugin.ts"
 import {
   renderApiKeyLoginSuccess,
   renderLoginBanner,
@@ -152,7 +156,11 @@ function resolveApiKeyLoginProvider(providerId: string | undefined): LoginMethod
   )
 }
 
-function resolveLoginMethod(opts: LoginCommandOptions): LoginMethod {
+function resolveLoginMethod(rawOpts: LoginCommandOptions): LoginMethod {
+  // Former provider ids (`ProviderPlugin.formerIds`) log in under the new id.
+  const opts = rawOpts.providerId
+    ? { ...rawOpts, providerId: canonicalProviderId(rawOpts.providerId) }
+    : rawOpts
   const method = opts.authMethod?.trim().toLowerCase()
   if (method && method !== "oauth" && method !== "api-key" && method !== "key") {
     throw new Error(`unknown auth method "${opts.authMethod}" (expected oauth or api-key)`)
