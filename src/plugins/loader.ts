@@ -39,6 +39,7 @@ import { buildPluginHost } from "./host/factory.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
 import { computeEffectiveName } from "./loader/helpers.ts"
 import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
+import { collectHostModes, type ResolvedHostMode } from "./loader/host-modes.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type {
   AgentContext,
@@ -286,6 +287,8 @@ export class PluginLoader {
   private asyncBlocksCache: PluginPromptBlocks | undefined = undefined
   /** Global slash-command registry (first-wins by name). */
   private readonly commands: CommandRegistry
+  /** Global host-mode registry (first-wins by id, like modes/commands). */
+  private readonly hostModes: Map<string, ResolvedHostMode>
   /** Lazily memoized frozen capability hosts. */
   private readonly hostCache = new Map<string, PluginHost>()
   /** Capability-host overrides (test sessionsDir injection). See {@link PluginLoaderOptions.hostOptions}. */
@@ -320,6 +323,8 @@ export class PluginLoader {
     coreToolNames: Set<string> = new Set(),
     /** Pre-built command registry (T-8a0c44). */
     commands: CommandRegistry,
+    /** Pre-built host-mode registry (`hostModes[]` manifest entries). */
+    hostModes: Map<string, ResolvedHostMode> = new Map(),
   ) {
     this.plugins = plugins
     this.toolIndex = toolIndex
@@ -338,6 +343,7 @@ export class PluginLoader {
     this.recommendSubagentModels = recommendSubagentModels
     this.hostOptions = hostOptions
     this.commands = commands
+    this.hostModes = hostModes
   }
 
   /**
@@ -811,6 +817,10 @@ export class PluginLoader {
         allCommands.push(cmd)
       }
     }
+    // Collect host modes after commands, same first-wins + lenient policy
+    // (see collectHostModes's doc for the implicit hostMode:stdio permission).
+    const hostModes = await collectHostModes(finalPlugins, logger)
+
     const commandRegistry = new CommandRegistry(allCommands, {
       timeoutMs,
       agent,
@@ -841,6 +851,7 @@ export class PluginLoader {
       opts.hostOptions,
       coreToolNames,
       commandRegistry,
+      hostModes,
     )
     // Resolve the forward-ref so handler contexts created earlier can
     // read the now-built command registry via `ctx.listCommands()`.
@@ -870,6 +881,14 @@ export class PluginLoader {
   }
   registerHostCommand(cmd: ResolvedCommand): boolean {
     return this.commands.registerHostCommand(cmd)
+  }
+  /** All loaded host modes contributed by plugins, first-wins by id. */
+  getHostModes(): ResolvedHostMode[] {
+    return [...this.hostModes.values()]
+  }
+  /** The resolved host mode for `id`, or `undefined` when none is loaded. */
+  findHostMode(id: string): ResolvedHostMode | undefined {
+    return this.hostModes.get(id)
   }
   getDefaultModeId(): string | null {
     return this.defaultModeId

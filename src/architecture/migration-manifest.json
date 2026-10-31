@@ -1194,6 +1194,20 @@
       "imports": []
     },
     {
+      "path": "src/host/startup/run-host-mode.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/run-host-mode.ts",
+      "imports": [
+        "plugin-api/src/types/plugin.ts",
+        "src/host-public/host-mode.ts",
+        "src/host/sdk-adapters/build-agent-core.ts",
+        "src/llm/model-info.ts",
+        "src/llm/model-registry.ts",
+        "src/plugins/loader.ts",
+        "src/sdk/agent-core.ts"
+      ]
+    },
+    {
       "path": "src/host/startup/run-non-interactive.stream-failure.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/run-non-interactive.stream-failure.test.ts",

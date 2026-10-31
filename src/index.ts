@@ -72,7 +72,12 @@ import {
   signInStepLabel,
 } from "./host/startup/provider-presentation.ts"
 import { peekResumeCredentialPin } from "./host/startup/resolve-credential-name.ts"
-import { isInteractiveResumeRun, wantsStreamJsonFailureLines } from "./host/startup/resume-mode.ts"
+import {
+  isHostModeRun,
+  isInteractiveResumeRun,
+  wantsStreamJsonFailureLines,
+} from "./host/startup/resume-mode.ts"
+import { runHostMode } from "./host/startup/run-host-mode.ts"
 import { runNonInteractivePrompt } from "./host/startup/run-non-interactive.ts"
 import { runStartupSubcommand } from "./host/startup/run-subcommand.ts"
 import { bootSessionStores } from "./host/startup/session-store-boot.ts"
@@ -1002,6 +1007,52 @@ async function main() {
     toolsHash,
   })
 
+  // `--host-mode <id>` (ACP Level 1's dispatch slot): hand the whole
+  // process to a plugin's `hostModes[]` entry instead of the human
+  // `--prompt`/REPL run below. Must sit HERE — after the session stores
+  // are open, but before every stdout write that follows (the ready
+  // banner, the resume header + replay, `InteractiveSession.create`'s
+  // TUI-flavored agent). `isHostModeRun` below is the predicate the
+  // banner/resume-header checks also AND in, so the two can never
+  // disagree about what counts as "the REPL" (see resume-mode.ts).
+  if (isHostModeRun(commandPlan.command)) {
+    // Guaranteed by planCommand (the "host-mode" command only exists when
+    // `--host-mode <id>` was parsed), but spelled out so the type stays
+    // honest instead of an unsafe assertion.
+    if (opts.hostModeId === undefined) {
+      throw new Error("internal error: host-mode command with no --host-mode id")
+    }
+    await runHostMode({
+      hostModeId: opts.hostModeId,
+      hostModeArgv: args.slice(args.indexOf("--host-mode") + 2),
+      promptSource: extractPromptFromArgs(args),
+      loader,
+      sessionDeps: {
+        auth,
+        model: selectedModel,
+        providerId: selectedProviderId,
+        ...(credentialName ? { credentialName } : {}),
+        effort,
+        ...(speed ? { speed } : {}),
+        serviceTier,
+        thinkingDisplay,
+        cacheTtl,
+        loader,
+        modeManager,
+        toolNamePolicy: opts.cliToolFilter,
+        saveEcho,
+        turnAttachments: turnAttachmentSeam.producers,
+        store,
+        blobStore,
+        fileTrackingStore,
+        systemPromptOverrides: opts.systemPromptOverrides,
+      },
+      sessionId: sid,
+      hostLifecycle,
+    })
+    return
+  }
+
   // Shared time-hint tracker. One instance threads through both
   // session-replay (for the historical tool headers when --resume hydrates
   // from JSONL) AND the live Agent (for new tool headers in this session).
@@ -1090,7 +1141,11 @@ async function main() {
   // `extractPrompt()` call still runs to drive the actual non-interactive
   // branch.
   const promptSource = extractPromptFromArgs(args)
-  const willEnterRepl = promptSource.kind === "none"
+  // `isHostModeRun` is defensive depth here, not load-bearing: the
+  // `--host-mode` branch above already returns before this point. Kept so
+  // the two predicates can never disagree if that early return ever moves
+  // (see resume-mode.ts's isHostModeRun doc).
+  const willEnterRepl = promptSource.kind === "none" && !isHostModeRun(commandPlan.command)
   if (willEnterRepl) {
     const stdoutCols = (process.stdout as { columns?: number }).columns ?? 80
     process.stdout.write(buildReadyBanner(modeManager, stdoutCols))
@@ -1116,7 +1171,8 @@ async function main() {
   // Decide from the parsed prompt source, the same value that picks the
   // REPL path. Any prompt form (`-p`, `--prompt=x`, positional, `-`) skips
   // the header and replay, so a stream-json stdout stays all JSON.
-  const isInteractiveResume = isInteractiveResumeRun(resumeSid, promptSource)
+  const isInteractiveResume =
+    isInteractiveResumeRun(resumeSid, promptSource) && !isHostModeRun(commandPlan.command)
   // Replay the FULL display history (not the compact-aware model path)
   // so the user still sees pre-compact turns in scrollback.
   const resumeReplayMessages = displayMessages.length > 0 ? displayMessages : initialMessages
