@@ -34,6 +34,7 @@
  * @module host/sdk-adapters/build-agent-core
  */
 
+import type { CodeHighlighter, ToolTranscriptFormatter } from "../../agent/tool-transcript-port.ts"
 import {
   combineTurnDrains,
   instantiateTurnAttachments,
@@ -64,7 +65,6 @@ import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
 import { computeStartupHashes, type StartupHashes } from "../startup/startup-hashes.ts"
-import type { CodeHighlighter } from "../ui/formatter/mdstream-code-highlighter.ts"
 
 import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
 import { MediaResolverAdapter } from "./media-resolver-adapter.ts"
@@ -188,6 +188,11 @@ export interface BuildAgentCoreDeps {
   toolTimeTracker?: import("../../tools/tool-time.ts").ToolTimeTracker | null
   /** Warm, fail-closed syntax highlighter for transcript tool output. */
   codeHighlighter?: CodeHighlighter | null
+  /**
+   * Host formatter for the tool transcript rows. Defaults to the plain-text
+   * core formatter (no ANSI, no code highlight).
+   */
+  transcriptFormatter?: ToolTranscriptFormatter | null
   /** Rounds between reflection checkpoints (AgentCoreConfig default when unset). */
   reflectionInterval?: number
   /** Reflection pause length in ms (AgentCoreConfig default when unset). */
@@ -297,6 +302,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     // Headless `--json`: no transcript header time-hint (cosmetic only).
     toolTimeTracker: deps.toolTimeTracker ?? null,
     codeHighlighter: deps.codeHighlighter ?? null,
+    transcriptFormatter: deps.transcriptFormatter ?? null,
     model: deps.model,
     store: deps.store,
     fileTrackingStore: deps.fileTrackingStore,
@@ -463,6 +469,7 @@ export async function openAgentCoreSession(
     // Headless `--json`: no transcript header time-hint (cosmetic only).
     toolTimeTracker: deps.toolTimeTracker ?? null,
     codeHighlighter: deps.codeHighlighter ?? null,
+    transcriptFormatter: deps.transcriptFormatter ?? null,
     model: deps.model,
     store: deps.store,
     fileTrackingStore: deps.fileTrackingStore,

@@ -22,39 +22,6 @@
 import { expandTabs } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { GLOBAL_STATUS_BUS } from "../bus/status.ts"
-// P4 FOLLOW-UP (core→host decoupling): this is the LAST host import in this
-// module. The raw box-drawing glyphs + palette were already pushed into the
-// host (formatRefusalRows / formatModeCloseRow / formatStreamBodyRow, plus
-// the header/preview/stream/findings formatters live here). What remains is
-// the whole tool-block RENDER PIPELINE, which core drives inline. Killing it
-// to zero means inverting `executeToolRound`'s render path behind a
-// host-provided renderer port threaded through ToolRoundContext (the
-// onStopNotice pattern), which belongs to Jacob's Phase-4 host-adapter /
-// SDK-port wiring — not a reactive rewrite here. `format.ts` itself can't
-// move to the leaf: it depends on core modules (bash-split, tools/truncation,
-// truncate-hint, term-width).
-import {
-  type CodeHighlighter,
-  clampBodyWithHint,
-  computeTuiElision,
-  effectiveBodyLineWidth,
-  formatDiagnosticsAnnotation,
-  formatModeCloseRow,
-  formatRefusalRows,
-  formatStreamBodyRow,
-  formatToolHeaderRows,
-  formatToolPreview,
-  highlightReadBody,
-  highlightUnifiedDiff,
-  renderFindingsPanel,
-  renderStreamedTail,
-  reopenFrameCloser,
-  resolveFileLanguage,
-  TOOL_PREVIEW_GUTTER_WIDTH,
-  TOOL_PREVIEW_LINES,
-  TOOL_PREVIEW_LINES_DEFAULT,
-  type ToolPresentation,
-} from "../host/ui/tool-transcript/format.ts"
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { resolveToolMediaContext } from "../media/tool-context.ts"
 import type { ModeManager } from "../modes/modes.ts"
@@ -92,6 +59,20 @@ import type { ToolTimeTracker } from "../tools/tool-time.ts"
 import { executeTool, type ToolResultMediaBlock } from "../tools/tools.ts"
 import { type TruncationInfo, truncateToolOutput } from "../tools/truncation.ts"
 
+import { PLAIN_TOOL_TRANSCRIPT } from "./plain-tool-transcript.ts"
+import {
+  computeTuiElision,
+  formatDiagnosticsAnnotation,
+  TOOL_PREVIEW_GUTTER_WIDTH,
+  TOOL_PREVIEW_LINES,
+  TOOL_PREVIEW_LINES_DEFAULT,
+} from "./tool-preview-budget.ts"
+import type {
+  CodeHighlighter,
+  ToolPresentation,
+  ToolTranscriptFormatter,
+} from "./tool-transcript-port.ts"
+
 /**
  * Everything {@link executeToolRound} needs from the agent. The original
  * loop body captured these via closure over `Agent` fields and `run()`
@@ -117,6 +98,11 @@ export interface ToolRoundContext {
   toolTimeTracker: ToolTimeTracker | null
   /** Warm, fail-closed syntax highlighter for presentation-only tool bodies. */
   codeHighlighter?: CodeHighlighter | null
+  /**
+   * Host formatter for the transcript rows. Defaults to the plain-text
+   * {@link PLAIN_TOOL_TRANSCRIPT} (no ANSI, no code highlight).
+   */
+  transcriptFormatter?: ToolTranscriptFormatter | null
   /** Active model id, used to resolve media (vision) capabilities. */
   model: string
   /** Append-only session store for tool_result persistence (optional). */
@@ -183,6 +169,7 @@ function mediaBlockToLegacy(block: ToolResultMediaBlock): ContentBlock {
  * linters, or formatters. All failure modes are contained by the HookBus.
  */
 async function runToolDidInvokeChain(
+  fmt: ToolTranscriptFormatter,
   lifecycle: LifecyclePort,
   toolName: string,
   execInput: Record<string, unknown>,
@@ -211,7 +198,7 @@ async function runToolDidInvokeChain(
   const renderCols = process.stdout.columns
   const diagScope = findings.find((f) => f.scope)?.scope
   return {
-    panel: renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
+    panel: fmt.renderFindingsPanel(findings, renderCols ? { cols: renderCols } : {}),
     annotation: formatDiagnosticsAnnotation(notes, diagScope),
   }
 }
@@ -341,6 +328,7 @@ export async function executeToolRound(
   ctx: ToolRoundContext,
 ): Promise<ToolResultBlock> {
   const { writeTranscript, signal } = ctx
+  const fmt = ctx.transcriptFormatter ?? PLAIN_TOOL_TRANSCRIPT
   const pres = ctx.presentation.get(tool.name)
   const renderCols = process.stdout.columns
   let headerWritten = false
@@ -348,7 +336,7 @@ export async function executeToolRound(
     if (headerWritten) return
     headerWritten = true
     const timeText = suppressToolTime ? undefined : ctx.toolTimeTracker?.format(Date.now())
-    const rows = formatToolHeaderRows({
+    const rows = fmt.formatToolHeaderRows({
       tool: { ...tool, input: execInput },
       presentation: pres,
       headerOverride: override,
@@ -446,7 +434,7 @@ export async function executeToolRound(
     // Render a denial block in the transcript so the user sees what
     // got blocked. The host owns the ⊘ glyph + frame + palette; core
     // supplies the message and the refusing mode's id.
-    for (const row of formatRefusalRows(content, ctx.modeManager?.activeId() ?? "mode")) {
+    for (const row of fmt.formatRefusalRows(content, ctx.modeManager?.activeId() ?? "mode")) {
       writeTranscript(row)
     }
   } else if (prepError) {
@@ -490,7 +478,7 @@ export async function executeToolRound(
     // id is enough : the model gets the structured details, the
     // user just needs to see that the model checked.
     const labelDisplay = active ? (active.label ?? active.id) : "default"
-    writeTranscript(formatModeCloseRow(labelDisplay))
+    writeTranscript(fmt.formatModeCloseRow(labelDisplay))
   } else {
     // Lifecycle beforeTool (tool.willInvoke): deny or rewrite input.
     // Runs AFTER the hard mode/CLI gate; hooks cannot allow a refused tool.
@@ -518,7 +506,7 @@ export async function executeToolRound(
               ? will.reason
               : "Tool blocked by lifecycle policy hook."
           isError = true
-          for (const row of formatRefusalRows(content, "policy")) {
+          for (const row of fmt.formatRefusalRows(content, "policy")) {
             writeTranscript(row)
           }
         } else if (will.action === "allow") {
@@ -541,7 +529,7 @@ export async function executeToolRound(
             writeToolHeader()
             content = rewriteError
             isError = true
-            for (const row of formatRefusalRows(content, "policy")) {
+            for (const row of fmt.formatRefusalRows(content, "policy")) {
               writeTranscript(row)
             }
           }
@@ -558,7 +546,7 @@ export async function executeToolRound(
           writeToolHeader()
           content = `Tool blocked by lifecycle policy hook. The approval hook failed (${msg}).`
           isError = true
-          for (const row of formatRefusalRows(content, "policy")) {
+          for (const row of fmt.formatRefusalRows(content, "policy")) {
             writeTranscript(row)
           }
         }
@@ -734,7 +722,7 @@ export async function executeToolRound(
               return
             }
             if (bufferedLastLine !== null) {
-              writeTranscript(formatStreamBodyRow(bufferedLastLine))
+              writeTranscript(fmt.formatStreamBodyRow(bufferedLastLine))
             }
             // Cheap pre-slice BEFORE expandTabs / displayWidth / codepoint
             // spreads. Mega-lines are already ruined for preview; keep
@@ -756,9 +744,9 @@ export async function executeToolRound(
             // a `<linenum>\t<content>` line (Read, also TSV-style
             // Bash output) underflows the cap by 1–8 cells and the
             // trailing `...(+Nch)` hint wraps into the gutter.
-            bufferedLastLine = clampBodyWithHint(
+            bufferedLastLine = fmt.clampBodyWithHint(
               expandTabs(previewRaw, TOOL_PREVIEW_GUTTER_WIDTH),
-              effectiveBodyLineWidth(),
+              fmt.effectiveBodyLineWidth(),
             )
             // Keep only the preview-sized raw slice (never the full
             // mega-line) for any residual callers of bufferedLastLineRaw.
@@ -866,7 +854,7 @@ export async function executeToolRound(
             // (which would call formatToolPreview and re-emit the
             // body) is skipped : but the tool_result push to the API
             // below still happens.
-            renderStreamedTail({
+            fmt.renderStreamedTail({
               bufferedLastLine,
               bufferedLastLineRaw,
               streamedLineCount,
@@ -968,7 +956,7 @@ export async function executeToolRound(
       // for aborted runs (no completed work to react to).
       let diagnosticsPanel: string[] = []
       if (!aborted) {
-        const augmented = await runToolDidInvokeChain(lifecycle, tool.name, execInput, isError)
+        const augmented = await runToolDidInvokeChain(fmt, lifecycle, tool.name, execInput, isError)
         if (augmented) {
           if (augmented.annotation) content = `${content}${augmented.annotation}`
           diagnosticsPanel = augmented.panel
@@ -982,7 +970,7 @@ export async function executeToolRound(
         // O(path + first line); mdstream is pre-warmed at startup, and any
         // timeout/protocol failure returns null so the existing render remains.
         const filePath = typeof execInput.file_path === "string" ? execInput.file_path : undefined
-        const language = filePath ? resolveFileLanguage({ path: filePath, content }) : null
+        const language = filePath ? fmt.resolveFileLanguage({ path: filePath, content }) : null
         let previewContent = content
         if (
           !isError &&
@@ -1004,7 +992,7 @@ export async function executeToolRound(
               annotationMatches.length === 0 ? -1 : Math.min(...annotationMatches)
             const readBody = annotationIdx < 0 ? content : content.slice(0, annotationIdx)
             const annotation = annotationIdx < 0 ? "" : content.slice(annotationIdx)
-            const highlighted = await highlightReadBody(readBody, language, ctx.codeHighlighter)
+            const highlighted = await fmt.highlightReadBody(readBody, language, ctx.codeHighlighter)
             if (highlighted !== null) {
               previewContent = highlighted + annotation
               contentHasAnsi = true
@@ -1015,12 +1003,16 @@ export async function executeToolRound(
                 ? `${displayNewFile ? "New file" : "Write"}: ${filePath}`
                 : undefined
             display =
-              (await highlightUnifiedDiff(displayPatch, language, ctx.codeHighlighter, title)) ??
-              display
+              (await fmt.highlightUnifiedDiff(
+                displayPatch,
+                language,
+                ctx.codeHighlighter,
+                title,
+              )) ?? display
           }
         }
 
-        const previewLines = formatToolPreview(previewContent, isError, display, {
+        const previewLines = fmt.formatToolPreview(previewContent, isError, display, {
           tool: tool.name,
           info: truncInfo,
           footer: displayFooter,
@@ -1032,7 +1024,7 @@ export async function executeToolRound(
         // blocks fuse into one frame instead of double-closing.
         if (diagnosticsPanel.length > 0 && previewLines.length > 0) {
           const lastIdx = previewLines.length - 1
-          previewLines[lastIdx] = reopenFrameCloser(previewLines[lastIdx])
+          previewLines[lastIdx] = fmt.reopenFrameCloser(previewLines[lastIdx])
         }
         for (const line of previewLines) writeTranscript(line)
         for (const line of diagnosticsPanel) writeTranscript(line)

@@ -37,7 +37,6 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import { GLOBAL_STATUS_BUS, type StatusActivity } from "../bus/status.ts"
 import type { SendOptions, StreamedResponse } from "../client/types.ts"
-import { formatActivityInfix } from "../host/ui/status/format.ts"
 import type { PluginLoader } from "../plugins/loader.ts"
 import type { TUIResult } from "../plugins/types.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
@@ -176,12 +175,10 @@ describe("plugin tool: no false 'stalled' seed (Bug 2)", () => {
 
     expect(seen.length).toBeGreaterThanOrEqual(1)
     const seed = seen[0]
-    const startedAt = seed.startedAt ?? Date.now()
-    // Simulate the renderer 10s later with no chunks (the exact condition
-    // that wrongly produced "⋯ stalled · last byte Ns ago" before the fix).
-    const infix = stripAnsi(
-      formatActivityInfix(seed, { now: startedAt + 10_000, entryStartedAt: startedAt }),
-    )
-    expect(infix).not.toContain("stalled")
+    // A host renders "⋯ stalled" only for a download with a last-chunk
+    // stamp that is too old. The seed for a non-streaming tool must not
+    // carry that stamp, so no host can show it as stalled.
+    const stallCandidate = seed.direction === "down" && seed.lastChunkAt != null
+    expect(stallCandidate).toBe(false)
   }, 10_000)
 })

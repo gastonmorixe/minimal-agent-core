@@ -210,18 +210,6 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
     },
   ],
   [
-    "src/cli/bash-split.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 0,
-      reason:
-        "Bash-tool transcript formatting helper the tool-executor adapter's " +
-        "writeTranscript path renders through; CLI-destined per the manifest, " +
-        "confirmed load-bearing by agent W's S34 finding",
-    },
-  ],
-  [
     "src/cli/slash-command-parse.ts",
     {
       cliFile: true,
@@ -331,90 +319,6 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
         "caller re-deriving them externally; the migration manifest already marks " +
         "it core-engine (stays in core, same path) — it sits under the forbidden " +
         "src/host/ folder only until its own future physical relocation",
-    },
-  ],
-  [
-    "src/host/session-replay-derivers.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 0,
-      reason:
-        "PluginLoader's own module graph (loader/late.ts -> loader/replay-renderers.ts) " +
-        "registers the --resume replay-renderer hooks unconditionally at import time; " +
-        "CLI-destined rendering code pulled in regardless of whether a host ever resumes",
-    },
-  ],
-  [
-    "src/host/ui/formatter/file-language.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 0,
-      reason:
-        "tool-transcript rendering helper the tool-executor adapter's transcript " +
-        "formatter (format.ts) imports; CLI-destined, confirmed load-bearing by agent W",
-    },
-  ],
-  [
-    "src/host/ui/formatter/mdstream-code-highlighter.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 3,
-      reason:
-        "the CodeHighlighter type build-agent-core.ts / tool-executor-adapter.ts bind " +
-        "into (agent W's own flagged type-boundary extraction, not yet done); " +
-        "CLI-destined, 3 ANSI literals for its own highlight styling",
-    },
-  ],
-  [
-    "src/host/ui/render/unified-diff.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 0,
-      reason:
-        "pulled in by the replay-renderers chain (session-replay-derivers.ts) " +
-        "PluginLoader registers at import time; CLI-destined diff-rendering helper",
-    },
-  ],
-  [
-    "src/host/ui/style/ansi.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 8,
-      reason:
-        "two independent edges reach this file's 8 ANSI literals: (Y3) " +
-        "./host/provider-auth's startupAuthLabel wraps the provider-id suffix in " +
-        "c.dim(...) for the startup banner; (Y4) the tool-transcript format.ts " +
-        "renderer (reached via host-kit/tool-executor-adapter) imports it for color " +
-        "styling. Both are cosmetic TUI dependencies of otherwise core-engine files, " +
-        "pending each file's own S34 move",
-    },
-  ],
-  [
-    "src/host/ui/tool-transcript/code-highlight-render.ts",
-    {
-      cliFile: true,
-      stdio: 0,
-      ansi: 6,
-      reason:
-        "code-highlight rendering the tool-transcript formatter imports; CLI-destined, " +
-        "6 ANSI literals for its own styling",
-    },
-  ],
-  [
-    "src/host/ui/tool-transcript/format.ts",
-    {
-      cliFile: true,
-      stdio: 3,
-      ansi: 2,
-      reason:
-        "the real tool-result transcript renderer ToolExecutorAdapter's writeTranscript " +
-        "path formats through; CLI-destined, confirmed load-bearing by agent W; 3 stdio " +
-        "reads + 2 ANSI literals of its own",
     },
   ],
   [

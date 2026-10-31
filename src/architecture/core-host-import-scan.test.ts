@@ -234,6 +234,11 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // wiring. Do not regenerate upward — a growing count means new core→host
 // coupling crept in, which is exactly what this test exists to stop.
 //
+// Ratcheted down in S34 Phase 4 (P4-A): five entries burned to 0.
+// tool-round.ts uses a host-injected transcript formatter port.
+// turn-attachments.ts and loader/replay-renderers.ts use the core replay
+// renderer registry. Their two tests were rewritten to match.
+//
 // Last ratcheted down 2026-10-31 (legacy Agent removed): 58 → 56 sites,
 // 42 → 41 files. agent/agent.ts (7) is gone. The REPL tests that imported
 // runRepl through agent.ts moved under src/host/ (blessed). Five e2e tests
@@ -250,11 +255,8 @@ describe("scanCoreHostImports (filesystem walk on a fixture tree)", () => {
 // (host-ansi/formatter imports repointed to the plugin-api leaf package).
 // ---------------------------------------------------------------------------
 const BASELINE = new Map<string, number>([
-  ["agent/agent.plugin-tool-feedback.test.ts", 1],
   ["agent/ask-user-host.test.ts", 3],
   ["agent/model-error.test.ts", 1],
-  ["agent/tool-round.ts", 1],
-  ["agent/turn-attachments.ts", 1],
   ["bus/abort-quit-keystroke.test.ts", 1],
   ["e2e/command-repl-e2e.test.ts", 3],
   ["e2e/first-run.test.ts", 1],
@@ -280,8 +282,6 @@ const BASELINE = new Map<string, number>([
   ["host-public/session-persistence-adapter.ts", 1],
   ["host-public/tool-executor-adapter.ts", 1],
   ["host-public/tool-registry-adapter.ts", 1],
-  ["plugins/loader.replay-renderers.test.ts", 1],
-  ["plugins/loader/replay-renderers.ts", 1],
   ["session/draft-store-editor.integration.test.ts", 1],
   ["session/queue-persist-e2e.test.ts", 3],
   ["test-utils/fixtures/paste-pty-driver.ts", 1],

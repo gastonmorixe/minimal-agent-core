@@ -1,7 +1,7 @@
 /**
  * Loader seam: manifest-declared `replayRenderers` are resolved through
  * the loader's blessed dynamic-import path and registered into the core
- * replay-renderer registry (`src/session-replay-derivers.ts`), so the
+ * replay-renderer registry (`loader/replay-renderer-registry.ts`), so the
  * `--resume` replay path can delegate per-tool re-rendering to plugins
  * WITHOUT core importing the plugins tree (the I2 invariant).
  */
@@ -11,10 +11,24 @@ import { join } from "node:path"
 
 import { afterEach, beforeAll, describe, expect, it } from "bun:test"
 
-import { clearReplayRenderers, deriveDisplayFallback } from "../host/session-replay-derivers.ts"
-
+import { clearReplayRenderers, getReplayRenderer } from "./loader/replay-renderer-registry.ts"
 import { CORE_TOOLS, ROOT, toolManifest, writePackage } from "./loader.fixtures.ts"
 import { PluginLoader } from "./loader.ts"
+
+/** Run the registered renderer for one replay row, as a host replay path does. */
+function deriveDisplayFallback(row: {
+  toolName: string
+  input: Record<string, unknown>
+  content: string
+  isError: boolean
+}): unknown {
+  return getReplayRenderer(row.toolName)?.({
+    input: row.input,
+    content: row.content,
+    callTs: null,
+    sidecarTasks: null,
+  })
+}
 
 const RR_HOME = join(ROOT, "replay-home")
 const RR_PROJECT = join(ROOT, "replay-project")
