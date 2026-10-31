@@ -287,6 +287,17 @@ export interface EditorControllerOptions {
    * Defaults to the singleton from `./input-capture-stack.ts`.
    */
   inputCaptureStack?: InputCaptureStack
+  /**
+   * `setTimeout` injection for the key dispatcher's bare-Esc /
+   * double-Esc / paste-coalesce timers (fake-timer tests). The
+   * dispatcher round-trips the returned handle through
+   * {@link clearTimeout}, so a fake clock is free to return any
+   * sentinel. Defaults to the real `setTimeout`. See
+   * `KeyDispatchOptions.setTimeout` (`./key-dispatch.ts`).
+   */
+  setTimeout?: (cb: () => void, ms: number) => unknown
+  /** `clearTimeout` injection paired with {@link setTimeout}. */
+  clearTimeout?: (handle: unknown) => void
 }
 
 /**
