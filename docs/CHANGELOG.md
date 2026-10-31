@@ -107,6 +107,16 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: `--output-format stream-json` has a new first line,
+  `session_started`. Its keys, in order: `type`, `streamVersion` (1),
+  `sessionId`, `model`, `provider`, `effort`, `cwd`, `version`,
+  `outputFormat`, then the `seq` (0) and `ts` envelope keys. The CLI writes
+  it before it opens the session, so it is on stdout even when the open
+  fails. Event lines then start at `seq` 1. It is not an `AgentEvent` kind.
+  `src/sdk/events.ts` exports its type as `SessionStartedLine`. Breaking
+  for stream-json readers: a reader that expects line 1 to be
+  `turn_started` must skip it. `--output-format json` does not change.
+
 - 2026-10-31: `--output-format stream-json` lines gain `sessionId`, `seq`,
   and `ts` keys, after the event keys. `sessionId` is the CLI session id.
   `seq` counts stdout lines from 0, with no gaps. `ts` is epoch

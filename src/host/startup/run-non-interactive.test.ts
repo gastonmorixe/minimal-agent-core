@@ -625,3 +625,88 @@ describe("runNonInteractivePrompt — stream-json line envelope", () => {
     }
   })
 })
+
+describe("runNonInteractivePrompt — stream-json session_started first line", () => {
+  const STREAM_INFO = {
+    sessionId: "sid-x",
+    model: "test-model",
+    provider: "test-provider",
+    effort: "high",
+    version: "9.9.9",
+    cwd: "/work",
+  }
+
+  it("stream-json with streamInfo: line 0 is session_started with exact keys, events start at seq 1", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: STREAM_INFO,
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    const first = lines[0] as Record<string, unknown>
+    expect(Object.keys(first)).toEqual([
+      "type",
+      "streamVersion",
+      "sessionId",
+      "model",
+      "provider",
+      "effort",
+      "cwd",
+      "version",
+      "outputFormat",
+      "seq",
+      "ts",
+    ])
+    expect(first).toMatchObject({
+      type: "session_started",
+      streamVersion: 1,
+      sessionId: "sid-x",
+      model: "test-model",
+      provider: "test-provider",
+      effort: "high",
+      cwd: "/work",
+      version: "9.9.9",
+      outputFormat: "stream-json",
+      seq: 0,
+    })
+    expect(typeof first.ts).toBe("number")
+    expect(lines[1]?.type).toBe("turn_started")
+    expect(lines.map((l) => l.seq)).toEqual(lines.map((_, i) => i))
+  })
+
+  it("stream-json: openSession rejects, stdout still has the session_started line and the error propagates", async () => {
+    const out: string[] = []
+    const run = runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        streamInfo: STREAM_INFO,
+        openEventStreamSession: () => Promise.reject(new Error("open failed")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    await expect(run).rejects.toThrow("open failed")
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.length).toBe(1)
+    expect(lines[0]?.type).toBe("session_started")
+    expect(lines[0]?.seq).toBe(0)
+  })
+
+  it("json with streamInfo: no session_started line", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        streamInfo: STREAM_INFO,
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.some((l) => l.type === "session_started")).toBe(false)
+    expect(lines[0]).toEqual({ type: "turn_started", turn: 1 })
+  })
+})
