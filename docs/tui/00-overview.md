@@ -67,7 +67,7 @@ Roughly: the **EditorController** decides what the live area *should look like* 
           │            │                │                            │                                               │
           ▼            │                ▼                            ▼                                               ▼
 ┌───────────────────┐  │  ┌──────────────────────────┐     ┌──────────────────┐                            ┌───────────────────┐
-│     term-caps     │  ├──┤     EditorController     ├──┬──┤ StdioInterceptor │console / formatter writes  │   Agent.run loop  │
+│     term-caps     │  ├──┤     EditorController     ├──┬──┤ StdioInterceptor │console / formatter writes  │ AgentCore.run loop│
 │ probe DECRPM 2026 │  │  │                          │  │  │                  │                            │                   │
 └─────────┬─────────┘  │  └─────────────┬────────────┘  │  └──────────────────┘                            └───────────────────┘
           │            │                │               │
@@ -94,7 +94,7 @@ Roughly: the **EditorController** decides what the live area *should look like* 
 3. **Construct the EditorController** with the compositor handed in. `maxLiveHeight` is a closure that returns `max(2, floor(rows/2))` so the live area never eats more than half the viewport.
 4. **Construct and install the StdioInterceptor**. From this point on every `process.stdout.write`, `process.stderr.write`, and `console.*` call routes through the compositor.
 5. **Subscribe to SIGWINCH** on `process.stdout` and fan it out to `compositor.notifyResize()` + `editor.notifyResize()`.
-6. **Hand off to `runRepl`** (in `src/agent.ts`).
+6. **Hand off to `runReplLiveArea`** (in `src/host/repl-live-area.ts`; the plain REPL is `runRepl` in `src/host/repl.ts`).
 
 ## Hard rules
 

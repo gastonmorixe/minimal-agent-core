@@ -9,11 +9,18 @@ write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
   typecheck, lint (oxlint), `format:check`, `biome:check` (format + import
   sort), `docs:check` (typedoc), then `bun test`. It stops at the first
   failure.
-- `bun test` runs the suite (currently 4588 pass / 10 skip; the skips are
-  live-network E2E behind `E2E=1`). `bunfig.toml` scopes test discovery to
+- `bun test` runs the whole suite. The skips are live-network E2E behind
+  `E2E=1`, plus tests that need the sibling `../minimal-agent-plugins`
+  checkout (they skip cleanly without it, see
+  `src/test-utils/sibling-repo.ts`). `bunfig.toml` scopes test discovery to
   first-party source: `pathIgnorePatterns` excludes the gitignored, vendored
   trees under `private/` (research clones that ship their own suites and
   dependencies), so the gate never runs third-party tests.
+- `bunfig.toml` preloads `src/test-utils/guard-process-exit.ts`. In tests,
+  a direct `process.exit` throws instead of ending the run, so a code path
+  that quits can never stop `bun test` early with a green exit code. Code that
+  quits takes an injectable exit function (see `EditorController`'s
+  `exitFn`).
 - Lint is `oxlint` (config in `.oxlintrc.json`). Biome owns formatting and
   import-sort only; its linter is off. `bun run format` does NOT sort imports,
   so run `bun run biome:fix` (or `bun run check`) before assuming a tree is
@@ -55,6 +62,23 @@ from the host, even when a plugin has its own `node_modules/@minimal-agent/core`
 Files in any other core copy refuse to load, so a subpath that core does not
 export stays unresolvable.
 
+## Core/CLI split bookkeeping
+
+The terminal host still lives in this repo while it moves to
+minimal-agent-cli. Two tests in `src/architecture/` keep the move honest:
+
+- `migration-manifest.test.ts`: every file under `src/host`, `src/ui`,
+  `src/input`, `src/terminal`, `src/cli`, `src/modes`, `src/plugins/host`,
+  `src/e2e` (plus the entry point, abort bus, stderr log sink, and
+  safe-stdout) has a row in `migration-manifest.json` that says `core-engine`,
+  `cli`, or `delete`, with a target path. A new file there needs a row. When
+  a CLI-bound file changes its imports, refresh the list with the one-liner in
+  `migration-manifest-scan.ts`.
+- `timer-inventory.test.ts`: every non-test core file that calls `setTimeout`
+  or `setInterval` is in `timer-inventory.ts` with a count, owner, and reason.
+  The list only shrinks: use an `AbortSignal` timeout, an injected sleep or
+  clock, or a host port instead of a new timer call.
+
 ## Conventions worth knowing
 
 - **Exhaustive switches over discriminated unions** end with a compile-time
@@ -66,7 +90,7 @@ export stays unresolvable.
   }
   ```
   If someone adds a union member, tsc fails at the switch instead of at
-  runtime. See `src/cli/command-plan.ts` and `src/client/debug.ts` for the
+  runtime. See `src/sdk/print-mode.ts` and `src/agent/turn-notice.ts` for the
   pattern.
 - **Generators carry a JSDoc `@yields`** (oxlint's jsdoc `require-yields` is on).
 - **Capabilities are data, not branching.** Code asks "does this model support
@@ -75,7 +99,7 @@ export stays unresolvable.
   (system prompt, tool descriptions, sub-prompts) is a `.md`/`.tmpl.md` file
   loaded through [`src/prompts/prompts.ts`](src/prompts/prompts.ts). Core prompts are under
   [`src/prompts/`](src/prompts/README.md); plugin prompts sit next to the plugin
-  (`PROMPT.md`, or `plugins/<id>/prompts/*`). Templates use `%%name%%` (required,
+  (`PROMPT.md`, or `<plugin>/prompts/*`). Templates use `%%name%%` (required,
   throws if unwired) and `%%name?%%` (optional). The rule: prose in markdown,
   control flow (which fragment, what order) in TypeScript. See
   `buildLoopSafetyParagraph` (formerly in the now-removed `src/headers.ts`; the
@@ -86,8 +110,8 @@ export stays unresolvable.
 
 The provider abstraction lives under [`src/llm/`](src/llm/). It exists so the
 agent loop, REPL, and live-area renderers depend on canonical types, never on a
-specific vendor's wire format. Anthropic is the first (and currently only wired)
-adapter; OpenAI Chat + Responses foundation files are present but not registered.
+specific vendor's wire format. Every provider (Anthropic, OpenAI, and the
+gateways) is a plugin in the sibling `../minimal-agent-plugins/` repo.
 
 Full design rationale, the capability schema, and the phase plan are in
 [`private/research/2026-05-28-llm-providers/01-architecture.md`](private/research/2026-05-28-llm-providers/01-architecture.md).
@@ -125,49 +149,51 @@ Vendor-neutral types and the orchestrator. Import everything from the barrel
 - `streaming/sse-parser.ts` : a generic line-buffered SSE parser the adapters
   reuse.
 
-### Provider plugins (`plugins/llm-<id>/`)
+### Provider plugins (`ma-llm-<id>-plugin/`)
 
-Each provider is a PLUGIN under `plugins/llm-<id>/`, not part of the core. A
-plugin ships a `provider.json` descriptor (`id` / `entry` / `export`) and
-exports a `ProviderPlugin` (`id` / `displayName` / `shortCode` / `register()`).
-Inside, the adapter is the only place that knows a wire format. Shape:
-`validate.ts` (capability gating), `request-body.ts` (canonical → wire),
-`response-stream.ts` (wire SSE → `CanonicalEvent`), `capabilities.ts` +
-`models.ts` (registry data), `headers.ts`, `adapter.ts` (implements the port +
-`bootstrap<Provider>()` + the exported `ProviderPlugin`). Canonical-core imports
-use `../../src/llm/*`.
+Each provider is a PLUGIN in the sibling `../minimal-agent-plugins/` repo, in
+its own `ma-llm-<id>-plugin/` folder. Core ships no provider and has no
+`plugins/` folder. A plugin ships a `provider.json` descriptor (`id` / `entry`
+/ `export`) and exports a `ProviderPlugin` (`id` / `displayName` /
+`shortCode` / `register(ctx)`). Inside, the adapter is the only place that
+knows a wire format. Shape: `validate.ts` (capability gating),
+`request-body.ts` (canonical → wire), `response-stream.ts` (wire SSE →
+`CanonicalEvent`), `capabilities.ts` + `models.ts` (registry data),
+`headers.ts`, `adapter.ts` (implements the port + `bootstrap<Provider>()` +
+the exported `ProviderPlugin`). Gateways that speak OpenAI Chat (Wafer,
+OpenRouter, ...) reuse the shared wire layer from the plugin contract instead.
 
-As of Wave G every provider plugin lives in the sibling
-`../minimal-agent-plugins/` repo (there is no in-core `plugins/` dir):
-- `ma-llm-anthropic-plugin` is complete: full Messages mapping, live SSE
-  fixtures, plugin-local model catalog + quota cache (no core `src/` imports).
-- `ma-llm-openai-plugin` is complete: Chat + Responses surfaces, gpt-5.x / gpt-4 /
-  o-series (gpt-5.5 registered dual-surface), live SSE fixtures.
+A plugin never imports core `src/`, and no plugin imports another plugin. It
+uses the plugin contract (`@minimal-agent/core/plugin-api/*`); today each
+plugin carries copies of the contract files it needs in its `lib/` folder.
+The I3 ratchet (`src/architecture/architecture.plugin-decoupling.test.ts`)
+scans the sibling repo, and its baseline is empty.
 
 `src/llm/provider-discovery.ts` is the EARLY provider loader: it scans each
 plugin root for `provider.json`, dynamically imports each `ProviderPlugin`, and
-registers it. Boot calls `registerDiscoveredProviders([<repo>/plugins,
-...resolveSiblingPluginRoots()])` then `activateDiscoveredProviders()` BEFORE any
-model resolution, so `src/index.ts` names no provider. The embedded `<repo>/plugins`
-root is now empty (providers come from the sibling clone at `~/.minimal-agent/plugins`
-in prod, or the sibling checkout at dev time). Separate from the TUI `PluginLoader`
-(which runs later for tools / live-area slots; provider registration must happen earlier).
+registers it. Boot (`src/host/startup/provider-discovery-boot.ts`) calls
+`registerDiscoveredProviders(...)` over the embedded `<repo>/plugins` root
+(empty), the dev-time sibling `../minimal-agent-plugins`, and
+`~/.minimal-agent/plugins` (the first-run clone), then
+`activateDiscoveredProviders()`, BEFORE any model resolution, so
+`src/index.ts` names no provider. `register(ctx)` gets a
+`ProviderSetupContext` (`models`, `providers`, `surfaceCodecs`). This is
+separate from the TUI `PluginLoader` (which runs later for tools / live-area
+slots; provider registration must happen earlier).
 
-### Coexistence with the legacy client (important)
+### Transport
 
-The new canonical layer runs ALONGSIDE the legacy `src/network/client.ts`, it does not
-replace it. `AgentCore.send` / `AgentCore.run` still reach `client.sendMessage`, which
-carries ~1500 lines of tuned cross-cutting infrastructure (idle/hard-timeout
-watchdogs, retry coordinator, 401 store-first refresh with a multi-process
-race fix, network observer, status bus). For Anthropic both paths emit identical
-bytes.
-
-`src/llm/adapter-legacy.ts` converts between the two shapes (`canonicalToSendOptions`,
-`sendOptionsToCanonical`, message converters). Migrating the
-agent loop onto `run()` (and moving the transport infrastructure into
-provider-neutral middleware) is "Phase 4-extended", a separate epic. **Do not
-refactor the `client.ts` watchdog/retry/observer/401-refresh code as a
-side-effect of provider work.**
+`AgentCore` sends through the canonical transport
+(`src/llm/transport/canonical-send.ts`): it calls `run()`, which resolves the
+model to its provider adapter. There is one transport for all providers. The
+transport infrastructure (stream watchdog, retry, auth refresh) lives under
+`src/llm/transport/`. `src/network/client.ts` is the shared network client
+(HTTP/2, HTTP/3, fetch, observers) that adapters get on `RunContext`.
+`src/llm/adapter-legacy.ts` converts between the older `SendOptions` /
+`StreamedResponse` shapes and the canonical types. The retry and recovery
+policy is being reworked (spec S16, S49), so read the code for its current
+behavior. **Do not change the watchdog, retry, or auth-refresh code as a
+side effect of provider work.**
 
 ### Adding a model or provider
 
@@ -177,9 +203,9 @@ side-effect of provider work.**
 - New provider: create `../minimal-agent-plugins/ma-llm-<id>-plugin/` mirroring an existing one, implement
   the `ProviderAdapter` port + a `bootstrap<Id>()`, export a `ProviderPlugin`,
   and add a `provider.json` pointing at it. Discovery registers it at startup.
-  A provider that reuses another's wire spec (e.g. an OpenAI-compatible gateway)
-  can import that plugin's translators/request-body (see `plugins/llm-openrouter`,
-  an OpenAI-compatible gateway that reuses `llm-openai`'s wire layer). The CLI
+  A provider that speaks another's wire format (e.g. an OpenAI-compatible
+  gateway) reuses the shared wire layer from the plugin contract (see
+  `ma-llm-openrouter-plugin`, which uses the OpenAI Chat layer). The CLI
   does not validate
   `--model` against the registry (the server is the source of truth), so
   forward-compat ids pass through.
@@ -216,8 +242,8 @@ Out-of-band prompt injection rides the `prompt.inject` bus channel
 (`{text, source?}`): the REPL turns it into a normal queued submit that fires
 BETWEEN turns. The live-area handler context gained `emit` so a periodic slot can
 use it. The `schedule` plugin (cron engine + `CronCreate/List/Delete` + `/loop`
-+ `/schedule` + a 1s heartbeat) is built entirely on these ports. It imports no
-harness runtime, only `import type` from `src/plugins/types.ts`. See
++ `/schedule` + a 1s heartbeat) is built entirely on these ports. It lives in
+the sibling repo (`ma-schedule-plugin`) and imports no core code. See
 `docs/changes/2026-05-30-schedule-plugin.md`.
 
 ## Git commits (Conventional Commits)

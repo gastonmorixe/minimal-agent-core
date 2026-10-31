@@ -1,9 +1,9 @@
 # `src/network/` — quick reference
 
-This is the agent's network layer. Every outbound request from
-`src/client.ts` (`sendMessage`, `checkQuota`), `src/auth.ts`
-(`refreshAccessToken`), and `src/oauth-login.ts` (`exchangeCode`)
-flows through it. Auto-formatter download and plugin traffic are
+This is the agent's network layer. Model requests flow through it: the
+canonical transport (`src/llm/transport/`) hands the client to each provider
+adapter on `RunContext.networkClient`. Auth refresh (`src/auth/auth.ts`) and
+OAuth login (`src/auth/oauth-login.ts`) use it too. Auto-formatter download and plugin traffic are
 candidates for upcoming PR-3 (see the design doc).
 
 ```

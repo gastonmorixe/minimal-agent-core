@@ -33,7 +33,7 @@ decides what is safe to expose.
 
 ## SurfaceCodec contract
 
-`@minimal-agent/plugin-api/llm/surface-codec`:
+`@minimal-agent/core/plugin-api/llm/surface-codec`:
 
 ```ts
 export interface SurfaceCodec {

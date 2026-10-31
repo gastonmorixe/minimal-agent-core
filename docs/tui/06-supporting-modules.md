@@ -163,4 +163,4 @@ Pre-allocates `n` lines at the bottom of the viewport by scrolling them up first
 
 ## What's missing
 
-There's no central "UI registry" or service locator. The compositor and the editor controller are each constructed once in `src/index.ts` and passed by reference. Plugins reach the editor via the host-bridge surface (`editor.footer.set`, etc.) which is wired in `src/agent.ts` and the plugin loader. If you find yourself wanting a global "where's the compositor?" lookup, that's a smell - pass it as a constructor arg.
+There's no central "UI registry" or service locator. The compositor and the editor controller are each constructed once in `src/index.ts` and passed by reference. Plugins reach the editor via the host-bridge surface (`editor.footer.set`, etc.) which is wired in `src/host/repl-editor-hooks.ts` and the plugin loader. If you find yourself wanting a global "where's the compositor?" lookup, that's a smell - pass it as a constructor arg.

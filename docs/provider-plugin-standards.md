@@ -6,13 +6,20 @@ the exemplar.
 ## Architecture
 
 A provider plugin adds a model provider (OpenAI, Anthropic, Wafer, OpenRouter,
-OpenCode, …) to the agent's list of callable backends. It registers on the
-shared model registry and exposes a `ProviderAdapter` that translates a
+OpenCode, …) to the agent's list of callable backends. It registers its models
+on the shared model registry and exposes a `ProviderAdapter` that translates a
 canonical request into the provider's wire format.
 
-Every provider plugin sits in `plugins/llm-<name>/` and exports a standard
-surface: `adapter.ts`, `auth.ts`, `capabilities.ts`, `models.ts`, `pricing.ts`,
-`session-info.ts`, `wire-constants.ts`, `index.ts`.
+Provider plugins live in the sibling
+[`minimal-agent-plugins`](https://github.com/gastonmorixe/minimal-agent-plugins)
+repo, one folder per provider: `ma-llm-<name>-plugin/`. Core ships no provider.
+At startup, `src/llm/provider-discovery.ts` scans each plugin root for a
+`provider.json` descriptor (`id`, `entry`, `export`), imports the exported
+`ProviderPlugin`, and calls its `register(ctx)`.
+
+A provider plugin has a standard surface: `provider.json`, `adapter.ts`,
+`auth.ts`, `capabilities.ts`, `models.ts`, `pricing.ts`, `session-info.ts`,
+`wire-constants.ts`, `index.ts`.
 
 ## Generic endpoint (no plugin needed)
 
@@ -27,22 +34,28 @@ in `register(ctx)` via `ctx.surfaceCodecs?.register(...)`.
 ### Pattern 1: OpenAI-compatible gateway (Wafer, OpenRouter)
 
 Most third-party providers speak OpenAI Chat Completions. You **reuse** the
-OpenAI wire layer wholesale instead of reimplementing it.
+shared OpenAI Chat wire layer instead of reimplementing it.
 
 ```
-llm-wafer/
-├── adapter.ts        // imports buildOpenAIChatBody + translateOpenAIChatStream
+ma-llm-wafer-plugin/
+├── provider.json     // { id, entry, export } for provider discovery
+├── adapter.ts        // uses buildOpenAIChatBody + translateOpenAIChatStream
 ├── auth.ts           // Bearer API key
 ├── capabilities.ts   // static capability snapshots per model
-├── models.ts         // registerModel() for each model in the catalog
+├── models.ts         // registers each model in the catalog
 ├── pricing.ts        // per-model input/output token pricing
-├── session-info.ts   // /v1/models + token-usage-accumulation hooks
+├── session-info.ts   // /v1/models + token-usage accumulation hooks
 ├── wire-constants.ts // base URL, endpoints, user agent
-├── index.ts          // re-exports public surface
+├── index.ts          // re-exports the public surface
+├── lib/              // contract files the plugin consumes (see below)
 └── wafer.test.ts     // end-to-end adapter tests
 ```
 
-Key imports from the shared OpenAI plugin (`../minimal-agent-plugins/ma-llm-openai-plugin/index.ts`):
+The shared wire layer is part of the plugin contract,
+`@minimal-agent/core/plugin-api/llm/openai-chat`. No plugin imports another
+plugin. Today each plugin carries a copy of the contract files it uses in its
+`lib/` folder (marked `// source: plugin-api/src/...`), so it imports them
+locally:
 
 ```typescript
 import {
@@ -50,17 +63,20 @@ import {
   translateOpenAIChatStream,    // SSE chunks → canonical events
   buildOpenAIHeaders,           // request headers
   validateOpenAIRequest,        // pre-flight validation
-} from "../llm-openai/index.ts"
+} from "./lib/openai-chat.ts"
 ```
 
-The adapter becomes ~50 lines: build body → set endpoint → POST → translate
+When the plugins depend on core directly, these copies are replaced by
+imports from `@minimal-agent/core/plugin-api/*`.
+
+The adapter is small: build the body, POST to the endpoint, translate the
 stream.
 
 ### Pattern 2: Custom wire format (Anthropic)
 
-Providers with a non-OpenAI wire format need their own `adapter.ts` wire logic.
-Anthropic is the canonical example — it has its own message format, streaming
-protocol, and validation.
+Providers with a non-OpenAI wire format need their own wire logic in the
+plugin. Anthropic is the canonical example. It has its own message format,
+streaming protocol, and validation.
 
 ## Template: starting a new provider
 
@@ -72,81 +88,82 @@ Files you must touch:
 
 | File | What to do |
 |---|---|
+| `provider.json` | Set `id`, `entry` (`./index.ts`), and `export` (the `ProviderPlugin` name) |
 | `wire-constants.ts` | Set base URL, endpoints, user agent |
-| `adapter.ts` | Wire the `ProviderAdapter` struct: `.adapter{run,validate}` |
-| `auth.ts` | Implement `ProviderAuthStrategy` (almost always Bearer key) |
+| `adapter.ts` | Implement the `ProviderAdapter` (`id`, `surfaces`, `validate`, `run`) and the `ProviderPlugin` |
+| `auth.ts` | Implement the API-key auth strategy (almost always a Bearer key) |
 | `capabilities.ts` | One `CAPS_<MODEL>` constant per model |
-| `models.ts` | `registerModel()` for each model, tagged with surface + capabilities |
+| `models.ts` | Register each model, tagged with surface + capabilities |
 | `pricing.ts` | Per-model token pricing (input/output per 1M tokens) |
 | `session-info.ts` | `GET /v1/models` → model list; per-call usage accumulation |
 | `index.ts` | Re-export the public surface |
 | `<name>.test.ts` | E2E adapter test (canonical request → wire → canonical events) |
 
-## Error tagging
+## Registration
 
-Every adapter must tag upstream errors with the provider name so diagnostics
-clearly identify the failing backend.
+`register(ctx)` receives a `ProviderSetupContext`:
+
+- `ctx.models`: registers the plugin's model catalog.
+- `ctx.providers`: registers the adapter.
+- `ctx.surfaceCodecs` (optional): registers a generic wire-surface codec.
+
+A plugin reads no core registry directly. It writes through `ctx` and keeps
+its own catalog data in `models.ts`.
+
+## Error classification
+
+An adapter turns a non-2xx response into an error that names the provider and
+carries a class that core can act on. Use `classifyUpstreamError` from the
+contract (`@minimal-agent/core/plugin-api/llm/errors`):
 
 ```typescript
-// adapter.ts, inside validate/run
-import { classifyUpstreamError } from "@minimal-agent/core/plugin-api/llm/errors"
-
-// Wrap upstream HTTP errors
-throw classifyUpstreamError("wafer", response.status, body)
+const { streamErrorType } = classifyUpstreamError({ httpStatus: status, upstreamCode })
+const err = new Error(`Wafer API ${status}: ${body}`)
+if (streamErrorType) err.streamErrorType = streamErrorType
+throw err
 ```
 
-The error tag appears in the TUI as `[wafer]` and in log lines.
+Core decides whether to retry, recover, or stop from that class. The provider
+name in the message shows in diagnostics and log lines.
 
 ## Stream usage
 
-All adapters use the shared SSE parser:
+All adapters use the shared SSE parser (`parseSse`, from
+`@minimal-agent/core/plugin-api/utils/sse-parser`) and the `NetworkClient`
+that core passes on `RunContext`:
 
 ```typescript
-import { parseSse } from "@minimal-agent/core/plugin-api/utils/sse-parser"
-
-async function* run(ctx: RunContext, req: CanonicalRequest): AsyncGenerator<CanonicalEvent> {
-  const response = await ctx.network.post(CHAT_COMPLETIONS_URL, {
-    headers: buildOpenAIHeaders(ctx),
-    body: buildOpenAIChatBody(req),
-    stream: true,
+async *run(req, model, ctx) {
+  const response = await ctx.networkClient.request({
+    method: "POST",
+    url: CHAT_COMPLETIONS_URL,
+    headers: buildOpenAIHeaders({ auth: ctx.auth }),
+    body: JSON.stringify(buildOpenAIChatBody(req, model)),
+    signal: req.signal,
   })
-  for await (const event of parseSse(response.body)) {
-    yield* translateOpenAIChatStream(event)
-  }
+  yield* translateOpenAIChatStream(parseSse(response.body))
 }
 ```
 
 `parseSse` handles `data:` lines, multi-line payloads, and `[DONE]` sentinels.
-Your translator function converts provider-specific chunks to canonical events
-(`content_block_delta`, `usage`, `stop`, etc.).
+Your translator converts provider-specific chunks to canonical events
+(`text_delta`, `tool_use_*`, `message_delta`, `stream_error`, ...).
 
-## SDK seam usage
+## The contract boundary
 
-The plugin imports from two packages:
+A provider plugin imports only:
 
-1. **`@minimal-agent/core/plugin-api`** — stable, public types. Always import from
-   here for `ProviderPlugin`, `CanonicalEvent`, `ProviderAuth`, `RunContext`,
-   `isEvent`, `NetworkClient`, SSE utilities.
+1. **The plugin contract**, `@minimal-agent/core/plugin-api/*`: `ProviderPlugin`,
+   `ProviderSetupContext`, `CanonicalEvent`, `CanonicalRequest`, `RunContext`,
+   `NetworkClient`, the error classes, the SSE parser, and the shared wire
+   layers. Today these come from the plugin's `lib/` copies.
+2. **Local structural types** for the few host types the contract does not
+   carry yet (`ProviderAdapter`, `ModelEntry`, `SurfaceId`). Wafer keeps them
+   in `lib/host-types.ts`.
 
-2. **`../../src/llm/*`** — internal core types. Only import `ProviderAdapter`,
-   `SurfaceId`, `ModelEntry`, `registerProvider`, `registerModel`,
-   `ModelRegistry` from here. These are the stable-to-import core types; verify
-   against the current architecture baseline (`scripts/check-architecture.ts`)
-   before importing anything else from `src/`.
-
-**Known gap (src/ import):** Provider plugins currently import from
-`../../src/llm/model-registry.ts` and `../../src/llm/provider.ts` to register
-models and type the adapter struct. These are not yet in `@minimal-agent/core/plugin-api`.
-When they move into the API package, provider plugins will drop all `src/`
-imports. Tracked in the skill-declared-tools spec (archived under `private/`).
-
-## Boot sequence
-
-Provider plugins register during the `setup()` phase of `PluginLoader.load()`.
-They do NOT use skill-declared tools, `PromptFragmentContext`, or
-`registerDynamicTools`. The `getPromptBlockAsync()` → `getExtraTools()` boot
-race fix documented in the skill-declared-tools spec does not affect provider
-registration order or timing. Provider plugins can safely ignore it.
+A plugin never imports core `src/`. The I3 ratchet
+(`src/architecture/architecture.plugin-decoupling.test.ts`) scans the sibling
+plugins repo and fails on any `src/` import. Its baseline is empty.
 
 ## Tests
 
@@ -155,8 +172,8 @@ Every provider must have:
 - **E2E adapter test** (`<name>.test.ts`): canonical request → adapter → canonical
   events. Uses a mock network client so no real API calls.
 - **Auth test** (`auth.test.ts`): key resolution, credential building.
-- **Model registration test**: `registerModel()` produces the expected surface +
-  capabilities.
+- **Model registration test**: registering the catalog produces the expected
+  surface + capabilities.
 - **Pricing test**: token cost calculation for known input/output pairs.
 
-Run: `bun test plugins/llm-<name>/<name>.test.ts`.
+Run, from the plugins repo: `bun test ma-llm-<name>-plugin/`.
