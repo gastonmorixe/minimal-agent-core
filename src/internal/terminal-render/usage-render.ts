@@ -6,18 +6,28 @@
  * leaf utility: callers inject host-specific model labeling through options
  * instead of importing the model registry here.
  *
- * @module usage-render
+ * INTERNAL BRIDGE (spec S33): the public `plugin-api/utils/usage-render`
+ * contract this module used to back moved to
+ * `minimal-agent-cli/src/terminal-kit`. This copy exists only so
+ * `src/host/commands/usage.ts` keeps compiling until S34 moves it to the
+ * CLI, at which point this whole `src/internal/terminal-render` folder is
+ * deleted — not exported, not part of the public API, not reachable by a
+ * plugin. The folded report *shapes* it renders (`UsageReport` et al.)
+ * stay in core's plugin-api (`utils/usage-report`): pure data, not
+ * terminal-rendering code.
+ *
+ * @module internal/terminal-render/usage-render
  */
 
-import { ansiStyle as c } from "./ansi.ts"
-import { displayWidth } from "./term-width.ts"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 import {
   USAGE_PERIODS,
   type UsageBreakdownRow,
   type UsagePeriod,
   type UsageReport,
   type UsageTotals,
-} from "./usage-report.ts"
+} from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 /** 1/8th-block ramp (shared visual language with quota-status). */
 const SLICES = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] as const

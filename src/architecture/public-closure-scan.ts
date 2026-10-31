@@ -80,16 +80,11 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       cliFile: false,
       stdio: 0,
       ansi: 48,
-      reason: "exported TUI helper; moves to the CLI's plugin UI contract (S33)",
-    },
-  ],
-  [
-    "plugin-api/src/utils/mode-style.ts",
-    {
-      cliFile: false,
-      stdio: 0,
-      ansi: 7,
-      reason: "exported TUI helper; moves to the CLI's plugin UI contract (S33)",
+      reason:
+        "exported TUI helper; real sibling plugins (schedule, memory, quota-status, " +
+        "diagnostics) import it directly for tool-handler output, not just cosmetics, " +
+        "so it stays pending a fix to those plugins or to the loader's all-or-nothing " +
+        "handler resolution (S33 session report)",
     },
   ],
   [
@@ -98,7 +93,7 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       cliFile: false,
       stdio: 0,
       ansi: 22,
-      reason: "exported TUI helper; moves to the CLI's plugin UI contract (S33)",
+      reason: "exported TUI helper; same real-plugin-dependency reason as ansi.ts above",
     },
   ],
   [
@@ -107,7 +102,7 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       cliFile: false,
       stdio: 0,
       ansi: 9,
-      reason: "exported TUI helper; moves to the CLI's plugin UI contract (S33)",
+      reason: "exported TUI helper; same real-plugin-dependency reason as ansi.ts above",
     },
   ],
 ])

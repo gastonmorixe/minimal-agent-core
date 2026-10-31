@@ -32,13 +32,29 @@
  * is the planned upgrade path once we have theme detection and a real test
  * harness.
  *
- * @module utils/mode-style
+ * INTERNAL BRIDGE (spec S33): the public `plugin-api/utils/mode-style`
+ * contract this module used to back moved to
+ * `minimal-agent-cli/src/terminal-kit`. This copy exists only so
+ * `src/modes/modes.ts` and `src/host/ui/style/mode.ts` keep compiling
+ * until S34 extracts the ANSI-dependent parts of `modes.ts` to the CLI
+ * (see that spec's own note), at which point this whole
+ * `src/internal/terminal-render` folder is deleted — not exported, not
+ * part of the public API, not reachable by a plugin. The declarative
+ * request shape (`ModeStyleRequest`, `ColorRequest`, `ThemeKey`) stays in
+ * core's plugin-api (`types/plugin`): that is the manifest contract a
+ * plugin author writes against, not rendering code.
+ *
+ * @module internal/terminal-render/mode-style
  */
 
-import type { ColorRequest, ModeStyleRequest, ThemeKey } from "../types/plugin.ts"
-import { ANSI_CODES } from "./ansi.ts"
-import { PALETTE, SEMANTIC } from "./palette.ts"
-import { truncateDisplayWidth } from "./term-width.ts"
+import type {
+  ColorRequest,
+  ModeStyleRequest,
+  ThemeKey,
+} from "@minimal-agent/core/plugin-api/types/plugin"
+import { ANSI_CODES } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { PALETTE, SEMANTIC } from "@minimal-agent/core/plugin-api/utils/palette"
+import { truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 // ---------------------------------------------------------------------------
 // Public types
