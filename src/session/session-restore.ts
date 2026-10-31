@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs"
 
 import { COMPACTION_USER_MARKER } from "../agent/context-compact.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../llm/messages.ts"
 import { appendUserTurn } from "../sdk/conversation-history.ts"
 
@@ -222,7 +223,7 @@ function foldRecordsInternal(
       case "rewind": {
         const targetIdx = userIdToIndex.get(rec.to)
         if (targetIdx === undefined) {
-          console.warn(`session-restore: rewind to unknown msgId ${rec.to} — skipping`)
+          diag.warn("session-restore.rewind-unknown", `rewind to unknown msgId ${rec.to}; skipping`)
           break
         }
         // Keep messages[0..targetIdx] inclusive; drop the rest.

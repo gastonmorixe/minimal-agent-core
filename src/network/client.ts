@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto"
 
+import { diag } from "../bus/diagnostic-bus.ts"
+import { loadUserConfig } from "../config/config.ts"
+import { resolveNetDbgEnabled } from "../logging/net-dbg.ts"
+
 import { networkActivityObserver } from "./activity-observer.ts"
 import { applyPreferredDnsResultOrder } from "./dns-order.ts"
 import { FetchTransport } from "./fetch-transport.ts"
@@ -401,10 +405,18 @@ export function createDefaultNetworkClient(): NetworkClient {
     )
   } else if (h3Mode !== "off" && h3Mode !== "") {
     // Unknown value → treat as "off" but tell the user.
-    process.stderr.write(
-      `[network] MINIMAL_AGENT_HTTP3="${h3Mode}" unrecognized (expected off/opt/force); h3 disabled.\n`,
+    diag.warn(
+      "network.http3-mode",
+      `MINIMAL_AGENT_HTTP3="${h3Mode}" unrecognized (expected off/opt/force); h3 disabled.`,
     )
   }
+
+  // NET_DBG capture: env wins, else the config file. Read once here, so the
+  // logger's level is stable for the process and logging never reads config.
+  const netDbg = resolveNetDbgEnabled(
+    process.env.MINIMAL_AGENT_NET_DBG,
+    process.env.MINIMAL_AGENT_NET_DBG === undefined ? loadUserConfig().netDbg : undefined,
+  )
 
   return new NetworkClient({
     primary,
@@ -416,7 +428,7 @@ export function createDefaultNetworkClient(): NetworkClient {
     // Order matters slightly: net-dbg snapshots full traffic to disk for
     // post-hoc debugging; the activity observer only mutates an attached
     // StatusHandle (cheap, in-memory). Neither depends on the other.
-    observers: [createNetDebugObserver(), networkActivityObserver],
+    observers: [createNetDebugObserver({ enabled: netDbg }), networkActivityObserver],
   })
 }
 

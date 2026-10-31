@@ -1,99 +1,75 @@
 /**
- * CLI/env/config names for system-prompt override plumbing.
+ * CLI flag names for system-prompt override plumbing.
  *
  * Kept in one pure module so prompt extraction, startup resolution, and help
- * text cannot drift on which flags take values.
+ * text cannot drift on which flags take values. The env and config key names
+ * are core config data (`src/config/system-prompt-override-keys.ts`). This
+ * module adds the CLI flag names to them, so no flag name lives in core
+ * config (spec S26).
  *
  * @module cli/system-prompt-override-flags
  */
 
+import {
+  SYSTEM_PROMPT_OVERRIDE_KEY_SPECS,
+  type SystemPromptOverrideKeySpec,
+} from "../config/system-prompt-override-keys.ts"
 import type { SystemPromptOverridePart } from "../llm/system-prompt-overrides.ts"
 
-/** Flag/env/config naming for one system-prompt override part. */
-export interface SystemPromptOverrideFlagSpec {
-  readonly part: SystemPromptOverridePart
+/** The three CLI flags for one system-prompt override part. */
+interface SystemPromptOverrideFlagNames {
   readonly valueFlag: string
   readonly fileFlag: string
   readonly noFlag: string
-  readonly envVar: string
-  readonly fileEnvVar: string
-  readonly configKey: string
-  readonly configFileKey: string
 }
 
-/** Supported startup system-prompt override flags. */
-export const SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS: readonly SystemPromptOverrideFlagSpec[] = [
-  {
-    part: "full",
+/** Flag/env/config naming for one system-prompt override part. */
+export interface SystemPromptOverrideFlagSpec
+  extends SystemPromptOverrideKeySpec,
+    SystemPromptOverrideFlagNames {}
+
+/** CLI flag names per override part. */
+const FLAG_NAMES: Readonly<Record<SystemPromptOverridePart, SystemPromptOverrideFlagNames>> = {
+  full: {
     valueFlag: "--system-prompt",
     fileFlag: "--system-prompt-file",
     noFlag: "--no-system-prompt",
-    envVar: "MINIMAL_AGENT_SYSTEM_PROMPT",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_PROMPT_FILE",
-    configKey: "full",
-    configFileKey: "fullFile",
   },
-  {
-    part: "identity",
+  identity: {
     valueFlag: "--system-identity",
     fileFlag: "--system-identity-file",
     noFlag: "--no-system-identity",
-    envVar: "MINIMAL_AGENT_SYSTEM_IDENTITY",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_IDENTITY_FILE",
-    configKey: "identity",
-    configFileKey: "identityFile",
   },
-  {
-    part: "providerPreamble",
+  providerPreamble: {
     valueFlag: "--provider-system-preamble",
     fileFlag: "--provider-system-preamble-file",
     noFlag: "--no-provider-system-preamble",
-    envVar: "MINIMAL_AGENT_PROVIDER_SYSTEM_PREAMBLE",
-    fileEnvVar: "MINIMAL_AGENT_PROVIDER_SYSTEM_PREAMBLE_FILE",
-    configKey: "providerPreamble",
-    configFileKey: "providerPreambleFile",
   },
-  {
-    part: "instructions",
+  instructions: {
     valueFlag: "--system-instructions",
     fileFlag: "--system-instructions-file",
     noFlag: "--no-system-instructions",
-    envVar: "MINIMAL_AGENT_SYSTEM_INSTRUCTIONS",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_INSTRUCTIONS_FILE",
-    configKey: "instructions",
-    configFileKey: "instructionsFile",
   },
-  {
-    part: "loopSafety",
+  loopSafety: {
     valueFlag: "--system-loop-safety",
     fileFlag: "--system-loop-safety-file",
     noFlag: "--no-system-loop-safety",
-    envVar: "MINIMAL_AGENT_SYSTEM_LOOP_SAFETY",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_LOOP_SAFETY_FILE",
-    configKey: "loopSafety",
-    configFileKey: "loopSafetyFile",
   },
-  {
-    part: "toolOutputConventions",
+  toolOutputConventions: {
     valueFlag: "--system-tool-output-conventions",
     fileFlag: "--system-tool-output-conventions-file",
     noFlag: "--no-system-tool-output-conventions",
-    envVar: "MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_TOOL_OUTPUT_CONVENTIONS_FILE",
-    configKey: "toolOutputConventions",
-    configFileKey: "toolOutputConventionsFile",
   },
-  {
-    part: "sessionContext",
+  sessionContext: {
     valueFlag: "--system-session-context",
     fileFlag: "--system-session-context-file",
     noFlag: "--no-system-session-context",
-    envVar: "MINIMAL_AGENT_SYSTEM_SESSION_CONTEXT",
-    fileEnvVar: "MINIMAL_AGENT_SYSTEM_SESSION_CONTEXT_FILE",
-    configKey: "sessionContext",
-    configFileKey: "sessionContextFile",
   },
-]
+}
+
+/** Supported startup system-prompt override flags, in core key-spec order. */
+export const SYSTEM_PROMPT_OVERRIDE_FLAG_SPECS: readonly SystemPromptOverrideFlagSpec[] =
+  SYSTEM_PROMPT_OVERRIDE_KEY_SPECS.map((spec) => Object.assign({}, spec, FLAG_NAMES[spec.part]))
 
 /** Flags that consume the next argv token as a value. */
 export const SYSTEM_PROMPT_OVERRIDE_VALUE_FLAGS: readonly string[] =

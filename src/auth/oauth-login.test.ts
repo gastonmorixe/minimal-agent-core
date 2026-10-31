@@ -16,6 +16,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
+import { getDiagnosticBus } from "../bus/diagnostic-bus.ts"
 import type { OAuthLoginProvider } from "../llm/provider-plugin.ts"
 import { NetworkClient, type NetworkRequest, NetworkResponse } from "../network/index.ts"
 import type { NetworkTransport } from "../network/types.ts"
@@ -895,12 +896,11 @@ describe("runOAuthLogin", () => {
   it("times out a hung device-code complete even when the provider ignores abort", async () => {
     const previous = process.env.DEBUG
     process.env.DEBUG = "1"
+    // DEBUG login traces are Debug-severity diagnostics (spec S25).
     const writes: string[] = []
-    const originalWrite = process.stderr.write.bind(process.stderr)
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"))
-      return true
-    }) as typeof process.stderr.write
+    const off = getDiagnosticBus().on("*", (e) => {
+      writes.push(`[${e.source}] ${e.message} ${JSON.stringify(e.structuredData ?? {})}\n`)
+    })
     const deviceProvider: OAuthLoginProvider = {
       ...fakeOAuthProvider,
       deviceCode: {
@@ -924,11 +924,11 @@ describe("runOAuthLogin", () => {
       ).rejects.toThrow("Sign-in timed out. Run login again.")
       expect(Date.now() - started).toBeLessThan(2_000)
       const joined = writes.join("")
-      expect(joined).toContain("[login] device-code waiting expiresInMs=40")
+      expect(joined).toContain("[auth.login] device-code waiting expiresInMs=40")
       expect(joined).not.toContain("secret.example.test")
       expect(joined).not.toContain("LEAK-CODE")
     } finally {
-      process.stderr.write = originalWrite
+      off()
       if (previous === undefined) delete process.env.DEBUG
       else process.env.DEBUG = previous
     }

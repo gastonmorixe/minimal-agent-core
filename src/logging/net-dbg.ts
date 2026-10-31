@@ -3,7 +3,9 @@
  * (req-meta.json, req-body.txt, res-meta.json, res-body.txt).
  *
  * Disabled by default. Enable with `MINIMAL_AGENT_NET_DBG=1` or `"netDbg": true`
- * in `~/.minimal-agent/config.jsonc`. Logs go to
+ * in `~/.minimal-agent/config.jsonc`. This module reads neither: the caller
+ * resolves the level ({@link resolveNetDbgEnabled}) and passes it to the
+ * observer (`createNetDebugObserver({ enabled })`). Logs go to
  * `<agent-home>/net-dbg/${epoch}-${human-date}/` (honoring
  * `MINIMAL_AGENT_HOME`), so captures from every project land in one
  * relocation-correct place instead of scattering across working
@@ -19,7 +21,7 @@ import { join } from "node:path"
 
 import { resolveNetDbgDir } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
-import { loadUserConfig } from "../config/config.ts"
+import { diag } from "../bus/diagnostic-bus.ts"
 import { getSessionId } from "../session/session-id.ts"
 
 /**
@@ -36,17 +38,6 @@ export function resolveNetDbgEnabled(
   if (envValue === "0") return false
   return configValue === true
 }
-
-/**
- * Captured at module load. Toggling MINIMAL_AGENT_NET_DBG (or editing the
- * config) at runtime does NOT take effect — this is intentional so the
- * logger's enabled state is stable for the lifetime of the process. Restart
- * to change. Config is only read when the env var does not decide it.
- */
-const ENABLED = resolveNetDbgEnabled(
-  process.env.MINIMAL_AGENT_NET_DBG,
-  process.env.MINIMAL_AGENT_NET_DBG === undefined ? loadUserConfig().netDbg : undefined,
-)
 
 let SEQ = 0
 let SESSION_DIR: string | null = null
@@ -119,8 +110,7 @@ export function netDbgSessionDir(
   return join(resolveNetDbgDir(env), formatSessionDirName(epoch, d, sessionId))
 }
 
-function ensureSessionDir(): string | null {
-  if (!ENABLED) return null
+function ensureSessionDir(): string {
   if (SESSION_DIR && existsSync(SESSION_DIR)) return SESSION_DIR
 
   const dir = netDbgSessionDir(Date.now(), new Date(), getSessionId())
@@ -147,15 +137,9 @@ export interface NetDbgHandle {
   finishResponse(): void
 }
 
-const NULL_HANDLE: NetDbgHandle = {
-  recordResponse() {},
-  appendResponseChunk() {},
-  finishResponse() {},
-}
-
 /**
  * Records a request to disk and returns a handle for streaming the response.
- * Returns a no-op handle when MINIMAL_AGENT_NET_DBG is not set.
+ * The caller decides whether logging is on: call this only when it is.
  *
  * The `opts` bag carries the request capture data: `url`, `method`,
  * `headers`, `body` (request body to write), and `protocol` (transport
@@ -171,7 +155,6 @@ export function beginRequest(opts: {
   protocol?: string
 }): NetDbgHandle {
   const dir = ensureSessionDir()
-  if (!dir) return NULL_HANDLE
 
   const seq = ++SEQ
   const stamp = isoStamp()
@@ -223,17 +206,10 @@ export function beginRequest(opts: {
   }
 }
 
-/**
- * Returns true if on-disk logging is active for this process.
- */
-export function netDbgEnabled(): boolean {
-  return ENABLED
-}
-
 let LOGGER_ERROR_REPORTED = false
 
 /**
- * Print a single console.warn the first time the logger fails (e.g. disk
+ * Emit one warning diagnostic the first time the logger fails (e.g. disk
  * full, permission denied, parent dir gone). Subsequent failures are silent
  * so we never spam. Tests can call {@link _resetLoggerErrorReportedForTest}
  * between cases to inspect the latched-on behaviour.
@@ -242,7 +218,7 @@ export function warnLoggerErrorOnce(err: unknown): void {
   if (LOGGER_ERROR_REPORTED) return
   LOGGER_ERROR_REPORTED = true
   const msg = err instanceof Error ? err.message : String(err)
-  console.warn(`[minimal-agent net-dbg] logger failure (further errors suppressed): ${msg}`)
+  diag.warn("net-dbg.logger-failure", `logger failure (further errors suppressed): ${msg}`)
 }
 
 /** Test-only: reset the once-flag. Not part of the public API. */

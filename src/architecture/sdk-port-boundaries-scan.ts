@@ -1,6 +1,12 @@
 /**
  * TypeScript-AST scanner for the SDK port-boundary architecture ratchet.
  *
+ * The same scan serves other architecture tests through
+ * {@link scanSourcesWithTypeScript}: the direct-write ratchet
+ * (`no-direct-writes.test.ts`, S25) and the public closure walk
+ * (`public-closure.test.ts`, S32). Comments and string contents never
+ * count as code, because the scan reads the AST.
+ *
  * @module architecture/sdk-port-boundaries-scan
  */
 
@@ -13,13 +19,15 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import * as ts from "typescript/unstable/ast"
 import { API } from "typescript/unstable/sync"
 
-export type SdkImportForm = "import" | "export-from" | "dynamic-import" | "require"
+/** `type-import` is a type-position `import("x").T`. It is reported in `typeImports` only. */
+export type SdkImportForm = "import" | "export-from" | "dynamic-import" | "require" | "type-import"
 
 export interface SdkImportSite {
   readonly file: string
   readonly line: number
   readonly form: SdkImportForm
   readonly specifier: string
+  /** The specifier resolved as if `file` were relative to `src/sdk`. */
   readonly resolved: string
   readonly typeOnly: boolean
 }
@@ -29,12 +37,21 @@ export interface SdkTokenViolation {
   readonly line: number
   readonly token: string
   readonly detail: string
+  /**
+   * For a `process.<x>`, `Bun.<x>`, or `console.<x>` token: the property read
+   * on it next, if any. `write` for `process.stdout.write(...)`.
+   */
+  readonly member?: string
 }
 
 export interface SdkScanResult {
   readonly imports: readonly SdkImportSite[]
   readonly computedDynamicImports: readonly SdkTokenViolation[]
   readonly ambientEscapes: readonly SdkTokenViolation[]
+  /** Type-position `import("x")` edges. The SDK ratchet does not read them. */
+  readonly typeImports: readonly SdkImportSite[]
+  /** String, template, and regex literals that hold an ESC (ANSI escape) character. */
+  readonly escapeLiterals: readonly SdkTokenViolation[]
 }
 
 const FORBIDDEN_ROOTS: ReadonlyMap<string, string> = new Map([
@@ -225,6 +242,26 @@ function propertyAccess(
   return undefined
 }
 
+/**
+ * The property read after `base.<x>`: `write` in `process.stdout.write`.
+ * Undefined when `base` has no property access, or nothing is read after it.
+ */
+function memberAfterAccess(base: ts.Node): string | undefined {
+  const access = base.parent
+  if (access === undefined || propertyAccess(access as ts.Expression)?.base !== base) {
+    return undefined
+  }
+  const outer =
+    access.parent === undefined ? undefined : propertyAccess(access.parent as ts.Expression)
+  return outer?.base === access ? outer.name : undefined
+}
+
+/** The ESC character that starts an ANSI escape sequence. */
+const ESC = "\u001b"
+
+/** ESC in regex source text: the raw character or an escape for it (`\x1b`, `\u001b`, `\u{1b}`). */
+const REGEX_ESC_RE = /\u001b|\\x1b|\\u001b|\\u\{0*1b\}/iu
+
 function isUnshadowedIdentifier(
   expression: ts.Expression,
   name: string,
@@ -313,6 +350,8 @@ function scanParsedSdkSource(sourceFile: ts.SourceFile, file: string): SdkScanRe
   const imports: SdkImportSite[] = []
   const computedDynamicImports: SdkTokenViolation[] = []
   const ambientEscapes: SdkTokenViolation[] = []
+  const typeImports: SdkImportSite[] = []
+  const escapeLiterals: SdkTokenViolation[] = []
 
   const line = (node: ts.Node): number =>
     sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
@@ -344,17 +383,34 @@ function scanParsedSdkSource(sourceFile: ts.SourceFile, file: string): SdkScanRe
       )
       return
     }
-    imports.push({
+    const site: SdkImportSite = {
       file,
       line: line(node),
       form,
       specifier,
       resolved: resolveSpecifier(file, specifier),
       typeOnly,
-    })
+    }
+    if (form === "type-import") typeImports.push(site)
+    else imports.push(site)
   }
   const addAmbient = (node: ts.Node, token: string, detail: string): void => {
-    ambientEscapes.push({ file, line: line(node), token, detail })
+    const member = memberAfterAccess(node)
+    ambientEscapes.push({
+      file,
+      line: line(node),
+      token,
+      detail,
+      ...(member === undefined ? {} : { member }),
+    })
+  }
+  const addEscapeLiteral = (node: ts.Node, kind: string): void => {
+    escapeLiterals.push({
+      file,
+      line: line(node),
+      token: kind,
+      detail: "literal holds an ESC (ANSI escape) character",
+    })
   }
 
   const visit = (node: ts.Node): void => {
@@ -398,6 +454,25 @@ function scanParsedSdkSource(sourceFile: ts.SourceFile, file: string): SdkScanRe
           else addImport(node.arguments[0], "require", specifier, false)
         }
       }
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteral(node.argument.literal)
+    ) {
+      addImport(node.argument.literal, "type-import", node.argument.literal.text, true)
+    }
+
+    if (
+      (ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)) &&
+      node.text.includes(ESC)
+    ) {
+      addEscapeLiteral(node, "string literal")
+    } else if (ts.isRegularExpressionLiteral(node) && REGEX_ESC_RE.test(node.text)) {
+      addEscapeLiteral(node, "regex literal")
     }
 
     if (
@@ -465,10 +540,11 @@ function scanParsedSdkSource(sourceFile: ts.SourceFile, file: string): SdkScanRe
   }
 
   visit(sourceFile)
-  return { imports, computedDynamicImports, ambientEscapes }
+  return { imports, computedDynamicImports, ambientEscapes, typeImports, escapeLiterals }
 }
 
-interface ScanEntry {
+/** One source to scan. `file` labels the results; the scan never reads it from disk. */
+export interface ScanEntry {
   readonly file: string
   readonly source: string
 }
@@ -511,7 +587,12 @@ function scannerNodeExecutable(): string {
   return executable
 }
 
-function scanSourcesWithTypeScript(entries: readonly ScanEntry[]): SdkScanResult[] {
+/**
+ * Scan many sources in one TypeScript child process. Returns one result per
+ * entry, in order. Import `resolved` paths assume `src/sdk`-relative labels;
+ * callers that label files differently resolve `specifier` themselves.
+ */
+export function scanSourcesWithTypeScript(entries: readonly ScanEntry[]): SdkScanResult[] {
   const directory = mkdtempSync(join(tmpdir(), "minimal-agent-sdk-scan-"))
   const config = join(directory, "tsconfig.json")
   const manifest = join(directory, "manifest.json")
@@ -532,7 +613,8 @@ function scanSourcesWithTypeScript(entries: readonly ScanEntry[]): SdkScanResult
     const output = execFileSync(
       scannerNodeExecutable(),
       [fileURLToPath(import.meta.url), SCAN_CHILD_ARGUMENT, config, manifest],
-      { encoding: "utf8" },
+      // A whole-repo scan prints several MB of JSON.
+      { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
     )
     return JSON.parse(output) as SdkScanResult[]
   } finally {
@@ -601,12 +683,16 @@ export function scanSdkPortBoundaries(root: string): SdkScanResult {
   const imports: SdkImportSite[] = []
   const computedDynamicImports: SdkTokenViolation[] = []
   const ambientEscapes: SdkTokenViolation[] = []
+  const typeImports: SdkImportSite[] = []
+  const escapeLiterals: SdkTokenViolation[] = []
   for (const result of scanSourcesWithTypeScript(entries)) {
     imports.push(...result.imports)
     computedDynamicImports.push(...result.computedDynamicImports)
     ambientEscapes.push(...result.ambientEscapes)
+    typeImports.push(...result.typeImports)
+    escapeLiterals.push(...result.escapeLiterals)
   }
-  return { imports, computedDynamicImports, ambientEscapes }
+  return { imports, computedDynamicImports, ambientEscapes, typeImports, escapeLiterals }
 }
 
 /** Return only module edges that resolve to forbidden concrete host collaborators. */

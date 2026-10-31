@@ -39,6 +39,7 @@ import {
   styleFromLegacyColor,
 } from "@minimal-agent/core/plugin-api/utils/mode-style"
 
+import { diag } from "../bus/diagnostic-bus.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
@@ -882,11 +883,12 @@ export class ModeManager {
     const m = this.active()
     if (m?.systemPromptAppend && !this.warnedSystemPromptAppend) {
       this.warnedSystemPromptAppend = true
-      console.error(
-        `  ${c.yellow("⚠")} mode "${m.id}" declares deprecated ` +
-          `\`systemPromptAppend\` — move the text to the plugin's ` +
-          `PROMPT.md so the system-prompt cache survives toggles. ` +
-          `(see ManifestMode.systemPromptAppend JSDoc)`,
+      diag.warn(
+        "modes.deprecated-system-prompt-append",
+        `mode "${m.id}" declares deprecated \`systemPromptAppend\`. Move the text to the ` +
+          `plugin's PROMPT.md so the system-prompt cache survives toggles ` +
+          `(see ManifestMode.systemPromptAppend JSDoc).`,
+        { mode: m.id },
       )
     }
     return ""

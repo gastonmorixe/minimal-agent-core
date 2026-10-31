@@ -18,6 +18,7 @@
 
 import { describe, expect, test } from "bun:test"
 
+import { getDiagnosticBus, type LogEvent } from "../bus/diagnostic-bus.ts"
 import type { ManifestMode } from "../plugins/types.ts"
 import { applyToolNamePolicy } from "../sdk/tool-filter.ts"
 
@@ -310,8 +311,8 @@ describe("ModeManager.consumePendingAttachment", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Deprecated APIs — should be silent no-ops (with a one-shot stderr warn for
-// systemPromptAddition when a mode declares the deprecated field).
+// Deprecated APIs — should be silent no-ops (with a one-shot warning
+// diagnostic for systemPromptAddition when a mode declares the deprecated field).
 // ---------------------------------------------------------------------------
 
 describe("ModeManager deprecated surfaces", () => {
@@ -330,21 +331,17 @@ describe("ModeManager deprecated surfaces", () => {
     }
     const m = new ModeManager([legacyMode], "legacy")
 
-    // The deprecation warner uses `console.error`, which Bun routes to its
-    // own stderr writer (not process.stderr.write directly). Capture via
-    // console.error override so we observe the formatted message.
-    const origConsoleError = console.error
+    // The deprecation warning is a diagnostic on the bus (spec S25), so
+    // capture the bus events.
     const captured: string[] = []
-    console.error = (...args: unknown[]): void => {
-      captured.push(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "))
-    }
+    const off = getDiagnosticBus().on("*", (e: LogEvent) => captured.push(e.message))
     try {
       // First call: returns "" and warns.
       expect(m.systemPromptAddition()).toBe("")
       // Second call: returns "" and DOES NOT warn again.
       expect(m.systemPromptAddition()).toBe("")
     } finally {
-      console.error = origConsoleError
+      off()
     }
 
     const blob = captured.join("\n")
@@ -357,15 +354,12 @@ describe("ModeManager deprecated surfaces", () => {
 
   test("systemPromptAddition stays silent when active mode has no systemPromptAppend", () => {
     const m = new ModeManager([ASK_MODE], "ask")
-    const origConsoleError = console.error
     const captured: string[] = []
-    console.error = (...args: unknown[]): void => {
-      captured.push(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "))
-    }
+    const off = getDiagnosticBus().on("*", (e: LogEvent) => captured.push(e.message))
     try {
       expect(m.systemPromptAddition()).toBe("")
     } finally {
-      console.error = origConsoleError
+      off()
     }
     expect(captured.join("\n")).not.toContain("systemPromptAppend")
   })

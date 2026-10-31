@@ -47,13 +47,13 @@
       "path": "src/cli/extract-prompt.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/cli/extract-prompt.test.ts",
-      "imports": ["src/cli/system-prompt-override-flags.ts"]
+      "imports": []
     },
     {
       "path": "src/cli/extract-prompt.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/cli/extract-prompt.ts",
-      "imports": ["src/cli/system-prompt-override-flags.ts"]
+      "imports": []
     },
     {
       "path": "src/cli/no-agents-md-flag.test.ts",
@@ -128,9 +128,10 @@
     },
     {
       "path": "src/cli/system-prompt-override-flags.ts",
-      "dest": "core-engine",
-      "target": "src/config/system-prompt-override-flags.ts",
-      "note": "S26: config and env key names stay in core config as data. The CLI flag names move to the CLI."
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/cli/system-prompt-override-flags.ts",
+      "note": "S26: the CLI flag names only. The env and config key names are core config data in src/config/system-prompt-override-keys.ts.",
+      "imports": ["src/config/system-prompt-override-keys.ts", "src/llm/system-prompt-overrides.ts"]
     },
     {
       "path": "src/cli/system-prompt-override-resolution.test.ts",
@@ -142,11 +143,7 @@
       "path": "src/cli/system-prompt-override-resolution.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/cli/system-prompt-override-resolution.ts",
-      "imports": [
-        "src/cli/system-prompt-override-flags.ts",
-        "src/config/config.ts",
-        "src/llm/system-prompt-overrides.ts"
-      ]
+      "imports": ["src/config/config.ts", "src/llm/system-prompt-overrides.ts"]
     },
     {
       "path": "src/e2e/command-repl-e2e.test.ts",
@@ -252,7 +249,7 @@
       "path": "src/e2e/system-prompt-override-e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/e2e/system-prompt-override-e2e.test.ts",
-      "imports": ["src/cli/system-prompt-override-flags.ts"]
+      "imports": []
     },
     {
       "path": "src/e2e/truncation-tmux.test.ts",
@@ -2252,8 +2249,8 @@
       "path": "src/ui/scrollback-submitted-at.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/scrollback-submitted-at.ts",
-      "note": "S26: normalizeSubmittedAtStyle moves into core config as data.",
-      "imports": ["plugin-api/src/utils/ansi.ts"]
+      "note": "S26: SubmittedAtStyle and normalizeSubmittedAtStyle are core config data in src/config/config.ts.",
+      "imports": ["plugin-api/src/utils/ansi.ts", "src/config/config.ts"]
     }
   ]
 }

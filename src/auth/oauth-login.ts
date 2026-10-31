@@ -23,6 +23,7 @@
 
 import { randomBytes } from "node:crypto"
 
+import { diag } from "../bus/diagnostic-bus.ts"
 import {
   listProviderPlugins,
   type OAuthLoginInstallResult,
@@ -92,13 +93,10 @@ function deviceCodeWaitMs(expiresInMs: number | undefined): number {
     : DEFAULT_DEVICE_CODE_WAIT_MS
 }
 
+/** DEBUG-gated login trace, as a Debug-severity diagnostic. */
 function debugLogin(line: string): void {
   if (!process.env.DEBUG) return
-  try {
-    process.stderr.write(`[login] ${line}\n`)
-  } catch {
-    // Best-effort. Login must not fail because stderr is closed.
-  }
+  diag.debug("auth.login", line)
 }
 
 function createDeadline(ms: number): { signal: AbortSignal; cancel: () => void } {

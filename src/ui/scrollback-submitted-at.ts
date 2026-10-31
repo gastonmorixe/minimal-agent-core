@@ -21,13 +21,10 @@
  */
 import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
-/**
- * Configured rendering style for submitted prompt timestamps.
- *
- * - `"inline-locale"` — dim stamp prefix before the prompt arrow (default).
- * - `"off"` / `false` — no stamp rendered.
- */
-export type SubmittedAtStyle = false | "off" | "inline-locale"
+import type { SubmittedAtStyle } from "../config/config.ts"
+
+/** The config style type lives in core config (spec S26). */
+export type { SubmittedAtStyle }
 
 /** Optional config shape for the submitted-at feature. */
 export interface SubmittedAtConfig {
@@ -53,17 +50,6 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
 const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   timeStyle: "medium",
 })
-
-/**
- * Normalize the raw user config value for submitted prompt timestamps.
- *
- * Returns the value when it matches one of the accepted literals, otherwise
- * `undefined` so the caller falls back to the default. Never throws.
- */
-export function normalizeSubmittedAtStyle(value: unknown): SubmittedAtStyle | undefined {
-  if (value === false || value === "off" || value === "inline-locale") return value
-  return undefined
-}
 
 /**
  * Return whether submitted prompt timestamps should be rendered at all.

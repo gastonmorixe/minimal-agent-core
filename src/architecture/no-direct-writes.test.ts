@@ -1,0 +1,133 @@
+/**
+ * Architecture fitness function: no direct process writes in the engine
+ * (spec S25).
+ *
+ * THE RULE: engine code reports through the diagnostic bus. It never calls
+ * `console.*`, `process.stdout.write`, `process.stderr.write`, or
+ * `Bun.stdout` / `Bun.stderr`. Scope and terms are in `direct-write-scan.ts`.
+ *
+ * The allow list holds the two CLI-bound files outside the CLI folders that
+ * still write (`logging/log-stderr.ts`, `infra/safe-stdout.ts`). They move
+ * to the CLI in S34, and then the list is empty. The list only shrinks: an
+ * entry that no longer writes, or whose file is gone, fails.
+ *
+ * Fixing a failure: report through `diag` from `src/bus/diagnostic-bus.ts`
+ * (Debug severity for debug traces), or take an injected writer from the
+ * host.
+ */
+
+import { join } from "node:path"
+
+import { describe, expect, it } from "bun:test"
+
+import {
+  CLI_FOLDERS,
+  DIRECT_WRITE_ALLOW_LIST,
+  directWriteScope,
+  directWritesIn,
+  inAreas,
+  isCliBound,
+  scanDirectWrites,
+} from "./direct-write-scan.ts"
+import { loadManifest } from "./migration-manifest-scan.ts"
+import { scanSdkSource } from "./sdk-port-boundaries-scan.ts"
+
+const REPO_ROOT = join(import.meta.dirname, "..", "..")
+
+/**
+ * The engine files that wrote directly before S25 (the corrected U17 list,
+ * less the deleted legacy `agent.ts`). The scope must keep covering them.
+ */
+const CONVERTED_FILES = [
+  "src/auth/oauth-login.ts",
+  "src/cache/cache.ts",
+  "src/config/config.ts",
+  "src/llm/preflight.ts",
+  "src/llm/transport/debug.ts",
+  "src/logging/net-dbg.ts",
+  "src/modes/modes.ts",
+  "src/network/client.ts",
+  "src/session/session-restore.ts",
+]
+
+describe("directWritesIn (scanner)", () => {
+  it("finds console output, stream writes, and Bun streams", () => {
+    const source = [
+      'console.log("x")',
+      'console.error("x")',
+      'console?.["warn"]("x")',
+      'process.stdout.write("x")',
+      'process.stderr.write("x")',
+      'globalThis.process.stderr.write("x")',
+      'Bun.write(Bun.stdout, "x")',
+      'Bun.stderr.write("x")',
+    ].join("\n")
+    expect(directWritesIn(scanSdkSource(source, "unit.ts")).map((w) => w.token)).toEqual([
+      "console.log",
+      "console.error",
+      "console.warn",
+      "process.stdout.write",
+      "process.stderr.write",
+      "process.stderr.write",
+      "Bun.stdout",
+      "Bun.stderr",
+    ])
+  })
+
+  it("ignores comments, strings, width reads, stream hand-off, and shadowed names", () => {
+    const source = [
+      '// console.log("x")',
+      '/* process.stderr.write("x") */',
+      'const text = "console.error process.stdout.write"',
+      "const width = process.stdout.columns",
+      "const tty = process.stderr.isTTY",
+      "const ctx = { stderr: process.stderr }",
+      'function f(console: { log(s: string): void }) { console.log("local") }',
+      'diag.warn("cache.anomaly", "console.log in a message is fine")',
+    ].join("\n")
+    expect(directWritesIn(scanSdkSource(source, "unit.ts"))).toEqual([])
+  })
+})
+
+describe("no direct writes in the engine (repo ratchet)", () => {
+  const rows = loadManifest(REPO_ROOT).rows
+  const scope = directWriteScope(REPO_ROOT, rows)
+  const writes = scanDirectWrites(REPO_ROOT, scope)
+
+  it("scopes every engine file, including the files S25 converted", () => {
+    for (const file of CONVERTED_FILES) expect(scope).toContain(file)
+    expect(scope).toContain("src/sdk/agent-core.ts")
+    expect(scope).toContain("plugin-api/src/index.ts")
+    // A core-engine row in a CLI folder is engine code.
+    expect(scope).toContain("src/host/sdk-adapters/build-agent-core.ts")
+    // CLI-bound files in the CLI folders move with their writes in S34.
+    expect(scope).not.toContain("src/host/repl.ts")
+    expect(scope).not.toContain("src/index.ts")
+  })
+
+  it("no engine file writes directly, outside the allow list", () => {
+    const offenders = writes
+      .filter((w) => !DIRECT_WRITE_ALLOW_LIST.has(w.file))
+      .map((w) => `  ${w.file}:${w.line} ${w.token}`)
+    expect(
+      offenders,
+      offenders.length > 0
+        ? "Direct writes in engine code. Report through diag (src/bus/diagnostic-bus.ts)\n" +
+            "or take an injected writer:\n" +
+            offenders.join("\n")
+        : "",
+    ).toEqual([])
+  })
+
+  it("the allow list only shrinks: each entry is CLI-bound, outside the CLI folders, and still writes", () => {
+    const writers = new Set(writes.map((w) => w.file))
+    const wrong: string[] = []
+    for (const [file, reason] of DIRECT_WRITE_ALLOW_LIST) {
+      if (!writers.has(file)) wrong.push(`  ${file}: no direct write left (remove the entry)`)
+      if (!isCliBound(file, rows)) wrong.push(`  ${file}: not CLI-bound in the manifest`)
+      if (inAreas(file, CLI_FOLDERS)) wrong.push(`  ${file}: in a CLI folder (out of scope)`)
+      if (reason.trim() === "") wrong.push(`  ${file}: empty reason`)
+    }
+    expect(wrong).toEqual([])
+  })
+})
