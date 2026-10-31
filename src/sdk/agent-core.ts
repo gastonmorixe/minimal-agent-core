@@ -421,7 +421,7 @@ export class AgentCore {
    * host supplies no session persistence, or persistence has no round
    * checkpoint method.
    */
-  private checkpointRound(round: number, streaks: Streaks): void {
+  private checkpointRound(round: number, streaks: Streaks = TURN_START.streaks): void {
     this.checkpoint = { round, streaks }
     this.sessionPersistence?.appendRoundCheckpoint?.(this.checkpoint)
   }
@@ -1024,6 +1024,10 @@ export class AgentCore {
       this.emit({ type: "status", phase: "waiting_for_host", cause: pausedOn.cause })
       outcome = "waiting"
     }
+    // S50 resume safety: a settled turn (every outcome but `waiting`) clears
+    // any round checkpoint it, or an earlier resumed process, left behind,
+    // so a stale one is never mistaken for an unfinished turn.
+    if (outcome !== "waiting" && this.checkpoint.round > 0) this.checkpointRound(0)
     const aborted = Boolean(signal?.aborted)
     void this.lifecycle.turnEnd?.({
       ok: !aborted && outcome !== "waiting",

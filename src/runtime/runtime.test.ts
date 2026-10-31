@@ -273,4 +273,81 @@ describe("createRuntime / resumeSession (S50)", () => {
     ).toThrow()
     runtime.close()
   })
+
+  it("does not re-run an already-completed round after the turn fully settled", async () => {
+    // Regression: round 1 was a tool call (checkpointed), round 2 answered
+    // with plain text and completed the turn. Nothing crashed. A later
+    // `resumeSession` + `run(text, { resume: true })` — e.g. a host that
+    // always resumes a reopened session rather than tracking liveness
+    // itself — must start a fresh turn, not replay round 2's already
+    // delivered reply as if the turn had been cut short at round 1.
+    const dir = tempSessionsDir()
+    const runtime = createRuntime()
+
+    let calls = 0
+    const transport: TransportFn = async function* () {
+      calls++
+      if (calls === 1) {
+        return {
+          blocks: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        }
+      }
+      return textOk("first turn done")
+    }
+
+    const id = "f730cc8c-3333-4333-8333-333333333333"
+    const session = runtime.openSession({
+      id,
+      auth: AUTH,
+      model: "m",
+      sendFn: transport,
+      toolRegistry: { list: () => [{ name: "Bash", description: "", input_schema: {} }] },
+      toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
+      persist: { dir },
+    })
+
+    const firstEntries = await collect(session.run("go"))
+    expect(calls).toBe(2)
+    const firstFinished = firstEntries.find(
+      (e) => e.ch === "event" && e.data.type === "run_finished",
+    )
+    expect(firstFinished).toMatchObject({ data: { outcome: "completed" } })
+    runtime.close()
+
+    const runtimeAfterRestart = createRuntime()
+    let resumedCalls = 0
+    const resumedTransport: TransportFn = async function* () {
+      resumedCalls++
+      return textOk("second turn done")
+    }
+    const resumed = runtimeAfterRestart.resumeSession(id, {
+      auth: AUTH,
+      sendFn: resumedTransport,
+      toolRegistry: { list: () => [{ name: "Bash", description: "", input_schema: {} }] },
+      toolExecutor: { execute: async () => ({ content: "ok", isError: false }) },
+      persist: { dir },
+    })
+
+    const resumedEntries = await collect(resumed.run("go again", { resume: true }))
+    // A fresh turn (round 1), not a continuation of the already-finished
+    // turn's round 2: exactly one send, and `turn_started` reports round 1.
+    expect(resumedCalls).toBe(1)
+    const turnStarted = resumedEntries.filter(
+      (e) => e.ch === "event" && e.data.type === "turn_started",
+    )
+    expect(
+      turnStarted.map((e) =>
+        e.ch === "event" && e.data.type === "turn_started" ? e.data.turn : -1,
+      ),
+    ).toEqual([1])
+    const userMessages = resumedEntries.filter(
+      (e) => e.ch === "event" && e.data.type === "user_message",
+    )
+    expect(userMessages).toHaveLength(1)
+    expect(userMessages[0]).toMatchObject({ data: { text: "go again" } })
+
+    runtimeAfterRestart.close()
+  })
 })

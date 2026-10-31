@@ -694,12 +694,16 @@ export function firstUserPromptSnippet(records: SessionRecord[], maxLen = 60): s
 
 /**
  * The latest round checkpoint of the session's last turn (the records after
- * its last `user` record), or `null` when that turn wrote none.
+ * its last `user` record), or `null` when that turn wrote none, or wrote
+ * only its terminal reset.
  *
- * A completed turn's final round writes no checkpoint (there is nothing
- * left to resume), so a non-null result means that turn was cut short : by
- * a crash, a restart, or a permanent error that paused it. Pass the result
- * as `AgentCoreConfig.initialCheckpoint` and call
+ * A turn that settles (any outcome but `waiting`) writes a final `round: 0`
+ * checkpoint once it is done, even if it ran several rounds and checkpointed
+ * mid-turn (`AgentCore`'s round-checkpoint reset, S50 resume safety) — there
+ * is nothing left to resume. So a non-null result here means that turn's
+ * LATEST checkpoint is still mid-turn: the turn was cut short by a crash, a
+ * restart, or a permanent error that paused it. Pass the result as
+ * `AgentCoreConfig.initialCheckpoint` and call
  * `AgentCore.run(input, {resume: true})` to continue it at the next round.
  */
 export function lastTurnRoundCheckpoint(
@@ -715,7 +719,7 @@ export function lastTurnRoundCheckpoint(
     const r = records[i]
     if (r.kind === "round_checkpoint") latest = r
   }
-  if (!latest) return null
+  if (!latest || latest.round <= 0) return null
   return {
     round: latest.round,
     streaks: { maxTokens: latest.maxTokensStreak, interrupted: latest.interruptedStreak },
