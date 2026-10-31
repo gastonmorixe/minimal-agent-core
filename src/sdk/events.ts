@@ -363,7 +363,8 @@ export type AgentEventType = AgentEvent["type"]
 /**
  * The nine kinds of the first event contract. The JSON route
  * (`--output-format json`) passes only these, so its stream changes by
- * added keys, never by added lines.
+ * added keys, never by added lines. The stream-json route uses
+ * {@link STREAM_JSON_EVENT_KINDS}.
  */
 export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
   "turn_started",
@@ -375,6 +376,16 @@ export const LEGACY_EVENT_KINDS: readonly AgentEventType[] = [
   "turn_completed",
   "notice",
   "error",
+]
+
+/**
+ * The kinds the stream-json route (`--output-format stream-json`) passes.
+ * It is the legacy nine plus the closing `run_finished` line. The json
+ * route stays frozen on {@link LEGACY_EVENT_KINDS}.
+ */
+export const STREAM_JSON_EVENT_KINDS: readonly AgentEventType[] = [
+  ...LEGACY_EVENT_KINDS,
+  "run_finished",
 ]
 
 /**

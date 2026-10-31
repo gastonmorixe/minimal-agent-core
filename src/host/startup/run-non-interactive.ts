@@ -13,17 +13,20 @@
  *     {@link RunNonInteractivePromptInput.openEventStreamSession} factory and
  *     the format is `json`/`stream-json` (and no `--output-schema`), the run
  *     drives a `createRuntime`/`Session` turn (`session.run()`) and
- *     serializes every {@link SessionEntry} whose `data.kind` is one of
- *     {@link LEGACY_EVENT_KINDS} to one JSONL line on stdout, in the exact
- *     wire format {@link serializeEvent} produces. The events ARE the
- *     output; the yielded text channel is drained and discarded (the
+ *     serializes every {@link SessionEntry} whose `data.kind` is kept to
+ *     one JSONL line on stdout, in the exact wire format
+ *     {@link serializeEvent} produces. `json` keeps
+ *     {@link LEGACY_EVENT_KINDS}. `stream-json` keeps
+ *     {@link STREAM_JSON_EVENT_KINDS}, so its last line is `run_finished`.
+ *     The events ARE the output; the yielded text channel is drained and discarded (the
  *     `item_completed` events already carry the assistant text).
  *
  * `Session`'s own event log always captures every `AgentEvent` kind — that is
  * its whole point, a complete trace (agent E's S48 design) — so this module
  * does NOT ask it to log anything less. It filters at its OWN subscription
- * boundary instead, keeping the frozen `LEGACY_EVENT_KINDS` wire format this
- * route has always shipped (`events-jsonl.integration.test.ts`).
+ * boundary instead. The `json` route keeps the frozen `LEGACY_EVENT_KINDS`
+ * wire format it has always shipped (`events-jsonl.integration.test.ts`).
+ * The `stream-json` route also keeps the closing `run_finished` line.
  *
  * The `Session` is built by an INJECTED factory, not constructed here: the
  * host (index.ts) closes over its collaborators and calls the
@@ -45,7 +48,7 @@ import { fatalErrorFields } from "../../llm/error-hint.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
 import type { Session } from "../../runtime/session.ts"
-import { LEGACY_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
+import { LEGACY_EVENT_KINDS, STREAM_JSON_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "../print-output.ts"
 import type { ReplAgentLike } from "../repl.ts"
 import { applyTurnWillStart } from "../repl-editor-hooks.ts"
@@ -53,6 +56,9 @@ import { Formatter } from "../ui/formatter/formatter.ts"
 
 /** `LEGACY_EVENT_KINDS`, as a `Set` for an O(1) membership check per entry. */
 const LEGACY_EVENT_KIND_SET: ReadonlySet<string> = new Set(LEGACY_EVENT_KINDS)
+
+/** `STREAM_JSON_EVENT_KINDS`, as a `Set`. It adds `run_finished` to the legacy nine. */
+const STREAM_JSON_EVENT_KIND_SET: ReadonlySet<string> = new Set(STREAM_JSON_EVENT_KINDS)
 
 /** Inputs for {@link runNonInteractivePrompt}. */
 export interface RunNonInteractivePromptInput {
@@ -118,8 +124,11 @@ function wantsEventStream(input: RunNonInteractivePromptInput): boolean {
 }
 
 /**
- * Drive a `Session` turn (`session.run()`) and emit its `LEGACY_EVENT_KINDS`
- * entries as JSONL to stdout. Used for `--output-format json` / `stream-json`.
+ * Drive a `Session` turn (`session.run()`) and emit its kept entries as
+ * JSONL to stdout. Used for `--output-format json` / `stream-json`. `json`
+ * keeps `LEGACY_EVENT_KINDS`. `stream-json` keeps `STREAM_JSON_EVENT_KINDS`,
+ * which adds the closing `run_finished` line. That line is written before
+ * any `exit` call, because `Session` drains its queue first.
  *
  * `Session`'s own event log always captures every `AgentEvent` kind (its
  * whole point, a complete trace) — this function filters AT THIS
@@ -146,6 +155,8 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   // thinking_delta events. json stays buffered (no deltas) so its event stream
   // matches Phase 2 and the frozen SDK golden.
   const emitDeltas = input.outputFormat === "stream-json"
+  // stream-json also keeps the closing run_finished line. json stays frozen.
+  const keep = emitDeltas ? STREAM_JSON_EVENT_KIND_SET : LEGACY_EVENT_KIND_SET
 
   try {
     const run = session.run(input.prompt, { emitDeltas })
@@ -153,10 +164,11 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
       // Text chunks are carried by the event stream (item_completed); the
       // raw yield channel is not written to stdout in structured mode. The
       // session's own log is the COMPLETE trace (every AgentEvent kind, by
-      // design); THIS is the subscription boundary that filters it down to
-      // the frozen LEGACY_EVENT_KINDS wire format, not a change to what
+      // design). THIS is the subscription boundary that filters it down to
+      // the wire format of the route (LEGACY_EVENT_KINDS for json,
+      // STREAM_JSON_EVENT_KINDS for stream-json). It does not change what
       // Session logs internally.
-      if (entry.ch === "event" && LEGACY_EVENT_KIND_SET.has(entry.data.type)) {
+      if (entry.ch === "event" && keep.has(entry.data.type)) {
         write(serializeEvent(entry.data))
       }
     }

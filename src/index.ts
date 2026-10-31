@@ -1142,8 +1142,9 @@ async function main() {
         cwd: process.cwd(),
         // Structured event-stream route for `--output-format json` / `stream-json`:
         // open a fully-wired Session (Tier-1 adapters, over createRuntime) whose
-        // own complete event log run-non-interactive filters down to
-        // LEGACY_EVENT_KINDS at its own subscription boundary. `text` /
+        // own complete event log run-non-interactive filters at its own
+        // subscription boundary: LEGACY_EVENT_KINDS for json,
+        // STREAM_JSON_EVENT_KINDS (adds run_finished) for stream-json. `text` /
         // `--output-schema` never call this (see wantsEventStream), so those
         // paths stay byte-identical.
         openEventStreamSession: () =>
