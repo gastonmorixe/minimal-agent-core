@@ -291,6 +291,22 @@ const BASELINE = new Map<string, number>([
   ["ui/style/ansi.ts", 1],
   ["ui/style/mode.ts", 1],
   ["ui/tool-transcript/format.ts", 1],
+
+  // S34 exports-gap decision (Y3): six thin `export * from` barrels under
+  // `src/exports/host/` that give a public `./host/*` subpath to a
+  // core-engine file (migration-manifest dest core-engine) that still
+  // physically sits under `src/host/` pending the S34 move. Each barrel is
+  // a brand-new, single-purpose forwarding file — not a growing edge on an
+  // existing collaborator — and burns to zero the same day its target
+  // physically moves out of `src/host/`. See the matching entries in
+  // `public-closure-scan.ts`'s `PUBLIC_CLOSURE_BASELINE` for the per-target
+  // reasoning.
+  ["host-public/context-exceeded-recovery.ts", 1],
+  ["host-public/model-catalog.ts", 1],
+  ["host-public/model-error.ts", 1],
+  ["host-public/provider-auth.ts", 1],
+  ["host-public/provider-discovery-boot.ts", 1],
+  ["host-public/session-index.ts", 1],
 ])
 
 describe("core→host import ratchet (repo invariant)", () => {

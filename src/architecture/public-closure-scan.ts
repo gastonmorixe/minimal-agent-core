@@ -105,6 +105,97 @@ export const PUBLIC_CLOSURE_BASELINE: ReadonlyMap<string, ClosureBaselineEntry> 
       reason: "exported TUI helper; same real-plugin-dependency reason as ansi.ts above",
     },
   ],
+  [
+    "src/host/commands/model-catalog-data.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/llm/model-catalog-data.ts) that physically " +
+        "sits under src/host/ only until the S34 move; exported now as ./host/model-catalog " +
+        "so a host can list the model registry without reimplementing it",
+    },
+  ],
+  [
+    "src/host/commands/session-index.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/session/session-index.ts) that physically " +
+        "sits under src/host/ only until the S34 move; exported now as ./host/session-index " +
+        "to resolve --resume/history targets",
+    },
+  ],
+  [
+    "src/host/context-exceeded-recovery.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, confirmed load-bearing by agent W) that physically sits under " +
+        "src/host/ only until the S34 move; exported now as ./host/context-exceeded-recovery",
+    },
+  ],
+  [
+    "src/host/model-error.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/llm/model-error.ts) that physically sits " +
+        "under src/host/ only until the S34 move; exported now as ./host/model-error, " +
+        "also an edge of ./host/context-exceeded-recovery above",
+    },
+  ],
+  [
+    "src/host/startup/provider-auth.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/auth/provider-auth.ts) that physically sits " +
+        "under src/host/ only until the S34 move; exported now as ./host/provider-auth " +
+        "so a host can resolve boot-time credentials",
+    },
+  ],
+  [
+    "src/host/startup/provider-discovery-boot.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 0,
+      reason:
+        "S34 exports-gap decision (Y3): core-engine file (migration-manifest dest " +
+        "core-engine, future target src/runtime/provider-discovery-boot.ts) that " +
+        "physically sits under src/host/ only until the S34 move; exported now as " +
+        "./host/provider-discovery-boot — critical, without it no host-constructed " +
+        "process can resolve any model at all",
+    },
+  ],
+  [
+    "src/host/ui/style/ansi.ts",
+    {
+      cliFile: true,
+      stdio: 0,
+      ansi: 8,
+      reason:
+        "S34 exports-gap decision (Y3): reached only via ./host/provider-auth's " +
+        "startupAuthLabel, which wraps the provider-id suffix in c.dim(...) for the " +
+        "startup banner; a genuinely cosmetic TUI dependency of an otherwise " +
+        "core-engine credential-resolution file, pending the file's own S34 move",
+    },
+  ],
 ])
 
 /** The result of one walk. */
