@@ -28,8 +28,6 @@ export interface ToolCallHost {
   emit(event: AgentEvent): void
   /** Whether the sink asked for `tool_output`. */
   wantsToolOutput: boolean
-  /** The tool's header input field (presentation data), for the input summary. */
-  headerKey(toolName: string): string | undefined
   /** Clock for `durationMs`, in ms. */
   now(): number
 }
@@ -42,7 +40,7 @@ export async function runToolCalls(
 ): Promise<ToolResultBlock[]> {
   const results: ToolResultBlock[] = []
   for (const tool of toolBlocks) {
-    const inputSummary = summarizeToolInput(tool.input, host.headerKey(tool.name))
+    const inputSummary = summarizeToolInput(tool.input)
     host.emit(toolCallEvent(tool, inputSummary))
     host.emit({ type: "status", phase: "running_tool", toolName: tool.name })
     const startedAt = host.now()

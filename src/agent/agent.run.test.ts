@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -9,18 +9,6 @@ import type { ContentBlock, Message, SendOptions, StreamedResponse } from "../cl
 import { PluginLoader } from "../plugins/loader.ts"
 import { SIBLING_REPO_ROOT, siblingPluginPresent } from "../test-utils/sibling-repo.ts"
 import { buildTestCore } from "../test-utils/test-core.ts"
-
-/** The Task tool's tui icon from the sibling tasks plugin manifest. */
-function taskTuiIcon(): string {
-  const manifest = JSON.parse(
-    readFileSync(join(SIBLING_REPO_ROOT, "ma-tasks-plugin", "manifest.json"), "utf8"),
-  ) as { tuis?: Array<{ icon?: string; trigger?: { type?: string; tool?: { name?: string } } }> }
-  const tui = manifest.tuis?.find(
-    (t) => t.trigger?.type === "tool" && t.trigger.tool?.name === "Task",
-  )
-  if (!tui?.icon) throw new Error("ma-tasks-plugin manifest has no Task tui icon")
-  return tui.icon
-}
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -180,13 +168,13 @@ describe("AgentCore.run transcript", () => {
           // drain
         }
         const plain = stripAnsi(transcript.join("\n"))
-        // Manifest-owned chrome (the Task tui's icon + name) followed by the
-        // plugin's header content slot (action verb + stats). The plugin no
-        // longer prepends its own `○ Tasks` brand — that lived inside the
-        // host frame and would shadow the manifest identity. The icon is read
-        // from the plugin manifest so the test does not pin another repo's glyph.
-        const icon = taskTuiIcon()
-        expect(plain).toContain(`  ╭ ${icon} Task + added 2 tasks · 0/2`)
+        // The tool name followed by the plugin's header content slot
+        // (action verb + stats). The plugin no longer prepends its own
+        // `○ Tasks` brand — that lived inside the host frame and would
+        // shadow the manifest identity. No cosmetic icon anymore (S29/S31
+        // dropped the manifest's `tuis[].icon` from core's read path; see
+        // `ToolRegistryAdapter`'s module doc).
+        expect(plain).toContain("  ╭ Task + added 2 tasks · 0/2")
         expect(plain).toContain("  │   ○  1  Verify lint clean")
         expect(plain).toContain("Verify lint clean")
         expect(plain).toContain("  ╰  0 done · 0 doing · 2 todo")

@@ -57,22 +57,12 @@ export interface ToolDefinition {
   name: string
   description: string
   input_schema: Record<string, unknown>
-  /** Optional cosmetic fields stripped before sending to the API. */
-  icon?: string
-  color?: string
-  headerKey?: string
 }
 
 /** Result of executing one tool call. */
 export interface ToolExecResult {
   content: string | ContentBlock[]
   isError: boolean
-  /** Optional pre-rendered ANSI body for transcript display. */
-  display?: string
-  /** Optional pre-rendered header content slot. */
-  displayHeader?: string
-  /** Optional pre-rendered footer row. */
-  displayFooter?: string
   /** Absolute path to raw pre-clamp output blob, if persisted. */
   rawPath?: string
   /** Size in bytes of the persisted blob. */
@@ -90,8 +80,6 @@ export interface ToolExecutor {
 export interface ToolRegistry {
   /** All tools available to the agent, in registration order. */
   list(): ToolDefinition[]
-  /** Optional per-tool cosmetic presentation (icon, color, headerKey). */
-  presentation?(): ReadonlyMap<string, { icon?: string; color?: string; headerKey?: string }>
 }
 
 /**
@@ -162,11 +150,6 @@ export interface SessionPersistence {
   appendToolResult(
     result: ToolResultBlock,
     rawBlob?: { path: string; bytes: number; sha256: string },
-    presentation?: {
-      display?: string
-      displayHeader?: string
-      displayFooter?: string
-    },
   ): void
   /** Append a free-form note. */
   appendNote(text: string): void

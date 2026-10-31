@@ -23,13 +23,17 @@ function oneLine(text: string, max = TOOL_SUMMARY_MAX_CHARS): string {
 }
 
 /**
- * One-line summary of a tool input. When the tool declares a header field
- * (`headerKey`, presentation data) and the input has it as a string, the
- * summary is that value; otherwise it is the compact JSON of the input.
+ * One-line summary of a tool input. When the caller names an identifying
+ * input field and the input has it as a string, the summary is that value;
+ * otherwise it is the compact JSON of the input. Core itself never passes
+ * a field name (S29: the tool's cosmetic presentation data that used to
+ * supply one is a CLI-side concern now), so today this always takes the
+ * JSON path; the parameter stays for a host or test that wants the
+ * preview-one-field behavior.
  */
-export function summarizeToolInput(input: unknown, headerKey?: string): string {
-  if (headerKey && input !== null && typeof input === "object") {
-    const value = (input as Record<string, unknown>)[headerKey]
+export function summarizeToolInput(input: unknown, preferField?: string): string {
+  if (preferField && input !== null && typeof input === "object") {
+    const value = (input as Record<string, unknown>)[preferField]
     if (typeof value === "string" && value.trim().length > 0) return oneLine(value)
   }
   try {

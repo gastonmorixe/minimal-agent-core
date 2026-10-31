@@ -27,6 +27,7 @@ import {
 
 import { diag } from "../../bus/diagnostic-bus.ts"
 import { ManifestError, parseManifest } from "../manifest.ts"
+import { warnLegacyToolPresentationFields } from "../manifest-legacy.ts"
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import { discoverPackageDirs, resolvePath } from "./helpers.ts"
@@ -209,6 +210,15 @@ export function discoverAndParsePackages(opts: DiscoveryOptions): DiscoveryResul
     try {
       const raw = JSON.parse(readFileSync(manifestPath, "utf-8"))
       manifest = parseManifest(raw, manifestPath)
+      // Legacy cosmetic fields are tolerated, not an error: same "don't
+      // race the startup banner" rule as the id-shadow notice below.
+      // Unlike that case, this has no existing `diag.notice` call to
+      // reuse without growing the S20 global-diag-site ratchet, so it is
+      // observable only when a caller supplies its own logger (tests);
+      // production stays silent rather than adding a new global site.
+      if (opts.explicitLogger) {
+        warnLegacyToolPresentationFields(raw, manifest.id, opts.explicitLogger)
+      }
       const rawObj = raw as Record<string, unknown>
       if (rawObj.replayRenderers != null) {
         replayRenderersRaw.set(dir, rawObj.replayRenderers)

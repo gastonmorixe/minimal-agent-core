@@ -3,10 +3,16 @@
  * {@link ToolRegistry} port.
  *
  * Assembles the advertised tool list:
- * `allTools = [...TOOL_DEFINITIONS, ...loader.getExtraTools()]`,
- * plus the presentation map (icon / color / headerKey keyed by tool name,
- * with alias slots mirrored from the loader's alias map).
+ * `allTools = [...TOOL_DEFINITIONS, ...loader.getExtraTools()]`.
  *
+ * `presentation()` is kept for its existing callers (`ToolExecutorAdapter`,
+ * `build-agent-core.ts`) but now always returns an empty map: `S29`/`S31`
+ * dropped the cosmetic `icon` / `color` / `headerKey` fields from both
+ * `ToolDefinition` and the plugin loader's tool-building path, so there is
+ * no longer a source to read them from. The CLI's own static presentation
+ * map (S41) replaces this.
+ *
+
  * ### Mode filtering — deliberately NOT applied here
  *
  * The request body advertises EVERY tool regardless of the active mode; mode
@@ -28,6 +34,9 @@ import { TOOL_DEFINITIONS } from "../../tools/tools.ts"
 /** Cosmetic presentation slot for one tool (transcript header rendering). */
 type Presentation = { icon?: string; color?: string; headerKey?: string }
 
+/** Always empty: neither `ToolDefinition` nor a plugin tool carries these fields anymore (S29/S31). */
+const EMPTY_PRESENTATION: ReadonlyMap<string, Presentation> = new Map()
+
 /**
  * A {@link ToolRegistry} over the built-in {@link TOOL_DEFINITIONS} merged with
  * a {@link PluginLoader}'s `getExtraTools()`.
@@ -35,37 +44,15 @@ type Presentation = { icon?: string; color?: string; headerKey?: string }
  * The tool list is computed once at construction (plugins do not change
  * mid-run, matching the legacy loop's once-per-run assembly). `list()` returns
  * that fixed set in registration order: core tools first, then plugin tools.
- * `presentation()` exposes the icon/color/headerKey map, including alias slots.
  */
 export class ToolRegistryAdapter implements ToolRegistry {
   private readonly tools: ToolDefinition[]
-  private readonly presentationMap: ReadonlyMap<string, Presentation>
 
   constructor(loader: PluginLoader | null) {
     // Core built-ins first, then plugin-contributed tools, in loader order.
     this.tools = loader
       ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as ToolDefinition[])]
       : [...TOOL_DEFINITIONS]
-
-    // Presentation map: only tools that declare at least one cosmetic field
-    // get a slot (same guard as the legacy builder).
-    const pres = new Map<string, Presentation>()
-    for (const t of this.tools) {
-      if (t.icon || t.color || t.headerKey) {
-        pres.set(t.name, { icon: t.icon, color: t.color, headerKey: t.headerKey })
-      }
-    }
-    // Mirror canonical presentation into alias slots so a tool_use the model
-    // emits under an old/legacy name still renders with the canonical
-    // icon/color. Aliases are NOT advertised to the model (not in `tools`);
-    // we read them straight from the loader, exactly as the legacy loop does.
-    if (loader) {
-      for (const [alias, canonical] of loader.getToolAliases()) {
-        const p = pres.get(canonical)
-        if (p && !pres.has(alias)) pres.set(alias, p)
-      }
-    }
-    this.presentationMap = pres
   }
 
   /** All available tools, core-first then plugin, in registration order. */
@@ -73,8 +60,8 @@ export class ToolRegistryAdapter implements ToolRegistry {
     return this.tools
   }
 
-  /** Per-tool cosmetic presentation (icon / color / headerKey), incl. aliases. */
+  /** Always empty now; see the module doc. */
   presentation(): ReadonlyMap<string, Presentation> {
-    return this.presentationMap
+    return EMPTY_PRESENTATION
   }
 }

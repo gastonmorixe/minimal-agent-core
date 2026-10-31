@@ -110,30 +110,6 @@ export type ToolMediaContext = ReadFileMediaContext
  * };
  * ```
  */
-/**
- * Color name for tool label rendering. Keys into the agent's ANSI color
- * palette (`c` in `src/host/ui/style/ansi.ts`). Kept as a string union so tool authors get
- * autocomplete without importing the palette.
- */
-export type ToolColor =
-  | "orange"
-  | "pink"
-  | "purple"
-  | "lime"
-  | "sky"
-  | "violet"
-  | "gold"
-  | "cyan"
-  | "green"
-  | "red"
-  | "yellow"
-  | "magenta"
-  | "brightCyan"
-  | "brightGreen"
-  | "brightYellow"
-  | "brightRed"
-  | "brightMagenta"
-
 export interface ToolDefinition {
   /** Unique tool name. Must match the `name` in `tool_use` blocks. */
   name: string
@@ -141,25 +117,6 @@ export interface ToolDefinition {
   description: string
   /** JSON Schema describing the tool's input parameters. */
   input_schema: Record<string, unknown>
-  /**
-   * Optional single-glyph icon shown next to the tool name in transcript
-   * headers. Purely cosmetic : never sent to the API. Pick something narrow
-   * (1 cell) so the header stays aligned.
-   */
-  icon?: string
-  /**
-   * Optional palette color for the tool's label in transcript headers.
-   * Purely cosmetic : never sent to the API.
-   */
-  color?: ToolColor
-  /**
-   * Optional name of the input field to surface in the transcript header
-   * (e.g. `"url"` for Fetch). Read synchronously by `formatToolInput` so a
-   * plugin tool shows a clean identifying header the instant the call
-   * starts. Purely cosmetic : never sent to the API. Only set for
-   * plugin-contributed tools (built-ins format their own headers).
-   */
-  headerKey?: string
 }
 
 /**

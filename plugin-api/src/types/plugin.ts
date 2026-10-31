@@ -1553,6 +1553,13 @@ export interface ManifestHandler {
    * headers. Only meaningful when `trigger.type === "tool"`. Purely visual —
    * never sent to the model. Pick a single-cell character (nerd-font glyphs
    * work) so the header stays aligned.
+   *
+   * @deprecated Core no longer reads this (S29/S31): `ToolDefinition` and
+   * the loader's tool-building path dropped the cosmetic fields, so a
+   * manifest that still sets it gets a one-time warning from
+   * `manifest-legacy.ts` and nothing more. Kept on the type only so an
+   * old manifest's raw JSON still structurally matches it. Removed
+   * entirely in S41, once the CLI has its own static presentation map.
    */
   icon?: string
   /**
@@ -1560,6 +1567,8 @@ export interface ManifestHandler {
    * Only meaningful when `trigger.type === "tool"`. Allowed values match
    * `ToolColor` in `src/tools.ts` (e.g. `"cyan"`, `"orange"`). Purely
    * visual — never sent to the model.
+   *
+   * @deprecated See {@link ManifestHandler.icon}.
    */
   color?: string
   /**
@@ -1574,6 +1583,8 @@ export interface ManifestHandler {
    *
    * Declarative on purpose: core stays closed to per-plugin special-casing
    * (OCP) while each plugin opens up the one field worth showing.
+   *
+   * @deprecated See {@link ManifestHandler.icon}.
    */
   headerKey?: string
   /**
