@@ -546,11 +546,22 @@ export async function executeToolRound(
             }
           }
         }
-      } catch {
+      } catch (e) {
         // Port failures must not brick the tool loop. Proceed with the
         // pre-hook input, so a port that mutated it and then threw cannot
         // run an unvalidated, un-noted rewrite.
         execInput = preHookInput
+        // An approval gate is on the chain: deny this tool call only.
+        if (lifecycle.hasFailClosedToolHook?.() === true) {
+          const msg = e instanceof Error ? e.message : String(e)
+          policyDenied = true
+          writeToolHeader()
+          content = `Tool blocked by lifecycle policy hook. The approval hook failed (${msg}).`
+          isError = true
+          for (const row of formatRefusalRows(content, "policy")) {
+            writeTranscript(row)
+          }
+        }
       }
     }
 

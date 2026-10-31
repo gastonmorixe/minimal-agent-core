@@ -346,6 +346,52 @@ describe("HookBus / failClosed listeners (approval gates)", () => {
     expect(r.payload).toBe(2)
   })
 
+  test("a failClosed listener that returns { payload: null } for an object halts", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    let downstream = false
+    bus.on("gate", () => ({ payload: null }) as unknown as { payload: { a: number } }, {
+      priority: 90,
+      source: "acp",
+      label: "acp:gate",
+      failClosed: true,
+    })
+    bus.on(
+      "gate",
+      () => {
+        downstream = true
+        return undefined
+      },
+      { priority: 10 },
+    )
+    const r = await bus.emitChain<{ a: number }>("gate", { a: 1 })
+    expect(r.halted).toBe(true)
+    expect(r.haltedBy).toBe("acp")
+    expect(r.reason).toContain("acp:gate")
+    expect(r.payload).toEqual({ a: 1 })
+    expect(downstream).toBe(false)
+  })
+
+  test("a failClosed listener that returns a non-object result halts", async () => {
+    for (const bad of ["allow", 42, true]) {
+      const bus = new HookBus(noLog)
+      bus.declare("gate", "chain")
+      bus.on("gate", () => bad as unknown as undefined, { source: "acp", failClosed: true })
+      const r = await bus.emitChain<{ a: number }>("gate", { a: 1 })
+      expect(r.halted).toBe(true)
+      expect(r.reason).toContain("Denied")
+    }
+  })
+
+  test("an unflagged listener that returns { payload: null } keeps today's behavior", async () => {
+    const bus = new HookBus(noLog)
+    bus.declare("gate", "chain")
+    bus.on("gate", () => ({ payload: null }) as unknown as { payload: { a: number } })
+    const r = await bus.emitChain<{ a: number } | null>("gate", { a: 1 })
+    expect(r.halted).toBe(false)
+    expect(r.payload).toBeNull()
+  })
+
   test("a failClosed listener that answers normally does not halt", async () => {
     const bus = new HookBus(noLog)
     bus.declare("gate", "chain")

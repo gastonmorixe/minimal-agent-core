@@ -64,6 +64,10 @@ export class LifecyclePortAdapter implements LifecyclePort {
     return this.emitChain("tool.willInvoke", payload, "Tool blocked by lifecycle policy hook.")
   }
 
+  hasFailClosedToolHook(): boolean {
+    return this.failClosedCount("tool.willInvoke") > 0
+  }
+
   async afterTool(payload: ToolDidInvokePayload): Promise<ToolDidInvokePayload> {
     try {
       if (this.hooks.hookBus.listenerCount("tool.didInvoke") === 0) return payload

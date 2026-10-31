@@ -172,6 +172,20 @@ export class HookBus {
         }
         continue
       }
+      if (entry.opts.failClosed) {
+        // An approval gate must answer with a well-formed result. A
+        // malformed one denies, the same as a throw.
+        const bad = malformedResult(cur, awaited)
+        if (bad) {
+          this.reportError(entry, channel, new Error(bad))
+          return {
+            payload: cur,
+            halted: true,
+            haltedBy: entry.opts.source,
+            reason: failReason(entry, bad),
+          }
+        }
+      }
       if (!awaited) continue // pass-through
       if (entry.opts.observeOnly) {
         // observation-only listeners must not mutate
@@ -374,6 +388,25 @@ function isThenable(x: unknown): x is Promise<unknown> {
 }
 
 /** Deny reason for a `failClosed` listener that threw or timed out. Message only, no stack. */
+/**
+ * Check the result of a `failClosed` listener. Return a problem text, or
+ * null when the result is well formed. A result must be undefined, null,
+ * or an object. When the current payload is an object, a returned
+ * `payload` must also be an object.
+ */
+function malformedResult(cur: unknown, result: unknown): string | null {
+  if (result === undefined || result === null) return null
+  if (typeof result !== "object") return `malformed result: ${typeof result}`
+  if (!("payload" in result)) return null
+  const next: unknown = result.payload
+  const curIsObject = typeof cur === "object" && cur !== null
+  const nextIsObject = typeof next === "object" && next !== null
+  if (curIsObject && !nextIsObject) {
+    return `malformed payload: ${next === null ? "null" : typeof next}`
+  }
+  return null
+}
+
 function failReason(entry: Entry, err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
   return `Denied: approval hook "${entry.opts.label}" failed (${msg}).`

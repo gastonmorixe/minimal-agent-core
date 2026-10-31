@@ -200,6 +200,13 @@ export interface LifecyclePort {
   beforeTool?(payload: ToolWillInvokePayload): Promise<PolicyDecision<ToolWillInvokePayload>>
 
   /**
+   * True when an approval gate (a `failClosed` hook) is on the beforeTool
+   * chain. The tool round then denies when the chain path throws, and
+   * never runs the tool with the original input.
+   */
+  hasFailClosedToolHook?(): boolean
+
+  /**
    * After a tool returns — augment findings/notes. Same shape as the
    * `tool.didInvoke` chain payload.
    */
