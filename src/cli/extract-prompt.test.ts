@@ -209,6 +209,9 @@ describe("extractPromptFromArgs", () => {
     for (const flag of FLAGS_WITH_VALUES) {
       if (flag === "--prompt") continue // already covered as a literal short-circuit
       expect(extractPromptFromArgs([flag, "VAL"])).toEqual({ kind: "none" })
+      // `--host-mode` owns every later arg, so "real-prompt" is mode argv
+      // there (see the --host-mode tests at the end of this file).
+      if (flag === "--host-mode") continue
       expect(extractPromptFromArgs([flag, "VAL", "real-prompt"])).toEqual({
         kind: "literal",
         text: "real-prompt",
@@ -337,5 +340,28 @@ describe("extractPromptFromArgs", () => {
 
   test("--platform <os> alone → none", () => {
     expect(extractPromptFromArgs(["--platform", "macos"])).toEqual({ kind: "none" })
+  })
+
+  // ---- regression: --host-mode must consume its id, and own the rest ----
+
+  test("--host-mode <id> alone → none (the id is not a prompt)", () => {
+    expect(extractPromptFromArgs(normalizeArgs(["--host-mode", "acp"]))).toEqual({ kind: "none" })
+  })
+
+  test("args after --host-mode <id> belong to the mode, never to the prompt", () => {
+    expect(
+      extractPromptFromArgs(normalizeArgs(["--host-mode", "acp", "extra", "-", "--prompt", "x"])),
+    ).toEqual({ kind: "none" })
+  })
+
+  test("a prompt before --host-mode still counts (runHostMode then rejects it)", () => {
+    expect(extractPromptFromArgs(normalizeArgs(["-p", "hi", "--host-mode", "acp"]))).toEqual({
+      kind: "literal",
+      text: "hi",
+    })
+    expect(extractPromptFromArgs(normalizeArgs(["hi", "--host-mode", "acp"]))).toEqual({
+      kind: "literal",
+      text: "hi",
+    })
   })
 })

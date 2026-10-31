@@ -74,12 +74,18 @@ export interface HostSession {
   readonly sessionId: string
   /**
    * Starts a turn immediately and streams every entry it produces until
-   * the turn ends. Mirrors `Session.run` (`src/runtime/session.ts`) exactly
-   * — this IS that method, not a re-shaped copy — so the entry gets core's
-   * real event shapes (`AgentEvent` via `SessionEntry`), not a neutral
-   * stand-in. `result` resolves with the same `TurnResult` `AgentCore.run`
-   * itself returns; await the iterable first (it throws on a run failure)
-   * before reading `result` for the outcome.
+   * the turn ends. Same shapes as `Session.run` (`src/runtime/session.ts`),
+   * so the entry gets core's real event shapes (`AgentEvent` via
+   * `SessionEntry`), not a neutral stand-in. `result` resolves with the
+   * same `TurnResult` `AgentCore.run` itself returns; await the iterable
+   * first (it throws on a run failure) before reading `result` for the
+   * outcome.
+   *
+   * Before the first model request, the host applies the `turn.willStart`
+   * chain, the same as the one-shot `--prompt` run. A hook can rewrite
+   * `input`. When a hook halts, no model request is sent: the iterable
+   * throws, and `result` rejects, with an Error whose `code` is
+   * `"turn.blocked"`. The session stays usable for the next prompt.
    *
    * @throws Error when the session is closed, or already running a turn.
    */
@@ -128,17 +134,17 @@ export interface HostRuntime {
    */
   setModel(id: string): void
   /**
-   * `undefined` until core lands a real `AgentCore.getEffort` (ACP-B's
-   * core PR, tracked in `acp-decisions.md` item 9 / the ACP spec section
-   * 10b plan item 1 — not yet landed as of this file). Re-check once it
-   * does: this should start reading the live value instead.
+   * Current reasoning effort, or `undefined` for the model default. Before
+   * {@link openSession}, this is the boot value (`--effort` or config).
+   * After it, this reads the live session's `AgentCore.getEffort` with no
+   * fallback, so a reset by {@link setModel} shows as `undefined`.
    */
   getEffort(): string | undefined
   /**
-   * Throws unconditionally until core lands a real `AgentCore.setEffort`
-   * (see {@link getEffort}'s note). Scaffolded now so the entry's own code
-   * and types don't need to change shape when that PR lands — only this
-   * function's body does.
+   * Checked setter (`AgentCore.setEffort`): validates `level` against the
+   * current model's effort levels and throws on a bad value, with state
+   * unchanged. `undefined` always passes (the model default). Throws when
+   * no session is open yet.
    */
   setEffort(level: string | undefined): void
 }
@@ -154,7 +160,12 @@ export interface HostModeContext {
   /** The host guarantees nothing else writes here while this mode runs. */
   readonly stdout: NodeJS.WriteStream
   readonly stderr: NodeJS.WriteStream
-  /** Fires on process shutdown (`SIGTERM`, `SIGINT`). */
+  /**
+   * Fires on the first `SIGTERM` or `SIGINT`. The entry must then end and
+   * resolve its exit code. A second signal, or no end within the grace
+   * period (5 s), makes the host end the process (exit code 128 plus the
+   * signal number), so a stuck entry cannot block shutdown.
+   */
   readonly abort: AbortSignal
   readonly cwd: string
   readonly env: Readonly<Record<string, string>>

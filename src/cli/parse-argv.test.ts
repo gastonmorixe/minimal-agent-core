@@ -192,3 +192,23 @@ describe("parseCliOptions — --effort vs --fast", () => {
     )
   })
 })
+
+describe("parseCliOptions — --host-mode", () => {
+  test("absent → undefined", () => {
+    expect(parseCliOptions([], NO_CFG, NO_ENV, NOOP_FORMATTER).hostModeId).toBeUndefined()
+  })
+
+  test("--host-mode <id> → the id, with later mode args ignored", () => {
+    const opts = parseCliOptions(["--host-mode", "acp", "--x"], NO_CFG, NO_ENV, NOOP_FORMATTER)
+    expect(opts.hostModeId).toBe("acp")
+  })
+
+  test("--host-mode with no id, or a flag in its place → undefined", () => {
+    expect(
+      parseCliOptions(["--host-mode"], NO_CFG, NO_ENV, NOOP_FORMATTER).hostModeId,
+    ).toBeUndefined()
+    expect(
+      parseCliOptions(["--host-mode", "--debug"], NO_CFG, NO_ENV, NOOP_FORMATTER).hostModeId,
+    ).toBeUndefined()
+  })
+})

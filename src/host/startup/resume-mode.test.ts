@@ -11,7 +11,11 @@ import { describe, expect, it } from "bun:test"
 import { normalizeArgs } from "../../cli/cli-args.ts"
 import { extractPromptFromArgs } from "../../cli/extract-prompt.ts"
 
-import { isInteractiveResumeRun, wantsStreamJsonFailureLines } from "./resume-mode.ts"
+import {
+  isHostModeRun,
+  isInteractiveResumeRun,
+  wantsStreamJsonFailureLines,
+} from "./resume-mode.ts"
 
 function decide(resumeSid: string | null, raw: string[]): boolean {
   return isInteractiveResumeRun(resumeSid, extractPromptFromArgs(normalizeArgs(raw)))
@@ -95,5 +99,19 @@ describe("wantsStreamJsonFailureLines", () => {
       })
       expect(json).toBe(!isInteractiveResumeRun("s", ps))
     }
+  })
+})
+
+describe("isHostModeRun", () => {
+  it("is true only for the host-mode command", () => {
+    expect(isHostModeRun("host-mode")).toBe(true)
+    for (const command of ["run", "login", "sessions", "auth-status", ""]) {
+      expect(isHostModeRun(command)).toBe(false)
+    }
+  })
+
+  it("a bare --host-mode <id> run is not taken for an interactive resume prompt", () => {
+    const ps = extractPromptFromArgs(normalizeArgs(["--host-mode", "acp"]))
+    expect(ps).toEqual({ kind: "none" })
   })
 })
