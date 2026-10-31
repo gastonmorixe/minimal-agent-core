@@ -193,12 +193,6 @@
       ]
     },
     {
-      "path": "src/e2e/install-sh.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/e2e/install-sh.test.ts",
-      "imports": []
-    },
-    {
       "path": "src/e2e/live-area-e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/e2e/live-area-e2e.test.ts",

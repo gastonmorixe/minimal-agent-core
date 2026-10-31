@@ -45,7 +45,7 @@ export type {
   WireTurnStoppedEvent,
   WireUsageEvent,
 } from "./wire-events.ts"
-// Neutral wire-event projections (a future ACP encoder's shared layer; see
+// Neutral wire-event projections (a shared layer for external encoders; see
 // `./wire-events`'s module doc). Re-exported here, not a new public
 // subpath: `./sdk/events` already is one (public-exports.json).
 export {

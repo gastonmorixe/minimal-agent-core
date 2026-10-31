@@ -1,7 +1,18 @@
-Orientation for agents working in this repo. User-facing usage lives in
+Orientation for agents working in this repo. Package overview lives in
 [`README.md`](README.md); deferred work in `private/TODOS.md` (untracked); per-change
 write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
 -engineering captures under `private/research/`.
+
+## What this repo is
+
+This repo is `@minimal-agent/core`, a library package: the agent engine and
+the plugin contract. It has no executable. The `minimal-agent` bin, the
+REPL, the TUI, argument parsing, and host-mode dispatch live in
+[gastonmorixe/minimal-agent-cli](https://github.com/gastonmorixe/minimal-agent-cli).
+Do not add CLI or protocol-specific code here (for example, ACP). A protocol
+lives in a plugin in `minimal-agent-plugins`. Core keeps only host-agnostic
+engine code and the generic plugin contract. The public surface is the
+`exports` map in `package.json` (see "Public package" below).
 
 ## Build, test, lint
 
@@ -19,7 +30,7 @@ write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
 - `bunfig.toml` preloads `src/test-utils/guard-process-exit.ts`. In tests,
   a direct `process.exit` throws instead of ending the run, so a code path
   that quits can never stop `bun test` early with a green exit code. Code that
-  quits takes an injectable exit function (see `EditorController`'s
+  quits takes an injectable exit function (the CLI `EditorController`'s
   `exitFn`).
 - Lint is `oxlint` (config in `.oxlintrc.json`). Biome owns formatting and
   import-sort only; its linter is off. `bun run format` does NOT sort imports,
@@ -32,11 +43,8 @@ write-ups in [`docs/changes/`](docs/changes/); deeper design notes and reverse
 way. The agent runs on Bun's standard library plus the TypeScript source in this
 repo, with no npm packages resolved at runtime. The only `devDependencies` are
 the toolchain (Bun types, Biome, oxlint, typedoc, TypeScript, Husky,
-Commitlint); none of it ships in the running agent. `scripts/install.sh` is the
-user installer: clone source, link `minimal-agent` and `ma` onto
-`~/.minimal-agent/bin` plus `~/.local/bin`, never `bun install`. Do not
-document `bunx github:...` as an install path (it skips the `ma` link and the
-plugins clone). Before reaching for a package, write the small piece you
+Commitlint); none of it ships in the running agent. Core has no user
+installer. Before reaching for a package, write the small piece you
 need as a readable file with a test. Optional external binaries (`mdstream`,
 `git`) are fetched on demand and must degrade gracefully when missing, they are
 never package dependencies. The extended-plugins repo follows the same policy:
@@ -64,8 +72,9 @@ export stays unresolvable.
 
 ## Core/CLI split bookkeeping
 
-The terminal host still lives in this repo while it moves to
-minimal-agent-cli. Four tests in `src/architecture/` keep the move honest:
+The terminal host moved to minimal-agent-cli. The CLI copy of each moved
+file is the canonical one. The core copies that remain are deleted in S34
+Phase 4. Four tests in `src/architecture/` keep the move honest:
 
 - `migration-manifest.test.ts`: every file under `src/host`, `src/ui`,
   `src/input`, `src/terminal`, `src/cli`, `src/modes`, `src/plugins/host`,
@@ -120,7 +129,7 @@ minimal-agent-cli. Four tests in `src/architecture/` keep the move honest:
 ## How the LLM layer is structured
 
 The provider abstraction lives under [`src/llm/`](src/llm/). It exists so the
-agent loop, REPL, and live-area renderers depend on canonical types, never on a
+agent loop and every host depend on canonical types, never on a
 specific vendor's wire format. Every provider (Anthropic, OpenAI, and the
 gateways) is a plugin in the sibling `../minimal-agent-plugins/` repo.
 
@@ -182,14 +191,15 @@ scans the sibling repo, and its baseline is empty.
 
 `src/llm/provider-discovery.ts` is the EARLY provider loader: it scans each
 plugin root for `provider.json`, dynamically imports each `ProviderPlugin`, and
-registers it. Boot (`src/host/startup/provider-discovery-boot.ts`) calls
+registers it. Host boot (`src/host/startup/provider-discovery-boot.ts`, exported
+as `./host/provider-discovery-boot`) calls
 `registerDiscoveredProviders(...)` over the embedded `<repo>/plugins` root
 (empty), the dev-time sibling `../minimal-agent-plugins`, and
 `~/.minimal-agent/plugins` (the first-run clone), then
-`activateDiscoveredProviders()`, BEFORE any model resolution, so
-`src/index.ts` names no provider. `register(ctx)` gets a
+`activateDiscoveredProviders()`, BEFORE any model resolution, so the host
+entry point names no provider. `register(ctx)` gets a
 `ProviderSetupContext` (`models`, `providers`, `surfaceCodecs`). This is
-separate from the TUI `PluginLoader` (which runs later for tools / live-area
+separate from the `PluginLoader` (which runs later for tools / live-area
 slots; provider registration must happen earlier).
 
 ### Transport
@@ -239,10 +249,11 @@ of provider work.**
 - Catalog + decision contract: [`docs/hooks.md`](docs/hooks.md). Channels such as
   `tool.willInvoke` and `message.willSend` are **wired emit sites** (not
   catalog-only). Mode/CLI deny runs before `tool.willInvoke`; silence ≠ allow.
-- Production interactive + `--prompt` human path: `InteractiveSession`
-  (`src/host/interactive-session.ts`) over `AgentCore`, the one agent loop.
-  The legacy `Agent` class is gone. Engine tests build `AgentCore` through
-  the production factory with `buildTestCore` (`src/test-utils/test-core.ts`).
+- `AgentCore` is the one agent loop. Hosts build it through
+  `buildAgentCore` (`./host-kit/build-agent-core`). The legacy `Agent` class
+  is gone. Engine tests build `AgentCore` through the production factory with
+  `buildTestCore` (`src/test-utils/test-core.ts`, exported as
+  `./testing/test-core`).
 - Reference policy fixture (plugins repo): `ma-policy-ref-plugin` (disabled by
   default).
 
@@ -252,15 +263,15 @@ Plugins contribute slash commands declaratively via a manifest `commands[]`
 array (`{name, summary, argHint?, handler}`), mirroring `tuis`/`modes`/
 `liveAreaSlots`. The loader collects them into a host-owned registry
 (`getCommands` / `hasCommand` / `listCommandInfo` / `dispatchCommand`,
-first-wins on cross-plugin name collision). `runReplLiveArea.onSubmit`
-intercepts a registered `/<name>` (parsed by the pure `src/cli/slash-command-parse.ts`)
-and acts on the handler's `CommandResult` union (`expand` → model turn,
-`notice`/`error` → scrollback, `none` → nothing). Commands work headlessly; the
+first-wins on cross-plugin name collision). The host intercepts a registered
+`/<name>` (parsed by the pure `src/cli/slash-command-parse.ts`) and acts on
+the handler's `CommandResult` union (`expand` → model turn, `notice`/`error`
+→ host output, `none` → nothing). Commands work headlessly; the
 `slash-menu` plugin is just an autocomplete overlay over the registry (it reads
 `ctx.listCommands()`, injected into hook/event contexts).
 
 Out-of-band prompt injection rides the `prompt.inject` bus channel
-(`{text, source?}`): the REPL turns it into a normal queued submit that fires
+(`{text, source?}`): the host turns it into a normal queued submit that fires
 BETWEEN turns. The live-area handler context gained `emit` so a periodic slot can
 use it. The `schedule` plugin (cron engine + `CronCreate/List/Delete` + `/loop`
 + `/schedule` + a 1s heartbeat) is built entirely on these ports. It lives in

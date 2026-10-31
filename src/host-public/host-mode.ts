@@ -1,10 +1,9 @@
 /**
  * Host-mode contract: a plugin-manifest `hostModes` entry hands the WHOLE
  * process to one plugin after full boot (auth, plugins/tools, modes,
- * stores), selected by `--host-mode <id>`. The first consumer is the ACP
- * plugin (`ma-acp-plugin`, Level 1, in the sibling `minimal-agent-plugins`
- * repo): a long-lived JSON-RPC-over-stdio protocol server, instead of the
- * one-shot `--prompt` / REPL agent run.
+ * stores), selected by `--host-mode <id>`. A plugin host mode is usually a
+ * long-lived protocol server over stdio (for example, JSON-RPC), instead of
+ * the one-shot `--prompt` / REPL agent run. Core names no protocol here.
  *
  * This lives in `src/host-public/` (exported as `./host-kit/host-mode`),
  * not `src/sdk/`: {@link HostSession.run}'s real event/result types come
@@ -14,8 +13,7 @@
  * "narrower audience than `./host/*`" home the host-kit cluster already
  * uses for exactly this shape of file.
  *
- * Design history: `research/2026-10-31-hostmodes-contract-draft.md` and
- * `research/2026-10-31-acp-plugin-spec-v3.md` section 10/10a in the
+ * Design history: `research/2026-10-31-hostmodes-contract-draft.md` in the
  * `minimal-agent` umbrella repo.
  *
  * Scope, Level 1:
@@ -23,11 +21,11 @@
  *   run's lifetime; a second `--host-mode` is a usage error, checked by the
  *   host before the entry is called).
  * - ONE session per process. {@link HostRuntime.openSession} may be called
- *   at most once; a second call throws. Many ACP sessions in one process is
- *   a real architecture change (`src/index.ts`'s boot builds exactly one
+ *   at most once; a second call throws. Many sessions in one process is
+ *   a real architecture change (the host boot builds exactly one
  *   conversation from process-global state today) and is explicitly
  *   deferred past Level 1 — see the design doc's "Single-session boot"
- *   section. The ACP host, at Level 1, runs one OS process per ACP session.
+ *   section. At Level 1, a plugin host mode runs one OS process per session.
  * - No per-session `cwd`: the first (only) session fixes the process cwd.
  *
  * The host guarantees, before calling the entry:
@@ -41,8 +39,7 @@
  *   polls quota.
  *
  * The host never calls `process.exit` after installing the mode (it can
- * truncate buffered stdout on a fast exit with a slow reader — measured in
- * `research/acp-spike/pipe-flush` and the ACP spec section 11). The entry's
+ * truncate buffered stdout on a fast exit with a slow reader). The entry's
  * resolved number is applied with `process.exitCode`, then the event loop
  * drains naturally. A rejected entry promise becomes exit code 1.
  *
@@ -63,7 +60,7 @@ export interface HostModelView {
 
 /**
  * One host-mode session. Built from the same per-session pieces
- * `src/index.ts`'s single-session boot uses for the human path
+ * the host's single-session boot uses for the human path
  * (`openAgentCoreSession`, the already-open session/blob/file-tracking
  * stores, `hostLifecycle.sessionStart`). Level 1: exactly one is opened per
  * process, and its `sessionId` is the process's own session id (the same
@@ -96,8 +93,8 @@ export interface HostSession {
   /**
    * Answers a pending `ask_user` preflight question (the session's default
    * `PendingAskRegistry`). Returns `false` when `askId` has no pending ask.
-   * This is NOT the per-tool approval gate (section 8 of the ACP spec) —
-   * that is a `tool.willInvoke` chain hook the plugin registers itself, not
+   * This is NOT the per-tool approval gate. That gate is a
+   * `tool.willInvoke` chain hook the plugin registers itself, not
    * something the host wires here.
    */
   answer(askId: string, answer: string | null): boolean
@@ -111,8 +108,7 @@ export interface HostSession {
  * CONTEXT functions, not methods on {@link HostSession} — the entry never
  * imports the model registry, or `AgentCore`, directly; this is the one
  * seam both the human CLI path and a host mode call through, so there is
- * exactly one place that validates a switch (decision record:
- * `acp-decisions.md` item 9 in the session that landed this contract).
+ * exactly one place that validates a switch.
  */
 export interface HostRuntime {
   /**
@@ -129,8 +125,7 @@ export interface HostRuntime {
   /**
    * Checked setter: throws on an unknown model id (for the current
    * provider), leaving the model unchanged. Applies from the next model
-   * request, which can be inside the same turn (see the ACP spec section
-   * 10b item 4) — never a core copy.
+   * request, which can be inside the same turn. It is never a core copy.
    */
   setModel(id: string): void
   /**

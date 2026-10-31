@@ -5,21 +5,22 @@
  * {@link AgentEvent} plus its envelope directly: those bytes are a frozen,
  * host-facing contract and this module changes none of them (see
  * `stream-json-writer.ts` and {@link serializeStreamJsonLine}, both
- * untouched by this file). This module exists for a SECOND consumer that
- * does not exist yet in core: a future ACP encoder (`ma-acp-plugin`, a
- * sibling-repo plugin) that speaks `session/update` instead of stream-json
- * lines. Rather than route stream-json through a shared type (risk, no
- * gain — see `research/2026-10-31-wire-event-mapper-design.md` section 5 in
- * the umbrella repo), core exposes only the PURE, STATELESS pieces both
- * encoders would otherwise have to re-derive: a neutral event shape with no
- * vendor or protocol vocabulary, a tool-name → category table, a tool
- * status projection, and an outcome+notice → stop-cause projection.
+ * untouched by this file). This module is a generic wire mapper for any
+ * external consumer that encodes agent events in its own format: for
+ * example, a stream-json style writer or a host-mode plugin that speaks a
+ * protocol over stdio. Rather than route stream-json through a shared type
+ * (risk, no gain — see `research/2026-10-31-wire-event-mapper-design.md`
+ * section 5 in the umbrella repo), core exposes only the PURE, STATELESS
+ * pieces each encoder would otherwise have to re-derive: a neutral event
+ * shape with no vendor or protocol vocabulary, a tool-name → category
+ * table, a tool status projection, and an outcome+notice → stop-cause
+ * projection.
  *
  * Nothing here is wired into any existing event path. Adding this file does
  * not change what any current sink receives or what any current format
  * writes: every function is a new, pure `AgentEvent → WireEvent` (or
  * `AgentEvent → some WireEvent field`) projection, called by nothing in
- * this package yet. A future ACP encoder calls these directly; the
+ * this package. An external encoder calls these directly. The
  * stream-json path keeps consuming {@link AgentEvent} as it always has.
  *
  * Design principles (from software-best-design-patterns):
@@ -28,18 +29,17 @@
  *   - Discriminated union: {@link WireEvent} and {@link WireStopCause} tag
  *     on a literal `kind`/`type`, narrowed exhaustively elsewhere with a
  *     `never` default, the same pattern as {@link AgentEvent}.
- *   - Neutral names: no ACP vocabulary (`sessionUpdate`, `agent_message_chunk`,
- *     `kind: "execute"`) and no stream-json vocabulary (`item_started`)
- *     leaks into this module. A future encoder supplies its own names.
+ *   - Neutral names: no protocol vocabulary (`sessionUpdate`,
+ *     `agent_message_chunk`, `kind: "execute"`) and no stream-json
+ *     vocabulary (`item_started`) leaks into this module. Each encoder
+ *     supplies its own names.
  *
- * Scope note: the richer, ACP-specific stop-reason refinements (folding
+ * Scope note: protocol-specific stop-reason refinements (folding
  * `pause_turn` / `context_window_exceeded` / a completed-turn `error` into a
- * particular ACP `stopReason` plus `_meta`) and the `configOptions` /
- * `model_adopted` notice work are OUT OF SCOPE here. They depend on core
- * changes that have not landed on this branch (`AgentCore.setEffort`, the
- * `model_adopted` {@link TurnNotice} variant) and on protocol vocabulary
- * that belongs in the ACP encoder, not in this neutral layer. See the
- * design doc sections 4a and 7a for that follow-up work.
+ * particular protocol stop reason plus metadata) and protocol config
+ * pushes are OUT OF SCOPE here. They use protocol vocabulary that belongs
+ * in each encoder, not in this neutral layer. See the design doc sections
+ * 4a and 7a.
  *
  * @module sdk/wire-events
  */
@@ -248,9 +248,9 @@ export function toWireUsage(usage: EventUsage): WireUsageEvent {
 /**
  * Project a {@link TurnNotice} to a {@link WireNoticeEvent}: `kind` becomes
  * the stable `code`, `severity` carries over as-is (core's `"warn"` stays
- * `"warn"` here; an ACP encoder maps it to ACP's `"warning"` itself — that
- * mapping is protocol vocabulary, not a neutral concern), and every other
- * field lands in `detail`.
+ * `"warn"` here; an encoder maps it to its own protocol value, such as
+ * `"warning"` — that mapping is protocol vocabulary, not a neutral concern),
+ * and every other field lands in `detail`.
  */
 export function toWireNotice(notice: TurnNotice): WireNoticeEvent {
   const { kind, severity, ...rest } = notice
@@ -350,12 +350,12 @@ export interface StopCauseInputs {
  * | failed    | —                         | `failed` (from `lastError`)   |
  * | waiting   | —                         | `waiting`                     |
  *
- * This is deliberately the coarse, SHARED cut only. The richer ACP-specific
+ * This is deliberately the coarse, SHARED cut only. A protocol-specific
  * refinement (reading `turn_completed.stopReason` to tell `end_turn` apart
  * from a completed-turn `pause_turn` / `context_window_exceeded` / `error`,
- * each with their own ACP `_meta`) stays in the ACP encoder: it needs ACP
- * vocabulary this neutral type does not carry, and depends on core notice
- * work (`model_adopted`, etc.) not yet landed. See design doc section 4a.
+ * each with its own protocol metadata) stays in each encoder. It needs
+ * protocol vocabulary this neutral type does not carry. See design doc
+ * section 4a.
  */
 export function deriveStopCause(inputs: StopCauseInputs): WireStopCause {
   const { outcome, lastNotice } = inputs
