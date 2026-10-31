@@ -51,23 +51,23 @@ async function runCli(args: string[], response: string) {
       // e2e harness imposes (each one was discovered the hard way — do not
       // change this pair without re-checking all three):
       //  1. REGISTERED: an unknown provider id is fatal at startup
-      //     (index.ts:671), so "test" does NOT work. llm-opencode is a real
+      //     (index.ts:671), so "test" does NOT work. llm-opencode-go is a real
       //     registered provider plugin.
       //  2. ANTHROPIC-MESSAGES PROTOCOL: MINIMAL_AGENT_TRANSPORT=test emits
       //     Anthropic SSE wire format, so the provider must speak the
-      //     `anthropic-messages` surface to DECODE it. opencode (adapter
+      //     `anthropic-messages` surface to DECODE it. opencode-go (adapter
       //     surface "anthropic-messages") + qwen3.7-plus (anthropic-messages
       //     surfaceId) decode correctly; ollama/deepseek is "custom" protocol
       //     and yields an empty answer ("Unexpected EOF") → e1 would fail.
       //  3. TOKEN-CLEAN: the provider-decoupling ratchet (provider-scan.ts)
       //     forbids anthropic/claude/openai/gpt/gemini/mistral/... literals in
-      //     core code, so a real vendor name reds test:arch. Neither "opencode"
+      //     core code, so a real vendor name reds test:arch. Neither "opencode-go"
       //     nor "qwen3.7-plus" matches the forbidden regex.
       // Without a pinned pair, the gate's `env -u MINIMAL_AGENT_PROVIDER -u
       // MINIMAL_AGENT_MODEL` on a multi-credential machine dies "multiple
       // provider credentials found" before schema logic runs — false-greening
       // e3/e4 (cred-fatal exit 1, not schema exit 1).
-      MINIMAL_AGENT_PROVIDER: "opencode",
+      MINIMAL_AGENT_PROVIDER: "opencode-go",
       MINIMAL_AGENT_MODEL: "qwen3.7-plus",
     },
   })

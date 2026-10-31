@@ -47,10 +47,10 @@ async function runCli(args: string[], response: string) {
       MINIMAL_AGENT_TEST_AUTH: "1",
       MINIMAL_AGENT_TRANSPORT: "test",
       MINIMAL_AGENT_TEST_RESPONSE: response,
-      // See output-mode.e2e.test.ts: opencode + qwen3.7-plus is the one pair
+      // See output-mode.e2e.test.ts: opencode-go + qwen3.7-plus is the one pair
       // that is registered, speaks anthropic-messages (to decode the test SSE),
       // and is token-clean for the provider-decoupling ratchet.
-      MINIMAL_AGENT_PROVIDER: "opencode",
+      MINIMAL_AGENT_PROVIDER: "opencode-go",
       MINIMAL_AGENT_MODEL: "qwen3.7-plus",
     },
   })
