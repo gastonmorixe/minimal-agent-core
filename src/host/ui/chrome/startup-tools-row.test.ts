@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { displayWidth, stripAnsi } from "../../../terminal/term-width.ts"
+import { displayWidth, stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { c } from "../style/ansi.ts"
 
 import { formatStartupToolsRow, wrapStartupToolsRows } from "./startup-tools-row.ts"

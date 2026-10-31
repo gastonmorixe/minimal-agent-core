@@ -36,7 +36,8 @@
  * @module startup-tools-row
  */
 
-import { displayWidth } from "../../../terminal/term-width.ts"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { c } from "../style/ansi.ts"
 
 /**

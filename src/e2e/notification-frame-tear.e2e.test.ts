@@ -24,8 +24,9 @@
 
 import { describe, expect, it } from "bun:test"
 
+import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { renderCommandNoticeBlock } from "../host/ui/command-notice.ts"
-import { stripAnsi } from "../terminal/term-width.ts"
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
 
 /**

@@ -6,8 +6,7 @@
  */
 
 import { ANSI_CODES, bgRgb } from "@minimal-agent/core/plugin-api/utils/ansi"
-
-import { displayWidth, truncateDisplayWidth } from "../../terminal/term-width.ts"
+import { displayWidth, truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 const { DIM, RESET } = ANSI_CODES
 const SELECTED_BG = bgRgb(55, 45, 85)

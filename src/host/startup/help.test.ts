@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { stripAnsi } from "../../terminal/term-width.ts"
+import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { renderHelp } from "./help.ts"
 
