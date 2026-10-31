@@ -41,7 +41,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { resolveAgentHome } from "@minimal-agent/plugin-api/utils/agent-paths"
+import { resolveAgentHome } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { acquireLock, type LockHandle } from "../infra/file-lock.ts"
 import { getSessionId } from "../session/session-id.ts"

@@ -6,10 +6,11 @@
 # `minimal-agent` and `ma` on PATH. First interactive launch then signs in,
 # fetches mdstream, and clones the plugins repo.
 #
-# bunx github:gastonmorixe/minimal-agent-core does NOT work. bunx always
-# runs `bun install`, then dies on the in-tree `workspace:*` plugin-api
-# dependency and would still pull the toolchain (biome, oxlint, husky).
-# Skip that path.
+# bunx github:gastonmorixe/minimal-agent-core is not the install path. It
+# runs the bin from a package cache, so it does not link `ma`, set up
+# ~/.minimal-agent, or clone the plugins repo. Skip that path. (Hosts such
+# as minimal-agent-cli do install core from git, as a dependency that they
+# import through the package `exports` map.)
 #
 # One-liner (private repo needs a GitHub token):
 #   curl -fsSL -H "Authorization: Bearer $(gh auth token)" \

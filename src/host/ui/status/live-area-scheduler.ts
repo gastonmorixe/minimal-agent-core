@@ -21,9 +21,9 @@
 import {
   getDecorationSuffix,
   setDecorationSuffix,
-} from "@minimal-agent/plugin-api/utils/decoration-suffix"
-import { getFooterTails, setFooterTail } from "@minimal-agent/plugin-api/utils/footer-tail"
-import { displayWidth, truncateDisplayWidth } from "@minimal-agent/plugin-api/utils/term-width"
+} from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
+import { getFooterTails, setFooterTail } from "@minimal-agent/core/plugin-api/utils/footer-tail"
+import { displayWidth, truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import {
   createPluginLogger,

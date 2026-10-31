@@ -10,7 +10,7 @@
  *
  * These tests use a FAKE provider plugin whose `register(ctx)` only touches the
  * provider-neutral contract types (`ProviderSetupContext`, `ProviderModelSpec`
- * from `@minimal-agent/plugin-api/llm/provider-plugin`) — the exact shape a
+ * from `@minimal-agent/core/plugin-api/llm/provider-plugin`) — the exact shape a
  * real plugin in its own repo would use — and assert the live registry is
  * populated as a side effect, with no `src/` registry import in the plugin's
  * code path.
@@ -18,13 +18,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { defaultCapabilities } from "@minimal-agent/plugin-api/llm/capabilities"
+import { defaultCapabilities } from "@minimal-agent/core/plugin-api/llm/capabilities"
 import type {
   ProviderAdapterView,
   ProviderModelSpec,
   ProviderPlugin,
   ProviderSetupContext,
-} from "@minimal-agent/plugin-api/llm/provider-plugin"
+} from "@minimal-agent/core/plugin-api/llm/provider-plugin"
 
 import {
   clearModelRegistry,

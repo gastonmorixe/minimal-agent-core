@@ -9,7 +9,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
-import { consumeStreamBounded } from "@minimal-agent/plugin-api/utils/bounded-drain"
+import { consumeStreamBounded } from "@minimal-agent/core/plugin-api/utils/bounded-drain"
 
 import { injectBinaryOptInArg } from "../../tools/binary-guard.ts"
 import type {

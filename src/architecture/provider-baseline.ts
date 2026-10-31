@@ -61,7 +61,7 @@ export const LEGACY_PROVIDER_TOKEN_BASELINE: ReadonlySet<string> = new Set([
   // deleted, and the contextManagement-packing line was removed. The codec is
   // provider-neutral in code.)
   // (llm/canonical-request.ts ratcheted OUT when the type surface MOVED to
-  // `@minimal-agent/plugin-api/llm/canonical-request` (Wave C-3): the src/ file
+  // `@minimal-agent/core/plugin-api/llm/canonical-request` (Wave C-3): the src/ file
   // is now a one-line re-export shim with zero provider tokens in code. The
   // example slugs in the original doc comments rode along to the leaf package,
   // which the provider-scan does not cover.)

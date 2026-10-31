@@ -17,7 +17,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { resolveNetDbgDir } from "@minimal-agent/plugin-api/utils/agent-paths"
+import { resolveNetDbgDir } from "@minimal-agent/core/plugin-api/utils/agent-paths"
 
 import { loadUserConfig } from "../config/config.ts"
 import { getSessionId } from "../session/session-id.ts"

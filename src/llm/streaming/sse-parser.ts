@@ -1,6 +1,6 @@
 /**
  * Re-export shim — the implementation moved to the leaf contract package
- * `@minimal-agent/plugin-api` in Wave D-0.
+ * `@minimal-agent/core/plugin-api` in Wave D-0.
  *
  * The generic SSE parser now lives at
  * `plugin-api/src/utils/sse-parser.ts`. This file stays at the old path so
@@ -12,4 +12,4 @@
  * @module llm/streaming/sse-parser
  */
 
-export * from "@minimal-agent/plugin-api/utils/sse-parser"
+export * from "@minimal-agent/core/plugin-api/utils/sse-parser"

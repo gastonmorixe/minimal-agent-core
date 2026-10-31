@@ -3,7 +3,7 @@
  *
  * Wave D-2 split: the PURE helpers (`makeCharRatioEstimator`,
  * `estimateTokensFromText`, `DEFAULT_CHARS_PER_TOKEN`, `TokenEstimator`) MOVED
- * to the leaf contract package `@minimal-agent/plugin-api/llm/token-estimate`
+ * to the leaf contract package `@minimal-agent/core/plugin-api/llm/token-estimate`
  * so a plugin's `models.ts` can build its per-model estimator without reaching
  * into `src/`. This module re-exports them, and keeps the one registry-bound
  * function {@link estimateTokensForModel} here — it calls `findModel` on the
@@ -12,11 +12,11 @@
  * @module llm/token-estimate
  */
 
-import { estimateTokensFromText } from "@minimal-agent/plugin-api/llm/token-estimate"
+import { estimateTokensFromText } from "@minimal-agent/core/plugin-api/llm/token-estimate"
 
 import { findModel, findModelForProvider } from "./model-registry.ts"
 
-export * from "@minimal-agent/plugin-api/llm/token-estimate"
+export * from "@minimal-agent/core/plugin-api/llm/token-estimate"
 
 /**
  * Estimate the token count of `text` for a specific model, using that

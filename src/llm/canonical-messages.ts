@@ -1,7 +1,7 @@
 /**
  * Re-export shim (Wave D-1). The canonical message/content-block type surface
  * MOVED to the leaf contract package
- * `@minimal-agent/plugin-api/llm/canonical-messages` so plugins can depend on
+ * `@minimal-agent/core/plugin-api/llm/canonical-messages` so plugins can depend on
  * it without reaching into `src/`. This shim keeps the old
  * `src/llm/canonical-messages.ts` import path alive for core (and any
  * not-yet-swept plugin) until the per-plugin D-5..D-12 sweeps re-point
@@ -12,4 +12,4 @@
  * @module llm/canonical-messages
  */
 
-export * from "@minimal-agent/plugin-api/llm/canonical-messages"
+export * from "@minimal-agent/core/plugin-api/llm/canonical-messages"

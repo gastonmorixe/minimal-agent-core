@@ -5,7 +5,7 @@
  * caller owns key event delivery and writing the rendered rows to the screen.
  */
 
-import { ANSI_CODES, bgRgb } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, bgRgb } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import { displayWidth, truncateDisplayWidth } from "../../terminal/term-width.ts"
 

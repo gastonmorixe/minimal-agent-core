@@ -21,7 +21,7 @@
  * @module agent/run-compact
  */
 
-import { abortableSleep } from "@minimal-agent/plugin-api/utils/retry"
+import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 
 import type { AuthResult } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"

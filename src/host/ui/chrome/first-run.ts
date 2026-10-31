@@ -26,7 +26,7 @@
 
 import { existsSync } from "node:fs"
 
-import { ansiStyle as A } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as A } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import { resolveAgentHome } from "../../../agent/agent-paths.ts"
 

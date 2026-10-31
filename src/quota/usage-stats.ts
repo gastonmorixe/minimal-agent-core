@@ -31,7 +31,7 @@ import {
   type UsagePeriod,
   type UsageReport,
   type UsageTotals,
-} from "@minimal-agent/plugin-api/utils/usage-report"
+} from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 import type { CanonicalUsage } from "../llm/canonical-events.ts"
 import { findModel, findModelForProvider } from "../llm/model-registry.ts"
@@ -56,10 +56,10 @@ export {
   type UsagePeriod,
   type UsageReport,
   type UsageTotals,
-} from "@minimal-agent/plugin-api/utils/usage-report"
+} from "@minimal-agent/core/plugin-api/utils/usage-report"
 
 /** Map a free-form CLI token to a {@link UsagePeriod}. Returns null on no match. */
-// `parseUsagePeriod` moved to the leaf (`@minimal-agent/plugin-api/utils/usage-report`)
+// `parseUsagePeriod` moved to the leaf (`@minimal-agent/core/plugin-api/utils/usage-report`)
 // next to USAGE_PERIODS — it's a pure string→enum helper with zero host state, so
 // a plugin can parse its own `/usage <period>` argv without importing `src/`.
 // Re-exported below for existing core call sites.

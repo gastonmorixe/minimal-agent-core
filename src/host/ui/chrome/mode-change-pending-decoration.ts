@@ -43,7 +43,7 @@
  * @module mode-change-pending-decoration
  */
 
-import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ANSI_CODES, ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import type { PendingModeAttachment } from "../../../modes/modes.ts"
 

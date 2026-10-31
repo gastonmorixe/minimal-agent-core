@@ -7,7 +7,7 @@
  * @module ui/startup/progress-spinner
  */
 
-import { ansiStyle as A, ANSI_CODES } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as A, ANSI_CODES } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import { BREATHING_DOT } from "../spinner/library/frames.ts"
 import { ANSI_PALETTE_RAINBOW } from "../spinner/library/palettes.ts"

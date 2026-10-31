@@ -27,7 +27,7 @@
  * @module modes
  */
 
-import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 import {
   clampLabel,
   detectStyleEnv,
@@ -37,7 +37,7 @@ import {
   resolveModeStyle,
   type StyleEnv,
   styleFromLegacyColor,
-} from "@minimal-agent/plugin-api/utils/mode-style"
+} from "@minimal-agent/core/plugin-api/utils/mode-style"
 
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
