@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { stripAnsi } from "../../../terminal/term-width.ts"
+import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { flattenAnsiToLines } from "./ansi-flatten.ts"
 

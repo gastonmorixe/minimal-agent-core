@@ -29,7 +29,7 @@
       "path": "src/cli/bash-split.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/cli/bash-split.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/cli/cli-args.test.ts",
@@ -202,7 +202,7 @@
       "path": "src/e2e/notification-frame-tear.e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/e2e/notification-frame-tear.e2e.test.ts",
-      "imports": ["src/test-utils/fake-terminal.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/test-utils/fake-terminal.ts"]
     },
     {
       "path": "src/e2e/output-format-g3.e2e.test.ts",
@@ -312,20 +312,9 @@
     },
     {
       "path": "src/host/commands/compact-contract.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/commands/compact-contract.test.ts",
-      "imports": [
-        "src/agent/run-compact.ts",
-        "src/host/sdk-adapters/session-persistence-adapter.ts",
-        "src/llm/messages.ts",
-        "src/llm/model-registry.ts",
-        "src/llm/provider-plugin.ts",
-        "src/llm/test-fixtures.ts",
-        "src/sdk/agent-core.ts",
-        "src/sdk/lifecycle.ts",
-        "src/session/session-restore.ts",
-        "src/session/session-store.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/commands/compact-contract.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the only real need is asserting runCompact's core-engine-internal contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/commands/compact-stream.ts",
@@ -394,6 +383,7 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/list-models-live.test.ts",
       "imports": [
+        "plugin-api/src/utils/term-width.ts",
         "src/auth/auth-store.ts",
         "src/llm/model-registry.ts",
         "src/llm/provider-plugin.ts",
@@ -405,6 +395,7 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/list-models-live.ts",
       "imports": [
+        "plugin-api/src/utils/term-width.ts",
         "src/auth/auth-strategies.ts",
         "src/llm/capabilities.ts",
         "src/llm/model-registry.ts",
@@ -417,6 +408,7 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/list-models.ts",
       "imports": [
+        "plugin-api/src/utils/term-width.ts",
         "src/host/commands/model-catalog-data.ts",
         "src/llm/capabilities.ts",
         "src/llm/provider-plugin.ts"
@@ -426,7 +418,7 @@
       "path": "src/host/commands/list-plugins.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/list-plugins.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/commands/list-plugins.ts",
@@ -451,6 +443,7 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/commands/list-ui.test.ts",
       "imports": [
+        "plugin-api/src/utils/term-width.ts",
         "src/auth/auth-store.ts",
         "src/llm/model-registry.ts",
         "src/llm/provider-plugin.ts",
@@ -538,18 +531,20 @@
     {
       "path": "src/host/context-exceeded-recovery.e2e.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/context-exceeded-recovery.e2e.test.ts"
+      "target": "src/host/context-exceeded-recovery.e2e.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/context-exceeded-recovery.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/context-exceeded-recovery.test.ts"
+      "target": "src/host/context-exceeded-recovery.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/context-exceeded-recovery.ts",
       "dest": "core-engine",
-      "target": "src/loops/context-overflow-recovery.ts",
-      "note": "S16: context overflow is a recoverable error. The loop compacts, then retries. Notice text stays in the CLI."
+      "target": "src/host/context-exceeded-recovery.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/editor-controller-input-event.test.ts",
@@ -579,7 +574,7 @@
       "path": "src/host/editor-controller.footer.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor-controller.footer.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/editor-controller.hooks.test.ts",
@@ -603,13 +598,17 @@
       "path": "src/host/editor-controller.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor-controller.test.ts",
-      "imports": ["src/test-utils/fake-terminal.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/test-utils/fake-terminal.ts"]
     },
     {
       "path": "src/host/editor-controller.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor-controller.ts",
-      "imports": ["src/bus/abort-quit-fsm.ts", "src/plugins/hooks/hooks.ts"]
+      "imports": [
+        "plugin-api/src/utils/term-width.ts",
+        "src/bus/abort-quit-fsm.ts",
+        "src/plugins/hooks/hooks.ts"
+      ]
     },
     {
       "path": "src/host/editor/buffer-style-layers.ts",
@@ -639,7 +638,7 @@
       "path": "src/host/editor/vertical-nav.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/editor/vertical-nav.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/interactive-session.test.ts",
@@ -801,15 +800,22 @@
       ]
     },
     {
+      "path": "src/host/sdk-adapters/build-agent-core.port-folds.test.ts",
+      "dest": "core-engine",
+      "target": "src/host/sdk-adapters/build-agent-core.port-folds.test.ts",
+      "note": "S34 exports-gap decision (Y4): correctness tests for the 5 PORT folds into build-agent-core.ts/openAgentCoreSession. Stays at its current path, same reason as its sibling build-agent-core.test.ts below."
+    },
+    {
       "path": "src/host/sdk-adapters/build-agent-core.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/build-agent-core.test.ts"
+      "target": "src/host/sdk-adapters/build-agent-core.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/build-agent-core.ts",
       "dest": "core-engine",
-      "target": "src/loops/assemble.ts",
-      "note": "S24: the build step moves to the loop assembly. The mdstream highlighter import leaves for a host port."
+      "target": "src/host/sdk-adapters/build-agent-core.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/golden-parity.test.ts",
@@ -825,32 +831,38 @@
     {
       "path": "src/host/sdk-adapters/lifecycle-port-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/lifecycle-port-adapter.test.ts"
+      "target": "src/host/sdk-adapters/lifecycle-port-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/lifecycle-port-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/lifecycle-port-adapter.ts"
+      "target": "src/host/sdk-adapters/lifecycle-port-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/media-resolver-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/media-resolver-adapter.test.ts"
+      "target": "src/host/sdk-adapters/media-resolver-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/media-resolver-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/media-resolver-adapter.ts"
+      "target": "src/host/sdk-adapters/media-resolver-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/mode-provider-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/mode-provider-adapter.test.ts"
+      "target": "src/host/sdk-adapters/mode-provider-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/mode-provider-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/mode-provider-adapter.ts"
+      "target": "src/host/sdk-adapters/mode-provider-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/plugin-tool-e2e.test.ts",
@@ -867,22 +879,26 @@
     {
       "path": "src/host/sdk-adapters/prompt-contributor-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/prompt-contributor-adapter.test.ts"
+      "target": "src/host/sdk-adapters/prompt-contributor-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/prompt-contributor-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/prompt-contributor-adapter.ts"
+      "target": "src/host/sdk-adapters/prompt-contributor-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/session-persistence-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/session-persistence-adapter.test.ts"
+      "target": "src/host/sdk-adapters/session-persistence-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/session-persistence-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/session-persistence-adapter.ts"
+      "target": "src/host/sdk-adapters/session-persistence-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/stream-json-parity.test.ts",
@@ -899,23 +915,26 @@
     {
       "path": "src/host/sdk-adapters/tool-executor-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/tool-executor-adapter.test.ts"
+      "target": "src/host/sdk-adapters/tool-executor-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/tool-executor-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/assemble.ts",
-      "note": "S24: the tool executor adapter moves to the loop assembly and takes no UI types."
+      "target": "src/host/sdk-adapters/tool-executor-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/tool-registry-adapter.test.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/tool-registry-adapter.test.ts"
+      "target": "src/host/sdk-adapters/tool-registry-adapter.test.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/sdk-adapters/tool-registry-adapter.ts",
       "dest": "core-engine",
-      "target": "src/loops/adapters/tool-registry-adapter.ts"
+      "target": "src/host/sdk-adapters/tool-registry-adapter.ts",
+      "note": "S34 decision: stays at its current path. openAgentCoreSession (src/index.ts) and buildTestCore (src/test-utils/test-core.ts) still call into this adapter seam directly, so it is load-bearing core-engine code, not dead. The aspirational src/loops/ reorg this row used to point at has not happened and is not part of S34; target now reflects reality."
     },
     {
       "path": "src/host/session-replay-derivers.test.ts",
@@ -1021,7 +1040,7 @@
       "path": "src/host/startup/help.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/help.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/startup/help.ts",
@@ -1107,14 +1126,9 @@
     },
     {
       "path": "src/host/startup/provider-presentation.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/startup/provider-presentation.test.ts",
-      "imports": [
-        "src/architecture/provider-scan.ts",
-        "src/llm/model-registry.ts",
-        "src/llm/provider-plugin.ts",
-        "src/llm/test-fixtures.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/startup/provider-presentation.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): asserts a core-engine architecture-ratchet contract (provider-token-neutral presentation text), not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/startup/provider-presentation.ts",
@@ -1246,14 +1260,9 @@
     },
     {
       "path": "src/host/startup/startup-rows.effort.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/startup/startup-rows.effort.test.ts",
-      "imports": [
-        "src/llm/capabilities.ts",
-        "src/llm/model-registry.ts",
-        "src/llm/pricing.ts",
-        "src/llm/token-estimate.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/startup/startup-rows.effort.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the raw need is llm/pricing.ts's MTokRate type for fixture construction, a core-engine pricing-fixture contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/startup/startup-rows.ts",
@@ -1299,7 +1308,11 @@
       "path": "src/host/ui/choice-modal.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/choice-modal.ts",
-      "imports": ["plugin-api/src/utils/ansi.ts", "plugin-api/src/utils/palette.ts"]
+      "imports": [
+        "plugin-api/src/utils/ansi.ts",
+        "plugin-api/src/utils/palette.ts",
+        "plugin-api/src/utils/term-width.ts"
+      ]
     },
     {
       "path": "src/host/ui/chrome/armed-footer.test.ts",
@@ -1317,7 +1330,7 @@
       "path": "src/host/ui/chrome/auth-prompt.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/auth-prompt.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/auth-prompt.ts",
@@ -1329,7 +1342,7 @@
       "path": "src/host/ui/chrome/auth-status.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/auth-status.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/auth-status.ts",
@@ -1341,7 +1354,7 @@
       "path": "src/host/ui/chrome/binary-provision.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/binary-provision.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/binary-provision.ts",
@@ -1371,7 +1384,7 @@
       "path": "src/host/ui/chrome/login.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/login.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/login.ts",
@@ -1383,7 +1396,7 @@
       "path": "src/host/ui/chrome/logout.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/logout.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/logout.ts",
@@ -1395,7 +1408,7 @@
       "path": "src/host/ui/chrome/mascot.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/mascot.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/mascot.ts",
@@ -1431,13 +1444,17 @@
       "path": "src/host/ui/chrome/queue-decoration.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/queue-decoration.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/queue-decoration.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/queue-decoration.ts",
-      "imports": ["plugin-api/src/utils/ansi.ts", "src/utils/truncate-hint.ts"]
+      "imports": [
+        "plugin-api/src/utils/ansi.ts",
+        "plugin-api/src/utils/term-width.ts",
+        "src/utils/truncate-hint.ts"
+      ]
     },
     {
       "path": "src/host/ui/chrome/ready-banner.test.ts",
@@ -1449,13 +1466,13 @@
       "path": "src/host/ui/chrome/ready-banner.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/ready-banner.ts",
-      "imports": ["src/modes/modes.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/modes/modes.ts"]
     },
     {
       "path": "src/host/ui/chrome/session-store-boot.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/session-store-boot.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/session-store-boot.ts",
@@ -1473,19 +1490,19 @@
       "path": "src/host/ui/chrome/startup-tools-row.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/startup-tools-row.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/chrome/startup-tools-row.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/chrome/startup-tools-row.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/command-list.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/command-list.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/command-list.ts",
@@ -1497,13 +1514,13 @@
       "path": "src/host/ui/command-notice.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/command-notice.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/command-notice.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/command-notice.ts",
-      "imports": ["plugin-api/src/types/plugin.ts"]
+      "imports": ["plugin-api/src/types/plugin.ts", "plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/command-output.ts",
@@ -1521,7 +1538,7 @@
       "path": "src/host/ui/compositor-cols-fallback.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/compositor-cols-fallback.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/compositor-mdstream.test.ts",
@@ -1533,7 +1550,7 @@
       "path": "src/host/ui/compositor-streamcol.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/compositor-streamcol.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/compositor.test.ts",
@@ -1545,7 +1562,7 @@
       "path": "src/host/ui/compositor.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/compositor.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/editor/renderer.test.ts",
@@ -1557,13 +1574,13 @@
       "path": "src/host/ui/editor/renderer.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/editor/renderer.ts",
-      "imports": ["plugin-api/src/utils/ansi.ts"]
+      "imports": ["plugin-api/src/utils/ansi.ts", "plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/formatter/ansi-flatten.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/formatter/ansi-flatten.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/formatter/ansi-flatten.ts",
@@ -1623,7 +1640,7 @@
       "path": "src/host/ui/help/render.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/help/render.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/model-picker.ts",
@@ -1641,13 +1658,13 @@
       "path": "src/host/ui/picker.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/picker.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/picker.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/picker.ts",
-      "imports": ["plugin-api/src/utils/ansi.ts"]
+      "imports": ["plugin-api/src/utils/ansi.ts", "plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/quit-modal.test.ts",
@@ -1695,7 +1712,7 @@
       "path": "src/host/ui/spinner/index.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/spinner/index.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/spinner/index.ts",
@@ -1767,7 +1784,7 @@
       "path": "src/host/ui/startup/tree.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/startup/tree.ts",
-      "imports": ["src/utils/build-info.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/utils/build-info.ts"]
     },
     {
       "path": "src/host/ui/status/diagnostic-surface.test.ts",
@@ -1797,19 +1814,27 @@
       "path": "src/host/ui/status/format.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/format.ts",
-      "imports": ["plugin-api/src/utils/ansi.ts", "src/bus/status.ts"]
+      "imports": [
+        "plugin-api/src/utils/ansi.ts",
+        "plugin-api/src/utils/term-width.ts",
+        "src/bus/status.ts"
+      ]
     },
     {
       "path": "src/host/ui/status/line-renderer.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/line-renderer.ts",
-      "imports": ["plugin-api/src/utils/ansi.ts", "src/bus/status.ts"]
+      "imports": [
+        "plugin-api/src/utils/ansi.ts",
+        "plugin-api/src/utils/term-width.ts",
+        "src/bus/status.ts"
+      ]
     },
     {
       "path": "src/host/ui/status/live-area-controller.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/live-area-controller.test.ts",
-      "imports": ["src/bus/status.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/bus/status.ts"]
     },
     {
       "path": "src/host/ui/status/live-area-controller.ts",
@@ -1842,15 +1867,9 @@
     },
     {
       "path": "src/host/ui/status/live-area-scheduler.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/ui/status/live-area-scheduler.test.ts",
-      "imports": [
-        "src/bus/global-bus.ts",
-        "src/internal/terminal-render/decoration-suffix.ts",
-        "src/internal/terminal-render/footer-tail.ts",
-        "src/plugins/event-bus.ts",
-        "src/quota/quota-broadcast.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/ui/status/live-area-scheduler.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): the quota/quota-broadcast.ts slice this test exercises is a core-engine quota-header-parsing contract, not UI behavior. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/ui/status/live-area-scheduler.ts",
@@ -1887,7 +1906,7 @@
       "path": "src/host/ui/status/status.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/status.test.ts",
-      "imports": ["src/bus/status.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/bus/status.ts"]
     },
     {
       "path": "src/host/ui/stdio-interceptor.test.ts",
@@ -1918,7 +1937,7 @@
       "path": "src/host/ui/style/mode.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/style/mode.test.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/style/mode.ts",
@@ -1978,7 +1997,7 @@
       "path": "src/host/ui/tool-transcript/continuation.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/tool-transcript/continuation.test.ts",
-      "imports": ["src/client/types.ts"]
+      "imports": ["plugin-api/src/utils/term-width.ts", "src/client/types.ts"]
     },
     {
       "path": "src/host/ui/tool-transcript/diagnostics-render.test.ts",
@@ -2008,13 +2027,18 @@
       "path": "src/host/ui/tool-transcript/format.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/tool-transcript/format.test.ts",
-      "imports": ["src/client/types.ts", "src/tools/truncation.ts"]
+      "imports": [
+        "plugin-api/src/utils/term-width.ts",
+        "src/client/types.ts",
+        "src/tools/truncation.ts"
+      ]
     },
     {
       "path": "src/host/ui/tool-transcript/format.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/tool-transcript/format.ts",
       "imports": [
+        "plugin-api/src/utils/term-width.ts",
         "src/llm/messages.ts",
         "src/sdk/tool-lifecycle.ts",
         "src/tools/glob-input.ts",
@@ -2030,19 +2054,15 @@
     },
     {
       "path": "src/host/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
-      "imports": [
-        "src/agent/tool-round.ts",
-        "src/sdk/lifecycle.ts",
-        "src/tools/feedback-tracker.ts"
-      ]
+      "dest": "core-engine",
+      "target": "src/host/ui/tool-transcript/tool-round-code-highlight.integration.test.ts",
+      "note": "S34 exports-gap decision (UNCLEAR resolution #1): validates a core-engine integration seam (code highlighting hooked into executeToolRound), not UI behavior per se. Reclassified cli -> core-engine; stays at its current path, no export needed."
     },
     {
       "path": "src/host/ui/turn-error.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/turn-error.test.ts",
-      "imports": ["plugin-api/src/llm/errors.ts"]
+      "imports": ["plugin-api/src/llm/errors.ts", "plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/host/ui/turn-error.ts",
@@ -2139,7 +2159,7 @@
       "path": "src/input/input.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/input/input.ts",
-      "imports": []
+      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/input/key-codec.ts",
@@ -2321,18 +2341,6 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/terminal/term-probe.ts",
       "imports": []
-    },
-    {
-      "path": "src/terminal/term-width.test.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/terminal/term-width.test.ts",
-      "imports": ["plugin-api/src/utils/term-width.ts"]
-    },
-    {
-      "path": "src/terminal/term-width.ts",
-      "dest": "cli",
-      "target": "minimal-agent-cli/src/terminal/term-width.ts",
-      "imports": ["plugin-api/src/utils/term-width.ts"]
     },
     {
       "path": "src/ui/",

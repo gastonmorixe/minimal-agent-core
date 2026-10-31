@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
-import { displayWidth } from "../terminal/term-width.ts"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { FakeTerminal } from "../test-utils/fake-terminal.ts"
 
 import { FakeCompositor, FakeOutput, FakeTTYInput, make } from "./editor-controller.fixtures.ts"

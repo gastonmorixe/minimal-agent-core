@@ -1,8 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { ProviderError } from "@minimal-agent/core/plugin-api/llm/errors"
-
-import { stripAnsi } from "../../terminal/term-width.ts"
+import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { errorCode, errorHint, formatFatalError, formatTurnError } from "./turn-error.ts"
 

@@ -34,12 +34,18 @@
  * @module host/sdk-adapters/build-agent-core
  */
 
+import {
+  combineTurnDrains,
+  instantiateTurnAttachments,
+  type TurnAttachmentContext,
+} from "../../agent/turn-attachments.ts"
 import type { AuthResult } from "../../auth/auth.ts"
 import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
 import type { StatusPort } from "../../bus/status-port.ts"
-import type { CacheTtl } from "../../cache/cache-ttl.ts"
+import { type CacheTtl, DEFAULT_CACHE_TTL } from "../../cache/cache-ttl.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { Message } from "../../llm/messages.ts"
+import { buildModelInfoSnapshot, buildSubagentModelRecommendations } from "../../llm/model-info.ts"
 import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
 import type { TransportFn } from "../../llm/transport/types.ts"
 import type { ModeManager } from "../../modes/modes.ts"
@@ -50,13 +56,14 @@ import { createRuntime } from "../../runtime/runtime.ts"
 import type { Session } from "../../runtime/session.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
 import type { EventSink } from "../../sdk/events.ts"
-import type { AgentCoreConfig, HostPorts } from "../../sdk/ports.ts"
+import type { AgentCoreConfig, CompactSourcePort, HostPorts } from "../../sdk/ports.ts"
 import type { ToolEnvPort } from "../../sdk/tool-env.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
 import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
 import type { SessionStore } from "../../session/session-store.ts"
 import { ToolFeedbackTracker } from "../../tools/feedback-tracker.ts"
+import { computeStartupHashes, type StartupHashes } from "../startup/startup-hashes.ts"
 import type { CodeHighlighter } from "../ui/formatter/mdstream-code-highlighter.ts"
 
 import { createLifecyclePort } from "./lifecycle-port-adapter.ts"
@@ -126,6 +133,19 @@ export interface BuildAgentCoreDeps {
   saveEcho: SaveEchoCollector | null
   /** Per-turn attachment producers (memory / tasks / fleet), in registry order. */
   turnAttachments: TurnAttachmentProducer[]
+  /**
+   * Raw context to instantiate the registered turn-attachment factories
+   * internally (S34 PORT fold: `agent/turn-attachments.ts`). When set,
+   * {@link buildAgentCore} / {@link openAgentCoreSession} call
+   * `instantiateTurnAttachments` + `combineTurnDrains` themselves and merge
+   * the result into `saveEcho` / `turnAttachments` above, instead of
+   * requiring the caller to do that first. Additive: a caller that already
+   * pre-instantiates (the original contract — passing `saveEcho` /
+   * `turnAttachments` directly) is unaffected by omitting this.
+   */
+  turnAttachmentContext?: TurnAttachmentContext
+  /** Logger forwarded to `instantiateTurnAttachments` when {@link turnAttachmentContext} is set. */
+  turnAttachmentLogger?: (msg: string) => void
   /** Injectable transport (test seam). Defaults to the registry-selected one. */
   sendFn?: TransportFn
   /** Optional network client forwarded to the transport. */
@@ -181,6 +201,51 @@ export interface BuildAgentCoreDeps {
    * {@link buildAgentCore} does not read it.
    */
   sessionId?: string
+  /**
+   * Compact-source override (S34 PORT fold: `plugins/host/providers/context-compact.ts`).
+   * Both {@link buildAgentCore} and
+   * {@link openAgentCoreSession} already wire the SDK's `compactSource`
+   * port to the plugin host's pending-compact queue
+   * (`takePendingCompact()`) by default; pass this to override that
+   * default — e.g. the REPL's keyboard-driven compact trigger feeds its own
+   * queue into the exact same port.
+   */
+  compactSource?: CompactSourcePort
+  /**
+   * Opt in to wiring the loader's ModelInfo-tool data source internally
+   * (S34 PORT fold: `llm/model-info.ts`), tied to the constructed core's
+   * own live model (`AgentCore.getModel()`), instead of the caller
+   * threading `modelInfoProvider` / `recommendSubagentModels` closures into
+   * `PluginLoader.load()` by hand. Off by default: an existing caller that
+   * already wires its own (e.g. a closure over its own live-model getter)
+   * keeps exactly its current behavior.
+   */
+  wireModelInfoSource?: boolean
+}
+
+/**
+ * Resolve the final `turnAttachments` / `saveEcho` pair for
+ * {@link buildAgentCore} / {@link openAgentCoreSession} (S34 PORT fold).
+ * With no `turnAttachmentContext`, returns `deps.turnAttachments` /
+ * `deps.saveEcho` unchanged — the original, pre-instantiated contract. With
+ * one, instantiates every registered turn-attachment factory against it and
+ * merges the result in, so a caller can pass the raw context instead of
+ * calling `instantiateTurnAttachments` / `combineTurnDrains` itself first.
+ */
+async function resolveTurnAttachments(
+  deps: BuildAgentCoreDeps,
+): Promise<{ turnAttachments: TurnAttachmentProducer[]; saveEcho: SaveEchoCollector | null }> {
+  if (!deps.turnAttachmentContext) {
+    return { turnAttachments: deps.turnAttachments, saveEcho: deps.saveEcho }
+  }
+  const { producers, drains } = await instantiateTurnAttachments(
+    deps.turnAttachmentContext,
+    deps.turnAttachmentLogger,
+  )
+  return {
+    turnAttachments: [...deps.turnAttachments, ...producers],
+    saveEcho: combineTurnDrains(deps.saveEcho ? [deps.saveEcho, ...drains] : drains),
+  }
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -240,12 +305,17 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
   })
 
+  // Turn attachments: pre-instantiated (the original contract) unless the
+  // caller passed a raw `turnAttachmentContext` (S34 PORT fold), in which
+  // case this instantiates the registered factories internally.
+  const { turnAttachments, saveEcho } = await resolveTurnAttachments(deps)
+
   // Prompt contributor: awaits the plugin prompt block once (parity seam),
   // plus save-echoes and per-turn attachment producers.
   const promptContributor = await PromptContributorAdapter.create({
     loader: deps.loader,
-    saveEcho: deps.saveEcho,
-    turnAttachments: deps.turnAttachments,
+    saveEcho,
+    turnAttachments,
   })
 
   // Session persistence: user/assistant/note/rewind only (tool_result owned by
@@ -268,9 +338,13 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   const mediaResolver = new MediaResolverAdapter(deps.model)
 
   // S17/S27: the `compactSource` port reads the plugin host's
-  // `context:compact` queue. AgentCore no longer imports `plugins/host`
-  // itself; this is the one place that bridges the two.
-  const ports: HostPorts = { compactSource: { take: () => takePendingCompact() } }
+  // `context:compact` queue by default (S34 PORT fold: a caller may
+  // override it instead, e.g. the REPL's keyboard-driven compact trigger).
+  // AgentCore no longer imports `plugins/host` itself; this is the one
+  // place that bridges the two.
+  const ports: HostPorts = {
+    compactSource: deps.compactSource ?? { take: () => takePendingCompact() },
+  }
 
   const config: AgentCoreConfig = {
     auth: deps.auth,
@@ -317,7 +391,25 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),
   }
 
-  return new AgentCore(config)
+  const core = new AgentCore(config)
+  wireModelInfoSourceIfOpted(deps, () => core.getModel())
+  return core
+}
+
+/**
+ * S34 PORT fold (`llm/model-info.ts`): when {@link BuildAgentCoreDeps.wireModelInfoSource}
+ * is set and a loader is present, replace its ModelInfo-tool data source
+ * with one tied to `getLiveModelId` — the constructed core's/session's own
+ * live model — instead of the caller threading those closures into
+ * `PluginLoader.load()` by hand. A no-op when the opt-in is unset (every
+ * existing caller's behavior is unchanged) or there is no loader.
+ */
+function wireModelInfoSourceIfOpted(deps: BuildAgentCoreDeps, getLiveModelId: () => string): void {
+  if (!deps.wireModelInfoSource || !deps.loader) return
+  deps.loader.setModelInfoSource(
+    () => buildModelInfoSnapshot(getLiveModelId(), deps.providerId),
+    () => buildSubagentModelRecommendations(getLiveModelId()),
+  )
 }
 
 /**
@@ -341,8 +433,16 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
  * `ask_denied` notice and the request sent unchanged — `AgentCore`'s own
  * headless fallback, the same behavior a bare `buildAgentCore`-built core
  * (no `ports.askUser`) has today.
+ *
+ * The returned value also carries `startupHashes` (S34 PORT fold:
+ * `host/startup/startup-hashes.ts`) — the `systemHash`/`toolsHash` pair a
+ * `--resume` drift check compares against the session-store meta record,
+ * computed from the SAME `deps` this function already assembled instead of
+ * a caller re-deriving them externally via a separate module call.
  */
-export async function openAgentCoreSession(deps: BuildAgentCoreDeps): Promise<Session> {
+export async function openAgentCoreSession(
+  deps: BuildAgentCoreDeps,
+): Promise<Session & { readonly startupHashes: StartupHashes }> {
   // Tool registry: core built-ins + plugin tools, with presentation + aliases.
   const toolRegistry = new ToolRegistryAdapter(deps.loader)
 
@@ -371,12 +471,17 @@ export async function openAgentCoreSession(deps: BuildAgentCoreDeps): Promise<Se
     ...(deps.toolEnv ? { toolEnv: deps.toolEnv } : {}),
   })
 
+  // Turn attachments: pre-instantiated (the original contract) unless the
+  // caller passed a raw `turnAttachmentContext` (S34 PORT fold), in which
+  // case this instantiates the registered factories internally.
+  const { turnAttachments, saveEcho } = await resolveTurnAttachments(deps)
+
   // Prompt contributor: awaits the plugin prompt block once (parity seam),
   // plus save-echoes and per-turn attachment producers.
   const promptContributor = await PromptContributorAdapter.create({
     loader: deps.loader,
-    saveEcho: deps.saveEcho,
-    turnAttachments: deps.turnAttachments,
+    saveEcho,
+    turnAttachments,
   })
 
   // Session persistence: user/assistant/note/rewind only (tool_result owned by
@@ -397,7 +502,7 @@ export async function openAgentCoreSession(deps: BuildAgentCoreDeps): Promise<Se
   const mediaResolver = new MediaResolverAdapter(deps.model)
 
   const runtime = createRuntime()
-  return runtime.openSession({
+  const session = await runtime.openSession({
     // Use the caller's session id when given. Else the runtime makes a UUID.
     ...(deps.sessionId !== undefined ? { id: deps.sessionId } : {}),
     auth: deps.auth,
@@ -439,10 +544,28 @@ export async function openAgentCoreSession(deps: BuildAgentCoreDeps): Promise<Se
     ...(deps.statusPort !== undefined ? { statusPort: deps.statusPort } : {}),
     ...(deps.pluginEvents !== undefined ? { pluginEvents: deps.pluginEvents } : {}),
     // S17/S27: the `compactSource` port reads the plugin host's
-    // `context:compact` queue, exactly like `buildAgentCore`.
-    ports: { compactSource: { take: () => takePendingCompact() } },
+    // `context:compact` queue by default, exactly like `buildAgentCore`
+    // (S34 PORT fold: a caller may override it instead).
+    ports: { compactSource: deps.compactSource ?? { take: () => takePendingCompact() } },
     askUserFallback: "none",
   })
+
+  wireModelInfoSourceIfOpted(deps, () => session.agentCore().getModel())
+
+  const startupHashes = await computeStartupHashes({
+    loader: deps.loader,
+    modeManager: deps.modeManager,
+    ...(deps.toolNamePolicy !== undefined ? { toolNamePolicy: deps.toolNamePolicy } : {}),
+    selectedModelBase: deps.model,
+    ...(deps.providerId !== undefined ? { selectedProviderId: deps.providerId } : {}),
+    auth: deps.auth,
+    cacheTtl: deps.cacheTtl ?? DEFAULT_CACHE_TTL,
+    ...(deps.systemPromptOverrides !== undefined
+      ? { systemPromptOverrides: deps.systemPromptOverrides }
+      : {}),
+  })
+
+  return Object.assign(session, { startupHashes })
 }
 
 /** No-op transcript writer for the headless path. */

@@ -6,8 +6,9 @@
 
 import { describe, expect, it } from "bun:test"
 
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import type { ToolUseBlock } from "../../../client/types.ts"
-import { displayWidth } from "../../../terminal/term-width.ts"
 
 import {
   formatToolInput,

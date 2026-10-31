@@ -18,8 +18,9 @@
  * @module ready-banner
  */
 
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import type { ModeManager } from "../../../modes/modes.ts"
-import { displayWidth } from "../../../terminal/term-width.ts"
 import { c } from "../style/ansi.ts"
 
 /** Separator between hint chunks: two spaces, a mid-dot, two spaces. */

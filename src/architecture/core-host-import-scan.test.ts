@@ -263,6 +263,23 @@ const BASELINE = new Map<string, number>([
   ["e2e/notification-frame-tear.e2e.test.ts", 1],
   ["e2e/prompt-inject-e2e.test.ts", 3],
   ["e2e/system-prompt-override-e2e.test.ts", 1],
+  // S34 exports-gap decision (Y4, host-kit cluster): these 8 are NOT P3-shim
+  // debt like the rest of this baseline — they are the new, deliberate
+  // `./host-kit/*` public re-export barrels (package.json#exports), each a
+  // one-line `export * from "../host/sdk-adapters/<name>.ts"`. The 8
+  // sdk-adapters genuinely live under src/host/ and are confirmed
+  // load-bearing (agent W's S34 finding); exporting them under a
+  // narrower-audience namespace outside src/host/ is the agreed fix for the
+  // exports gap, matching the public-closure baseline exceptions added in
+  // the same change. Each counts exactly 1 (the barrel's single re-export).
+  ["host-public/build-agent-core.ts", 1],
+  ["host-public/lifecycle-port-adapter.ts", 1],
+  ["host-public/media-resolver-adapter.ts", 1],
+  ["host-public/mode-provider-adapter.ts", 1],
+  ["host-public/prompt-contributor-adapter.ts", 1],
+  ["host-public/session-persistence-adapter.ts", 1],
+  ["host-public/tool-executor-adapter.ts", 1],
+  ["host-public/tool-registry-adapter.ts", 1],
   ["plugins/loader.replay-renderers.test.ts", 1],
   ["plugins/loader/replay-renderers.ts", 1],
   ["session/draft-store-editor.integration.test.ts", 1],
@@ -291,6 +308,22 @@ const BASELINE = new Map<string, number>([
   ["ui/style/ansi.ts", 1],
   ["ui/style/mode.ts", 1],
   ["ui/tool-transcript/format.ts", 1],
+
+  // S34 exports-gap decision (Y3): six thin `export * from` barrels under
+  // `src/exports/host/` that give a public `./host/*` subpath to a
+  // core-engine file (migration-manifest dest core-engine) that still
+  // physically sits under `src/host/` pending the S34 move. Each barrel is
+  // a brand-new, single-purpose forwarding file — not a growing edge on an
+  // existing collaborator — and burns to zero the same day its target
+  // physically moves out of `src/host/`. See the matching entries in
+  // `public-closure-scan.ts`'s `PUBLIC_CLOSURE_BASELINE` for the per-target
+  // reasoning.
+  ["host-public/context-exceeded-recovery.ts", 1],
+  ["host-public/model-catalog.ts", 1],
+  ["host-public/model-error.ts", 1],
+  ["host-public/provider-auth.ts", 1],
+  ["host-public/provider-discovery-boot.ts", 1],
+  ["host-public/session-index.ts", 1],
 ])
 
 describe("core→host import ratchet (repo invariant)", () => {

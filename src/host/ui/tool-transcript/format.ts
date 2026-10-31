@@ -9,16 +9,17 @@
  * @module ui/tool-transcript/format
  */
 
-import { shouldSoftSplit, splitBashSegments } from "../../../cli/bash-split.ts"
-import type { ToolUseBlock } from "../../../llm/messages.ts"
-import type { Finding, FindingSeverity } from "../../../sdk/tool-lifecycle.ts"
 import {
   displayWidth,
   expandTabs,
   truncateDisplayWidth,
   wordWrap,
   wrapIndented,
-} from "../../../terminal/term-width.ts"
+} from "@minimal-agent/core/plugin-api/utils/term-width"
+
+import { shouldSoftSplit, splitBashSegments } from "../../../cli/bash-split.ts"
+import type { ToolUseBlock } from "../../../llm/messages.ts"
+import type { Finding, FindingSeverity } from "../../../sdk/tool-lifecycle.ts"
 import { globPathFromInput, globPatternFromInput } from "../../../tools/glob-input.ts"
 import { countLines, type TruncationInfo } from "../../../tools/truncation.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"
