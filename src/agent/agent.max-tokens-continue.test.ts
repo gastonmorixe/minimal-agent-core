@@ -21,22 +21,34 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../auth/auth.ts"
 import type { StreamedResponse } from "../client/types.ts"
-
-import { Agent } from "./agent.ts"
+import type { TransportFn } from "../llm/transport/types.ts"
+import type { AgentCore } from "../sdk/agent-core.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const auth: AuthResult = { type: "api-key", token: "test-token" }
 
-async function drainRun(agent: Agent, prompt: string): Promise<string[]> {
+/** Build an AgentCore whose transcript sink records into the returned array. */
+async function buildAgent(
+  sendFn: TransportFn,
+): Promise<{ agent: AgentCore; transcript: string[] }> {
   const transcript: string[] = []
-  const gen = agent.run(prompt, { onTranscriptLine: (line) => transcript.push(line) })
+  const agent = await buildTestCore({
+    auth,
+    sendFn,
+    writeTranscript: (line) => transcript.push(line),
+  })
+  return { agent, transcript }
+}
+
+async function drainRun(agent: AgentCore, prompt: string): Promise<void> {
+  const gen = agent.run(prompt)
   while (true) {
     const { done } = await gen.next()
     if (done) break
   }
-  return transcript
 }
 
-describe("Agent.run max_tokens auto-continue", () => {
+describe("AgentCore.run max_tokens auto-continue", () => {
   it("auto-continues when a response truncates with no tool block, then finishes", async () => {
     let round = 0
     const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
@@ -58,8 +70,8 @@ describe("Agent.run max_tokens auto-continue", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn })
-    const transcript = await drainRun(agent, "write a long thing")
+    const { agent, transcript } = await buildAgent(sendFn)
+    await drainRun(agent, "write a long thing")
 
     // It made a second request (recovered) rather than dying after round 1.
     expect(round).toBe(2)
@@ -98,8 +110,8 @@ describe("Agent.run max_tokens auto-continue", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn })
-    const transcript = await drainRun(agent, "go")
+    const { agent, transcript } = await buildAgent(sendFn)
+    await drainRun(agent, "go")
 
     expect(round).toBe(2)
     const joined = transcript.join("\n")
@@ -123,8 +135,8 @@ describe("Agent.run max_tokens auto-continue", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn })
-    const transcript = await drainRun(agent, "loop forever")
+    const { agent, transcript } = await buildAgent(sendFn)
+    await drainRun(agent, "loop forever")
 
     // Cap is 5: rounds 1..5 each auto-continue, round 6 trips the cap and
     // stops. So sendFn is called exactly 6 times, not infinitely.
@@ -160,8 +172,8 @@ describe("Agent.run max_tokens auto-continue", () => {
       } as StreamedResponse
     }
 
-    const agent = new Agent({ auth, model: "test-model", sendFn })
-    const transcript = await drainRun(agent, "mixed")
+    const { agent, transcript } = await buildAgent(sendFn)
+    await drainRun(agent, "mixed")
 
     // rounds: 1 trunc(1), 2 trunc(2), 3 tool(reset→0), 4 trunc(1), 5 trunc(2),
     // 6 trunc(3), 7 trunc(4), 8 trunc(5), 9 trunc → cap trips. = 9 calls.

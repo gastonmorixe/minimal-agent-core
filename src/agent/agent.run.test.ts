@@ -7,8 +7,7 @@ import { describe, expect, it } from "bun:test"
 import type { AuthResult } from "../auth/auth.ts"
 import type { ContentBlock, Message, SendOptions, StreamedResponse } from "../client/types.ts"
 import { PluginLoader } from "../plugins/loader.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -16,8 +15,8 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "")
 }
 
-describe("Agent.run transcript", () => {
-  it("writes tool header and tool result preview via opts.onTranscriptLine", async () => {
+describe("AgentCore.run transcript", () => {
+  it("writes tool header and tool result preview via the writeTranscript sink", async () => {
     let round = 0
     const sendFn = async function* () {
       round++
@@ -44,12 +43,14 @@ describe("Agent.run transcript", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn })
-
     const transcript: string[] = []
-    const gen = agent.run("go", {
-      onTranscriptLine: (line: string) => transcript.push(line),
+    const agent = await buildTestCore({
+      auth,
+      sendFn,
+      writeTranscript: (line: string) => transcript.push(line),
     })
+
+    const gen = agent.run("go")
 
     while (true) {
       const { done } = await gen.next()
@@ -91,18 +92,16 @@ describe("Agent.run transcript", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({
+    const transcript: string[] = []
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn,
       reflectionInterval: 50,
       reflectionCooldownMs: 0,
+      writeTranscript: (line: string) => transcript.push(line),
     })
 
-    const transcript: string[] = []
-    const gen = agent.run("go", {
-      onTranscriptLine: (line: string) => transcript.push(line),
-    })
+    const gen = agent.run("go")
 
     while (true) {
       const { done } = await gen.next()
@@ -152,16 +151,14 @@ describe("Agent.run transcript", () => {
         } as StreamedResponse
       }
 
-      const agent = new Agent({
+      const transcript: string[] = []
+      const agent = await buildTestCore({
         auth: { type: "api-key", token: "test-token" },
-        model: "test-model",
         loader,
         sendFn,
+        writeTranscript: (line) => transcript.push(line),
       })
-      const transcript: string[] = []
-      for await (const _ of agent.run("go", {
-        onTranscriptLine: (line) => transcript.push(line),
-      })) {
+      for await (const _ of agent.run("go")) {
         // drain
       }
       const plain = stripAnsi(transcript.join("\n"))
@@ -220,7 +217,7 @@ describe("Agent.run transcript", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
 
     const gen = agent.run("go")
     while (true) {
@@ -262,7 +259,7 @@ describe("Agent.run transcript", () => {
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn })
     const ac = new AbortController()
     const gen = agent.run("go", { signal: ac.signal })
     while (true) {
@@ -308,10 +305,9 @@ describe("Agent.run transcript", () => {
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn })
+    const agent = await buildTestCore({ auth, sendFn, writeTranscript: () => {} })
     const gen = agent.run("go", {
       signal: ac.signal,
-      onTranscriptLine: () => {},
     })
     // First `next()` returns the "preamble" yield; we're now paused with
     // round 1 mid-execution. Abort here.
@@ -333,7 +329,7 @@ describe("Agent.run transcript", () => {
   })
 })
 
-describe("Agent.run coalesces onto a trailing user message (resume after force-quit)", () => {
+describe("AgentCore.run coalesces onto a trailing user message (resume after force-quit)", () => {
   // Resume state: the prior turn ran a tool, the result came back, but the
   // assistant continuation never streamed (force-quit). extractPendingDraft
   // pulled the un-replied prompt into the editor, leaving the history ending
@@ -375,7 +371,7 @@ describe("Agent.run coalesces onto a trailing user message (resume after force-q
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, initialMessages })
+    const agent = await buildTestCore({ auth, sendFn, initialMessages })
 
     const gen = agent.run("the resumed draft")
     while (true) {
@@ -420,7 +416,7 @@ describe("Agent.run coalesces onto a trailing user message (resume after force-q
       } as StreamedResponse
     }
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, initialMessages })
+    const agent = await buildTestCore({ auth, sendFn, initialMessages })
     const gen = agent.run("next question")
     while (true) {
       const { done } = await gen.next()
@@ -434,7 +430,7 @@ describe("Agent.run coalesces onto a trailing user message (resume after force-q
   })
 })
 
-describe("Agent + SessionStore", () => {
+describe("AgentCore + SessionStore", () => {
   it("persists user, assistant, and tool_result records across a full run", async () => {
     const { mkdtempSync } = await import("node:fs")
     const { tmpdir } = await import("node:os")
@@ -479,9 +475,9 @@ describe("Agent + SessionStore", () => {
     })
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({ auth, model: "test-model", sendFn, store })
+    const agent = await buildTestCore({ auth, sendFn, store, writeTranscript: () => {} })
 
-    const gen = agent.run("go", { onTranscriptLine: () => {} })
+    const gen = agent.run("go")
     while (true) {
       const { done } = await gen.next()
       if (done) break
@@ -500,11 +496,10 @@ describe("Agent + SessionStore", () => {
     expect(loaded.messages).toHaveLength(4)
   })
 
-  it("seeds messages from initialMessages on construction (resume path)", () => {
+  it("seeds messages from initialMessages on construction (resume path)", async () => {
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({
+    const agent = await buildTestCore({
       auth,
-      model: "test-model",
       initialMessages: [
         { role: "user", content: "earlier" },
         { role: "assistant", content: [{ type: "text", text: "ok" }] },

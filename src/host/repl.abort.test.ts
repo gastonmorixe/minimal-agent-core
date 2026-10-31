@@ -39,8 +39,9 @@ import type { AuthResult } from "../auth/auth.ts"
 import { abortBus as globalAbortBus } from "../bus/abort-bus.ts"
 import { StatusBus } from "../bus/status.ts"
 import type { Message, SendOptions, StreamedResponse } from "../client/types.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
-import { Agent, type ReplAgentLike, runRepl } from "./agent.ts"
+import { type ReplAgentLike, runRepl } from "./repl.ts"
 
 // ----------------------------- fakes ---------------------------------------
 
@@ -484,7 +485,7 @@ describe("runReplLiveArea : abort bus integration", () => {
 })
 
 // ---------------------------------------------------------------------------
-// End-to-end: real Agent + real tools + real Bash sleep, abort kills child.
+// End-to-end: real AgentCore + real tools + real Bash sleep, abort kills child.
 // ---------------------------------------------------------------------------
 
 describe("runReplLiveArea : abort kills in-flight tool", () => {
@@ -492,7 +493,7 @@ describe("runReplLiveArea : abort kills in-flight tool", () => {
     const compositor = new FakeCompositor()
     const editor = new FakeEditor()
 
-    // Build a real Agent whose first round emits a Bash tool_use, then
+    // Build a real AgentCore whose first round emits a Bash tool_use, then
     // (if it ever resumes) returns a benign assistant text. The tool will
     // be aborted via the global bus before the second round happens.
     let round = 0
@@ -524,11 +525,14 @@ describe("runReplLiveArea : abort kills in-flight tool", () => {
     }
 
     const auth: AuthResult = { type: "api-key", token: "test-token" }
-    const agent = new Agent({
+    const core = await buildTestCore({
       auth,
-      model: "test-model",
       sendFn: sendFn as any,
     })
+    // AgentCore has no `pluginLoader()` (the product wraps it in
+    // InteractiveSession, which supplies one), but runReplLiveArea calls it
+    // unconditionally. Graft a null loader so the REPL can drive the core.
+    const agent = Object.assign(core, { pluginLoader: () => null })
 
     const replPromise = runRepl(agent as any, {
       output: { isTTY: true, write: () => true } as any,

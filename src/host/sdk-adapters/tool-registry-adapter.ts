@@ -2,8 +2,8 @@
  * Host adapter: bind the core tool set + plugin-contributed tools to the SDK
  * {@link ToolRegistry} port.
  *
- * Reproduces exactly what the legacy `Agent` assembles at
- * `src/agent/agent.ts`: `allTools = [...TOOL_DEFINITIONS, ...loader.getExtraTools()]`,
+ * Assembles the advertised tool list:
+ * `allTools = [...TOOL_DEFINITIONS, ...loader.getExtraTools()]`,
  * plus the presentation map (icon / color / headerKey keyed by tool name,
  * with alias slots mirrored from the loader's alias map).
  *
@@ -43,7 +43,6 @@ export class ToolRegistryAdapter implements ToolRegistry {
 
   constructor(loader: PluginLoader | null) {
     // Core built-ins first, then plugin-contributed tools, in loader order.
-    // Byte-identical to `src/agent/agent.ts`'s `allTools`.
     this.tools = loader
       ? [...TOOL_DEFINITIONS, ...(loader.getExtraTools() as ToolDefinition[])]
       : [...TOOL_DEFINITIONS]

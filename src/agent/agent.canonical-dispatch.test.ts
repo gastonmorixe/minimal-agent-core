@@ -7,7 +7,7 @@
  * canonical `run()` to its owning adapter; an unregistered id raises an
  * unknown-model error rather than falling back to a hard-wired vendor.
  *
- * Core-side seam test: drives a real `Agent.run` turn with NO injected `sendFn`
+ * Core-side seam test: drives a real `AgentCore.run` turn with NO injected `sendFn`
  * (so the production default transport is exercised) against a SYNTHETIC in-test
  * provider registered straight into the canonical registries — no real provider
  * import (invariant I2). The fake provider uses a neutral id ("acme") because
@@ -39,8 +39,7 @@ import {
   NetworkResponse,
   type NetworkTransport,
 } from "../network/index.ts"
-
-import { Agent } from "./agent.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 
 function fakeNetworkClient(
   handler: (req: NetworkRequest) => NetworkResponse | Promise<NetworkResponse>,
@@ -120,7 +119,7 @@ function writeStoredAcmeKey(apiKey: string): void {
   defaultAuthStore().set(write.serviceId, write.displayName, write.secrets as SecretBag)
 }
 
-describe("Agent default transport — multi-provider dispatch", () => {
+describe("AgentCore default transport — multi-provider dispatch", () => {
   let dir: string
   const prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
 
@@ -149,7 +148,7 @@ describe("Agent default transport — multi-provider dispatch", () => {
     })
 
     const auth: AuthResult = { type: "oauth", token: HOST_SESSION_SECRET }
-    const agent = new Agent({ auth, model: "acme-model-1", networkClient })
+    const agent = await buildTestCore({ auth, model: "acme-model-1", networkClient })
 
     const out: string[] = []
     const gen = agent.run("ping")
@@ -175,7 +174,7 @@ describe("Agent default transport — multi-provider dispatch", () => {
     // An unregistered model id no longer falls back to a hard-wired vendor
     // endpoint. Every request routes through the canonical run(), which fails
     // to resolve the model and raises before any network call.
-    const agent = new Agent({ auth, model: "totally-unregistered-model", networkClient })
+    const agent = await buildTestCore({ auth, model: "totally-unregistered-model", networkClient })
     let threw = false
     try {
       const gen = agent.run("ping")

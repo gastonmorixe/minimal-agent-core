@@ -5,8 +5,8 @@
  *
  * SCOPE (honest, per the P4 ruling): this is the Codex-style turn/item/tool
  * EVENT stream. It is NOT yet what the live CLI `--json` flag emits — the
- * non-interactive CLI path currently drives the legacy Agent and `--json`
- * ships the "final answer as one JSONL line," not this event stream. Wiring
+ * non-interactive CLI `--json` path ships the "final answer as one JSONL
+ * line," not this event stream. Wiring
  * AgentCore + this JsonlEventSink into the CLI's non-interactive path is
  * PHASE 5 (owner: Dorothy). This test pins the event-stream contract NOW so
  * that Phase 5 swap lands against a frozen, proven wire format instead of an

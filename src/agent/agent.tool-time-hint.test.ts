@@ -1,7 +1,7 @@
 /**
  * Integration test for the tool-header time-hint suffix.
  *
- * Wires a real `Agent` with a `ToolTimeTracker`, drives one tool round,
+ * Wires a real `AgentCore` with a `ToolTimeTracker`, drives one tool round,
  * and asserts the rendered `╭` header line ends with ` · <time>` in the
  * expected format. Format-only assertions (regex) keep the test stable
  * across wall-clocks; we don't try to mock `Date.now()` because the
@@ -14,9 +14,8 @@
 import { describe, expect, it } from "bun:test"
 
 import type { StreamedResponse } from "../client/types.ts"
+import { buildTestCore } from "../test-utils/test-core.ts"
 import { ToolTimeTracker } from "../tools/tool-time.ts"
-
-import { Agent } from "./agent.ts"
 
 const ANSI_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 
@@ -61,18 +60,16 @@ function singleBashRoundSendFn(): import("../llm/transport/types.ts").TransportF
 const TIME_RE = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2}/
 const HMS_RE = /\d{2}:\d{2}:\d{2}/
 
-describe("Agent tool header — time-hint suffix", () => {
+describe("AgentCore tool header — time-hint suffix", () => {
   it("appends ` · Mon DD HH:MM:SS` on the first tool when tracker is wired", async () => {
-    const agent = new Agent({
+    const transcript: string[] = []
+    const agent = await buildTestCore({
       auth: { type: "api-key", token: "test-token" },
-      model: "test-model",
       sendFn: singleBashRoundSendFn(),
       toolTimeTracker: new ToolTimeTracker(),
+      writeTranscript: (line) => transcript.push(line),
     })
-    const transcript: string[] = []
-    for await (const _ of agent.run("hi", {
-      onTranscriptLine: (line) => transcript.push(line),
-    })) {
+    for await (const _ of agent.run("hi")) {
       // drain
     }
     const headerLine = transcript.find((l) => l.includes("╭"))
@@ -83,16 +80,14 @@ describe("Agent tool header — time-hint suffix", () => {
   })
 
   it("emits NO time suffix when toolTimeTracker is omitted (default)", async () => {
-    const agent = new Agent({
+    const transcript: string[] = []
+    const agent = await buildTestCore({
       auth: { type: "api-key", token: "test-token" },
-      model: "test-model",
       sendFn: singleBashRoundSendFn(),
       // no toolTimeTracker
+      writeTranscript: (line) => transcript.push(line),
     })
-    const transcript: string[] = []
-    for await (const _ of agent.run("hi", {
-      onTranscriptLine: (line) => transcript.push(line),
-    })) {
+    for await (const _ of agent.run("hi")) {
       // drain
     }
     const headerLine = transcript.find((l) => l.includes("╭"))
@@ -149,16 +144,14 @@ describe("Agent tool header — time-hint suffix", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test seam
     } as any as import("../llm/transport/types.ts").TransportFn
 
-    const agent = new Agent({
+    const transcript: string[] = []
+    const agent = await buildTestCore({
       auth: { type: "api-key", token: "test-token" },
-      model: "test-model",
       sendFn,
       toolTimeTracker: new ToolTimeTracker(),
+      writeTranscript: (line) => transcript.push(line),
     })
-    const transcript: string[] = []
-    for await (const _ of agent.run("hi", {
-      onTranscriptLine: (line) => transcript.push(line),
-    })) {
+    for await (const _ of agent.run("hi")) {
       // drain
     }
     const headers = transcript.filter((l) => l.includes("╭")).map(stripAnsi)

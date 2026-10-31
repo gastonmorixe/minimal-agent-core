@@ -359,7 +359,7 @@ export function createPluginLogger(pluginId: string, bus?: DiagnosticBus): Plugi
  * is set, avoiding a noisy duplicate.
  *
  * `Symbol.for(...)` is intentional: it lives in the global registry so
- * tagging in `client.ts` and detection in `agent.ts` see the same
+ * tagging in `client.ts` and detection in the REPL see the same
  * symbol identity even across module/test reloads.
  */
 const DIAG_EMITTED_SYMBOL = Symbol.for("minimal-agent.diag.error-already-rendered")

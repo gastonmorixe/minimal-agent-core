@@ -108,7 +108,7 @@ export async function computeStartupHashes(
   // Resolve blob-store enablement BEFORE the hash so the resume drift detector
   // treats "blob store on" vs "off" as distinct prefix shapes (cheap; the
   // config loader is memoized). The reflection defaults below MUST track the
-  // Agent class field defaults in src/agent.ts.
+  // AgentCore field defaults in src/sdk/agent-core.ts.
   const blobStoreEnabled = loadBlobStoreConfig().config.enabled
   const hasBodyExtras = Boolean(sessionContextForHash || afterInstructionsForHash)
   const systemForHash = hasBodyExtras
