@@ -107,6 +107,13 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: `--output-format stream-json` lines gain `sessionId`, `seq`,
+  and `ts` keys, after the event keys. `sessionId` is the CLI session id.
+  `seq` counts stdout lines from 0, with no gaps. `ts` is epoch
+  milliseconds (UTC). `src/sdk/events.ts` exports `serializeStreamJsonLine`,
+  `StreamJsonEnvelope`, and `StreamJsonLine`. `--output-format json` does
+  not change.
+
 - 2026-10-31: `item_started` carries `input` on a `tool_use` item. It is
   the exact input the model sent. It is a copy, so a sink that changes it
   does not change the history. It has no size cap: a large Write or Edit

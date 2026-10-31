@@ -61,7 +61,7 @@ class DiscardTranscript implements TranscriptSink {
  * `chunks` are given the sendFn yields them in order (to exercise the delta
  * path); otherwise it yields `text`.
  */
-function openSession(text: string, chunks?: string[]): Session {
+function openSession(text: string, chunks?: string[], id?: string): Session {
   const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
     for (const c of chunks ?? [text]) yield c
     return {
@@ -78,6 +78,7 @@ function openSession(text: string, chunks?: string[]): Session {
     toolExecutor: new StubExecutor(),
     transcriptSink: new DiscardTranscript(),
     sendFn,
+    ...(id !== undefined ? { id } : {}),
   })
 }
 
@@ -134,6 +135,12 @@ function parseLines(out: readonly string[]): unknown[] {
     .map((l) => JSON.parse(l))
 }
 
+/** Drop the stream-json envelope keys so a test can compare the event part. */
+function eventPart(line: unknown): Record<string, unknown> {
+  const { sessionId: _s, seq: _q, ts: _t, ...rest } = (line ?? {}) as Record<string, unknown>
+  return rest
+}
+
 function baseInput(over: Partial<RunNonInteractivePromptInput>): RunNonInteractivePromptInput {
   return {
     agent: neverAgent(),
@@ -182,8 +189,8 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
       .filter((l) => l.length > 0)
       .map((l) => JSON.parse(l))
     // stream-json closes with run_finished. The error event comes just before it.
-    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "failed" })
-    expect(events.at(-2)).toEqual({
+    expect(eventPart(events.at(-1))).toEqual({ type: "run_finished", outcome: "failed" })
+    expect(eventPart(events.at(-2))).toEqual({
       type: "error",
       message: "needs login",
       code: "p.login",
@@ -222,7 +229,7 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
     )
     expect(atExit.length).toBe(1)
     const snap = atExit[0] as Array<Record<string, unknown>>
-    expect(snap.at(-1)).toEqual({ type: "run_finished", outcome: "failed" })
+    expect(eventPart(snap.at(-1))).toEqual({ type: "run_finished", outcome: "failed" })
     expect(snap.at(-2)?.type).toBe("error")
   })
 
@@ -257,7 +264,7 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
     )
     expect(exits).toEqual([1])
     const snap = atExit[0] as Array<Record<string, unknown>>
-    expect(snap.at(-1)).toEqual({ type: "run_finished", outcome: "waiting" })
+    expect(eventPart(snap.at(-1))).toEqual({ type: "run_finished", outcome: "waiting" })
     expect(snap.some((e) => e.type === "error")).toBe(true)
   })
 })
@@ -273,7 +280,7 @@ describe("runNonInteractivePrompt — run_finished closing line", () => {
       }),
     )
     const events = parseLines(out) as Array<Record<string, unknown>>
-    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "completed" })
+    expect(eventPart(events.at(-1))).toEqual({ type: "run_finished", outcome: "completed" })
     expect(events.at(-2)?.type).toBe("turn_completed")
   })
 
@@ -373,10 +380,10 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     expect(out.length).toBe(6)
     expect(out.every((l) => l.endsWith("\n"))).toBe(true)
     const events = out.map((l) => JSON.parse(l))
-    expect(events[0]).toEqual({ type: "turn_started", turn: 1 })
+    expect(eventPart(events[0])).toEqual({ type: "turn_started", turn: 1 })
     expect(events.some((e) => e.type === "text_delta")).toBe(true)
-    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "completed" })
-    expect(events.at(-2)).toEqual({
+    expect(eventPart(events.at(-1))).toEqual({ type: "run_finished", outcome: "completed" })
+    expect(eventPart(events.at(-2))).toEqual({
       type: "turn_completed",
       turn: 1,
       stopReason: "end_turn",
@@ -563,5 +570,58 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     expect(rec.calls()).toBe(1)
     // A conforming answer means no schema-failure exit.
     expect(exitCode).toBeUndefined()
+  })
+})
+
+describe("runNonInteractivePrompt — stream-json line envelope", () => {
+  it("stream-json: every line has sessionId, seq 0..n-1, and a non-decreasing ts", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () => Promise.resolve(openSession("hello", ["he", "llo"], "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.length).toBeGreaterThan(2)
+    for (const l of lines) expect(l.sessionId).toBe("sid-x")
+    expect(lines.map((l) => l.seq)).toEqual(lines.map((_, i) => i))
+    const ts = lines.map((l) => l.ts)
+    for (const t of ts) expect(typeof t).toBe("number")
+    for (let i = 1; i < ts.length; i++) {
+      expect(ts[i] as number).toBeGreaterThanOrEqual(ts[i - 1] as number)
+    }
+  })
+
+  it("stream-json: the event keys come first, then sessionId, seq, ts", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () => Promise.resolve(openSession("hi", undefined, "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const first = parseLines(out)[0] as Record<string, unknown>
+    expect(Object.keys(first)).toEqual(["type", "turn", "sessionId", "seq", "ts"])
+  })
+
+  it("json: no line has sessionId, seq, or ts", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        openEventStreamSession: () => Promise.resolve(openSession("hello", ["he", "llo"], "sid-x")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const lines = parseLines(out) as Array<Record<string, unknown>>
+    expect(lines.length).toBeGreaterThan(0)
+    for (const l of lines) {
+      expect("sessionId" in l).toBe(false)
+      expect("seq" in l).toBe(false)
+      expect("ts" in l).toBe(false)
+    }
   })
 })

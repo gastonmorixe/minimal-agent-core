@@ -18,6 +18,8 @@
  *     {@link serializeEvent} produces. `json` keeps
  *     {@link LEGACY_EVENT_KINDS}. `stream-json` keeps
  *     {@link STREAM_JSON_EVENT_KINDS}, so its last line is `run_finished`.
+ *     Each stream-json line also carries `sessionId`, `seq`, and `ts` after
+ *     the event keys (see {@link serializeStreamJsonLine}). json lines do not.
  *     The events ARE the output; the yielded text channel is drained and
  *     discarded (the `item_completed` events already carry the assistant
  *     text).
@@ -49,7 +51,12 @@ import { fatalErrorFields } from "../../llm/error-hint.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
 import type { Session } from "../../runtime/session.ts"
-import { LEGACY_EVENT_KINDS, STREAM_JSON_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
+import {
+  LEGACY_EVENT_KINDS,
+  STREAM_JSON_EVENT_KINDS,
+  serializeEvent,
+  serializeStreamJsonLine,
+} from "../../sdk/events.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "../print-output.ts"
 import type { ReplAgentLike } from "../repl.ts"
 import { applyTurnWillStart } from "../repl-editor-hooks.ts"
@@ -129,7 +136,10 @@ function wantsEventStream(input: RunNonInteractivePromptInput): boolean {
  * JSONL to stdout. Used for `--output-format json` / `stream-json`. `json`
  * keeps `LEGACY_EVENT_KINDS`. `stream-json` keeps `STREAM_JSON_EVENT_KINDS`,
  * which adds the closing `run_finished` line. That line is written before
- * any `exit` call, because `Session` drains its queue first.
+ * any `exit` call, because `Session` drains its queue first. Each stream-json
+ * line gets the envelope keys `sessionId` (the entry's session id), `seq` (a
+ * count of lines on this stdout, from 0), and `ts` (the entry's epoch ms).
+ * json lines stay byte-identical to `serializeEvent(entry.data)`.
  *
  * `Session`'s own event log always captures every `AgentEvent` kind (its
  * whole point, a complete trace) — this function filters AT THIS
@@ -158,6 +168,9 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
   const emitDeltas = input.outputFormat === "stream-json"
   // stream-json also keeps the closing run_finished line. json stays frozen.
   const keep = emitDeltas ? STREAM_JSON_EVENT_KIND_SET : LEGACY_EVENT_KIND_SET
+  // stream-json lines carry an envelope. seq counts the lines written to this
+  // stdout, from 0. It is not entry.seq, which counts every logged entry.
+  let seq = 0
 
   try {
     const run = session.run(input.prompt, { emitDeltas })
@@ -170,7 +183,12 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
       // STREAM_JSON_EVENT_KINDS for stream-json). It does not change what
       // Session logs internally.
       if (entry.ch === "event" && keep.has(entry.data.type)) {
-        write(serializeEvent(entry.data))
+        if (emitDeltas) {
+          const env = { sessionId: entry.sessionId, seq: seq++, ts: entry.ts }
+          write(serializeStreamJsonLine(entry.data, env))
+        } else {
+          write(serializeEvent(entry.data))
+        }
       }
     }
     const result = await run.result
