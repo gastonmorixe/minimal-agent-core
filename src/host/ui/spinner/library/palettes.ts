@@ -8,7 +8,7 @@
  * @module spinner/library/palettes
  */
 
-import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import type { Colorizer } from "../types.ts"
 

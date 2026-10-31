@@ -17,8 +17,8 @@
  * @module ui/choice-modal
  */
 
-import { ANSI_CODES, color as colorText } from "@minimal-agent/plugin-api/utils/ansi"
-import { PALETTE } from "@minimal-agent/plugin-api/utils/palette"
+import { ANSI_CODES, color as colorText } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { PALETTE } from "@minimal-agent/core/plugin-api/utils/palette"
 
 import { displayWidth } from "../../terminal/term-width.ts"
 

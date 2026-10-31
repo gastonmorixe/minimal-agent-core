@@ -4,9 +4,6 @@
   "workspaces": {
     "": {
       "name": "minimal-agent",
-      "dependencies": {
-        "@minimal-agent/plugin-api": "workspace:*",
-      },
       "devDependencies": {
         "@biomejs/biome": "catalog:",
         "@commitlint/cli": "^21.2.3",
@@ -19,10 +16,6 @@
         "oxlint-tsgolint": "catalog:",
         "typescript": "catalog:",
       },
-    },
-    "plugin-api": {
-      "name": "@minimal-agent/plugin-api",
-      "version": "0.1.0",
     },
     "tools/docs": {
       "name": "@minimal-agent/docs-tooling",
@@ -150,8 +143,6 @@
     "@microsoft/tsdoc-config": ["@microsoft/tsdoc-config@0.18.3", "", { "dependencies": { "@microsoft/tsdoc": "0.17.1", "ajv": "~8.18.0", "jju": "~1.4.0", "resolve": "~1.22.2" } }, "sha512-0I0rGXo1eJziw3EEErkDS9p/0RzBcyOiV+zbSDqOZTeURmhtut+WIvpih0LM5g+ZpZ9SyFxDfkhAcl/r8e2zGw=="],
 
     "@minimal-agent/docs-tooling": ["@minimal-agent/docs-tooling@workspace:tools/docs"],
-
-    "@minimal-agent/plugin-api": ["@minimal-agent/plugin-api@workspace:plugin-api"],
 
     "@oxlint-tsgolint/darwin-arm64": ["@oxlint-tsgolint/darwin-arm64@7.0.2004", "", { "os": "darwin", "cpu": "arm64" }, "sha512-uJk3ttju7Lz+Nv8WG4CsLyewoL1qf/Ny8S8OksJ7Bm/F14Tc9gMfW6arM1PCc57IzH/X/I79YsCWTgxX1FKibQ=="],
 

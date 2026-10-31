@@ -8,9 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { setDecorationSuffix } from "@minimal-agent/plugin-api/utils/decoration-suffix"
-import { clearFooterTails, setFooterTail } from "@minimal-agent/plugin-api/utils/footer-tail"
-import { displayWidth } from "@minimal-agent/plugin-api/utils/term-width"
+import { setDecorationSuffix } from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
+import { clearFooterTails, setFooterTail } from "@minimal-agent/core/plugin-api/utils/footer-tail"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { FakeClock, makeSink, makeSlot } from "./live-area-scheduler.fixtures.ts"
 import { LiveAreaScheduler } from "./live-area-scheduler.ts"

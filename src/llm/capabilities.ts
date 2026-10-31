@@ -1,6 +1,6 @@
 /**
  * Re-export shim (Wave D-1). The capability type/util surface MOVED to the
- * leaf contract package `@minimal-agent/plugin-api/llm/capabilities` so plugins
+ * leaf contract package `@minimal-agent/core/plugin-api/llm/capabilities` so plugins
  * can depend on it without reaching into `src/`. This shim keeps the old
  * `src/llm/capabilities.ts` import path alive for core (and any not-yet-swept
  * plugin) until the per-plugin D-5..D-12 sweeps re-point importers at the
@@ -10,4 +10,4 @@
  * @module llm/capabilities
  */
 
-export * from "@minimal-agent/plugin-api/llm/capabilities"
+export * from "@minimal-agent/core/plugin-api/llm/capabilities"

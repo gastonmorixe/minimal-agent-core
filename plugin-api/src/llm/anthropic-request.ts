@@ -336,7 +336,7 @@ function toAnthropicContentBlock(block: CanonicalBlock): AnthropicContentBlock |
 }
 
 function toAnthropicImageSource(
-  src: import("@minimal-agent/plugin-api/llm/canonical-messages").ImageSource,
+  src: import("@minimal-agent/core/plugin-api/llm/canonical-messages").ImageSource,
 ): AnthropicImageSource | null {
   switch (src.kind) {
     case "url":
@@ -353,7 +353,7 @@ function toAnthropicImageSource(
 }
 
 function toAnthropicCacheControl(
-  hint: import("@minimal-agent/plugin-api/llm/canonical-messages").CanonicalCacheHint,
+  hint: import("@minimal-agent/core/plugin-api/llm/canonical-messages").CanonicalCacheHint,
 ): AnthropicCacheControl {
   const out: AnthropicCacheControl = { type: "ephemeral" }
   if (hint.ttl) out.ttl = hint.ttl
@@ -370,7 +370,7 @@ function toAnthropicToolDef(tool: CanonicalToolDefinition): AnthropicToolDef {
 }
 
 function toAnthropicToolChoice(
-  choice: import("@minimal-agent/plugin-api/llm/canonical-tools").ToolChoice,
+  choice: import("@minimal-agent/core/plugin-api/llm/canonical-tools").ToolChoice,
 ): AnthropicRequestBody["tool_choice"] {
   switch (choice.type) {
     case "auto":

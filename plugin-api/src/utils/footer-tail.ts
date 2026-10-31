@@ -23,7 +23,7 @@
  *   ctx.setFooterTail?.("") // clear when idle
  *
  *   // In the host flush:
- *   import { getFooterTails } from "@minimal-agent/plugin-api/utils/footer-tail"
+ *   import { getFooterTails } from "@minimal-agent/core/plugin-api/utils/footer-tail"
  *   const tails = getFooterTails()
  *   if (tails) line = padRight(line, tails, cols)
  */

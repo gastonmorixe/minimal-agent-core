@@ -10,7 +10,7 @@
  * @module llm/transport/debug
  */
 
-import { ansiStyle } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 import { clampWithHint } from "../../utils/truncate-hint.ts"
 import type { ContentBlock, Message } from "../messages.ts"

@@ -10,7 +10,7 @@
  * The block field names use snake_case (`tool_use_id`, `cache_control`)
  * because that is the on-disk persisted shape; renaming them would break
  * resume of existing sessions. The canonical request/event types in
- * `@minimal-agent/plugin-api/llm/*` are the camelCase transport vocabulary
+ * `@minimal-agent/core/plugin-api/llm/*` are the camelCase transport vocabulary
  * the provider port consumes; the transport codec maps between the two.
  *
  * @module llm/messages

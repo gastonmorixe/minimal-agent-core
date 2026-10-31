@@ -19,7 +19,7 @@
  *
  * @module scrollback-submitted-at
  */
-import { ansiStyle as c } from "@minimal-agent/plugin-api/utils/ansi"
+import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
 
 /**
  * Configured rendering style for submitted prompt timestamps.

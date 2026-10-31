@@ -3,7 +3,7 @@
  *
  * This is the LEAF copy: pure path math, no IO, no `src/` imports. Both the
  * host (`src/agent-paths.ts` re-exports these) and every plugin that can take
- * a workspace dependency (`@minimal-agent/plugin-api/utils/agent-paths`) call
+ * a workspace dependency (`@minimal-agent/core/plugin-api/utils/agent-paths`) call
  * the SAME functions, so the resolution rule lives in exactly one place.
  *
  * ## The contract

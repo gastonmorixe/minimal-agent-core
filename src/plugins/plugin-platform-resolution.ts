@@ -23,7 +23,7 @@ import {
   detectPlatform,
   type NormalizedPlatform,
   normalizePlatform,
-} from "@minimal-agent/plugin-api/utils/platform"
+} from "@minimal-agent/core/plugin-api/utils/platform"
 
 /** Where the effective platform value came from (for banner/provenance). */
 export type PlatformSource = "cli" | "env" | "detected"
