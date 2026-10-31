@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { displayWidth } from "../../terminal/term-width.ts"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { Picker, type PickerItem } from "./picker.ts"
 

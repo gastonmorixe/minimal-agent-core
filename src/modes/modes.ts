@@ -306,27 +306,6 @@ export interface PendingModeAttachment {
   toId: string | null
 }
 
-/**
- * Color helpers indexed by the manifest's `color` field.
- *
- * Falls back to {@link c.cyan} for unknown values. Kept in sync with
- * `VALID_MODE_COLORS` in `plugins/manifest.ts`.
- */
-const COLOR_HELPERS: Record<string, (s: string) => string> = {
-  cyan: c.cyan,
-  blue: c.blue,
-  magenta: c.magenta,
-  yellow: c.yellow,
-  green: c.green,
-  red: c.red,
-  pink: c.pink,
-  purple: c.purple,
-  orange: c.orange,
-  sky: c.sky,
-  lime: c.lime,
-  gold: c.gold,
-}
-
 /** Default fallback when a mode declares no `statusLabel`. */
 function defaultStatusLabel(mode: ManifestMode): string {
   if (mode.statusLabel) return mode.statusLabel
@@ -1014,20 +993,6 @@ export class ModeManager {
    */
   statusStyle(): ResolvedSurfaceStyle | null {
     return this.resolved()?.status ?? null
-  }
-
-  /**
-   * Color helper for the active mode (defaults to {@link c.cyan}). Useful
-   * when the REPL wants to color the spinner accent or other small UI bits
-   * via the legacy `c.*` helper signature.
-   *
-   * @deprecated Prefer {@link statusStyle} or {@link resolved} so callers
-   * also get bold/dim/bg, not just a fg-only function.
-   */
-  color(): (s: string) => string {
-    const m = this.active()
-    if (!m) return c.cyan
-    return COLOR_HELPERS[m.color ?? "cyan"] ?? c.cyan
   }
 
   private notify(): void {

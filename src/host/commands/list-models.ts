@@ -14,10 +14,11 @@
  * @module commands/list-models
  */
 
+import { displayWidth, wordWrap } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import type { PrintFormat } from "../../cli/print-format.ts"
 import type { Capabilities, ServerToolId } from "../../llm/capabilities.ts"
 import { canonicalProviderId } from "../../llm/provider-plugin.ts"
-import { displayWidth, wordWrap } from "../../terminal/term-width.ts"
 import { writeCommandRows } from "../ui/command-output.ts"
 import { c } from "../ui/style/ansi.ts"
 

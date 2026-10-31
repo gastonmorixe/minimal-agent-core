@@ -8,7 +8,7 @@
  * @module ui/help/render
  */
 
-import { displayWidth } from "../../../terminal/term-width.ts"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 export interface HelpRow {
   term: string

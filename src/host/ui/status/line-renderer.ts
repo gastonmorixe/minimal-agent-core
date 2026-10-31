@@ -1,7 +1,7 @@
 import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { displayWidth, truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import type { StatusBus, StatusSnapshot } from "../../../bus/status.ts"
-import { displayWidth, truncateDisplayWidth } from "../../../terminal/term-width.ts"
 import {
   BlinkingNerdSpinner,
   type BlinkingNerdSpinnerTheme,

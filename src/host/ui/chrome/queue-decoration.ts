@@ -51,8 +51,8 @@
  * (byte-for-byte) so a turn that merely has a queue looks unchanged.
  */
 import { ANSI_CODES, bgRgb, ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+import { displayWidth, truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
-import { displayWidth, truncateDisplayWidth } from "../../../terminal/term-width.ts"
 import { truncHint } from "../../../utils/truncate-hint.ts"
 
 /**

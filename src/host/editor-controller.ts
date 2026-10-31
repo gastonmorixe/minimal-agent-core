@@ -13,6 +13,8 @@
 
 import { EventEmitter } from "node:events"
 
+import { truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { type AbortBus, abortBus } from "../bus/abort-bus.ts"
 import {
   EscapeHatch,
@@ -26,7 +28,6 @@ import {
 import { EditorBuffer } from "../input/editor-buffer.ts"
 import { type InputCaptureStack, inputCaptureStack } from "../input/input-capture-stack.ts"
 import type { Hooks } from "../plugins/hooks/hooks.ts"
-import { truncateDisplayWidth } from "../terminal/term-width.ts"
 
 import { BufferStyleLayers } from "./editor/buffer-style-layers.ts"
 import { FooterLayers } from "./editor/footer-layers.ts"

@@ -6,7 +6,7 @@ import {
   cursorVisualCol,
   displayWidth,
   wrapRows,
-} from "../terminal/term-width.ts"
+} from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import {
   findCsiEnd,

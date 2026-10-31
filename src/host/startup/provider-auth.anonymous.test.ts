@@ -11,13 +11,14 @@ import { join } from "node:path"
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
+
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth-store.ts"
 import {
   type ApiKeyAuthProvider,
   clearProviderPlugins,
   registerProviderPlugin,
 } from "../../llm/provider-plugin.ts"
-import { stripAnsi } from "../../terminal/term-width.ts"
 
 import { resolveStartupAuth, startupAuthLabel } from "./provider-auth.ts"
 

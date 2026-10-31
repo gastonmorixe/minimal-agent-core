@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { displayWidth, stripAnsi } from "../../terminal/term-width.ts"
+import { displayWidth, stripAnsi } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { coerceNoticeBlock, renderCommandNoticeBlock } from "./command-notice.ts"
 

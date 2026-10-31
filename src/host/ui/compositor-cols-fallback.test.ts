@@ -33,7 +33,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
-import { displayWidth } from "../../terminal/term-width.ts"
+import { displayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import { Compositor } from "./compositor.ts"
 
