@@ -111,7 +111,7 @@ export interface CliOptions {
   readonly wantAuthStatus: boolean
   /**
    * `--host-mode <id>` — hands the whole process to the matching plugin
-   * `hostModes[]` entry after full boot (ACP Level 1's dispatch slot).
+   * `hostModes[]` entry after full boot (the plugin host-mode dispatch slot).
    * `undefined` when the flag is absent; `planCommand` only selects the
    * `"host-mode"` command when this is set.
    */

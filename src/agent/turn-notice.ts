@@ -135,9 +135,9 @@ export interface AskDeniedNotice {
  * The core adopted a different model on its own, through the preflight
  * `adoptModelId` path (a provider issue resolution, not a user-requested
  * `setModel`). Emitted every time `to !== from`, so a client watching the
- * notice stream never keeps a stale model value — this is also what a
- * future ACP host turns into a `session/update` `config_option_update`
- * push. `effortReset` is `true` when the new model does not support the
+ * notice stream never keeps a stale model value. A host-mode plugin can
+ * turn this notice into a model-change push in its own protocol.
+ * `effortReset` is `true` when the new model does not support the
  * prior effort level, which the core already reset to the model default
  * (`undefined`) in the same step that adopted the model; `effortFrom` is
  * that prior level, or `null` when no reset happened.
