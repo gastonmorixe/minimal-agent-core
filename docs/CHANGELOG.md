@@ -107,6 +107,23 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: `item_started` carries `input` on a `tool_use` item (C2). It is
+  the exact input the model sent. It is a copy, so a sink that changes it
+  does not change the history. It has no size cap: a large Write or Edit
+  payload appears in full. A persisted runtime session writes every event
+  kind to `<sid>.events.jsonl`, so that file now stores each tool input
+  three times per call: in the assistant record, in `tool_call`, and in
+  `item_started`. Follow-up idea, not done: the core copies the input even
+  when no sink takes `item_started` (`agent-core.ts` builds item events
+  before the emit filter). A lazy build like `wantsToolOutput`
+  (`event-filter.ts`) would skip that copy.
+
+- 2026-10-31: `--output-format stream-json` ends with a `run_finished` line
+  (C3). `src/sdk/events.ts` exports `STREAM_JSON_EVENT_KINDS`: the legacy
+  nine kinds plus `run_finished`. The line has the run outcome (`completed`,
+  `failed`, `aborted`, `waiting`). It is on stdout before the process exits.
+  `--output-format json` does not change. It stays on `LEGACY_EVENT_KINDS`.
+
 - 2026-10-31: No direct process writes in engine code (S25).
   `src/architecture/no-direct-writes.test.ts` fails on `console.*`,
   `process.stdout.write`, `process.stderr.write`, or `Bun.stdout` /

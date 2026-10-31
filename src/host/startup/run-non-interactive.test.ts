@@ -125,6 +125,15 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
   return buf
 }
 
+/** Parse the JSONL chunks written so far into event objects. */
+function parseLines(out: readonly string[]): unknown[] {
+  return out
+    .join("")
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l))
+}
+
 function baseInput(over: Partial<RunNonInteractivePromptInput>): RunNonInteractivePromptInput {
   return {
     agent: neverAgent(),
@@ -172,13 +181,114 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
       .split("\n")
       .filter((l) => l.length > 0)
       .map((l) => JSON.parse(l))
-    expect(events.at(-1)).toEqual({
+    // stream-json closes with run_finished. The error event comes just before it.
+    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "failed" })
+    expect(events.at(-2)).toEqual({
       type: "error",
       message: "needs login",
       code: "p.login",
       hint: "run: login",
     })
     expect(exits).toEqual([1])
+  })
+
+  it("stream-json fatal error: run_finished failed is on stdout before exit is called", async () => {
+    const out: string[] = []
+    // Snapshot of the stdout lines at the moment exit is called.
+    const atExit: unknown[][] = []
+    // biome-ignore lint/correctness/useYield: throws before the first chunk
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      throw Object.assign(new Error("needs login"), { code: "p.login", hint: "run: login" })
+    }
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () =>
+          Promise.resolve(
+            createRuntime().openSession({
+              auth: AUTH,
+              model: "test-model",
+              toolRegistry: EMPTY_REGISTRY,
+              toolExecutor: new StubExecutor(),
+              transcriptSink: new DiscardTranscript(),
+              sendFn,
+            }),
+          ),
+        stdout: (s) => out.push(s),
+        exit: ((_code: number) => {
+          atExit.push(parseLines(out))
+        }) as (code: number) => never,
+      }),
+    )
+    expect(atExit.length).toBe(1)
+    const snap = atExit[0] as Array<Record<string, unknown>>
+    expect(snap.at(-1)).toEqual({ type: "run_finished", outcome: "failed" })
+    expect(snap.at(-2)?.type).toBe("error")
+  })
+
+  it("stream-json waiting run: run_finished waiting is on stdout before exit is called", async () => {
+    const out: string[] = []
+    const atExit: unknown[][] = []
+    const exits: number[] = []
+    // A permanent error pauses the run (outcome waiting), it does not throw.
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      throw Object.assign(new Error("fatal upstream failure"), { errorClass: "permanent" })
+    }
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () =>
+          Promise.resolve(
+            createRuntime().openSession({
+              auth: AUTH,
+              model: "test-model",
+              toolRegistry: EMPTY_REGISTRY,
+              toolExecutor: new StubExecutor(),
+              transcriptSink: new DiscardTranscript(),
+              sendFn,
+            }),
+          ),
+        stdout: (s) => out.push(s),
+        exit: ((code: number) => {
+          exits.push(code)
+          atExit.push(parseLines(out))
+        }) as (code: number) => never,
+      }),
+    )
+    expect(exits).toEqual([1])
+    const snap = atExit[0] as Array<Record<string, unknown>>
+    expect(snap.at(-1)).toEqual({ type: "run_finished", outcome: "waiting" })
+    expect(snap.some((e) => e.type === "error")).toBe(true)
+  })
+})
+
+describe("runNonInteractivePrompt — run_finished closing line", () => {
+  it("stream-json success: the last line is run_finished completed, after turn_completed", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "stream-json",
+        openEventStreamSession: () => Promise.resolve(openSession("hi")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const events = parseLines(out) as Array<Record<string, unknown>>
+    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "completed" })
+    expect(events.at(-2)?.type).toBe("turn_completed")
+  })
+
+  it("json success: no run_finished line (the json route stays on the frozen nine)", async () => {
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        openEventStreamSession: () => Promise.resolve(openSession("hi")),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const events = parseLines(out) as Array<Record<string, unknown>>
+    expect(events.some((e) => e.type === "run_finished")).toBe(false)
+    expect(events.at(-1)?.type).toBe("turn_completed")
   })
 })
 
@@ -258,13 +368,15 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     expect(opened).toBe(1)
     // One write per event (live flush), each a complete JSONL line. stream-json
     // includes the realtime text_delta, so a single-chunk "yo" turn produces:
-    // turn_started, text_delta, item_started, item_completed, turn_completed.
-    expect(out.length).toBe(5)
+    // turn_started, text_delta, item_started, item_completed, turn_completed,
+    // and the closing run_finished line.
+    expect(out.length).toBe(6)
     expect(out.every((l) => l.endsWith("\n"))).toBe(true)
     const events = out.map((l) => JSON.parse(l))
     expect(events[0]).toEqual({ type: "turn_started", turn: 1 })
     expect(events.some((e) => e.type === "text_delta")).toBe(true)
-    expect(events.at(-1)).toEqual({
+    expect(events.at(-1)).toEqual({ type: "run_finished", outcome: "completed" })
+    expect(events.at(-2)).toEqual({
       type: "turn_completed",
       turn: 1,
       stopReason: "end_turn",
