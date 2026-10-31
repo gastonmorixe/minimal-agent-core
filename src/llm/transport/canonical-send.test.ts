@@ -202,6 +202,9 @@ afterAll(() => {
   else process.env.MINIMAL_AGENT_AUTH_FILE = prevModuleAuthFile
   resetDefaultAuthStoreForTests()
   if (moduleAuthDir) rmSync(moduleAuthDir, { recursive: true, force: true })
+  // Every completed send adds to the process-wide session-token totals; leave
+  // them at zero for the next file in a shared `bun test` process.
+  clearSessionTokens()
 })
 
 function writeStoredOpenAIKey(apiKey: string): void {
