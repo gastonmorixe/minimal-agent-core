@@ -168,6 +168,7 @@ function foldRecordsInternal(
       case "meta":
       case "note":
       case "history_edit":
+      case "round_checkpoint":
       case "attach":
       case "detach":
         continue
@@ -685,4 +686,38 @@ export function firstUserPromptSnippet(records: SessionRecord[], maxLen = 60): s
     }
   }
   return ""
+}
+
+// ---------------------------------------------------------------------------
+// Round checkpoint resume (S50)
+// ---------------------------------------------------------------------------
+
+/**
+ * The latest round checkpoint of the session's last turn (the records after
+ * its last `user` record), or `null` when that turn wrote none.
+ *
+ * A completed turn's final round writes no checkpoint (there is nothing
+ * left to resume), so a non-null result means that turn was cut short : by
+ * a crash, a restart, or a permanent error that paused it. Pass the result
+ * as `AgentCoreConfig.initialCheckpoint` and call
+ * `AgentCore.run(input, {resume: true})` to continue it at the next round.
+ */
+export function lastTurnRoundCheckpoint(
+  records: SessionRecord[],
+): { round: number; streaks: { maxTokens: number; interrupted: number } } | null {
+  let lastUserAt = -1
+  for (let i = 0; i < records.length; i++) {
+    if (records[i].kind === "user") lastUserAt = i
+  }
+  if (lastUserAt < 0) return null
+  let latest: Extract<SessionRecord, { kind: "round_checkpoint" }> | null = null
+  for (let i = lastUserAt + 1; i < records.length; i++) {
+    const r = records[i]
+    if (r.kind === "round_checkpoint") latest = r
+  }
+  if (!latest) return null
+  return {
+    round: latest.round,
+    streaks: { maxTokens: latest.maxTokensStreak, interrupted: latest.interruptedStreak },
+  }
 }

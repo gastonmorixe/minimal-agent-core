@@ -206,6 +206,39 @@ export interface StatusEvent {
   cause?: string
 }
 
+/** One answer the user can pick in an {@link AskUserEvent}. */
+export interface AskUserOption {
+  /** The id the host answers with. */
+  id: string
+  /** Short caption. */
+  label: string
+  /** One-line explanation. */
+  description?: string
+  /** At most one option per ask is the default. */
+  isDefault?: boolean
+  /** Picking it loses state (for example, it strips context). */
+  destructive?: boolean
+}
+
+/**
+ * The loop asks the user a question and waits for the answer from the
+ * host's `askUser` port. One event per ask. A run without the port emits no
+ * `ask_user`: it denies the ask with an `ask_denied` notice instead.
+ */
+export interface AskUserEvent {
+  type: "ask_user"
+  /** Id of this ask, unique per core. The host answers the ask by this id. */
+  askId: string
+  /** Stable machine code of the question (for example a preflight issue code). */
+  code: string
+  /** One-line title. */
+  title: string
+  /** Body text. `\n` breaks a paragraph. */
+  detail: string
+  /** The answers the user can pick, in order. */
+  options: AskUserOption[]
+}
+
 /**
  * The discriminated union of every structured agent event. Narrow on the
  * `type` field:
@@ -231,6 +264,7 @@ export type AgentEvent =
   | NoticeEvent
   | ErrorEvent
   | StatusEvent
+  | AskUserEvent
 
 /** Every `AgentEvent["type"]` tag, for exhaustiveness checks and routing. */
 export type AgentEventType = AgentEvent["type"]

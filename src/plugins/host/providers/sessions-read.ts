@@ -328,6 +328,8 @@ export function summarizeRecord(r: SessionRecord): string {
       return `attach · pid ${r.pid} on ${r.hostname}`
     case "detach":
       return `detach · pid ${r.pid} · ${r.reason}`
+    case "round_checkpoint":
+      return `round checkpoint · round ${r.round}`
     default: {
       return `unknown · ${JSON.stringify(r satisfies never)}`
     }
@@ -351,6 +353,7 @@ export function recordBodyText(r: SessionRecord): string {
       return r.replacementMessages.map((m) => `${m.role}: ${m.content}`).join("\n")
     case "rewind":
     case "history_edit":
+    case "round_checkpoint":
     case "attach":
     case "detach":
       return ""

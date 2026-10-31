@@ -5,10 +5,20 @@
  * @module sdk/agent-core-helpers
  */
 
+import {
+  sessionResumedAttachmentText,
+  streamInterruptedAttachmentText,
+  turnAbortedAttachmentText,
+} from "../agent/PROMPTS.ts"
+import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
+import type { ContentBlock, ToolResultBlock } from "../llm/messages.ts"
 import type { StreamedResponse } from "../llm/transport/types.ts"
 
 import type { AgentEvent, EventUsage } from "./events.ts"
+import type { HostPorts } from "./host-ports.ts"
+import { takeQueuedText } from "./host-ports.ts"
+import type { PromptContributor } from "./ports.ts"
 
 export type MaybePromise<T> = T | Promise<T>
 
@@ -67,4 +77,100 @@ export function toEventUsage(usage: StreamedResponse["usage"] | undefined): Even
       ? { cacheCreationTokens: usage.cache_creation_input_tokens }
       : {}),
   }
+}
+
+/** The pieces {@link buildInitialUserContent} needs from the core. */
+export interface InitialUserContentDeps {
+  modeProvider?: { consumePendingAttachment?(): ContentBlock | null } | null
+  promptContributors: PromptContributor[]
+  mediaResolver?: { resolveUserContent(text: string): Promise<ContentBlock[]> } | null
+}
+
+/**
+ * Build a turn's initial user content: orphan-repair results, then the
+ * runtime marker (abort / session-resumed), the mode attachment, turn
+ * attachments, save echoes, and finally the user's own text (resolved
+ * through the media resolver when one is wired). Skipped entirely by the
+ * caller on an S50 round-level `resume` (nothing new was typed).
+ */
+export async function buildInitialUserContent(
+  deps: InitialUserContentDeps,
+  opts: {
+    userText: string
+    orphanRepair: ToolResultBlock[]
+    turnMarker: "aborted" | "resumed" | null
+  },
+): Promise<ContentBlock[]> {
+  const content: ContentBlock[] = [...opts.orphanRepair]
+  if (opts.turnMarker === "aborted") {
+    content.push({ type: "text", text: turnAbortedAttachmentText() })
+  } else if (opts.turnMarker === "resumed") {
+    content.push({ type: "text", text: sessionResumedAttachmentText() })
+  }
+  const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
+  if (modeAttach) content.push(modeAttach)
+  for (const contributor of deps.promptContributors) {
+    for (const b of contributor.turnAttachments?.() ?? []) content.push(b)
+  }
+  for (const contributor of deps.promptContributors) {
+    for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
+  }
+  if (opts.userText.length > 0) {
+    if (deps.mediaResolver) {
+      content.push(...(await deps.mediaResolver.resolveUserContent(opts.userText)))
+    } else {
+      content.push({ type: "text", text: opts.userText })
+    }
+  }
+  return content
+}
+
+/** The pieces {@link nextRoundContent} needs from the core. */
+export interface NextRoundContentDeps {
+  modeProvider?: { consumePendingAttachment?(): ContentBlock | null } | null
+  promptContributors: PromptContributor[]
+  sessionPersistence?: { appendUser(content: ContentBlock[]): string } | null
+  reflectionInterval: number
+  reflectionCooldownMs: number
+  reflectionSilenceRemaining: number
+}
+
+/**
+ * The user message after a tool round: tool results, then the salvage
+ * attachment, the mode attachment, save echoes, queued host text (through
+ * the `inputQueue` port), and the reflection checkpoint when one is due
+ * (through the `reflectionGate` port). Returns the content plus the new
+ * `reflectionSilenceRemaining`, since a due-but-silenced checkpoint
+ * decrements it; the caller writes that back onto the core.
+ */
+export async function nextRoundContent(
+  deps: NextRoundContentDeps,
+  toolResults: ToolResultBlock[],
+  salvaged: boolean,
+  round: number,
+  ports: HostPorts,
+): Promise<{ content: ContentBlock[]; reflectionSilenceRemaining: number }> {
+  const content: ContentBlock[] = [...toolResults]
+  if (salvaged) content.push({ type: "text", text: streamInterruptedAttachmentText() })
+  const modeAttach = deps.modeProvider?.consumePendingAttachment?.() ?? null
+  if (modeAttach) content.push(modeAttach)
+  for (const contributor of deps.promptContributors) {
+    for (const e of contributor.saveEchoes?.() ?? []) content.push(e)
+  }
+  const queuedText = takeQueuedText(ports.inputQueue)
+  if (queuedText) {
+    content.push({ type: "text", text: queuedText })
+    deps.sessionPersistence?.appendUser([{ type: "text", text: queuedText }])
+    ports.inputQueue?.injected?.(queuedText)
+  }
+  let reflectionSilenceRemaining = deps.reflectionSilenceRemaining
+  if (deps.reflectionInterval > 0 && round % deps.reflectionInterval === 0) {
+    if (reflectionSilenceRemaining > 0) {
+      reflectionSilenceRemaining -= 1
+    } else {
+      await ports.reflectionGate?.beforeCheckpoint(round)
+      content.push(buildReflectionCheckpointBlock(round, deps.reflectionCooldownMs))
+    }
+  }
+  return { content, reflectionSilenceRemaining }
 }

@@ -118,6 +118,20 @@ export interface StreamInterruptedCappedNotice {
 }
 
 /**
+ * The loop needed an answer from the user, and the host gave it no
+ * `askUser` port (a headless run). The ask was denied, and the request went
+ * out unchanged.
+ */
+export interface AskDeniedNotice {
+  kind: "ask_denied"
+  severity: "warn"
+  /** Machine code of the ask (for example a preflight issue code). */
+  code: string
+  /** Title of the ask. */
+  title: string
+}
+
+/**
  * The discriminated union of every out-of-band condition the agent loop
  * surfaces. Narrow on `kind`.
  */
@@ -130,6 +144,7 @@ export type TurnNotice =
   | StreamInterruptedSalvagedNotice
   | StreamInterruptedContinuingNotice
   | StreamInterruptedCappedNotice
+  | AskDeniedNotice
 
 /**
  * Project a turn's stop reason + details into a {@link StopNotice}, or
@@ -182,6 +197,8 @@ export function formatTurnNoticePlain(notice: TurnNotice): string {
       return `[stream] Provider closed the response without a terminal event mid-output; auto-continuing from local state (${notice.attempt}/${notice.cap}).`
     case "stream_interrupted_capped":
       return `[stream] Provider closed the response without a terminal event ${notice.cap} times in a row mid-output; stopping. Partial output above is preserved.`
+    case "ask_denied":
+      return `[ask] No host can answer "${notice.title}" (${notice.code}) in this run; denied the ask and sent the request unchanged.`
     default: {
       const _exhaustive: never = notice
       return _exhaustive

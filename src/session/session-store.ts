@@ -273,6 +273,28 @@ export interface HistoryEditRecord {
 }
 
 /**
+ * Round checkpoint (S50). Written after each completed round of the
+ * in-flight turn (one model send + its tool calls, when the loop is about
+ * to send another round) so a crash or a restart can resume the turn
+ * instead of replaying it.
+ *
+ * Pure metadata: never folded into model or display history
+ * ({@link foldRecordsForModel} / {@link foldRecordsForDisplay} skip it), and
+ * never counted as conversation content. The round that completes the turn
+ * (no further round follows) writes none — nothing is left to resume.
+ *
+ * `round` and the two streak counters mirror `AgentCore`'s in-memory
+ * `Streaks` state (`src/sdk/stop-policy.ts`) at the checkpoint.
+ */
+export interface RoundCheckpointRecord {
+  kind: "round_checkpoint"
+  ts: string
+  round: number
+  maxTokensStreak: number
+  interruptedStreak: number
+}
+
+/**
  * Process-attach marker. Written once on session open (new OR resume) so any
  * other process can answer "is an agent currently attached to this session?"
  *
@@ -317,6 +339,7 @@ export type SessionRecord =
   | CompactRecord
   | RewindRecord
   | HistoryEditRecord
+  | RoundCheckpointRecord
   | AttachRecord
   | DetachRecord
 
@@ -955,6 +978,24 @@ export class SessionStore {
   /** Spec alias for {@link appendRewind}. */
   recordRewind(toMsgId: string, droppedCount: number, now: Date = new Date()): void {
     this.appendRewind(toMsgId, droppedCount, now)
+  }
+
+  /**
+   * Append a round checkpoint (S50). Pure metadata: it does not mark the
+   * session as having real conversation (the round's own records already
+   * did that), so it never keeps an otherwise-empty session from cleanup.
+   */
+  appendRoundCheckpoint(
+    checkpoint: { round: number; maxTokensStreak: number; interruptedStreak: number },
+    now: Date = new Date(),
+  ): void {
+    this.write({
+      kind: "round_checkpoint",
+      ts: now.toISOString(),
+      round: checkpoint.round,
+      maxTokensStreak: checkpoint.maxTokensStreak,
+      interruptedStreak: checkpoint.interruptedStreak,
+    })
   }
 
   /**

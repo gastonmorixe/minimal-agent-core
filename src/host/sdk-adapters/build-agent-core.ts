@@ -42,10 +42,11 @@ import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts
 import type { TransportFn } from "../../llm/transport/types.ts"
 import type { ModeManager } from "../../modes/modes.ts"
 import type { NetworkClient } from "../../network/index.ts"
+import { takePendingCompact } from "../../plugins/host/providers/context-compact.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { AgentCore } from "../../sdk/agent-core.ts"
 import type { EventSink } from "../../sdk/events.ts"
-import type { AgentCoreConfig } from "../../sdk/ports.ts"
+import type { AgentCoreConfig, HostPorts } from "../../sdk/ports.ts"
 import { type ToolNamePolicy, toolFilterFromNamePolicy } from "../../sdk/tool-filter.ts"
 import { type BlobStore, loadBlobStoreConfig } from "../../session/blob-store.ts"
 import type { FileTrackingStore } from "../../session/file-tracking-store.ts"
@@ -94,6 +95,12 @@ export interface BuildAgentCoreDeps {
   cacheTtl?: CacheTtl
   /** Pre-existing conversation to seed the core (resume). */
   initialMessages?: Message[]
+  /**
+   * Round checkpoint to resume an unfinished turn from (S50). Read it back
+   * from the session's last `appendRoundCheckpoint` record and pass it with
+   * a `run(input, {resume: true})` call.
+   */
+  initialCheckpoint?: AgentCoreConfig["initialCheckpoint"]
   /** Plugin loader (tools + prompt fragments + modes). Null when no plugins. */
   loader: PluginLoader | null
   /** Mode manager. Null when modes are disabled. */
@@ -226,6 +233,11 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
   // Media resolver: ingest inline @file / image refs using the run's model.
   const mediaResolver = new MediaResolverAdapter(deps.model)
 
+  // S17/S27: the `compactSource` port reads the plugin host's
+  // `context:compact` queue. AgentCore no longer imports `plugins/host`
+  // itself; this is the one place that bridges the two.
+  const ports: HostPorts = { compactSource: { take: () => takePendingCompact() } }
+
   const config: AgentCoreConfig = {
     auth: deps.auth,
     model: deps.model,
@@ -238,6 +250,8 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.thinkingDisplay !== undefined ? { thinkingDisplay: deps.thinkingDisplay } : {}),
     ...(deps.cacheTtl !== undefined ? { cacheTtl: deps.cacheTtl } : {}),
     ...(deps.initialMessages !== undefined ? { initialMessages: deps.initialMessages } : {}),
+    ...(deps.initialCheckpoint !== undefined ? { initialCheckpoint: deps.initialCheckpoint } : {}),
+    ports,
     ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),
     ...(deps.networkClient !== undefined ? { networkClient: deps.networkClient } : {}),
     ...(deps.eventSink !== undefined ? { eventSink: deps.eventSink } : {}),
