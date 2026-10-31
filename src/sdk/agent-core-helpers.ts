@@ -21,6 +21,7 @@ import type { AgentEvent, EventUsage } from "./events.ts"
 import type { HostPorts } from "./host-ports.ts"
 import { takeQueuedText } from "./host-ports.ts"
 import type { PromptContributor } from "./ports.ts"
+import { copyInput } from "./tool-facts.ts"
 
 export type MaybePromise<T> = T | Promise<T>
 
@@ -63,7 +64,10 @@ export function itemEvents(blocks: StreamedResponse["blocks"], round: number): A
       id,
       // `label` is the pre-S19 field name; `toolName` is the declared one
       // (spec S19). Both carry the same value until phase 5 exit (S37).
-      ...(block.type === "tool_use" ? { label: block.name, toolName: block.name } : {}),
+      // `input` is a copy (spec C2), so a sink cannot reach history through it.
+      ...(block.type === "tool_use"
+        ? { label: block.name, toolName: block.name, input: copyInput(block.input) }
+        : {}),
     })
     out.push({ type: "item_completed", itemType, id, text })
   }

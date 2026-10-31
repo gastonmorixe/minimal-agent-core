@@ -82,7 +82,7 @@ export function capUtf8(
 }
 
 /** A copy of the model's tool input, so a sink cannot reach history through it. */
-function copyInput(input: Record<string, unknown>): Record<string, unknown> {
+export function copyInput(input: Record<string, unknown>): Record<string, unknown> {
   try {
     return structuredClone(input)
   } catch {

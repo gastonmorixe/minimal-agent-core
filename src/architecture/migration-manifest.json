@@ -246,6 +246,24 @@
       "imports": []
     },
     {
+      "path": "src/e2e/resume-stream-json.e2e.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/e2e/resume-stream-json.e2e.test.ts",
+      "imports": ["src/test-utils/sibling-repo.ts"]
+    },
+    {
+      "path": "src/e2e/stream-json-large-output.e2e.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/e2e/stream-json-large-output.e2e.test.ts",
+      "imports": ["src/test-utils/sibling-repo.ts"]
+    },
+    {
+      "path": "src/e2e/stream-json-session.e2e.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/e2e/stream-json-session.e2e.test.ts",
+      "imports": ["src/test-utils/sibling-repo.ts"]
+    },
+    {
       "path": "src/e2e/system-prompt-override-e2e.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/e2e/system-prompt-override-e2e.test.ts",
@@ -1008,6 +1026,17 @@
       ]
     },
     {
+      "path": "src/host/startup/fixtures/stream-json-exit-child.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/fixtures/stream-json-exit-child.ts",
+      "imports": [
+        "src/auth/auth.ts",
+        "src/llm/transport/types.ts",
+        "src/runtime/runtime.ts",
+        "src/sdk/ports.ts"
+      ]
+    },
+    {
       "path": "src/host/startup/help.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/help.test.ts",
@@ -1151,6 +1180,30 @@
       ]
     },
     {
+      "path": "src/host/startup/resume-mode.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/resume-mode.test.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/resume-mode.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/resume-mode.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/run-non-interactive.stream-failure.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/run-non-interactive.stream-failure.test.ts",
+      "imports": [
+        "src/auth/auth.ts",
+        "src/llm/transport/types.ts",
+        "src/runtime/runtime.ts",
+        "src/runtime/session.ts",
+        "src/sdk/ports.ts"
+      ]
+    },
+    {
       "path": "src/host/startup/run-non-interactive.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/run-non-interactive.test.ts",
@@ -1171,7 +1224,8 @@
         "src/plugins/loader.ts",
         "src/plugins/stream.ts",
         "src/runtime/session.ts",
-        "src/sdk/events.ts"
+        "src/sdk/events.ts",
+        "src/session/session-id.ts"
       ]
     },
     {
@@ -1225,6 +1279,24 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/startup-tree.ts",
       "imports": []
+    },
+    {
+      "path": "src/host/startup/stream-json-exit-tail.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/stream-json-exit-tail.test.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/stream-json-writer.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/stream-json-writer.test.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/stream-json-writer.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/stream-json-writer.ts",
+      "imports": ["src/llm/error-hint.ts", "src/sdk/events.ts"]
     },
     {
       "path": "src/host/ui/choice-modal.test.ts",

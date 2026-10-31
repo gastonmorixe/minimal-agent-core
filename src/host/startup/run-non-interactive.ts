@@ -13,17 +13,33 @@
  *     {@link RunNonInteractivePromptInput.openEventStreamSession} factory and
  *     the format is `json`/`stream-json` (and no `--output-schema`), the run
  *     drives a `createRuntime`/`Session` turn (`session.run()`) and
- *     serializes every {@link SessionEntry} whose `data.kind` is one of
- *     {@link LEGACY_EVENT_KINDS} to one JSONL line on stdout, in the exact
- *     wire format {@link serializeEvent} produces. The events ARE the
- *     output; the yielded text channel is drained and discarded (the
- *     `item_completed` events already carry the assistant text).
+ *     serializes every {@link SessionEntry} whose `data.kind` is kept to
+ *     one JSONL line on stdout, in the exact wire format
+ *     {@link serializeEvent} produces. `json` keeps
+ *     {@link LEGACY_EVENT_KINDS}. `stream-json` keeps
+ *     {@link STREAM_JSON_EVENT_KINDS}, so its last line is `run_finished`.
+ *     Each stream-json line also carries `sessionId`, `seq`, and `ts` after
+ *     the event keys (see {@link serializeStreamJsonLine}). json lines do not.
+ *     When the host passes {@link RunNonInteractivePromptInput.streamInfo},
+ *     the first stream-json line is `session_started`, written before the
+ *     session opens.
+ *     All stream-json lines go through one writer
+ *     (`host/startup/stream-json-writer.ts`), which owns `seq`. A failure
+ *     after argv parse still ends stdout with an `error` line and a
+ *     `run_finished` line with outcome `failed`: the core writes them for a
+ *     failure inside the run, and the host writes them for a failure outside
+ *     it (a failed session open, a resume failure, a `turn.willStart` halt).
+ *     Argv and flag errors give no JSON. They go to stderr only.
+ *     The events ARE the output; the yielded text channel is drained and
+ *     discarded (the `item_completed` events already carry the assistant
+ *     text).
  *
  * `Session`'s own event log always captures every `AgentEvent` kind — that is
  * its whole point, a complete trace (agent E's S48 design) — so this module
  * does NOT ask it to log anything less. It filters at its OWN subscription
- * boundary instead, keeping the frozen `LEGACY_EVENT_KINDS` wire format this
- * route has always shipped (`events-jsonl.integration.test.ts`).
+ * boundary instead. The `json` route keeps the frozen `LEGACY_EVENT_KINDS`
+ * wire format it has always shipped (`events-jsonl.integration.test.ts`).
+ * The `stream-json` route also keeps the closing `run_finished` line.
  *
  * The `Session` is built by an INJECTED factory, not constructed here: the
  * host (index.ts) closes over its collaborators and calls the
@@ -45,14 +61,31 @@ import { fatalErrorFields } from "../../llm/error-hint.ts"
 import type { PluginLoader } from "../../plugins/loader.ts"
 import { PluginStream } from "../../plugins/stream.ts"
 import type { Session } from "../../runtime/session.ts"
-import { LEGACY_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
+import { LEGACY_EVENT_KINDS, STREAM_JSON_EVENT_KINDS, serializeEvent } from "../../sdk/events.ts"
+import { getSessionId } from "../../session/session-id.ts"
 import { enforceOutputSchema, PrintOutput, resolvePrintModeOptions } from "../print-output.ts"
 import type { ReplAgentLike } from "../repl.ts"
 import { applyTurnWillStart } from "../repl-editor-hooks.ts"
 import { Formatter } from "../ui/formatter/formatter.ts"
 
+import {
+  type StreamInfo,
+  setStreamJsonWrite,
+  writeStreamJsonEvent,
+  writeStreamJsonFailure,
+  writeStreamJsonSessionStarted,
+} from "./stream-json-writer.ts"
+
+export type { StreamInfo } from "./stream-json-writer.ts"
+
+/** The stderr text of a `turn.willStart` halt. */
+const TURN_BLOCKED_MESSAGE = "turn.willStart: prompt blocked by lifecycle policy hook."
+
 /** `LEGACY_EVENT_KINDS`, as a `Set` for an O(1) membership check per entry. */
 const LEGACY_EVENT_KIND_SET: ReadonlySet<string> = new Set(LEGACY_EVENT_KINDS)
+
+/** `STREAM_JSON_EVENT_KINDS`, as a `Set`. It adds `run_finished` to the legacy nine. */
+const STREAM_JSON_EVENT_KIND_SET: ReadonlySet<string> = new Set(STREAM_JSON_EVENT_KINDS)
 
 /** Inputs for {@link runNonInteractivePrompt}. */
 export interface RunNonInteractivePromptInput {
@@ -95,6 +128,14 @@ export interface RunNonInteractivePromptInput {
    */
   readonly openEventStreamSession?: () => Promise<Session>
   /**
+   * Session info for the first stream-json line (`session_started`). When it
+   * is set and the format is `stream-json`, that line is written at seq 0,
+   * before the session opens. When it is unset, no such line is written and
+   * events start at seq 0. The json route ignores it. Never put auth,
+   * tokens, credential names, or env values here.
+   */
+  readonly streamInfo?: StreamInfo
+  /**
    * Where JSONL event lines go in the structured path. Injected for testing;
    * defaults to `process.stdout`. Only consulted on the event-stream route.
    */
@@ -118,8 +159,14 @@ function wantsEventStream(input: RunNonInteractivePromptInput): boolean {
 }
 
 /**
- * Drive a `Session` turn (`session.run()`) and emit its `LEGACY_EVENT_KINDS`
- * entries as JSONL to stdout. Used for `--output-format json` / `stream-json`.
+ * Drive a `Session` turn (`session.run()`) and emit its kept entries as
+ * JSONL to stdout. Used for `--output-format json` / `stream-json`. `json`
+ * keeps `LEGACY_EVENT_KINDS`. `stream-json` keeps `STREAM_JSON_EVENT_KINDS`,
+ * which adds the closing `run_finished` line. That line is written before
+ * any `exit` call, because `Session` drains its queue first. Each stream-json
+ * line gets the envelope keys `sessionId` (the entry's session id), `seq` (a
+ * count of lines on this stdout, from 0), and `ts` (the entry's epoch ms).
+ * json lines stay byte-identical to `serializeEvent(entry.data)`.
  *
  * `Session`'s own event log always captures every `AgentEvent` kind (its
  * whole point, a complete trace) — this function filters AT THIS
@@ -135,17 +182,40 @@ function wantsEventStream(input: RunNonInteractivePromptInput): boolean {
  */
 async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<void> {
   const write = input.stdout ?? ((chunk: string) => void process.stdout.write(chunk))
-  const exit = input.exit ?? ((code: number): never => process.exit(code))
+  // Never call process.exit after writing the stream. On a slow pipe reader,
+  // process.exit can drop the queued tail (measured: 1 MB and up, Bun 1.4.x).
+  // So the default only sets the exit code, and the caller returns. The
+  // process then ends by itself once stdout drains. An injected `exit` (tests)
+  // keeps its old behavior.
+  const fail = (code: number): void => {
+    if (input.exit) input.exit(code)
+    else process.exitCode = code
+  }
   // Non-null: wantsEventStream() already verified openEventStreamSession is
   // present. It returns a promise (the real openAgentCoreSession awaits the
   // plugin prompt block), so await it before running.
   const openSession = input.openEventStreamSession as () => Promise<Session>
-  const session = await openSession()
 
   // stream-json is the realtime surface: opt into token-level text_delta /
   // thinking_delta events. json stays buffered (no deltas) so its event stream
   // matches Phase 2 and the frozen SDK golden.
-  const emitDeltas = input.outputFormat === "stream-json"
+  const isStreamJson = input.outputFormat === "stream-json"
+  const emitDeltas = isStreamJson
+  // stream-json also keeps the closing run_finished line. json stays frozen.
+  const keep = isStreamJson ? STREAM_JSON_EVENT_KIND_SET : LEGACY_EVENT_KIND_SET
+  // stream-json lines carry an envelope. The shared writer owns seq, which
+  // counts the lines on this stdout from 0. It is not entry.seq, which counts
+  // every logged entry. The json route does not use the writer.
+  if (isStreamJson) setStreamJsonWrite(write)
+
+  // The session_started line goes first, before the open, so a failed open
+  // still leaves it on stdout. The open error then propagates as before, and
+  // the host's main().catch writes the failure lines.
+  if (isStreamJson && input.streamInfo !== undefined) {
+    writeStreamJsonSessionStarted(input.streamInfo)
+  }
+
+  const session = await openSession()
 
   try {
     const run = session.run(input.prompt, { emitDeltas })
@@ -153,24 +223,41 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
       // Text chunks are carried by the event stream (item_completed); the
       // raw yield channel is not written to stdout in structured mode. The
       // session's own log is the COMPLETE trace (every AgentEvent kind, by
-      // design); THIS is the subscription boundary that filters it down to
-      // the frozen LEGACY_EVENT_KINDS wire format, not a change to what
+      // design). THIS is the subscription boundary that filters it down to
+      // the wire format of the route (LEGACY_EVENT_KINDS for json,
+      // STREAM_JSON_EVENT_KINDS for stream-json). It does not change what
       // Session logs internally.
-      if (entry.ch === "event" && LEGACY_EVENT_KIND_SET.has(entry.data.type)) {
-        write(serializeEvent(entry.data))
+      if (entry.ch === "event" && keep.has(entry.data.type)) {
+        if (isStreamJson) {
+          writeStreamJsonEvent(entry.data, { sessionId: entry.sessionId, ts: entry.ts })
+        } else {
+          write(serializeEvent(entry.data))
+        }
       }
     }
     const result = await run.result
     // A paused run (permanent error) already emitted its `error` event.
     // Nobody can answer a one-shot run, so exit non-zero like a failure.
-    if (result.outcome === "waiting") exit(1)
+    if (result.outcome === "waiting") fail(1)
   } catch (err) {
     // The core already surfaced the fatal error on the stream as an `error`
     // event (with code/hint). Keep stdout a clean JSONL document (no stack
     // trace), but exit non-zero so scripts see the failure. An abort is not
     // a failure of the run itself.
-    if (fatalErrorFields(err)) exit(1)
+    if (fatalErrorFields(err)) fail(1)
   }
+}
+
+/** Write the stream-json failure lines for a `turn.willStart` halt. */
+function writeTurnBlocked(input: RunNonInteractivePromptInput): void {
+  if (input.stdout !== undefined) setStreamJsonWrite(input.stdout)
+  const err = Object.assign(new Error(TURN_BLOCKED_MESSAGE), { code: "turn.blocked" })
+  const info = input.streamInfo
+  writeStreamJsonFailure(err, {
+    // Never an empty id on the wire. Without streamInfo, use the CLI id.
+    sessionId: info?.sessionId ?? getSessionId(),
+    ...(info !== undefined ? { streamInfo: info } : {}),
+  })
 }
 
 /**
@@ -185,7 +272,9 @@ export async function runNonInteractivePrompt(input: RunNonInteractivePromptInpu
   // Parity with REPL: `turn.willStart` may rewrite or halt before the model.
   const turn = await applyTurnWillStart(loader, input.prompt)
   if (turn.halted) {
-    process.stderr.write(`turn.willStart: prompt blocked by lifecycle policy hook.\n`)
+    process.stderr.write(`${TURN_BLOCKED_MESSAGE}\n`)
+    // stream-json still ends stdout with error and run_finished failed lines.
+    if (input.outputFormat === "stream-json") writeTurnBlocked(input)
     exit(1)
   }
   const prompt = turn.text

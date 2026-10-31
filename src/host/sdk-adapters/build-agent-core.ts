@@ -195,6 +195,13 @@ export interface BuildAgentCoreDeps {
   /** Retry tunables (clock, backoff ceiling). No attempt or round limit exists. */
   retry?: AgentCoreConfig["retry"]
   /**
+   * Session id for {@link openAgentCoreSession}. The CLI passes its own
+   * session id so the Session and its event log use the same id as the
+   * store. When unset, the runtime makes a fresh random UUID.
+   * {@link buildAgentCore} does not read it.
+   */
+  sessionId?: string
+  /**
    * Compact-source override (S34 PORT fold: `plugins/host/providers/context-compact.ts`).
    * Both {@link buildAgentCore} and
    * {@link openAgentCoreSession} already wire the SDK's `compactSource`
@@ -496,6 +503,8 @@ export async function openAgentCoreSession(
 
   const runtime = createRuntime()
   const session = await runtime.openSession({
+    // Use the caller's session id when given. Else the runtime makes a UUID.
+    ...(deps.sessionId !== undefined ? { id: deps.sessionId } : {}),
     auth: deps.auth,
     model: deps.model,
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
