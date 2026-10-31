@@ -46,7 +46,7 @@ const EMBEDDED_DIR = join(import.meta.dir, "../..")
 const PLUGIN_ROOTS = [join(EMBEDDED_DIR, "plugins"), ...resolveSiblingPluginRoots(EMBEDDED_DIR)]
 
 const HAVE_BOTH =
-  siblingPluginPresent("ma-llm-opencode-plugin") && siblingPluginPresent("ma-llm-wafer-plugin")
+  siblingPluginPresent("ma-llm-opencode-go-plugin") && siblingPluginPresent("ma-llm-wafer-plugin")
 
 /** Bare id registered under both providers so scoped dispatch can be asserted. */
 const SHARED_ID = "dispatch-shared-model"
@@ -72,10 +72,10 @@ async function discoverBothWithSharedModel(): Promise<void> {
 
   registerModel({
     id: SHARED_ID,
-    providerId: "opencode",
+    providerId: "opencode-go",
     surfaceId: "surface-a",
     displayName: "Dispatch Shared (OpenCode)",
-    tags: ["opencode", "dispatch-fixture"],
+    tags: ["opencode-go", "dispatch-fixture"],
     capabilities: defaultCapabilities(),
     pricing: TEST_RATE,
     estimateTokens: makeCharRatioEstimator(3.5),
@@ -114,14 +114,14 @@ describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalReq
   it("run() with providerId:'opencode' routes to OpenCode, not Wafer", async () => {
     await discoverBothWithSharedModel()
 
-    const ocModel = findModelForProvider(SHARED_ID, "opencode")
+    const ocModel = findModelForProvider(SHARED_ID, "opencode-go")
     const wfModel = findModelForProvider(SHARED_ID, "wafer")
-    expect(ocModel?.providerId).toBe("opencode")
+    expect(ocModel?.providerId).toBe("opencode-go")
     expect(wfModel?.providerId).toBe("wafer")
 
     const req: CanonicalRequest = {
       modelId: SHARED_ID,
-      providerId: "opencode",
+      providerId: "opencode-go",
       messages: [userText("hi")],
       generation: { maxOutputTokens: 1 },
     }
@@ -216,8 +216,8 @@ describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalReq
 
     const { buildModelInfoSnapshot } = await import("./model-info.ts")
 
-    const ocSnapshot = buildModelInfoSnapshot(SHARED_ID, "opencode")
-    expect(ocSnapshot.providerId).toBe("opencode")
+    const ocSnapshot = buildModelInfoSnapshot(SHARED_ID, "opencode-go")
+    expect(ocSnapshot.providerId).toBe("opencode-go")
     expect(ocSnapshot.resolved).toBe(true)
 
     const wfSnapshot = buildModelInfoSnapshot(SHARED_ID, "wafer")
@@ -238,7 +238,7 @@ describe.skipIf(!HAVE_BOTH)("dispatch disambiguation: providerId on CanonicalReq
     const { modelShortLabel } = await import("./model-label.ts")
 
     // Scoped for OpenCode -> label uses OpenCode's short code ("og").
-    const ocLabel = modelShortLabel(SHARED_ID, "opencode")
+    const ocLabel = modelShortLabel(SHARED_ID, "opencode-go")
     expect(ocLabel).toMatch(/^og/i)
     expect(ocLabel).not.toMatch(/^wf/i)
 
