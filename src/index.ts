@@ -1149,6 +1149,8 @@ async function main() {
         // paths stay byte-identical.
         openEventStreamSession: () =>
           openAgentCoreSession({
+            // Same sid the store was opened with, so the stream carries the CLI id.
+            sessionId: sid,
             auth,
             model: selectedModel,
             providerId: selectedProviderId,

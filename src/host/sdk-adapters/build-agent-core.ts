@@ -174,6 +174,13 @@ export interface BuildAgentCoreDeps {
   reflectionCooldownMs?: number
   /** Retry tunables (clock, backoff ceiling). No attempt or round limit exists. */
   retry?: AgentCoreConfig["retry"]
+  /**
+   * Session id for {@link openAgentCoreSession}. The CLI passes its own
+   * session id so the Session and its event log use the same id as the
+   * store. When unset, the runtime makes a fresh random UUID.
+   * {@link buildAgentCore} does not read it.
+   */
+  sessionId?: string
 }
 
 /** The config-union effort values AgentCore accepts. */
@@ -391,6 +398,8 @@ export async function openAgentCoreSession(deps: BuildAgentCoreDeps): Promise<Se
 
   const runtime = createRuntime()
   return runtime.openSession({
+    // Use the caller's session id when given. Else the runtime makes a UUID.
+    ...(deps.sessionId !== undefined ? { id: deps.sessionId } : {}),
     auth: deps.auth,
     model: deps.model,
     ...(deps.providerId !== undefined ? { providerId: deps.providerId } : {}),
