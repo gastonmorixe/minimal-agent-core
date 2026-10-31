@@ -7,6 +7,10 @@ created-at: "2026-05-01T00:00:00-0400"
 updated-at: "2026-10-31T00:00:00-0400"
 format: "Keep a Changelog (pragmatic, date-stamped)"
 latest-unreleased:
+  - id: "2026-10-31-host-mode-review-fixes"
+    type: fix
+    status: landed
+    detail: "Host mode: getEffort reads the live core, HostSession.run applies turn.willStart, a second signal or the grace period ends the process, --host-mode <id> is not a prompt; setModel accepts [1m] ids; preflight adoption of an unknown id keeps the model and emits a new public TurnNotice variant, model_adopt_failed (./sdk/turn-notice), severity warn"
   - id: "2026-10-31-model-effort-switching"
     type: feat
     status: landed
@@ -111,6 +115,14 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: new public `TurnNotice` variant `model_adopt_failed`
+  (`./sdk/turn-notice`), severity `warn`. A provider preflight can name a
+  model id (`adoptModelId`) that the registry does not know. The core now
+  first asks the provider plugin to register the id
+  (`registerAdHocModel`). When the id is still unknown, the core keeps the
+  current model and effort, emits this notice, and the turn goes on.
+  Before, the turn failed. Hosts with an exhaustive `switch` over
+  `TurnNotice` must add the new case.
 - 2026-10-31: with `--output-format stream-json`, a failure after argv
   parse still ends stdout with machine-readable lines: an `error` line,
   then a `run_finished` line with outcome `failed`. This covers a failed
@@ -306,6 +318,17 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Fixed
 
+- 2026-10-31: host mode (`--host-mode <id>`) review fixes.
+  `HostRuntime.getEffort` reads the live session after `setModel` resets
+  the effort (before, it showed the stale boot value).
+  `HostSession.run` applies the `turn.willStart` chain like the one-shot
+  run. A halting hook stops the turn with the `turn.blocked` error.
+  A second `SIGINT`/`SIGTERM`, or no end 5 s after the first, now ends
+  the process, so a stuck entry cannot block shutdown. The `<id>` after
+  `--host-mode`, and every later arg, is no longer read as a prompt.
+- 2026-10-31: `AgentCore.setModel` accepts an id with a `[1m]` / `[2m]`
+  suffix. It looks up the base id and stores the raw id. Before, it threw
+  "unknown model", also on a re-select of the current `[1m]` model.
 - 2026-10-31: stream-json exits through `process.exitCode`, so a slow pipe
   reader keeps the last lines. On a paused or failed run, the event-stream
   route called `process.exit(1)` right after the last line. With a slow

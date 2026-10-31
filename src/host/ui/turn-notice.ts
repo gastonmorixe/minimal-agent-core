@@ -85,6 +85,10 @@ export function renderTurnNotice(notice: TurnNotice): string {
         `Adopted model "${notice.to}" (was "${notice.from}")${effort}`,
       )}`
     }
+    case "model_adopt_failed":
+      return `\n  ${c.boldYellow("!")} ${c.yellow(
+        `Could not adopt model "${notice.requested}" (${notice.reason}) — kept "${notice.model}"`,
+      )}`
     default: {
       const _exhaustive: never = notice
       return _exhaustive

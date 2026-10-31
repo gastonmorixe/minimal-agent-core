@@ -152,6 +152,22 @@ export interface ModelAdoptedNotice {
 }
 
 /**
+ * The preflight `adoptModelId` path named a model id the registry does not
+ * know for the session's provider, even after the provider plugin had a
+ * chance to register it ad hoc (`ProviderPlugin.registerAdHocModel`). The
+ * core kept the current model and effort, and the turn went on. `model` is
+ * the model the core kept. `requested` is the id the preflight named.
+ * `reason` is the registry's error message.
+ */
+export interface ModelAdoptFailedNotice {
+  kind: "model_adopt_failed"
+  severity: "warn"
+  model: string
+  requested: string
+  reason: string
+}
+
+/**
  * The discriminated union of every out-of-band condition the agent loop
  * surfaces. Narrow on `kind`.
  */
@@ -166,6 +182,7 @@ export type TurnNotice =
   | StreamInterruptedCappedNotice
   | AskDeniedNotice
   | ModelAdoptedNotice
+  | ModelAdoptFailedNotice
 
 /**
  * Project a turn's stop reason + details into a {@link StopNotice}, or
@@ -224,6 +241,8 @@ export function formatTurnNoticePlain(notice: TurnNotice): string {
       const effort = notice.effortReset ? ` (effort reset from "${notice.effortFrom}")` : ""
       return `[model] Adopted model "${notice.to}" (was "${notice.from}")${effort}.`
     }
+    case "model_adopt_failed":
+      return `[model] Could not adopt model "${notice.requested}" (${notice.reason}); kept "${notice.model}".`
     default: {
       const _exhaustive: never = notice
       return _exhaustive

@@ -11,7 +11,11 @@ import {
   turnAbortedAttachmentText,
 } from "../agent/PROMPTS.ts"
 import { buildReflectionCheckpointBlock } from "../agent/reflection.ts"
-import type { ModelAdoptedNotice, TurnNotice } from "../agent/turn-notice.ts"
+import type {
+  ModelAdoptedNotice,
+  ModelAdoptFailedNotice,
+  TurnNotice,
+} from "../agent/turn-notice.ts"
 import type { StatusPort } from "../bus/status-port.ts"
 import { validateEffortForModel } from "../config/effort-resolution.ts"
 import type { StopReason } from "../llm/canonical-events.ts"
@@ -22,6 +26,7 @@ import {
   resolveModel,
   resolveModelForProvider,
 } from "../llm/model-registry.ts"
+import { findProviderPlugin } from "../llm/provider-plugin.ts"
 import type { RetryPolicyOptions } from "../llm/transport/retry-policy.ts"
 import { normalizeModelForAPI, type StreamedResponse } from "../llm/transport/types.ts"
 
@@ -266,16 +271,20 @@ export interface ModelChange {
  * Validate `model` against the registry — scoped to `providerId` when set
  * (same-provider switching only, agent-core.ts:149/198/496), else globally
  * via {@link resolveModel} — and resolve what `currentEffort` becomes on
- * the new model. Throws on an unknown model; the caller must not assign
- * anything to its own state until this returns, so a throw leaves model
- * and effort unchanged.
+ * the new model. The lookup uses the base id without a `[1m]` / `[2m]`
+ * suffix ({@link normalizeModelForAPI}), the same as
+ * {@link effortLevelsForModel}. The returned `model` keeps the raw id, so
+ * the suffix still selects the large context window. Throws on an unknown
+ * model; the caller must not assign anything to its own state until this
+ * returns, so a throw leaves model and effort unchanged.
  */
 export function resolveModelChange(
   model: string,
   providerId: string | undefined,
   currentEffort: string | undefined,
 ): ModelChange {
-  const entry = providerId ? resolveModelForProvider(model, providerId) : resolveModel(model)
+  const apiModel = normalizeModelForAPI(model)
+  const entry = providerId ? resolveModelForProvider(apiModel, providerId) : resolveModel(apiModel)
   if (currentEffort === undefined) {
     return { model, effort: undefined, effortReset: false, effortFrom: undefined }
   }
@@ -291,7 +300,7 @@ export interface ModelAdoption {
   model: string
   effort: string | undefined
   /** `null` when `adoptModelId` was absent or already the current model (no change, no notice). */
-  notice: ModelAdoptedNotice | null
+  notice: ModelAdoptedNotice | ModelAdoptFailedNotice | null
 }
 
 /**
@@ -302,6 +311,14 @@ export interface ModelAdoption {
  * `model_adopted` notice — emitted on EVERY automatic change where
  * `to !== from`, so a client watching the notice stream never keeps a
  * stale model value.
+ *
+ * A provider preflight can name a live-only model that the static
+ * registry does not know. So when the lookup fails, the provider plugin
+ * first gets a chance to register the id ad hoc
+ * (`ProviderPlugin.registerAdHocModel`, the same step startup does for
+ * `--model`). When the id is still unknown, this never throws: it keeps
+ * the current model and effort and returns a `model_adopt_failed` warn
+ * notice, so the turn goes on.
  */
 export function adoptModel(
   model: string,
@@ -310,7 +327,22 @@ export function adoptModel(
   adoptModelId: string | undefined,
 ): ModelAdoption {
   if (!adoptModelId || adoptModelId === model) return { model, effort, notice: null }
-  const change = resolveModelChange(adoptModelId, providerId, effort)
+  let change: ModelChange
+  try {
+    change = resolveAdoptedModel(adoptModelId, providerId, effort)
+  } catch (e) {
+    return {
+      model,
+      effort,
+      notice: {
+        kind: "model_adopt_failed",
+        severity: "warn",
+        model,
+        requested: adoptModelId,
+        reason: e instanceof Error ? e.message : String(e),
+      },
+    }
+  }
   return {
     model: change.model,
     effort: change.effort,
@@ -322,6 +354,25 @@ export function adoptModel(
       effortReset: change.effortReset,
       effortFrom: change.effortFrom ?? null,
     },
+  }
+}
+
+/**
+ * {@link resolveModelChange}, with one retry after the provider plugin
+ * registers an unknown id ad hoc. Throws when the id is still unknown.
+ */
+function resolveAdoptedModel(
+  model: string,
+  providerId: string | undefined,
+  effort: string | undefined,
+): ModelChange {
+  try {
+    return resolveModelChange(model, providerId, effort)
+  } catch (e) {
+    const plugin = providerId ? findProviderPlugin(providerId) : undefined
+    if (!plugin?.registerAdHocModel) throw e
+    plugin.registerAdHocModel(normalizeModelForAPI(model))
+    return resolveModelChange(model, providerId, effort)
   }
 }
 
