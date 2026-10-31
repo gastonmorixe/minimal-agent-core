@@ -7,16 +7,24 @@
  *
  * Usage:
  *   // In the intercom renderer (or any code calling setDecorationLines):
- *   import { getDecorationSuffix } from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
+ *   import { getDecorationSuffix } from "./decoration-suffix.ts"
  *   const suffix = getDecorationSuffix()
  *   lines[0] = suffix ? `${lines[0]} ${suffix}` : lines[0]
  *   editor.setDecorationLines(lines)
  *
  *   // In the diagnostics plugin's LSP-status updater:
- *   import { setDecorationSuffix } from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
+ *   import { setDecorationSuffix } from "./decoration-suffix.ts"
  *   setDecorationSuffix("· ♻ sk-lsp · · tsgo")
  *
  * The suffix is a single styled string. Empty / null means append nothing.
+ *
+ * INTERNAL BRIDGE (spec S33): the public
+ * `plugin-api/utils/decoration-suffix` contract this module used to back
+ * moved to `minimal-agent-cli/src/terminal-kit`. This copy exists only so
+ * `src/host/ui/status/live-area-scheduler.ts` keeps compiling until S34
+ * moves it to the CLI, at which point this whole
+ * `src/internal/terminal-render` folder is deleted — not exported, not
+ * part of the public API, not reachable by a plugin.
  */
 
 let suffix = ""

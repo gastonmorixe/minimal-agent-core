@@ -18,11 +18,6 @@
  * @module ui/status/live-area-scheduler
  */
 
-import {
-  getDecorationSuffix,
-  setDecorationSuffix,
-} from "@minimal-agent/core/plugin-api/utils/decoration-suffix"
-import { getFooterTails, setFooterTail } from "@minimal-agent/core/plugin-api/utils/footer-tail"
 import { displayWidth, truncateDisplayWidth } from "@minimal-agent/core/plugin-api/utils/term-width"
 
 import {
@@ -32,6 +27,11 @@ import {
   getDiagnosticBus,
   Severity,
 } from "../../../bus/diagnostic-bus.ts"
+import {
+  getDecorationSuffix,
+  setDecorationSuffix,
+} from "../../../internal/terminal-render/decoration-suffix.ts"
+import { getFooterTails, setFooterTail } from "../../../internal/terminal-render/footer-tail.ts"
 import { agentContextToEnv } from "../../../plugins/agent-context.ts"
 import type { EventBus } from "../../../plugins/event-bus.ts"
 import type { PluginHost } from "../../../plugins/host/capabilities.ts"
@@ -379,7 +379,7 @@ export class LiveAreaScheduler {
       // Keyed footer-tail publisher: bound to THIS slot's plugin id so
       // concurrent plugins publish independent right-aligned segments
       // without clobbering each other. Two slots of the same plugin share
-      // the key (last writer wins). See plugin-api/utils/footer-tail.
+      // the key (last writer wins). See internal/terminal-render/footer-tail.
       setFooterTail: (text: string) => setFooterTail(s.slot.pluginId, text),
       // Cells the slot must leave free: the live-area cols-1 wrap cell
       // (always >= 1) plus anything the host appends after this line

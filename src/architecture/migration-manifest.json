@@ -512,7 +512,7 @@
       "target": "minimal-agent-cli/src/commands/usage.ts",
       "imports": [
         "plugin-api/src/utils/ansi.ts",
-        "plugin-api/src/utils/usage-render.ts",
+        "src/internal/terminal-render/usage-render.ts",
         "src/llm/model-label.ts",
         "src/quota/usage-stats.ts"
       ]
@@ -1749,9 +1749,9 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/live-area-scheduler.tails.test.ts",
       "imports": [
-        "plugin-api/src/utils/decoration-suffix.ts",
-        "plugin-api/src/utils/footer-tail.ts",
         "plugin-api/src/utils/term-width.ts",
+        "src/internal/terminal-render/decoration-suffix.ts",
+        "src/internal/terminal-render/footer-tail.ts",
         "src/plugins/event-bus.ts"
       ]
     },
@@ -1760,9 +1760,9 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/live-area-scheduler.test.ts",
       "imports": [
-        "plugin-api/src/utils/decoration-suffix.ts",
-        "plugin-api/src/utils/footer-tail.ts",
         "src/bus/global-bus.ts",
+        "src/internal/terminal-render/decoration-suffix.ts",
+        "src/internal/terminal-render/footer-tail.ts",
         "src/plugins/event-bus.ts",
         "src/quota/quota-broadcast.ts"
       ]
@@ -1772,10 +1772,10 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/status/live-area-scheduler.ts",
       "imports": [
-        "plugin-api/src/utils/decoration-suffix.ts",
-        "plugin-api/src/utils/footer-tail.ts",
         "plugin-api/src/utils/term-width.ts",
         "src/bus/diagnostic-bus.ts",
+        "src/internal/terminal-render/decoration-suffix.ts",
+        "src/internal/terminal-render/footer-tail.ts",
         "src/plugins/agent-context.ts",
         "src/plugins/event-bus.ts",
         "src/plugins/host/capabilities.ts",
@@ -1839,7 +1839,7 @@
       "path": "src/host/ui/style/mode.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/ui/style/mode.ts",
-      "imports": ["plugin-api/src/utils/mode-style.ts"]
+      "imports": ["src/internal/terminal-render/mode-style.ts"]
     },
     {
       "path": "src/host/ui/term-caps.test.ts",

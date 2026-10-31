@@ -23,9 +23,17 @@
  *   ctx.setFooterTail?.("") // clear when idle
  *
  *   // In the host flush:
- *   import { getFooterTails } from "@minimal-agent/core/plugin-api/utils/footer-tail"
+ *   import { getFooterTails } from "./footer-tail.ts"
  *   const tails = getFooterTails()
  *   if (tails) line = padRight(line, tails, cols)
+ *
+ * INTERNAL BRIDGE (spec S33): the public `plugin-api/utils/footer-tail`
+ * contract this module used to back moved to
+ * `minimal-agent-cli/src/terminal-kit`. This copy exists only so
+ * `src/host/ui/status/live-area-scheduler.ts` keeps compiling until S34
+ * moves it to the CLI, at which point this whole
+ * `src/internal/terminal-render` folder is deleted — not exported, not
+ * part of the public API, not reachable by a plugin.
  */
 
 const tails = new Map<string, string>()

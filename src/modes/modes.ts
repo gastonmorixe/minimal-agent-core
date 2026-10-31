@@ -28,6 +28,8 @@
  */
 
 import { ansiStyle as c } from "@minimal-agent/core/plugin-api/utils/ansi"
+
+import { diag } from "../bus/diagnostic-bus.ts"
 import {
   clampLabel,
   detectStyleEnv,
@@ -37,9 +39,7 @@ import {
   resolveModeStyle,
   type StyleEnv,
   styleFromLegacyColor,
-} from "@minimal-agent/core/plugin-api/utils/mode-style"
-
-import { diag } from "../bus/diagnostic-bus.ts"
+} from "../internal/terminal-render/mode-style.ts"
 import type { ContentBlock } from "../llm/messages.ts"
 import type { ManifestMode, ModePermissions, ToolPermission } from "../plugins/types.ts"
 import { applyToolNamePolicy, isToolNameAllowed, type ToolNamePolicy } from "../sdk/tool-filter.ts"
