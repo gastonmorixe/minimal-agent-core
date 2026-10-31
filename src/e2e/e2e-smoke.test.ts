@@ -62,12 +62,12 @@ describe("CLI smoke", () => {
             // deterministic. Without this, the canonical gate (`env -u
             // MINIMAL_AGENT_PROVIDER -u MINIMAL_AGENT_MODEL bun run check`) on a
             // machine with multiple credentialed providers dies "multiple
-            // provider credentials found" before the CLI ever answers. opencode
+            // provider credentials found" before the CLI ever answers. opencode-go
             // (surface "anthropic-messages", so it decodes the test transport)
             // + qwen3.7-plus are neither vendor-token-flagged by the
             // provider-decoupling ratchet nor ambiguous at selection time. Same
             // pin as src/output-mode.e2e.test.ts.
-            MINIMAL_AGENT_PROVIDER: "opencode",
+            MINIMAL_AGENT_PROVIDER: "opencode-go",
             MINIMAL_AGENT_MODEL: "qwen3.7-plus",
           },
         },
@@ -131,7 +131,7 @@ describe("CLI smoke", () => {
             // deterministic under the canonical `env -u MINIMAL_AGENT_PROVIDER -u
             // MINIMAL_AGENT_MODEL` gate on a multi-credential machine. See the
             // sibling test above for the full rationale.
-            MINIMAL_AGENT_PROVIDER: "opencode",
+            MINIMAL_AGENT_PROVIDER: "opencode-go",
             MINIMAL_AGENT_MODEL: "qwen3.7-plus",
           },
         },
