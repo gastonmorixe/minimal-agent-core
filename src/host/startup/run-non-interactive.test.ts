@@ -3,20 +3,21 @@
  * (`src/host/startup/run-non-interactive.ts`), focused on the Phase-2b
  * structured event-stream route (`--output-format json` / `stream-json`).
  *
- * The event-stream path drives a real {@link AgentCore} (built by the injected
- * factory, mirroring the frozen `buildAgentCore(deps)` seam) whose
- * {@link JsonlEventSink} serializes each {@link AgentEvent} to one JSONL line.
+ * The event-stream path drives a real `Session` (built by the injected
+ * factory, mirroring the `openAgentCoreSession(deps)` seam over
+ * `createRuntime`/`openSession`) and serializes each kept `SessionEntry`
+ * to one JSONL line, in the same wire format `JsonlEventSink` produces.
  * These tests assert:
- *   - json / stream-json route through the injected core factory and emit the
- *     exact JSONL event sequence to the injected stdout (id-join intact);
+ *   - json / stream-json route through the injected session factory and emit
+ *     the exact JSONL event sequence to the injected stdout (id-join intact);
  *   - stream-json flushes one write per event (live);
- *   - text does NOT take the event route (the factory is never built);
+ *   - text does NOT take the event route (the factory is never opened);
  *   - json WITHOUT a factory falls back to the legacy path (no regression);
  *   - json + `--output-schema` stays on the legacy buffered path.
  *
  * The G3 CLI-stdout gate (a real subprocess `--output-format json` run) lives
- * in `src/e2e/output-mode.e2e.test.ts`; this file pins the host wiring at the
- * unit level.
+ * in `src/e2e/output-format-g3.e2e.test.ts`; this file pins the host wiring
+ * at the unit level.
  *
  * @module host/startup/run-non-interactive.test
  */
@@ -25,9 +26,15 @@ import { describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../../auth/auth.ts"
 import type { StreamedResponse } from "../../llm/transport/types.ts"
-import { AgentCore } from "../../sdk/agent-core.ts"
-import type { EventSink } from "../../sdk/events.ts"
-import type { ToolExecResult, ToolExecutor, ToolRegistry, TranscriptSink } from "../../sdk/ports.ts"
+import { createRuntime } from "../../runtime/runtime.ts"
+import type { Session } from "../../runtime/session.ts"
+import type {
+  ToolDefinition,
+  ToolExecResult,
+  ToolExecutor,
+  ToolRegistry,
+  TranscriptSink,
+} from "../../sdk/ports.ts"
 import type { ReplAgentLike } from "../repl.ts"
 
 import {
@@ -49,12 +56,12 @@ class DiscardTranscript implements TranscriptSink {
 }
 
 /**
- * Build a real AgentCore that emits a single text turn `text` and routes its
- * events through `eventSink`. Mirrors the minimal config the frozen
- * `events-jsonl.integration.test.ts` uses. When `chunks` are given the sendFn
- * yields them in order (to exercise the delta path); otherwise it yields `text`.
+ * Open a real `Session` that emits a single text turn `text`. Mirrors the
+ * minimal config the frozen `events-jsonl.integration.test.ts` uses. When
+ * `chunks` are given the sendFn yields them in order (to exercise the delta
+ * path); otherwise it yields `text`.
  */
-function makeCore(eventSink: EventSink, text: string, chunks?: string[]): AgentCore {
+function openSession(text: string, chunks?: string[]): Session {
   const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
     for (const c of chunks ?? [text]) yield c
     return {
@@ -64,16 +71,13 @@ function makeCore(eventSink: EventSink, text: string, chunks?: string[]): AgentC
       usage: { input_tokens: 1, output_tokens: 1 },
     } as StreamedResponse
   }
-  return new AgentCore({
+  return createRuntime().openSession({
     auth: AUTH,
     model: "test-model",
-    systemPrompt: "",
-    maxTokens: 4096,
     toolRegistry: EMPTY_REGISTRY,
     toolExecutor: new StubExecutor(),
     transcriptSink: new DiscardTranscript(),
     sendFn,
-    eventSink,
   })
 }
 
@@ -146,18 +150,17 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
     await runNonInteractivePrompt(
       baseInput({
         outputFormat: "stream-json",
-        buildCore: (sink) =>
-          new AgentCore({
-            auth: AUTH,
-            model: "test-model",
-            systemPrompt: "",
-            maxTokens: 4096,
-            toolRegistry: EMPTY_REGISTRY,
-            toolExecutor: new StubExecutor(),
-            transcriptSink: new DiscardTranscript(),
-            sendFn,
-            eventSink: sink,
-          }),
+        openEventStreamSession: () =>
+          Promise.resolve(
+            createRuntime().openSession({
+              auth: AUTH,
+              model: "test-model",
+              toolRegistry: EMPTY_REGISTRY,
+              toolExecutor: new StubExecutor(),
+              transcriptSink: new DiscardTranscript(),
+              sendFn,
+            }),
+          ),
         stdout: (s) => out.push(s),
         exit: ((code: number) => {
           exits.push(code)
@@ -180,21 +183,21 @@ describe("runNonInteractivePrompt — structured route fatal error", () => {
 })
 
 describe("runNonInteractivePrompt — structured event-stream route", () => {
-  it("json: builds the core and emits the exact JSONL event sequence to stdout", async () => {
+  it("json: opens the session and emits the exact JSONL event sequence to stdout", async () => {
     const out: string[] = []
-    let built = 0
+    let opened = 0
     await runNonInteractivePrompt(
       baseInput({
         outputFormat: "json",
-        buildCore: (sink) => {
-          built++
-          return makeCore(sink, "hi")
+        openEventStreamSession: () => {
+          opened++
+          return Promise.resolve(openSession("hi"))
         },
         stdout: (s) => out.push(s),
       }),
     )
 
-    expect(built).toBe(1)
+    expect(opened).toBe(1)
     const events = out
       .join("")
       .split("\n")
@@ -213,22 +216,22 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     ])
   })
 
-  it("json: awaits an async core factory (real buildAgentCore returns a Promise)", async () => {
+  it("json: awaits an async session factory (real openAgentCoreSession returns a Promise)", async () => {
     const out: string[] = []
-    let built = 0
+    let opened = 0
     await runNonInteractivePrompt(
       baseInput({
         outputFormat: "json",
-        // Mirror the real seam: buildAgentCore(deps) is async.
-        buildCore: async (sink) => {
-          built++
+        // Mirror the real seam: openAgentCoreSession(deps) is async.
+        openEventStreamSession: async () => {
+          opened++
           await Promise.resolve()
-          return makeCore(sink, "hi")
+          return openSession("hi")
         },
         stdout: (s) => out.push(s),
       }),
     )
-    expect(built).toBe(1)
+    expect(opened).toBe(1)
     const events = out
       .join("")
       .split("\n")
@@ -240,19 +243,19 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
 
   it("stream-json: routes to the event stream and flushes one write per event", async () => {
     const out: string[] = []
-    let built = 0
+    let opened = 0
     await runNonInteractivePrompt(
       baseInput({
         outputFormat: "stream-json",
-        buildCore: (sink) => {
-          built++
-          return makeCore(sink, "yo")
+        openEventStreamSession: () => {
+          opened++
+          return Promise.resolve(openSession("yo"))
         },
         stdout: (s) => out.push(s),
       }),
     )
 
-    expect(built).toBe(1)
+    expect(opened).toBe(1)
     // One write per event (live flush), each a complete JSONL line. stream-json
     // includes the realtime text_delta, so a single-chunk "yo" turn produces:
     // turn_started, text_delta, item_started, item_completed, turn_completed.
@@ -274,7 +277,7 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     await runNonInteractivePrompt(
       baseInput({
         outputFormat: "stream-json",
-        buildCore: (sink) => makeCore(sink, "hello", ["he", "llo"]),
+        openEventStreamSession: () => Promise.resolve(openSession("hello", ["he", "llo"])),
         stdout: (s) => out.push(s),
       }),
     )
@@ -289,7 +292,7 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     await runNonInteractivePrompt(
       baseInput({
         outputFormat: "json",
-        buildCore: (sink) => makeCore(sink, "hello", ["he", "llo"]),
+        openEventStreamSession: () => Promise.resolve(openSession("hello", ["he", "llo"])),
         stdout: (s) => out.push(s),
       }),
     )
@@ -308,22 +311,88 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     ])
   })
 
-  it("text: does NOT take the event route (factory never built, legacy-path agent runs)", async () => {
-    let built = 0
+  it("json: a tool-calling turn preserves the id-join and leaves out tool_output (opt-in only)", async () => {
+    // Session's own event log always captures EVERY AgentEvent kind,
+    // including the opt-in tool_output (ALL_EVENT_KINDS, agent E's S48
+    // complete-trace design) -- this exercises that the route's own
+    // subscription-boundary filter still keeps the wire down to
+    // LEGACY_EVENT_KINDS, same as JsonlEventSink's default always did.
+    let round = 0
+    const sendFn = async function* (): AsyncGenerator<string, StreamedResponse, undefined> {
+      round++
+      if (round === 1) {
+        return {
+          blocks: [{ type: "tool_use" as const, id: "call-xyz", name: "DoThing", input: {} }],
+          text: "",
+          stopReason: "tool_use",
+        } as StreamedResponse
+      }
+      yield "done"
+      return {
+        blocks: [{ type: "text" as const, text: "done" }],
+        text: "done",
+        stopReason: "end_turn",
+      } as StreamedResponse
+    }
+    const toolRegistry: ToolRegistry = {
+      list: (): ToolDefinition[] => [{ name: "DoThing", description: "d", input_schema: {} }],
+    }
+    const toolExecutor: ToolExecutor = {
+      async execute(): Promise<ToolExecResult> {
+        return { content: "tool output text", isError: false }
+      },
+    }
+    const session = createRuntime().openSession({
+      auth: AUTH,
+      model: "test-model",
+      toolRegistry,
+      toolExecutor,
+      transcriptSink: new DiscardTranscript(),
+      sendFn,
+    })
+    const out: string[] = []
+    await runNonInteractivePrompt(
+      baseInput({
+        outputFormat: "json",
+        openEventStreamSession: () => Promise.resolve(session),
+        stdout: (s) => out.push(s),
+      }),
+    )
+    const events = out
+      .join("")
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l))
+    // The frozen wire format never carries tool_output (opt-in, kept out of
+    // LEGACY_EVENT_KINDS) even though the session's own log captured it.
+    expect(events.some((e) => e.type === "tool_output")).toBe(false)
+    const toolStart = events.find((e) => e.type === "item_started" && e.itemType === "tool_use")
+    const toolResult = events.find((e) => e.type === "tool_result")
+    expect(toolStart).toBeDefined()
+    expect(toolResult).toBeDefined()
+    expect(toolResult?.id).toBe("call-xyz")
+    expect(toolResult?.id).toBe(toolStart?.id)
+    expect(toolResult?.name).toBe("DoThing")
+    expect(toolResult?.isError).toBe(false)
+    expect(events.at(-1)?.type).toBe("turn_completed")
+  })
+
+  it("text: does NOT take the event route (factory never opened, legacy-path agent runs)", async () => {
+    let opened = 0
     const rec = recordingAgent([])
     const captured = await captureStdout(() =>
       runNonInteractivePrompt(
         baseInput({
           agent: rec.agent,
           outputFormat: "text",
-          buildCore: () => {
-            built++
-            return makeCore(new NoopSink(), "x")
+          openEventStreamSession: () => {
+            opened++
+            return Promise.resolve(openSession("x"))
           },
         }),
       ),
     )
-    expect(built).toBe(0)
+    expect(opened).toBe(0)
     expect(rec.calls()).toBe(1)
     // Legacy text path with no header + empty output writes just the trailing newline.
     expect(captured).toBe("\n")
@@ -337,7 +406,7 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
           agent: rec.agent,
           outputFormat: "json",
           wantJsonOutput: true,
-          // buildCore intentionally omitted.
+          // openEventStreamSession intentionally omitted.
         }),
       ),
     )
@@ -352,8 +421,8 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
     expect(last.text).toContain("the answer")
   })
 
-  it("json + --output-schema: stays on the legacy buffered path (factory not built)", async () => {
-    let built = 0
+  it("json + --output-schema: stays on the legacy buffered path (factory not opened)", async () => {
+    let opened = 0
     const rec = recordingAgent(['{"answer":"ok"}'])
     const schema = {
       type: "object",
@@ -367,9 +436,9 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
           agent: rec.agent,
           outputFormat: "json",
           outputSchema: schema,
-          buildCore: () => {
-            built++
-            return makeCore(new NoopSink(), "x")
+          openEventStreamSession: () => {
+            opened++
+            return Promise.resolve(openSession("x"))
           },
           exit: ((code: number) => {
             exitCode = code
@@ -378,14 +447,9 @@ describe("runNonInteractivePrompt — structured event-stream route", () => {
         }),
       ),
     )
-    expect(built).toBe(0)
+    expect(opened).toBe(0)
     expect(rec.calls()).toBe(1)
     // A conforming answer means no schema-failure exit.
     expect(exitCode).toBeUndefined()
   })
 })
-
-/** An EventSink that drops every event (used where the sink is irrelevant). */
-class NoopSink implements EventSink {
-  emit(): void {}
-}
