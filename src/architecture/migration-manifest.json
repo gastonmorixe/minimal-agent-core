@@ -1007,6 +1007,17 @@
       ]
     },
     {
+      "path": "src/host/startup/fixtures/stream-json-exit-child.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/fixtures/stream-json-exit-child.ts",
+      "imports": [
+        "src/auth/auth.ts",
+        "src/llm/transport/types.ts",
+        "src/runtime/runtime.ts",
+        "src/sdk/ports.ts"
+      ]
+    },
+    {
       "path": "src/host/startup/help.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/help.test.ts",
@@ -1258,6 +1269,12 @@
       "path": "src/host/startup/startup-tree.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/startup-tree.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/stream-json-exit-tail.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/stream-json-exit-tail.test.ts",
       "imports": []
     },
     {

@@ -182,7 +182,15 @@ function wantsEventStream(input: RunNonInteractivePromptInput): boolean {
  */
 async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<void> {
   const write = input.stdout ?? ((chunk: string) => void process.stdout.write(chunk))
-  const exit = input.exit ?? ((code: number): never => process.exit(code))
+  // Never call process.exit after writing the stream. On a slow pipe reader,
+  // process.exit can drop the queued tail (measured: 1 MB and up, Bun 1.4.x).
+  // So the default only sets the exit code, and the caller returns. The
+  // process then ends by itself once stdout drains. An injected `exit` (tests)
+  // keeps its old behavior.
+  const fail = (code: number): void => {
+    if (input.exit) input.exit(code)
+    else process.exitCode = code
+  }
   // Non-null: wantsEventStream() already verified openEventStreamSession is
   // present. It returns a promise (the real openAgentCoreSession awaits the
   // plugin prompt block), so await it before running.
@@ -230,13 +238,13 @@ async function runCoreEventStream(input: RunNonInteractivePromptInput): Promise<
     const result = await run.result
     // A paused run (permanent error) already emitted its `error` event.
     // Nobody can answer a one-shot run, so exit non-zero like a failure.
-    if (result.outcome === "waiting") exit(1)
+    if (result.outcome === "waiting") fail(1)
   } catch (err) {
     // The core already surfaced the fatal error on the stream as an `error`
     // event (with code/hint). Keep stdout a clean JSONL document (no stack
     // trace), but exit non-zero so scripts see the failure. An abort is not
     // a failure of the run itself.
-    if (fatalErrorFields(err)) exit(1)
+    if (fatalErrorFields(err)) fail(1)
   }
 }
 

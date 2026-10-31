@@ -302,6 +302,17 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Fixed
 
+- 2026-10-31: stream-json exits through `process.exitCode`, so a slow pipe
+  reader keeps the last lines. On a paused or failed run, the event-stream
+  route called `process.exit(1)` right after the last line. With a slow
+  reader, Bun dropped the queued tail, including `run_finished`: measured
+  5 of 5 runs at 1 MB and at 4 MB, 0 of 5 at 70 KB. The route now sets the
+  exit code and returns, and the process ends by itself with code 1. The
+  json route uses the same path. The text route does not change.
+  `main().catch` in `src/index.ts` still calls `process.exit(1)` after
+  writing the failure lines. Those lines are small, but large output
+  written before such a failure keeps the same risk. A follow-up covers it.
+
 - 2026-10-31: a non-interactive `--resume` no longer prints the human
   resume header and history replay to stdout. The old check matched only
   the literal `--prompt` flag, so a positional prompt or `-` (stdin) still
