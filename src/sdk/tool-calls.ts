@@ -42,6 +42,12 @@ export async function runToolCalls(
   for (const tool of toolBlocks) {
     const inputSummary = summarizeToolInput(tool.input)
     host.emit(toolCallEvent(tool, inputSummary))
+    if (signal?.aborted === true) {
+      // The turn was aborted: do not start this tool. Give it the same
+      // "aborted" result that an aborted tool gives.
+      results.push(skipAbortedTool(host, tool, inputSummary))
+      continue
+    }
     host.emit({ type: "status", phase: "running_tool", toolName: tool.name })
     const startedAt = host.now()
     const result = await host.executor.execute(tool, signal)
@@ -68,4 +74,32 @@ export async function runToolCalls(
     })
   }
   return results
+}
+
+/** Text of the tool result for a tool call that did not start because of an abort. */
+const TOOL_ABORTED_RESULT = "tool aborted by user"
+
+/** Record an "aborted" result for a tool call that did not start. */
+function skipAbortedTool(
+  host: ToolCallHost,
+  tool: ToolUseBlock,
+  inputSummary: string,
+): ToolResultBlock {
+  const toolResult: ToolResultBlock = {
+    type: "tool_result",
+    tool_use_id: tool.id,
+    content: TOOL_ABORTED_RESULT,
+    is_error: true,
+  }
+  host.persistence?.appendToolResult(toolResult)
+  host.emit({
+    type: "tool_result",
+    id: tool.id,
+    name: tool.name,
+    isError: true,
+    inputSummary,
+    outputSummary: summarizeToolOutput(TOOL_ABORTED_RESULT),
+    durationMs: 0,
+  })
+  return toolResult
 }

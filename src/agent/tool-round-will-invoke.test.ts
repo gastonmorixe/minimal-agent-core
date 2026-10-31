@@ -5,8 +5,10 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 import type { ToolUseBlock } from "../llm/messages.ts"
+import { Hooks } from "../plugins/hooks/hooks.ts"
 import {
   allowDecision,
+  chainResultToDecision,
   denyDecision,
   type LifecyclePort,
   NOOP_LIFECYCLE,
@@ -419,5 +421,56 @@ describe("executeToolRound — tool.willInvoke", () => {
     )
     expect(text).not.toContain("FAKE-NESTED-VALUE")
     expect(text).not.toContain("FAKE-REMOVED-VALUE")
+  })
+
+  test("a failClosed hook that returns { payload: null } denies and the tool does not run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-null-"))
+    const path = join(dir, "gated.txt")
+    const hooks = new Hooks({ logger: () => {} })
+    hooks.on("tool.willInvoke", () => ({ payload: null }) as never, {
+      caller: "plugin",
+      priority: 50,
+      source: "acp",
+      failClosed: true,
+    })
+    // The same mapping that the host LifecyclePortAdapter uses.
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      hasFailClosedToolHook: () => hooks.hookBus.failClosedCount("tool.willInvoke") > 0,
+      async beforeTool(p) {
+        return chainResultToDecision(await hooks.emitChain("tool.willInvoke", p))
+      },
+    }
+    const tool: ToolUseBlock = {
+      type: "tool_use",
+      id: "tu_null",
+      name: "Write",
+      input: { file_path: path, content: "should-not-land\n" },
+    }
+    const result = await executeToolRound(tool, baseCtx({ lifecycle }))
+    expect(result.is_error).toBe(true)
+    expect(existsSync(path)).toBe(false)
+  })
+
+  test("a throw in the chain path with a failClosed hook on it denies the tool", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ma-willinvoke-gate-throw-"))
+    const path = join(dir, "gated.txt")
+    const lifecycle: LifecyclePort = {
+      ...NOOP_LIFECYCLE,
+      hasFailClosedToolHook: () => true,
+      async beforeTool() {
+        throw new Error("port failure")
+      },
+    }
+    const tool: ToolUseBlock = {
+      type: "tool_use",
+      id: "tu_gate_throw",
+      name: "Write",
+      input: { file_path: path, content: "should-not-land\n" },
+    }
+    const result = await executeToolRound(tool, baseCtx({ lifecycle }))
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain("port failure")
+    expect(existsSync(path)).toBe(false)
   })
 })
