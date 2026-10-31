@@ -190,10 +190,20 @@ transport infrastructure (stream watchdog, retry, auth refresh) lives under
 `src/llm/transport/`. `src/network/client.ts` is the shared network client
 (HTTP/2, HTTP/3, fetch, observers) that adapters get on `RunContext`.
 `src/llm/adapter-legacy.ts` converts between the older `SendOptions` /
-`StreamedResponse` shapes and the canonical types. The retry and recovery
-policy is being reworked (spec S16, S49), so read the code for its current
-behavior. **Do not change the watchdog, retry, or auth-refresh code as a
-side effect of provider work.**
+`StreamedResponse` shapes and the canonical types.
+
+The loop owns retries. `AgentCore` sends one attempt
+(`canonicalAttemptFn`), and the pure `decideNext` (`src/sdk/stop-policy.ts`,
+the v2 stop table) decides from the error class: `transient` retries forever
+with backoff (`src/llm/transport/retry-policy.ts`, 60 s ceiling,
+`Retry-After` wins), `recoverable` runs one recovery action
+(`src/sdk/run-recovery.ts`), and `permanent` pauses the run (outcome
+`waiting`). Adapters stamp the class on their errors through
+`classifyUpstreamError` and `tagUpstreamError` (plugin-api
+`llm/errors`). No round or retry cap exists; do not add one.
+`canonicalSendFn` keeps `withRetry` for side calls outside the loop.
+**Do not change the watchdog, retry, or auth-refresh code as a side effect
+of provider work.**
 
 ### Adding a model or provider
 
