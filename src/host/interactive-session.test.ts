@@ -178,13 +178,31 @@ describe("InteractiveSession", () => {
       "text-stop",
     ])
     expect(transportOptions).toHaveLength(2)
+    // `Session.run()` wraps the caller's `signal` in its own AbortController
+    // (so `session.abort()` can also stop the run) and forwards THAT wrapper
+    // to the transport, not the caller's raw signal object. Every round of
+    // one run shares the one wrapper, and aborting the caller's controller
+    // still aborts it -- checked below, since that propagation (not object
+    // identity) is the real contract `InteractiveSession.run` promises.
+    const forwardedSignal = transportOptions[0]?.signal
+    expect(forwardedSignal).toBeInstanceOf(AbortSignal)
     for (const invocation of transportOptions) {
-      expect(invocation.signal).toBe(controller.signal)
+      expect(invocation.signal).toBe(forwardedSignal)
       expect(invocation.onThinkingStart).toBe(opts.onThinkingStart)
       expect(invocation.onThinkingStop).toBe(opts.onThinkingStop)
       expect(invocation.onTextStop).toBe(opts.onTextStop)
-      expect(invocation.onThinkingDelta).toBe(opts.onThinkingChunk)
+      // `AgentCore` wraps `onThinkingDelta` itself to also emit a
+      // `thinking_delta` event when `emitDeltas` is on (`Session.run()`'s
+      // default, since its own event log needs the delta stream) -- so
+      // this is no longer the SAME function reference as `onThinkingChunk`.
+      // The `lifecycle` assertion above already proves the wrapped
+      // function still calls through with the right text.
+      expect(typeof invocation.onThinkingDelta).toBe("function")
+      expect(invocation.onThinkingDelta).not.toBe(opts.onThinkingChunk)
     }
+    expect(forwardedSignal?.aborted).toBe(false)
+    controller.abort()
+    expect(forwardedSignal?.aborted).toBe(true)
     expect(queued).toEqual(["queued prompt"])
     expect(notices).toEqual(["max_tokens_salvaged"])
   })

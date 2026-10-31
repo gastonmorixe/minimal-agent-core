@@ -642,16 +642,29 @@
       "target": "minimal-agent-cli/src/interactive-session.ts",
       "imports": [
         "src/agent/context-compact.ts",
+        "src/agent/preflight-pipeline.ts",
         "src/agent/turn-notice.ts",
         "src/bus/status.ts",
         "src/host/sdk-adapters/build-agent-core.ts",
+        "src/host/sdk-adapters/lifecycle-port-adapter.ts",
+        "src/host/sdk-adapters/media-resolver-adapter.ts",
+        "src/host/sdk-adapters/mode-provider-adapter.ts",
+        "src/host/sdk-adapters/prompt-contributor-adapter.ts",
+        "src/host/sdk-adapters/session-persistence-adapter.ts",
+        "src/host/sdk-adapters/tool-executor-adapter.ts",
+        "src/host/sdk-adapters/tool-registry-adapter.ts",
         "src/llm/messages.ts",
         "src/llm/provider.ts",
         "src/llm/transport/types.ts",
         "src/modes/modes.ts",
+        "src/plugins/host/providers/context-compact.ts",
         "src/plugins/loader.ts",
         "src/plugins/types.ts",
-        "src/sdk/agent-core.ts"
+        "src/runtime/runtime.ts",
+        "src/runtime/session.ts",
+        "src/sdk/tool-filter.ts",
+        "src/session/blob-store.ts",
+        "src/tools/feedback-tracker.ts"
       ]
     },
     {

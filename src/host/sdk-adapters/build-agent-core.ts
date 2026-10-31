@@ -180,9 +180,13 @@ const EFFORT_VALUES = new Set(["low", "medium", "high", "max"])
 /**
  * Narrow the host's opaque effort string to the {@link AgentCoreConfig} union,
  * dropping anything unrecognized (undefined → server default). Mirrors the
- * legacy path's string→union threading.
+ * legacy path's string→union threading. Exported so `InteractiveSession`'s
+ * `openSession`-based assembly (`interactive-session.ts`) applies the exact
+ * same narrowing when it builds a `Session` instead of a bare `AgentCore`.
  */
-function toEffort(effort: string | undefined): "low" | "medium" | "high" | "max" | undefined {
+export function toEffort(
+  effort: string | undefined,
+): "low" | "medium" | "high" | "max" | undefined {
   return effort !== undefined && EFFORT_VALUES.has(effort)
     ? (effort as "low" | "medium" | "high" | "max")
     : undefined

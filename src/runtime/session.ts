@@ -15,6 +15,7 @@
  * @module runtime/session
  */
 
+import type { AskUserFn } from "../agent/preflight-pipeline.ts"
 import type { TurnNotice } from "../agent/turn-notice.ts"
 import { bridgeDiagnosticsToEventLog } from "../diagnostics/event-log-bridge.ts"
 import type { Diagnostics, SessionDiagnostics } from "../diagnostics/hub.ts"
@@ -59,6 +60,22 @@ export interface SessionRunOptions {
   onThinkingStop?: () => void | Promise<void>
   onTextStop?: () => void | Promise<void>
   onNotice?: (notice: TurnNotice) => void | Promise<void>
+  /**
+   * Per-run override for this turn's preflight `askUser` port (S17). Wins
+   * over whatever port the session was built with (`openSession`'s
+   * `ports.askUser` / `askUserFallback`) — see `host-ports.ts#runPorts`,
+   * which `AgentCore.run` already applies underneath this call. A host
+   * that asks interactively per-turn (e.g. a TUI that only wires a modal
+   * when one is actually mounted) passes it here instead of at
+   * construction time.
+   */
+  askUser?: AskUserFn
+  /** Per-run override for this turn's queued-input drain (S17). */
+  drainQueuedUserText?: () => string | null
+  /** Notified when the loop injects text this run's `drainQueuedUserText` drained. */
+  onQueueInject?: (text: string) => void
+  /** Per-run override for this turn's reflection-checkpoint gate (S17). */
+  beforeReflectionCheckpoint?: (round: number) => void | Promise<void>
 }
 
 /**
@@ -79,6 +96,19 @@ export type SessionOptions = Omit<
   eventLogPath?: string
   /** Round checkpoint to resume an unfinished turn from (S50, `resumeSession`). */
   initialCheckpoint?: RoundCheckpoint
+  /**
+   * Default when the caller supplies no `ports.askUser`. `"registry"`
+   * (default): build a {@link PendingAskRegistry} so `session.answer`
+   * always has something to resolve — the original headless default.
+   * `"none"`: leave the core's askUser port unset at construction, so a
+   * run with no per-run `askUser` override (`SessionRunOptions.askUser`)
+   * denies each preflight issue with an `ask_denied` notice and sends the
+   * request unchanged, matching `AgentCore`'s own "no port" fallback
+   * (`sdk/preflight-ask.ts`). A host that asks per-turn rather than
+   * per-session (e.g. one session shared by an interactive and a
+   * one-shot code path) wants this.
+   */
+  askUserFallback?: "registry" | "none"
 }
 
 /** One running conversation. Build it with `runtime.openSession` / `runtime.resumeSession`. */
@@ -103,7 +133,9 @@ export class Session {
     this.unbridge = bridgeDiagnosticsToEventLog(diagnostics, this.log)
 
     const callerAskUser = options.ports?.askUser
-    this.askRegistry = callerAskUser ? null : new PendingAskRegistry()
+    const wantsAskRegistry =
+      !callerAskUser && (options.askUserFallback ?? "registry") === "registry"
+    this.askRegistry = wantsAskRegistry ? new PendingAskRegistry() : null
     const ports: HostPorts = {
       askUser: callerAskUser ?? this.askRegistry ?? undefined,
       inputQueue: options.ports?.inputQueue ?? NOOP_INPUT_QUEUE,
@@ -128,10 +160,18 @@ export class Session {
    * from now on, in order, until the turn ends — then it ends too. The
    * run starts immediately; it does not wait for the first `next()` call,
    * so many sessions can run concurrently without anyone iterating yet.
+   * Its `result` property resolves with the same `TurnResult`
+   * `AgentCore.run` itself returns (outcome, and the pausing error for
+   * `outcome: "waiting"`) — the entry stream alone cannot carry a raw
+   * error object. It never rejects on its own; await the iterable first
+   * (it throws on a run failure) before reading `result` for the outcome.
    *
    * @throws Error when the session is closed, or already running a turn
    */
-  run(input: string, options: SessionRunOptions = {}): AsyncIterable<SessionEntry> {
+  run(
+    input: string,
+    options: SessionRunOptions = {},
+  ): AsyncIterable<SessionEntry> & { readonly result: Promise<TurnResult> } {
     if (this.closed) throw new Error(`session ${this.id} is closed`)
     if (this.running) throw new Error(`session ${this.id} already has a run in progress`)
     this.running = true
@@ -173,7 +213,20 @@ export class Session {
       w?.()
     }
 
-    void (async (): Promise<TurnResult | undefined> => {
+    let settleResult: (value: TurnResult) => void = () => {}
+    let failResult: (reason: unknown) => void = () => {}
+    const result = new Promise<TurnResult>((resolve, reject) => {
+      settleResult = resolve
+      failResult = reject
+    })
+    // A caller that only drains the entry stream (the common case: the
+    // iterable itself already throws on failure) never touches `result`.
+    // Attach a handler now so that path never surfaces an unhandled
+    // rejection; a caller that does read `result` still gets its real
+    // rejection (a promise may have many listeners).
+    result.catch(() => {})
+
+    void (async (): Promise<void> => {
       try {
         const gen = this.core.run(input, {
           signal: controller.signal,
@@ -184,19 +237,28 @@ export class Session {
           ...(options.onThinkingStop ? { onThinkingStop: options.onThinkingStop } : {}),
           ...(options.onTextStop ? { onTextStop: options.onTextStop } : {}),
           ...(options.onNotice ? { onNotice: options.onNotice } : {}),
+          ...(options.askUser ? { askUser: options.askUser } : {}),
+          ...(options.drainQueuedUserText
+            ? { drainQueuedUserText: options.drainQueuedUserText }
+            : {}),
+          ...(options.onQueueInject ? { onQueueInject: options.onQueueInject } : {}),
+          ...(options.beforeReflectionCheckpoint
+            ? { beforeReflectionCheckpoint: options.beforeReflectionCheckpoint }
+            : {}),
         })
         let step = await gen.next()
         while (!step.done) step = await gen.next()
-        return step.value
+        settleResult(step.value)
       } catch (error) {
         failure = error
-        return undefined
+        failResult(error)
       } finally {
         finish()
       }
     })()
 
     return {
+      result,
       [Symbol.asyncIterator](): AsyncIterator<SessionEntry> {
         return (async function* drain(): AsyncGenerator<SessionEntry, void, undefined> {
           while (true) {
@@ -218,6 +280,17 @@ export class Session {
   /** Subscribe to this session's log. See `SessionEventLog.subscribe`. */
   subscribe(listener: SessionEntryListener, options: SubscribeOptions = {}): Unsubscribe {
     return this.log.subscribe(listener, options)
+  }
+
+  /**
+   * The underlying `AgentCore`. An escape hatch for host operations
+   * outside the session-driving contract — model switching, manual
+   * `compact`, turn-state bookkeeping (`history`, `appendNote`,
+   * `rollbackPendingTurn`, ...), or a host-owned live history rewrite
+   * (`replaceMessages`). Never for running a turn; use `run()` for that.
+   */
+  agentCore(): AgentCore {
+    return this.core
   }
 
   /**
