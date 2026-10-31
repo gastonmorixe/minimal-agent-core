@@ -35,7 +35,7 @@ import {
 } from "../../auth/auth-store.ts"
 import { getDiagnosticBus } from "../../bus/diagnostic-bus.ts"
 import { setGlobalEventBus } from "../../bus/global-bus.ts"
-import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
+import type { StatusFields, StatusPort } from "../../bus/status-port.ts"
 import {
   NetworkClient,
   type NetworkRequest,
@@ -755,11 +755,21 @@ describe("canonicalSendFn — --debug request dump", () => {
 // flipped to ↓ but the label was misleading.
 // ---------------------------------------------------------------------------
 
-describe("canonicalSendFn — status label lifecycle", () => {
-  it("transitions label from 'Sending request' to 'Receiving stream' on message_start", async () => {
-    GLOBAL_STATUS_BUS.reset()
-    const labels: (string | null)[] = []
-    const unsub = GLOBAL_STATUS_BUS.subscribe((label) => labels.push(label))
+describe("canonicalSendFn — status phase lifecycle", () => {
+  it("transitions phase from 'sending' to 'receiving' on message_start (spec S23)", async () => {
+    // The engine never reads a global status bus (S23): the send reports
+    // through an injected StatusPort, phase codes only, no label.
+    const phases: StatusFields["phase"][] = []
+    const statusPort: StatusPort = {
+      open: (fields) => {
+        phases.push(fields.phase)
+        return {
+          update: (next) => phases.push(next.phase),
+          updateActivity: () => {},
+          clear: () => {},
+        }
+      },
+    }
 
     const networkClient = fakeNetworkClient(() => sseFromEvents(pongEvents()))
     const auth: AuthResult = { type: "oauth", token: "test-token" }
@@ -769,22 +779,13 @@ describe("canonicalSendFn — status label lifecycle", () => {
       model: "claude-opus-4-8",
       stream: true,
       networkClient,
+      statusPort,
     })
     while (!(await gen.next()).done) {
       // drain
     }
-    unsub()
 
-    // The subscription fires on subscribe (catches whatever is current—
-    // typically null after reset), then on every create/update/clear.
-    // We assert that "Sending request" and "Receiving stream" both
-    // appeared, proving the label transition happened.
-    expect(labels).toContain("Sending request")
-    expect(labels).toContain("Receiving stream")
-    // "Receiving stream" should appear after "Sending request"
-    const sendIdx = labels.indexOf("Sending request")
-    const recvIdx = labels.indexOf("Receiving stream")
-    expect(recvIdx).toBeGreaterThan(sendIdx)
+    expect(phases).toEqual(["sending", "receiving"])
   }, 5_000)
 })
 

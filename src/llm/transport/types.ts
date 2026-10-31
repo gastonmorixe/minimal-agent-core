@@ -13,6 +13,8 @@
  */
 
 import type { AuthResult } from "../../auth/auth.ts"
+import type { PluginEventsPort } from "../../bus/plugin-events-port.ts"
+import type { StatusPort } from "../../bus/status-port.ts"
 import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { NetworkClient } from "../../network/index.ts"
 import type { ContentBlock, Message } from "../messages.ts"
@@ -213,6 +215,20 @@ export interface SendOptions {
    * Esc/Ctrl+C handling to cancel an in-flight turn.
    */
   signal?: AbortSignal
+
+  /**
+   * Live status port (spec S23): where this send reports its phase
+   * (`sending`, then `receiving`) and its byte activity. The transport
+   * never reads a global status bus; with no port, it reports nothing.
+   */
+  statusPort?: StatusPort
+
+  /**
+   * Live-output telemetry port (spec S28): where streamed-output token
+   * progress reports, per run. The transport never reads a global
+   * plugin-bus pointer; with no port, it reports nothing.
+   */
+  pluginEvents?: PluginEventsPort
 }
 
 /**

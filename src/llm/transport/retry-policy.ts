@@ -23,6 +23,7 @@ import type {
 } from "@minimal-agent/core/plugin-api/llm/errors"
 import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 
+import type { StatusPort } from "../../bus/status-port.ts"
 import { tagTransientNetworkError } from "../../network/index.ts"
 
 export type { ErrorClass, RecoveryAction }
@@ -117,6 +118,12 @@ export interface RetryPolicyOptions {
   ceilingMs?: number
   /** Jitter source in [0, 1). Default `Math.random`. */
   random?: () => number
+  /**
+   * Live status port (spec S23): where a retry wait reports its phase
+   * (`retrying` / `waiting_for_quota`) and its countdown. The loop never
+   * reads a global status bus; with no port, a wait reports nothing.
+   */
+  statusPort?: StatusPort
 }
 
 function isAbortError(err: unknown): boolean {

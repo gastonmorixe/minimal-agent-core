@@ -40,7 +40,8 @@
 import { randomUUID } from "node:crypto"
 
 import { providerPeerToken, resolveStoredProviderAuth } from "../../auth/auth-strategies.ts"
-import { GLOBAL_STATUS_BUS, type StatusHandle } from "../../bus/status.ts"
+import type { StatusHandle } from "../../bus/status.ts"
+import { type LiveStatus, NOOP_STATUS_PORT } from "../../bus/status-port.ts"
 import { processDiagnostics } from "../../diagnostics/hub.ts"
 import {
   defaultNetworkClient,
@@ -72,32 +73,20 @@ import type { SendOptions, StreamedResponse } from "./types.ts"
 import { withStreamWatchdog } from "./watchdog.ts"
 
 /**
- * Intercept the canonical event stream to drive the status-label lifecycle.
+ * Intercept the canonical event stream to drive the status-phase lifecycle.
  *
- * The legacy `client.ts` updates the label through explicit calls after
- * each SSE-parser stage: "Waiting for response" when headers arrive, then
- * "Receiving stream" on the first data chunk. The canonical path never did
- * this, so the initial "Sending request" label persisted even once response
- * bytes were flowing in — the ↑/↓ arrow would correctly flip to ↓ but the
- * label stayed misleading.
- *
- * This wrapper fires label transitions at the corresponding canonical-event
- * boundaries:
- *
- *   - `message_start` → `"Receiving stream"` (response content has begun)
- *
- * Additional transitions ("Thinking", "Writing response") are handled by
- * the client.ts SSE parser for the legacy Anthropic path; they are not
- * reproduced here because the canonical event bridge delegates those
- * lifecycle callbacks to the caller's own hooks.
+ * This wrapper moves the phase at the corresponding canonical-event
+ * boundary: `message_start` → `receiving` (response content has begun).
+ * Core writes a phase code only (spec S23); a label, if any, is the host's
+ * job (the `StatusPort` implementation owns that).
  */
-async function* updateLabelsFromEvents(
+async function* updatePhaseFromEvents(
   events: AsyncIterable<CanonicalEvent>,
-  statusHandle: { update(label: string): void },
+  live: LiveStatus,
 ): AsyncGenerator<CanonicalEvent> {
   for await (const ev of events) {
     if (ev.type === "message_start") {
-      statusHandle.update("Receiving stream")
+      live.update({ phase: "receiving" })
     }
     yield ev
   }
@@ -207,15 +196,24 @@ export async function* canonicalAttemptFn(
   // ------------------------------------------------------------------
   // Realtime activity binding (status-line ↑/↓ bytes infix).
   //
+  // The live status comes from the injected `statusPort` (spec S23); with
+  // none, `live` reports nowhere and this send is silent on the status
+  // channel. `requestStatus` is a thin `StatusHandle`-shaped adapter over
+  // `live`, kept only so `bindPrimaryStreamRequest` / `networkActivityObserver`
+  // (byte-counter plumbing) stay unchanged: it forwards `updateActivity` /
+  // `clear` and never sets a label.
+  //
   // Wire ids are PER REQUEST, not per send. A provider may start side traffic
   // (Grok's OAuth billing GET is the observed case) while its response stream
   // is open. Reusing one id lets that probe overwrite the stream's net-dbg and
   // activity trackers. Each watchdog attempt therefore creates a fresh
   // stream-only client below; side requests keep NetworkClient's own UUIDs.
-  const requestStatus = GLOBAL_STATUS_BUS.create("Sending request", {
-    notificationId: "network.request",
-    category: "network",
-  })
+  const live = (opts.statusPort ?? NOOP_STATUS_PORT).open({ phase: "sending" })
+  const requestStatus: StatusHandle = {
+    update: () => {},
+    updateActivity: (partial) => live.updateActivity(partial),
+    clear: () => live.clear(),
+  }
   const baseClient = (opts.networkClient ?? defaultNetworkClient) as NetworkClient
 
   // One attempt = run() guarded by the watchdog, bridged to the legacy
@@ -279,15 +277,18 @@ export async function* canonicalAttemptFn(
         },
       },
     )
-    const labelledEvents = updateLabelsFromEvents(
+    const phasedEvents = updatePhaseFromEvents(
       finalizeEvents(events, () => detachAttemptActivity()),
-      requestStatus,
+      live,
     )
-    return canonicalEventsToLegacyStream(labelledEvents, {
+    return canonicalEventsToLegacyStream(phasedEvents, {
       onThinkingStart: opts.onThinkingStart,
       onThinkingDelta: opts.onThinkingDelta,
       onThinkingStop: opts.onThinkingStop,
       onTextStop: opts.onTextStop,
+      // Live-output telemetry (spec S28): forwarded from the per-send
+      // `pluginEvents` port, never read from a global pointer here.
+      pluginEvents: opts.pluginEvents,
       // Usage/quota broadcast on the same buses as the legacy client:
       // record the turn's footprint and re-render the quota footer. The
       // network observer is already shared via opts.networkClient, so

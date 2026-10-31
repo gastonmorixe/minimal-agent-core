@@ -4,21 +4,22 @@
  *
  * Background
  * ----------
- * `Bun.spawn` in `execBash` (src/tools.ts) forwards `process.env` wholesale
- * and then overrides three things:
+ * `Bun.spawn` in `execBash` (src/tools/tools.ts) forwards `process.env`
+ * wholesale and then overrides three things:
  *
  *   - `TERM=dumb` so subprocess tools don't emit ANSI escapes that would
  *     corrupt our tool-output rendering.
- *   - `COLUMNS=<process.stdout.columns>` so tools inside Bash (`tput cols`,
+ *   - `COLUMNS=<toolEnv.values().columns>` so tools inside Bash (`tput cols`,
  *     `stty size` fallback, shell scripts that consult `$COLUMNS`) see
  *     real values instead of macOS BSD tput's hardcoded 80×24 fallback.
- *   - `LINES=<process.stdout.rows>` for symmetry.
+ *   - `LINES=<toolEnv.values().lines>` for symmetry.
  *
- * Node/Bun does NOT auto-populate `process.env.COLUMNS` : the live terminal
- * size lives in `process.stdout.columns` (sourced from ioctl(TIOCGWINSZ)).
- * Without explicit injection, the bash subprocess sees empty `$COLUMNS` and
- * `tput cols` lands on its 80×24 hardcoded last-resort. This test pins the
- * forwarding contract.
+ * Spec S24: this module never reads `process.stdout` itself; the values
+ * come from the injected `toolEnv` port (`src/sdk/tool-env.ts`), which the
+ * host builds from its own view of the controlling terminal. With no port
+ * (or a port that reports nothing), the subprocess sees empty `$COLUMNS` /
+ * `$LINES` and `tput cols` lands on its 80×24 hardcoded last-resort. This
+ * test pins the forwarding contract on the port, not on `process.stdout`.
  *
  * Snapshot-at-spawn semantics : if the user resizes mid-command, `$COLUMNS`
  * inside that bash does NOT update. Acceptable for short-lived commands;
@@ -27,19 +28,27 @@
  *
  * Env isolation
  * -------------
- * The test asserts what `execBash` injects from `process.stdout.{columns,rows}`
- * into the subprocess. We MUST scrub any inherited `COLUMNS`/`LINES` on
- * `process.env` before each test : without scrubbing, when this file runs
- * nested inside another minimal-agent's `execBash` (or any shell that
- * exported `COLUMNS`), the parent has already injected `COLUMNS=NNN` into
- * our `process.env`, and the `{ ...process.env, ... }` spread inside our
- * own `execBash` would re-forward it to the inner subprocess, masking the
- * "no TTY" branch (subprocess sees `COLUMNS=NNN` even though our local
- * `process.stdout.columns` is unset).
+ * We MUST scrub any inherited `COLUMNS`/`LINES` on `process.env` before
+ * each test : without scrubbing, when this file runs nested inside another
+ * minimal-agent's `execBash` (or any shell that exported `COLUMNS`), the
+ * parent has already injected `COLUMNS=NNN` into our `process.env`, and the
+ * `{ ...process.env, ... }` spread inside our own `execBash` would
+ * re-forward it to the inner subprocess, masking the "no port" branch.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import type { ToolEnvPort } from "../sdk/tool-env.ts"
+
 import { executeTool } from "./tools.ts"
+
+function fixedToolEnv(columns?: number, lines?: number): ToolEnvPort {
+  return {
+    values: () => ({
+      ...(columns !== undefined ? { columns } : {}),
+      ...(lines !== undefined ? { lines } : {}),
+    }),
+  }
+}
 
 describe("Bash tool : env injection", () => {
   let savedCols: string | undefined
@@ -59,28 +68,27 @@ describe("Bash tool : env injection", () => {
     else process.env.LINES = savedLines
   })
 
-  it("forwards process.stdout.columns as $COLUMNS", async () => {
-    const want = process.stdout.columns
-    if (typeof want !== "number" || want <= 0) {
-      // Running under bun test without a TTY : the injection is correctly
-      // skipped and the subprocess sees no $COLUMNS. Assert the negative.
-      const r = await executeTool("Bash", { command: 'printf "%s" "${COLUMNS-}"' })
-      expect(r.content).toBe("")
-      return
-    }
-    const r = await executeTool("Bash", { command: 'printf "%s" "${COLUMNS-}"' })
-    expect(r.content).toBe(String(Math.floor(want)))
+  it("forwards toolEnv().columns as $COLUMNS", async () => {
+    const r = await executeTool(
+      "Bash",
+      { command: 'printf "%s" "${COLUMNS-}"' },
+      { toolEnv: fixedToolEnv(97) },
+    )
+    expect(r.content).toBe("97")
   })
 
-  it("forwards process.stdout.rows as $LINES", async () => {
-    const want = process.stdout.rows
-    if (typeof want !== "number" || want <= 0) {
-      const r = await executeTool("Bash", { command: 'printf "%s" "${LINES-}"' })
-      expect(r.content).toBe("")
-      return
-    }
-    const r = await executeTool("Bash", { command: 'printf "%s" "${LINES-}"' })
-    expect(r.content).toBe(String(Math.floor(want)))
+  it("forwards toolEnv().lines as $LINES", async () => {
+    const r = await executeTool(
+      "Bash",
+      { command: 'printf "%s" "${LINES-}"' },
+      { toolEnv: fixedToolEnv(undefined, 31) },
+    )
+    expect(r.content).toBe("31")
+  })
+
+  it("with no toolEnv port, injects neither $COLUMNS nor $LINES", async () => {
+    const r = await executeTool("Bash", { command: 'printf "%s" "${COLUMNS-}:${LINES-}"' })
+    expect(r.content).toBe(":")
   })
 
   it("keeps TERM=dumb (capabilities belong to TERM, not COLUMNS)", async () => {

@@ -27,6 +27,7 @@ import { dirname, resolve } from "node:path"
 
 import type { ImageBlock } from "../llm/canonical-messages.ts"
 import { decideReadFile, type ReadFileMediaContext } from "../media/read-file.ts"
+import type { ToolEnvPort } from "../sdk/tool-env.ts"
 import {
   type FileTrackingStore,
   normalizeTrackedPath,
@@ -276,6 +277,12 @@ export interface ToolExecOpts {
   onStderr?: (chunk: string) => void
   /** Optional durable tracker for tool file observations. */
   fileTrackingStore?: FileTrackingStore
+  /**
+   * Width and other env values a child process should see (spec S24). Core
+   * never reads the terminal size itself; with no port, `Bash` spawns with
+   * no `COLUMNS` / `LINES` override.
+   */
+  toolEnv?: ToolEnvPort
 }
 
 /**
@@ -611,12 +618,17 @@ async function execBash(
     // `TERM=dumb` is kept : it prevents subprocess tools from emitting
     // ANSI escapes that would corrupt our tool-output rendering. Size
     // belongs to env vars; capabilities belong to TERM.
+    //
+    // The values come from the injected `toolEnv` port (spec S24): this
+    // module never reads `process.stdout` itself. With no port, Bash spawns
+    // with no `COLUMNS` / `LINES` override.
     const env: Record<string, string> = { ...process.env, TERM: "dumb" }
-    if (typeof process.stdout.columns === "number" && process.stdout.columns > 0) {
-      env.COLUMNS = String(Math.floor(process.stdout.columns))
+    const toolEnvValues = opts.toolEnv?.values() ?? {}
+    if (typeof toolEnvValues.columns === "number" && toolEnvValues.columns > 0) {
+      env.COLUMNS = String(Math.floor(toolEnvValues.columns))
     }
-    if (typeof process.stdout.rows === "number" && process.stdout.rows > 0) {
-      env.LINES = String(Math.floor(process.stdout.rows))
+    if (typeof toolEnvValues.lines === "number" && toolEnvValues.lines > 0) {
+      env.LINES = String(Math.floor(toolEnvValues.lines))
     }
     const proc = Bun.spawn(["bash", "-c", command], {
       cwd: bashCwd,

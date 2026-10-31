@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test"
 
-import { setGlobalEventBus } from "../bus/global-bus.ts"
-import { EventBus } from "../plugins/event-bus.ts"
+import type { PluginEventsPort } from "../bus/plugin-events-port.ts"
 
-import { canonicalEventsToLegacyStream } from "./adapter-legacy.ts"
+import { canonicalEventsToLegacyStream, type LegacyStreamCallbacks } from "./adapter-legacy.ts"
 import type { CanonicalEvent, CanonicalUsage } from "./canonical-events.ts"
 import {
   LLM_OUTPUT_DELTA,
@@ -15,11 +14,17 @@ async function* fromArray(events: CanonicalEvent[]): AsyncIterable<CanonicalEven
   for (const e of events) yield e
 }
 
-async function drain(events: CanonicalEvent[]) {
-  const gen = canonicalEventsToLegacyStream(fromArray(events))
+async function drain(events: CanonicalEvent[], cb: LegacyStreamCallbacks = {}) {
+  const gen = canonicalEventsToLegacyStream(fromArray(events), cb)
   let next = await gen.next()
   while (!next.done) next = await gen.next()
   return next.value
+}
+
+/** A `PluginEventsPort` capturing every emitted channel/payload. */
+function makeSink(): PluginEventsPort & { seen: Array<{ channel: string; payload: unknown }> } {
+  const seen: Array<{ channel: string; payload: unknown }> = []
+  return { seen, emit: (event, payload) => seen.push({ channel: event, payload }) }
 }
 
 const initialUsage: CanonicalUsage = {
@@ -37,34 +42,26 @@ const finalUsage: CanonicalUsage = {
 
 afterEach(() => {
   resetStreamDeltaAccumulator()
-  setGlobalEventBus(null)
 })
 
 describe("canonicalEventsToLegacyStream output telemetry", () => {
-  it("batches deltas through the real bus and emits one end after the final flush", async () => {
-    const bus = new EventBus(() => {})
-    const seen: Array<{ channel: string; payload: unknown }> = []
-    bus.on(LLM_OUTPUT_DELTA, (ctx) => {
-      seen.push({ channel: ctx.event, payload: ctx.payload })
-    })
-    bus.on(LLM_OUTPUT_END, (ctx) => {
-      seen.push({ channel: ctx.event, payload: ctx.payload })
-    })
-    setGlobalEventBus(bus)
+  it("batches deltas through the injected pluginEvents port and emits one end after the final flush", async () => {
+    const sink = makeSink()
 
-    await drain([
-      { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
-      { type: "text_start", index: 0 },
-      { type: "text_delta", index: 0, text: "x".repeat(200) },
-      { type: "text_delta", index: 0, text: "y".repeat(100) },
-      { type: "text_stop", index: 0, finalText: "" },
-      { type: "message_delta", stopReason: "end_turn", usage: finalUsage },
-      { type: "message_stop" },
-    ])
-    await Promise.resolve()
-    await Promise.resolve()
+    await drain(
+      [
+        { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+        { type: "text_start", index: 0 },
+        { type: "text_delta", index: 0, text: "x".repeat(200) },
+        { type: "text_delta", index: 0, text: "y".repeat(100) },
+        { type: "text_stop", index: 0, finalText: "" },
+        { type: "message_delta", stopReason: "end_turn", usage: finalUsage },
+        { type: "message_stop" },
+      ],
+      { pluginEvents: sink },
+    )
 
-    expect(seen).toEqual([
+    expect(sink.seen).toEqual([
       { channel: LLM_OUTPUT_DELTA, payload: { deltaTokens: 50 } },
       { channel: LLM_OUTPUT_DELTA, payload: { deltaTokens: 25 } },
       { channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } },
@@ -72,44 +69,49 @@ describe("canonicalEventsToLegacyStream output telemetry", () => {
   })
 
   it("emits output end after a stream error", async () => {
-    const bus = new EventBus(() => {})
-    const seen: Array<{ channel: string; payload: unknown }> = []
-    bus.on(LLM_OUTPUT_END, (ctx) => {
-      seen.push({ channel: ctx.event, payload: ctx.payload })
-    })
-    setGlobalEventBus(bus)
+    const sink = makeSink()
 
     await expect(
-      drain([
-        { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
-        { type: "stream_error", retryable: false, category: "api" },
-      ]),
+      drain(
+        [
+          { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+          { type: "stream_error", retryable: false, category: "api" },
+        ],
+        { pluginEvents: sink },
+      ),
     ).rejects.toThrow("canonical stream error: api")
-    await Promise.resolve()
-    await Promise.resolve()
 
-    expect(seen).toEqual([{ channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } }])
+    expect(sink.seen).toEqual([{ channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } }])
   })
 
   it("does not emit output end until a tool-use stream finishes", async () => {
-    const bus = new EventBus(() => {})
-    const seen: Array<{ channel: string; payload: unknown }> = []
-    bus.on(LLM_OUTPUT_END, (ctx) => {
-      seen.push({ channel: ctx.event, payload: ctx.payload })
-    })
-    setGlobalEventBus(bus)
+    const sink = makeSink()
 
-    await drain([
-      { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
-      { type: "tool_use_start", index: 0, id: "tool_1", name: "Bash" },
-      { type: "tool_use_stop", index: 0 },
-      { type: "message_delta", stopReason: "tool_use", usage: finalUsage },
-      { type: "message_stop" },
-    ])
-    await Promise.resolve()
-    await Promise.resolve()
+    await drain(
+      [
+        { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+        { type: "tool_use_start", index: 0, id: "tool_1", name: "Bash" },
+        { type: "tool_use_stop", index: 0 },
+        { type: "message_delta", stopReason: "tool_use", usage: finalUsage },
+        { type: "message_stop" },
+      ],
+      { pluginEvents: sink },
+    )
 
-    expect(seen).toEqual([{ channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } }])
+    expect(sink.seen).toEqual([{ channel: LLM_OUTPUT_END, payload: { reason: "stream_end" } }])
+  })
+
+  it("is silent with no pluginEvents port (spec S28: never reads a global pointer)", async () => {
+    await expect(
+      drain([
+        { type: "message_start", messageId: "m1", modelId: "test-model-large", initialUsage },
+        { type: "text_start", index: 0 },
+        { type: "text_delta", index: 0, text: "hi" },
+        { type: "text_stop", index: 0, finalText: "hi" },
+        { type: "message_delta", stopReason: "end_turn", usage: finalUsage },
+        { type: "message_stop" },
+      ]),
+    ).resolves.toBeDefined()
   })
 })
 
