@@ -25,7 +25,7 @@
  * @module llm/run
  */
 
-import { diag } from "../bus/diagnostic-bus.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import { defaultNetworkClient } from "../network/index.ts"
 
 import type { CanonicalEvent } from "./canonical-events.ts"
@@ -45,6 +45,8 @@ export interface RunOptions {
   acceptDegrade?: boolean
   /** Run context (auth, networkClient, sessionId, debug, onUsage). */
   context: RunContext
+  /** Where the degrade diagnostic goes: the caller's handle (S20). Default: the process bus. */
+  diagnostics?: Diagnostics
 }
 
 /**
@@ -65,7 +67,8 @@ export async function* run(req: CanonicalRequest, opts: RunOptions): AsyncIterab
   let effective: CanonicalRequest = req
   if (!validation.ok) {
     if (opts.acceptDegrade && validation.degrade) {
-      diag.warn(
+      const diagnostics = opts.diagnostics ?? processDiagnostics()
+      diagnostics.warn(
         "capability.degrade",
         `model ${model.id} downgraded by stripping ${validation.errors.length} unsupported feature(s): ${validation.errors.map((e) => e.capability).join(", ")}`,
       )

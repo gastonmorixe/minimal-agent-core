@@ -16,7 +16,7 @@
  * @module sdk/sink-guard
  */
 
-import { type DiagnosticBus, Facility, getDiagnosticBus, Severity } from "../bus/diagnostic-bus.ts"
+import { type DiagnosticEmitter, Facility, Severity } from "../bus/diagnostic-bus.ts"
 
 /** Diagnostic code for the first failure of one listener. */
 export const SINK_ERROR_CODE = "events.sink-error"
@@ -79,16 +79,15 @@ export function createSinkGuard(onFirstFailure: (failure: SinkFailure) => void):
 
 /**
  * Report the first failure of `listener` as one `events.sink-error`
- * diagnostic on a diagnostic bus. Hosts that have no session event log use
- * this. `bus` defaults to the process bus until diagnostics are injected
- * (S20).
+ * diagnostic. `diagnostics` is the owner's injected handle (S20), so a
+ * session's sink failure carries that session's id.
  */
 export function reportSinkError(
   listener: string,
   failure: SinkFailure,
-  bus: DiagnosticBus = getDiagnosticBus(),
+  diagnostics: DiagnosticEmitter,
 ): void {
-  bus.emit({
+  diagnostics.emit({
     ts: Date.now(),
     severity: Severity.Error,
     facility: Facility.User,

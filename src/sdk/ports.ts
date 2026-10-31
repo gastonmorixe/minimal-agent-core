@@ -340,6 +340,14 @@ export interface AgentCoreConfig {
    */
   eventSink?: EventSink
   /**
+   * Diagnostics handle (S20). A runtime passes the session scope
+   * (`DiagnosticsHub.session(id)`, `src/diagnostics/hub.ts`), so every
+   * diagnostic of this core, its transport, its compaction, and its network
+   * requests carries the session id. Omit it and they go to the process bus
+   * with no session id.
+   */
+  diagnostics?: import("../diagnostics/hub.ts").Diagnostics
+  /**
    * Optional lifecycle / policy port (beforeSend, beforeTool, afterToolBatch,
    * compact, session). Hosts wire a HookBus adapter; omit or pass
    * {@link NOOP_LIFECYCLE} when no plugins are loaded. AgentCore never imports

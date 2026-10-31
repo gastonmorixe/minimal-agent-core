@@ -9,6 +9,7 @@ export {
   defaultNetworkClient,
   NetworkClient,
   type NetworkRequestInput,
+  withRequestDiagnostics,
 } from "./client.ts"
 export { applyPreferredDnsResultOrder, type DnsResultOrder } from "./dns-order.ts"
 export { FetchTransport } from "./fetch-transport.ts"

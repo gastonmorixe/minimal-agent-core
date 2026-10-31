@@ -26,6 +26,7 @@ import { abortableSleep } from "@minimal-agent/core/plugin-api/utils/retry"
 import type { AuthResult } from "../auth/auth.ts"
 import { providerPeerToken, resolveStoredProviderAuth } from "../auth/auth-strategies.ts"
 import { getGlobalEventBus } from "../bus/global-bus.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
 import { legacyAuthToProviderAuth } from "../llm/adapter-legacy.ts"
 import type { CanonicalRequest } from "../llm/canonical-request.ts"
 import type { ContentBlock, Message } from "../llm/messages.ts"
@@ -38,7 +39,11 @@ import { is401 } from "../llm/transport/auth-refresh.ts"
 import { classifyError, retryDelayMs } from "../llm/transport/retry-policy.ts"
 import { emitOutputEnd, LLM_OUTPUT_DELTA } from "../llm/transport/stream-delta.ts"
 import { normalizeModelForAPI } from "../llm/transport/types.ts"
-import { defaultNetworkClient, type NetworkClient } from "../network/index.ts"
+import {
+  defaultNetworkClient,
+  type NetworkClient,
+  withRequestDiagnostics,
+} from "../network/index.ts"
 import type { LifecyclePort } from "../sdk/lifecycle.ts"
 import { LifecycleSendDeniedError } from "../sdk/with-lifecycle-send.ts"
 
@@ -69,6 +74,11 @@ export interface RunCompactInput {
    */
   credentialName?: string
   networkClient?: NetworkClient
+  /**
+   * Diagnostics handle of the caller (S20). The summary and remote compact
+   * requests report here. Default: the process bus.
+   */
+  diagnostics?: Diagnostics
   reason: CompactReason
   /**
    * When true (default), try provider.compact first. Set false to force
@@ -467,6 +477,12 @@ async function runRemoteCompact(
   )
 }
 
+/** The network client for a compact request, stamped with the caller's diagnostics. */
+function compactNetworkClient(input: RunCompactInput): NetworkClient {
+  const client = input.networkClient ?? defaultNetworkClient
+  return input.diagnostics ? withRequestDiagnostics(client, input.diagnostics) : client
+}
+
 /**
  * Blocking single-shot summary call over the same model/provider auth as
  * the live send path. Resolves with trimmed summary text, or `undefined`
@@ -484,7 +500,7 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
   const ctx: RunContext = {
     auth: providerAuth,
     sessionId: "compact-local",
-    networkClient: input.networkClient ?? defaultNetworkClient,
+    networkClient: compactNetworkClient(input),
   }
   // MUST go through the provider's resolveSystemPrompt so Anthropic OAuth
   // plan auth gets billing + Claude Code identity preamble. A bare compaction
@@ -527,7 +543,10 @@ async function runLocalSummary(input: RunCompactInput): Promise<string | undefin
     }
     let attemptText = ""
     try {
-      for await (const ev of run(req, { context: ctx })) {
+      for await (const ev of run(req, {
+        context: ctx,
+        ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+      })) {
         if (ev.type === "text_delta") {
           attemptText += ev.text
           const deltaTokens = Math.max(1, Math.round(ev.text.length / 4))
@@ -676,7 +695,7 @@ async function tryRemoteCompact(input: RunCompactInput): Promise<CompactResult |
   const ctx: RunContext = {
     auth: providerAuth,
     sessionId: "compact",
-    networkClient: input.networkClient ?? defaultNetworkClient,
+    networkClient: compactNetworkClient(input),
   }
 
   // Build a minimal canonical request from the live history for the

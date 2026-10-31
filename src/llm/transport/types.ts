@@ -13,6 +13,7 @@
  */
 
 import type { AuthResult } from "../../auth/auth.ts"
+import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { NetworkClient } from "../../network/index.ts"
 import type { ContentBlock, Message } from "../messages.ts"
 
@@ -95,6 +96,12 @@ export interface SendOptions {
   requestType?: RequestType
   /** Network client used for API transport. */
   networkClient?: NetworkClient
+  /**
+   * Diagnostics handle of the caller (S20). The transport reports retries,
+   * stalls, and auth refreshes here, and stamps it on each network request.
+   * AgentCore passes its own. Without one the transport uses the process bus.
+   */
+  diagnostics?: Diagnostics
   /**
    * Adaptive thinking config. Pass `false` to disable.
    *

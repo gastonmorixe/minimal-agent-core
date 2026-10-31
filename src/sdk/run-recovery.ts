@@ -11,6 +11,7 @@
  * @module sdk/run-recovery
  */
 
+import type { Diagnostics } from "../diagnostics/hub.ts"
 import { noteRecoveryFailed, waitBeforeRetry } from "../llm/transport/retry.ts"
 import {
   type ClassifiedError,
@@ -34,6 +35,8 @@ export interface RecoveryHost {
   emitStatus(status: RetryStatus): void
   compact(opts: { reason: "exceeded" }): Promise<unknown>
   policy: RetryPolicyOptions
+  /** The core's diagnostics handle (S20). */
+  diagnostics: Diagnostics
 }
 
 /**
@@ -55,7 +58,7 @@ export async function recover(
         await host.compact({ reason: "exceeded" })
         return true
       } catch (err) {
-        noteRecoveryFailed(action, error.cause, err)
+        noteRecoveryFailed(host.diagnostics, action, error.cause, err)
         return false
       }
     case "wait_for_quota":
@@ -103,5 +106,6 @@ export async function waitToRetry(
     elapsedMs,
     ...(signal ? { signal } : {}),
     policy: host.policy,
+    diagnostics: host.diagnostics,
   })
 }

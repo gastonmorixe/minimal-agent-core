@@ -1,3 +1,5 @@
+import type { Diagnostics } from "../diagnostics/hub.ts"
+
 export type NetworkMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 export type NetworkProtocol = "http/1.1" | "h2" | "h3" | "ws" | "webrtc"
@@ -74,6 +76,13 @@ export interface NetworkRequest {
    * {@link NetworkResponse.writeRequestBody} (Connect bidi).
    */
   keepRequestOpen?: boolean
+  /**
+   * Diagnostics handle of the caller (S20). The pool is shared by every
+   * session, so it takes the handle per request, like `signal`, and reports
+   * this request's diagnostics there. Policies and observers see it too.
+   * Absent: the client's own `diagnostics`, if any.
+   */
+  diagnostics?: Diagnostics
 }
 
 /**

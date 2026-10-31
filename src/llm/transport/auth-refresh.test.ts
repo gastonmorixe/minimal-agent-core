@@ -11,10 +11,23 @@
 
 import { describe, expect, it } from "bun:test"
 
+import type { LogEvent } from "../../bus/diagnostic-bus.ts"
+import { createDiagnostics, type Diagnostics } from "../../diagnostics/hub.ts"
 import type { ProviderAuth } from "../provider.ts"
 
 import { type AuthRefreshState, is401, withAuthRefresh } from "./auth-refresh.ts"
 import type { StreamedResponse } from "./types.ts"
+
+/** A diagnostics handle that records what it gets, bound to session `s1`. */
+function recorder(): { events: LogEvent[]; diagnostics: Diagnostics } {
+  const events: LogEvent[] = []
+  return {
+    events,
+    diagnostics: createDiagnostics({ emit: (e) => events.push(e) }, { sessionId: "s1" }),
+  }
+}
+
+const { diagnostics } = recorder()
 
 function resp(text: string): StreamedResponse {
   return { blocks: [{ type: "text", text }], text, stopReason: "end_turn" }
@@ -58,6 +71,7 @@ describe("is401", () => {
 
 describe("withAuthRefresh", () => {
   it("network-refreshes on 401 and retries with the fresh token", async () => {
+    const rec = recorder()
     let refreshCalls = 0
     const state: AuthRefreshState = {
       auth: {
@@ -70,12 +84,16 @@ describe("withAuthRefresh", () => {
       },
     }
     const { yields, result } = await drain(
-      withAuthRefresh(attemptUntilToken(state, new Set(["stale"]), "ok"), state),
+      withAuthRefresh(attemptUntilToken(state, new Set(["stale"]), "ok"), state, {
+        diagnostics: rec.diagnostics,
+      }),
     )
     expect(yields).toEqual(["ok"])
     expect(result.text).toBe("ok")
     expect(refreshCalls).toBe(1)
     expect((state.auth as { token: string }).token).toBe("fresh")
+    // The refresh is reported on the injected handle, with its session id.
+    expect(rec.events.map((e) => [e.source, e.sessionId])).toEqual([["auth.refresh", "s1"]])
   })
 
   it("store-first: adopts a peer-rotated token WITHOUT a network refresh", async () => {
@@ -93,6 +111,7 @@ describe("withAuthRefresh", () => {
     const { result } = await drain(
       withAuthRefresh(attemptUntilToken(state, new Set(["stale"]), "ok"), state, {
         peerToken: () => "peer-fresh",
+        diagnostics,
       }),
     )
     expect(result.text).toBe("ok")
@@ -115,6 +134,7 @@ describe("withAuthRefresh", () => {
     await drain(
       withAuthRefresh(attemptUntilToken(state, new Set(["stale"]), "ok"), state, {
         peerToken: () => undefined,
+        diagnostics,
       }),
     )
     expect(refreshCalls).toBe(1)
@@ -144,7 +164,7 @@ describe("withAuthRefresh", () => {
               throw err401() // always 401, even after refresh
             })(),
           state,
-          { peerToken: () => "peer-but-still-stale" },
+          { peerToken: () => "peer-but-still-stale", diagnostics },
         ),
       )
     } catch (e) {
@@ -170,6 +190,7 @@ describe("withAuthRefresh", () => {
               throw new Error("500 overloaded")
             })(),
           state,
+          { diagnostics },
         ),
       )
     } catch (e) {
@@ -190,6 +211,7 @@ describe("withAuthRefresh", () => {
               throw err401()
             })(),
           state,
+          { diagnostics },
         ),
       )
     } catch (e) {
