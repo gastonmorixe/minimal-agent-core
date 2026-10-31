@@ -82,6 +82,7 @@ import {
   publishResolvedRequestEnv,
   validateStartupEffort,
 } from "./host/startup/startup-rows.ts"
+import { type StreamInfo, writeStreamJsonFailure } from "./host/startup/stream-json-writer.ts"
 import { isColdStart, maybeShowFirstRunWelcome } from "./host/ui/chrome/first-run.ts"
 import { buildReadyBanner } from "./host/ui/chrome/ready-banner.ts"
 import { resolveFormatter } from "./host/ui/formatter/auto.ts"
@@ -177,6 +178,20 @@ const {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
+
+/** The stream-json session info, once the model and version are known. */
+let streamFailureInfo: StreamInfo | undefined
+
+/**
+ * On `--output-format stream-json`, end stdout with the failure lines
+ * (`error`, then `run_finished` failed). Call it before the stderr text and
+ * the exit. `--output-schema` stays on the legacy route, so it is skipped.
+ */
+function writeStreamFailure(err: unknown): void {
+  if (outputFormat !== "stream-json" || outputSchemaPath !== undefined) return
+  const info = streamFailureInfo
+  writeStreamJsonFailure(err, { sessionId: getSessionId(), ...(info ? { streamInfo: info } : {}) })
+}
 
 /**
  * Entry point. Orchestrates the full startup flow:
@@ -470,6 +485,17 @@ async function main() {
   // The object is frozen by createAgentContext, so it can be passed
   // around without defensive copies.
   const agentVersion = readEmbeddedPackageVersion(embeddedDir)
+  // Values for the stream-json session_started line. No auth, token,
+  // credential name, or env values go here.
+  const streamInfo: StreamInfo = {
+    sessionId: getSessionId(),
+    model: selectedModel,
+    provider: selectedProviderId,
+    effort,
+    version: agentVersion,
+    cwd: process.cwd(),
+  }
+  streamFailureInfo = streamInfo
   const agentContext = createAgentContext({
     sessionId: getSessionId(),
     pid: process.pid,
@@ -822,6 +848,7 @@ async function main() {
     try {
       resumeSid = resolveSessionTarget(effectiveResumeArg, process.cwd())
       if (!resumeSid) {
+        writeStreamFailure(new Error("no saved sessions found to --resume last"))
         console.error(`  ${c.boldRed("error")} no saved sessions found to --resume last`)
         process.exit(1)
       }
@@ -905,6 +932,7 @@ async function main() {
       }
       // Hash drift: compute below once we have system+tools.
     } catch (err) {
+      writeStreamFailure(err)
       console.error(
         `  ${c.boldRed("error")} could not resume session ${effectiveResumeArg}: ${err instanceof Error ? err.message : String(err)}`,
       )
@@ -1140,16 +1168,8 @@ async function main() {
         outputSchema,
         loader: hasPlugins ? loader : null,
         cwd: process.cwd(),
-        // Values for the stream-json session_started first line. No auth,
-        // token, credential name, or env values go here.
-        streamInfo: {
-          sessionId: sid,
-          model: selectedModel,
-          provider: selectedProviderId,
-          effort,
-          version: agentVersion,
-          cwd: process.cwd(),
-        },
+        // Values for the stream-json session_started first line.
+        streamInfo,
         // Structured event-stream route for `--output-format json` / `stream-json`:
         // open a fully-wired Session (Tier-1 adapters, over createRuntime) whose
         // own complete event log run-non-interactive filters at its own
@@ -1263,6 +1283,7 @@ main()
     await defaultNetworkClient.close()
   })
   .catch((err: Error) => {
+    writeStreamFailure(err)
     console.error(formatFatalError(err))
     process.exit(1)
   })

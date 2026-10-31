@@ -22,7 +22,7 @@
  * @module host/startup/run-non-interactive.test
  */
 
-import { describe, expect, it } from "bun:test"
+import { beforeEach, describe, expect, it } from "bun:test"
 
 import type { AuthResult } from "../../auth/auth.ts"
 import type { StreamedResponse } from "../../llm/transport/types.ts"
@@ -41,6 +41,10 @@ import {
   type RunNonInteractivePromptInput,
   runNonInteractivePrompt,
 } from "./run-non-interactive.ts"
+import { resetStreamJsonWriterForTests } from "./stream-json-writer.ts"
+
+// The stream-json writer is a process-wide singleton. Each test starts clean.
+beforeEach(() => resetStreamJsonWriterForTests())
 
 const AUTH: AuthResult = { type: "api-key", token: "test-token" }
 const EMPTY_REGISTRY: ToolRegistry = { list: () => [] }

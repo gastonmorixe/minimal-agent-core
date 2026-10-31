@@ -1137,6 +1137,18 @@
       ]
     },
     {
+      "path": "src/host/startup/run-non-interactive.stream-failure.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/run-non-interactive.stream-failure.test.ts",
+      "imports": [
+        "src/auth/auth.ts",
+        "src/llm/transport/types.ts",
+        "src/runtime/runtime.ts",
+        "src/runtime/session.ts",
+        "src/sdk/ports.ts"
+      ]
+    },
+    {
       "path": "src/host/startup/run-non-interactive.test.ts",
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/run-non-interactive.test.ts",
@@ -1216,6 +1228,18 @@
       "dest": "cli",
       "target": "minimal-agent-cli/src/startup/startup-tree.ts",
       "imports": []
+    },
+    {
+      "path": "src/host/startup/stream-json-writer.test.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/stream-json-writer.test.ts",
+      "imports": []
+    },
+    {
+      "path": "src/host/startup/stream-json-writer.ts",
+      "dest": "cli",
+      "target": "minimal-agent-cli/src/startup/stream-json-writer.ts",
+      "imports": ["src/llm/error-hint.ts", "src/sdk/events.ts"]
     },
     {
       "path": "src/host/ui/choice-modal.test.ts",

@@ -107,6 +107,16 @@ write-ups live under [`docs/changes/`](changes/); research handoffs under
 
 ### Added
 
+- 2026-10-31: with `--output-format stream-json`, a failure after argv
+  parse still ends stdout with machine-readable lines: an `error` line,
+  then a `run_finished` line with outcome `failed`. This covers a failed
+  session open, a failed `--resume`, a `turn.willStart` halt (code
+  `turn.blocked`), and any other fatal error. When the model is known and
+  no `session_started` line is on stdout yet, that line comes first. An
+  abort gives only `run_finished` with outcome `aborted`. Argv and flag
+  errors still go to stderr only. The stderr text, the exit codes, and the
+  json and text routes do not change.
+
 - 2026-10-31: `--output-format stream-json` has a new first line,
   `session_started`. Its keys, in order: `type`, `streamVersion` (1),
   `sessionId`, `model`, `provider`, `effort`, `cwd`, `version`,
