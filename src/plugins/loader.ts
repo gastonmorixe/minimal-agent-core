@@ -37,6 +37,7 @@ import { Hooks } from "./hooks/hooks.ts"
 import type { PluginHost } from "./host/capabilities.ts"
 import { buildPluginHost } from "./host/factory.ts"
 import type { CommandDispatchOptions } from "./loader/commands.ts"
+import { installHostCoreResolver } from "./loader/host-core-resolver.ts"
 import { pluginHandlerErrorResult, unknownPluginToolResult } from "./loader/PROMPTS.ts"
 import type {
   AgentContext,
@@ -449,6 +450,9 @@ export class PluginLoader {
     // instead of racing the startup banner box with a raw stderr write.
     // Tests inject their own logger and bypass the bus.
     const logger = opts.logger ?? ((msg: string) => diag.warn("plugin-loader", msg))
+    // Plugin imports of `@minimal-agent/core/*` get the host's copy, so only
+    // one copy of the contract loads (see loader/host-core-resolver.ts).
+    installHostCoreResolver()
     const coreToolNames = opts.coreToolNames ?? new Set<string>()
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const eventBus = opts.bus ?? new EventBus(logger)
