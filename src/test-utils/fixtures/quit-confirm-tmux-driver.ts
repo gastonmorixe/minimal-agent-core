@@ -7,6 +7,7 @@
  */
 import { EventEmitter } from "node:events"
 
+import type { QuitReason } from "../../bus/abort-quit-fsm.ts"
 import { EditorController } from "../../host/editor-controller.ts"
 import { printGoodbye } from "../../host/ui/chrome/goodbye-banner.ts"
 import { StdioInterceptor } from "../../host/ui/stdio-interceptor.ts"
@@ -68,9 +69,16 @@ const editor = new EditorController({
 })
 
 const SID = "d5e415fb-bc89-4bfd-aba7-c41512830175"
-let quitFired: string | null = null
-editor.on("quit", (reason: any) => {
-  quitFired = String(reason)
+// Mirror runReplLiveArea: its `cancel` listener wakes the REPL loop, whose
+// `finally` tears down and prints the goodbye banner in microtasks. That
+// lands before the editor's hard exit (`setImmediate` → process.exit).
+editor.on("quit", (reason: QuitReason) => {
+  queueMicrotask(() => {
+    editor.stop()
+    compositor.unmount()
+    printGoodbye({ sessionId: SID, reason }, { write: (s) => process.stdout.write(s) })
+    interceptor.uninstall()
+  })
 })
 
 interceptor.install()
@@ -105,12 +113,12 @@ void (async () => {
   stdin.send("\x03")
   await sleep(200)
 
+  // Reached only when the second Ctrl+C did not quit: a confirmed quit ends
+  // the process through the editor's hard exit before this timer fires.
+  const state = editor.fsmStateForTest().kind
   editor.stop()
   compositor.unmount()
-  printGoodbye(
-    { sessionId: SID, reason: (quitFired as any) ?? "confirmed" },
-    { write: (s) => process.stdout.write(s) },
-  )
   interceptor.uninstall()
-  process.exit(0)
+  process.stdout.write(`  [3] FAIL: no quit, state=${state}\n`)
+  process.exit(1)
 })()

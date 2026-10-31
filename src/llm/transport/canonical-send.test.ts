@@ -202,6 +202,9 @@ afterAll(() => {
   else process.env.MINIMAL_AGENT_AUTH_FILE = prevModuleAuthFile
   resetDefaultAuthStoreForTests()
   if (moduleAuthDir) rmSync(moduleAuthDir, { recursive: true, force: true })
+  // Every completed send adds to the process-wide session-token totals; leave
+  // them at zero for the next file in a shared `bun test` process.
+  clearSessionTokens()
 })
 
 function writeStoredOpenAIKey(apiKey: string): void {
@@ -307,9 +310,14 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
   const ANTHROPIC_SECRET = "anthropic-oauth-secret-DO-NOT-LEAK"
   const auth: AuthResult = { type: "oauth", token: ANTHROPIC_SECRET }
   let dir: string
-  const prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
+  // Captured per test, NOT at describe-collection time: the module `beforeAll`
+  // sandbox (and its seeded anthropic credential) is set AFTER collection, so a
+  // collection-time capture would restore the pre-sandbox path and strand every
+  // later suite on the real store.
+  let prevAuthFile: string | undefined
 
   beforeEach(() => {
+    prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
     dir = mkdtempSync(join(tmpdir(), "minimal-agent-auth-"))
     process.env.MINIMAL_AGENT_AUTH_FILE = join(dir, "auth.jsonc")
     resetDefaultAuthStoreForTests()
@@ -365,6 +373,34 @@ describe("canonicalSendFn — cross-provider dispatch + per-provider auth (the m
     expect(caught).not.toContain("apiKeys.openai")
     expect(reached).toBe(false)
   }, 15_000)
+
+  it("honors the MINIMAL_AGENT_TEST_AUTH seam with the caller credential (empty store)", async () => {
+    // Startup returns a synthetic test token under this seam without reading
+    // the store; the send must not then demand a real stored credential.
+    const prevTestAuth = process.env.MINIMAL_AGENT_TEST_AUTH
+    process.env.MINIMAL_AGENT_TEST_AUTH = "1"
+    let seenAuth = ""
+    const networkClient = fakeNetworkClient((req) => {
+      seenAuth = req.headers?.authorization ?? ""
+      return sseFromEvents(pongEvents())
+    })
+    try {
+      const gen = canonicalSendFn({
+        auth: { type: "oauth", token: "test-token" },
+        messages,
+        model: "gpt-5.5",
+        stream: true,
+        networkClient,
+      })
+      while (!(await gen.next()).done) {
+        // drain
+      }
+    } finally {
+      if (prevTestAuth === undefined) delete process.env.MINIMAL_AGENT_TEST_AUTH
+      else process.env.MINIMAL_AGENT_TEST_AUTH = prevTestAuth
+    }
+    expect(seenAuth).toBe("Bearer test-token")
+  }, 15_000)
 })
 
 // ---------------------------------------------------------------------------
@@ -377,11 +413,15 @@ describe("canonicalSendFn — provider auth source is host store only", () => {
 
   let dir: string
   let cfgPath: string
-  const prevConfig = process.env.MINIMAL_AGENT_CONFIG
-  const prevOpenAI = process.env.OPENAI_API_KEY
-  const prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
+  // Captured per test (see the cross-provider suite above for why).
+  let prevConfig: string | undefined
+  let prevOpenAI: string | undefined
+  let prevAuthFile: string | undefined
 
   beforeEach(() => {
+    prevConfig = process.env.MINIMAL_AGENT_CONFIG
+    prevOpenAI = process.env.OPENAI_API_KEY
+    prevAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
     dir = mkdtempSync(join(tmpdir(), "minimal-agent-auth-store-"))
     cfgPath = join(dir, "config.jsonc")
     process.env.MINIMAL_AGENT_CONFIG = cfgPath

@@ -82,6 +82,7 @@ export function make(
     continuation?: string
     columns?: number
     bareEscapeMs?: number
+    /** Double-Escape gesture window; default 0 (off), production uses 500. */
     doubleEscapeMs?: number
     abortBus?: AbortBus
     /** Override armed-state painter cadence. Set 0 to disable tick. */
@@ -98,6 +99,7 @@ export function make(
   if (opts.columns) output.columns = opts.columns
   const compositor = new FakeCompositor()
   const ctrl = new EditorController({
+    exitFn: () => {},
     prompt: opts.prompt ?? "> ",
     continuationPrompt: opts.continuation ?? "  ",
     compositor: compositor as any,
@@ -108,7 +110,10 @@ export function make(
     // dedicated test that opts into a non-zero window.
     resizeDebounceMs: opts.resizeDebounceMs ?? 0,
     ...(opts.bareEscapeMs !== undefined ? { bareEscapeMs: opts.bareEscapeMs } : {}),
-    ...(opts.doubleEscapeMs !== undefined ? { doubleEscapeMs: opts.doubleEscapeMs } : {}),
+    // The double-Escape window defers every single Escape until it closes.
+    // Keep it off unless a test opts in, so a single Escape routes right
+    // after the bare-Esc timer (same default as abort-quit-keystroke's harness).
+    doubleEscapeMs: opts.doubleEscapeMs ?? 0,
     ...(opts.abortBus ? { abortBus: opts.abortBus } : {}),
     ...(opts.armedTickMs !== undefined ? { armedTickMs: opts.armedTickMs } : {}),
     ...(opts.nowFn ? { nowFn: opts.nowFn } : {}),

@@ -1,9 +1,14 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { describe, expect, it } from "bun:test"
 
 import type { LoadedPlugin, ManifestFile } from "../types.ts"
 
 import {
   classifyPluginPrompt,
+  discoverPackageDirs,
   escapeTagAttr,
   leadingHeadingText,
   PROMPT_ROLE_ORDER,
@@ -158,5 +163,23 @@ describe("PROMPT_ROLE_ORDER", () => {
     expect(tool).toBeLessThan(emit)
     expect(emit).toBeLessThan(mode)
     expect(mode).toBeLessThan(context)
+  })
+})
+
+describe("discoverPackageDirs", () => {
+  it("returns package dirs sorted by name, whatever the readdir order", () => {
+    const root = mkdtempSync(join(tmpdir(), "ma-discover-"))
+    try {
+      for (const name of ["pkg_c", "pkg_a", "pkg_b"]) {
+        mkdirSync(join(root, "plugins", name), { recursive: true })
+        writeFileSync(join(root, "plugins", name, "manifest.json"), "{}")
+      }
+      mkdirSync(join(root, "plugins", "no-manifest"))
+      expect(discoverPackageDirs(root, "plugins")).toEqual(
+        ["pkg_a", "pkg_b", "pkg_c"].map((n) => join(root, "plugins", n)),
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

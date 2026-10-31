@@ -124,6 +124,7 @@ describe("prompt.inject : out-of-band prompt enqueue through runReplLiveArea", (
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as never })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,
@@ -161,6 +162,7 @@ describe("prompt.inject : out-of-band prompt enqueue through runReplLiveArea", (
     const output = new FakeOutput()
     const compositor = new Compositor({ output: output as never })
     const editor = new EditorController({
+      exitFn: () => {},
       prompt: "❯ ",
       continuationPrompt: "  ",
       compositor,

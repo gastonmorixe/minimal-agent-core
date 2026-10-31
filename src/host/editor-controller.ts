@@ -228,6 +228,7 @@ export class EditorController extends EventEmitter {
   private fsmState: FsmState = initialFsmState()
   private readonly fsmOptions: FsmOptions
   private readonly nowFn: () => number
+  private readonly exitFn: (code: number) => void
   private readonly escapeHatch = new EscapeHatch()
   private readonly armedTickMs: number
   private armedTicker: ReturnType<typeof setInterval> | null = null
@@ -281,6 +282,7 @@ export class EditorController extends EventEmitter {
     this.abortBus = opts.abortBus ?? abortBus
     this.fsmOptions = opts.quitFsm ?? {}
     this.nowFn = opts.nowFn ?? (() => Date.now())
+    this.exitFn = opts.exitFn ?? ((code) => process.exit(code))
     this.armedTickMs = opts.armedTickMs ?? 250
     this.hooks = opts.hooks ?? null
     this.inputCaptureStack = opts.inputCaptureStack ?? inputCaptureStack
@@ -324,7 +326,7 @@ export class EditorController extends EventEmitter {
         // never resolves). process.exit() tears through the event loop;
         // the existing process.on("exit") handler in installCleanupHooksOnce
         // still restores terminal settings first.
-        setImmediate(() => process.exit(0))
+        setImmediate(() => this.exitFn(0))
       },
       dispatchKeyHook: (key) => this.dispatchKeyHook(key),
       tryQueueNav: (key) => this.tryQueueNav(key),
@@ -509,7 +511,7 @@ export class EditorController extends EventEmitter {
           // cancellation can't break a hung transport. process.exit()
           // tears through the event loop; the existing process.on("exit")
           // handler in installCleanupHooksOnce still restores the terminal.
-          setImmediate(() => process.exit(0))
+          setImmediate(() => this.exitFn(0))
           break
         }
       }

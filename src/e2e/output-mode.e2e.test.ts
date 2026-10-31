@@ -17,6 +17,13 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "bun:test"
 
+import { siblingPluginPresent } from "../test-utils/sibling-repo.ts"
+
+// These tests boot the real CLI with the opencode-go provider plugin from the
+// sibling plugins repo. On a bare core checkout (core CI) it is absent, so
+// they skip (see test-utils/sibling-repo.ts). The umbrella checkout runs them.
+const HAVE_PROVIDER = siblingPluginPresent("ma-llm-opencode-go-plugin")
+
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) return ""
   return new Response(stream).text()
@@ -78,7 +85,7 @@ const objSchema = {
   required: ["answer"],
 }
 
-describe("--output-schema enforcement (e2e)", () => {
+describe.skipIf(!HAVE_PROVIDER)("--output-schema enforcement (e2e)", () => {
   it("e1: conforming JSON answer → exit 0, answer on stdout", async () => {
     const schemaPath = tmpSchema(objSchema)
     const { exitCode, stdout } = await runCli(
@@ -124,7 +131,7 @@ describe("--output-schema enforcement (e2e)", () => {
   })
 })
 
-describe("--json final-answer JSONL (e2e)", () => {
+describe.skipIf(!HAVE_PROVIDER)("--json final-answer JSONL (e2e)", () => {
   it("j1: --json emits the AgentCore event stream; the answer is a text item_completed, exit 0", async () => {
     // Post agent-loop-refactor integration, `--json` drives AgentCore and emits
     // the full structured event stream (turn_started → item_started →

@@ -83,6 +83,7 @@ function makeHarness(opts: {
   const compositor = new Compositor({ output })
   compositor.mount()
   const ctrl = new EditorController({
+    exitFn: () => {},
     prompt: "ASK ❯ ",
     continuationPrompt: "  ",
     // biome-ignore lint/suspicious/noExplicitAny: test harness wiring

@@ -84,14 +84,16 @@ export function resolveSiblingPluginRoots(embeddedDir: string): string[] {
 
 /**
  * Lists plugin package directories under `rootDir/sub`: every immediate
- * subdirectory containing a `manifest.json`. Returns `[]` when the base
- * directory does not exist, so missing plugin roots are not an error.
+ * subdirectory containing a `manifest.json`, sorted by name. Returns `[]`
+ * when the base directory does not exist, so missing plugin roots are not an
+ * error. Sorting keeps first-wins collisions the same on every filesystem
+ * (readdir order is sorted on APFS but not on ext4).
  */
 export function discoverPackageDirs(rootDir: string, sub: string): string[] {
   const base = join(rootDir, sub)
   if (!existsSync(base) || !statSync(base).isDirectory()) return []
   const out: string[] = []
-  for (const entry of readdirSync(base)) {
+  for (const entry of readdirSync(base).sort()) {
     const full = join(base, entry)
     if (!statSync(full).isDirectory()) continue
     if (!existsSync(join(full, "manifest.json"))) continue

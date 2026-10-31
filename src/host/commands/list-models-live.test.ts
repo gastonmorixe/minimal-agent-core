@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { defaultAuthStore, resetDefaultAuthStoreForTests } from "../../auth/auth-store.ts"
 import { clearModelRegistry, clearProviderRegistry } from "../../llm/model-registry.ts"
@@ -9,7 +13,19 @@ import { stripAnsi } from "../../terminal/term-width.ts"
 import { runListModelsLiveCommand } from "./list-models-live.ts"
 
 describe("list-models-live", () => {
+  // Never touch the real ~/.minimal-agent/auth.jsonc.
+  let authDir = ""
+  const savedAuthFile = process.env.MINIMAL_AGENT_AUTH_FILE
+  beforeEach(() => {
+    authDir = mkdtempSync(join(tmpdir(), "ma-list-auth-"))
+    process.env.MINIMAL_AGENT_AUTH_FILE = join(authDir, "auth.jsonc")
+    resetDefaultAuthStoreForTests()
+  })
+
   afterEach(() => {
+    if (savedAuthFile === undefined) delete process.env.MINIMAL_AGENT_AUTH_FILE
+    else process.env.MINIMAL_AGENT_AUTH_FILE = savedAuthFile
+    rmSync(authDir, { recursive: true, force: true })
     clearModelRegistry()
     clearProviderRegistry()
     clearProviderPlugins()

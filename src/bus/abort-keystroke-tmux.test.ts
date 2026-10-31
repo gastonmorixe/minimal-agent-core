@@ -2,7 +2,7 @@
  * tmux smoke: end-to-end regression guard for **Bug A + Bug B** (May 2026 -
  * see project memory `#abort-quit-fsm` and `src/abort-quit-keystroke.test.ts`).
  *
- * Spawns `tmp/abort-real-editor-tmux.ts` (which wires a REAL
+ * Spawns `src/host/editor-controller.abort-keystroke-tmux-driver.ts` (which wires a REAL
  * `EditorController` into `runReplLiveArea`) inside a tmux pane, drives byte
  * sequences via `tmux paste-buffer` (which preserves the literal bytes - the
  * conventional `tmux send-keys` translates key names through tmux's input
@@ -79,7 +79,7 @@ desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", ()
         "120",
         "-y",
         "30",
-        "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
+        "bun run src/host/editor-controller.abort-keystroke-tmux-driver.ts; sleep 2",
       ])
       expect(start.status).toBe(0)
 
@@ -124,7 +124,7 @@ desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", ()
         "120",
         "-y",
         "30",
-        "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
+        "bun run src/host/editor-controller.abort-keystroke-tmux-driver.ts; sleep 2",
       ])
       expect(start.status).toBe(0)
 
@@ -171,7 +171,7 @@ desc("tmux smoke: abort-keystroke - kitty/xterm encodings route through FSM", ()
         "120",
         "-y",
         "30",
-        "bun run tmp/abort-real-editor-tmux.ts; sleep 2",
+        "bun run src/host/editor-controller.abort-keystroke-tmux-driver.ts; sleep 2",
       ])
       expect(start.status).toBe(0)
 
