@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 
 import { diag } from "../bus/diagnostic-bus.ts"
 import { loadUserConfig } from "../config/config.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
 import { resolveNetDbgEnabled } from "../logging/net-dbg.ts"
 
 import { networkActivityObserver } from "./activity-observer.ts"
@@ -55,6 +56,11 @@ export interface NetworkClientOptions {
    * sees the final substituted response). See {@link NetworkPolicy}.
    */
   policies?: NetworkPolicy[]
+  /**
+   * Runtime-level diagnostics handle, for requests that carry no
+   * `diagnostics` of their own. Absent: such requests report nothing.
+   */
+  diagnostics?: Diagnostics
 }
 
 export type NetworkRequestInput = Omit<NetworkRequest, "id" | "transportHint"> & {
@@ -70,6 +76,7 @@ export class NetworkClient {
   private readonly transports: Map<NetworkProtocol, NetworkTransport>
   private readonly plaintextHttpTransport?: NetworkTransport
   private readonly policies: NetworkPolicy[]
+  private readonly diagnostics: Diagnostics | undefined
 
   constructor(opts: NetworkClientOptions) {
     this.primary = opts.primary
@@ -79,6 +86,7 @@ export class NetworkClient {
     this.transports = opts.transports ?? new Map()
     this.plaintextHttpTransport = opts.plaintextHttpTransport
     this.policies = opts.policies ?? []
+    this.diagnostics = opts.diagnostics
   }
 
   async request(input: NetworkRequestInput): Promise<NetworkResponse> {
@@ -125,6 +133,7 @@ export class NetworkClient {
             transportHint: this.fallback!.id,
           })
           fb.transport.fallbackUsed = true
+          this.noteFallback(carried, transport, err)
           return this.tapResponse(carried, fb)
         }
         throw err
@@ -230,6 +239,21 @@ export class NetworkClient {
     return this.allowFetchFallback || req.allowFetchFallback === true
   }
 
+  /** Report that the fetch fallback served `req`, on the request's own handle. */
+  private noteFallback(req: NetworkRequest, primary: NetworkTransport, err: unknown): void {
+    const diagnostics = req.diagnostics ?? this.diagnostics
+    const error = err instanceof Error ? err.message : String(err)
+    diagnostics?.warn(
+      "network.fetch-fallback",
+      `${primary.id} failed, fetch served the request: ${error}`,
+      {
+        label: req.label,
+        primary: primary.id,
+        error,
+      },
+    )
+  }
+
   private tapResponse(req: NetworkRequest, response: NetworkResponse): NetworkResponse {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
     let settled = false
@@ -329,6 +353,20 @@ export class NetworkClient {
   private notifyError(req: NetworkRequest, err: unknown): void {
     for (const observer of this.observers) observer.onError?.(req, err)
   }
+}
+
+/**
+ * A view of `client` that stamps `diagnostics` on every request that carries
+ * none (S20). Transports, connections, policies, and observers stay shared:
+ * one pool serves many sessions, and each request still reports to its own.
+ */
+export function withRequestDiagnostics(
+  client: NetworkClient,
+  diagnostics: Diagnostics,
+): NetworkClient {
+  const view: NetworkClient = Object.create(client)
+  view.request = (input) => client.request(input.diagnostics ? input : { ...input, diagnostics })
+  return view
 }
 
 /** True for a cleartext `http://` URL (not `https://`). Malformed → false. */

@@ -36,6 +36,7 @@
 
 import type { AuthResult } from "../../auth/auth.ts"
 import type { CacheTtl } from "../../cache/cache-ttl.ts"
+import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { Message } from "../../llm/messages.ts"
 import type { SystemPromptOverrides } from "../../llm/system-prompt-overrides.ts"
 import type { TransportFn } from "../../llm/transport/types.ts"
@@ -119,6 +120,13 @@ export interface BuildAgentCoreDeps {
   networkClient?: NetworkClient
   /** Structured event sink (the JsonlEventSink for `--json`/`stream-json`). */
   eventSink?: EventSink
+  /**
+   * Diagnostics handle (S20). The runtime (S47) passes the session's scope
+   * (`DiagnosticsHub.session(id)`) so every diagnostic of this core, its
+   * transport, and its compaction carries the session id. Omit for the
+   * process-bus fallback.
+   */
+  diagnostics?: Diagnostics
   /** Resolved system-prompt overrides from CLI/env/config. */
   systemPromptOverrides?: SystemPromptOverrides
   /**
@@ -233,6 +241,7 @@ export async function buildAgentCore(deps: BuildAgentCoreDeps): Promise<AgentCor
     ...(deps.sendFn !== undefined ? { sendFn: deps.sendFn } : {}),
     ...(deps.networkClient !== undefined ? { networkClient: deps.networkClient } : {}),
     ...(deps.eventSink !== undefined ? { eventSink: deps.eventSink } : {}),
+    ...(deps.diagnostics !== undefined ? { diagnostics: deps.diagnostics } : {}),
     toolRegistry,
     ...(toolFilter ? { toolFilter } : {}),
     toolExecutor,

@@ -40,13 +40,14 @@
 import { randomUUID } from "node:crypto"
 
 import { providerPeerToken, resolveStoredProviderAuth } from "../../auth/auth-strategies.ts"
-import { diag } from "../../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS, type StatusHandle } from "../../bus/status.ts"
+import { processDiagnostics } from "../../diagnostics/hub.ts"
 import {
   defaultNetworkClient,
   NetworkClient,
   type NetworkRequestInput,
   networkActivityObserver,
+  withRequestDiagnostics,
 } from "../../network/index.ts"
 import {
   rebroadcastQuotaForSessionUpdate,
@@ -165,6 +166,7 @@ export async function* canonicalSendFn(
 ): AsyncGenerator<string, StreamedResponse, undefined> {
   return yield* withRetry(() => canonicalAttemptFn(opts), {
     ...(opts.signal ? { signal: opts.signal } : {}),
+    ...(opts.diagnostics ? { diagnostics: opts.diagnostics } : {}),
   })
 }
 
@@ -185,6 +187,9 @@ export async function* canonicalAttemptFn(
   // this inline; the canonical path must do it too or `--debug` goes silent
   // for normal conversations (which all route through here post-flip).
   debugRequestOptions(opts)
+  // The caller's handle (AgentCore passes its session scope). Stall and auth
+  // diagnostics go here, and every network request of the attempt carries it.
+  const diagnostics = opts.diagnostics ?? processDiagnostics()
 
   const req = sendOptionsToCanonical(opts)
   // The model's provider, used to scope both the credential lookup and the
@@ -226,11 +231,14 @@ export async function* canonicalAttemptFn(
     let detachAttemptActivity = (): void => {}
     const events = withStreamWatchdog(
       (signal) => {
-        const attemptClient = bindPrimaryStreamRequest(baseClient, {
-          statusHandle: requestStatus,
-          onHeaders: () => phaseCtl?.markHeadersReceived(),
-          onBodyChunk: () => phaseCtl?.markBodyActivity(),
-        })
+        const attemptClient = bindPrimaryStreamRequest(
+          withRequestDiagnostics(baseClient, diagnostics),
+          {
+            statusHandle: requestStatus,
+            onHeaders: () => phaseCtl?.markHeadersReceived(),
+            onBodyChunk: () => phaseCtl?.markBodyActivity(),
+          },
+        )
         detachAttemptActivity = attemptClient.detach
         const ctx: RunContext = {
           auth: authState.auth,
@@ -245,7 +253,7 @@ export async function* canonicalAttemptFn(
         // degrade path yields a non-retryable StreamErrorEvent describing
         // the downgrade first, which the agent surfaces as a notice. This
         // matches the legacy transport's behavior for the same combos.
-        return run({ ...req, signal }, { context: ctx, acceptDegrade: true })
+        return run({ ...req, signal }, { context: ctx, acceptDegrade: true, diagnostics })
       },
       {
         streamIdleTimeoutMs: opts.streamIdleTimeoutMs,
@@ -261,7 +269,7 @@ export async function* canonicalAttemptFn(
           // Mirror the legacy scrollback surface so a stalled canonical
           // attempt reads identically to a stalled legacy one. Phase is also
           // on the thrown error for retry.ts (diag alone is not enough).
-          diag.warn("api.stream-stalled", `stream ${reason}`, {
+          diagnostics.warn("api.stream-stalled", `stream ${reason}`, {
             "error-type": reason,
             "idle-ms": idleMs,
             "elapsed-ms": elapsedMs,
@@ -299,6 +307,7 @@ export async function* canonicalAttemptFn(
       peerToken: providerId
         ? () => providerPeerToken(providerId, undefined, opts.credentialName)
         : undefined,
+      diagnostics,
     })
 
   // The status handle stays bound for the whole attempt and is torn down in

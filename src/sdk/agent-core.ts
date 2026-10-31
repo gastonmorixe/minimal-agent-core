@@ -38,6 +38,7 @@ import { createReflectionAckStripper } from "../agent/reflection-ack-stripper.ts
 import { detectStopNotice, formatTurnNoticePlain, type TurnNotice } from "../agent/turn-notice.ts"
 import type { AuthResult } from "../auth/auth.ts"
 import { type CacheTtl, DEFAULT_CACHE_TTL } from "../cache/cache-ttl.ts"
+import { type Diagnostics, processDiagnostics } from "../diagnostics/hub.ts"
 import {
   clampMaxOutputTokens,
   type EstimableTool,
@@ -166,8 +167,12 @@ export class AgentCore {
   /** One-shot runtime marker for the next attachments-only continuation turn. */
   private pendingTurnMarker: "aborted" | "resumed" | null = null
   private eventSink: EventSink | null
+  /** Injected diagnostics handle (S20): the session scope when a runtime owns this core. */
+  private readonly diagnostics: Diagnostics
   /** Isolates the event sink. Its first throw emits one `events.sink-error` (S22). */
-  private readonly sinkGuard = createSinkGuard((failure) => reportSinkError("eventSink", failure))
+  private readonly sinkGuard = createSinkGuard((failure) =>
+    reportSinkError("eventSink", failure, this.diagnostics),
+  )
   private lifecycle: LifecyclePort
 
   constructor(config: AgentCoreConfig) {
@@ -176,6 +181,7 @@ export class AgentCore {
     this.credentialName = config.credentialName
     this.auth = config.auth
     this.lifecycle = config.lifecycle ?? NOOP_LIFECYCLE
+    this.diagnostics = config.diagnostics ?? processDiagnostics()
     this.sendFn = wrapTransportWithLifecycle(config.sendFn ?? selectedTransport, this.lifecycle)
     this.networkClient = config.networkClient
     this.toolRegistry = config.toolRegistry
@@ -244,6 +250,7 @@ export class AgentCore {
       auth: this.auth,
       ...(this.credentialName ? { credentialName: this.credentialName } : {}),
       networkClient: this.networkClient,
+      diagnostics: this.diagnostics,
       lifecycle: this.lifecycle,
       reason: opts?.reason,
       preferRemote: opts?.preferRemote,
@@ -354,6 +361,7 @@ export class AgentCore {
       emitStatus: (status) => this.emit({ type: "status", ...status }),
       compact: (opts) => this.compact(opts),
       policy: this.retryPolicy,
+      diagnostics: this.diagnostics,
     }
   }
 
@@ -443,6 +451,7 @@ export class AgentCore {
         selectedProviderId: this.providerId,
         ...(this.credentialName ? { credentialName: this.credentialName } : {}),
         ...(this.networkClient ? { networkClient: this.networkClient } : {}),
+        diagnostics: this.diagnostics,
         ...(req.tools ? { tools: req.tools } : {}),
         ...(req.system ? { system: req.system } : {}),
         ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
@@ -778,7 +787,9 @@ export class AgentCore {
       for (let attempt = 1; response === undefined; attempt++) {
         const sent = yield* this.sendAttempt(req, rounds)
         if (sent.kind === "response") {
-          if (attempt > 1) noteRetryRecovered(attempt - 1, clock.now() - startedAt, lastCause)
+          if (attempt > 1) {
+            noteRetryRecovered(this.diagnostics, attempt - 1, clock.now() - startedAt, lastCause)
+          }
           response = sent.response
           break
         }

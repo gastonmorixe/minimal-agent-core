@@ -32,7 +32,7 @@
  * @module llm/transport/auth-refresh
  */
 
-import { diag } from "../../bus/diagnostic-bus.ts"
+import type { Diagnostics } from "../../diagnostics/hub.ts"
 import type { ProviderAuth } from "../provider.ts"
 
 import type { StreamedResponse } from "./types.ts"
@@ -50,6 +50,8 @@ export interface AuthRefreshOptions {
    * straight to network refresh.
    */
   peerToken?: () => string | undefined | null
+  /** Where the `auth.refresh` diagnostics go: the caller's handle (S20). */
+  diagnostics: Diagnostics
 }
 
 /** Heuristic: is this thrown error an HTTP 401 / auth failure? */
@@ -68,14 +70,16 @@ export function is401(err: unknown): boolean {
  *
  * @param makeAttempt - Fresh attempt factory; re-reads `state.auth` each call.
  * @param state - Mutable auth holder; `auth.token` is updated on refresh.
+ * @param opts - Peer-token hook and the diagnostics handle.
  * @yields the attempt's text deltas.
  * @returns the successful attempt's `StreamedResponse`.
  */
 export async function* withAuthRefresh(
   makeAttempt: () => AsyncGenerator<string, StreamedResponse, undefined>,
   state: AuthRefreshState,
-  opts: AuthRefreshOptions = {},
+  opts: AuthRefreshOptions,
 ): AsyncGenerator<string, StreamedResponse, undefined> {
+  const { diagnostics } = opts
   let triedPeer = false
   let triedRefresh = false
 
@@ -93,7 +97,10 @@ export async function* withAuthRefresh(
         triedPeer = true
         const peer = opts.peerToken?.()
         if (peer && peer !== auth.token) {
-          diag.info("auth.refresh", "peer-process rotated token; retrying with fresh stored value")
+          diagnostics.info(
+            "auth.refresh",
+            "peer-process rotated token; retrying with fresh stored value",
+          )
           auth.token = peer
           continue
         }
@@ -103,7 +110,7 @@ export async function* withAuthRefresh(
       // 2) network refresh.
       if (!triedRefresh) {
         triedRefresh = true
-        diag.info("auth.refresh", "access token expired (401); refreshing")
+        diagnostics.info("auth.refresh", "access token expired (401); refreshing")
         const next = await auth.refresh()
         auth.token = next.token
         continue
@@ -112,7 +119,7 @@ export async function* withAuthRefresh(
       // 3) both paths exhausted and still 401 — credentials are stale. The
       // refresh was the recovery, so the error is now permanent: the loop
       // pauses and waits for the host (re-login) instead of retrying.
-      diag.error("auth.refresh", "401 persists after token refresh; credentials are stale")
+      diagnostics.error("auth.refresh", "401 persists after token refresh; credentials are stale")
       throw Object.assign(err as object, { errorClass: "permanent" })
     }
   }

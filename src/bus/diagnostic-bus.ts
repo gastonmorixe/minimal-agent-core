@@ -122,6 +122,12 @@ export interface LogEvent {
   readonly message: string
   /** Optional RFC 5424 STRUCTURED-DATA values. */
   readonly structuredData?: StructuredData
+  /**
+   * Session that produced the event. A session diagnostics handle
+   * (`src/diagnostics/hub.ts`) stamps it. Absent for runtime-level events
+   * and for the global {@link diag} helpers.
+   */
+  readonly sessionId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +141,12 @@ export interface LogEvent {
  * - `(event) => boolean` — arbitrary predicate.
  */
 export type DiagnosticFilter = Severity | "*" | ((event: LogEvent) => boolean)
+
+/**
+ * Anything that accepts events: a {@link DiagnosticBus}, or a diagnostics
+ * handle (`src/diagnostics/hub.ts`). Producers that only emit take this.
+ */
+export type DiagnosticEmitter = Pick<DiagnosticBus, "emit">
 
 export interface DiagnosticBus {
   /** Fan out the event to every matching subscriber, sync. */
@@ -310,13 +322,13 @@ export interface PluginLogger {
 
 /**
  * Construct a plugin-scoped logger. All emits go through {@link bus}
- * (default: the process-wide singleton) and carry a source field of
- * `${pluginId}.${source}`.
+ * (a bus or a diagnostics handle; default: the process-wide singleton) and
+ * carry a source field of `${pluginId}.${source}`.
  *
  * For Plugins the loader constructs this once per handler context;
  * the same pluginId stamps every emit from that handler.
  */
-export function createPluginLogger(pluginId: string, bus?: DiagnosticBus): PluginLogger {
+export function createPluginLogger(pluginId: string, bus?: DiagnosticEmitter): PluginLogger {
   const targetBus = bus ?? getDiagnosticBus()
   const prefix = pluginId && pluginId.length > 0 ? pluginId + "." : ""
   function emit(severity: Severity): (s: string, m: string, sd?: StructuredData) => void {

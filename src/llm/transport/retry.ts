@@ -50,8 +50,8 @@
  * @module llm/transport/retry
  */
 
-import { diag } from "../../bus/diagnostic-bus.ts"
 import { GLOBAL_STATUS_BUS } from "../../bus/status.ts"
+import { type Diagnostics, processDiagnostics } from "../../diagnostics/hub.ts"
 
 import {
   type ClassifiedError,
@@ -70,6 +70,8 @@ const RETRY_SUSTAINED_WARN_EVERY = 12
 export interface RetryOptions extends RetryPolicyOptions {
   /** Caller cancellation. Aborts the backoff sleep and stops the loop. */
   signal?: AbortSignal
+  /** Where the retry diagnostics go (S20). Default: the process bus. */
+  diagnostics?: Diagnostics
 }
 
 /** Format a ms duration as `12s` / `1m 47s` / `2h 13m` / `1d 4h`. */
@@ -99,6 +101,8 @@ export interface RetryWait {
   signal?: AbortSignal
   /** Tunables (the clock is the one used here). */
   policy?: RetryPolicyOptions
+  /** Where the `api.retry` diagnostic goes (S20). */
+  diagnostics: Diagnostics
 }
 
 /**
@@ -111,7 +115,7 @@ export async function waitBeforeRetry(w: RetryWait): Promise<void> {
   const retries = nextAttempt - 1
   const sustained = retries > 1 && (retries - 1) % RETRY_SUSTAINED_WARN_EVERY === 0
   const what = curve === "quota" ? "waiting for quota reset" : `${curve} retry`
-  diag.warn(
+  w.diagnostics.warn(
     "api.retry",
     `${c.cause}: ${what}, attempt ${nextAttempt} after ${(delayMs / 1000).toFixed(1)}s, ${formatElapsedLong(elapsedMs)} elapsed${sustained ? ", still retrying" : ""}`,
     {
@@ -149,19 +153,29 @@ export async function waitBeforeRetry(w: RetryWait): Promise<void> {
  * Note that an attempt succeeded after retries. The notices clear the TUI
  * stall and retry banners (same sources as the warnings).
  */
-export function noteRetryRecovered(retries: number, elapsedMs: number, lastCause: string): void {
-  diag.notice(
+export function noteRetryRecovered(
+  diagnostics: Diagnostics,
+  retries: number,
+  elapsedMs: number,
+  lastCause: string,
+): void {
+  diagnostics.notice(
     "api.retry-success",
     `recovered after ${retries} retr${retries === 1 ? "y" : "ies"} (${formatElapsedLong(elapsedMs)} total) — last error ${lastCause}`,
     { attempt: retries + 1, retries, "elapsed-ms": elapsedMs, "last-error": lastCause },
   )
-  diag.notice("api.stream-stalled", "stream recovered after retry", { recovery: "true" })
-  diag.notice("api.retry", "retry recovered", { recovery: "true" })
+  diagnostics.notice("api.stream-stalled", "stream recovered after retry", { recovery: "true" })
+  diagnostics.notice("api.retry", "retry recovered", { recovery: "true" })
 }
 
 /** Note that a recovery action failed, so the loop pauses on the original error. */
-export function noteRecoveryFailed(action: string, cause: string, err: unknown): void {
-  diag.warn("api.recovery-failed", `${action} failed after ${cause}: ${String(err)}`, {
+export function noteRecoveryFailed(
+  diagnostics: Diagnostics,
+  action: string,
+  cause: string,
+  err: unknown,
+): void {
+  diagnostics.warn("api.recovery-failed", `${action} failed after ${cause}: ${String(err)}`, {
     action,
     "error-type": cause,
   })
@@ -192,6 +206,7 @@ export async function* withRetry(
   opts: RetryOptions = {},
 ): AsyncGenerator<string, StreamedResponse, undefined> {
   let hasYielded = false
+  const diagnostics = opts.diagnostics ?? processDiagnostics()
   const clock = opts.clock ?? SYSTEM_CLOCK
   const startedAt = clock.now()
   let lastCause = "unknown"
@@ -207,14 +222,16 @@ export async function* withRetry(
         hasYielded = true
         yield result.value
       }
-      if (attempt > 1) noteRetryRecovered(attempt - 1, clock.now() - startedAt, lastCause)
+      if (attempt > 1) {
+        noteRetryRecovered(diagnostics, attempt - 1, clock.now() - startedAt, lastCause)
+      }
       return result.value
     } catch (err) {
       const c = classifyError(err)
       if (c?.errorClass !== "transient") {
         // Post-tool terminal-less close: never send the same body again.
         if (c?.cause === TERMINAL_LESS_TAG) {
-          diag.warn(
+          diagnostics.warn(
             "api.retry-terminal-less-stop",
             `stream_closed_without_terminal: continueTurn — terminalLessClose (completedToolCalls=${c.progress?.completedToolCalls ?? 0})`,
             {
@@ -240,6 +257,7 @@ export async function* withRetry(
         elapsedMs: clock.now() - startedAt,
         ...(opts.signal ? { signal: opts.signal } : {}),
         policy: opts,
+        diagnostics,
       })
       // Next loop iteration: a fresh attempt with the (possibly refreshed)
       // auth/token from the prior attempt's auth-refresh layer.

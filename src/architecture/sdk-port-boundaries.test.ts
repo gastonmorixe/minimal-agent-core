@@ -498,6 +498,9 @@ describe("SDK port boundaries scanner", () => {
 
     // Type-only edges are deliberately counted, not exempted. Keep this exact
     // inventory as a ratchet so additions require an intentional architecture review.
-    expect(typeOnlySdkImportCount(result)).toBe(29)
+    // 29 -> 31 (S20): `Diagnostics` (src/diagnostics/hub.ts) threaded as a
+    // type-only edge into `src/sdk/run-recovery.ts` and `src/sdk/lifecycle-compact.ts`,
+    // the two sdk-owned call sites that now take the injected diagnostics handle.
+    expect(typeOnlySdkImportCount(result)).toBe(31)
   })
 })

@@ -6,6 +6,7 @@
 
 import type { CompactReason, CompactRequestOpts, CompactStats } from "../agent/context-compact.ts"
 import type { AuthResult } from "../auth/auth.ts"
+import type { Diagnostics } from "../diagnostics/hub.ts"
 import type { Message } from "../llm/messages.ts"
 import type { NetworkClient } from "../network/index.ts"
 
@@ -18,6 +19,8 @@ export interface CompactWithLifecycleInput {
   auth: AuthResult
   credentialName?: string
   networkClient?: NetworkClient
+  /** The core's diagnostics handle (S20), forwarded to the compact requests. */
+  diagnostics?: Diagnostics
   lifecycle: LifecyclePort
   reason?: CompactReason
   preferRemote?: boolean
@@ -76,6 +79,7 @@ export async function compactWithLifecycle(
     auth: input.auth,
     ...(input.credentialName ? { credentialName: input.credentialName } : {}),
     networkClient: input.networkClient,
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
     reason,
     preferRemote: input.preferRemote,
     ...(input.mode ? { mode: input.mode } : {}),
